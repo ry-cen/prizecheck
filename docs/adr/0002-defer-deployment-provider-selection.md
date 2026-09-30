@@ -1,0 +1,3 @@
+# Defer deployment provider selection
+
+The application stack remains React/TypeScript/Vite, Python/FastAPI, PostgreSQL, and Better Auth email codes. Hosting, managed PostgreSQL, object storage, email delivery, background jobs, CI, and domain providers are undecided for now. Build behind HTTP, database, job, email, and object-storage boundaries so a provider can be selected after the application and representative workload are measured. This decision supersedes the deployment-specific portions of [ADR 0001](0001-react-python-workers-auth-boundary.md) and the earlier Wayfinder hosting resolutions; the owner-only launch, manual release, recovery, privacy, performance, and cost goals remain.

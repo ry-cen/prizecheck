@@ -1,0 +1,17 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: tcg
+      POSTGRES_PASSWORD: tcg
+      POSTGRES_DB: tcg
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tcg"]
+      interval: 2s
+      retries: 20
+    volumes:
+      - db_data:/var/lib/postgresql/data
+volumes:
+  db_data:
