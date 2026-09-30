@@ -3,6 +3,7 @@ import hashlib
 import hmac
 import os
 import time
+from datetime import datetime
 from contextlib import asynccontextmanager
 from uuid import UUID
 
@@ -26,6 +27,38 @@ class LocationsResponse(BaseModel):
 
 class HealthResponse(BaseModel):
     status: str
+
+
+class CatalogStatus(BaseModel):
+    available: bool
+    revision: int
+    last_success: datetime | None
+
+
+class CatalogRun(BaseModel):
+    id: UUID
+    phase: str
+    outcome: str | None
+    enumerated_count: int
+    fetched_count: int
+    validated_count: int
+    error: str | None
+    started_at: datetime
+    finished_at: datetime | None
+
+
+class CatalogReview(BaseModel):
+    id: UUID
+    kind: str
+    source_id: str
+    detail: str
+    created_at: datetime
+
+
+class OwnerCatalogStatus(BaseModel):
+    catalog: CatalogStatus
+    run: CatalogRun | None
+    pending_reviews: list[CatalogReview]
 
 
 def connect():
@@ -95,3 +128,55 @@ def location(location_id: UUID, user_id: str = Depends(verified_user)):
     if row is None:
         raise HTTPException(404, "Location not found")
     return Location(**row)
+
+
+def require_owner(conn, user_id: str):
+    row = conn.execute("SELECT 1 FROM owner_binding WHERE singleton AND user_id=%s", (user_id,)).fetchone()
+    if not row:
+        raise HTTPException(403, "Owner access required")
+
+
+def catalog_status_row(conn) -> CatalogStatus:
+    row = conn.execute("SELECT active_generation, revision, last_success FROM catalog_state WHERE singleton").fetchone()
+    return CatalogStatus(available=row["active_generation"] is not None, revision=row["revision"], last_success=row["last_success"])
+
+
+@app.get("/api/catalog/status", response_model=CatalogStatus)
+def catalog_status(user_id: str = Depends(verified_user)):
+    with connect() as conn:
+        return catalog_status_row(conn)
+
+
+@app.get("/api/admin/catalog-runs", response_model=OwnerCatalogStatus)
+def owner_catalog_status(user_id: str = Depends(verified_user)):
+    with connect() as conn:
+        require_owner(conn, user_id)
+        run = conn.execute("""SELECT id,phase,outcome,enumerated_count,fetched_count,validated_count,error,started_at,finished_at
+          FROM catalog_run ORDER BY started_at DESC LIMIT 1""").fetchone()
+        reviews = conn.execute("""SELECT id,kind,source_id,detail,created_at FROM catalog_review
+          WHERE status='pending' ORDER BY created_at LIMIT 50""").fetchall()
+        return OwnerCatalogStatus(catalog=catalog_status_row(conn), run=CatalogRun(**run) if run else None,
+                                  pending_reviews=[CatalogReview(**row) for row in reviews])
+
+
+@app.post("/api/admin/catalog-runs", response_model=OwnerCatalogStatus)
+def start_catalog_run(user_id: str = Depends(verified_user)):
+    with connect() as conn:
+        with conn.transaction():
+            require_owner(conn, user_id)
+            conn.execute("SELECT pg_advisory_xact_lock(914702)")
+            active = conn.execute("SELECT id FROM catalog_run WHERE outcome IS NULL").fetchone()
+            if not active:
+                conn.execute("INSERT INTO catalog_run DEFAULT VALUES")
+    return owner_catalog_status(user_id)
+
+
+from .location_tree import router as location_tree_router  # noqa: E402
+from .catalog_search import router as catalog_search_router  # noqa: E402
+from .holdings import router as holdings_router  # noqa: E402
+from .missing_cards import router as missing_cards_router  # noqa: E402
+
+app.include_router(location_tree_router)
+app.include_router(catalog_search_router)
+app.include_router(holdings_router)
+app.include_router(missing_cards_router)

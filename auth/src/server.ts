@@ -1,7 +1,7 @@
-import { createHash, createHmac } from 'node:crypto';
+import { createHash, createHmac, randomInt } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { isIP } from 'node:net';
-import { auth, pool } from './auth.js';
+import { auth, deliverCode, pool } from './auth.js';
 
 const origin = process.env.PUBLIC_ORIGIN || 'http://localhost:5173';
 const ownerEmail = (process.env.OWNER_EMAIL || '').trim().toLowerCase();
@@ -150,12 +150,37 @@ const server = createServer(async (request, response) => {
       const current = await session(request);
       return json(response, 200, { signedIn: !!current, userId: current?.user.id || null });
     }
+    if (path === '/auth/approval-code' && request.method === 'POST') {
+      if (!sameOrigin(request)) return json(response, 403, { error: 'Origin required' });
+      const current = await session(request);
+      if (!current) return json(response, 401, { error: 'Authentication required' });
+      const body = JSON.parse(await readBody(request)) as { reportId?: unknown; action?: unknown };
+      const reportId = typeof body.reportId === 'string' ? body.reportId.toLowerCase() : body.reportId;
+      const action = body.action;
+      if (typeof reportId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(reportId) ||
+        (action !== 'approve_printing' && action !== 'approve_edition')) return json(response, 422, { error: 'Invalid approval request' });
+      const owner = await pool.query<{ email: string }>(`SELECT u.email FROM owner_binding b
+        JOIN "user" u ON u.id=b.user_id WHERE b.singleton AND b.user_id=$1`, [current.user.id]);
+      if (!owner.rows[0]) return json(response, 403, { error: 'Owner access required' });
+      const report = await pool.query<{ kind: string }>(`SELECT kind FROM missing_card_report
+        WHERE id=$1 AND status IN ('pending','needs_info')`, [reportId]);
+      if (!report.rows[0] || action !== `approve_${report.rows[0].kind}`) return json(response, 404, { error: 'Report not found' });
+      const email = owner.rows[0].email;
+      if (!await allowedSend(email, trustedClientIp(request))) return json(response, 429, { error: 'Code rate limit reached. Try later.' });
+      const code = randomInt(0, 1_000_000).toString().padStart(6, '0');
+      const codeHash = createHmac('sha256', internalSecret).update(`${current.user.id}:${reportId}:${action}:${code}`).digest('hex');
+      await deliverCode(email, code, 'catalog approval');
+      await pool.query(`INSERT INTO catalog_approval_code(owner_id,report_id,action,code_hash,expires_at)
+        VALUES ($1,$2,$3,$4,now()+interval '5 minutes')`, [current.user.id, reportId, action, codeHash]);
+      return json(response, 202, { message: 'Approval code sent.' });
+    }
     if (path === '/auth/sign-out' && request.method === 'POST') {
       if (!sameOrigin(request)) return json(response, 403, { error: 'Origin required' });
       const result = await auth.handler(betterRequest(request, '/api/auth/sign-out', '{}'));
       return relay(response, result);
     }
     if (path.startsWith('/api/')) {
+      if (request.method !== 'GET' && request.method !== 'HEAD' && !sameOrigin(request)) return json(response, 403, { error: 'Origin required' });
       const current = await session(request);
       if (!current && path !== '/api/health') return json(response, 401, { error: 'Authentication required' });
       const body = request.method === 'GET' || request.method === 'HEAD' ? '' : await readBody(request);

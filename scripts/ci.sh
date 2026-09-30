@@ -15,6 +15,8 @@ cleanup() {
 trap cleanup EXIT
 .venv/bin/python scripts/migrate.py
 .venv/bin/python scripts/generate_client.py --check
+.venv/bin/python scripts/generate_location_client.py --check
+.venv/bin/python scripts/generate_holdings_client.py --check
 npm run build
 .venv/bin/uvicorn app.main:app --app-dir api --host 127.0.0.1 --port 8000 > /tmp/tcg-api-test.log 2>&1 & api_pid=$!
 npx tsx auth/src/server.ts > /tmp/tcg-auth-test.log 2>&1 & auth_pid=$!

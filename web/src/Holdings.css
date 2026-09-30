@@ -1,0 +1,13 @@
+.holdings-panel { margin-top: 1rem; }
+.holdings-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.holding-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(126px, 1fr)); gap: .75rem; padding: 0; list-style: none; }
+.holding-stack { position: relative; min-height: 190px; border: 1px solid #b8c4c8; border-radius: .5rem; padding: .4rem; background: #fff; box-shadow: .2rem .2rem 0 #dce5e8; }
+.holding-stack:focus-visible { outline: 3px solid #1769aa; outline-offset: 2px; }
+.holding-stack img, .holding-placeholder { width: 100%; height: 150px; object-fit: contain; border-radius: .25rem; }
+.holding-placeholder { display: grid; place-items: center; background: #edf1f2; color: #455; text-align: center; font-size: .8rem; }
+.holding-count { position: absolute; top: .5rem; right: .5rem; padding: .15rem .4rem; border-radius: 1rem; color: #fff; background: #143e55; }
+.holding-details { display: grid; gap: .1rem; margin-top: .35rem; font-size: .78rem; overflow-wrap: anywhere; }
+.holding-add { margin-top: 1rem; padding: 1rem; border: 1px solid #b8c4c8; border-radius: .5rem; }
+.holding-add form { display: flex; flex-wrap: wrap; align-items: end; gap: .75rem; margin: .75rem 0; }
+.holding-add label { display: grid; gap: .25rem; flex: 1 1 13rem; }
+.holding-add input, .holding-add select { width: 100%; max-width: 100%; }

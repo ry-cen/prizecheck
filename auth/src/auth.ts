@@ -9,6 +9,18 @@ if (process.env.NODE_ENV === 'production' && ['console', 'file'].includes(proces
   throw new Error('Fake email delivery is for local development only');
 }
 
+export async function deliverCode(email: string, otp: string, purpose = 'sign-in') {
+  if (process.env.MAIL_MODE === 'console') {
+    process.stdout.write(`Local ${purpose} code for ${email}: ${otp}\n`);
+    return;
+  }
+  if (process.env.MAIL_MODE === 'file' && process.env.MAIL_FILE) {
+    await appendFile(process.env.MAIL_FILE, JSON.stringify({ email, otp, purpose }) + '\n', { mode: 0o600 });
+    return;
+  }
+  throw new Error('Email delivery is not configured');
+}
+
 export const auth = betterAuth({
   database: pool,
   secret: process.env.BETTER_AUTH_SECRET,
@@ -25,16 +37,7 @@ export const auth = betterAuth({
     resendStrategy: 'rotate',
     storeOTP: 'hashed',
     async sendVerificationOTP({ email, otp }) {
-      if (process.env.MAIL_MODE === 'console') {
-        // Local fake delivery only. Never log a code in a deployed environment.
-        process.stdout.write(`Local sign-in code for ${email}: ${otp}\n`);
-        return;
-      }
-      if (process.env.MAIL_MODE === 'file' && process.env.MAIL_FILE) {
-        await appendFile(process.env.MAIL_FILE, JSON.stringify({ email, otp }) + '\n', { mode: 0o600 });
-        return;
-      }
-      throw new Error('Email delivery is not configured');
+      await deliverCode(email, otp);
     },
   })],
 });
