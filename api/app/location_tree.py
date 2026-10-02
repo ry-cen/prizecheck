@@ -35,6 +35,7 @@ class CreateLocation(BaseModel):
     name: str
     parent_id: UUID | None = None
     parent_version: int | None = Field(default=None, ge=1)
+    conversion: str | None = None
     idempotency_key: UUID
 
 
@@ -42,8 +43,20 @@ class EditLocation(BaseModel):
     name: str | None = None
     parent_id: UUID | None = None
     parent_version: int | None = Field(default=None, ge=1)
+    conversion: str | None = None
     version: int = Field(ge=1)
     idempotency_key: UUID
+
+
+class DeleteLocation(BaseModel):
+    name: str
+    version: int = Field(ge=1)
+    idempotency_key: UUID
+
+
+class DeleteLocationResult(BaseModel):
+    deleted_id: UUID
+    owner_revision: int
 
 
 def error(status: int, code: str):
@@ -58,12 +71,11 @@ def cleaned_name(name: str) -> str:
 
 
 def owner_and_rows(conn, user_id: str):
-    conn.execute("INSERT INTO inventory_owner (user_id) VALUES (%s) ON CONFLICT DO NOTHING", (user_id,))
+    created = conn.execute("INSERT INTO inventory_owner (user_id) VALUES (%s) ON CONFLICT DO NOTHING RETURNING user_id", (user_id,)).fetchone()
     owner = conn.execute("SELECT revision FROM inventory_owner WHERE user_id=%s FOR UPDATE", (user_id,)).fetchone()
-    rows = conn.execute("SELECT id,name,kind,parent_id,version FROM location WHERE owner_id=%s", (user_id,)).fetchall()
-    if not rows:
+    if created:
         conn.execute("INSERT INTO location(id,owner_id,parent_id,name,kind) VALUES (%s,%s,NULL,'Unsorted','storage_leaf')", (uuid4(), user_id))
-        rows = conn.execute("SELECT id,name,kind,parent_id,version FROM location WHERE owner_id=%s", (user_id,)).fetchall()
+    rows = conn.execute("SELECT id,name,kind,parent_id,version FROM location WHERE owner_id=%s", (user_id,)).fetchall()
     return owner["revision"], {row["id"]: row for row in rows}
 
 
@@ -109,12 +121,22 @@ def check_name(name, parent_id, rows, exclude=None):
         error(409, "LOCATION_NAME_CONFLICT")
 
 
-def check_empty(conn, node_id):
-    # Ticket 04 installs Holdings. Once present, edits of stocked nodes are
-    # held for the explicit conversion flow in ticket 06.
-    if conn.execute("SELECT to_regclass('holding') AS table_name").fetchone()["table_name"]:
-        if conn.execute("SELECT 1 FROM holding WHERE location_id=%s LIMIT 1", (node_id,)).fetchone():
-            error(409, "STOCKED_LOCATION_REQUIRES_CONVERSION")
+def has_holdings(conn, node_id):
+    return bool(conn.execute("SELECT 1 FROM holding WHERE location_id=%s LIMIT 1", (node_id,)).fetchone())
+
+
+def move_holdings(conn, owner_id, source_id, target_id, next_revision):
+    conn.execute("""UPDATE holding SET location_id=%s,version=%s
+      WHERE owner_id=%s AND location_id=%s""", (target_id, next_revision, owner_id, source_id))
+
+
+def unsorted_child(conn, owner_id, parent_id, rows):
+    check_name("Unsorted", parent_id, rows)
+    row = conn.execute("""INSERT INTO location(id,owner_id,parent_id,name,kind)
+      VALUES (%s,%s,%s,'Unsorted','storage_leaf') RETURNING id,name,kind,parent_id,version""",
+                       (uuid4(), owner_id, parent_id)).fetchone()
+    rows[row["id"]] = row
+    return row
 
 
 def replay(conn, user_id, key, payload):
@@ -146,7 +168,7 @@ def tree(user_id: str = Depends(verified_user)):
 def create_location(command: CreateLocation, user_id: str = Depends(verified_user)):
     name = cleaned_name(command.name)
     with connect() as conn, conn.transaction():
-        _, rows = owner_and_rows(conn, user_id)
+        revision, rows = owner_and_rows(conn, user_id)
         digest, previous = replay(conn, user_id, command.idempotency_key, command.model_dump(mode="json"))
         if previous:
             return previous
@@ -154,14 +176,20 @@ def create_location(command: CreateLocation, user_id: str = Depends(verified_use
         if parent and depth_of(parent["id"], rows) >= 12:
             error(409, "LOCATION_DEPTH_LIMIT")
         check_name(name, command.parent_id, rows)
+        stocked = bool(parent and parent["kind"] == "storage_leaf" and has_holdings(conn, parent["id"]))
+        if stocked and command.conversion not in ("move_holdings_to_child", "create_unsorted_child"):
+            error(409, "STOCKED_LOCATION_REQUIRES_CONVERSION")
+        if command.conversion and not stocked:
+            error(409, "INVALID_LOCATION_CONVERSION")
         if parent:
-            if parent["kind"] == "storage_leaf":
-                check_empty(conn, parent["id"])
             conn.execute("UPDATE location SET kind='organization',version=version+1 WHERE id=%s", (parent["id"],))
         new_id = uuid4()
         row = conn.execute("INSERT INTO location(id,owner_id,parent_id,name,kind) VALUES (%s,%s,%s,%s,'storage_leaf') RETURNING id,name,kind,parent_id,version",
                            (new_id, user_id, command.parent_id, name)).fetchone()
         rows[row["id"]] = row
+        if stocked:
+            target = row if command.conversion == "move_holdings_to_child" else unsorted_child(conn, user_id, parent["id"], rows)
+            move_holdings(conn, user_id, parent["id"], target["id"], revision + 1)
         return store_result(conn, user_id, command.idempotency_key, digest, row, rows)
 
 
@@ -169,7 +197,7 @@ def create_location(command: CreateLocation, user_id: str = Depends(verified_use
 def edit_location(location_id: UUID, command: EditLocation, user_id: str = Depends(verified_user)):
     name = cleaned_name(command.name) if command.name is not None else None
     with connect() as conn, conn.transaction():
-        _, rows = owner_and_rows(conn, user_id)
+        revision, rows = owner_and_rows(conn, user_id)
         digest, previous = replay(conn, user_id, command.idempotency_key, {"location_id": str(location_id), **command.model_dump(mode="json", exclude_unset=True)})
         if previous:
             return previous
@@ -184,6 +212,11 @@ def edit_location(location_id: UUID, command: EditLocation, user_id: str = Depen
             error(400, "EMPTY_LOCATION_EDIT")
         destination = command.parent_id if "parent_id" in command.model_fields_set else current["parent_id"]
         moving = destination != current["parent_id"]
+        if command.conversion and not moving:
+            error(409, "INVALID_LOCATION_CONVERSION")
+        if current["name"] == "Unsorted" and current["parent_id"] is None and (moving or (name is not None and name != current["name"])):
+            if has_holdings(conn, location_id) or any(row["parent_id"] == location_id for row in rows.values()):
+                error(409, "LOCATION_NOT_EMPTY")
         if moving:
             parent = check_parent(destination, command.parent_version, rows)
             branch = descendants(location_id, rows)
@@ -192,11 +225,18 @@ def edit_location(location_id: UUID, command: EditLocation, user_id: str = Depen
             max_relative = max(depth_of(node_id, rows) - depth_of(location_id, rows) for node_id in branch)
             if (depth_of(destination, rows) if destination else 0) + 1 + max_relative > 12:
                 error(409, "LOCATION_DEPTH_LIMIT")
-            check_empty(conn, location_id)
             if parent:
-                if parent["kind"] == "storage_leaf":
-                    check_empty(conn, parent["id"])
+                stocked = parent["kind"] == "storage_leaf" and has_holdings(conn, parent["id"])
+                if stocked and command.conversion != "create_unsorted_child":
+                    error(409, "STOCKED_LOCATION_REQUIRES_CONVERSION")
+                if command.conversion and not stocked:
+                    error(409, "INVALID_LOCATION_CONVERSION")
                 conn.execute("UPDATE location SET kind='organization',version=version+1 WHERE id=%s", (parent["id"],))
+                if stocked:
+                    unsorted = unsorted_child(conn, user_id, parent["id"], rows)
+                    move_holdings(conn, user_id, parent["id"], unsorted["id"], revision + 1)
+            elif command.conversion:
+                error(409, "INVALID_LOCATION_CONVERSION")
             old_parent_id = current["parent_id"]
             if old_parent_id is not None:
                 last_child = not any(r["parent_id"] == old_parent_id and r["id"] != location_id for r in rows.values())
@@ -206,3 +246,36 @@ def edit_location(location_id: UUID, command: EditLocation, user_id: str = Depen
                            (name or current["name"], destination, location_id)).fetchone()
         rows[row["id"]] = row
         return store_result(conn, user_id, command.idempotency_key, digest, row, rows)
+
+
+@router.delete("/{location_id}", response_model=DeleteLocationResult)
+def delete_location(location_id: UUID, command: DeleteLocation, user_id: str = Depends(verified_user)):
+    name = cleaned_name(command.name)
+    with connect() as conn, conn.transaction():
+        revision, rows = owner_and_rows(conn, user_id)
+        digest, previous = replay(conn, user_id, command.idempotency_key,
+                                  {"action": "delete", "location_id": str(location_id), **command.model_dump(mode="json")})
+        if previous:
+            return previous
+        current = rows.get(location_id)
+        if current is None:
+            error(404, "LOCATION_NOT_FOUND")
+        if current["kind"] == "deck":
+            error(409, "DECK_REQUIRES_DECK_COMMAND")
+        if current["version"] != command.version:
+            error(409, "STALE_LOCATION")
+        if current["name"] != name:
+            error(409, "LOCATION_NAME_CONFIRMATION_MISMATCH")
+        if has_holdings(conn, location_id) or any(row["parent_id"] == location_id for row in rows.values()):
+            error(409, "LOCATION_NOT_EMPTY")
+        conn.execute("DELETE FROM location WHERE owner_id=%s AND id=%s", (user_id, location_id))
+        parent_id = current["parent_id"]
+        if parent_id is not None:
+            last_child = not any(row["parent_id"] == parent_id and row["id"] != location_id for row in rows.values())
+            conn.execute("UPDATE location SET kind=%s,version=version+1 WHERE owner_id=%s AND id=%s",
+                         ("storage_leaf" if last_child else "organization", user_id, parent_id))
+        result = DeleteLocationResult(deleted_id=location_id, owner_revision=revision + 1).model_dump(mode="json")
+        conn.execute("UPDATE inventory_owner SET revision=revision+1 WHERE user_id=%s", (user_id,))
+        conn.execute("INSERT INTO location_command(owner_id,request_key,request_digest,response) VALUES (%s,%s,%s,%s)",
+                     (user_id, command.idempotency_key, digest, json.dumps(result)))
+        return result

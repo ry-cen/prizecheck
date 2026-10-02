@@ -1,6 +1,7 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createLocation, editLocation, getLocationTree, LocationError, type TreeNode } from './location_generated';
 import { Holdings } from './Holdings';
+import { LocationSafetyDialog, type SafetyIntent } from './LocationSafetyDialog';
 import './LocationTree.css';
 
 type Action = 'create' | 'rename' | 'move' | null;
@@ -10,10 +11,12 @@ export function LocationTree() {
   const [selected, setSelected] = useState<string | null>(null);
   const [drawer, setDrawer] = useState(false);
   const [action, setAction] = useState<Action>(null);
+  const [safetyIntent, setSafetyIntent] = useState<SafetyIntent | null>(null);
   const [name, setName] = useState('');
   const [parentId, setParentId] = useState('');
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
+  const moveReady = useRef<((destinationId: string) => void) | null>(null);
 
   async function refresh(preferred?: string) {
     const result = await getLocationTree();
@@ -50,6 +53,13 @@ export function LocationTree() {
       setAction(null); setDrawer(false);
     } catch (cause) {
       const code = cause instanceof LocationError ? cause.code : 'LOCATION_REQUEST_FAILED';
+      if (code === 'STOCKED_LOCATION_REQUIRES_CONVERSION') {
+        const parent = parentId ? byId.get(parentId) : undefined;
+        if (action === 'create' && parent) setSafetyIntent({ action: 'create', name, parent });
+        else if (action === 'move' && current && parent) setSafetyIntent({ action: 'move', location: current, parent });
+        setAction(null);
+        return;
+      }
       const messages: Record<string, string> = {
         STALE_LOCATION: 'This Location changed in another tab. The tree has been refreshed; review it and try again.',
         LOCATION_NAME_CONFLICT: 'A sibling already has that name.',
@@ -65,7 +75,13 @@ export function LocationTree() {
   }
   function select(id: string) { setSelected(id); setDrawer(false); setAction(null); }
   function branch(parent: string | null): React.ReactNode {
-    return <ul>{children(parent).map(node => <li key={node.id}><button className={node.id === selected ? 'tree-item active' : 'tree-item'} onClick={() => select(node.id)} aria-current={node.id === selected ? 'page' : undefined}>{node.name}</button>{children(node.id).length > 0 && branch(node.id)}</li>)}</ul>;
+    return <ul>{children(parent).map(node => {
+      const destination = (node.kind === 'storage_leaf' || node.kind === 'deck') && node.id !== selected;
+      return <li key={node.id}><button className={node.id === selected ? 'tree-item active' : 'tree-item'} onClick={() => select(node.id)}
+        onDragOver={event => { if (destination && moveReady.current && event.dataTransfer.types.includes('text/plain')) { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; } }}
+        onDrop={event => { if (!destination || !moveReady.current || event.dataTransfer.getData('text/plain') !== `tcg-move:${selected}`) return; event.preventDefault(); moveReady.current(node.id); }}
+        aria-current={node.id === selected ? 'page' : undefined}>{node.name}</button>{children(node.id).length > 0 && branch(node.id)}</li>;
+    })}</ul>;
   }
   return <section className="location-layout" aria-label="Locations">
     <aside id="location-drawer" className={drawer ? 'location-sidebar open' : 'location-sidebar'} aria-label="Locations tree">
@@ -76,9 +92,10 @@ export function LocationTree() {
     <div className="location-content">
       <button className="mobile-only" onClick={() => setDrawer(true)} aria-expanded={drawer} aria-controls="location-drawer">Browse Locations</button>
       <nav className="breadcrumbs" aria-label="Location breadcrumbs"><button onClick={() => { setDrawer(true); setSelected(null); }}>All Locations</button>{breadcrumbs.map(node => <React.Fragment key={node.id}><span aria-hidden="true"> / </span><button onClick={() => select(node.id)}>{node.name}</button></React.Fragment>)}</nav>
-      {current ? <><header className="location-heading"><div><h2>{current.name}</h2><p>{current.kind === 'organization' ? 'Organizational Location' : current.kind === 'deck' ? 'Deck' : 'Storage Leaf'}</p></div>{current.kind !== 'deck' && <div className="location-actions"><button onClick={() => open('rename')}>Rename</button><button onClick={() => open('move')}>Move Location</button><button onClick={() => { open('create'); setParentId(current.id); }}>New child</button></div>}</header>
-        {current.kind === 'organization' ? <section aria-label="Child Locations"><h3>Inside this Location</h3>{children(current.id).map(node => <button className="child-location" key={node.id} onClick={() => select(node.id)}>{node.name}</button>)}</section> : <Holdings key={current.id} locationId={current.id} locationName={current.name} />}
+      {current ? <><header className="location-heading"><div><h2>{current.name}</h2><p>{current.kind === 'organization' ? 'Organizational Location' : current.kind === 'deck' ? 'Deck' : 'Storage Leaf'}</p></div>{current.kind !== 'deck' && <div className="location-actions"><button onClick={() => open('rename')}>Rename</button><button onClick={() => open('move')}>Move Location</button><button onClick={() => { open('create'); setParentId(current.id); }}>New child</button><button onClick={() => { setAction(null); setSafetyIntent({ action: 'delete', location: current }); }}>Delete Location</button></div>}</header>
+        {current.kind === 'organization' ? <section aria-label="Child Locations"><h3>Inside this Location</h3>{children(current.id).map(node => <button className="child-location" key={node.id} onClick={() => select(node.id)}>{node.name}</button>)}</section> : <Holdings key={current.id} locationId={current.id} locationName={current.name} destinations={nodes.filter(node => node.kind === 'storage_leaf' || node.kind === 'deck').map(node => ({ id: node.id, name: node.name }))} onMoveReady={move => { moveReady.current = move; }} />}
       </> : <p>Select a Location from the tree.</p>}
+      {safetyIntent && <LocationSafetyDialog intent={safetyIntent} onDone={async id => { setSafetyIntent(null); await refresh(id); }} onCancel={() => setSafetyIntent(null)} onStale={refresh} />}
       {action && <form className="location-form" onSubmit={save}><h3>{action === 'create' ? 'New Location' : action === 'rename' ? 'Rename Location' : 'Move Location'}</h3>
         {action !== 'move' && <label>Name <input autoFocus required maxLength={120} value={name} onChange={event => setName(event.target.value)}/></label>}
         {action !== 'rename' && <label>Parent Location <select value={parentId} onChange={event => setParentId(event.target.value)}><option value="">Top level</option>{nodes.filter(node => node.kind !== 'deck').map(node => <option key={node.id} value={node.id}>{'  '.repeat(node.depth - 1)}{node.name}</option>)}</select></label>}

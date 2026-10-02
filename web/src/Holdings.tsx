@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { searchCatalog, type PrintingView } from './generated';
 import { addHolding, getLeafHoldings, HoldingError, type HoldingView } from './holdings_generated';
+import { MoveHoldings, type MoveDestination } from './MoveHoldings';
 import './Holdings.css';
 
 function descriptorText(descriptor: Record<string, unknown>) {
@@ -16,7 +17,7 @@ function HoldingArt({ url, name }: { url: string | null; name: string }) {
 }
 
 /** Mount inside the selected Storage Leaf's contents area. */
-export function Holdings({ locationId, locationName }: { locationId: string; locationName: string }) {
+export function Holdings({ locationId, locationName, destinations, onMoveReady }: { locationId: string; locationName: string; destinations: MoveDestination[]; onMoveReady?: (move: ((destinationId: string) => void) | null) => void }) {
   const [holdings, setHoldings] = useState<HoldingView[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [query, setQuery] = useState('');
@@ -89,6 +90,7 @@ export function Holdings({ locationId, locationName }: { locationId: string; loc
       </article>
     </li>)}</ul> : <p>No cards here yet.</p>}
     {cursor && <button type="button" onClick={() => void load(cursor)}>More cards</button>}
+    <MoveHoldings locationId={locationId} holdings={holdings} destinations={destinations} onMoved={() => load()} onMoveReady={onMoveReady} />
     {adding && <div className="holding-add"><h4>Add a Card Edition to {locationName}</h4>
       <form onSubmit={search}><label>Search English card name <input value={query} onChange={event => { setQuery(event.target.value); pendingKey.current = null; }} required maxLength={120} /></label><button disabled={busy}>Search</button></form>
       {matches.length > 0 && <form onSubmit={add}><label>Card Edition <select required value={editionId} onChange={event => { setEditionId(event.target.value); pendingKey.current = null; }}><option value="">Choose a Printing and Edition</option>{matches.flatMap(printing => printing.editions.filter(edition => edition.active).map(edition => <option key={edition.id} value={edition.id}>{printing.name} · {printing.set_name} #{printing.collector_number} · {descriptorText(edition.descriptor)}</option>))}</select></label>

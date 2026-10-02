@@ -102,15 +102,10 @@ def locations(user_id: str = Depends(verified_user)):
     with connect() as conn:
         with conn.transaction():
             # One transaction protects onboarding against repeated tabs/requests.
-            conn.execute("INSERT INTO inventory_owner (user_id) VALUES (%s) ON CONFLICT DO NOTHING", (user_id,))
-            conn.execute(
-                """INSERT INTO location (id, owner_id, parent_id, name, kind)
-                   SELECT gen_random_uuid(), %s, NULL, 'Unsorted', 'storage_leaf'
-                   WHERE NOT EXISTS (
-                     SELECT 1 FROM location WHERE owner_id = %s AND parent_id IS NULL AND name = 'Unsorted'
-                   ) ON CONFLICT DO NOTHING""",
-                (user_id, user_id),
-            )
+            created = conn.execute("INSERT INTO inventory_owner (user_id) VALUES (%s) ON CONFLICT DO NOTHING RETURNING user_id", (user_id,)).fetchone()
+            if created:
+                conn.execute("""INSERT INTO location (id, owner_id, parent_id, name, kind)
+                  VALUES (gen_random_uuid(), %s, NULL, 'Unsorted', 'storage_leaf')""", (user_id,))
             rows = conn.execute(
                 "SELECT id, name, kind, parent_id, version FROM location WHERE owner_id = %s ORDER BY created_at, id",
                 (user_id,),
@@ -175,8 +170,10 @@ from .location_tree import router as location_tree_router  # noqa: E402
 from .catalog_search import router as catalog_search_router  # noqa: E402
 from .holdings import router as holdings_router  # noqa: E402
 from .missing_cards import router as missing_cards_router  # noqa: E402
+from .moves import router as moves_router  # noqa: E402
 
 app.include_router(location_tree_router)
 app.include_router(catalog_search_router)
 app.include_router(holdings_router)
 app.include_router(missing_cards_router)
+app.include_router(moves_router)
