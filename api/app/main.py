@@ -182,3 +182,6 @@ app.include_router(collection_router)
 
 from .decks import router as decks_router  # noqa: E402
 app.include_router(decks_router)
+
+from .publications import router as publications_router  # noqa: E402
+app.include_router(publications_router)
