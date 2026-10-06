@@ -80,5 +80,17 @@ promote({'card-1': 'Pikachu'})`], { env: { ...process.env, PYTHONPATH: 'api:api/
     await page.mouse.up();
     await expect(selection.getByRole('status')).toContainText('Moved 1 copies');
     await expect(panel.locator('.holding-stack')).toContainText('×1');
+    await selection.getByRole('button', { name: 'Select stack' }).click();
+    await selection.getByRole('button', { name: 'Remove selected' }).click();
+    const confirmation = page.getByRole('dialog', { name: 'Confirm Inventory Removal' });
+    await expect(confirmation).toContainText('Remove 1 copies from your tracked Collection?');
+    await confirmation.getByRole('button', { name: 'Cancel removal' }).click();
+    await expect(panel.locator('.holding-stack')).toContainText('×1');
+    await selection.getByRole('button', { name: 'Remove selected' }).click();
+    await confirmation.getByRole('button', { name: 'Confirm removal' }).click();
+    await expect(selection.getByRole('status')).toContainText('Removed 1 copies');
+    await expect(panel.locator('.holding-stack')).toHaveCount(0);
+    await selection.getByRole('button', { name: 'Undo', exact: true }).first().click();
+    await expect(panel.locator('.holding-stack')).toContainText('×1');
   } finally { await pool.end(); }
 });
