@@ -113,8 +113,7 @@ def test_stable_ids_review_and_bounded_raw_retention():
         def fetch(self, source_id):
             card = super().fetch(source_id)
             if source_id == "test-2":
-                card["variants_detailed"] = [{"type": "holo", "foil": "cosmos", "variantId": "provider-a"},
-                                             {"type": "holo", "foil": "cosmos", "variantId": "provider-b"}]
+                card["variants"] = {"normal": True, "firstEdition": True}
             return card
     for source in (AmbiguousSource(), Source()):
         client.post(path, headers=headers(owner, "POST", path))

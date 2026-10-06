@@ -3,6 +3,7 @@ import { searchCatalog, type PrintingView } from './generated';
 import { addHolding, getLeafHoldings, HoldingError, type HoldingView, type LeafFilters } from './holdings_generated';
 import { MoveHoldings, type MoveDestination } from './MoveHoldings';
 import './Holdings.css';
+import { EditionCorrections } from './EditionCorrections';
 
 function descriptorText(descriptor: Record<string, unknown>) {
   if (typeof descriptor.label === 'string') return descriptor.label;
@@ -100,6 +101,7 @@ export function Holdings({ locationId, locationName, destinations, onMoveReady, 
       </article>
     </li>)}</ul> : <p>No cards here yet.</p>}
     {cursor && <button type="button" onClick={() => void load(cursor)}>More cards</button>}
+    <EditionCorrections holdings={holdings} onChanged={async()=>{await load();await onInventoryChanged?.();}} />
     <MoveHoldings locationId={locationId} holdings={holdings} destinations={destinations} onMoved={() => load()} onMoveReady={onMoveReady} />
     {adding && <div className="holding-add"><h4>Add a Card Edition to {locationName}</h4>
       <form onSubmit={search}><label>Search English card name <input value={query} onChange={event => { setQuery(event.target.value); pendingKey.current = null; }} required maxLength={120} /></label><button disabled={busy}>Search</button></form>

@@ -154,24 +154,33 @@ const server = createServer(async (request, response) => {
       if (!sameOrigin(request)) return json(response, 403, { error: 'Origin required' });
       const current = await session(request);
       if (!current) return json(response, 401, { error: 'Authentication required' });
-      const body = JSON.parse(await readBody(request)) as { reportId?: unknown; action?: unknown };
-      const reportId = typeof body.reportId === 'string' ? body.reportId.toLowerCase() : body.reportId;
+      const body = JSON.parse(await readBody(request)) as { reportId?: unknown; reviewId?: unknown; action?: unknown };
+      const isReview = body.reviewId !== undefined;
+      const target = isReview ? body.reviewId : body.reportId;
+      const targetId = typeof target === 'string' ? target.toLowerCase() : target;
       const action = body.action;
-      if (typeof reportId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(reportId) ||
-        (action !== 'approve_printing' && action !== 'approve_edition')) return json(response, 422, { error: 'Invalid approval request' });
+      if (typeof targetId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetId) ||
+        (isReview ? action !== 'confirm_source' && action !== 'resolve_catalog' : action !== 'approve_printing' && action !== 'approve_edition') ||
+        (isReview && body.reportId !== undefined)) return json(response, 422, { error: 'Invalid approval request' });
       const owner = await pool.query<{ email: string }>(`SELECT u.email FROM owner_binding b
         JOIN "user" u ON u.id=b.user_id WHERE b.singleton AND b.user_id=$1`, [current.user.id]);
       if (!owner.rows[0]) return json(response, 403, { error: 'Owner access required' });
-      const report = await pool.query<{ kind: string }>(`SELECT kind FROM missing_card_report
-        WHERE id=$1 AND status IN ('pending','needs_info')`, [reportId]);
-      if (!report.rows[0] || action !== `approve_${report.rows[0].kind}`) return json(response, 404, { error: 'Report not found' });
+      if (isReview) {
+        const review = await pool.query<{ kind: string }>(`SELECT kind FROM catalog_review WHERE id=$1 AND status='pending'`, [targetId]);
+        if (!review.rows[0] || action === 'confirm_source' && review.rows[0].kind !== 'source_match') return json(response, 404, { error: 'Review not found' });
+      } else {
+        const report = await pool.query<{ kind: string }>(`SELECT kind FROM missing_card_report
+          WHERE id=$1 AND status IN ('pending','needs_info')`, [targetId]);
+        if (!report.rows[0] || action !== `approve_${report.rows[0].kind}`) return json(response, 404, { error: 'Report not found' });
+      }
       const email = owner.rows[0].email;
       if (!await allowedSend(email, trustedClientIp(request))) return json(response, 429, { error: 'Code rate limit reached. Try later.' });
       const code = randomInt(0, 1_000_000).toString().padStart(6, '0');
-      const codeHash = createHmac('sha256', internalSecret).update(`${current.user.id}:${reportId}:${action}:${code}`).digest('hex');
+      const codeHash = createHmac('sha256', internalSecret).update(`${current.user.id}:${targetId}:${action}:${code}`).digest('hex');
       await deliverCode(email, code, 'catalog approval');
-      await pool.query(`INSERT INTO catalog_approval_code(owner_id,report_id,action,code_hash,expires_at)
-        VALUES ($1,$2,$3,$4,now()+interval '5 minutes')`, [current.user.id, reportId, action, codeHash]);
+      const targetColumn = isReview ? 'review_id' : 'report_id';
+      await pool.query(`INSERT INTO catalog_approval_code(owner_id,${targetColumn},action,code_hash,expires_at)
+        VALUES ($1,$2,$3,$4,now()+interval '5 minutes')`, [current.user.id, targetId, action, codeHash]);
       return json(response, 202, { message: 'Approval code sent.' });
     }
     if (path === '/auth/sign-out' && request.method === 'POST') {

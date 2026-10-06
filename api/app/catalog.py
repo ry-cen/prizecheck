@@ -51,7 +51,7 @@ def variant_descriptors(record: dict) -> tuple[list[dict], bool]:
             descriptors.append(descriptor)
         keys = [json.dumps(value, sort_keys=True) for value in descriptors]
         if len(keys) != len(set(keys)):
-            return [{"kind": "unspecified", "label": "Unspecified Variant"}], True
+            raise CatalogError("Descriptor collision requires review before promotion")
         if descriptors:
             return descriptors, False
     variants = record.get("variants")
@@ -178,6 +178,8 @@ def execute_run(conn, run_id: UUID, source=None, before_promotion=None):
                 for future in done:
                     source_id = pending.pop(future)
                     records[source_id] = future.result()
+                    if not isinstance(records[source_id], dict) or records[source_id].get("id") != source_id:
+                        raise CatalogError("Full record source ID mismatch")
                     if len(records) % 50 == 0:
                         _progress(conn, run_id, "fetching", fetched_count=len(records))
                     next_id = next(remaining, None)
@@ -191,9 +193,12 @@ def execute_run(conn, run_id: UUID, source=None, before_promotion=None):
         refs = [(item["set_id"], item["collector_number"]) for item in normalized]
         if len(set(refs)) != len(refs):
             raise CatalogError("Duplicate set and collector reference")
-        previous = conn.execute("SELECT source_count FROM catalog_generation WHERE id = (SELECT active_generation FROM catalog_state WHERE singleton)").fetchone()
-        if previous and len(first) < previous["source_count"] * 0.99:
-            raise CatalogError("English source ID count dropped by more than 1%")
+        previous_ids={row['source_id'] for row in conn.execute("""SELECT gp.source_id
+          FROM catalog_generation_printing gp JOIN catalog_printing p ON p.id=gp.printing_id
+          WHERE gp.generation_id=(SELECT active_generation FROM catalog_state WHERE singleton)
+            AND p.source='tcgdex' AND NOT gp.tombstoned""").fetchall()}
+        if previous_ids and len(previous_ids-first)>len(previous_ids)*0.01:
+            raise CatalogError('English source ID count dropped by more than 1%')
         raw = gzip.compress(json.dumps([records[key] for key in sorted(first)], ensure_ascii=False, separators=(",", ":")).encode(), mtime=0)
         limit = int(os.environ.get("CATALOG_RAW_MAX_BYTES", "100000000"))
         if len(raw) > limit:
@@ -213,27 +218,55 @@ def execute_run(conn, run_id: UUID, source=None, before_promotion=None):
             for item in normalized:
                 source_id = item["source_id"]
                 existing = old.get(source_id)
+                candidate=dict(item)
+                if old_id and not conn.execute('SELECT 1 FROM catalog_source_reference WHERE source_id=%s',(source_id,)).fetchone():
+                    matches=conn.execute("""SELECT gp.printing_id FROM catalog_generation_printing gp
+                      JOIN catalog_printing p ON p.id=gp.printing_id WHERE gp.generation_id=%s
+                      AND p.source='manual' AND lower(gp.set_id)=lower(%s) AND lower(gp.collector_number)=lower(%s)""",
+                      (old_id,item['set_id'],item['collector_number'])).fetchall()
+                    if matches:
+                        match_candidate={**candidate,'manual_printing_ids':[str(row['printing_id']) for row in matches]}
+                        conn.execute("""INSERT INTO catalog_review(printing_id,source_id,kind,source_fingerprint,detail,candidate)
+                          VALUES (%s,%s,'source_match',%s,'Possible match to a reviewed manual Printing; physical confirmation required',%s)
+                          ON CONFLICT DO NOTHING""",(existing['printing_id'] if existing else None,source_id,item['fingerprint'],json.dumps(match_candidate)))
                 if existing and existing["display_name"] != item["name"]:
                     item["name"] = existing["display_name"]
                     item["search_name"] = existing["search_name"]
                     conn.execute("""INSERT INTO catalog_review(printing_id,source_id,kind,source_fingerprint,detail)
                       VALUES (%s,%s,'name_change',%s,'Source name changed; identity review required') ON CONFLICT DO NOTHING""",
                       (existing["printing_id"], source_id, item["fingerprint"]))
+                    conn.execute("UPDATE catalog_review SET candidate=%s WHERE source_id=%s AND kind='name_change' AND source_fingerprint=%s",(json.dumps(candidate),source_id,item['fingerprint']))
+                if existing and old_id:
+                    old_descriptors={json.dumps(r['descriptor'],sort_keys=True) for r in conn.execute("""SELECT e.descriptor
+                      FROM catalog_generation_edition ge JOIN catalog_edition e ON e.id=ge.edition_id
+                      WHERE ge.generation_id=%s AND ge.printing_id=%s AND ge.active
+                        AND NOT EXISTS (SELECT 1 FROM catalog_override co WHERE co.edition_id=e.id)""",(old_id,existing['printing_id'])).fetchall()}
+                    new_descriptors={json.dumps(d,sort_keys=True) for d in item['descriptors']}
+                    if old_descriptors-new_descriptors:item['ambiguous']=True
                 if item["ambiguous"]:
                     conn.execute("""INSERT INTO catalog_review(printing_id,source_id,kind,source_fingerprint,detail)
                       VALUES (%s,%s,'variant_ambiguity',%s,'Variant flags require review') ON CONFLICT DO NOTHING""",
                       (existing["printing_id"] if existing else None, source_id, item["fingerprint"]))
+                    conn.execute("UPDATE catalog_review SET candidate=%s WHERE source_id=%s AND kind='variant_ambiguity' AND source_fingerprint=%s",(json.dumps(candidate),source_id,item['fingerprint']))
                 identity_id = existing["identity_id"] if existing else conn.execute("""INSERT INTO catalog_identity(identity_key,display_name)
                   VALUES (%s,%s) ON CONFLICT(identity_key) DO UPDATE SET identity_key=EXCLUDED.identity_key RETURNING id""",
                   (item["identity_key"], item["name"])).fetchone()["id"]
                 printing_id = conn.execute("""INSERT INTO catalog_printing(source,source_id,identity_id)
                   VALUES ('tcgdex',%s,%s) ON CONFLICT(source_id) DO UPDATE SET source_id=EXCLUDED.source_id RETURNING id""",
                   (source_id, identity_id)).fetchone()["id"]
+                conn.execute("UPDATE catalog_review SET printing_id=%s WHERE source_id=%s AND source_fingerprint=%s AND printing_id IS NULL",(printing_id,source_id,item['fingerprint']))
                 conn.execute("""INSERT INTO catalog_generation_printing
                   (generation_id,printing_id,source_id,set_id,set_name,collector_number,display_name,search_name,image_url,source_fingerprint,basic_energy)
                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                   (run_id, printing_id, source_id, item["set_id"], item["set_name"], item["collector_number"],
                    item["name"], item["search_name"], item["image_url"], item["fingerprint"], item["basic_energy"]))
+                if item['ambiguous'] and existing:
+                    # Pending physical ambiguity cannot withdraw established Editions.
+                    conn.execute("""INSERT INTO catalog_generation_edition(generation_id,edition_id,printing_id,active)
+                      SELECT %s,edition_id,printing_id,active FROM catalog_generation_edition
+                      WHERE generation_id=%s AND printing_id=%s ON CONFLICT DO NOTHING""",
+                      (run_id,old_id,printing_id))
+                    item['descriptors']=[]
                 for descriptor in item["descriptors"]:
                     descriptor_key = json.dumps(descriptor, sort_keys=True)
                     edition_id = conn.execute("""INSERT INTO catalog_edition(printing_id,descriptor_key,descriptor)
@@ -269,6 +302,8 @@ def execute_run(conn, run_id: UUID, source=None, before_promotion=None):
                     conn.execute("""INSERT INTO catalog_generation_edition(generation_id,edition_id,printing_id,active)
                       SELECT %s,edition_id,printing_id,false FROM catalog_generation_edition WHERE generation_id=%s AND printing_id=%s""",
                       (run_id, old_id, prior["printing_id"]))
+            conn.execute("""UPDATE catalog_generation_edition ge SET active=false
+              FROM catalog_edition_replacement er WHERE ge.generation_id=%s AND ge.edition_id=er.edition_id""",(run_id,))
             conn.execute("UPDATE catalog_state SET active_generation=%s, revision=revision+1, last_success=now() WHERE singleton", (run_id,))
             conn.execute("UPDATE catalog_run SET phase='complete', outcome='succeeded', finished_at=now(), lease_until=NULL WHERE id=%s", (run_id,))
             # Keep current and previous successful compressed raw generations.

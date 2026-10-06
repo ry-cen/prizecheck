@@ -202,14 +202,15 @@ def leaf_holdings(location_id: UUID, cursor: str | None = Query(default=None, ma
                 except (ValueError,TypeError): fail(400,'INVALID_CURSOR')
                 params.extend([amount,amount,UUID(key[1])])
         rows = conn.execute(f"""SELECT h.edition_id,h.quantity,h.version,h.location_id,l.name AS location_name,
-          p.id AS printing_id,coalesce(gp.display_name,ci.display_name) AS printing_name,
+          p.id AS printing_id,coalesce(pd.display_name,ci.display_name) AS printing_name,
           coalesce(gp.search_name,lower(ci.display_name)) AS search_name,
-          coalesce(gp.set_id,'') AS set_id,coalesce(gp.set_name,'') AS set_name,
-          coalesce(gp.collector_number,'') AS collector_number,e.descriptor,gp.image_url
+          coalesce(pd.set_id,'') AS set_id,coalesce(pd.set_name,'') AS set_name,
+          coalesce(pd.collector_number,'') AS collector_number,e.descriptor,pd.image_url
           FROM holding h JOIN location l ON l.id=h.location_id AND l.owner_id=h.owner_id
           JOIN catalog_edition e ON e.id=h.edition_id
           JOIN catalog_printing p ON p.id=e.printing_id
           JOIN catalog_identity ci ON ci.id=p.identity_id
+          LEFT JOIN catalog_printing_display pd ON pd.printing_id=p.id
           LEFT JOIN catalog_generation_printing gp ON gp.generation_id=%s AND gp.printing_id=p.id
           WHERE h.owner_id=%s AND h.location_id=%s {filters} {after}
           ORDER BY {order} LIMIT 49""", params).fetchall()

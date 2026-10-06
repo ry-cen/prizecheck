@@ -40,6 +40,7 @@ class PrintingView(BaseModel):
     high_image_url: str | None
     editions: list[EditionView]
     evidence_url: str | None = None
+    source_references: list[str] = []
 
 
 class SearchResponse(BaseModel):
@@ -122,13 +123,16 @@ def _views(conn, generation: UUID, rows: list[dict]) -> list[PrintingView]:
     evidence_rows = conn.execute("""SELECT printing_id,evidence_url FROM catalog_override
       WHERE action='approve_printing' AND printing_id=ANY(%s)""", (ids,)).fetchall()
     evidence = {row["printing_id"]: row["evidence_url"] for row in evidence_rows}
+    references: dict[UUID,list[str]] = {value: [] for value in ids}
+    for ref in conn.execute('SELECT printing_id,source_id FROM catalog_source_reference WHERE printing_id=ANY(%s) ORDER BY source_id',(ids,)).fetchall():
+        references[ref['printing_id']].append(ref['source_id'])
     return [PrintingView(id=row["id"], source=row["source"], source_id=row["public_source_id"],
                          set_id=row["set_id"], set_name=row["set_name"], collector_number=row["collector_number"],
                          name=row["display_name"], identity_id=row["identity_id"], identity_name=row["identity_name"],
                          basic_energy=row["basic_energy"], tombstoned=row["tombstoned"],
                          low_image_url=f'{row["image_url"]}/low.webp' if row["image_url"] else None,
                          high_image_url=f'{row["image_url"]}/high.webp' if row["image_url"] else None,
-                         editions=editions[row["id"]], evidence_url=evidence.get(row["id"])) for row in rows]
+                         editions=editions[row["id"]], evidence_url=evidence.get(row["id"]),source_references=references[row["id"]]) for row in rows]
 
 
 @router.get("/api/catalog/search", response_model=SearchResponse)
