@@ -175,10 +175,14 @@ def apply_selection(manifest_id, command, user_id):
                 fail(404, "LOCATION_NOT_FOUND")
             # Materialize the staged set in the transaction. Validation and both
             # sides of the transfer use this same snapshot under the owner lock.
+            conn.execute("""CREATE TEMP TABLE selected_work ON COMMIT DROP AS
+              SELECT * FROM move_manifest_item WHERE owner_id=%s""", (user_id,))
+            conn.execute("CREATE UNIQUE INDEX ON selected_work(edition_id)")
+            conn.execute("ANALYZE selected_work")
             conn.execute("""CREATE TEMP TABLE move_work ON COMMIT DROP AS
               SELECT mi.edition_id,mi.quantity,mi.expected_version,h.quantity AS source_quantity,
                 h.version AS source_version,d.quantity AS destination_quantity
-              FROM move_manifest_item mi
+              FROM selected_work mi
               LEFT JOIN holding h ON h.owner_id=mi.owner_id AND h.location_id=%s AND h.edition_id=mi.edition_id
               LEFT JOIN holding d ON d.owner_id=mi.owner_id AND d.location_id=%s AND d.edition_id=mi.edition_id
               WHERE mi.owner_id=%s""", (source, command.destination_id, user_id))
