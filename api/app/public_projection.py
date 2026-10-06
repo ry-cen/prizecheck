@@ -21,15 +21,21 @@ class FilePublicProjection:
         self.directory = Path(os.environ.get('PUBLIC_PROJECTION_DIR', '.local/public-projections')).resolve()
         self.path = self.directory / 'current.json'
 
-    def read(self):
+    def read_state(self):
         try:
             with self.path.open() as stream:
                 value = json.load(stream)
             if not isinstance(value, dict) or value.get('format') != 1 or not isinstance(value.get('decks'), dict):
                 raise ProjectionUnavailable()
-            return value['decks']
+            revision = value.get('revision', 0)
+            if not isinstance(revision, int) or revision < 0:
+                raise ProjectionUnavailable()
+            return value['decks'], revision
         except (OSError, ValueError) as exc:
             raise ProjectionUnavailable() from exc
+
+    def read(self):
+        return self.read_state()[0]
 
     @contextmanager
     def writer(self, initialize=False):
@@ -49,7 +55,8 @@ class FilePublicProjection:
         try:
             with tempfile.NamedTemporaryFile(mode='w', dir=self.directory, prefix='.pending-', delete=False) as stream:
                 temporary = stream.name
-                json.dump({'format': 1, 'decks': decks}, stream, ensure_ascii=False, separators=(',', ':'))
+                revision = self.read_state()[1] + 1 if self.path.exists() else 0
+                json.dump({'format': 1, 'revision': revision, 'decks': decks}, stream, ensure_ascii=False, separators=(',', ':'))
                 stream.flush()
                 os.fsync(stream.fileno())
             os.replace(temporary, self.path)

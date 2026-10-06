@@ -8,6 +8,8 @@ from app.main import app  # noqa: E402
 
 
 def ts_type(value):
+    if "enum" in value:
+        return " | ".join(repr(part) for part in value["enum"])
     if "$ref" in value:
         return value["$ref"].split("/")[-1]
     if "anyOf" in value:
@@ -20,7 +22,7 @@ def ts_type(value):
 
 
 schema = app.openapi()["components"]["schemas"]
-names = ("PublishCommand", "RevokeCommand", "PublicationStatus", "PublicationResult", "PublicEdition", "PublicIdentity", "PublicIdentityCheck", "PublicChecks", "PublicSnapshot")
+names = ("VisibilityCommand", "PublishCommand", "RevokeCommand", "PublicationStatus", "PublicationResult", "PublicEdition", "PublicIdentity", "PublicIdentityCheck", "PublicChecks", "PublicSnapshot")
 lines = ["// Generated from FastAPI OpenAPI by scripts/generate_publications_client.py. Do not edit."]
 for name in names:
     definition = schema[name]
@@ -31,7 +33,7 @@ lines.append("""
 export class PublicationError extends Error {
   constructor(public status: number, public code: string) { super(code); }
 }
-async function request<T>(path: string, method: string, body?: object): Promise<T> {
+async function request<T>(path: string, method: string, body?: object, onResponse?: (response: Response) => void): Promise<T> {
   const response = await fetch(path, { method, credentials: 'same-origin',
     headers: body ? { 'content-type': 'application/json' } : undefined,
     body: body ? JSON.stringify(body) : undefined });
@@ -39,12 +41,19 @@ async function request<T>(path: string, method: string, body?: object): Promise<
     const payload = await response.json().catch(() => ({}));
     throw new PublicationError(response.status, payload?.detail?.code ?? 'PUBLICATION_REQUEST_FAILED');
   }
+  onResponse?.(response);
   return response.json() as Promise<T>;
 }
 export const getPublication = (id: string) => request<PublicationStatus>(`/api/decks/${encodeURIComponent(id)}/publication`, 'GET');
 export const publishDeck = (id: string, body: PublishCommand) => request<PublicationResult>(`/api/decks/${encodeURIComponent(id)}/publication`, 'POST', body);
 export const republishDeck = (id: string, body: PublishCommand) => request<PublicationResult>(`/api/decks/${encodeURIComponent(id)}/publication`, 'PUT', body);
 export const revokeDeck = (id: string, body: RevokeCommand) => request<PublicationResult>(`/api/decks/${encodeURIComponent(id)}/publication`, 'DELETE', body);
+export const setPublicationVisibility = (id: string, body: VisibilityCommand) => request<PublicationResult>(`/api/decks/${encodeURIComponent(id)}/publication/visibility`, 'PATCH', body);
+export async function getPublicDeckPage(token: string) {
+  let robots = 'noindex, nofollow';
+  const snapshot = await request<PublicSnapshot>(`/api/public/decks/${encodeURIComponent(token)}`, 'GET', undefined, response => { robots = response.headers.get('x-robots-tag') ?? robots; });
+  return { snapshot, robots };
+}
 export const getPublicDeck = (token: string) => request<PublicSnapshot>(`/api/public/decks/${encodeURIComponent(token)}`, 'GET');
 """)
 content = "\n".join(lines)

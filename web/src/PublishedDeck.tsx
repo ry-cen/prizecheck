@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { getPublicDeck, PublicationError, type PublicSnapshot } from './publications_generated';
+import { getPublicDeckPage, PublicationError, type PublicSnapshot } from './publications_generated';
 
 const labels: Record<string, string> = { basic_energy_exempt: 'Basic Energy exemption supported', unresolved: 'Basic Energy classification unresolved', over_limit: 'Over four-copy limit', within_limit: 'Within four-copy limit' };
 
@@ -14,7 +14,7 @@ export function PublishedDeck({ token }: { token: string }) {
   useEffect(() => {
     let active = true;
     setSnapshot(null); setMessage('Loading snapshot…');
-    void getPublicDeck(token).then(result => { if (active) { setSnapshot(result); setMessage(''); } }).catch(cause => {
+    void getPublicDeckPage(token).then(result => { if (active) { setSnapshot(result.snapshot); robots.content = result.robots; setMessage(''); } }).catch(cause => {
       if (active) setMessage(cause instanceof PublicationError && cause.status === 404 ? 'Published Deck not found.' : 'Published Deck temporarily unavailable. Reload to retry.');
     });
     const robots = document.createElement('meta'); robots.name = 'robots'; robots.content = 'noindex, nofollow'; document.head.append(robots);
