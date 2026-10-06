@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { getLeafHoldings, type HoldingView } from './holdings_generated';
 import { commitMove, MoveError, stageMove, startMove, type MoveItem } from './moves_generated';
 import './MoveHoldings.css';
+import { applyUndo, dismissUndo, listUndo, removeInventory, type UndoEntry } from './inventoryUndo';
 
 export type MoveDestination = { id: string; name: string };
 type PendingCommit = { manifestId: string; destinationId: string; key: string };
@@ -17,6 +18,12 @@ export function MoveHoldings({ locationId, holdings, destinations, onMoved, onMo
   const [selected, setSelected] = useState<Record<string, MoveItem>>({});
   const [fan, setFan] = useState<string | null>(null);
   const [sheet, setSheet] = useState(false);
+  const [removing, setRemoving] = useState(false);
+  const [undoEntries, setUndoEntries] = useState<UndoEntry[]>([]);
+  const removalAttempt = useRef<{manifest: string; key: string} | null>(null);
+  const undoKeys = useRef<Record<string,string>>({});
+  async function refreshUndo() { setUndoEntries(await listUndo()); }
+  useEffect(() => { void refreshUndo().catch(() => undefined); const timer = window.setInterval(() => void refreshUndo().catch(() => undefined), 15000); return () => window.clearInterval(timer); }, [locationId]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [progress, setProgress] = useState('');
@@ -33,7 +40,7 @@ export function MoveHoldings({ locationId, holdings, destinations, onMoved, onMo
   }, [onMoveReady]);
 
   function select(item: HoldingView, amount: string) {
-    pending.current = null;
+    pending.current = null; removalAttempt.current = null;
     setSelected(previous => {
       const next = { ...previous };
       if (!/^[0-9]+$/.test(amount) || BigInt(amount) < 1n || BigInt(amount) > BigInt(item.quantity)) delete next[item.edition_id];
@@ -43,7 +50,7 @@ export function MoveHoldings({ locationId, holdings, destinations, onMoved, onMo
   }
 
   async function selectAll() {
-    setBusy(true); setMessage(''); setProgress('Loading cards…'); pending.current = null;
+    setBusy(true); setMessage(''); setProgress('Loading cards…'); pending.current = null; removalAttempt.current = null;
     try {
       const all: HoldingView[] = [];
       let cursor: string | null = null;
@@ -61,7 +68,7 @@ export function MoveHoldings({ locationId, holdings, destinations, onMoved, onMo
 
   async function refreshSelection() {
     if (busy || !chosen.length) return;
-    setBusy(true); setMessage(''); setProgress('Refreshing selected cards…'); pending.current = null;
+    setBusy(true); setMessage(''); setProgress('Refreshing selected cards…'); pending.current = null; removalAttempt.current = null;
     try {
       const refreshed: Record<string, MoveItem> = {};
       let cursor: string | null = null;
@@ -103,7 +110,7 @@ export function MoveHoldings({ locationId, holdings, destinations, onMoved, onMo
       const result = await commitMove(attempt.manifestId, destinationId, attempt.key);
       pending.current = null;
       setSelected({}); setFan(null); setSheet(false);
-      await onMoved();
+      await onMoved(); await refreshUndo();
       setMessage(`Moved ${result.copy_count} copies across ${result.edition_count} Editions.`);
     } catch (cause) {
       const code = cause instanceof MoveError ? cause.code : '';
@@ -121,12 +128,41 @@ export function MoveHoldings({ locationId, holdings, destinations, onMoved, onMo
     } finally { setBusy(false); setProgress(''); }
   }
 
+  async function remove() {
+    if (busy || !chosen.length) return;
+    setBusy(true); setMessage('');
+    try {
+      let attempt = removalAttempt.current;
+      if (!attempt) {
+        const manifest = await startMove(locationId);
+        for (let index = 0; index < chosen.length; index += 500) await stageMove(manifest.id, chosen.slice(index,index+500));
+        attempt = {manifest:manifest.id,key:crypto.randomUUID()}; removalAttempt.current = attempt;
+      }
+      const result = await removeInventory(attempt.manifest,attempt.key);
+      removalAttempt.current = null; pending.current = null; setSelected({}); setRemoving(false);
+      await onMoved(); await refreshUndo();
+      setMessage(`Removed ${result.copy_count} copies from your Collection. Undo is available for ten minutes.`);
+    } catch (error) {
+      if (error instanceof MoveError && error.status < 500) removalAttempt.current = null;
+      setMessage('Removal failed or needs a safe retry. Your selection is saved; refresh if cards changed.');
+    } finally { setBusy(false); }
+  }
+  async function undo(entry: UndoEntry) {
+    setBusy(true);
+    try {
+      const key = undoKeys.current[entry.id] ??= crypto.randomUUID();
+      await applyUndo(entry.id,key); await onMoved(); await refreshUndo(); setMessage('Inventory restored.');
+    } catch { setMessage('Undo is incompatible or expired. Dismiss this entry to reach an older action.'); }
+    finally { setBusy(false); }
+  }
+
   return <section className="move-holdings" aria-label="Move cards">
     <div className="move-toolbar"><button type="button" disabled={busy || !holdings.length} onClick={() => void selectAll()}>Select all in this Location</button>
-      <button type="button" disabled={busy || !chosen.length} onClick={() => { setSelected({}); setFan(null); pending.current = null; }}>Clear selection</button>
+      <button type="button" disabled={busy || !chosen.length} onClick={() => { setSelected({}); setFan(null); pending.current = null; removalAttempt.current = null; }}>Clear selection</button>
       <button type="button" disabled={busy || !chosen.length} onClick={() => void refreshSelection()}>Refresh selection</button>
       <span aria-live="polite">{copies.toString()} copies · {chosen.length} Editions selected</span>
-      <button type="button" disabled={busy || !chosen.length} onClick={() => setSheet(true)}>Move selected</button></div>
+      <button type="button" disabled={busy || !chosen.length} onClick={() => setSheet(true)}>Move selected</button>
+      <button type="button" disabled={busy || !chosen.length} onClick={() => setRemoving(true)}>Remove selected</button></div>
     {holdings.length > 0 && <ul className="move-selection-list">{holdings.map(item => <li key={item.edition_id}>
       <span>{item.printing_name} · {item.set_name} #{item.collector_number} · ×{item.quantity}</span>
       <button type="button" onClick={() => select(item, selected[item.edition_id] ? '0' : item.quantity)}>{selected[item.edition_id] ? 'Deselect stack' : 'Select stack'}</button>
@@ -152,6 +188,16 @@ export function MoveHoldings({ locationId, holdings, destinations, onMoved, onMo
         {destination.name}</button>) : <p>No other Storage Leaf is available.</p>}
       <button type="button" onClick={() => setSheet(false)}>Cancel</button>
     </div>}
+    {removing && <div role="dialog" aria-label="Confirm Inventory Removal">
+      <p>Remove {copies.toString()} copies from your tracked Collection?</p>
+      <button disabled={busy} onClick={() => void remove()}>Confirm removal</button>
+      <button disabled={busy} onClick={() => setRemoving(false)}>Cancel removal</button>
+    </div>}
+    {undoEntries.length > 0 && <section aria-label="Recent inventory actions"><h4>Recent actions · Undo for ten minutes</h4>
+      <ol>{undoEntries.map((entry,index) => <li key={entry.id}>{entry.action === 'move' ? 'Move' : 'Inventory Removal'}
+        <button disabled={busy || index !== 0} onClick={() => void undo(entry)}>Undo</button>
+        <button disabled={busy} onClick={() => void dismissUndo(entry.id).then(refreshUndo).catch(() => setMessage('Dismiss failed. Try again.'))}>Dismiss</button>
+      </li>)}</ol></section>}
     {progress && <p role="status" aria-live="polite">{progress}</p>}
     {message && <p role="status">{message}</p>}
   </section>;
