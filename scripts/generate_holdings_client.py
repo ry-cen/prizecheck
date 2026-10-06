@@ -41,7 +41,11 @@ async function request<T>(path: string, method = 'GET', body?: object): Promise<
   }
   return response.json() as Promise<T>;
 }
-export const getLeafHoldings = (locationId: string, cursor?: string) => request<LeafHoldings>(`/api/holdings/${encodeURIComponent(locationId)}${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`);
+export type LeafFilters = { name?: string; set_id?: string; collector_number?: string; sort?: 'name' | 'quantity' };
+export const getLeafHoldings = (locationId: string, cursor?: string, filters: LeafFilters = {}) => {
+  const query = new URLSearchParams({ ...filters, ...(cursor ? { cursor } : {}) });
+  return request<LeafHoldings>(`/api/holdings/${encodeURIComponent(locationId)}?${query}`);
+};
 export const addHolding = (body: AddHolding) => request<AddResult>('/api/holdings', 'POST', body);
 """)
 content = "\n".join(lines)

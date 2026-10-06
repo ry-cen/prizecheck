@@ -177,3 +177,5 @@ app.include_router(catalog_search_router)
 app.include_router(holdings_router)
 app.include_router(missing_cards_router)
 app.include_router(moves_router)
+from .collection import router as collection_router  # noqa: E402
+app.include_router(collection_router)
