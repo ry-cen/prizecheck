@@ -1,3 +1,4 @@
+from test_catalog import claim_current
 import hashlib
 import hmac
 import json
@@ -177,7 +178,7 @@ def test_next_pull_preserves_manual_printing_and_edition(seeded_catalog):
     assert manual_variant["evidence_url"] == "https://example.org/foil"
     with connect() as conn:
         conn.execute("INSERT INTO catalog_run DEFAULT VALUES")
-        execute_run(conn, claim_run(conn), Source(ids=("fixture-1",)))
+        execute_run(conn, claim_current(conn), Source(ids=("fixture-1",)))
         generation = conn.execute("SELECT active_generation FROM catalog_state").fetchone()["active_generation"]
         manual = conn.execute("SELECT tombstoned FROM catalog_generation_printing WHERE generation_id=%s AND printing_id=%s", (generation, manual_id)).fetchone()
         manual_edition = conn.execute("SELECT active FROM catalog_generation_edition WHERE generation_id=%s AND edition_id=%s", (generation, edition_id)).fetchone()

@@ -1,3 +1,4 @@
+from test_catalog import claim_current
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
@@ -27,7 +28,7 @@ def promote(names):
     reset_catalog()
     with connect() as conn:
         conn.execute("INSERT INTO catalog_run DEFAULT VALUES")
-        execute_run(conn, claim_run(conn), SearchSource(names))
+        execute_run(conn, claim_current(conn), SearchSource(names))
 
 
 def search(**params):

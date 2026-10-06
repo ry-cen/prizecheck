@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
-import { readFileSync } from 'node:fs';
+import { readFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { Pool } from 'pg';
 
 test('owner signs in, sees Unsorted, follows safe destination, then signs out', async ({ page }) => {
@@ -40,6 +41,10 @@ test('external return destinations are discarded', async ({ page }) => {
 });
 
 test('bound owner starts one catalog run from the private panel', async ({ page }) => {
+  const gate = process.env.CATALOG_PROCESS_FIXTURE_DIR;
+  if (!gate) throw new Error('Configure the CI deterministic catalog child source before this test');
+  mkdirSync(gate, { recursive: true }); rmSync(`${gate}/release`, { force: true });
+  execFileSync('.venv/bin/python', ['-c', 'from test_catalog import reset_catalog; reset_catalog()'], { env: { ...process.env, PYTHONPATH: 'api:api/tests' } });
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });
   await pool.query('DELETE FROM auth_send_event');
   await pool.query('DELETE FROM owner_binding');
@@ -60,8 +65,14 @@ test('bound owner starts one catalog run from the private panel', async ({ page 
   await page.getByRole('button', { name: 'Owner controls' }).click();
   await expect(page.getByRole('heading', { name: 'English catalog pull' })).toBeVisible();
   await page.getByRole('button', { name: 'Start full English pull' }).click();
-  await expect(page.getByText('Phase: queued')).toBeVisible();
+  await expect(page.getByText(/Phase: (queued|enumerating)/)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Start full English pull' })).toBeDisabled();
   expect((await pool.query('SELECT count(*) AS n FROM catalog_run WHERE outcome IS NULL')).rows[0].n).toBe('1');
-  await pool.query("UPDATE catalog_run SET phase='failed',outcome='failed',finished_at=now() WHERE outcome IS NULL");
+  await page.goto('about:blank');
+  writeFileSync(`${gate}/release`, 'released');
+  await expect.poll(async () => (await pool.query('SELECT outcome FROM catalog_run ORDER BY started_at DESC LIMIT 1')).rows[0]?.outcome).toBe('succeeded');
+  await page.goto('http://localhost:5173/locations');
+  await page.getByRole('button', { name: 'Owner controls' }).click();
+  await expect(page.getByText('Phase: complete')).toBeVisible();
   await pool.end();
 });
