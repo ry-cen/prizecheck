@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { createDeck, getDeck, getDecks, DeckError, type DeckDetail, type TreeNode } from './decks_generated';
 import { getLocationTree } from './location_generated';
 import { Holdings } from './Holdings';
+import { PublishDeck } from './PublishDeck';
 
 export function Decks() {
   const [decks, setDecks] = useState<TreeNode[]>([]);
@@ -48,6 +49,7 @@ export function Decks() {
       <ul>{detail.checks.identities.map(identity => <li key={identity.identity_id}>{identity.name} · {identity.quantity} copies · {labels[identity.status] ?? 'Check unresolved'}</li>)}</ul>
       <p>{detail.checks.disclaimer}</p><button type="button" onClick={() => void refreshChecks(detail.deck.id)}>Refresh checks</button>
       <Holdings key={detail.deck.id} locationId={detail.deck.id} locationName={detail.deck.name} destinations={leaves} onInventoryChanged={() => refreshChecks(detail.deck.id)} />
+      <PublishDeck key={detail.deck.id} deckId={detail.deck.id} />
     </section>}
     {message && <p role="status">{message}</p>}
   </section>;

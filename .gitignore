@@ -6,3 +6,4 @@ dist/
 .env
 test-results/
 playwright-report/
+.local/public-projections/
