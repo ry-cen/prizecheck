@@ -17,7 +17,7 @@ function HoldingArt({ url, name }: { url: string | null; name: string }) {
 }
 
 /** Mount inside the selected Storage Leaf's contents area. */
-export function Holdings({ locationId, locationName, destinations, onMoveReady }: { locationId: string; locationName: string; destinations: MoveDestination[]; onMoveReady?: (move: ((destinationId: string) => void) | null) => void }) {
+export function Holdings({ locationId, locationName, destinations, onMoveReady, onInventoryChanged }: { locationId: string; locationName: string; destinations: MoveDestination[]; onMoveReady?: (move: ((destinationId: string) => void) | null) => void; onInventoryChanged?: () => Promise<void> | void }) {
   const [holdings, setHoldings] = useState<HoldingView[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [query, setQuery] = useState('');
@@ -34,6 +34,7 @@ export function Holdings({ locationId, locationName, destinations, onMoveReady }
       const result = await getLeafHoldings(locationId, next);
       setHoldings(previous => next ? [...previous, ...result.holdings] : result.holdings);
       setCursor(result.next_cursor);
+      await onInventoryChanged?.();
     } catch (cause) {
       if (cause instanceof HoldingError && (cause.code === 'INVENTORY_CHANGED' || cause.code === 'CATALOG_CHANGED')) {
         const first = await getLeafHoldings(locationId);
