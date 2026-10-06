@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import json
 import os
+from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -165,8 +166,12 @@ def cursor_decode(token: str, user_id: str, location_id: UUID, owner_revision: i
 
 @router.get("/{location_id}", response_model=LeafHoldings)
 def leaf_holdings(location_id: UUID, cursor: str | None = Query(default=None, max_length=1024),
+                  name: str=Query(default='',max_length=120),set_id: str=Query(default='',max_length=80),
+                  collector_number: str=Query(default='',max_length=40),sort: Literal['name','quantity']='name',
                   user_id: str = Depends(verified_user)):
+    from .collection import decode_cursor, encode_cursor
     with connect() as conn, conn.transaction():
+        conn.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ')
         owner = conn.execute("SELECT revision FROM inventory_owner WHERE user_id=%s", (user_id,)).fetchone()
         leaf = conn.execute("""SELECT id,name,kind FROM location WHERE id=%s AND owner_id=%s""",
                             (location_id, user_id)).fetchone()
@@ -176,11 +181,29 @@ def leaf_holdings(location_id: UUID, cursor: str | None = Query(default=None, ma
             fail(409, "NOT_STORAGE_LEAF")
         state = conn.execute("SELECT active_generation,revision FROM catalog_state WHERE singleton").fetchone()
         revision = owner["revision"] if owner else 1
-        key = cursor_decode(cursor, user_id, location_id, revision, state["revision"]) if cursor else None
-        after = "AND (coalesce(gp.search_name,ci.display_name),h.edition_id) > (%s,%s)" if key else ""
+        name=name.strip().lower(); set_id=set_id.strip().lower(); collector_number=collector_number.strip().lower()
+        context=[user_id,str(location_id),name,set_id,collector_number,sort,revision,state['revision']]
+        key=decode_cursor(cursor,context) if cursor else None
+        params=[state['active_generation'],user_id,location_id]
+        filters=''
+        if name:
+            filters+=" AND coalesce(gp.search_name,lower(ci.display_name)) LIKE %s ESCAPE '!'"
+            params.append(name.replace('!','!!').replace('%','!%').replace('_','!_')+'%')
+        if set_id: filters+=' AND lower(gp.set_id)=%s'; params.append(set_id)
+        if collector_number: filters+=' AND lower(gp.collector_number)=%s'; params.append(collector_number)
+        after=''; order='coalesce(gp.search_name,lower(ci.display_name)),h.edition_id' if sort=='name' else 'h.quantity DESC,h.edition_id'
+        if key:
+            if sort=='name':
+                after='AND (coalesce(gp.search_name,lower(ci.display_name)),h.edition_id)>(%s,%s)'
+                params.extend([key[0],UUID(key[1])])
+            else:
+                after='AND (h.quantity<%s OR (h.quantity=%s AND h.edition_id>%s))'
+                try: amount=int(key[0])
+                except (ValueError,TypeError): fail(400,'INVALID_CURSOR')
+                params.extend([amount,amount,UUID(key[1])])
         rows = conn.execute(f"""SELECT h.edition_id,h.quantity,h.version,h.location_id,l.name AS location_name,
           p.id AS printing_id,coalesce(gp.display_name,ci.display_name) AS printing_name,
-          coalesce(gp.search_name,ci.display_name) AS search_name,
+          coalesce(gp.search_name,lower(ci.display_name)) AS search_name,
           coalesce(gp.set_id,'') AS set_id,coalesce(gp.set_name,'') AS set_name,
           coalesce(gp.collector_number,'') AS collector_number,e.descriptor,gp.image_url
           FROM holding h JOIN location l ON l.id=h.location_id AND l.owner_id=h.owner_id
@@ -188,10 +211,8 @@ def leaf_holdings(location_id: UUID, cursor: str | None = Query(default=None, ma
           JOIN catalog_printing p ON p.id=e.printing_id
           JOIN catalog_identity ci ON ci.id=p.identity_id
           LEFT JOIN catalog_generation_printing gp ON gp.generation_id=%s AND gp.printing_id=p.id
-          WHERE h.owner_id=%s AND h.location_id=%s {after}
-          ORDER BY coalesce(gp.search_name,ci.display_name),h.edition_id LIMIT 49""",
-                            (state["active_generation"], user_id, location_id, *key) if key else
-                            (state["active_generation"], user_id, location_id)).fetchall()
+          WHERE h.owner_id=%s AND h.location_id=%s {filters} {after}
+          ORDER BY {order} LIMIT 49""", params).fetchall()
         page = rows[:48]
         views = [HoldingView(edition_id=row["edition_id"], quantity=str(row["quantity"]), version=row["version"],
                              printing_id=row["printing_id"], printing_name=row["printing_name"],
@@ -199,4 +220,4 @@ def leaf_holdings(location_id: UUID, cursor: str | None = Query(default=None, ma
                              descriptor=row["descriptor"], image_url=f'{row["image_url"]}/low.webp' if row["image_url"] else None,
                              location_id=row["location_id"], location_name=row["location_name"]) for row in page]
         return LeafHoldings(holdings=views, owner_revision=revision, catalog_revision=state["revision"],
-                            next_cursor=cursor_encode(user_id, location_id, revision, state["revision"], page[-1]) if len(rows) > 48 else None)
+                            next_cursor=encode_cursor(context,[str(page[-1]['quantity']) if sort=='quantity' else page[-1]['search_name'],str(page[-1]['edition_id'])]) if len(rows)>48 else None)

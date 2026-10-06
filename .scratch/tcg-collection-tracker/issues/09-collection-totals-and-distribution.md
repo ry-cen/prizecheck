@@ -4,7 +4,7 @@
 
 **Blocked by:** 04 — Add Holdings
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 **What to build:** A collector can browse an aggregate Collection, see each owned Card Edition once with its total, and find the Storage Leaves holding its copies.
 
@@ -12,3 +12,7 @@
 - [ ] Provide indexed search, filter, sort, and keyset pages for Collection and leaf views, with 30 Collection entries and 48 leaf Holdings per page by default.
 - [ ] Cursors bind owner, filters, sort, inventory revision, and catalog revision where relevant. A change prompts a clear restart from page one rather than mixing revisions.
 - [ ] Browser/API/PostgreSQL tests cover duplicate Editions across leaves, accurate totals after Add, rollups, 25,000-Holding plans, cursor invalidation, and cross-owner isolation.
+
+## Implementation evidence
+
+Implemented derived totals, direct Storage Leaf distribution, descendant rollups, filters/name-or-quantity sorting, and revision-bound keyset pages (30 Collection / 48 leaf). Signed API tests and Add regressions pass on disposable PostgreSQL; TypeScript/build and generated-client checks pass. The 25,000-Holding fixture records indexed distribution and leaf quantity plans in [query-plan evidence](../validation/09-collection-25000-plans.json). Browser test is prepared; ticket remains open until the integration browser gate confirms the Collection navigation.
