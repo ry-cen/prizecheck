@@ -187,14 +187,14 @@ def leaf_holdings(location_id: UUID, cursor: str | None = Query(default=None, ma
         params=[state['active_generation'],user_id,location_id]
         filters=''
         if name:
-            filters+=" AND coalesce(gp.search_name,lower(ci.display_name)) LIKE %s ESCAPE '!'"
+            filters+=" AND coalesce(lower(pd.display_name),lower(ci.display_name)) LIKE %s ESCAPE '!'"
             params.append(name.replace('!','!!').replace('%','!%').replace('_','!_')+'%')
-        if set_id: filters+=' AND lower(gp.set_id)=%s'; params.append(set_id)
-        if collector_number: filters+=' AND lower(gp.collector_number)=%s'; params.append(collector_number)
-        after=''; order='coalesce(gp.search_name,lower(ci.display_name)),h.edition_id' if sort=='name' else 'h.quantity DESC,h.edition_id'
+        if set_id: filters+=' AND lower(pd.set_id)=%s'; params.append(set_id)
+        if collector_number: filters+=' AND lower(pd.collector_number)=%s'; params.append(collector_number)
+        after=''; order='coalesce(lower(pd.display_name),lower(ci.display_name)),h.edition_id' if sort=='name' else 'h.quantity DESC,h.edition_id'
         if key:
             if sort=='name':
-                after='AND (coalesce(gp.search_name,lower(ci.display_name)),h.edition_id)>(%s,%s)'
+                after='AND (coalesce(lower(pd.display_name),lower(ci.display_name)),h.edition_id)>(%s,%s)'
                 params.extend([key[0],UUID(key[1])])
             else:
                 after='AND (h.quantity<%s OR (h.quantity=%s AND h.edition_id>%s))'
@@ -203,7 +203,7 @@ def leaf_holdings(location_id: UUID, cursor: str | None = Query(default=None, ma
                 params.extend([amount,amount,UUID(key[1])])
         rows = conn.execute(f"""SELECT h.edition_id,h.quantity,h.version,h.location_id,l.name AS location_name,
           p.id AS printing_id,coalesce(pd.display_name,ci.display_name) AS printing_name,
-          coalesce(gp.search_name,lower(ci.display_name)) AS search_name,
+          coalesce(lower(pd.display_name),lower(ci.display_name)) AS search_name,
           coalesce(pd.set_id,'') AS set_id,coalesce(pd.set_name,'') AS set_name,
           coalesce(pd.collector_number,'') AS collector_number,e.descriptor,pd.image_url
           FROM holding h JOIN location l ON l.id=h.location_id AND l.owner_id=h.owner_id

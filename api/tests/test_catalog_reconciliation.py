@@ -12,7 +12,7 @@ def run(source):
     with connect() as conn:
         run_id=conn.execute('INSERT INTO catalog_run DEFAULT VALUES RETURNING id').fetchone()['id']
         conn.commit()
-        claimed=claim_run(conn)
+        claimed=claim_run(conn,run_id)
         assert claimed==run_id
         execute_run(conn,run_id,source)
     return run_id

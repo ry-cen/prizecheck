@@ -28,10 +28,10 @@ promote({'card-1': 'Pikachu'})`], { env: { ...process.env, PYTHONPATH: 'api:api/
     await page.getByLabel('Six-digit code').fill(JSON.parse(mailLines(mailFile).at(-1)!).otp);
     await page.getByRole('button', { name: 'Sign in' }).click();
     await page.getByRole('button', { name: 'New top-level Location' }).click();
-    await page.getByLabel('Name').fill(source);
+    await page.getByLabel('Name', { exact: true }).fill(source);
     await page.getByRole('button', { name: 'Save' }).click();
     await page.getByRole('button', { name: 'New top-level Location' }).click();
-    await page.getByLabel('Name').fill(destination);
+    await page.getByLabel('Name', { exact: true }).fill(destination);
     await page.getByRole('button', { name: 'Save' }).click();
     await page.getByRole('navigation', { name: 'Location tree' }).getByRole('button', { name: source }).click();
     const panel = page.getByRole('region', { name: `Cards in ${source}` });
@@ -46,7 +46,7 @@ promote({'card-1': 'Pikachu'})`], { env: { ...process.env, PYTHONPATH: 'api:api/
     await selection.getByRole('button', { name: 'Fan copies' }).click();
     await selection.getByRole('button', { name: 'Select 2 Pikachu copies' }).click();
     await expect(selection).toContainText('2 copies · 1 Editions selected');
-    await selection.getByRole('button', { name: 'Move selected' }).click();
+    await selection.getByRole('button', { name: 'Move selected', exact: true }).click();
     await page.getByRole('dialog', { name: 'Choose Move destination' }).getByRole('button', { name: destination }).click();
     await expect(selection.getByRole('status')).toContainText('Moved 2 copies');
     await expect(panel.locator('.holding-stack')).toContainText('×1');
@@ -60,7 +60,7 @@ promote({'card-1': 'Pikachu'})`], { env: { ...process.env, PYTHONPATH: 'api:api/
     ) UPDATE holding SET quantity=quantity+1,version=(SELECT revision FROM changed)
       WHERE location_id=$1 AND edition_id=$2`,
       [selectedRow.rows[0].location_id, selectedRow.rows[0].edition_id]);
-    await selection.getByRole('button', { name: 'Move selected' }).click();
+    await selection.getByRole('button', { name: 'Move selected', exact: true }).click();
     await page.getByRole('dialog', { name: 'Choose Move destination' }).getByRole('button', { name: destination }).click();
     await expect(selection.getByRole('status')).toContainText('selection is saved');
     await selection.getByRole('button', { name: 'Refresh selection' }).click();
@@ -79,6 +79,18 @@ promote({'card-1': 'Pikachu'})`], { env: { ...process.env, PYTHONPATH: 'api:api/
     await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2, { steps: 12 });
     await page.mouse.up();
     await expect(selection.getByRole('status')).toContainText('Moved 1 copies');
+    await expect(panel.locator('.holding-stack')).toContainText('×1');
+    await selection.getByRole('button', { name: 'Select stack' }).click();
+    await selection.getByRole('button', { name: 'Remove selected' }).click();
+    const confirmation = page.getByRole('dialog', { name: 'Confirm Inventory Removal' });
+    await expect(confirmation).toContainText('Remove 1 copies from your tracked Collection?');
+    await confirmation.getByRole('button', { name: 'Cancel removal' }).click();
+    await expect(panel.locator('.holding-stack')).toContainText('×1');
+    await selection.getByRole('button', { name: 'Remove selected' }).click();
+    await confirmation.getByRole('button', { name: 'Confirm removal' }).click();
+    await expect(selection.getByRole('status')).toContainText('Removed 1 copies');
+    await expect(panel.locator('.holding-stack')).toHaveCount(0);
+    await selection.getByRole('button', { name: 'Undo', exact: true }).first().click();
     await expect(panel.locator('.holding-stack')).toContainText('×1');
   } finally { await pool.end(); }
 });

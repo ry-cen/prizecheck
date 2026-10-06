@@ -45,6 +45,7 @@ class CatalogRun(BaseModel):
     error: str | None
     started_at: datetime
     finished_at: datetime | None
+    heartbeat_stale: bool
 
 
 class CatalogReview(BaseModel):
@@ -146,8 +147,9 @@ def catalog_status(user_id: str = Depends(verified_user)):
 def owner_catalog_status(user_id: str = Depends(verified_user)):
     with connect() as conn:
         require_owner(conn, user_id)
-        run = conn.execute("""SELECT id,phase,outcome,enumerated_count,fetched_count,validated_count,error,started_at,finished_at
-          FROM catalog_run ORDER BY started_at DESC LIMIT 1""").fetchone()
+        run = conn.execute("""SELECT id,phase,outcome,enumerated_count,fetched_count,validated_count,error,started_at,finished_at,
+          (outcome IS NULL AND coalesce(lease_until,started_at+interval '2 minutes')<=clock_timestamp()) AS heartbeat_stale
+          FROM catalog_run ORDER BY (outcome IS NULL) DESC,started_at DESC LIMIT 1""").fetchone()
         reviews = conn.execute("""SELECT id,kind,source_id,detail,created_at FROM catalog_review
           WHERE status='pending' ORDER BY created_at LIMIT 50""").fetchall()
         return OwnerCatalogStatus(catalog=catalog_status_row(conn), run=CatalogRun(**run) if run else None,
@@ -156,13 +158,11 @@ def owner_catalog_status(user_id: str = Depends(verified_user)):
 
 @app.post("/api/admin/catalog-runs", response_model=OwnerCatalogStatus)
 def start_catalog_run(user_id: str = Depends(verified_user)):
+    from .catalog_dispatch import dispatch_import
     with connect() as conn:
-        with conn.transaction():
-            require_owner(conn, user_id)
-            conn.execute("SELECT pg_advisory_xact_lock(914702)")
-            active = conn.execute("SELECT id FROM catalog_run WHERE outcome IS NULL").fetchone()
-            if not active:
-                conn.execute("INSERT INTO catalog_run DEFAULT VALUES")
+        require_owner(conn, user_id)
+        conn.commit()
+        dispatch_import(conn)
     return owner_catalog_status(user_id)
 
 
@@ -184,3 +184,6 @@ from .decks import router as decks_router  # noqa: E402
 app.include_router(decks_router)
 from .catalog_reconciliation import router as catalog_reconciliation_router  # noqa: E402
 app.include_router(catalog_reconciliation_router)
+
+from .publications import router as publications_router  # noqa: E402
+app.include_router(publications_router)

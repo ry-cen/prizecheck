@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createLocation, editLocation, getLocationTree, LocationError, type TreeNode } from './location_generated';
 import { Holdings } from './Holdings';
+import { Collection } from './Collection';
 import { LocationSafetyDialog, type SafetyIntent } from './LocationSafetyDialog';
 import './LocationTree.css';
 
@@ -93,7 +94,7 @@ export function LocationTree() {
       <button className="mobile-only" onClick={() => setDrawer(true)} aria-expanded={drawer} aria-controls="location-drawer">Browse Locations</button>
       <nav className="breadcrumbs" aria-label="Location breadcrumbs"><button onClick={() => { setDrawer(true); setSelected(null); }}>All Locations</button>{breadcrumbs.map(node => <React.Fragment key={node.id}><span aria-hidden="true"> / </span><button onClick={() => select(node.id)}>{node.name}</button></React.Fragment>)}</nav>
       {current ? <><header className="location-heading"><div><h2>{current.name}</h2><p>{current.kind === 'organization' ? 'Organizational Location' : current.kind === 'deck' ? 'Deck' : 'Storage Leaf'}</p></div>{current.kind !== 'deck' && <div className="location-actions"><button onClick={() => open('rename')}>Rename</button><button onClick={() => open('move')}>Move Location</button><button onClick={() => { open('create'); setParentId(current.id); }}>New child</button><button onClick={() => { setAction(null); setSafetyIntent({ action: 'delete', location: current }); }}>Delete Location</button></div>}</header>
-        {current.kind === 'organization' ? <section aria-label="Child Locations"><h3>Inside this Location</h3>{children(current.id).map(node => <button className="child-location" key={node.id} onClick={() => select(node.id)}>{node.name}</button>)}</section> : <Holdings key={current.id} locationId={current.id} locationName={current.name} destinations={nodes.filter(node => node.kind === 'storage_leaf' || node.kind === 'deck').map(node => ({ id: node.id, name: node.name }))} onMoveReady={move => { moveReady.current = move; }} />}
+        {current.kind === 'organization' ? <><section aria-label="Child Locations"><h3>Inside this Location</h3>{children(current.id).map(node => <button className="child-location" key={node.id} onClick={() => select(node.id)}>{node.name}</button>)}</section><Collection key={current.id} locationId={current.id} locationName={current.name} /></> : <Holdings key={current.id} locationId={current.id} locationName={current.name} destinations={nodes.filter(node => node.kind === 'storage_leaf' || node.kind === 'deck').map(node => ({ id: node.id, name: node.name }))} onMoveReady={move => { moveReady.current = move; }} />}
       </> : <p>Select a Location from the tree.</p>}
       {safetyIntent && <LocationSafetyDialog intent={safetyIntent} onDone={async id => { setSafetyIntent(null); await refresh(id); }} onCancel={() => setSafetyIntent(null)} onStale={refresh} />}
       {action && <form className="location-form" onSubmit={save}><h3>{action === 'create' ? 'New Location' : action === 'rename' ? 'Rename Location' : 'Move Location'}</h3>

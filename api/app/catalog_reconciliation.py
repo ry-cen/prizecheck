@@ -199,3 +199,15 @@ def reassign(command: ReassignHolding,user_id: str=Depends(verified_user)):
         conn.execute('INSERT INTO move_response(owner_id,request_key,edition_count,copy_count) VALUES (%s,%s,1,%s)',
           (user_id,command.idempotency_key,amount))
         return ReassignResult(quantity=str(amount),owner_revision=new_revision)
+
+class ReviewEditionView(BaseModel):
+    id: UUID
+    descriptor: dict
+
+@router.get('/api/admin/catalog-reviews/{review_id}/editions',response_model=list[ReviewEditionView])
+def review_editions(review_id: UUID,user_id: str=Depends(verified_user)):
+    with connect() as conn:
+        require_owner(conn,user_id)
+        review=conn.execute('SELECT printing_id FROM catalog_review WHERE id=%s',(review_id,)).fetchone()
+        if not review:fail(404,'REVIEW_NOT_FOUND')
+        return [ReviewEditionView(**row) for row in conn.execute('SELECT id,descriptor FROM catalog_edition WHERE printing_id=%s ORDER BY descriptor_key,id',(review['printing_id'],)).fetchall()]

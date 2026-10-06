@@ -10,7 +10,7 @@ async function read<T>(path: string): Promise<T> {
   return response.json() as Promise<T>;
 }
 export const getCollection = (filters: CollectionFilters={},cursor?: string) => {
-  const query=new URLSearchParams({...filters,...(cursor ? {cursor} : {})});
+  const query=new URLSearchParams(Object.entries({...filters,...(cursor ? {cursor} : {})}).filter(([,value])=>value !== undefined).map(([key,value])=>[key,value as string]));
   return read<CollectionPage>(`/api/collection?${query}`);
 };
 export const getEditionDistribution = (editionId: string) => read<Distribution>(`/api/collection/editions/${encodeURIComponent(editionId)}`);

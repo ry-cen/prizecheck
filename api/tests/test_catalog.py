@@ -9,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.catalog import CatalogError, claim_run, execute_run
+from unittest.mock import patch
 from app.main import app, connect
 
 client = TestClient(app)
@@ -43,6 +44,18 @@ class Source:
                 "variants": {"normal": True, "holo": False, "reverse": number == "2"}}
 
 
+
+def claim_current(conn):
+    run_id = conn.execute("SELECT id FROM catalog_run WHERE outcome IS NULL").fetchone()['id']
+    conn.commit()
+    return claim_run(conn,run_id)
+
+
+def dispatch_fixture(owner):
+    path = '/api/admin/catalog-runs'
+    with patch('app.catalog_dispatch.launch_import'):
+        return client.post(path,headers=headers(owner,'POST',path))
+
 def reset_catalog():
     with connect() as conn:
         conn.execute("TRUNCATE catalog_review,catalog_generation_edition,catalog_generation_printing,catalog_edition,catalog_printing,catalog_identity,catalog_generation,catalog_run CASCADE")
@@ -60,13 +73,13 @@ def seed_successful_generation():
     assert client.get("/api/catalog/status", headers=headers(other, "GET", "/api/catalog/status")).json() == {
         "available": False, "revision": 0, "last_success": None}
     assert client.post(path, headers=headers(other, "POST", path)).status_code == 403
-    first = client.post(path, headers=headers(owner, "POST", path)).json()
-    second = client.post(path, headers=headers(owner, "POST", path)).json()
+    first = dispatch_fixture(owner).json()
+    second = dispatch_fixture(owner).json()
     assert first["run"]["id"] == second["run"]["id"]
     assert first["run"]["phase"] == "queued"
     with connect() as conn:
         assert conn.execute("SELECT count(*) AS n FROM catalog_run").fetchone()["n"] == 1
-        run_id = claim_run(conn)
+        run_id = claim_current(conn)
         assert str(run_id) == first["run"]["id"]
         execute_run(conn, run_id, Source())
     status = client.get("/api/catalog/status", headers=headers(other, "GET", "/api/catalog/status")).json()
@@ -91,10 +104,10 @@ def test_failed_fetch_changed_enumeration_and_promotion_preserve_generation():
         old = conn.execute("SELECT active_generation,revision FROM catalog_state").fetchone()
     scenarios = [Source(fail="test-2"), Source(second=("test-1",)), Source()]
     for index, source in enumerate(scenarios):
-        response = client.post(path, headers=headers(owner, "POST", path))
+        response = dispatch_fixture(owner)
         assert response.status_code == 200
         with connect() as conn:
-            run_id = claim_run(conn)
+            run_id = claim_current(conn)
             with pytest.raises((CatalogError, RuntimeError)):
                 execute_run(conn, run_id, source, before_promotion=(lambda: (_ for _ in ()).throw(RuntimeError("boom"))) if index == 2 else None)
             state = conn.execute("SELECT active_generation,revision FROM catalog_state").fetchone()
@@ -116,9 +129,9 @@ def test_stable_ids_review_and_bounded_raw_retention():
                 card["variants"] = {"normal": True, "firstEdition": True}
             return card
     for source in (AmbiguousSource(), Source()):
-        client.post(path, headers=headers(owner, "POST", path))
+        dispatch_fixture(owner)
         with connect() as conn:
-            execute_run(conn, claim_run(conn), source)
+            execute_run(conn, claim_current(conn), source)
     with connect() as conn:
         assert conn.execute("SELECT id FROM catalog_printing WHERE source_id='test-1'").fetchone()["id"] == original
         assert conn.execute("SELECT count(*) AS n FROM catalog_generation").fetchone()["n"] == 2
@@ -130,7 +143,7 @@ def test_missing_energy_type_is_unresolved():
     reset_catalog()
     with connect() as conn:
         conn.execute("INSERT INTO catalog_run DEFAULT VALUES")
-        run_id = claim_run(conn)
+        run_id = claim_current(conn)
         class UncertainEnergy(Source):
             def fetch(self, source_id):
                 card = super().fetch(source_id)

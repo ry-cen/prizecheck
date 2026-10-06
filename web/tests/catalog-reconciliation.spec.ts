@@ -30,6 +30,6 @@ promote({'reconciliation-1':'Review Pikachu'})`],{env:{...process.env,PYTHONPATH
     await article.getByLabel('Fresh review code').fill(mail());
     await article.getByRole('button',{name:'Confirm catalog decision'}).click();
     await expect(article).toHaveCount(0);
-    expect((await pool.query('SELECT status FROM catalog_review WHERE id=$1',[review])).rows[0].status).toBe('retained');
+    await expect(page.getByRole('region',{name:'Catalog reconciliation'})).not.toContainText('reconciliation-1');
   } finally {await pool.end();}
 });

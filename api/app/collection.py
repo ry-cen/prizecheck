@@ -80,10 +80,10 @@ def collection(name: str=Query(default='',max_length=120),set_id: str=Query(defa
             params.extend([user_id,location_id,user_id])
         filters=''
         if name:
-            filters+=" AND coalesce(gp.search_name,lower(ci.display_name)) LIKE %s ESCAPE '!'"
+            filters+=" AND coalesce(lower(pd.display_name),lower(ci.display_name)) LIKE %s ESCAPE '!'"
             params.append(name.replace('!','!!').replace('%','!%').replace('_','!_')+'%')
-        if set_id: filters+=' AND lower(gp.set_id)=%s'; params.append(set_id)
-        if collector_number: filters+=' AND lower(gp.collector_number)=%s'; params.append(collector_number)
+        if set_id: filters+=' AND lower(pd.set_id)=%s'; params.append(set_id)
+        if collector_number: filters+=' AND lower(pd.collector_number)=%s'; params.append(collector_number)
         after=''
         order='search_name,edition_id' if sort=='name' else 'quantity DESC,edition_id'
         if key:
@@ -94,7 +94,7 @@ def collection(name: str=Query(default='',max_length=120),set_id: str=Query(defa
                 except (ValueError,TypeError): fail(400,'INVALID_CURSOR')
                 params.extend([amount,amount,UUID(key[1])])
         rows=conn.execute(f"""WITH totals AS (SELECT {COLUMNS},sum(h.quantity) AS quantity,1 AS version,
-          coalesce(gp.search_name,lower(ci.display_name)) AS search_name,
+          coalesce(lower(pd.display_name),lower(ci.display_name)) AS search_name,
           '00000000-0000-0000-0000-000000000000'::uuid AS location_id,'Collection' AS location_name
           FROM holding h {JOINS} WHERE h.owner_id=%s {scope} {filters}
           GROUP BY e.id,ci.id,pd.printing_id,gp.generation_id,gp.printing_id)

@@ -190,8 +190,9 @@ const server = createServer(async (request, response) => {
     }
     if (path.startsWith('/api/')) {
       if (request.method !== 'GET' && request.method !== 'HEAD' && !sameOrigin(request)) return json(response, 403, { error: 'Origin required' });
-      const current = await session(request);
-      if (!current && path !== '/api/health') return json(response, 401, { error: 'Authentication required' });
+      const publicRead = request.method === 'GET' && /^\/api\/public\/decks\/[^/]+$/.test(path);
+      const current = publicRead || path === '/api/health' ? null : await session(request);
+      if (!current && !publicRead && path !== '/api/health') return json(response, 401, { error: 'Authentication required' });
       const body = request.method === 'GET' || request.method === 'HEAD' ? '' : await readBody(request);
       const stamp = Math.floor(Date.now() / 1000).toString();
       const bodyHash = hash(body);
@@ -204,7 +205,7 @@ const server = createServer(async (request, response) => {
       }
       if (body) headers['content-type'] = request.headers['content-type'] || 'application/json';
       const upstream = await fetch(`${apiOrigin}${request.url}`, { method: request.method, headers, body: body || undefined });
-      response.writeHead(upstream.status, { 'content-type': upstream.headers.get('content-type') || 'application/json', 'cache-control': 'no-store' });
+      response.writeHead(upstream.status, { 'content-type': upstream.headers.get('content-type') || 'application/json', 'cache-control': 'no-store', ...(upstream.headers.has('x-robots-tag') ? { 'x-robots-tag': upstream.headers.get('x-robots-tag')! } : {}) });
       response.end(await upstream.text());
       return;
     }
