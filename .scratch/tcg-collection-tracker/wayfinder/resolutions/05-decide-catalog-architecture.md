@@ -2,6 +2,8 @@
 
 **Deployment amendment:** [ADR 0002](../../../../docs/adr/0002-defer-deployment-provider-selection.md) defers the named GitHub Actions, R2, and Neon choices below. The manual pull, private raw-generation retention, atomic promotion, and search behavior remain approved.
 
+**Execution amendment:** [ADR 0003](../../../../docs/adr/0003-on-demand-catalog-imports.md) specifies one import process launched on demand by the owner panel, which exits after its supplied run. No permanently polling catalog worker is required. See [ticket 19](../../issues/19-manual-catalog-import-command.md).
+
 The owner confirmed the catalog and search contract below. Earlier Card Identity and hosting resolutions apply.
 
 ## Agreed product decisions
@@ -18,7 +20,7 @@ The owner confirmed the catalog and search contract below. Earlier Card Identity
 ## Control and execution
 
 - The single operator account is identified by immutable application user ID in server-side configuration. The frontend hides the control panel from other accounts, and every control-panel API operation independently checks that ID. After the operator signs in, a deploy-time setup step explicitly binds that account ID; the first person to sign in is never granted access automatically. Neither email text nor a client-side flag grants the role.
-- `POST /admin/catalog-runs` accepts one operator request and creates one run ID. A second request while a run is active returns that run rather than starting another. The endpoint dispatches a `workflow_dispatch` GitHub Actions job with the run ID; credentials remain server-side. The job writes progress and results to the run record. The panel can be closed and reopened to see the same run.
+- `POST /api/admin/catalog-runs` accepts one operator request, reserves one run ID, and launches one background import process for that run. A second request while a healthy run is active returns it without another launch. PostgreSQL serializes dispatch and runner ownership; launch failure and orphan recovery follow the [on-demand import specification](../../proposals/manual-catalog-import.md). The process writes progress/results and exits. The panel can be closed and reopened to see the same run. Eventual hosting must support the on-demand launcher; provider choice remains deferred.
 - The panel displays phase, counts of enumerated/fetched/validated records, start and completion times, last success, a concise error, and review queue. It never displays access tokens or raw card payloads. No timer or cron starts a catalog run.
 
 ## Full English pull and promotion
