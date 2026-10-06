@@ -179,12 +179,17 @@ def apply_selection(manifest_id, command, user_id):
               SELECT * FROM move_manifest_item WHERE owner_id=%s""", (user_id,))
             conn.execute("CREATE UNIQUE INDEX ON selected_work(edition_id)")
             conn.execute("ANALYZE selected_work")
+            conn.execute("""CREATE TEMP TABLE current_work ON COMMIT DROP AS
+              SELECT * FROM holding WHERE owner_id=%s AND location_id IN (%s,%s)""",
+              (user_id,source,command.destination_id))
+            conn.execute("CREATE UNIQUE INDEX ON current_work(location_id,edition_id)")
+            conn.execute("ANALYZE current_work")
             conn.execute("""CREATE TEMP TABLE move_work ON COMMIT DROP AS
               SELECT mi.edition_id,mi.quantity,mi.expected_version,h.quantity AS source_quantity,
                 h.version AS source_version,d.quantity AS destination_quantity
               FROM selected_work mi
-              LEFT JOIN holding h ON h.owner_id=mi.owner_id AND h.location_id=%s AND h.edition_id=mi.edition_id
-              LEFT JOIN holding d ON d.owner_id=mi.owner_id AND d.location_id=%s AND d.edition_id=mi.edition_id
+              LEFT JOIN current_work h ON h.owner_id=mi.owner_id AND h.location_id=%s AND h.edition_id=mi.edition_id
+              LEFT JOIN current_work d ON d.owner_id=mi.owner_id AND d.location_id=%s AND d.edition_id=mi.edition_id
               WHERE mi.owner_id=%s""", (source, command.destination_id, user_id))
             conn.execute("CREATE UNIQUE INDEX ON move_work(edition_id)")
             conn.execute("ANALYZE move_work")
