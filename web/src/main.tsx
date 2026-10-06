@@ -2,6 +2,9 @@ import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { getLocations, getCatalogStatus, getOwnerCatalogStatus, startCatalogRun, type Location, type CatalogStatus, type OwnerCatalogStatus } from './generated';
 import { LocationTree } from './LocationTree';
+import { Collection } from './Collection';
+import { Decks } from './Decks';
+import { PublishedDeck } from './PublishedDeck';
 import { CatalogSearch } from './CatalogSearch';
 import { MissingCardReports, OwnerMissingCardReview } from './MissingCardReports';
 import './style.css';
@@ -19,9 +22,8 @@ function App() {
   const [locations, setLocations] = useState<Location[]>([]);
   const [catalog, setCatalog] = useState<CatalogStatus | null>(null);
   const [ownerCatalog, setOwnerCatalog] = useState<OwnerCatalogStatus | null>(null);
-  const [showOwner, setShowOwner] = useState(false);
-  const [showCatalog, setShowCatalog] = useState(false);
-  const [showReports, setShowReports] = useState(false);
+  const [view, setView] = useState<'locations' | 'collection' | 'decks' | 'catalog' | 'reports' | 'owner'>('locations');
+  const showOwner = view === 'owner';
   const [email, setEmail] = useState('');
   const [code, setCode] = useState('');
   const [sent, setSent] = useState(false);
@@ -72,13 +74,13 @@ function App() {
 
   async function signOut() {
     const response = await fetch('/auth/sign-out', { method: 'POST', credentials: 'same-origin' });
-    if (response.ok) { setSession({ signedIn: false, userId: null }); setLocations([]); setCatalog(null); setOwnerCatalog(null); setShowOwner(false); setShowCatalog(false); setShowReports(false); history.replaceState(null, '', '/locations'); }
+    if (response.ok) { setSession({ signedIn: false, userId: null }); setLocations([]); setCatalog(null); setOwnerCatalog(null); setView('locations'); history.replaceState(null, '', '/locations'); }
   }
 
   if (session === null) return <main><h1>TCG Collection</h1><p>Loading…</p><p role="alert">{message}</p></main>;
   if (!session.signedIn) return <main className="auth"><h1>TCG Collection</h1><p>Sign in with a code sent to your email.</p><form onSubmit={requestCode}><label>Email <input type="email" autoComplete="email" required value={email} onChange={e => setEmail(e.target.value)}/></label><button>Send code</button></form>{sent && <form onSubmit={verifyCode}><label>Six-digit code <input inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} required value={code} onChange={e => setCode(e.target.value)}/></label><button>Sign in</button></form>}<p role="status">{message}</p></main>;
-  return <main><header><h1>{showOwner ? 'Owner controls' : showReports ? 'Missing cards' : showCatalog ? 'Catalog' : 'Locations'}</h1><button onClick={signOut}>Sign out</button></header>
-    <nav><button onClick={() => { setShowOwner(false); setShowCatalog(false); setShowReports(false); }}>Locations</button><button onClick={() => { setShowOwner(false); setShowCatalog(true); setShowReports(false); }}>Catalog</button><button onClick={() => { setShowOwner(false); setShowCatalog(false); setShowReports(true); }}>Missing cards</button>{ownerCatalog && <button onClick={() => { setShowOwner(true); setShowCatalog(false); setShowReports(false); }}>Owner controls</button>}</nav>
+  return <main><header><h1>{({ locations: 'Locations', collection: 'Collection', decks: 'Decks', catalog: 'Catalog', reports: 'Missing cards', owner: 'Owner controls' })[view]}</h1><button onClick={signOut}>Sign out</button></header>
+    <nav aria-label="Main views">{(['locations', 'collection', 'decks', 'catalog', 'reports'] as const).map(item => <button key={item} aria-current={view === item ? 'page' : undefined} onClick={() => setView(item)}>{{ locations: 'Locations', collection: 'Collection', decks: 'Decks', catalog: 'Catalog', reports: 'Missing cards' }[item]}</button>)}{ownerCatalog && <button aria-current={showOwner ? 'page' : undefined} onClick={() => setView('owner')}>Owner controls</button>}</nav>
     {showOwner && ownerCatalog ? <section aria-label="Catalog pull">
       <h2>English catalog pull</h2>
       <p>{ownerCatalog.catalog.available ? `Last successful pull: ${new Date(ownerCatalog.catalog.last_success!).toLocaleString()}` : 'Catalog unavailable until the first complete import.'}</p>
@@ -88,8 +90,9 @@ function App() {
       <h3>Pending review ({ownerCatalog.pending_reviews.length})</h3>
       {ownerCatalog.pending_reviews.map(item => <article key={item.id}><strong>{item.kind}</strong> · {item.source_id}<p>{item.detail}</p></article>)}
       <OwnerMissingCardReview />
-    </section> : showReports ? <MissingCardReports /> : showCatalog ? <CatalogSearch /> : <><p>Your private physical storage.</p><p>{catalog?.available ? `English catalog last pulled ${new Date(catalog.last_success!).toLocaleString()}.` : 'Catalog unavailable until the first complete import.'}</p><LocationTree /></>}
+    </section> : view === 'reports' ? <MissingCardReports /> : view === 'catalog' ? <CatalogSearch /> : view === 'collection' ? <Collection /> : view === 'decks' ? <Decks /> : <><p>Your private physical storage.</p><p>{catalog?.available ? `English catalog last pulled ${new Date(catalog.last_success!).toLocaleString()}.` : 'Catalog unavailable until the first complete import.'}</p><LocationTree /></>}
     <p role="alert">{message}</p></main>;
 }
 
-createRoot(document.getElementById('root')!).render(<App/>);
+const publishedRoute = /^\/published\/([^/]+)$/.exec(location.pathname);
+createRoot(document.getElementById('root')!).render(publishedRoute ? <PublishedDeck token={publishedRoute[1]} /> : <App/>);

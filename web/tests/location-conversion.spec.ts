@@ -53,6 +53,7 @@ promote({'card-1': 'Pikachu'})`], { env: { ...process.env, PYTHONPATH: 'api:api/
     await page.getByRole('button', { name: 'New top-level Location' }).click();
     await page.locator('.location-form').getByLabel('Name').fill(empty);
     await page.getByRole('button', { name: 'Save' }).click();
+    await expect(page.getByRole('heading', { name: empty, exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'Delete Location' }).click();
     const deletion = page.getByRole('form', { name: 'Delete Location' });
     await deletion.getByLabel(`Type ${empty} to confirm`).fill(empty);
