@@ -25,3 +25,11 @@
 ## Comments
 
 - 2026-10-03: Initial terminal-only draft was replaced at the owner's direction. Imports continue to start from Owner controls; the API launches an import process only when requested. Specification changes are recorded; runtime implementation is pending.
+
+## Implementation evidence
+
+Implemented on `codex/mvp-19`. Owner dispatch uses PostgreSQL serialization, a durable reservation, two-minute startup/heartbeat grace, exclusive runner checks, and guarded explicit recovery. The fixed-argument detached launcher starts `app.catalog_import --run-id <UUID>` with an independent connection and a finite reaper; the polling worker is removed. Exact-run children revalidate queued/current state, retain session ownership through import commits, sanitize failure outcomes, and exit with codes 0/1/2/130. `CatalogRun.heartbeat_stale` enables owner recovery guidance without changing state on GET.
+
+Seventeen deterministic HTTP/PostgreSQL/process tests pass, including concurrent dispatch, launch failure, authorization, abandoned reservation recovery, delayed/duplicate children, real detached child survival across actual uvicorn termination/restart, child PID exit, abrupt kill recovery, and prior importer rollback/retention/identity/search contracts. Generated client and web TypeScript checks pass. Browser test now observes a real paused fixture child, closes the page, releases it, and reopens the result; integration browser/full-CI gate pending.
+
+For CI API startup only, prepend `api/tests/catalog_process_fixture` and `api` to PYTHONPATH and set `CATALOG_PROCESS_FIXTURE_DIR` to a temporary directory (also supplied to Playwright). The browser test creates its `release` file. This trusted test bootstrap replaces the external source boundary without introducing test flags into production import code. Do not set it for the Python test suite, which has its own deterministic source fixtures.

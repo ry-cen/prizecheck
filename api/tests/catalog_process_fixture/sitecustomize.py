@@ -1,0 +1,21 @@
+"""CI-only source boundary; opt in by putting this directory on PYTHONPATH.
+
+No production importer configuration enables this fixture. The gate path gives
+browser tests time to observe the real detached child before releasing fetch.
+"""
+import os
+from pathlib import Path
+import time
+
+if os.environ.get('CATALOG_PROCESS_FIXTURE_DIR'):
+    import app.catalog
+    class FixtureSource(app.catalog.TCGdexSource):
+        def enumerate(self):
+            gate = Path(os.environ['CATALOG_PROCESS_FIXTURE_DIR']) / 'release'
+            deadline = time.monotonic()+30
+            while not gate.exists() and time.monotonic()<deadline:
+                time.sleep(.05)
+            return {'process-1'}
+        def fetch(self, source_id):
+            return {'id':source_id,'name':'Pikachu','localId':'1','set':{'id':'fixture','name':'Fixture Set'},'category':'Pokemon','variants':{'normal':True}}
+    app.catalog.TCGdexSource = FixtureSource

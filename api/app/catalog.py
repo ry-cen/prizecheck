@@ -143,26 +143,29 @@ def _progress(conn, run_id: UUID, phase: str, **counts):
     conn.commit()
 
 
-def claim_run(conn) -> UUID | None:
-    # Session lock covers the entire network fetch and promotion. A crashed
-    # worker releases it; a replacement can claim the expired lease.
+class RunnerBusy(CatalogError):
+    pass
+
+
+def claim_run(conn, run_id: UUID) -> UUID | None:
+    # The session lock outlives progress commits and publication transactions.
     if not conn.execute("SELECT pg_try_advisory_lock(914703) AS acquired").fetchone()["acquired"]:
-        return None
+        conn.rollback()
+        raise RunnerBusy("Catalog importer already running")
     conn.commit()
     with conn.transaction():
-        row = conn.execute("""SELECT id FROM catalog_run WHERE outcome IS NULL
-          AND (phase = 'queued' OR lease_until < now()) ORDER BY started_at FOR UPDATE SKIP LOCKED LIMIT 1""").fetchone()
+        row = conn.execute("""SELECT id FROM catalog_run WHERE id=%s AND outcome IS NULL
+          AND phase='queued' FOR UPDATE""", (run_id,)).fetchone()
         if not row:
             conn.execute("SELECT pg_advisory_unlock(914703)")
             return None
-        run_id = row["id"]
-        conn.execute("UPDATE catalog_run SET phase = 'enumerating', lease_until = now() + interval '2 minutes' WHERE id = %s", (run_id,))
+        conn.execute("UPDATE catalog_run SET phase='enumerating', lease_until=now()+interval '2 minutes' WHERE id=%s", (run_id,))
     return run_id
 
 
 def execute_run(conn, run_id: UUID, source=None, before_promotion=None):
-    source = source or TCGdexSource()
     try:
+        source = source or TCGdexSource()
         first = source.enumerate()
         _progress(conn, run_id, "fetching", enumerated_count=len(first))
         records = {}
@@ -279,12 +282,18 @@ def execute_run(conn, run_id: UUID, source=None, before_promotion=None):
                 database_bytes = conn.execute("SELECT pg_database_size(current_database()) AS size").fetchone()["size"]
                 if database_bytes > int(db_limit):
                     raise CatalogError("Catalog exceeds configured database capacity gate")
-    except Exception as exc:
+    except BaseException as exc:
         conn.rollback()
-        safe = str(exc) if isinstance(exc, CatalogError) else "Catalog import failed; check worker logs"
-        conn.execute("UPDATE catalog_run SET phase='failed', outcome='failed', error=%s, finished_at=now(), lease_until=NULL WHERE id=%s", (safe[:180], run_id))
+        safe = str(exc) if isinstance(exc, CatalogError) else "Catalog import failed; start a new pull"
+        conn.execute("UPDATE catalog_run SET phase='failed', outcome='failed', error=%s, finished_at=now(), lease_until=NULL WHERE id=%s AND outcome IS NULL", (safe[:180], run_id))
         conn.commit()
         raise
     finally:
-        if isinstance(source, TCGdexSource):
-            source.client.close()
+        try:
+            if isinstance(source, TCGdexSource):
+                source.client.close()
+        finally:
+            if not conn.closed:
+                conn.rollback()
+                conn.execute("SELECT pg_advisory_unlock(914703)")
+                conn.commit()
