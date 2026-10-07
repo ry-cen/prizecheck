@@ -24,14 +24,19 @@ def typescript_type(value):
 
 
 lines = ["// Generated from FastAPI OpenAPI by scripts/generate_client.py. Do not edit."]
-for name in ("Location", "LocationsResponse", "HealthResponse", "CatalogStatus", "CatalogRun", "CatalogReview", "OwnerCatalogStatus", "EditionView", "PrintingView", "SearchResponse", "DetailResponse", "ReportInput", "ReportView", "ReportUpdate", "DecisionInput"):
+for name in ("Location", "LocationsResponse", "HealthResponse", "CatalogStatus", "CatalogRun", "CatalogReview", "OwnerCatalogStatus", "EditionView", "PrintingView", "SearchResponse", "DetailResponse", "ReportInput", "ReportView", "ReportUpdate", "DecisionInput", "QuotaStatus", "OperationsStatus"):
     definition = schema["components"]["schemas"][name]
     fields = []
     for key, value in definition["properties"].items():
         optional = "" if key in definition.get("required", []) else "?"
         fields.append(f"{key}{optional}: {typescript_type(value)}")
     lines.append(f"export type {name} = {{ {'; '.join(fields)} }};")
-content = "\n".join(lines) + "\n" + """export async function getLocations(): Promise<LocationsResponse> {
+content = "\n".join(lines) + "\n" + """export async function getOperationsStatus(): Promise<OperationsStatus> {
+  const response = await fetch('/api/admin/operations', { credentials: 'same-origin' });
+  if (!response.ok) throw new Error(`Operational status failed (${response.status})`);
+  return response.json() as Promise<OperationsStatus>;
+}
+export async function getLocations(): Promise<LocationsResponse> {
   const response = await fetch('/api/locations', { credentials: 'same-origin' });
   if (!response.ok) throw new Error(`Locations request failed (${response.status})`);
   return response.json() as Promise<LocationsResponse>;

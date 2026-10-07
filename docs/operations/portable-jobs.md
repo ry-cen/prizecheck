@@ -1,0 +1,43 @@
+# Portable operational jobs
+
+The implementation selects no provider. A scheduler invokes independent commands in the application working directory, with secrets injected as environment variables. The backup and watchdog commands do not invoke one another. Install these schedules through the scheduler adapter chosen at deployment:
+
+| Job | UTC schedule | Command |
+| --- | --- | --- |
+| Daily logical backup | Daily, 03:00 | `.venv/bin/python scripts/operations_job.py backup` |
+| Independent backup watchdog | Hourly, minute15 | `.venv/bin/python scripts/operations_job.py watchdog` |
+| Disposable recovery drill | Monthly, first day04:00 | `.venv/bin/python scripts/operations_job.py restore --target tcg_recovery_monthly_YYYYMM` |
+
+The monthly target must be new; existing databases are never overwritten. Remove only that disposable target after recording the drill. Source connection is `DATABASE_URL`; restore administration uses `RESTORE_ADMIN_DATABASE_URL`. Scheduler installation, actual daily execution and remote durability need deployment evidence, rather than a code-level assertion.
+
+## Private object storage boundary
+
+`scripts/private_backup_store.py` defines `PrivateBackupStore.put(key, source_path)`, `get(key, destination_path)`, `list(prefix)` and `delete(key)`. `put` must atomically replace the complete object; listings omit partial uploads. All objects are private. The filesystem adapter is selected by `BACKUP_PRIVATE_DIR` (root mode0700, objects0600). It refuses public-store overlap including the application's default public directory and an empty public-store setting.
+
+To plug in remote private storage, set `BACKUP_STORE_FACTORY=installed_module:factory_function`. The no-argument factory obtains credentials from injected configuration and returns this protocol. It must enforce private bucket/container policy, encrypted transport, atomic complete-object replacement and the namespace scope. No recovery or API rewrite is needed. Authentication, object storage and scheduler provider identities never belong in manifests or logs.
+
+A daily job holds a PostgreSQL advisory lock across backup/upload/retention, captures the logical snapshot with `recovery.py`, archives it, uploads it, reads it back and verifies SHA256 equality before atomically publishing `last-success.json`. Only then does it update owner status. Retention keeps the newest successful snapshot for each of the latest seven recorded UTC dates and four recorded ISO weeks; overlapping daily/weekly copies share one object. The currently referenced backup is always protected. All deletions happen after a verified new upload; unknown keys are untouched. Backup failures increment a sanitized counter and emit a bounded generic job result.
+
+The independent watchdog reads persisted success metadata, checks age against25 hours, serializes alert transitions in PostgreSQL and increments the incident counter once per stale period. A fresh backup resolves the period. Missing success metadata is an alert condition, while the panel labels the backup itself unverified. The panel includes the latest independent check timestamp so a stopped watchdog is visible.
+
+## Alert delivery and quotas
+
+The owner panel is always the alert fallback. Eligible email additionally requires `MAIL_SENDER_VERIFIED=true`, a verified owner recipient in the immutable owner binding, `MAIL_MODE=http`, `MAIL_RELAY_URL`, `MAIL_RELAY_TOKEN` and `MAIL_FROM`. This uses the same generic JSON envelope as the sign-in relay: `from`, `to`, `subject`, `text`. HTTPS is required; development permits HTTP on loopback only. Redirects are refused, requests time out after5 seconds, and response bodies never become log data. The relay must honor the durable `Idempotency-Key` to prevent duplicates if a process dies after delivery but before the database acknowledgement. Failed deliveries remain pending for the next independent watchdog. Repeated stale checks do not create repeated incidents or send acknowledged alerts again.
+
+Configured allowance adapters report measurements through:
+
+```sh
+.venv/bin/python scripts/operations_job.py quota --resource database_bytes --used 700000000 --allowance 1000000000
+```
+
+Resources are `database_bytes`, `storage_bytes`, `email_monthly`, `requests_monthly`, `runtime_ms`. The owner panel warns at70% and marks measurements older than25 hours unverified. Missing allowances are unverified. Supply measured values and contractual maxima; local synthetic inputs are not provider usage proof.
+
+## Sanitized health
+
+`GET /api/admin/operations` is signed-session owner-only. It exposes counts/timestamps for backup, restore, watchdog, catalog failures/reviews, private API requests/failures/authorization denials, sign-in requests/delivery counters, public projection failures/pending work, release failures and quotas. No emails, OTPs, tokens, Location names, card payloads or object keys appear. Private API trends are bounded hourly aggregates, kept48 hours. Anonymous public projection routes skip the private-database metrics writer entirely.
+
+Authentication and release adapters update only the fixed-name `operations_counter` vocabulary with an atomic increment. Delivery/failure counts remain unverified until an adapter records outcomes. The current mean response metric covers private API processing, not external network latency. This panel is operational evidence, not a substitute for release gates or a claim that a scheduler is installed.
+
+## Local verification
+
+2026-10-06/07 UTC, disposable PostgreSQL on55432 and local private object fixtures. `api/tests/test_operations.py` exercises owner authorization/privacy, real backup upload/verification,35 daily snapshot objects reduced to7daily/4weekly retention, job-driven disposable restore, injected missed schedule and deduplicated alert, controlled relay failure/retry/acknowledgement, and the70% quota boundary. `web/tests/operations.spec.ts` covers the owner view's stale warning and allowance warning in the complete browser gate. The isolated recovery boundary suite remains in `tests/operations`.
