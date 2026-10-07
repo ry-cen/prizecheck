@@ -10,6 +10,7 @@ def test_operational_health_is_owner_only_and_reports_unverified_metrics():
     with connect() as conn:
         conn.execute('DELETE FROM owner_binding')
         conn.execute('DELETE FROM operations_quota')
+        conn.execute('DELETE FROM operations_counter')
         conn.execute('UPDATE operations_state SET backup_last_success=NULL,backup_stale=false')
         conn.execute('INSERT INTO inventory_owner(user_id) VALUES (%s),(%s)', (owner,other))
         conn.execute('INSERT INTO owner_binding(user_id) VALUES (%s)', (owner,))
@@ -82,6 +83,10 @@ def test_real_backup_watchdog_deduplicates_stale_condition(tmp_path):
     with connect() as conn:
         state = conn.execute('SELECT backup_stale,backup_alerts FROM operations_state').fetchone()
         assert state == {'backup_stale':True,'backup_alerts':1}
+        owner=conn.execute('SELECT user_id FROM owner_binding').fetchone()['user_id']
+    with TestClient(app) as client:
+        status=client.get('/api/admin/operations',headers=headers(owner,'GET','/api/admin/operations')).json()
+        assert status['backup_state']=='stale' and status['backup_alerts']==1
 
 def test_configured_quota_warns_at_seventy_percent_without_private_labels():
     import subprocess,sys

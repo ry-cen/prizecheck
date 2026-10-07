@@ -19,6 +19,7 @@ class OperationsStatus(BaseModel):
     backup_last_success: datetime | None
     restore_last_success: datetime | None
     backup_state: Literal['unverified','fresh','stale']
+    backup_stale: bool
     backup_failures: int
     restore_failures: int
     backup_alerts: int
@@ -58,4 +59,4 @@ def operations_status(user_id: str = Depends(verified_user)):
          (SELECT count(*) FROM auth_send_event WHERE sent_at>=clock_timestamp()-interval '24 hours') AS sign_in_requests_24h""").fetchone()
         counters = {row['name']:row['count'] for row in conn.execute('SELECT name,count FROM operations_counter').fetchall()}
         quotas = conn.execute("SELECT *,used::numeric>=allowance::numeric*0.7 AS warning,measured_at>=clock_timestamp()-interval '25 hours' AS verified FROM operations_quota ORDER BY resource").fetchall()
-        return OperationsStatus(sign_in_delivery='recorded' if 'sign_in_delivered' in counters or 'sign_in_failed' in counters else 'unverified',sign_in_delivered=counters.get('sign_in_delivered'),sign_in_failed=counters.get('sign_in_failed'),gateway_authorization_denials=counters.get('authorization_denials',0),release_failures=counters.get('release_failed',0),provider_quotas='recorded' if quotas else 'unverified',quotas=[QuotaStatus(**item) for item in quotas],**{key:value for key,value in state.items() if key!='singleton' and key!='backup_stale'},**totals,**counts)
+        return OperationsStatus(sign_in_delivery='recorded' if 'sign_in_delivered' in counters or 'sign_in_failed' in counters else 'unverified',sign_in_delivered=counters.get('sign_in_delivered'),sign_in_failed=counters.get('sign_in_failed'),gateway_authorization_denials=counters.get('authorization_denials',0),release_failures=counters.get('release_failed',0),provider_quotas='recorded' if quotas else 'unverified',quotas=[QuotaStatus(**item) for item in quotas],**{key:value for key,value in state.items() if key!='singleton'},**totals,**counts)

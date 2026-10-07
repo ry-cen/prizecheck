@@ -14,7 +14,7 @@ export function OperationsHealth() {
     <button onClick={() => void refresh()}>Refresh operational health</button>
     {error && <p role="alert">Operational health temporarily unavailable.</p>}
     {status && <>
-      <p role={status.backup_state === 'stale' ? 'alert' : 'status'}>Backup: {status.backup_state}. Last success: {when(status.backup_last_success)}. Failed jobs: {status.backup_failures}.</p>
+      <p role={status.backup_state === 'stale' || status.backup_stale ? 'alert' : 'status'}>Backup: {status.backup_state}. Last success: {when(status.backup_last_success)}. Failed jobs: {status.backup_failures}.</p>
       <p>Disposable restore: {when(status.restore_last_success)}. Failed restores: {status.restore_failures}.</p>
       <p>Backup watchdog: {when(status.watchdog_last_check)}. Stale backup alerts: {status.backup_alerts}.</p>
       <p>Sign-in requests in 24 hours: {status.sign_in_requests_24h}. Recorded delivery: {status.sign_in_delivered ?? 'Unverified'}. Delivery failures: {status.sign_in_failed ?? 'Unverified'}.</p>
