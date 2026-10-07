@@ -1,0 +1,55 @@
+{
+  "scope": "real local auth/API/assets adapter and disposable database; no production provider",
+  "first_commit": "47ff191943a8ae1095bb955f2dbf18b99771ab03",
+  "second_commit": "a2a2f03379a6da72f3bc9074608c2ec23b63f571",
+  "checks": [
+    "exact selected branch gate",
+    "candidate full CI",
+    "previous full CI on candidate schema",
+    "real runtime activate and protected/public/assets smoke",
+    "failed candidate smoke automatically restores previous runtime",
+    "successor activation",
+    "rollback without reversed migrations",
+    "private Location survives",
+    "tamper refusal preserves runtime/active"
+  ],
+  "migration_delta": "019_operations.sql and 020_signup.sql added in candidate; previous app CI passes against this schema; no reversal on rollback",
+  "recorded_at_utc": "2026-10-07T20:33:10.565042+00:00",
+  "environment": {
+    "platform": "macOS-15.0.1-arm64-arm-64bit-Mach-O",
+    "python": "3.14.2",
+    "postgresql": "16.15 Homebrew, loopback port55432",
+    "runtime": "real FastAPI + Better Auth + exact built assets; two independent disposable CI databases and one disposable runtime database"
+  },
+  "fixture": "Synthetic single private owner/Location; filesystem projections; no real owner mail or production data",
+  "outcome": "passed",
+  "expected": "all gates pass; failed smoke restores first runtime with unchanged active pointer; rollback preserves private Location; tamper refused",
+  "actual": "all expected outcomes observed;3 release command/drill tests passed",
+  "counts": {
+    "candidate_api_passed": 77,
+    "candidate_api_explicit_capacity_skipped": 1,
+    "candidate_auth_passed": 13,
+    "candidate_browser_passed": 20,
+    "candidate_operations_passed": 7,
+    "candidate_operations_explicit_drill_skipped": 1,
+    "previous_api_passed": 68,
+    "previous_auth_passed": 6,
+    "previous_browser_passed": 19
+  },
+  "subsequent_adapter_hardening": {
+    "source_commit": "784751f",
+    "runtime_source_sha256": "ed822131a154d4a3df2cb16e9dc7460b9d2ab634ca86aed5f1eb343271289ad1",
+    "focused_actual_runtime_checks": [
+      "missing candidate schema rejected before swap",
+      "deliberately stale synthetic signup readiness rejected after schema upgrade",
+      "existing baseline remains active"
+    ],
+    "result": "3 focused checks passed; full release drill intentionally skipped in this focused run"
+  },
+  "remaining_external_checks": [
+    "protected hosted CI identity/attestation and same-runtime image",
+    "production TLS/origin/cookies/mail/provider cutover",
+    "real owner OTP and sender-domain evidence",
+    "full English/provider capacity and release walkthrough"
+  ]
+}
