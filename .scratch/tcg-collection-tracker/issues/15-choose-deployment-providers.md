@@ -1,6 +1,6 @@
 # 15 — Choose deployment providers
 
-**Label:** needs-info
+**Label:** ready-for-agent
 
 **Blocked by:** 01 — Owner sign-in and Unsorted
 

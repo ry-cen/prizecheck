@@ -22,3 +22,10 @@ The owner confirmed local preparation only; production provisioning remains pend
 ## Revised implementation scope — 2026-10-06
 
 Per owner instruction and [ADR 0004](../../../docs/adr/0004-provider-agnostic-completion.md), provider selection is no longer a blocking dependency. Complete executable vendor-neutral adapters and local acceptance evidence for this ticket. The original checklist above retains production requirements for historical traceability; those external acceptance gates are now tracked in [the launch checklist](../launch-checklist.md), not counted as local implementation evidence.
+
+## Provider-independent completion criteria
+
+- [ ] A fixed credential-free gate builds and checks an immutable exact-main commit, seals artifacts and rejects altered artifacts or caller-supplied success.
+- [ ] A configurable runtime adapter participates in serialized activation, protected/public/assets smoke, and compatible previous-release rollback. Missing configuration fails closed.
+- [ ] Migration prefix and previous-application compatibility are exercised against candidate schema without destructive migration reversal.
+- [ ] Local release and rollback drills record actual fixture, procedure, expected/actual outcome and gaps; representative load evidence remains labeled synthetic.

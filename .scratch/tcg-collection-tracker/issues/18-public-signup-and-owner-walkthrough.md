@@ -17,3 +17,10 @@
 ## Revised implementation scope — 2026-10-06
 
 Per owner instruction and [ADR 0004](../../../docs/adr/0004-provider-agnostic-completion.md), provider selection is no longer a blocking dependency. Complete executable vendor-neutral adapters and local acceptance evidence for this ticket. The original checklist above retains production requirements for historical traceability; those external acceptance gates are now tracked in [the launch checklist](../launch-checklist.md), not counted as local implementation evidence.
+
+## Provider-independent completion criteria
+
+- [ ] A configurable real delivery adapter is exercised through HTTP/email protocol acceptance and failure tests without logging secrets or recipient payloads.
+- [ ] Explicit readiness configuration gates public signup closed by default; user/account, inventory owner and Unsorted creation are atomic.
+- [ ] Public-mode local regressions cover returning sessions, burst limits, delivery failures, cross-owner privacy and ordinary-user owner-panel denial.
+- [ ] Automated desktop/mobile journeys exercise the available application flows; actual owner walkthrough and real delivery remain separately tracked launch acceptance.
