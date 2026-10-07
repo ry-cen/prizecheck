@@ -107,6 +107,7 @@ def gate(args):
         name = 'tcg_release_'+secrets.token_hex(8)
         with psycopg.connect(args.admin_url,autocommit=True) as conn:
             conn.execute(sql.SQL('CREATE DATABASE {}').format(sql.Identifier(name)))
+        databases = [name]
         env = {'PATH':os.environ['PATH'],'HOME':temp,'DATABASE_URL':urlunsplit(urlsplit(args.admin_url)._replace(path='/'+name)),
                'RECOVERY_TEST_DATABASE_URL':urlunsplit(urlsplit(args.admin_url)._replace(path='/'+name)),
                'PLAYWRIGHT_BROWSERS_PATH':os.environ.get('PLAYWRIGHT_BROWSERS_PATH',str(Path.home()/'Library/Caches/ms-playwright'))}
@@ -127,13 +128,22 @@ def gate(args):
                     path.chmod(0o700 if path.is_dir() else 0o600)
                 (old/'release.json').unlink()
                 dependencies(old,runtime)
-                # Candidate migrations already installed. Old application suite must pass on that schema.
+                # Isolate the previous suite's data while installing the candidate's exact schema.
+                # Sharing candidate fixture rows can invalidate old browser assumptions unrelated to compatibility.
+                compatibility_db = name+'_compat'
+                with psycopg.connect(args.admin_url,autocommit=True) as conn:
+                    conn.execute(sql.SQL('CREATE DATABASE {}').format(sql.Identifier(compatibility_db)))
+                databases.append(compatibility_db)
+                legacy_env = {**env,'DATABASE_URL':urlunsplit(urlsplit(args.admin_url)._replace(path='/'+compatibility_db)),
+                              'RECOVERY_TEST_DATABASE_URL':urlunsplit(urlsplit(args.admin_url)._replace(path='/'+compatibility_db))}
+                run([str(runtime/'.venv/bin/python'),'scripts/migrate.py'],checkout,legacy_env)
                 with (store/('compatibility-'+selected+'-'+secrets.token_hex(4)+'.log')).open('wb') as log:
-                    run(['bash','scripts/ci.sh'],old,env,log)
+                    run(['bash','scripts/ci.sh'],old,legacy_env,log)
                 compatibility = 'previous fixed CI passed against candidate schema; unchanged migration prefix'
         finally:
             with psycopg.connect(args.admin_url,autocommit=True) as conn:
-                conn.execute(sql.SQL('DROP DATABASE {} WITH (FORCE)').format(sql.Identifier(name)))
+                for database in databases:
+                    conn.execute(sql.SQL('DROP DATABASE {} WITH (FORCE)').format(sql.Identifier(database)))
         (checkout/'.venv').unlink()
         (checkout/'node_modules').unlink()
         for path in checkout.rglob('__pycache__'):
