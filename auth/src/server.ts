@@ -3,12 +3,14 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { isIP } from 'node:net';
 import { auth, deliverCode, pool } from './auth.js';
 import { PublicReadLimiter } from './publicReads.js';
+import { signupEnabled } from './signup.js';
 
 const origin = process.env.PUBLIC_ORIGIN || 'http://localhost:5173';
 const ownerEmail = (process.env.OWNER_EMAIL || '').trim().toLowerCase();
 const apiOrigin = process.env.API_ORIGIN || 'http://127.0.0.1:8000';
 const internalSecret = process.env.INTERNAL_AUTH_SECRET || '';
 const publicReadLimiter = new PublicReadLimiter();
+const publicSignup = signupEnabled();
 if (!ownerEmail || !internalSecret || !process.env.BETTER_AUTH_SECRET || !process.env.DATABASE_URL) {
   throw new Error('OWNER_EMAIL, INTERNAL_AUTH_SECRET, BETTER_AUTH_SECRET, DATABASE_URL are required');
 }
@@ -79,6 +81,13 @@ async function allowedSend(email: string, ip: string): Promise<boolean> {
   }
 }
 
+async function authCounter(name: 'sign_in_delivered' | 'sign_in_failed' | 'authorization_denials') {
+  try {
+    await pool.query(`INSERT INTO operations_counter(name,count) VALUES($1,1)
+      ON CONFLICT(name) DO UPDATE SET count=operations_counter.count+1,updated_at=now()`, [name]);
+  } catch { console.error('Operational counter unavailable'); }
+}
+
 function betterRequest(request: IncomingMessage, path: string, body?: string) {
   const headers = new Headers();
   if (request.headers.cookie) headers.set('cookie', request.headers.cookie);
@@ -110,13 +119,15 @@ const server = createServer(async (request, response) => {
       const started = Date.now();
       const body = JSON.parse(await readBody(request));
       const email = normalizedEmail(body.email);
-      if (email && email === ownerEmail) {
+      if (email && (email === ownerEmail || publicSignup)) {
         try {
           const ip = trustedClientIp(request);
           if (await allowedSend(email, ip)) {
-            await auth.handler(betterRequest(request, '/api/auth/email-otp/send-verification-otp', JSON.stringify({ email, type: 'sign-in' })));
+            const sent = await auth.handler(betterRequest(request, '/api/auth/email-otp/send-verification-otp', JSON.stringify({ email, type: 'sign-in' })));
+            await authCounter(sent.ok ? 'sign_in_delivered' : 'sign_in_failed');
           }
         } catch {
+          await authCounter('sign_in_failed');
           console.error('Code delivery unavailable');
         }
       }
@@ -127,22 +138,13 @@ const server = createServer(async (request, response) => {
       if (!sameOrigin(request)) return json(response, 403, { error: 'Origin required' });
       const body = JSON.parse(await readBody(request));
       const email = normalizedEmail(body.email);
-      if (!email || email !== ownerEmail || !/^\d{6}$/.test(body.code)) {
+      if (!email || (!publicSignup && email !== ownerEmail) || !/^\d{6}$/.test(body.code)) {
         return json(response, 401, { error: 'Invalid or expired code. Request a new code.' });
       }
       const result = await auth.handler(betterRequest(request, '/api/auth/sign-in/email-otp', JSON.stringify({ email, otp: body.code })));
       if (!result.ok) return json(response, 401, { error: 'Invalid or expired code. Request a new code.' });
       const verified = await result.clone().json() as { user?: { id?: string } };
       if (!verified.user?.id) return json(response, 503, { error: 'Service temporarily unavailable' });
-      const stamp = Math.floor(Date.now() / 1000).toString();
-      const signature = createHmac('sha256', internalSecret)
-        .update(`GET\n/api/locations\n${hash('')}\n${verified.user.id}\n${stamp}`).digest('hex');
-      const onboarding = await fetch(`${apiOrigin}/api/locations`, { headers: {
-        'x-internal-user': verified.user.id,
-        'x-internal-time': stamp,
-        'x-internal-signature': signature,
-      } });
-      if (!onboarding.ok) return json(response, 503, { error: 'Service temporarily unavailable' });
       const cookies = result.headers.getSetCookie();
       response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store', 'set-cookie': cookies });
       response.end(JSON.stringify({ signedIn: true }));
@@ -166,7 +168,10 @@ const server = createServer(async (request, response) => {
         (isReview && body.reportId !== undefined)) return json(response, 422, { error: 'Invalid approval request' });
       const owner = await pool.query<{ email: string }>(`SELECT u.email FROM owner_binding b
         JOIN "user" u ON u.id=b.user_id WHERE b.singleton AND b.user_id=$1`, [current.user.id]);
-      if (!owner.rows[0]) return json(response, 403, { error: 'Owner access required' });
+      if (!owner.rows[0]) {
+        await authCounter('authorization_denials');
+        return json(response, 403, { error: 'Owner access required' });
+      }
       if (isReview) {
         const review = await pool.query<{ kind: string }>(`SELECT kind FROM catalog_review WHERE id=$1 AND status='pending'`, [targetId]);
         if (!review.rows[0] || action === 'confirm_source' && review.rows[0].kind !== 'source_match') return json(response, 404, { error: 'Review not found' });
