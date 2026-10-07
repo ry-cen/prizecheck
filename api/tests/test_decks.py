@@ -65,3 +65,19 @@ def test_four_copy_groups_printings_and_editions_and_requires_supported_energy()
     with psycopg.connect(os.environ['DATABASE_URL']) as conn:
         conn.execute("UPDATE catalog_generation_printing SET basic_energy='supported' WHERE generation_id=%s", (generation,))
     assert call('GET', f'/api/decks/{deck}', owner).json()['checks']['identities'][0]['status'] == 'basic_energy_exempt'
+
+
+def test_deck_index_pages_bind_owner_and_inventory_revision():
+    owner, other, _, _, _, _ = fixture()
+    for index in range(32):
+        assert create(owner, f'Deck {index:02}').status_code == 201
+    first = call('GET', '/api/decks', owner).json()
+    assert len(first['decks']) == 30 and first['next_cursor']
+    second = call('GET', '/api/decks?cursor=' + first['next_cursor'], owner).json()
+    assert [deck['name'] for deck in second['decks']] == ['Deck 30', 'Deck 31']
+    assert second['next_cursor'] is None
+    assert call('GET', '/api/decks?cursor=' + first['next_cursor'], other).status_code == 400
+    assert call('GET', '/api/decks?cursor=invalid', owner).status_code == 400
+    create(owner, 'Later')
+    stale = call('GET', '/api/decks?cursor=' + first['next_cursor'], owner)
+    assert stale.status_code == 409 and stale.json()['detail']['code'] == 'INVENTORY_CHANGED'

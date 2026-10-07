@@ -5,6 +5,7 @@ import { Holdings } from './Holdings';
 import { PublishDeck } from './PublishDeck';
 
 export function Decks() {
+  const [cursor, setCursor] = useState<string | null>(null);
   const [decks, setDecks] = useState<TreeNode[]>([]);
   const [leaves, setLeaves] = useState<TreeNode[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
@@ -16,7 +17,17 @@ export function Decks() {
 
   async function loadIndex() {
     const [index, tree] = await Promise.all([getDecks(), getLocationTree()]);
-    setDecks(index.decks); setLeaves(tree.locations.filter(item => item.kind !== 'organization'));
+    setDecks(index.decks); setCursor(index.next_cursor); setLeaves(tree.locations.filter(item => item.kind !== 'organization'));
+  }
+  async function moreDecks() {
+    if (!cursor) return;
+    try {
+      const index = await getDecks(cursor); setDecks(previous => [...previous, ...index.decks]); setCursor(index.next_cursor);
+    } catch (cause) {
+      if (cause instanceof DeckError && cause.code === 'INVENTORY_CHANGED') {
+        await loadIndex(); setMessage('Decks changed. Showing the first page.');
+      } else setMessage('Decks are temporarily unavailable. Please retry.');
+    }
   }
   async function refreshChecks(id: string) {
     try { setDetail(await getDeck(id)); }
@@ -43,6 +54,7 @@ export function Decks() {
     <p>Decks contain the cards physically stored in them. Incomplete Decks remain usable.</p>
     <form onSubmit={create}><label>Deck name <input required maxLength={120} value={name} onChange={event => { setName(event.target.value); setPending(null); }} /></label><button disabled={busy}>Create Deck</button></form>
     <nav aria-label="Deck index">{decks.map(deck => <button type="button" key={deck.id} onClick={() => setSelected(deck.id)} aria-current={selected === deck.id ? 'page' : undefined}>{deck.name}</button>)}</nav>
+    {cursor && <button type="button" onClick={() => void moreDecks()}>More Decks</button>}
     {!decks.length && <p>No Decks yet.</p>}
     {detail && <section aria-label={`Checks for ${detail.deck.name}`}><h3>{detail.deck.name}</h3>
       <p>{detail.checks.total} cards · {detail.checks.size_status === 'complete' ? 'Exactly 60 cards' : detail.checks.size_status === 'shortage' ? `${detail.checks.shortage} cards short of 60` : `${detail.checks.excess} cards over 60`}</p>

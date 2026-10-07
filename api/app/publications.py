@@ -6,6 +6,7 @@ import secrets
 from datetime import datetime, timezone
 from contextlib import contextmanager
 from uuid import UUID
+from typing import Literal
 
 import psycopg
 from fastapi import APIRouter, Depends, HTTPException, Response
@@ -77,6 +78,11 @@ class PublishCommand(BaseModel):
 
 
 class RevokeCommand(BaseModel):
+    idempotency_key: UUID
+
+
+class VisibilityCommand(BaseModel):
+    visibility: Literal['listed', 'unlisted']
     idempotency_key: UUID
 
 
@@ -183,7 +189,13 @@ def mutate(deck_id, command, owner, action):
                 else:
                     token = active['token']
                     version = active['version'] + (1 if action == 'republish' else 0)
-                if action == 'revoke':
+                if action == 'visibility':
+                    record = store.read().get(token)
+                    if not record:
+                        raise ProjectionUnavailable()
+                    projection = {'visibility': command.visibility, 'snapshot': PublicSnapshot.model_validate(record['snapshot']).model_dump(mode='json')}
+                    conn.execute('UPDATE deck_publication SET visibility=%s WHERE token=%s', (command.visibility, token))
+                elif action == 'revoke':
                     projection = None
                     conn.execute('UPDATE deck_publication SET revoked=true WHERE token=%s', (token,))
                 else:
@@ -223,6 +235,11 @@ def republish(deck_id: UUID, command: PublishCommand, user_id: str = Depends(ver
 @router.delete('/api/decks/{deck_id}/publication', response_model=PublicationResult)
 def revoke(deck_id: UUID, command: RevokeCommand, user_id: str = Depends(verified_user)):
     return mutate(deck_id, command, user_id, 'revoke')
+
+
+@router.patch('/api/decks/{deck_id}/publication/visibility', response_model=PublicationResult)
+def set_visibility(deck_id: UUID, command: VisibilityCommand, user_id: str = Depends(verified_user)):
+    return mutate(deck_id, command, user_id, 'visibility')
 
 
 @router.get('/api/public/decks/{token}', response_model=PublicSnapshot)

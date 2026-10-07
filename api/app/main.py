@@ -187,3 +187,6 @@ app.include_router(catalog_reconciliation_router)
 
 from .publications import router as publications_router  # noqa: E402
 app.include_router(publications_router)
+
+from .discovery import router as discovery_router  # noqa: E402
+app.include_router(discovery_router)

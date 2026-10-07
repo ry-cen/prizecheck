@@ -39,7 +39,7 @@ async function request<T>(path: string, method: string, body?: object): Promise<
   }
   return response.json() as Promise<T>;
 }
-export const getDecks = () => request<DeckIndex>('/api/decks', 'GET');
+export const getDecks = (cursor?: string) => request<DeckIndex>('/api/decks' + (cursor ? '?cursor=' + encodeURIComponent(cursor) : ''), 'GET');
 export const createDeck = (body: CreateDeck) => request<LocationCommandResult>('/api/decks', 'POST', body);
 export const getDeck = (id: string) => request<DeckDetail>(`/api/decks/${encodeURIComponent(id)}`, 'GET');
 """)

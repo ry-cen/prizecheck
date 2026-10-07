@@ -1,4 +1,9 @@
 """Physical Decks and deliberately limited construction checks."""
+import base64
+import hashlib
+import hmac
+import json
+import os
 from uuid import UUID, uuid4
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
@@ -18,6 +23,7 @@ class CreateDeck(BaseModel):
 class DeckIndex(BaseModel):
     decks: list[TreeNode]
     owner_revision: int
+    next_cursor: str | None
 
 
 class IdentityCheck(BaseModel):
@@ -60,12 +66,55 @@ def create_deck(command: CreateDeck, user_id: str = Depends(verified_user)):
         return store_result(conn, user_id, command.idempotency_key, digest, row, rows)
 
 
+def deck_cursor_encode(user_id, revision, row):
+    payload = json.dumps({'v': 1, 'u': user_id, 'r': revision,
+                          'k': [row['sort_name'], str(row['id'])]}, separators=(',', ':')).encode()
+    mac = hmac.new(os.environ['INTERNAL_AUTH_SECRET'].encode(), payload, hashlib.sha256).digest()
+    return base64.urlsafe_b64encode(payload + mac).decode().rstrip('=')
+
+
+def deck_cursor_decode(token, user_id, revision):
+    try:
+        if len(token) > 2048:
+            raise ValueError()
+        raw = base64.urlsafe_b64decode(token + '=' * (-len(token) % 4))
+        payload, mac = raw[:-32], raw[-32:]
+        expected = hmac.new(os.environ['INTERNAL_AUTH_SECRET'].encode(), payload, hashlib.sha256).digest()
+        if not hmac.compare_digest(mac, expected):
+            raise ValueError()
+        data = json.loads(payload)
+        if data['v'] != 1 or data['u'] != user_id or not isinstance(data['r'], int):
+            raise ValueError()
+        if data['r'] != revision:
+            error(409, 'INVENTORY_CHANGED')
+        if len(data['k']) != 2 or not isinstance(data['k'][0], str):
+            raise ValueError()
+        return data['k'][0], UUID(data['k'][1])
+    except (ValueError, KeyError, TypeError):
+        error(400, 'INVALID_CURSOR')
+
+
 @router.get('', response_model=DeckIndex)
-def deck_index(user_id: str = Depends(verified_user)):
+def deck_index(cursor: str | None = None, user_id: str = Depends(verified_user)):
     with connect() as conn, conn.transaction():
-        revision, rows = owner_and_rows(conn, user_id)
-        return DeckIndex(decks=[node_model(row, rows) for row in sorted(rows.values(), key=lambda r: (r['name'].casefold(), str(r['id'])))
-                                if row['kind'] == 'deck'], owner_revision=revision)
+        created = conn.execute('INSERT INTO inventory_owner(user_id) VALUES (%s) ON CONFLICT DO NOTHING RETURNING user_id', (user_id,)).fetchone()
+        revision = conn.execute('SELECT revision FROM inventory_owner WHERE user_id=%s FOR UPDATE', (user_id,)).fetchone()['revision']
+        if created:
+            conn.execute("INSERT INTO location(id,owner_id,name,kind) VALUES (%s,%s,'Unsorted','storage_leaf')", (uuid4(),user_id))
+        key = deck_cursor_decode(cursor, user_id, revision) if cursor else None
+        after = 'AND (lower(name),id) > (%s,%s)' if key else ''
+        page = conn.execute(f"""SELECT id,name,kind,parent_id,version,lower(name) AS sort_name
+          FROM location WHERE owner_id=%s AND kind='deck' {after}
+          ORDER BY lower(name),id LIMIT 31""", (user_id, *key) if key else (user_id,)).fetchall()
+        # Read ancestors for only the bounded page, preserving nested Deck depth.
+        depths = {row['id']: row['depth'] for row in conn.execute("""WITH RECURSIVE ancestors AS (
+          SELECT id AS deck_id,id,parent_id,1 AS depth FROM location WHERE owner_id=%s AND id=ANY(%s)
+          UNION ALL SELECT a.deck_id,l.id,l.parent_id,a.depth+1 FROM location l JOIN ancestors a ON l.id=a.parent_id
+          WHERE l.owner_id=%s AND a.depth<12)
+          SELECT deck_id AS id,max(depth) AS depth FROM ancestors GROUP BY deck_id""",
+          (user_id, [row['id'] for row in page[:30]],user_id)).fetchall()}
+        return DeckIndex(decks=[TreeNode(**row,depth=depths[row['id']]) for row in page[:30]], owner_revision=revision,
+                         next_cursor=deck_cursor_encode(user_id, revision, page[29]) if len(page)>30 else None)
 
 
 @router.get('/{deck_id}', response_model=DeckDetail)
