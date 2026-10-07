@@ -1,6 +1,6 @@
 # Public signup and email adapters
 
-Signup remains owner-only by default. `SIGNUP_MODE=local-public` enables local rehearsal with file or relay mail and is forbidden in production. No configuration was changed on a running production environment. Sender verification, real recipient delivery, owner walkthrough and production recovery/performance acceptance remain independent proofs.
+Signup remains owner-only by default. `SIGNUP_MODE=local-public` enables local rehearsal only with explicit `NODE_ENV=development` or `test` and a loopback `PUBLIC_ORIGIN`; unset environments and nonlocal origins fail closed. No configuration was changed on a running production environment. Sender verification, real recipient delivery, owner walkthrough and production recovery/performance acceptance remain independent proofs.
 
 `SIGNUP_MODE=public` requires `MAIL_MODE=http`, `RELEASE_COMMIT` (full forty-character commit), and `SIGNUP_READINESS_FILE` pointing to operator-maintained JSON:
 

@@ -144,3 +144,81 @@ def test_eligible_watchdog_email_retries_same_alert_and_deduplicates(tmp_path):
             assert conn.execute('SELECT backup_alerts FROM operations_state').fetchone()['backup_alerts']==1
     finally:
         server.shutdown();server.server_close();worker.join()
+
+def test_early_backup_configuration_failure_reaches_owner_status(tmp_path):
+    import subprocess,sys
+    from pathlib import Path
+    private=tmp_path/'unsafe-private';private.mkdir(mode=0o755)
+    with connect() as conn:
+        before=conn.execute('SELECT backup_failures FROM operations_state').fetchone()['backup_failures']
+        owner=conn.execute('SELECT user_id FROM owner_binding').fetchone()['user_id']
+    result=subprocess.run([sys.executable,str(Path(__file__).resolve().parents[2]/'scripts/operations_job.py'),'backup'],env=dict(os.environ,BACKUP_PRIVATE_DIR=str(private)),capture_output=True)
+    assert result.returncode!=0
+    with TestClient(app) as client:
+        status=client.get('/api/admin/operations',headers=headers(owner,'GET','/api/admin/operations')).json()
+        assert status['backup_failures']==before+1
+
+def test_corrupt_restore_archive_failure_reaches_owner_status(tmp_path):
+    import json,subprocess,sys
+    from datetime import datetime,timezone
+    from pathlib import Path
+    private=tmp_path/'private';private.mkdir(mode=0o700);(private/'snapshots').mkdir(mode=0o700)
+    key='snapshots/20260101T000000Z-'+uuid4().hex+'.tar.gz'
+    (private/key).write_bytes(b'not an archive')
+    (private/'last-success.json').write_text(json.dumps({'snapshot':key,'completed_at':datetime.now(timezone.utc).isoformat()}))
+    with connect() as conn:
+        before=conn.execute('SELECT restore_failures FROM operations_state').fetchone()['restore_failures']
+        owner=conn.execute('SELECT user_id FROM owner_binding').fetchone()['user_id']
+    result=subprocess.run([sys.executable,str(Path(__file__).resolve().parents[2]/'scripts/operations_job.py'),'restore','--target','tcg_recovery_corrupt_'+uuid4().hex],env=dict(os.environ,BACKUP_PRIVATE_DIR=str(private),RESTORE_ADMIN_DATABASE_URL=os.environ['DATABASE_URL']),capture_output=True)
+    assert result.returncode!=0
+    with TestClient(app) as client:
+        status=client.get('/api/admin/operations',headers=headers(owner,'GET','/api/admin/operations')).json()
+        assert status['restore_failures']==before+1
+
+
+def test_watchdog_cannot_overwrite_concurrent_backup_completion(tmp_path):
+    import json,subprocess,sys,time
+    from pathlib import Path
+    root=Path(__file__).resolve().parents[2]
+    private=tmp_path/'private';private.mkdir(mode=0o700)
+    (private/'last-success.json').write_text(json.dumps({'snapshot':'snapshots/20200101T000000Z-'+uuid4().hex+'.tar.gz','completed_at':'2020-01-01T00:00:00+00:00'}))
+    adapter=tmp_path/'race_store.py'
+    adapter.write_text('''import os,time
+from pathlib import Path
+from private_backup_store import FilePrivateBackupStore
+class Store(FilePrivateBackupStore):
+ def get(self,key,destination):
+  super().get(key,destination)
+  if key=='last-success.json' and os.environ.get('PAUSE_WATCHDOG')=='yes':
+   Path(os.environ['RACE_READ']).touch()
+   while not Path(os.environ['RACE_RELEASE']).exists(): time.sleep(.02)
+def factory(): return Store(os.environ['BACKUP_PRIVATE_DIR'])
+''')
+    read,release=tmp_path/'read',tmp_path/'release'
+    env=dict(os.environ,BACKUP_PRIVATE_DIR=str(private),BACKUP_STORE_FACTORY='race_store:factory',PYTHONPATH=str(tmp_path),RACE_READ=str(read),RACE_RELEASE=str(release),MAIL_SENDER_VERIFIED='false')
+    with connect() as conn:
+        conn.execute('DELETE FROM operations_alert')
+        conn.execute('UPDATE operations_state SET backup_stale=false,backup_alerts=0')
+    watchdog=subprocess.Popen([sys.executable,str(root/'scripts/operations_job.py'),'watchdog'],env=dict(env,PAUSE_WATCHDOG='yes'),stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+    backup=None
+    try:
+        deadline=time.monotonic()+10
+        while not read.exists() and time.monotonic()<deadline: time.sleep(.02)
+        assert read.exists()
+        backup=subprocess.Popen([sys.executable,str(root/'scripts/operations_job.py'),'backup'],env=dict(env,PGAPPNAME='review_race_backup'),stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+        deadline=time.monotonic()+10
+        while backup.poll() is None and time.monotonic()<deadline:
+            with connect() as conn:
+                blocked=conn.execute("SELECT 1 FROM pg_stat_activity WHERE application_name='review_race_backup' AND wait_event='advisory'").fetchone()
+            if blocked: break
+            time.sleep(.02)
+        release.touch()
+        assert watchdog.wait(timeout=10)==0
+        assert backup.wait(timeout=20)==0
+        with connect() as conn:
+            assert conn.execute('SELECT backup_stale FROM operations_state').fetchone()['backup_stale'] is False
+            assert conn.execute('SELECT count(*) AS n FROM operations_alert WHERE resolved_at IS NULL').fetchone()['n']==0
+    finally:
+        release.touch()
+        for child in (watchdog,backup):
+            if child and child.poll() is None: child.kill();child.wait()
