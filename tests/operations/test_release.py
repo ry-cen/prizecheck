@@ -85,7 +85,7 @@ class ReleaseTest(unittest.TestCase):
                 if initial is None:
                     switch('activate',first)
                 self.assertEqual(status(),first)
-                gate = subprocess.run(base+['gate','--commit',second,'--main-ref','refs/heads/codex/manual-release','--store',str(store),'--runtime',str(runtime_root),'--admin-url',admin],env=env,capture_output=True)
+                gate = subprocess.run(base+['gate','--commit',second,'--main-ref',os.environ.get('RELEASE_DRILL_MAIN_REF','refs/heads/codex/manual-release'),'--store',str(store),'--runtime',str(runtime_root),'--admin-url',admin],env=env,capture_output=True)
                 self.assertEqual(gate.returncode,0,gate.stderr.decode())
                 # Fault at the external runtime HTTP seam after real candidate application.
                 # The release coordinator must restore the actual previous runtime and active record.
@@ -156,6 +156,81 @@ class ReleaseTest(unittest.TestCase):
                           'migration_delta':'019_operations.sql and 020_signup.sql added in candidate; previous app CI passes against this schema; no reversal on rollback'}
                 if os.environ.get('RELEASE_DRILL_REPORT'):
                     Path(os.environ['RELEASE_DRILL_REPORT']).write_text(json.dumps(report,indent=2))
+            finally:
+                if runtime:
+                    runtime.terminate()
+                    runtime.wait(timeout=15)
+                with psycopg.connect(admin,autocommit=True) as conn:
+                    conn.execute(sql.SQL('DROP DATABASE {} WITH (FORCE)').format(sql.Identifier(name)))
+
+    @unittest.skipUnless(os.environ.get('RELEASE_RUNTIME_FIXTURE_STORE'), 'existing real gated artifact fixture only')
+    def test_adapter_rejects_missing_schema_and_stale_signup_release(self):
+        import psycopg
+        from psycopg import sql
+        import secrets
+        import socket
+        import time
+        import urllib.error
+        import urllib.request
+        from urllib.parse import urlsplit, urlunsplit
+        import uuid
+        store = Path(os.environ['RELEASE_RUNTIME_FIXTURE_STORE'])
+        first = os.environ['RELEASE_DRILL_FIRST']
+        second = os.environ['RELEASE_RUNTIME_FIXTURE_SECOND']
+        runtime_root = Path(os.environ['RELEASE_DRILL_RUNTIME'])
+        admin = os.environ['RECOVERY_TEST_DATABASE_URL']
+        name = 'tcg_release_readiness_'+uuid.uuid4().hex
+        url = urlunsplit(urlsplit(admin)._replace(path='/'+name))
+        with tempfile.TemporaryDirectory() as temp:
+            proof = Path(temp)/'deliberately-stale-synthetic-readiness.json'
+            proof.write_text(json.dumps({'schemaVersion':1,'releaseCommit':'0'*40,
+              'authorizedByOwner':True,'senderVerified':True,'recipientDeliveryVerified':True,
+              'ownerWalkthroughVerified':True,'recoveryVerified':True,'privacyVerified':True,'capacityVerified':True,
+              'evidence':'Synthetic rejection probe; no actual production proof'}))
+            projection = Path(temp)/'public'
+            projection.mkdir()
+            env = {**os.environ,'DATABASE_URL':url,'PUBLIC_PROJECTION_DIR':str(projection),
+                   'RELEASE_CONTROL_KEY':secrets.token_hex(32),'INTERNAL_AUTH_SECRET':secrets.token_hex(32),
+                   'BETTER_AUTH_SECRET':secrets.token_hex(32),'OWNER_EMAIL':'owner@example.test',
+                   'SIGNUP_MODE':'public','MAIL_MODE':'http','MAIL_HTTP_URL':'http://127.0.0.1:1',
+                   'MAIL_HTTP_KEY':'synthetic-key','SIGNUP_READINESS_FILE':str(proof),'RELEASE_COMMIT':'0'*40}
+            with psycopg.connect(admin,autocommit=True) as conn:
+                conn.execute(sql.SQL('CREATE DATABASE {}').format(sql.Identifier(name)))
+            runtime = None
+            try:
+                subprocess.run([str(runtime_root/'.venv/bin/python'),str(store/first/'scripts/migrate.py')],env=env,check=True,capture_output=True)
+                subprocess.run([str(runtime_root/'.venv/bin/python'),str(store/first/'scripts/init_public_projection.py')],env=env,check=True,capture_output=True)
+                with socket.socket() as sock:
+                    sock.bind(('127.0.0.1',0))
+                    listen_port = sock.getsockname()[1]
+                origin = f'http://127.0.0.1:{listen_port}'
+                runtime = subprocess.Popen([str(runtime_root/'.venv/bin/python'),str(ROOT/'scripts/release_runtime.py'),'--store',str(store),'--runtime',str(runtime_root),'--port',str(listen_port)],env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+                def request(path,body=None):
+                    value = urllib.request.Request(origin+path,data=None if body is None else json.dumps(body).encode(),
+                      headers={'x-release-key':env['RELEASE_CONTROL_KEY'],'Content-Type':'application/json'})
+                    with urllib.request.urlopen(value,timeout=30) as response:
+                        return json.loads(response.read())
+                for _ in range(100):
+                    try:
+                        self.assertEqual(request('/__release/status')['commit'],first)
+                        break
+                    except OSError:
+                        time.sleep(.1)
+                else:
+                    self.fail('Baseline runtime did not start')
+                with self.assertRaises(urllib.error.HTTPError) as failure:
+                    request('/__release/apply',{'commit':second})
+                self.assertEqual(failure.exception.code,503)
+                failure.exception.close()
+                self.assertEqual(request('/__release/status')['commit'],first)
+                # After schema readiness is satisfied, inherited stale RELEASE_COMMIT must still
+                # be replaced by the actual candidate commit, rejecting the fake readiness file.
+                subprocess.run([str(runtime_root/'.venv/bin/python'),str(store/second/'scripts/migrate.py')],env=env,check=True,capture_output=True)
+                with self.assertRaises(urllib.error.HTTPError) as failure:
+                    request('/__release/apply',{'commit':second})
+                self.assertEqual(failure.exception.code,503)
+                failure.exception.close()
+                self.assertEqual(request('/__release/status')['commit'],first)
             finally:
                 if runtime:
                     runtime.terminate()

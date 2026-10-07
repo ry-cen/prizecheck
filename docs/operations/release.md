@@ -61,6 +61,7 @@ Keep control endpoints private and authenticated; prevent unauthorized callers a
 After gating a baseline and advancing the selected integration branch, the opt-in command uses a newly created disposable database and real local adapter. It gates the successor, exercises old-application compatibility, actual activation, injected smoke-failure recovery, successful successor activation, rollback, preserved private data and artifact-tamper rejection. Standard operation tests also check missing-gate and wrong-main refusal.
 
 ```sh
+RELEASE_DRILL_MAIN_REF=refs/heads/codex/manual-release \
 RELEASE_DRILL_STORE=/private/disposable-release-store \
 RELEASE_DRILL_FIRST=FULL_GATED_BASELINE_COMMIT \
 RELEASE_DRILL_RUNTIME=/private/installed-runtime \
@@ -69,4 +70,4 @@ RELEASE_DRILL_REPORT=/private/sanitized-release-report.json \
 .venv/bin/python -m unittest discover -s tests/operations -p test_release.py -v
 ```
 
-The reproducible proof fixture uses branch `codex/manual-release` as the selected ref; production configuration uses its own authoritative protected main ref. Fixed application CI reserves ports 8000/3001/5173. Runtime smoke uses separate ephemeral ports. The disposable database and runtime processes are cleaned up; sealed local artifacts remain for inspection. Full-English capacity, real OTP delivery, production ingress/recovery/rollback and provider-resource measurements remain external launch checks. Synthetic capacity evidence remains explicitly synthetic.
+Set RELEASE_DRILL_MAIN_REF to the checked-out authoritative branch. The recorded proof fixture used branch `codex/manual-release` as the selected ref; production configuration uses its own authoritative protected main ref. Fixed application CI reserves ports 8000/3001/5173. Runtime smoke uses separate ephemeral ports. The disposable database and runtime processes are cleaned up; sealed local artifacts remain for inspection. Full-English capacity, real OTP delivery, production ingress/recovery/rollback and provider-resource measurements remain external launch checks. Synthetic capacity evidence remains explicitly synthetic.
