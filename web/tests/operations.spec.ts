@@ -17,6 +17,7 @@ test('owner sees stale backup and allowance warning in operational health', asyn
     const lines = readFileSync(process.env.MAIL_FILE!, 'utf8').trim().split('\n');
     await page.getByLabel('Six-digit code').fill(JSON.parse(lines.at(-1)!).otp);
     await page.getByRole('button', { name: 'Sign in' }).click();
+    await expect(page.getByRole('button', { name: 'Sign out' })).toBeVisible();
     const owner = await pool.query('SELECT id FROM "user" WHERE email=$1', [email]);
     await expect.poll(async () => (await pool.query('SELECT count(*) AS n FROM inventory_owner WHERE user_id=$1', [owner.rows[0].id])).rows[0].n).toBe('1');
     await pool.query('INSERT INTO owner_binding(user_id) VALUES($1)', [owner.rows[0].id]);
