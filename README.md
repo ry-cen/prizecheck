@@ -10,7 +10,7 @@ Requires Node 20+, Python 3.11+, and PostgreSQL 16. Docker Compose is an optiona
 2. Copy `.env.example` to `.env`. Set `DATABASE_URL`, `OWNER_EMAIL`, and both secrets. The Compose URL is `postgresql://tcg:tcg@127.0.0.1:5432/tcg`. Use two distinct random secrets of at least 32 characters.
 3. Run `npm ci`, `python3 -m venv .venv`, and `.venv/bin/pip install -r api/requirements.txt`.
 4. Load `.env` into the shell (`set -a; source .env; set +a`), then run `.venv/bin/python scripts/migrate.py`.
-5. In separate terminals with the same environment, run `.venv/bin/uvicorn app.main:app --app-dir api --host 127.0.0.1 --port 8000` and `npm run dev`. Open `http://localhost:5173/`.
+5. In separate terminals with the same environment, run `.venv/bin/uvicorn app.main:app --app-dir api --host 127.0.0.1 --port 8000 --no-access-log` and `npm run dev`. Open `http://localhost:5173/`.
 
 The owner starts each full English pull in Owner controls. The API promptly launches one detached Python child for that server-generated run ID; the child saves progress, holds PostgreSQL session ownership through publication, and exits. No importer polls or remains idle between pulls. Closing the browser or restarting the API does not stop a local import. An unfinished run with stale progress can be checked and recovered by an explicit Start request; the server never overlaps an importer that still holds its session lock, and allows a two-minute startup window. A host shutdown or destroyed execution environment can interrupt the process.
 

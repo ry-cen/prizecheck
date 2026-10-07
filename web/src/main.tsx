@@ -5,6 +5,8 @@ import { LocationTree } from './LocationTree';
 import { Collection } from './Collection';
 import { Decks } from './Decks';
 import { PublishedDeck } from './PublishedDeck';
+import { Discovery } from './Discovery';
+import { CatalogReview } from './CatalogReview';
 import { CatalogSearch } from './CatalogSearch';
 import { MissingCardReports, OwnerMissingCardReview } from './MissingCardReports';
 import './style.css';
@@ -84,15 +86,17 @@ function App() {
     {showOwner && ownerCatalog ? <section aria-label="Catalog pull">
       <h2>English catalog pull</h2>
       <p>{ownerCatalog.catalog.available ? `Last successful pull: ${new Date(ownerCatalog.catalog.last_success!).toLocaleString()}` : 'Catalog unavailable until the first complete import.'}</p>
-      <button disabled={!!ownerCatalog.run && !ownerCatalog.run.outcome} onClick={() => void beginCatalogRun()}>Start full English pull</button>
+      <button disabled={!!ownerCatalog.run && !ownerCatalog.run.outcome && !ownerCatalog.run.heartbeat_stale} onClick={() => void beginCatalogRun()}>Start full English pull</button>
       <button onClick={() => void getOwnerCatalogStatus().then(result => { setOwnerCatalog(result); if (result) setCatalog(result.catalog); }).catch(() => setMessage('Catalog status temporarily unavailable.'))}>Refresh status</button>
       {ownerCatalog.run && <article><h3>Run {ownerCatalog.run.id}</h3><p>Phase: {ownerCatalog.run.phase}</p><p>Enumerated: {ownerCatalog.run.enumerated_count} · Fetched: {ownerCatalog.run.fetched_count} · Validated: {ownerCatalog.run.validated_count}</p><p>Result: {ownerCatalog.run.outcome ?? 'In progress'}</p>{ownerCatalog.run.error && <p role="alert">{ownerCatalog.run.error}</p>}</article>}
+      {ownerCatalog.run?.heartbeat_stale && !ownerCatalog.run.outcome && <p role="status">Progress is stale. Start a full pull to check the current runner and recover if interrupted.</p>}
       <h3>Pending review ({ownerCatalog.pending_reviews.length})</h3>
       {ownerCatalog.pending_reviews.map(item => <article key={item.id}><strong>{item.kind}</strong> · {item.source_id}<p>{item.detail}</p></article>)}
+      <CatalogReview />
       <OwnerMissingCardReview />
     </section> : view === 'reports' ? <MissingCardReports /> : view === 'catalog' ? <CatalogSearch /> : view === 'collection' ? <Collection /> : view === 'decks' ? <Decks /> : <><p>Your private physical storage.</p><p>{catalog?.available ? `English catalog last pulled ${new Date(catalog.last_success!).toLocaleString()}.` : 'Catalog unavailable until the first complete import.'}</p><LocationTree /></>}
     <p role="alert">{message}</p></main>;
 }
 
 const publishedRoute = /^\/published\/([^/]+)$/.exec(location.pathname);
-createRoot(document.getElementById('root')!).render(publishedRoute ? <PublishedDeck token={publishedRoute[1]} /> : <App/>);
+createRoot(document.getElementById('root')!).render(publishedRoute ? <PublishedDeck token={publishedRoute[1]} /> : location.pathname === '/discover' ? <Discovery /> : <App/>);

@@ -30,9 +30,11 @@ promote({'card-1': 'Pikachu'})`], { env: { ...process.env, PYTHONPATH: 'api:api/
     await page.getByRole('button', { name: 'New top-level Location' }).click();
     await page.getByLabel('Name', { exact: true }).fill(source);
     await page.getByRole('button', { name: 'Save' }).click();
+    await expect(page.getByRole('heading', { name: source, exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'New top-level Location' }).click();
     await page.getByLabel('Name', { exact: true }).fill(destination);
     await page.getByRole('button', { name: 'Save' }).click();
+    await expect(page.getByRole('heading', { name: destination, exact: true })).toBeVisible();
     await page.getByRole('navigation', { name: 'Location tree' }).getByRole('button', { name: source }).click();
     const panel = page.getByRole('region', { name: `Cards in ${source}` });
     await panel.getByRole('button', { name: 'Add cards' }).click();

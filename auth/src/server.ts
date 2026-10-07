@@ -2,11 +2,13 @@ import { createHash, createHmac, randomInt } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { isIP } from 'node:net';
 import { auth, deliverCode, pool } from './auth.js';
+import { PublicReadLimiter } from './publicReads.js';
 
 const origin = process.env.PUBLIC_ORIGIN || 'http://localhost:5173';
 const ownerEmail = (process.env.OWNER_EMAIL || '').trim().toLowerCase();
 const apiOrigin = process.env.API_ORIGIN || 'http://127.0.0.1:8000';
 const internalSecret = process.env.INTERNAL_AUTH_SECRET || '';
+const publicReadLimiter = new PublicReadLimiter();
 if (!ownerEmail || !internalSecret || !process.env.BETTER_AUTH_SECRET || !process.env.DATABASE_URL) {
   throw new Error('OWNER_EMAIL, INTERNAL_AUTH_SECRET, BETTER_AUTH_SECRET, DATABASE_URL are required');
 }
@@ -190,7 +192,11 @@ const server = createServer(async (request, response) => {
     }
     if (path.startsWith('/api/')) {
       if (request.method !== 'GET' && request.method !== 'HEAD' && !sameOrigin(request)) return json(response, 403, { error: 'Origin required' });
-      const publicRead = request.method === 'GET' && /^\/api\/public\/decks\/[^/]+$/.test(path);
+      const publicRead = request.method === 'GET' && (/^\/api\/public\/decks\/[^/]+$/.test(path) || path === '/api/public/discovery' || path === '/api/public/sitemap.xml');
+      if (publicRead && !publicReadLimiter.take(trustedClientIp(request))) {
+        response.setHeader('retry-after', publicReadLimiter.retryAfter().toString());
+        return json(response, 429, { error: 'Too many public requests. Retry shortly.' });
+      }
       const current = publicRead || path === '/api/health' ? null : await session(request);
       if (!current && !publicRead && path !== '/api/health') return json(response, 401, { error: 'Authentication required' });
       const body = request.method === 'GET' || request.method === 'HEAD' ? '' : await readBody(request);

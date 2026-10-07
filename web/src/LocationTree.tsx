@@ -88,7 +88,7 @@ export function LocationTree() {
     <aside id="location-drawer" className={drawer ? 'location-sidebar open' : 'location-sidebar'} aria-label="Locations tree">
       <div className="sidebar-heading"><h2>Storage tree</h2><button className="mobile-only" onClick={() => setDrawer(false)}>Close</button></div>
       <nav aria-label="Location tree">{branch(null)}</nav>
-      <button onClick={() => { setDrawer(false); open('create'); setParentId(''); }}>New top-level Location</button>
+      <button disabled={busy} onClick={() => { setDrawer(false); open('create'); setParentId(''); }}>New top-level Location</button>
     </aside>
     <div className="location-content">
       <button className="mobile-only" onClick={() => setDrawer(true)} aria-expanded={drawer} aria-controls="location-drawer">Browse Locations</button>
