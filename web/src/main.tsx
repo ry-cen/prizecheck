@@ -11,10 +11,15 @@ import { CatalogSearch } from './CatalogSearch';
 import { MissingCardReports, OwnerMissingCardReview } from './MissingCardReports';
 import './style.css';
 
+type View = 'locations' | 'collection' | 'decks' | 'catalog' | 'reports' | 'owner';
+const protectedViews: View[] = ['locations','collection','decks','catalog','reports','owner'];
+function pathView(): View { const candidate = location.pathname.slice(1) as View; return protectedViews.includes(candidate) ? candidate : 'locations'; }
+
 type Session = { signedIn: boolean; userId: string | null };
 function safeDestination(): string {
   const value = new URLSearchParams(location.search).get('next');
-  if (!value || !value.startsWith('/') || value.startsWith('//') || value.includes('\\')) return '/locations';
+  if (!value) return protectedViews.includes(location.pathname.slice(1) as View) ? `${location.pathname}${location.search}${location.hash}` : '/locations';
+  if (!value.startsWith('/') || value.startsWith('//') || value.includes('\\')) return '/locations';
   const url = new URL(value, location.origin);
   return url.origin === location.origin ? `${url.pathname}${url.search}${url.hash}` : '/locations';
 }
@@ -24,7 +29,7 @@ function App() {
   const [locations, setLocations] = useState<Location[]>([]);
   const [catalog, setCatalog] = useState<CatalogStatus | null>(null);
   const [ownerCatalog, setOwnerCatalog] = useState<OwnerCatalogStatus | null>(null);
-  const [view, setView] = useState<'locations' | 'collection' | 'decks' | 'catalog' | 'reports' | 'owner'>('locations');
+  const [view, setView] = useState<View>(pathView);
   const showOwner = view === 'owner';
   const [email, setEmail] = useState('');
   const [code, setCode] = useState('');
@@ -45,7 +50,8 @@ function App() {
       setMessage('Service temporarily unavailable. Please retry.');
     }
   }
-  useEffect(() => { void refresh(); }, []);
+  useEffect(() => { void refresh(); const onPop = () => setView(pathView()); window.addEventListener('popstate', onPop); return () => window.removeEventListener('popstate', onPop); }, []);
+  function navigate(next: View) { history.pushState(null, '', `/${next}`); setView(next); }
   useEffect(() => {
     if (!showOwner || !ownerCatalog?.run || ownerCatalog.run.outcome) return;
     const timer = window.setInterval(() => { void getOwnerCatalogStatus().then(result => { setOwnerCatalog(result); if (result) setCatalog(result.catalog); }).catch(() => setMessage('Catalog status temporarily unavailable.')); }, 5000);
@@ -71,6 +77,7 @@ function App() {
     const response = await fetch('/auth/verify-code', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email, code }) });
     if (!response.ok) { setMessage('Invalid or expired code. Request a new code.'); return; }
     history.replaceState(null, '', safeDestination());
+    setView(pathView());
     await refresh();
   }
 
@@ -82,7 +89,7 @@ function App() {
   if (session === null) return <main><h1>TCG Collection</h1><p>Loading…</p><p role="alert">{message}</p></main>;
   if (!session.signedIn) return <main className="auth"><h1>TCG Collection</h1><p>Sign in with a code sent to your email.</p><form onSubmit={requestCode}><label>Email <input type="email" autoComplete="email" required value={email} onChange={e => setEmail(e.target.value)}/></label><button>Send code</button></form>{sent && <form onSubmit={verifyCode}><label>Six-digit code <input inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} required value={code} onChange={e => setCode(e.target.value)}/></label><button>Sign in</button></form>}<p role="status">{message}</p></main>;
   return <main><header><h1>{({ locations: 'Locations', collection: 'Collection', decks: 'Decks', catalog: 'Catalog', reports: 'Missing cards', owner: 'Owner controls' })[view]}</h1><button onClick={signOut}>Sign out</button></header>
-    <nav aria-label="Main views">{(['locations', 'collection', 'decks', 'catalog', 'reports'] as const).map(item => <button key={item} aria-current={view === item ? 'page' : undefined} onClick={() => setView(item)}>{{ locations: 'Locations', collection: 'Collection', decks: 'Decks', catalog: 'Catalog', reports: 'Missing cards' }[item]}</button>)}{ownerCatalog && <button aria-current={showOwner ? 'page' : undefined} onClick={() => setView('owner')}>Owner controls</button>}</nav>
+    <nav aria-label="Main views">{(['locations', 'collection', 'decks', 'catalog', 'reports'] as const).map(item => <button key={item} aria-current={view === item ? 'page' : undefined} onClick={() => navigate(item)}>{{ locations: 'Locations', collection: 'Collection', decks: 'Decks', catalog: 'Catalog', reports: 'Missing cards' }[item]}</button>)}{ownerCatalog && <button aria-current={showOwner ? 'page' : undefined} onClick={() => navigate('owner')}>Owner controls</button>}</nav>
     {showOwner && ownerCatalog ? <section aria-label="Catalog pull">
       <h2>English catalog pull</h2>
       <p>{ownerCatalog.catalog.available ? `Last successful pull: ${new Date(ownerCatalog.catalog.last_success!).toLocaleString()}` : 'Catalog unavailable until the first complete import.'}</p>

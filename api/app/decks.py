@@ -12,7 +12,7 @@ from .location_tree import (TreeNode, LocationCommandResult, cleaned_name, owner
                             replay, check_name, store_result, error, node_model)
 
 router = APIRouter(prefix='/api/decks', tags=['decks'])
-DISCLAIMER = 'Standard eligibility, rotation, bans, and special card rules are not evaluated.'
+from .construction_checks import DISCLAIMER, IdentityCount, evaluate_checks
 
 
 class CreateDeck(BaseModel):
@@ -133,10 +133,9 @@ def deck_detail(deck_id: UUID, user_id: str = Depends(verified_user)):
           LEFT JOIN catalog_generation_printing gp ON gp.printing_id=p.id AND gp.generation_id=%s
           WHERE h.owner_id=%s AND h.location_id=%s GROUP BY ci.id,ci.display_name
           ORDER BY ci.display_name,ci.id""", (state['active_generation'], user_id, deck_id)).fetchall()
-        total = sum(int(group['quantity']) for group in groups)
-        identities = [IdentityCheck(identity_id=g['id'], name=g['display_name'], quantity=str(g['quantity']),
-                      status='basic_energy_exempt' if g['exempt'] else 'unresolved' if g['unresolved']
-                      else 'over_limit' if g['quantity'] > 4 else 'within_limit') for g in groups]
+        evaluated = evaluate_checks([IdentityCount(int(g['quantity']),g['exempt'],g['unresolved']) for g in groups])
+        identities = [IdentityCheck(identity_id=g['id'],name=g['display_name'],quantity=str(g['quantity']),status=status)
+                      for g,status in zip(groups,evaluated.identity_statuses)]
         return DeckDetail(deck=node_model(deck, rows), owner_revision=revision, catalog_revision=state['revision'],
-             checks=DeckChecks(total=str(total), shortage=str(max(0, 60-total)), excess=str(max(0, total-60)),
-                               size_status='complete' if total == 60 else 'shortage' if total < 60 else 'excess', identities=identities))
+             checks=DeckChecks(total=str(evaluated.total),shortage=str(evaluated.shortage),excess=str(evaluated.excess),
+                               size_status=evaluated.size_status,identities=identities))

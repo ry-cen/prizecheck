@@ -16,7 +16,8 @@ export function PublishDeck({ deckId }: { deckId: string }) {
 
   async function act(action: 'publish' | 'republish' | 'revoke' | 'visibility', visibility?: 'listed' | 'unlisted') {
     setBusy(true); setMessage('');
-    const attempt = pending.current ?? { action, title, key: crypto.randomUUID(), visibility };
+    const retry = pending.current?.action === action && pending.current.visibility === visibility;
+    const attempt = retry ? pending.current! : { action, title, key: crypto.randomUUID(), visibility };
     pending.current = attempt;
     try {
       if (attempt.action === 'visibility') await setPublicationVisibility(deckId, { visibility: attempt.visibility!, idempotency_key: attempt.key });
@@ -37,7 +38,7 @@ export function PublishDeck({ deckId }: { deckId: string }) {
   return <section aria-label="Publish Deck"><h3>Publish a snapshot</h3>
     <p>Anyone with an Unlisted link can view the snapshot. Your private Deck name and other Locations stay private. Private edits appear only after you republish.</p>
     {publication ? <><form onSubmit={submit}><label>Public title <input required maxLength={120} value={title} disabled={busy || !!pending.current} onChange={event => setTitle(event.target.value)} /></label>
-      <button disabled={busy}>{pending.current ? 'Retry publication' : publication.token ? 'Republish snapshot' : 'Publish Unlisted snapshot'}</button></form>
+      <button disabled={busy}>{pending.current && ['publish','republish'].includes(pending.current.action) ? 'Retry publication' : publication.token ? 'Republish snapshot' : 'Publish Unlisted snapshot'}</button></form>
       {publication.token && <><p>Snapshot version {publication.version} · {publication.visibility}</p>
         <a href={`/published/${publication.token}`} target="_blank" rel="noreferrer">View public snapshot</a>
         <p>Listed snapshots appear in public discovery and sitemaps. Changing visibility preserves this snapshot and its version.</p>

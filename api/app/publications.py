@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator, ValidationError
 
 from .main import connect, verified_user
-from .decks import DISCLAIMER
+from .construction_checks import DISCLAIMER, IdentityCount, evaluate_checks
 from .public_projection import FilePublicProjection, ProjectionUnavailable
 
 router = APIRouter(tags=['publication'])
@@ -131,17 +131,15 @@ def snapshot(conn, owner, deck_id, title, version):
         group['classes'].append(row['basic_energy'])
         group['editions'].append(PublicEdition(set_id=row['set_id'], set_name=row['set_name'], collector_number=row['collector_number'],
             variant=row['descriptor'], image_url=f"{row['image_url']}/low.webp" if row['image_url'] else None, quantity=str(row['quantity'])))
-    total = sum(group['amount'] for group in groups.values())
+    evaluated = evaluate_checks([IdentityCount(g['amount'],all(value=='supported' for value in g['classes']),
+                                             'unresolved' in g['classes']) for g in groups.values()])
     identities, checks = [], []
-    for group in groups.values():
+    for group,status in zip(groups.values(),evaluated.identity_statuses):
         amount = group['amount']
-        status = ('basic_energy_exempt' if all(value == 'supported' for value in group['classes']) else
-                  'unresolved' if 'unresolved' in group['classes'] else 'over_limit' if amount > 4 else 'within_limit')
-        identities.append(PublicIdentity(name=group['name'], quantity=str(amount), editions=group['editions']))
-        checks.append(PublicIdentityCheck(name=group['name'], quantity=str(amount), status=status))
-    return PublicSnapshot(title=title, published_at=datetime.now(timezone.utc), version=version, total=str(total), identities=identities,
-        checks=PublicChecks(size_status='complete' if total == 60 else 'shortage' if total < 60 else 'excess',
-                            shortage=str(max(0,60-total)), excess=str(max(0,total-60)), identities=checks))
+        identities.append(PublicIdentity(name=group['name'],quantity=str(amount),editions=group['editions']))
+        checks.append(PublicIdentityCheck(name=group['name'],quantity=str(amount),status=status))
+    return PublicSnapshot(title=title,published_at=datetime.now(timezone.utc),version=version,total=str(evaluated.total),identities=identities,
+        checks=PublicChecks(size_status=evaluated.size_status,shortage=str(evaluated.shortage),excess=str(evaluated.excess),identities=checks))
 
 
 def drain(conn, store):

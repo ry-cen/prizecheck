@@ -21,7 +21,7 @@ test('collector organizes Locations on desktop and navigates the same tree on mo
   await page.getByRole('button', { name: 'New top-level Location' }).click();
   await page.locator('.location-form').getByLabel('Name').fill(binder);
   await page.getByRole('button', { name: 'Save' }).click();
-  await expect(page.getByRole('heading', { name: binder })).toBeVisible();
+  await expect(page.getByRole('heading', { name: binder, exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'New child' }).click();
   await page.locator('.location-form').getByLabel('Name').fill(pageName);
   await page.getByRole('button', { name: 'Save' }).click();
@@ -30,11 +30,11 @@ test('collector organizes Locations on desktop and navigates the same tree on mo
   await page.getByRole('button', { name: 'Rename' }).click();
   await page.locator('.location-form').getByLabel('Name').fill(`Updated ${pageName}`);
   await page.getByRole('button', { name: 'Save' }).click();
-  await expect(page.getByRole('heading', { name: `Updated ${pageName}` })).toBeVisible();
+  await expect(page.getByRole('heading', { name: `Updated ${pageName}`, exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'New top-level Location' }).click();
   await page.locator('.location-form').getByLabel('Name').fill(shelf);
   await page.getByRole('button', { name: 'Save' }).click();
-  await page.getByRole('navigation', { name: 'Location tree' }).getByRole('button', { name: `Updated ${pageName}` }).click();
+  await page.getByRole('navigation', { name: 'Location tree' }).getByRole('button', { name: `Updated ${pageName}`, exact: true }).click();
   await page.getByRole('button', { name: 'Move Location' }).click();
   await page.getByRole('combobox', { name: 'Parent Location' }).selectOption({ label: shelf });
   await page.getByRole('button', { name: 'Save' }).click();
@@ -43,8 +43,8 @@ test('collector organizes Locations on desktop and navigates the same tree on mo
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole('button', { name: 'Browse Locations' }).click();
   await expect(page.getByRole('navigation', { name: 'Location tree' })).toBeVisible();
-  await page.getByRole('navigation', { name: 'Location tree' }).getByRole('button', { name: binder }).click();
-  await expect(page.getByRole('heading', { name: binder })).toBeVisible();
+  await page.getByRole('navigation', { name: 'Location tree' }).getByRole('button', { name: binder, exact: true }).click();
+  await expect(page.getByRole('heading', { name: binder, exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'New child' }).click();
   await expect(page.getByRole('heading', { name: 'New Location' })).toBeVisible();
   await pool.end();

@@ -25,6 +25,13 @@ promote({'reconciliation-1':'Review Pikachu'})`],{env:{...process.env,PYTHONPATH
     const article=page.getByRole('region',{name:'Catalog reconciliation'}).getByRole('article').filter({hasText:'reconciliation-1'});
     await article.getByLabel('Review reason').fill('Physical card confirms original English name');
     await article.getByLabel('Review evidence URL').fill('https://example.org/card-photo');
+    // Sign-in and catalog approval share the one-email-per-minute limit.
+    await pool.query('UPDATE auth_send_event SET sent_at=now()');
+    const limited = page.waitForResponse(r=>r.url().endsWith('/auth/approval-code'));
+    await article.getByRole('button',{name:'Send review code'}).click();
+    expect((await limited).status()).toBe(429);
+    await expect(article.getByRole('status')).toContainText('Unable to send review code');
+    await pool.query("UPDATE auth_send_event SET sent_at=now()-interval '61 seconds'");
     await article.getByRole('button',{name:'Send review code'}).click();
     await expect(article.getByRole('status')).toContainText('Fresh review code sent');
     await article.getByLabel('Fresh review code').fill(mail());
