@@ -4,7 +4,7 @@
 
 **Blocked by:** 17 — Manual release and owner-only launch
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 **What to build:** The owner can open registration to other collectors after verified email delivery and a successful desktop/mobile walkthrough of the owner-only app.
 
@@ -13,3 +13,7 @@
 - [ ] The owner completes desktop and mobile journeys for search, Add, Move, Undo, Deck check, publish, anonymous view, republish, and revoke; record outcomes and fix blocking mismatches.
 - [ ] Re-run cross-owner privacy, public projection, sign-in burst, email failure, and release smoke checks against the public configuration. The owner panel stays unavailable to ordinary collectors.
 - [ ] Record exact release commit, sender verification and real-recipient delivery, walkthrough, backup/restore freshness, load/cost evidence, and any explicitly accepted nonblocking deviations. Keep signup closed if a privacy, authorization, atomicity, integrity, recovery, or required performance/capacity gate fails.
+
+## Revised implementation scope — 2026-10-06
+
+Per owner instruction and [ADR 0004](../../../docs/adr/0004-provider-agnostic-completion.md), provider selection is no longer a blocking dependency. Complete executable vendor-neutral adapters and local acceptance evidence for this ticket. The original checklist above retains production requirements for historical traceability; those external acceptance gates are now tracked in [the launch checklist](../launch-checklist.md), not counted as local implementation evidence.

@@ -4,7 +4,7 @@
 
 **Blocked by:** 15 — Choose deployment providers
 
-**Status:** ready-for-agent
+**Status:** in-progress
 
 **What to build:** The owner can see operational health and recover private data using the selected providers before trusting the app with production inventory.
 
@@ -18,3 +18,7 @@
 ## Local preparation — 2026-10-06
 
 The owner confirmed local preparation only; production provisioning remains pending. [Local operations review and validation](../evidence/local-operations-review.md) records deployment topology, private snapshot/disposable restore tooling, and synthetic capacity measurements. These do not satisfy provider selection or production launch gates; acceptance checklists remain open.
+
+## Revised implementation scope — 2026-10-06
+
+Per owner instruction and [ADR 0004](../../../docs/adr/0004-provider-agnostic-completion.md), provider selection is no longer a blocking dependency. Complete executable vendor-neutral adapters and local acceptance evidence for this ticket. The original checklist above retains production requirements for historical traceability; those external acceptance gates are now tracked in [the launch checklist](../launch-checklist.md), not counted as local implementation evidence.
