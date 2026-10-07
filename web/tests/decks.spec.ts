@@ -28,7 +28,7 @@ promote({'card-1': 'Pikachu'})`], { env: { ...process.env, PYTHONPATH: 'api:api/
     await page.getByRole('button', { name: 'Create Deck', exact: true }).click();
     const checks = page.getByRole('region', { name: `Checks for ${name}` });
     await expect(checks).toContainText('0 cards · 60 cards short of 60');
-    await expect(checks).toContainText('Standard eligibility, rotation, bans, and special card rules are not evaluated.');
+    await expect(checks).toContainText('Basic deck checks only. Standard format eligibility, rotation, banned cards, and special card rules are not evaluated.');
     const holdings = page.getByRole('region', { name: `Cards in ${name}` });
     await holdings.getByRole('button', { name: 'Add cards', exact: true }).click();
     await holdings.getByLabel('Search English card name').fill('Pika');
