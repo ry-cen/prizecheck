@@ -1,0 +1,315 @@
+{
+  "fixture": "SYNTHETIC: 1000 users, 200 session records, initially 25000 Holdings, one synthetic Printing with 25000 synthetic Editions; five full-size Move inverses",
+  "environment": {
+    "platform": "macOS-15.0.1-arm64-arm-64bit-Mach-O",
+    "python": "3.14.2",
+    "postgresql": "16.15 (Homebrew)",
+    "transport": "FastAPI TestClient HTTP contract (in process), local PostgreSQL; excludes network/auth gateway/browser"
+  },
+  "initial_database_bytes": 34767375,
+  "final_database_bytes": 131636247,
+  "undo_payload_bytes": [
+    978479,
+    978479,
+    978479,
+    978479,
+    978479
+  ],
+  "warm_http": {
+    "collection": {
+      "samples_seconds": [
+        0.06284216698259115,
+        0.06345849949866533,
+        0.06234233360737562,
+        0.06288187485188246,
+        0.06493333261460066,
+        0.0641859583556652,
+        0.06555979140102863,
+        0.0649415822699666,
+        0.06474891677498817,
+        0.0649226251989603,
+        0.06355445925146341,
+        0.06502849981188774,
+        0.06674216780811548,
+        0.06819404102861881,
+        0.06951133441179991,
+        0.06724674999713898,
+        0.06662154197692871,
+        0.06632804218679667,
+        0.06458862498402596,
+        0.06584758311510086
+      ],
+      "p95_seconds": 0.06819404102861881
+    },
+    "leaf": {
+      "samples_seconds": [
+        0.036027874797582626,
+        0.035478750243783,
+        0.03757008444517851,
+        0.03768645878881216,
+        0.03705954272300005,
+        0.037402584217488766,
+        0.038205333054065704,
+        0.03969004191458225,
+        0.03849983308464289,
+        0.03656304161995649,
+        0.03630412556231022,
+        0.036323290318250656,
+        0.03649029042571783,
+        0.03704804182052612,
+        0.037261417135596275,
+        0.0370907923206687,
+        0.03848970774561167,
+        0.04013491701334715,
+        0.039796666242182255,
+        0.03859750088304281
+      ],
+      "p95_seconds": 0.039796666242182255
+    }
+  },
+  "moves": [
+    {
+      "stage_seconds": 1.1150360824540257,
+      "commit_http_seconds": 1.9164240006357431,
+      "total_seconds": 3.031461707316339
+    },
+    {
+      "stage_seconds": 1.223606999963522,
+      "commit_http_seconds": 1.92429562471807,
+      "total_seconds": 3.147903874516487
+    },
+    {
+      "stage_seconds": 1.365032833069563,
+      "commit_http_seconds": 2.130503541789949,
+      "total_seconds": 3.4955367501825094
+    },
+    {
+      "stage_seconds": 1.4093839162960649,
+      "commit_http_seconds": 2.14975249953568,
+      "total_seconds": 3.559136957861483
+    },
+    {
+      "stage_seconds": 1.517858250066638,
+      "commit_http_seconds": 2.136876874603331,
+      "total_seconds": 3.6547357495874166
+    }
+  ],
+  "plans": {
+    "leaf_quantity": [
+      {
+        "Plan": {
+          "Node Type": "Limit",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Startup Cost": 0.42,
+          "Total Cost": 6.34,
+          "Plan Rows": 49,
+          "Plan Width": 24,
+          "Actual Startup Time": 30.196,
+          "Actual Total Time": 30.326,
+          "Actual Rows": 49,
+          "Actual Loops": 1,
+          "Shared Hit Blocks": 126686,
+          "Shared Read Blocks": 49,
+          "Shared Dirtied Blocks": 58,
+          "Shared Written Blocks": 0,
+          "Local Hit Blocks": 0,
+          "Local Read Blocks": 0,
+          "Local Dirtied Blocks": 0,
+          "Local Written Blocks": 0,
+          "Temp Read Blocks": 0,
+          "Temp Written Blocks": 0,
+          "Plans": [
+            {
+              "Node Type": "Index Only Scan",
+              "Parent Relationship": "Outer",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Scan Direction": "Forward",
+              "Index Name": "holding_owner_leaf_quantity",
+              "Relation Name": "holding",
+              "Alias": "holding",
+              "Startup Cost": 0.42,
+              "Total Cost": 33107.94,
+              "Plan Rows": 274232,
+              "Plan Width": 24,
+              "Actual Startup Time": 30.195,
+              "Actual Total Time": 30.322,
+              "Actual Rows": 49,
+              "Actual Loops": 1,
+              "Index Cond": "((owner_id = 'b2ea5735-14e4-4d17-b83e-cc08992f8505'::text) AND (location_id = '42375506-c109-4d0e-bb3d-701648d6bcdd'::uuid))",
+              "Rows Removed by Index Recheck": 0,
+              "Heap Fetches": 125049,
+              "Shared Hit Blocks": 126686,
+              "Shared Read Blocks": 49,
+              "Shared Dirtied Blocks": 58,
+              "Shared Written Blocks": 0,
+              "Local Hit Blocks": 0,
+              "Local Read Blocks": 0,
+              "Local Dirtied Blocks": 0,
+              "Local Written Blocks": 0,
+              "Temp Read Blocks": 0,
+              "Temp Written Blocks": 0
+            }
+          ]
+        },
+        "Planning": {
+          "Shared Hit Blocks": 104,
+          "Shared Read Blocks": 0,
+          "Shared Dirtied Blocks": 0,
+          "Shared Written Blocks": 0,
+          "Local Hit Blocks": 0,
+          "Local Read Blocks": 0,
+          "Local Dirtied Blocks": 0,
+          "Local Written Blocks": 0,
+          "Temp Read Blocks": 0,
+          "Temp Written Blocks": 0
+        },
+        "Planning Time": 0.331,
+        "Triggers": [],
+        "Execution Time": 30.343
+      }
+    ],
+    "distribution": [
+      {
+        "Plan": {
+          "Node Type": "Index Scan",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Scan Direction": "Forward",
+          "Index Name": "holding_owner_edition_location",
+          "Relation Name": "holding",
+          "Alias": "holding",
+          "Startup Cost": 0.42,
+          "Total Cost": 8.44,
+          "Plan Rows": 1,
+          "Plan Width": 24,
+          "Actual Startup Time": 0.027,
+          "Actual Total Time": 0.036,
+          "Actual Rows": 2,
+          "Actual Loops": 1,
+          "Index Cond": "((owner_id = 'b2ea5735-14e4-4d17-b83e-cc08992f8505'::text) AND (edition_id = 'b2b5235e-1140-4f19-9173-cca86eea18be'::uuid))",
+          "Rows Removed by Index Recheck": 0,
+          "Shared Hit Blocks": 11,
+          "Shared Read Blocks": 0,
+          "Shared Dirtied Blocks": 0,
+          "Shared Written Blocks": 0,
+          "Local Hit Blocks": 0,
+          "Local Read Blocks": 0,
+          "Local Dirtied Blocks": 0,
+          "Local Written Blocks": 0,
+          "Temp Read Blocks": 0,
+          "Temp Written Blocks": 0
+        },
+        "Planning": {
+          "Shared Hit Blocks": 0,
+          "Shared Read Blocks": 0,
+          "Shared Dirtied Blocks": 0,
+          "Shared Written Blocks": 0,
+          "Local Hit Blocks": 0,
+          "Local Read Blocks": 0,
+          "Local Dirtied Blocks": 0,
+          "Local Written Blocks": 0,
+          "Temp Read Blocks": 0,
+          "Temp Written Blocks": 0
+        },
+        "Planning Time": 0.064,
+        "Triggers": [],
+        "Execution Time": 0.043
+      }
+    ],
+    "totals": [
+      {
+        "Plan": {
+          "Node Type": "Aggregate",
+          "Strategy": "Sorted",
+          "Partial Mode": "Simple",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Startup Cost": 0.42,
+          "Total Cost": 22985.42,
+          "Plan Rows": 274232,
+          "Plan Width": 48,
+          "Actual Startup Time": 0.047,
+          "Actual Total Time": 143.084,
+          "Actual Rows": 25000,
+          "Actual Loops": 1,
+          "Group Key": [
+            "edition_id"
+          ],
+          "Shared Hit Blocks": 255487,
+          "Shared Read Blocks": 0,
+          "Shared Dirtied Blocks": 0,
+          "Shared Written Blocks": 0,
+          "Local Hit Blocks": 0,
+          "Local Read Blocks": 0,
+          "Local Dirtied Blocks": 0,
+          "Local Written Blocks": 0,
+          "Temp Read Blocks": 0,
+          "Temp Written Blocks": 0,
+          "Plans": [
+            {
+              "Node Type": "Index Scan",
+              "Parent Relationship": "Outer",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Scan Direction": "Forward",
+              "Index Name": "holding_owner_edition_location",
+              "Relation Name": "holding",
+              "Alias": "holding",
+              "Startup Cost": 0.42,
+              "Total Cost": 18186.36,
+              "Plan Rows": 274232,
+              "Plan Width": 24,
+              "Actual Startup Time": 0.014,
+              "Actual Total Time": 131.367,
+              "Actual Rows": 50000,
+              "Actual Loops": 1,
+              "Index Cond": "(owner_id = 'b2ea5735-14e4-4d17-b83e-cc08992f8505'::text)",
+              "Rows Removed by Index Recheck": 0,
+              "Shared Hit Blocks": 255487,
+              "Shared Read Blocks": 0,
+              "Shared Dirtied Blocks": 0,
+              "Shared Written Blocks": 0,
+              "Local Hit Blocks": 0,
+              "Local Read Blocks": 0,
+              "Local Dirtied Blocks": 0,
+              "Local Written Blocks": 0,
+              "Temp Read Blocks": 0,
+              "Temp Written Blocks": 0
+            }
+          ]
+        },
+        "Planning": {
+          "Shared Hit Blocks": 21,
+          "Shared Read Blocks": 0,
+          "Shared Dirtied Blocks": 0,
+          "Shared Written Blocks": 0,
+          "Local Hit Blocks": 0,
+          "Local Read Blocks": 0,
+          "Local Dirtied Blocks": 0,
+          "Local Written Blocks": 0,
+          "Temp Read Blocks": 0,
+          "Temp Written Blocks": 0
+        },
+        "Planning Time": 0.085,
+        "Triggers": [],
+        "Execution Time": 143.737
+      }
+    ]
+  },
+  "unverified": [
+    "full English catalog and realistic catalog cardinality",
+    "real 200 monthly active workload and 10000 monthly public views",
+    "cold starts/internet/browser timings",
+    "provider quotas/costs",
+    "transaction-only duration (commit HTTP includes transaction and serialization)",
+    "production readiness"
+  ],
+  "recorded_at_utc": "2026-10-07T03:46:00.479614+00:00",
+  "boundary_checks": [
+    "five successful atomic 25000-Edition Moves with exact source/destination balances",
+    "stale 25000-Edition Move rejected without any changes",
+    "forced destination write failure rolls back and retry succeeds"
+  ]
+}
