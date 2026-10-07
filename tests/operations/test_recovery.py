@@ -32,6 +32,15 @@ class RecoveryTest(unittest.TestCase):
             self.assertNotEqual(run.returncode,0)
             self.assertFalse(destination.exists())
 
+    def test_backup_rejects_empty_public_store_configuration(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as workspace:
+            destination = Path(workspace)/'private-backup'
+            env = dict(os.environ, DATABASE_URL=os.environ['RECOVERY_TEST_DATABASE_URL'], PUBLIC_PROJECTION_DIR='')
+            run = subprocess.run([str(ROOT/'.venv/bin/python'), str(ROOT/'scripts/recovery.py'), 'backup', str(destination)], cwd=workspace, env=env, capture_output=True)
+            self.assertNotEqual(run.returncode,0)
+            self.assertFalse(destination.exists())
+
     def test_backup_refuses_role_without_sequence_visibility(self):
         admin = os.environ['RECOVERY_TEST_DATABASE_URL']
         suffix = uuid.uuid4().hex
