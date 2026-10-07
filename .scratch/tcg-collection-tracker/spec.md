@@ -217,3 +217,7 @@ The first production release is owner-only. The application uses React, TypeScri
 | [Find an authoritative cross-language Card Identity source](wayfinder/tickets/12-find-cross-language-card-identity-source.md) | [First English catalog pull](issues/02-first-english-catalog-pull.md), [Physical Decks and checks](issues/10-physical-decks-and-checks.md) |
 | [Assess Limitless TCG as a Card Identity and Printing source](wayfinder/tickets/13-assess-limitless-card-identity-source.md) | [First English catalog pull](issues/02-first-english-catalog-pull.md) |
 | [Decide fallback for missing English catalog records](wayfinder/tickets/14-decide-missing-english-catalog-fallback.md) | [Missing-card reports and approval](issues/13-missing-card-reports-and-approval.md), [Safe catalog refresh and reconciliation](issues/14-safe-catalog-refresh-and-reconciliation.md) |
+
+## Implementation checkpoint — 2026-10-06
+
+Application tickets 01–14 and 19 are complete on `codex/mvp-integration`; [combined validation](evidence/integration-validation.md) and [resolved review findings](evidence/code-review.md) document the local evidence. Tickets 15–18 remain pending for provider decisions, provisioning and production launch proof, per owner instruction. [Provider options](evidence/provider-options.md) are prepared for that decision. The specification remains needs-info until those gates are resolved.

@@ -18,7 +18,9 @@ At integration d133845 plus navigation/client/gate wiring, the same disposable-d
 
 ## Final integration
 
-Pending implementation, full gate and independent Standards/Spec review. Baseline evidence does not close any remaining MVP ticket.
+Date: 2026-10-06. Tested code commit: `859f2aa` on `codex/mvp-integration`. The procedure above passed migrations through 018, every generated-client check, TypeScript and Vite build, 68 API/PostgreSQL tests (29.93s), six live Better Auth tests (5.46s), and all 19 Chromium browser tests (45.6s). Suite durations are not product latency measurements. Deterministic catalog fixtures exercise real detached import processes; this is not evidence of a full live English catalog import or provider object-storage deployment.
+
+Independent Standards and Spec reviews against `a38c674` identified five findings; all were fixed and independently rechecked. See [review resolutions](code-review.md). Application tickets 08–12, 14 and 19 are closed; production tickets 15–18 remain pending by owner instruction. Test services were cleaned up, and task-created implementation worktrees were removed. The existing PostgreSQL service was preserved.
 
 ## Production gates
 

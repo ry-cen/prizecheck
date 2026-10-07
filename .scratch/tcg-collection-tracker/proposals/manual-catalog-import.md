@@ -1,6 +1,6 @@
 # Control-panel catalog imports on demand
 
-**Status:** implemented; integration validation pending.
+**Status:** implemented and locally integration-validated; production validation pending.
 
 **Implementation ticket:** [19 — Control-panel catalog imports on demand](../issues/19-manual-catalog-import-command.md)
 

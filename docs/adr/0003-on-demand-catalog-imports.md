@@ -1,6 +1,6 @@
 # Launch catalog import processes on demand
 
-**Status:** accepted; implemented, integration validation pending.
+**Status:** accepted; implemented and locally integration-validated; production validation pending.
 
 The owner retains Start full English pull in the control panel. An authenticated API request reserves one durable catalog run and launches one detached Python process for that run ID. The process saves progress and outcome, performs the existing validated atomic import, and exits. There is no continuously running catalog worker polling for jobs.
 
