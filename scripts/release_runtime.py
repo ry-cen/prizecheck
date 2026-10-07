@@ -6,6 +6,7 @@ import mimetypes
 import os
 from pathlib import Path
 import shutil
+import signal
 import subprocess
 import tempfile
 import threading
@@ -14,7 +15,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import urllib.error
 import urllib.request
 
-from release import dependencies, port, verify
+from release import dependencies, runtime_fingerprint, verify
+import socket
+
+
+def port():
+    with socket.socket() as sock:
+        sock.bind(('127.0.0.1',0))
+        return sock.getsockname()[1]
 
 
 class Runtime:
@@ -42,6 +50,8 @@ class Runtime:
         receipt = verify(release)
         if receipt['commit'] != commit:
             raise ValueError('Release identity mismatch')
+        if receipt['runtime_fingerprint'] != runtime_fingerprint(self.runtime):
+            raise ValueError('Installed runtime differs from gate')
         temp = tempfile.TemporaryDirectory(prefix='tcg-release-runtime-')
         checkout = Path(temp.name)/'app'
         processes = []
@@ -104,6 +114,11 @@ class Handler(BaseHTTPRequestHandler):
                     body = json.loads(self.rfile.read(length))
                     commit = runtime.apply(body['commit'])
                     self.reply(200,json.dumps({'commit':commit}).encode())
+                elif self.command == 'POST' and self.path == '/__release/clear':
+                    with runtime.lock:
+                        runtime.stop(runtime.current)
+                        runtime.current = None
+                    self.reply(200,b'{"commit":null}')
                 elif self.command == 'GET' and self.path == '/__release/status':
                     with runtime.lock:
                         commit = runtime.current['commit'] if runtime.current else None
@@ -166,10 +181,16 @@ def main():
     key = os.environ.get('RELEASE_CONTROL_KEY','')
     if len(key) < 32 or not os.environ.get('DATABASE_URL') or not os.environ.get('PUBLIC_PROJECTION_DIR'):
         parser.error('Private control key, database and public projection configuration required')
+    def terminate(*_):
+        raise SystemExit(0)
+    signal.signal(signal.SIGTERM,terminate)
     server = ThreadingHTTPServer(('127.0.0.1',args.port),Handler)
     server.key = key
     server.runtime = Runtime(args.store.resolve(),args.runtime.resolve(),f'http://127.0.0.1:{args.port}')
     try:
+        active = args.store/'active'
+        if active.is_symlink():
+            server.runtime.apply(active.resolve().name)
         server.serve_forever()
     finally:
         server.runtime.stop(server.runtime.current)

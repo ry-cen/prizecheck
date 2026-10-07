@@ -70,16 +70,7 @@ promote({'card-1': 'Pikachu'})`], { env: { ...process.env, PYTHONPATH: 'api:api/
     await expect(selection).toContainText('1 copies · 1 Editions selected');
     const dragHandle = selection.getByRole('button', { name: 'Drag selected Pikachu stack' });
     const dropTarget = page.getByRole('navigation', { name: 'Location tree' }).getByRole('button', { name: destination });
-    await dragHandle.scrollIntoViewIfNeeded();
-    await dropTarget.scrollIntoViewIfNeeded();
-    const from = await dragHandle.boundingBox();
-    const to = await dropTarget.boundingBox();
-    if (!from || !to) throw new Error('Move drag controls are not visible');
-    await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
-    await page.mouse.down();
-    await page.mouse.move(from.x + from.width / 2 + 20, from.y + from.height / 2 + 20, { steps: 5 });
-    await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2, { steps: 12 });
-    await page.mouse.up();
+    await dragHandle.dragTo(dropTarget);
     await expect(selection.getByRole('status')).toContainText('Moved 1 copies');
     await expect(panel.locator('.holding-stack')).toContainText('×1');
     await selection.getByRole('button', { name: 'Select stack' }).click();

@@ -8,24 +8,23 @@ import os
 from pathlib import Path
 import secrets
 import shutil
-import socket
 import subprocess
 import sys
 import tarfile
 import tempfile
-import time
 import urllib.error
 import urllib.request
 
 import psycopg
 from psycopg import sql
-from psycopg.conninfo import conninfo_to_dict, make_conninfo
+from psycopg.conninfo import conninfo_to_dict
+from urllib.parse import urlsplit, urlunsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def run(args, cwd, env=None):
-    subprocess.run(args,cwd=cwd,env=env,check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+def run(args, cwd, env=None, log=None):
+    subprocess.run(args,cwd=cwd,env=env,check=True,stdout=log or subprocess.DEVNULL,stderr=log or subprocess.DEVNULL)
 
 
 def digest(path):
@@ -35,7 +34,7 @@ def digest(path):
 
 def verify(path):
     receipt = json.loads((path/'release.json').read_text())
-    if receipt.get('gate') != 'fixed-ci-v1':
+    if receipt.get('gate') != 'fixed-ci-v2':
         raise ValueError('No trusted gate receipt')
     actual = {str(p.relative_to(path)):digest(p) for p in path.rglob('*') if p.is_file() and p != path/'release.json'}
     if actual != receipt['files']:
@@ -58,7 +57,20 @@ def dependencies(checkout,runtime):
         (checkout/name).symlink_to((runtime/name).resolve(),target_is_directory=True)
 
 
+def runtime_fingerprint(runtime):
+    fingerprint = hashlib.sha256()
+    for directory in (runtime/'.venv',runtime/'node_modules'):
+        for path in sorted(directory.rglob('*')):
+            if not path.is_file() or any(part in ('__pycache__','.cache','.vite','.vite-temp') for part in path.parts) or path.suffix == '.pyc':
+                continue
+            fingerprint.update(str(path.relative_to(runtime)).encode()+b'\0'+digest(path).encode()+b'\0')
+    fingerprint.update(digest(Path(shutil.which('node'))).encode())
+    return fingerprint.hexdigest()
+
+
 def local_url(url):
+    if urlsplit(url).scheme not in ('postgresql','postgres'):
+        raise ValueError('PostgreSQL URL required by Python and Node boundaries')
     options = conninfo_to_dict(url)
     if options.get('host') not in ('127.0.0.1','localhost','::1') or options.get('hostaddr','127.0.0.1') not in ('127.0.0.1','::1'):
         raise ValueError('Explicit loopback database required')
@@ -93,10 +105,11 @@ def gate(args):
         name = 'tcg_release_'+secrets.token_hex(8)
         with psycopg.connect(args.admin_url,autocommit=True) as conn:
             conn.execute(sql.SQL('CREATE DATABASE {}').format(sql.Identifier(name)))
-        env = {'PATH':os.environ['PATH'],'HOME':temp,'DATABASE_URL':make_conninfo(args.admin_url,dbname=name),
+        env = {'PATH':os.environ['PATH'],'HOME':temp,'DATABASE_URL':urlunsplit(urlsplit(args.admin_url)._replace(path='/'+name)),
                'PLAYWRIGHT_BROWSERS_PATH':os.environ.get('PLAYWRIGHT_BROWSERS_PATH',str(Path.home()/'Library/Caches/ms-playwright'))}
         try:
-            run(['bash','scripts/ci.sh'],checkout,env)
+            with (store/('ci-'+selected+'-'+secrets.token_hex(4)+'.log')).open('wb') as log:
+                run(['bash','scripts/ci.sh'],checkout,env,log)
             compatibility = 'first release; no previous release available'
             previous_commit = None
             active = store/'active'
@@ -111,7 +124,8 @@ def gate(args):
                 (old/'release.json').unlink()
                 dependencies(old,runtime)
                 # Candidate migrations already installed. Old application suite must pass on that schema.
-                run(['bash','scripts/ci.sh'],old,env)
+                with (store/('compatibility-'+selected+'-'+secrets.token_hex(4)+'.log')).open('wb') as log:
+                    run(['bash','scripts/ci.sh'],old,env,log)
                 compatibility = 'previous fixed CI passed against candidate schema; unchanged migration prefix'
         finally:
             with psycopg.connect(args.admin_url,autocommit=True) as conn:
@@ -124,8 +138,8 @@ def gate(args):
             if path.exists():
                 shutil.rmtree(path)
         files = {str(p.relative_to(checkout)):digest(p) for p in checkout.rglob('*') if p.is_file()}
-        receipt = {'gate':'fixed-ci-v1','commit':selected,'main_ref':args.main_ref,'previous_commit':previous_commit,'files':files,'compatibility':compatibility,
-                   'scope':'local fixed CI; external CI identity and provider production proof pending'}
+        receipt = {'gate':'fixed-ci-v2','commit':selected,'main_ref':args.main_ref,'previous_commit':previous_commit,'files':files,'compatibility':compatibility,
+                   'runtime_fingerprint':runtime_fingerprint(runtime),'scope':'local fixed CI; external CI identity and provider production proof pending'}
         (checkout/'release.json').write_text(json.dumps(receipt,sort_keys=True))
         destination = store/selected
         if destination.exists():
@@ -135,12 +149,6 @@ def gate(args):
             path.chmod(0o555 if path.is_dir() else 0o444)
         destination.chmod(0o555)
         print(json.dumps({'status':'gated','commit':selected,'compatibility':compatibility}))
-
-
-def port():
-    with socket.socket() as sock:
-        sock.bind(('127.0.0.1',0))
-        return sock.getsockname()[1]
 
 
 def runtime_request(url,key,path,body=None):
@@ -154,7 +162,7 @@ def runtime_request(url,key,path,body=None):
         return json.loads(response.read())
 
 
-def smoke(url):
+def smoke(url,release):
     import re
     for route,status in [('/api/health',200),('/api/locations',401),('/api/public/decks/unknown-smoke-token',404)]:
         try:
@@ -165,13 +173,17 @@ def smoke(url):
         if actual != status:
             raise ValueError('Protected/public smoke failed')
     with urllib.request.urlopen(url.rstrip('/')+'/',timeout=5) as response:
-        html = response.read().decode()
+        content = response.read()
+        if content != (release/'dist/web/index.html').read_bytes():
+            raise ValueError('Wrong active assets')
+        html = content.decode()
     assets = re.findall(r'(?:src|href)="(/assets/[^" ]+)"',html)
     if not assets:
         raise ValueError('Built assets missing')
     for asset in assets:
         with urllib.request.urlopen(url.rstrip('/')+asset,timeout=5) as response:
-            if response.status != 200:
+            expected = (release/'dist/web'/asset.lstrip('/')).resolve()
+            if (release/'dist/web').resolve() not in expected.parents or response.status != 200 or response.read() != expected.read_bytes():
                 raise ValueError('Asset smoke failed')
 
 
@@ -191,6 +203,8 @@ def switch(args):
         if target.parent != store:
             raise ValueError('Release outside private store')
         receipt = verify(target)
+        if receipt['runtime_fingerprint'] != runtime_fingerprint(runtime):
+            raise ValueError('Installed runtime differs from tested release')
         env = dict(os.environ)
         local_url(env['DATABASE_URL'])
         if not env.get('PUBLIC_PROJECTION_DIR'):
@@ -208,23 +222,25 @@ def switch(args):
             current = None
         if current is None and receipt['previous_commit'] is not None:
             raise ValueError('Expected previous release missing')
-        if args.command != 'rollback':
-            run([str(runtime/'.venv/bin/python'),str(target/'scripts/migrate.py')],target,env)
         key = env.get('RELEASE_CONTROL_KEY','')
         if len(key) < 32:
             raise ValueError('Private runtime control key required')
         observed = runtime_request(args.runtime_url,key,'/__release/status')['commit']
         if observed != (current.name if current else None):
             raise ValueError('Runtime and recorded release differ')
+        if args.command != 'rollback':
+            run([str(runtime/'.venv/bin/python'),str(target/'scripts/migrate.py')],target,env)
         try:
             applied = runtime_request(args.runtime_url,key,'/__release/apply',{'commit':target.name})
             if applied.get('commit') != target.name:
                 raise ValueError('Runtime applied wrong release')
-            smoke(args.runtime_url)
+            smoke(args.runtime_url,target)
         except Exception:
             if current is not None:
                 runtime_request(args.runtime_url,key,'/__release/apply',{'commit':current.name})
-                smoke(args.runtime_url)
+                smoke(args.runtime_url,current)
+            else:
+                runtime_request(args.runtime_url,key,'/__release/clear',{})
             raise
         if current is not None:
             temp = store/'.previous-next'
