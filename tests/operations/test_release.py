@@ -68,7 +68,8 @@ class ReleaseTest(unittest.TestCase):
                         return json.loads(response.read())['commit']
                 for _ in range(100):
                     try:
-                        self.assertIsNone(status())
+                        initial = status()
+                        self.assertIn(initial,(None,first))
                         break
                     except OSError:
                         time.sleep(.1)
@@ -81,10 +82,56 @@ class ReleaseTest(unittest.TestCase):
                         args += ['--commit',commit]
                     result = subprocess.run(args,env=env,capture_output=True)
                     self.assertEqual(result.returncode,0,result.stderr.decode())
-                switch('activate',first)
+                if initial is None:
+                    switch('activate',first)
                 self.assertEqual(status(),first)
                 gate = subprocess.run(base+['gate','--commit',second,'--main-ref','refs/heads/codex/manual-release','--store',str(store),'--runtime',str(runtime_root),'--admin-url',admin],env=env,capture_output=True)
                 self.assertEqual(gate.returncode,0,gate.stderr.decode())
+                # Fault at the external runtime HTTP seam after real candidate application.
+                # The release coordinator must restore the actual previous runtime and active record.
+                from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+                import threading
+                import urllib.error
+                failure = {'pending':True}
+                class FaultProxy(BaseHTTPRequestHandler):
+                    def log_message(self,*args):
+                        pass
+                    def request(self):
+                        if self.path == '/api/health' and failure['pending'] and status() == second:
+                            failure['pending'] = False
+                            self.send_response(503)
+                            self.end_headers()
+                            return
+                        length = int(self.headers.get('Content-Length','0'))
+                        body = self.rfile.read(length) if length else None
+                        request = urllib.request.Request(origin+self.path,data=body,method=self.command,
+                          headers={k:v for k,v in self.headers.items() if k.lower() not in ('host','connection')})
+                        try:
+                            response = urllib.request.urlopen(request,timeout=30)
+                        except urllib.error.HTTPError as error:
+                            response = error
+                        with response:
+                            self.send_response(response.status)
+                            data = response.read()
+                            self.send_header('Content-Length',str(len(data)))
+                            self.end_headers()
+                            self.wfile.write(data)
+                    do_GET = request
+                    do_POST = request
+                proxy = ThreadingHTTPServer(('127.0.0.1',0),FaultProxy)
+                thread = threading.Thread(target=proxy.serve_forever,daemon=True)
+                thread.start()
+                try:
+                    proxy_origin = f'http://127.0.0.1:{proxy.server_port}'
+                    failed = subprocess.run(base+['activate','--commit',second,'--store',str(store),'--runtime',str(runtime_root),'--runtime-url',proxy_origin],env=env,capture_output=True)
+                    self.assertNotEqual(failed.returncode,0)
+                    self.assertFalse(failure['pending'])
+                    self.assertEqual(status(),first)
+                    self.assertEqual((store/'active').resolve().name,first)
+                finally:
+                    proxy.shutdown()
+                    proxy.server_close()
+                    thread.join()
                 switch('activate',second)
                 self.assertEqual(status(),second)
                 switch('rollback')
@@ -105,8 +152,8 @@ class ReleaseTest(unittest.TestCase):
                     asset.write_bytes(original)
                     asset.chmod(0o444)
                 report = {'scope':'real local auth/API/assets adapter and disposable database; no production provider',
-                          'first_commit':first,'second_commit':second,'checks':['exact selected branch gate','candidate full CI','previous full CI on candidate schema','real runtime activate and protected/public/assets smoke','successor activation','rollback without reversed migrations','private Location survives','tamper refusal preserves runtime/active'],
-                          'migration_delta':'none between these two application releases; real deployed schema upgrades remain separate proof'}
+                          'first_commit':first,'second_commit':second,'checks':['exact selected branch gate','candidate full CI','previous full CI on candidate schema','real runtime activate and protected/public/assets smoke','failed candidate smoke automatically restores previous runtime','successor activation','rollback without reversed migrations','private Location survives','tamper refusal preserves runtime/active'],
+                          'migration_delta':'019_operations.sql and 020_signup.sql added in candidate; previous app CI passes against this schema; no reversal on rollback'}
                 if os.environ.get('RELEASE_DRILL_REPORT'):
                     Path(os.environ['RELEASE_DRILL_REPORT']).write_text(json.dumps(report,indent=2))
             finally:

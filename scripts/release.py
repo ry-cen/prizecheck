@@ -84,6 +84,8 @@ def compatible(previous,candidate):
 
 
 def gate(args):
+    if not (ROOT/'.git').exists():
+        raise ValueError('Exact main commit required; authoritative repository unavailable')
     selected = subprocess.check_output(['git','rev-parse',args.commit+'^{commit}'],cwd=ROOT,text=True).strip()
     if not args.main_ref.startswith('refs/heads/'):
         raise ValueError('Explicit selected main branch required')
@@ -106,10 +108,12 @@ def gate(args):
         with psycopg.connect(args.admin_url,autocommit=True) as conn:
             conn.execute(sql.SQL('CREATE DATABASE {}').format(sql.Identifier(name)))
         env = {'PATH':os.environ['PATH'],'HOME':temp,'DATABASE_URL':urlunsplit(urlsplit(args.admin_url)._replace(path='/'+name)),
+               'RECOVERY_TEST_DATABASE_URL':urlunsplit(urlsplit(args.admin_url)._replace(path='/'+name)),
                'PLAYWRIGHT_BROWSERS_PATH':os.environ.get('PLAYWRIGHT_BROWSERS_PATH',str(Path.home()/'Library/Caches/ms-playwright'))}
         try:
             with (store/('ci-'+selected+'-'+secrets.token_hex(4)+'.log')).open('wb') as log:
                 run(['bash','scripts/ci.sh'],checkout,env,log)
+                run([str(runtime/'.venv/bin/python'),'-m','unittest','discover','-s','tests/operations','-v'],checkout,env,log)
             compatibility = 'first release; no previous release available'
             previous_commit = None
             active = store/'active'
