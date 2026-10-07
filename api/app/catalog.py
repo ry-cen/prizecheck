@@ -233,6 +233,20 @@ def execute_run(conn, run_id: UUID, source=None, before_promotion=None):
                         conn.execute("""INSERT INTO catalog_review(printing_id,source_id,kind,source_fingerprint,detail,candidate)
                           VALUES (%s,%s,'source_match',%s,'Possible match to a reviewed manual Printing; physical confirmation required',%s)
                           ON CONFLICT DO NOTHING""",(existing['printing_id'] if existing else None,source_id,item['fingerprint'],json.dumps(match_candidate)))
+                if existing:
+                    established = conn.execute("SELECT * FROM catalog_printing_display WHERE printing_id=%s",
+                                               (existing['printing_id'],)).fetchone()
+                    if established and (established['set_id'] != item['set_id'] or
+                                        established['collector_number'] != item['collector_number']):
+                        conn.execute("""INSERT INTO catalog_review(printing_id,source_id,kind,source_fingerprint,detail,candidate)
+                          VALUES (%s,%s,'reference_change',%s,'Source set or collector number changed; physical Printing review required',%s)
+                          ON CONFLICT DO NOTHING""", (existing['printing_id'],source_id,item['fingerprint'],json.dumps(candidate)))
+                        for field in ('set_id','set_name','collector_number','image_url'):
+                            item[field] = established[field]
+                        item['basic_energy'] = existing['basic_energy']
+                        # A recycled source reference cannot create Editions on
+                        # the established physical Printing while review is pending.
+                        item['ambiguous'] = True
                 if existing and existing["display_name"] != item["name"]:
                     item["name"] = existing["display_name"]
                     item["search_name"] = existing["search_name"]

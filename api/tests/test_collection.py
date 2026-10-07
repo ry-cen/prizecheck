@@ -89,3 +89,13 @@ def test_large_collection_retains_exact_totals_and_indexed_distribution(tmp_path
     assert page.status_code==200 and len(page.json()['entries'])==30
     assert all(x['quantity']=='1' for x in page.json()['entries'])
     assert page.json()['next_cursor']
+
+
+def test_collection_entries_are_aggregates_and_distribution_has_real_leaf_holdings():
+    owner,_,leaf,_,edition,_=fixture()
+    add(owner,leaf,edition,'3')
+    entry=call('GET','/api/collection',owner).json()['entries'][0]
+    assert entry['quantity']=='3'
+    assert not {'location_id','location_name','version'} & entry.keys()
+    holding=call('GET',f'/api/collection/editions/{edition}',owner).json()['holdings'][0]
+    assert holding['location_id']==leaf and holding['version']>=1

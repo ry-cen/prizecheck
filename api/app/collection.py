@@ -9,8 +9,19 @@ from .holdings import HoldingView, fail
 
 router = APIRouter(prefix='/api/collection', tags=['collection'])
 
+class CollectionEntry(BaseModel):
+    edition_id: UUID
+    quantity: str
+    printing_id: UUID
+    printing_name: str
+    set_id: str
+    set_name: str
+    collector_number: str
+    descriptor: dict
+    image_url: str | None
+
 class CollectionPage(BaseModel):
-    entries: list[HoldingView]
+    entries: list[CollectionEntry]
     owner_revision: int
     catalog_revision: int
     next_cursor: str | None = None
@@ -26,8 +37,8 @@ JOINS = """JOIN catalog_edition e ON e.id=h.edition_id
  LEFT JOIN catalog_printing_display pd ON pd.printing_id=p.id
  LEFT JOIN catalog_generation_printing gp ON gp.printing_id=p.id AND gp.generation_id=%s"""
 
-def views(rows):
-    return [HoldingView(**{**row,'quantity':str(row['quantity']),
+def views(rows, model=HoldingView):
+    return [model(**{**row,'quantity':str(row['quantity']),
              'image_url':f"{row['image_url']}/low.webp" if row['image_url'] else None}) for row in rows]
 
 def encode_cursor(context, key):
@@ -93,15 +104,14 @@ def collection(name: str=Query(default='',max_length=120),set_id: str=Query(defa
                 try: amount=int(key[0])
                 except (ValueError,TypeError): fail(400,'INVALID_CURSOR')
                 params.extend([amount,amount,UUID(key[1])])
-        rows=conn.execute(f"""WITH totals AS (SELECT {COLUMNS},sum(h.quantity) AS quantity,1 AS version,
-          coalesce(lower(pd.display_name),lower(ci.display_name)) AS search_name,
-          '00000000-0000-0000-0000-000000000000'::uuid AS location_id,'Collection' AS location_name
+        rows=conn.execute(f"""WITH totals AS (SELECT {COLUMNS},sum(h.quantity) AS quantity,
+          coalesce(lower(pd.display_name),lower(ci.display_name)) AS search_name
           FROM holding h {JOINS} WHERE h.owner_id=%s {scope} {filters}
           GROUP BY e.id,ci.id,pd.printing_id,gp.generation_id,gp.printing_id)
           SELECT * FROM totals {after} ORDER BY {order} LIMIT 31""",params).fetchall()
         page=rows[:30]
         next_cursor=encode_cursor(context,[str(page[-1]['quantity']) if sort=='quantity' else page[-1]['search_name'],str(page[-1]['edition_id'])]) if len(rows)>30 else None
-        return CollectionPage(entries=views(page),owner_revision=revision,catalog_revision=state['revision'],next_cursor=next_cursor)
+        return CollectionPage(entries=views(page,CollectionEntry),owner_revision=revision,catalog_revision=state['revision'],next_cursor=next_cursor)
 
 @router.get('/editions/{edition_id}',response_model=Distribution)
 def distribution(edition_id: UUID,user_id: str=Depends(verified_user)):

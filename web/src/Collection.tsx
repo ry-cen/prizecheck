@@ -1,10 +1,10 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { getCollection, getEditionDistribution, type CollectionFilters } from './collection_generated';
+import { getCollection, getEditionDistribution, type CollectionFilters, type CollectionEntry } from './collection_generated';
 import { HoldingError, type HoldingView } from './holdings_generated';
 import './Holdings.css';
 
 export function Collection({ locationId, locationName }: { locationId?: string; locationName?: string }) {
-  const [entries,setEntries]=useState<HoldingView[]>([]);
+  const [entries,setEntries]=useState<CollectionEntry[]>([]);
   const [cursor,setCursor]=useState<string|null>(null);
   const [filters,setFilters]=useState<CollectionFilters>({sort:'name'});
   const [draft,setDraft]=useState<CollectionFilters>({sort:'name'});

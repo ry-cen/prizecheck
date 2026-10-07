@@ -138,3 +138,22 @@ def test_cross_owner_commands_are_not_found_even_during_public_storage_outage():
     (Path(os.environ['PUBLIC_PROJECTION_DIR']) / 'current.json').unlink()
     assert command(other, deck).status_code == 404
     assert command(other, str(uuid4())).status_code == 404
+
+
+def test_private_and_public_checks_share_rules_without_private_identity_serialization():
+    import psycopg
+    owner,_,_,_,edition,generation=fixture()
+    deck=create(owner,'Private rules fixture').json()['location']['id']
+    add(owner,deck,edition,'5')
+    for classification,status in [('not_basic','over_limit'),('unresolved','unresolved'),('supported','basic_energy_exempt')]:
+        with psycopg.connect(os.environ['DATABASE_URL']) as conn:
+            conn.execute('UPDATE catalog_generation_printing SET basic_energy=%s WHERE generation_id=%s',(classification,generation))
+        private=call('GET',f'/api/decks/{deck}',owner).json()['checks']
+        publication=command(owner,deck,'POST' if classification=='not_basic' else 'PUT').json()
+        public=client.get(f"/api/public/decks/{publication['token']}").json()['checks']
+        expected={'size_status':'shortage','shortage':'55','excess':'0'}
+        assert {key:private[key] for key in expected}==expected
+        assert {key:public[key] for key in expected}==expected
+        assert private['identities'][0]['status']==public['identities'][0]['status']==status
+        assert set(public['identities'][0])=={'name','quantity','status'}
+        assert private['identities'][0]['identity_id'] not in json.dumps(public)

@@ -108,6 +108,9 @@ describe('live Better Auth boundary', () => {
         }
       }
       expect(response?.status).toBe(503);
+      const publicDiscovery = await fetch('http://127.0.0.1:3002/api/public/discovery', { headers: { cookie: 'better-auth.session_token=forged' } });
+      expect(publicDiscovery.status).toBe(200);
+      expect((await publicDiscovery.json()).decks).toBeInstanceOf(Array);
       const request = await fetch('http://127.0.0.1:3002/auth/request-code', { method: 'POST', headers: { origin, 'content-type': 'application/json' }, body: JSON.stringify({ email }) });
       expect(request.status).toBe(202);
     } finally {

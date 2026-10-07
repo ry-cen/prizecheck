@@ -197,3 +197,27 @@ def test_review_codes_reject_wrong_action_and_count_invalid_attempts():
     with connect() as conn:
         assert conn.execute('SELECT attempts FROM catalog_approval_code WHERE review_id=%s',(review,)).fetchone()['attempts']==3
         assert conn.execute('SELECT status FROM catalog_review WHERE id=%s',(review,)).fetchone()['status']=='pending'
+
+
+def test_reused_source_reference_is_frozen_in_search_and_queued_for_review():
+    reset_catalog(); run(Source())
+    owner=f'owner-{uuid4()}'
+    with connect() as conn:
+        conn.execute('INSERT INTO inventory_owner(user_id) VALUES (%s)',(owner,))
+        conn.execute('INSERT INTO owner_binding(singleton,user_id) VALUES (true,%s)',(owner,))
+    before=call('GET','/api/catalog/search?name=Pik',owner).json()['printings'][0]
+    class ReusedReference(Source):
+        def fetch(self,sid):
+            record=super().fetch(sid)
+            if sid=='test-2':
+                record['set']={'id':'other','name':'Other Set'};record['localId']='999'
+                record['variants']={'holo':True};record['image']='https://example.org/different'
+            return record
+    run(ReusedReference())
+    after=call('GET','/api/catalog/search?name=Pik',owner).json()['printings'][0]
+    assert after['set_id']=='test' and after['collector_number']=='2'
+    assert after['id']==before['id'] and after['editions']==before['editions']
+    reviews=call('GET','/api/admin/catalog-reviews',owner).json()
+    reference=[review for review in reviews if review['kind']=='reference_change']
+    assert len(reference)==1 and reference[0]['candidate']['set_id']=='other'
+    assert reference[0]['candidate']['collector_number']=='999'
