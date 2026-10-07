@@ -14,3 +14,7 @@
 - [ ] The owner panel shows sign-in delivery/failures, authorization denials, API trends, catalog runs/review, backup age and restore result, public projection failures, and provider quota warnings. Logs omit OTPs, emails, tokens, private Location names, and card payloads.
 - [ ] Warn at 70% of applicable provider allowances and show unavailable metrics as unverified. Job/release failures reach the owner through configured notifications or the panel before a verified sender domain exists.
 - [ ] Integration tests cover backup creation, disposable restore, stale-marker detection, alert deduplication, panel authorization, and private/public storage separation.
+
+## Local preparation — 2026-10-06
+
+The owner confirmed local preparation only; production provisioning remains pending. [Local operations review and validation](../evidence/local-operations-review.md) records deployment topology, private snapshot/disposable restore tooling, and synthetic capacity measurements. These do not satisfy provider selection or production launch gates; acceptance checklists remain open.

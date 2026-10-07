@@ -23,3 +23,7 @@ The runtime + within-allowance managed database/object/email candidates suggest 
 ## Evidence required before closing ticket 15
 
 Record full English source generation size, 1,000-account fixture, 200 monthly active users, one 25,000-Holding collector, five worst-case Undo payloads, and 10,000 monthly anonymous views. Measure request resources, catalog job runtime, cold/warm timings, query plans, database bytes, public reads without PostgreSQL, disposable restores, independent backup watchdog, and compatible rollback. Local timings do not prove provider performance or cost. Missing provider metrics remain unverified.
+
+## Application measurement checkpoint — 2026-10-06
+
+[Local synthetic capacity evidence](local-capacity.md), [local recovery review](local-operations-review.md), and [deployment topology](../../../docs/deployment-boundaries.md) now provide reproducible preparation. The synthetic one-Printing fixture is insufficient to establish full catalog capacity, provider latency, or monthly cost. No provider was selected or provisioned.

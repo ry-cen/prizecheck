@@ -14,3 +14,7 @@
 - [ ] At the agreed fixture (1,000 accounts, 200 monthly active users, full English catalog, one 25,000-Holding collector, five worst-case Undo payloads, and 10,000 public views/month), report cold/warm timings, query plans, transaction duration, database bytes, provider usage, and under-$10 idle-cost arithmetic.
 - [ ] At fixture scale, 95% of warmed Collection/Location pages finish within two seconds and ordinary inventory actions within five seconds; a 25,000-Edition Move finishes within two minutes from pressing Move with progress and no partial change. Improve or upgrade constrained components rather than impose a count cap or weaken atomicity.
 - [ ] Each proof records fixture, environment, procedure, expected/actual result, date, and sanitized artifact location. Privacy, authorization, atomicity, integrity, backup recovery, and required performance/capacity failures block launch.
+
+## Local preparation — 2026-10-06
+
+The owner confirmed local preparation only; production provisioning remains pending. [Local operations review and validation](../evidence/local-operations-review.md) records deployment topology, private snapshot/disposable restore tooling, and synthetic capacity measurements. These do not satisfy provider selection or production launch gates; acceptance checklists remain open.
