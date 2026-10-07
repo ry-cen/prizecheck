@@ -1,10 +1,10 @@
 # 15 — Choose deployment providers
 
-**Label:** needs-info
+**Label:** ready-for-agent
 
 **Blocked by:** 01 — Owner sign-in and Unsorted
 
-**Status:** needs-info
+**Status:** complete
 
 **What to decide:** Select hosting and service providers after the application shell can be measured. The app remains deployable through replaceable HTTP, PostgreSQL, email, job, object-storage, and logging boundaries until this decision is made.
 
@@ -16,3 +16,7 @@
 ## Local preparation — 2026-10-06
 
 The owner confirmed local preparation only; production provisioning remains pending. [Local operations review and validation](../evidence/local-operations-review.md) records deployment topology, private snapshot/disposable restore tooling, and synthetic capacity measurements. These do not satisfy provider selection or production launch gates; acceptance checklists remain open.
+
+## Owner scope decision — 2026-10-06
+
+The owner directed provider-agnostic implementation and removal of provider selection as a blocker. Resolved by [ADR 0004](../../../docs/adr/0004-provider-agnostic-completion.md). The original provider comparison checklist is historical and does not represent completed provisioning or production proof. Production acceptance is tracked in [the launch checklist](../launch-checklist.md).
