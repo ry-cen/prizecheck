@@ -190,3 +190,29 @@ app.include_router(publications_router)
 
 from .discovery import router as discovery_router  # noqa: E402
 app.include_router(discovery_router)
+
+from .operations import router as operations_router  # noqa: E402
+app.include_router(operations_router)
+
+
+@app.middleware('http')
+async def bounded_operational_counts(request: Request,call_next):
+    started = time.perf_counter()
+    response = await call_next(request)
+    # Anonymous projection requests must never wake the private database.
+    if request.url.path.startswith('/api/') and not request.url.path.startswith('/api/public/') and request.url.path!='/api/health':
+        try:
+            with connect() as conn:
+                conn.execute("""INSERT INTO operations_hour(hour,requests,failures,authorization_denials,elapsed_ms)
+                  VALUES(date_trunc('hour',now()),1,%s,%s,%s)
+                  ON CONFLICT(hour) DO UPDATE SET requests=operations_hour.requests+1,
+                  failures=operations_hour.failures+excluded.failures,
+                  authorization_denials=operations_hour.authorization_denials+excluded.authorization_denials,
+                  elapsed_ms=operations_hour.elapsed_ms+excluded.elapsed_ms""",
+                  (int(response.status_code>=500),int(response.status_code in (401,403)),int((time.perf_counter()-started)*1000)))
+                if response.status_code>=500 and '/publication' in request.url.path:
+                    conn.execute('UPDATE operations_state SET projection_failures=projection_failures+1 WHERE singleton')
+                conn.execute("DELETE FROM operations_hour WHERE hour<now()-interval '48 hours'")
+        except psycopg.Error:
+            pass
+    return response
