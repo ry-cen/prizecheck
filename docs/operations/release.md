@@ -32,7 +32,7 @@ The bundled adapter binds only loopback, uses local HTTP/development cookies and
   --store /private/release-store --runtime /private/installed-runtime --port 5173
 ```
 
-It restores an existing active release on startup, verifies artifacts/dependencies, starts candidate auth/API processes before retiring the old processes, and stops children on termination. This local adapter is an executable test/development implementation, not an internet-facing TLS deployment. A production runtime adapter must preserve the protocol below and configure production origin/cookies/mail/process lifetime through its own provider-specific runtime implementation.
+It restores an existing active release on startup, verifies artifacts/dependencies and its configured database's applied migration names, binds RELEASE_COMMIT to the loaded commit, starts candidate auth/API processes before retiring the old processes, and stops children on termination. This local adapter is an executable test/development implementation, not an internet-facing TLS deployment. A production runtime adapter must preserve the protocol below and configure production origin/cookies/mail/process lifetime through its own provider-specific runtime implementation.
 
 ```sh
 .venv/bin/python scripts/release.py activate \
@@ -50,7 +50,7 @@ The coordinator takes an exclusive filesystem lock, checks receipt/current/previ
 The configured origin can be HTTPS or loopback HTTP; control redirects are refused so the private key is not forwarded elsewhere. The coordinator never executes arbitrary provider shell callbacks. Implement these authenticated HTTP endpoints using `x-release-key`:
 
 - `GET /__release/status`: return `commit` (null initially) and `runtime_fingerprint` matching the gated installed runtime.
-- `POST /__release/apply`, JSON `{"commit":"FULL_SHA"}`: verify the sealed artifact, actually load that auth/API/assets release, and return its commit only after readiness. Preserve and stop old processes safely.
+- `POST /__release/apply`, JSON `{"commit":"FULL_SHA"}`: verify the sealed artifact and database readiness, set RELEASE_COMMIT to the loaded commit (never an inherited stale value), actually load that auth/API/assets release, and return its commit only after readiness. Preserve and stop old processes safely.
 - `POST /__release/clear`, JSON `{}`: stop an unsuccessful initial runtime and return a null commit.
 - Normal `/`, built asset, `/auth/*`, and `/api/*` routes must reflect the current runtime and preserve public privacy/cache headers.
 

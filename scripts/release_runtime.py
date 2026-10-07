@@ -4,6 +4,8 @@ import hmac
 import json
 import mimetypes
 import os
+
+import psycopg
 from pathlib import Path
 import shutil
 import signal
@@ -52,6 +54,11 @@ class Runtime:
             raise ValueError('Release identity mismatch')
         if receipt['runtime_fingerprint'] != runtime_fingerprint(self.runtime):
             raise ValueError('Installed runtime differs from gate')
+        with psycopg.connect(os.environ['DATABASE_URL'],connect_timeout=5) as conn:
+            applied = {row[0] for row in conn.execute('SELECT name FROM schema_migration')}
+        required = {path.name for path in (release/'migrations').glob('*.sql')}
+        if not required <= applied:
+            raise ValueError('Runtime database does not have candidate schema')
         temp = tempfile.TemporaryDirectory(prefix='tcg-release-runtime-')
         checkout = Path(temp.name)/'app'
         processes = []
@@ -63,7 +70,7 @@ class Runtime:
             dependencies(checkout,self.runtime)
             api_port,auth_port = port(),port()
             env = {**os.environ,'PYTHONPATH':str(checkout/'api'),'API_ORIGIN':f'http://127.0.0.1:{api_port}',
-                   'AUTH_PORT':str(auth_port),'AUTH_HOST':'127.0.0.1','PUBLIC_ORIGIN':self.origin,'NODE_ENV':'development'}
+                   'AUTH_PORT':str(auth_port),'AUTH_HOST':'127.0.0.1','RELEASE_COMMIT':commit,'PUBLIC_ORIGIN':self.origin,'NODE_ENV':'development'}
             processes.append(subprocess.Popen([str(self.runtime/'.venv/bin/python'),'-m','uvicorn','app.main:app','--host','127.0.0.1','--port',str(api_port),'--no-access-log'],cwd=checkout,env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL))
             processes.append(subprocess.Popen(['node','--import','tsx','auth/src/server.ts'],cwd=checkout,env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL))
             bundle['auth'] = f'http://127.0.0.1:{auth_port}'
