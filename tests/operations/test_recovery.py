@@ -20,6 +20,50 @@ class RecoveryTest(unittest.TestCase):
             self.assertNotEqual(run.returncode,0)
             self.assertFalse(destination.exists())
 
+    def test_backup_rejects_default_public_store_without_configuration(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as workspace:
+            public = Path(workspace)/'.local/public-projections'
+            public.mkdir(parents=True)
+            destination = public/'private-backup'
+            env = dict(os.environ, DATABASE_URL=os.environ['RECOVERY_TEST_DATABASE_URL'])
+            env.pop('PUBLIC_PROJECTION_DIR',None)
+            run = subprocess.run([str(ROOT/'.venv/bin/python'), str(ROOT/'scripts/recovery.py'), 'backup', str(destination)], cwd=workspace, env=env, capture_output=True)
+            self.assertNotEqual(run.returncode,0)
+            self.assertFalse(destination.exists())
+
+    def test_backup_refuses_role_without_sequence_visibility(self):
+        admin = os.environ['RECOVERY_TEST_DATABASE_URL']
+        suffix = uuid.uuid4().hex
+        source = 'tcg_recovery_restricted_' + suffix
+        role = 'tcg_recovery_role_' + suffix
+        backup = Path('/tmp')/('tcg-recovery-restricted-'+suffix)
+        with psycopg.connect(admin,autocommit=True) as conn:
+            conn.execute(sql.SQL('CREATE DATABASE {}').format(sql.Identifier(source)))
+            conn.execute(sql.SQL('CREATE ROLE {} LOGIN').format(sql.Identifier(role)))
+        source_url = make_conninfo(admin,dbname=source)
+        try:
+            subprocess.run([str(ROOT/'.venv/bin/python'),str(ROOT/'scripts/migrate.py')],env=dict(os.environ,DATABASE_URL=source_url),check=True,capture_output=True)
+            with psycopg.connect(source_url) as conn:
+                conn.execute("INSERT INTO auth_send_event(email_key,ip_key) VALUES ('private-hash','private-hash')")
+                conn.execute(sql.SQL('GRANT USAGE ON SCHEMA public TO {}').format(sql.Identifier(role)))
+                conn.execute(sql.SQL('GRANT SELECT ON ALL TABLES IN SCHEMA public TO {}').format(sql.Identifier(role)))
+            restricted = make_conninfo(source_url,user=role)
+            # A real PostgreSQL role can read rows while pg_sequences masks last_value.
+            with psycopg.connect(restricted) as conn:
+                self.assertEqual(conn.execute('SELECT count(*) FROM auth_send_event').fetchone(),(1,))
+                self.assertIsNone(conn.execute("SELECT last_value FROM pg_sequences WHERE sequencename='auth_send_event_id_seq'").fetchone()[0])
+            run = subprocess.run([str(ROOT/'.venv/bin/python'),str(ROOT/'scripts/recovery.py'),'backup',str(backup)],env=dict(os.environ,DATABASE_URL=restricted),capture_output=True)
+            self.assertNotEqual(run.returncode,0)
+            self.assertFalse(backup.exists())
+            self.assertNotIn(b'private-hash',run.stderr)
+        finally:
+            with psycopg.connect(admin,autocommit=True) as conn:
+                conn.execute(sql.SQL('DROP DATABASE {} WITH (FORCE)').format(sql.Identifier(source)))
+                conn.execute(sql.SQL('DROP ROLE {}').format(sql.Identifier(role)))
+            import shutil
+            shutil.rmtree(backup,ignore_errors=True)
+
     def test_private_snapshot_restores_identity_and_rejects_existing_target(self):
         admin = os.environ['RECOVERY_TEST_DATABASE_URL']
         suffix = uuid.uuid4().hex
@@ -63,6 +107,7 @@ class RecoveryTest(unittest.TestCase):
                 self.assertEqual(conn.execute('SELECT projected FROM publication_command').fetchall(), [(False,)])
                 self.assertEqual(conn.execute('SELECT sequence FROM publication_command').fetchall(), [(1,)])
                 self.assertEqual(conn.execute("SELECT nextval('publication_command_sequence_seq')").fetchone(), (2,))
+                self.assertEqual(conn.execute("SELECT nextval('auth_send_event_id_seq')").fetchone(), (1,))
                 self.assertEqual(conn.execute('SELECT active_generation,last_success FROM catalog_state').fetchall(), [(None,None)])
             refused = subprocess.run(cmd, env=restored_env, capture_output=True)
             self.assertNotEqual(refused.returncode, 0)
