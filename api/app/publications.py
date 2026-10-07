@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, ValidationEr
 
 from .main import connect, verified_user
 from .construction_checks import DISCLAIMER, IdentityCount, evaluate_checks
-from .public_projection import FilePublicProjection, ProjectionUnavailable
+from .public_projection import public_projection_store, ProjectionUnavailable
 
 router = APIRouter(tags=['publication'])
 TOKEN = re.compile(r'[A-Za-z0-9_-]{32}')
@@ -158,8 +158,17 @@ def authorized_writer(owner, deck_id):
     with connect() as conn:
         owned_deck(conn, owner, deck_id)
         conn.commit()
-        with FilePublicProjection().writer() as store:
-            yield store, conn
+        # Session lock spans transaction commits and serializes durable outbox
+        # replay for every adapter. CAS alone cannot prevent old PUT replay after DELETE.
+        conn.execute('SELECT pg_advisory_lock(914705)')
+        conn.commit()
+        try:
+            with public_projection_store().writer() as store:
+                yield store, conn
+        finally:
+            conn.rollback()
+            conn.execute('SELECT pg_advisory_unlock(914705)')
+            conn.commit()
 
 
 def mutate(deck_id, command, owner, action):
@@ -167,7 +176,7 @@ def mutate(deck_id, command, owner, action):
     digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
     try:
         with authorized_writer(owner, deck_id) as (store, conn):
-            # writer flock spans commits, and serializes outbox recovery + writes.
+            # Session writer ownership spans commits and serialized outbox recovery.
             drain(conn, store)
             with conn.transaction():
                 owned_deck(conn, owner, deck_id)
@@ -246,7 +255,7 @@ def public_snapshot(token: str, response: Response):
     if not TOKEN.fullmatch(token):
         raise HTTPException(404, {'code': 'PUBLISHED_DECK_NOT_FOUND'}, headers=PUBLIC_HEADERS)
     try:
-        record = FilePublicProjection().read().get(token)
+        record = public_projection_store().read().get(token)
     except ProjectionUnavailable:
         raise HTTPException(503, {'code': 'PUBLIC_PROJECTION_UNAVAILABLE'}, headers=PUBLIC_HEADERS) from None
     if record is None:

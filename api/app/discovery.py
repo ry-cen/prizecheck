@@ -12,7 +12,7 @@ from fastapi import APIRouter, HTTPException, Response
 from pydantic import ValidationError
 
 from .publications import PublicModel, PublicSnapshot, TOKEN, PUBLIC_HEADERS
-from .public_projection import FilePublicProjection, ProjectionUnavailable
+from .public_projection import public_projection_store, ProjectionUnavailable
 
 router = APIRouter(tags=['public discovery'])
 HEADERS = {**PUBLIC_HEADERS, 'X-Robots-Tag': 'index, follow'}
@@ -76,7 +76,7 @@ def cursor_decode(token, query, revision):
 
 def listed_snapshots():
     try:
-        objects, revision = FilePublicProjection().read_state()
+        objects, revision = public_projection_store().read_state()
         listed = []
         for token, record in objects.items():
             if not TOKEN.fullmatch(token) or record['visibility'] not in ('listed','unlisted'):
