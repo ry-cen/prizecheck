@@ -154,11 +154,16 @@ def gate(args):
 def runtime_request(url,key,path,body=None):
     from urllib.parse import urlparse
     parsed = urlparse(url)
-    if parsed.scheme != 'http' or parsed.hostname not in ('127.0.0.1','localhost','::1') or parsed.path not in ('','/'):
-        raise ValueError('Explicit local runtime adapter required')
+    if parsed.path not in ('','/') or parsed.query or parsed.fragment or parsed.username or parsed.password or not parsed.hostname:
+        raise ValueError('Explicit runtime adapter origin required')
+    if parsed.scheme != 'https' and not (parsed.scheme == 'http' and parsed.hostname in ('127.0.0.1','localhost','::1')):
+        raise ValueError('HTTPS adapter or loopback HTTP required')
     request = urllib.request.Request(url.rstrip('/')+path,data=None if body is None else json.dumps(body).encode(),
                                      headers={'x-release-key':key,'Content-Type':'application/json'})
-    with urllib.request.urlopen(request,timeout=30) as response:
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self,*_):
+            return None
+    with urllib.request.build_opener(NoRedirect()).open(request,timeout=30) as response:
         return json.loads(response.read())
 
 
@@ -206,7 +211,8 @@ def switch(args):
         if receipt['runtime_fingerprint'] != runtime_fingerprint(runtime):
             raise ValueError('Installed runtime differs from tested release')
         env = dict(os.environ)
-        local_url(env['DATABASE_URL'])
+        if urlsplit(env['DATABASE_URL']).scheme not in ('postgresql','postgres'):
+            raise ValueError('Runtime PostgreSQL URL required')
         if not env.get('PUBLIC_PROJECTION_DIR'):
             raise ValueError('Explicit local projection store required')
         if active.is_symlink():
@@ -225,7 +231,10 @@ def switch(args):
         key = env.get('RELEASE_CONTROL_KEY','')
         if len(key) < 32:
             raise ValueError('Private runtime control key required')
-        observed = runtime_request(args.runtime_url,key,'/__release/status')['commit']
+        status = runtime_request(args.runtime_url,key,'/__release/status')
+        if status.get('runtime_fingerprint') != receipt['runtime_fingerprint']:
+            raise ValueError('Provider runtime differs from tested runtime')
+        observed = status['commit']
         if observed != (current.name if current else None):
             raise ValueError('Runtime and recorded release differ')
         if args.command != 'rollback':
@@ -235,6 +244,13 @@ def switch(args):
             if applied.get('commit') != target.name:
                 raise ValueError('Runtime applied wrong release')
             smoke(args.runtime_url,target)
+            if current is not None:
+                temp = store/('.previous-next-'+secrets.token_hex(8))
+                temp.symlink_to(current.name,target_is_directory=True)
+                os.replace(temp,previous_link)
+            temp = store/('.active-next-'+secrets.token_hex(8))
+            temp.symlink_to(target.name,target_is_directory=True)
+            os.replace(temp,active)
         except Exception:
             if current is not None:
                 runtime_request(args.runtime_url,key,'/__release/apply',{'commit':current.name})
@@ -242,13 +258,6 @@ def switch(args):
             else:
                 runtime_request(args.runtime_url,key,'/__release/clear',{})
             raise
-        if current is not None:
-            temp = store/'.previous-next'
-            temp.symlink_to(current.name,target_is_directory=True)
-            os.replace(temp,previous_link)
-        temp = store/'.active-next'
-        temp.symlink_to(target.name,target_is_directory=True)
-        os.replace(temp,active)
         print(json.dumps({'status':args.command,'commit':target.name,'smoke':'protected/public/assets passed'}))
 
 

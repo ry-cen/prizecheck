@@ -10,7 +10,7 @@ function mailLines(path: string): string[] {
 }
 
 test('copy handles, destination control, and drag perform the same Move', async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 1200 });
+  await page.setViewportSize({ width: 1440, height: 2000 });
   execFileSync('.venv/bin/python', ['-c', `from test_catalog_search import promote
 promote({'card-1': 'Pikachu'})`], { env: { ...process.env, PYTHONPATH: 'api:api/tests' } });
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });

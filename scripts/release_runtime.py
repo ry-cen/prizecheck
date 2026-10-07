@@ -122,7 +122,7 @@ class Handler(BaseHTTPRequestHandler):
                 elif self.command == 'GET' and self.path == '/__release/status':
                     with runtime.lock:
                         commit = runtime.current['commit'] if runtime.current else None
-                    self.reply(200,json.dumps({'commit':commit}).encode())
+                    self.reply(200,json.dumps({'commit':commit,'runtime_fingerprint':runtime_fingerprint(runtime.runtime)}).encode())
                 else:
                     self.reply(404,b'{}')
             except Exception:
