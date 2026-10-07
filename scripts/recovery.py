@@ -35,7 +35,7 @@ def dump_schema(env, snapshot, section, path):
 
 def backup(url, destination):
     destination = Path(destination).resolve()
-    public = os.environ.get('PUBLIC_PROJECTION_DIR')
+    public = os.environ.get('PUBLIC_PROJECTION_DIR', '.local/public-projections')
     if public and (destination == Path(public).resolve() or Path(public).resolve() in destination.parents):
         raise ValueError('Private backup cannot use public storage')
     # mkdir is exclusive: an existing object is never overwritten.
@@ -44,6 +44,14 @@ def backup(url, destination):
         with psycopg.connect(url) as conn:
             conn.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY')
             snapshot, cutoff = conn.execute('SELECT pg_export_snapshot(), transaction_timestamp()').fetchone()
+            hidden_sequence = conn.execute("""
+                SELECT 1 FROM pg_sequences
+                WHERE schemaname='public'
+                  AND NOT has_sequence_privilege(format('%I.%I',schemaname,sequencename),'SELECT,USAGE')
+                LIMIT 1
+            """).fetchone()
+            if hidden_sequence:
+                raise ValueError('Backup role cannot read sequence high-water marks')
             env = pg_env(url)
             dump_schema(env, snapshot, 'pre-data', destination/'pre.sql')
             dump_schema(env, snapshot, 'post-data', destination/'post.sql')
