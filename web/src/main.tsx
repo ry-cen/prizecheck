@@ -1,3 +1,4 @@
+import { OperationsHealth } from './OperationsHealth';
 import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { getLocations, getCatalogStatus, getOwnerCatalogStatus, startCatalogRun, type Location, type CatalogStatus, type OwnerCatalogStatus } from './generated';
@@ -99,6 +100,7 @@ function App() {
       {ownerCatalog.run?.heartbeat_stale && !ownerCatalog.run.outcome && <p role="status">Progress is stale. Start a full pull to check the current runner and recover if interrupted.</p>}
       <h3>Pending review ({ownerCatalog.pending_reviews.length})</h3>
       {ownerCatalog.pending_reviews.map(item => <article key={item.id}><strong>{item.kind}</strong> · {item.source_id}<p>{item.detail}</p></article>)}
+      <OperationsHealth />
       <CatalogReview />
       <OwnerMissingCardReview />
     </section> : view === 'reports' ? <MissingCardReports /> : view === 'catalog' ? <CatalogSearch /> : view === 'collection' ? <Collection /> : view === 'decks' ? <Decks /> : <><p>Your private physical storage.</p><p>{catalog?.available ? `English catalog last pulled ${new Date(catalog.last_success!).toLocaleString()}.` : 'Catalog unavailable until the first complete import.'}</p><LocationTree /></>}
