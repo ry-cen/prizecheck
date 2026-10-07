@@ -4,7 +4,14 @@ import { readFileSync } from 'node:fs';
 export function signupEnabled(): boolean {
   const mode = process.env.SIGNUP_MODE || 'owner-only';
   if (mode === 'owner-only') return false;
-  if (mode === 'local-public' && process.env.NODE_ENV !== 'production') return true;
+  if (mode === 'local-public') {
+    const localOrigin = new URL(process.env.PUBLIC_ORIGIN || 'http://localhost:5173');
+    if (!['development','test'].includes(process.env.NODE_ENV || '') ||
+        !['localhost','127.0.0.1','[::1]'].includes(localOrigin.hostname)) {
+      throw new Error('Local signup requires explicit development/test and loopback origin');
+    }
+    return true;
+  }
   if (mode !== 'public') throw new Error('Invalid signup configuration');
   const path = process.env.SIGNUP_READINESS_FILE;
   const commit = process.env.RELEASE_COMMIT;

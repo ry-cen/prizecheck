@@ -54,48 +54,52 @@ def backup_job(url,store,directory):
     with psycopg.connect(url) as guard:
         if not guard.execute('SELECT pg_try_advisory_lock(18374491)').fetchone()[0]:
             raise ValueError('Backup already running')
-        try:
-            snapshot = directory/'snapshot'
-            backup(url,snapshot)
-            key = 'snapshots/'+datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')+'-'+uuid4().hex+'.tar.gz'
-            archive = directory/'snapshot.tar.gz'
-            with tarfile.open(archive,'w:gz') as tar:
-                for path in snapshot.iterdir():
-                    tar.add(path,arcname=path.name)
-            store.put(key,archive)
-            verified = directory/'verified.tar.gz'
-            store.get(key,verified)
-            with archive.open('rb') as expected,verified.open('rb') as actual:
-                if hashlib.file_digest(expected,'sha256').digest()!=hashlib.file_digest(actual,'sha256').digest():
-                    raise ValueError('Uploaded snapshot verification failed')
-            completed = datetime.now(timezone.utc)
-            marker = directory/'last-success.json'
-            marker.write_text(json.dumps({'snapshot':key,'completed_at':completed.isoformat()}))
+        snapshot = directory/'snapshot'
+        backup(url,snapshot)
+        key = 'snapshots/'+datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')+'-'+uuid4().hex+'.tar.gz'
+        archive = directory/'snapshot.tar.gz'
+        with tarfile.open(archive,'w:gz') as tar:
+            for path in snapshot.iterdir():
+                tar.add(path,arcname=path.name)
+        store.put(key,archive)
+        verified = directory/'verified.tar.gz'
+        store.get(key,verified)
+        with archive.open('rb') as expected,verified.open('rb') as actual:
+            if hashlib.file_digest(expected,'sha256').digest()!=hashlib.file_digest(actual,'sha256').digest():
+                raise ValueError('Uploaded snapshot verification failed')
+        completed = datetime.now(timezone.utc)
+        marker = directory/'last-success.json'
+        marker.write_text(json.dumps({'snapshot':key,'completed_at':completed.isoformat()}))
+        # Only publication/completion shares watchdog ownership; long snapshot work
+        # must not prevent an independent watchdog from observing an old marker.
+        with psycopg.connect(url) as completion:
+            completion.execute('SELECT pg_advisory_lock(18374492)')
+            completion.commit()
             store.put('last-success.json',marker)
             with psycopg.connect(url) as conn:
                 conn.execute('UPDATE operations_state SET backup_last_success=%s,backup_stale=false WHERE singleton',(completed,))
                 conn.execute("UPDATE operations_alert SET resolved_at=now() WHERE kind='backup_stale' AND resolved_at IS NULL")
-            retain(store,key)
-        except Exception:
-            with psycopg.connect(url) as conn:
-                conn.execute('UPDATE operations_state SET backup_failures=backup_failures+1 WHERE singleton')
-            raise
+        retain(store,key)
 
 
 def watchdog(url,store,directory):
-    marker = read_marker(store,directory)
-    stamp = datetime.fromisoformat(marker['completed_at']) if marker else None
-    stale = stamp is None or datetime.now(timezone.utc)-stamp>timedelta(hours=25)
-    with psycopg.connect(url) as conn:
-        state = conn.execute('SELECT backup_stale FROM operations_state WHERE singleton FOR UPDATE').fetchone()
-        new_alert = stale and not state[0]
-        conn.execute('UPDATE operations_state SET backup_last_success=%s,backup_stale=%s,backup_alerts=backup_alerts+%s,watchdog_last_check=now() WHERE singleton',(stamp,stale,int(new_alert)))
-        if new_alert:
-            conn.execute("INSERT INTO operations_alert(kind) VALUES ('backup_stale') ON CONFLICT DO NOTHING")
-        if not stale:
-            conn.execute("UPDATE operations_alert SET resolved_at=now() WHERE kind='backup_stale' AND resolved_at IS NULL")
-    deliver_pending(url)
-    return stale
+    # Independent processes share ownership only during marker evaluation/completion.
+    with psycopg.connect(url) as guard:
+        guard.execute('SELECT pg_advisory_lock(18374492)')
+        guard.commit()
+        marker = read_marker(store,directory)
+        stamp = datetime.fromisoformat(marker['completed_at']) if marker else None
+        stale = stamp is None or datetime.now(timezone.utc)-stamp>timedelta(hours=25)
+        with psycopg.connect(url) as conn:
+            state = conn.execute('SELECT backup_stale FROM operations_state WHERE singleton FOR UPDATE').fetchone()
+            new_alert = stale and not state[0]
+            conn.execute('UPDATE operations_state SET backup_last_success=%s,backup_stale=%s,backup_alerts=backup_alerts+%s,watchdog_last_check=now() WHERE singleton',(stamp,stale,int(new_alert)))
+            if new_alert:
+                conn.execute("INSERT INTO operations_alert(kind) VALUES ('backup_stale') ON CONFLICT DO NOTHING")
+            if not stale:
+                conn.execute("UPDATE operations_alert SET resolved_at=now() WHERE kind='backup_stale' AND resolved_at IS NULL")
+        deliver_pending(url)
+        return stale
 
 
 def restore_job(url,store,directory,target):
@@ -111,14 +115,9 @@ def restore_job(url,store,directory,target):
         if any(not item.isfile() or Path(item.name).name!=item.name for item in tar.getmembers()):
             raise ValueError('Unsafe backup archive')
         tar.extractall(snapshot,filter='data')
-    try:
-        restore(os.environ['RESTORE_ADMIN_DATABASE_URL'],snapshot,target)
-        with psycopg.connect(url) as conn:
-            conn.execute('UPDATE operations_state SET restore_last_success=now() WHERE singleton')
-    except Exception:
-        with psycopg.connect(url) as conn:
-            conn.execute('UPDATE operations_state SET restore_failures=restore_failures+1 WHERE singleton')
-        raise
+    restore(os.environ['RESTORE_ADMIN_DATABASE_URL'],snapshot,target)
+    with psycopg.connect(url) as conn:
+        conn.execute('UPDATE operations_state SET restore_last_success=now() WHERE singleton')
 
 
 def main():
@@ -150,6 +149,14 @@ def main():
         print('{"status":"ok"}')
         return 0
     except Exception:
+        # Count each command failure once, including adapter setup and extraction.
+        field = {'backup':'backup_failures','restore':'restore_failures'}.get(args.command)
+        if field:
+            try:
+                with psycopg.connect(os.environ['DATABASE_URL']) as conn:
+                    conn.execute(f'UPDATE operations_state SET {field}={field}+1 WHERE singleton')
+            except Exception:
+                pass  # Database outages cannot durably report themselves.
         print('Operational job failed; inspect sanitized owner status.',file=sys.stderr)
         return 1
 

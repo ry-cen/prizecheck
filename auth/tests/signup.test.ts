@@ -22,7 +22,7 @@ beforeAll(async () => {
   await admin.query(`CREATE DATABASE "${database}"`);
   const connection = new URL(process.env.DATABASE_URL!); connection.pathname = '/' + database;
   pool = new Pool({ connectionString: connection.toString() });
-  const env = { ...process.env, DATABASE_URL: connection.toString(), AUTH_PORT: '3198', MAIL_MODE: 'file', MAIL_FILE: join(directory, 'mail'), SIGNUP_MODE: 'local-public', OWNER_EMAIL: 'owner@example.test', PUBLIC_ORIGIN: origin };
+  const env = { ...process.env, DATABASE_URL: connection.toString(), AUTH_PORT: '3198', MAIL_MODE: 'file', MAIL_FILE: join(directory, 'mail'), SIGNUP_MODE: 'local-public', NODE_ENV: 'test', OWNER_EMAIL: 'owner@example.test', PUBLIC_ORIGIN: origin };
   await new Promise<void>((resolve, reject) => {
     const migration = spawn('.venv/bin/python', ['scripts/migrate.py'], { env, stdio: 'ignore' });
     migration.on('exit', status => status === 0 ? resolve() : reject(new Error('Migration failed')));
@@ -82,7 +82,7 @@ it('refuses to start public signup without audited readiness or with fake produc
 it('keeps code-request responses uniform when configured delivery fails', async () => {
   const connection = new URL(process.env.DATABASE_URL!); connection.pathname = '/' + database;
   const failing = spawn('node', ['--import','tsx','auth/src/server.ts'], {
-    env: { ...process.env, DATABASE_URL: connection.toString(), AUTH_PORT: '3199', MAIL_MODE: 'file', MAIL_FILE: directory, SIGNUP_MODE: 'local-public', OWNER_EMAIL: 'owner@example.test', PUBLIC_ORIGIN: origin }, stdio: 'ignore',
+    env: { ...process.env, DATABASE_URL: connection.toString(), AUTH_PORT: '3199', MAIL_MODE: 'file', MAIL_FILE: directory, SIGNUP_MODE: 'local-public', NODE_ENV: 'test', OWNER_EMAIL: 'owner@example.test', PUBLIC_ORIGIN: origin }, stdio: 'ignore',
   });
   try {
     for (let n=0;n<50;n++) {
@@ -96,5 +96,16 @@ it('keeps code-request responses uniform when configured delivery fails', async 
     expect((await pool.query('SELECT id FROM "user" WHERE email=$1',[email])).rows).toEqual([]);
   } finally {
     if (failing.exitCode === null) { failing.kill(); await new Promise(resolve => failing.once('exit',resolve)); }
+  }
+});
+it('rejects local-public outside an explicitly local development or test environment', async () => {
+  for (const settings of [{ NODE_ENV: undefined, PUBLIC_ORIGIN: origin }, { NODE_ENV: 'development', PUBLIC_ORIGIN: 'https://tracker.example.test' }]) {
+    const env: NodeJS.ProcessEnv = { ...process.env, OWNER_EMAIL:'owner@example.test', SIGNUP_MODE:'local-public', AUTH_PORT:'3199', MAIL_MODE:'file',MAIL_FILE:join(directory,'mail'),...settings };
+    if (settings.NODE_ENV===undefined) delete env.NODE_ENV;
+    const candidate=spawn('node',['--import','tsx','auth/src/server.ts'],{env,stdio:'ignore'});
+    try {
+      const status=await Promise.race([new Promise(resolve=>candidate.once('exit',resolve)),new Promise(resolve=>setTimeout(()=>resolve('still-running'),5000))]);
+      expect(status).toBe(1);
+    } finally { if(candidate.exitCode===null&&candidate.signalCode===null){candidate.kill();await new Promise(resolve=>candidate.once('exit',resolve));} }
   }
 });
