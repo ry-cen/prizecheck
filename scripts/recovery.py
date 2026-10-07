@@ -36,7 +36,9 @@ def dump_schema(env, snapshot, section, path):
 def backup(url, destination):
     destination = Path(destination).resolve()
     public = os.environ.get('PUBLIC_PROJECTION_DIR', '.local/public-projections')
-    if public and (destination == Path(public).resolve() or Path(public).resolve() in destination.parents):
+    if not public.strip():
+        raise ValueError('Public storage configuration cannot be empty')
+    if destination == Path(public).resolve() or Path(public).resolve() in destination.parents:
         raise ValueError('Private backup cannot use public storage')
     # mkdir is exclusive: an existing object is never overwritten.
     destination.mkdir(mode=0o700)
