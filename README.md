@@ -34,3 +34,7 @@ This setup is one-time and rejects a different ID once bound. Never derive owner
 The Python API returns a safe public `/api/health`. Protected routes accept only short-lived HMAC assertions from the auth gateway after Better Auth verifies the server session. The browser cannot choose its user ID. `scripts/generate_client.py` reads FastAPI OpenAPI schemas to generate `web/src/generated.ts` and `--check` detects drift.
 
 Public Deck snapshots use a separate sanitized local object projection. Initialize a new store with `.venv/bin/python scripts/init_public_projection.py` and configure `PUBLIC_PROJECTION_DIR` for the API. See [public projection setup, failure recovery, and privacy](docs/public-projections.md). Disable or redact access logs on public token routes before deployment.
+
+## Verification and commit checks
+
+Install dependencies with `npm ci` and the Python environment as above. Husky installs the staged-formatting, type/contract and fast privacy checks automatically. Run `TEST_ADMIN_DATABASE_URL=postgresql://YOUR_TEST_ROLE@127.0.0.1:5432/postgres npm run verify` for isolated application, recovery and release-runtime checks. See [verification](docs/agents/verification.md) for failure artifacts and single-journey reproduction.

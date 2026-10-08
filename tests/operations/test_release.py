@@ -11,11 +11,25 @@ ROOT = Path(__file__).resolve().parents[2]
 class ReleaseTest(unittest.TestCase):
     def test_gate_rejects_commit_other_than_selected_main_without_creating_store(self):
         with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)/'repo'
+            (repo/'scripts').mkdir(parents=True)
+            import shutil
+            shutil.copy2(ROOT/'scripts/release.py', repo/'scripts/release.py')
+            def git(*args):
+                return subprocess.check_output(['git', *args], cwd=repo, text=True).strip()
+            git('init', '-b', 'main')
+            git('config', 'user.email', 'fixture@example.test')
+            git('config', 'user.name', 'Release fixture')
+            (repo/'fixture').write_text('first')
+            git('add', '.'); git('commit', '-m', 'first')
+            previous = git('rev-parse', 'HEAD')
+            (repo/'fixture').write_text('second')
+            git('add', '.'); git('commit', '-m', 'second')
             store = Path(temp)/'releases'
-            result = subprocess.run([str(ROOT/'.venv/bin/python'), str(ROOT/'scripts/release.py'), 'gate', '--commit', 'a38c674', '--main-ref', 'refs/heads/codex/mvp-integration', '--store', str(store), '--admin-url', 'postgresql://localhost/postgres'],capture_output=True)
-            self.assertNotEqual(result.returncode,0)
+            result = subprocess.run([str(ROOT/'.venv/bin/python'), str(repo/'scripts/release.py'), 'gate', '--commit', previous, '--main-ref', 'refs/heads/main', '--store', str(store), '--admin-url', 'postgresql://localhost/postgres'], capture_output=True)
+            self.assertNotEqual(result.returncode, 0)
             self.assertFalse(store.exists())
-            self.assertIn(b"Exact main commit required", result.stderr)
+            self.assertIn(b'Exact main commit required', result.stderr)
 
     def test_activation_requires_a_gated_release(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -52,7 +66,7 @@ class ReleaseTest(unittest.TestCase):
             runtime = None
             try:
                 subprocess.run([str(runtime_root/'.venv/bin/python'),str(store/first/'scripts/migrate.py')],env=env,check=True,capture_output=True)
-                subprocess.run([str(runtime_root/'.venv/bin/python'),str(store/first/'scripts/init_public_projection.py')],env=env,check=True,capture_output=True)
+                subprocess.run([str(runtime_root/'.venv/bin/python'),str(ROOT/'scripts/init_public_projection.py')],env=env,check=True,capture_output=True)
                 with psycopg.connect(url) as conn:
                     conn.execute("INSERT INTO inventory_owner(user_id) VALUES ('release-proof')")
                     location = str(uuid.uuid4())
@@ -163,7 +177,6 @@ class ReleaseTest(unittest.TestCase):
                 with psycopg.connect(admin,autocommit=True) as conn:
                     conn.execute(sql.SQL('DROP DATABASE {} WITH (FORCE)').format(sql.Identifier(name)))
 
-    @unittest.skipUnless(os.environ.get('RELEASE_RUNTIME_FIXTURE_STORE'), 'existing real gated artifact fixture only')
     def test_adapter_rejects_missing_schema_and_stale_signup_release(self):
         import psycopg
         from psycopg import sql
@@ -174,10 +187,9 @@ class ReleaseTest(unittest.TestCase):
         import urllib.request
         from urllib.parse import urlsplit, urlunsplit
         import uuid
-        store = Path(os.environ['RELEASE_RUNTIME_FIXTURE_STORE'])
-        first = os.environ['RELEASE_DRILL_FIRST']
-        second = os.environ['RELEASE_RUNTIME_FIXTURE_SECOND']
-        runtime_root = Path(os.environ['RELEASE_DRILL_RUNTIME'])
+        from release_fixtures import runtime_fixtures
+        store, first, second = runtime_fixtures()
+        runtime_root = ROOT
         admin = os.environ['RECOVERY_TEST_DATABASE_URL']
         name = 'tcg_release_readiness_'+uuid.uuid4().hex
         url = urlunsplit(urlsplit(admin)._replace(path='/'+name))
@@ -199,7 +211,7 @@ class ReleaseTest(unittest.TestCase):
             runtime = None
             try:
                 subprocess.run([str(runtime_root/'.venv/bin/python'),str(store/first/'scripts/migrate.py')],env=env,check=True,capture_output=True)
-                subprocess.run([str(runtime_root/'.venv/bin/python'),str(store/first/'scripts/init_public_projection.py')],env=env,check=True,capture_output=True)
+                subprocess.run([str(runtime_root/'.venv/bin/python'),str(ROOT/'scripts/init_public_projection.py')],env=env,check=True,capture_output=True)
                 with socket.socket() as sock:
                     sock.bind(('127.0.0.1',0))
                     listen_port = sock.getsockname()[1]
@@ -268,15 +280,14 @@ class ReleasePrivacyTest(unittest.TestCase):
             for server in (target,proxy):server.shutdown();server.server_close()
             for worker in workers:worker.join()
 
-    @unittest.skipUnless(os.environ.get('RELEASE_SECURITY_FIXTURE_STORE'),'retained real sealed artifacts and local PostgreSQL only')
     def test_real_runtime_keeps_cookie_otp_and_malformed_key_out_of_proxy_and_logs(self):
         import psycopg,secrets,socket,time,uuid,urllib.request
         from psycopg import sql
         from psycopg.conninfo import make_conninfo
         from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
         from threading import Thread
-        store=Path(os.environ['RELEASE_SECURITY_FIXTURE_STORE'])
-        first='47ff191943a8ae1095bb955f2dbf18b99771ab03';second='a2a2f03379a6da72f3bc9074608c2ec23b63f571'
+        from release_fixtures import runtime_fixtures
+        store, first, second = runtime_fixtures()
         admin=os.environ['RECOVERY_TEST_DATABASE_URL'];name='tcg_release_security_'+uuid.uuid4().hex
         proxy_requests=[]
         class Proxy(BaseHTTPRequestHandler):
@@ -295,7 +306,10 @@ class ReleasePrivacyTest(unittest.TestCase):
                 url=urlunsplit(urlsplit(admin)._replace(path='/'+name))
                 subprocess.run([str(ROOT/'.venv/bin/python'),str(ROOT/'scripts/migrate.py')],env=dict(os.environ,DATABASE_URL=url),check=True,capture_output=True)
                 projection=work/'public';projection.mkdir();(projection/'current.json').write_text('{"format":1,"revision":0,"decks":{}}')
-                isolated=work/'store';isolated.mkdir();(isolated/first).symlink_to(store/first,target_is_directory=True);(isolated/second).symlink_to(store/second,target_is_directory=True);(isolated/'active').symlink_to(first,target_is_directory=True)
+                isolated=work/'store';isolated.mkdir()
+                import shutil
+                shutil.copytree(store/first,isolated/first);shutil.copytree(store/second,isolated/second)
+                (isolated/'active').symlink_to(first,target_is_directory=True)
                 with socket.socket() as sock:sock.bind(('127.0.0.1',0));port=sock.getsockname()[1]
                 origin=f'http://127.0.0.1:{port}';trap=f'http://127.0.0.1:{proxy.server_port}'
                 env=dict(os.environ,DATABASE_URL=url,PUBLIC_PROJECTION_DIR=str(projection),OWNER_EMAIL='owner@example.test',INTERNAL_AUTH_SECRET=secrets.token_hex(32),BETTER_AUTH_SECRET=secrets.token_hex(32),RELEASE_CONTROL_KEY=secrets.token_hex(32),MAIL_MODE='file',MAIL_FILE=str(work/'mail'),HTTP_PROXY=trap,http_proxy=trap,HTTPS_PROXY=trap,https_proxy=trap,NO_PROXY='',no_proxy='')
@@ -322,6 +336,32 @@ class ReleasePrivacyTest(unittest.TestCase):
                 self.assertNotIn(b'DO_NOT_LOG',failure.stderr)
                 self.assertIn(b'Private runtime control key',failure.stderr)
                 with psycopg.connect(url) as conn:self.assertEqual(conn.execute("SELECT count FROM operations_counter WHERE name='release_failed'").fetchone()[0],1)
+                # The same freshly built test-only artifacts exercise real activation,
+                # rollback and tamper refusal without a retained CI store.
+                with psycopg.connect(url) as conn:
+                    conn.execute("INSERT INTO inventory_owner(user_id) VALUES ('runtime-retro-proof')")
+                    conn.execute("INSERT INTO location(id,owner_id,name,kind) VALUES (gen_random_uuid(),'runtime-retro-proof','Unsorted','storage_leaf')")
+                def switch(command, commit=None):
+                    argv=[str(ROOT/'.venv/bin/python'),str(ROOT/'scripts/release.py'),command,'--store',str(isolated),'--runtime',str(ROOT),'--runtime-url',origin]
+                    if commit: argv+=['--commit',commit]
+                    return subprocess.run(argv,env=env,capture_output=True)
+                activated=switch('activate',second)
+                self.assertEqual(activated.returncode,0,activated.stderr.decode())
+                self.assertEqual((isolated/'active').resolve().name,second)
+                rolled_back=switch('rollback')
+                self.assertEqual(rolled_back.returncode,0,rolled_back.stderr.decode())
+                self.assertEqual((isolated/'active').resolve().name,first)
+                with psycopg.connect(url) as conn:
+                    self.assertEqual(conn.execute("SELECT name FROM location WHERE owner_id='runtime-retro-proof'").fetchall(),[('Unsorted',)])
+                asset=isolated/second/'dist/web/index.html'
+                original=asset.read_bytes()
+                try:
+                    asset.write_bytes(b'tampered')
+                    rejected=switch('activate',second)
+                    self.assertNotEqual(rejected.returncode,0)
+                    self.assertEqual((isolated/'active').resolve().name,first)
+                finally:
+                    asset.write_bytes(original)
                 with psycopg.connect(url) as conn:conn.execute('DROP TABLE operations_counter')
                 legacy=subprocess.run([str(ROOT/'.venv/bin/python'),str(ROOT/'scripts/release.py'),'activate','--store',str(work/'missing'),'--runtime-url',origin,'--commit','0'*40],env=env,capture_output=True)
                 self.assertNotEqual(legacy.returncode,0);self.assertIn(b'Release failure status unavailable.',legacy.stderr)
@@ -330,3 +370,8 @@ class ReleasePrivacyTest(unittest.TestCase):
             if runtime and runtime.stderr:runtime.stderr.close()
             proxy.shutdown();proxy.server_close();worker.join()
             with psycopg.connect(admin,autocommit=True) as conn:conn.execute(sql.SQL('DROP DATABASE {} WITH (FORCE)').format(sql.Identifier(name)))
+
+
+def tearDownModule():
+    from release_fixtures import cleanup
+    cleanup()

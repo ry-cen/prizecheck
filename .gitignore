@@ -7,3 +7,5 @@ dist/
 test-results/
 playwright-report/
 .local/public-projections/
+
+.scratch/verification/

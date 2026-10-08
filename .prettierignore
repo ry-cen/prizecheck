@@ -1,0 +1,6 @@
+node_modules/
+.venv/
+dist/
+.scratch/
+web/src/generated.ts
+web/src/*_generated.ts

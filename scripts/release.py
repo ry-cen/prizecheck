@@ -136,11 +136,10 @@ def gate(args):
         databases = [name]
         env = {'PATH':os.environ['PATH'],'HOME':temp,'DATABASE_URL':urlunsplit(urlsplit(args.admin_url)._replace(path='/'+name)),
                'RECOVERY_TEST_DATABASE_URL':urlunsplit(urlsplit(args.admin_url)._replace(path='/'+name)),
-               'PLAYWRIGHT_BROWSERS_PATH':os.environ.get('PLAYWRIGHT_BROWSERS_PATH',str(Path.home()/'Library/Caches/ms-playwright'))}
+               'RELEASE_TEST_HISTORY_ROOT': str(ROOT), 'PLAYWRIGHT_BROWSERS_PATH':os.environ.get('PLAYWRIGHT_BROWSERS_PATH',str(Path.home()/'Library/Caches/ms-playwright'))}
         try:
             with (store/('ci-'+selected+'-'+secrets.token_hex(4)+'.log')).open('wb') as log:
                 run(['bash','scripts/ci.sh'],checkout,env,log)
-                run([str(runtime/'.venv/bin/python'),'-m','unittest','discover','-s','tests/operations','-v'],checkout,env,log)
             compatibility = 'first release; no previous release available'
             previous_commit = None
             active = store/'active'
