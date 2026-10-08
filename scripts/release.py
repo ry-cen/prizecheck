@@ -23,6 +23,32 @@ from urllib.parse import urlsplit, urlunsplit
 ROOT = Path(__file__).resolve().parents[1]
 
 
+class ReleaseError(ValueError):
+    """Only fixed operator diagnostics are safe to render at the CLI."""
+
+
+def valid_control_key(key):
+    return len(key)>=32 and all(32<ord(character)<127 for character in key)
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self,*args,**kwargs):
+        return None
+
+
+def direct_http_open(request,timeout):
+    # Control keys, session cookies and OTPs must never enter an ambient proxy.
+    return urllib.request.build_opener(urllib.request.ProxyHandler({}),NoRedirect()).open(request,timeout=timeout)
+
+
+def record_release_failure():
+    try:
+        with psycopg.connect(os.environ['DATABASE_URL']) as conn:
+            conn.execute("INSERT INTO operations_counter(name,count) VALUES('release_failed',1) ON CONFLICT(name) DO UPDATE SET count=operations_counter.count+1,updated_at=now()")
+    except Exception:
+        print('Release failure status unavailable.',file=sys.stderr)
+
+
 def run(args, cwd, env=None, log=None):
     subprocess.run(args,cwd=cwd,env=env,check=True,stdout=log or subprocess.DEVNULL,stderr=log or subprocess.DEVNULL)
 
@@ -35,10 +61,10 @@ def digest(path):
 def verify(path):
     receipt = json.loads((path/'release.json').read_text())
     if receipt.get('gate') != 'fixed-ci-v2':
-        raise ValueError('No trusted gate receipt')
+        raise ReleaseError('No trusted gate receipt')
     actual = {str(p.relative_to(path)):digest(p) for p in path.rglob('*') if p.is_file() and p != path/'release.json'}
     if actual != receipt['files']:
-        raise ValueError('Release integrity mismatch')
+        raise ReleaseError('Release integrity mismatch')
     return receipt
 
 
@@ -53,7 +79,7 @@ def locked(store):
 def dependencies(checkout,runtime):
     for name in ('.venv','node_modules'):
         if not (runtime/name).exists():
-            raise ValueError('Installed Python and Node dependencies required')
+            raise ReleaseError('Installed Python and Node dependencies required')
         (checkout/name).symlink_to((runtime/name).resolve(),target_is_directory=True)
 
 
@@ -70,28 +96,28 @@ def runtime_fingerprint(runtime):
 
 def local_url(url):
     if urlsplit(url).scheme not in ('postgresql','postgres'):
-        raise ValueError('PostgreSQL URL required by Python and Node boundaries')
+        raise ReleaseError('PostgreSQL URL required by Python and Node boundaries')
     options = conninfo_to_dict(url)
     if options.get('host') not in ('127.0.0.1','localhost','::1') or options.get('hostaddr','127.0.0.1') not in ('127.0.0.1','::1'):
-        raise ValueError('Explicit loopback database required')
+        raise ReleaseError('Explicit loopback database required')
 
 
 def compatible(previous,candidate):
     old = {p.name:digest(p) for p in (previous/'migrations').glob('*.sql')}
     new = {p.name:digest(p) for p in (candidate/'migrations').glob('*.sql')}
     if any(new.get(name) != sha for name,sha in old.items()):
-        raise ValueError('Existing migrations removed or changed')
+        raise ReleaseError('Existing migrations removed or changed')
 
 
 def gate(args):
     if not (ROOT/'.git').exists():
-        raise ValueError('Exact main commit required; authoritative repository unavailable')
+        raise ReleaseError('Exact main commit required; authoritative repository unavailable')
     selected = subprocess.check_output(['git','rev-parse',args.commit+'^{commit}'],cwd=ROOT,text=True).strip()
     if not args.main_ref.startswith('refs/heads/'):
-        raise ValueError('Explicit selected main branch required')
+        raise ReleaseError('Explicit selected main branch required')
     main = subprocess.check_output(['git','rev-parse',args.main_ref+'^{commit}'],cwd=ROOT,text=True).strip()
     if selected != main:
-        raise ValueError('Exact main commit required')
+        raise ReleaseError('Exact main commit required')
     local_url(args.admin_url)
     store = args.store.resolve()
     runtime = args.runtime.resolve()
@@ -157,7 +183,7 @@ def gate(args):
         (checkout/'release.json').write_text(json.dumps(receipt,sort_keys=True))
         destination = store/selected
         if destination.exists():
-            raise ValueError('Immutable release already exists')
+            raise ReleaseError('Immutable release already exists')
         shutil.copytree(checkout,destination)
         for path in destination.rglob('*'):
             path.chmod(0o555 if path.is_dir() else 0o444)
@@ -169,15 +195,14 @@ def runtime_request(url,key,path,body=None):
     from urllib.parse import urlparse
     parsed = urlparse(url)
     if parsed.path not in ('','/') or parsed.query or parsed.fragment or parsed.username or parsed.password or not parsed.hostname:
-        raise ValueError('Explicit runtime adapter origin required')
+        raise ReleaseError('Explicit runtime adapter origin required')
     if parsed.scheme != 'https' and not (parsed.scheme == 'http' and parsed.hostname in ('127.0.0.1','localhost','::1')):
-        raise ValueError('HTTPS adapter or loopback HTTP required')
+        raise ReleaseError('HTTPS adapter or loopback HTTP required')
+    if not valid_control_key(key):
+        raise ReleaseError('Private runtime control key must be printable ASCII')
     request = urllib.request.Request(url.rstrip('/')+path,data=None if body is None else json.dumps(body).encode(),
                                      headers={'x-release-key':key,'Content-Type':'application/json'})
-    class NoRedirect(urllib.request.HTTPRedirectHandler):
-        def redirect_request(self,*_):
-            return None
-    with urllib.request.build_opener(NoRedirect()).open(request,timeout=30) as response:
+    with direct_http_open(request,timeout=30) as response:
         return json.loads(response.read())
 
 
@@ -185,25 +210,25 @@ def smoke(url,release):
     import re
     for route,status in [('/api/health',200),('/api/locations',401),('/api/public/decks/unknown-smoke-token',404)]:
         try:
-            with urllib.request.urlopen(url.rstrip('/')+route,timeout=5) as response:
+            with direct_http_open(url.rstrip('/')+route,timeout=5) as response:
                 actual = response.status
         except urllib.error.HTTPError as error:
             actual = error.code
         if actual != status:
-            raise ValueError('Protected/public smoke failed')
-    with urllib.request.urlopen(url.rstrip('/')+'/',timeout=5) as response:
+            raise ReleaseError('Protected/public smoke failed')
+    with direct_http_open(url.rstrip('/')+'/',timeout=5) as response:
         content = response.read()
         if content != (release/'dist/web/index.html').read_bytes():
-            raise ValueError('Wrong active assets')
+            raise ReleaseError('Wrong active assets')
         html = content.decode()
     assets = re.findall(r'(?:src|href)="(/assets/[^" ]+)"',html)
     if not assets:
-        raise ValueError('Built assets missing')
+        raise ReleaseError('Built assets missing')
     for asset in assets:
-        with urllib.request.urlopen(url.rstrip('/')+asset,timeout=5) as response:
+        with direct_http_open(url.rstrip('/')+asset,timeout=5) as response:
             expected = (release/'dist/web'/asset.lstrip('/')).resolve()
             if (release/'dist/web').resolve() not in expected.parents or response.status != 200 or response.read() != expected.read_bytes():
-                raise ValueError('Asset smoke failed')
+                raise ReleaseError('Asset smoke failed')
 
 
 def switch(args):
@@ -213,50 +238,50 @@ def switch(args):
         previous_link = store/'previous'
         if args.command == 'rollback':
             if not previous_link.is_symlink():
-                raise ValueError('No previous compatible release')
+                raise ReleaseError('No previous compatible release')
             target = previous_link.resolve()
         else:
             if len(args.commit) != 40 or any(c not in '0123456789abcdef' for c in args.commit):
-                raise ValueError('Full release commit required')
+                raise ReleaseError('Full release commit required')
             target = store/args.commit
         if target.parent != store:
-            raise ValueError('Release outside private store')
+            raise ReleaseError('Release outside private store')
         receipt = verify(target)
         if receipt['runtime_fingerprint'] != runtime_fingerprint(runtime):
-            raise ValueError('Installed runtime differs from tested release')
+            raise ReleaseError('Installed runtime differs from tested release')
         env = dict(os.environ)
         if urlsplit(env['DATABASE_URL']).scheme not in ('postgresql','postgres'):
-            raise ValueError('Runtime PostgreSQL URL required')
+            raise ReleaseError('Runtime PostgreSQL URL required')
         if not env.get('PUBLIC_PROJECTION_DIR'):
-            raise ValueError('Explicit local projection store required')
+            raise ReleaseError('Explicit local projection store required')
         if active.is_symlink():
             current = active.resolve()
             verify(current)
             current_receipt = verify(current)
             if args.command == 'rollback' and current_receipt['previous_commit'] != receipt['commit']:
-                raise ValueError('No tested rollback relationship')
+                raise ReleaseError('No tested rollback relationship')
             if args.command != 'rollback' and receipt['previous_commit'] != current_receipt['commit']:
-                raise ValueError('Gate is not bound to current release')
+                raise ReleaseError('Gate is not bound to current release')
             compatible(target,current) if args.command == 'rollback' else compatible(current,target)
         else:
             current = None
         if current is None and receipt['previous_commit'] is not None:
-            raise ValueError('Expected previous release missing')
+            raise ReleaseError('Expected previous release missing')
         key = env.get('RELEASE_CONTROL_KEY','')
-        if len(key) < 32:
-            raise ValueError('Private runtime control key required')
+        if not valid_control_key(key):
+            raise ReleaseError('Private runtime control key required')
         status = runtime_request(args.runtime_url,key,'/__release/status')
         if status.get('runtime_fingerprint') != receipt['runtime_fingerprint']:
-            raise ValueError('Provider runtime differs from tested runtime')
+            raise ReleaseError('Provider runtime differs from tested runtime')
         observed = status['commit']
         if observed != (current.name if current else None):
-            raise ValueError('Runtime and recorded release differ')
+            raise ReleaseError('Runtime and recorded release differ')
         if args.command != 'rollback':
             run([str(runtime/'.venv/bin/python'),str(target/'scripts/migrate.py')],target,env)
         try:
             applied = runtime_request(args.runtime_url,key,'/__release/apply',{'commit':target.name})
             if applied.get('commit') != target.name:
-                raise ValueError('Runtime applied wrong release')
+                raise ReleaseError('Runtime applied wrong release')
             smoke(args.runtime_url,target)
             if current is not None:
                 temp = store/('.previous-next-'+secrets.token_hex(8))
@@ -293,11 +318,13 @@ def main():
     args = parser.parse_args()
     try:
         gate(args) if args.command == 'gate' else switch(args)
-    except ValueError as error:
-        print(str(error),file=sys.stderr)
-        return 1
-    except Exception:
-        print('Local release failed; activation unchanged. Check private runtime configuration.',file=sys.stderr)
+    except Exception as error:
+        if args.command != 'gate':
+            record_release_failure()
+        if isinstance(error,ReleaseError):
+            print(str(error),file=sys.stderr)
+        else:
+            print('Local release failed; activation unchanged. Check private runtime configuration.',file=sys.stderr)
         return 1
     return 0
 

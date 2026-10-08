@@ -17,7 +17,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import urllib.error
 import urllib.request
 
-from release import dependencies, runtime_fingerprint, verify
+from release import dependencies, runtime_fingerprint, verify, direct_http_open, valid_control_key
 import socket
 
 
@@ -78,7 +78,7 @@ class Runtime:
                 if any(p.poll() is not None for p in processes):
                     raise ValueError('Candidate runtime failed')
                 try:
-                    with urllib.request.urlopen(bundle['auth']+'/api/health',timeout=.5) as response:
+                    with direct_http_open(bundle['auth']+'/api/health',timeout=.5) as response:
                         if response.status == 200:
                             break
                 except OSError:
@@ -146,7 +146,7 @@ class Handler(BaseHTTPRequestHandler):
                 headers = {k:v for k,v in self.headers.items() if k.lower() not in ('host','connection','x-release-key')}
                 request = urllib.request.Request(bundle['auth']+self.path,data=body,headers=headers,method=self.command)
                 try:
-                    response = urllib.request.urlopen(request,timeout=30)
+                    response = direct_http_open(request,timeout=30)
                 except urllib.error.HTTPError as error:
                     response = error
                 except OSError:
@@ -186,7 +186,7 @@ def main():
     parser.add_argument('--port',type=int,required=True)
     args = parser.parse_args()
     key = os.environ.get('RELEASE_CONTROL_KEY','')
-    if len(key) < 32 or not os.environ.get('DATABASE_URL') or not os.environ.get('PUBLIC_PROJECTION_DIR'):
+    if not valid_control_key(key) or not os.environ.get('DATABASE_URL') or not os.environ.get('PUBLIC_PROJECTION_DIR'):
         parser.error('Private control key, database and public projection configuration required')
     def terminate(*_):
         raise SystemExit(0)
