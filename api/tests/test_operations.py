@@ -222,3 +222,19 @@ def factory(): return Store(os.environ['BACKUP_PRIVATE_DIR'])
         release.touch()
         for child in (watchdog,backup):
             if child and child.poll() is None: child.kill();child.wait()
+
+def test_failed_release_command_increments_owner_panel_once(tmp_path):
+    import subprocess,sys
+    from pathlib import Path
+    with connect() as conn:
+        row=conn.execute("SELECT count FROM operations_counter WHERE name='release_failed'").fetchone()
+        before=row['count'] if row else 0
+        owner='release-review-'+str(uuid4())
+        conn.execute('INSERT INTO inventory_owner(user_id) VALUES(%s)',(owner,))
+        conn.execute('DELETE FROM owner_binding')
+        conn.execute('INSERT INTO owner_binding(user_id) VALUES(%s)',(owner,))
+    failure=subprocess.run([sys.executable,str(Path(__file__).resolve().parents[2]/'scripts/release.py'),'activate','--store',str(tmp_path/'missing-gate'),'--runtime-url','http://127.0.0.1:1','--commit','0'*40],env=os.environ,capture_output=True)
+    assert failure.returncode!=0
+    with TestClient(app) as client:
+        status=client.get('/api/admin/operations',headers=headers(owner,'GET','/api/admin/operations')).json()
+        assert status['release_failures']==before+1
