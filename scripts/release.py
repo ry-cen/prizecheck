@@ -324,7 +324,7 @@ def main():
         if isinstance(error,ReleaseError):
             print(str(error),file=sys.stderr)
         else:
-            print('Local release failed; activation unchanged. Check private runtime configuration.',file=sys.stderr)
+            print('Release failed; check private runtime configuration and active state.',file=sys.stderr)
         return 1
     return 0
 
