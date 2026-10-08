@@ -4,9 +4,11 @@
 
 **Blocked by:** 15 — Choose deployment providers
 
-**Status:** in-progress
+**Status:** complete
 
 **What to build:** The owner can see operational health and recover private data using the selected providers before trusting the app with production inventory.
+
+## Original production acceptance — moved to launch checklist
 
 - [ ] Daily logical PostgreSQL backups include user/auth, inventory, Deck, transfer, and publication data in private object storage, excluding rebuildable catalog and expired temporary payloads. Retain seven daily and four weekly copies; target a 24-hour recovery point.
 - [ ] Restore a real backup into a disposable database monthly and verify row counts and key invariants. Document the restore procedure without relying on a production destructive test.
@@ -25,7 +27,11 @@ Per owner instruction and [ADR 0004](../../../docs/adr/0004-provider-agnostic-co
 
 ## Provider-independent completion criteria
 
-- [ ] A configurable private-object adapter backs real logical snapshots, with seven daily/four weekly retention and durable success/failure state.
-- [ ] Separate backup and watchdog commands demonstrate stale detection after 25 hours and deduplicated alerts without sharing a scheduler lifetime.
-- [ ] Owner-only operational status reports sanitized delivery, denial/API, import/review, backup/restore and public-projection health; quotas warn at 70% or explicitly remain unverified.
-- [ ] Disposable PostgreSQL/process/HTTP/storage tests demonstrate backup, restore, retention, stale alerts, authorization and storage separation.
+- [x] A configurable private-object adapter backs real logical snapshots, with seven daily/four weekly retention and durable success/failure state.
+- [x] Separate backup and watchdog commands demonstrate stale detection after 25 hours and deduplicated alerts without sharing a scheduler lifetime.
+- [x] Owner-only operational status reports sanitized delivery, denial/API, import/review, backup/restore and public-projection health; quotas warn at 70% or explicitly remain unverified.
+- [x] Disposable PostgreSQL/process/HTTP/storage tests demonstrate backup, restore, retention, stale alerts, authorization and storage separation.
+
+## Completion — 2026-10-07
+
+Closed on `codex/mvp-integration` at application integration `bd33a95` under ADR 0004. [Completion and review evidence](../evidence/provider-agnostic-completion.md) records actual local checks and resolved findings. Provider adapters can be configured without changing domain logic. Production/public-launch evidence remains separately tracked and no production signup configuration was activated.

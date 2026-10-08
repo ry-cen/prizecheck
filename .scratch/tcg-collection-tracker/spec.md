@@ -1,8 +1,8 @@
 # Pokémon TCG Collection Tracker MVP
 
-**Status:** needs-info
+**Status:** complete
 
-**Label:** needs-info
+**Label:** ready-for-agent
 
 ## Problem Statement
 
@@ -221,3 +221,7 @@ The first production release is owner-only. The application uses React, TypeScri
 ## Implementation checkpoint — 2026-10-06
 
 Application tickets 01–14 and 19 are complete on `codex/mvp-integration`; [combined validation](evidence/integration-validation.md) and [resolved review findings](evidence/code-review.md) document the local evidence. Tickets 15–18 remain pending for provider decisions, provisioning and production launch proof, per owner instruction. [Provider options](evidence/provider-options.md) are prepared for that decision. The specification remains needs-info until those gates are resolved.
+
+## Provider-agnostic implementation completion — 2026-10-07
+
+Tickets 01–19 are complete under the owner-approved revised scope in [ADR 0004](../../docs/adr/0004-provider-agnostic-completion.md). The previous needs-info checkpoints are historical. [Completion evidence](evidence/provider-agnostic-completion.md) records application, operations, mobile and release checks. [Provider plug-in contracts](../../docs/provider-adapters.md) describe configuration and adapter interfaces. [Production launch acceptance](launch-checklist.md) remains separate, with public signup closed by default. This status records implemented vendor-neutral behavior, not a deployed production launch.

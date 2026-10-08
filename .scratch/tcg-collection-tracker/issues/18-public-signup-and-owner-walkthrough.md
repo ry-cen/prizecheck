@@ -4,9 +4,11 @@
 
 **Blocked by:** 17 — Manual release and owner-only launch
 
-**Status:** in-progress
+**Status:** complete
 
 **What to build:** The owner can open registration to other collectors after verified email delivery and a successful desktop/mobile walkthrough of the owner-only app.
+
+## Original production acceptance — moved to launch checklist
 
 - [ ] Verify an owner-controlled sending domain with the chosen email provider and record real code delivery/sign-in for a recipient other than the owner before enabling public signup.
 - [ ] Public signup atomically creates each account and Unsorted Storage Leaf; returning accounts use the same email-code flow. Preserve uniform code-request responses, durable rate limits, 30-day rolling sessions, and owner role binding to immutable ID.
@@ -20,7 +22,11 @@ Per owner instruction and [ADR 0004](../../../docs/adr/0004-provider-agnostic-co
 
 ## Provider-independent completion criteria
 
-- [ ] A configurable real delivery adapter is exercised through HTTP/email protocol acceptance and failure tests without logging secrets or recipient payloads.
-- [ ] Explicit readiness configuration gates public signup closed by default; user/account, inventory owner and Unsorted creation are atomic.
-- [ ] Public-mode local regressions cover returning sessions, burst limits, delivery failures, cross-owner privacy and ordinary-user owner-panel denial.
-- [ ] Automated desktop/mobile journeys exercise the available application flows; actual owner walkthrough and real delivery remain separately tracked launch acceptance.
+- [x] A configurable real delivery adapter is exercised through HTTP/email protocol acceptance and failure tests without logging secrets or recipient payloads.
+- [x] Explicit readiness configuration gates public signup closed by default; user/account, inventory owner and Unsorted creation are atomic.
+- [x] Public-mode local regressions cover returning sessions, burst limits, delivery failures, cross-owner privacy and ordinary-user owner-panel denial.
+- [x] Automated desktop/mobile journeys exercise the available application flows; actual owner walkthrough and real delivery remain separately tracked launch acceptance.
+
+## Completion — 2026-10-07
+
+Closed on `codex/mvp-integration` at application integration `bd33a95` under ADR 0004. [Completion and review evidence](../evidence/provider-agnostic-completion.md) records actual local checks and resolved findings. Provider adapters can be configured without changing domain logic. Production/public-launch evidence remains separately tracked and no production signup configuration was activated.

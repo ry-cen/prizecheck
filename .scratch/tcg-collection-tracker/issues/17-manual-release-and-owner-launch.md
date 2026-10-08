@@ -4,9 +4,11 @@
 
 **Blocked by:** 02 — First English catalog pull; 03 — Collector catalog search; 04 — Add Holdings; 05 — Location tree; 06 — Safe Location conversion and deletion; 07 — Select and Move Holdings; 08 — Inventory Removal and Undo; 09 — Collection totals and distribution; 10 — Physical Decks and checks; 11 — Unlisted Deck publishing; 12 — Listed Deck discovery; 13 — Missing-card reports and approval; 14 — Safe catalog refresh and reconciliation; 15 — Choose deployment providers; 16 — Backups, alerts, and owner status
 
-**Status:** in-progress
+**Status:** complete
 
 **What to build:** The owner can manually release the completed MVP after CI passes, verify it in an owner-only production environment, and roll it back if needed.
+
+## Original production acceptance — moved to launch checklist
 
 - [ ] A credential-free gate verifies that the exact selected main commit passed required Python/TypeScript, browser/HTTP/PostgreSQL/job/object-storage, generated-contract, build, and migration-compatibility checks before a dependent secret-bearing deploy step runs.
 - [ ] Releases serialize, apply backward-compatible migrations, deploy compatible auth/API/assets, smoke-test protected and public routes, and retain a previous compatible release for a tested rollback without destructive migration reversal.
@@ -25,7 +27,11 @@ Per owner instruction and [ADR 0004](../../../docs/adr/0004-provider-agnostic-co
 
 ## Provider-independent completion criteria
 
-- [ ] A fixed credential-free gate builds and checks an immutable exact-main commit, seals artifacts and rejects altered artifacts or caller-supplied success.
-- [ ] A configurable runtime adapter participates in serialized activation, protected/public/assets smoke, and compatible previous-release rollback. Missing configuration fails closed.
-- [ ] Migration prefix and previous-application compatibility are exercised against candidate schema without destructive migration reversal.
-- [ ] Local release and rollback drills record actual fixture, procedure, expected/actual outcome and gaps; representative load evidence remains labeled synthetic.
+- [x] A fixed credential-free gate builds and checks an immutable exact-main commit, seals artifacts and rejects altered artifacts or caller-supplied success.
+- [x] A configurable runtime adapter participates in serialized activation, protected/public/assets smoke, and compatible previous-release rollback. Missing configuration fails closed.
+- [x] Migration prefix and previous-application compatibility are exercised against candidate schema without destructive migration reversal.
+- [x] Local release and rollback drills record actual fixture, procedure, expected/actual outcome and gaps; representative load evidence remains labeled synthetic.
+
+## Completion — 2026-10-07
+
+Closed on `codex/mvp-integration` at application integration `bd33a95` under ADR 0004. [Completion and review evidence](../evidence/provider-agnostic-completion.md) records actual local checks and resolved findings. Provider adapters can be configured without changing domain logic. Production/public-launch evidence remains separately tracked and no production signup configuration was activated.
