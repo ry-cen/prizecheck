@@ -117,7 +117,7 @@ def validate_quote(lookup: dict, state: QuoteState, now: datetime) -> QuoteView:
         return _unavailable('lookup_mismatch', 'failed')
     amount = parse_amount(payload.get('amount'))
     # A zero is never shown: a missing price must not be indistinguishable from a free card.
-    if amount is None or amount == 0 or payload.get('currency') != 'USD' or payload.get('source') != 'tcgdex':
+    if amount is None or payload.get('currency') != 'USD' or payload.get('source') != 'tcgdex':
         return _unavailable('invalid_quote', 'failed')
     provider = _timestamp(payload.get('provider_updated_at'), now)
     age = 'known' if provider else 'unknown'

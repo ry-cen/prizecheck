@@ -97,10 +97,16 @@ def test_missing_garbled_naive_or_future_provider_time_is_age_unknown_not_fresh(
     assert result.status == "quote" and result.age == "unknown" and result.stale is None and result.provider_updated_at is None
 
 
-@pytest.mark.parametrize("amount", ["1e3", "NaN", "-0.01", 0.43, 43, "12345678901234", "0.4300000", None, "0"])
+@pytest.mark.parametrize("amount", ["1e3", "NaN", "-0.01", 0.43, 43, "12345678901234", "0.4300000", None])
 def test_a_bad_amount_fails_only_that_quote_closed(amount):
     result = view(quote_state(amount))
     assert (result.status, result.reason, result.amount, result.display_amount) == ("failed", "invalid_quote", None, None)
+
+
+def test_a_validated_zero_quote_is_a_real_zero_price():
+    # spec: quotes are finite, nonnegative decimals; only missing data must never read as $0.
+    result = view(quote_state("0"))
+    assert (result.status, result.amount, result.display_amount) == ("quote", "0", "$0.00")
 
 
 @pytest.mark.parametrize("change", [{"currency": "EUR"}, {"currency": None}, {"source": "other"}])

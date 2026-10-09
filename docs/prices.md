@@ -11,7 +11,7 @@ A quote is valid for an Edition only when all of these hold:
 - PostgreSQL says the Edition is `verified` and publishes a `quote_lookup` (`{source:'tcgdex', card, variant}`). `edition_targets` sets it only when the source variant block's product matched the reviewed product.
 - The keys are read under PostgreSQL's `mapping_revision` for that Edition (`quote:<public_ref>:<rev>`, `result:<public_ref>:<rev>`). Other revisions are never read. A revision is opaque and never reused.
 - The payload's `card` and `variant` equal `quote_lookup` exactly, otherwise the row fails closed (`lookup_mismatch`).
-- The amount matches `^(0|[1-9]\d{0,11})(\.\d{1,6})?$`, is held as a `Decimal`, and the payload says `USD` from `tcgdex`. A JSON float, exponent, sign, `NaN`, whitespace or a 13th digit fails only that row (`invalid_quote`). A zero amount also fails closed: a missing price must never look like a free card.
+- The amount matches `^(0|[1-9]\d{0,11})(\.\d{1,6})?$`, is held as a `Decimal`, and the payload says `USD` from `tcgdex`. A JSON float, exponent, sign, `NaN`, whitespace or a 13th digit fails only that row (`invalid_quote`). A validated zero amount is a real zero price and shows `$0.00`; missing, evicted or unknown data is never shown as zero.
 - PostgreSQL is authoritative for state. The store's `quarantine:` record is never read. A PostgreSQL quarantine hides a price before any outbox delivery.
 - `catalog_edition_metadata.quote_candidate` (an import snapshot) never seeds a price.
 
