@@ -1,5 +1,6 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { createServer, type Server } from "node:net";
@@ -400,6 +401,244 @@ assert store.compare_and_swap({k: rows[k].version for k in keys}, {
     expect(readFileSync(mailFile, "utf8").trim().split("\n").length).toBe(
       before
     );
+  });
+
+  it("issues metadata approval codes only to the owner for existing, well-formed targets, and a code spends end to end", async () => {
+    const ids = {
+      identity: randomUUID(),
+      printing: randomUUID(),
+      edition: randomUUID(),
+    };
+    await pool.query(
+      "INSERT INTO catalog_identity(id,identity_key,display_name) VALUES ($1,$2,'Gateway Probe')",
+      [ids.identity, `gateway-probe-${ids.identity}`]
+    );
+    await pool.query(
+      "INSERT INTO catalog_printing(id,source,identity_id) VALUES ($1,'manual',$2)",
+      [ids.printing, ids.identity]
+    );
+    await pool.query(
+      "INSERT INTO catalog_edition(id,printing_id,descriptor_key,descriptor) VALUES ($1,$2,'probe',$3)",
+      [ids.edition, ids.printing, JSON.stringify({ finish: "normal" })]
+    );
+    // Earlier tests may have saturated the send limiter; code delivery is not what this test is about.
+    const reset = () => pool.query("DELETE FROM auth_send_event");
+    await reset();
+    await post("/auth/request-code", { email });
+    const signedIn = await post("/auth/verify-code", {
+      email,
+      code: latestCode(),
+    });
+    expect(signedIn.status).toBe(200);
+    const cookie = signedIn.headers.get("set-cookie")!.split(";")[0];
+    const userId = (
+      await pool.query('SELECT id FROM "user" WHERE email=$1', [email])
+    ).rows[0].id as string;
+    const previous = (await pool.query("SELECT user_id FROM owner_binding"))
+      .rows[0]?.user_id as string | undefined;
+    await pool.query(
+      "INSERT INTO inventory_owner(user_id) VALUES ($1),('gateway-non-owner') ON CONFLICT DO NOTHING",
+      [userId]
+    );
+    const bind = async (id?: string) => {
+      await pool.query("DELETE FROM owner_binding");
+      if (id)
+        await pool.query(
+          "INSERT INTO owner_binding(singleton,user_id) VALUES (true,$1)",
+          [id]
+        );
+    };
+    await bind(userId);
+    try {
+      const approval = async (body: object) => {
+        await reset();
+        return post("/auth/approval-code", body, cookie);
+      };
+      const target = `edition:${ids.edition}`;
+      const forms = [
+        { metadataTarget: "edition:not-a-uuid", action: "resolve_metadata" },
+        { metadataTarget: `printing:${ids.printing}`, action: "activate_rule" },
+        {
+          metadataTarget: "rule:live_derivation:1",
+          action: "resolve_metadata",
+        },
+        { metadataTarget: "rule:unknown_rule:1", action: "activate_rule" },
+        {
+          metadataTarget: "rule:live_derivation:1234567",
+          action: "activate_rule",
+        },
+        { metadataTarget: "rule:live_derivation:-1", action: "activate_rule" },
+        { metadataTarget: target, action: "approve_printing" },
+        { metadataTarget: target, action: "resolve_catalog" },
+        {
+          metadataTarget: target,
+          reportId: randomUUID(),
+          action: "resolve_metadata",
+        },
+        {
+          metadataTarget: target,
+          reviewId: randomUUID(),
+          action: "resolve_metadata",
+        },
+        { metadataTarget: 123, action: "resolve_metadata" },
+        { metadataTarget: `${target} `, action: "resolve_metadata" },
+      ];
+      const count = async () =>
+        (
+          await pool.query(
+            "SELECT count(*)::int AS n FROM catalog_approval_code"
+          )
+        ).rows[0].n as number;
+      const before = await count();
+      for (const form of forms)
+        expect((await approval(form)).status, JSON.stringify(form)).toBe(422);
+      for (const missing of [
+        `edition:${randomUUID()}`,
+        `printing:${randomUUID()}`,
+      ])
+        expect(
+          (
+            await approval({
+              metadataTarget: missing,
+              action: "resolve_metadata",
+            })
+          ).status
+        ).toBe(404);
+      expect(await count()).toBe(before);
+
+      for (const [metadataTarget, action] of [
+        [`printing:${ids.printing}`, "resolve_metadata"],
+        ["rule:live_derivation:1", "activate_rule"],
+        ["rule:marketplace_matching:0", "activate_rule"],
+      ])
+        expect((await approval({ metadataTarget, action })).status).toBe(202);
+      const issued = await approval({
+        metadataTarget: `edition:${ids.edition.toUpperCase()}`,
+        action: "resolve_metadata",
+      });
+      expect(issued.status).toBe(202);
+      const rows = await pool.query(
+        "SELECT metadata_target,action,report_id,review_id FROM catalog_approval_code WHERE metadata_target IS NOT NULL ORDER BY created_at DESC LIMIT 4"
+      );
+      expect(rows.rows.map((row) => row.metadata_target).sort()).toEqual(
+        [
+          target,
+          `printing:${ids.printing}`,
+          "rule:live_derivation:1",
+          "rule:marketplace_matching:0",
+        ].sort()
+      );
+      expect(
+        rows.rows.every(
+          (row) => row.report_id === null && row.review_id === null
+        )
+      ).toBe(true);
+
+      // The emailed code spends on exactly the decision it was issued for, through the gateway and API.
+      const spend = latestCode();
+      const shown = await fetch(
+        `${base}/api/admin/catalog-metadata/editions/${ids.edition}`,
+        { headers: { cookie } }
+      );
+      expect(shown.status).toBe(200);
+      const item = await shown.json();
+      const decide = (code: string) =>
+        post(
+          "/api/admin/catalog-metadata/decisions",
+          {
+            target: "marketplace",
+            printing_id: ids.printing,
+            edition_id: ids.edition,
+            decision: "unmap",
+            basis_revision: item.basis_revision,
+            evidence_digest: item.evidence_digest,
+            evidence_url: "https://example.org/gateway",
+            reason: "Gateway round trip",
+            report_ids: [],
+            code,
+          },
+          cookie
+        );
+      expect((await decide("000000")).status).toBe(403);
+      const decided = await decide(spend);
+      expect(decided.status).toBe(200);
+      expect((await decided.json()).state).toBe("unverified");
+      expect((await decide(spend)).status).toBeGreaterThanOrEqual(403); // spent, and the basis moved
+      const history = await fetch(
+        `${base}/api/admin/catalog-metadata/editions/${ids.edition}/history`,
+        { headers: { cookie } }
+      );
+      expect(
+        (await history.json()).map((row: { decision: string }) => row.decision)
+      ).toEqual(["unmap"]);
+
+      // A collector never gets a code and cannot read or decide through the admin surface.
+      const denials = async () =>
+        Number(
+          (
+            await pool.query(
+              "SELECT coalesce(max(count),0) AS n FROM operations_counter WHERE name='authorization_denials'"
+            )
+          ).rows[0].n
+        );
+      const codes = await count();
+      await bind("gateway-non-owner");
+      try {
+        const counted = await denials();
+        expect(
+          (
+            await approval({
+              metadataTarget: target,
+              action: "resolve_metadata",
+            })
+          ).status
+        ).toBe(403);
+        expect(
+          (
+            await approval({
+              metadataTarget: "rule:live_derivation:1",
+              action: "activate_rule",
+            })
+          ).status
+        ).toBe(403);
+        expect(await denials()).toBe(counted + 2);
+        expect(
+          (
+            await fetch(`${base}/api/admin/catalog-metadata/queue`, {
+              headers: { cookie },
+            })
+          ).status
+        ).toBe(403);
+        expect((await decide("123456")).status).toBe(403);
+        expect(
+          (
+            await fetch(`${base}/api/admin/catalog-rules`, {
+              headers: { cookie },
+            })
+          ).status
+        ).toBe(403);
+        // Reporting stays open to every verified collector and approves nothing.
+        const report = await post(
+          "/api/catalog/metadata-reports",
+          {
+            target: "marketplace",
+            issue: "incorrect",
+            printing_id: ids.printing,
+            edition_id: ids.edition,
+            proposed: { product_id: 5 },
+          },
+          cookie
+        );
+        expect(report.status).toBe(201);
+        expect((await report.json()).status).toBe("pending");
+      } finally {
+        await bind(userId);
+      }
+      expect(await count()).toBe(codes);
+      await post("/auth/sign-out", {}, cookie);
+    } finally {
+      await bind(previous);
+    }
   });
 
   it("fails closed when the auth database is unavailable", async () => {
