@@ -73,6 +73,16 @@ afterAll(async () => {
     await new Promise((resolve) => child.once("exit", resolve));
   }
   await pool?.end();
+  // pool.end() resolves before the server sees every socket close; a forced drop
+  // would then terminate a closing client and surface 57P01 as an unhandled error.
+  for (let n = 0; n < 50; n++) {
+    const { rows } = await admin.query(
+      "SELECT count(*)::int AS count FROM pg_stat_activity WHERE datname=$1",
+      [database]
+    );
+    if (rows[0].count === 0) break;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
   await admin.query(`DROP DATABASE IF EXISTS "${database}" WITH (FORCE)`);
   await admin.end();
   rmSync(directory, { recursive: true, force: true });
