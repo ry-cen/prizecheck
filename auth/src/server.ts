@@ -5,6 +5,8 @@ import {
   type ServerResponse,
 } from "node:http";
 import { isIP } from "node:net";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { auth, deliverCode, pool } from "./auth.js";
 import { PublicReadLimiter } from "./publicReads.js";
 import { signupEnabled } from "./signup.js";
@@ -26,6 +28,19 @@ if (
   );
 }
 
+// Routes that carry a trusted three-second budget. Keep in step with BUDGETED_ROUTES in api/app/price_budget.py:
+// tickets 09 and 12 each add one line to both lists.
+const BUDGETED_ROUTES: { method: string; pattern: RegExp }[] = [
+  { method: "POST", pattern: /^\/api\/prices\/editions$/ },
+];
+const BUDGET_MS = 3_000;
+// The answer is gated at 3.0 s, so the abort fires early enough to write the 504 inside it.
+const RESPONSE_MARGIN_MS = 100;
+const BUDGET_BODY_BYTES = 16_384;
+
+class BudgetExceeded extends Error {}
+class PayloadTooLarge extends Error {}
+
 function json(response: ServerResponse, status: number, body: unknown) {
   response.writeHead(status, {
     "content-type": "application/json",
@@ -41,6 +56,39 @@ async function readBody(request: IncomingMessage): Promise<string> {
     if (body.length > 16_384) throw new Error("Payload too large");
   }
   return body;
+}
+
+// Bytes, not characters: a multi-byte body must not slip under the cap.
+async function readBudgetedBody(request: IncomingMessage): Promise<string> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of request) {
+    const piece = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    size += piece.length;
+    if (size > BUDGET_BODY_BYTES) throw new PayloadTooLarge();
+    chunks.push(piece);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+// Rejects when the budget is spent. The wrapped work cannot always be cancelled (the session lookup takes no
+// signal), so it is abandoned rather than awaited.
+function withinBudget<T>(work: Promise<T>, milliseconds: number): Promise<T> {
+  work.catch(() => undefined);
+  if (milliseconds <= 0) return Promise.reject(new BudgetExceeded());
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new BudgetExceeded()), milliseconds);
+    work.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      }
+    );
+  });
 }
 
 function sameOrigin(request: IncomingMessage) {
@@ -161,6 +209,8 @@ async function session(request: IncomingMessage) {
 }
 
 const server = createServer(async (request, response) => {
+  // Monotonic receipt time, before any body read or session lookup: budgeted routes spend their three seconds from here.
+  const received = performance.now();
   const path = new URL(request.url || "/", origin).pathname;
   try {
     if (path === "/auth/request-code" && request.method === "POST") {
@@ -385,14 +435,25 @@ const server = createServer(async (request, response) => {
           error: "Too many public requests. Retry shortly.",
         });
       }
+      const budgeted = BUDGETED_ROUTES.some(
+        (route) => route.method === request.method && route.pattern.test(path)
+      );
+      const left = () =>
+        BUDGET_MS - RESPONSE_MARGIN_MS - (performance.now() - received);
       const current =
-        publicRead || path === "/api/health" ? null : await session(request);
+        publicRead || path === "/api/health"
+          ? null
+          : budgeted
+            ? await withinBudget(session(request), left())
+            : await session(request);
       if (!current && !publicRead && path !== "/api/health")
         return json(response, 401, { error: "Authentication required" });
       const body =
         request.method === "GET" || request.method === "HEAD"
           ? ""
-          : await readBody(request);
+          : budgeted
+            ? await withinBudget(readBudgetedBody(request), left())
+            : await readBody(request);
       const stamp = Math.floor(Date.now() / 1000).toString();
       const bodyHash = hash(body);
       const signature = current
@@ -408,27 +469,95 @@ const server = createServer(async (request, response) => {
         headers["x-internal-time"] = stamp;
         headers["x-internal-signature"] = signature;
       }
+      let controller: AbortController | undefined;
+      let timer: NodeJS.Timeout | undefined;
+      if (budgeted && current) {
+        // A separately signed budget: what is left of the three seconds, for this caller and this exact request.
+        const milliseconds = Math.floor(left());
+        if (milliseconds <= 0) throw new BudgetExceeded();
+        const caller = `user:${current.user.id}`;
+        headers["x-internal-budget-ms"] = String(milliseconds);
+        headers["x-internal-budget-time"] = stamp;
+        headers["x-internal-caller"] = caller;
+        headers["x-internal-budget-signature"] = createHmac(
+          "sha256",
+          internalSecret
+        )
+          .update(
+            `budget\n${request.method}\n${path}\n${bodyHash}\n${caller}\n${milliseconds}\n${stamp}`
+          )
+          .digest("hex");
+        controller = new AbortController();
+        timer = setTimeout(() => controller!.abort(), milliseconds);
+      }
       if (body)
         headers["content-type"] =
           request.headers["content-type"] || "application/json";
-      const upstream = await fetch(`${apiOrigin}${request.url}`, {
-        method: request.method,
-        headers,
-        body: body || undefined,
-      });
-      response.writeHead(upstream.status, {
-        "content-type":
-          upstream.headers.get("content-type") || "application/json",
-        "cache-control": "no-store",
-        ...(upstream.headers.has("x-robots-tag")
-          ? { "x-robots-tag": upstream.headers.get("x-robots-tag")! }
-          : {}),
-      });
-      response.end(await upstream.text());
+      try {
+        const upstream = await fetch(`${apiOrigin}${request.url}`, {
+          method: request.method,
+          headers,
+          body: body || undefined,
+          signal: controller?.signal,
+        });
+        const disposition = upstream.headers.get("content-disposition");
+        if (
+          disposition &&
+          /^attachment(?:;|$)/i.test(disposition) &&
+          upstream.body
+        ) {
+          // A file download (Deck exports): forward the disposition and stream without buffering. A client
+          // disconnect or an upstream failure tears the pipe down.
+          response.writeHead(upstream.status, {
+            "content-type":
+              upstream.headers.get("content-type") ||
+              "application/octet-stream",
+            "content-disposition": disposition,
+            "cache-control": "no-store",
+            ...(upstream.headers.has("x-robots-tag")
+              ? { "x-robots-tag": upstream.headers.get("x-robots-tag")! }
+              : {}),
+          });
+          await pipeline(
+            Readable.fromWeb(
+              upstream.body as import("node:stream/web").ReadableStream
+            ),
+            response
+          );
+          return;
+        }
+        // Read the whole body before the status line, so a budget abort mid-body can still answer 504.
+        const text = await upstream.text();
+        response.writeHead(upstream.status, {
+          "content-type":
+            upstream.headers.get("content-type") || "application/json",
+          "cache-control": "no-store",
+          ...(upstream.headers.has("x-robots-tag")
+            ? { "x-robots-tag": upstream.headers.get("x-robots-tag")! }
+            : {}),
+        });
+        response.end(text);
+      } catch (error) {
+        if (controller?.signal.aborted) throw new BudgetExceeded();
+        throw error;
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
       return;
     }
     json(response, 404, { error: "Not found" });
   } catch (error) {
+    if (response.headersSent) {
+      // A failure after the status line (a download pipe): the only honest signal left is a broken connection.
+      response.destroy();
+      return;
+    }
+    if (error instanceof BudgetExceeded)
+      return json(response, 504, { detail: { code: "PRICE_DEADLINE" } });
+    if (error instanceof PayloadTooLarge) {
+      response.setHeader("connection", "close");
+      return json(response, 413, { error: "Payload too large" });
+    }
     console.error(
       "Gateway request failed",
       error instanceof Error ? error.name : "unknown"

@@ -204,12 +204,18 @@ from .deck_mass_entry import router as deck_mass_entry_router  # noqa: E402
 app.include_router(deck_mass_entry_router)
 
 
+from .price_budget import is_budgeted  # noqa: E402
+
+
 @app.middleware('http')
 async def bounded_operational_counts(request: Request,call_next):
     started = time.perf_counter()
     response = await call_next(request)
     # Anonymous projection requests must never wake the private database.
-    if request.url.path.startswith('/api/') and not request.url.path.startswith('/api/public/') and request.url.path!='/api/health':
+    # Budgeted routes (prices) are exempt: this write is a synchronous PostgreSQL connect on the event loop before the
+    # response is sent, which would spend their three seconds and make a read route write.
+    if request.url.path.startswith('/api/') and not request.url.path.startswith('/api/public/') and request.url.path!='/api/health' \
+            and not is_budgeted(request.method, request.url.path):
         try:
             with connect() as conn:
                 conn.execute("""INSERT INTO operations_hour(hour,requests,failures,authorization_denials,elapsed_ms)
