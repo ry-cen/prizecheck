@@ -196,6 +196,13 @@ app.include_router(discovery_router)
 from .operations import router as operations_router  # noqa: E402
 app.include_router(operations_router)
 
+from .prices import router as prices_router  # noqa: E402
+app.include_router(prices_router)
+from .deck_live_export import router as deck_live_export_router  # noqa: E402
+app.include_router(deck_live_export_router)
+from .deck_mass_entry import router as deck_mass_entry_router  # noqa: E402
+app.include_router(deck_mass_entry_router)
+
 
 @app.middleware('http')
 async def bounded_operational_counts(request: Request,call_next):

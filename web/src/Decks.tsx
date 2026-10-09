@@ -10,6 +10,8 @@ import {
 import { getLocationTree } from "./location_generated";
 import { Holdings } from "./Holdings";
 import { PublishDeck } from "./PublishDeck";
+import { DeckLiveExport } from "./DeckLiveExport";
+import { DeckMassEntryExport } from "./DeckMassEntryExport";
 
 export function Decks() {
   const [cursor, setCursor] = useState<string | null>(null);
@@ -171,6 +173,18 @@ export function Decks() {
             onInventoryChanged={() => refreshChecks(detail.deck.id)}
           />
           <PublishDeck key={detail.deck.id} deckId={detail.deck.id} />
+          <DeckLiveExport
+            key={`live-${detail.deck.id}`}
+            deckId={detail.deck.id}
+            ownerRevision={detail.owner_revision}
+            checks={detail.checks}
+          />
+          <DeckMassEntryExport
+            key={`mass-${detail.deck.id}`}
+            deckId={detail.deck.id}
+            ownerRevision={detail.owner_revision}
+            checks={detail.checks}
+          />
         </section>
       )}
       {message && <p role="status">{message}</p>}
