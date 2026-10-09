@@ -208,6 +208,8 @@ test("collector reports an Edition mapping, nothing changes until the maintainer
   await expect(history).toContainText(EVIDENCE);
   await expect(history).toContainText("Product page matches the card");
   await expect(history).toContainText("product id 4321");
+  // No matching rule was active, so the decision retains none.
+  await expect(history).toContainText("No rule");
 
   // The collector now sees the outcome on their report.
   await setMaintainer(false);
@@ -315,6 +317,10 @@ test("a maintainer-cleared quarantine is visible in the public record after deli
   await item.getByRole("button", { name: "Record decision" }).click();
   await expect(item).toContainText("Public delivery: delivered");
   await expect(item).toContainText("verified");
+  await item.getByRole("button", { name: "Show history" }).click();
+  await expect(
+    item.getByRole("region", { name: "Decision history" })
+  ).toContainText("Rule: marketplace_matching v1");
 
   const published = JSON.parse(
     execFileSync(
@@ -372,4 +378,211 @@ test("the maintainer lists rule versions and activates a rule with a fresh code"
   await sendCode(page, matching);
   await matching.getByRole("button", { name: "Apply rule change" }).click();
   await expect(matching).toContainText("No active rule");
+});
+
+const printingRow = async () =>
+  (
+    await pool.query(
+      `SELECT p.id,m.live_state,m.live_identity FROM catalog_printing p
+       JOIN catalog_printing_metadata m ON m.printing_id=p.id WHERE p.source_id='meta-1'`
+    )
+  ).rows[0];
+
+/** Activates the shipped matching rule, then moves the normal Edition's source product so it quarantines. */
+function quarantineNormalEdition() {
+  execFileSync(
+    ".venv/bin/python",
+    [
+      "-c",
+      `from test_catalog_metadata import Records
+from test_catalog_reconciliation import run
+from test_catalog_targets import card
+from app.main import connect
+from app.catalog_targets import MATCHING, activate_rule
+with connect() as conn, conn.transaction():
+    conn.execute("INSERT INTO inventory_owner(user_id) VALUES ('seed-maintainer') ON CONFLICT DO NOTHING")
+    activate_rule(conn, MATCHING, 1, 'seed-maintainer', 'https://example.org/rule', 'Reviewed against the target')
+changed = card(1)
+changed['variants_detailed'][0]['pricing']['tcgplayer']['normal']['productId'] = 999
+run(Records(changed))`,
+    ],
+    { env: { ...process.env, PYTHONPATH: "api:api/tests" } }
+  );
+}
+
+async function reportLive(page: Page, printingId: string) {
+  const response = await page.request.post(
+    `${ORIGIN}/api/catalog/metadata-reports`,
+    {
+      headers: { origin: ORIGIN },
+      data: {
+        target: "live",
+        issue: "missing",
+        printing_id: printingId,
+        proposed: { set_code: "dab" },
+        note: "Live identity is missing",
+      },
+    }
+  );
+  expect(response.status()).toBe(201);
+}
+
+test("quarantining the Edition mapping leaves a reviewed Live identity eligible", async ({
+  page,
+}) => {
+  seed(false);
+  await signIn(page);
+  await setMaintainer(true);
+  const printing = await printingRow();
+  await reportLive(page, printing.id);
+  let review = await openOwnerReview(page);
+
+  // Activate the Live rule v1 with a fresh code.
+  const live = review
+    .getByRole("region", { name: "Metadata rules" })
+    .getByRole("article")
+    .filter({ hasText: "live_derivation" });
+  await live.getByLabel("Rule version").selectOption("1");
+  await live.getByLabel("Rule evidence URL").fill(EVIDENCE);
+  await live.getByLabel("Rule reason").fill("Reviewed the Live rule");
+  await sendCode(page, live);
+  await live.getByRole("button", { name: "Apply rule change" }).click();
+  await expect(live).toContainText("Active: version 1");
+  // The activation changed the target's evidence, so reopen the review first.
+  review = await openOwnerReview(page);
+
+  // A complete Live correction; the set code is normalised to upper case.
+  const item = review
+    .getByRole("article")
+    .filter({ hasText: "Furret" })
+    .filter({ hasText: "Live identity" });
+  await item.getByLabel("Decision", { exact: true }).selectOption("correct");
+  await item.getByLabel("Live name").fill("Furret");
+  await item.getByLabel("Live set code").fill("dab");
+  await item.getByLabel("Live collector number").fill("1");
+  await item.getByLabel("Decision evidence URL").fill(EVIDENCE);
+  await item.getByLabel("Decision reason").fill("Printed identity checked");
+  await sendCode(page, item);
+  await item.getByRole("button", { name: "Record decision" }).click();
+  await expect(item).toContainText("Decision recorded: eligible");
+  expect(await printingRow()).toMatchObject({
+    live_state: "eligible",
+    live_identity: {
+      category: "Pokemon",
+      name: "Furret",
+      set_code: "DAB",
+      number: "1",
+    },
+  });
+  await item.getByRole("button", { name: "Show history" }).click();
+  await expect(
+    item.getByRole("region", { name: "Decision history" })
+  ).toContainText("Rule: live_derivation v1");
+
+  // Now the same Printing's Edition mapping is quarantined.
+  quarantineNormalEdition();
+  const edition = await normal();
+  expect(edition).toMatchObject({
+    mapping_state: "quarantined",
+    printing_id: printing.id,
+  });
+  review = await openOwnerReview(page);
+  await expect(
+    review
+      .getByRole("article")
+      .filter({ hasText: "Furret" })
+      .filter({ hasText: "normal" })
+  ).toContainText("quarantined");
+  const marketplaceApi = await page.request.get(
+    `${ORIGIN}/api/admin/catalog-metadata/editions/${edition.id}`
+  );
+  expect((await marketplaceApi.json()).state).toBe("quarantined");
+  // Live is independent: still eligible in the database and in the maintainer API.
+  expect((await printingRow()).live_state).toBe("eligible");
+  const liveApi = await page.request.get(
+    `${ORIGIN}/api/admin/catalog-metadata/printings/${printing.id}`
+  );
+  expect((await liveApi.json()).state).toBe("eligible");
+});
+
+test("a request for information round-trips through the collector back to the maintainer queue", async ({
+  page,
+}) => {
+  seed(false);
+  await signIn(page);
+  await setMaintainer(true);
+  const target = await normal();
+  const created = await page.request.post(
+    `${ORIGIN}/api/catalog/metadata-reports`,
+    {
+      headers: { origin: ORIGIN },
+      data: {
+        target: "marketplace",
+        issue: "incorrect",
+        printing_id: target.printing_id,
+        edition_id: target.id,
+        proposed: { product_id: 4321 },
+        note: "Original note",
+      },
+    }
+  );
+  expect(created.status()).toBe(201);
+  const reportId = (await created.json()).id as string;
+  const review = await openOwnerReview(page);
+  const item = review
+    .getByRole("article")
+    .filter({ hasText: "Furret" })
+    .filter({ hasText: "normal" });
+  await item.getByLabel("Decision reason").fill("Which listing did you mean?");
+  await item
+    .getByRole("button", { name: /Ask reporter for information/ })
+    .click();
+  await expect(item).toContainText("Information requested from the reporter.");
+  expect(
+    (
+      await pool.query(
+        "SELECT status FROM catalog_metadata_report WHERE id=$1",
+        [reportId]
+      )
+    ).rows[0].status
+  ).toBe("needs_info");
+
+  // The collector sees the request and answers it.
+  await setMaintainer(false);
+  await page.reload();
+  await page.getByRole("button", { name: "Catalog", exact: true }).click();
+  const mine = page.getByRole("region", { name: "My metadata reports" });
+  await expect(mine).toContainText("needs info");
+  await expect(mine).toContainText("Which listing did you mean?");
+  await mine
+    .getByLabel("Additional information")
+    .fill("The TCGplayer listing 4321");
+  await mine
+    .getByRole("button", { name: "Send information to maintainer" })
+    .click();
+  await expect(mine).toContainText("Information sent to the maintainer.");
+  await expect(mine).toContainText("pending");
+  expect(
+    (
+      await pool.query(
+        "SELECT status,note FROM catalog_metadata_report WHERE id=$1",
+        [reportId]
+      )
+    ).rows[0]
+  ).toEqual({ status: "pending", note: "The TCGplayer listing 4321" });
+
+  // The answered report is back in the maintainer queue.
+  await setMaintainer(true);
+  const again = await openOwnerReview(page);
+  await expect(
+    again
+      .getByRole("article")
+      .filter({ hasText: "Furret" })
+      .filter({ hasText: "normal" })
+  ).toContainText("1 linked report");
+  const queue = await page.request.get(
+    `${ORIGIN}/api/admin/catalog-metadata/queue`
+  );
+  const items = (await queue.json()).items as { report_ids: string[] }[];
+  expect(items.some((entry) => entry.report_ids.includes(reportId))).toBe(true);
 });

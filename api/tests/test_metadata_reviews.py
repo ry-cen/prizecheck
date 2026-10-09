@@ -648,6 +648,48 @@ def test_a_live_correction_that_collides_with_another_printing_is_refused_whole(
         assert conn.execute("SELECT count(*) AS n FROM catalog_metadata_decision").fetchone()["n"] == 0
 
 
+def recorded_rule(decision_id):
+    with connect() as conn:
+        return conn.execute("""SELECT a.kind,a.version,d.rule_activation_id FROM catalog_metadata_decision d
+          LEFT JOIN catalog_rule_activation a ON a.id=d.rule_activation_id WHERE d.id=%s""", (decision_id,)).fetchone()
+
+
+def active_activation_id(kind):
+    with connect() as conn:
+        return conn.execute("SELECT activation_id FROM catalog_rule_state WHERE kind=%s", (kind,)).fetchone()["activation_id"]
+
+
+def test_a_live_decision_records_the_active_live_rule_activation_and_history_shows_its_version(world):
+    activate_as_owner(LIVE, 1)
+    response = decide(evidence("printings", world["printing"]), "correct", LIVE_INPUTS)
+    assert response.status_code == 200, response.text
+    recorded = recorded_rule(response.json()["decision_id"])
+    assert (recorded["kind"], recorded["version"]) == ("live_derivation", 1)
+    assert recorded["rule_activation_id"] == active_activation_id(LIVE)
+    row = request("GET", f"{ADMIN}/printings/{world['printing']}/history", OWNER).json()[0]
+    assert (row["rule_kind"], row["rule_version"]) == ("live_derivation", 1)
+    assert "rule_activation_id" not in row
+
+
+def test_a_marketplace_decision_records_the_matching_activation_only_when_one_is_active(quarantined):
+    item = next(i for i in queue()["items"] if i["edition_id"] == quarantined["normal"])
+    with_rule = decide(item, "correct", {"product_id": 1234, "quote_variant": "normal"})
+    assert with_rule.status_code == 200, with_rule.text
+    recorded = recorded_rule(with_rule.json()["decision_id"])
+    assert (recorded["kind"], recorded["version"]) == ("marketplace_matching", 1)
+    assert recorded["rule_activation_id"] == active_activation_id(MATCHING)
+    history = request("GET", f"{ADMIN}/editions/{quarantined['normal']}/history", OWNER).json()
+    assert (history[0]["rule_kind"], history[0]["rule_version"]) == ("marketplace_matching", 1)
+    with connect() as conn, conn.transaction():
+        activate_rule(conn, MATCHING, None, OWNER, "https://example.org/rule", "Deactivated for the test")
+    item = evidence("editions", quarantined["reverse"])
+    without = decide(item, "correct", {"product_id": 4321, "quote_variant": "reverse-holo"})
+    assert without.status_code == 200, without.text
+    assert recorded_rule(without.json()["decision_id"])["rule_activation_id"] is None
+    history = request("GET", f"{ADMIN}/editions/{quarantined['reverse']}/history", OWNER).json()
+    assert (history[0]["rule_kind"], history[0]["rule_version"]) == (None, None)
+
+
 # ------------------------------------------------------------------ rule activation
 
 

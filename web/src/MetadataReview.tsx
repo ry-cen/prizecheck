@@ -125,6 +125,11 @@ function History({
                 <p>Checks: {summarize(row.checks)}</p>
                 <p>Reason: {row.reason}</p>
                 <p>
+                  {row.rule_kind
+                    ? `Rule: ${row.rule_kind} v${row.rule_version}`
+                    : "No rule"}
+                </p>
+                <p>
                   Evidence:{" "}
                   <a href={row.evidence_url} target="_blank" rel="noreferrer">
                     {row.evidence_url}

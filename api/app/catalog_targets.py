@@ -414,7 +414,7 @@ class TargetContext:
         return printing_id in self._waiting
 
 
-def _verified_elsewhere(conn, printing_id, edition_id):
+def verified_elsewhere(conn, printing_id, edition_id):
     """A product may be shared by sibling Editions, but never by another Printing, and one
     (product, quote variant) price slot belongs to a single verified Edition."""
     def held(product_id, quote_variant=None):
@@ -452,7 +452,7 @@ def refresh_editions(conn, context, edition_ids):
             "SELECT source_fingerprint FROM catalog_metadata_rejection WHERE edition_id=%s AND target='marketplace'",
             (edition_id,))])
         current = edition_state(row)
-        new = evaluate_edition(current, facts, rejections, context.matching, _verified_elsewhere(conn, row["printing_id"], row["id"]))
+        new = evaluate_edition(current, facts, rejections, context.matching, verified_elsewhere(conn, row["printing_id"], row["id"]))
         if new == current:
             continue
         bump = 1 if (new.state == "verified") != (current.state == "verified") else 0

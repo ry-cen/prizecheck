@@ -19,8 +19,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, HttpUrl
 
 from . import public_catalog
-from .catalog_targets import (LIVE, MATCHING, REGISTRIES, MatchingRulesV1, TargetContext, _verified_elsewhere, activate_rule,
-                              code_digest, fingerprint, is_unspecified, refresh_editions, refresh_printing)
+from .catalog_targets import (LIVE, MATCHING, REGISTRIES, MatchingRulesV1, TargetContext, activate_rule,
+                              code_digest, fingerprint, is_unspecified, refresh_editions, refresh_printing, verified_elsewhere)
 from .holdings import fail
 from .main import connect, require_owner, verified_user
 from .missing_cards import _code_hash
@@ -226,6 +226,9 @@ class MetadataDecisionRow(BaseModel):
     reviewer_id: str
     reviewed_at: datetime
     clock_revision: int
+    # The rule activation that validated the decision; null when no rule applied.
+    rule_kind: Literal["live_derivation", "marketplace_matching"] | None = None
+    rule_version: int | None = None
 
 
 TARGET_KINDS = {"editions": "edition", "printings": "printing"}
@@ -332,9 +335,11 @@ def target_history(kind: Literal["editions", "printings"], target_id: UUID, user
     with connect() as conn:
         require_owner(conn, user_id)
         loaded = _existing(conn, kind, target_id)
-        clause = "edition_id=%s" if loaded["kind"] == "edition" else "printing_id=%s AND target='live'"
+        clause = "d.edition_id=%s" if loaded["kind"] == "edition" else "d.printing_id=%s AND d.target='live'"
         return [MetadataDecisionRow(**{key: row[key] for key in MetadataDecisionRow.model_fields}) for row in conn.execute(
-            f"SELECT * FROM catalog_metadata_decision WHERE {clause} ORDER BY reviewed_at DESC,clock_revision DESC,id", (target_id,)).fetchall()]
+            f"""SELECT d.*,a.kind AS rule_kind,a.version AS rule_version FROM catalog_metadata_decision d
+              LEFT JOIN catalog_rule_activation a ON a.id=d.rule_activation_id WHERE {clause}
+              ORDER BY d.reviewed_at DESC,d.clock_revision DESC,d.id""", (target_id,)).fetchall()]
 
 
 # ---------------------------------------------------------------- approval codes and delivery
@@ -447,7 +452,7 @@ def plan_marketplace(conn, command: MetadataDecisionInput, loaded) -> dict:
         if not isinstance(found, tuple):
             fail(422, "INVALID_PRODUCT")
         reviewed = {"product_id": found[0], "quote_variant": found[1]}
-    if _verified_elsewhere(conn, loaded["printing_id"], loaded["edition_id"])(reviewed["product_id"], reviewed["quote_variant"]):
+    if verified_elsewhere(conn, loaded["printing_id"], loaded["edition_id"])(reviewed["product_id"], reviewed["quote_variant"]):
         fail(409, "MAPPING_CONFLICT")
     return {"state": "verified", "reason": None, **reviewed, "reviewed": reviewed,
             "checks": {"printing": "passed", "product": "passed", "variant": "passed" if reviewed["quote_variant"] else "not_established"}}
@@ -517,18 +522,20 @@ def decide(command: MetadataDecisionInput, user_id: str = Depends(verified_user)
             context = TargetContext(conn)
             plan = plan_marketplace(conn, command, loaded) if kind == "edition" else plan_live(conn, command, loaded, context)
             closing = _closable_reports(conn, command)
+            validating = context.matching if kind == "edition" else context.live
             if not consume_metadata_code(conn, user_id, f"{kind}:{target_id}", "resolve_metadata", command.code):
                 bad_code = True
             else:
                 revision = conn.execute("SELECT catalog_begin_correction() AS revision").fetchone()["revision"]
                 source_fingerprint = loaded["source_fingerprint"]
                 decision_id = conn.execute("""INSERT INTO catalog_metadata_decision(target,printing_id,edition_id,decision,reviewed_value,
-                  source_value,source_fingerprint,checks,basis_revision,evidence_url,reason,reviewer_id,clock_revision)
-                  VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+                  source_value,source_fingerprint,checks,basis_revision,evidence_url,reason,reviewer_id,clock_revision,rule_activation_id)
+                  VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
                                            (command.target, command.printing_id, command.edition_id, command.decision,
                                             json.dumps(plan["reviewed"]), json.dumps(loaded["source_candidate"]) if source_fingerprint else None,
                                             source_fingerprint, json.dumps(plan["checks"]), command.basis_revision,
-                                            str(command.evidence_url), reason, user_id, revision)).fetchone()["id"]
+                                            str(command.evidence_url), reason, user_id, revision,
+                                            validating.activation_id if validating else None)).fetchone()["id"]
                 if source_fingerprint and command.decision != "verify_source":
                     conn.execute("""INSERT INTO catalog_metadata_rejection(target,printing_id,edition_id,source_fingerprint,decision_id)
                       VALUES (%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING""",
