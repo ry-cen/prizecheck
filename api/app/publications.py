@@ -204,7 +204,13 @@ def mutate(deck_id, command, owner, action):
                     record = store.read().get(token)
                     if not record:
                         raise ProjectionUnavailable()
-                    projection = {'visibility': command.visibility, 'snapshot': PublicSnapshot.model_validate(record['snapshot']).model_dump(mode='json')}
+                    # Validate only: visibility never reinterprets frozen contents, so legacy
+                    # objects keep their exact stored bytes (no inferred or null references).
+                    try:
+                        PublicSnapshot.model_validate(record['snapshot'])
+                    except (KeyError, TypeError, ValueError, ValidationError):
+                        raise ProjectionUnavailable() from None
+                    projection = {'visibility': command.visibility, 'snapshot': record['snapshot']}
                     conn.execute('UPDATE deck_publication SET visibility=%s WHERE token=%s', (command.visibility, token))
                 elif action == 'revoke':
                     projection = None
