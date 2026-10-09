@@ -51,7 +51,7 @@ class Records(Source):
 def editions(source_id="meta-1"):
     with connect() as conn:
         return conn.execute("""SELECT e.id,e.descriptor,e.public_ref,m.mapping_candidate,m.mapping_revision,
-          m.mapping_quarantined,m.quote_candidate,m.xmin::text AS metadata_xmin,e.xmin::text AS edition_xmin
+          m.mapping_state,m.mapping_reason,m.public_revision,m.quote_candidate,m.xmin::text AS metadata_xmin,e.xmin::text AS edition_xmin
           FROM catalog_edition e JOIN catalog_printing p ON p.id=e.printing_id
           LEFT JOIN catalog_edition_metadata m ON m.edition_id=e.id
           WHERE p.source_id=%s ORDER BY e.descriptor_key""", (source_id,)).fetchall()
@@ -76,12 +76,13 @@ def test_set_growth_changes_no_mapping_revision_or_quarantine():
     for kind, row in after.items():
         assert row["id"] == before[kind]["id"]
         assert row["mapping_revision"] == before[kind]["mapping_revision"]
-        assert not row["mapping_quarantined"]
+        assert row["mapping_state"] == "unverified" and row["public_revision"] == before[kind]["public_revision"]
         assert "physical_evidence" not in row["mapping_candidate"]
     assert reviews() == []
 
 
-def test_lookup_candidate_change_advances_mapping_revision_and_quarantines():
+def test_lookup_candidate_change_advances_mapping_revision_without_inventing_a_quarantine():
+    # Nothing was ever verified, so there is no approved fact to contradict.
     reset_catalog(); run(Records(furret()))
     before = by_type(editions())
     changed = furret()
@@ -89,9 +90,10 @@ def test_lookup_candidate_change_advances_mapping_revision_and_quarantines():
     run(Records(changed))
     after = by_type(editions())
     assert after["normal"]["mapping_revision"] == before["normal"]["mapping_revision"] + 1
-    assert after["normal"]["mapping_quarantined"]
+    assert after["normal"]["mapping_state"] == "unverified"
+    assert after["normal"]["public_revision"] > before["normal"]["public_revision"]
     assert after["reverse"]["mapping_revision"] == before["reverse"]["mapping_revision"]
-    assert not after["reverse"]["mapping_quarantined"]
+    assert after["reverse"]["public_revision"] == before["reverse"]["public_revision"]
 
 
 def test_exact_variant_match_is_the_only_edition_quote_candidate():
@@ -125,7 +127,7 @@ def test_record_level_marketplace_data_is_never_an_edition_quote():
 def printing_rows(source_id="meta-1"):
     with connect() as conn:
         return conn.execute("""SELECT p.id,p.public_ref,p.xmin::text AS printing_xmin,m.xmin::text AS metadata_xmin,
-          m.source_record,m.export_candidate,m.live_revision,m.live_quarantined
+          m.source_record,m.export_candidate,m.live_revision,m.live_state,m.public_revision
           FROM catalog_printing p JOIN catalog_printing_metadata m ON m.printing_id=p.id WHERE p.source_id=%s""",
                             (source_id,)).fetchone()
 
@@ -150,7 +152,8 @@ def test_quote_only_changes_update_quotes_without_identity_or_review_churn():
     for kind, row in after.items():
         assert (row["id"], row["descriptor"], row["public_ref"], row["edition_xmin"]) == (
             before[kind]["id"], before[kind]["descriptor"], before[kind]["public_ref"], before[kind]["edition_xmin"])
-        assert row["mapping_revision"] == before[kind]["mapping_revision"] and not row["mapping_quarantined"]
+        assert row["mapping_revision"] == before[kind]["mapping_revision"] and row["mapping_state"] == "unverified"
+        assert row["public_revision"] == before[kind]["public_revision"]
     assert after["normal"]["quote_candidate"]["tcgplayer"]["normal"]["marketPrice"] == 0.31
     assert after["reverse"]["quote_candidate"]["tcgplayer"]["reverse-holofoil"]["marketPrice"] == 0.47
     assert printing_rows() == printing
@@ -175,7 +178,8 @@ def test_set_growth_changes_no_live_export_revision():
     printing = printing_rows()
     run(Records(furret(set={"id": "swsh3", "name": "Darkness Ablaze", "cardCount": {"official": 189, "total": 205}})))
     after = printing_rows()
-    assert after["live_revision"] == printing["live_revision"] and not after["live_quarantined"]
+    assert after["live_revision"] == printing["live_revision"] and after["live_state"] == "unsupported"
+    assert after["public_revision"] == printing["public_revision"]
     assert after["export_candidate"]["set"] == {"id": "swsh3", "name": "Darkness Ablaze"}
 
 

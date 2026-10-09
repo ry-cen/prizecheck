@@ -15,6 +15,7 @@ import httpx
 import psycopg
 from psycopg.rows import dict_row
 
+from .catalog_targets import IDENTITY_REVIEW_KINDS, TargetContext, refresh_editions, refresh_printing
 from .public_catalog import publish_catalog_best_effort
 
 BASE_URL = "https://api.tcgdex.net/v2/en/cards"
@@ -250,47 +251,52 @@ def edition_metadata(record, descriptor, physical_conflict):
     }
 
 
-def store_source_metadata(conn, printing_id, record, physical_conflict=False):
+def store_source_metadata(conn, printing_id, record, physical_conflict=False, identity_flags=(), context=None):
     """Retain source candidates without approving a physical or target match.
 
-    Unchanged rows are not rewritten; only changed lookup candidates or
-    correspondence advance mapping revisions.
+    Unchanged rows are not rewritten. Changed lookup candidates advance mapping revisions;
+    a changed candidate then re-evaluates marketplace state, and a changed export candidate
+    (or a queued identity review) re-evaluates Live state. A pre-existing default row
+    (empty candidate) is initial: it is neither a contradiction nor a revision bump.
     """
+    context = context or TargetContext(conn)
     metadata = source_metadata(record)
-    conn.execute("""INSERT INTO catalog_printing_metadata AS m
+    changed = conn.execute("""INSERT INTO catalog_printing_metadata AS m
       (printing_id,source_record,unknown_fields,export_candidate)
       VALUES (%s,%s,%s,%s) ON CONFLICT(printing_id) DO UPDATE SET
       source_record=EXCLUDED.source_record,unknown_fields=EXCLUDED.unknown_fields,
       export_candidate=EXCLUDED.export_candidate,
-      live_revision=m.live_revision+CASE WHEN m.export_candidate IS DISTINCT FROM EXCLUDED.export_candidate THEN 1 ELSE 0 END,
-      live_verified=CASE WHEN m.export_candidate IS DISTINCT FROM EXCLUDED.export_candidate THEN false ELSE m.live_verified END,
-      live_quarantined=m.live_quarantined OR m.export_candidate IS DISTINCT FROM EXCLUDED.export_candidate,
+      live_revision=m.live_revision+CASE WHEN m.export_candidate<>'{}'::jsonb
+        AND m.export_candidate IS DISTINCT FROM EXCLUDED.export_candidate THEN 1 ELSE 0 END,
       updated_at=now()
       WHERE (m.source_record,m.unknown_fields,m.export_candidate)
-        IS DISTINCT FROM (EXCLUDED.source_record,EXCLUDED.unknown_fields,EXCLUDED.export_candidate)""",
-                 (printing_id, json.dumps(metadata["source_record"]), json.dumps(metadata["unknown_fields"]),
-                  json.dumps(metadata["export_candidate"])))
+        IS DISTINCT FROM (EXCLUDED.source_record,EXCLUDED.unknown_fields,EXCLUDED.export_candidate)
+      RETURNING m.printing_id""",
+                           (printing_id, json.dumps(metadata["source_record"]), json.dumps(metadata["unknown_fields"]),
+                            json.dumps(metadata["export_candidate"]))).fetchone()
+    if changed or identity_flags or context.waiting(printing_id):
+        refresh_printing(conn, context, printing_id)
+    updated = []
     for edition in conn.execute("SELECT id,descriptor FROM catalog_edition WHERE printing_id=%s", (printing_id,)).fetchall():
         item = edition_metadata(record, edition["descriptor"], physical_conflict)
-        conn.execute("""INSERT INTO catalog_edition_metadata AS m
-          (edition_id,mapping_candidate,mapping_evidence,quote_candidate,source_variant,unknown_fields,mapping_quarantined)
-          VALUES (%s,%s,%s,%s,%s,%s,%s) ON CONFLICT(edition_id) DO UPDATE SET
+        row = conn.execute("""INSERT INTO catalog_edition_metadata AS m
+          (edition_id,mapping_candidate,mapping_evidence,quote_candidate,source_variant,unknown_fields)
+          VALUES (%s,%s,%s,%s,%s,%s) ON CONFLICT(edition_id) DO UPDATE SET
           mapping_candidate=EXCLUDED.mapping_candidate,mapping_evidence=EXCLUDED.mapping_evidence,
           quote_candidate=EXCLUDED.quote_candidate,source_variant=EXCLUDED.source_variant,unknown_fields=EXCLUDED.unknown_fields,
-          mapping_revision=m.mapping_revision+
-            CASE WHEN m.mapping_candidate IS DISTINCT FROM EXCLUDED.mapping_candidate THEN 1 ELSE 0 END,
-          mapping_verified=CASE WHEN m.mapping_candidate IS DISTINCT FROM EXCLUDED.mapping_candidate
-            OR EXCLUDED.mapping_quarantined THEN false ELSE m.mapping_verified END,
-          mapping_quarantined=m.mapping_quarantined OR EXCLUDED.mapping_quarantined OR
-            m.mapping_candidate IS DISTINCT FROM EXCLUDED.mapping_candidate,
+          mapping_revision=m.mapping_revision+CASE WHEN m.mapping_candidate<>'{}'::jsonb
+            AND m.mapping_candidate IS DISTINCT FROM EXCLUDED.mapping_candidate THEN 1 ELSE 0 END,
           updated_at=now()
           WHERE (m.mapping_candidate,m.mapping_evidence,m.quote_candidate,m.source_variant,m.unknown_fields)
             IS DISTINCT FROM (EXCLUDED.mapping_candidate,EXCLUDED.mapping_evidence,EXCLUDED.quote_candidate,
                               EXCLUDED.source_variant,EXCLUDED.unknown_fields)
-            OR EXCLUDED.mapping_quarantined AND (m.mapping_verified OR NOT m.mapping_quarantined)""",
-                     (edition["id"], json.dumps(item["mapping_candidate"]), json.dumps(item["mapping_evidence"]),
-                      json.dumps(item["quote_candidate"]), json.dumps(item["source_variant"]),
-                      json.dumps(item["unknown_fields"]), item["unresolved"]))
+          RETURNING m.edition_id""",
+                           (edition["id"], json.dumps(item["mapping_candidate"]), json.dumps(item["mapping_evidence"]),
+                            json.dumps(item["quote_candidate"]), json.dumps(item["source_variant"]),
+                            json.dumps(item["unknown_fields"]))).fetchone()
+        if row:
+            updated.append(row["edition_id"])
+    refresh_editions(conn, context, updated)
 
 
 REVIEW_PHYSICAL_FIELDS = ("name", "set_id", "set_name", "collector_number", "descriptors", "basic_energy")
@@ -430,6 +436,10 @@ def execute_run(conn, run_id: UUID, source=None, before_promotion=None):
         _progress(conn, run_id, "promoting", validated_count=len(normalized))
         with conn.transaction():
             state = conn.execute("SELECT active_generation FROM catalog_state WHERE singleton FOR UPDATE").fetchone()
+            # Take the commit-ordered public revision before any metadata row is touched.
+            conn.execute("SELECT catalog_begin_correction()")
+            targets = TargetContext(conn)
+            targets.prime_claims(item["metadata"]["export_candidate"] for item in normalized)
             old_id = state["active_generation"]
             conn.execute("INSERT INTO catalog_generation(id,source_count,raw_gzip,raw_sha256) VALUES (%s,%s,%s,%s)",
                          (run_id, len(first), raw, hashlib.sha256(raw).hexdigest()))
@@ -464,8 +474,15 @@ def execute_run(conn, run_id: UUID, source=None, before_promotion=None):
                 source_reviews = prior_reviews.get(source_id, [])
                 item["fingerprint"] = review_fingerprint(candidate, records[source_id], existing, source_reviews, previous_records)
                 same_reviews = {review["kind"]: review for review in source_reviews if review["source_fingerprint"] == item["fingerprint"]}
+                # A decided review for this exact source value is settled: it no longer contradicts the Printing.
+                decided = {kind for kind, review in same_reviews.items() if review["status"] != "pending"}
+                reference_changed = name_changed = False
+
+                identity_flags = set()
 
                 def queue_review(kind, detail, evidence, printing_id):
+                    if kind in IDENTITY_REVIEW_KINDS:
+                        identity_flags.add(kind)
                     # Decided reviews keep their provenance. A pending review gains
                     # evidence only when legacy rows lack it or the physical candidate
                     # differs; quote churn never rewrites what a reviewer is viewing.
@@ -498,10 +515,12 @@ def execute_run(conn, run_id: UUID, source=None, before_promotion=None):
                         # A recycled source reference cannot create Editions on
                         # the established physical Printing while review is pending.
                         item['ambiguous'] = True
+                        reference_changed = True
                 if existing and existing["display_name"] != item["name"]:
                     item["name"] = existing["display_name"]
                     item["search_name"] = existing["search_name"]
                     queue_review('name_change', 'Source name changed; identity review required', candidate, existing["printing_id"])
+                    name_changed = True
                 if existing and old_id:
                     new_descriptors={json.dumps(d,sort_keys=True) for d in item['descriptors']}
                     if old_descriptors.get(existing['printing_id'], set())-new_descriptors:item['ambiguous']=True
@@ -548,10 +567,10 @@ def execute_run(conn, run_id: UUID, source=None, before_promotion=None):
                       JOIN catalog_override co ON co.edition_id=ge.edition_id AND co.action='approve_edition'
                       WHERE ge.generation_id=%s AND ge.printing_id=%s
                       ON CONFLICT(generation_id,edition_id) DO NOTHING""", (run_id, old_id, printing_id))
-                physical_conflict = item['ambiguous'] or bool(existing and (
-                    candidate['name'] != item['name'] or candidate['set_id'] != item['set_id'] or
-                    candidate['collector_number'] != item['collector_number']))
-                store_source_metadata(conn, printing_id, records[source_id], physical_conflict)
+                physical_conflict = (item['ambiguous'] and 'variant_ambiguity' not in decided
+                                     or name_changed and 'name_change' not in decided
+                                     or reference_changed and 'reference_change' not in decided)
+                store_source_metadata(conn, printing_id, records[source_id], physical_conflict, identity_flags, targets)
             for source_id, prior in old.items():
                 if source_id not in first:
                     if source_id.startswith("manual:"):

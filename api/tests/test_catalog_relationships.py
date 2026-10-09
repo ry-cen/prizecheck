@@ -133,9 +133,9 @@ def test_quote_and_target_metadata_imports_preserve_every_existing_relationship(
         assert relationships(collector) == before
         assert client.get(public_path).json() == published
     with connect() as conn:
-        mapping = conn.execute("SELECT mapping_revision,mapping_quarantined FROM catalog_edition_metadata WHERE edition_id=%s",
+        mapping = conn.execute("SELECT mapping_revision,mapping_state FROM catalog_edition_metadata WHERE edition_id=%s",
                                (normal,)).fetchone()
-    assert mapping == {"mapping_revision": 2, "mapping_quarantined": True}
+    assert mapping == {"mapping_revision": 2, "mapping_state": "unverified"}
 
     # Ambiguous correspondence: the source now describes one product-free variant.
     collapsed = product_split()

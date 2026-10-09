@@ -250,8 +250,10 @@ def decide_report(report_id: UUID, payload: DecisionInput, user_id: str = Depend
         if not _consume_code(conn, user_id, report_id, action, payload.code):
             bad_code = True
         else:
+            # Take the commit-ordered public revision before any catalog or metadata row is written.
+            conn.execute("SELECT catalog_begin_correction()")
             if report["kind"] == "printing":
-                key = name  # Conservative Card Identity normalization keeps punctuation and case.
+                key = name # Conservative Card Identity normalization keeps punctuation and case.
                 identity = conn.execute("""INSERT INTO catalog_identity(identity_key,display_name) VALUES (%s,%s)
                   ON CONFLICT(identity_key) DO UPDATE SET identity_key=EXCLUDED.identity_key RETURNING id""", (key, name)).fetchone()
                 printing_id = conn.execute("""INSERT INTO catalog_printing(source,identity_id)
