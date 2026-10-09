@@ -16,12 +16,11 @@ from uuid import UUID
 
 import psycopg
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field, HttpUrl, field_validator
+from pydantic import BaseModel, Field, HttpUrl
 
 from . import public_catalog
-from .catalog_targets import (LIVE, MATCHING, REGISTRIES, LiveRulesV1, MatchingRulesV1, TargetContext, _verified_elsewhere,
-                              activate_rule, code_digest, fingerprint, is_unspecified, load_active, refresh_editions,
-                              refresh_printing)
+from .catalog_targets import (LIVE, MATCHING, REGISTRIES, MatchingRulesV1, TargetContext, _verified_elsewhere, activate_rule,
+                              code_digest, fingerprint, is_unspecified, refresh_editions, refresh_printing)
 from .holdings import fail
 from .main import connect, require_owner, verified_user
 from .missing_cards import _code_hash
@@ -584,3 +583,90 @@ def apply_live(conn, context, printing_id, plan, decision_id):
     state = conn.execute("SELECT live_state,live_reason FROM catalog_printing_metadata WHERE printing_id=%s", (printing_id,)).fetchone()
     if state["live_state"] != "eligible":
         fail(409, "LIVE_CONFLICT")
+
+
+# ---------------------------------------------------------------- rule activation
+
+
+class RuleVersionView(BaseModel):
+    version: int
+    code_digest: str
+
+
+class ActiveRuleView(BaseModel):
+    activation_id: UUID
+    version: int | None
+    activated_at: datetime
+    evidence_url: str
+    reason: str
+    # False when the code changed after approval; the rule is then inactive until re-approved.
+    digest_current: bool
+
+
+class MetadataRuleView(BaseModel):
+    kind: Literal["live_derivation", "marketplace_matching"]
+    versions: list[RuleVersionView]
+    active: ActiveRuleView | None
+
+
+class MetadataRuleActivation(BaseModel):
+    version: int | None = Field(default=None, ge=1, le=999_999)
+    evidence_url: HttpUrl
+    reason: str = Field(min_length=1, max_length=2000)
+    code: str | None = Field(default=None, pattern=r"^\d{6}$")
+
+
+class MetadataRuleResult(BaseModel):
+    kind: str
+    version: int | None
+    printings: int
+    editions: int
+    public_revision: int
+    public_delivery: Literal["delivered", "pending"]
+
+
+@router.get("/api/admin/catalog-rules", response_model=list[MetadataRuleView])
+def rules(user_id: str = Depends(verified_user)):
+    with connect() as conn:
+        require_owner(conn, user_id)
+        views = []
+        for kind in (LIVE, MATCHING):
+            row = conn.execute("""SELECT a.id,a.version,a.code_digest,a.activated_at,a.evidence_url,a.reason FROM catalog_rule_state s
+              JOIN catalog_rule_activation a ON a.id=s.activation_id WHERE s.kind=%s""", (kind,)).fetchone()
+            active = None
+            if row:
+                current = row["version"] is not None and row["version"] in REGISTRIES[kind] and code_digest(kind, row["version"]) == row["code_digest"]
+                active = ActiveRuleView(activation_id=row["id"], version=row["version"], activated_at=row["activated_at"],
+                                        evidence_url=row["evidence_url"], reason=row["reason"], digest_current=current or row["version"] is None)
+            views.append(MetadataRuleView(kind=kind, active=active, versions=[
+                RuleVersionView(version=version, code_digest=code_digest(kind, version)) for version in sorted(REGISTRIES[kind])]))
+        return views
+
+
+@router.post("/api/admin/catalog-rules/{kind}/activate", response_model=MetadataRuleResult)
+def activate(kind: Literal["live_derivation", "marketplace_matching"], command: MetadataRuleActivation,
+             user_id: str = Depends(verified_user)):
+    reason = " ".join(command.reason.split())
+    if not reason:
+        fail(422, "REASON_REQUIRED")
+    bad_code = False
+    try:
+        with connect() as conn, conn.transaction():
+            require_owner(conn, user_id)
+            if command.version is not None and command.version not in REGISTRIES[kind]:
+                fail(422, "UNKNOWN_RULE_VERSION")
+            conn.execute(f"SET LOCAL lock_timeout='{LOCK_TIMEOUT}'")
+            revision = conn.execute("SELECT catalog_begin_correction() AS revision").fetchone()["revision"]
+            conn.execute("SELECT 1 FROM catalog_rule_state WHERE kind=%s FOR UPDATE", (kind,))
+            # Deactivation names version 0 in the approval target, which only a real version number can never equal.
+            if not consume_metadata_code(conn, user_id, f"rule:{kind}:{command.version or 0}", "activate_rule", command.code):
+                bad_code = True
+            else:
+                changed = activate_rule(conn, kind, command.version, user_id, str(command.evidence_url), reason)
+    except psycopg.errors.LockNotAvailable:
+        fail(409, "CATALOG_BUSY")
+    if bad_code:
+        fail(403, "INVALID_APPROVAL_CODE")
+    public_catalog.publish_catalog_best_effort()
+    return MetadataRuleResult(kind=kind, version=command.version, printings=changed["printings"], editions=changed["editions"],
+                              public_revision=revision, public_delivery=delivery_status(revision=revision))

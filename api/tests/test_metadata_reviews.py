@@ -3,7 +3,6 @@ import hashlib
 import hmac
 import json
 import os
-import threading
 import time
 from uuid import uuid4
 
@@ -17,7 +16,7 @@ from app.catalog_targets import LIVE, MATCHING, activate_rule, edition_targets, 
 from test_catalog import reset_catalog
 from test_catalog_metadata import Records, furret
 from test_catalog_reconciliation import run
-from test_catalog_targets import activate, card, isolated_rules, metadata  # noqa: F401 (fixture re-export)
+from test_catalog_targets import card, isolated_rules, metadata  # noqa: F401 (isolated_rules is an autouse fixture)
 
 client = TestClient(app)
 OWNER, REPORTER, OTHER = "meta-owner", "meta-reporter", "meta-other"
@@ -374,6 +373,10 @@ def test_a_product_or_price_slot_held_elsewhere_is_a_mapping_conflict(world):
     response = decide(evidence("editions", second), "correct", {"product_id": 1001, "quote_variant": "normal"})
     assert (response.status_code, response.json()["detail"]["code"]) == (409, "MAPPING_CONFLICT")
     assert edition_row(second)["product_id"] == 1002
+    # Even in a price slot nobody holds, a product belongs to one Printing (the database index alone would not catch this).
+    shared = decide(evidence("editions", second), "correct", {"product_id": 1001, "quote_variant": "holofoil"})
+    assert (shared.status_code, shared.json()["detail"]["code"]) == (409, "MAPPING_CONFLICT")
+    assert decide(evidence("editions", second), "correct", {"product_id": 1001, "quote_variant": None}).json()["detail"]["code"] == "MAPPING_CONFLICT"
     # A sibling Edition may share the product but not the exact (product, variant) slot.
     clash = decide(evidence("editions", world["normal"]), "correct", {"product_id": 1001, "quote_variant": "reverse-holofoil"})
     assert (clash.status_code, clash.json()["detail"]["code"]) == (409, "MAPPING_CONFLICT")
@@ -557,3 +560,190 @@ def test_decisions_touch_no_quote_result_or_work_data_and_call_no_source(quarant
     assert kinds <= {"printing", "edition"}
     assert snapshot()["state"] == before["state"] and len(published) == 1
     assert not any(hasattr(metadata_reviews, name) for name in ("public_records", "quote_states", "read_all"))
+
+
+# ------------------------------------------------------------------ Live decisions (API side of AC4)
+
+LIVE_INPUTS = {"category": "Pokemon", "name": "Furret", "set_code": "DAB", "collector_number": "1"}
+
+
+def printing_row(printing_id):
+    with connect() as conn:
+        return conn.execute("SELECT * FROM catalog_printing_metadata WHERE printing_id=%s", (printing_id,)).fetchone()
+
+
+def test_a_live_correction_needs_an_active_rule_and_complete_reviewed_inputs(world):
+    item = evidence("printings", world["printing"])
+    refused = decide(item, "correct", LIVE_INPUTS)
+    assert (refused.status_code, refused.json()["detail"]["code"]) == (409, "NO_ACTIVE_RULE")
+    activate_as_owner(LIVE, 1)
+    before = printing_row(world["printing"])
+    item = evidence("printings", world["printing"])
+    for bad in ({**LIVE_INPUTS, "set_code": None}, {k: v for k, v in LIVE_INPUTS.items() if k != "set_code"},
+                {**LIVE_INPUTS, "category": "Mystery"}, {**LIVE_INPUTS, "tcg_online": "DAB"}, None):
+        response = decide(item, "correct", bad)
+        assert (response.status_code, response.json()["detail"]["code"]) == (422, "INVALID_LIVE_INPUT"), bad
+    assert printing_row(world["printing"])["public_revision"] == before["public_revision"]
+    editions_before = {key: edition_row(world[key])["mapping_revision"] for key in ("normal", "reverse")}
+    response = decide(item, "correct", LIVE_INPUTS)
+    assert response.status_code == 200, response.text
+    assert (response.json()["state"], response.json()["mapping_revision"]) == ("eligible", None)
+    row = printing_row(world["printing"])
+    assert (row["live_state"], row["live_basis"], row["live_identity"]) == (
+        "eligible", "maintainer", {"category": "Pokemon", "name": "Furret", "set_code": "DAB", "number": "1"})
+    assert row["live_inputs"] == LIVE_INPUTS and row["live_decision_id"] and row["live_activation_id"]
+    # Live and marketplace revisions move independently.
+    assert {key: edition_row(world[key])["mapping_revision"] for key in ("normal", "reverse")} == editions_before
+    with connect() as conn:
+        live = printing_live(conn, [row["printing_id"]])[row["printing_id"]]
+        decision = conn.execute("SELECT * FROM catalog_metadata_decision").fetchone()
+    assert live.state == "eligible" and live.identity["set_code"] == "DAB"
+    assert (decision["target"], decision["edition_id"], decision["reviewed_value"]) == ("live", None, LIVE_INPUTS)
+
+
+def test_live_verify_source_uses_only_a_rule_covered_source_and_unsupported_stays_closed(world):
+    activate_as_owner(LIVE, 1)  # the shipped table is empty: the source set is not covered
+    item = evidence("printings", world["printing"])
+    uncovered = decide(item, "verify_source")
+    assert (uncovered.status_code, uncovered.json()["detail"]["code"]) == (422, "INVALID_LIVE_INPUT")
+    unsupported = decide(item, "unsupported")
+    assert unsupported.status_code == 200, unsupported.text
+    row = printing_row(world["printing"])
+    assert (row["live_state"], row["live_reason"], row["live_auto_closed"]) == ("unsupported", "reviewed_unsupported", True)
+    run(Records(card(1, regulationMark="E")))  # any later source value leaves a reviewed decision alone
+    after = printing_row(world["printing"])
+    assert (after["public_revision"], after["live_state"]) == (row["public_revision"], "unsupported")
+
+
+def test_live_verify_source_accepts_a_rule_derived_identity_as_a_maintainer_decision(world):
+    activate_as_owner(LIVE, 99)
+    row = printing_row(world["printing"])
+    assert (row["live_state"], row["live_basis"]) == ("eligible", "rule")
+    suspended_by = card(1, regulationMark="E")
+    run(Records(suspended_by))
+    assert printing_row(world["printing"])["live_state"] == "suspended"
+    assert [(i["kind"], i["state"], i["reason"]) for i in queue()["items"]] == [("printing", "suspended", "source_changed")]
+    item = evidence("printings", world["printing"])
+    response = decide(item, "verify_source")
+    assert response.status_code == 200, response.text
+    row = printing_row(world["printing"])
+    assert (row["live_state"], row["live_basis"], row["live_identity"]["set_code"]) == ("eligible", "maintainer", "DAA")
+    assert row["live_decision_id"] is not None and row["live_accepted_fingerprint"] == item["source_fingerprint"]
+    assert queue()["items"] == []
+
+
+def test_a_live_correction_that_collides_with_another_printing_is_refused_whole(world):
+    activate_as_owner(LIVE, 99)
+    run(Records(card(1), card(2)))
+    first = printing_row(world["printing"])
+    assert first["live_state"] == "eligible"
+    with connect() as conn:
+        second = str(conn.execute("SELECT id FROM catalog_printing WHERE source_id='meta-2'").fetchone()["id"])
+    item = evidence("printings", second)
+    clash = decide(item, "correct", {**LIVE_INPUTS, "set_code": "DAA", "collector_number": "1"})
+    assert (clash.status_code, clash.json()["detail"]["code"]) == (409, "LIVE_CONFLICT")
+    assert printing_row(world["printing"])["live_state"] == "eligible"  # the peer was not suspended: the transaction rolled back
+    assert printing_row(second)["live_decision_id"] is None
+    with connect() as conn:
+        assert conn.execute("SELECT count(*) AS n FROM catalog_metadata_decision").fetchone()["n"] == 0
+
+
+# ------------------------------------------------------------------ rule activation
+
+
+def activation(kind, version, *, issue=True, **over):
+    if issue:
+        code_for(f"rule:{kind}:{version or 0}", "activate_rule")
+    body = {"version": version, "evidence_url": "https://example.org/rule", "reason": "Reviewed the table", "code": "123456", **over}
+    return request("POST", f"/api/admin/catalog-rules/{kind}/activate", OWNER, body)
+
+
+def test_rules_list_reviewed_versions_with_digests_and_the_active_activation(world):
+    listed = request("GET", "/api/admin/catalog-rules", OWNER).json()
+    by_kind = {row["kind"]: row for row in listed}
+    assert set(by_kind) == {"live_derivation", "marketplace_matching"}
+    assert by_kind["marketplace_matching"]["versions"][0]["version"] == 1 and by_kind["marketplace_matching"]["active"] is None
+    assert {v["version"] for v in by_kind["live_derivation"]["versions"]} >= {1, 99}
+    response = activation("marketplace_matching", 1)
+    assert response.status_code == 200, response.text
+    active = next(r for r in request("GET", "/api/admin/catalog-rules", OWNER).json() if r["kind"] == "marketplace_matching")["active"]
+    assert (active["version"], active["digest_current"], active["reason"]) == (1, True, "Reviewed the table")
+    assert [v["code_digest"] for v in active_versions(1)] == [code_digest_of(MATCHING, 1)]
+
+
+def active_versions(version):
+    rows = next(r for r in request("GET", "/api/admin/catalog-rules", OWNER).json() if r["kind"] == "marketplace_matching")["versions"]
+    return [v for v in rows if v["version"] == version]
+
+
+def code_digest_of(kind, version):
+    from app.catalog_targets import code_digest
+    return code_digest(kind, version)
+
+
+def test_activating_a_matching_rule_verifies_unverified_editions_and_enqueues_them(world):
+    before = snapshot()
+    response = activation("marketplace_matching", 1)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert (body["editions"], body["printings"], body["kind"], body["version"]) == (2, 0, "marketplace_matching", 1)
+    assert {edition_row(world[key])["mapping_state"] for key in ("normal", "reverse")} == {"verified"}
+    assert snapshot()["state"] == before["state"] and body["public_revision"] == before["clock"] + 1
+    with connect() as conn:
+        queued = conn.execute("SELECT target_kind,revision FROM catalog_public_outbox WHERE revision=%s", (body["public_revision"],)).fetchall()
+        row = conn.execute("SELECT * FROM catalog_rule_activation ORDER BY activated_at DESC").fetchone()
+    assert {(q["target_kind"]) for q in queued} == {"edition"} and len(queued) == 2
+    assert (row["reviewer_id"], row["version"], row["clock_revision"]) == (OWNER, 1, body["public_revision"])
+    assert body["public_delivery"] in ("delivered", "pending")
+
+
+def test_rule_activation_codes_are_per_kind_and_version_and_deactivation_is_version_zero(world):
+    unknown = activation("live_derivation", 12345, issue=False)
+    assert (unknown.status_code, unknown.json()["detail"]["code"]) == (422, "UNKNOWN_RULE_VERSION")
+    code_for("rule:live_derivation:1", "activate_rule")
+    assert activation("live_derivation", 99, issue=False).status_code == 403  # a code for version 1 is not for version 99
+    assert activation("marketplace_matching", 1, issue=False).status_code == 403  # nor for another kind
+    wrong_action = f"rule:live_derivation:99"
+    code_for(wrong_action, "resolve_metadata")
+    assert activation("live_derivation", 99, issue=False).status_code == 403
+    assert activation("live_derivation", 99, issue=False, code=None).status_code == 422
+    assert printing_row(world["printing"])["live_state"] == "unsupported"
+    assert activation("live_derivation", 99).status_code == 200
+    assert printing_row(world["printing"])["live_state"] == "eligible"
+    off = activation("live_derivation", None)
+    assert off.status_code == 200 and off.json()["version"] is None
+    with connect() as conn:
+        assert conn.execute("""SELECT a.version FROM catalog_rule_state s JOIN catalog_rule_activation a ON a.id=s.activation_id
+          WHERE s.kind='live_derivation'""").fetchone()["version"] is None
+    assert printing_row(world["printing"])["live_state"] == "suspended"  # an eligible Printing is suspended, never silently reset
+    assert activation("live_derivation", 99, issue=False).status_code == 403  # the code was spent
+
+
+# ------------------------------------------------------------------ no refresh route, no personal overrides
+
+
+def test_openapi_has_no_refresh_or_force_route_and_no_report_or_decision_path_is_public():
+    paths = app.openapi()["paths"]
+    mine = [path for path in paths if path.startswith(("/api/admin/catalog-metadata", "/api/admin/catalog-rules", "/api/catalog/metadata-reports"))]
+    assert len(mine) >= 9
+    assert not [path for path in paths if any(word in path.lower() for word in ("refresh", "force", "retry"))]
+    assert not [p for p in mine for method in paths[p] if method.lower() not in {"get", "post", "patch"}]
+    reads = {(p, m) for p in mine for m in paths[p]}
+    assert ("/api/admin/catalog-metadata/decisions", "post") in reads
+
+
+def test_deck_and_holding_mutations_ignore_product_live_and_price_fields(world):
+    with connect() as conn:
+        leaf = conn.execute("INSERT INTO location(owner_id,name,kind,id) VALUES (%s,%s,'storage_leaf',%s) RETURNING id",
+                            (REPORTER, f"Box {uuid4()}", uuid4())).fetchone()["id"]
+    before = snapshot()
+    overrides = {"product_id": 99, "quote_variant": "normal", "live_identity": {"set_code": "ZZZ"}, "live_state": "eligible",
+                 "mapping_state": "verified", "price": "1.00", "market_price": 1, "mapping_revision": 9}
+    added = request("POST", "/api/holdings", REPORTER, {"location_id": str(leaf), "edition_id": world["normal"], "quantity": "2",
+                                                       "idempotency_key": str(uuid4()), **overrides})
+    assert added.status_code == 200, added.text
+    deck = request("POST", "/api/decks", REPORTER, {"name": f"Overrides {uuid4()}", "idempotency_key": str(uuid4()), **overrides})
+    assert deck.status_code == 201, deck.text
+    after = snapshot()
+    assert after == before
+    assert not any(key in json.dumps(added.json()) for key in ("product_id", "price"))
