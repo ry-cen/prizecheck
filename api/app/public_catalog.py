@@ -231,12 +231,14 @@ def _drain_locked(conn, store, deadline):
     written = unchanged = 0
     skip, retried = [], set()
     while not _expired(deadline):
-        rows = conn.execute("""SELECT sequence,target_kind,target_id FROM catalog_public_outbox
+        rows = conn.execute("""SELECT sequence,priority,target_kind,target_id FROM catalog_public_outbox
           WHERE delivered_at IS NULL AND sequence<>ALL(%s::bigint[]) ORDER BY priority,sequence LIMIT %s""",
                             (skip, CHUNK_TARGETS * 4)).fetchall()
         conn.commit()
         if not rows:
             break
+        # A chunk never mixes priorities, so an invalidation is not delayed behind ordinary work.
+        rows = [row for row in rows if row['priority'] == rows[0]['priority']]
         chunk = list(dict.fromkeys((row['target_kind'], row['target_id']) for row in rows))[:CHUNK_TARGETS]
         sequences = [row['sequence'] for row in rows if (row['target_kind'], row['target_id']) in chunk]
         try:
@@ -341,10 +343,20 @@ def _scan(conn, store):
             conn.commit()
             keys = [key for target in built for key in built[target].values]
             records = store.read_all(keys, deadline=time.monotonic() + CHUNK_SECONDS).records
+            suspects = []
             for target, value in built.items():
                 store_max = max([store_max, *(stored_revision(records[key].value) for key in value.values)])
-                if classify(value, records) in ('ahead', 'mismatch'):
+                verdict = classify(value, records)
+                if verdict == 'mismatch':
                     conflicts[kind].append(target[1])
+                elif verdict == 'ahead':
+                    suspects.append(target)
+            if suspects:
+                # A correction committed and delivered between the build and the read is live traffic, not
+                # a restore. Only a record still ahead of a fresh build is a recovery conflict.
+                fresh = build_values(conn, suspects)
+                conn.commit()
+                conflicts[kind] += [target[1] for target in suspects if target in fresh and classify(fresh[target], records) == 'ahead']
     return store_max, conflicts['printing'], conflicts['edition']
 
 
@@ -387,15 +399,22 @@ def rebuild(conn, store=None):
     Raises ProjectionUnavailable when the store is unreachable or delivery cannot finish.
     """
     store = store or public_record_store()
+    # An empty catalog reads no keys, so probe once: an uninitialized or unreachable store must still fail.
+    store.read_records([catalog_printing_key('0' * 48)], deadline=time.monotonic() + CHUNK_SECONDS)
     store_max, printings, editions = _scan(conn, store)
     conflicts = _reconcile(conn, store_max, printings, editions)
     mark_all_dirty(conn)
+    horizon = conn.execute('SELECT coalesce(max(sequence),0) AS horizon FROM catalog_public_outbox').fetchone()['horizon']
+    conn.commit()
     for _ in range(LOCK_WAITS):  # A concurrent request-path drainer is brief; recovery waits for it.
         result = drain(conn, store)
         if not result.busy:
             break
         time.sleep(LOCK_WAIT_SECONDS)
-    if result.pending or result.busy:
+    # Success means everything this rebuild enqueued was delivered; later work and unrelated stuck rows are not its concern.
+    left = conn.execute('SELECT count(*) AS n FROM catalog_public_outbox WHERE delivered_at IS NULL AND sequence<=%s AND last_error IS DISTINCT FROM \'RevisionBehind\'', (horizon,)).fetchone()['n']
+    conn.commit()
+    if result.busy or left:
         raise ProjectionUnavailable()
     return RebuildResult(result.written, result.unchanged, store_max, conflicts)
 

@@ -81,12 +81,15 @@ class Stall:
     """Pause one thread right after an operation returns, until the test releases it."""
 
     def __init__(self, monkeypatch, owner, name):
-        self.reached, self.release, self.thread, self.armed = threading.Event(), threading.Event(), None, False
+        self.reached, self.release, self.thread, self.armed, self.skip = threading.Event(), threading.Event(), None, False, 0
         original = getattr(owner, name)
 
         def wrapper(*args, **kwargs):
             result = original(*args, **kwargs)
             if self.armed and threading.current_thread() is self.thread:
+                if self.skip:
+                    self.skip -= 1
+                    return result
                 self.armed = False
                 self.reached.set()
                 assert self.release.wait(20)
@@ -166,6 +169,33 @@ def test_priority_zero_invalidations_are_delivered_before_ordinary_work(monkeypa
         assert drain(conn).state == 'delivered'
     assert [catalog_edition_key(edition_ref) in keys_ for keys_ in order] == [True, False]
     assert catalog_edition_key(refs[ordinary['id']]) in order[1]
+
+
+def test_a_priority_zero_printing_suspension_is_not_delayed_behind_ordinary_editions_in_the_same_chunk(monkeypatch):
+    printing, normal, printing_ref, edition_ref = stage()
+    _, editions = metadata()
+    with connect() as conn:
+        conn.execute('DELETE FROM catalog_public_outbox')
+        conn.execute("INSERT INTO catalog_public_outbox(target_kind,target_id,revision,priority) VALUES ('edition',%s,%s,1)",
+                     (editions['reverse']['id'], editions['reverse']['public_revision']))
+        conn.execute("INSERT INTO catalog_public_outbox(target_kind,target_id,revision,priority) VALUES ('printing',%s,%s,0)",
+                     (printing['printing_id'], printing['public_revision']))
+        refs = [row['public_ref'] for row in conn.execute('SELECT public_ref FROM catalog_edition')]
+    keys = [catalog_printing_key(printing_ref)] + [key for ref in refs for key in (catalog_edition_key(ref), quarantine_key(ref))]
+    records = read(*keys)
+    assert public_record_store().compare_and_swap({key: records[key].version for key in keys}, {key: None for key in keys},
+                                                  deadline=time.monotonic() + 5)
+    order = []
+    original = FilePublicRecords.compare_and_swap
+
+    def spy(store, expected, changes, **kwargs):
+        order.append(sorted(changes))
+        return original(store, expected, changes, **kwargs)
+
+    monkeypatch.setattr(FilePublicRecords, 'compare_and_swap', spy)
+    with connect() as conn:
+        assert drain(conn).state == 'delivered'
+    assert catalog_printing_key(printing_ref) in order[0] and len(order) == 2
 
 
 def test_a_lost_cas_is_retried_from_a_fresh_build(monkeypatch):
@@ -526,6 +556,23 @@ def test_r3_postgres_older_than_the_store_marks_recovery_conflicts_above_the_sto
         assert conn.execute("SELECT count(*) AS n FROM catalog_public_outbox WHERE last_error='StoreAhead'").fetchone()['n'] == 0
 
 
+def test_a_correction_delivered_while_the_rebuild_scans_is_not_mistaken_for_a_recovery_conflict(monkeypatch):
+    """The scan builds from PostgreSQL then reads the store without the drain lock; live delivery in that gap is not R3."""
+    printing, normal, printing_ref, edition_ref = stage()
+    stall = Stall(monkeypatch, public_catalog, 'build_values')
+    stall.skip = 1  # Let the Printing page through; stall after the Edition page is built, before it is compared.
+    outcome = []
+    failures = stall.run(lambda: outcome.append(rebuild(connect())))
+    run(Records(changed_product()))  # commits the contradiction and delivers it, as the API does after a commit
+    assert read(quarantine_key(edition_ref))[quarantine_key(edition_ref)].value['state'] == 'quarantined'
+    stall.finish(failures)
+    assert outcome[0].conflicts == 0
+    _, rows = metadata()
+    assert (rows['normal']['mapping_state'], rows['normal']['mapping_reason']) == ('quarantined', 'candidate_changed')
+    assert read(catalog_edition_key(edition_ref))[catalog_edition_key(edition_ref)].value['marketplace']['reason'] == 'candidate_changed'
+    assert not pending()
+
+
 def test_rebuild_clock_reconciliation_needs_no_stamp_or_clock_lock_when_the_store_is_not_ahead():
     stage()
     with connect() as holder:  # An in-flight correction holds the clock; a rebuild with nothing to reconcile must not wait on it.
@@ -551,6 +598,23 @@ def test_rebuild_waits_for_a_concurrent_drainer_instead_of_failing(monkeypatch):
         assert rebuild(conn).unchanged > 0
 
 
+def test_rebuild_of_an_empty_catalog_still_refuses_an_uninitialized_store(tmp_path, monkeypatch):
+    monkeypatch.setenv('PUBLIC_PROJECTION_DIR', str(tmp_path / 'never'))
+    with connect() as conn, pytest.raises(ProjectionUnavailable):
+        rebuild(conn)
+    assert not (tmp_path / 'never').exists()
+
+
+def test_rebuild_succeeds_despite_unrelated_stuck_rows_and_work_enqueued_after_it_started():
+    printing, normal, printing_ref, edition_ref = stage()
+    with connect() as conn:
+        conn.execute("INSERT INTO catalog_public_outbox(target_kind,target_id,revision) VALUES ('edition',%s,%s)",
+                     (normal['id'], normal['public_revision'] + 10))
+        conn.commit()
+        drain(conn)  # leaves the future row stuck as RevisionBehind
+        assert rebuild(conn).conflicts == 0
+
+
 def test_rebuild_refuses_an_uninitialized_store_and_reports_unavailable(tmp_path, monkeypatch):
     stage()
     monkeypatch.setenv('PUBLIC_PROJECTION_DIR', str(tmp_path / 'never'))
@@ -572,16 +636,22 @@ def test_best_effort_shim_ignores_printing_ids_never_raises_and_reports_delivery
 
 
 def test_reimport_with_changed_source_display_leaves_public_values_and_the_outbox_untouched():
-    """Display belongs to the immutable Printing (016): a source rename or image change publishes nothing new."""
+    """Display belongs to the immutable Printing (016): a source image or set-name change moves no public display field."""
     printing, normal, printing_ref, edition_ref = stage()
     pkey = catalog_printing_key(printing_ref)
     before = read(pkey)[pkey]
     changed = card(1)
-    changed.update({'name': 'Furret Prime', 'image': 'https://assets.tcgdex.net/en/other/meta-1'})
+    changed.update({'image': 'https://assets.tcgdex.net/en/other/meta-1'})
     changed['set'] = {**changed.get('set', {}), 'name': 'Renamed Set'}
     run(Records(changed))
     after = read(pkey)[pkey]
-    assert after.value['name'] == before.value['name'] and after.value['set_name'] == before.value['set_name']
+    with connect() as conn:  # The import really recorded the new source display in its generation row.
+        latest = conn.execute("""SELECT gp.image_url,gp.set_name FROM catalog_generation_printing gp
+          JOIN catalog_generation g ON g.id=gp.generation_id WHERE gp.printing_id=%s ORDER BY g.imported_at DESC LIMIT 1""",
+                              (printing['printing_id'],)).fetchone()
+    assert latest['set_name'] == 'Renamed Set' and latest['image_url'] == 'https://assets.tcgdex.net/en/other/meta-1'
+    display = ('printing_ref', 'name', 'set_id', 'set_name', 'collector_number', 'image_url')
+    assert {k: after.value[k] for k in display} == {k: before.value[k] for k in display}  # display is write-once (016)
     with connect() as conn:
         drain(conn)
     assert not pending()
