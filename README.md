@@ -74,7 +74,16 @@ set +a
 
 The public store defaults to `.local/public-projections`. Initialize it for a new
 installation; use the [projection recovery instructions](docs/public-projections.md)
-if an existing store is lost or corrupt.
+if an existing store is lost or corrupt. For a new installation,
+`init_public_projection.py` also initializes the shared public records store.
+
+If you are upgrading an existing installation whose publication store predates
+shared records, do not re-run `init_public_projection.py`. Run
+`.venv/bin/python scripts/init_public_records.py` with the same environment
+instead. It touches only the records store, is safe to repeat, and upgrades an
+empty legacy records store. It exits with status 1 and changes nothing if
+established records are missing or corrupt, or if a legacy store holds data.
+Restore those from backup rather than resetting them.
 
 ### 3. Start the app
 

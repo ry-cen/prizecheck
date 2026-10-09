@@ -23,7 +23,7 @@ A private SHA256 receipt binds the exact commit, selected ref, files, previous c
 
 ## Runtime configuration and real activation
 
-Inject DATABASE_URL, INTERNAL_AUTH_SECRET, BETTER_AUTH_SECRET, OWNER_EMAIL, MAIL_MODE/MAIL_FILE or the mail adapter configuration, PUBLIC_PROJECTION_DIR, and a private RELEASE_CONTROL_KEY of at least 32 characters. Initialize the projection store explicitly with `scripts/init_public_projection.py`. Dependencies must match the gated fingerprint; changing the runtime requires a fresh gate in that environment.
+Inject DATABASE_URL, INTERNAL_AUTH_SECRET, BETTER_AUTH_SECRET, OWNER_EMAIL, MAIL_MODE/MAIL_FILE or the mail adapter configuration, PUBLIC_PROJECTION_DIR, and a private RELEASE_CONTROL_KEY of at least 32 characters. Initialize the projection store explicitly with `scripts/init_public_projection.py`, which also initializes the shared public records store. For an install that already has a publication store but no shared records, run only `scripts/init_public_records.py`. It leaves the publication/discovery manifest untouched, is idempotent, and exits 1 without changes if established records are missing or corrupt or a legacy records store holds data (restore from backup). With `PUBLIC_PROJECTION_ADAPTER=http` both scripts call the relay's `initialize` action, so the deployment-owned relay defines its own upgrade behavior (see `docs/http-public-projection.md`). Dependencies must match the gated fingerprint; changing the runtime requires a fresh gate in that environment.
 
 The bundled adapter binds only loopback, uses local HTTP/development cookies and serves a real FastAPI process, Better Auth gateway and built SPA. Run it in the foreground under a supervisor:
 
