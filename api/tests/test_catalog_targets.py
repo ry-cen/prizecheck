@@ -173,7 +173,7 @@ def test_printing_level_correspondence_name_mismatch_and_duplicate_products_neve
     run(Records(card(1), printing_level, duplicate))
     assert {row["mapping_state"] for row in metadata("meta-1")[1].values()} == {"verified"}
     assert {(row["mapping_state"], row["mapping_reason"]) for row in metadata("meta-2")[1].values()} == {("unverified", "rule_failed")}
-    assert {(row["mapping_state"], row["mapping_reason"]) for row in metadata("meta-3")[1].values()} == {("unverified", "rule_failed")}
+    assert {(row["mapping_state"], row["mapping_reason"]) for row in metadata("meta-3")[1].values()} == {("unverified", "duplicate_mapping")}
 
 
 def test_unspecified_variants_never_verify_under_either_descriptor_shape():
@@ -726,3 +726,25 @@ def test_decisions_are_append_only_and_independent_of_catalog_revision():
         conn.execute("UPDATE catalog_metadata_decision SET reason='rewritten'")
     with connect() as conn, pytest.raises(psycopg.errors.RaiseException, match="append-only"):
         conn.execute("DELETE FROM catalog_metadata_decision")
+
+
+def test_sibling_editions_sharing_a_quote_variant_never_both_verify():
+    reset_catalog(); activate(MATCHING, 1)
+    record = card(1)
+    # Two physical Editions whose finish table maps to the same variant key of one product.
+    record["variants_detailed"] = [
+        {"type": "normal", "size": "standard", "variantId": "a", "pricing": {"tcgplayer": {"unit": "USD", "normal": {"productId": 77}}}},
+        {"finish": "normal", "size": "standard", "variantId": "b", "pricing": {"tcgplayer": {"unit": "USD", "normal": {"productId": 77}}}},
+    ]
+    run(Records(record))
+    with connect() as conn:
+        rows = conn.execute("""SELECT m.edition_id,m.mapping_state,m.mapping_reason,m.quote_variant FROM catalog_edition_metadata m
+          JOIN catalog_edition e ON e.id=m.edition_id JOIN catalog_printing p ON p.id=e.printing_id
+          WHERE p.source_id='meta-1' ORDER BY m.mapping_state DESC""").fetchall()
+    assert [row["mapping_state"] for row in rows] == ["verified", "unverified"]
+    assert rows[1]["mapping_reason"] == "duplicate_mapping"
+    # The database backstop refuses a second verified Edition in the same price slot.
+    with connect() as conn, pytest.raises(psycopg.errors.UniqueViolation):
+        conn.execute("""UPDATE catalog_edition_metadata SET mapping_state='verified',product_id=77,quote_variant='normal',
+          mapping_basis='matching_rule',matching_activation_id=(SELECT activation_id FROM catalog_rule_state WHERE kind='marketplace_matching'),
+          auto_closed=true WHERE edition_id=%s""", (rows[1]["edition_id"],))

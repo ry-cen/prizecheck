@@ -126,6 +126,9 @@ ALTER TABLE catalog_edition_metadata
  ADD CHECK(quote_variant IS NULL OR product_id IS NOT NULL),
  ADD CHECK(mapping_state<>'quarantined' OR mapping_reason IS NOT NULL),
  ADD CHECK(mapping_state NOT IN ('verified','quarantined') OR auto_closed);
+-- DB backstop: one verified Edition per (product, quote variant), so no two Editions share a price.
+CREATE UNIQUE INDEX catalog_edition_verified_price_slot ON catalog_edition_metadata(product_id,quote_variant)
+ WHERE mapping_state='verified' AND quote_variant IS NOT NULL;
 ALTER TABLE catalog_edition_metadata DROP COLUMN mapping_verified, DROP COLUMN mapping_quarantined;
 
 ALTER TABLE catalog_printing_metadata

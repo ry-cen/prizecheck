@@ -166,9 +166,10 @@ class MatchingRulesV1:
         if problem:
             return Failure(problem)
         [(key, product)] = found.items()
-        if verified_elsewhere(product):
+        variant = cls.variant(facts["descriptor"], key)
+        if verified_elsewhere(product, variant):
             return Failure("duplicate")
-        return product, cls.variant(facts["descriptor"], key)
+        return product, variant
 
 
 LIVE_RULES = {1: LiveRulesV1}
@@ -239,6 +240,11 @@ def edition_state(row) -> EditionState:
     return EditionState(*(row[column] for column in EDITION_COLUMNS))
 
 
+def _product_variant(facts, found):
+    [(key, product)] = found.items()
+    return product, MatchingRulesV1.variant(facts["descriptor"], key)
+
+
 def evaluate_edition(current, facts, rejections, active, verified_elsewhere):
     """Next marketplace state for one Edition given a changed or re-examined candidate.
 
@@ -258,7 +264,7 @@ def evaluate_edition(current, facts, rejections, active, verified_elsewhere):
             reason = "physical_conflict"
         elif problem == "conflict":
             reason = "candidate_conflict"
-        elif problem is None and verified_elsewhere(next(iter(found.values()))):
+        elif problem is None and verified_elsewhere(*_product_variant(facts, found)):
             reason = "duplicate_mapping"
         else:
             reason = "candidate_changed"
@@ -276,7 +282,7 @@ def evaluate_edition(current, facts, rejections, active, verified_elsewhere):
         return replace(current, reason="reviewed_unmapped")
     result = active.rule.evaluate(facts, verified_elsewhere)
     if isinstance(result, Failure):
-        return replace(current, reason="rule_failed")
+        return replace(current, reason="duplicate_mapping" if result.reason == "duplicate" else "rule_failed")
     product_id, quote_variant = result
     return EditionState(state="verified", reason=None, product_id=product_id, quote_variant=quote_variant,
                         basis="matching_rule", activation_id=active.activation_id, accepted_fingerprint=candidate_fp,
@@ -408,11 +414,14 @@ class TargetContext:
         return printing_id in self._waiting
 
 
-def _verified_elsewhere(conn, printing_id):
-    def held(product_id):
+def _verified_elsewhere(conn, printing_id, edition_id):
+    """A product may be shared by sibling Editions, but never by another Printing, and one
+    (product, quote variant) price slot belongs to a single verified Edition."""
+    def held(product_id, quote_variant=None):
         return conn.execute("""SELECT 1 FROM catalog_edition_metadata m JOIN catalog_edition e ON e.id=m.edition_id
-          WHERE m.mapping_state='verified' AND m.product_id=%s AND e.printing_id<>%s LIMIT 1""",
-                            (product_id, printing_id)).fetchone() is not None
+          WHERE m.mapping_state='verified' AND m.product_id=%s AND m.edition_id<>%s
+            AND (e.printing_id<>%s OR (%s::text IS NOT NULL AND m.quote_variant=%s::text)) LIMIT 1""",
+                            (product_id, edition_id, printing_id, quote_variant, quote_variant)).fetchone() is not None
     return held
 
 
@@ -443,7 +452,7 @@ def refresh_editions(conn, context, edition_ids):
             "SELECT source_fingerprint FROM catalog_metadata_rejection WHERE edition_id=%s AND target='marketplace'",
             (edition_id,))])
         current = edition_state(row)
-        new = evaluate_edition(current, facts, rejections, context.matching, _verified_elsewhere(conn, row["printing_id"]))
+        new = evaluate_edition(current, facts, rejections, context.matching, _verified_elsewhere(conn, row["printing_id"], row["id"]))
         if new == current:
             continue
         bump = 1 if (new.state == "verified") != (current.state == "verified") else 0
