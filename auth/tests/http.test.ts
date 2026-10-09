@@ -1,7 +1,11 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { Pool } from "pg";
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
+import { createServer, type Server } from "node:net";
+import { mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const base = process.env.TEST_BASE_URL || "http://localhost:5173";
 const origin = process.env.TEST_ORIGIN || "http://localhost:5173";
@@ -99,6 +103,191 @@ describe("live Better Auth boundary", () => {
     expect(
       (await fetch(base + "/api/locations", { headers: { cookie } })).status
     ).toBe(401);
+  });
+
+  it("serves Published Deck reads with no, forged and valid cookies without waking either database", async () => {
+    // A counting listener stands in for PostgreSQL: every connection attempt is a wakeup.
+    let wakeups = 0;
+    const database: Server = createServer((socket) => {
+      wakeups++;
+      socket.destroy();
+    });
+    const listen = (server: Server) =>
+      new Promise<number>((resolve) =>
+        server.listen(0, "127.0.0.1", () =>
+          resolve((server.address() as { port: number }).port)
+        )
+      );
+    const freePort = async () => {
+      const probe = createServer();
+      const port = await listen(probe);
+      await new Promise((resolve) => probe.close(resolve));
+      return port;
+    };
+    const databasePort = await listen(database);
+    const apiPort = await freePort();
+    const gatewayPort = await freePort();
+    const databaseUrl = `postgresql://nobody:nobody@127.0.0.1:${databasePort}/none`;
+    const directory = mkdtempSync(join(tmpdir(), "public-deck-boundary-"));
+    const token = "A".repeat(32);
+    const edition = {
+      set_id: "base",
+      set_name: "Base Set",
+      collector_number: "25",
+      variant: { label: "Unspecified Variant" },
+      image_url: null,
+      quantity: "3",
+      edition_ref: "a".repeat(48),
+      printing_ref: "b".repeat(48),
+    };
+    const snapshot = {
+      title: "Boundary deck",
+      published_at: "2026-01-02T03:04:05Z",
+      version: 1,
+      total: "3",
+      identities: [{ name: "Pikachu", quantity: "3", editions: [edition] }],
+      checks: {
+        size_status: "short",
+        shortage: "57",
+        excess: "0",
+        identities: [
+          { name: "Pikachu", quantity: "3", status: "within_limit" },
+        ],
+      },
+    };
+    const projection = join(directory, "current.json");
+    writeFileSync(
+      projection,
+      JSON.stringify({
+        format: 1,
+        revision: 0,
+        decks: { [token]: { visibility: "unlisted", snapshot } },
+      })
+    );
+    const children: ChildProcess[] = [];
+    const environment = {
+      ...process.env,
+      DATABASE_URL: databaseUrl,
+      PUBLIC_PROJECTION_DIR: directory,
+      PUBLIC_PROJECTION_ADAPTER: "filesystem",
+    };
+    // A valid session from the live gateway: the isolated gateway must ignore it.
+    await pool.query(
+      "UPDATE auth_send_event SET sent_at = now() - interval '61 seconds'"
+    );
+    await post("/auth/request-code", { email });
+    const signedIn = await post("/auth/verify-code", {
+      email,
+      code: latestCode(),
+    });
+    expect(signedIn.status).toBe(200);
+    const valid = signedIn.headers.get("set-cookie")!.split(";")[0];
+    try {
+      children.push(
+        spawn(
+          ".venv/bin/uvicorn",
+          [
+            "app.main:app",
+            "--app-dir",
+            "api",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            String(apiPort),
+            "--no-access-log",
+          ],
+          { cwd: process.cwd(), env: environment, stdio: "ignore" }
+        ),
+        spawn("node", ["--import", "tsx", "auth/src/server.ts"], {
+          cwd: process.cwd(),
+          env: {
+            ...environment,
+            AUTH_PORT: String(gatewayPort),
+            API_ORIGIN: `http://127.0.0.1:${apiPort}`,
+          },
+          stdio: "ignore",
+        })
+      );
+      const gateway = `http://127.0.0.1:${gatewayPort}`;
+      let ready = false;
+      for (let attempt = 0; attempt < 100 && !ready; attempt++) {
+        try {
+          ready =
+            (await fetch(gateway + "/api/public/discovery")).status === 200;
+        } catch {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+      }
+      expect(ready).toBe(true);
+      const baseline = wakeups;
+      const read = (cookie?: string, path = `/api/public/decks/${token}`) =>
+        fetch(gateway + path, cookie ? { headers: { cookie } } : undefined);
+      const bodies: string[] = [];
+      for (const cookie of [
+        undefined,
+        "better-auth.session_token=forged",
+        valid,
+      ]) {
+        const response = await read(cookie);
+        expect(response.status).toBe(200);
+        expect(response.headers.get("set-cookie")).toBeNull();
+        expect(response.headers.get("x-robots-tag")).toBe("noindex, nofollow");
+        bodies.push(await response.text());
+      }
+      expect(new Set(bodies).size).toBe(1);
+      const shown = JSON.parse(bodies[0]);
+      // Strict public allowlist, including the additive opaque references.
+      expect(Object.keys(shown).sort()).toEqual([
+        "checks",
+        "identities",
+        "published_at",
+        "title",
+        "total",
+        "version",
+      ]);
+      expect(Object.keys(shown.identities[0].editions[0]).sort()).toEqual(
+        Object.keys(edition).sort()
+      );
+      expect(shown.identities[0].editions[0]).toMatchObject({
+        edition_ref: edition.edition_ref,
+        printing_ref: edition.printing_ref,
+      });
+      expect(bodies[0]).not.toMatch(/owner|location_id|holding|session|email/i);
+      for (const cookie of [
+        undefined,
+        "better-auth.session_token=forged",
+        valid,
+      ]) {
+        expect(
+          (await read(cookie, `/api/public/decks/${"B".repeat(32)}`)).status
+        ).toBe(404);
+      }
+      // Durable storage loss is unavailable, never 404, and reads recover without a restart.
+      renameSync(projection, projection + ".away");
+      expect((await read(valid)).status).toBe(503);
+      renameSync(projection + ".away", projection);
+      expect((await read(valid)).status).toBe(200);
+      expect(wakeups).toBe(baseline);
+      // Control: a private route does wake the gateway database, so the counter is live.
+      expect(
+        (
+          await fetch(gateway + "/api/locations", {
+            headers: { cookie: "better-auth.session_token=forged" },
+          })
+        ).status
+      ).toBeGreaterThanOrEqual(401);
+      expect(wakeups).toBeGreaterThan(baseline);
+    } finally {
+      for (const child of children) {
+        if (child.exitCode === null && child.signalCode === null) {
+          child.kill();
+          await new Promise((resolve) => child.once("exit", resolve));
+        }
+      }
+      await new Promise((resolve) => database.close(resolve));
+      rmSync(directory, { recursive: true, force: true });
+      await post("/auth/sign-out", {}, valid);
+    }
   });
 
   it("rejects missing origin and forged identity headers", async () => {

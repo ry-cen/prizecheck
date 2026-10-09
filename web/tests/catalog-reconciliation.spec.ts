@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { chmodSync, readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 
@@ -344,6 +344,105 @@ run(AmbiguousSource({'card-1': 'Correction Pikachu', 'card-2': 'Unknown facets'}
         )
       ).rows[0].public_ref
     ).toBe(normalEdition.public_ref);
+    // Public references resolve only to public-safe shared catalog records.
+    const ref = /^[0-9a-f]{48}$/;
+    expect(snapshot.identities[0].editions[0].edition_ref).toMatch(ref);
+    const records = JSON.parse(
+      execFileSync(
+        ".venv/bin/python",
+        [
+          "-c",
+          `import json,time
+from app.public_projection import public_record_store
+from app.public_records import catalog_edition_key, catalog_printing_key
+keys=[catalog_edition_key('${normalEdition.public_ref}'),catalog_printing_key('${normalEdition.printing_ref}')]
+rows=public_record_store().read_records(keys,deadline=time.monotonic()+5).records
+print(json.dumps({'edition':rows[keys[0]].value,'printing':rows[keys[1]].value}))`,
+        ],
+        { env: { ...process.env, PYTHONPATH: "api:api/tests" } }
+      ).toString()
+    );
+    expect(Object.keys(records.edition).sort()).toEqual([
+      "descriptor",
+      "edition_ref",
+      "printing_ref",
+    ]);
+    expect(Object.keys(records.printing).sort()).toEqual([
+      "collector_number",
+      "image_url",
+      "name",
+      "printing_ref",
+      "set_id",
+      "set_name",
+    ]);
+    expect(records.edition).toMatchObject({
+      edition_ref: normalEdition.public_ref,
+      printing_ref: normalEdition.printing_ref,
+    });
+    expect(records.printing.printing_ref).toBe(normalEdition.printing_ref);
+    // A private edit after publication changes nothing public until republish.
+    const reverseEdition = (
+      await pool.query(
+        "SELECT e.id,e.public_ref FROM catalog_edition e JOIN catalog_printing p ON p.id=e.printing_id WHERE p.source_id='card-1' AND e.descriptor->>'finish'='reverse'"
+      )
+    ).rows[0];
+    expect(
+      (
+        await page.request.post(gateway("/api/holdings"), {
+          headers: sameOrigin,
+          data: {
+            location_id: deckId,
+            edition_id: reverseEdition.id,
+            quantity: "2",
+            idempotency_key: randomUUID(),
+          },
+        })
+      ).status()
+    ).toBe(200);
+    expect(await (await page.request.get(publicPath)).json()).toEqual(snapshot);
+    // Durable recovery: a failed object write is queued with its references and replays exactly.
+    const republishKey = randomUUID();
+    const republish = () =>
+      page.request.put(gateway(`/api/decks/${deckId}/publication`), {
+        headers: sameOrigin,
+        data: { title: "Reference check 2", idempotency_key: republishKey },
+      });
+    const projectionDir = process.env.PUBLIC_PROJECTION_DIR;
+    const canBlock = !!projectionDir && process.getuid?.() !== 0;
+    if (canBlock) {
+      chmodSync(projectionDir, 0o500);
+      try {
+        expect((await republish()).status()).toBe(503);
+      } finally {
+        chmodSync(projectionDir, 0o700);
+      }
+      expect(await (await page.request.get(publicPath)).json()).toEqual(
+        snapshot
+      );
+    }
+    const recovered = await republish();
+    expect(recovered.status()).toBe(200);
+    expect((await recovered.json()).version).toBe(2);
+    const republished = await (await page.request.get(publicPath)).json();
+    expect(republished.version).toBe(2);
+    const shown = republished.identities
+      .flatMap((identity: { editions: unknown[] }) => identity.editions)
+      .map((row: { edition_ref: string; quantity: string }) => [
+        row.edition_ref,
+        row.quantity,
+      ]);
+    expect(shown).toEqual(
+      expect.arrayContaining([
+        [normalEdition.public_ref, "3"],
+        [reverseEdition.public_ref, "2"],
+      ])
+    );
+    const revoked = await page.request.delete(
+      gateway(`/api/decks/${deckId}/publication`),
+      { headers: sameOrigin, data: { idempotency_key: randomUUID() } }
+    );
+    expect(revoked.status()).toBe(200);
+    expect((await page.request.get(publicPath)).status()).toBe(404);
     await page.reload();
     await page
       .getByRole("navigation", { name: "Location tree" })
