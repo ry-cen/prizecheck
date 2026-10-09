@@ -6,6 +6,7 @@ import {
   type CollectionEntry,
 } from "./collection_generated";
 import { HoldingError, type HoldingView } from "./holdings_generated";
+import { EditionPrice } from "./EditionPrice";
 import "./Holdings.css";
 
 export function Collection({
@@ -140,6 +141,7 @@ export function Collection({
                         .join(" · ") || "Unspecified Variant"}
                 </span>
                 <strong>{item.quantity} copies</strong>
+                <EditionPrice editionId={item.edition_id} />
                 <button onClick={() => void find(item.edition_id)}>
                   Find copies
                 </button>

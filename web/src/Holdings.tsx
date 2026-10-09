@@ -10,6 +10,7 @@ import {
 import { MoveHoldings, type MoveDestination } from "./MoveHoldings";
 import "./Holdings.css";
 import { EditionCorrections } from "./EditionCorrections";
+import { EditionPrice } from "./EditionPrice";
 
 function descriptorText(descriptor: Record<string, unknown>) {
   if (typeof descriptor.label === "string") return descriptor.label;
@@ -247,6 +248,7 @@ export function Holdings({
                   </span>
                   <span>{descriptorText(item.descriptor)}</span>
                   <span>{item.location_name}</span>
+                  <EditionPrice editionId={item.edition_id} />
                 </div>
               </article>
             </li>

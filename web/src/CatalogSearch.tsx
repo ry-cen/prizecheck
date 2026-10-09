@@ -7,6 +7,7 @@ import {
 } from "./generated";
 import { MissingCardReports } from "./MissingCardReports";
 import { MetadataReport, MyMetadataReports } from "./MetadataReport";
+import { EditionPrice } from "./EditionPrice";
 import "./CatalogSearch.css";
 
 function CardArt({ url, name }: { url: string | null; name: string }) {
@@ -273,6 +274,7 @@ export function CatalogSearch() {
                 >
                   Report metadata
                 </button>
+                {edition.active && <EditionPrice editionId={edition.id} />}
               </li>
             ))}
           </ul>
@@ -343,6 +345,16 @@ export function CatalogSearch() {
                           )
                           .join(", ") || "None"}
                       </p>
+                      <ul aria-label={`Edition prices for ${printing.name}`}>
+                        {printing.editions
+                          .filter((edition) => edition.active)
+                          .map((edition) => (
+                            <li key={edition.id}>
+                              {descriptorLabel(edition.descriptor)}
+                              <EditionPrice editionId={edition.id} />
+                            </li>
+                          ))}
+                      </ul>
                       <p>
                         Source:{" "}
                         {printing.source === "tcgdex"

@@ -200,21 +200,35 @@ def ids(*editions):
     return {"edition_ids": [str(edition) for edition in editions]}
 
 
-def world():
-    """Two verified Editions of one Printing (normal and reverse) and an Unspecified Variant Edition of another."""
+def world(pagers=0):
+    """Two verified Editions of one Printing (normal and reverse) and an Unspecified Variant Edition of another.
+
+    `pagers` adds that many further unspecified Printings (used by the browser spec to fill more than one page)."""
     reset_catalog()
     activate(MATCHING, 1)
     plain = furret(id="meta-2", localId="2")
     del plain["variants_detailed"]
     plain["variants"] = {}
-    run(Records(card(1), plain))
+    extra = []
+    for number in range(pagers):
+        record = furret(id=f"pager-{number}", name=f"Aaa {number:02d}", localId=str(100 + number))
+        del record["variants_detailed"]
+        record["variants"] = {}
+        extra.append(record)
+    run(Records(card(1), plain, *extra))
     with connect() as conn:
         rows = conn.execute("""SELECT e.id,e.public_ref,e.descriptor,m.mapping_state,m.mapping_revision,m.quote_variant,p.source_id
-          FROM catalog_edition e JOIN catalog_edition_metadata m ON m.edition_id=e.id JOIN catalog_printing p ON p.id=e.printing_id""").fetchall()
-    found = {}
+          FROM catalog_edition e JOIN catalog_edition_metadata m ON m.edition_id=e.id JOIN catalog_printing p ON p.id=e.printing_id
+          ORDER BY p.source_id""").fetchall()
+    found = {"pagers": []}
     for row in rows:
-        found["unspecified" if row["source_id"] == "meta-2" else row["quote_variant"]] = row
-    assert set(found) == {"normal", "reverse-holofoil", "unspecified"}, found
+        if row["source_id"] == "meta-2":
+            found["unspecified"] = row
+        elif row["source_id"] == "meta-1":
+            found[row["quote_variant"]] = row
+        else:
+            found["pagers"].append(row)
+    assert {"normal", "reverse-holofoil", "unspecified"} <= set(found), found
     return found
 
 
@@ -232,6 +246,27 @@ def seed(store, edition, amount="0.43", *, variant=None, card_id=None, state="qu
     if payload:
         changes[keys[0]] = quote
     assert store.compare_and_swap({key: snapshot.records[key].version for key in changes}, changes, deadline=time.monotonic() + 5)
+
+
+def ui_world(pagers=0):
+    """Browser-spec seeding (web/tests/prices.spec.ts): the catalog, as ids. Quotes are seeded by ui_apply."""
+    found = world(pagers)
+    return {**{key: str(row["id"]) for key, row in found.items() if key != "pagers"}, "pagers": [str(row["id"]) for row in found["pagers"]]}
+
+
+def ui_apply(commands):
+    """Browser-spec commands against the live stack's real record store. {op:'quote', edition, ...seed arguments} writes
+    what ticket 08 will write; {op:'sql', statement, edition} runs one UPDATE for the Edition (PostgreSQL state)."""
+    store = public_record_store()
+    for command in commands:
+        with connect() as conn:
+            if command["op"] == "sql":
+                conn.execute(command["statement"], (command["edition"],))
+                continue
+            edition = conn.execute("""SELECT e.id,e.public_ref,m.mapping_revision,m.quote_variant,p.source_id FROM catalog_edition e
+              JOIN catalog_edition_metadata m ON m.edition_id=e.id JOIN catalog_printing p ON p.id=e.printing_id WHERE e.id=%s""",
+                                   (command["edition"],)).fetchone()
+        seed(store, edition, **{key: value for key, value in command.items() if key not in ("op", "edition")})
 
 
 def prices_of(response):
