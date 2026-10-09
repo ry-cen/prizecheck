@@ -201,6 +201,8 @@ class MetadataQueueItem(BaseModel):
     source_fingerprint: str | None
     reviewed_value: dict | None
     report_ids: list[UUID]
+    # What the open reports say (never who sent them), so a needs_info reply can be read.
+    reports: list[MetadataReportView]
     rejected_fingerprints: list[str]
     evidence_digest: str
 
@@ -247,7 +249,7 @@ def load_target(conn, kind: str, target_id: UUID, lock: bool = False):
             return None
         reviewed = ({"product_id": row["product_id"], "quote_variant": row["quote_variant"]}
                     if row["state"] == "verified" else None)
-        reports = conn.execute("""SELECT id FROM catalog_metadata_report WHERE target='marketplace' AND edition_id=%s AND status=ANY(%s)
+        reports = conn.execute("""SELECT * FROM catalog_metadata_report WHERE target='marketplace' AND edition_id=%s AND status=ANY(%s)
           ORDER BY created_at,id""", (target_id, list(OPEN))).fetchall()
         rejected = conn.execute("""SELECT source_fingerprint FROM catalog_metadata_rejection WHERE target='marketplace' AND edition_id=%s
           ORDER BY source_fingerprint""", (target_id,)).fetchall()
@@ -261,24 +263,25 @@ def load_target(conn, kind: str, target_id: UUID, lock: bool = False):
         if not row:
             return None
         reviewed = row["live_identity"] if row["state"] == "eligible" else row["live_inputs"]
-        reports = conn.execute("""SELECT id FROM catalog_metadata_report WHERE target='live' AND printing_id=%s AND status=ANY(%s)
+        reports = conn.execute("""SELECT * FROM catalog_metadata_report WHERE target='live' AND printing_id=%s AND status=ANY(%s)
           ORDER BY created_at,id""", (target_id, list(OPEN))).fetchall()
         rejected = conn.execute("""SELECT source_fingerprint FROM catalog_metadata_rejection WHERE target='live' AND printing_id=%s
           ORDER BY source_fingerprint""", (target_id,)).fetchall()
         target = "live"
     candidate = row["candidate"] or {}
     source_fingerprint = fingerprint(candidate) if candidate else None
-    report_ids = [r["id"] for r in reports]
+    summaries = [_view(r) for r in reports]
+    report_ids = [r.id for r in summaries]
     digest = hashlib.sha256(json.dumps({
         "target": target, "printing_id": str(row["printing_id"]), "edition_id": str(row["edition_id"]) if row["edition_id"] else None,
         "state": row["state"], "reason": row["reason"], "basis_revision": row["public_revision"],
         "mapping_revision": row["mapping_revision"], "candidate": source_fingerprint, "reviewed": reviewed,
-        "reports": [str(r) for r in report_ids]}, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+        "reports": [r.model_dump(mode="json") for r in summaries]}, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
     return {"kind": kind, "target": target, "printing_id": row["printing_id"], "edition_id": row["edition_id"],
             "descriptor": row["descriptor"], "set_id": row["set_id"], "collector_number": row["collector_number"],
             "name": row["name"], "state": row["state"], "reason": row["reason"], "basis_revision": row["public_revision"],
             "mapping_revision": row["mapping_revision"], "source_candidate": candidate, "source_fingerprint": source_fingerprint,
-            "reviewed_value": reviewed, "report_ids": report_ids, "rejected_fingerprints": [r["source_fingerprint"] for r in rejected],
+            "reviewed_value": reviewed, "report_ids": report_ids, "reports": summaries, "rejected_fingerprints": [r["source_fingerprint"] for r in rejected],
             "evidence_digest": digest, "row": row}
 
 

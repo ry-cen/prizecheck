@@ -882,3 +882,28 @@ def test_rule_activation_hands_an_undelivered_backlog_to_a_detached_drain(world,
     # Verified Editions are never re-qualified, so deactivating changes nothing and starts no drain.
     assert off.status_code == 200 and off.json()["public_delivery"] == "delivered" and spawned == [True]
 
+
+
+def test_the_maintainer_sees_report_contents_without_the_reporters_identity_and_the_digest_binds_them(quarantined):
+    first = evidence("editions", quarantined["normal"])
+    created = market_report(quarantined, note="Product 4321 is on the card sleeve", evidence_url="https://example.org/sleeve").json()
+    shown = evidence("editions", quarantined["normal"])
+    [summary] = shown["reports"]
+    assert (summary["id"], summary["target"], summary["issue"], summary["status"]) == (created["id"], "marketplace", "incorrect", "pending")
+    assert summary["proposed"] == {"product_id": 4321, "quote_variant": "normal"}
+    assert summary["evidence_url"] == "https://example.org/sleeve" and summary["note"] == "Product 4321 is on the card sleeve"
+    assert summary["created_at"] and shown["report_ids"] == [created["id"]]
+    assert REPORTER not in json.dumps(shown) and "reporter" not in json.dumps(shown)
+    assert next(item for item in queue()["items"] if item["edition_id"] == quarantined["normal"])["reports"] == shown["reports"]
+    # Asking for information and the reporter's reply are visible and change the evidence the decision binds to.
+    asked = request("POST", f"{ADMIN}/reports/{created['id']}/decision", OWNER, {"decision": "needs_info", "reason": "Which sleeve?"})
+    assert asked.status_code == 200
+    waiting = evidence("editions", quarantined["normal"])
+    assert waiting["reports"][0]["status"] == "needs_info" and waiting["evidence_digest"] != shown["evidence_digest"]
+    reply = request("PATCH", f"{REPORTS}/{created['id']}", REPORTER, {"note": "The Furret sleeve from the 2020 box", "evidence_url": "https://example.org/box"})
+    assert reply.status_code == 200
+    answered = evidence("editions", quarantined["normal"])
+    assert answered["reports"][0]["note"] == "The Furret sleeve from the 2020 box" and answered["reports"][0]["evidence_url"] == "https://example.org/box"
+    assert answered["evidence_digest"] not in (waiting["evidence_digest"], shown["evidence_digest"], first["evidence_digest"])
+    stale = decide(waiting, "unmap", issue=True)
+    assert (stale.status_code, stale.json()["detail"]["code"]) == (409, "METADATA_EVIDENCE_CHANGED")

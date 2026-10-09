@@ -522,6 +522,7 @@ test("a request for information round-trips through the collector back to the ma
         printing_id: target.printing_id,
         edition_id: target.id,
         proposed: { product_id: 4321 },
+        evidence_url: "https://example.org/listing",
         note: "Original note",
       },
     }
@@ -533,6 +534,12 @@ test("a request for information round-trips through the collector back to the ma
     .getByRole("article")
     .filter({ hasText: "Furret" })
     .filter({ hasText: "normal" });
+  // The maintainer can read what was reported, and the link cannot leak the opener.
+  await expect(item).toContainText("Note: Original note");
+  await expect(item).toContainText("product_id");
+  const link = item.getByRole("link", { name: "https://example.org/listing" });
+  await expect(link).toHaveAttribute("rel", "noopener noreferrer");
+  await expect(link).toHaveAttribute("href", "https://example.org/listing");
   await item.getByLabel("Decision reason").fill("Which listing did you mean?");
   await item
     .getByRole("button", { name: /Ask reporter for information/ })
@@ -579,7 +586,7 @@ test("a request for information round-trips through the collector back to the ma
       .getByRole("article")
       .filter({ hasText: "Furret" })
       .filter({ hasText: "normal" })
-  ).toContainText("1 linked report");
+  ).toContainText("Note: The TCGplayer listing 4321"); // the reply is readable
   const queue = await page.request.get(
     `${ORIGIN}/api/admin/catalog-metadata/queue`
   );

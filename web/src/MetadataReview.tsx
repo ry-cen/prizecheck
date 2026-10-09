@@ -52,6 +52,11 @@ const codeError = (error: unknown) =>
     ? "Code rate limit reached. Try again in a minute."
     : "Unable to send the code. Please retry.";
 
+function safeLink(value: string | null): string | undefined {
+  // Reporter-supplied: only http(s) is ever a link.
+  return value && /^https?:\/\//i.test(value) ? value : undefined;
+}
+
 function summarize(value: Record<string, unknown> | null | undefined) {
   if (!value || !Object.keys(value).length) return "none";
   return Object.entries(value)
@@ -325,27 +330,45 @@ function ReviewItem({
       )}
       {hasReports && (
         <ul>
-          {item.report_ids.map((id) => (
-            <li key={id}>
-              Report {id.slice(0, 8)}{" "}
-              <button
-                type="button"
-                disabled={busy || !reason.trim()}
-                aria-label={`Ask reporter for information on report ${id.slice(0, 8)}`}
-                onClick={() => void reportDecision(id, "needs_info")}
-              >
-                Ask for information
-              </button>{" "}
-              <button
-                type="button"
-                disabled={busy || !reason.trim()}
-                aria-label={`Reject report ${id.slice(0, 8)}`}
-                onClick={() => void reportDecision(id, "reject")}
-              >
-                Reject report
-              </button>
-            </li>
-          ))}
+          {item.reports.map((report) => {
+            const id = report.id;
+            return (
+              <li key={id}>
+                Report {id.slice(0, 8)} ({report.issue},{" "}
+                {report.status.replace(/_/g, " ")})
+                <div>Proposed: {summarize(report.proposed)}</div>
+                {report.note && <div>Note: {report.note}</div>}
+                {safeLink(report.evidence_url) && (
+                  <div>
+                    Evidence:{" "}
+                    <a
+                      href={safeLink(report.evidence_url)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      {report.evidence_url}
+                    </a>
+                  </div>
+                )}{" "}
+                <button
+                  type="button"
+                  disabled={busy || !reason.trim()}
+                  aria-label={`Ask reporter for information on report ${id.slice(0, 8)}`}
+                  onClick={() => void reportDecision(id, "needs_info")}
+                >
+                  Ask for information
+                </button>{" "}
+                <button
+                  type="button"
+                  disabled={busy || !reason.trim()}
+                  aria-label={`Reject report ${id.slice(0, 8)}`}
+                  onClick={() => void reportDecision(id, "reject")}
+                >
+                  Reject report
+                </button>
+              </li>
+            );
+          })}
         </ul>
       )}
       <label htmlFor={decisionId}>Decision</label>
@@ -537,7 +560,10 @@ function RuleCard({
       });
       setCode("");
       setStatus(
-        `Rule change recorded for ${result.printings} Printings and ${result.editions} Editions. Public delivery: ${result.public_delivery}.`
+        `Rule change recorded for ${result.printings} Printings and ${result.editions} Editions. Public delivery: ${result.public_delivery}.` +
+          (result.public_delivery === "pending"
+            ? " A background drain is delivering the remaining changes; until it finishes the public store may still show the old eligibility. If it stays pending, run scripts/backfill_public_catalog.py (exit code 3 means another drain is still running; retry later)."
+            : "")
       );
       await onChanged();
     } catch (failure) {
