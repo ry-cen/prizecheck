@@ -135,7 +135,8 @@ def test_quote_and_target_metadata_imports_preserve_every_existing_relationship(
     with connect() as conn:
         mapping = conn.execute("SELECT mapping_revision,mapping_state FROM catalog_edition_metadata WHERE edition_id=%s",
                                (normal,)).fetchone()
-    assert mapping == {"mapping_revision": 2, "mapping_state": "unverified"}
+    # A variant ID is enrichment the matching rule never reads, so the revision quotes are keyed on does not move.
+    assert mapping == {"mapping_revision": 1, "mapping_state": "unverified"}
 
     # Ambiguous correspondence: the source now describes one product-free variant.
     collapsed = product_split()
