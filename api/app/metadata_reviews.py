@@ -435,6 +435,18 @@ def _source_facts(conn, loaded):
             "source_id": row["source_id"], "source_record": row["source_record"] or {}, "display": display}
 
 
+def _variant_block_holds(loaded, reviewed) -> bool:
+    """True when this Edition's own source variant block for the quote variant key holds the reviewed product."""
+    candidate = loaded["source_candidate"]
+    if not isinstance(candidate, dict) or candidate.get("correspondence") != "source_candidate":
+        return False
+    pricing = (candidate.get("candidate") or {}).get("pricing")
+    block = pricing.get("tcgplayer") if isinstance(pricing, dict) else None
+    entry = block.get(reviewed["quote_variant"]) if isinstance(block, dict) and reviewed["quote_variant"] not in MatchingRulesV1.BLOCK_METADATA else None
+    product = entry.get("productId") if isinstance(entry, dict) else None
+    return type(product) is int and product == reviewed["product_id"]
+
+
 def plan_marketplace(conn, command: MetadataDecisionInput, loaded) -> dict:
     """Validate a marketplace decision and return the effect to apply. Raises before anything is written."""
     decision = command.decision
@@ -448,6 +460,10 @@ def plan_marketplace(conn, command: MetadataDecisionInput, loaded) -> dict:
                 "reviewed": {"product_id": None, "quote_variant": None}}
     if decision == "correct":
         reviewed = _product_value(command.reviewed_value)
+        if reviewed["quote_variant"] is not None and not _variant_block_holds(loaded, reviewed):
+            # The price lookup names the source card and variant key only, so it may be published only while
+            # that variant's source block really belongs to the reviewed product. Otherwise the product stands unpriced.
+            reviewed = {**reviewed, "quote_variant": None}
     else:
         if not loaded["source_candidate"]:
             fail(422, "INVALID_PRODUCT")

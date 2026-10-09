@@ -266,13 +266,13 @@ def test_correction_verifies_a_quarantined_edition_with_provenance_and_without_c
     item = evidence("editions", quarantined["normal"])
     before = snapshot()
     before_row = edition_row(quarantined["normal"])
-    response = decide(item, "correct", {"product_id": 4321, "quote_variant": "normal"})
+    response = decide(item, "correct", {"product_id": 999, "quote_variant": "normal"})  # the source block now says 999
     assert response.status_code == 200, response.text
     body = response.json()
     assert (body["state"], body["reason"], body["decision"]) == ("verified", None, "correct")
     after = edition_row(quarantined["normal"])
     assert (after["mapping_state"], after["product_id"], after["quote_variant"], after["mapping_basis"], after["auto_closed"]) == (
-        "verified", 4321, "normal", "maintainer", True)
+        "verified", 999, "normal", "maintainer", True)
     assert after["mapping_revision"] == before_row["mapping_revision"] + 1 and after["public_revision"] > before_row["public_revision"]
     assert str(after["mapping_decision_id"]) == body["decision_id"] and after["accepted_fingerprint"] == item["source_fingerprint"]
     after_snapshot = snapshot()
@@ -286,10 +286,10 @@ def test_correction_verifies_a_quarantined_edition_with_provenance_and_without_c
     assert (decision["reviewer_id"], decision["decision"], decision["basis_revision"], decision["source_fingerprint"]) == (
         OWNER, "correct", item["basis_revision"], item["source_fingerprint"])
     assert decision["checks"] == {"printing": "passed", "product": "passed", "variant": "passed"}
-    assert decision["clock_revision"] == after["public_revision"] and decision["reviewed_value"] == {"product_id": 4321, "quote_variant": "normal"}
+    assert decision["clock_revision"] == after["public_revision"] and decision["reviewed_value"] == {"product_id": 999, "quote_variant": "normal"}
     assert [(r["source_fingerprint"], r["decision_id"]) for r in rejections] == [(item["source_fingerprint"], decision["id"])]
     assert [(o["target_kind"], str(o["target_id"])) for o in outbox] == [("edition", quarantined["normal"])]
-    assert targets.product_id == 4321 and targets.quote_lookup["variant"] == "normal"
+    assert targets.product_id == 999 and targets.quote_lookup["variant"] == "normal"
     assert len(published) == 1
     assert code_row(target_of(item))["consumed_at"] is not None
     # The rejected source value repeats: no new quarantine, no new revision.
@@ -377,10 +377,11 @@ def test_a_product_or_price_slot_held_elsewhere_is_a_mapping_conflict(world):
     shared = decide(evidence("editions", second), "correct", {"product_id": 1001, "quote_variant": "holofoil"})
     assert (shared.status_code, shared.json()["detail"]["code"]) == (409, "MAPPING_CONFLICT")
     assert decide(evidence("editions", second), "correct", {"product_id": 1001, "quote_variant": None}).json()["detail"]["code"] == "MAPPING_CONFLICT"
-    # A sibling Edition may share the product but not the exact (product, variant) slot.
+    # A sibling may share the product, but the sibling's variant key is not in this Edition's own source block,
+    # so the correction is published unpriced rather than borrowing the sibling's price slot.
     clash = decide(evidence("editions", world["normal"]), "correct", {"product_id": 1001, "quote_variant": "reverse-holofoil"})
-    assert (clash.status_code, clash.json()["detail"]["code"]) == (409, "MAPPING_CONFLICT")
-    assert decide(evidence("editions", world["normal"]), "correct", {"product_id": 1001, "quote_variant": None}).status_code == 200
+    assert clash.status_code == 200, clash.text
+    assert (edition_row(world["normal"])["product_id"], edition_row(world["normal"])["quote_variant"]) == (1001, None)
 
 
 def test_unmap_and_reject_source_clear_the_mapping_and_the_rejected_value_stays_rejected(quarantined):
@@ -815,3 +816,33 @@ def test_a_wrong_approval_code_never_takes_the_catalog_clock(world):
     assert clock_revision() == before
     assert code_row("rule:marketplace_matching:1")["attempts"] == 1
     assert activation("marketplace_matching", 1, issue=False).status_code == 200
+
+
+# ------------------------------------------------------------------ a corrected price lookup must belong to the reviewed product
+
+
+def test_a_correction_is_priced_only_when_the_source_variant_block_holds_the_reviewed_product(quarantined):
+    item = evidence("editions", quarantined["normal"])
+    # The source block for "normal" now holds product 999. Reviewing product 4321 must not publish a lookup
+    # that would show product 999's prices next to product 4321.
+    assert decide(item, "correct", {"product_id": 4321, "quote_variant": "normal"}).status_code == 200
+    row = edition_row(quarantined["normal"])
+    assert (row["mapping_state"], row["product_id"], row["quote_variant"]) == ("verified", 4321, None)
+    with connect() as conn:
+        decision = conn.execute("SELECT reviewed_value,checks FROM catalog_metadata_decision").fetchone()
+        targets = edition_targets(conn, [row["edition_id"]])[row["edition_id"]]
+    assert decision["reviewed_value"] == {"product_id": 4321, "quote_variant": None}
+    assert decision["checks"] == {"printing": "passed", "product": "passed", "variant": "not_established"}
+    assert targets.product_id == 4321 and targets.quote_lookup is None
+    # A variant key the source block does not have is unpriced as well.
+    other = evidence("editions", quarantined["reverse"])
+    assert decide(other, "correct", {"product_id": 1001, "quote_variant": "holofoil"}).status_code == 200
+    assert edition_row(quarantined["reverse"])["quote_variant"] is None
+
+
+def test_a_correction_without_a_source_candidate_is_published_unpriced(world):
+    with connect() as conn:
+        conn.execute("UPDATE catalog_edition_metadata SET mapping_candidate='{}'::jsonb WHERE edition_id=%s", (world["normal"],))
+    item = evidence("editions", world["normal"])
+    assert decide(item, "correct", {"product_id": 5005, "quote_variant": "normal"}).status_code == 200
+    assert edition_row(world["normal"])["quote_variant"] is None

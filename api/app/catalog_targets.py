@@ -415,13 +415,19 @@ class TargetContext:
 
 
 def verified_elsewhere(conn, printing_id, edition_id):
-    """A product may be shared by sibling Editions, but never by another Printing, and one
-    (product, quote variant) price slot belongs to a single verified Edition."""
+    """Whether a (product, quote variant) pair is already held by another verified Edition.
+
+    A product may be shared by sibling Editions, but never by another Printing. A quote variant
+    names one price slot of the Printing's source card, so it belongs to a single verified
+    Edition of that Printing whatever product the sibling holds: the published quote lookup
+    carries the card and variant key, not the product.
+    """
     def held(product_id, quote_variant=None):
         return conn.execute("""SELECT 1 FROM catalog_edition_metadata m JOIN catalog_edition e ON e.id=m.edition_id
-          WHERE m.mapping_state='verified' AND m.product_id=%s AND m.edition_id<>%s
-            AND (e.printing_id<>%s OR (%s::text IS NOT NULL AND m.quote_variant=%s::text)) LIMIT 1""",
-                            (product_id, edition_id, printing_id, quote_variant, quote_variant)).fetchone() is not None
+          WHERE m.mapping_state='verified' AND m.edition_id<>%s
+            AND ((m.product_id=%s AND e.printing_id<>%s)
+              OR (e.printing_id=%s AND %s::text IS NOT NULL AND m.quote_variant=%s::text)) LIMIT 1""",
+                            (edition_id, product_id, printing_id, printing_id, quote_variant, quote_variant)).fetchone() is not None
     return held
 
 

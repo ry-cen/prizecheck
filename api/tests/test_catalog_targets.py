@@ -748,3 +748,25 @@ def test_sibling_editions_sharing_a_quote_variant_never_both_verify():
         conn.execute("""UPDATE catalog_edition_metadata SET mapping_state='verified',product_id=77,quote_variant='normal',
           mapping_basis='matching_rule',matching_activation_id=(SELECT activation_id FROM catalog_rule_state WHERE kind='marketplace_matching'),
           auto_closed=true WHERE edition_id=%s""", (rows[1]["edition_id"],))
+
+
+def test_a_price_slot_belongs_to_one_edition_of_a_printing_whatever_the_product():
+    """The public quote lookup names the Printing's source card and variant key, not the product."""
+    from app.catalog_targets import verified_elsewhere
+    reset_catalog(); activate(MATCHING, 1)
+    run(Records(card(1)))
+    printing, rows = metadata()
+    normal, reverse = rows["normal"], rows["reverse"]
+    assert (normal["mapping_state"], normal["quote_variant"], reverse["quote_variant"]) == ("verified", "normal", "reverse-holofoil")
+    with connect() as conn:
+        held = verified_elsewhere(conn, printing["printing_id"], reverse["id"])
+        assert held(2002, "normal")        # the sibling's slot, even for another product
+        assert not held(2002, None)        # unpriced siblings never share a slot
+        assert not held(1001, "reverse-holofoil")  # its own slot is its own
+        assert not held(2002, "holofoil")  # an unheld slot
+    with connect() as conn, pytest.raises(psycopg.errors.UniqueViolation):  # the database refuses it as well
+        conn.execute("UPDATE catalog_edition_metadata SET product_id=2002,quote_variant='normal' WHERE edition_id=%s", (reverse["id"],))
+    # Another Printing may use the same variant key.
+    run(Records(card(1), card(2)))
+    _, other = metadata("meta-2")
+    assert (other["normal"]["mapping_state"], other["normal"]["quote_variant"]) == ("verified", "normal")

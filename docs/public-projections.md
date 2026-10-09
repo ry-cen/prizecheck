@@ -56,6 +56,8 @@ quarantine:edition:<ref> {edition_ref, revision, mapping_revision, state: clear|
 
 `revision` is the commit-ordered public review revision (`public_revision`). `product_id` is published only while the Edition is verified. `quote_lookup` is published only while it is verified and has a reviewed quote variant. Live identity is published only while the Printing is eligible. Reason codes are the fixed enums in migration 023.
 
+`quote_lookup` names the source card and the variant key but not the product, so two rules keep it honest. First, an Edition is priced only when the product it publishes belongs to that variant block: a maintainer `correct` keeps its `quote_variant` only while the Edition's own source block for that variant key holds the reviewed `productId`; otherwise the Edition is published verified but unpriced (`quote_variant` NULL). Second, one `(Printing, quote_variant)` price slot belongs to a single verified Edition, whatever product its sibling holds (code check plus the unique index `catalog_edition_verified_printing_slot`). **Obligation for the quote writers (tickets 07 and 08):** before storing a quote under `quote:<ref>:<mapping_revision>`, check that the fetched variant block's `productId` equals the published `product_id`; a mismatch is `absent`, never a quote.
+
 ### Delivery
 
 Every correction takes its `public_revision` from one PostgreSQL clock row that stays locked until commit, and a trigger enqueues the changed target in `catalog_public_outbox` in the same transaction. A drain (`drain`) selects pending targets ordered by `(priority, sequence)`, so quarantines and suspensions go first. For each target it re-reads current committed PostgreSQL state and compares the revision with what is stored:

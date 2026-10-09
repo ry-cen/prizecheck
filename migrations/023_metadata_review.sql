@@ -129,6 +129,14 @@ ALTER TABLE catalog_edition_metadata
 -- DB backstop: one verified Edition per (product, quote variant), so no two Editions share a price.
 CREATE UNIQUE INDEX catalog_edition_verified_price_slot ON catalog_edition_metadata(product_id,quote_variant)
  WHERE mapping_state='verified' AND quote_variant IS NOT NULL;
+-- One price slot per (Printing, quote variant) whatever the product: the published quote lookup names the
+-- Printing's source card and variant key but not the product, so two sibling Editions in one slot would show one price.
+ALTER TABLE catalog_edition_metadata ADD COLUMN printing_id uuid;
+UPDATE catalog_edition_metadata m SET printing_id=e.printing_id FROM catalog_edition e WHERE e.id=m.edition_id;
+ALTER TABLE catalog_edition_metadata ALTER COLUMN printing_id SET NOT NULL,
+ ADD FOREIGN KEY (edition_id,printing_id) REFERENCES catalog_edition(id,printing_id) ON DELETE CASCADE;
+CREATE UNIQUE INDEX catalog_edition_verified_printing_slot ON catalog_edition_metadata(printing_id,quote_variant)
+ WHERE mapping_state='verified' AND quote_variant IS NOT NULL;
 ALTER TABLE catalog_edition_metadata DROP COLUMN mapping_verified, DROP COLUMN mapping_quarantined;
 
 ALTER TABLE catalog_printing_metadata
@@ -197,6 +205,9 @@ CREATE INDEX catalog_public_outbox_pending ON catalog_public_outbox(priority,seq
 -- Database-enforced revision stamping and same-transaction enqueue.
 CREATE FUNCTION stamp_edition_metadata() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
+ IF NEW.printing_id IS NULL THEN
+  SELECT printing_id INTO NEW.printing_id FROM catalog_edition WHERE id=NEW.edition_id;
+ END IF;
  IF NEW.mapping_state='verified' AND EXISTS (SELECT 1 FROM catalog_edition e
      WHERE e.id=NEW.edition_id AND e.descriptor->>'label'='Unspecified Variant') THEN
   RAISE EXCEPTION 'An Unspecified Variant cannot be marketplace-verified';
