@@ -141,7 +141,7 @@ def test_active_rule_verifies_only_an_exact_variant_and_names_the_quote_variant(
     with connect() as conn:
         targets = edition_targets(conn, [row["id"] for row in rows.values()])
     normal = targets[rows["normal"]["id"]]
-    assert (normal.state, normal.product_id, normal.price_lookup) == ("verified", 1001,
+    assert (normal.state, normal.product_id, normal.quote_lookup) == ("verified", 1001,
                                                                       {"source": "tcgdex", "card": "meta-1", "variant": "normal"})
 
 
@@ -156,7 +156,7 @@ def test_product_pass_with_variant_failure_is_verified_but_unpriced():
     assert (rows["normal"]["mapping_state"], rows["normal"]["product_id"], rows["normal"]["quote_variant"]) == ("verified", 55, None)
     with connect() as conn:
         target = edition_targets(conn, [rows["normal"]["id"]])[rows["normal"]["id"]]
-    assert target.product_id == 55 and target.price_lookup is None
+    assert target.product_id == 55 and target.quote_lookup is None
 
 
 def test_printing_level_correspondence_name_mismatch_and_duplicate_products_never_verify():
@@ -224,7 +224,7 @@ def test_changed_mapping_quarantines_immediately_and_never_auto_reverifies():
         targets = edition_targets(conn, [rows["normal"]["id"], rows["reverse"]["id"]])
         live = printing_live(conn, [printing["printing_id"]])[printing["printing_id"]]
     quarantined = targets[rows["normal"]["id"]]
-    assert (quarantined.state, quarantined.reason, quarantined.product_id, quarantined.price_lookup) == (
+    assert (quarantined.state, quarantined.reason, quarantined.product_id, quarantined.quote_lookup) == (
         "quarantined", "candidate_changed", None, None)
     assert targets[rows["reverse"]["id"]].product_id == 1001
     assert live.state == "eligible" and live.identity["set_code"] == "DAA"  # independent valid Live eligibility remains
@@ -657,7 +657,7 @@ def test_manual_printing_has_metadata_but_only_a_maintainer_can_map_it():
     with connect() as conn:
         mapped = edition_targets(conn, [edition])[edition]
         assert conn.execute("SELECT source_id FROM catalog_printing WHERE id=%s", (printing,)).fetchone()["source_id"] is None
-    assert (mapped.state, mapped.product_id, mapped.price_lookup) == ("verified", 6006, None)
+    assert (mapped.state, mapped.product_id, mapped.quote_lookup) == ("verified", 6006, None)
 
 
 def test_retired_source_record_keeps_reviewed_meaning_without_changing_identity():

@@ -110,7 +110,7 @@ def test_verified_priced_edition_and_eligible_printing_publish_only_the_reviewed
         assert private not in text
 
 
-def test_price_lookup_is_public_only_when_verified_and_a_quote_variant_is_set():
+def test_quote_lookup_is_public_only_when_verified_and_a_quote_variant_is_set():
     from app.public_catalog import rebuild
     reset_catalog()
     activate(MATCHING, 1)
@@ -328,6 +328,7 @@ def test_readers_fail_closed_on_missing_malformed_or_inconsistent_records():
         ({**good, 'marketplace': {**good['marketplace'], 'product_id': '1001'}}, hold),
         ({**good, 'marketplace': {**good['marketplace'], 'state': 'bogus'}}, hold),
         ({**good, 'marketplace': {**good['marketplace'], 'product_id': None}}, hold),
+        ({**good, 'marketplace': {**good['marketplace'], 'reason': 7}}, hold),
         ('not a record', hold), (good, ['not', 'a', 'record']), (good, {**hold, 'state': 'bogus'}),
     ]
     for edition, quarantine in mismatches:
@@ -350,6 +351,9 @@ def test_readers_fail_closed_on_missing_malformed_or_inconsistent_records():
     for broken in ({**published, 'live': {**published['live'], 'identity': None}},
                    {**published, 'live': {**published['live'], 'state': 'maybe'}},
                    {**published, 'live': {**published['live'], 'identity': {'name': 'x'}}},
+                   {**published, 'live': {**published['live'], 'reason': 7}},
+                   {**published, 'live': {**published['live'], 'rule_version': '99'}},
+                   {**published, 'live': {**published['live'], 'rule_version': 0}},
                    {**published, 'revision': -1}, {**published, 'printing_ref': 'e' * 48}, {**published, 'live': 'eligible'}):
         swap({pkey: broken})
         assert live_states(store, [pref], deadline())[pref].state == 'unknown'

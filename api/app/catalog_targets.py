@@ -559,7 +559,7 @@ class EditionTargets:
     reason: str | None
     mapping_revision: int
     product_id: int | None
-    price_lookup: dict | None
+    quote_lookup: dict | None
 
 
 @dataclass(frozen=True)

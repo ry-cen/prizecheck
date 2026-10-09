@@ -4,9 +4,11 @@ Anonymous readers resolve opaque Edition/Printing references, Live eligibility a
 marketplace eligibility only through these records. Values are a strict allowlist
 (see ``printing_value``/``edition_value``/``quarantine_value``): public references,
 display fields, the physical descriptor, the public review revision and the effective
-Live/marketplace state with its fixed reason code. Internal UUIDs, source IDs, owners,
-Holdings, sessions, reviewer identity, evidence, free-text reasons, reports, rejected
-fingerprints, source candidates and quote amounts never appear here.
+Live/marketplace state with its fixed reason code. The one source identifier published is
+the TCGdex card ID inside ``quote_lookup.card`` (with the quote variant key), and only for a
+verified, priced Edition. Internal UUIDs, owners, Holdings, sessions, reviewer identity,
+evidence, free-text reasons, reports, rejected fingerprints, source candidates and quote
+amounts never appear here.
 
 Delivery rests on two facts. Every correction takes a commit-ordered ``public_revision``
 from one PostgreSQL clock and enqueues the target in the same transaction (a dirty-target
@@ -501,6 +503,8 @@ def _marketplace(ref, edition, quarantine):
         product = market['product_id']
         if product is not None and (type(product) is not int or product <= 0):
             return None
+        if market['reason'] is not None and not isinstance(market['reason'], str):
+            return None
     except (KeyError, TypeError):
         return None
     if quarantine['state'] == 'quarantined' or market['state'] == 'quarantined':
@@ -562,7 +566,9 @@ def _live(ref, value, generation):
             return unknown
         live = value['live']
         if not isinstance(live, dict) or set(live) != {'state', 'reason', 'rule_version', 'identity'} \
-                or live['state'] not in ('unsupported', 'eligible', 'suspended'):
+                or live['state'] not in ('unsupported', 'eligible', 'suspended') \
+                or not (live['reason'] is None or isinstance(live['reason'], str)) \
+                or not (live['rule_version'] is None or _int(live['rule_version']) and live['rule_version'] >= 1):
             return unknown
         identity = live['identity']
         if live['state'] == 'eligible':

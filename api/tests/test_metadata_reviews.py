@@ -289,7 +289,7 @@ def test_correction_verifies_a_quarantined_edition_with_provenance_and_without_c
     assert decision["clock_revision"] == after["public_revision"] and decision["reviewed_value"] == {"product_id": 4321, "quote_variant": "normal"}
     assert [(r["source_fingerprint"], r["decision_id"]) for r in rejections] == [(item["source_fingerprint"], decision["id"])]
     assert [(o["target_kind"], str(o["target_id"])) for o in outbox] == [("edition", quarantined["normal"])]
-    assert targets.product_id == 4321 and targets.price_lookup["variant"] == "normal"
+    assert targets.product_id == 4321 and targets.quote_lookup["variant"] == "normal"
     assert len(published) == 1
     assert code_row(target_of(item))["consumed_at"] is not None
     # The rejected source value repeats: no new quarantine, no new revision.
