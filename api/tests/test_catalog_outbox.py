@@ -688,3 +688,40 @@ def test_drain_refuses_a_connection_with_an_open_transaction_and_loses_nothing()
         assert conn.execute('SELECT 1 FROM inventory_owner WHERE user_id=%s', (owner,)).fetchone()  # the caller's write survived
         conn.commit()
         assert drain(conn).state == 'delivered'  # and an idle connection still drains
+
+
+def plant_foreign_timeline(edition_ref, mapping_revision, *, revision_gap=1000):
+    """Make the store hold Edition state from a lost timeline: a higher mapping revision with its quote already written."""
+    from app.public_records import quote_key, result_key
+    key, held = catalog_edition_key(edition_ref), quarantine_key(edition_ref)
+    records = read(key, held)
+    value = records[key].value
+    high = value['revision'] + revision_gap
+    foreign = {**value, 'revision': high, 'marketplace': {**value['marketplace'], 'mapping_revision': mapping_revision}}
+    foreign_hold = {**records[held].value, 'revision': high, 'mapping_revision': mapping_revision}
+    quote, result = quote_key(edition_ref, mapping_revision), result_key(edition_ref, mapping_revision)
+    store = public_record_store()
+    versions = {name: record.version for name, record in read(key, held, quote, result).items()}
+    assert store.compare_and_swap(versions, {key: foreign, held: foreign_hold, quote: {'attempt': 1, 'amount': '9.99'},
+                                             result: {'state': 'quote', 'attempt': 1}}, deadline=time.monotonic() + 5)
+    return mapping_revision
+
+
+def test_r3_never_reuses_a_mapping_revision_the_lost_timeline_already_wrote_quotes_under():
+    from app.public_catalog import marketplace_states
+    printing, normal, printing_ref, edition_ref = stage()
+    with connect() as conn:
+        before = conn.execute('SELECT mapping_revision FROM catalog_edition_metadata WHERE edition_id=%s', (normal['id'],)).fetchone()['mapping_revision']
+    stored = plant_foreign_timeline(edition_ref, before + 4)
+    with connect() as conn:
+        assert rebuild(conn).conflicts >= 1
+        after = conn.execute('SELECT mapping_revision,mapping_state FROM catalog_edition_metadata WHERE edition_id=%s', (normal['id'],)).fetchone()
+    assert after['mapping_state'] == 'quarantined'
+    assert after['mapping_revision'] > stored  # not before+1, which a later verify would walk up to the planted quote
+    states = marketplace_states(public_record_store(), [edition_ref], time.monotonic() + 5)
+    assert states[edition_ref].state == 'quarantined' and states[edition_ref].quote is None
+    # The same holds for an Edition that was already quarantined when the recovery conflict was found.
+    again = plant_foreign_timeline(edition_ref, after['mapping_revision'] + 6)
+    with connect() as conn:
+        assert rebuild(conn).conflicts >= 1
+        assert conn.execute('SELECT mapping_revision FROM catalog_edition_metadata WHERE edition_id=%s', (normal['id'],)).fetchone()['mapping_revision'] > again

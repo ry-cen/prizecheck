@@ -337,10 +337,34 @@ class RebuildResult:
 SCAN_PAGE = 500
 
 
+def _stored_mapping_revision(built, records):
+    """The highest mapping revision the store holds for one Edition (its catalog and quarantine records)."""
+    found = [0]
+    for key in built.values:
+        value = records[key].value
+        if not isinstance(value, dict):
+            continue
+        market = value.get('marketplace')
+        for candidate in (value.get('mapping_revision'), market.get('mapping_revision') if isinstance(market, dict) else None):
+            if type(candidate) is int and candidate > 0:
+                found.append(candidate)
+    return max(found)
+
+
+def _note_conflict(conflicts, kind, target, built, records):
+    if kind == 'edition':
+        conflicts['edition'][target[1]] = _stored_mapping_revision(built, records)
+    else:
+        conflicts['printing'].append(target[1])
+
+
 def _scan(conn, store):
-    """Read every PostgreSQL-known key from the store. Returns (store_max, printing ids, edition ids in conflict)."""
+    """Read every PostgreSQL-known key from the store.
+
+    Returns (store_max, printing ids in conflict, {edition id in conflict: highest stored mapping revision}).
+    """
     store_max = 0
-    conflicts = {'printing': [], 'edition': []}
+    conflicts = {'printing': [], 'edition': {}}
     last = {'printing': None, 'edition': None}
     for kind, table, column in (('printing', 'catalog_printing_metadata', 'printing_id'),
                                 ('edition', 'catalog_edition_metadata', 'edition_id')):
@@ -361,7 +385,7 @@ def _scan(conn, store):
                 store_max = max([store_max, *(stored_revision(records[key].value) for key in value.values)])
                 verdict = classify(value, records)
                 if verdict == 'mismatch':
-                    conflicts[kind].append(target[1])
+                    _note_conflict(conflicts, kind, target, value, records)
                 elif verdict == 'ahead':
                     suspects.append(target)
             if suspects:
@@ -369,12 +393,18 @@ def _scan(conn, store):
                 # a restore. Only a record still ahead of a fresh build is a recovery conflict.
                 fresh = build_values(conn, suspects)
                 conn.commit()
-                conflicts[kind] += [target[1] for target in suspects if target in fresh and classify(fresh[target], records) == 'ahead']
+                for target in suspects:
+                    if target in fresh and classify(fresh[target], records) == 'ahead':
+                        _note_conflict(conflicts, kind, target, fresh[target], records)
     return store_max, conflicts['printing'], conflicts['edition']
 
 
 def _reconcile(conn, store_max, printings, editions):
     """One correction transaction: advance the clock past the store, then stamp conflicts above it.
+
+    ``editions`` maps each conflicting Edition to the highest mapping revision the store holds
+    for it. The new mapping revision is above both PostgreSQL's and the store's, so quotes the
+    lost timeline already wrote under a revision can never be served for a later mapping.
 
     The clock moves first. ``catalog_begin_correction`` caches its revision for the whole
     transaction, so taking it earlier would stamp every conflict at or below ``store_max``.
@@ -389,10 +419,10 @@ def _reconcile(conn, store_max, printings, editions):
             return 0
         revision = conn.execute('SELECT catalog_begin_correction() AS revision').fetchone()['revision']
         if editions:
-            conn.execute("""UPDATE catalog_edition_metadata SET mapping_state='quarantined',mapping_reason='recovery_conflict',
-              auto_closed=true,public_revision=%s,
-              mapping_revision=mapping_revision+(CASE WHEN mapping_state='quarantined' THEN 0 ELSE 1 END)
-              WHERE edition_id=ANY(%s::uuid[])""", (revision, editions))
+            conn.execute("""UPDATE catalog_edition_metadata m SET mapping_state='quarantined',mapping_reason='recovery_conflict',
+              auto_closed=true,public_revision=%s,mapping_revision=greatest(m.mapping_revision,c.stored)+1
+              FROM unnest(%s::uuid[],%s::bigint[]) AS c(id,stored) WHERE m.edition_id=c.id""",
+                         (revision, list(editions), list(editions.values())))
         if printings:
             conn.execute("""UPDATE catalog_printing_metadata SET live_state='suspended',live_reason='recovery_conflict',
               live_identity=NULL,live_auto_closed=true,public_revision=%s WHERE printing_id=ANY(%s::uuid[])""",
