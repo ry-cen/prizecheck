@@ -291,10 +291,12 @@ def _clear_cache():
 
 # --- Shared adapter behaviour -------------------------------------------------------
 class _Records:
-    def read_all(self, keys, *, deadline):
-        """Complete row semantics at one pinned generation, including empty rows."""
+    def read_all(self, keys, *, deadline, generation=None):
+        """Complete row semantics at one pinned generation, including empty rows.
+
+        ``generation`` starts the read at an already-pinned snapshot so several reads share it.
+        """
         keys = list(dict.fromkeys(keys))
-        generation = None
         rows = {}
         for offset in range(0, max(1, len(keys)), MAX_BATCH):
             batch = self.read_records(keys[offset:offset + MAX_BATCH], deadline=deadline, generation=generation)
@@ -991,7 +993,7 @@ def public_record_store():
 _RESULT_STATES = ('quote', 'absent', 'pending')
 
 
-def quote_states(store, pairs, *, deadline):
+def quote_states(store, pairs, *, deadline, generation=None):
     """Current quote state per (edition_ref, mapping_revision), at one generation.
 
     Result marker values: {'state': 'pending', ...} suppresses any payload;
@@ -999,13 +1001,14 @@ def quote_states(store, pairs, *, deadline):
     {'state': 'quote', 'attempt': A, ...} exposes the quote payload only when it
     is present with the same 'attempt'. A missing marker, or an evicted or
     mismatched payload, is 'unknown'. Other mapping revisions are never read.
-    Malformed markers/payloads fail closed with ProjectionUnavailable.
+    Malformed markers/payloads fail closed with ProjectionUnavailable. ``generation``
+    reads at a snapshot pinned by an earlier read (for example the catalog eligibility read).
     """
     pairs = list(dict.fromkeys((_ref(edition), mapping_revision) for edition, mapping_revision in pairs))
     keys = []
     for edition, mapping_revision in pairs:
         keys += [result_key(edition, mapping_revision), quote_key(edition, mapping_revision)]
-    snapshot = store.read_all(keys, deadline=deadline)
+    snapshot = store.read_all(keys, deadline=deadline, generation=generation)
     states = {}
     for pair in pairs:
         result = snapshot.records[result_key(*pair)].value

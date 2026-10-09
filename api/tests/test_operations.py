@@ -238,3 +238,30 @@ def test_failed_release_command_increments_owner_panel_once(tmp_path):
     with TestClient(app) as client:
         status=client.get('/api/admin/operations',headers=headers(owner,'GET','/api/admin/operations')).json()
         assert status['release_failures']==before+1
+
+
+def test_owner_status_counts_pending_public_catalog_deliveries_and_their_age_without_ids():
+    owner = 'ops-'+str(uuid4())
+    path = '/api/admin/operations'
+    with connect() as conn:
+        conn.execute('DELETE FROM owner_binding')
+        conn.execute('DELETE FROM catalog_public_outbox')
+        conn.execute('INSERT INTO inventory_owner(user_id) VALUES (%s)', (owner,))
+        conn.execute('INSERT INTO owner_binding(user_id) VALUES (%s)', (owner,))
+    with TestClient(app) as client:
+        body = client.get(path, headers=headers(owner, 'GET', path)).json()
+        assert body['catalog_outbox_pending'] == 0 and body['catalog_outbox_oldest_seconds'] is None
+        target = str(uuid4())
+        with connect() as conn:
+            conn.execute("""INSERT INTO catalog_public_outbox(target_kind,target_id,revision,created_at,attempts,last_error)
+              VALUES ('edition',%s,1,now()-interval '90 seconds',2,'ProjectionUnavailable'),
+                     ('printing',%s,1,now()-interval '10 seconds',0,NULL)""", (target, str(uuid4())))
+            conn.execute("""INSERT INTO catalog_public_outbox(target_kind,target_id,revision,created_at,delivered_at)
+              VALUES ('edition',%s,1,now()-interval '1000 seconds',now())""", (str(uuid4()),))
+        response = client.get(path, headers=headers(owner, 'GET', path))
+        body = response.json()
+        assert body['catalog_outbox_pending'] == 2  # delivered rows never count
+        assert 89 <= body['catalog_outbox_oldest_seconds'] < 150
+        assert target not in response.text and 'ProjectionUnavailable' not in response.text
+    with connect() as conn:
+        conn.execute('DELETE FROM catalog_public_outbox')

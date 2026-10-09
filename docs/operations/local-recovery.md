@@ -24,6 +24,32 @@ The CLI verifies checksums before creation, creates a fresh database, restores s
 
 Recovered catalog search remains unavailable until a successful full source reimport: `active_generation` and `last_success` are reset, while immutable catalog identities/displays and manual corrections survive. A restored private database must not be connected to an independently restored, older public projection store: revoked tokens could otherwise reappear. Public projection reconciliation/rebuild and provider-specific cutover remain a separate required recovery procedure. Do not use this disposable drill as a production cutover command.
 
+## Rebuilding public catalog records
+
+The public catalog records in `PUBLIC_PROJECTION_DIR/records` are derived from PostgreSQL. Rebuild them with one command; it needs the same `DATABASE_URL` and `PUBLIC_PROJECTION_DIR` as the API:
+
+```sh
+.venv/bin/python scripts/init_public_records.py      # only if the records store must exist
+.venv/bin/python scripts/backfill_public_catalog.py  # the rebuild
+```
+
+The rebuild reads every key it knows from PostgreSQL, so it works from three starting states. It prints written and unchanged counts, recovery conflicts and the highest stored revision. It exits 1, with a fixed message, when the store or database is unreachable or delivery cannot finish. It never creates the store, never touches Published Decks or the discovery revision and cursor, and is safe to repeat: a second run writes nothing. Anonymous Deck and discovery reads do not depend on the records store and keep working throughout.
+
+**R1: the records store was lost or re-initialized empty.** Run `init_public_records.py`, then the rebuild. It re-enqueues every Printing and Edition and writes them all. Until it finishes, readers of catalog eligibility find no record and treat every Edition and Printing as ineligible (fail closed).
+
+**R2: the records store was restored from an older copy.** Run the rebuild. Every restored record has a lower revision than PostgreSQL, so each is overwritten with the current value. Stale clears cannot survive: only revisions newer than the stored one are written.
+
+**R3: PostgreSQL was restored to a point older than the records store** (for example `scripts/recovery.py restore`, which restores sequences but not the store). Run the rebuild; do not first reset the store.
+
+1. The rebuild scans the store for its highest revision (`store_max`) and for records PostgreSQL does not explain: a stored revision above PostgreSQL's, or the same revision with different content.
+2. In one transaction it advances the revision clock to `greatest(revision, store_max)` so no later correction can fall below the store.
+3. It marks each unexplained Edition `quarantined` and each unexplained Printing `suspended`, both with reason `recovery_conflict`, at a revision above `store_max`. This closes marketplace and Live eligibility for those targets until a maintainer reviews them.
+4. It delivers everything. The fail-closed conflict values replace the foreign records.
+
+Review each `recovery_conflict` target in the maintainer queue; there is no bulk tool. A target that exists only in the newer store and not in the restored PostgreSQL cannot be found by the scan, because the store has no key listing; it is unreachable for readers because no PostgreSQL reference points at it.
+
+Check progress with the owner operations status: `catalog_outbox_pending` returns to 0 and `catalog_outbox_oldest_seconds` is empty when delivery is complete. A row stuck with `StoreAhead` or `RevisionValueMismatch` means the store holds a record PostgreSQL does not explain; run the rebuild.
+
 ## Local proof
 
 2026-10-06, local PostgreSQL on port 55432, deterministic small private fixture, disposable `tcg_recovery_*` databases. Run with an administrative connection injected as `RECOVERY_TEST_DATABASE_URL`:

@@ -37,3 +37,44 @@ The filesystem adapter stores immutable content-addressed generations behind one
 Cleanup runs only during writes. It is incremental and best-effort, so a cleanup failure never fails a commit. Cleanup always keeps the current generation and every generation superseded within the last 15 seconds. Readers can therefore pin one generation across many 128-key batches; after that window, reads of the old generation fail closed. The operation log keeps explicit operation IDs for 120 seconds. Deleted-record tombstones are compacted after 10 minutes without making old versions valid again.
 
 Back up the `records` directory with the rest of the projection directory. A copy taken without stopping writers can capture a pointer that names a generation absent from that copy. If so, restore from a quiescent copy. Missing, corrupt, or full storage returns unavailable rather than older data. Do not delete files by hand or re-initialize over lost state.
+
+## Public catalog records: reviewed state, outbox and delivery
+
+`api/app/public_catalog.py` is the only writer of the `catalog:printing:<ref>`, `catalog:edition:<ref>` and `quarantine:edition:<ref>` records. PostgreSQL is authoritative; the store is a derived, rebuildable copy. Values are exact allowlists. No internal UUID, source ID, owner, reviewer, evidence URL, free-text reason, report, reporter, rejected fingerprint, source candidate or quote amount is ever published.
+
+```
+catalog:printing:<ref>   {printing_ref, name, set_id, set_name, collector_number, image_url,
+                          revision,
+                          live: {state: unsupported|eligible|suspended, reason: <code|null>, rule_version: <int|null>,
+                                 identity: {category, name, set_code, number} | null}}
+catalog:edition:<ref>    {edition_ref, printing_ref, descriptor, revision,
+                          marketplace: {state: unverified|verified|quarantined, reason: <code|null>, mapping_revision,
+                                        product_id: <int|null>,
+                                        quote_lookup: {source: "tcgdex", card, variant} | null}}
+quarantine:edition:<ref> {edition_ref, revision, mapping_revision, state: clear|quarantined}
+```
+
+`revision` is the commit-ordered public review revision (`public_revision`). `product_id` is published only while the Edition is verified. `quote_lookup` is published only while it is verified and has a reviewed quote variant. Live identity is published only while the Printing is eligible. Reason codes are the fixed enums in migration 023.
+
+### Delivery
+
+Every correction takes its `public_revision` from one PostgreSQL clock row that stays locked until commit, and a trigger enqueues the changed target in `catalog_public_outbox` in the same transaction. A drain (`drain`) selects pending targets ordered by `(priority, sequence)`, so quarantines and suspensions go first. For each target it re-reads current committed PostgreSQL state and compares the revision with what is stored:
+
+- Stored revision lower (a missing record counts as -1, a ticket-04 record without a revision as 0): write.
+- Equal revision and equal value: mark delivered; nothing is written (replay is free).
+- Equal revision, different value: write nothing; the row stays pending with `last_error=RevisionValueMismatch`.
+- Stored revision higher than PostgreSQL's: write nothing; the row stays pending with `last_error=StoreAhead`. Run the rebuild.
+
+An Edition's catalog and quarantine records always go in the same compare-and-swap, which holds at most 64 Editions or 128 Printing keys. A lost compare-and-swap rebuilds from PostgreSQL instead of trusting the stale read. A stalled or late drainer can therefore never write an older revision over a newer one, and an invalidation cannot be overtaken by a stale clear. Rows are marked delivered only up to the revision actually stored.
+
+No PostgreSQL transaction or row lock is held during store I/O. A session advisory lock (914706) keeps one drainer running; correctness does not depend on it. A busy drain reports `pending`, and the holder re-checks once after unlocking. There is no scheduler: the drain runs after catalog import and after missing-card approval (`publish_catalog_best_effort`, now a shim over `drain`), at the start of the decision and rule-activation paths, and from the rebuild script. Request paths use a short budget and report `public_delivery: delivered|pending`. Rows whose target no longer exists are marked delivered without a write (`last_error=TargetMissing`).
+
+A records-store outage (`ProjectionUnavailable`) never rolls back PostgreSQL. The row stays pending with `attempts` and `last_error=ProjectionUnavailable`; the next drain delivers it. The owner operations status reports `catalog_outbox_pending` and `catalog_outbox_oldest_seconds`. Anonymous readers see the previous eligibility until delivery, so a nonzero pending count is the lag to watch. There is no owner "retry delivery" endpoint.
+
+### Readers fail closed
+
+`marketplace_states(store, edition_refs, deadline)` reads `catalog:edition` and `quarantine:edition` for all references at one pinned generation, then reads quote state with `quote_states(..., generation=g)` at that same generation. An Edition is `unknown` (ineligible) if either record is missing or malformed, if their `revision` or `mapping_revision` differ, or if it is quarantined or not verified. A verified Edition is product-eligible when `product_id` is set, and price-eligible when `quote_lookup` is set. `live_states(store, printing_refs, deadline)` does the same for `catalog:printing`. Quote writers (tickets 07 and 08) must include the `quarantine:edition:<ref>` version in `expected` on every fenced write and write only the current `mapping_revision`.
+
+### Recovery
+
+`scripts/backfill_public_catalog.py` (the name is kept) rebuilds the records from PostgreSQL. It first scans the store for the highest stored revision (`store_max`) and for records PostgreSQL does not explain, advances the clock with `greatest(revision, store_max)`, marks each unexplained target `quarantined` or `suspended` with reason `recovery_conflict` at a revision above `store_max`, then re-enqueues and delivers every target. It never initializes the store (run `init_public_records.py` first), exits 1 when the store is unreachable or delivery cannot finish, and a second run writes nothing. See `docs/operations/local-recovery.md` for the R1 to R3 procedures.

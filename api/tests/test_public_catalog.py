@@ -9,13 +9,21 @@ import pytest
 from app.main import connect
 from app.public_projection import FilePublicProjection, ProjectionUnavailable, public_record_store
 from app.public_records import FilePublicRecords, catalog_edition_key, catalog_printing_key
+from app.catalog_targets import LIVE, MATCHING
+from app.public_records import quarantine_key
+from test_catalog import reset_catalog
+from test_catalog_metadata import Records
 from test_catalog_search import promote
+from test_catalog_targets import activate, card, isolated_rules, metadata, run  # noqa: F401  (isolated_rules is an autouse fixture)
 from test_decks import create
 from test_holdings import add, fixture
 from test_publications import command
 
-PRINTING_KEYS = {'printing_ref', 'name', 'set_id', 'set_name', 'collector_number', 'image_url'}
-EDITION_KEYS = {'edition_ref', 'printing_ref', 'descriptor'}
+PRINTING_KEYS = {'printing_ref', 'name', 'set_id', 'set_name', 'collector_number', 'image_url', 'revision', 'live'}
+LIVE_KEYS = {'state', 'reason', 'rule_version', 'identity'}
+EDITION_KEYS = {'edition_ref', 'printing_ref', 'descriptor', 'revision', 'marketplace'}
+MARKETPLACE_KEYS = {'state', 'reason', 'mapping_revision', 'product_id', 'quote_lookup'}
+QUARANTINE_KEYS = {'edition_ref', 'revision', 'mapping_revision', 'state'}
 
 
 @pytest.fixture(autouse=True)
@@ -39,31 +47,84 @@ def catalog_rows(conn):
       FROM catalog_printing p JOIN catalog_edition e ON e.printing_id=p.id ORDER BY p.id,e.descriptor_key""").fetchall()
 
 
-def test_writer_publishes_exact_allowlisted_records_and_is_idempotent():
-    from app.public_catalog import publish_catalog
+def test_rebuild_publishes_exact_allowlisted_records_and_is_idempotent():
+    from app.public_catalog import rebuild
+    reset_catalog()
     owner, _, _, _, edition, _ = fixture()
     with connect() as conn:
-        row = conn.execute("""SELECT p.id,p.public_ref AS printing_ref,e.public_ref AS edition_ref FROM catalog_edition e
-          JOIN catalog_printing p ON p.id=e.printing_id WHERE e.id=%s""", (edition,)).fetchone()
-        result = publish_catalog(conn, printing_ids=[row['id']])
-    assert result.written == 2
-    printing_key, edition_key = catalog_printing_key(row['printing_ref']), catalog_edition_key(row['edition_ref'])
-    records = read(printing_key, edition_key)
-    printing, published = records[printing_key].value, records[edition_key].value
+        row = conn.execute("""SELECT p.id,p.public_ref AS printing_ref,e.public_ref AS edition_ref,pm.public_revision AS printing_revision,
+          em.public_revision AS edition_revision,em.mapping_revision FROM catalog_edition e
+          JOIN catalog_printing p ON p.id=e.printing_id JOIN catalog_printing_metadata pm ON pm.printing_id=p.id
+          JOIN catalog_edition_metadata em ON em.edition_id=e.id WHERE e.id=%s""", (edition,)).fetchone()
+        result = rebuild(conn)
+    assert result.written == 2 and result.unchanged == 0
+    printing_key, edition_key, quarantine = (catalog_printing_key(row['printing_ref']), catalog_edition_key(row['edition_ref']),
+                                             quarantine_key(row['edition_ref']))
+    records = read(printing_key, edition_key, quarantine)
+    printing, published, held = records[printing_key].value, records[edition_key].value, records[quarantine].value
     # Allowlist: exactly these keys, no internal identifier, owner, source or inventory field.
-    assert set(printing) == PRINTING_KEYS and set(published) == EDITION_KEYS
+    assert set(printing) == PRINTING_KEYS and set(printing['live']) == LIVE_KEYS
+    assert set(published) == EDITION_KEYS and set(published['marketplace']) == MARKETPLACE_KEYS
+    assert set(held) == QUARANTINE_KEYS
     assert printing == {'printing_ref': row['printing_ref'], 'name': 'Pikachu', 'set_id': 'base', 'set_name': 'Base Set',
-                        'collector_number': '25', 'image_url': None}
+                        'collector_number': '25', 'image_url': None, 'revision': row['printing_revision'],
+                        'live': {'state': 'unsupported', 'reason': 'no_active_rule', 'rule_version': None, 'identity': None}}
     assert published == {'edition_ref': row['edition_ref'], 'printing_ref': row['printing_ref'],
-                         'descriptor': {'label': 'Unspecified Variant'}}
-    serialized = json.dumps(printing) + json.dumps(published)
+                         'descriptor': {'label': 'Unspecified Variant'}, 'revision': row['edition_revision'],
+                         'marketplace': {'state': 'unverified', 'reason': 'unspecified_variant',
+                                         'mapping_revision': row['mapping_revision'], 'product_id': None, 'quote_lookup': None}}
+    assert held == {'edition_ref': row['edition_ref'], 'revision': row['edition_revision'],
+                    'mapping_revision': row['mapping_revision'], 'state': 'clear'}
+    serialized = json.dumps(printing) + json.dumps(published) + json.dumps(held)
     for internal in (str(row['id']), edition, owner):
         assert internal not in serialized
     versions = {key: record.version for key, record in records.items()}
     with connect() as conn:
-        again = publish_catalog(conn, printing_ids=[row['id']])
+        again = rebuild(conn)
     assert again.written == 0 and again.unchanged == 2
     assert {key: record.version for key, record in read(*versions).items()} == versions
+
+
+def test_verified_priced_edition_and_eligible_printing_publish_only_the_reviewed_public_fields():
+    from app.public_catalog import rebuild
+    reset_catalog()
+    activate(MATCHING, 1)
+    activate(LIVE, 99)
+    run(Records(card(1)))
+    printing, editions = metadata()
+    with connect() as conn:
+        rebuild(conn)
+        refs = conn.execute("SELECT public_ref FROM catalog_printing WHERE id=%s", (printing['printing_id'],)).fetchone()['public_ref']
+        normal = conn.execute("SELECT public_ref FROM catalog_edition WHERE id=%s", (editions['normal']['id'],)).fetchone()['public_ref']
+    shown = read(catalog_printing_key(refs), catalog_edition_key(normal), quarantine_key(normal))
+    live = shown[catalog_printing_key(refs)].value['live']
+    assert live == {'state': 'eligible', 'reason': None, 'rule_version': 99,
+                    'identity': {'category': 'Pokemon', 'name': 'Furret', 'set_code': 'DAA', 'number': '1'}}
+    market = shown[catalog_edition_key(normal)].value['marketplace']
+    assert market == {'state': 'verified', 'reason': None, 'mapping_revision': editions['normal']['mapping_revision'],
+                      'product_id': 1001, 'quote_lookup': {'source': 'tcgdex', 'card': 'meta-1', 'variant': 'normal'}}
+    assert shown[quarantine_key(normal)].value['state'] == 'clear'
+    # Reviewer, evidence, free-text reason, fingerprints and candidates are never published.
+    text = json.dumps({key: record.value for key, record in shown.items()})
+    for private in ('reviewer', 'evidence', 'https://example.org', 'fingerprint', 'candidate', 'owner-'):
+        assert private not in text
+
+
+def test_price_lookup_is_public_only_when_verified_and_a_quote_variant_is_set():
+    from app.public_catalog import rebuild
+    reset_catalog()
+    activate(MATCHING, 1)
+    record = card(1)
+    record['variants_detailed'] = [{'type': 'normal', 'size': 'standard', 'variantId': 'n-1',
+                                    'pricing': {'tcgplayer': {'unit': 'USD', 'holofoil': {'productId': 55}}}}]
+    run(Records(record))
+    _, rows = metadata()
+    with connect() as conn:
+        rebuild(conn)
+        ref = conn.execute("SELECT public_ref FROM catalog_edition WHERE id=%s", (rows['normal']['id'],)).fetchone()['public_ref']
+    # Product check passed, variant check did not: product-eligible but unpriced.
+    market = read(catalog_edition_key(ref))[catalog_edition_key(ref)].value['marketplace']
+    assert (market['state'], market['product_id'], market['quote_lookup']) == ('verified', 55, None)
 
 
 def test_catalog_import_publishes_every_printing_and_edition_after_commit():
@@ -74,10 +135,11 @@ def test_catalog_import_publishes_every_printing_and_edition_after_commit():
     assert len(rows) >= 3
     for row in rows:
         printing_key, edition_key = catalog_printing_key(row['printing_ref']), catalog_edition_key(row['edition_ref'])
-        records = read(printing_key, edition_key)
+        records = read(printing_key, edition_key, quarantine_key(row['edition_ref']))
         printing, edition = records[printing_key].value, records[edition_key].value
         assert set(printing) == PRINTING_KEYS and printing['printing_ref'] == row['printing_ref']
         assert set(edition) == EDITION_KEYS and edition['printing_ref'] == row['printing_ref']
+        assert set(records[quarantine_key(row['edition_ref'])].value) == QUARANTINE_KEYS
         assert edition['descriptor'] == row['descriptor'] and edition['edition_ref'] == row['edition_ref']
 
 
@@ -106,6 +168,8 @@ def test_records_store_failure_does_not_roll_back_import_or_change_publication(m
         assert conn.execute("SELECT count(*) AS n FROM catalog_printing").fetchone()['n'] == 1
     # Snapshot objects, visibility and the discovery revision all live in current.json.
     assert current.read_bytes() == published
+    with connect() as conn:  # Nothing was delivered, so the work is still queued for the next drain.
+        assert conn.execute("SELECT count(*) AS n FROM catalog_public_outbox WHERE delivered_at IS NULL").fetchone()['n'] >= 2
 
 
 def test_backfill_recovers_a_missing_record_and_is_idempotent():
@@ -118,7 +182,7 @@ def test_backfill_recovers_a_missing_record_and_is_idempotent():
     assert read(key)[key].value is None
     assert backfill().written == 1
     assert read(key)[key].value['edition_ref'] == row['edition_ref']
-    assert backfill().written == 0
+    assert backfill().written == 0 and backfill().written == 0
 
 
 def test_backfill_script_publishes_existing_data_and_refuses_an_uninitialized_store(tmp_path):
@@ -135,6 +199,7 @@ def test_backfill_script_publishes_existing_data_and_refuses_an_uninitialized_st
     assert refused.returncode == 1 and 'Traceback' not in refused.stderr and not empty.exists()
     done = subprocess.run(script, env=os.environ, capture_output=True, text=True)
     assert done.returncode == 0, done.stderr
+    assert 'rebuilt' in done.stdout and 'recovery conflicts' in done.stdout
     key = catalog_edition_key(row['edition_ref'])
     assert read(key)[key].value['printing_ref'] == row['printing_ref']
 
@@ -184,7 +249,110 @@ def test_full_catalog_scale_publishes_in_bounded_batches_without_a_whole_run_dea
     promote(cards)
     elapsed = time.monotonic() - started
     with connect() as conn:
-        total = conn.execute("SELECT (SELECT count(*) FROM catalog_printing)+(SELECT count(*) FROM catalog_edition) AS n").fetchone()['n']
-    assert total >= 600 and sum(calls) == total and max(calls) <= 128
+        total = conn.execute("SELECT (SELECT count(*) FROM catalog_printing)+2*(SELECT count(*) FROM catalog_edition) AS n").fetchone()['n']
+    assert total >= 900 and sum(calls) == total and max(calls) <= 128
     assert public_catalog.backfill().written == 0
     assert elapsed < 60
+
+
+# ------------------------------------------------------------------ fail-closed readers sharing one generation
+
+
+def staged_refs():
+    from app.public_catalog import drain
+    reset_catalog()
+    activate(MATCHING, 1)
+    activate(LIVE, 99)
+    run(Records(card(1)))
+    printing, editions = metadata()
+    with connect() as conn:
+        drain(conn)
+        pref = conn.execute('SELECT public_ref FROM catalog_printing WHERE id=%s', (printing['printing_id'],)).fetchone()['public_ref']
+        refs = {key: conn.execute('SELECT public_ref FROM catalog_edition WHERE id=%s', (row['id'],)).fetchone()['public_ref']
+                for key, row in editions.items()}
+    return pref, refs
+
+
+def swap(changes):
+    keys = list(changes)
+    records = read(*keys)
+    assert public_record_store().compare_and_swap({key: records[key].version for key in keys}, changes, deadline=deadline())
+
+
+def test_marketplace_and_live_readers_use_one_generation_and_expose_quotes_only_for_verified_priced_editions():
+    from app.public_catalog import live_states, marketplace_states
+    from app.public_records import quote_key, result_key
+    pref, refs = staged_refs()
+    normal = refs['normal']
+    mapping_revision = read(quarantine_key(normal))[quarantine_key(normal)].value['mapping_revision']
+    swap({quote_key(normal, mapping_revision): {'attempt': 1, 'amount': '1.00'},
+          result_key(normal, mapping_revision): {'state': 'quote', 'attempt': 1}})
+    store = public_record_store()
+    states = marketplace_states(store, list(refs.values()), deadline())
+    market = states[normal]
+    assert market.state == 'verified' and market.product_eligible and market.price_eligible and market.product_id == 1001
+    assert market.quote_lookup == {'source': 'tcgdex', 'card': 'meta-1', 'variant': 'normal'}
+    assert market.quote.status == 'quote' and market.quote.generation == market.generation
+    assert {state.generation for state in states.values()} == {market.generation}
+    live = live_states(store, [pref], deadline())[pref]
+    assert live.eligible and live.identity['set_code'] == 'DAA' and live.rule_version == 99
+    # Pinning: later writes are invisible at the earlier generation, so catalog and quote state stay consistent.
+    pinned = market.generation
+    swap({quarantine_key(normal): {**read(quarantine_key(normal))[quarantine_key(normal)].value, 'state': 'quarantined'}})
+    assert marketplace_states(store, [normal], deadline(), generation=pinned)[normal].state == 'verified'
+    assert marketplace_states(store, [normal], deadline())[normal].state == 'quarantined'
+    assert marketplace_states(store, [], deadline()) == {} and live_states(store, [], deadline()) == {}
+
+
+def test_readers_fail_closed_on_missing_malformed_or_inconsistent_records():
+    from app.public_catalog import live_states, marketplace_states
+    pref, refs = staged_refs()
+    normal, reverse = refs['normal'], refs['reverse']
+    store = public_record_store()
+    key, held = catalog_edition_key(normal), quarantine_key(normal)
+    original = read(key, held)
+    good, hold = original[key].value, original[held].value
+
+    def state(edition=good, quarantine=hold):
+        swap({key: edition, held: quarantine})
+        return marketplace_states(store, [normal], deadline())[normal]
+
+    assert state().state == 'verified'
+    mismatches = [
+        (good, {**hold, 'revision': hold['revision'] + 1}),
+        (good, {**hold, 'mapping_revision': hold['mapping_revision'] + 1}),
+        ({**good, 'marketplace': {**good['marketplace'], 'mapping_revision': 99}}, hold),
+        ({**good, 'edition_ref': 'f' * 48}, hold),
+        ({k: v for k, v in good.items() if k != 'marketplace'}, hold),
+        ({**good, 'extra': 1}, hold),
+        ({**good, 'marketplace': {**good['marketplace'], 'product_id': '1001'}}, hold),
+        ({**good, 'marketplace': {**good['marketplace'], 'state': 'bogus'}}, hold),
+        ({**good, 'marketplace': {**good['marketplace'], 'product_id': None}}, hold),
+        ('not a record', hold), (good, ['not', 'a', 'record']), (good, {**hold, 'state': 'bogus'}),
+    ]
+    for edition, quarantine in mismatches:
+        result = state(edition, quarantine)
+        assert result.state == 'unknown' and not result.product_eligible, (edition, quarantine)
+    assert state(good, {**hold, 'state': 'quarantined'}).state == 'quarantined'
+    quarantined = state({**good, 'marketplace': {**good['marketplace'], 'state': 'quarantined', 'reason': 'candidate_changed',
+                                                'product_id': None, 'quote_lookup': None}}, {**hold, 'state': 'quarantined'})
+    assert (quarantined.state, quarantined.reason, quarantined.product_id) == ('quarantined', 'candidate_changed', None)
+    swap({key: None, held: None})
+    assert marketplace_states(store, [normal], deadline())[normal].state == 'unknown'  # missing records
+    swap({key: good, held: hold})
+    assert marketplace_states(store, [normal], deadline())[normal].state == 'verified'
+    # A different Edition of the same Printing is judged on its own records only.
+    assert marketplace_states(store, [reverse], deadline())[reverse].state == 'verified'
+    # Live: per Printing, fail closed on shape, independent of any Edition.
+    pkey = catalog_printing_key(pref)
+    published = read(pkey)[pkey].value
+    assert live_states(store, [pref], deadline())[pref].eligible
+    for broken in ({**published, 'live': {**published['live'], 'identity': None}},
+                   {**published, 'live': {**published['live'], 'state': 'maybe'}},
+                   {**published, 'live': {**published['live'], 'identity': {'name': 'x'}}},
+                   {**published, 'revision': -1}, {**published, 'printing_ref': 'e' * 48}, {**published, 'live': 'eligible'}):
+        swap({pkey: broken})
+        assert live_states(store, [pref], deadline())[pref].state == 'unknown'
+    swap({pkey: {**published, 'live': {**published['live'], 'state': 'suspended', 'reason': 'source_changed', 'identity': None}}})
+    suspended = live_states(store, [pref], deadline())[pref]
+    assert (suspended.state, suspended.reason, suspended.eligible) == ('suspended', 'source_changed', False)

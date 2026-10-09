@@ -1,9 +1,14 @@
-"""Idempotently publish public-safe catalog records from PostgreSQL into the shared records store.
+"""Rebuild the public catalog records in the shared records store from PostgreSQL.
 
-Run after scripts/init_public_records.py (or init_public_projection.py) on existing installs,
-and to retry after a records-store outage: catalog imports and Printing/Edition approvals publish
-best effort after they commit, and a failed write is repaired here. Only missing or changed
-records are written. It never resets, repairs or initializes the store itself.
+The name is kept for existing runbooks and CI. Run it after scripts/init_public_records.py (or
+init_public_projection.py) and whenever the records store was lost, re-initialized empty or
+restored from an older copy, or PostgreSQL was restored to a point older than the store.
+
+Steps: scan the store for the highest stored revision and for records PostgreSQL does not
+explain, advance the revision clock past that maximum, mark every unexplained target
+quarantined/suspended with reason recovery_conflict, then re-enqueue and deliver every target.
+Only records that are older than PostgreSQL are written; a second run writes nothing. It never
+resets, repairs or initializes the store itself, and it never touches Published Decks or discovery.
 """
 import sys
 from pathlib import Path
@@ -18,9 +23,10 @@ def main():
     try:
         result = backfill()
     except (ProjectionUnavailable, psycopg.Error):
-        print('Public catalog records could not be published; check the records store and database.', file=sys.stderr)
+        print('Public catalog records could not be rebuilt; check the records store and database.', file=sys.stderr)
         return 1
-    print(f'Public catalog records published: {result.written} written, {result.unchanged} unchanged')
+    print(f'Public catalog records rebuilt: {result.written} written, {result.unchanged} unchanged, '
+          f'{result.conflicts} recovery conflicts, highest stored revision {result.store_max}')
     return 0
 
 

@@ -28,6 +28,8 @@ class OperationsStatus(BaseModel):
     projection_pending: int
     catalog_failures: int
     catalog_pending_reviews: int
+    catalog_outbox_pending: int
+    catalog_outbox_oldest_seconds: float | None
     api_requests_24h: int
     api_failures_24h: int
     authorization_denials_24h: int
@@ -56,6 +58,8 @@ def operations_status(user_id: str = Depends(verified_user)):
          (SELECT count(*) FROM publication_command WHERE NOT projected) AS projection_pending,
          (SELECT count(*) FROM catalog_run WHERE outcome='failed') AS catalog_failures,
          (SELECT count(*) FROM catalog_review WHERE status='pending') AS catalog_pending_reviews,
+         (SELECT count(*) FROM catalog_public_outbox WHERE delivered_at IS NULL) AS catalog_outbox_pending,
+         (SELECT extract(epoch FROM clock_timestamp()-min(created_at))::float FROM catalog_public_outbox WHERE delivered_at IS NULL) AS catalog_outbox_oldest_seconds,
          (SELECT count(*) FROM auth_send_event WHERE sent_at>=clock_timestamp()-interval '24 hours') AS sign_in_requests_24h""").fetchone()
         counters = {row['name']:row['count'] for row in conn.execute('SELECT name,count FROM operations_counter').fetchall()}
         quotas = conn.execute("SELECT *,used::numeric>=allowance::numeric*0.7 AS warning,measured_at>=clock_timestamp()-interval '25 hours' AS verified FROM operations_quota ORDER BY resource").fetchall()
