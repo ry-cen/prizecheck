@@ -83,7 +83,10 @@ shared records, do not re-run `init_public_projection.py`. Run
 instead. It touches only the records store, is safe to repeat, and upgrades an
 empty legacy records store. It exits with status 1 and changes nothing if
 established records are missing or corrupt, or if a legacy store holds data.
-Restore those from backup rather than resetting them.
+Restore those from backup rather than resetting them. Then run
+`.venv/bin/python scripts/backfill_public_catalog.py` to publish public catalog
+records for the existing catalog; rerun it to repair records after a records-store
+outage. It only writes missing or changed records.
 
 ### 3. Start the app
 
