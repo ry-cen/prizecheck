@@ -637,6 +637,11 @@ assert store.compare_and_swap({k: rows[k].version for k in keys}, {
       expect(await count()).toBe(codes);
       await post("/auth/sign-out", {}, cookie);
     } finally {
+      // Leave no open report behind for the browser suite that shares this database.
+      await pool.query(
+        "DELETE FROM catalog_metadata_report WHERE printing_id=$1",
+        [ids.printing]
+      );
       await bind(previous);
     }
   });
