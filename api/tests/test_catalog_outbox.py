@@ -1,4 +1,5 @@
 """Revision-guarded outbox delivery of public catalog records: ordering, races, outages and recovery."""
+import os
 import shutil
 import threading
 import time
@@ -629,15 +630,6 @@ def test_rebuild_refuses_an_uninitialized_store_and_reports_unavailable(tmp_path
 # ------------------------------------------------------------------ shim, display, readers of the enqueue contract
 
 
-def test_best_effort_shim_ignores_printing_ids_never_raises_and_reports_delivery(monkeypatch):
-    stage()
-    assert public_catalog.publish_catalog_best_effort(printing_ids=[uuid4()]) is True
-    monkeypatch.setattr(FilePublicRecords, 'read_all', lambda *args, **kwargs: (_ for _ in ()).throw(ProjectionUnavailable()))
-    run(Records(changed_product()))
-    assert public_catalog.publish_catalog_best_effort() is False
-    assert not hasattr(public_catalog, 'publish_catalog') and not hasattr(public_catalog, '_sync')
-
-
 def test_reimport_with_changed_source_display_leaves_public_values_and_the_outbox_untouched():
     """Display belongs to the immutable Printing (016): a source image or set-name change moves no public display field."""
     printing, normal, printing_ref, edition_ref = stage()
@@ -725,3 +717,150 @@ def test_r3_never_reuses_a_mapping_revision_the_lost_timeline_already_wrote_quot
     with connect() as conn:
         assert rebuild(conn).conflicts >= 1
         assert conn.execute('SELECT mapping_revision FROM catalog_edition_metadata WHERE edition_id=%s', (normal['id'],)).fetchone()['mapping_revision'] > again
+
+
+# ------------------------------------------------------------------ a request delivers its own targets first; rebuild reports a busy drainer
+
+
+def test_a_request_drain_delivers_the_callers_own_targets_before_an_unrelated_backlog(monkeypatch):
+    activate(MATCHING, 1)
+    activate(LIVE, 99)
+    run(Records(card(1), card(2), card(3), card(4)))
+    with connect() as conn:
+        drain(conn)
+    monkeypatch.setattr('app.catalog.publish_catalog_best_effort', lambda *args, **kwargs: True)  # an import with a backlog
+    run(Records(card(1), changed_product(2), changed_product(3), changed_product(4)))  # older, unrelated invalidations
+    run(Records(changed_product(1), changed_product(2), changed_product(3), changed_product(4)))  # then the caller's own
+    mine, rows = metadata('meta-1')
+    with connect() as conn:
+        ref = conn.execute('SELECT public_ref FROM catalog_edition WHERE id=%s', (rows['normal']['id'],)).fetchone()['public_ref']
+    key = quarantine_key(ref)
+    assert len(pending()) >= 4 and read(key)[key].value['state'] == 'clear'
+    original = FilePublicRecords.compare_and_swap
+
+    def slow(store, *args, **kwargs):
+        time.sleep(0.4)
+        return original(store, *args, **kwargs)
+
+    monkeypatch.setattr(FilePublicRecords, 'compare_and_swap', slow)
+    monkeypatch.setattr(public_catalog, 'CHUNK_TARGETS', 1)
+    with connect() as conn:
+        result = drain(conn, budget=0.7, printing_ids=[mine['printing_id']])
+    assert read(key)[key].value['state'] == 'quarantined'  # delivered inside the short budget
+    assert result.state == 'pending' and result.pending >= 1  # the unrelated backlog is left for later drains
+    # Without a hint the same budget is spent in (priority, sequence) order and the caller waits behind older rows.
+    monkeypatch.setattr(FilePublicRecords, 'compare_and_swap', original)
+    with connect() as conn:
+        assert drain(conn).state == 'delivered'
+
+
+def test_best_effort_shim_resolves_printing_ids_never_hides_delivery_failure_and_reports_delivery(monkeypatch):
+    printing, normal, printing_ref, edition_ref = stage()
+    assert public_catalog.publish_catalog_best_effort(printing_ids=[uuid4()]) is True  # an unknown hint costs nothing
+    monkeypatch.setattr(FilePublicRecords, 'read_all', lambda *args, **kwargs: (_ for _ in ()).throw(ProjectionUnavailable()))
+    run(Records(changed_product()))
+    assert public_catalog.publish_catalog_best_effort(printing_ids=[printing['printing_id']]) is False
+    assert not hasattr(public_catalog, 'publish_catalog') and not hasattr(public_catalog, '_sync')
+
+
+def test_rebuild_reports_a_busy_drainer_distinctly_and_the_script_exits_with_its_own_code(monkeypatch, capsys):
+    import importlib.util
+    stage()
+    monkeypatch.setattr(public_catalog, 'LOCK_WAITS', 2)
+    monkeypatch.setattr(public_catalog, 'LOCK_WAIT_SECONDS', 0.01)
+    holder = connect()
+    holder.execute('SELECT pg_advisory_lock(%s)', (LOCK,))
+    holder.commit()
+    try:
+        with connect() as conn, pytest.raises(public_catalog.RebuildBusy) as busy:
+            rebuild(conn)
+        assert isinstance(busy.value, ProjectionUnavailable)  # existing callers keep treating it as unavailable
+        path = Path(__file__).resolve().parents[2] / 'scripts/backfill_public_catalog.py'
+        spec = importlib.util.spec_from_file_location('backfill_script', path)
+        script = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(script)
+        assert script.main() == 3
+        message = capsys.readouterr().err
+        assert 'another drain is running' in message.lower() and 'retry' in message.lower()
+    finally:
+        holder.execute('SELECT pg_advisory_unlock(%s)', (LOCK,))
+        holder.commit()
+        holder.close()
+
+
+# ------------------------------------------------------------------ the outbox is per database; a swapped store is noticed by the next drain
+
+
+def test_a_drain_notices_a_store_restored_older_than_the_outbox_and_republishes_without_a_rebuild(tmp_path):
+    stage()
+    records_dir = Path(FilePublicProjection().directory) / 'records'
+    older = tmp_path / 'older-copy'
+    shutil.copytree(records_dir, older)
+    older_values = snapshot_values()
+    run(Records(changed_product()))
+    newest = snapshot_values()
+    assert newest != older_values and not pending()  # everything is delivered as far as PostgreSQL knows
+    shutil.rmtree(records_dir)
+    shutil.copytree(older, records_dir)
+    _clear_cache()
+    assert snapshot_values() == older_values  # stale clears are visible again
+    with connect() as conn:
+        result = drain(conn)
+    assert result.state == 'delivered' and result.written > 0
+    assert snapshot_values() == newest
+
+
+def test_a_drain_republishes_into_a_wiped_store_and_leaves_a_current_store_alone(tmp_path, monkeypatch):
+    stage()
+    expected = snapshot_values()
+    writes = Writes(monkeypatch)
+    with connect() as conn:
+        assert drain(conn).written == 0  # nothing to do for a store that is current
+    assert writes.log == []
+    monkeypatch.setenv('PUBLIC_PROJECTION_DIR', str(tmp_path / 'fresh'))
+    with FilePublicProjection().writer(initialize=True):
+        pass
+    public_record_store().initialize(deadline=time.monotonic() + 5)
+    assert all(value is None for value in snapshot_values().values())
+    with connect() as conn:
+        assert drain(conn).state == 'delivered'
+    assert snapshot_values() == expected
+
+
+# ------------------------------------------------------------------ rule activation delivers its backlog from a detached drain
+
+
+def test_spawn_background_drain_starts_a_detached_unbounded_drain_and_never_raises(monkeypatch):
+    started = []
+
+    class Child:
+        pass
+
+    monkeypatch.setattr(public_catalog.subprocess, 'Popen', lambda *args, **kwargs: started.append((args, kwargs)) or Child())
+    assert public_catalog.spawn_background_drain() is True
+    [(args, kwargs)] = started
+    assert args[0][1:] == ['-m', 'app.catalog_import', '--drain']
+    assert kwargs['start_new_session'] is True and kwargs['close_fds'] is True
+    assert kwargs['stdin'] == kwargs['stdout'] == kwargs['stderr'] == public_catalog.subprocess.DEVNULL
+    monkeypatch.setattr(public_catalog.subprocess, 'Popen', lambda *args, **kwargs: (_ for _ in ()).throw(OSError('no fork')))
+    assert public_catalog.spawn_background_drain() is False
+
+
+def test_the_detached_drain_entry_delivers_everything_pending_and_reports_the_result(tmp_path):
+    import subprocess
+    import sys
+    stage()
+    run(Records(changed_product()))
+    with connect() as conn:
+        conn.execute('UPDATE catalog_public_outbox SET delivered_at=NULL')
+        conn.commit()
+    assert pending()
+    api = Path(__file__).resolve().parents[1]
+    done = subprocess.run([sys.executable, '-m', 'app.catalog_import', '--drain'], cwd=api, env=os.environ.copy(),
+                          capture_output=True, text=True, timeout=60)
+    assert done.returncode == 0 and done.stdout == '' and 'Traceback' not in done.stderr
+    assert not pending()
+    refused = subprocess.run([sys.executable, '-m', 'app.catalog_import'], cwd=api, env=os.environ.copy(), capture_output=True, timeout=60)
+    assert refused.returncode == 2  # neither --run-id nor --drain is a usage error, never a silent no-op
+    from app import catalog_import
+    assert catalog_import.main(['--drain']) == 0

@@ -20,8 +20,12 @@ rolls back the PostgreSQL commit that triggered it and never touches Published D
 snapshots, visibility or the discovery revision.
 """
 import logging
+import os
+import subprocess
+import sys
 import time
 from dataclasses import dataclass
+from pathlib import Path
 
 from psycopg.pq import TransactionStatus
 
@@ -39,6 +43,7 @@ LOCK_WAITS = 100            # Rebuild retries a busy drain lock for up to ~20 s.
 LOCK_WAIT_SECONDS = 0.2
 REQUEST_BUDGET = 2.0        # Seconds a request path may spend draining after its own commit.
 LIVE_IDENTITY_KEYS = ('category', 'name', 'set_code', 'number')
+BEHIND_PROBE = 5            # Most recently delivered targets whose stored revision proves the store was not rolled back.
 
 
 class DrainMisuse(RuntimeError):
@@ -234,46 +239,84 @@ def _deliver(conn, store, chunk, deadline):
     return written, unchanged, stuck
 
 
-def _drain_locked(conn, store, deadline):
-    """Deliver pending targets in (priority, sequence) order. Holds no PostgreSQL lock during store I/O."""
+def _drain_locked(conn, store, deadline, first=None):
+    """Deliver pending targets in (priority, sequence) order. Holds no PostgreSQL lock during store I/O.
+
+    ``first`` (``['kind:id', ...]``) is the caller's own targets: they are delivered before the rest, so a
+    request is not made to wait behind an unrelated backlog it has no part in.
+    """
     written = unchanged = 0
     skip, retried = [], set()
-    while not _expired(deadline):
-        rows = conn.execute("""SELECT sequence,priority,target_kind,target_id FROM catalog_public_outbox
-          WHERE delivered_at IS NULL AND sequence<>ALL(%s::bigint[]) ORDER BY priority,sequence LIMIT %s""",
-                            (skip, CHUNK_TARGETS * 4)).fetchall()
-        conn.commit()
-        if not rows:
-            break
-        # A chunk never mixes priorities, so an invalidation is not delayed behind ordinary work.
-        rows = [row for row in rows if row['priority'] == rows[0]['priority']]
-        chunk = list(dict.fromkeys((row['target_kind'], row['target_id']) for row in rows))[:CHUNK_TARGETS]
-        sequences = [row['sequence'] for row in rows if (row['target_kind'], row['target_id']) in chunk]
-        try:
-            wrote, same, stuck = _deliver(conn, store, chunk, deadline)
-        except ProjectionUnavailable:
-            conn.rollback()
-            _record_failure(conn, sequences, 'ProjectionUnavailable')
-            break
-        written += wrote
-        unchanged += same
-        left = conn.execute("SELECT sequence,target_kind,target_id FROM catalog_public_outbox WHERE sequence=ANY(%s) AND delivered_at IS NULL",
-                            (sequences,)).fetchall()
-        conn.commit()
-        for row in left:
-            target = (row['target_kind'], row['target_id'])
-            if target in stuck:
-                _record_failure(conn, [row['sequence']], stuck[target])
-                skip.append(row['sequence'])
-            elif row['sequence'] in retried:  # Still undelivered after a clean round: never spin on it.
-                _record_failure(conn, [row['sequence']], 'RevisionBehind')
-                skip.append(row['sequence'])
-            else:
-                retried.add(row['sequence'])  # Normally a newer revision enqueued while delivering.
+    for scope in ([first] if first else []) + [None]:
+        while not _expired(deadline):
+            rows = conn.execute("""SELECT sequence,priority,target_kind,target_id FROM catalog_public_outbox
+              WHERE delivered_at IS NULL AND sequence<>ALL(%s::bigint[])
+                AND (%s::text[] IS NULL OR target_kind||':'||target_id::text=ANY(%s::text[]))
+              ORDER BY priority,sequence LIMIT %s""", (skip, scope, scope, CHUNK_TARGETS * 4)).fetchall()
+            conn.commit()
+            if not rows:
+                break
+            # A chunk never mixes priorities, so an invalidation is not delayed behind ordinary work.
+            rows = [row for row in rows if row['priority'] == rows[0]['priority']]
+            chunk = list(dict.fromkeys((row['target_kind'], row['target_id']) for row in rows))[:CHUNK_TARGETS]
+            sequences = [row['sequence'] for row in rows if (row['target_kind'], row['target_id']) in chunk]
+            try:
+                wrote, same, stuck = _deliver(conn, store, chunk, deadline)
+            except ProjectionUnavailable:
+                conn.rollback()
+                _record_failure(conn, sequences, 'ProjectionUnavailable')
+                return written, unchanged, len(skip)
+            written += wrote
+            unchanged += same
+            left = conn.execute("SELECT sequence,target_kind,target_id FROM catalog_public_outbox WHERE sequence=ANY(%s) AND delivered_at IS NULL",
+                                (sequences,)).fetchall()
+            conn.commit()
+            for row in left:
+                target = (row['target_kind'], row['target_id'])
+                if target in stuck:
+                    _record_failure(conn, [row['sequence']], stuck[target])
+                    skip.append(row['sequence'])
+                elif row['sequence'] in retried:  # Still undelivered after a clean round: never spin on it.
+                    _record_failure(conn, [row['sequence']], 'RevisionBehind')
+                    skip.append(row['sequence'])
+                else:
+                    retried.add(row['sequence'])  # Normally a newer revision enqueued while delivering.
     return written, unchanged, len(skip)
 
 
-def drain(conn, store=None, *, budget=None):
+def _own_keys(conn, printing_ids):
+    """``kind:id`` keys for the given Printings and all their Editions: what a request path just changed."""
+    ids = [str(value) for value in printing_ids]
+    rows = conn.execute("""SELECT 'printing:'||id::text AS key FROM catalog_printing WHERE id::text=ANY(%s)
+      UNION ALL SELECT 'edition:'||id::text FROM catalog_edition WHERE printing_id::text=ANY(%s)""", (ids, ids)).fetchall()
+    conn.commit()
+    return [row['key'] for row in rows]
+
+
+def _store_behind(conn, store, deadline):
+    """True when the store lacks a record the outbox says was delivered (restored older copy, wiped or replaced store).
+
+    Delivery state lives in PostgreSQL, so it cannot notice by itself that the store was swapped. This is a sampled
+    high-water probe: the most recently delivered targets must be in the store at (at least) the delivered revision.
+    A rolled-back store that is still at least as new as those samples is not detected; ``rebuild`` covers it.
+    """
+    rows = conn.execute("""SELECT target_kind,target_id,max(revision) AS revision FROM catalog_public_outbox
+      WHERE delivered_at IS NOT NULL AND last_error IS DISTINCT FROM 'TargetMissing'
+      GROUP BY target_kind,target_id ORDER BY max(revision) DESC LIMIT %s""", (BEHIND_PROBE,)).fetchall()
+    conn.commit()
+    if not rows:
+        return False
+    delivered = {(row['target_kind'], row['target_id']): row['revision'] for row in rows}
+    built = build_values(conn, list(delivered))
+    conn.commit()
+    keys = [key for target in built for key in built[target].values]
+    if not keys:
+        return False
+    records = store.read_all(keys, deadline=_bounded(deadline)).records
+    return any(stored_revision(records[key].value) < delivered[target] for target in built for key in built[target].values)
+
+
+def drain(conn, store=None, *, budget=None, printing_ids=None):
     """Deliver the outbox to the records store. Never raises ProjectionUnavailable; failures leave rows pending.
 
     ``budget`` is seconds for request paths (None for scripts and background imports). Only one
@@ -283,11 +326,16 @@ def drain(conn, store=None, *, budget=None):
     This function COMMITS (and rolls back its own reads) on ``conn``. It therefore requires an
     idle connection and raises ``DrainMisuse`` otherwise, instead of discarding or committing a
     caller's transaction. Call it after the caller's own commit.
+
+    ``printing_ids`` is the caller's hint: those Printings and their Editions are delivered first.
+    A drain also checks (``_store_behind``) that the store still holds what the outbox says was
+    delivered; when it does not, every target is re-enqueued before delivery.
     """
     if conn.info.transaction_status != TransactionStatus.IDLE:
         raise DrainMisuse('drain() commits; call it on a connection with no open transaction')
     store = store or public_record_store()
     deadline = None if budget is None else time.monotonic() + budget
+    first = _own_keys(conn, printing_ids) if printing_ids else None
     written = unchanged = 0
     stuck = 0
     for _ in range(2):
@@ -297,7 +345,12 @@ def drain(conn, store=None, *, budget=None):
             return DrainResult(written, unchanged, pending, busy=True)
         conn.commit()
         try:
-            wrote, same, stuck = _drain_locked(conn, store, deadline)
+            try:
+                if _store_behind(conn, store, deadline):
+                    mark_all_dirty(conn)
+            except ProjectionUnavailable:
+                conn.rollback()  # The delivery below fails the same way and records it.
+            wrote, same, stuck = _drain_locked(conn, store, deadline, first)
             written += wrote
             unchanged += same
         finally:
@@ -323,6 +376,13 @@ def mark_all_dirty(conn):
       ON CONFLICT(target_kind,target_id,revision) DO UPDATE
         SET delivered_at=NULL,attempts=0,last_error=NULL,priority=least(catalog_public_outbox.priority,EXCLUDED.priority)""")
     conn.commit()
+
+
+class RebuildBusy(ProjectionUnavailable):
+    """Another drainer (for example a detached import or rule-activation drain) held the lock for the whole wait.
+
+    Nothing is wrong with the store or the database: retry once the other drain has finished.
+    """
 
 
 @dataclass(frozen=True)
@@ -457,7 +517,9 @@ def rebuild(conn, store=None):
     # Success means everything this rebuild enqueued was delivered; later work and unrelated stuck rows are not its concern.
     left = conn.execute('SELECT count(*) AS n FROM catalog_public_outbox WHERE delivered_at IS NULL AND sequence<=%s AND last_error IS DISTINCT FROM \'RevisionBehind\'', (horizon,)).fetchone()['n']
     conn.commit()
-    if result.busy or left:
+    if result.busy:
+        raise RebuildBusy()
+    if left:
         raise ProjectionUnavailable()
     return RebuildResult(result.written, result.unchanged, store_max, conflicts)
 
@@ -465,21 +527,48 @@ def rebuild(conn, store=None):
 def publish_catalog_best_effort(conn=None, *, printing_ids=None, budget=None):
     """Post-commit hook (shim over ``drain``): never raises, never affects committed PostgreSQL work.
 
-    ``printing_ids`` is accepted for old callers and ignored: the outbox, not the caller, knows what is dirty.
+    The outbox, not the caller, knows what is dirty; ``printing_ids`` only says which Printings (and their
+    Editions) to deliver first, so a request is not held up by an unrelated backlog.
     A caller without its own connection is a request path and gets the short request budget.
     """
     try:
         if conn is None:
             from .main import connect
             with connect() as own:
-                result = drain(own, budget=REQUEST_BUDGET if budget is None else budget)
+                result = drain(own, budget=REQUEST_BUDGET if budget is None else budget, printing_ids=printing_ids)
         else:
-            result = drain(conn, budget=budget)
+            result = drain(conn, budget=budget, printing_ids=printing_ids)
         return result.state == 'delivered'
     except DrainMisuse:
         raise  # A programming error, not a delivery outage: never hide it behind best-effort.
     except Exception as exc:  # Records are rebuildable; report only the class, never details.
         log.warning('Public catalog records not published (%s); run scripts/backfill_public_catalog.py', type(exc).__name__)
+        return False
+
+
+def drain_to_completion(conn, store=None):
+    """Unbounded drain for a detached process: waits out a busy drainer, then delivers everything pending."""
+    for _ in range(LOCK_WAITS):
+        result = drain(conn, store)
+        if not result.busy:
+            break
+        time.sleep(LOCK_WAIT_SECONDS)
+    return result
+
+
+def spawn_background_drain():
+    """Start an unbounded drain in a detached session, as the import dispatcher starts an import. Never raises.
+
+    Rule (de)activation can change thousands of targets inside one request, far more than the short request
+    budget delivers; the remainder is delivered here. Until it finishes the owner sees ``public_delivery: pending``.
+    """
+    try:
+        subprocess.Popen([sys.executable, '-m', 'app.catalog_import', '--drain'], cwd=Path(__file__).resolve().parents[1],
+                         env=os.environ.copy(), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         start_new_session=True, close_fds=True)
+        return True
+    except Exception as exc:
+        log.warning('Background catalog drain not started (%s); run scripts/backfill_public_catalog.py', type(exc).__name__)
         return False
 
 

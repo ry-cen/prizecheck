@@ -48,6 +48,14 @@ def published(monkeypatch):
     return calls
 
 
+@pytest.fixture(autouse=True)
+def spawned(monkeypatch):
+    """Never start a real detached drain from a route test; record that one was asked for."""
+    calls = []
+    monkeypatch.setattr(public_catalog, "spawn_background_drain", lambda: calls.append(True) or True)
+    return calls
+
+
 def seed_users():
     reset_catalog()
     with connect() as conn:
@@ -861,3 +869,16 @@ def test_enrichment_after_a_maintainer_decision_neither_closes_nor_re_stamps_the
         "verified", settled["mapping_revision"], settled["public_revision"])
     assert after["accepted_fingerprint"] != settled["accepted_fingerprint"]  # follows the new source state silently
     assert queue()["items"] == []
+
+
+def test_rule_activation_hands_an_undelivered_backlog_to_a_detached_drain(world, spawned):
+    response = activation("marketplace_matching", 1)
+    assert response.status_code == 200, response.text
+    assert response.json()["public_delivery"] == "pending"  # the (stubbed) request drain delivered nothing
+    assert spawned == [True]
+    with connect() as conn:
+        conn.execute("UPDATE catalog_public_outbox SET delivered_at=now()")
+    off = activation("marketplace_matching", None)
+    # Verified Editions are never re-qualified, so deactivating changes nothing and starts no drain.
+    assert off.status_code == 200 and off.json()["public_delivery"] == "delivered" and spawned == [True]
+

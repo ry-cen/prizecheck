@@ -707,6 +707,11 @@ def activate(kind: Literal["live_derivation", "marketplace_matching"], command: 
         fail(409, "CATALOG_BUSY")
     if bad_code:
         fail(403, "INVALID_APPROVAL_CODE")
+    # A short drain delivers the urgent invalidations (priority 0 first). A rule can change thousands of targets, so
+    # whatever remains is delivered by an unbounded drain in a detached process; until then the owner sees "pending".
     public_catalog.publish_catalog_best_effort()
+    delivery = delivery_status(revision=revision)
+    if delivery == "pending":
+        public_catalog.spawn_background_drain()
     return MetadataRuleResult(kind=kind, version=command.version, printings=changed["printings"], editions=changed["editions"],
-                              public_revision=revision, public_delivery=delivery_status(revision=revision))
+                              public_revision=revision, public_delivery=delivery)
