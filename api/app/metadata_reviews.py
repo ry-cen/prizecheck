@@ -345,11 +345,13 @@ def target_history(kind: Literal["editions", "printings"], target_id: UUID, user
 # ---------------------------------------------------------------- approval codes and delivery
 
 
-def consume_metadata_code(conn, owner_id: str, target: str, action: str, code: str | None) -> bool:
+def consume_metadata_code(conn, owner_id: str, target: str, action: str, code: str | None, *, spend: bool = True) -> bool:
     """Spend the newest unexpired code issued for exactly this target form and action.
 
     The lookup never falls back to report or review codes, and the target string is part of
-    the keyed hash, so a code for one target form cannot be replayed on another.
+    the keyed hash, so a code for one target form cannot be replayed on another. ``spend=False``
+    only verifies (a wrong guess is still counted): the routes verify before taking the catalog
+    clock, so a bad code never commits a bare clock bump, and spend inside the correction.
     """
     if code is None:
         fail(422, "FRESH_CODE_REQUIRED")
@@ -361,7 +363,8 @@ def consume_metadata_code(conn, owner_id: str, target: str, action: str, code: s
     if not hmac.compare_digest(challenge["code_hash"], _code_hash(owner_id, target, action, code)):
         conn.execute("UPDATE catalog_approval_code SET attempts=attempts+1 WHERE id=%s", (challenge["id"],))
         return False
-    conn.execute("UPDATE catalog_approval_code SET consumed_at=now() WHERE id=%s", (challenge["id"],))
+    if spend:
+        conn.execute("UPDATE catalog_approval_code SET consumed_at=now() WHERE id=%s", (challenge["id"],))
     return True
 
 
@@ -505,6 +508,12 @@ def decide(command: MetadataDecisionInput, user_id: str = Depends(verified_user)
     kind = "edition" if command.target == "marketplace" else "printing"
     target_id = command.edition_id or command.printing_id
     bad_code = False
+    # A wrong code is decided before the clock is taken, so it commits only its attempt count.
+    with connect() as conn, conn.transaction():
+        require_owner(conn, user_id)
+        known = consume_metadata_code(conn, user_id, f"{kind}:{target_id}", "resolve_metadata", command.code, spend=False)
+    if not known:
+        fail(403, "INVALID_APPROVAL_CODE")
     try:
         with connect() as conn, conn.transaction():
             require_owner(conn, user_id)
@@ -657,16 +666,21 @@ def activate(kind: Literal["live_derivation", "marketplace_matching"], command: 
     if not reason:
         fail(422, "REASON_REQUIRED")
     bad_code = False
+    target = f"rule:{kind}:{command.version or 0}"  # Deactivation names version 0, which a real version never equals.
+    with connect() as conn, conn.transaction():
+        require_owner(conn, user_id)
+        if command.version is not None and command.version not in REGISTRIES[kind]:
+            fail(422, "UNKNOWN_RULE_VERSION")
+        known = consume_metadata_code(conn, user_id, target, "activate_rule", command.code, spend=False)
+    if not known:
+        fail(403, "INVALID_APPROVAL_CODE")  # before the clock: a wrong code commits only its attempt count
     try:
         with connect() as conn, conn.transaction():
             require_owner(conn, user_id)
-            if command.version is not None and command.version not in REGISTRIES[kind]:
-                fail(422, "UNKNOWN_RULE_VERSION")
             conn.execute(f"SET LOCAL lock_timeout='{LOCK_TIMEOUT}'")
             revision = conn.execute("SELECT catalog_begin_correction() AS revision").fetchone()["revision"]
             conn.execute("SELECT 1 FROM catalog_rule_state WHERE kind=%s FOR UPDATE", (kind,))
-            # Deactivation names version 0 in the approval target, which only a real version number can never equal.
-            if not consume_metadata_code(conn, user_id, f"rule:{kind}:{command.version or 0}", "activate_rule", command.code):
+            if not consume_metadata_code(conn, user_id, target, "activate_rule", command.code):
                 bad_code = True
             else:
                 changed = activate_rule(conn, kind, command.version, user_id, str(command.evidence_url), reason)

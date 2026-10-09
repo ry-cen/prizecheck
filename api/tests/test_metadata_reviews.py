@@ -789,3 +789,29 @@ def test_deck_and_holding_mutations_ignore_product_live_and_price_fields(world):
     after = snapshot()
     assert after == before
     assert not any(key in json.dumps(added.json()) for key in ("product_id", "price"))
+
+
+# ------------------------------------------------------------------ a wrong approval code costs the catalog nothing
+
+
+def clock_revision():
+    with connect() as conn:
+        return conn.execute("SELECT revision FROM catalog_public_clock").fetchone()["revision"]
+
+
+def test_a_wrong_approval_code_never_takes_the_catalog_clock(world):
+    item = evidence("editions", world["normal"])
+    code_for(target_of(item), "resolve_metadata")
+    before = clock_revision()
+    assert decide(item, "unmap", issue=False, code="000000").status_code == 403
+    assert decide(item, "unmap", issue=False, code=None).status_code == 422
+    assert clock_revision() == before  # no bare clock bump, and no stamp on the target
+    assert code_row(target_of(item))["attempts"] == 1  # the guess is still counted
+    assert decide(item, "unmap", issue=False).status_code == 200
+    # A rule activation behaves the same.
+    code_for("rule:marketplace_matching:1", "activate_rule")
+    before = clock_revision()
+    assert activation("marketplace_matching", 1, issue=False, code="000000").status_code == 403
+    assert clock_revision() == before
+    assert code_row("rule:marketplace_matching:1")["attempts"] == 1
+    assert activation("marketplace_matching", 1, issue=False).status_code == 200
