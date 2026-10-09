@@ -10,6 +10,7 @@ from pydantic import BaseModel,Field,HttpUrl
 from .main import connect,require_owner,verified_user
 from .missing_cards import _code_hash
 from .holdings import fail
+from . import public_catalog
 
 router=APIRouter()
 
@@ -46,6 +47,19 @@ def evidence_digest(row):
     shown={key:row[key] for key in ('id','printing_id','source_id','kind','detail','candidate','source_fingerprint')}
     return hashlib.sha256(json.dumps(shown,sort_keys=True,default=str,ensure_ascii=False).encode()).hexdigest()
 
+def release_price_slots(conn,edition_ids):
+    """A deprecated Edition stops holding its product and price slot, so its replacement can be verified.
+
+    Verified Editions become unmapped (``reviewed_unmapped``, sticky against imports and rule activations) and the
+    change is stamped from the commit-ordered clock, which the caller's ``catalog_state`` lock already precedes.
+    Returns whether any Edition changed, so the caller delivers the new public state after its commit.
+    """
+    conn.execute('SELECT catalog_begin_correction()')
+    return conn.execute("""UPDATE catalog_edition_metadata SET mapping_state='unverified',mapping_reason='reviewed_unmapped',
+      product_id=NULL,quote_variant=NULL,mapping_basis=NULL,mapping_decision_id=NULL,matching_activation_id=NULL,
+      accepted_fingerprint=NULL,accepted_projection=NULL,auto_closed=true,mapping_revision=mapping_revision+1,updated_at=now()
+      WHERE edition_id=ANY(%s) AND mapping_state='verified' RETURNING edition_id""",(list(edition_ids),)).fetchone() is not None
+
 def view(row):return CatalogReviewView(**row,evidence_digest=evidence_digest(row))
 
 def consume_review_code(conn,owner_id,review_id,action,code):
@@ -67,6 +81,7 @@ def reviews(user_id: str=Depends(verified_user)):
 
 @router.post('/api/admin/catalog-reviews/{review_id}/decision',response_model=CatalogReviewView)
 def decide(review_id: UUID,command: CatalogDecision,user_id: str=Depends(verified_user)):
+    released=False
     with connect() as conn:
         require_owner(conn,user_id)
         state=conn.execute('SELECT active_generation,revision FROM catalog_state WHERE singleton FOR UPDATE').fetchone()
@@ -109,6 +124,7 @@ def decide(review_id: UUID,command: CatalogDecision,user_id: str=Depends(verifie
                 conn.execute("""INSERT INTO catalog_edition_replacement(edition_id,replacement_edition_id,review_id,reviewer_id,evidence_url,reason)
                   VALUES (%s,%s,%s,%s,%s,%s)""",(item.edition_id,item.replacement_edition_id,review_id,user_id,str(command.evidence_url),command.reason.strip()))
             conn.execute('UPDATE catalog_generation_edition SET active=false WHERE generation_id=%s AND printing_id=%s',(state['active_generation'],original))
+            released=release_price_slots(conn,original_editions)
             status='corrected'
         elif command.decision=='deprecate_edition':
             if not command.edition_id or not command.replacement_edition_id or command.edition_id==command.replacement_edition_id:
@@ -126,13 +142,16 @@ def decide(review_id: UUID,command: CatalogDecision,user_id: str=Depends(verifie
             conn.execute('''INSERT INTO catalog_edition_replacement(edition_id,replacement_edition_id,review_id,reviewer_id,evidence_url,reason)
               VALUES (%s,%s,%s,%s,%s,%s)''',(command.edition_id,command.replacement_edition_id,review_id,user_id,str(command.evidence_url),command.reason.strip()))
             conn.execute('UPDATE catalog_generation_edition SET active=false WHERE generation_id=%s AND edition_id=%s',(state['active_generation'],command.edition_id))
+            released=release_price_slots(conn,[command.edition_id])
             status='corrected'
         else:
             consume_review_code(conn,user_id,review_id,'resolve_catalog',command.code)
         result=conn.execute('''UPDATE catalog_review SET status=%s,reviewer_id=%s,reviewed_at=now(),evidence_url=%s,reason=%s
           WHERE id=%s RETURNING *''',(status,user_id,str(command.evidence_url),command.reason.strip(),review_id)).fetchone()
         conn.execute('UPDATE catalog_state SET revision=revision+1 WHERE singleton')
-        return view(result)
+        response=view(result)
+    if released:public_catalog.publish_catalog_best_effort()  # after the commit; the outbox keeps it recoverable
+    return response
 
 class ReassignHolding(BaseModel):
     location_id: UUID

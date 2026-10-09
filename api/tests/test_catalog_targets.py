@@ -806,3 +806,38 @@ def test_a_price_slot_belongs_to_one_edition_of_a_printing_whatever_the_product(
     run(Records(card(1), card(2)))
     _, other = metadata("meta-2")
     assert (other["normal"]["mapping_state"], other["normal"]["quote_variant"]) == ("verified", "normal")
+
+
+def test_a_deprecated_edition_releases_its_product_and_price_slot_to_its_replacement():
+    from test_catalog_reconciliation import review_code, shown
+    from test_holdings import call
+    reset_catalog()
+    run(Records(card(1), card(2)))
+    _, old_rows = metadata("meta-1")
+    _, new_rows = metadata("meta-2")
+    old, new = old_rows["normal"], new_rows["normal"]
+    decide_mapping(old["id"], old["mapping_candidate"], 5000, "normal")  # a maintainer verified the old Edition
+    with pytest.raises(psycopg.errors.UniqueViolation):  # another Printing cannot take its price slot meanwhile
+        decide_mapping(new["id"], new["mapping_candidate"], 5000, "normal")
+    user = owner()
+    with connect() as conn:
+        review = conn.execute("""INSERT INTO catalog_review(printing_id,source_id,kind,source_fingerprint,detail)
+          VALUES (%s,'meta-1','variant_ambiguity','correction','Finish correction') RETURNING id""", (old["printing_id"],)).fetchone()["id"]
+        before = conn.execute("SELECT mapping_revision,public_revision FROM catalog_edition_metadata WHERE edition_id=%s", (old["id"],)).fetchone()
+    review_code(user, review, "resolve_catalog")
+    response = call("POST", f"/api/admin/catalog-reviews/{review}/decision", user, {
+        "decision": "deprecate_edition", "reason": "Same physical card, corrected edition", "evidence_url": "https://example.org/e",
+        "code": "123456", "edition_id": str(old["id"]), "replacement_edition_id": str(new["id"]), "evidence_digest": shown(user, review)})
+    assert response.status_code == 200, response.text
+    with connect() as conn:
+        released = conn.execute("SELECT * FROM catalog_edition_metadata WHERE edition_id=%s", (old["id"],)).fetchone()
+        pending = conn.execute("SELECT priority FROM catalog_public_outbox WHERE target_id=%s AND revision=%s",
+                               (old["id"], released["public_revision"])).fetchall()
+    assert (released["mapping_state"], released["mapping_reason"], released["product_id"], released["quote_variant"]) == (
+        "unverified", "reviewed_unmapped", None, None)
+    assert released["mapping_revision"] == before["mapping_revision"] + 1 and released["public_revision"] > before["public_revision"]
+    assert released["mapping_decision_id"] is None and released["accepted_fingerprint"] is None and pending  # published as unmapped
+    decide_mapping(new["id"], new["mapping_candidate"], 5000, "normal")  # the replacement can now take the slot
+    assert metadata("meta-2")[1]["normal"]["mapping_state"] == "verified"
+    run(Records(card(1), card(2)))  # imports never re-verify the released Edition
+    assert metadata("meta-1")[1]["normal"]["mapping_state"] == "unverified"
