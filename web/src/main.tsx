@@ -17,6 +17,7 @@ import { PublishedDeck } from "./PublishedDeck";
 import { Discovery } from "./Discovery";
 import { CatalogReview } from "./CatalogReview";
 import { CatalogSearch } from "./CatalogSearch";
+import { MetadataReview } from "./MetadataReview";
 import {
   MissingCardReports,
   OwnerMissingCardReview,
@@ -319,6 +320,7 @@ function App() {
           ))}
           <OperationsHealth />
           <CatalogReview />
+          <MetadataReview />
           <OwnerMissingCardReview />
         </section>
       ) : view === "reports" ? (

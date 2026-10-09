@@ -6,6 +6,7 @@ import {
   type SearchResponse,
 } from "./generated";
 import { MissingCardReports } from "./MissingCardReports";
+import { MetadataReport, MyMetadataReports } from "./MetadataReport";
 import "./CatalogSearch.css";
 
 function CardArt({ url, name }: { url: string | null; name: string }) {
@@ -56,6 +57,10 @@ export function CatalogSearch() {
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
   const [reportEdition, setReportEdition] = useState(false);
+  const [metadataReport, setMetadataReport] = useState<{
+    editionId: string | null;
+  } | null>(null);
+  const [reportsKey, setReportsKey] = useState(0);
   const request = useRef(0);
 
   async function search(
@@ -118,6 +123,7 @@ export function CatalogSearch() {
       setDetail(response.printing);
       setSelectedEdition(null);
       setReportEdition(false);
+      setMetadataReport(null);
     } catch {
       setMessage("Printing details are unavailable. Please retry.");
     }
@@ -235,6 +241,7 @@ export function CatalogSearch() {
               <li key={edition.id}>
                 <button
                   type="button"
+                  id={`edition-${edition.id}`}
                   disabled={!edition.active}
                   aria-pressed={selectedEdition === edition.id}
                   onClick={() => setSelectedEdition(edition.id)}
@@ -258,7 +265,14 @@ export function CatalogSearch() {
                     </a>
                   </>
                 )}
-                {!edition.active && " Unavailable"}
+                {!edition.active && " Unavailable"}{" "}
+                <button
+                  type="button"
+                  aria-describedby={`edition-${edition.id}`}
+                  onClick={() => setMetadataReport({ editionId: edition.id })}
+                >
+                  Report metadata
+                </button>
               </li>
             ))}
           </ul>
@@ -279,6 +293,25 @@ export function CatalogSearch() {
             Report missing Edition
           </button>
           {reportEdition && <MissingCardReports printingId={detail.id} />}
+          <button
+            type="button"
+            onClick={() => setMetadataReport({ editionId: null })}
+          >
+            Report Printing metadata
+          </button>
+          {metadataReport && (
+            <MetadataReport
+              key={metadataReport.editionId ?? "printing"}
+              printingId={detail.id}
+              printingName={detail.name}
+              editions={detail.editions.map((edition) => ({
+                id: edition.id,
+                label: descriptorLabel(edition.descriptor),
+              }))}
+              initialEditionId={metadataReport.editionId}
+              onSubmitted={() => setReportsKey((value) => value + 1)}
+            />
+          )}
         </article>
       ) : (
         result?.available && (
@@ -339,6 +372,7 @@ export function CatalogSearch() {
           </div>
         )
       )}
+      <MyMetadataReports refreshKey={reportsKey} />
     </section>
   );
 }
