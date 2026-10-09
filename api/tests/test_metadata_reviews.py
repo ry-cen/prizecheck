@@ -620,7 +620,7 @@ def test_live_verify_source_accepts_a_rule_derived_identity_as_a_maintainer_deci
     activate_as_owner(LIVE, 99)
     row = printing_row(world["printing"])
     assert (row["live_state"], row["live_basis"]) == ("eligible", "rule")
-    suspended_by = card(1, regulationMark="E")
+    suspended_by = card(1, category="Trainer")
     run(Records(suspended_by))
     assert printing_row(world["printing"])["live_state"] == "suspended"
     assert [(i["kind"], i["state"], i["reason"]) for i in queue()["items"]] == [("printing", "suspended", "source_changed")]
@@ -846,3 +846,18 @@ def test_a_correction_without_a_source_candidate_is_published_unpriced(world):
     item = evidence("editions", world["normal"])
     assert decide(item, "correct", {"product_id": 5005, "quote_variant": "normal"}).status_code == 200
     assert edition_row(world["normal"])["quote_variant"] is None
+
+
+def test_enrichment_after_a_maintainer_decision_neither_closes_nor_re_stamps_the_edition(quarantined):
+    item = evidence("editions", quarantined["normal"])
+    assert decide(item, "verify_source").status_code == 200
+    settled = edition_row(quarantined["normal"])
+    assert settled["accepted_projection"] is not None
+    enriched = changed_card()
+    enriched["variants_detailed"][0]["pricing"]["cardmarket"] = {"productId": 31337, "avg": 2.0}
+    run(Records(enriched))
+    after = edition_row(quarantined["normal"])
+    assert (after["mapping_state"], after["mapping_revision"], after["public_revision"]) == (
+        "verified", settled["mapping_revision"], settled["public_revision"])
+    assert after["accepted_fingerprint"] != settled["accepted_fingerprint"]  # follows the new source state silently
+    assert queue()["items"] == []

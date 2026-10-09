@@ -335,13 +335,13 @@ def test_missing_input_is_unsupported_and_rule_uncovered_sets_stay_unsupported()
     assert (metadata("meta-3")[0]["live_state"], metadata("meta-3")[0]["live_reason"]) == ("unsupported", "rule_uncovered")
 
 
-def test_source_change_suspends_only_the_affected_printing_and_its_marketplace_state_is_untouched():
+def test_a_rule_input_change_suspends_only_the_affected_printing_and_its_marketplace_state_is_untouched():
     reset_catalog(); activate(MATCHING, 1); activate(LIVE, 99)
     run(Records(card(1), card(2)))
     before_one, editions_one = metadata("meta-1")
     before_two, _ = metadata("meta-2")
     changed = card(1)
-    changed["regulationMark"] = "E"  # part of the Live export candidate, not a physical or lookup change
+    changed["category"] = "Trainer"  # an input the Live rule reads
     run(Records(changed, card(2)))
     one, rows_one = metadata("meta-1")
     two, _ = metadata("meta-2")
@@ -356,6 +356,42 @@ def test_source_change_suspends_only_the_affected_printing_and_its_marketplace_s
         assert printing_live(conn, [one["printing_id"]])[one["printing_id"]].identity is None
     # Independent revisions: Live moved, marketplace did not.
     assert {row["mapping_revision"] for row in rows_one.values()} == {2}
+
+
+def test_source_enrichment_the_rules_never_read_closes_nothing_and_publishes_nothing():
+    reset_catalog(); activate(MATCHING, 1); activate(LIVE, 99)
+    run(Records(card(1)))
+    before, rows = metadata()
+    assert before["live_state"] == "eligible" and {row["mapping_state"] for row in rows.values()} == {"verified"}
+    enriched = card(1)
+    enriched["regulationMark"] = "E"                                  # Live export candidate, not a Live rule input
+    enriched["set"] = {**enriched["set"], "tcgOnline": "DAA"}
+    enriched["variants_detailed"][0]["variantId"] = "n-2"
+    enriched["variants_detailed"][0]["pricing"]["cardmarket"] = {"productId": 4242, "avg": 1.0}  # a Cardmarket ID the TCGplayer rule never reads
+    run(Records(enriched))
+    after, rows_after = metadata()
+    assert (after["live_state"], after["live_reason"]) == ("eligible", None)
+    assert after["public_revision"] == before["public_revision"]
+    assert after["export_candidate"] != before["export_candidate"]
+    assert after["live_accepted_fingerprint"] == fingerprint(after["export_candidate"])  # silently moved to the new source state
+    for key in rows:
+        assert rows_after[key]["mapping_state"] == "verified"
+        assert (rows_after[key]["mapping_revision"], rows_after[key]["public_revision"]) == (
+            rows[key]["mapping_revision"], rows[key]["public_revision"]), key  # quotes keyed on the revision stay valid
+        assert outbox(rows[key]["id"]) == outbox_before(rows, key)
+    assert rows_after["normal"]["mapping_candidate"] != rows["normal"]["mapping_candidate"]
+    assert rows_after["normal"]["accepted_fingerprint"] == fingerprint(rows_after["normal"]["mapping_candidate"])
+    assert outbox(after["printing_id"]) == [row for row in outbox(after["printing_id"]) if row["revision"] <= before["public_revision"]]
+    # A later change to an input the rules do read still closes the target.
+    conflicting = card(1)
+    conflicting["variants_detailed"][0]["pricing"]["tcgplayer"]["holofoil"] = {"productId": 9999}
+    run(Records(conflicting))
+    _, closed = metadata()
+    assert (closed["normal"]["mapping_state"], closed["normal"]["mapping_reason"]) == ("quarantined", "candidate_conflict")
+
+
+def outbox_before(rows, key):
+    return [row for row in outbox(rows[key]["id"]) if row["revision"] <= rows[key]["public_revision"]]
 
 
 def settle(source_id="meta-1", status="retained"):
@@ -450,7 +486,7 @@ def decide_live(printing_id, inputs, fingerprint_value):
 
 def test_only_a_maintainer_decision_lifts_a_suspension_and_it_needs_an_active_rule():
     reset_catalog(); run(Records(furret())); activate(LIVE, 99)
-    run(Records(furret(regulationMark="E")))
+    run(Records(furret(category="Trainer")))
     printing, _ = metadata()
     assert printing["live_state"] == "suspended"
     inputs = {"category": "Pokemon", "name": "Furret", "set_code": "DAB", "collector_number": "136"}

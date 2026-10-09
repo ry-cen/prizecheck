@@ -55,6 +55,12 @@ class LiveRulesV1:
     uncontested Printing is qualified from its source export candidate through the
     reviewed set table. The table ships empty: no Live set code is evidenced in this
     repository, and codes are never guessed from ``tcgOnline`` or invented.
+
+    Changing this class, its table or the helpers below changes ``code_digest``, and a changed
+    digest deactivates the approved rule (every eligible Printing the next import touches
+    would be suspended as ``no_active_rule``). A new set code therefore ships as a new
+    ``LiveRulesV2`` registered next to V1 and activated by a maintainer; it is never an edit
+    of V1. ``test_registered_rule_digests_are_pinned`` fails on any unplanned change.
     """
     CATEGORIES = frozenset(("Pokemon", "Trainer", "Energy"))
     SET_CODES: dict = {}
@@ -79,6 +85,15 @@ class LiveRulesV1:
         if not cls.NUMBER.fullmatch(number):
             return Failure("missing_input")
         return {"category": category, "name": normalized_name(name), "set_code": set_code, "number": number}
+
+    @classmethod
+    def projection(cls, export):
+        """The source fields ``derive_source`` reads. Only a change here may close an eligible Printing."""
+        if not isinstance(export, dict):
+            return {}
+        source_set = export.get("set")
+        return {"category": export.get("category"), "name": export.get("name"), "localId": export.get("localId"),
+                "set_id": source_set.get("id") if isinstance(source_set, dict) else None}
 
     @classmethod
     def derive_reviewed(cls, inputs):
@@ -139,6 +154,21 @@ class MatchingRulesV1:
         if listed is not None and listed != next(iter(found.values())):
             return "conflict", found
         return None, found
+
+    @classmethod
+    def projection(cls, correspondence, lookup):
+        """The candidate inputs ``evaluate`` reads: correspondence, the TCGplayer product IDs by variant key and thirdParty.tcgplayer.
+
+        Other lookup identifiers (a Cardmarket ID, a variant ID) are enrichment: they never close a verified mapping.
+        """
+        pricing = lookup.get("pricing") if isinstance(lookup, dict) else None
+        block = pricing.get("tcgplayer") if isinstance(pricing, dict) else None
+        products = ({key: value["productId"] for key, value in block.items()
+                     if key not in cls.BLOCK_METADATA and isinstance(value, dict) and "productId" in value}
+                    if isinstance(block, dict) else {})
+        third_party = lookup.get("thirdParty") if isinstance(lookup, dict) else None
+        return {"correspondence": correspondence, "products": products,
+                "third_party_tcgplayer": third_party.get("tcgplayer") if isinstance(third_party, dict) else None}
 
     @classmethod
     def variant(cls, descriptor, key):
@@ -230,10 +260,11 @@ class EditionState:
     activation_id: object = None
     accepted_fingerprint: str | None = None
     auto_closed: bool = False
+    accepted_projection: str | None = None  # fingerprint of the rule inputs of the accepted candidate
 
 
 EDITION_COLUMNS = ("mapping_state", "mapping_reason", "product_id", "quote_variant", "mapping_basis", "mapping_decision_id",
-                   "matching_activation_id", "accepted_fingerprint", "auto_closed")
+                   "matching_activation_id", "accepted_fingerprint", "auto_closed", "accepted_projection")
 
 
 def edition_state(row) -> EditionState:
@@ -256,9 +287,12 @@ def evaluate_edition(current, facts, rejections, active, verified_elsewhere):
     candidate_fp = facts["fingerprint"]
     if current.state == "quarantined":
         return current  # Strict clearing: nothing but a maintainer decision lifts it.
+    projection_fp = fingerprint(MatchingRulesV1.projection(facts["correspondence"], facts["lookup"]))
     if current.state == "verified":
         if candidate_fp == current.accepted_fingerprint or candidate_fp in rejections:
             return current
+        if current.accepted_projection is not None and projection_fp == current.accepted_projection:
+            return replace(current, accepted_fingerprint=candidate_fp)  # enrichment the rule never reads: accept silently
         problem, found = MatchingRulesV1.products(facts["lookup"])
         if facts["correspondence"] == "unresolved":
             reason = "physical_conflict"
@@ -286,7 +320,7 @@ def evaluate_edition(current, facts, rejections, active, verified_elsewhere):
     product_id, quote_variant = result
     return EditionState(state="verified", reason=None, product_id=product_id, quote_variant=quote_variant,
                         basis="matching_rule", activation_id=active.activation_id, accepted_fingerprint=candidate_fp,
-                        auto_closed=True)
+                        auto_closed=True, accepted_projection=projection_fp)
 
 
 # ---------------------------------------------------------------- Live state
@@ -304,10 +338,12 @@ class PrintingState:
     activation_id: object = None
     accepted_fingerprint: str | None = None
     auto_closed: bool = False
+    accepted_projection: str | None = None  # fingerprint of the rule inputs of the accepted export candidate
 
 
 PRINTING_COLUMNS = ("live_state", "live_reason", "live_basis", "live_inputs", "live_identity", "live_claim",
-                    "live_decision_id", "live_activation_id", "live_accepted_fingerprint", "live_auto_closed")
+                    "live_decision_id", "live_activation_id", "live_accepted_fingerprint", "live_auto_closed",
+                    "live_accepted_projection")
 
 
 def printing_state(row) -> PrintingState:
@@ -327,6 +363,7 @@ def evaluate_printing(current, export_candidate, contested, rejections, active, 
     ``display`` is the established Printing display, which a source-derived identity must match.
     """
     candidate_fp = fingerprint(export_candidate)
+    projection_fp = fingerprint(LiveRulesV1.projection(export_candidate) if active is None else active.rule.projection(export_candidate))
     if not reviewed:
         if current.state == "suspended":
             return current
@@ -357,14 +394,15 @@ def evaluate_printing(current, export_candidate, contested, rejections, active, 
             return replace(current, state="unsupported", reason="reviewed_unsupported", identity=None, claim=None)
         if contested():
             return deny("identity_review_pending")
-        if current.state == "eligible" and candidate_fp != current.accepted_fingerprint and candidate_fp not in rejections:
-            return deny("source_changed")
+        if current.state == "eligible" and candidate_fp != current.accepted_fingerprint and candidate_fp not in rejections \
+                and (current.accepted_projection is None or current.accepted_projection != projection_fp):
+            return deny("source_changed")  # a rule input moved; other export changes are accepted silently below
         if current.state == "eligible" and derived != current.identity:
             return deny("rule_uncovered")  # A different rule version must not change a public identity unreviewed.
     return PrintingState(state="eligible", reason=None, basis="maintainer" if maintainer else "rule",
                          inputs=current.inputs if maintainer else None, identity=derived, claim=claim,
                          decision_id=current.decision_id if maintainer else None, activation_id=active.activation_id,
-                         accepted_fingerprint=candidate_fp, auto_closed=True)
+                         accepted_fingerprint=candidate_fp, auto_closed=True, accepted_projection=projection_fp)
 
 
 # ---------------------------------------------------------------- persistence
@@ -437,7 +475,7 @@ def refresh_editions(conn, context, edition_ids):
         return 0
     rows = conn.execute("""SELECT e.id,e.printing_id,e.descriptor,p.source,p.source_id,em.mapping_candidate,
       em.mapping_state,em.mapping_reason,em.product_id,em.quote_variant,em.mapping_basis,em.mapping_decision_id,
-      em.matching_activation_id,em.accepted_fingerprint,em.auto_closed,pm.source_record,
+      em.matching_activation_id,em.accepted_fingerprint,em.accepted_projection,em.auto_closed,pm.source_record,
       d.set_id,d.collector_number,d.display_name
       FROM catalog_edition e JOIN catalog_printing p ON p.id=e.printing_id
       JOIN catalog_edition_metadata em ON em.edition_id=e.id
@@ -463,17 +501,17 @@ def refresh_editions(conn, context, edition_ids):
             continue
         bump = 1 if (new.state == "verified") != (current.state == "verified") else 0
         conn.execute("""UPDATE catalog_edition_metadata SET mapping_state=%s,mapping_reason=%s,product_id=%s,quote_variant=%s,
-          mapping_basis=%s,mapping_decision_id=%s,matching_activation_id=%s,accepted_fingerprint=%s,auto_closed=%s,
-          mapping_revision=mapping_revision+%s,updated_at=now() WHERE edition_id=%s""",
+          mapping_basis=%s,mapping_decision_id=%s,matching_activation_id=%s,accepted_fingerprint=%s,accepted_projection=%s,
+          auto_closed=%s,mapping_revision=mapping_revision+%s,updated_at=now() WHERE edition_id=%s""",
                      (new.state, new.reason, new.product_id, new.quote_variant, new.basis, new.decision_id,
-                      new.activation_id, new.accepted_fingerprint, new.auto_closed, bump, row["id"]))
+                      new.activation_id, new.accepted_fingerprint, new.accepted_projection, new.auto_closed, bump, row["id"]))
         changed += 1
     return changed
 
 
 PRINTING_SELECT = """SELECT m.export_candidate,m.live_state,m.live_reason,m.live_basis,m.live_inputs,m.live_identity,m.live_claim,
   m.live_decision_id,m.live_activation_id,m.live_accepted_fingerprint,m.live_auto_closed,
-  d.set_id,d.collector_number,d.display_name
+  m.live_accepted_projection,d.set_id,d.collector_number,d.display_name
   FROM catalog_printing_metadata m LEFT JOIN catalog_printing_display d ON d.printing_id=m.printing_id
   WHERE m.printing_id=%s"""
 
@@ -481,10 +519,10 @@ PRINTING_SELECT = """SELECT m.export_candidate,m.live_state,m.live_reason,m.live
 def _write_printing(conn, printing_id, new):
     conn.execute("""UPDATE catalog_printing_metadata SET live_state=%s,live_reason=%s,live_basis=%s,live_inputs=%s::jsonb,
       live_identity=%s::jsonb,live_claim=%s,live_decision_id=%s,live_activation_id=%s,live_accepted_fingerprint=%s,
-      live_auto_closed=%s,updated_at=now() WHERE printing_id=%s""",
+      live_accepted_projection=%s,live_auto_closed=%s,updated_at=now() WHERE printing_id=%s""",
                  (new.state, new.reason, new.basis, None if new.inputs is None else json.dumps(new.inputs),
                   None if new.identity is None else json.dumps(new.identity), new.claim, new.decision_id,
-                  new.activation_id, new.accepted_fingerprint, new.auto_closed, printing_id))
+                  new.activation_id, new.accepted_fingerprint, new.accepted_projection, new.auto_closed, printing_id))
 
 
 def refresh_printing(conn, context, printing_id, reviewed=False):

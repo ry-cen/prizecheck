@@ -566,7 +566,10 @@ def decide(command: MetadataDecisionInput, user_id: str = Depends(verified_user)
                       VALUES (%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING""",
                                  (command.target, command.printing_id, command.edition_id, source_fingerprint, decision_id))
                 if kind == "edition":
-                    apply_marketplace(conn, context, target_id, plan, decision_id, source_fingerprint)
+                    candidate = loaded["source_candidate"]
+                    projection = (fingerprint(MatchingRulesV1.projection(candidate.get("correspondence"), candidate.get("candidate") or {}))
+                                  if source_fingerprint else None)
+                    apply_marketplace(conn, context, target_id, plan, decision_id, source_fingerprint, projection)
                 else:
                     apply_live(conn, context, target_id, plan, decision_id)
                 if closing:
@@ -589,15 +592,15 @@ def decide(command: MetadataDecisionInput, user_id: str = Depends(verified_user)
                           public_delivery=delivery_status(target_kind=kind, target_id=target_id))
 
 
-def apply_marketplace(conn, context, edition_id, plan, decision_id, source_fingerprint):
+def apply_marketplace(conn, context, edition_id, plan, decision_id, source_fingerprint, source_projection=None):
     verified = plan["state"] == "verified"
     try:
         with conn.transaction():  # a savepoint, so a lost price-slot race is a clean 409 rather than an aborted transaction
             conn.execute("""UPDATE catalog_edition_metadata SET mapping_state=%s,mapping_reason=%s,product_id=%s,quote_variant=%s,
-              mapping_basis=%s,mapping_decision_id=%s,matching_activation_id=NULL,accepted_fingerprint=%s,auto_closed=true,
-              mapping_revision=mapping_revision+1,updated_at=now() WHERE edition_id=%s""",
+              mapping_basis=%s,mapping_decision_id=%s,matching_activation_id=NULL,accepted_fingerprint=%s,accepted_projection=%s,
+              auto_closed=true,mapping_revision=mapping_revision+1,updated_at=now() WHERE edition_id=%s""",
                          (plan["state"], plan["reason"], plan["product_id"], plan["quote_variant"], "maintainer" if verified else None,
-                          decision_id, source_fingerprint if verified else None, edition_id))
+                          decision_id, source_fingerprint if verified else None, source_projection if verified else None, edition_id))
     except psycopg.errors.UniqueViolation:
         fail(409, "MAPPING_CONFLICT")
     refresh_editions(conn, context, [edition_id])
@@ -607,7 +610,7 @@ def apply_live(conn, context, printing_id, plan, decision_id):
     if plan["state"] == "unsupported":
         conn.execute("""UPDATE catalog_printing_metadata SET live_state='unsupported',live_reason='reviewed_unsupported',live_basis=NULL,
           live_inputs=NULL,live_identity=NULL,live_claim=NULL,live_decision_id=%s,live_activation_id=NULL,live_accepted_fingerprint=NULL,
-          live_auto_closed=true,updated_at=now() WHERE printing_id=%s""", (decision_id, printing_id))
+          live_accepted_projection=NULL,live_auto_closed=true,updated_at=now() WHERE printing_id=%s""", (decision_id, printing_id))
         return
     conn.execute("UPDATE catalog_printing_metadata SET live_inputs=%s,live_decision_id=%s,updated_at=now() WHERE printing_id=%s",
                  (json.dumps(plan["inputs"]), decision_id, printing_id))

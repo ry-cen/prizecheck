@@ -15,7 +15,7 @@ import httpx
 import psycopg
 from psycopg.rows import dict_row
 
-from .catalog_targets import IDENTITY_REVIEW_KINDS, TargetContext, refresh_editions, refresh_printing
+from .catalog_targets import IDENTITY_REVIEW_KINDS, MatchingRulesV1, TargetContext, refresh_editions, refresh_printing
 from .public_catalog import publish_catalog_best_effort
 
 BASE_URL = "https://api.tcgdex.net/v2/en/cards"
@@ -251,6 +251,10 @@ def edition_metadata(record, descriptor, physical_conflict):
     }
 
 
+def rule_inputs(mapping_candidate):
+    return MatchingRulesV1.projection(mapping_candidate.get("correspondence"), mapping_candidate.get("candidate") or {})
+
+
 def store_source_metadata(conn, printing_id, record, physical_conflict=False, identity_flags=(), context=None):
     """Retain source candidates without approving a physical or target match.
 
@@ -277,15 +281,18 @@ def store_source_metadata(conn, printing_id, record, physical_conflict=False, id
     if changed or identity_flags or context.waiting(printing_id):
         refresh_printing(conn, context, printing_id)
     updated = []
-    for edition in conn.execute("SELECT id,descriptor FROM catalog_edition WHERE printing_id=%s", (printing_id,)).fetchall():
+    for edition in conn.execute("""SELECT e.id,e.descriptor,m.mapping_candidate AS previous FROM catalog_edition e
+      LEFT JOIN catalog_edition_metadata m ON m.edition_id=e.id WHERE e.printing_id=%s""", (printing_id,)).fetchall():
         item = edition_metadata(record, edition["descriptor"], physical_conflict)
+        # Quotes are keyed on the mapping revision, so it moves only when a matching-rule input moved.
+        previous = edition["previous"]
+        bump = int(bool(previous) and rule_inputs(previous) != rule_inputs(item["mapping_candidate"]))
         row = conn.execute("""INSERT INTO catalog_edition_metadata AS m
           (edition_id,mapping_candidate,mapping_evidence,quote_candidate,source_variant,unknown_fields)
           VALUES (%s,%s,%s,%s,%s,%s) ON CONFLICT(edition_id) DO UPDATE SET
           mapping_candidate=EXCLUDED.mapping_candidate,mapping_evidence=EXCLUDED.mapping_evidence,
           quote_candidate=EXCLUDED.quote_candidate,source_variant=EXCLUDED.source_variant,unknown_fields=EXCLUDED.unknown_fields,
-          mapping_revision=m.mapping_revision+CASE WHEN m.mapping_candidate<>'{}'::jsonb
-            AND m.mapping_candidate IS DISTINCT FROM EXCLUDED.mapping_candidate THEN 1 ELSE 0 END,
+          mapping_revision=m.mapping_revision+%s,
           updated_at=now()
           WHERE (m.mapping_candidate,m.mapping_evidence,m.quote_candidate,m.source_variant,m.unknown_fields)
             IS DISTINCT FROM (EXCLUDED.mapping_candidate,EXCLUDED.mapping_evidence,EXCLUDED.quote_candidate,
@@ -293,7 +300,7 @@ def store_source_metadata(conn, printing_id, record, physical_conflict=False, id
           RETURNING m.edition_id""",
                            (edition["id"], json.dumps(item["mapping_candidate"]), json.dumps(item["mapping_evidence"]),
                             json.dumps(item["quote_candidate"]), json.dumps(item["source_variant"]),
-                            json.dumps(item["unknown_fields"]))).fetchone()
+                            json.dumps(item["unknown_fields"]), bump)).fetchone()
         if row:
             updated.append(row["edition_id"])
     refresh_editions(conn, context, updated)
