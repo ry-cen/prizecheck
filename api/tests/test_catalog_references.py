@@ -95,6 +95,23 @@ def migrate(url, before=None):
                 conn.execute("INSERT INTO schema_migration(name) VALUES (%s)", (path.name,))
 
 
+def migrated_state(conn):
+    editions = conn.execute("""SELECT mapping_state,mapping_reason,count(*)::int AS n FROM catalog_edition_metadata
+      GROUP BY 1,2 ORDER BY 3 DESC""").fetchall()
+    printings = conn.execute("""SELECT live_state,live_reason,count(*)::int AS n FROM catalog_printing_metadata
+      GROUP BY 1,2""").fetchall()
+    revisions = conn.execute("""WITH stamps AS (SELECT public_revision FROM catalog_edition_metadata
+        UNION ALL SELECT public_revision FROM catalog_printing_metadata)
+      SELECT (SELECT count(DISTINCT public_revision) FROM stamps)::int AS distinct,
+        (SELECT max(public_revision) FROM stamps) AS stamp,
+        (SELECT count(*) FROM catalog_public_outbox)::int AS outbox,
+        (SELECT count(*) FROM catalog_public_outbox WHERE delivered_at IS NULL)::int AS pending,
+        (SELECT count(*) FROM catalog_public_outbox WHERE priority=0)::int AS urgent,
+        (SELECT count(*) FROM stamps WHERE public_revision=0)::int AS unstamped""").fetchone()
+    clock = conn.execute("SELECT revision FROM catalog_public_clock").fetchone()["revision"]
+    return {"editions": editions, "printings": printings, "revisions": revisions, "clock": clock}
+
+
 def test_migrating_a_populated_catalog_assigns_distinct_references_without_changing_other_columns():
     admin = os.environ.get("RECOVERY_TEST_DATABASE_URL")
     if not admin:
@@ -116,8 +133,10 @@ def test_migrating_a_populated_catalog_assigns_distinct_references_without_chang
                 printing = conn.execute("INSERT INTO catalog_printing(source,source_id,identity_id) VALUES (%s,%s,%s) RETURNING id",
                                         (*source, identity)).fetchone()[0]
                 for finish in ("normal", "reverse"):
+                    unspecified = finish == "reverse" and index % 10 == 0
+                    descriptor = '{"kind":"unspecified","label":"Unspecified Variant"}' if unspecified else f'{{"finish":"{finish}"}}'
                     edition = conn.execute("""INSERT INTO catalog_edition(printing_id,descriptor_key,descriptor)
-                      VALUES (%s,%s,%s) RETURNING id""", (printing, finish, f'{{"finish":"{finish}"}}')).fetchone()[0]
+                      VALUES (%s,%s,%s) RETURNING id""", (printing, finish, descriptor)).fetchone()[0]
                     conn.execute("INSERT INTO holding VALUES ('collector',%s,%s,%s,1)", (leaf, edition, index + 1))
         tables = ("catalog_identity", "catalog_printing", "catalog_edition", "holding")
 
@@ -130,10 +149,10 @@ def test_migrating_a_populated_catalog_assigns_distinct_references_without_chang
         migrate(url, before="022_mapping_evidence.sql")
         with psycopg.connect(url) as conn:
             # Metadata written by the unreleased 021 importer embedded evidence in the candidate.
-            conn.execute("""INSERT INTO catalog_edition_metadata(edition_id,mapping_candidate)
+            conn.execute("""INSERT INTO catalog_edition_metadata(edition_id,mapping_candidate,mapping_quarantined)
               SELECT id,'{"candidate":{"variantId":"v"},"correspondence":"source_candidate",
                 "physical_evidence":{"set":{"cardCount":{"total":201}}},"variant_evidence":{"type":"normal"}}'
-              FROM catalog_edition""")
+              ,descriptor_key='reverse' FROM catalog_edition""")
         subprocess.run([sys.executable, str(ROOT / "scripts/migrate.py")], env={**os.environ, "DATABASE_URL": url},
                        check=True, capture_output=True)
         after = snapshot()
@@ -145,6 +164,14 @@ def test_migrating_a_populated_catalog_assigns_distinct_references_without_chang
                           "mapping_evidence": {"physical_evidence": {"set": {"cardCount": {"total": 201}}},
                                                "variant_evidence": {"type": "normal"}},
                           "mapping_revision": 1}]
+        with psycopg.connect(url, row_factory=dict_row) as conn:
+            self_check = migrated_state(conn)
+        assert self_check["editions"] == [{"mapping_state": "unverified", "mapping_reason": "no_matching_rule", "n": 76},
+                                          {"mapping_state": "unverified", "mapping_reason": "unspecified_variant", "n": 4}]
+        assert self_check["printings"] == [{"live_state": "unsupported", "live_reason": "no_active_rule", "n": 40}]
+        # One revision stamps the whole backfill, every target is enqueued once, and nothing else moved.
+        assert self_check["revisions"] == {"distinct": 1, "stamp": self_check["clock"], "outbox": 120, "pending": 120,
+                                           "urgent": 0, "unstamped": 0}
         refs = [row["public_ref"] for table in ("catalog_printing", "catalog_edition") for row in after[table]]
         assert len(refs) == 120 and len(set(refs)) == 120 and all(REFERENCE.fullmatch(ref) for ref in refs)
     finally:

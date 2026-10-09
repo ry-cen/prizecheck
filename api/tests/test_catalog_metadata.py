@@ -281,3 +281,69 @@ def test_legacy_candidate_reuse_ignores_image_and_ambiguity_flags():
     make_legacy(candidate, {"id": "meta-1", "historical": "raw payload"})
     run(Records(renamed(normal=0.66, reverse=0.67, card=0.66)))
     assert len(reviews()) == 1
+
+
+def correspondences():
+    return {kind: row["mapping_candidate"]["correspondence"] for kind, row in by_type(editions()).items()}
+
+
+def decide_pending(status="retained"):
+    with connect() as conn:
+        conn.execute("UPDATE catalog_review SET status=%s WHERE status='pending'", (status,))
+
+
+def test_decided_name_review_stops_marking_every_edition_unresolved_on_each_import():
+    reset_catalog(); run(Records(furret())); run(Records(renamed()))
+    assert correspondences() == {"normal": "unresolved", "reverse": "unresolved"}
+    decide_pending()
+    run(Records(renamed()))
+    assert correspondences() == {"normal": "source_candidate", "reverse": "source_candidate"}
+    settled = by_type(editions())
+    run(Records(renamed(normal=0.99, reverse=1.99, card=0.99)))
+    run(Records(renamed()))
+    assert {kind: (row["mapping_revision"], row["public_revision"]) for kind, row in by_type(editions()).items()} == {
+        kind: (row["mapping_revision"], row["public_revision"]) for kind, row in settled.items()}
+    assert [row["status"] for row in reviews()] == ["retained"]
+
+
+def test_a_new_source_fingerprint_after_a_decided_review_is_contested_again():
+    reset_catalog(); run(Records(furret())); run(Records(renamed()))
+    decide_pending()
+    run(Records(renamed()))
+    again = furret()
+    again["name"] = "Furret Omega"
+    run(Records(again))
+    assert [row["status"] for row in reviews()] == ["retained", "pending"]
+    assert correspondences() == {"normal": "unresolved", "reverse": "unresolved"}
+
+
+def test_decided_reference_review_clears_the_conflict_only_with_its_ambiguity_review():
+    reset_catalog(); run(Records(furret()))
+    moved = furret(set={"id": "swsh9", "name": "Brilliant Stars"})
+    run(Records(moved))
+    assert {row["kind"] for row in reviews()} == {"reference_change", "variant_ambiguity"}
+    with connect() as conn:
+        conn.execute("UPDATE catalog_review SET status='retained' WHERE kind='reference_change'")
+    run(Records(moved))
+    assert correspondences() == {"normal": "unresolved", "reverse": "unresolved"}
+    decide_pending()
+    run(Records(moved))
+    assert correspondences() == {"normal": "source_candidate", "reverse": "source_candidate"}
+
+
+def test_contradicted_verified_mapping_stays_quarantined_after_its_review_is_decided():
+    from app.catalog_targets import MATCHING, activate_rule
+    reset_catalog(); run(Records(furret()))
+    user = owner()
+    with connect() as conn, conn.transaction():
+        activate_rule(conn, MATCHING, 1, user, "https://example.org/rule", "Reviewed")
+    try:
+        assert {row["mapping_state"] for row in editions()} == {"verified"}
+        run(Records(renamed()))
+        assert {(row["mapping_state"], row["mapping_reason"]) for row in editions()} == {("quarantined", "physical_conflict")}
+        decide_pending()
+        run(Records(renamed())); run(Records(renamed())); run(Records(furret()))
+        assert {row["mapping_state"] for row in editions()} == {"quarantined"}
+    finally:
+        with connect() as conn:
+            conn.execute("UPDATE catalog_rule_state SET activation_id=NULL")

@@ -219,10 +219,17 @@ CREATE TRIGGER stamp_printing_metadata BEFORE INSERT OR UPDATE ON catalog_printi
 CREATE FUNCTION enqueue_metadata_outbox() RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE kind text; target uuid; urgent boolean;
 BEGIN
- IF TG_OP='UPDATE' AND NEW.public_revision IS NOT DISTINCT FROM OLD.public_revision THEN RETURN NULL; END IF;
+ -- A second change in the same transaction keeps its revision, so enqueue also when the
+ -- public tuple moves; the unique key makes that an idempotent priority upgrade.
  IF TG_TABLE_NAME='catalog_edition_metadata' THEN
+  IF TG_OP='UPDATE' AND (NEW.public_revision,NEW.mapping_state,NEW.mapping_revision,NEW.product_id,NEW.quote_variant,NEW.mapping_reason)
+     IS NOT DISTINCT FROM (OLD.public_revision,OLD.mapping_state,OLD.mapping_revision,OLD.product_id,OLD.quote_variant,OLD.mapping_reason)
+  THEN RETURN NULL; END IF;
   kind := 'edition'; target := NEW.edition_id; urgent := NEW.mapping_state='quarantined';
  ELSE
+  IF TG_OP='UPDATE' AND (NEW.public_revision,NEW.live_state,NEW.live_identity,NEW.live_activation_id,NEW.live_reason)
+     IS NOT DISTINCT FROM (OLD.public_revision,OLD.live_state,OLD.live_identity,OLD.live_activation_id,OLD.live_reason)
+  THEN RETURN NULL; END IF;
   kind := 'printing'; target := NEW.printing_id; urgent := NEW.live_state='suspended';
  END IF;
  INSERT INTO catalog_public_outbox(target_kind,target_id,revision,priority)

@@ -256,12 +256,14 @@ def evaluate_edition(current, facts, rejections, active, verified_elsewhere):
     # unverified
     if is_unspecified(facts["descriptor"]):
         return replace(current, reason="unspecified_variant")
-    if candidate_fp in rejections or current.reason == "reviewed_unmapped":
-        return replace(current, reason="reviewed_unmapped")
+    if current.reason == "reviewed_unmapped":
+        return current
     if current.auto_closed:
         return replace(current, reason=current.reason or "no_matching_rule")
     if active is None:
-        return replace(current, reason="no_matching_rule")
+        return replace(current, reason="no_matching_rule")  # no rejection lookup needed on the default path
+    if candidate_fp in rejections:
+        return replace(current, reason="reviewed_unmapped")
     result = active.rule.evaluate(facts, verified_elsewhere)
     if isinstance(result, Failure):
         return replace(current, reason="rule_failed")
@@ -329,6 +331,8 @@ def evaluate_printing(current, export_candidate, contested, rejections, active, 
                        auto_closed=was_eligible)
 
     if isinstance(derived, Failure):
+        if derived.reason == "conflicting_input" and not reviewed and contested():
+            return deny("identity_review_pending", None)  # the pending review is the better explanation
         return deny(derived.reason, None)
     if collides(claim):
         return deny("conflicting_input")
