@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, HttpUrl
 
 from .main import connect, require_owner, verified_user
+from .public_catalog import publish_catalog_best_effort
 
 router = APIRouter()
 
@@ -275,4 +276,6 @@ def decide_report(report_id: UUID, payload: DecisionInput, user_id: str = Depend
               (reason, user_id, printing_id, edition_id, evidence, report_id)).fetchone()
     if bad_code:
         raise HTTPException(403, {"code": "INVALID_APPROVAL_CODE", "message": "Invalid or expired approval code."})
+    # The approval is committed; publishing its public catalog records is best effort and recoverable.
+    publish_catalog_best_effort(printing_ids=[printing_id])
     return _view(row)

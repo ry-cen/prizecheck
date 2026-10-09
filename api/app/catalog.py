@@ -15,6 +15,8 @@ import httpx
 import psycopg
 from psycopg.rows import dict_row
 
+from .public_catalog import publish_catalog_best_effort
+
 BASE_URL = "https://api.tcgdex.net/v2/en/cards"
 MAX_WORKERS = 8
 MAX_CARDS = 100_000
@@ -584,6 +586,9 @@ def execute_run(conn, run_id: UUID, source=None, before_promotion=None):
                 database_bytes = conn.execute("SELECT pg_database_size(current_database()) AS size").fetchone()["size"]
                 if database_bytes > int(db_limit):
                     raise CatalogError("Catalog exceeds configured database capacity gate")
+        # The import is committed. Public catalog records are a derived copy: a failure
+        # here is reported and recoverable by backfill, never a failed or rolled-back run.
+        publish_catalog_best_effort(conn)
     except BaseException as exc:
         conn.rollback()
         safe = str(exc) if isinstance(exc, CatalogError) else "Catalog import failed; start a new pull"

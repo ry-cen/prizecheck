@@ -24,6 +24,7 @@ cleanup() {
 trap cleanup EXIT
 .venv/bin/python scripts/migrate.py
 .venv/bin/python scripts/init_public_projection.py
+.venv/bin/python scripts/backfill_public_catalog.py
 npm run guardrails
 npm run build
 case "${VERIFY_SUITE:-all}" in
