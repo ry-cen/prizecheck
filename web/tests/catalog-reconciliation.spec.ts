@@ -365,13 +365,17 @@ print(json.dumps({'edition':rows[keys[0]].value,'printing':rows[keys[1]].value})
     expect(Object.keys(records.edition).sort()).toEqual([
       "descriptor",
       "edition_ref",
+      "marketplace",
       "printing_ref",
+      "revision",
     ]);
     expect(Object.keys(records.printing).sort()).toEqual([
       "collector_number",
       "image_url",
+      "live",
       "name",
       "printing_ref",
+      "revision",
       "set_id",
       "set_name",
     ]);

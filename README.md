@@ -86,7 +86,9 @@ established records are missing or corrupt, or if a legacy store holds data.
 Restore those from backup rather than resetting them. Then run
 `.venv/bin/python scripts/backfill_public_catalog.py` to publish public catalog
 records for the existing catalog; rerun it to repair records after a records-store
-outage. It only writes missing or changed records.
+outage. It rebuilds records from PostgreSQL through the revision-guarded
+catalog outbox and never overwrites a newer record (see
+[public projections](docs/public-projections.md)).
 
 ### 3. Start the app
 
