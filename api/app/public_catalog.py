@@ -23,6 +23,8 @@ import logging
 import time
 from dataclasses import dataclass
 
+from psycopg.pq import TransactionStatus
+
 from .public_projection import ProjectionUnavailable, public_record_store
 from .public_records import (catalog_edition_key, catalog_printing_key, quarantine_key, quote_states)
 
@@ -37,6 +39,10 @@ LOCK_WAITS = 100            # Rebuild retries a busy drain lock for up to ~20 s.
 LOCK_WAIT_SECONDS = 0.2
 REQUEST_BUDGET = 2.0        # Seconds a request path may spend draining after its own commit.
 LIVE_IDENTITY_KEYS = ('category', 'name', 'set_code', 'number')
+
+
+class DrainMisuse(RuntimeError):
+    """``drain`` was handed a connection with an open transaction; it commits, so it never borrows one."""
 
 
 @dataclass(frozen=True)
@@ -273,10 +279,15 @@ def drain(conn, store=None, *, budget=None):
     ``budget`` is seconds for request paths (None for scripts and background imports). Only one
     drainer runs at a time; a busy lock reports ``pending``. The holder re-checks once after
     unlocking so work enqueued meanwhile is not stranded until the next trigger.
+
+    This function COMMITS (and rolls back its own reads) on ``conn``. It therefore requires an
+    idle connection and raises ``DrainMisuse`` otherwise, instead of discarding or committing a
+    caller's transaction. Call it after the caller's own commit.
     """
+    if conn.info.transaction_status != TransactionStatus.IDLE:
+        raise DrainMisuse('drain() commits; call it on a connection with no open transaction')
     store = store or public_record_store()
     deadline = None if budget is None else time.monotonic() + budget
-    conn.rollback()
     written = unchanged = 0
     stuck = 0
     for _ in range(2):
@@ -435,6 +446,8 @@ def publish_catalog_best_effort(conn=None, *, printing_ids=None, budget=None):
         else:
             result = drain(conn, budget=budget)
         return result.state == 'delivered'
+    except DrainMisuse:
+        raise  # A programming error, not a delivery outage: never hide it behind best-effort.
     except Exception as exc:  # Records are rebuildable; report only the class, never details.
         log.warning('Public catalog records not published (%s); run scripts/backfill_public_catalog.py', type(exc).__name__)
         return False

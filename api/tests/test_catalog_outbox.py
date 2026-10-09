@@ -311,6 +311,7 @@ def test_store_ahead_and_same_revision_mismatch_are_reported_not_overwritten(mon
     mark = len(writes.log)
     with connect() as conn:
         conn.execute("UPDATE catalog_public_outbox SET delivered_at=NULL,last_error=NULL WHERE target_kind='edition'")
+        conn.commit()
         drain(conn)
     assert {row['last_error'] for row in pending() if row['target_id'] == normal['id']} == {'RevisionValueMismatch'}
     assert read(key)[key].value == other and writes.log[mark:] == []
@@ -444,6 +445,7 @@ def test_commit_order_not_allocation_order_decides_delivery(monkeypatch):
         conn.execute('UPDATE catalog_public_outbox SET delivered_at=now()')
         ids = [row['id'] for row in conn.execute("""SELECT e.id FROM catalog_edition e JOIN catalog_edition_metadata m ON m.edition_id=e.id
           WHERE m.mapping_state='verified' ORDER BY e.id""").fetchall()]
+        conn.commit()
     first, second = ids[0], ids[-1]
     writes = Writes(monkeypatch)
     with connect() as holder:
@@ -467,6 +469,7 @@ def test_commit_order_not_allocation_order_decides_delivery(monkeypatch):
         revisions = {row['edition_id']: row['public_revision'] for row in conn.execute(
             'SELECT edition_id,public_revision FROM catalog_edition_metadata WHERE edition_id=ANY(%s)', ([first, second],))}
         assert revisions[first] < revisions[second]
+        conn.commit()
         assert drain(conn).state == 'delivered'
     assert writes.log and all(revision for entry in writes.log for revision, _ in entry.values())
 
@@ -658,3 +661,30 @@ def test_reimport_with_changed_source_display_leaves_public_values_and_the_outbo
     with connect() as conn:
         assert conn.execute("SELECT count(*) AS n FROM catalog_public_outbox WHERE last_error IN ('RevisionValueMismatch','StoreAhead')").fetchone()['n'] == 0
     assert stored_revision(after.value) >= stored_revision(before.value)
+
+
+# ------------------------------------------------------------------ drain commits, so it refuses an open transaction
+
+
+def test_drain_refuses_a_connection_with_an_open_transaction_and_loses_nothing():
+    stage()
+    run(Records(changed_product()))
+    owner = f'drain-misuse-{uuid4()}'
+    with connect() as conn:
+        conn.execute('UPDATE catalog_public_outbox SET delivered_at=NULL')
+        conn.commit()
+        with pytest.raises(public_catalog.DrainMisuse):
+            with conn.transaction():
+                drain(conn)  # Rolling back here would silently discard the caller's transaction.
+    assert pending()  # Nothing was published
+    with connect() as conn:
+        conn.execute('INSERT INTO inventory_owner(user_id) VALUES (%s)', (owner,))  # implicit transaction, uncommitted
+        with pytest.raises(public_catalog.DrainMisuse):
+            drain(conn)
+        with pytest.raises(public_catalog.DrainMisuse):
+            public_catalog.publish_catalog_best_effort(conn)  # The shim never hides a programming error
+        conn.commit()
+    with connect() as conn:
+        assert conn.execute('SELECT 1 FROM inventory_owner WHERE user_id=%s', (owner,)).fetchone()  # the caller's write survived
+        conn.commit()
+        assert drain(conn).state == 'delivered'  # and an idle connection still drains
