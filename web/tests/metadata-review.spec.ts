@@ -194,7 +194,7 @@ test("collector reports an Edition mapping, nothing changes until the maintainer
   expect(after).toMatchObject({
     mapping_state: "verified",
     product_id: "4321",
-    quote_variant: "normal",
+    quote_variant: null, // the source's "normal" block holds another product, so the correction is unpriced
   });
   expect(
     (await pool.query("SELECT status FROM catalog_metadata_report")).rows
@@ -536,7 +536,7 @@ test("a request for information round-trips through the collector back to the ma
     .filter({ hasText: "normal" });
   // The maintainer can read what was reported, and the link cannot leak the opener.
   await expect(item).toContainText("Note: Original note");
-  await expect(item).toContainText("product_id");
+  await expect(item).toContainText("product id 4321");
   const link = item.getByRole("link", { name: "https://example.org/listing" });
   await expect(link).toHaveAttribute("rel", "noopener noreferrer");
   await expect(link).toHaveAttribute("href", "https://example.org/listing");
