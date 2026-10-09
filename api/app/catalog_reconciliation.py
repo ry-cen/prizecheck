@@ -2,7 +2,9 @@
 from datetime import datetime
 from typing import Literal
 from uuid import UUID
+import hashlib
 import hmac
+import json
 from fastapi import APIRouter,Depends,HTTPException
 from pydantic import BaseModel,Field,HttpUrl
 from .main import connect,require_owner,verified_user
@@ -20,12 +22,15 @@ class CatalogReviewView(BaseModel):
     detail: str
     candidate: dict
     created_at: datetime
+    evidence_digest: str
 
 class EditionReplacementInput(BaseModel):
     edition_id: UUID
     replacement_edition_id: UUID
 
 class CatalogDecision(BaseModel):
+    # The decision binds to the exact evidence the reviewer was shown.
+    evidence_digest: str=Field(pattern=r'^[0-9a-f]{64}$')
     decision: Literal['keep_existing','confirm_source','deprecate_edition','deprecate_printing']
     reason: str=Field(min_length=1,max_length=2000)
     evidence_url: HttpUrl
@@ -37,7 +42,11 @@ class CatalogDecision(BaseModel):
     edition_replacements: list[EditionReplacementInput]=Field(default_factory=list,max_length=500)
 
 
-def view(row):return CatalogReviewView(**row)
+def evidence_digest(row):
+    shown={key:row[key] for key in ('id','printing_id','source_id','kind','detail','candidate','source_fingerprint')}
+    return hashlib.sha256(json.dumps(shown,sort_keys=True,default=str,ensure_ascii=False).encode()).hexdigest()
+
+def view(row):return CatalogReviewView(**row,evidence_digest=evidence_digest(row))
 
 def consume_review_code(conn,owner_id,review_id,action,code):
     if code is None: fail(422,'FRESH_CODE_REQUIRED')
@@ -65,6 +74,7 @@ def decide(review_id: UUID,command: CatalogDecision,user_id: str=Depends(verifie
         if not row:fail(404,'REVIEW_NOT_FOUND')
         if row['status']!='pending':fail(409,'REVIEW_ALREADY_RESOLVED')
         if not command.reason.strip():fail(422,'REASON_REQUIRED')
+        if not hmac.compare_digest(command.evidence_digest,evidence_digest(row)):fail(409,'REVIEW_EVIDENCE_CHANGED')
         status='retained'
         if command.decision=='confirm_source':
             if row['kind']!='source_match' or str(command.manual_printing_id) not in row['candidate'].get('manual_printing_ids',[]):

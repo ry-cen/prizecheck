@@ -91,6 +91,13 @@ def test_manual_survives_tombstones_and_source_match_enters_owner_queue():
         run(Later(ids=[f'test-{n}' for n in range(1,98)]+['future-1','future-2','future-3']))
 
 
+def shown(owner,review_id):
+    """The evidence digest the owner's review queue displayed for one pending review."""
+    queue=call('GET','/api/admin/catalog-reviews',owner)
+    assert queue.status_code==200,queue.text
+    return next(row['evidence_digest'] for row in queue.json() if row['id']==str(review_id))
+
+
 def review_code(owner,review_id,action,code='123456'):
     import hmac,hashlib,os
     digest=hmac.new(os.environ['INTERNAL_AUTH_SECRET'].encode(),f'{owner}:{review_id}:{action}:{code}'.encode(),hashlib.sha256).hexdigest()
@@ -115,7 +122,7 @@ def test_owner_confirmation_binds_fresh_code_and_never_repoints_holdings():
     assert queue.status_code==200,queue.text
     match=next(x for x in queue.json() if x['kind']=='source_match')
     path=f"/api/admin/catalog-reviews/{match['id']}/decision"
-    body={'decision':'confirm_source','reason':'Same physical Printing confirmed','evidence_url':'https://example.org/photo','manual_printing_id':str(manual)}
+    body={'decision':'confirm_source','reason':'Same physical Printing confirmed','evidence_url':'https://example.org/photo','manual_printing_id':str(manual),'evidence_digest':match['evidence_digest']}
     assert call('POST',path,other,body).status_code==403
     assert call('POST',path,owner,body).json()['detail']['code']=='FRESH_CODE_REQUIRED'
     review_code(owner,match['id'],'confirm_source')
@@ -140,7 +147,7 @@ def test_deprecation_is_explicit_and_collector_reassignment_is_version_checked()
         conn.execute('INSERT INTO holding VALUES (%s,%s,%s,4,1)',(collector,leaf,source['id']))
         review=conn.execute("INSERT INTO catalog_review(printing_id,source_id,kind,source_fingerprint,detail) VALUES (%s,'test-2','variant_ambiguity','correction','Finish correction') RETURNING id",(source['printing'],)).fetchone()['id']
     review_code(owner,review,'resolve_catalog')
-    decision=call('POST',f'/api/admin/catalog-reviews/{review}/decision',owner,{'decision':'deprecate_edition','reason':'Physical finish corrected','evidence_url':'https://example.org/foil','code':'123456','edition_id':str(source['id']),'replacement_edition_id':str(target)})
+    decision=call('POST',f'/api/admin/catalog-reviews/{review}/decision',owner,{'decision':'deprecate_edition','reason':'Physical finish corrected','evidence_url':'https://example.org/foil','code':'123456','edition_id':str(source['id']),'replacement_edition_id':str(target),'evidence_digest':shown(owner,review)})
     assert decision.status_code==200,decision.text
     rows=call('GET',f'/api/holdings/{leaf}',collector).json()['holdings']
     assert rows[0]['edition_id']==str(source['id']) and rows[0]['quantity']=='4'
@@ -166,7 +173,7 @@ def test_printing_correction_requires_complete_explicit_edition_mapping():
         editions=conn.execute('SELECT id FROM catalog_edition WHERE printing_id=%s',(original,)).fetchall()
         review=conn.execute("INSERT INTO catalog_review(printing_id,source_id,kind,source_fingerprint,detail) VALUES (%s,'test-2','name_change','correction','Incorrect identity') RETURNING id",(original,)).fetchone()['id']
     review_code(owner,review,'resolve_catalog')
-    body={'decision':'deprecate_printing','reason':'English physical identity corrected','evidence_url':'https://example.org/printing','code':'123456','replacement_printing_id':str(replacement),'edition_replacements':[{'edition_id':str(editions[0]['id']),'replacement_edition_id':str(target)}]}
+    body={'decision':'deprecate_printing','reason':'English physical identity corrected','evidence_url':'https://example.org/printing','code':'123456','replacement_printing_id':str(replacement),'evidence_digest':shown(owner,review),'edition_replacements':[{'edition_id':str(editions[0]['id']),'replacement_edition_id':str(target)}]}
     path=f'/api/admin/catalog-reviews/{review}/decision'
     rejected=call('POST',path,owner,body)
     assert rejected.status_code==422 and rejected.json()['detail']['code']=='INCOMPLETE_EDITION_MAPPING'
@@ -190,7 +197,7 @@ def test_review_codes_reject_wrong_action_and_count_invalid_attempts():
         printing=conn.execute("SELECT id FROM catalog_printing WHERE source_id='test-2'").fetchone()['id']
         review=conn.execute("INSERT INTO catalog_review(printing_id,source_id,kind,source_fingerprint,detail) VALUES (%s,'test-2','name_change','code-test','Name review') RETURNING id",(printing,)).fetchone()['id']
     review_code(owner,review,'resolve_catalog')
-    body={'decision':'keep_existing','reason':'Retain physical card','evidence_url':'https://example.org/photo','code':'000000'}
+    body={'decision':'keep_existing','reason':'Retain physical card','evidence_url':'https://example.org/photo','code':'000000','evidence_digest':shown(owner,review)}
     path=f'/api/admin/catalog-reviews/{review}/decision'
     for _ in range(3):assert call('POST',path,owner,body).status_code==403
     assert call('POST',path,owner,{**body,'code':'123456'}).status_code==403
@@ -221,3 +228,31 @@ def test_reused_source_reference_is_frozen_in_search_and_queued_for_review():
     reference=[review for review in reviews if review['kind']=='reference_change']
     assert len(reference)==1 and reference[0]['candidate']['set_id']=='other'
     assert reference[0]['candidate']['collector_number']=='999'
+
+
+def test_decision_requires_the_unchanged_evidence_digest_shown_to_the_owner():
+    reset_catalog();run(Source())
+    owner=str(uuid4())
+    with connect() as conn:
+        conn.execute('INSERT INTO inventory_owner(user_id) VALUES (%s)',(owner,))
+        conn.execute('INSERT INTO owner_binding(user_id) VALUES (%s)',(owner,))
+        printing=conn.execute("SELECT id FROM catalog_printing WHERE source_id='test-2'").fetchone()['id']
+        review=conn.execute("""INSERT INTO catalog_review(printing_id,source_id,kind,source_fingerprint,detail,candidate)
+          VALUES (%s,'test-2','name_change','digest-test','Name review','{"name":"Raichu"}') RETURNING id""",(printing,)).fetchone()['id']
+    viewed=shown(owner,review)
+    with connect() as conn:
+        conn.execute("""UPDATE catalog_review SET candidate='{"name":"Different evidence"}' WHERE id=%s""",(review,))
+    review_code(owner,review,'resolve_catalog')
+    path=f'/api/admin/catalog-reviews/{review}/decision'
+    body={'decision':'keep_existing','reason':'Retain physical card','evidence_url':'https://example.org/photo','code':'123456'}
+    assert call('POST',path,owner,body).status_code==422
+    stale=call('POST',path,owner,{**body,'evidence_digest':viewed})
+    assert stale.status_code==409 and stale.json()['detail']['code']=='REVIEW_EVIDENCE_CHANGED'
+    with connect() as conn:
+        assert conn.execute('SELECT status FROM catalog_review WHERE id=%s',(review,)).fetchone()['status']=='pending'
+        assert conn.execute('SELECT consumed_at,attempts FROM catalog_approval_code WHERE review_id=%s',(review,)).fetchone()=={'consumed_at':None,'attempts':0}
+    current=shown(owner,review)
+    assert current!=viewed
+    accepted=call('POST',path,owner,{**body,'evidence_digest':current})
+    assert accepted.status_code==200,accepted.text
+    assert accepted.json()['candidate']=={'name':'Different evidence'}

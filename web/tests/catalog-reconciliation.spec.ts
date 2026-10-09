@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 
 test("owner resolves source drift with evidence and a fresh action-bound email code", async ({
@@ -125,10 +126,11 @@ promote({'card-1':'Correction Pikachu'})`,
       .fill(process.env.OWNER_EMAIL || "owner@example.test");
     await page.getByRole("button", { name: "Send code", exact: true }).click();
     await expect(page.getByRole("status")).toContainText("code has been sent");
-    const code = JSON.parse(
-      readFileSync(process.env.MAIL_FILE!, "utf8").trim().split("\n").at(-1)!
-    ).otp;
-    await page.getByLabel("Six-digit code").fill(code);
+    const mail = () =>
+      JSON.parse(
+        readFileSync(process.env.MAIL_FILE!, "utf8").trim().split("\n").at(-1)!
+      ).otp as string;
+    await page.getByLabel("Six-digit code").fill(mail());
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
     await page.getByRole("button", { name: "New top-level Location" }).click();
     await page.getByLabel("Name", { exact: true }).fill(location);
@@ -171,38 +173,121 @@ run(MetadataSource({'card-1': 'Correction Pikachu'}))`,
       'INSERT INTO owner_binding(singleton,user_id) SELECT true,id FROM "user" WHERE email=$1 ON CONFLICT(singleton) DO UPDATE SET user_id=EXCLUDED.user_id',
       [process.env.OWNER_EMAIL || "owner@example.test"]
     );
+    const gateway = (path: string) => new URL(path, page.url()).href;
+    const sameOrigin = { origin: new URL(page.url()).origin };
+    const queue = async () => {
+      const response = await page.request.get(
+        gateway("/api/admin/catalog-reviews")
+      );
+      expect(response.ok()).toBeTruthy();
+      return response.json();
+    };
+    // Published Deck references are checked through the gateway across imports.
+    const deck = await page.request.post(gateway("/api/decks"), {
+      headers: sameOrigin,
+      data: { name: `Published ${location}`, idempotency_key: randomUUID() },
+    });
+    expect(deck.status()).toBe(201);
+    const deckId = (await deck.json()).location.id;
+    const normalEdition = (
+      await pool.query(
+        "SELECT e.id,e.public_ref,p.public_ref AS printing_ref FROM catalog_edition e JOIN catalog_printing p ON p.id=e.printing_id WHERE p.source_id='card-1' AND e.descriptor->>'finish'='normal'"
+      )
+    ).rows[0];
+    expect(
+      (
+        await page.request.post(gateway("/api/holdings"), {
+          headers: sameOrigin,
+          data: {
+            location_id: deckId,
+            edition_id: normalEdition.id,
+            quantity: "3",
+            idempotency_key: randomUUID(),
+          },
+        })
+      ).status()
+    ).toBe(200);
+    const published = await page.request.post(
+      gateway(`/api/decks/${deckId}/publication`),
+      {
+        headers: sameOrigin,
+        data: { title: "Reference check", idempotency_key: randomUUID() },
+      }
+    );
+    expect(published.status()).toBe(200);
+    const publicPath = gateway(
+      `/api/public/decks/${(await published.json()).token}`
+    );
+    const snapshot = await (await page.request.get(publicPath)).json();
+    expect(snapshot.identities[0].editions[0]).toMatchObject({
+      edition_ref: normalEdition.public_ref,
+      printing_ref: normalEdition.printing_ref,
+    });
     refresh("0.25");
+    const firstQueue = await queue();
+    expect(firstQueue).toHaveLength(1);
+    // Quote-only refreshes neither add reviews nor change the evidence shown.
+    refresh("0.43");
+    expect(await queue()).toEqual(firstQueue);
     // Model a pending review made by the historical raw-fingerprint importer.
     await pool.query(
       "UPDATE catalog_review SET source_fingerprint='legacy-raw-evidence',candidate=candidate-'metadata' WHERE source_id='card-1' AND kind='name_change'"
     );
-    const queueBefore = await page.request.get(
-      new URL("/api/admin/catalog-reviews", page.url()).href
-    );
-    expect(queueBefore.ok()).toBeTruthy();
-    const pendingBefore = await queueBefore.json();
+    const pendingBefore = await queue();
     refresh("0.43", "UPDATED");
-    const queueAfter = await page.request.get(
-      new URL("/api/admin/catalog-reviews", page.url()).href
+    const queueAfter = await queue();
+    expect(queueAfter.map((row: { id: string }) => row.id)).toEqual(
+      pendingBefore.map((row: { id: string }) => row.id)
     );
-    expect(queueAfter.ok()).toBeTruthy();
+    const latestReview = queueAfter[0];
+    // Legacy evidence is backfilled once; quote payloads never enter review evidence.
+    expect(latestReview.candidate.metadata.export_candidate.set.tcgOnline).toBe(
+      "UPDATED"
+    );
     expect(
-      (await queueAfter.json()).map((row: { id: string }) => row.id)
-    ).toEqual(pendingBefore.map((row: { id: string }) => row.id));
-    const latestReview = (await queueAfter.json())[0];
-    expect(
-      latestReview.candidate.metadata.source_record.pricing.tcgplayer.normal
-        .marketPrice
-    ).toBe(0.43);
+      latestReview.candidate.metadata.source_record.pricing
+    ).toBeUndefined();
+    expect(latestReview.evidence_digest).not.toBe(
+      pendingBefore[0].evidence_digest
+    );
+    // The owner decides through the gateway with a fresh code bound to the evidence shown.
     await pool.query(
-      "UPDATE catalog_review SET status='retained' WHERE id=$1",
-      [latestReview.id]
+      "UPDATE auth_send_event SET sent_at=now()-interval '61 seconds'"
     );
+    const sent = await page.request.post(gateway("/auth/approval-code"), {
+      headers: sameOrigin,
+      data: { reviewId: latestReview.id, action: "resolve_catalog" },
+    });
+    expect(sent.ok()).toBeTruthy();
+    const decision = {
+      decision: "keep_existing",
+      reason: "Physical card confirms the established name",
+      evidence_url: "https://example.org/card-photo",
+      code: mail(),
+    };
+    const decide = (digest: string) =>
+      page.request.post(
+        gateway(`/api/admin/catalog-reviews/${latestReview.id}/decision`),
+        { headers: sameOrigin, data: { ...decision, evidence_digest: digest } }
+      );
+    const stale = await decide(pendingBefore[0].evidence_digest);
+    expect(stale.status()).toBe(409);
+    expect((await stale.json()).detail.code).toBe("REVIEW_EVIDENCE_CHANGED");
+    const retained = await decide(latestReview.evidence_digest);
+    expect(retained.status()).toBe(200);
+    const decided = await retained.json();
+    expect(decided.status).toBe("retained");
     refresh("0.99", "UPDATED");
-    const afterRetained = await page.request.get(
-      new URL("/api/admin/catalog-reviews", page.url()).href
-    );
-    expect(await afterRetained.json()).toEqual([]);
+    expect(await queue()).toEqual([]);
+    const provenance = (
+      await pool.query(
+        "SELECT status,candidate,reviewer_id FROM catalog_review WHERE id=$1",
+        [latestReview.id]
+      )
+    ).rows[0];
+    expect(provenance.status).toBe("retained");
+    expect(provenance.candidate).toEqual(decided.candidate);
+    expect(provenance.reviewer_id).toBeTruthy();
     const catalogBefore = await page.request.get(
       new URL("/api/catalog/search?name=Correction", page.url()).href
     );
@@ -249,6 +334,16 @@ run(AmbiguousSource({'card-1': 'Correction Pikachu', 'card-2': 'Unknown facets'}
       { unclassifiedFacet: "one" },
       { unclassifiedFacet: "two" },
     ]);
+    // Quote, target-metadata and ambiguous imports leave the frozen public references intact.
+    expect(await (await page.request.get(publicPath)).json()).toEqual(snapshot);
+    expect(
+      (
+        await pool.query(
+          "SELECT id,public_ref FROM catalog_edition WHERE id=$1",
+          [normalEdition.id]
+        )
+      ).rows[0].public_ref
+    ).toBe(normalEdition.public_ref);
     await page.reload();
     await page
       .getByRole("navigation", { name: "Location tree" })

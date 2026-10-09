@@ -100,6 +100,8 @@ class RecoveryTest(unittest.TestCase):
                 conn.execute("INSERT INTO publication_command(owner_id,request_key,request_digest,token,result) VALUES ('owner',%s,'digest','burned-test-token','{}')", (uuid.uuid4(),))
                 conn.execute("INSERT INTO inventory_undo(id,owner_id,action,source_id,payload) VALUES (%s,'owner','remove',%s,'{}')", (uuid.uuid4(),location))
                 conn.execute("INSERT INTO inventory_undo(id,owner_id,action,source_id,expires_at,payload) VALUES (%s,'owner','remove',%s,now()-interval '1 minute','{\"private\":\"expired\"}')", (uuid.uuid4(), location))
+            with psycopg.connect(source_url) as conn:
+                references = conn.execute("SELECT p.public_ref,e.public_ref FROM catalog_printing p JOIN catalog_edition e ON e.printing_id=p.id").fetchall()
             run = subprocess.run([str(ROOT / '.venv/bin/python'), str(ROOT / 'scripts/recovery.py'), 'backup', str(backup)], env=env, capture_output=True)
             self.assertEqual(run.returncode, 0, run.stderr.decode())
             self.assertEqual(backup.stat().st_mode & 0o777, 0o700)
@@ -112,6 +114,12 @@ class RecoveryTest(unittest.TestCase):
             with psycopg.connect(make_conninfo(admin, dbname=target)) as conn:
                 self.assertEqual(conn.execute('SELECT edition_id,quantity,version FROM holding').fetchall(), [(edition,42,3)])
                 self.assertEqual(conn.execute('SELECT id FROM catalog_printing').fetchall(), [(printing,)])
+                # Opaque public references are restored, not reassigned; new rows still receive one.
+                self.assertEqual(conn.execute("SELECT p.public_ref,e.public_ref FROM catalog_printing p JOIN catalog_edition e ON e.printing_id=p.id").fetchall(), references)
+                fresh = conn.execute("INSERT INTO catalog_printing(source,identity_id) VALUES ('manual',%s) RETURNING public_ref", (identity,)).fetchone()[0]
+                self.assertRegex(fresh, '^[0-9a-f]{48}$')
+                self.assertNotIn(fresh, references[0])
+                conn.rollback()
                 self.assertEqual(conn.execute('SELECT printing_id,edition_id FROM catalog_override').fetchall(), [(printing,edition)])
                 self.assertEqual(conn.execute('SELECT revoked FROM deck_publication').fetchall(), [(True,)])
                 self.assertEqual(conn.execute('SELECT projected FROM publication_command').fetchall(), [(False,)])
