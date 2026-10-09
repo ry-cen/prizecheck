@@ -1,6 +1,6 @@
-# Dependencies
-node_modules/
-.venv/
+# Dependencies (no trailing slash, so worktree symlinks match too)
+node_modules
+.venv
 
 # Python caches
 __pycache__/
