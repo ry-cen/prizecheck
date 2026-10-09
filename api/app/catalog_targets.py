@@ -176,14 +176,24 @@ MATCHING_RULES = {1: MatchingRulesV1}
 REGISTRIES = {LIVE: LIVE_RULES, MATCHING: MATCHING_RULES}
 
 
-def code_digest(kind: str, version: int) -> str:
-    """sha256 of the rule's reviewed table plus its interpreter source."""
-    rule = REGISTRIES[kind][version]
+def _source(obj):
     try:
-        source = inspect.getsource(rule)
+        return inspect.getsource(obj)
     except (OSError, TypeError):
-        source = rule.__qualname__
-    return hashlib.sha256((canonical(rule.table()) + "\n" + source).encode()).hexdigest()
+        return getattr(obj, "__qualname__", repr(obj))
+
+
+def code_digest(kind: str, version: int) -> str:
+    """sha256 of the rule's reviewed table plus all interpreter source it executes.
+
+    Inherited rule classes and the shared helpers are covered, so a subclass cannot
+    pick up unreviewed logic from its base without changing the approved digest.
+    """
+    rule = REGISTRIES[kind][version]
+    parts = [canonical(rule.table())]
+    parts += [_source(klass) for klass in rule.__mro__ if klass is not object]
+    parts += [_source(helper) for helper in (normalized_name, is_unspecified, canonical)]
+    return hashlib.sha256("\n".join(parts).encode()).hexdigest()
 
 
 @dataclass(frozen=True)

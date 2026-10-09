@@ -153,9 +153,13 @@ def test_migrating_a_populated_catalog_assigns_distinct_references_without_chang
               SELECT id,'{"candidate":{"variantId":"v"},"correspondence":"source_candidate",
                 "physical_evidence":{"set":{"cardCount":{"total":201}}},"variant_evidence":{"type":"normal"}}'
               ,descriptor_key='reverse' FROM catalog_edition""")
+        migrate(url, before="023_metadata_review.sql")
+        through_022 = snapshot()
         subprocess.run([sys.executable, str(ROOT / "scripts/migrate.py")], env={**os.environ, "DATABASE_URL": url},
                        check=True, capture_output=True)
         after = snapshot()
+        # Migration 023 rewrites no ID, descriptor, public reference or correspondence.
+        assert after == through_022
         for table in tables:
             assert [{key: value for key, value in row.items() if key != "public_ref"} for row in after[table]] == before[table]
         with psycopg.connect(url, row_factory=dict_row) as conn:

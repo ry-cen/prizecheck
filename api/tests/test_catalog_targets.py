@@ -598,7 +598,7 @@ def test_import_takes_the_clock_before_touching_metadata_and_blocks_behind_an_ea
         assert not reached.wait(1.0), "promotion advanced past the clock held by an earlier correction"
         with connect() as watcher:
             waiting = watcher.execute("""SELECT count(*) AS n FROM pg_stat_activity WHERE wait_event_type='Lock'
-              AND query LIKE '%catalog_begin_correction%'""").fetchone()["n"]
+              AND datname=current_database() AND query LIKE '%catalog_begin_correction%'""").fetchone()["n"]
         assert waiting == 1
         holder.commit()
         thread.join(30)
