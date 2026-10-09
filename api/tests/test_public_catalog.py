@@ -89,11 +89,16 @@ def test_records_store_failure_does_not_roll_back_import_or_change_publication(m
     current = Path(os.environ['PUBLIC_PROJECTION_DIR']) / 'current.json'
     published = current.read_bytes()
 
+    attempts = []
+
     def unavailable(*args, **kwargs):
+        attempts.append(kwargs)
         raise ProjectionUnavailable()
 
     monkeypatch.setattr(FilePublicRecords, 'compare_and_swap', unavailable)
     promote({'card-1': 'Pikachu'})
+    # The post-commit write was really attempted (and failed); the run still succeeded.
+    assert attempts
     with connect() as conn:
         assert conn.execute("SELECT outcome FROM catalog_run").fetchone()['outcome'] == 'succeeded'
         state = conn.execute("SELECT active_generation,revision FROM catalog_state").fetchone()
@@ -162,3 +167,24 @@ def test_catalog_and_quote_record_writes_leave_snapshots_discovery_revision_and_
     assert client.get(f'/api/public/decks/{token}').content == published.content
     assert client.get('/api/public/discovery').json() == page
     assert client.get('/api/public/discovery', params={'cursor': cursor}).status_code == 200
+
+
+def test_full_catalog_scale_publishes_in_bounded_batches_without_a_whole_run_deadline(monkeypatch):
+    from app import public_catalog
+    cards = {f'card-{index}': f'Card {index}' for index in range(1, 301)}
+    calls = []
+    original = FilePublicRecords.compare_and_swap
+
+    def counted(self, expected, changes, **kwargs):
+        calls.append(len(changes))
+        return original(self, expected, changes, **kwargs)
+
+    monkeypatch.setattr(FilePublicRecords, 'compare_and_swap', counted)
+    started = time.monotonic()
+    promote(cards)
+    elapsed = time.monotonic() - started
+    with connect() as conn:
+        total = conn.execute("SELECT (SELECT count(*) FROM catalog_printing)+(SELECT count(*) FROM catalog_edition) AS n").fetchone()['n']
+    assert total >= 600 and sum(calls) == total and max(calls) <= 128
+    assert public_catalog.backfill().written == 0
+    assert elapsed < 60

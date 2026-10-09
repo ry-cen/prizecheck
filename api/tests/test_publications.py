@@ -196,6 +196,24 @@ def test_failed_object_write_preserves_whole_snapshot_and_retry_recovers(monkeyp
     assert client.get(path).status_code == 404
 
 
+def test_failed_republish_replay_cannot_revive_a_revoked_token_or_erase_the_invalidation(monkeypatch):
+    owner, _, _, _, edition, _ = fixture()
+    deck = create(owner).json()['location']['id']
+    add(owner, deck, edition, '1')
+    token = command(owner, deck).json()['token']
+    path = f'/api/public/decks/{token}'
+    stale = uuid4()
+    with monkeypatch.context() as patch:
+        patch.setattr(os, 'replace', lambda *args: (_ for _ in ()).throw(OSError('object storage unavailable')))
+        assert command(owner, deck, 'PUT', key=stale).status_code == 503
+    # The queued PUT is replayed before the DELETE, which is then the newest authority.
+    assert command(owner, deck, 'DELETE').status_code == 200
+    assert client.get(path).status_code == 404 and token not in stored_decks()['decks']
+    replay = command(owner, deck, 'PUT', key=stale)
+    assert replay.status_code == 200 and replay.json()['revoked'] is False
+    assert client.get(path).status_code == 404 and token not in stored_decks()['decks']
+
+
 def test_corrupt_projection_returns_safe_unavailable_and_title_is_plain_text():
     from pathlib import Path
     owner, _, _, _, _, _ = fixture()

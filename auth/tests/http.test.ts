@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { Pool } from "pg";
-import { spawn, type ChildProcess } from "node:child_process";
+import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { createServer, type Server } from "node:net";
 import { mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -156,12 +156,26 @@ describe("live Better Auth boundary", () => {
       },
     };
     const projection = join(directory, "current.json");
+    // Enough Listed decks that discovery returns a real next-page cursor.
+    const listed = Object.fromEntries(
+      Array.from({ length: 31 }, (_, index) => [
+        `L${String(index).padStart(31, "0")}`,
+        {
+          visibility: "listed",
+          snapshot: {
+            ...snapshot,
+            title: `Listed ${index}`,
+            published_at: `2026-02-01T00:00:${String(index).padStart(2, "0")}Z`,
+          },
+        },
+      ])
+    );
     writeFileSync(
       projection,
       JSON.stringify({
         format: 1,
         revision: 0,
-        decks: { [token]: { visibility: "unlisted", snapshot } },
+        decks: { [token]: { visibility: "unlisted", snapshot }, ...listed },
       })
     );
     const children: ChildProcess[] = [];
@@ -268,6 +282,54 @@ describe("live Better Auth boundary", () => {
       renameSync(projection + ".away", projection);
       expect((await read(valid)).status).toBe(200);
       expect(wakeups).toBe(baseline);
+      // Writing catalog, quote and result records changes no snapshot, discovery revision or cursor.
+      const firstPage = await (
+        await read(valid, "/api/public/discovery")
+      ).json();
+      expect(firstPage.decks).toHaveLength(30);
+      expect(firstPage.next_cursor).toBeTruthy();
+      const before = {
+        projection: readFileSync(projection, "utf8"),
+        deck: await (await read(valid)).text(),
+      };
+      execFileSync(
+        ".venv/bin/python",
+        [
+          "-c",
+          `import time
+from app.public_projection import public_record_store
+from app.public_records import catalog_edition_key, quote_key, result_key
+store = public_record_store()
+store.initialize(deadline=time.monotonic() + 5)
+ref = '${edition.edition_ref}'
+keys = [catalog_edition_key(ref), quote_key(ref, 1), result_key(ref, 1)]
+rows = store.read_records(keys, deadline=time.monotonic() + 5).records
+assert store.compare_and_swap({k: rows[k].version for k in keys}, {
+  keys[0]: {'edition_ref': ref, 'printing_ref': '${edition.printing_ref}', 'descriptor': {'label': 'Unspecified Variant'}},
+  keys[1]: {'attempt': 1, 'amount': '1.00'}, keys[2]: {'state': 'quote', 'attempt': 1}}, deadline=time.monotonic() + 5)`,
+        ],
+        { cwd: process.cwd(), env: { ...environment, PYTHONPATH: "api" } }
+      );
+      expect(readFileSync(projection, "utf8")).toBe(before.projection);
+      expect(await (await read(valid)).text()).toBe(before.deck);
+      const afterPage = await (
+        await read(valid, "/api/public/discovery")
+      ).json();
+      expect(afterPage.revision).toBe(firstPage.revision);
+      expect(afterPage).toEqual(firstPage);
+      const next = await read(
+        valid,
+        `/api/public/discovery?cursor=${encodeURIComponent(firstPage.next_cursor)}`
+      );
+      expect(next.status).toBe(200);
+      expect((await next.json()).decks).toHaveLength(1);
+      expect(wakeups).toBe(baseline);
+      // Controls: private routes do wake the databases, so the counter is live for both processes.
+      const beforeApi = wakeups;
+      expect(
+        (await fetch(`http://127.0.0.1:${apiPort}/api/locations`)).status
+      ).toBe(401);
+      expect(wakeups).toBeGreaterThan(beforeApi);
       // Control: a private route does wake the gateway database, so the counter is live.
       expect(
         (

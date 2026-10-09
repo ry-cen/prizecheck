@@ -21,9 +21,9 @@ from .public_records import catalog_edition_key, catalog_printing_key
 
 log = logging.getLogger(__name__)
 BATCH_KEYS = 128
-PRINTING_PAGE = 40
+PRINTING_PAGE = 60
 ATTEMPTS = 4
-BUDGET_SECONDS = 20
+CHUNK_SECONDS = 10  # Per read/CAS attempt, so a full catalog is never bounded by one deadline.
 
 
 @dataclass(frozen=True)
@@ -68,12 +68,13 @@ def _pages(conn, printing_ids):
         last = printings[-1]['id']
 
 
-def _sync(store, desired, budget):
+def _sync(store, desired):
     keys = list(desired)
     written = 0
     for start in range(0, len(keys), BATCH_KEYS):
         chunk = {key: desired[key] for key in keys[start:start + BATCH_KEYS]}
         for _ in range(ATTEMPTS):
+            budget = time.monotonic() + CHUNK_SECONDS
             snapshot = store.read_records(list(chunk), deadline=budget)
             changes = {key: value for key, value in chunk.items() if snapshot.records[key].value != value}
             if not changes:
@@ -93,11 +94,10 @@ def publish_catalog(conn, *, printing_ids=None, store=None):
     repeat: unchanged records are not rewritten.
     """
     store = store or public_record_store()
-    budget = time.monotonic() + BUDGET_SECONDS
     written = total = 0
     ids = [str(value) for value in printing_ids] if printing_ids is not None else None
     for desired in _pages(conn, ids):
-        written += _sync(store, desired, budget)
+        written += _sync(store, desired)
         total += len(desired)
     return CatalogPublication(written=written, unchanged=total - written)
 
