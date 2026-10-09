@@ -306,7 +306,8 @@ ref = '${edition.edition_ref}'
 keys = [catalog_edition_key(ref), quote_key(ref, 1), result_key(ref, 1)]
 rows = store.read_records(keys, deadline=time.monotonic() + 5).records
 assert store.compare_and_swap({k: rows[k].version for k in keys}, {
-  keys[0]: {'edition_ref': ref, 'printing_ref': '${edition.printing_ref}', 'descriptor': {'label': 'Unspecified Variant'}},
+  keys[0]: {'edition_ref': ref, 'printing_ref': '${edition.printing_ref}', 'descriptor': {'label': 'Unspecified Variant'}, 'revision': 1,
+    'marketplace': {'state': 'unverified', 'reason': 'unspecified_variant', 'mapping_revision': 0, 'product_id': None, 'quote_lookup': None}},
   keys[1]: {'attempt': 1, 'amount': '1.00'}, keys[2]: {'state': 'quote', 'attempt': 1}}, deadline=time.monotonic() + 5)`,
         ],
         { cwd: process.cwd(), env: { ...environment, PYTHONPATH: "api" } }
