@@ -1,0 +1,15 @@
+# Remaining TCGdex price fixtures
+
+Fetched: 2026-10-08 17:11 UTC. Read-only checks against TCGdex's official English API. The fixture in [`remaining-price-fixtures.json`](remaining-price-fixtures.json) captures the relevant response fields. Previously captured ordinary examples were reused from [`tcgdex-pricing-samples.json`](tcgdex-pricing-samples.json).
+
+## Findings
+
+- **Special illustration rare:** TCGdex returned `sv03-223`, Charizard ex, rarity `Special illustration rare`, set Obsidian Flames, local ID `223`. Its `holo` detailed variant has TCGplayer product ID `509980` and `holofoil.marketPrice` **$99.18 USD**, updated `2026-10-07T22:55:06.584Z`. This confirms a populated price payload for one special-art record. The API's product reference does not prove the linked TCGplayer listing is the exact physical printing; this fixture does not include a listing-page verification. [TCGdex card response](https://api.tcgdex.net/v2/en/cards/sv03-223)
+- **English promo:** TCGdex returned `svp-085`, Pikachu with Grey Felt Hat, rarity `Promo`, set SVP Black Star Promos, local ID `085`. Its `normal` detailed variant has `thirdParty.tcgplayer: 518861`, but `pricing.tcgplayer` is explicitly `null`. The record does have Cardmarket pricing, so this demonstrates source-specific price absence rather than a missing card or missing all-market pricing. [TCGdex card response](https://api.tcgdex.net/v2/en/cards/svp-085)
+- **Missing quote versus missing field:** In the prior live `base1-98` Fire Energy sample, the unlimited variant has a USD TCGplayer quote, two shadowless variants have explicit `pricing.tcgplayer: null`, and the 1999–2000 copyright variant has no `pricing` field in the captured detailed entry. These are three distinct data states. The physical variant rows remain present in all cases. [TCGdex card response](https://api.tcgdex.net/v2/en/cards/base1-98) · [captured prior fixture](tcgdex-pricing-samples.json)
+
+## Comparison and limits
+
+The special-art record has a populated TCGplayer product reference and market quote, while the English promo has a product reference without a TCGplayer quote. The earlier Base Set Energy sample also shows that individual detailed variants can have null or absent price data even when another variant on the same card has a quote. This supports modeling availability per detailed variant and marketplace, preserving `null` separately from an omitted field. It does **not** establish that the special-art product ID maps to the intended physical finish/printing: TCGdex's FAQ says distinct printings can share marketplace listings and prices, so exact physical matching still needs a check against the actual TCGplayer product listing. [TCGdex FAQ](https://tcgdex.dev/faq)
+
+Evidence is limited to two newly fetched full card records and the previously captured Base Set Energy record. Set-index/detail lookups were used only to find valid IDs; no broad card catalog was fetched. Earlier guessed IDs that returned 404 were request-ID failures, not evidence about coverage. No comparison against another current marketplace source was made, and no promo TCGplayer price was available in this sample.

@@ -1,0 +1,40 @@
+Pokémon: 14
+4 Gimmighoul SSP 97
+4 Gholdengo ex PAR 139
+1 Gholdengo SSP 131
+1 N's Zoroark ex JTG 98
+1 N's Zorua JTG 97
+1 Fezandipiti ex SFA 38
+1 Munkidori TWM 95
+1 Iron Bundle PAR 56
+
+Trainer: 34
+4 Arven OBF 186
+2 Ciphermaniac's Codebreaking TEF 145
+2 Professor Turo's Scenario PAR 171
+2 Boss's Orders PAL 172
+1 Iono PAL 185
+4 Buddy-Buddy Poffin TEF 144
+4 Superior Energy Retrieval PAL 189
+2 Nest Ball SVI 181
+2 Night Stretcher SFA 61
+1 Ultra Ball SVI 196
+1 Super Rod PAL 188
+1 Counter Catcher PAR 160
+1 Switch SVI 194
+1 Earthen Vessel PAR 163
+1 Energy Search Pro SSP 176
+2 Technical Machine: Evolution PAR 178
+1 Rescue Board TEF 159
+1 Levincia JTG 150
+1 Jamming Tower TWM 153
+
+Energy: 12
+3 Metal Energy SVE 8
+2 Lightning Energy SVE 4
+2 Darkness Energy SVE 7
+1 Grass Energy SVE 1
+1 Fire Energy SVE 2
+1 Water Energy SVE 3
+1 Psychic Energy SVE 5
+1 Fighting Energy SVE 6

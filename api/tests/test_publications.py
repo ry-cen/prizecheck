@@ -43,7 +43,7 @@ def test_snapshot_allowlist_private_edits_republish_revoke_and_burned_url():
     assert snapshot['title'] == 'Public deck' and snapshot['total'] == '59' and snapshot['version'] == 1
     identity = snapshot['identities'][0]
     assert set(identity) == {'name', 'quantity', 'editions'}
-    assert set(identity['editions'][0]) == {'set_id','set_name','collector_number','variant','image_url','quantity'}
+    assert set(identity['editions'][0]) == {'set_id','set_name','collector_number','variant','image_url','quantity','edition_ref','printing_ref'}
     assert set(snapshot['checks']) == {'size_status','shortage','excess','identities','disclaimer'}
     assert set(snapshot['checks']['identities'][0]) == {'name','quantity','status'}
     serialized = json.dumps(snapshot)

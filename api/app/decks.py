@@ -42,6 +42,17 @@ class DeckChecks(BaseModel):
     disclaimer: str = DISCLAIMER
 
 
+class DeckEditionQuantity(BaseModel):
+    edition_id: UUID
+    quantity: str
+
+
+class DeckContents(BaseModel):
+    editions: list[DeckEditionQuantity]
+    owner_revision: int
+    catalog_revision: int
+
+
 class DeckDetail(BaseModel):
     deck: TreeNode
     checks: DeckChecks
@@ -139,3 +150,34 @@ def deck_detail(deck_id: UUID, user_id: str = Depends(verified_user)):
         return DeckDetail(deck=node_model(deck, rows), owner_revision=revision, catalog_revision=state['revision'],
              checks=DeckChecks(total=str(evaluated.total),shortage=str(evaluated.shortage),excess=str(evaluated.excess),
                                size_status=evaluated.size_status,identities=identities))
+
+
+def capture_deck_contents(deck_id: UUID, user_id: str) -> DeckContents:
+    """Detach a complete inventory capture before any pricing/export source work.
+
+    Inventory writers serialize on the owner row, so the revision and every
+    Edition quantity belong to the same committed inventory state. Catalog
+    activation is fenced separately for the captured catalog revision.
+    """
+    with connect() as conn, conn.transaction():
+        revision, rows = owner_and_rows(conn, user_id)
+        deck = rows.get(deck_id)
+        if not deck or deck['kind'] != 'deck':
+            error(404, 'DECK_NOT_FOUND')
+        catalog_revision = conn.execute(
+            'SELECT revision FROM catalog_state WHERE singleton FOR SHARE'
+        ).fetchone()['revision']
+        holdings = conn.execute("""SELECT edition_id,quantity FROM holding
+          WHERE owner_id=%s AND location_id=%s ORDER BY edition_id""",
+          (user_id, deck_id)).fetchall()
+        contents = DeckContents(
+            editions=[DeckEditionQuantity(edition_id=row['edition_id'], quantity=str(row['quantity']))
+                      for row in holdings],
+            owner_revision=revision, catalog_revision=catalog_revision)
+    # Both transaction locks and the connection are released before callers can wait.
+    return contents
+
+
+@router.get('/{deck_id}/contents', response_model=DeckContents)
+def deck_contents(deck_id: UUID, user_id: str = Depends(verified_user)):
+    return capture_deck_contents(deck_id, user_id)

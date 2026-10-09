@@ -169,3 +169,9 @@ def public_projection_store():
     if adapter == 'http':
         return HttpPublicProjection()
     raise ProjectionUnavailable()
+
+
+def public_record_store():
+    """Select independent shared records without advancing discovery revisions."""
+    from .public_records import public_record_store as select_records
+    return select_records()

@@ -1,40 +1,187 @@
-# TCG Collection Tracker
+# Pokémon TCG Collection Tracker
 
-Tickets 01–02 provide owner email-code sign-in, a private Unsorted Storage Leaf, and an owner-started English TCGdex catalog pull. The app uses React, TypeScript, Vite, FastAPI, Better Auth, and PostgreSQL. Hosting and delivery providers are deliberately unselected.
+A web app for tracking the physical Pokémon cards you own, how many copies you
+have, and where they are stored. Organize boxes, binders, and shelves into a
+location tree, move cards between them, and build decks from your actual inventory.
 
-## Local setup
+A Deck is a physical storage location: moving cards into it changes where those
+copies are stored. The Collection view totals your holdings across all locations.
+Public sharing uses a separate snapshot so visitors can see a published deck
+without seeing your private inventory or storage tree.
 
-Requires Node 20+, Python 3.11+, and PostgreSQL 16. Docker Compose is an optional way to run PostgreSQL.
+## What you can do
 
-1. Start PostgreSQL with `docker compose up -d db`, or use a local server.
-2. Copy `.env.example` to `.env`. Set `DATABASE_URL`, `OWNER_EMAIL`, and both secrets. The Compose URL is `postgresql://tcg:tcg@127.0.0.1:5432/tcg`. Use two distinct random secrets of at least 32 characters.
-3. Run `npm ci`, `python3 -m venv .venv`, and `.venv/bin/pip install -r api/requirements.txt`.
-4. Load `.env` into the shell (`set -a; source .env; set +a`), then run `.venv/bin/python scripts/migrate.py`.
-5. In separate terminals with the same environment, run `.venv/bin/uvicorn app.main:app --app-dir api --host 127.0.0.1 --port 8000 --no-access-log` and `npm run dev`. Open `http://localhost:5173/`.
+- Search an English Pokémon card catalog imported from TCGdex, with printing and
+  physical edition distinctions. Unknown finishes remain **Unspecified Variant**.
+- Add card quantities to storage locations, move selections in bulk, remove cards
+  from inventory, and undo recent moves or removals.
+- Browse your full collection and find the locations holding each edition.
+- Create physical decks and check the 60-card total and four-copy limit, including
+  supported Basic Energy exemptions. These checks do not establish tournament or
+  Standard legality.
+- Publish revocable deck snapshots as unlisted links or listed pages in public
+  discovery at `/discover`. Anyone with an unlisted link can view it.
+- Report missing catalog entries. Owner controls provide catalog imports, review
+  of corrections and missing entries, and operational status.
 
-The owner starts each full English pull in Owner controls. The API promptly launches one detached Python child for that server-generated run ID; the child saves progress, holds PostgreSQL session ownership through publication, and exits. No importer polls or remains idle between pulls. Closing the browser or restarting the API does not stop a local import. An unfinished run with stale progress can be checked and recovered by an explicit Start request; the server never overlaps an importer that still holds its session lock, and allows a two-minute startup window. A host shutdown or destroyed execution environment can interrupt the process.
+The application and local operations tooling are implemented. Hosting, email,
+and storage providers are still unselected; production launch has a separate
+[acceptance checklist](.scratch/tcg-collection-tracker/launch-checklist.md).
+Sign-in uses email codes and defaults to the configured owner account only.
 
-The host must support detached Python subprocesses, inherited server environment, independent database connections, and process lifetime beyond the request/API restart. The launcher uses the current Python interpreter, a fixed argument list, no shell, a nonblocking output sink, and a finite child-reaping thread. Hosting must provide this capability or an equivalent on-demand job launcher before deployment; request sandboxes that kill children after returning are insufficient. Docker Compose continues to run PostgreSQL only. The current and previous successful compressed raw generations are private PostgreSQL rows. `CATALOG_RAW_MAX_BYTES` bounds each compressed generation (default 100 MB); set `CATALOG_DB_MAX_BYTES` to the selected database's safe capacity threshold before deployment. A failed import keeps the prior active generation and revision. The first catalog remains unavailable until a complete import succeeds.
+## Run locally
 
-With `MAIL_MODE=console`, the fake delivery code appears in the auth service terminal. With `MAIL_MODE=file` and `MAIL_FILE` set to a private local path, it is appended there for tests. Production delivery must provide a real sender adapter before launch; neither fake mode should be deployed. Set `DAILY_SEND_CAP` below the chosen delivery provider's actual daily allowance. The limiter uses the connection IP by default. If a reverse proxy is used, list only its transport IP in `TRUSTED_PROXY_IPS` and configure it to replace incoming `X-Real-IP` with the client IP; untrusted callers cannot choose their own rate-limit IP.
+Use Node.js 22.12+ and Python 3.11+. You also need PostgreSQL 16, either installed
+locally or through Docker Compose. Run the commands below from the repository root.
 
-Only the configured `OWNER_EMAIL` can receive a code in this first configuration. After that person first signs in, bind owner privileges explicitly to Better Auth's immutable user ID:
+### 1. Install dependencies and configure the environment
+
+```sh
+npm ci
+python3 -m venv .venv
+.venv/bin/pip install -r api/requirements.txt
+cp .env.example .env
+```
+
+Edit `.env`:
+
+- Set `OWNER_EMAIL` to the address you will use to sign in.
+- Replace `BETTER_AUTH_SECRET` and `INTERNAL_AUTH_SECRET` with two distinct random
+  secrets of at least 32 characters. Run `openssl rand -hex 32` once for each.
+- Set `DATABASE_URL` if you are using your own PostgreSQL server. The example URL
+  already matches the included Compose database.
+
+Keep `MAIL_MODE=console` for local development: sign-in codes appear in the auth
+service terminal instead of being emailed. Keep `.env` private.
+
+### 2. Initialize the database and public snapshot store
+
+If using Compose, start PostgreSQL and wait for it to be healthy:
+
+```sh
+docker compose up -d --wait db
+```
+
+Then load the environment and initialize a new local installation:
+
+```sh
+set -a
+source .env
+set +a
+.venv/bin/python scripts/migrate.py
+.venv/bin/python scripts/init_public_projection.py
+```
+
+The public store defaults to `.local/public-projections`. Initialize it for a new
+installation; use the [projection recovery instructions](docs/public-projections.md)
+if an existing store is lost or corrupt.
+
+### 3. Start the app
+
+In one terminal, with `.env` loaded:
+
+```sh
+.venv/bin/uvicorn app.main:app --app-dir api --host 127.0.0.1 --port 8000 --no-access-log
+```
+
+In a second terminal, load the same environment and start the auth gateway and UI:
+
+```sh
+set -a
+source .env
+set +a
+npm run dev
+```
+
+Open **http://localhost:5173/**. Request a code for `OWNER_EMAIL`, read it in the
+`npm run dev` terminal, and sign in. Your account starts with an Unsorted storage
+location.
+
+### 4. Bind the owner and import the catalog
+
+After the first sign-in, run these commands in a terminal with `.env` loaded:
 
 ```sh
 psql "$DATABASE_URL" -c 'select id, email from "user";'
 .venv/bin/python scripts/bind_owner.py '<id from the query>'
 ```
 
-This setup is one-time and rejects a different ID once bound. Never derive owner privilege from the current email address or signup order. The API gateway must be the only publicly routed path to the API; the API and auth service bind to loopback locally. A deployment can place them on a private network with the same signed internal request boundary. All browser requests use the same public origin. Secure cookies are enabled outside loopback HTTP development; local HTTP uses HttpOnly and SameSite=Lax without Secure so browsers can sign in.
+Owner privileges bind to that immutable account ID. This is a one-time setup and
+rejects a different ID once bound. Refresh the page, open **Owner controls**, and
+choose **Start full English pull**. The import requires internet access to TCGdex;
+the catalog becomes available after the first complete successful pull.
 
-## Verification
+Imports run on demand in a separate Python process and survive closing the browser
+or restarting the API. A failed refresh keeps the previous successful catalog.
 
-`scripts/ci.sh` runs the migration, generated client check, TypeScript check, Vite build, PostgreSQL/API tests, live Better Auth HTTP tests, and Chromium journey against a disposable `DATABASE_URL`. It requires `npm ci`, `.venv` dependencies, and `npx playwright install chromium` beforehand. It is provider-neutral so a later CI provider can invoke the same gate. Do not point it at an account or production database; its tests change auth records.
+### 5. Try the inventory workflow
 
-The Python API returns a safe public `/api/health`. Protected routes accept only short-lived HMAC assertions from the auth gateway after Better Auth verifies the server session. The browser cannot choose its user ID. `scripts/generate_client.py` reads FastAPI OpenAPI schemas to generate `web/src/generated.ts` and `--check` detects drift.
+Create a location for a box or binder, then add an edition and quantity from the
+catalog in that location. Create a Deck and move some of those copies into it.
+Check **Collection** to see the total and its distribution between locations;
+check **Decks** for construction counts. Publish a snapshot when you want to share
+that deck. Later inventory edits require publishing an updated snapshot to change
+what visitors see.
 
-Public Deck snapshots use a separate sanitized local object projection. Initialize a new store with `.venv/bin/python scripts/init_public_projection.py` and configure `PUBLIC_PROJECTION_DIR` for the API. See [public projection setup, failure recovery, and privacy](docs/public-projections.md). Disable or redact access logs on public token routes before deployment.
+## Development
 
-## Verification and commit checks
+The stack is React, TypeScript, and Vite for the UI; Better Auth for email-code
+sessions; FastAPI/Python for application logic; and PostgreSQL for private data.
 
-Install dependencies with `npm ci` and the Python environment as above. Husky installs the staged-formatting, type/contract and fast privacy checks automatically. Run `TEST_ADMIN_DATABASE_URL=postgresql://YOUR_TEST_ROLE@127.0.0.1:5432/postgres npm run verify` for isolated application, recovery and release-runtime checks. See [verification](docs/agents/verification.md) for failure artifacts and single-journey reproduction.
+Browser requests use one origin. Vite proxies `/auth` and `/api` to the auth gateway,
+which verifies sessions and signs protected requests to FastAPI. Keep the API behind
+that gateway. Anonymous deck and discovery reads use a sanitized public projection.
+
+| Path                               | Purpose                                                                  |
+| ---------------------------------- | ------------------------------------------------------------------------ |
+| `web/src/`                         | React views and generated API clients                                    |
+| `auth/src/`                        | Better Auth, email delivery, and API gateway                             |
+| `api/app/`                         | Inventory, catalog, decks, publications, and operations logic            |
+| `migrations/`                      | Database schema migrations                                               |
+| `scripts/`                         | Migrations, client generation, verification, recovery, and release tools |
+| `docs/`                            | Architecture decisions and operational guides                            |
+| `.scratch/tcg-collection-tracker/` | Specification, implementation tickets, and launch evidence               |
+
+FastAPI's OpenAPI schemas generate the TypeScript clients. Edit the generators or
+API contracts rather than editing generated clients directly.
+
+Useful commands:
+
+```sh
+npm run check       # TypeScript and generated-client drift checks
+npm run build       # Checks plus the production frontend build
+npm run guardrails  # Database-free privacy and tooling checks
+```
+
+For the full application, recovery, and release-runtime regression gate, install
+Chromium and provide a local PostgreSQL role that can create and drop databases:
+
+```sh
+npx playwright install chromium
+TEST_ADMIN_DATABASE_URL=postgresql://YOUR_TEST_ROLE@127.0.0.1:5432/postgres npm run verify
+```
+
+The runner creates disposable databases and services, tests the current working
+tree, and saves diagnostics under `.scratch/verification/`. It needs full Git
+history for historical runtime fixtures. See the [verification guide](docs/agents/verification.md)
+for focused reruns and failure artifacts. `npm ci` installs the pre-commit hook
+for staged formatting, type/contract checks, and fast privacy checks.
+
+Use `dev` as the integration branch. Update `main` from `dev` when a release is
+authorized.
+
+## Further reading
+
+- [Domain model](CONTEXT.md): printings, editions, holdings, locations, and decks.
+- [Product specification](.scratch/tcg-collection-tracker/spec.md) and
+  [local issue tracker](docs/agents/issue-tracker.md): scope and implementation history.
+- [Architecture decisions](docs/adr/): stack, on-demand imports, and provider decisions.
+- [Provider adapters](docs/provider-adapters.md) and
+  [deployment boundaries](docs/deployment-boundaries.md): connecting a hosting runtime,
+  real email delivery, storage, and scheduling.
+- [Signup readiness](docs/signup-readiness.md): email adapters and the gate for opening
+  public signup. Console/file email modes are local-only.
+- [Public projections](docs/public-projections.md): snapshot storage, privacy, and recovery.
+- [Local recovery](docs/operations/local-recovery.md),
+  [portable operations jobs](docs/operations/portable-jobs.md), and
+  [release tooling](docs/operations/release.md): backups, restores, monitoring, and releases.

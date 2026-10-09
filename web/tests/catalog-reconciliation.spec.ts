@@ -147,6 +147,118 @@ promote({'card-1':'Correction Pikachu'})`,
     await panel.getByLabel("Quantity", { exact: true }).fill("4");
     await panel.getByRole("button", { name: "Add to Location" }).click();
     await expect(panel.locator(".holding-stack")).toContainText("×4");
+    // Catalog imports are fixture work; observations go through the real gateway.
+    const refresh = (amount: string, onlineCode = "FIXTURE") =>
+      execFileSync(
+        ".venv/bin/python",
+        [
+          "-c",
+          `from test_catalog_search import SearchSource
+from test_catalog_reconciliation import run
+class MetadataSource(SearchSource):
+    def fetch(self, sid):
+        card = super().fetch(sid)
+        card['name'] = 'Incoming physical discrepancy'
+        card['pricing'] = {'tcgplayer': {'normal': {'marketPrice': ${amount}}}}
+        card['thirdParty'] = {'tcgplayer': '12345'}
+        card['set']['tcgOnline'] = '${onlineCode}'
+        return card
+run(MetadataSource({'card-1': 'Correction Pikachu'}))`,
+        ],
+        { env: { ...process.env, PYTHONPATH: "api:api/tests" } }
+      );
+    await pool.query(
+      'INSERT INTO owner_binding(singleton,user_id) SELECT true,id FROM "user" WHERE email=$1 ON CONFLICT(singleton) DO UPDATE SET user_id=EXCLUDED.user_id',
+      [process.env.OWNER_EMAIL || "owner@example.test"]
+    );
+    refresh("0.25");
+    // Model a pending review made by the historical raw-fingerprint importer.
+    await pool.query(
+      "UPDATE catalog_review SET source_fingerprint='legacy-raw-evidence',candidate=candidate-'metadata' WHERE source_id='card-1' AND kind='name_change'"
+    );
+    const queueBefore = await page.request.get(
+      new URL("/api/admin/catalog-reviews", page.url()).href
+    );
+    expect(queueBefore.ok()).toBeTruthy();
+    const pendingBefore = await queueBefore.json();
+    refresh("0.43", "UPDATED");
+    const queueAfter = await page.request.get(
+      new URL("/api/admin/catalog-reviews", page.url()).href
+    );
+    expect(queueAfter.ok()).toBeTruthy();
+    expect(
+      (await queueAfter.json()).map((row: { id: string }) => row.id)
+    ).toEqual(pendingBefore.map((row: { id: string }) => row.id));
+    const latestReview = (await queueAfter.json())[0];
+    expect(
+      latestReview.candidate.metadata.source_record.pricing.tcgplayer.normal
+        .marketPrice
+    ).toBe(0.43);
+    await pool.query(
+      "UPDATE catalog_review SET status='retained' WHERE id=$1",
+      [latestReview.id]
+    );
+    refresh("0.99", "UPDATED");
+    const afterRetained = await page.request.get(
+      new URL("/api/admin/catalog-reviews", page.url()).href
+    );
+    expect(await afterRetained.json()).toEqual([]);
+    const catalogBefore = await page.request.get(
+      new URL("/api/catalog/search?name=Correction", page.url()).href
+    );
+    const priorEditions = (await catalogBefore.json()).printings[0].editions;
+    execFileSync(
+      ".venv/bin/python",
+      [
+        "-c",
+        `from test_catalog_search import SearchSource
+from test_catalog_reconciliation import run
+class AmbiguousSource(SearchSource):
+    def fetch(self, sid):
+        card = super().fetch(sid)
+        card['name'] = 'Incoming physical discrepancy'
+        card['variants_detailed'] = [
+            {'finish': 'normal', 'thirdParty': {'tcgplayer': 1}, 'unclassifiedFacet': 'one'},
+            {'finish': 'normal', 'thirdParty': {'tcgplayer': 2}, 'unclassifiedFacet': 'two'}]
+        return card
+run(AmbiguousSource({'card-1': 'Correction Pikachu', 'card-2': 'Unknown facets'}))`,
+      ],
+      { env: { ...process.env, PYTHONPATH: "api:api/tests" } }
+    );
+    const catalogAfter = await page.request.get(
+      new URL("/api/catalog/search?name=Correction", page.url()).href
+    );
+    expect((await catalogAfter.json()).printings[0].editions).toEqual(
+      priorEditions
+    );
+    const unknownPrinting = await page.request.get(
+      new URL("/api/catalog/search?name=Incoming", page.url()).href
+    );
+    expect(
+      (await unknownPrinting.json()).printings[0].editions.map(
+        (row: { descriptor: unknown }) => row.descriptor
+      )
+    ).toEqual([{ kind: "unspecified", label: "Unspecified Variant" }]);
+    const physicalQueue = await page.request.get(
+      new URL("/api/admin/catalog-reviews", page.url()).href
+    );
+    const ambiguity = (await physicalQueue.json()).find(
+      (row: { kind: string }) => row.kind === "variant_ambiguity"
+    );
+    expect(ambiguity.candidate.metadata.unknown_fields.variants).toEqual([
+      { unclassifiedFacet: "one" },
+      { unclassifiedFacet: "two" },
+    ]);
+    await page.reload();
+    await page
+      .getByRole("navigation", { name: "Location tree" })
+      .getByRole("button", { name: location, exact: true })
+      .click();
+    await expect(panel.locator(".holding-stack")).toHaveCount(1);
+    await expect(panel.locator(".holding-stack")).toContainText(
+      "Correction Pikachu"
+    );
+    await expect(panel.locator(".holding-stack")).toContainText("×4");
     const editions = (
       await pool.query(
         "SELECT e.id,e.descriptor->>'finish' AS finish,p.id AS printing FROM catalog_edition e JOIN catalog_printing p ON p.id=e.printing_id WHERE p.source_id='card-1'"

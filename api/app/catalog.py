@@ -32,16 +32,71 @@ def fingerprint(value: dict) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 
+# Review identity deliberately excludes mutable lookup and quote information.
+# Descriptor correspondence remains unchanged until the target-datastore preflight.
+MUTABLE_SOURCE_KEYS = frozenset(("variantId", "pricing", "card_pricing", "cardmarket", "tcgplayer", "thirdParty", "tcgOnline"))
+PHYSICAL_VARIANT_KEYS = frozenset(("finish", "type", "subtype", "size", "stamp", "stamps", "foil", "foilPattern"))
+
+
+def physical_review_evidence(value):
+    if isinstance(value, dict):
+        return {key: physical_review_evidence(item) for key, item in value.items()
+                if key not in MUTABLE_SOURCE_KEYS}
+    if isinstance(value, list):
+        return [physical_review_evidence(item) for item in value]
+    return value
+
+
+def marketplace_candidates(value):
+    """Keep lookup identifiers separate from the changing quote payload."""
+    if isinstance(value, dict):
+        result = {}
+        for key, item in value.items():
+            if key in ("variantId", "thirdParty", "productId"):
+                result[key] = item
+            elif isinstance(item, (dict, list)):
+                nested = marketplace_candidates(item)
+                if nested:
+                    result[key] = nested
+        return result
+    if isinstance(value, list):
+        return [marketplace_candidates(item) for item in value]
+    return {}
+
+
+def source_metadata(record):
+    variants = record.get("variants_detailed")
+    variants = variants if isinstance(variants, list) else []
+    return {
+        "source_record": record,
+        "unknown_fields": {"record": {key: value for key, value in record.items()
+                         if key not in MUTABLE_SOURCE_KEYS and key not in
+                         ("id", "name", "set", "localId", "image", "category", "energyType", "variants", "variants_detailed",
+                          "regulationMark", "rarity", "illustrator", "dexId", "hp", "types", "evolveFrom", "stage", "suffix",
+                          "item", "abilities", "attacks", "weaknesses", "resistances", "retreat", "legal", "description")},
+                           "variants": [
+            {key: value for key, value in item.items()
+             if key not in PHYSICAL_VARIANT_KEYS and key not in MUTABLE_SOURCE_KEYS}
+            if isinstance(item, dict) else {"unclassified": item}
+            for item in variants]},
+        "export_candidate": {key: record[key] for key in
+                             ("name", "category", "energyType", "set", "localId", "regulationMark") if key in record},
+    }
+
+
 def variant_descriptors(record: dict) -> tuple[list[dict], bool]:
     detailed = record.get("variants_detailed")
     if detailed is not None:
         if not isinstance(detailed, list):
             return [{"kind": "unspecified", "label": "Unspecified Variant"}], True
         descriptors = []
+        unclassified = False
         for item in detailed:
             if not isinstance(item, dict):
                 return [{"kind": "unspecified", "label": "Unspecified Variant"}], True
-            # Provider IDs and marketplace data are deliberately excluded from identity.
+            if any(key not in PHYSICAL_VARIANT_KEYS and key not in MUTABLE_SOURCE_KEYS for key in item):
+                unclassified = True
+            # Existing descriptor correspondence stays intact until preflight.
             descriptor = {key: value for key, value in item.items()
                           if key not in ("variantId", "pricing", "cardmarket", "tcgplayer") and value is not None}
             if not descriptor:
@@ -53,7 +108,7 @@ def variant_descriptors(record: dict) -> tuple[list[dict], bool]:
         if len(keys) != len(set(keys)):
             raise CatalogError("Descriptor collision requires review before promotion")
         if descriptors:
-            return descriptors, False
+            return descriptors, unclassified
     variants = record.get("variants")
     if not isinstance(variants, dict):
         return [{"kind": "unspecified", "label": "Unspecified Variant"}], False
@@ -129,8 +184,65 @@ def normalize(record: dict) -> dict:
         "collector_number": str(number), "name": name, "identity_key": name,
         "search_name": name.casefold(), "image_url": image if isinstance(image, str) and image.startswith("https://") else None,
         "descriptors": descriptors,
-        "ambiguous": ambiguous, "basic_energy": basic, "fingerprint": fingerprint(record),
+        "ambiguous": ambiguous, "basic_energy": basic, "fingerprint": fingerprint(physical_review_evidence(record)),
+        "metadata": source_metadata(record),
     }
+
+
+def store_source_metadata(conn, printing_id, record, physical_conflict=False):
+    """Retain source candidates without approving a physical or target match."""
+    metadata = source_metadata(record)
+    conn.execute("""INSERT INTO catalog_printing_metadata
+      (printing_id,source_record,unknown_fields,export_candidate)
+      VALUES (%s,%s,%s,%s) ON CONFLICT(printing_id) DO UPDATE SET
+      source_record=EXCLUDED.source_record,unknown_fields=EXCLUDED.unknown_fields,
+      export_candidate=EXCLUDED.export_candidate,
+      live_revision=catalog_printing_metadata.live_revision+
+        CASE WHEN catalog_printing_metadata.export_candidate IS DISTINCT FROM EXCLUDED.export_candidate THEN 1 ELSE 0 END,
+      live_verified=CASE WHEN catalog_printing_metadata.export_candidate IS DISTINCT FROM EXCLUDED.export_candidate
+        THEN false ELSE catalog_printing_metadata.live_verified END,
+      live_quarantined=catalog_printing_metadata.live_quarantined OR
+        catalog_printing_metadata.export_candidate IS DISTINCT FROM EXCLUDED.export_candidate,
+      updated_at=now()""", (printing_id, json.dumps(record), json.dumps(metadata['unknown_fields']),
+                            json.dumps(metadata['export_candidate'])))
+    detailed = record.get('variants_detailed')
+    detailed = detailed if isinstance(detailed, list) else []
+    editions = conn.execute('SELECT id,descriptor FROM catalog_edition WHERE printing_id=%s', (printing_id,)).fetchall()
+    for edition in editions:
+        # Match only the existing exact descriptor. No cleaned keys, aliases,
+        # product-ID correspondence or ambiguous record selection is permitted.
+        exact = []
+        for variant in detailed:
+            if isinstance(variant, dict):
+                descriptor = {key: value for key, value in variant.items()
+                              if key not in ('variantId', 'pricing', 'cardmarket', 'tcgplayer') and value is not None}
+                if isinstance(descriptor.get('stamps'), list):
+                    descriptor['stamps'] = sorted(descriptor['stamps'], key=lambda value: json.dumps(value, sort_keys=True))
+                if descriptor == edition['descriptor']:
+                    exact.append(variant)
+        variant = exact[0] if len(exact) == 1 else {}
+        unresolved = physical_conflict or bool(detailed) and len(exact) != 1
+        mapping = marketplace_candidates(variant if variant else record)
+        # Unresolved candidates remain review evidence, never eligible metadata.
+        mapping = {'candidate': mapping, 'correspondence': 'unresolved' if unresolved else 'source_candidate',
+                   'physical_evidence': {key: physical_review_evidence(record[key]) for key in ('id', 'name', 'set', 'localId', 'variants') if key in record},
+                   'variant_evidence': physical_review_evidence(variant)}
+        quote = variant.get('pricing', record.get('pricing', {}))
+        unknown = {key: value for key, value in variant.items()
+                   if key not in PHYSICAL_VARIANT_KEYS and key not in MUTABLE_SOURCE_KEYS}
+        conn.execute("""INSERT INTO catalog_edition_metadata
+          (edition_id,mapping_candidate,quote_candidate,source_variant,unknown_fields,mapping_quarantined)
+          VALUES (%s,%s,%s,%s,%s,%s) ON CONFLICT(edition_id) DO UPDATE SET
+          mapping_candidate=EXCLUDED.mapping_candidate,quote_candidate=EXCLUDED.quote_candidate,
+          source_variant=EXCLUDED.source_variant,unknown_fields=EXCLUDED.unknown_fields,
+          mapping_revision=catalog_edition_metadata.mapping_revision+
+            CASE WHEN catalog_edition_metadata.mapping_candidate IS DISTINCT FROM EXCLUDED.mapping_candidate THEN 1 ELSE 0 END,
+          mapping_verified=CASE WHEN catalog_edition_metadata.mapping_candidate IS DISTINCT FROM EXCLUDED.mapping_candidate
+            OR EXCLUDED.mapping_quarantined THEN false ELSE catalog_edition_metadata.mapping_verified END,
+          mapping_quarantined=catalog_edition_metadata.mapping_quarantined OR EXCLUDED.mapping_quarantined OR
+            catalog_edition_metadata.mapping_candidate IS DISTINCT FROM EXCLUDED.mapping_candidate,
+          updated_at=now()""", (edition['id'], json.dumps(mapping), json.dumps(quote), json.dumps(variant),
+                                json.dumps(unknown), unresolved))
 
 
 def _progress(conn, run_id: UUID, phase: str, **counts):
@@ -222,6 +334,19 @@ def execute_run(conn, run_id: UUID, source=None, before_promotion=None):
                 source_id = item["source_id"]
                 existing = old.get(source_id)
                 candidate=dict(item)
+                # Historical reviews used raw-payload hashes. Reuse their key
+                # only when preserved candidate evidence proves the exact same
+                # physical discrepancy, including retained/rejected decisions;
+                # no descriptor/reference rewrite occurs.
+                physical_candidate = physical_review_evidence({key: value for key, value in candidate.items()
+                                                               if key not in ('metadata', 'fingerprint', 'manual_printing_ids', 'manual_printings')})
+                prior_reviews = conn.execute("SELECT candidate,source_fingerprint FROM catalog_review WHERE source_id=%s ORDER BY created_at,id", (source_id,)).fetchall()
+                for review in prior_reviews:
+                    prior_candidate = physical_review_evidence({key: value for key, value in review['candidate'].items()
+                                                                if key not in ('metadata', 'fingerprint', 'manual_printing_ids', 'manual_printings')})
+                    if prior_candidate == physical_candidate:
+                        item['fingerprint'] = review['source_fingerprint']
+                        break
                 if old_id and not conn.execute('SELECT 1 FROM catalog_source_reference WHERE source_id=%s',(source_id,)).fetchone():
                     matches=conn.execute("""SELECT gp.printing_id,gp.display_name,gp.set_name,gp.collector_number FROM catalog_generation_printing gp
                       JOIN catalog_printing p ON p.id=gp.printing_id WHERE gp.generation_id=%s
@@ -285,6 +410,10 @@ def execute_run(conn, run_id: UUID, source=None, before_promotion=None):
                       WHERE generation_id=%s AND printing_id=%s ON CONFLICT DO NOTHING""",
                       (run_id,old_id,printing_id))
                     item['descriptors']=[]
+                if not existing and any(item['metadata']['unknown_fields']['variants']):
+                    # Unknown physical facets are retained in review/source data,
+                    # never admitted automatically into a new Edition identity.
+                    item['descriptors'] = [{"kind": "unspecified", "label": "Unspecified Variant"}]
                 for descriptor in item["descriptors"]:
                     descriptor_key = json.dumps(descriptor, sort_keys=True)
                     edition_id = conn.execute("""INSERT INTO catalog_edition(printing_id,descriptor_key,descriptor)
@@ -298,6 +427,10 @@ def execute_run(conn, run_id: UUID, source=None, before_promotion=None):
                       JOIN catalog_override co ON co.edition_id=ge.edition_id AND co.action='approve_edition'
                       WHERE ge.generation_id=%s AND ge.printing_id=%s
                       ON CONFLICT(generation_id,edition_id) DO NOTHING""", (run_id, old_id, printing_id))
+                physical_conflict = item['ambiguous'] or bool(existing and (
+                    candidate['name'] != item['name'] or candidate['set_id'] != item['set_id'] or
+                    candidate['collector_number'] != item['collector_number']))
+                store_source_metadata(conn, printing_id, records[source_id], physical_conflict)
             for source_id, prior in old.items():
                 if source_id not in first:
                     if source_id.startswith("manual:"):
