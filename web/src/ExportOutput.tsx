@@ -40,21 +40,31 @@ export function ExportOutput({
   copyLabel = "Copy",
   downloadLabel = "Download",
 }: ExportOutputProps) {
-  const [copyStatus, setCopyStatus] = useState("");
-  const [copyFailed, setCopyFailed] = useState(false);
+  // A copy result belongs to the exact text it was attempted for, so a newer
+  // export never inherits an earlier "Copied" or failure state.
+  const [copyResult, setCopyResult] = useState<{
+    text: string;
+    failed: boolean;
+  } | null>(null);
+  const current = copyResult && copyResult.text === text ? copyResult : null;
+  const copyFailed = current?.failed ?? false;
+  const copyStatus = current
+    ? current.failed
+      ? "Copy failed. Select the text below and copy it manually."
+      : "Copied to clipboard."
+    : "";
   const inline =
     !empty && text !== null && byteLength <= INLINE_EXPORT_LIMIT_BYTES;
 
   async function copy() {
     if (text === null) return;
-    setCopyStatus("");
-    setCopyFailed(false);
+    const attempted = text;
+    setCopyResult(null);
     try {
-      await navigator.clipboard.writeText(text);
-      setCopyStatus("Copied to clipboard.");
+      await navigator.clipboard.writeText(attempted);
+      setCopyResult({ text: attempted, failed: false });
     } catch {
-      setCopyFailed(true);
-      setCopyStatus("Copy failed. Select the text below and copy it manually.");
+      setCopyResult({ text: attempted, failed: true });
     }
   }
 
