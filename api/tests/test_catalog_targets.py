@@ -841,3 +841,20 @@ def test_a_deprecated_edition_releases_its_product_and_price_slot_to_its_replace
     assert metadata("meta-2")[1]["normal"]["mapping_state"] == "verified"
     run(Records(card(1), card(2)))  # imports never re-verify the released Edition
     assert metadata("meta-1")[1]["normal"]["mapping_state"] == "unverified"
+
+
+PINNED_DIGESTS = {
+    (LIVE, 1): "79ed62c768325f3dc0d378e0f8128251c6f8ef4a778b6351c4097c9ec1235084",
+    (MATCHING, 1): "5367c25316bea657d01a044af5a175dfe66dab656d36f82bcc16bb060dfb25d6",
+}
+
+
+def test_registered_rule_digests_are_pinned():
+    """Any edit to a shipped rule's source or table changes its digest and silently deactivates the approved rule.
+
+    A new Live set code ships as ``LiveRulesV2`` (a new registered version), never as an edit of V1. If this
+    fails after a deliberate change, ship the change as a new rule version and pin that version here.
+    """
+    registered = {(kind, version): code_digest(kind, version)
+                  for kind, registry in REGISTRIES.items() for version in registry if version != 99}  # 99 is the test-injected table
+    assert registered == PINNED_DIGESTS

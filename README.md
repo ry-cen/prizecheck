@@ -88,7 +88,9 @@ Restore those from backup rather than resetting them. Then run
 records for the existing catalog; rerun it to repair records after a records-store
 outage. It rebuilds records from PostgreSQL through the revision-guarded
 catalog outbox and never overwrites a newer record (see
-[public projections](docs/public-projections.md)).
+[public projections](docs/public-projections.md)). It exits 3, changing nothing, when
+another drain (an import or rule activation still delivering) held the lock for the
+whole wait; retry later.
 
 ### 3. Start the app
 

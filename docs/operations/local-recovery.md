@@ -33,11 +33,11 @@ The public catalog records in `PUBLIC_PROJECTION_DIR/records` are derived from P
 .venv/bin/python scripts/backfill_public_catalog.py  # the rebuild
 ```
 
-The rebuild reads every key it knows from PostgreSQL, so it works from three starting states. It prints written and unchanged counts, recovery conflicts and the highest stored revision. It exits 1, with a fixed message, when the store or database is unreachable or delivery cannot finish. It never creates the store, never touches Published Decks or the discovery revision and cursor, and is safe to repeat: a second run writes nothing. Anonymous Deck and discovery reads do not depend on the records store and keep working throughout.
+The rebuild reads every key it knows from PostgreSQL, so it works from three starting states. It prints written and unchanged counts, recovery conflicts and the highest stored revision. It exits 1, with a fixed message, when the store or database is unreachable or delivery cannot finish, and 3 (also with a fixed message, nothing changed) when another drain, such as an import or rule activation still delivering in a detached process, held the delivery lock for the whole wait; retry once it finishes. It never creates the store, never touches Published Decks or the discovery revision and cursor, and is safe to repeat: a second run writes nothing. Anonymous Deck and discovery reads do not depend on the records store and keep working throughout.
 
 **R1: the records store was lost or re-initialized empty.** Run `init_public_records.py`, then the rebuild. It re-enqueues every Printing and Edition and writes them all. Until it finishes, readers of catalog eligibility find no record and treat every Edition and Printing as ineligible (fail closed).
 
-**R2: the records store was restored from an older copy.** Run the rebuild. Every restored record has a lower revision than PostgreSQL, so each is overwritten with the current value. Stale clears cannot survive: only revisions newer than the stored one are written.
+**R2: the records store was restored from an older copy.** Run the rebuild (an ordinary drain also notices a store that lacks the most recently delivered records and re-enqueues everything, but only the rebuild is guaranteed to cover a copy that is still newer than those samples). Every restored record has a lower revision than PostgreSQL, so each is overwritten with the current value. Stale clears cannot survive: only revisions newer than the stored one are written.
 
 **R3: PostgreSQL was restored to a point older than the records store** (for example `scripts/recovery.py restore`, which restores sequences but not the store). Run the rebuild; do not first reset the store.
 
@@ -46,7 +46,7 @@ The rebuild reads every key it knows from PostgreSQL, so it works from three sta
 3. It marks each unexplained Edition `quarantined` and each unexplained Printing `suspended`, both with reason `recovery_conflict`, at a revision above `store_max`. This closes marketplace and Live eligibility for those targets until a maintainer reviews them.
 4. It delivers everything. The fail-closed conflict values replace the foreign records.
 
-Review each `recovery_conflict` target in the maintainer queue; there is no bulk tool. A target that exists only in the newer store and not in the restored PostgreSQL cannot be found by the scan, because the store has no key listing; it is unreachable for readers because no PostgreSQL reference points at it.
+Review each `recovery_conflict` target in the maintainer queue; there is no bulk tool. A target that exists only in the newer store and not in the restored PostgreSQL cannot be found by the scan, because the store has no key listing. Catalog readers cannot reach it, because no PostgreSQL reference points at it, but a Published Deck in a newer publication store can still reference it (tickets 12 to 14). Reconcile the publication projection against the restored database before, or together with, an R3 recovery; the catalog rebuild alone does not make those references safe. Quotes the lost timeline wrote under a conflicting Edition's mapping revision are never served again: the recovery conflict is stamped at a mapping revision above the highest one in the store.
 
 Check progress with the owner operations status: `catalog_outbox_pending` returns to 0 and `catalog_outbox_oldest_seconds` is empty when delivery is complete. A row stuck with `StoreAhead` or `RevisionValueMismatch` means the store holds a record PostgreSQL does not explain; run the rebuild.
 
