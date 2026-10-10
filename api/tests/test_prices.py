@@ -238,11 +238,22 @@ def world(pagers=0):
     return found
 
 
-def seed(store, edition, amount="0.43", *, variant=None, card_id=None, state="quote", revision=None, updated="2026-10-08T00:00:00Z",
-         checked="2026-10-09T00:00:00Z", payload=True, result=None, **over):
+RELATIVE = object()  # seed() default: a time relative to now (an explicit None still means "no time")
+
+
+def ago(delta):
+    return (datetime.now(timezone.utc) - delta).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def seed(store, edition, amount="0.43", *, variant=None, card_id=None, state="quote", revision=None, updated=RELATIVE,
+         checked=RELATIVE, payload=True, result=None, **over):
     """Write what ticket 08 will write: a result marker plus a quote payload under the Edition's reference and revision."""
     revision = revision or edition["mapping_revision"]
     ref = edition["public_ref"]
+    # Defaults are relative to the wall clock: a provider time a day old and a check ten minutes old (under the 1 h
+    # fresh band), so no seeded record ages into another band as the calendar moves.
+    updated = ago(timedelta(days=1)) if updated is RELATIVE else updated
+    checked = ago(timedelta(minutes=10)) if checked is RELATIVE else checked
     quote = {"attempt": 1, "amount": amount, "currency": "USD", "source": "tcgdex", "card": card_id or edition["source_id"],
              "variant": variant or edition["quote_variant"], "provider_updated_at": updated, **over}
     marker = result if result is not None else {"state": state, "attempt": 1, "checked_at": checked}
@@ -311,7 +322,8 @@ def test_a_quote_without_a_result_marker_or_with_an_evicted_payload_is_not_cache
 def test_absent_is_final_and_pending_hides_the_quote_even_when_a_payload_exists(store):
     editions = world()
     normal, reverse = editions["normal"], editions["reverse-holofoil"]
-    seed(store, normal, result={"state": "absent", "checked_at": "2026-10-09T00:00:00Z", "expires_at": "2026-10-10T00:00:00Z"})
+    seed(store, normal, result={"state": "absent", "checked_at": ago(timedelta(minutes=10)),
+                                 "expires_at": ago(-timedelta(minutes=50))})
     seed(store, reverse, result={"state": "pending"})
     rows = prices_of(post(ids(normal["id"], reverse["id"])))
     one = rows[str(normal["id"])]
@@ -402,29 +414,45 @@ def test_a_quote_for_another_card_or_variant_than_postgres_published_fails_close
     assert {r["reason"] for r in rows.values()} == {"lookup_mismatch"} and {r["status"] for r in rows.values()} == {"failed"}
 
 
-def test_a_malformed_result_fails_the_batch_but_not_the_labels_that_need_no_store(store):
+def test_one_malformed_result_fails_only_its_own_row_not_the_batch(store):
     editions = world()
     normal, reverse, plain = editions["normal"], editions["reverse-holofoil"], editions["unspecified"]
     seed(store, normal, result={"state": "nonsense"}, payload=False)
     seed(store, reverse)
     rows = prices_of(post(ids(normal["id"], reverse["id"], plain["id"])))
-    assert (rows[str(normal["id"])]["status"], rows[str(normal["id"])]["reason"]) == ("failed", "store_unavailable")
-    assert (rows[str(reverse["id"])]["status"], rows[str(reverse["id"])]["reason"]) == ("failed", "store_unavailable")
+    assert (rows[str(normal["id"])]["status"], rows[str(normal["id"])]["reason"], rows[str(normal["id"])]["amount"]) == \
+        ("failed", "invalid_quote", None)
+    assert (rows[str(reverse["id"])]["status"], rows[str(reverse["id"])]["amount"]) == ("quote", "0.43")
     assert rows[str(plain["id"])]["reason"] == "unspecified_variant"
+
+
+def test_a_malformed_quote_payload_fails_only_its_own_row(store):
+    editions = world()
+    normal, reverse = editions["normal"], editions["reverse-holofoil"]
+    seed(store, normal)
+    seed(store, reverse)
+    key = quote_key(normal["public_ref"], normal["mapping_revision"])
+    version = store.read_records([key], deadline=time.monotonic() + 5).records[key].version
+    assert store.compare_and_swap({key: version}, {key: ["not", "a", "dict"]}, deadline=time.monotonic() + 5)
+    rows = prices_of(post(ids(normal["id"], reverse["id"])))
+    assert (rows[str(normal["id"])]["status"], rows[str(normal["id"])]["reason"]) == ("failed", "invalid_quote")
+    assert rows[str(reverse["id"])]["amount"] == "0.43"
 
 
 def test_staleness_uses_the_module_clock_and_a_fresh_check_does_not_clear_it(store, monkeypatch):
     editions = world()
     normal, reverse = editions["normal"], editions["reverse-holofoil"]
-    seed(store, normal, updated="2026-10-07T12:00:00Z", checked="2026-10-09T11:59:59Z")
-    seed(store, reverse, updated="2026-10-07T12:00:01Z")
-    monkeypatch.setattr(prices, "_now", lambda: datetime(2026, 10, 9, 12, 0, 0, tzinfo=timezone.utc))
+    base = datetime.now(timezone.utc).replace(microsecond=0)
+    text = lambda moment: moment.isoformat().replace("+00:00", "Z")  # noqa: E731
+    seed(store, normal, updated=text(base - timedelta(hours=48)), checked=text(base - timedelta(seconds=1)))
+    seed(store, reverse, updated=text(base - timedelta(hours=48) + timedelta(seconds=1)))
+    monkeypatch.setattr(prices, "_now", lambda: base)
     rows = prices_of(post(ids(normal["id"], reverse["id"])))
     assert rows[str(normal["id"])]["stale"] is False  # exactly 48 h
     assert rows[str(reverse["id"])]["stale"] is False
-    monkeypatch.setattr(prices, "_now", lambda: datetime(2026, 10, 9, 12, 0, 0, 500, tzinfo=timezone.utc))
+    monkeypatch.setattr(prices, "_now", lambda: base + timedelta(microseconds=500))
     rows = prices_of(post(ids(normal["id"], reverse["id"])))
-    assert rows[str(normal["id"])]["stale"] is True and rows[str(normal["id"])]["checked_at"] == "2026-10-09T11:59:59Z"
+    assert rows[str(normal["id"])]["stale"] is True and rows[str(normal["id"])]["checked_at"] == text(base - timedelta(seconds=1))
     assert rows[str(reverse["id"])]["stale"] is False
 
 
@@ -635,10 +663,10 @@ def test_bodies_over_16_kib_are_413_even_when_valid_json_and_correctly_signed():
 # ------------------------------------------------------------------ no side effects
 
 
-def test_a_price_read_writes_nothing_and_contacts_nothing_but_postgres_and_the_store(store, monkeypatch):
+def test_an_under_one_hour_read_writes_nothing_and_contacts_nothing_but_postgres_and_the_store(store, monkeypatch):
     editions = world()
     normal, plain = editions["normal"], editions["unspecified"]
-    seed(store, normal)
+    seed(store, normal, checked=ago(timedelta(minutes=59)))  # inside the 1 h fresh band: no admission, no write
     tables = ("catalog_edition", "catalog_edition_metadata", "catalog_printing", "catalog_public_outbox", "operations_hour")
 
     def stamps():

@@ -28,8 +28,8 @@ A quote is valid for an Edition only when all of these hold:
 | unavailable | `not_cached`                         | no result marker, an evicted payload, or no key for the current revision                                          |
 | unavailable | `confirmed_absent`                   | the writer confirmed the provider has no quote; never resurrected                                                 |
 | pending     | none                                 | a refresh is in flight; any stored quote is hidden                                                                |
-| failed      | `lookup_mismatch`, `invalid_quote`   | the cached record failed validation                                                                               |
-| failed      | `store_unavailable`                  | the store is down, or a result/quote record was malformed (one bad record fails the whole store read)             |
+| failed      | `lookup_mismatch`, `invalid_quote`   | the cached record failed validation, or its result/quote record was malformed (that row only)                     |
+| failed      | `store_unavailable`                  | the store is down                                                                                                 |
 | failed      | `deadline`, `validation_unavailable` | the budget ran out, or final PostgreSQL validation could not finish. The quote is withheld and `withheld` is true |
 
 Display and age:
@@ -104,5 +104,5 @@ For any `/api/` response whose `content-disposition` starts with `attachment`, t
 
 - API thread-pool queueing before the handler is not counted; the gateway abort is the hard gate.
 - Clock skew between hosts is assumed negligible; headers carry remaining milliseconds.
-- `quote_states` fails the whole store read on one malformed `result:`/`quote:` record. That is left to 07/08.
+- A malformed `result:`/`quote:` record fails only its own row (`invalid_quote`); a store outage still fails the read (`store_unavailable`).
 - Prices are read when a slot mounts; an open page does not poll.

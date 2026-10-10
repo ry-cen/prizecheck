@@ -11,7 +11,6 @@ Contract for the later writer (ticket 08) and for tickets 09/12: docs/prices.md.
 from datetime import datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal, localcontext
 import os
-import re
 import threading
 from typing import Literal
 from uuid import UUID
@@ -27,6 +26,7 @@ from .main import verified_user
 from .price_budget import MAX_BODY_BYTES, Budget, trusted_budget
 from .public_projection import ProjectionUnavailable
 from .public_records import QuoteState, public_record_store, quote_states
+from .quote_contract import parse_amount  # noqa: F401  (moved; re-exported so `prices.parse_amount` keeps working)
 
 router = APIRouter(prefix='/api/prices', tags=['prices'])
 
@@ -39,7 +39,6 @@ Reason = Literal['not_found', 'unverified', 'quarantined', 'unspecified_variant'
                  'confirmed_absent', 'lookup_mismatch', 'invalid_quote', 'store_unavailable', 'deadline',
                  'validation_unavailable']
 
-_AMOUNT = re.compile(r'(0|[1-9][0-9]{0,11})(\.[0-9]{1,6})?')
 _CENT = Decimal('0.01')
 
 
@@ -58,14 +57,6 @@ class QuoteView(BaseModel):
     checked_at: str | None = None
     age: Literal['known', 'unknown'] = 'unknown'
     stale: bool | None = None            # True only when the quote is strictly more than 48 h old.
-
-
-def parse_amount(value) -> Decimal | None:
-    """Strict decimal text -> Decimal, or None. Floats, exponents, signs, NaN/Infinity and long values are refused."""
-    if type(value) is not str or not _AMOUNT.fullmatch(value):
-        return None
-    amount = Decimal(value)
-    return amount if amount.is_finite() and amount >= 0 else None
 
 
 def format_usd(amount: Decimal) -> str:
@@ -110,6 +101,8 @@ def validate_quote(lookup: dict, state: QuoteState, now: datetime) -> QuoteView:
         return QuoteView(status='unavailable', reason='confirmed_absent', checked_at=checked_text)
     if state.status == 'pending':
         return QuoteView(status='pending')
+    if state.status == 'invalid':  # a malformed result/quote row: this row only
+        return _unavailable('invalid_quote', 'failed')
     payload = state.quote
     if state.status != 'quote' or not isinstance(payload, dict):
         return _unavailable('invalid_quote', 'failed')

@@ -700,12 +700,31 @@ def test_quote_state_never_falls_back_to_an_older_mapping_revision_or_attempt(ad
     assert (states[(OTHER, 1)].status, states[(OTHER, 1)].quote) == ('unknown', None)
 
 
-@pytest.mark.parametrize('result', [{'state': 'bogus'}, ['quote'], {'state': 'quote'}, 'absent'])
-def test_quote_state_malformed_result_fails_closed(adapter, result):
+@pytest.mark.parametrize('result', [{'state': 'bogus'}, ['quote'], {'state': 'quote'}, 'absent',
+                                    {'state': 'quote', 'attempt': True}, {'state': 'quote', 'attempt': 1.5}])
+def test_quote_state_malformed_result_is_invalid_for_that_row_only(adapter, result):
     store, _ = adapter
     write(store, {result_key(REF, 1): result})
+    write(store, {result_key(OTHER, 1): {'state': 'quote', 'attempt': 1}, quote_key(OTHER, 1): {'attempt': 1, 'amount': '5.00'}})
+    states = quote_states(store, [(REF, 1), (OTHER, 1)], deadline=deadline())
+    assert (states[(REF, 1)].status, states[(REF, 1)].quote) == ('invalid', None)
+    assert (states[(OTHER, 1)].status, states[(OTHER, 1)].quote) == ('quote', {'attempt': 1, 'amount': '5.00'})
+    assert states[(REF, 1)].generation == states[(OTHER, 1)].generation
+
+
+def test_quote_state_non_dict_payload_is_invalid_for_that_row_only(adapter):
+    store, _ = adapter
+    write(store, {result_key(REF, 1): {'state': 'quote', 'attempt': 1}, quote_key(REF, 1): ['nope']})
+    write(store, {result_key(OTHER, 1): {'state': 'absent'}})
+    states = quote_states(store, [(REF, 1), (OTHER, 1)], deadline=deadline())
+    assert (states[(REF, 1)].status, states[(REF, 1)].quote) == ('invalid', None)
+    assert states[(OTHER, 1)].status == 'absent'
+
+
+def test_quote_state_store_unavailability_still_raises(adapter):
+    store, _ = adapter
     with pytest.raises(ProjectionUnavailable):
-        quote_states(store, [(REF, 1)], deadline=deadline())
+        quote_states(store, [(REF, 1)], deadline=time.monotonic() - 1)
 
 
 def test_quote_states_cover_more_than_one_batch_at_one_generation(adapter):

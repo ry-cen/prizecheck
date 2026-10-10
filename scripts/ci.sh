@@ -16,10 +16,11 @@ export MAIL_MODE=file
 export MAIL_FILE="$(mktemp)"
 export PUBLIC_PROJECTION_DIR="$(mktemp -d)"
 export CATALOG_PROCESS_FIXTURE_DIR="$(mktemp -d)"
+export PRICE_RUNNER_LOCK_DIR="$(mktemp -d)"
 cleanup() {
   kill "${api_pid:-}" "${auth_pid:-}" "${web_pid:-}" 2>/dev/null || true
   rm -f "$MAIL_FILE"
-  rm -rf "$PUBLIC_PROJECTION_DIR" "$CATALOG_PROCESS_FIXTURE_DIR"
+  rm -rf "$PUBLIC_PROJECTION_DIR" "$CATALOG_PROCESS_FIXTURE_DIR" "$PRICE_RUNNER_LOCK_DIR"
 }
 trap cleanup EXIT
 .venv/bin/python scripts/migrate.py

@@ -96,7 +96,7 @@ class RecordSnapshot:
 
 @dataclass(frozen=True)
 class QuoteState:
-    status: str          # 'quote' | 'absent' | 'pending' | 'unknown'
+    status: str          # 'quote' | 'absent' | 'pending' | 'unknown' | 'invalid' (this row's records are malformed)
     result: object       # Current-result marker value, or None.
     quote: object        # Usable quote payload only when status == 'quote'.
     generation: str
@@ -1001,7 +1001,8 @@ def quote_states(store, pairs, *, deadline, generation=None):
     {'state': 'quote', 'attempt': A, ...} exposes the quote payload only when it
     is present with the same 'attempt'. A missing marker, or an evicted or
     mismatched payload, is 'unknown'. Other mapping revisions are never read.
-    Malformed markers/payloads fail closed with ProjectionUnavailable. ``generation``
+    A malformed marker or payload makes only that row 'invalid' (never usable); the batch still succeeds, and store
+    unavailability still raises ProjectionUnavailable. ``generation``
     reads at a snapshot pinned by an earlier read (for example the catalog eligibility read).
     """
     pairs = list(dict.fromkeys((_ref(edition), mapping_revision) for edition, mapping_revision in pairs))
@@ -1016,15 +1017,18 @@ def quote_states(store, pairs, *, deadline, generation=None):
         if result is None:
             states[pair] = QuoteState('unknown', None, None, snapshot.generation)
             continue
+        # A malformed row is that row's problem only (status 'invalid'); store unavailability raised above.
         if not isinstance(result, dict) or result.get('state') not in _RESULT_STATES \
                 or (payload is not None and not isinstance(payload, dict)):
-            raise ProjectionUnavailable()
+            states[pair] = QuoteState('invalid', None, None, snapshot.generation)
+            continue
         if result['state'] != 'quote':
             states[pair] = QuoteState(result['state'], result, None, snapshot.generation)
             continue
         attempt = result.get('attempt')
         if isinstance(attempt, bool) or not isinstance(attempt, (int, str)):
-            raise ProjectionUnavailable()
+            states[pair] = QuoteState('invalid', None, None, snapshot.generation)
+            continue
         usable = payload is not None and type(payload.get('attempt')) is type(attempt) and payload['attempt'] == attempt
         states[pair] = QuoteState('quote' if usable else 'unknown', result, payload if usable else None, snapshot.generation)
     return states
