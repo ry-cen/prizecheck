@@ -298,7 +298,8 @@ class Admission:
         # Awaiting rows: hard rows that are joined or admitted. A running job is awaited only while its slot's lease is
         # valid, owned by the job's owner and unexpired; one whose lease has run out waits for the reclaim; anything else
         # is uncertain and answers at once.
-        dead_jobs = False
+        dead_rows: dict[int, list] = {}          # slot -> keys of rows joined to a running job whose lease has run out
+        queued_rows: list = []                    # keys of rows whose job is queued (joined or admitted now)
         for row, job in joins:
             outcome, entry = self.outcomes[row.key], sched['jobs'][job]
             blocked = None
@@ -310,11 +311,13 @@ class Admission:
                     if source_active:
                         blocked = ('backoff', 'source_backoff')
                     else:
-                        dead_jobs = True
+                        dead_rows.setdefault(entry['slot'], []).append(row.key)
             elif source_active:
                 blocked = ('backoff', 'source_backoff')
             elif not coming:
                 blocked = ('busy', 'no_runner')
+            else:
+                queued_rows.append(row.key)
             if outcome.klass == 'soft':
                 if blocked and blocked[1] == 'runner_uncertain':
                     self._refuse(row, *blocked)
@@ -326,6 +329,8 @@ class Admission:
                 outcome.awaiting = True
         for item in admitted:
             outcome = self.outcomes[item[0].key]
+            if coming:
+                queued_rows.append(item[0].key)
             if outcome.klass == 'soft':
                 outcome.refresh = 'background'
             elif coming:
@@ -404,8 +409,8 @@ class Admission:
         else:
             self._usable_before = 0
         owners = {slot: lease.pop('_owner') for slot, lease in reservations.items()}
-        self._slot_info = {'reclaimable': reclaimable, 'usable': usable, 'queued': len(queued), 'dead': dead_jobs,
-                           'source_active': source_active}
+        self._slot_info = {'reclaimable': reclaimable, 'usable': usable, 'queued': len(queued), 'dead_rows': dead_rows,
+                           'queued_rows': queued_rows, 'source_active': source_active}
 
         writing = bool(work_changes) or bool(reservations) or any(o.awaiting for o in self.outcomes.values())
         if not writing:
@@ -464,13 +469,8 @@ class Admission:
     def _after_commit(self, plan):
         self.committed = True
         self.permit_held = self.request_id in plan['changes'][qc.scheduler_key()]['interactive']
-        launched_any = False
-        for slot, owner in plan['owners'].items():
-            if self._spawn_into(slot, owner):
-                launched_any = True
-        if plan['owners'] and not launched_any and self._usable_before == 0:
-            self._give_up('launch_failed')       # nothing is running or coming: jobs stay queued, rows answer at once
-        self._reclaim_dead(launched_any)
+        launched = sum(1 for slot, owner in plan['owners'].items() if self._spawn_into(slot, owner))
+        self._reclaim_dead(launched, reserved=bool(plan['owners']))
 
     def _spawn_into(self, slot, owner) -> bool:
         try:
@@ -482,50 +482,81 @@ class Admission:
             self._free_slot(slot, owner)
         return started
 
-    def _give_up(self, reason):
-        """No runner is coming: rows that were waiting (or promised a background refresh) answer ``busy`` now. Counted once
-        in ``stats.refused`` by the post-response ``release()`` CAS, never by a new request-path write."""
-        for row in self.rows:
-            outcome = self.outcomes[row.key]
+    def _give_up(self, reason, keys):
+        """No runner is coming for these rows: those that were waiting (or promised a background refresh) answer ``busy``
+        now. Each reason is counted once per access in ``stats.refused``, by the post-response ``release()`` CAS, never by a
+        new request-path write."""
+        touched = False
+        for key in keys:
+            outcome = self.outcomes[key]
             if outcome.klass == 'fresh' or outcome.refresh in ('busy', 'backoff'):
                 continue
             if outcome.awaiting or outcome.refresh == 'background':
                 outcome.awaiting = False
                 outcome.refresh = 'busy'
                 outcome.reason = reason
-        self._late[reason] = self._late.get(reason, 0) + 1
+                touched = True
+        if touched:
+            self._late.setdefault(reason, 1)
 
-    def _reclaim_dead(self, launched_any):
-        """One bounded reclaim of a slot whose lease has run out, when work is pending and no runner is coming. On
-        ``reclaimed`` the same CAS wrote a fresh reservation, so the runner is spawned into it; on ``uncertain`` (other host,
-        lock held, lock file missing, or the store too slow) the waiting rows are ``busy`` / ``runner_uncertain``."""
+    def _reclaim_dead(self, launched, reserved=False):
+        """Settle the runner slots after the admission CAS (or instead of it). Each slot whose lease has run out and that
+        holds a joined job, or that the queue needs because nothing is usable, gets one bounded reclaim. Rows are settled
+        per slot: an ``uncertain`` slot gives up only the rows joined to it; a slot reclaimed or freed elsewhere turns its
+        rows into queued work. Queued work gives up only when something was attempted and no runner is usable or coming.
+        Spawns respect ``runner_target``: a second runner only for more than four pending jobs."""
         info = self._slot_info
-        if not info or not info['reclaimable']:
+        if not info:
             return
-        if not (info['dead'] or (info['queued'] > 0 and info['usable'] == 0 and not launched_any)):
-            return
+        dead_rows = info['dead_rows']
+        queued_rows = list(info['queued_rows'])
+        pending = info['queued'] + sum(len(keys) for keys in dead_rows.values())
+        target = qc.runner_target(pending)
+        runners = info['usable'] + launched
+        attempted = reserved
+        launch_failed = reserved and launched == 0
+        uncertain_keys: list = []
         deadline = min(self.budget.wait_until, time.monotonic() + RECLAIM_SECONDS)
-        spawned = uncertain = failed = False
+        needs_queue = info['queued'] > 0 and info['usable'] == 0 and launched == 0
         for slot in info['reclaimable']:
+            if slot not in dead_rows and not (needs_queue and runners < target):
+                continue
+            attempted = True
             owner = secrets.token_hex(16)
-            replace = None if info['source_active'] else owner
+            replace = owner if not info['source_active'] and runners < target else None
             try:
                 outcome = price_launcher.reclaim_slot(self.store, slot, deadline=deadline, attempts=1, replace_with=replace)
             except Exception:  # noqa: BLE001 - a reclaim never fails admission
                 outcome = 'uncertain'
-            if outcome == 'uncertain':
-                uncertain = True
-            elif outcome == 'reclaimed' and replace is not None:
-                if self._spawn_into(slot, owner):
-                    spawned = True
-                else:
-                    failed = True
-        if spawned:
-            return                                   # a runner is coming for whatever the reclaim requeued
-        if uncertain:
-            self._give_up('runner_uncertain')
-        elif failed:
-            self._give_up('launch_failed')
+            if outcome == 'uncertain' and replace is not None and self._lease_owner(slot) == owner:
+                outcome = 'reclaimed'            # the cleanup CAS landed; only its answer was lost
+            keys = dead_rows.get(slot, [])
+            if outcome == 'reclaimed':
+                if replace is not None and self._spawn_into(slot, owner):
+                    runners += 1
+                elif replace is not None:
+                    launch_failed = True
+                queued_rows += keys              # requeued: served by whichever runner is coming
+            elif outcome == 'uncertain':
+                uncertain_keys += keys
+            elif self._lease_owner(slot) is None:   # freed by someone else without a runner (failed spawn, release)
+                queued_rows += keys
+        if uncertain_keys:
+            self._give_up('runner_uncertain', uncertain_keys)
+        if attempted and runners == 0:
+            self._give_up('launch_failed' if launch_failed else 'no_runner', queued_rows)
+
+    def _lease_owner(self, slot):
+        """One bounded read of a slot lease: its owner, ``None`` when the slot is free, ``''`` when unreadable or held by
+        an unreadable lease."""
+        key = qc.runner_lease_key(slot)
+        try:
+            value = self.store.read_records([key], deadline=min(self.budget.wait_until, time.monotonic() + 0.3)).records[key].value
+        except _STORE_ERRORS:
+            return ''
+        if value is None or qc.slot_status(value, qc.wall_ms()) == 'free':
+            return None
+        return value.get('owner', '') if isinstance(value, dict) else ''
 
     def _recover_unknown(self, plan) -> bool:
         """The admission CAS answered neither yes nor no. A reservation inside it is all-or-nothing with the rest, so one

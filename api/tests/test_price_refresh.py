@@ -636,6 +636,134 @@ def test_an_uncertain_dead_slot_answers_busy_at_once_and_is_recorded_in_stats(en
             os.close(descriptor)
 
 
+def slots_scene(env, specs):
+    """Several runners at once. ``specs``: {slot: (index, lock, expired)}; each slot's owner holds one running job for
+    edition ``index`` and one source permit. Returns {slot: owner} and the descriptors of held locks."""
+    now = qc.wall_ms()
+    sched = qc.new_scheduler(now)
+    owners, held = {}, []
+    for slot, (index, lock, expired) in specs.items():
+        owner = f'{slot + 10:x}' * 32
+        owners[slot] = owner
+        job = f'{ref(index)}:1'
+        sched['jobs'][job] = qc.new_job('user:z', f'c-{index}', now)
+        sched['jobs'][job].update(state='running', slot=slot, owner=owner, attempt=1)
+        sched['source'][f'p{slot}'] = {'caller': 'user:z', 'slot': slot, 'owner': owner, 'jobs': [job], 'started_ms': now}
+        work = qc.new_work(ref(index), 1, f'c-{index}', 'normal', '77', 'user:z', now)
+        work.update(state='running', attempt=1, slot=slot, owner=owner)
+        env.put(qc.work_record_key(ref(index), 1), qc.validate_work(work))
+        lease = qc.new_runner_lease(owner, price_launcher.host_id(), now - 20_000, 1)
+        lease.update(state='running', claimed_ms=now - 20_000, supervisor_pid=2, worker_pid=3,
+                     lease_until_ms=now - 1 if expired else now + 10_000, hard_stop_ms=now + 45_000)
+        env.put(qc.runner_lease_key(slot), qc.validate_runner_lease(lease))
+        if lock != 'missing':
+            descriptor = os.open(price_launcher.lock_path(slot, owner), os.O_RDWR | os.O_CREAT, 0o600)
+            if lock == 'held':
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                held.append(descriptor)
+            else:
+                os.close(descriptor)
+    env.put(qc.scheduler_key(), qc.validate_scheduler(sched))
+    return owners, held
+
+
+def test_an_uncertain_slot_never_turns_a_row_on_a_live_slot_busy(env):
+    env.seed(1, 25 * HOUR)
+    env.seed(2, 25 * HOUR)
+    owners, held = slots_scene(env, {0: (1, 'free', False), 1: (2, 'held', True)})
+    try:
+        admission = env.admit([1, 2])
+        assert admission.outcomes[1].awaiting and admission.outcomes[1].refresh is None   # its runner is alive
+        assert labels(admission)[2] == 'busy' and admission.outcomes[2].reason == 'runner_uncertain'
+        assert env.spawns == [] and env.value(qc.runner_lease_key(1))['owner'] == owners[1]
+        admission.release()
+    finally:
+        for descriptor in held:
+            os.close(descriptor)
+
+
+def test_a_reclaimed_slot_and_an_uncertain_slot_each_settle_their_own_rows(env):
+    env.seed(1, 25 * HOUR)
+    env.seed(2, 25 * HOUR)
+    owners, held = slots_scene(env, {0: (1, 'free', True), 1: (2, 'held', True)})
+    try:
+        started = time.monotonic()
+        admission = env.admit([1, 2])
+        assert time.monotonic() - started < 0.5
+        (slot, owner), = env.spawns
+        assert slot == 0 and env.value(qc.runner_lease_key(0))['owner'] == owner
+        assert admission.outcomes[1].awaiting                                  # requeued; the new runner serves it
+        assert labels(admission)[2] == 'busy' and admission.outcomes[2].reason == 'runner_uncertain'
+        assert not admission.outcomes[2].awaiting
+        admission.release()
+    finally:
+        for descriptor in held:
+            os.close(descriptor)
+
+
+def test_one_runner_is_spawned_for_a_short_queue_even_when_two_slots_are_reclaimable(env):
+    env.seed(1, 25 * HOUR)
+    env.seed(2, 25 * HOUR)
+    slots_scene(env, {0: (1, 'free', True), 1: (2, 'free', True)})
+    admission = env.admit([1, 2])
+    assert len(env.spawns) == 1                                               # two jobs call for one runner
+    sched = env.scheduler()
+    assert sched['source'] == {} and {job['state'] for job in sched['jobs'].values()} == {'queued'}
+    assert [env.value(qc.runner_lease_key(s)) is None for s in (0, 1)].count(True) == 1
+    assert admission.outcomes[1].awaiting and admission.outcomes[2].awaiting
+    admission.release()
+
+
+def test_a_slot_freed_by_someone_else_without_a_runner_answers_at_once(env, monkeypatch):
+    env.seed(1, 25 * HOUR)
+    dead_scene(env, 'free')
+    real = price_launcher.reclaim_slot
+
+    def freed_elsewhere(store, slot, **kwargs):     # another API reclaimed it, then its spawn failed and it freed the slot
+        assert real(store, slot) == 'reclaimed'
+        return 'not_applicable'
+    monkeypatch.setattr(price_launcher, 'reclaim_slot', freed_elsewhere)
+    started = time.monotonic()
+    admission = env.admit([1])
+    admission.wait()
+    assert labels(admission) == {1: 'busy'} and time.monotonic() - started < 0.5 and env.spawns == []
+
+
+def test_a_reclaim_whose_answer_is_lost_still_spawns_into_its_reservation(env):
+    class LostCleanup:
+        def __init__(self, store):
+            self.store = store
+
+        def __getattr__(self, name):
+            return getattr(self.store, name)
+
+        def compare_and_swap(self, expected, changes, *, deadline, operation_id=None):
+            done = self.store.compare_and_swap(expected, changes, deadline=deadline, operation_id=operation_id)
+            if operation_id and operation_id.startswith('cleanup:'):
+                raise ProjectionUnavailable()
+            return done
+
+        def operation_status(self, operation_id, *, deadline):
+            raise ProjectionUnavailable()
+    env.seed(1, 25 * HOUR)
+    dead_scene(env, 'free')
+    admission = evaluate_and_admit(env.rows([1]), 'user:a', env.budget(), LostCleanup(env.store))
+    (slot, owner), = env.spawns
+    assert env.value(qc.runner_lease_key(slot))['owner'] == owner and admission.outcomes[1].awaiting
+    admission.release()
+
+
+def test_launch_failed_is_counted_once_per_access(env, monkeypatch):
+    monkeypatch.setattr(price_launcher, 'spawn', lambda slot, owner: False)
+    env.seed(1, 25 * HOUR)
+    env.seed(2, 25 * HOUR)
+    slots_scene(env, {1: (1, 'free', True)})                                  # slot 0 free: reserved; slot 1 reclaimed
+    admission = env.admit([1, 2])
+    assert labels(admission) == {1: 'busy', 2: 'busy'}
+    admission.release()
+    assert env.scheduler()['stats']['refused'].get('launch_failed') == 1
+
+
 def test_a_dead_slot_with_a_free_lock_is_reclaimed_and_a_runner_is_spawned_for_the_requeued_job(env):
     env.seed(1, 25 * HOUR)
     dead_scene(env, 'free')
