@@ -2,9 +2,10 @@
 
 ``evaluate_and_admit(rows, caller, budget)`` classifies the stored state of each row by the age of ``result.checked_at``,
 joins rows already in flight, admits new jobs under every cap with one bounded compare-and-swap, reserves a runner
-slot when work is queued and nobody is coming, and calls ``price_launcher.spawn`` after the commit. It never
-writes a quote, never fetches a source, and never changes a user-visible state: the caller always keeps the
-cached view. Reads under one hour write nothing and contact nothing. There is no way to force a refresh: only stored
+slot when work is queued and nobody is coming, and calls ``price_launcher.spawn`` after the commit. When work is
+pending but the only slot is a dead runner (lease run out), it asks ``price_launcher.reclaim_slot`` for one bounded
+reclaim and spawns into the reservation that CAS wrote. It never writes a quote, never fetches a source, and never
+changes a user-visible state: the caller always keeps the cached view. Reads under one hour write nothing and contact nothing. There is no way to force a refresh: only stored
 state, the server clock and the signed caller decide.
 
 Bands (``result.checked_at`` against ``quote_contract.wall_ms()``): under 1 h fresh; 1 h up to 24 h soft (cached now,
@@ -38,6 +39,8 @@ TRY_SECONDS = 0.6
 MAX_TRIES = 2
 POLL_SECONDS = 0.1
 RELEASE_SECONDS = 1.0
+RECLAIM_SECONDS = 0.6      # one reclaim step on the request path (read, lock proof, one CAS attempt)
+FOLLOW_UP_SECONDS = 0.25   # of the hard wait kept for the reads that follow it, so they never touch the PostgreSQL reserve
 CHUNK_ROWS = 64            # work: + backoff: per row = 128 keys
 MAX_CHUNKS = 4
 _STORE_ERRORS = (ProjectionUnavailable, qc.ContractError, ValueError, OSError, KeyError, TypeError)
@@ -115,6 +118,8 @@ class Admission:
         self._released = False
         self._versions: dict[str, str] = {}                      # result key -> version when classified
         self._usable_before = 0
+        self._slot_info: dict | None = None                      # what _plan saw of the runner slots, for the reclaim step
+        self._late: dict[str, int] = {}                          # refusals decided after the commit; release() records them
 
     # ---- helpers -------------------------------------------------------------------------------------------
     def _refuse(self, row, label, reason):
@@ -169,13 +174,16 @@ class Admission:
                     return None
                 generation = None
             plan = self._plan(generation)
-            if plan is None:
+            if plan is None:                        # nothing to write; a dead runner may still need its slot reclaimed
+                self._reclaim_dead(False)
                 return None
             verdict = self._commit(plan, attempt)
             if verdict == 'committed':
                 self._after_commit(plan)
                 return None
             if verdict == 'unavailable':
+                if self._recover_unknown(plan):
+                    return None
                 return self._refuse_all_open('store_unavailable')
         return self._refuse_all_open('conflict')
 
@@ -212,6 +220,10 @@ class Admission:
                 leases.append(qc.validate_runner_lease(deepcopy(rec[key].value)))
             except qc.ContractError:
                 leases.append('invalid')
+        statuses = [qc.slot_status(lease, now) for lease in leases]
+        usable = statuses.count('usable')
+        free_slots = [slot for slot, status in zip(qc.RUNNER_SLOTS, statuses) if status == 'free']
+        reclaimable = [slot for slot, status in zip(qc.RUNNER_SLOTS, statuses) if status == 'reclaimable']
         source_active = False
         if rec[source_key].value is not None:
             try:
@@ -279,19 +291,47 @@ class Admission:
                 if self.outcomes[row.key].refresh is None and all(row is not a[0] for a in admitted):
                     self._refuse(row, 'busy', 'job_cap')
 
-        # Awaiting rows: hard rows that are joined or admitted.
-        for row, _ in joins:
-            outcome = self.outcomes[row.key]
+        # A runner is coming for queued work when the source is clear and a slot is usable, can be reserved in this CAS
+        # (a free slot), can be reclaimed after the commit, or is winding down (its supervisor hands the queue on).
+        coming = not source_active and (usable > 0 or bool(free_slots) or bool(reclaimable) or 'winding_down' in statuses)
+
+        # Awaiting rows: hard rows that are joined or admitted. A running job is awaited only while its slot's lease is
+        # valid, owned by the job's owner and unexpired; one whose lease has run out waits for the reclaim; anything else
+        # is uncertain and answers at once.
+        dead_jobs = False
+        for row, job in joins:
+            outcome, entry = self.outcomes[row.key], sched['jobs'][job]
+            blocked = None
+            if entry['state'] == 'running':
+                lease = leases[entry['slot']] if entry['slot'] in qc.RUNNER_SLOTS else 'invalid'
+                if not isinstance(lease, dict) or lease['owner'] != entry['owner']:
+                    blocked = ('busy', 'runner_uncertain')
+                elif lease['lease_until_ms'] <= now:
+                    if source_active:
+                        blocked = ('backoff', 'source_backoff')
+                    else:
+                        dead_jobs = True
+            elif source_active:
+                blocked = ('backoff', 'source_backoff')
+            elif not coming:
+                blocked = ('busy', 'no_runner')
             if outcome.klass == 'soft':
-                outcome.refresh = 'background'
+                if blocked and blocked[1] == 'runner_uncertain':
+                    self._refuse(row, *blocked)
+                else:
+                    outcome.refresh = 'background'
+            elif blocked:
+                self._refuse(row, *blocked)
             else:
                 outcome.awaiting = True
         for item in admitted:
             outcome = self.outcomes[item[0].key]
             if outcome.klass == 'soft':
                 outcome.refresh = 'background'
-            else:
+            elif coming:
                 outcome.awaiting = True
+            else:
+                self._refuse(item[0], 'busy', 'no_runner')      # admitted and queued, but nobody can serve it now
         needs_permit = bool(admitted) or any(o.awaiting for o in self.outcomes.values())
 
         # Interactive permit and anonymous ledger.
@@ -319,7 +359,8 @@ class Admission:
             if reason:
                 taken = [a[0] for a in admitted]
                 for row in open_rows:
-                    if self.outcomes[row.key].awaiting or any(row is t for t in taken):
+                    outcome = self.outcomes[row.key]
+                    if outcome.awaiting or (any(row is t for t in taken) and outcome.refresh in (None, 'background')):
                         self._refuse(row, 'busy', reason)
                 admitted, needs_permit, shard = [], False, None
             else:
@@ -352,19 +393,9 @@ class Admission:
         reservations = {}
         queued = [j for j, v in sched['jobs'].items() if v['state'] == 'queued']
         if queued and not source_active:
-            usable = 0
-            free = []
-            for slot, lease in zip(qc.RUNNER_SLOTS, leases):
-                if lease is None or (lease != 'invalid' and lease['state'] == 'reserved'
-                                     and now - lease['reserved_ms'] > qc.RESERVATION_TTL_MS):
-                    free.append(slot)
-                elif lease != 'invalid' and (
-                        (lease['state'] == 'running' and lease['lease_until_ms'] > now and lease['hard_stop_ms'] > now + 3000)
-                        or (lease['state'] == 'reserved' and now - lease['reserved_ms'] <= qc.RESERVATION_TTL_MS)):
-                    usable += 1
-            target = 2 if len(queued) > 4 else 1
+            target = qc.runner_target(len(queued))
             self._usable_before = usable
-            for slot in free:
+            for slot in free_slots:
                 if usable + len(reservations) >= target:
                     break
                 owner = secrets.token_hex(16)
@@ -373,6 +404,8 @@ class Admission:
         else:
             self._usable_before = 0
         owners = {slot: lease.pop('_owner') for slot, lease in reservations.items()}
+        self._slot_info = {'reclaimable': reclaimable, 'usable': usable, 'queued': len(queued), 'dead': dead_jobs,
+                           'source_active': source_active}
 
         writing = bool(work_changes) or bool(reservations) or any(o.awaiting for o in self.outcomes.values())
         if not writing:
@@ -433,25 +466,82 @@ class Admission:
         self.permit_held = self.request_id in plan['changes'][qc.scheduler_key()]['interactive']
         launched_any = False
         for slot, owner in plan['owners'].items():
-            try:
-                started = price_launcher.spawn(slot, owner) is True
-            except Exception:  # noqa: BLE001 - a launcher never fails admission
-                started = False
-            self.reservations.append((slot, owner, started))
-            launched_any = launched_any or started
-            if not started:
-                self._free_slot(slot, owner)
+            if self._spawn_into(slot, owner):
+                launched_any = True
         if plan['owners'] and not launched_any and self._usable_before == 0:
-            # Nothing is running or coming: do not wait for a runner that does not exist. Jobs stay queued.
-            for row in self.rows:
-                outcome = self.outcomes[row.key]
-                if outcome.klass == 'fresh' or outcome.refresh == 'busy':
-                    continue
-                if outcome.awaiting or outcome.refresh == 'background':
-                    outcome.awaiting = False
-                    outcome.refresh = 'busy'
-                    outcome.reason = 'launch_failed'
-            self.refused['launch_failed'] = self.refused.get('launch_failed', 0) + 1
+            self._give_up('launch_failed')       # nothing is running or coming: jobs stay queued, rows answer at once
+        self._reclaim_dead(launched_any)
+
+    def _spawn_into(self, slot, owner) -> bool:
+        try:
+            started = price_launcher.spawn(slot, owner) is True
+        except Exception:  # noqa: BLE001 - a launcher never fails admission
+            started = False
+        self.reservations.append((slot, owner, started))
+        if not started:
+            self._free_slot(slot, owner)
+        return started
+
+    def _give_up(self, reason):
+        """No runner is coming: rows that were waiting (or promised a background refresh) answer ``busy`` now. Counted once
+        in ``stats.refused`` by the post-response ``release()`` CAS, never by a new request-path write."""
+        for row in self.rows:
+            outcome = self.outcomes[row.key]
+            if outcome.klass == 'fresh' or outcome.refresh in ('busy', 'backoff'):
+                continue
+            if outcome.awaiting or outcome.refresh == 'background':
+                outcome.awaiting = False
+                outcome.refresh = 'busy'
+                outcome.reason = reason
+        self._late[reason] = self._late.get(reason, 0) + 1
+
+    def _reclaim_dead(self, launched_any):
+        """One bounded reclaim of a slot whose lease has run out, when work is pending and no runner is coming. On
+        ``reclaimed`` the same CAS wrote a fresh reservation, so the runner is spawned into it; on ``uncertain`` (other host,
+        lock held, lock file missing, or the store too slow) the waiting rows are ``busy`` / ``runner_uncertain``."""
+        info = self._slot_info
+        if not info or not info['reclaimable']:
+            return
+        if not (info['dead'] or (info['queued'] > 0 and info['usable'] == 0 and not launched_any)):
+            return
+        deadline = min(self.budget.wait_until, time.monotonic() + RECLAIM_SECONDS)
+        spawned = uncertain = failed = False
+        for slot in info['reclaimable']:
+            owner = secrets.token_hex(16)
+            replace = None if info['source_active'] else owner
+            try:
+                outcome = price_launcher.reclaim_slot(self.store, slot, deadline=deadline, attempts=1, replace_with=replace)
+            except Exception:  # noqa: BLE001 - a reclaim never fails admission
+                outcome = 'uncertain'
+            if outcome == 'uncertain':
+                uncertain = True
+            elif outcome == 'reclaimed' and replace is not None:
+                if self._spawn_into(slot, owner):
+                    spawned = True
+                else:
+                    failed = True
+        if spawned:
+            return                                   # a runner is coming for whatever the reclaim requeued
+        if uncertain:
+            self._give_up('runner_uncertain')
+        elif failed:
+            self._give_up('launch_failed')
+
+    def _recover_unknown(self, plan) -> bool:
+        """The admission CAS answered neither yes nor no. A reservation inside it is all-or-nothing with the rest, so one
+        bounded re-read of that lease tells whether it landed; if so the runner is spawned and the permit is ours to release."""
+        if not plan['owners']:
+            return False
+        slot, owner = next(iter(plan['owners'].items()))
+        key = qc.runner_lease_key(slot)
+        try:
+            value = self.store.read_records([key], deadline=min(self.budget.wait_until, time.monotonic() + 0.5)).records[key].value
+        except _STORE_ERRORS:
+            return False
+        if not isinstance(value, dict) or value.get('owner') != owner:
+            return False
+        self._after_commit(plan)
+        return True
 
     def _free_slot(self, slot, owner):
         key = qc.runner_lease_key(slot)
@@ -477,9 +567,10 @@ class Admission:
         sched_key = qc.scheduler_key()
         result_keys = {k: result_key(r.edition_ref, r.mapping_revision) for k, r in awaiting.items()}
         resolved: dict = {}
+        stop_at = budget.wait_until          # polling stops here; once a row resolved, FOLLOW_UP_SECONDS earlier
         try:
             while True:
-                snap = self.store.read_all([sched_key, *result_keys.values()], deadline=budget.wait_until)
+                snap = self.store.read_all([sched_key, *result_keys.values()], deadline=stop_at)
                 jobs = (snap.records[sched_key].value or {}).get('jobs', {}) if isinstance(snap.records[sched_key].value, dict) else {}
                 for key, row in awaiting.items():
                     if key in resolved:
@@ -489,9 +580,11 @@ class Admission:
                         changed.add(key)
                     elif self.outcomes[key].job not in jobs:
                         resolved[key] = False
-                if len(resolved) == len(awaiting) or budget.wait_remaining() <= POLL_SECONDS / 2:
+                if resolved:                     # follow-up reads (failure stamps, changed rows) must fit before wait_until
+                    stop_at = min(stop_at, budget.wait_until - FOLLOW_UP_SECONDS)
+                if len(resolved) == len(awaiting) or stop_at - time.monotonic() <= POLL_SECONDS / 2:
                     break
-                time.sleep(min(POLL_SECONDS, budget.wait_remaining()))
+                time.sleep(min(POLL_SECONDS, stop_at - time.monotonic()))
         except _STORE_ERRORS:
             pass
         failed = [k for k, moved in resolved.items() if not moved]
@@ -499,7 +592,7 @@ class Admission:
         if failed and budget.wait_remaining() > 0:
             try:
                 keys = {k: qc.edition_backoff_key(awaiting[k].edition_ref, awaiting[k].mapping_revision) for k in failed}
-                got = self.store.read_all(list(keys.values()), deadline=budget.wait_until + 0.2).records
+                got = self.store.read_all(list(keys.values()), deadline=budget.wait_until).records
                 for k, key in keys.items():
                     try:
                         stamps[k] = qc.validate_edition_backoff(deepcopy(got[key].value))['last_attempt_ms']
@@ -520,8 +613,9 @@ class Admission:
 
     # ---- release -------------------------------------------------------------------------------------------
     def release(self):
-        """Best-effort release of the interactive permit with its own 1 s deadline; the TTL reclaims it otherwise."""
-        if self._released or not self.permit_held:
+        """Best-effort release of the interactive permit with its own 1 s deadline; the TTL reclaims it otherwise. The same
+        post-response CAS adds the refusals decided after the admission commit (``_late``) to ``stats.refused``."""
+        if self._released or not (self.permit_held or self._late):
             return
         self._released = True
         deadline = time.monotonic() + RELEASE_SECONDS
@@ -529,10 +623,17 @@ class Admission:
         for attempt in range(3):
             try:
                 record = self.store.read_records([key], deadline=deadline).records[key]
-                if not isinstance(record.value, dict) or self.request_id not in record.value.get('interactive', {}):
+                if not isinstance(record.value, dict):
                     return
                 sched = deepcopy(record.value)
-                del sched['interactive'][self.request_id]
+                changed = sched['interactive'].pop(self.request_id, None) is not None
+                refused = sched['stats']['refused']
+                for reason, count in self._late.items():
+                    if reason in refused or len(refused) < 32:
+                        refused[reason] = refused.get(reason, 0) + count
+                        changed = True
+                if not changed:
+                    return
                 qc.validate_scheduler(sched)
                 if self.store.compare_and_swap({key: record.version}, {key: sched}, deadline=deadline,
                                                operation_id=f'release-{self.request_id}-{attempt}'):

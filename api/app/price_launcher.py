@@ -14,9 +14,17 @@ Contract for ``spawn(slot, owner)``:
 - It must not block on the child and must not touch PostgreSQL or the record store.
 - It is called from a request thread, at most once per reservation.
 
-Contract for ``reclaim_slot(store, slot)`` (called by admission when no usable slot is found, as its own bounded CAS):
+Contract for ``reclaim_slot(store, slot, *, deadline=None, attempts=4, replace_with=None)`` (called by admission's
+``_after_commit`` when work is pending and the slot's lease has run out, as its own bounded step):
 
-- ``'not_applicable'``: nothing to reclaim (free slot, live lease, or a young unclaimed reservation).
+- ``deadline`` is an absolute ``time.monotonic()`` value that bounds every store call, ``operation_status`` included; the
+  request path passes ``min(wait_until, now + 0.6)`` with ``attempts=1``. Supervisor and operator callers pass neither and keep
+  the 2 s per call default.
+- ``replace_with`` is a new 32-hex owner: the cleanup CAS then writes a fresh ``reserved`` lease for it instead of freeing the
+  slot, so the caller can ``spawn`` without a second CAS. Only a CAS that wrote it returns ``'reclaimed'``.
+
+- ``'not_applicable'``: nothing to reclaim (free slot, live lease, a young unclaimed reservation, or a slot someone else
+  already freed or replaced).
 - ``'reclaimed'``: the slot was freed; for a claimed slot the owner's source permits were released, its unexpired
   running jobs requeued and its expired ones dropped, with every ``work:`` record rewritten (version bump fences any
   stale writer).
@@ -142,17 +150,24 @@ def deadline_in(seconds: float = STORE_TIMEOUT_S) -> float:
     return time.monotonic() + seconds
 
 
-def commit(store, expected: dict, changes: dict, operation_id: str, *, timeout: float = STORE_TIMEOUT_S) -> bool:
+def _at(timeout: float, deadline: float | None) -> float:
+    """The absolute deadline for one store call: the caller's, or ``timeout`` seconds from now."""
+    return deadline if deadline is not None else deadline_in(timeout)
+
+
+def commit(store, expected: dict, changes: dict, operation_id: str, *, timeout: float = STORE_TIMEOUT_S,
+           deadline: float | None = None) -> bool:
     """One CAS whose unknown outcome is resolved: ``operation_status`` first, then the expected versions. ``True`` only
-    when the change is known committed; ``False`` on conflict (or an operation id already used for other content)."""
+    when the change is known committed; ``False`` on conflict (or an operation id already used for other content).
+    ``deadline`` (absolute monotonic) bounds the CAS and the ``operation_status`` follow-up together."""
     try:
-        return bool(store.compare_and_swap(expected, changes, deadline=deadline_in(timeout), operation_id=operation_id))
+        return bool(store.compare_and_swap(expected, changes, deadline=_at(timeout, deadline), operation_id=operation_id))
     except OperationConflict:
         return False
     except ProjectionUnavailable:
         pass
     try:
-        if store.operation_status(operation_id, deadline=deadline_in(timeout)):
+        if store.operation_status(operation_id, deadline=_at(timeout, deadline)):
             return True
     except ProjectionUnavailable:
         return False
@@ -160,8 +175,8 @@ def commit(store, expected: dict, changes: dict, operation_id: str, *, timeout: 
     return False
 
 
-def read(store, keys, *, timeout: float = STORE_TIMEOUT_S, generation=None):
-    return store.read_records(list(keys), deadline=deadline_in(timeout), generation=generation)
+def read(store, keys, *, timeout: float = STORE_TIMEOUT_S, generation=None, deadline: float | None = None):
+    return store.read_records(list(keys), deadline=_at(timeout, deadline), generation=generation)
 
 
 def scheduler_value(record):
@@ -184,32 +199,50 @@ def tidy_scheduler(scheduler: dict) -> dict:
     return scheduler
 
 
-def cleanup_slot(store, slot: int, owner: str, *, attempts: int = 4) -> bool:
+def cleanup_slot(store, slot: int, owner: str, *, attempts: int = 4, deadline: float | None = None,
+                 replace_with: str | None = None) -> bool:
     """Free ``slot`` if it is still held by ``owner``: release that owner's source permits, requeue its unexpired running
     jobs, drop the expired ones, rewrite each ``work:`` record (version bump) and clear the lease, in one CAS.
 
+    ``replace_with`` (a new owner nonce) writes a fresh ``reserved`` lease for that owner in the same CAS instead of
+    clearing the slot. ``deadline`` is absolute and bounds every call; no new attempt starts after it.
+
     Returns ``True`` when the slot is no longer held by ``owner`` (freed here, or already freed or replaced), ``False``
     when the store stayed unavailable or contended."""
+    return _cleanup(store, slot, owner, attempts=attempts, deadline=deadline, replace_with=replace_with) != 'failed'
+
+
+def _cleanup(store, slot, owner, *, attempts, deadline, replace_with) -> str:
+    """``'freed'`` (this call's CAS committed), ``'gone'`` (the slot was no longer ``owner``'s) or ``'failed'``."""
     lease_key = qc.runner_lease_key(slot)
     scheduler_key = qc.scheduler_key()
     for _ in range(attempts):
+        if deadline is not None and time.monotonic() >= deadline:
+            return 'failed'
         try:
-            snapshot = read(store, [scheduler_key, lease_key])
+            snapshot = read(store, [scheduler_key, lease_key], deadline=deadline)
             lease = snapshot.records[lease_key].value
-            if lease is None or lease.get('owner') != owner:
-                return True
+            if lease is None or (isinstance(lease, dict) and lease.get('owner') != owner):
+                return 'gone'
+            if not isinstance(lease, dict):
+                return 'failed'
             scheduler = scheduler_value(snapshot.records[scheduler_key].value)
             owned = sorted((key for key, job in scheduler['jobs'].items()
                             if job['state'] == 'running' and job['owner'] == owner and job['slot'] == slot),
                            key=lambda key: scheduler['jobs'][key]['admitted_ms'])[:100]
             work_keys = {key: qc.work_record_key(*qc.split_job_id(key)) for key in owned}
-            works = read(store, list(work_keys.values())).records if work_keys else {}
+            works = read(store, list(work_keys.values()), deadline=deadline).records if work_keys else {}
         except ProjectionUnavailable:
             continue
         except (ValueError, KeyError, TypeError):
-            return False  # A corrupt scheduler needs the operator, not an automatic rewrite.
+            return 'failed'  # A corrupt scheduler needs the operator, not an automatic rewrite.
         now = qc.wall_ms()
-        changes = {lease_key: None}
+        try:
+            replacement = None if replace_with is None else qc.validate_runner_lease(
+                qc.new_runner_lease(replace_with, host_id(), now, os.getpid()))
+        except (OSError, ValueError):
+            return 'failed'
+        changes = {lease_key: replacement}
         expected = {scheduler_key: snapshot.records[scheduler_key].version, lease_key: snapshot.records[lease_key].version}
         for key in scheduler['source'].copy():
             if scheduler['source'][key]['owner'] == owner:
@@ -234,17 +267,18 @@ def cleanup_slot(store, slot: int, owner: str, *, attempts: int = 4) -> bool:
         for caller in {scheduler['jobs'][key]['caller'] for key in requeued}:
             scheduler['fifo'][caller].sort(key=lambda key: (scheduler['jobs'][key]['admitted_ms'], key))
         changes[scheduler_key] = qc.validate_scheduler(tidy_scheduler(scheduler))
-        if commit(store, expected, changes, f'cleanup:{slot}:{owner}:{uuid4().hex[:16]}'):
-            return True
-    return False
+        if commit(store, expected, changes, f'cleanup:{slot}:{owner}:{uuid4().hex[:16]}', deadline=deadline):
+            return 'freed'
+    return 'failed'
 
 
 # --- Reclaim --------------------------------------------------------------------------------------------------------
-def reclaim_slot(store, slot: int) -> str:
+def reclaim_slot(store, slot: int, *, deadline: float | None = None, attempts: int = 4,
+                 replace_with: str | None = None) -> str:
     """Same-host reclaim of an expired slot (see module docstring). Never creates a lock file."""
     lease_key = qc.runner_lease_key(slot)
     try:
-        row = read(store, [lease_key]).records[lease_key]
+        row = read(store, [lease_key], deadline=deadline).records[lease_key]
         lease = qc.validate_runner_lease(deepcopy(row.value))
     except ProjectionUnavailable:
         return 'uncertain'
@@ -256,8 +290,13 @@ def reclaim_slot(store, slot: int) -> str:
     if lease['state'] == 'reserved':
         if now - lease['reserved_ms'] <= qc.RESERVATION_TTL_MS:
             return 'not_applicable'
-        return 'reclaimed' if commit(store, {lease_key: row.version}, {lease_key: None},
-                                     f'unreserve:{slot}:{lease["owner"]}:{uuid4().hex[:16]}') else 'not_applicable'
+        try:
+            replacement = None if replace_with is None else qc.validate_runner_lease(
+                qc.new_runner_lease(replace_with, host_id(), now, os.getpid()))
+        except (OSError, ValueError):
+            return 'uncertain'
+        return 'reclaimed' if commit(store, {lease_key: row.version}, {lease_key: replacement},
+                                     f'unreserve:{slot}:{lease["owner"]}:{uuid4().hex[:16]}', deadline=deadline) else 'not_applicable'
     if lease['lease_until_ms'] > now:
         return 'not_applicable'
     try:
@@ -273,8 +312,11 @@ def reclaim_slot(store, slot: int) -> str:
         except OSError:
             # EWOULDBLOCK: a process still holds the lock and may be alive (SIGSTOP) -- never replace it.
             return 'uncertain'
-        if not cleanup_slot(store, slot, lease['owner']):
+        outcome = _cleanup(store, slot, lease['owner'], attempts=attempts, deadline=deadline, replace_with=replace_with)
+        if outcome == 'failed':
             return 'uncertain'
+        if outcome == 'gone':
+            return 'not_applicable'
         try:
             lock_path(slot, lease['owner'], directory).unlink(missing_ok=True)
         except OSError:
@@ -286,19 +328,25 @@ def reclaim_slot(store, slot: int) -> str:
 
 def release_slot(store, slot: int) -> str:
     """Operator release (``scripts/price_runners.py release --confirm-terminated``): the operator asserts the runner is
-    gone, so no host or lock check. Frees a claimed or reserved slot with the same cleanup as a reclaim."""
+    gone, so no host or lock check. Frees a claimed or reserved slot with the same cleanup as a reclaim. A lease that fails
+    validation is released too (through its owner when it still names one, else the key is simply cleared)."""
     lease_key = qc.runner_lease_key(slot)
     row = read(store, [lease_key]).records[lease_key]
     if row.value is None:
         return 'not_applicable'
-    lease = qc.validate_runner_lease(deepcopy(row.value))
-    if lease['state'] == 'reserved':
-        ok = commit(store, {lease_key: row.version}, {lease_key: None}, f'release:{slot}:{lease["owner"]}:{uuid4().hex[:16]}')
+    try:
+        lease = qc.validate_runner_lease(deepcopy(row.value))
+        owner, state = lease['owner'], lease['state']
+    except ValueError:
+        raw = row.value.get('owner') if isinstance(row.value, dict) else None
+        owner, state = (raw if type(raw) is str and _OWNER.fullmatch(raw) else None), None
+    if state == 'reserved' or owner is None:
+        ok = commit(store, {lease_key: row.version}, {lease_key: None}, f'release:{slot}:{owner}:{uuid4().hex[:16]}')
     else:
-        ok = cleanup_slot(store, slot, lease['owner'])
-    if ok:
+        ok = cleanup_slot(store, slot, owner)
+    if ok and owner is not None:
         try:
-            lock_path(slot, lease['owner']).unlink(missing_ok=True)
-        except OSError:
+            lock_path(slot, owner).unlink(missing_ok=True)
+        except (OSError, ValueError):
             pass
     return 'released' if ok else 'failed'

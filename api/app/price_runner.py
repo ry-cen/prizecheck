@@ -51,6 +51,7 @@ STOP_MARGIN_MS = 2_500            # now + 2.5 s <= hard_stop_ms before a claim
 CLEANUP_GRACE_MS = 60_000
 CLAIM_RETRIES = 3
 WRITE_TRIES = 3
+RETRY_PAUSE_S = (0.02, 0.1)       # jitter after a claim that lost a race, so two workers do not collide in lockstep
 
 EDITION_KEYS = {'edition_ref', 'printing_ref', 'descriptor', 'revision', 'marketplace'}
 MARKETPLACE_KEYS = {'state', 'reason', 'mapping_revision', 'product_id', 'quote_lookup'}
@@ -173,6 +174,10 @@ def _ms_after(delay_s):
     return qc.wall_ms() + int(delay_s * 1000)
 
 
+def _retry_pause():
+    time.sleep(random.uniform(*RETRY_PAUSE_S))
+
+
 class Worker:
     """The claim/fetch/write loop. ``fetcher`` and ``selector`` default to the lazily imported source modules."""
 
@@ -216,11 +221,15 @@ class Worker:
                     claimed = self.try_claim()
                 except Unavailable:
                     claimed = 'unavailable'
+                except (qc.ContractError, TypeError, KeyError, AttributeError):
+                    claimed = 'none'         # a record that fails the contract is nothing to claim, never a crash
             if claimed == 'lost':
                 result = 'fenced'
                 break
             if claimed in ('claimed', 'retry'):
                 idle_since = None
+                if claimed == 'retry':
+                    _retry_pause()
                 continue
             if self.inflight:
                 idle_since = None
@@ -343,12 +352,22 @@ class Worker:
         new['ring'] = survivors
         new['cursor'] = (sum(1 for name in scheduler['ring'][:index + 1] if name in new['fifo'])) % len(survivors) if survivors else 0
         changes[self.scheduler_key] = qc.validate_scheduler(new)
-        if not self.commit(expected, changes, f'claim:{self.slot}:{self.owner}:{permit_id}'):
+        if not self.commit(expected, changes, f'claim:{self.slot}:{self.owner}:{permit_id}') \
+                and not self.claim_landed(permit_id):
             return 'retry'
         with self.lock:
             self.inflight += 1
         self.work_queue.put(Claim(permit_id, caller, card, ready))
         return 'claimed'
+
+    def claim_landed(self, permit_id):
+        """A claim CAS answered false or unknown: it may still have committed. Its permit in the scheduler says so."""
+        try:
+            value = self.read([self.scheduler_key])[self.scheduler_key].value
+            permit = qc.validate_scheduler(deepcopy(value))['source'].get(permit_id)
+        except (Unavailable, qc.ContractError, TypeError):
+            return False
+        return permit is not None and permit['owner'] == self.owner and permit['slot'] == self.slot
 
     def cancel(self, version, scheduler, job_ids, expired=False):
         """Remove queued jobs from the scheduler and delete their ``work:`` records. No backoff, no check-age change."""
@@ -374,7 +393,8 @@ class Worker:
             raw = rows[self.scheduler_key].value
             if raw is not None:
                 scheduler = qc.validate_scheduler(deepcopy(raw))
-                blocked = rows[self.source_key].value is not None and rows[self.source_key].value.get('retry_ms', 0) > now
+                blocked = rows[self.source_key].value is not None \
+                    and qc.validate_source_backoff(deepcopy(rows[self.source_key].value))['retry_ms'] > now
                 if not blocked and any(job['state'] == 'queued' and job['expires_ms'] > now for job in scheduler['jobs'].values()):
                     return False
             exiting = dict(lease, state='exiting')
@@ -439,14 +459,21 @@ class Worker:
                 return
             now = qc.wall_ms()
             delay = failure.retry_after_s if failure.retry_after_s is not None else qc.BACKOFF_BASE_S
-            retry = now + int(min(delay, qc.RETRY_AFTER_CAP_S) * 1000)
+            try:
+                retry = now + int(min(delay, qc.RETRY_AFTER_CAP_S) * 1000)
+            except (TypeError, ValueError, OverflowError):
+                retry = now + qc.BACKOFF_BASE_S * 1000
             reason = 'rate_limited' if failure.rate_limited and failure.retry_after_s is None else 'retry_after'
             try:
                 if row.value is not None:
                     retry = max(retry, qc.validate_source_backoff(deepcopy(row.value))['retry_ms'])
             except qc.ContractError:
                 pass
-            record = qc.new_source_backoff(reason, retry, now)
+            retry = min(retry, now + qc.RETRY_AFTER_CAP_S * 1000)     # never beyond one hour from now
+            try:
+                record = qc.validate_source_backoff(qc.new_source_backoff(reason, retry, now))
+            except qc.ContractError:
+                return
             if self.commit({self.source_key: row.version}, {self.source_key: record}, f'source-backoff:{self.owner}:{uuid4().hex[:16]}'):
                 return
 
@@ -616,14 +643,17 @@ def supervise(slot, owner):
     if lease is None:
         os.close(ctrl_write)  # EOF: the parked worker exits without any source I/O.
         _reap(worker, kill=True)
+        _drop_lock_if_lost(store, slot, owner)
         return 0
     renewer = Renewer(store, slot, owner)
     renewer.start()
     os.write(ctrl_write, json.dumps({'hard_stop_ms': lease['hard_stop_ms']}).encode())
     os.close(ctrl_write)
+    clean = False
     while True:
-        done, _ = os.waitpid(worker, os.WNOHANG)
+        done, status = os.waitpid(worker, os.WNOHANG)
         if done:
+            clean = os.WIFEXITED(status) and os.WEXITSTATUS(status) == 0
             break
         if renewer.lost or qc.wall_ms() >= lease['hard_stop_ms']:
             _reap(worker, kill=True)
@@ -641,8 +671,22 @@ def supervise(slot, owner):
         price_launcher.lock_path(slot, owner).unlink(missing_ok=True)
     except OSError:
         pass
-    handoff(store, slot)
+    if clean:                         # a crashed or killed worker must not respawn into the same failure
+        handoff(store, slot)
     return 0
+
+
+def _drop_lock_if_lost(store, slot, owner):
+    """A failed claim leaves a lock file nobody will use. Remove it only when the slot is plainly not ours any more (empty,
+    or held by another owner); an unreadable slot keeps the file, since the claim may have landed."""
+    key = qc.runner_lease_key(slot)
+    try:
+        lease = price_launcher.read(store, [key], timeout=1.0).records[key].value
+        mine = isinstance(lease, dict) and lease.get('owner') == owner and lease.get('state') != 'reserved'
+        if not mine:
+            price_launcher.lock_path(slot, owner).unlink(missing_ok=True)
+    except (ProjectionUnavailable, OSError, ValueError):
+        pass
 
 
 def _reap(pid, kill):
@@ -655,46 +699,52 @@ def _reap(pid, kill):
 
 
 def handoff(store, freed_slot):
-    """Reserve a free slot and spawn a successor when runnable jobs remain and no other slot can serve them."""
+    """Reserve free slots and spawn successors when runnable jobs remain and too few slots can serve them. Uses the same
+    slot classification as admission (``qc.slot_status``): a stale reservation is free, a malformed lease is neither free nor
+    usable, and more than four queued jobs call for a second runner."""
     scheduler_key, source_key = qc.scheduler_key(), qc.source_backoff_key()
     keys = [scheduler_key, source_key] + [qc.runner_lease_key(slot) for slot in qc.RUNNER_SLOTS]
     try:
         rows = price_launcher.read(store, keys).records
         raw = rows[scheduler_key].value
         now = qc.wall_ms()
-        if raw is None or (rows[source_key].value or {}).get('retry_ms', 0) > now:
+        if raw is None:
             return False
+        try:
+            if rows[source_key].value is not None and qc.validate_source_backoff(rows[source_key].value)['retry_ms'] > now:
+                return False
+        except qc.ContractError:
+            pass
         scheduler = qc.validate_scheduler(deepcopy(raw))
-        if not any(job['state'] == 'queued' and job['expires_ms'] > now for job in scheduler['jobs'].values()):
+        queued = sum(1 for job in scheduler['jobs'].values() if job['state'] == 'queued' and job['expires_ms'] > now)
+        if not queued:
             return False
-        usable = False
-        for slot in qc.RUNNER_SLOTS:
-            lease = rows[qc.runner_lease_key(slot)].value
-            if lease is not None and lease['state'] != 'exiting' and (lease['state'] == 'reserved'
-                    and now - lease['reserved_ms'] <= qc.RESERVATION_TTL_MS or lease['state'] == 'running'
-                    and lease['lease_until_ms'] > now and (lease['hard_stop_ms'] or 0) > now + 3_000):
-                usable = True
-        if usable:
-            return False
-        free = [slot for slot in (freed_slot, *qc.RUNNER_SLOTS) if rows[qc.runner_lease_key(slot)].value is None]
-        if not free:
-            return False
-        slot, owner = free[0], uuid4().hex
-        key = qc.runner_lease_key(slot)
-        reservation = qc.new_runner_lease(owner, price_launcher.host_id(), now, os.getpid())
-        if not price_launcher.commit(store, {key: rows[key].version}, {key: reservation}, f'handoff:{slot}:{owner}'):
-            return False
+        statuses = {slot: qc.slot_status(rows[qc.runner_lease_key(slot)].value, now) for slot in qc.RUNNER_SLOTS}
+        wanted = qc.runner_target(queued) - sum(1 for status in statuses.values() if status == 'usable')
+        free = [slot for slot in (freed_slot, *qc.RUNNER_SLOTS) if statuses.get(slot) == 'free']
+        free = list(dict.fromkeys(free))[:max(wanted, 0)]
+        reserved = []
+        for slot in free:
+            owner = uuid4().hex
+            key = qc.runner_lease_key(slot)
+            reservation = qc.new_runner_lease(owner, price_launcher.host_id(), now, os.getpid())
+            if price_launcher.commit(store, {key: rows[key].version}, {key: reservation}, f'handoff:{slot}:{owner}'):
+                reserved.append((slot, owner))
     except (ProjectionUnavailable, qc.ContractError, KeyError, TypeError, OSError):
         return False
-    if not price_launcher.spawn(slot, owner):
+    spawned = False
+    for slot, owner in reserved:
+        if price_launcher.spawn(slot, owner):
+            spawned = True
+            continue
+        key = qc.runner_lease_key(slot)
         try:
             row = price_launcher.read(store, [key]).records[key]
             if isinstance(row.value, dict) and row.value.get('owner') == owner:
                 price_launcher.commit(store, {key: row.version}, {key: None}, f'unreserve:{slot}:{owner}:{uuid4().hex[:8]}')
         except ProjectionUnavailable:
             pass
-        return False
-    return True
+    return spawned
 
 
 def main(argv=None):

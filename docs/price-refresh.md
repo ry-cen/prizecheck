@@ -60,7 +60,7 @@ Backoff schedule: failure k waits `min(60 * 2^(k-1), 900)` s times a jitter in 0
 - `PRICE_FIXTURE_LAUNCHER=record|fail` (with `PRICE_FIXTURE_LAUNCH_LOG`) replaces `price_launcher.spawn`.
 - A process that asks to import `app.price_runner` while `PRICE_RUNNER_LOCK_DIR` is set refuses non-loopback connects.
 
-`PRICE_RUNNER_LOCK_DIR` is the host-local directory for runner lock files (default `.local/price-runners`, gitignored). CI points it at a private temporary directory.
+`PRICE_RUNNER_LOCK_DIR` is the host-local directory for runner lock files (default `.local/price-runners`, gitignored). CI points it at a private temporary directory. In production it must be a **persistent, host-local volume** (not a network filesystem, not a per-container tmpfs): `host-id` and the lock files live there, and a regenerated `host-id` makes every earlier lease look like another host's, so reclaim answers `uncertain` until the operator releases the slot.
 
 ## Admission (ticket 07)
 
@@ -102,6 +102,20 @@ Code: `api/app/price_runner.py` (supervisor and worker), `api/app/price_launcher
 - **Per-Edition write.** One CAS per Edition with `operation_id = price:<ref>:<rev>:<attempt>`, expecting `result:`, `quote:`, `fence:`, `work:`, `catalog:edition:`, `quarantine:edition:`, `backoff:price:edition:`. Quote: `result` and `quote` with the new attempt, `work:` and the backoff deleted (an unchanged price is rewritten the same way). Absent: `result` absent and `quote` deleted in the same CAS. Failure: only `backoff:price:edition:` is written and `work:` deleted; `result:` and `quote:` are never touched. A 429, or a valid Retry-After, additionally sets `backoff:price:source` in a separate CAS.
 - **Conflicts.** The writer re-reads. If `work:` or `fence:` no longer shows this claim (owner, slot, attempt), or the Edition is no longer eligible, it abandons silently (counted in `stats.fenced`). If only `quote:` (an eviction) moved it retries, up to three tries. An unknown outcome is resolved with `operation_status`, then by re-reading.
 - **Release.** After the writes, a scheduler CAS removes the permit and the claim's jobs. It is retried until the hard stop and never replaced by time.
+
+- **Robustness.** A record that fails the contract (scheduler, source backoff) makes an iteration a no-op, never a crash. The source backoff written by the runner is validated and clamped to one hour from now. A claim CAS whose answer is false or unknown is checked by re-reading the scheduler: if its permit is there, the claim proceeds. A worker that lost a claim race sleeps 20-100 ms before retrying. A supervisor whose worker exited nonzero (or was killed) cleans up but does not hand off to a successor; the next access reserves one. A supervisor whose claim failed removes its lock file.
+
+### Slot classification and request-path reclaim
+
+One predicate, `quote_contract.slot_status`, serves admission and the runner's `handoff`: `free` (no lease, or a reservation older than 5 s), `usable` (young reservation, or running with a live lease and more than 3 s before `hard_stop_ms`), `reclaimable` (running or exiting with `lease_until_ms <= now`), `winding_down` (live exiting, or about to be killed) and `invalid`. `runner_target(queued)` is 2 when more than four jobs wait, else 1; handoff reserves up to that many free slots.
+
+Admission joins a running job as awaitable only when its slot's lease is valid, owned by the job's owner and unexpired. A job whose lease has run out waits for the reclaim; any other mismatch answers `busy` / `runner_uncertain` at once. A queued hard join waits only when the source is not in backoff and a runner is coming (a slot usable, free so it is reserved in the same CAS, reclaimable, or winding down); otherwise it answers `backoff` / `source_backoff` or `busy` / `no_runner` at once, writing nothing.
+
+After the admission CAS (or instead of it, when there is nothing to write) `Admission._reclaim_dead` runs when a slot is `reclaimable` and either a joined running job sits on it, or jobs are queued with no usable slot and no successful spawn. It calls `reclaim_slot(store, slot, deadline=min(wait_until, now + 0.6 s), attempts=1, replace_with=<new owner>)`; the cleanup CAS then writes a fresh `reserved` lease in the same write and admission spawns into it (freeing the slot if the spawn fails). `uncertain` relabels waiting rows `busy` / `runner_uncertain` with no wait. Deviation from the review text: dead running jobs count as pending work, otherwise a SIGKILLed runner with nothing queued would never be reclaimed. Refusals decided after the commit (`runner_uncertain`, `launch_failed`) are added to `stats.refused` by the post-response `release()` CAS, never by a new request-path write. An admission CAS with an unknown outcome that carried a reservation is resolved by one bounded re-read of that lease; if the owner matches the admission landed, so the runner is spawned and the permit released normally.
+
+Every launcher call on the request path takes an absolute `deadline` (read, commit, cleanup, reclaim, and the `operation_status` follow-up); supervisor and operator callers keep their 2 s defaults. The hard wait stops polling 0.25 s before `wait_until` once any row has resolved, and the follow-up reads (failure stamps; the route's re-read of changed rows) use `wait_until` as their deadline, so the 0.5 s PostgreSQL reserve is never spent.
+
+Known risk (review F2, not changed): admission expects both lease versions in every CAS, so a lease renewal landing between its read and its commit makes it conflict and retry once.
 
 ### Reclaim and operator recovery
 

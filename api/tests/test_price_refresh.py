@@ -2,8 +2,11 @@
 hard wait and permit release against both record-store adapters (filesystem and the HTTP relay), with the real monotonic
 clock and deterministic interleavings (barriers, relay delay fault)."""
 from copy import deepcopy
+import fcntl
 import json
 import multiprocessing
+import os
+from types import SimpleNamespace
 import subprocess
 import sys
 import threading
@@ -135,6 +138,13 @@ class Env:
             sched['ring'].append(caller)
         self.put(qc.scheduler_key(), qc.validate_scheduler(sched))
         return sched
+
+
+@pytest.fixture(autouse=True)
+def lock_directory(tmp_path, monkeypatch):
+    directory = tmp_path / 'locks'
+    monkeypatch.setenv('PRICE_RUNNER_LOCK_DIR', str(directory))
+    return directory
 
 
 @pytest.fixture(params=['file', 'http'])
@@ -573,3 +583,287 @@ def test_the_store_is_unavailable_leaves_rows_busy_and_never_raises(env, monkeyp
             raise ProjectionUnavailable()
     admission = evaluate_and_admit(rows, 'user:a', env.budget(), Down())
     assert labels(admission) == {1: 'busy'} and admission.outcomes[1].reason == 'store_unavailable'
+
+
+# ------------------------------------------------------------------ reclaim, uncertain slots, deadlines (review M1-M4, F1, F5)
+OWNER = 'd' * 32
+
+
+def dead_scene(env, lock='free', *, index=1, slot=0, expired=True, lease_owner=None):
+    """A runner that was SIGKILLed: its slot is running with a lease that has run out, it holds a source permit and one
+    running job. ``lock``: 'free' (termination provable), 'held' (flock still taken) or 'missing' (no lock file)."""
+    now = qc.wall_ms()
+    job = f'{ref(index)}:1'
+    sched = qc.new_scheduler(now)
+    sched['jobs'][job] = qc.new_job('user:z', f'c-{index}', now)
+    sched['jobs'][job].update(state='running', slot=slot, owner=OWNER, attempt=1)
+    sched['source']['p1'] = {'caller': 'user:z', 'slot': slot, 'owner': OWNER, 'jobs': [job], 'started_ms': now}
+    env.put(qc.scheduler_key(), qc.validate_scheduler(sched))
+    work = qc.new_work(ref(index), 1, f'c-{index}', 'normal', '77', 'user:z', now)
+    work.update(state='running', attempt=1, slot=slot, owner=OWNER)
+    env.put(qc.work_record_key(ref(index), 1), qc.validate_work(work))
+    lease = qc.new_runner_lease(lease_owner or OWNER, price_launcher.host_id(), now - 20_000, 1)
+    lease.update(state='running', claimed_ms=now - 20_000, supervisor_pid=2, worker_pid=3,
+                 lease_until_ms=now - 1 if expired else now + 10_000, hard_stop_ms=now + 45_000)
+    env.put(qc.runner_lease_key(slot), qc.validate_runner_lease(lease))
+    if lock == 'missing':
+        return None
+    descriptor = os.open(price_launcher.lock_path(slot, OWNER), os.O_RDWR | os.O_CREAT, 0o600)
+    if lock == 'held':
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return descriptor
+    os.close(descriptor)
+    return None
+
+
+@pytest.mark.parametrize('lock', ['held', 'missing'])
+def test_an_uncertain_dead_slot_answers_busy_at_once_and_is_recorded_in_stats(env, lock):
+    env.seed(1, 25 * HOUR)
+    descriptor = dead_scene(env, lock)
+    try:
+        started = time.monotonic()
+        admission = env.admit([1])
+        admission.wait()
+        elapsed = time.monotonic() - started
+        assert labels(admission) == {1: 'busy'} and admission.outcomes[1].reason == 'runner_uncertain'
+        assert elapsed < 0.3 and env.spawns == []
+        assert env.value(qc.runner_lease_key(0))['owner'] == OWNER           # an unprovable slot is never touched
+        admission.release()
+        stats = env.scheduler()['stats']['refused']
+        assert stats.get('runner_uncertain', 0) >= 1 and env.scheduler()['interactive'] == {}
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+
+
+def test_a_dead_slot_with_a_free_lock_is_reclaimed_and_a_runner_is_spawned_for_the_requeued_job(env):
+    env.seed(1, 25 * HOUR)
+    dead_scene(env, 'free')
+    admission = env.admit([1])
+    job = f'{ref(1)}:1'
+    (slot, owner), = env.spawns
+    assert slot == 0 and owner != OWNER
+    lease = qc.validate_runner_lease(env.value(qc.runner_lease_key(0)))
+    assert lease['owner'] == owner and lease['state'] == 'reserved'
+    sched = env.scheduler()
+    assert sched['source'] == {} and sched['jobs'][job]['state'] == 'queued' and sched['fifo'] == {'user:z': [job]}
+    assert admission.outcomes[1].awaiting                                  # a runner is coming for it
+    assert not price_launcher.lock_path(0, OWNER).exists()
+    admission.release()
+
+
+def test_a_dead_slot_whose_spawn_fails_answers_busy_and_frees_the_reservation(env, monkeypatch):
+    monkeypatch.setattr(price_launcher, 'spawn', lambda slot, owner: False)
+    env.seed(1, 25 * HOUR)
+    dead_scene(env, 'free')
+    started = time.monotonic()
+    admission = env.admit([1])
+    assert labels(admission) == {1: 'busy'} and time.monotonic() - started < 1.0
+    assert env.value(qc.runner_lease_key(0)) is None and env.scheduler()['jobs'][f'{ref(1)}:1']['state'] == 'queued'
+
+
+def test_a_running_job_whose_slot_belongs_to_someone_else_is_busy_without_waiting(env):
+    env.seed(1, 25 * HOUR)
+    dead_scene(env, 'free', lease_owner='e' * 32, expired=False)
+    started = time.monotonic()
+    admission = env.admit([1])
+    admission.wait()
+    assert labels(admission) == {1: 'busy'} and admission.outcomes[1].reason == 'runner_uncertain'
+    assert time.monotonic() - started < 0.3 and not admission.outcomes[1].awaiting
+
+
+def test_a_running_job_on_a_live_slot_is_still_awaited(env):
+    env.seed(1, 25 * HOUR)
+    dead_scene(env, 'free', expired=False)
+    admission = env.admit([1])
+    assert admission.outcomes[1].awaiting and env.spawns == []
+    admission.release()
+
+
+def test_a_reclaim_against_a_delayed_store_stays_inside_the_budget(env):
+    if env.relay_config is None:
+        pytest.skip('relay-only fault')
+    env.seed(1, 61 * MIN)            # soft: no permit, so the reclaim is the only write the request attempts
+    dead_scene(env, 'free')
+    rows = env.rows([1])
+    with fault(env.relay_config, 'delay-transact', 1.5):
+        started = time.monotonic()
+        admission = evaluate_and_admit(rows, 'user:a', env.budget(seconds=3.0), env.store)
+        elapsed = time.monotonic() - started
+    assert elapsed < 1.0 and labels(admission) == {1: 'busy'} and admission.outcomes[1].reason == 'runner_uncertain'
+
+
+def test_slot_status_is_one_predicate_for_admission_and_handoff():
+    now = 1_000_000
+
+    def lease(state, **fields):
+        value = qc.new_runner_lease(OWNER, 'h', now - 1_000, 1)
+        if state != 'reserved':
+            value.update(state=state, claimed_ms=now - 9_000, supervisor_pid=2, worker_pid=3, lease_until_ms=now + 5_000,
+                         hard_stop_ms=now + 40_000)
+        value.update(fields)
+        return value
+    status = qc.slot_status
+    assert status(None, now) == 'free'
+    assert status(lease('reserved'), now) == 'usable'
+    assert status(lease('reserved', reserved_ms=now - 6_000, lease_until_ms=now - 1_000), now) == 'free'
+    assert status(lease('running'), now) == 'usable'
+    assert status(lease('running', hard_stop_ms=now + 2_000), now) == 'winding_down'
+    assert status(lease('running', lease_until_ms=now), now) == 'reclaimable'
+    assert status(lease('exiting'), now) == 'winding_down'
+    assert status(lease('exiting', lease_until_ms=now - 1), now) == 'reclaimable'
+    assert status({'v': 1}, now) == 'invalid' and status('invalid', now) == 'invalid' and status(7, now) == 'invalid'
+    assert [qc.runner_target(n) for n in (0, 1, 4, 5, 9)] == [1, 1, 1, 2, 2]
+
+
+# ------------------------------------------------------------------ F1: hard joins wait only when a runner is coming
+def test_source_backoff_with_queued_joins_answers_at_once_and_writes_nothing(env):
+    env.seed(1, 25 * HOUR)
+    env.admit([1]).release()                                              # a queued job with a reserved slot
+    now = qc.wall_ms()
+    env.put(qc.source_backoff_key(), qc.new_source_backoff('rate_limited', now + 30_000, now))
+    generation = env.generation()
+    started = time.monotonic()
+    admission = env.admit([1], caller='user:b')
+    admission.wait()
+    assert labels(admission) == {1: 'backoff'} and admission.outcomes[1].reason == 'source_backoff'
+    assert time.monotonic() - started < 0.3 and env.generation() == generation
+
+
+def test_a_queued_hard_join_with_no_runner_coming_is_busy_at_once(env):
+    env.seed(1, 25 * HOUR)
+    env.admit([1]).release()
+    for slot in (0, 1):                                                   # nothing usable, nothing free, nothing to reclaim
+        env.put(qc.runner_lease_key(slot), {'v': 1, 'junk': True})
+    started = time.monotonic()
+    admission = env.admit([1], caller='user:b')
+    admission.wait()
+    assert labels(admission) == {1: 'busy'} and admission.outcomes[1].reason == 'no_runner'
+    assert time.monotonic() - started < 0.3
+
+
+def test_a_queued_hard_join_still_waits_when_a_reservation_is_made_in_the_same_cas(env):
+    env.seed(1, 25 * HOUR)
+    env.admit([1]).release()
+    env.put(qc.runner_lease_key(0), None)
+    env.put(qc.runner_lease_key(1), None)
+    env.spawns.clear()
+    admission = env.admit([1], caller='user:b')
+    assert admission.outcomes[1].awaiting and len(env.spawns) == 1
+    admission.release()
+
+
+# ------------------------------------------------------------------ F5: an unknown admission outcome with a reservation
+class LostAnswer:
+    """Commits the admission CAS and then loses the answer, including the operation status."""
+
+    def __init__(self, store):
+        self.store = store
+
+    def __getattr__(self, name):
+        return getattr(self.store, name)
+
+    def compare_and_swap(self, expected, changes, *, deadline, operation_id=None):
+        done = self.store.compare_and_swap(expected, changes, deadline=deadline, operation_id=operation_id)
+        if operation_id and operation_id.startswith('admit-'):
+            raise ProjectionUnavailable()
+        return done
+
+    def operation_status(self, operation_id, *, deadline):
+        raise ProjectionUnavailable()
+
+
+def test_an_unknown_admission_outcome_with_a_reservation_still_spawns_the_runner(env):
+    env.seed(1, 25 * HOUR)
+    rows = env.rows([1])
+    admission = evaluate_and_admit(rows, 'user:a', env.budget(), LostAnswer(env.store))
+    (slot, owner), = env.spawns
+    assert env.value(qc.runner_lease_key(slot))['owner'] == owner
+    assert admission.permit_held
+    admission.release()
+    assert env.scheduler()['interactive'] == {}
+
+
+def test_an_unknown_admission_outcome_that_did_not_land_spawns_nothing(env):
+    class Dropped(LostAnswer):
+        def compare_and_swap(self, expected, changes, *, deadline, operation_id=None):
+            raise ProjectionUnavailable()
+    env.seed(1, 25 * HOUR)
+    admission = evaluate_and_admit(env.rows([1]), 'user:a', env.budget(), Dropped(env.store))
+    assert env.spawns == [] and labels(admission) == {1: 'busy'}
+
+
+# ------------------------------------------------------------------ M4: the post-wait reads keep the PostgreSQL reserve
+class Sluggish:
+    """Every read takes ``delay`` seconds and fails when it would outlast its own deadline."""
+
+    def __init__(self, store, delay):
+        self.store, self.delay, self.slow = store, delay, False
+
+    def __getattr__(self, name):
+        return getattr(self.store, name)
+
+    def _slow(self, deadline):
+        if self.slow:
+            time.sleep(max(0.0, min(self.delay, deadline - time.monotonic())))
+            if time.monotonic() >= deadline:
+                raise ProjectionUnavailable()
+
+    def read_all(self, keys, *, deadline, generation=None):
+        self._slow(deadline)
+        return self.store.read_all(keys, deadline=deadline, generation=generation)
+
+    def read_records(self, keys, *, deadline, generation=None):
+        self._slow(deadline)
+        return self.store.read_records(keys, deadline=deadline, generation=generation)
+
+
+def test_follow_up_reads_after_the_hard_wait_leave_the_postgresql_reserve(env):
+    store = Sluggish(env.store, 0.2)
+    env.seed(1, 25 * HOUR)
+    env.seed(2, 25 * HOUR)
+    budget = Budget(hard=time.monotonic() + 1.5, caller='user:a')
+    admission = evaluate_and_admit(env.rows([1, 2], store), 'user:a', budget, store)
+    sched = env.scheduler()                                               # job 1 fails at once; job 2 stays pending
+    gone = f'{ref(1)}:1'
+    del sched['jobs'][gone]
+    sched['fifo']['user:a'].remove(gone)
+    env.put(qc.scheduler_key(), qc.validate_scheduler(sched))
+    stamp = qc.wall_ms()
+    env.put(qc.edition_backoff_key(ref(1), 1), qc.new_edition_backoff(1, stamp, stamp + 60_000, 'timeout'))
+    store.slow = True
+    admission.wait(budget)
+    assert budget.remaining() >= 0.45, budget.remaining()
+    assert labels(admission) == {1: 'failed', 2: 'timeout'}
+    assert admission.outcomes[1].failed_at_ms is not None             # the shortened poll still left room for the follow-up
+    store.slow = False
+    admission.release()
+
+
+def test_the_route_helper_rereads_changed_rows_inside_the_wait_window(env):
+    from app import main  # noqa: F401  (main first: it includes the prices router while loading)
+    from app import prices
+    store = Sluggish(env.store, 0.2)
+    env.seed(1, 25 * HOUR)
+    env.seed(2, 25 * HOUR)
+    budget = Budget(hard=time.monotonic() + 1.5, caller='user:a')
+    pairs = [(ref(1), 1), (ref(2), 1)]
+    states = quote_states(store, pairs, deadline=deadline())
+    found = {i: (None, None, SimpleNamespace(quote_lookup={'card': f'c-{i}', 'variant': 'normal'}, product_id=77)) for i in (1, 2)}
+    # A runner writes row 1 before the wait starts, so the wait resolves it; row 2 stays pending until the window ends.
+    original = price_refresh.Admission.wait
+
+    def write_then_wait(self, budget=None):
+        env.seed(1, 0)
+        store.slow = True
+        return original(self, budget)
+    price_refresh.Admission.wait = write_then_wait
+    releases = []
+    try:
+        admission = prices._admit([1, 2], pairs, found, states, budget, store, releases)
+    finally:
+        price_refresh.Admission.wait = original
+    assert budget.remaining() >= 0.45, budget.remaining()
+    assert admission.outcomes[1].refresh == 'refreshed'
+    store.slow = False
+    releases[0]()

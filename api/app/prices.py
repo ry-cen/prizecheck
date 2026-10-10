@@ -272,7 +272,7 @@ def _admit(lookable, pairs, found, states, budget: Budget, store, releases: list
     if changed:
         wanted = [(r.edition_ref, r.mapping_revision) for r in rows if r.key in changed]
         try:
-            fresh = quote_states(store, wanted, deadline=budget.wait_until + 0.25)
+            fresh = quote_states(store, wanted, deadline=budget.wait_until)
             states.update(fresh)
         except (ProjectionUnavailable, ValueError):
             for key in changed:

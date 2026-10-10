@@ -31,6 +31,7 @@ __all__ = [
     'new_fence', 'new_job', 'new_quote_result', 'new_absent_result', 'new_quote_payload',
     'validate_scheduler', 'validate_ledger_shard', 'validate_runner_lease', 'validate_source_backoff',
     'validate_edition_backoff', 'validate_work', 'validate_fence', 'validate_quote_result', 'validate_quote_payload',
+    'slot_status', 'runner_target',
 ]
 
 
@@ -405,6 +406,39 @@ def validate_runner_lease(record) -> dict | None:
         if record['hard_stop_ms'] < record['claimed_ms']:
             _fail('hard_stop_ms precedes the claim')
     return record
+
+
+SLOT_SAFETY_MS = 3_000                # a running slot this close to its hard stop does not count as a runner to wait for
+
+
+def slot_status(lease, now_ms: int) -> str:
+    """The one classification of a runner slot, shared by admission and the runner's handoff.
+
+    ``free``: no lease, or a reservation older than the TTL (anyone may overwrite it). ``usable``: a young reservation, or a
+    running lease that is live with more than ``SLOT_SAFETY_MS`` before its hard stop. ``reclaimable``: running or exiting
+    with ``lease_until_ms <= now`` (a candidate for ``price_launcher.reclaim_slot``, never taken without the lock proof).
+    ``winding_down``: live but leaving (exiting, or about to be killed); its supervisor hands the queue on. ``invalid``: not a
+    runner lease at all. ``lease`` may be the raw stored value, a validated lease or the string ``'invalid'``; never raises."""
+    if lease is None:
+        return 'free'
+    try:
+        lease = validate_runner_lease(lease)
+    except (ContractError, TypeError, ValueError, KeyError, RecursionError):
+        return 'invalid'
+    if lease is None:
+        return 'free'
+    if lease['state'] == 'reserved':
+        return 'usable' if now_ms - lease['reserved_ms'] <= RESERVATION_TTL_MS else 'free'
+    if lease['lease_until_ms'] <= now_ms:
+        return 'reclaimable'
+    if lease['state'] == 'running' and lease['hard_stop_ms'] > now_ms + SLOT_SAFETY_MS:
+        return 'usable'
+    return 'winding_down'
+
+
+def runner_target(queued: int) -> int:
+    """How many runners the queue calls for: a second one when more than four jobs wait."""
+    return 2 if queued > 4 else 1
 
 
 def new_source_backoff(reason: str, retry_ms: int, set_ms: int) -> dict:

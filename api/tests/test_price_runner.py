@@ -19,10 +19,11 @@ from uuid import uuid4
 
 import pytest
 
-from app import price_launcher, price_runner, price_source, tcgdex_record
+from app import price_launcher, price_refresh, price_runner, price_source, tcgdex_record
 from app import quote_contract as qc
+from app.price_budget import Budget
 from app.public_projection import ProjectionUnavailable
-from app.public_records import (catalog_edition_key, quarantine_key, quote_key, result_key)
+from app.public_records import (catalog_edition_key, catalog_printing_key, quarantine_key, quote_key, quote_states, result_key)
 from public_records_fixture import backend_from_config, serve_relay, store_from_config
 
 API_DIR = Path(__file__).resolve().parents[1]
@@ -483,7 +484,7 @@ def test_marketplace_validation_matches_the_catalog_reader():
 
 
 def test_runner_modules_load_no_postgres_code():
-    code = 'import sys; sys.path.insert(0, "'+str(API_DIR)+'"); import app.price_runner, app.price_launcher; bad=[m for m in sys.modules if m.split(".")[0] in ("psycopg","psycopg_pool") or m in ("app.main","app.prices","app.public_catalog")]; print(bad)'
+    code = 'import sys; sys.path.insert(0, "'+str(API_DIR)+'"); import app.price_runner, app.price_launcher, app.price_source, app.tcgdex_record; bad=[m for m in sys.modules if m.split(".")[0] in ("psycopg","psycopg_pool") or m in ("app.main","app.prices","app.public_catalog")]; print(bad)'
     out = subprocess.run([sys.executable, '-c', code], cwd=API_DIR, env={'PYTHONPATH': str(API_DIR), 'PATH': os.environ['PATH']},
                          capture_output=True, text=True, check=True).stdout
     assert out.strip() == '[]'
@@ -681,6 +682,10 @@ class _Result:
     pass
 
 def fetch(card, may_retry):
+    _marker = os.path.join(_dir, "crashed")
+    if card in _config.get("crash_once", []) and not os.path.exists(_marker):
+        open(_marker, "w").close()
+        os._exit(3)  # A worker that dies with a nonzero status before any request.
     with open(os.path.join(_dir, "fake-env.json"), "w") as out:
         json.dump({"env": sorted(os.environ), "psycopg": any(m.split(".")[0] == "psycopg" for m in sys.modules)}, out)
     try:
@@ -876,6 +881,7 @@ def test_late_or_foreign_claim_exits_without_any_source_io(fs_env, proc):
     time.sleep(1.5)
     assert source.requests == [] and fs_env.get(qc.runner_lease_key(0)) == lease and lease['state'] == 'reserved'
     assert fs_env.get(result_key(ref(1), 1)) is None
+    assert not price_launcher.lock_path(0, owner).exists()      # F6: a supervisor whose claim failed removes its lock file
 
 
 def test_cold_start_from_admission_commit_to_first_request(fs_env, proc):
@@ -930,6 +936,7 @@ def test_sigstopped_runner_is_not_replaced_and_completes_after_sigcont(fs_env, p
     supervisor, worker = supervisor_pid(fs_env)
     started.append(supervisor)
     assert source.arrived.wait(10)
+    before = fs_env.get(qc.runner_lease_key(0))['lease_until_ms']
     os.killpg(supervisor, signal.SIGSTOP)
     stopped = time.monotonic()
     time.sleep(11.2)  # Past the 10 s lease, in real time.
@@ -937,6 +944,9 @@ def test_sigstopped_runner_is_not_replaced_and_completes_after_sigcont(fs_env, p
     assert price_launcher.reclaim_slot(fs_env.store, 0) == 'uncertain'  # The lock is still held: never replaced.
     assert fs_env.get(qc.runner_lease_key(0))['owner'] == owner and time.monotonic() - stopped > 11
     os.killpg(supervisor, signal.SIGCONT)
+    # Renewal resumes at once: the lease runs out again no sooner than ten seconds from now, not from the claim.
+    renewed = wait_for(lambda: fs_env.get(qc.runner_lease_key(0))['lease_until_ms'] > qc.wall_ms() and fs_env.get(qc.runner_lease_key(0)), timeout=5)
+    assert renewed['lease_until_ms'] > before + 10_000 and renewed['owner'] == owner
     source.hold['stop-1'].set()
     wait_for(lambda: fs_env.get(result_key(ref(1), 1)))
     assert fs_env.get(result_key(ref(1), 1))['attempt'] == 1 and len(source.requests) == 1
@@ -997,3 +1007,295 @@ def test_hanging_worker_is_killed_at_the_sixty_five_second_hard_stop(fs_env, pro
     assert scheduler['source'] == {} and scheduler['jobs'] == {}  # The 60 s job expired and was dropped by the cleanup CAS.
     assert fs_env.get(result_key(ref(1), 1)) is None and not alive(supervisor)
     assert price_launcher.reclaim_slot(fs_env.store, 0) == 'not_applicable'
+
+
+# --- Review fixes: reclaim from the request path, deadlines, uncertain slots ------------------------------------------------------
+def admit_rows(env, indexes, cards, *, seconds=3.0, caller='user:a'):
+    """Admission the way the route runs it: states from ``quote_states``, a trusted budget, the real launcher."""
+    pairs = [(ref(i), 1) for i in indexes]
+    states = quote_states(env.store, pairs, deadline=deadline())
+    rows = [price_refresh.Row(i, ref(i), 1, {'card': cards[i], 'variant': 'normal'}, 1000 + i, states[(ref(i), 1)]) for i in indexes]
+    return price_refresh.evaluate_and_admit(rows, caller, Budget(hard=time.monotonic() + seconds, caller=caller), env.store)
+
+
+def expire_lease(env, slot=0):
+    key = qc.runner_lease_key(slot)
+    lease = env.get(key)
+    lease['lease_until_ms'] = qc.wall_ms() - 1
+    env.put({key: lease})
+
+
+def kill_runner(env, started, source, card):
+    """Spawn a runner, let its fetch reach the source (the pre-write pause), SIGKILL the whole group, expire its lease."""
+    source.hold[card] = threading.Event()
+    owner, _ = reserve_and_spawn(env, started)
+    supervisor, worker = supervisor_pid(env)
+    started.append(supervisor)
+    assert source.arrived.wait(10)
+    os.killpg(supervisor, signal.SIGKILL)
+    wait_for(lambda: not alive(supervisor) and not alive(worker), timeout=5)
+    expire_lease(env)
+    return owner
+
+
+def test_the_next_access_reclaims_a_sigkilled_runner_and_the_hard_row_completes(env, proc):
+    source, started = proc
+    seed(env, [{'index': 1, 'card': 'kill-1'}])
+    dead = kill_runner(env, started, source, 'kill-1')
+    source.hold['kill-1'].set()
+    begin = time.monotonic()
+    admission = admit_rows(env, [1], {1: 'kill-1'})
+    admission.wait()
+    elapsed = time.monotonic() - begin
+    assert admission.outcomes[1].refresh == 'refreshed' and elapsed < 2.4, (admission.outcomes[1], elapsed)
+    state = state_of(env, 1)
+    assert state['result']['state'] == 'quote' and state['result']['attempt'] == state['fence']['attempt'] == 2
+    assert len(source.requests) == 2 and state['work'] is None
+    assert not price_launcher.lock_path(0, dead).exists()
+    admission.release()
+    wait_for(lambda: env.get(qc.runner_lease_key(0)) is None, timeout=6)
+    assert env.get(SCHEDULER)['source'] == {}
+
+
+def test_a_runner_killed_before_its_write_and_reclaimed_never_resurrects_the_old_quote(env, proc):
+    source, started = proc
+    source.prices['kill-2'] = None                                         # the source now says the Edition has no price
+    seed(env, [{'index': 1, 'card': 'kill-2'}])
+    env.put({result_key(ref(1), 1): qc.new_quote_result(1, qc.wall_ms() - 25 * 3_600_000),
+             quote_key(ref(1), 1): qc.new_quote_payload(1, '7.00', 'kill-2', 'normal', None), qc.fence_record_key(ref(1), 1): qc.new_fence(1)})
+    before = {name: env.get(key) for name, key in (('result', result_key(ref(1), 1)), ('quote', quote_key(ref(1), 1)))}
+    kill_runner(env, started, source, 'kill-2')
+    assert {name: env.get(key) for name, key in (('result', result_key(ref(1), 1)), ('quote', quote_key(ref(1), 1)))} == before
+    source.hold['kill-2'].set()
+    admission = admit_rows(env, [1], {1: 'kill-2'})
+    admission.wait()
+    state = state_of(env, 1)
+    assert admission.outcomes[1].refresh == 'refreshed'
+    assert state['result']['state'] == 'absent' and state['quote'] is None and state['result']['attempt'] == state['fence']['attempt'] == 3
+    admission.release()
+
+
+def test_a_stopped_runner_with_an_expired_lease_is_uncertain_at_once_and_recorded(fs_env, proc):
+    source, started = proc
+    source.hold['stop-2'] = threading.Event()
+    seed(fs_env, [{'index': 1, 'card': 'stop-2'}])
+    owner, _ = reserve_and_spawn(fs_env, started)
+    supervisor, worker = supervisor_pid(fs_env)
+    started.append(supervisor)
+    assert source.arrived.wait(10)
+    os.killpg(supervisor, signal.SIGSTOP)
+    expire_lease(fs_env)
+    begin = time.monotonic()
+    admission = admit_rows(fs_env, [1], {1: 'stop-2'})
+    admission.wait()
+    elapsed = time.monotonic() - begin
+    assert admission.outcomes[1].refresh == 'busy' and admission.outcomes[1].reason == 'runner_uncertain' and elapsed < 0.3, elapsed
+    assert fs_env.get(qc.runner_lease_key(0))['owner'] == owner
+    admission.release()
+    assert fs_env.get(SCHEDULER)['stats']['refused'].get('runner_uncertain', 0) >= 1
+    os.killpg(supervisor, signal.SIGCONT)
+    source.hold['stop-2'].set()
+    wait_for(lambda: fs_env.get(result_key(ref(1), 1)))
+
+
+def test_a_crashed_worker_leaves_its_jobs_queued_and_hands_off_to_nobody(fs_env, proc, lock_directory):
+    source, started = proc
+    (lock_directory / 'fake-source.json').write_text(json.dumps({'origin': source.origin, 'crash_once': ['crash-1']}))
+    seed(fs_env, [{'index': 1, 'card': 'crash-1'}])
+    reserve_and_spawn(fs_env, started)
+    supervisor, worker = supervisor_pid(fs_env)
+    started.append(supervisor)
+    wait_for(lambda: not alive(supervisor), timeout=10)
+    time.sleep(2.5)                                                       # a successor would have started and served the job
+    assert (lock_directory / 'crashed').exists()
+    assert fs_env.get(qc.runner_lease_key(0)) is None and fs_env.get(result_key(ref(1), 1)) is None
+    assert source.requests == [] and [job['state'] for job in fs_env.get(SCHEDULER)['jobs'].values()] == ['queued']
+
+
+# --- Review fixes: store-level launcher helpers -----------------------------------------------------------------------------------
+class Stalled:
+    """Every store call sleeps up to ``delay`` (never past its own deadline) and then fails."""
+
+    def __init__(self, store, delay):
+        self.store, self.delay, self.calls = store, delay, 0
+
+    def _stall(self, deadline):
+        self.calls += 1
+        time.sleep(max(0.0, min(self.delay, deadline - time.monotonic())))
+        raise ProjectionUnavailable()
+
+    def read_records(self, keys, *, deadline, generation=None):
+        self._stall(deadline)
+
+    def compare_and_swap(self, expected, changes, *, deadline, operation_id=None):
+        self._stall(deadline)
+
+    def operation_status(self, operation_id, *, deadline):
+        self._stall(deadline)
+
+
+def test_launcher_helpers_stop_at_an_absolute_deadline(env):
+    owner, _ = claimed_scene(env, expired=True)
+    stalled = Stalled(env.store, 5.0)
+    begin = time.monotonic()
+    assert price_launcher.cleanup_slot(stalled, 0, owner, deadline=begin + 0.4) is False
+    assert time.monotonic() - begin < 0.7
+    begin = time.monotonic()
+    assert price_launcher.reclaim_slot(stalled, 0, deadline=begin + 0.4, attempts=1) == 'uncertain'
+    assert time.monotonic() - begin < 0.7
+    begin = time.monotonic()
+    assert price_launcher.commit(stalled, {SCHEDULER: 'x'}, {SCHEDULER: {}}, 'op-1', deadline=begin + 0.4) is False
+    assert time.monotonic() - begin < 0.7
+    begin = time.monotonic()
+    with pytest.raises(ProjectionUnavailable):
+        price_launcher.read(stalled, [SCHEDULER], deadline=begin + 0.3)
+    assert time.monotonic() - begin < 0.6
+
+
+def test_a_reclaim_writes_a_fresh_reservation_in_the_same_cas(env):
+    owner, jobs = claimed_scene(env, expired=True)
+    key = qc.runner_lease_key(0)
+    lease = env.get(key)
+    lease['lease_until_ms'] = qc.wall_ms() - 1
+    env.put({key: lease})
+    os.close(os.open(price_launcher.lock_path(0, owner), os.O_RDWR | os.O_CREAT, 0o600))
+    successor = owner_nonce()
+    assert price_launcher.reclaim_slot(env.store, 0, replace_with=successor) == 'reclaimed'
+    fresh = qc.validate_runner_lease(env.get(key))
+    assert fresh['owner'] == successor and fresh['state'] == 'reserved' and fresh['host'] == price_launcher.host_id()
+    assert fresh['launcher_pid'] == os.getpid() and env.get(SCHEDULER)['source'] == {}
+    # Someone else already replaced the slot: nothing is written and nothing is claimed to have been reclaimed.
+    assert price_launcher.reclaim_slot(env.store, 0, replace_with=owner_nonce()) == 'not_applicable'
+    assert env.get(key)['owner'] == successor
+
+
+# --- Review fixes: runner loop (F3, F4, F6) -------------------------------------------------------------------------------------------
+def test_a_corrupt_scheduler_or_source_backoff_is_nothing_to_claim_not_a_crash(fs_env):
+    owner = owner_nonce()
+    seed(fs_env, [], lease=running_lease(owner))
+    fs_env.put({SCHEDULER: {'v': 1, 'bogus': True}})
+    assert make_worker(fs_env, owner, ok_fetcher()).run() == 'idle'
+    seed(fs_env, [{'index': 1, 'card': 'base1-1'}], scheduler=None)
+    fs_env.put({qc.source_backoff_key(): {'junk': 1}})
+    assert make_worker(fs_env, owner, ok_fetcher()).run() == 'idle'
+
+
+def test_source_backoff_is_validated_and_clamped_to_one_hour_after_it_is_set(fs_env):
+    now = qc.wall_ms()
+    fs_env.put({qc.source_backoff_key(): qc.new_source_backoff('retry_after', now + 10 * 3_600_000 + 3_600_000, now + 10 * 3_600_000)})
+    worker = make_worker(fs_env, owner_nonce(), ok_fetcher(), hard_stop=now + 60_000)
+    worker.set_source_backoff(price_runner.Outcome('failure', reason='http_status', retry_after_s=3_600.0, rate_limited=True))
+    record = qc.validate_source_backoff(fs_env.get(qc.source_backoff_key()))
+    assert record['retry_ms'] - record['set_ms'] <= 3_600_000 and record['retry_ms'] <= qc.wall_ms() + 3_600_000
+
+
+class LostClaim:
+    """The claim CAS commits and the answer, including the operation status, is lost."""
+
+    def __init__(self, store):
+        self.store, self.lost = store, 0
+
+    def __getattr__(self, name):
+        return getattr(self.store, name)
+
+    def compare_and_swap(self, expected, changes, *, deadline, operation_id=None):
+        done = self.store.compare_and_swap(expected, changes, deadline=deadline, operation_id=operation_id)
+        if operation_id and operation_id.startswith('claim:') and not self.lost:
+            self.lost += 1
+            raise ProjectionUnavailable()
+        return done
+
+    def operation_status(self, operation_id, *, deadline):
+        raise ProjectionUnavailable()
+
+
+def test_a_lost_claim_answer_does_not_strand_the_claim(env):
+    owner = owner_nonce()
+    seed(env, [{'index': 1, 'card': 'base1-1'}], lease=running_lease(owner))
+    lossy = LostClaim(env.store)
+    worker = price_runner.Worker(lossy, 0, owner, env.get(qc.runner_lease_key(0))['hard_stop_ms'], fetcher=ok_fetcher(),
+                                 selector=select_by_record, idle_s=0.3, poll_s=0.02)
+    assert worker.run() == 'idle' and lossy.lost == 1
+    assert state_of(env, 1)['result']['state'] == 'quote' and env.get(SCHEDULER)['jobs'] == {}
+    assert env.get(SCHEDULER)['source'] == {}
+
+
+def test_a_lost_claim_race_pauses_with_jitter_before_retrying(fs_env, monkeypatch):
+    pauses = []
+    monkeypatch.setattr(price_runner, '_retry_pause', lambda: pauses.append(1))
+    owner = owner_nonce()
+    seed(fs_env, [], lease=running_lease(owner))
+    worker = make_worker(fs_env, owner, ok_fetcher())
+    answers = iter(['retry', 'retry'])
+    worker.try_claim = lambda: next(answers, 'none')
+    assert worker.run() == 'idle' and len(pauses) == 2
+
+
+def test_operator_release_accepts_an_invalid_lease_and_the_script_prints_no_traceback(fs_env):
+    owner = owner_nonce()
+    key = qc.runner_lease_key(0)
+    fs_env.put({key: {'v': 1, 'owner': owner, 'state': 'bogus'}})
+    assert price_launcher.release_slot(fs_env.store, 0) == 'released' and fs_env.get(key) is None
+    fs_env.put({key: {'junk': True}})
+    base = [sys.executable, str(API_DIR.parent / 'scripts' / 'price_runners.py')]
+    environment = {**os.environ, **fs_env.variables, 'PYTHONPATH': str(API_DIR)}
+    done = subprocess.run(base + ['release', '--slot', '0', '--confirm-terminated'], env=environment, capture_output=True, text=True)
+    assert 'Traceback' not in done.stderr and fs_env.get(key) is None and done.returncode == 0
+    broken = subprocess.run(base + ['release', '--slot', '0', '--confirm-terminated'], env={**environment, 'PUBLIC_PROJECTION_DIR': '/nonexistent/x'},
+                            capture_output=True, text=True)
+    assert 'Traceback' not in broken.stderr and broken.returncode == 1
+
+
+# --- Review fixes: handoff shares the admission slot predicate (M3.6) -------------------------------------------------------------------
+def test_handoff_treats_a_stale_reservation_as_free_and_survives_a_malformed_lease(env, monkeypatch):
+    spawned = []
+    monkeypatch.setattr(price_launcher, 'spawn', lambda slot, owner: spawned.append((slot, owner)) or True)
+    seed(env, [{'index': 1, 'card': 'next-1'}])
+    stale = qc.new_runner_lease(owner_nonce(), price_launcher.host_id(), qc.wall_ms() - 6_000, os.getpid())
+    env.put({qc.runner_lease_key(0): stale, qc.runner_lease_key(1): {'junk': True}})
+    assert price_runner.handoff(env.store, 1) is True
+    (slot, owner), = spawned
+    assert slot == 0 and env.get(qc.runner_lease_key(0))['owner'] == owner and env.get(qc.runner_lease_key(1)) == {'junk': True}
+
+
+def test_handoff_reserves_the_second_slot_when_more_than_four_jobs_wait(env, monkeypatch):
+    spawned = []
+    monkeypatch.setattr(price_launcher, 'spawn', lambda slot, owner: spawned.append((slot, owner)) or True)
+    seed(env, [{'index': i, 'card': f'next-{i}', 'caller': f'user:{"abcde"[i % 5]}'} for i in range(1, 6)])
+    assert price_runner.handoff(env.store, 0) is True
+    assert sorted(slot for slot, _ in spawned) == [0, 1]
+    assert price_runner.handoff(env.store, 0) is False                   # two fresh reservations already cover the queue
+
+
+# --- Review fixes: AC5 and capacity ------------------------------------------------------------------------------------------------------
+def test_runner_writes_leave_catalog_quarantine_and_printing_versions_unchanged(env):
+    keys = [catalog_edition_key(ref(1)), quarantine_key(ref(1)), catalog_printing_key(ref(1 + 5000))]
+    seed(env, [{'index': 1, 'card': 'base1-1'}, {'index': 2, 'card': 'base1-2'}])
+    env.put({keys[2]: {'printing': 'fixture'}})
+    keys += [catalog_edition_key(ref(2)), quarantine_key(ref(2))]
+    before = {key: env.version(key) for key in keys}
+    run_worker_on_seeded(env, ok_fetcher())
+    assert {key: env.version(key) for key in keys} == before
+    assert state_of(env, 1)['result']['state'] == 'quote' and state_of(env, 2)['result']['state'] == 'quote'
+
+
+def run_worker_on_seeded(env, fetcher):
+    owner = owner_nonce()
+    env.put({qc.runner_lease_key(0): running_lease(owner)})
+    assert make_worker(env, owner, fetcher).run() == 'idle'
+
+
+def test_a_store_at_capacity_keeps_the_absent_result_the_runner_wrote(tmp_path, monkeypatch):
+    config = {'adapter': 'filesystem', 'directory': str(tmp_path / 'records'), 'max_entries': 1}
+    Path(config['directory']).mkdir()
+    backend_from_config(config).initialize(deadline=deadline())
+    small = Env(store_from_config(config), {})
+    seed(small, [{'index': 1, 'card': 'gone-1'}, {'index': 2, 'card': 'busy-2', 'caller': 'user:b'}, {'index': 3, 'card': 'busy-3', 'caller': 'user:c'}])
+    prices = {'gone-1': None, 'busy-2': '2.00', 'busy-3': '3.00'}
+
+    def fetch(card, may_retry):
+        return Fetched({'price': prices[card], 'updated': None})
+    run_worker_on_seeded(small, fetch)
+    one = state_of(small, 1)
+    assert one['result']['state'] == 'absent' and one['quote'] is None
+    assert one['result']['expires_at'] > one['result']['checked_at']

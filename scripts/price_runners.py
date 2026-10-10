@@ -54,6 +54,9 @@ def main(argv=None):
     except ProjectionUnavailable:
         print('Record store unavailable.', file=sys.stderr)
         return 1
+    except Exception as error:  # noqa: BLE001 - an operator tool prints a clean error, not a traceback
+        print(f'Failed: {type(error).__name__}: {error}', file=sys.stderr)
+        return 1
 
 
 if __name__ == '__main__':
