@@ -788,7 +788,8 @@ def test_cached_reads_at_20k_records_are_well_under_the_500ms_budget(populated, 
             assert len(store.read_all(keys[iteration * 500:][:1000], deadline=deadline()).records) == 1000
             complete.append(time.monotonic() - started)
         commits = []
-        for iteration in range(20):
+        # 60 samples, so a couple of fsync stalls from a busy disk cannot set the p95 alone.
+        for iteration in range(60):
             batch = [result_key(ref(iteration), 1), quote_key(ref(iteration), 1), fence_key(ref(iteration), 1)]
             current = store.read_records(batch, deadline=deadline())
             started = time.monotonic()
