@@ -169,9 +169,17 @@ def test_404_and_400_are_not_retried(fake):
 
 
 def test_429_is_retried_and_retry_after_is_returned(fake):
-    fake.script = [respond(429, headers=[('Retry-After', '120')]), respond(429, headers=[('Retry-After', '120')])]
+    fake.script = [respond(429, headers=[('Retry-After', '1')]), respond(429, headers=[('Retry-After', '1')])]
     result = price_source.fetch('x')
-    assert (result.reason, result.status, result.retry_after, result.attempts) == ('http_status', 429, 120, 2)
+    assert (result.reason, result.status, result.retry_after, result.attempts) == ('http_status', 429, 1, 2)
+
+
+def test_a_retry_after_longer_than_the_retry_window_is_not_retried_early(fake):
+    fake.script = [respond(429, headers=[('Retry-After', '120')]), respond(200, GOOD)]
+    asked = []
+    result = price_source.fetch('x', may_retry=lambda: asked.append(1) or True)
+    assert (result.ok, result.reason, result.status, result.retry_after, result.attempts) == (False, 'http_status', 429, 120, 1)
+    assert (len(fake.requests), asked) == (1, [])
 
 
 def test_retry_hook_can_refuse_the_second_attempt(fake):

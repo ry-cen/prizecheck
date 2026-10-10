@@ -129,6 +129,8 @@ def fetch(card, may_retry: Callable[[], bool] | None = None) -> Fetched:
         retryable = first in ('timeout', 'transport') or (first == 'http_status' and (second == 429 or second >= 500))
         if not retryable or attempt == MAX_ATTEMPTS:
             return outcome
+        if outcome.retry_after is not None and outcome.retry_after > RETRY_WAIT_S[1]:
+            return outcome  # the origin asked for longer than our retry window; never retry early
         wait = _uniform(*RETRY_WAIT_S)
         if deadline - time.monotonic() < wait + RETRY_MARGIN_S:
             return outcome
