@@ -46,10 +46,11 @@ class RecoveryTest(unittest.TestCase):
         suffix = uuid.uuid4().hex
         source = 'tcg_recovery_restricted_' + suffix
         role = 'tcg_recovery_role_' + suffix
+        password = uuid.uuid4().hex
         backup = Path('/tmp')/('tcg-recovery-restricted-'+suffix)
         with psycopg.connect(admin,autocommit=True) as conn:
             conn.execute(sql.SQL('CREATE DATABASE {}').format(sql.Identifier(source)))
-            conn.execute(sql.SQL('CREATE ROLE {} LOGIN').format(sql.Identifier(role)))
+            conn.execute(sql.SQL('CREATE ROLE {} LOGIN PASSWORD {}').format(sql.Identifier(role),sql.Literal(password)))
         source_url = make_conninfo(admin,dbname=source)
         try:
             subprocess.run([str(ROOT/'.venv/bin/python'),str(ROOT/'scripts/migrate.py')],env=dict(os.environ,DATABASE_URL=source_url),check=True,capture_output=True)
@@ -57,7 +58,7 @@ class RecoveryTest(unittest.TestCase):
                 conn.execute("INSERT INTO auth_send_event(email_key,ip_key) VALUES ('private-hash','private-hash')")
                 conn.execute(sql.SQL('GRANT USAGE ON SCHEMA public TO {}').format(sql.Identifier(role)))
                 conn.execute(sql.SQL('GRANT SELECT ON ALL TABLES IN SCHEMA public TO {}').format(sql.Identifier(role)))
-            restricted = make_conninfo(source_url,user=role)
+            restricted = make_conninfo(source_url,user=role,password=password)
             # A real PostgreSQL role can read rows while pg_sequences masks last_value.
             with psycopg.connect(restricted) as conn:
                 self.assertEqual(conn.execute('SELECT count(*) FROM auth_send_event').fetchone(),(1,))
