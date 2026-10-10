@@ -6,7 +6,7 @@ This records the owner-approved direction for a later collector-workspace redesi
 
 ## Established domain boundary
 
-Visual tiles represent selectable units of a fungible [Holding](../../../../CONTEXT.md). They do not create durable physical-copy records or copy-specific fields. A Collection remains an aggregate; an Organizational Location cannot contain Holdings; a Deck remains a specialized Storage Leaf. Dedicated deck-building UI is deferred.
+Visual tiles represent selectable units of a fungible [Holding](../../../../../CONTEXT.md). They do not create durable physical-copy records or copy-specific fields. A Collection remains an aggregate; an Organizational Location cannot contain Holdings; a Deck remains a specialized Storage Leaf. Dedicated deck-building UI is deferred.
 
 ## Workspace and tiles
 
@@ -50,7 +50,7 @@ The owner approved a future multi-source operation contract: a group Move target
 
 Inventory Removal across sources is atomic and confirmed as one operation. One Undo restores every moved or removed quantity to its original source atomically; failure must not partially undo. Keep the current newest-five, ten-minute Undo policy; an incompatible newest Undo remains dismissible so older eligible records can be reached.
 
-Current MVP/backend contracts remain single-source, so this is a product requirement rather than an implementation claim. [ADR 0005](../../../../docs/adr/0005-collector-workspace-multi-source-direction.md) and [atomic multi-source inventory operations](../tickets/30-decide-atomic-multi-source-inventory-operations.md) record the required backend design work.
+Current MVP/backend contracts remain single-source, so this is a product requirement rather than an implementation claim. [ADR 0005](../../../../adr/0005-collector-workspace-multi-source-direction.md) and [atomic multi-source inventory operations](https://github.com/ry-cen/tcg-tracker/issues/49) record the required backend design work.
 
 ## Superseded proposal
 

@@ -1,6 +1,6 @@
 # Collector workspace prototype
 
-Supports [Prototype collector workspace](../../tickets/26-prototype-collector-workspace.md). This is development-only design evidence, not production behavior or an accepted backend contract.
+Supports [Prototype collector workspace](https://github.com/ry-cen/tcg-tracker/issues/45). This is development-only design evidence, not production behavior or an accepted backend contract.
 
 ## Run
 
@@ -91,4 +91,4 @@ Variants A, B, and C, including the vertical-fan screenshots and selection check
 
 ## Boundaries
 
-The current artifact does not change the quantity-based Holding model, create copy identities, write inventory, or establish a backend contract. Multi-source atomic operations remain pending in [atomic multi-source inventory operations](../../tickets/30-decide-atomic-multi-source-inventory-operations.md).
+The current artifact does not change the quantity-based Holding model, create copy identities, write inventory, or establish a backend contract. Multi-source atomic operations remain pending in [atomic multi-source inventory operations](https://github.com/ry-cen/tcg-tracker/issues/49).
