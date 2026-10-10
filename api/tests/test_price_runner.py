@@ -1005,7 +1005,10 @@ def test_hanging_worker_is_killed_at_the_sixty_five_second_hard_stop(fs_env, pro
     wait_for(lambda: fs_env.get(qc.runner_lease_key(0)) is None, timeout=10)
     scheduler = fs_env.get(SCHEDULER)
     assert scheduler['source'] == {} and scheduler['jobs'] == {}  # The 60 s job expired and was dropped by the cleanup CAS.
-    assert fs_env.get(result_key(ref(1), 1)) is None and not alive(supervisor)
+    # The supervisor exits right after freeing the slot; until this process's reaper thread collects it, it is a zombie
+    # that os.kill(pid, 0) still reports as alive, so its exit is awaited (briefly) rather than sampled.
+    wait_for(lambda: not alive(supervisor), timeout=5)
+    assert fs_env.get(result_key(ref(1), 1)) is None
     assert price_launcher.reclaim_slot(fs_env.store, 0) == 'not_applicable'
 
 
