@@ -87,6 +87,25 @@ async function put(page: Page, deck: string, number: number, quantity: number) {
   expect(added.status()).toBe(200);
 }
 
+/**
+ * One copy of each card's Normal Edition stored in the Deck by SQL, then one owner revision bump, as live-export.spec.ts
+ * makeDeck does. The HTTP Add path has its own browser and API tests; the export under test only reads the Deck.
+ */
+async function putAll(deck: string, numbers: number[]) {
+  const owner = (
+    await pool.query('SELECT id FROM "user" WHERE email=$1', [OWNER_EMAIL])
+  ).rows[0].id as string;
+  for (const number of numbers)
+    await pool.query(
+      "INSERT INTO holding(owner_id,location_id,edition_id,quantity,version) VALUES($1,$2,$3,1,1)",
+      [owner, deck, await editionOf(number)]
+    );
+  await pool.query(
+    "UPDATE inventory_owner SET revision=revision+1 WHERE user_id=$1",
+    [owner]
+  );
+}
+
 async function openDeck(page: Page, name: string) {
   await page.reload();
   await page.getByRole("button", { name: "Decks", exact: true }).click();
@@ -230,8 +249,10 @@ test(
     seed(51, {});
     await signIn(page);
     const deck = await createDeck(page);
-    for (let number = 1; number <= 51; number++)
-      await put(page, deck.id, number, 1);
+    await putAll(
+      deck.id,
+      Array.from({ length: 51 }, (_, index) => index + 1)
+    );
     const region = await openDeck(page, deck.name);
     await region
       .getByRole("button", { name: "Prepare TCGplayer export" })
@@ -254,12 +275,12 @@ test(
   }
 );
 
-// @slow (capacity): 130 sequential Holding writes.
+// @slow (capacity): 130 mapped Printings, each a maintainer decision.
 test(
   "a link over 2,000 bytes is withheld and the complete text is offered",
   { tag: "@slow" },
   async ({ page }) => {
-    test.setTimeout(240_000); // 130 sequential Holding writes
+    test.setTimeout(240_000); // 130 maintainer decisions
     const cards = 130;
     const mapped = Object.fromEntries(
       Array.from({ length: cards }, (_, index) => [
@@ -270,8 +291,10 @@ test(
     seed(cards, mapped);
     await signIn(page);
     const deck = await createDeck(page);
-    for (let number = 1; number <= cards; number++)
-      await put(page, deck.id, number, 1);
+    await putAll(
+      deck.id,
+      Array.from({ length: cards }, (_, index) => index + 1)
+    );
     const region = await openDeck(page, deck.name);
     await region
       .getByRole("button", { name: "Prepare TCGplayer export" })

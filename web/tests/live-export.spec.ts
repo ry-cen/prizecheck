@@ -363,16 +363,15 @@ test("an export that changed before it arrived is discarded", async ({
   await expect(live.getByLabel("Live export text")).toHaveCount(0);
 });
 
-// @slow (capacity): builds and downloads more than 256 KiB of export text.
-// @serial: with four stacks loading the host, the Deck detail query over 1,500 SQL-seeded Holdings sometimes ran for
-// over a minute (CPU, no lock wait) instead of milliseconds; it runs alone, after a fresh ANALYZE.
+// @slow (capacity): builds and downloads more than 256 KiB of export text (300 rows of ~1 KB names).
+// A fresh ANALYZE keeps the planner current after the SQL bulk load.
 test(
   "output beyond 256 KiB is not shown inline and downloads complete",
-  { tag: ["@serial", "@slow"] },
+  { tag: "@slow" },
   async ({ page }) => {
     test.setTimeout(240_000);
-    const long = "X".repeat(200);
-    const cards: Card[] = Array.from({ length: 1500 }, (_, index) => {
+    const long = "X".repeat(1000);
+    const cards: Card[] = Array.from({ length: 300 }, (_, index) => {
       const name = `${long} ${String(index).padStart(4, "0")}`;
       return {
         key: `b${index}`,
@@ -408,7 +407,7 @@ test(
     const path = await download.path();
     expect(statSync(path).size).toBe(meta.byte_length);
     const body = readFileSync(path, "utf8");
-    expect(body.startsWith("Trainer: 1500\n")).toBe(true);
-    expect(body.split("\n")).toHaveLength(1501);
+    expect(body.startsWith("Trainer: 300\n")).toBe(true);
+    expect(body.split("\n")).toHaveLength(301);
   }
 );
