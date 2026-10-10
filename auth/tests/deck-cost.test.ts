@@ -272,6 +272,48 @@ describe("a complete private Deck through the gateways", () => {
     }));
   }, 90_000);
 
+  it("reports an incomplete scan, with the copy total but no numeric coverage, when the store cannot answer the cache read", async () => {
+    await stack.quiesce();
+    const [[priced], [other]] = await stack.cards(2);
+    await stack.seedQuote(priced, "0.25", 10 * 60_000, ago(HOUR));
+    await stack.seedQuote(other, "0.43", 10 * 60_000, ago(HOUR));
+    const deck = await deckWith([
+      [priced, 3],
+      [other, 2],
+    ]);
+    // The relay answers every read with a malformed body: the API's store read fails for the whole Deck.
+    const fault = join(stack.directory, "store", "faults", "malformed-records");
+    mkdirSync(join(stack.directory, "store", "faults"), { recursive: true });
+    writeFileSync(fault, "");
+    let response;
+    try {
+      response = await cost(0, deck);
+    } finally {
+      rmSync(fault, { force: true });
+    }
+    expect(response.status).toBe(200);
+    expect(response.elapsed).toBeLessThanOrEqual(3_000);
+    expect(response.cost).toMatchObject({
+      status: "incomplete",
+      reason: "store_unavailable",
+      total_copies: "5",
+      priced_copies: null,
+      stale_copies: null,
+      amount: null,
+      display_amount: null,
+    });
+    // Once the store answers again the same Deck is complete.
+    const again = await cost(1, deck);
+    expect(again.cost).toMatchObject({
+      status: "priced",
+      amount: "1.61",
+      priced_copies: "5",
+    });
+    metric(
+      `deck incomplete scan (store read failed): ${response.elapsed.toFixed(0)} ms (bound 3000)`
+    );
+  }, 60_000);
+
   it("answers an empty Deck with $0.00 at once and touches no coordination record", async () => {
     await stack.quiesce();
     const before = await stack.read([SCHEDULER]);
