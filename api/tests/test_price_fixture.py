@@ -97,7 +97,8 @@ def test_launcher_hook_patches_the_module_on_import_and_a_bad_origin_is_loud(tmp
     assert out.stdout.split() == ['True', 'True'] and len(log.read_text().splitlines()) == 2
     out = run("from app import price_launcher; print(price_launcher.spawn(0, 'a' * 32))", tmp_path, PRICE_FIXTURE_LAUNCHER='fail')
     assert out.stdout.strip() == 'False', out.stderr
-    out = run("from app import price_launcher; print(price_launcher.spawn(0, 'a' * 32))", tmp_path)
-    assert out.stdout.strip() == 'False', out.stderr  # the production stub also launches nothing
+    (tmp_path / "not-a-directory").write_text("")
+    out = run("from app import price_launcher; print(price_launcher.spawn(0, 'a' * 32))", tmp_path, PRICE_RUNNER_LOCK_DIR=str(tmp_path / "not-a-directory"))
+    assert out.stdout.strip() == 'False', out.stderr  # the real launcher reports a launch failure instead of raising
     bad = run("pass", tmp_path, PRICE_FIXTURE_SOURCE_ORIGIN='https://api.tcgdex.net')
     assert 'loopback' in bad.stderr  # python reports a failing sitecustomize on stderr and carries on

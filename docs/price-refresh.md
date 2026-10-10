@@ -109,7 +109,7 @@ Code: `api/app/price_runner.py` (supervisor and worker), `api/app/price_launcher
 
 ### Source seam
 
-The worker imports `app.price_source` and `app.tcgdex_record` lazily (08-A). It assumes `price_source.fetch_card(card, may_retry)` returns an object with `ok`, `record` (parsed dict) or `reason`/`status`/`retry_after_s`/`rate_limited`, and `tcgdex_record.select_quote(record, descriptor, lookup, product_id)` returns an object with `kind` (`quote`, `absent`, `failure`), `amount`, `provider_updated_at`, `reason`.
+The worker imports `app.price_source` and `app.tcgdex_record` lazily. It calls `price_source.fetch(card, may_retry)` (`may_retry` spends a bucket token in a small scheduler CAS) and maps `Fetched.status` 429, or 503 with a valid `retry_after`, to a source-wide backoff; every failure also writes the per-Edition backoff. `tcgdex_record.select_quote(record, descriptor, lookup, product_id)` returns `Quote`, `Absent` or `Failure(reason)`, each mapped to the per-Edition write above. The catalog `product_id` is an integer and the `work:` copy is text; they are compared as text.
 
 ### Recovery table
 

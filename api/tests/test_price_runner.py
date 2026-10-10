@@ -618,7 +618,8 @@ def test_environment_allowlist_drops_database_and_secrets(monkeypatch, lock_dire
                         'NODE_ENV': 'test', 'OTHER': '1'}.items():
         monkeypatch.setenv(name, value)
     environment = price_launcher.runner_environment(price_launcher.lock_dir())
-    assert set(environment) == {'PATH', 'LANG', 'NODE_ENV', 'PYTHONPATH', 'PUBLIC_PROJECTION_DIR', 'PRICE_RUNNER_LOCK_DIR'}
+    assert {'PATH', 'LANG', 'NODE_ENV', 'PYTHONPATH', 'PUBLIC_PROJECTION_DIR', 'PRICE_RUNNER_LOCK_DIR'} <= set(environment)
+    assert all(name.startswith('PUBLIC_PROJECTION_') or name in {'PATH', 'LANG', 'NODE_ENV', 'PYTHONPATH', 'PRICE_RUNNER_LOCK_DIR'} for name in environment)
     assert environment['PRICE_RUNNER_LOCK_DIR'] == str(lock_directory.resolve())
 
 
