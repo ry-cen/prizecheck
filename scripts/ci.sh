@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# The verification gate. scripts/verify.py runs it in a copied checkout with its own databases and ports, and the
+# release gate (scripts/release.py) runs it directly with one database and no VERIFY_* settings. Keep it compatible
+# with bash 3.2 (macOS /bin/bash): no mapfile, no associative arrays, no "wait -n".
 set -euo pipefail
 cd "$(dirname "$0")/.."
 : "${DATABASE_URL:?Set DATABASE_URL to a disposable PostgreSQL database}"
@@ -17,34 +20,99 @@ export MAIL_FILE="$(mktemp)"
 export PUBLIC_PROJECTION_DIR="$(mktemp -d)"
 export CATALOG_PROCESS_FIXTURE_DIR="$(mktemp -d)"
 export PRICE_RUNNER_LOCK_DIR="$(mktemp -d)"
+export VERIFY_SUITE="${VERIFY_SUITE:-all}"
+export VERIFY_FAST="${VERIFY_FAST:-}"
+export VERIFY_WORK="$(mktemp -d)"
+export VERIFY_PYTEST_WORKER_ROOT="$VERIFY_WORK/pytest"
+pids=()
+stacks=1
 cleanup() {
-  kill "${api_pid:-}" "${auth_pid:-}" "${web_pid:-}" 2>/dev/null || true
+  if [ "${#pids[@]}" -gt 0 ]; then kill "${pids[@]}" 2>/dev/null || true; fi
   rm -f "$MAIL_FILE"
-  rm -rf "$PUBLIC_PROJECTION_DIR" "$CATALOG_PROCESS_FIXTURE_DIR" "$PRICE_RUNNER_LOCK_DIR"
+  rm -rf "$PUBLIC_PROJECTION_DIR" "$CATALOG_PROCESS_FIXTURE_DIR" "$PRICE_RUNNER_LOCK_DIR" "$VERIFY_WORK"
 }
 trap cleanup EXIT
+phase() {  # $1: phase name; $2: start or end
+  printf '%s\t%s\t%s\n' "$1" "$2" "$(date +%s)" >> "$TEST_LOG_DIR/phases.tsv"
+  echo "== verify phase: $1 $2"
+}
+start_stack() {  # $1: stack directory holding env.sh; $2: log directory
+  mkdir -p "$2"
+  (. "$1/env.sh"; PYTHONPATH="$PWD/api/tests/catalog_process_fixture:$PWD/api" exec .venv/bin/uvicorn app.main:app --app-dir api --host 127.0.0.1 --port "$API_PORT" --no-access-log) > "$2/api.log" 2>&1 &
+  pids+=($!)
+  (. "$1/env.sh"; exec node --import tsx auth/src/server.ts) > "$2/auth.log" 2>&1 &
+  pids+=($!)
+  (. "$1/env.sh"; exec node node_modules/vite/bin/vite.js --config web/vite.config.ts --strictPort) > "$2/web.log" 2>&1 &
+  pids+=($!)
+}
+wait_for_stack() {  # $1: stack directory holding env.sh
+  local origin
+  origin=$(. "$1/env.sh"; echo "$TEST_ORIGIN")
+  for i in $(seq 1 50); do
+    kill -0 "${pids[@]}"
+    if curl -fsS "$origin/api/health" >/dev/null 2>&1; then break; fi
+    sleep .2
+  done
+  kill -0 "${pids[@]}"
+  curl -fsS "$origin/api/health" >/dev/null
+}
+case "$VERIFY_SUITE" in
+  all|api|browser|auth|operations) ;;
+  *) echo 'Unknown verification suite' >&2; exit 1 ;;
+esac
+phase setup start
 .venv/bin/python scripts/migrate.py
 .venv/bin/python scripts/init_public_projection.py
 .venv/bin/python scripts/backfill_public_catalog.py
-npm run guardrails
-npm run build
-case "${VERIFY_SUITE:-all}" in
-  all|browser|auth)
-PYTHONPATH="$PWD/api/tests/catalog_process_fixture:$PWD/api" .venv/bin/uvicorn app.main:app --app-dir api --host 127.0.0.1 --port "${API_PORT:-8000}" --no-access-log > "$TEST_LOG_DIR/api.log" 2>&1 & api_pid=$!
-node --import tsx auth/src/server.ts > "$TEST_LOG_DIR/auth.log" 2>&1 & auth_pid=$!
-node node_modules/vite/bin/vite.js --config web/vite.config.ts --strictPort > "$TEST_LOG_DIR/web.log" 2>&1 & web_pid=$!
-for i in $(seq 1 50); do
-  kill -0 "$api_pid" "$auth_pid" "$web_pid"
-  if curl -fsS "$PUBLIC_ORIGIN/api/health" >/dev/null 2>&1; then break; fi
-  sleep .2
-done
-kill -0 "$api_pid" "$auth_pid" "$web_pid"
-curl -fsS "$PUBLIC_ORIGIN/api/health" >/dev/null
-    ;;
-  operations) ;;
-  *) echo 'Unknown verification suite' >&2; exit 1 ;;
+case "$VERIFY_SUITE" in api) ;; *) npm run guardrails; npm run build ;; esac
+case "$VERIFY_SUITE" in
+  all) .venv/bin/python scripts/verify_resources.py prepare --pytest --stacks ;;
+  api) .venv/bin/python scripts/verify_resources.py prepare --pytest ;;
+  browser|auth) .venv/bin/python scripts/verify_resources.py prepare --stacks ;;
 esac
-case "${VERIFY_SUITE:-all}" in all) PYTHONPATH=api .venv/bin/pytest -q api/tests ;; esac
-case "${VERIFY_SUITE:-all}" in all|auth) npm run test:auth ;; esac
-case "${VERIFY_SUITE:-all}" in all|browser) npx playwright test "$@" ;; esac
-case "${VERIFY_SUITE:-all}" in all|operations) .venv/bin/python -m unittest discover -s tests/operations -v ;; esac
+case "$VERIFY_SUITE" in
+  all|browser|auth)
+    stacks=$(cat "$VERIFY_WORK/stacks/count")
+    start_stack "$VERIFY_WORK/stacks/s0" "$TEST_LOG_DIR"
+    k=1
+    while [ "$k" -lt "$stacks" ]; do  # not seq: BSD seq counts down when stacks is 1
+      start_stack "$VERIFY_WORK/stacks/s$k" "$TEST_LOG_DIR/stack-$k"
+      k=$((k + 1))
+    done
+    k=0
+    while [ "$k" -lt "$stacks" ]; do
+      wait_for_stack "$VERIFY_WORK/stacks/s$k"
+      k=$((k + 1))
+    done
+    export VERIFY_BROWSER_STACKS="$(cat "$VERIFY_WORK/stacks/stacks.json")"
+    ;;
+esac
+phase setup end
+case "$VERIFY_SUITE" in
+  all|api)
+    phase pytest start
+    .venv/bin/python scripts/run_pytest.py ${VERIFY_FAST:+--fast} -- "$@"
+    phase pytest end
+    ;;
+esac
+case "$VERIFY_SUITE" in
+  all|auth)
+    phase vitest start
+    npm run test:auth
+    phase vitest end
+    ;;
+esac
+case "$VERIFY_SUITE" in
+  all|browser)
+    phase browser start
+    .venv/bin/python scripts/run_playwright.py --workers "$stacks" ${VERIFY_FAST:+--fast} -- "$@"
+    phase browser end
+    ;;
+esac
+case "$VERIFY_SUITE" in
+  all|operations)
+    phase operations start
+    .venv/bin/python -m unittest discover -s tests/operations -v
+    phase operations end
+    ;;
+esac
