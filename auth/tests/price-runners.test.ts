@@ -46,8 +46,10 @@ async function watched<T>(body: () => Promise<T>, natural = false) {
   const stop = runners.watch();
   try {
     const value = await body();
+    const idleFrom = performance.now();
     await (natural ? stack.quiesce() : settle()); // natural: the runners exit on their own (2 s idle) and free their slots
-    return { value, processes: await stop() };
+    const idleExitMs = performance.now() - idleFrom;
+    return { value, processes: await stop(), idleExitMs };
   } catch (error) {
     await stop();
     throw error;
@@ -101,7 +103,11 @@ describe("source boundary scenarios through the gateways", () => {
     await stack.seedQuote(edition, "0.40", 25 * HOUR, PROVIDER_TIME);
     const before = await state(edition);
     source.behaviour.set(edition.card, { kind: "status", code: 500 });
-    const { value: response, processes } = await watched(async () => {
+    const {
+      value: response,
+      processes,
+      idleExitMs,
+    } = await watched(async () => {
       const response = await stack.prices(0, [edition.id]);
       await waitFor(
         async () => (await state(edition)).backoff,
@@ -109,6 +115,9 @@ describe("source boundary scenarios through the gateways", () => {
       );
       return response;
     }, true);
+    // The only bounded idle-exit check on the relay adapter: the runners leave on their own about 2 s after their
+    // last job and free their slots. The bound is generous because vitest has no serial pass yet (#68).
+    expect(idleExitMs).toBeLessThan(4_500);
     expect(response.status).toBe(200);
     expect(response.elapsed).toBeLessThanOrEqual(3_000);
     expect(["failed", "timeout"]).toContain(response.rows[edition.id].refresh);
