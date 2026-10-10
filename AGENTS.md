@@ -1,3 +1,7 @@
+## Branch policy
+
+Use `dev` as the integration branch. Update `main` from `dev` when the user authorizes a release.
+
 ## Agent skills
 
 ### Issue tracker
