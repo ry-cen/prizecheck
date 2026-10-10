@@ -111,7 +111,7 @@ def eligible(work, edition, quarantine):
 # --- Source seam ------------------------------------------------------------------------------------------------------
 def _default_fetcher():
     module = importlib.import_module('app.price_source')
-    return module.fetch_card
+    return module.fetch
 
 
 def _default_selector():
@@ -132,11 +132,11 @@ class Outcome:
 
 
 def fetch_failure(fetched):
-    retry = getattr(fetched, 'retry_after_s', None)
+    retry = getattr(fetched, 'retry_after', None)
     retry = float(retry) if type(retry) in (int, float) and not isinstance(retry, bool) and retry >= 1 else None
     return Outcome('failure', reason=_failure_reason(getattr(fetched, 'reason', None)),
                    retry_after_s=None if retry is None else min(retry, qc.RETRY_AFTER_CAP_S),
-                   rate_limited=getattr(fetched, 'rate_limited', False) is True or getattr(fetched, 'status', None) == 429)
+                   rate_limited=getattr(fetched, 'status', None) == 429 or (getattr(fetched, 'status', None) == 503 and retry is not None))
 
 
 def decide(selector, record, descriptor, lookup, product_id):
@@ -144,7 +144,7 @@ def decide(selector, record, descriptor, lookup, product_id):
         chosen = selector(record, descriptor, lookup, product_id)
     except Exception:
         return Outcome('failure', reason='malformed')
-    kind = getattr(chosen, 'kind', None)
+    kind = {'Quote': 'quote', 'Absent': 'absent', 'Failure': 'failure'}.get(type(chosen).__name__)
     if kind == 'absent':
         return Outcome('absent')
     if kind == 'quote' and qc.parse_amount(getattr(chosen, 'amount', None)) is not None:
@@ -418,7 +418,7 @@ class Worker:
             if fetched is None or getattr(fetched, 'ok', False) is not True or not isinstance(getattr(fetched, 'record', None), dict):
                 failure = fetch_failure(fetched) if fetched is not None and getattr(fetched, 'ok', None) is False \
                     else Outcome('failure', reason='transport')
-            if failure is not None and (failure.rate_limited or failure.retry_after_s is not None):
+            if failure is not None and failure.rate_limited:
                 self.set_source_backoff(failure)
             for job in claim.jobs:
                 try:

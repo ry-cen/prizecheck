@@ -19,7 +19,7 @@ from uuid import uuid4
 
 import pytest
 
-from app import price_launcher, price_runner
+from app import price_launcher, price_runner, price_source, tcgdex_record
 from app import quote_contract as qc
 from app.public_projection import ProjectionUnavailable
 from app.public_records import (catalog_edition_key, quarantine_key, quote_key, result_key)
@@ -165,22 +165,30 @@ class Fetched:
 class Failed:
     ok = False
 
-    def __init__(self, reason='http_status', status=500, retry_after_s=None, rate_limited=False):
-        self.reason, self.status, self.retry_after_s, self.rate_limited = reason, status, retry_after_s, rate_limited
-
-
-class Chosen:
-    def __init__(self, kind, amount=None, provider_updated_at=None, reason=None):
-        self.kind, self.amount, self.provider_updated_at, self.reason = kind, amount, provider_updated_at, reason
+    def __init__(self, reason='http_status', status=500, retry_after=None):
+        self.reason, self.status, self.retry_after = reason, status, retry_after
 
 
 def select_by_record(record, descriptor, lookup, product_id):
-    """record: {'price': '1.50'|None, 'updated': iso, 'fail': {variant: reason}}"""
+    """Stands in for ``tcgdex_record.select_quote`` with its real result types.
+    record: {'price': '1.50'|None, 'updated': iso, 'fail': {variant: reason}}"""
     if lookup['variant'] in record.get('fail', {}):
-        return Chosen('failure', reason=record['fail'][lookup['variant']])
+        return tcgdex_record.Failure(record['fail'][lookup['variant']])
     if record['price'] is None:
-        return Chosen('absent')
-    return Chosen('quote', record['price'], record.get('updated'))
+        return tcgdex_record.Absent()
+    return tcgdex_record.Quote(record['price'], lookup['card'], lookup['variant'], record.get('updated'))
+
+
+def test_runner_maps_the_real_source_and_record_types():
+    assert price_runner.fetch_failure(price_source.Fetched(False, reason='http_status', status=429, retry_after=90)).rate_limited
+    failure = price_runner.fetch_failure(price_source.Fetched(False, reason='http_status', status=500, retry_after=30))
+    assert (failure.reason, failure.retry_after_s, failure.rate_limited) == ('http_status', 30.0, False)
+    assert price_runner.fetch_failure(price_source.Fetched(False, reason='http_status', status=503, retry_after=30)).rate_limited
+    lookup = {'source': 'tcgdex', 'card': 'c-1', 'variant': 'normal'}
+    quote = price_runner.decide(lambda *a: tcgdex_record.Quote('1.5', 'c-1', 'normal', '2026-10-01T00:00:00Z'), {}, {}, lookup, 5)
+    assert (quote.kind, quote.amount) == ('quote', '1.5')
+    assert price_runner.decide(lambda *a: tcgdex_record.Absent(), {}, {}, lookup, 5).kind == 'absent'
+    assert price_runner.decide(lambda *a: tcgdex_record.Failure('ambiguous'), {}, {}, lookup, 5).reason == 'ambiguous'
 
 
 def make_worker(env, owner, fetcher, *, slot=0, selector=select_by_record, idle_s=0.3, hard_stop=None):
@@ -286,7 +294,7 @@ def test_rate_limit_sets_source_backoff_and_blocks_further_claims(env):
         if card == 'a-2':
             time.sleep(0.6)  # Outlast the 429's backoff write; the caller cap keeps a-3 queued until a permit frees.
             return Fetched({'price': '1.00', 'updated': None})
-        return Failed('http_status', 429, retry_after_s=120, rate_limited=True)
+        return Failed('http_status', 429, retry_after=120)
     run_worker(env, fetch, [{'index': i, 'card': f'a-{i}'} for i in (1, 2, 3)])
     assert 'a-3' not in calls  # Never fetched while the source is backing off.
     backoff = qc.validate_source_backoff(env.get(qc.source_backoff_key()))
@@ -390,7 +398,7 @@ def test_expired_and_ineligible_jobs_are_cancelled_without_a_fetch(env):
     assert make_worker(env, owner, ok_fetcher(calls=calls)).run() == 'idle'
     assert calls == [] and env.get(SCHEDULER)['jobs'] == {}
     assert env.get(SCHEDULER)['stats']['expired'] == 1
-    assert state_of(env, 1)['work'] is None and state_of(env, 2)['work'] is None and now
+    assert state_of(env, 1)['work'] is None and state_of(env, 2)['work'] is None
 
 
 def test_lost_lease_stops_claims(env):
@@ -517,7 +525,7 @@ def test_cleanup_requeues_unexpired_drops_expired_and_bumps_work_versions(env):
     assert queued == {jobs[0], jobs[1]} and set(scheduler['jobs']) == queued
     assert scheduler['fifo'] == {'user:a': sorted(queued, key=lambda j: (scheduler['jobs'][j]['admitted_ms'], j))} and scheduler['ring'] == ['user:a']
     assert all(env.version(key) != versions[key] for key in keys[:2]) and env.get(keys[0])['state'] == 'queued'
-    assert env.get(keys[2]) is None and scheduler['stats']['expired'] == 1 and env_now
+    assert env.get(keys[2]) is None and scheduler['stats']['expired'] == 1
 
 
 def test_cleanup_ignores_a_slot_held_by_someone_else(env):
@@ -555,7 +563,6 @@ def test_reclaim_requires_an_expired_same_host_lease_and_a_free_lock(env, monkey
     assert price_launcher.reclaim_slot(env.store, 0) == 'reclaimed'
     assert env.get(key) is None and not price_launcher.lock_path(0, owner).exists()
     assert price_launcher.reclaim_slot(env.store, 0) == 'not_applicable'
-    assert monkeypatch
 
 
 def test_reclaim_never_trusts_another_host(env):
@@ -584,7 +591,7 @@ def test_operator_release_frees_a_claimed_slot_without_a_lock_check(env):
     owner, jobs = claimed_scene(env, host='other-host')
     assert price_launcher.release_slot(env.store, 0) == 'released'
     assert env.get(qc.runner_lease_key(0)) is None and env.get(SCHEDULER)['source'] == {}
-    assert price_launcher.release_slot(env.store, 0) == 'not_applicable' and jobs
+    assert price_launcher.release_slot(env.store, 0) == 'not_applicable'
 
 
 def test_operator_script_status_and_release(fs_env):
@@ -601,7 +608,7 @@ def test_operator_script_status_and_release(fs_env):
 
 def test_host_id_is_created_once_and_stable(lock_directory):
     first = price_launcher.host_id()
-    assert price_launcher.host_id() == first and qc.new_runner_lease(owner_nonce(), first, 1, 1)
+    assert price_launcher.host_id() == first
     assert [p.name for p in lock_directory.iterdir()] == ['host-id']
 
 
@@ -641,6 +648,28 @@ def test_handoff_reserves_a_slot_only_for_runnable_jobs(env, monkeypatch):
     assert price_runner.handoff(env.store, 0) is False and env.get(qc.runner_lease_key(0)) is None
 
 
+def test_handoff_leaves_queued_jobs_to_a_healthy_running_slot(env, monkeypatch):
+    spawned = []
+    monkeypatch.setattr(price_launcher, 'spawn', lambda slot, owner: spawned.append((slot, owner)) or True)
+    healthy = running_lease(owner_nonce(), 1)
+    healthy['lease_until_ms'] = qc.wall_ms() + 4_000  # Mid-renewal: far less than a full 10 s left, still valid.
+    seed(env, [{'index': 1, 'card': 'next-1'}], lease=healthy, slot=1)
+    assert price_runner.handoff(env.store, 0) is False and spawned == []
+    expired = dict(healthy, lease_until_ms=qc.wall_ms() - 1)
+    env.put({qc.runner_lease_key(1): expired})
+    assert price_runner.handoff(env.store, 0) is True and spawned[0][0] == 0
+
+
+def test_runner_store_directory_matches_the_api_even_from_another_working_directory(tmp_path, monkeypatch):
+    monkeypatch.delenv('PUBLIC_PROJECTION_DIR', raising=False)
+    monkeypatch.chdir(tmp_path)
+    expected = str(Path('.local/public-projections').resolve())
+    monkeypatch.setenv('PYTHONPATH', 'relative/dir')
+    environment = price_launcher.runner_environment(price_launcher.lock_dir())
+    assert environment['PUBLIC_PROJECTION_DIR'] == expected
+    assert environment['PYTHONPATH'] == str((tmp_path / 'relative' / 'dir').resolve())
+
+
 # --- Real processes ----------------------------------------------------------------------------------------------------------------
 FAKE_SOURCE = '''
 import json, os, socket, sys, time, urllib.request, urllib.error
@@ -650,7 +679,7 @@ _config = json.load(open(os.path.join(_dir, "fake-source.json")))
 class _Result:
     pass
 
-def fetch_card(card, may_retry):
+def fetch(card, may_retry):
     with open(os.path.join(_dir, "fake-env.json"), "w") as out:
         json.dump({"env": sorted(os.environ), "psycopg": any(m.split(".")[0] == "psycopg" for m in sys.modules)}, out)
     try:
@@ -660,27 +689,29 @@ def fetch_card(card, may_retry):
     result = _Result()
     try:
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-        request = urllib.request.Request(_config["origin"] + "/cards/" + card)
+        request = urllib.request.Request(_config["origin"] + "/cards/" + card, headers={"x-fixture-pid": str(os.getpid())})
         with opener.open(request, timeout=_config.get("timeout", 20)) as response:
             result.ok, result.record = True, json.load(response)
     except urllib.error.HTTPError as error:
         result.ok, result.reason, result.status = False, "http_status", error.code
-        result.rate_limited = error.code == 429
         retry = error.headers.get("Retry-After")
-        result.retry_after_s = float(retry) if retry else None
+        result.retry_after = int(float(retry)) if retry else None
     except Exception:
         result.ok, result.reason = False, "transport"
     return result
 '''
 FAKE_RECORD = '''
-class _Chosen:
+class Quote:
+    def __init__(self, amount, card, variant, provider_updated_at):
+        self.amount, self.card, self.variant, self.provider_updated_at = amount, card, variant, provider_updated_at
+
+class Absent:
     pass
 
 def select_quote(record, descriptor, lookup, product_id):
-    chosen = _Chosen()
-    chosen.kind = "absent" if record["price"] is None else "quote"
-    chosen.amount, chosen.provider_updated_at = record["price"], record.get("updated")
-    return chosen
+    if record["price"] is None:
+        return Absent()
+    return Quote(record["price"], lookup["card"], lookup["variant"], record.get("updated"))
 '''
 SITECUSTOMIZE = '''
 import os, sys, types
@@ -702,6 +733,7 @@ class FakeSource:
         self.requests, self.hold, self.lock = [], {}, threading.Lock()
         self.prices = {}
         self.arrived = threading.Event()
+        self.live, self.peak, self.callers, self.delay = {}, {'all': 0}, {}, 0.0
         source = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -710,12 +742,21 @@ class FakeSource:
 
             def do_GET(self):
                 card = self.path.rsplit('/', 1)[-1]
+                pid = self.headers.get('x-fixture-pid')
                 with source.lock:
                     source.requests.append((card, time.time()))
+                    source.live[card] = pid
+                    source.peak['all'] = max(source.peak['all'], len(source.live))
+                    for key in {pid, source.callers.get(card)}:
+                        count = sum(1 for c, p in source.live.items() if p == key or source.callers.get(c) == key)
+                        source.peak[key] = max(source.peak.get(key, 0), count)
                 source.arrived.set()
                 gate = source.hold.get(card)
                 if gate is not None:
                     gate.wait(120)
+                time.sleep(source.delay)
+                with source.lock:
+                    source.live.pop(card, None)
                 body = json.dumps({'price': source.prices.get(card, '1.25'), 'updated': '2026-10-02T00:00:00Z'}).encode()
                 self.send_response(200)
                 self.send_header('Content-Length', str(len(body)))
@@ -753,9 +794,12 @@ def proc(tmp_path, lock_directory, monkeypatch):
     source.close()
     for pid in started:
         try:
+            os.killpg(pid, signal.SIGCONT)
             os.killpg(pid, signal.SIGKILL)
         except (ProcessLookupError, PermissionError):
             pass
+    # A runner started by this test (not registered above) must not outlive it or skew the next test's process counts.
+    subprocess.run(['pkill', '-9', '-f', 'app.price_runner --slot'], capture_output=True)
 
 
 def reserve_and_spawn(env, started, slot=0, *, reserved_ms=None):
@@ -861,6 +905,7 @@ def test_sigkilled_group_is_reclaimed_through_the_lock_with_one_extra_fetch(env,
     wait_for(lambda: env.get(result_key(ref(1), 1)))
     assert len(source.requests) == 2 and env.get(result_key(ref(1), 1))['attempt'] == 2
     assert env.get(qc.fence_record_key(ref(1), 1))['attempt'] == 2 and env.get(qc.work_record_key(ref(1), 1)) is None
+    wait_for(lambda: env.get(qc.runner_lease_key(0)) is None, timeout=6)
 
 
 def test_sigstopped_runner_is_not_replaced_and_completes_after_sigcont(fs_env, proc, monkeypatch):
@@ -872,15 +917,52 @@ def test_sigstopped_runner_is_not_replaced_and_completes_after_sigcont(fs_env, p
     started.append(supervisor)
     assert source.arrived.wait(10)
     os.killpg(supervisor, signal.SIGSTOP)
-    real = qc.wall_ms
-    monkeypatch.setattr(qc, 'wall_ms', lambda: real() + 11_000)
-    assert price_launcher.reclaim_slot(fs_env.store, 0) == 'uncertain'
-    monkeypatch.setattr(qc, 'wall_ms', real)
-    assert fs_env.get(qc.runner_lease_key(0))['owner'] == owner
+    stopped = time.monotonic()
+    time.sleep(11.2)  # Past the 10 s lease, in real time.
+    assert fs_env.get(qc.runner_lease_key(0))['lease_until_ms'] < qc.wall_ms()
+    assert price_launcher.reclaim_slot(fs_env.store, 0) == 'uncertain'  # The lock is still held: never replaced.
+    assert fs_env.get(qc.runner_lease_key(0))['owner'] == owner and time.monotonic() - stopped > 11
     os.killpg(supervisor, signal.SIGCONT)
     source.hold['stop-1'].set()
     wait_for(lambda: fs_env.get(result_key(ref(1), 1)))
     assert fs_env.get(result_key(ref(1), 1))['attempt'] == 1 and len(source.requests) == 1
+    wait_for(lambda: fs_env.get(qc.runner_lease_key(0)) is None, timeout=6)  # Cleanup still frees the slot normally.
+
+
+def test_two_runner_processes_respect_slot_caller_and_global_caps(env, proc):
+    source, started = proc
+    source.delay = 0.4
+    callers = {f'cap-{i}': f'user:{"abcde"[i % 5]}' for i in range(12)}
+    source.callers = callers
+    seed(env, [{'index': i + 1, 'card': f'cap-{i}', 'caller': callers[f'cap-{i}']} for i in range(12)])
+    reserve_and_spawn(env, started, 0)
+    reserve_and_spawn(env, started, 1)
+    pids = {}
+    for slot in (0, 1):
+        supervisor, worker = supervisor_pid(env, slot)
+        started.append(supervisor)
+        pids[str(worker)] = slot
+    counts, sampling = [], threading.Event()
+
+    def sample():
+        while not sampling.is_set():
+            out = subprocess.run(['pgrep', '-f', 'app.price_runner --slot'], capture_output=True, text=True).stdout.split()
+            counts.append(len(out))
+            time.sleep(0.05)
+    sampler = threading.Thread(target=sample)
+    sampler.start()
+    try:
+        for i in range(12):
+            wait_for(lambda: env.get(result_key(ref(i + 1), 1)), timeout=40)
+    finally:
+        sampling.set()
+        sampler.join()
+    assert 2 <= max(counts) <= 4  # A supervisor and a worker per slot, never more.
+    assert source.peak['all'] <= 8
+    for pid, slot in pids.items():
+        assert source.peak.get(pid, 0) <= 4, (pid, slot)
+    assert all(source.peak.get(caller, 0) <= 2 for caller in set(callers.values()))
+    assert sorted(card for card, _ in source.requests) == sorted(callers)  # One fetch per card.
 
 
 def test_hanging_worker_is_killed_at_the_sixty_five_second_hard_stop(fs_env, proc, lock_directory):
