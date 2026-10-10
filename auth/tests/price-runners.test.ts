@@ -79,6 +79,14 @@ const jobsOf = async () =>
   Object.keys((await stack.get(SCHEDULER))?.jobs ?? {}).map(
     (id) => id.split(":")[0]
   );
+/** Waits until the scheduler has counted `reason` among its refusals (post-response, so polled). */
+const refused = (reason: string) =>
+  waitFor(
+    async () =>
+      ((await stack.get(SCHEDULER))?.stats?.refused?.[reason] ?? 0) >= 1,
+    `stats.refused.${reason}`,
+    3_000
+  );
 
 // ================================================================ AC8: source failures, each through a gateway
 describe("source boundary scenarios through the gateways", () => {
@@ -290,6 +298,7 @@ describe("failed launch, cancellation and restart", () => {
     }
     expect(first.rows[edition.id].refresh).toBe("busy");
     expect(first.elapsed).toBeLessThan(1_500); // refused at once instead of sitting out the wait
+    await refused("launch_failed"); // the reason, recorded by the post-response release
     expect(await jobsOf()).toEqual([edition.ref]);
     expect(source.requests(edition.card)).toHaveLength(0);
     expect((await runners.counts()).live).toEqual([]);
@@ -447,6 +456,7 @@ describe("pause and crash", () => {
       runners.signalGroup(group, "SIGCONT");
       window = performance.now() - stoppedAt;
       await pending;
+      await refused("runner_uncertain"); // busy because the slot is uncertain, not launch_failed/no_runner
     } finally {
       try {
         if (group !== null) runners.signalGroup(group, "SIGCONT");
