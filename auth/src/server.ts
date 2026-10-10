@@ -28,11 +28,14 @@ if (
   );
 }
 
-// Routes that carry a trusted three-second budget. Keep in step with BUDGETED_ROUTES in api/app/price_budget.py:
-// ticket 12 adds one line to both lists.
+// Routes that carry a trusted three-second budget. Keep in step with BUDGETED_ROUTES in api/app/price_budget.py.
 const BUDGETED_ROUTES: { method: string; pattern: RegExp }[] = [
   { method: "POST", pattern: /^\/api\/prices\/editions$/ },
   { method: "GET", pattern: /^\/api\/decks\/[^/]+\/cost$/ },
+  {
+    method: "GET",
+    pattern: /^\/api\/public\/decks\/[^/]+\/versions\/[^/]+\/cost$/,
+  },
 ];
 const BUDGET_MS = 3_000;
 // The answer is gated at 3.0 s, so the abort fires early enough to write the 504 inside it.
@@ -407,11 +410,11 @@ const server = createServer(async (request, response) => {
         !sameOrigin(request)
       )
         return json(response, 403, { error: "Origin required" });
-      const publicRead =
-        request.method === "GET" &&
-        (/^\/api\/public\/decks\/[^/]+$/.test(path) ||
-          path === "/api/public/discovery" ||
-          path === "/api/public/sitemap.xml");
+      // Every route under /api/public/ is anonymous: the gateway never looks up a session for it and never forwards an
+      // identity, whatever cookies arrive (Published Deck snapshots, discovery, the sitemap and nested routes such as
+      // the Published Deck cost).
+      const publicPath = path.startsWith("/api/public/");
+      const publicRead = request.method === "GET" && publicPath;
       if (publicRead && !publicReadLimiter.take(trustedClientIp(request))) {
         response.setHeader(
           "retry-after",
@@ -427,12 +430,12 @@ const server = createServer(async (request, response) => {
       const left = () =>
         BUDGET_MS - RESPONSE_MARGIN_MS - (performance.now() - received);
       const current =
-        publicRead || path === "/api/health"
+        publicPath || path === "/api/health"
           ? null
           : budgeted
             ? await withinBudget(session(request), left())
             : await session(request);
-      if (!current && !publicRead && path !== "/api/health")
+      if (!current && !publicPath && path !== "/api/health")
         return json(response, 401, { error: "Authentication required" });
       const body =
         request.method === "GET" || request.method === "HEAD"
@@ -457,8 +460,9 @@ const server = createServer(async (request, response) => {
       }
       let controller: AbortController | undefined;
       let timer: NodeJS.Timeout | undefined;
-      if (budgeted && current) {
+      if (budgeted && (current || publicRead)) {
         // A separately signed budget: what is left of the three seconds, for this caller and this exact request.
+        // A public read is always an anonymous caller (anon:<keyed digest>), even with a valid session cookie.
         const milliseconds = Math.floor(left());
         if (milliseconds <= 0) throw new BudgetExceeded();
         const caller = callerFor(request, current);
