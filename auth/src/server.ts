@@ -4,10 +4,10 @@ import {
   type IncomingMessage,
   type ServerResponse,
 } from "node:http";
-import { isIP } from "node:net";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { auth, deliverCode, pool } from "./auth.js";
+import { callerFor, trustedClientIp } from "./caller.js";
 import { PublicReadLimiter } from "./publicReads.js";
 import { signupEnabled } from "./signup.js";
 
@@ -105,21 +105,6 @@ function normalizedEmail(value: unknown): string | null {
 
 function hash(value: string) {
   return createHash("sha256").update(value).digest("hex");
-}
-
-function trustedClientIp(request: IncomingMessage) {
-  const peer = request.socket.remoteAddress || "unknown";
-  const trusted = (process.env.TRUSTED_PROXY_IPS || "")
-    .split(",")
-    .map((value) => value.trim());
-  const forwarded = request.headers["x-real-ip"];
-  if (
-    trusted.includes(peer) &&
-    typeof forwarded === "string" &&
-    isIP(forwarded)
-  )
-    return forwarded;
-  return peer;
 }
 
 async function allowedSend(email: string, ip: string): Promise<boolean> {
@@ -475,7 +460,7 @@ const server = createServer(async (request, response) => {
         // A separately signed budget: what is left of the three seconds, for this caller and this exact request.
         const milliseconds = Math.floor(left());
         if (milliseconds <= 0) throw new BudgetExceeded();
-        const caller = `user:${current.user.id}`;
+        const caller = callerFor(request, current);
         headers["x-internal-budget-ms"] = String(milliseconds);
         headers["x-internal-budget-time"] = stamp;
         headers["x-internal-caller"] = caller;
