@@ -36,7 +36,7 @@ Tickets that existed only on feature branches were migrated the same day, labell
 - `feature: prices & exports` (`feature/card-prices-and-deck-exports`): Wayfinder tickets 16–25 are issues #35–#44; implementation tickets 01–15 are issues #50–#64, with titles prefixed "Prices & exports".
 - `feature: workspace redesign` (`feature/ui-workspace-redesign`): Wayfinder tickets 26–30 are issues #45–#49.
 
-Those branches still track their planning files under `.scratch/`. Before merging one into `dev`, move its non-ticket files (specs, maps, research, resolutions, evidence, fixtures) to the matching `docs/planning/` path, delete its ticket files, and update ticket status on GitHub instead of in Markdown. `.gitignore` does not stop already-tracked files from coming back in a merge.
+Each branch also has a cleanup commit that moves its planning files from `.scratch/` to `docs/planning/` and deletes its ticket files. A branch commit that predates that cleanup and edits `.scratch/` will conflict when replayed onto `dev`. Resolve it by dropping the `.scratch/` change and recording the update on the GitHub issue or the moved `docs/planning/` file.
 
 ## Skill operations
 
