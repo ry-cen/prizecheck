@@ -59,6 +59,10 @@ Backoff schedule: failure k waits `min(60 * 2^(k-1), 900)` s times a jitter in 0
 - `PRICE_FIXTURE_SOURCE_ORIGIN` redirects `app.price_source.ORIGIN` to a loopback origin.
 - `PRICE_FIXTURE_LAUNCHER=record|fail` (with `PRICE_FIXTURE_LAUNCH_LOG`) replaces `price_launcher.spawn`.
 - A process that asks to import `app.price_runner` while `PRICE_RUNNER_LOCK_DIR` is set refuses non-loopback connects.
+- Launched runners never see `PRICE_FIXTURE_*` (the launcher's allowlist drops them), so a test writes the loopback origin to `$PRICE_RUNNER_LOCK_DIR/fixture-source-origin`. The fixture reads it when `app.price_source` is imported; the environment variable wins, and a non-loopback value fails the import. Runner requests then carry `x-fixture-slot`, `x-fixture-pid` and `x-fixture-pgid`.
+- In a runner process the fixture also logs every connect destination to `connects.log` and registers `runner-pids/<pid>` (`supervisor`, and `worker` for each fork). Tests count, stop and kill only those pids; nothing searches the host's process table.
+
+Real-process boundary scenarios (ticket 08-C) live in `auth/tests/price-runners.test.ts` (two gateways, two APIs, the HTTP relay, a fake TCGdex server and a fake PostgreSQL port) and `web/tests/price-refresh.spec.ts` (the live stack's runners against a hanging source). Their timing margins are appended to `price-runners-metrics.log` in `TEST_LOG_DIR`. A hanging source shows `failed` when the runner's 2 s source deadline ends inside the 2.5 s wait window, and `timeout` when it ends after it. Both are labelled fallbacks that keep the cached quote.
 
 `PRICE_RUNNER_LOCK_DIR` is the host-local directory for runner lock files (default `.local/price-runners`, gitignored). CI points it at a private temporary directory. In production it must be a **persistent, host-local volume** (not a network filesystem, not a per-container tmpfs): `host-id` and the lock files live there, and a regenerated `host-id` makes every earlier lease look like another host's, so reclaim answers `uncertain` until the operator releases the slot.
 
