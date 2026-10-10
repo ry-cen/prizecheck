@@ -30,7 +30,7 @@ TCGdex documents optional `pricing.tcgplayer` data on card objects. Variant entr
 
 TCGdex says its API is free and needs no API key. It recommends caching bulk responses. Its FAQ acknowledges missing prices and incorrect marketplace mappings, including different printings mapped to the same listing. It describes improved per-variant marketplace IDs as in development; this research did not verify rollout or live coverage. [FAQ](https://tcgdex.dev/faq)
 
-The tracker already imports TCGdex card records, but has no implemented price feature. `api/app/catalog.py` excludes pricing keys from variant descriptors; the active specification lists valuation outside the existing MVP. [Catalog normalization](../../../../api/app/catalog.py), [Current specification](../../spec.md)
+The tracker already imports TCGdex card records, but has no implemented price feature. `api/app/catalog.py` excludes pricing keys from variant descriptors; the active specification lists valuation outside the existing MVP. [Catalog normalization](../../../../../api/app/catalog.py), [Current specification](../../spec.md)
 
 Inference: TCGdex is a practical candidate to investigate for price display without a new direct TCGplayer key. It is not yet a validated price feed for this tracker. Before designing valuation, verify representative live records, exact edition-to-price mapping, missing/stale behavior, refresh needs, and permitted downstream use. Neither documentation availability nor free API access establishes downstream data rights.
 

@@ -26,7 +26,7 @@ without seeing your private inventory or storage tree.
 
 The application and local operations tooling are implemented. Hosting, email,
 and storage providers are still unselected; production launch has a separate
-[acceptance checklist](.scratch/tcg-collection-tracker/launch-checklist.md).
+[acceptance checklist](docs/planning/tcg-collection-tracker/launch-checklist.md).
 Sign-in uses email codes and defaults to the configured owner account only.
 
 ## Run locally
@@ -148,15 +148,15 @@ Browser requests use one origin. Vite proxies `/auth` and `/api` to the auth gat
 which verifies sessions and signs protected requests to FastAPI. Keep the API behind
 that gateway. Anonymous deck and discovery reads use a sanitized public projection.
 
-| Path                               | Purpose                                                                  |
-| ---------------------------------- | ------------------------------------------------------------------------ |
-| `web/src/`                         | React views and generated API clients                                    |
-| `auth/src/`                        | Better Auth, email delivery, and API gateway                             |
-| `api/app/`                         | Inventory, catalog, decks, publications, and operations logic            |
-| `migrations/`                      | Database schema migrations                                               |
-| `scripts/`                         | Migrations, client generation, verification, recovery, and release tools |
-| `docs/`                            | Architecture decisions and operational guides                            |
-| `.scratch/tcg-collection-tracker/` | Specification, implementation tickets, and launch evidence               |
+| Path                                    | Purpose                                                                             |
+| --------------------------------------- | ----------------------------------------------------------------------------------- |
+| `web/src/`                              | React views and generated API clients                                               |
+| `auth/src/`                             | Better Auth, email delivery, and API gateway                                        |
+| `api/app/`                              | Inventory, catalog, decks, publications, and operations logic                       |
+| `migrations/`                           | Database schema migrations                                                          |
+| `scripts/`                              | Migrations, client generation, verification, recovery, and release tools            |
+| `docs/`                                 | Architecture decisions and operational guides                                       |
+| `docs/planning/tcg-collection-tracker/` | Specification, Wayfinder decisions, and launch evidence (tickets are GitHub Issues) |
 
 FastAPI's OpenAPI schemas generate the TypeScript clients. Edit the generators or
 API contracts rather than editing generated clients directly.
@@ -189,7 +189,7 @@ authorized.
 ## Further reading
 
 - [Domain model](CONTEXT.md): printings, editions, holdings, locations, and decks.
-- [Product specification](.scratch/tcg-collection-tracker/spec.md) and
+- [Product specification](docs/planning/tcg-collection-tracker/spec.md) and
   [local issue tracker](docs/agents/issue-tracker.md): scope and implementation history.
 - [Architecture decisions](docs/adr/): stack, on-demand imports, and provider decisions.
 - [Provider adapters](docs/provider-adapters.md) and

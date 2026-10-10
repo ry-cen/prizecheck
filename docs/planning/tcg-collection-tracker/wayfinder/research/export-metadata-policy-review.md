@@ -1,6 +1,6 @@
 # Export metadata policy review
 
-Reviewed: 2026-10-08. Architect review of [Decide export metadata provenance and correction](../tickets/24-decide-export-metadata-contract.md). Planning policy only; no implementation, destination or database test.
+Reviewed: 2026-10-08. Architect review of [Decide export metadata provenance and correction](https://github.com/ry-cen/tcg-tracker/issues/43). Planning policy only; no implementation, destination or database test.
 
 ## Completed architect report
 

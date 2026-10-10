@@ -1,6 +1,6 @@
 # Edition compatibility policy review
 
-Reviewed on 2026-10-08 by the scoped architect who performed the earlier [read-only audit](edition-marketplace-compatibility-audit.md). The primary integrated the report. Scope: [accepted compatibility resolution](../resolutions/23-decide-marketplace-metadata-separation.md), active/historical ticket criteria, [scope ADR](../../../../docs/adr/0007-edition-marketplace-metadata-boundary.md) and export metadata cross-reference. No new database attempts, application edits or child delegation occurred.
+Reviewed on 2026-10-08 by the scoped architect who performed the earlier [read-only audit](edition-marketplace-compatibility-audit.md). The primary integrated the report. Scope: [accepted compatibility resolution](../resolutions/23-decide-marketplace-metadata-separation.md), active/historical ticket criteria, [scope ADR](../../../../adr/0007-edition-marketplace-metadata-boundary.md) and export metadata cross-reference. No new database attempts, application edits or child delegation occurred.
 
 ## Outcome
 
@@ -11,8 +11,8 @@ The owner-approved actual-datastore preflight and reviewed correction plan are m
 ## Requirements retained for the handoff
 
 - `/to-spec` and later implementation: target-datastore census, compatibility storage/alias representation, reviewed correction procedure, atomicity/recovery and regression evidence. These must account for references outside current Holdings.
-- [Export metadata provenance and correction](../tickets/24-decide-export-metadata-contract.md): initial/replacement mapping verification evidence, provenance, correction responsibility and maintenance. Changed mappings remain ineligible pending catalog-maintainer verification under the accepted policy.
-- [Published Deck prices and snapshot compatibility](../tickets/20-decide-published-price-contract.md): public coordination/storage, legacy snapshot compatibility, revocation and version-safe totals using reviewed mappings.
+- [Export metadata provenance and correction](https://github.com/ry-cen/tcg-tracker/issues/43): initial/replacement mapping verification evidence, provenance, correction responsibility and maintenance. Changed mappings remain ineligible pending catalog-maintainer verification under the accepted policy.
+- [Published Deck prices and snapshot compatibility](https://github.com/ry-cen/tcg-tracker/issues/39): public coordination/storage, legacy snapshot compatibility, revocation and version-safe totals using reviewed mappings.
 
 The local database's refused connection and small/synthetic source observations are not passing persisted-data, rollout or concurrency evidence. This was a read-only document review, not implementation or runtime testing.
 

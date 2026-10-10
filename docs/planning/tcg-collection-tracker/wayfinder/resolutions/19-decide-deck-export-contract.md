@@ -2,7 +2,7 @@
 
 **Decision:** accepted by the owner on 2026-10-08 with “yes to all” for the four export-contract questions.
 
-**Ticket:** [Decide Deck export precision and fallback behavior](../tickets/19-decide-deck-export-contract.md).
+**Ticket:** [Decide Deck export precision and fallback behavior](https://github.com/ry-cen/tcg-tracker/issues/38).
 
 ## Actions and exported contents
 
@@ -16,7 +16,7 @@ Combine quantities only when Editions share the same verified Live card identifi
 
 If any included card lacks required Live metadata or has an unresolved/unsupported target mapping, block the Live export and identify all unresolved cards. Do not silently drop copies, replace a Printing, or offer a partial list as the full Deck.
 
-The inspected Limitless formatter uses category-count headings, quantity/name/set/number rows, blank lines between groups, and no Total Cards footer. These observations establish a format reference, not proof that Live accepts every special promo/subset/Energy mapping. [Live price and export fixtures](../tickets/21-verify-price-and-export-fixtures.md) retains actual importer acceptance as open evidence.
+The inspected Limitless formatter uses category-count headings, quantity/name/set/number rows, blank lines between groups, and no Total Cards footer. These observations establish a format reference, not proof that Live accepts every special promo/subset/Energy mapping. [Live price and export fixtures](https://github.com/ry-cen/tcg-tracker/issues/40) retains actual importer acceptance as open evidence.
 
 ## TCGplayer matching and fallback
 
@@ -34,6 +34,6 @@ For unusually large Decks, preserve quantities and provide full text instead of 
 
 ## Next decisions and evidence
 
-The now-specific [export metadata provenance and correction decision](../tickets/24-decide-export-metadata-contract.md) owns Live categories/identifiers, promo and Energy crosswalks, verified marketplace references, and how missing mappings become available. [Published prices and snapshot compatibility](../tickets/20-decide-published-price-contract.md) owns old public snapshots and sanitized projection evolution.
+The now-specific [export metadata provenance and correction decision](https://github.com/ry-cen/tcg-tracker/issues/43) owns Live categories/identifiers, promo and Energy crosswalks, verified marketplace references, and how missing mappings become available. [Published prices and snapshot compatibility](https://github.com/ry-cen/tcg-tracker/issues/39) owns old public snapshots and sanitized projection evolution.
 
 The original [export research](../research/deck-export-formats.md) verified Limitless's first-party formatter and Mass Entry href, not successful Live import or Mass Entry destination prefill. Those evidence gaps remain open. This resolution records product choices only; it does not implement the serializer, grant mapping certainty, or complete the later specification.

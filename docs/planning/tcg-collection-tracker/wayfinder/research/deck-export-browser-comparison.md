@@ -1,6 +1,6 @@
 # Deck export browser comparison
 
-Observed on 2026-10-08 in the Codex in-app browser on macOS. The owner authorized replacing the clipboard with the public reference list and requested comparison with a similar Limitless deck in place of opening the locked native Pokémon TCG Live client. [Planning evidence scope](../../../../docs/adr/0005-deck-export-planning-evidence.md).
+Observed on 2026-10-08 in the Codex in-app browser on macOS. The owner authorized replacing the clipboard with the public reference list and requested comparison with a similar Limitless deck in place of opening the locked native Pokémon TCG Live client. [Planning evidence scope](../../../../adr/0005-deck-export-planning-evidence.md).
 
 ## Similar public Decks
 

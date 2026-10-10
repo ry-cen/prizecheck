@@ -2,7 +2,7 @@
 
 **Decision:** owner accepted the simplified shared-model planning boundary on 2026-10-08 by moving to the next Wayfinder ticket after the architect review.
 
-**Ticket:** [Decide Published Deck prices and snapshot compatibility](../tickets/20-decide-published-price-contract.md).
+**Ticket:** [Decide Published Deck prices and snapshot compatibility](https://github.com/ry-cen/tcg-tracker/issues/39).
 
 ## Published rows and shared facts
 

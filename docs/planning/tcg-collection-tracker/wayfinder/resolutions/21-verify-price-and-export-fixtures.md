@@ -1,8 +1,8 @@
 # Resolution — Bounded price fixtures and public export comparison
 
-**Ticket:** [Verify live price and export fixtures](../tickets/21-verify-price-and-export-fixtures.md).
+**Ticket:** [Verify live price and export fixtures](https://github.com/ry-cen/tcg-tracker/issues/40).
 
-**Outcome:** planning investigation complete on 2026-10-08 under the [owner's amended evidence scope](../../../../docs/adr/0005-deck-export-planning-evidence.md). This is not a successful Pokémon TCG Live compatibility check.
+**Outcome:** planning investigation complete on 2026-10-08 under the [owner's amended evidence scope](../../../../adr/0005-deck-export-planning-evidence.md). This is not a successful Pokémon TCG Live compatibility check.
 
 ## Observations
 
@@ -16,7 +16,7 @@ TCGplayer Mass Entry visibly prefilled all 35 reference quantity/product-ID rows
 
 Native app access reported a locked Mac. The owner instructed comparison against a similar Limitless deck instead of opening Live. Actual game import, promos/ALT/subset acceptance, malformed/incomplete cases, manual Mass Entry matching, oversized links and exact physical finish/condition matching remain explicit handoff checks in the evidence note. There is no claim of game acceptance, universal price coverage or a successful exact-Edition cart.
 
-The evidence informs [export metadata provenance and correction](../tickets/24-decide-export-metadata-contract.md), [marketplace metadata separation and existing Edition compatibility](../tickets/23-decide-marketplace-metadata-separation.md) and [price refresh scope and workload bounds](../tickets/22-decide-price-refresh-boundary.md). Those decisions remain open. No application code, feature spec or implementation tickets were written.
+The evidence informs [export metadata provenance and correction](https://github.com/ry-cen/tcg-tracker/issues/43), [marketplace metadata separation and existing Edition compatibility](https://github.com/ry-cen/tcg-tracker/issues/42) and [price refresh scope and workload bounds](https://github.com/ry-cen/tcg-tracker/issues/41). Those decisions remain open. No application code, feature spec or implementation tickets were written.
 
 ## Agent and verification
 

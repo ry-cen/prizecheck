@@ -2,7 +2,7 @@
 
 **Decision:** accepted by the owner on 2026-10-08 with “yes to all” for the price-contract round.
 
-**Ticket:** [Decide card-price presentation and Deck cost](../tickets/18-decide-price-contract.md).
+**Ticket:** [Decide card-price presentation and Deck cost](https://github.com/ry-cen/tcg-tracker/issues/37).
 
 ## Price meaning and surfaces
 
@@ -20,7 +20,7 @@ An empty Deck can show a $0.00 subtotal with “No cards.” A nonempty Deck wit
 
 ## Freshness and retained quotes
 
-**Current schedule:** [Access-triggered price refresh](../../../../docs/adr/0006-access-triggered-price-refresh.md) supersedes the original daily schedule and owner Refresh prices control. The [accepted refresh contract](22-decide-price-refresh-boundary.md) holds the automatic-only access, one-hour/24-hour/three-second behavior, shared bounded work and confirmed-absence policy. No users have manual price refresh. Displayed card prices and complete private/Published Deck costs count as access, including public visitors; no daily fallback updates unaccessed cards. Numeric workload/retry limits and the public-only projection mechanism remain for `/to-spec` and the Published Deck decision. The source-age and retained-quote-on-failure rules below remain accepted; confirmed source unavailability supersedes an older quote as specified in the refresh contract.
+**Current schedule:** [Access-triggered price refresh](../../../../adr/0006-access-triggered-price-refresh.md) supersedes the original daily schedule and owner Refresh prices control. The [accepted refresh contract](22-decide-price-refresh-boundary.md) holds the automatic-only access, one-hour/24-hour/three-second behavior, shared bounded work and confirmed-absence policy. No users have manual price refresh. Displayed card prices and complete private/Published Deck costs count as access, including public visitors; no daily fallback updates unaccessed cards. Numeric workload/retry limits and the public-only projection mechanism remain for `/to-spec` and the Published Deck decision. The source-age and retained-quote-on-failure rules below remain accepted; confirmed source unavailability supersedes an older quote as specified in the refresh contract.
 
 Continue showing and including the last known quote when refresh fails, provided its Edition mapping remains defensible. Mark a quote **stale** when its provider pricing timestamp is more than 48 hours old. Do not use the card metadata update time or a recent application fetch to make an old quote appear fresh. If the source pricing timestamp is absent or unusable, show **Age unknown**; a fetch timestamp may be shown separately but cannot establish price age.
 
@@ -32,12 +32,12 @@ A six-card Deck contains three copies quoted at $0.25 with a fresh source timest
 
 ## Boundaries and remaining decisions
 
-Published Decks support these prices and aggregate semantics. The owner already chose refreshed quotes for the fixed published cards. Private edits must not change public card quantities. [Published Deck prices and compatibility](../tickets/20-decide-published-price-contract.md) owns the public-object behavior and migration; this resolution does not replace that contract.
+Published Decks support these prices and aggregate semantics. The owner already chose refreshed quotes for the fixed published cards. Private edits must not change public card quantities. [Published Deck prices and compatibility](https://github.com/ry-cen/tcg-tracker/issues/39) owns the public-object behavior and migration; this resolution does not replace that contract.
 
-[Price refresh scope and workload bounds](../tickets/22-decide-price-refresh-boundary.md) is now unblocked. [Marketplace metadata separation and Edition compatibility](../tickets/23-decide-marketplace-metadata-separation.md) owns defensible mapping rules and preservation of existing identities. [Live price and export fixtures](../tickets/21-verify-price-and-export-fixtures.md) retains unverified source/destination evidence. Export defaults and fallbacks remain in [Deck export precision and fallback](../tickets/19-decide-deck-export-contract.md).
+[Price refresh scope and workload bounds](https://github.com/ry-cen/tcg-tracker/issues/41) is now unblocked. [Marketplace metadata separation and Edition compatibility](https://github.com/ry-cen/tcg-tracker/issues/42) owns defensible mapping rules and preservation of existing identities. [Live price and export fixtures](https://github.com/ry-cen/tcg-tracker/issues/40) retains unverified source/destination evidence. Export defaults and fallbacks remain in [Deck export precision and fallback](https://github.com/ry-cen/tcg-tracker/issues/38).
 
 This is an accepted product decision, not application implementation, a validated production feed, or a completed specification. The existing three live price samples and earlier architect review remain evidence with their stated limitations. No additional agent delegation or application tests were necessary to record the owner's answers.
 
 ## Historical refresh schedule
 
-Superseded by [ADR: access-triggered price refresh](../../../../docs/adr/0006-access-triggered-price-refresh.md) on 2026-10-08: “Refresh locally stored price information daily and provide an owner Refresh prices control. Opening a card or Deck does not require a live TCGdex request. Refresh scheduling, workload bounds and the public projection mechanism remain separate design decisions.”
+Superseded by [ADR: access-triggered price refresh](../../../../adr/0006-access-triggered-price-refresh.md) on 2026-10-08: “Refresh locally stored price information daily and provide an owner Refresh prices control. Opening a card or Deck does not require a live TCGdex request. Refresh scheduling, workload bounds and the public projection mechanism remain separate design decisions.”

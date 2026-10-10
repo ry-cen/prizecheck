@@ -9,9 +9,9 @@ Two researchers investigated pricing and export contracts in separate exclusivel
 ## Review findings incorporated
 
 - Distinguish observed product-ID Mass Entry links from documented typed input. A typed-text deep link remains unverified; readable copyable text is the fallback.
-- [Refresh scope and workload bounds](../tickets/22-decide-price-refresh-boundary.md) explicitly owns refresh universe, published-card inclusion, workload and partial-failure decisions.
-- [Marketplace metadata separation and existing Edition compatibility](../tickets/23-decide-marketplace-metadata-separation.md) owns current `thirdParty` contamination of Edition descriptors. Existing code retains withdrawn variants pending review; no automatic Holding movement or persisted contamination count was demonstrated.
-- [Published price design](../tickets/20-decide-published-price-contract.md) carries delayed-refresh invariants: no token resurrection, stale overwrite, mismatched snapshot totals, private-data exposure or anonymous database wakeups.
+- [Refresh scope and workload bounds](https://github.com/ry-cen/tcg-tracker/issues/41) explicitly owns refresh universe, published-card inclusion, workload and partial-failure decisions.
+- [Marketplace metadata separation and existing Edition compatibility](https://github.com/ry-cen/tcg-tracker/issues/42) owns current `thirdParty` contamination of Edition descriptors. Existing code retains withdrawn variants pending review; no automatic Holding movement or persisted contamination count was demonstrated.
+- [Published price design](https://github.com/ry-cen/tcg-tracker/issues/39) carries delayed-refresh invariants: no token resurrection, stale overwrite, mismatched snapshot totals, private-data exposure or anonymous database wakeups.
 
 The architect reviewed code paths and planning artifacts, not persisted Edition records or independent live payloads. Its review does not approve unanswered owner choices or an implementation design.
 

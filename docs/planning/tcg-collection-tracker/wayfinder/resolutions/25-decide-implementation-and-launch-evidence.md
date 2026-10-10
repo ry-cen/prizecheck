@@ -2,7 +2,7 @@
 
 **Decision:** owner accepted all three questions with “yes to all” on 2026-10-08.
 
-**Ticket:** [Decide implementation acceptance and launch evidence](../tickets/25-decide-implementation-and-launch-evidence.md).
+**Ticket:** [Decide implementation acceptance and launch evidence](https://github.com/ry-cen/tcg-tracker/issues/44).
 
 ## Implementation completion evidence
 

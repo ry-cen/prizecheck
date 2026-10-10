@@ -2,7 +2,7 @@
 
 **Status:** accepted planning proposal; no implementation approved or performed.
 
-**Ticket:** [Decide Published Deck prices and snapshot compatibility](../tickets/20-decide-published-price-contract.md).
+**Ticket:** [Decide Published Deck prices and snapshot compatibility](https://github.com/ry-cen/tcg-tracker/issues/39).
 
 **Latest review routing:** task `a514454542f348a28273eca75f185a03`; completed attempt `3c49162f1b73494d875bcc25628f54d2`.
 
@@ -10,8 +10,8 @@
 
 ## Established decisions
 
-- A Published Deck is a sanitized snapshot rather than a live private Deck or Location. Published rows and quantities remain fixed until republish; current private Holdings never replace them ([context](../../../../CONTEXT.md), [public snapshot resolution](../resolutions/09-decide-public-deck-contract.md)).
-- Automatic price refresh is access-triggered: use cache under one hour; refresh in the background from one to 24 hours; at hard expiry, the whole price/Deck-cost interaction has a three-second maximum. No user can force a refresh ([ADR 0006](../../../../docs/adr/0006-access-triggered-price-refresh.md), [refresh resolution](../resolutions/22-decide-price-refresh-boundary.md)).
+- A Published Deck is a sanitized snapshot rather than a live private Deck or Location. Published rows and quantities remain fixed until republish; current private Holdings never replace them ([context](../../../../../CONTEXT.md), [public snapshot resolution](../resolutions/09-decide-public-deck-contract.md)).
+- Automatic price refresh is access-triggered: use cache under one hour; refresh in the background from one to 24 hours; at hard expiry, the whole price/Deck-cost interaction has a three-second maximum. No user can force a refresh ([ADR 0006](../../../../adr/0006-access-triggered-price-refresh.md), [refresh resolution](../resolutions/22-decide-price-refresh-boundary.md)).
 - Latest verified metadata, mapping invalidation, and deterministic Live derivation rules apply automatically to the same fixed published Printing/Edition. A correction cannot substitute a different physical card ([export metadata resolution](../resolutions/24-decide-export-metadata-contract.md)).
 - The owner accepted readable legacy pages and unchanged discovery: prices and exports stay on the selected Published Deck page; search does not fetch prices or add price/cost sorting or filtering.
 
@@ -52,9 +52,9 @@ The earlier architect review (task `ecef4cc84ace4b7783bf2b27c75b9618`, completed
 
 ## Evidence and limitations
 
-`catalog_edition` is a shared Edition linked to a Printing and uniquely keyed by its descriptor ([`migrations/003_catalog.sql:40`](../../../../migrations/003_catalog.sql#L40)). Generation records reference those shared Editions ([`migrations/003_catalog.sql:75`](../../../../migrations/003_catalog.sql#L75)). `holding` keys quantity by owner, storage leaf, and Edition, and holds are limited to storage leaves/decks ([`migrations/006_add_holdings.sql:3`](../../../../migrations/006_add_holdings.sql#L3), [`migrations/006_add_holdings.sql:24`](../../../../migrations/006_add_holdings.sql#L24)); additions increment that shared key ([`api/app/holdings.py:118`](../../../../api/app/holdings.py#L118)).
+`catalog_edition` is a shared Edition linked to a Printing and uniquely keyed by its descriptor ([`migrations/003_catalog.sql:40`](../../../../../migrations/003_catalog.sql#L40)). Generation records reference those shared Editions ([`migrations/003_catalog.sql:75`](../../../../../migrations/003_catalog.sql#L75)). `holding` keys quantity by owner, storage leaf, and Edition, and holds are limited to storage leaves/decks ([`migrations/006_add_holdings.sql:3`](../../../../../migrations/006_add_holdings.sql#L3), [`migrations/006_add_holdings.sql:24`](../../../../../migrations/006_add_holdings.sql#L24)); additions increment that shared key ([`api/app/holdings.py:118`](../../../../../api/app/holdings.py#L118)).
 
-Current publication code freezes display fields and quantity ([`api/app/publications.py:132`](../../../../api/app/publications.py#L132)) and persists the active projection/content envelope through its durable outbox ([`api/app/publications.py:209`](../../../../api/app/publications.py#L209)). Existing public tests prohibit internal UUID disclosure ([`api/tests/test_publications.py:50`](../../../../api/tests/test_publications.py#L50)). The `thirdParty` nested-descriptor hazard belongs to the already accepted Edition-compatibility decision, not this shared-reference choice ([`api/app/catalog.py:45`](../../../../api/app/catalog.py#L45)).
+Current publication code freezes display fields and quantity ([`api/app/publications.py:132`](../../../../../api/app/publications.py#L132)) and persists the active projection/content envelope through its durable outbox ([`api/app/publications.py:209`](../../../../../api/app/publications.py#L209)). Existing public tests prohibit internal UUID disclosure ([`api/tests/test_publications.py:50`](../../../../../api/tests/test_publications.py#L50)). The `thirdParty` nested-descriptor hazard belongs to the already accepted Edition-compatibility decision, not this shared-reference choice ([`api/app/catalog.py:45`](../../../../../api/app/catalog.py#L45)).
 
 The architect performed a read-only review only: no code, tests, datastore census, external research, Live import, or exact physical marketplace-match proof was performed.
 
