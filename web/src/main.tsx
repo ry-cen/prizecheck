@@ -347,9 +347,23 @@ function App() {
   );
 }
 
+const collectorPreview =
+  import.meta.env.DEV &&
+  location.pathname === "/locations" &&
+  new URLSearchParams(location.search).get("prototype") === "collector";
+const CollectorPreview = import.meta.env.DEV
+  ? React.lazy(
+      () => import("./prototypes/collector-workspace/CollectorWorkspace")
+    )
+  : () => null;
+
 const publishedRoute = /^\/published\/([^/]+)$/.exec(location.pathname);
 createRoot(document.getElementById("root")!).render(
-  publishedRoute ? (
+  collectorPreview ? (
+    <React.Suspense fallback={<p>Loading sample workspace…</p>}>
+      <CollectorPreview />
+    </React.Suspense>
+  ) : publishedRoute ? (
     <PublishedDeck token={publishedRoute[1]} />
   ) : location.pathname === "/discover" ? (
     <Discovery />
