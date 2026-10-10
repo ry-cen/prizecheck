@@ -24,7 +24,7 @@ def ts_type(value):
 
 schema = app.openapi()["components"]["schemas"]
 lines = ["// Generated from FastAPI OpenAPI by scripts/generate_prices_client.py. Do not edit."]
-for name in ("PriceRow", "PricesResponse"):
+for name in ("PriceRow", "PricesResponse", "DeckCost"):
     definition = schema[name]
     # The route always serializes every field, so every field is present even where the model has a default.
     fields = [f"{field}: {ts_type(value)}" for field, value in definition["properties"].items()]
@@ -43,6 +43,15 @@ export async function getEditionPrices(editionIds: string[], signal?: AbortSigna
     throw new PriceError(response.status, payload?.detail?.code ?? 'PRICE_REQUEST_FAILED');
   }}
   return response.json() as Promise<PricesResponse>;
+}}
+// One access prices every copy of the Deck server-side; the browser never sums rows or pages.
+export async function getDeckCost(deckId: string, signal?: AbortSignal): Promise<DeckCost> {{
+  const response = await fetch(`/api/decks/${{encodeURIComponent(deckId)}}/cost`, {{ method: 'GET', credentials: 'same-origin', signal }});
+  if (!response.ok) {{
+    const payload = await response.json().catch(() => ({{}}));
+    throw new PriceError(response.status, payload?.detail?.code ?? 'PRICE_REQUEST_FAILED');
+  }}
+  return response.json() as Promise<DeckCost>;
 }}
 """)
 content = "\n".join(lines)

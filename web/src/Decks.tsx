@@ -12,6 +12,7 @@ import { Holdings } from "./Holdings";
 import { PublishDeck } from "./PublishDeck";
 import { DeckLiveExport } from "./DeckLiveExport";
 import { DeckMassEntryExport } from "./DeckMassEntryExport";
+import { DeckCostSummary } from "./DeckCost";
 
 export function Decks() {
   const [cursor, setCursor] = useState<string | null>(null);
@@ -150,6 +151,13 @@ export function Decks() {
                 ? `${detail.checks.shortage} cards short of 60`
                 : `${detail.checks.excess} cards over 60`}
           </p>
+          <DeckCostSummary
+            key={`cost-${detail.deck.id}`}
+            deckId={detail.deck.id}
+            ownerRevision={detail.owner_revision}
+            totalCopies={detail.checks.total}
+            onNewerRevision={() => void refreshChecks(detail.deck.id)}
+          />
           <ul>
             {detail.checks.identities.map((identity) => (
               <li key={identity.identity_id}>
