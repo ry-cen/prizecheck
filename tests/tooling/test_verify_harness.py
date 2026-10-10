@@ -48,6 +48,23 @@ class VerifyArgumentsTest(unittest.TestCase):
         self.assertEqual((verify.port_count(1), verify.port_count(4)), (6, 15))
 
 
+class ClockGuardTest(unittest.TestCase):
+    def test_a_quiet_run_has_no_warnings(self):
+        self.assertEqual(verify.clock_warnings(1.2, {'start': 0.04, 'end': -0.3}), [])
+        self.assertEqual(verify.clock_warnings(0.0, {'start': None, 'end': None}), [])
+
+    def test_a_suspended_host_or_a_skewed_database_clock_is_reported(self):
+        warnings = verify.clock_warnings(540.0, {'start': 0.04, 'end': -312.5})
+        self.assertEqual(len(warnings), 2)
+        self.assertIn('suspended for about 540 s', warnings[0])
+        self.assertIn('-312.5 s off the host clock at the end', warnings[1])
+
+    def test_the_gate_runs_ci_sh_with_the_selectors(self):
+        command = verify.gate_command(['-k', 'x'])
+        self.assertEqual(command[-4:], ['bash', 'scripts/ci.sh', '-k', 'x'])
+        self.assertIn(command[0], ('bash', 'caffeinate'))
+
+
 class RunPytestTest(unittest.TestCase):
     def test_marker_expressions(self):
         self.assertEqual(run_pytest.marker_expressions(False), ('not serial', 'serial'))

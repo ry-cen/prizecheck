@@ -9,6 +9,7 @@ import shutil
 import socket
 import subprocess
 import tempfile
+import time
 from urllib.parse import urlsplit, urlunsplit
 
 import psycopg
@@ -74,6 +75,40 @@ def database_url(admin_url, name):
     return urlunsplit(urlsplit(admin_url)._replace(path='/' + name))
 
 
+SUSPEND_LIMIT_S = 5.0     # wall time beyond the monotonic clock: the host slept (both clocks stop counting together otherwise)
+SKEW_LIMIT_S = 2.0        # PostgreSQL's clock against this host's; approval-code expiry compares the two
+
+
+def database_skew(admin_url):
+    """Seconds by which the database server's clock is ahead of this host's (negative when it lags), or None."""
+    try:
+        with psycopg.connect(admin_url, autocommit=True, connect_timeout=5) as conn:
+            before = time.time()
+            server = conn.execute('SELECT extract(epoch FROM clock_timestamp())').fetchone()[0]
+            after = time.time()
+        return round(float(server) - (before + after) / 2, 3)
+    except psycopg.Error:
+        return None
+
+
+def clock_warnings(suspended, skews):
+    """Lines that say this run's timing and expiry failures are not evidence: the host slept, or the database clock
+    disagreed with the host's (Docker's VM clock lags after the host sleeps and catches up later)."""
+    lines = []
+    if suspended > SUSPEND_LIMIT_S:
+        lines.append(f'the host was suspended for about {suspended:.0f} s during this run')
+    for when, skew in skews.items():
+        if skew is not None and abs(skew) > SKEW_LIMIT_S:
+            lines.append(f'the database clock was {skew:+.1f} s off the host clock at the {when} of this run')
+    return lines
+
+
+def gate_command(selectors):
+    """ci.sh, kept from idle sleep where the host offers caffeinate (macOS). A closed lid on battery still sleeps."""
+    command = ['bash', 'scripts/ci.sh', *selectors]
+    return ['caffeinate', '-i', *command] if shutil.which('caffeinate') else command
+
+
 def drop_databases(admin_url, name, created):
     """Drop the run's databases and anything else left under its name."""
     with psycopg.connect(admin_url, autocommit=True) as conn:
@@ -131,8 +166,17 @@ def main(argv=None):
                     created.append(database)
             for sock in reservations:
                 sock.close()
+            skews = {'start': database_skew(args.admin_url)}
+            wall, steady = time.time(), time.monotonic()
             with (artifacts/'verification.log').open('w') as log:
-                result = subprocess.run(['bash', 'scripts/ci.sh', *args.selectors], cwd=checkout, env=env, stdout=log, stderr=subprocess.STDOUT).returncode
+                result = subprocess.run(gate_command(args.selectors), cwd=checkout, env=env, stdout=log, stderr=subprocess.STDOUT).returncode
+            suspended = round(max(0.0, (time.time() - wall) - (time.monotonic() - steady)), 1)
+            skews['end'] = database_skew(args.admin_url)
+            warnings = clock_warnings(suspended, skews)
+            if warnings:
+                with (artifacts/'verification.log').open('a') as log:
+                    log.write('\n'.join(f'== WARNING: {line}; wall-clock and expiry failures in this run are not evidence. '
+                                         'Keep the host awake and rerun.' for line in warnings) + '\n')
             try:
                 timings = summarize(artifacts)
             except Exception as error:  # A broken report never changes the gate's result.
@@ -141,7 +185,8 @@ def main(argv=None):
                 'run': identifier, 'exit_code': result, 'suite': args.suite, 'selectors': args.selectors,
                 'browser_args': args.selectors if args.suite == 'browser' else [], 'fast': args.fast,
                 'pytest_workers': pytest_workers, 'browser_workers': browser_workers, 'ports': ports, 'databases': names,
-                'database_removed': False, 'timings': timings}))
+                'database_removed': False, 'timings': timings, 'host_suspended_seconds': suspended,
+                'database_clock_skew_seconds': skews, 'clock_warnings': warnings}))
     finally:
         for sock in reservations:
             sock.close()
@@ -151,6 +196,9 @@ def main(argv=None):
                 report = json.loads((artifacts/'result.json').read_text())
                 report['database_removed'] = True
                 (artifacts/'result.json').write_text(json.dumps(report))
+        if (artifacts/'result.json').exists():
+            for line in json.loads((artifacts/'result.json').read_text()).get('clock_warnings', []):
+                print(f'WARNING: {line}; timing failures in this run are not evidence. Keep the host awake and rerun.')
         print(f'Verification artifacts: {artifacts}')
     return result if result is not None else 1
 
