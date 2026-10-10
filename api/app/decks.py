@@ -152,14 +152,19 @@ def deck_detail(deck_id: UUID, user_id: str = Depends(verified_user)):
                                size_status=evaluated.size_status,identities=identities))
 
 
-def capture_deck_contents(deck_id: UUID, user_id: str) -> DeckContents:
+def capture_deck_contents(deck_id: UUID, user_id: str, timeout_ms: int | None = None) -> DeckContents:
     """Detach a complete inventory capture before any pricing/export source work.
 
     Inventory writers serialize on the owner row, so the revision and every
     Edition quantity belong to the same committed inventory state. Catalog
     activation is fenced separately for the captured catalog revision.
+    ``timeout_ms`` bounds every statement and lock wait (the budgeted Deck cost
+    route passes what is left of its three seconds).
     """
     with connect() as conn, conn.transaction():
+        if timeout_ms is not None:
+            conn.execute(f'SET LOCAL statement_timeout = {max(1, int(timeout_ms))}')
+            conn.execute(f'SET LOCAL lock_timeout = {max(1, int(timeout_ms))}')
         revision, rows = owner_and_rows(conn, user_id)
         deck = rows.get(deck_id)
         if not deck or deck['kind'] != 'deck':

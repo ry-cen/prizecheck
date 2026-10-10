@@ -1,4 +1,4 @@
-"""Trusted request budget for deadline-bound routes (prices today; Deck cost and public quotes later).
+"""Trusted request budget for deadline-bound routes (Edition prices, private Deck cost; public quotes later).
 
 The gateway takes the receipt time, spends part of the three seconds on its own work, and signs what is
 left for the API: milliseconds remaining, a timestamp, and the caller. A client can neither extend that
@@ -25,9 +25,10 @@ MAX_BODY_BYTES = 16 * 1024
 FINAL_MARGIN_MS = 50              # Left after the final validation times out, to build the response.
 
 # (method, path pattern) for every route that carries a gateway budget. Keep in step with BUDGETED_ROUTES in
-# auth/src/server.ts: tickets 09 and 12 each add one line to both lists.
+# auth/src/server.ts: ticket 12 adds one line to both lists.
 BUDGETED_ROUTES = (
     ('POST', re.compile(r'^/api/prices/editions$')),
+    ('GET', re.compile(r'^/api/decks/[^/]+/cost$')),
 )
 
 
