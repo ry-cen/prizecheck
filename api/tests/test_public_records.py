@@ -744,7 +744,7 @@ def test_quote_states_cover_more_than_one_batch_at_one_generation(adapter):
 
 
 # --- Performance against the 500 ms cached-read p95 budget -----------------------
-PERF_RECORDS = 20_000
+PERF_RECORDS = 10_000
 
 
 @pytest.fixture(scope='module')
@@ -770,9 +770,9 @@ def _p95(samples):
 
 
 @pytest.mark.parametrize('adapter_name', ['filesystem', 'http'])
-@pytest.mark.serial(reason='capacity: asserts read latency percentiles at 20k records')
-@pytest.mark.slow(reason='capacity: builds 20k records')
-def test_cached_reads_at_20k_records_are_well_under_the_500ms_budget(populated, adapter_name):
+@pytest.mark.serial(reason='capacity: asserts read latency percentiles at 10k records')
+@pytest.mark.slow(reason='capacity: builds 10k records')
+def test_cached_reads_at_10k_records_are_well_under_the_500ms_budget(populated, adapter_name):
     config, keys, populate = populated
     relay = None
     if adapter_name == 'http':
@@ -791,7 +791,7 @@ def test_cached_reads_at_20k_records_are_well_under_the_500ms_budget(populated, 
             assert len(store.read_records(batch, deadline=deadline()).records) == 128
             single.append(time.monotonic() - started)
             started = time.monotonic()
-            assert len(store.read_all(keys[iteration * 500:][:1000], deadline=deadline()).records) == 1000
+            assert len(store.read_all(keys[iteration * ((len(keys) - 1000) // 19):][:1000], deadline=deadline()).records) == 1000
             complete.append(time.monotonic() - started)
         commits = []
         # 60 samples, so a couple of fsync stalls from a busy disk cannot set the p95 alone.

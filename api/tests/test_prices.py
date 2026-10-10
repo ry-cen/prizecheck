@@ -526,7 +526,7 @@ def test_a_relay_that_stalls_cannot_hold_the_answer_past_three_seconds(store, mo
     Hanging.release = threading.Event()
     server = ThreadingHTTPServer(("127.0.0.1", 0), Hanging)
     server.daemon_threads = True
-    threading.Thread(target=server.serve_forever, daemon=True).start()
+    threading.Thread(target=server.serve_forever, kwargs={'poll_interval': 0.02}, daemon=True).start()
     monkeypatch.setenv("PUBLIC_PROJECTION_ADAPTER", "http")
     monkeypatch.setenv("PUBLIC_PROJECTION_URL", f"http://127.0.0.1:{server.server_port}")
     monkeypatch.setenv("PUBLIC_PROJECTION_TOKEN", "t")

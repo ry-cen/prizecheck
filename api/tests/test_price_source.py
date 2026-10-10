@@ -42,7 +42,8 @@ class Fake:
         self.server.daemon_threads = True
         self.server.handle_error = lambda *args: None
         self.origin = 'http://127.0.0.1:%d' % self.server.server_address[1]
-        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        # shutdown() waits up to one poll interval (0.5 s by default) for serve_forever to notice.
+        threading.Thread(target=self.server.serve_forever, kwargs={'poll_interval': 0.02}, daemon=True).start()
 
     def close(self):
         self.server.shutdown()

@@ -120,7 +120,7 @@ def test_eligible_watchdog_email_retries_same_alert_and_deduplicates(tmp_path):
             self.end_headers()
         def log_message(self,*args): pass
     server=ThreadingHTTPServer(('127.0.0.1',0),Relay)
-    worker=Thread(target=server.serve_forever,daemon=True);worker.start()
+    worker=Thread(target=server.serve_forever,kwargs={'poll_interval':0.02},daemon=True);worker.start()
     owner='alert-'+str(uuid4())
     with connect() as conn:
         conn.execute('DELETE FROM owner_binding')

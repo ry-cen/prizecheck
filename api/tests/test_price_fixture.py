@@ -133,7 +133,7 @@ def recorder():
 
     server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
     server.daemon_threads = True
-    threading.Thread(target=server.serve_forever, daemon=True).start()
+    threading.Thread(target=server.serve_forever, kwargs={'poll_interval': 0.02}, daemon=True).start()
     yield f'http://127.0.0.1:{server.server_port}', seen, state
     server.shutdown()
 
