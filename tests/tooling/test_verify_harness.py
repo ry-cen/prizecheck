@@ -24,6 +24,7 @@ run_pytest = load('run_pytest')
 run_playwright = load('run_playwright')
 verify_resources = load('verify_resources')
 verify_report = load('verify_report')
+verify_discard = load('verify_discard')
 ADMIN = 'postgresql://tcg@127.0.0.1:5432/postgres'
 
 
@@ -63,6 +64,31 @@ class ClockGuardTest(unittest.TestCase):
         command = verify.gate_command(['-k', 'x'])
         self.assertEqual(command[-4:], ['bash', 'scripts/ci.sh', '-k', 'x'])
         self.assertIn(command[0], ('bash', 'caffeinate'))
+
+
+class VerifyDiscardTest(unittest.TestCase):
+    def test_only_an_exact_run_directory_is_removed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runs = Path(directory) / 'verification'
+            run = runs / '20261010T195314Z-28c6ae5f'
+            run.mkdir(parents=True)
+            (run / 'verification.log').write_text('')
+            self.assertEqual(verify_discard.run_directory('20261010T195314Z-28c6ae5f', runs), run)
+            for bad in ('', ' ', '.', '..', '*', '20261010T195314Z-28c6ae5f/..', '../verification', '/', None):
+                with self.assertRaises(ValueError, msg=repr(bad)):
+                    verify_discard.run_directory(bad, runs)
+
+    def test_a_missing_or_foreign_directory_is_refused(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runs = Path(directory) / 'verification'
+            (runs / '20261010T195314Z-00000000').mkdir(parents=True)  # no log or result: not a run
+            for run_id in ('20261010T195314Z-00000000', '20261010T195314Z-11111111'):
+                with self.assertRaises(ValueError):
+                    verify_discard.run_directory(run_id, runs)
+
+    def test_the_command_refuses_an_empty_id_without_removing_anything(self):
+        self.assertEqual(verify_discard.main(['']), 2)
+        self.assertEqual(verify_discard.main([]), 2)
 
 
 class RunPytestTest(unittest.TestCase):
@@ -185,6 +211,23 @@ class VerifyReportTest(unittest.TestCase):
             self.assertIsNone(totals['playwright'])
             self.assertIsNone(totals['vitest'])
             self.assertIn('api.tests.test_a::test_x | parallel | 3.5', (run / 'verification.log').read_text())
+
+    def test_failed_tests_are_named_with_their_pass_and_worker(self):
+        with tempfile.TemporaryDirectory() as directory:
+            run = Path(directory)
+            (run / 'pytest-serial.xml').write_text('<testsuites><testsuite tests="2" failures="1" errors="0" skipped="0">'
+                                                   '<testcase classname="api.tests.test_a" name="test_x" time="1"><failure/></testcase>'
+                                                   '<testcase classname="api.tests.test_a" name="test_y" time="1"/></testsuite></testsuites>')
+            (run / 'playwright-parallel.json').write_text(json.dumps({'stats': {'expected': 1, 'unexpected': 1}, 'suites': [
+                {'specs': [{'file': 'moves.spec.ts', 'line': 15, 'title': 'drag', 'tests': [
+                    {'status': 'unexpected', 'results': [{'parallelIndex': 2, 'duration': 10}]}]},
+                           {'file': 'decks.spec.ts', 'line': 9, 'title': 'ok', 'tests': [
+                    {'status': 'expected', 'results': [{'parallelIndex': 0, 'duration': 10}]}]}]}]}))
+            (run / 'verification.log').write_text('')
+            totals = verify_report.summarize(run)
+            self.assertEqual(totals['failed'], ['playwright parallel: moves.spec.ts:15 › drag (unexpected, worker 2)',
+                                                'pytest serial: api.tests.test_a::test_x'])
+            self.assertIn('Failed tests:\n- playwright parallel: moves.spec.ts:15', (run / 'verification.log').read_text())
 
     def test_vitest_counts_include_tests_left_out_by_fast_as_skipped(self):
         with tempfile.TemporaryDirectory() as directory:

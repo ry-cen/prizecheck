@@ -123,6 +123,8 @@ def main(argv=None):
     identifier = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')+'-'+secrets.token_hex(4)
     artifacts = ROOT/'.scratch/verification'/identifier
     artifacts.mkdir(parents=True, mode=0o700)
+    # Printed first, so a run that is stopped early still names its own directory (scripts/verify_discard.py).
+    print(f'Verification run: {identifier}', flush=True)
     name = 'tcg_verify_'+secrets.token_hex(8)
     names = database_names(name, pytest_workers, browser_workers)
     created = []

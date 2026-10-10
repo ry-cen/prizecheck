@@ -94,8 +94,42 @@ def playwright_results(directory):
     return counts, cases
 
 
+def failed_tests(directory):
+    """Every failed or errored test, as '<suite> <pass>: <test>', read from the same reports as the counts. A flaky
+    Playwright test (failed, then passed on a retry) is listed too, marked flaky."""
+    directory, failed = Path(directory), []
+    for report in (*PYTEST_REPORTS, 'vitest.xml'):
+        path = directory / report
+        if not path.exists():
+            continue
+        suite = 'vitest' if report == 'vitest.xml' else 'pytest ' + report.split('-')[1].split('.')[0]
+        for case in ET.parse(path).getroot().iter('testcase'):
+            if case.find('failure') is not None or case.find('error') is not None:
+                separator = ' › ' if report == 'vitest.xml' else '::'
+                failed.append(f"{suite}: {case.get('classname')}{separator}{case.get('name')}")
+    for report in PLAYWRIGHT_REPORTS:
+        path = directory / report
+        if not path.exists():
+            continue
+        group = report.split('-')[1].split('.')[0]
+        suites = list(json.loads(path.read_text()).get('suites', []))
+        while suites:
+            suite = suites.pop()
+            suites.extend(suite.get('suites', []))
+            for spec in suite.get('specs', []):
+                for test in spec.get('tests', []):
+                    if test.get('status') in ('unexpected', 'flaky'):
+                        worker = ','.join(str(result.get('parallelIndex')) for result in test.get('results', []))
+                        failed.append(f"playwright {group}: {spec.get('file')}:{spec.get('line')} › {spec.get('title')}"
+                                      f" ({test.get('status')}, worker {worker})")
+    return sorted(failed)
+
+
 def markdown(summary):
-    lines = ['| Phase | Seconds |', '| --- | ---: |']
+    lines = []
+    if summary.get('failed'):
+        lines += ['Failed tests:', *(f'- {name}' for name in summary['failed']), '']
+    lines += ['| Phase | Seconds |', '| --- | ---: |']
     lines += [f'| {name} | {seconds} |' for name, seconds in summary['phases'].items()]
     for suite in ('pytest', 'vitest', 'playwright'):
         counts = summary[suite]['counts']
@@ -112,7 +146,7 @@ def collect(directory):
     pytest_counts, pytest_cases = pytest_results(directory)
     vitest_counts, vitest_cases = vitest_results(directory)
     playwright_counts, playwright_cases = playwright_results(directory)
-    return {'phases': phases(directory),
+    return {'phases': phases(directory), 'failed': failed_tests(directory),
             'pytest': {'counts': pytest_counts, 'slowest': pytest_cases[:30]},
             'vitest': {'counts': vitest_counts, 'slowest': vitest_cases[:20]},
             'playwright': {'counts': playwright_counts, 'slowest': playwright_cases[:20]}}
@@ -127,8 +161,8 @@ def summarize(directory):
     (directory / 'timings.md').write_text(text)
     with (directory / 'verification.log').open('a') as log:
         log.write('\n== verification summary\n' + text)
-    return {'phases': summary['phases'], 'pytest': summary['pytest']['counts'], 'vitest': summary['vitest']['counts'],
-            'playwright': summary['playwright']['counts']}
+    return {'phases': summary['phases'], 'failed': summary['failed'], 'pytest': summary['pytest']['counts'],
+            'vitest': summary['vitest']['counts'], 'playwright': summary['playwright']['counts']}
 
 
 if __name__ == '__main__':

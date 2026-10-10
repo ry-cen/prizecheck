@@ -10,7 +10,13 @@ export default defineConfig({
   // scripts/run_playwright.py passes --workers; tests in one file always run in order in one worker.
   workers: 1,
   fullyParallel: false,
-  use: { browserName: "chromium", headless: true },
+  // A failure keeps its trace and screenshot under TEST_BROWSER_OUTPUT/<pass>/ for diagnosis.
+  use: {
+    browserName: "chromium",
+    headless: true,
+    trace: "retain-on-failure",
+    screenshot: "only-on-failure",
+  },
   reporter: process.env.VERIFY_PLAYWRIGHT_JSON
     ? [["list"], ["json", { outputFile: process.env.VERIFY_PLAYWRIGHT_JSON }]]
     : "list",
