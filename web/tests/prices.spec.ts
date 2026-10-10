@@ -325,3 +325,122 @@ test("a gateway deadline answer becomes the same labelled fallback", async ({
   await expect(panel.getByText("Price check timed out").first()).toBeVisible();
   await expect(panel.locator(".holding-grid > li")).toHaveCount(1);
 });
+
+const REFRESH_LABELS: [string | null, string | null, RegExp | null][] = [
+  ["background", null, /Refreshing in background/],
+  ["refreshed", null, /Refreshed just now/],
+  ["timeout", null, /Refresh timed out — showing cached/],
+  ["busy", null, /Refresh busy — showing cached/],
+  ["backoff", null, /Source backing off — showing cached/],
+  [
+    "failed",
+    "2026-01-02T03:04:05+00:00",
+    /Last refresh failed at 2026-01-02 03:04 UTC — showing cached/,
+  ],
+  [null, null, null],
+];
+
+test("each refresh outcome has its own label and never changes the cached price shown", async ({
+  page,
+}) => {
+  const ids = seed();
+  apply([
+    {
+      op: "quote",
+      edition: ids.normal,
+      amount: "0.25",
+      updated: ago(1),
+      checked: ago(0.1),
+    },
+  ]);
+  await signIn(page);
+  await hold([ids.normal]);
+  for (const [refresh, failedAt, label] of REFRESH_LABELS) {
+    await page.route("**/api/prices/editions", async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      for (const row of body.prices) {
+        row.refresh = refresh;
+        row.refresh_failed_at = failedAt;
+      }
+      await route.fulfill({ response, json: body });
+    });
+    await page.reload();
+    await page.getByRole("button", { name: "Unsorted" }).first().click();
+    const panel = page.getByRole("region", { name: "Cards in Unsorted" });
+    const slot = panel.locator(".edition-price").first();
+    await expect(slot).toContainText("$0.25");
+    if (label) await expect(slot).toContainText(label);
+    else await expect(slot.locator(".price-refresh")).toHaveCount(0);
+    await expect(slot).not.toContainText("$0.00");
+    await expect(slot.getByRole("button")).toHaveCount(0);
+    await page.unroute("**/api/prices/editions");
+  }
+});
+
+test("at most two price batches are in flight, later ones queue, and nothing is polled or retried", async ({
+  page,
+}) => {
+  const ids = seed(110);
+  await signIn(page);
+  await hold([
+    ...ids.pagers,
+    ids.normal,
+    ids["reverse-holofoil"],
+    ids.unspecified,
+  ]);
+  await page.reload();
+  const seen: string[][] = [];
+  let live = 0;
+  let peak = 0;
+  let release: () => void = () => undefined;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  await page.route("**/api/prices/editions", async (route) => {
+    seen.push(route.request().postDataJSON().edition_ids);
+    live += 1;
+    peak = Math.max(peak, live);
+    await gate;
+    live -= 1;
+    await route.continue().catch(() => undefined);
+  });
+  await page.getByRole("button", { name: "Unsorted" }).first().click();
+  const panel = page.getByRole("region", { name: "Cards in Unsorted" });
+  await expect(panel.locator(".holding-grid > li")).toHaveCount(48);
+  await panel.getByRole("button", { name: "More cards" }).click();
+  await expect(panel.locator(".holding-grid > li")).toHaveCount(96);
+  await panel.getByRole("button", { name: "More cards" }).click();
+  await expect(panel.locator(".holding-grid > li")).toHaveCount(113);
+  await page.waitForTimeout(800);
+  expect(seen).toHaveLength(2);
+  expect(peak).toBe(2);
+  release();
+  await expect.poll(() => seen.length).toBe(3);
+  await page.waitForTimeout(1_000);
+  expect(peak).toBeLessThanOrEqual(2);
+  expect(seen.every((batch) => batch.length <= 64)).toBe(true);
+  expect(seen.flat()).toHaveLength(113);
+  expect(new Set(seen.flat()).size).toBe(113);
+});
+
+test("following a link does not prefetch prices for unrendered cards", async ({
+  page,
+}) => {
+  const ids = seed();
+  await signIn(page);
+  await hold([ids.normal]);
+  await page.reload();
+  const seen: string[][] = [];
+  await page.route("**/api/prices/editions", async (route) => {
+    seen.push(route.request().postDataJSON().edition_ids);
+    await route.continue();
+  });
+  await page.getByRole("button", { name: "Unsorted" }).first().click();
+  const panel = page.getByRole("region", { name: "Cards in Unsorted" });
+  await expect(panel.locator(".edition-price").first()).not.toContainText(
+    "Checking prices"
+  );
+  expect(seen.flat()).toEqual([ids.normal]);
+  for (const link of await page.locator("a[href]").all()) await link.hover();
+  await page.waitForTimeout(500);
+  expect(seen.flat()).toEqual([ids.normal]);
+});

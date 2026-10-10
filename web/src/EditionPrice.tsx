@@ -17,24 +17,25 @@ type Settled =
   { kind: "row"; row: PriceRow } | { kind: "timeout" } | { kind: "error" };
 type Waiter = (settled: Settled) => void;
 
+const MAX_IN_FLIGHT = 2;
+
 const waiting = new Map<string, Set<Waiter>>();
+const queue: Array<Map<string, Set<Waiter>>> = [];
+let inFlight = 0;
 let scheduled: ReturnType<typeof setTimeout> | null = null;
 
-function flush() {
-  scheduled = null;
-  for (const [id, set] of waiting) if (!set.size) waiting.delete(id); // unmounted before the batch left
-  const ids = [...waiting.keys()].slice(0, MAX_PRICE_EDITIONS);
-  if (!ids.length) return;
-  const waiters = new Map<string, Set<Waiter>>();
-  for (const id of ids) {
-    waiters.set(id, waiting.get(id)!);
-    waiting.delete(id);
-  }
-  if (waiting.size) scheduled = setTimeout(flush, 0);
+// Batches wait here (never more than MAX_IN_FLIGHT on the wire); there is no polling and no retry.
+function pump() {
+  while (inFlight < MAX_IN_FLIGHT && queue.length) send(queue.shift()!);
+}
+
+function send(waiters: Map<string, Set<Waiter>>) {
+  const ids = [...waiters.keys()];
   const settle = (settled: (id: string) => Settled) => {
     for (const [id, set] of waiters)
       for (const waiter of set) waiter(settled(id));
   };
+  inFlight += 1;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), CLIENT_TIMEOUT_MS);
   getEditionPrices(ids, controller.signal)
@@ -51,7 +52,26 @@ function flush() {
         (cause instanceof PriceError && cause.code === "PRICE_DEADLINE");
       settle(() => (late ? { kind: "timeout" } : { kind: "error" }));
     })
-    .finally(() => clearTimeout(timer));
+    .finally(() => {
+      clearTimeout(timer);
+      inFlight -= 1;
+      pump();
+    });
+}
+
+function flush() {
+  scheduled = null;
+  for (const [id, set] of waiting) if (!set.size) waiting.delete(id); // unmounted before the batch left
+  while (waiting.size) {
+    const batch = new Map<string, Set<Waiter>>();
+    for (const [id, set] of waiting) {
+      if (batch.size >= MAX_PRICE_EDITIONS) break;
+      batch.set(id, set);
+      waiting.delete(id);
+    }
+    queue.push(batch);
+  }
+  pump();
 }
 
 function request(editionId: string, waiter: Waiter) {
@@ -99,6 +119,27 @@ function Quote({ row }: { row: PriceRow }) {
   );
 }
 
+function Refresh({ row }: { row: PriceRow }) {
+  const cached = row.status === "quote" ? " — showing cached" : "";
+  let text: string | null = null;
+  if (row.refresh === "background") text = "Refreshing in background";
+  else if (row.refresh === "refreshed") text = "Refreshed just now";
+  else if (row.refresh === "timeout") text = `Refresh timed out${cached}`;
+  else if (row.refresh === "busy") text = `Refresh busy${cached}`;
+  else if (row.refresh === "backoff") text = `Source backing off${cached}`;
+  else if (row.refresh === "failed" || row.refresh_failed_at)
+    text = `Last refresh failed${
+      row.refresh_failed_at ? ` at ${moment(row.refresh_failed_at)}` : ""
+    }${cached}`;
+  if (!text) return null;
+  return (
+    <span className="price-refresh" data-refresh={row.refresh ?? "failed"}>
+      {" "}
+      · {text}
+    </span>
+  );
+}
+
 export function EditionPrice({ editionId }: { editionId: string }) {
   const [settled, setSettled] = useState<Settled | null>(null);
   useEffect(() => {
@@ -124,6 +165,7 @@ export function EditionPrice({ editionId }: { editionId: string }) {
   return (
     <span className="edition-price" data-price-status={status}>
       {content}
+      {settled?.kind === "row" && <Refresh row={settled.row} />}
     </span>
   );
 }
