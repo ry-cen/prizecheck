@@ -30,7 +30,7 @@ pytest runs in two passes. The first runs every test not marked `serial` with py
 - Mark a test `slow` when it launches real processes, waits out real wall-clock intervals, sleeps a second or more, or builds a capacity-sized data set.
 - Both marks take a `reason`; a `slow` reason starts with `process:`, `wall-clock:`, `capacity:` or `sleep:`. `scripts/check_guardrails.py` checks the reasons and requires both marks on tests that use the `proc` runner fixture.
 
-Playwright runs one application stack per worker: its own database, API, auth and web servers, mail file, projection, runner lock and catalog fixture directories. `web/tests/support/browser-stack.ts` points each worker at its stack, so specs in different workers never share data; the tests of one file still run in order in one worker. Tests tagged `@serial` run afterwards with one worker and say why in a comment; `price-refresh.spec.ts` is serial because its label depends on a real runner's deadline inside the server's wait window. Tests tagged `@slow` say their category in a comment.
+Playwright runs one application stack per worker: its own database, API, auth and web servers, mail file, projection, runner lock and catalog fixture directories. `web/tests/support/browser-stack.ts` points each worker at its stack, so specs in different workers never share data; the tests of one file still run in order in one worker. Tests tagged `@serial` run afterwards with one worker and say why in a comment; `price-refresh.spec.ts` is serial because its label depends on a real runner's deadline inside the server's wait window. The 256 KiB Live export test is serial too: under four stacks its Deck checks query over 1,500 SQL-seeded Holdings sometimes ran for over a minute, so it runs alone after an `ANALYZE`. Tests tagged `@slow` say their category in a comment.
 
 Worker counts follow the host: pytest `min(6, max(2, cores / 2))`, browser stacks `min(4, max(2, cores / 3))`. `--pytest-workers N` and `--browser-workers N` override them; `1` runs that suite in one process as before.
 
@@ -47,6 +47,8 @@ Each run prints its `.scratch/verification/<run>/` directory. It holds:
 - `browser/parallel/` and `browser/serial/` (Playwright output), `playwright-parallel.json`, `playwright-serial.json`;
 - `pytest-parallel.xml`, `pytest-serial.xml`, `vitest.xml` (per-test times), `phases.tsv`, `timings.md`, `timings.json`;
 - `result.json`: exit code, suite, selectors, `fast`, worker counts, databases, timings.
+
+The runner prints `Verification run: <id>` before anything else, so a run that is stopped early still names its directory. Remove a run with `.venv/bin/python scripts/verify_discard.py <id>`, which refuses anything but one existing run directory; never `rm -rf` a path built from a captured id, because an empty id removes every run's evidence.
 
 Read counts from `verification.log`, not from the exit code. Failed runs keep the same diagnostics. These logs contain synthetic fixture data. `--suite auth` and `--suite operations` isolate those checks for diagnosis.
 
