@@ -5,13 +5,22 @@ No production configuration enables this. Hooks are inert unless their environme
 - ``PRICE_FIXTURE_SOURCE_ORIGIN=http://127.0.0.1:<port>``: when ``app.price_source`` is imported, its module-level
   ``ORIGIN`` string is replaced by this loopback origin. Production code has no origin parameter, so this is the
   only way a test points the source client at a local server. Only loopback http origins are accepted.
+- ``$PRICE_RUNNER_LOCK_DIR/fixture-source-origin``: the same redirect for launched runners. The launcher's environment
+  allowlist drops ``PRICE_FIXTURE_SOURCE_ORIGIN`` but keeps ``PRICE_RUNNER_LOCK_DIR``, so a test writes the loopback
+  origin into this file. It is read when ``app.price_source`` is imported (not at start), the environment variable wins
+  when both are present, and a non-loopback value fails the import loudly. While a redirect is active, requests from a
+  runner process (``--slot n`` on its command line) carry ``x-fixture-slot``, ``x-fixture-pid`` and ``x-fixture-pgid``
+  so a fake source can attribute concurrency per slot and stop or kill the exact process group.
 - ``PRICE_FIXTURE_LAUNCHER=record|fail``: when ``app.price_launcher`` is imported, ``spawn`` is replaced. ``record``
   starts nothing and returns True (the reservation then expires on its own); ``fail`` returns False. If
   ``PRICE_FIXTURE_LAUNCH_LOG`` names a file, each call appends ``{"slot", "owner", "outcome", "pid"}`` as one JSON line.
 - Loopback-only connect guard: in any process that is started as the price runner (the import system is asked for
   ``app.price_runner``) while ``PRICE_RUNNER_LOCK_DIR`` is set, ``socket.connect`` to a non-loopback IP address
   raises ``NonLoopbackConnection`` and appends a line to ``$PRICE_RUNNER_LOCK_DIR/guard-violations.log``. The trigger
-  is the import request, not an environment flag, because the runner's environment is an allowlist.
+  is the import request, not an environment flag, because the runner's environment is an allowlist. The same process
+  appends every connect destination (loopback and AF_UNIX included) to ``connects.log`` as ``{"pid", "address"}``, and
+  registers itself as ``runner-pids/<pid>`` (``supervisor``) and each child it forks (``worker``), so tests count and
+  clean up exactly the runners they launched without any host-wide process search.
 
 Importing this module has no side effects; ``install()`` is called once from ``sitecustomize``.
 """
@@ -29,6 +38,9 @@ LAUNCHER = 'PRICE_FIXTURE_LAUNCHER'
 LAUNCH_LOG = 'PRICE_FIXTURE_LAUNCH_LOG'
 LOCK_DIR = 'PRICE_RUNNER_LOCK_DIR'
 VIOLATIONS = 'guard-violations.log'
+ORIGIN_FILE = 'fixture-source-origin'
+PIDS_DIR = 'runner-pids'
+CONNECTS = 'connects.log'
 
 
 class NonLoopbackConnection(OSError):
@@ -52,11 +64,23 @@ def _is_loopback(address):
         return False  # An unresolved host name: refuse rather than guess.
 
 
-def install_connect_guard(violation_log=None):
+def _shown(address):
+    """A JSON-safe connect destination: ``[host, port, ...]`` for IP sockets, the path for AF_UNIX."""
+    if isinstance(address, tuple):
+        return [item if isinstance(item, (str, int)) else repr(item) for item in address]
+    if isinstance(address, bytes):
+        return address.decode('utf-8', 'replace')
+    return address if isinstance(address, str) else repr(address)
+
+
+def install_connect_guard(violation_log=None, connect_log=None):
     """Patch ``socket.socket.connect``/``connect_ex``. Returns a function that restores them."""
     real_connect, real_connect_ex = socket.socket.connect, socket.socket.connect_ex
 
     def check(address):
+        if connect_log:
+            with open(connect_log, 'a') as log:
+                log.write(json.dumps({'pid': os.getpid(), 'address': _shown(address)}) + '\n')
         if not _is_loopback(address):
             if violation_log:
                 with open(violation_log, 'a') as log:
@@ -76,6 +100,76 @@ def install_connect_guard(violation_log=None):
     def uninstall():
         socket.socket.connect, socket.socket.connect_ex = real_connect, real_connect_ex
     return uninstall
+
+
+class _HeaderedHttpx:
+    """``httpx`` as ``app.price_source`` sees it: every attribute is the real one (so ``httpx.TimeoutException`` still
+    classifies timeouts), except that ``Client`` merges the fixture headers into the client's own."""
+
+    def __init__(self, real, headers):
+        self._real, self._headers = real, headers
+
+    def __getattr__(self, name):
+        return getattr(self._real, name)
+
+    def Client(self, *args, headers=None, **kwargs):  # noqa: N802 - mirrors httpx.Client
+        merged = dict(headers or {})
+        merged.update(self._headers())
+        return self._real.Client(*args, headers=merged, **kwargs)
+
+
+def runner_slot(argv=None):
+    """The ``--slot`` of a price runner's command line, or None in any other process."""
+    argv = sys.argv if argv is None else argv
+    for index, item in enumerate(argv[:-1]):
+        if item == '--slot' and argv[index + 1] in ('0', '1'):
+            return argv[index + 1]
+    return None
+
+
+def source_redirect(origin):
+    """The ``app.price_source`` patch: a loopback origin, plus attribution headers when this process is a runner."""
+    def redirect(module):
+        if type(getattr(module, 'ORIGIN', None)) is not str:
+            raise RuntimeError('app.price_source must define a module-level ORIGIN string')
+        module.ORIGIN = origin
+        slot = runner_slot()
+        if slot is not None:
+            module.httpx = _HeaderedHttpx(module.httpx, lambda: {
+                'x-fixture-slot': slot, 'x-fixture-pid': str(os.getpid()), 'x-fixture-pgid': str(os.getpgid(0))})
+    return redirect
+
+
+def origin_from_file(directory):
+    """The redirect for a launched runner, decided when ``app.price_source`` is imported: the file, if present."""
+    def redirect(module):
+        path = os.path.join(directory, ORIGIN_FILE)
+        try:
+            with open(path) as handle:
+                text = handle.read().strip()
+        except FileNotFoundError:
+            return
+        try:
+            origin = loopback_origin(text)
+        except RuntimeError:
+            raise RuntimeError(f'{path} must hold a loopback http origin with a port') from None
+        source_redirect(origin)(module)
+    return redirect
+
+
+def register_runner(directory):
+    """Record this process (``supervisor``) and every child it forks (``worker``) under ``runner-pids/``."""
+    registry = os.path.join(directory, PIDS_DIR)
+
+    def write(role):
+        try:
+            os.makedirs(registry, exist_ok=True)
+            with open(os.path.join(registry, str(os.getpid())), 'w') as handle:
+                handle.write(role)
+        except OSError:
+            pass
+    write('supervisor')
+    os.register_at_fork(after_in_child=lambda: write('worker'))
 
 
 def launcher_hook(mode, log_path=None):
@@ -120,24 +214,21 @@ def install(environ=None):
     environ = os.environ if environ is None else environ
     patches, on_lookup = {}, {}
     if environ.get(SOURCE_ORIGIN):
-        origin = loopback_origin(environ[SOURCE_ORIGIN])
-
-        def redirect(module):
-            if type(getattr(module, 'ORIGIN', None)) is not str:
-                raise RuntimeError('app.price_source must define a module-level ORIGIN string')
-            module.ORIGIN = origin
-        patches['app.price_source'] = redirect
+        patches['app.price_source'] = source_redirect(loopback_origin(environ[SOURCE_ORIGIN]))
+    elif environ.get(LOCK_DIR):
+        patches['app.price_source'] = origin_from_file(environ[LOCK_DIR])
     if environ.get(LAUNCHER):
         spawn = launcher_hook(environ[LAUNCHER], environ.get(LAUNCH_LOG))
         patches['app.price_launcher'] = lambda module: setattr(module, 'spawn', spawn)
     if environ.get(LOCK_DIR):
-        log = os.path.join(environ[LOCK_DIR], VIOLATIONS)
+        directory = environ[LOCK_DIR]
         state = {'done': False}
 
         def guard():
             if not state['done']:
                 state['done'] = True
-                install_connect_guard(log)
+                install_connect_guard(os.path.join(directory, VIOLATIONS), os.path.join(directory, CONNECTS))
+                register_runner(directory)
         on_lookup['app.price_runner'] = guard
     if patches or on_lookup:
         sys.meta_path.insert(0, _PatchOnImport(patches, on_lookup))
