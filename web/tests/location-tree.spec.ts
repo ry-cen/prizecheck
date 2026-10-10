@@ -58,6 +58,12 @@ test("collector organizes Locations on desktop and navigates the same tree on mo
   await page.getByRole("button", { name: "New top-level Location" }).click();
   await page.locator(".location-form").getByLabel("Name").fill(shelf);
   await page.getByRole("button", { name: "Save" }).click();
+  // Wait for the tree refresh so the Parent Location options include the shelf.
+  await expect(
+    page
+      .getByRole("navigation", { name: "Location tree" })
+      .getByRole("button", { name: shelf, exact: true })
+  ).toBeVisible();
   await page
     .getByRole("navigation", { name: "Location tree" })
     .getByRole("button", { name: `Updated ${pageName}`, exact: true })

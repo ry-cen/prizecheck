@@ -88,6 +88,11 @@ test("mobile collector can search, Add, Move, Undo, check and publish a physical
       .getByRole("button", { name: "Unsorted", exact: true })
       .tap();
     await expect(checks).toContainText("1 cards · 59 cards short of 60");
+    // The undo list refreshes after the counts; tapping before it does can
+    // latch onto an earlier test's entry, which then becomes non-newest.
+    await expect(
+      move.getByText("Moved 2 copies across 1 Editions.")
+    ).toBeVisible();
     await move.getByRole("button", { name: "Undo", exact: true }).first().tap();
     await expect(checks).toContainText("3 cards · 57 cards short of 60");
     const publishing = page.getByRole("region", {
