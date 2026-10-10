@@ -2,7 +2,7 @@
 
 ### Issue tracker
 
-Issues, specs, and Wayfinder artifacts are tracked as local Markdown under `.scratch/`. See `docs/agents/issue-tracker.md`.
+Tickets are GitHub Issues on `ry-cen/tcg-tracker`; specs and Wayfinder artifacts are Markdown under `docs/planning/`. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 

@@ -1,43 +1,57 @@
-# Issue tracker: Local Markdown
+# Issue tracker: GitHub Issues
 
-Issues, specifications, and Wayfinder artifacts for this repository live as Markdown files under `.scratch/`.
+Tickets for this repository are GitHub Issues on [ry-cen/tcg-tracker](https://github.com/ry-cen/tcg-tracker/issues). Specifications, Wayfinder maps, research, prototypes, resolutions and evidence are tracked Markdown under `docs/planning/`. Use the `gh` CLI for issue operations.
+
+`.scratch/` is ignored local working space. Do not store anything there that must be shared or kept.
 
 ## Feature conventions
 
-- One feature per directory: `.scratch/<feature-slug>/`
-- The specification is `.scratch/<feature-slug>/spec.md`
-- Implementation tickets are stored individually under `.scratch/<feature-slug>/issues/`
-- Ticket state is recorded in a `Status` field near the top of each ticket
-- Comments and conversation history may be appended under a `## Comments` heading
+- One feature per planning directory: `docs/planning/<feature-slug>/`
+- The specification is `docs/planning/<feature-slug>/spec.md`
+- Implementation tickets are GitHub Issues labelled `implementation`
+- Wayfinder decision tickets are GitHub Issues labelled `wayfinder`
+- Ticket state is the issue's open/closed state; close completed work with reason "completed"
+- Comments and conversation history go in issue comments
 
 ## Existing Pokémon TCG tracker effort
 
-The active effort is `.scratch/tcg-collection-tracker/`.
+The active effort is `docs/planning/tcg-collection-tracker/`.
 
-- Specification: `.scratch/tcg-collection-tracker/spec.md`
-- Implementation tickets: `.scratch/tcg-collection-tracker/issues/`
-- Wayfinder map: `.scratch/tcg-collection-tracker/wayfinder/map.md`
-- Wayfinder decision tickets: `.scratch/tcg-collection-tracker/wayfinder/tickets/`
-- Research: `.scratch/tcg-collection-tracker/wayfinder/research/`
-- Prototypes: `.scratch/tcg-collection-tracker/wayfinder/prototypes/`
-- Resolutions: `.scratch/tcg-collection-tracker/wayfinder/resolutions/`
+- Specification: `docs/planning/tcg-collection-tracker/spec.md`
+- Implementation tickets: [issues labelled `implementation`](https://github.com/ry-cen/tcg-tracker/issues?q=label%3Aimplementation)
+- Wayfinder map: `docs/planning/tcg-collection-tracker/wayfinder/map.md`
+- Wayfinder decision tickets: [issues labelled `wayfinder`](https://github.com/ry-cen/tcg-tracker/issues?q=label%3Awayfinder)
+- Research: `docs/planning/tcg-collection-tracker/wayfinder/research/`
+- Prototypes: `docs/planning/tcg-collection-tracker/wayfinder/prototypes/`
+- Resolutions: `docs/planning/tcg-collection-tracker/wayfinder/resolutions/`
+- Evidence: `docs/planning/tcg-collection-tracker/evidence/`
+- Launch checklist: `docs/planning/tcg-collection-tracker/launch-checklist.md`
 
-These existing locations are authoritative. Do not relocate or duplicate their contents to match a generic convention.
+The original tickets were migrated from `.scratch/` Markdown on 2026-10-09. Implementation tickets 01–19 are issues #16–#34; Wayfinder tickets 01–15 are issues #1–#15. Each issue body ends with a note giving its original path.
+
+## Feature-branch efforts
+
+Tickets that existed only on feature branches were migrated the same day, labelled by feature:
+
+- `feature: prices & exports` (`feature/card-prices-and-deck-exports`): Wayfinder tickets 16–25 are issues #35–#44; implementation tickets 01–15 are issues #50–#64, with titles prefixed "Prices & exports".
+- `feature: workspace redesign` (`feature/ui-workspace-redesign`): Wayfinder tickets 26–30 are issues #45–#49.
+
+Those branches still track their planning files under `.scratch/`. Before merging one into `dev`, move its non-ticket files (specs, maps, research, resolutions, evidence, fixtures) to the matching `docs/planning/` path, delete its ticket files, and update ticket status on GitHub instead of in Markdown. `.gitignore` does not stop already-tracked files from coming back in a merge.
 
 ## Skill operations
 
-When a skill says “publish to the issue tracker,” create or update the appropriate Markdown artifact under `.scratch/<feature-slug>/`.
+When a skill says “publish to the issue tracker,” create or update a GitHub Issue (`gh issue create` / `gh issue edit`) with the appropriate label. Put long-form specs and supporting artifacts under `docs/planning/<feature-slug>/` and link them from the issue.
 
-When a skill says “fetch the relevant ticket,” read the referenced local Markdown file. The user will normally provide its path, number, or linked name.
+When a skill says “fetch the relevant ticket,” read the issue with `gh issue view <number> --comments`. The user will normally provide its number, URL, or title.
 
 ## Wayfinder operations
 
 - Read the effort’s `wayfinder/map.md`.
-- Scan `wayfinder/tickets/` for the next open, unblocked ticket.
-- Claim a ticket by updating its status before starting work.
-- Store substantial supporting research, prototypes, and resolutions in their existing Wayfinder subdirectories.
-- Resolve a ticket by recording its conclusion, closing its status, and adding a linked summary to the map’s “Decisions so far” section.
-- Preserve dependencies and refer to tickets by their linked names rather than bare numbers.
+- List open, unblocked Wayfinder tickets with `gh issue list --label wayfinder --state open`.
+- Claim a ticket by assigning it before starting work.
+- Store substantial supporting research, prototypes, and resolutions in their existing Wayfinder subdirectories under `docs/planning/`.
+- Resolve a ticket by commenting its conclusion, closing the issue, and adding a linked summary to the map’s “Decisions so far” section.
+- Preserve dependencies and refer to tickets by issue links rather than bare numbers.
 
 ## Completion and launch acceptance
 

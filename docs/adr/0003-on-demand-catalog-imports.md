@@ -10,4 +10,4 @@ This refines the execution behavior of ticket 02 and preserves the owner-panel a
 
 Local execution requires a host that supports detached Python subprocesses independent of the API request and process lifetime. Eventual hosting must provide that capability or an equivalent on-demand job launcher. [ADR 0002](0002-defer-deployment-provider-selection.md) continues to defer provider selection.
 
-See the [detailed spec](../../.scratch/tcg-collection-tracker/proposals/manual-catalog-import.md) and [ticket 19](../../.scratch/tcg-collection-tracker/issues/19-manual-catalog-import-command.md).
+See the [detailed spec](../planning/tcg-collection-tracker/proposals/manual-catalog-import.md) and [ticket 19](https://github.com/ry-cen/tcg-tracker/issues/34).

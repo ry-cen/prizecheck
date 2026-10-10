@@ -1,11 +1,49 @@
+# Dependencies
 node_modules/
 .venv/
+
+# Python caches
 __pycache__/
+*.py[cod]
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Build output and tool caches
 dist/
-.env
+*.tsbuildinfo
+.vite/
+.vite-temp/
+.cache/
+coverage/
+.coverage
+htmlcov/
+
+# Test reports
 test-results/
 playwright-report/
-.local/public-projections/
+blob-report/
+playwright/.cache/
 
-.scratch/verification/
+# Environment and secrets (keep the template)
+.env
+.env.*
+!.env.example
+
+# Local runtime state
+.local/
+*.log
+
+# Local scratch space and verification runs
+.scratch/
+
+# Claude Code local state
+.claude/worktrees/
+.claude/settings.local.json
+
+# Editor and OS files
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~
