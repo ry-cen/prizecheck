@@ -29,6 +29,12 @@ ADMIN = 'postgresql://tcg@127.0.0.1:5432/postgres'
 
 
 class VerifyArgumentsTest(unittest.TestCase):
+    def test_operations_run_in_the_full_gate_and_their_own_suite_but_not_under_fast(self):
+        self.assertTrue(verify.runs_operations('all', False))
+        self.assertFalse(verify.runs_operations('all', True))
+        self.assertTrue(verify.runs_operations('operations', True))
+        self.assertFalse(verify.runs_operations('api', False))
+
     def test_selectors_need_the_api_or_browser_suite(self):
         with self.assertRaises(SystemExit):
             verify.parse_arguments(['--admin-url', ADMIN, '--suite', 'all', '--', 'api/tests/test_api.py'])

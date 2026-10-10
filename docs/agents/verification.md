@@ -6,12 +6,12 @@ The runner checks the current working-tree source, including staged changes. Git
 
 ## Loops
 
-| Command                                                       | Runs                                                                               | Enough for                                    |
-| ------------------------------------------------------------- | ---------------------------------------------------------------------------------- | --------------------------------------------- |
-| `npm run verify -- --suite api -- <pytest selectors>`         | the selected `api/tests` tests; without selectors all of `api/tests`, nothing else | iterating on API code and its tests           |
-| `npm run verify -- --suite browser -- <Playwright selectors>` | the selected Playwright specs against fresh stacks                                 | reproducing a browser failure                 |
-| `npm run verify -- --fast`                                    | the whole gate without `slow` pytest and vitest tests and `@slow` Playwright tests | a worker's check before handing a change back |
-| `npm run verify`                                              | everything                                                                         | acceptance; CI runs this                      |
+| Command                                                       | Runs                                                                                                                            | Enough for                                    |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
+| `npm run verify -- --suite api -- <pytest selectors>`         | the selected `api/tests` tests; without selectors all of `api/tests`, nothing else                                              | iterating on API code and its tests           |
+| `npm run verify -- --suite browser -- <Playwright selectors>` | the selected Playwright specs against fresh stacks                                                                              | reproducing a browser failure                 |
+| `npm run verify -- --fast`                                    | the whole gate without `slow` pytest and vitest tests, `@slow` Playwright tests and the operations (release and recovery) suite | a worker's check before handing a change back |
+| `npm run verify`                                              | everything                                                                                                                      | acceptance; CI runs this                      |
 
 ```sh
 npm run verify -- --suite api -- api/tests/test_prices.py -k stale
@@ -30,7 +30,7 @@ pytest runs in two passes. The first runs every test not marked `serial` with py
 - Mark a test `slow` when it launches real processes, waits out real wall-clock intervals, sleeps a second or more, or builds a capacity-sized data set.
 - Both marks take a `reason`; a `slow` reason starts with `process:`, `wall-clock:`, `capacity:` or `sleep:`. `scripts/check_guardrails.py` checks the reasons and requires both marks on tests that use the `proc` runner fixture.
 
-Playwright runs one application stack per worker: its own database, API, auth and web servers, mail file, projection, runner lock and catalog fixture directories. `web/tests/support/browser-stack.ts` points each worker at its stack, so specs in different workers never share data; the tests of one file still run in order in one worker. Tests tagged `@serial` run afterwards with one worker and say why in a comment; `price-refresh.spec.ts` is serial because its label depends on a real runner's deadline inside the server's wait window. The 256 KiB Live export test is serial too: under four stacks its Deck checks query over 1,500 SQL-seeded Holdings sometimes ran for over a minute, so it runs alone after an `ANALYZE`. Tests tagged `@slow` say their category in a comment.
+Playwright runs one application stack per worker: its own database, API, auth and web servers, mail file, projection, runner lock and catalog fixture directories. `web/tests/support/browser-stack.ts` points each worker at its stack, so specs in different workers never share data; the tests of one file still run in order in one worker. Tests tagged `@serial` run afterwards with one worker and say why in a comment; `price-refresh.spec.ts` is serial because its label depends on a real runner's deadline inside the server's wait window. Tests tagged `@slow` say their category in a comment.
 
 Worker counts follow the host: pytest `min(6, max(2, cores / 2))`, browser stacks `min(4, max(2, cores / 3))`. `--pytest-workers N` and `--browser-workers N` override them; `1` runs that suite in one process as before.
 
@@ -54,6 +54,6 @@ Read counts from `verification.log`, not from the exit code. Failed runs keep th
 
 The pre-commit hook runs staged Prettier, TypeScript/generated-contract checks and database-free privacy guardrails. Generated clients remain generator-owned and are excluded from formatting. The hook does not require a running database; the full gate belongs in CI.
 
-Recovery, runtime readiness, activation/rollback/tamper, proxy-isolation, key-redaction and release-failure regressions run in the ordinary gate. Runtime fixtures are built in a temporary directory from repository history and current source. Their synthetic integrity receipts are test-only fixtures, not CI attestations or deployable releases. They never depend on artifacts left by an earlier agent session. The expensive exact-commit predecessor/successor release drill remains an explicit opt-in command documented in `docs/operations/release.md`; its skip is not a passing drill.
+Recovery, runtime readiness, activation/rollback/tamper, proxy-isolation, key-redaction and release-failure regressions run in the ordinary gate. Runtime fixtures are built in a temporary directory from repository history and current source. Their synthetic integrity receipts are test-only fixtures, not CI attestations or deployable releases. They never depend on artifacts left by an earlier agent session. The expensive exact-commit predecessor/successor release drill remains an explicit opt-in command documented in `docs/operations/release.md`; its skip is not a passing drill. `--fast` leaves the operations suite out; the full gate and `--suite operations` run it.
 
 For changes to verification, also run `npm run guardrails`. Mechanical release-transport, exception-output, process-scope and test-tier rules live in `scripts/check_guardrails.py`; extending those rules requires positive and negative examples in `tests/tooling` rather than duplicating them in AGENTS.md. Harness logic has unit tests in `tests/tooling/test_verify_harness.py`.

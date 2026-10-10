@@ -112,8 +112,13 @@ case "$VERIFY_SUITE" in
 esac
 case "$VERIFY_SUITE" in
   all|operations)
-    phase operations start
-    .venv/bin/python -m unittest discover -s tests/operations -v
-    phase operations end
+    # verify.py sets VERIFY_OPERATIONS=0 for --fast; the release gate (scripts/release.py) sets nothing, so it runs.
+    if [ "${VERIFY_OPERATIONS:-1}" = 1 ]; then
+      phase operations start
+      .venv/bin/python -m unittest discover -s tests/operations -v
+      phase operations end
+    else
+      echo "== verify phase: operations skipped (--fast)"
+    fi
     ;;
 esac

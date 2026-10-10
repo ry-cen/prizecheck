@@ -33,7 +33,7 @@ def parse_arguments(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--admin-url', default=os.environ.get('TEST_ADMIN_DATABASE_URL', os.environ.get('DATABASE_URL')))
     parser.add_argument('--suite', choices=SUITES, default='all')
-    parser.add_argument('--fast', action='store_true', help='leave out pytest tests marked slow and Playwright tests tagged @slow')
+    parser.add_argument('--fast', action='store_true', help='leave out pytest and vitest tests marked slow, Playwright tests tagged @slow, and the operations suite')
     parser.add_argument('--pytest-workers', type=int, default=pytest_workers, help='pytest-xdist workers, one database each')
     parser.add_argument('--browser-workers', type=int, default=browser_workers, help='Playwright workers, one stack each')
     parser.add_argument('selectors', nargs=argparse.REMAINDER)
@@ -58,6 +58,11 @@ def parse_arguments(argv=None):
 def effective_workers(suite, pytest_workers, browser_workers):
     """Only the suites that run pytest or Playwright get extra databases and stacks."""
     return (pytest_workers if suite in ('all', 'api') else 1), (browser_workers if suite in ('all', 'browser') else 1)
+
+
+def runs_operations(suite, fast):
+    """The operations (release and recovery) suite runs in the full gate and in --suite operations, not under --fast."""
+    return suite == 'operations' or (suite == 'all' and not fast)
 
 
 def database_names(name, pytest_workers, browser_workers):
@@ -160,6 +165,7 @@ def main(argv=None):
               API_ORIGIN=f'http://127.0.0.1:{api}', TEST_ORIGIN=f'http://localhost:{web}',
               TEST_SIGNUP_PORT=str(signup), TEST_SECONDARY_AUTH_PORT=str(secondary), TEST_UNAVAILABLE_AUTH_PORT=str(unavailable),
               VERIFY_SUITE=args.suite, VERIFY_FAST='1' if args.fast else '',
+              VERIFY_OPERATIONS='1' if runs_operations(args.suite, args.fast) else '0',
               VERIFY_PYTEST_DATABASE_URLS=json.dumps(workers), VERIFY_EXTRA_STACKS=json.dumps(stacks),
               TEST_LOG_DIR=str(artifacts), TEST_BROWSER_OUTPUT=str(artifacts/'browser'), RELEASE_TEST_HISTORY_ROOT=str(ROOT))
             with psycopg.connect(args.admin_url, autocommit=True) as conn:
