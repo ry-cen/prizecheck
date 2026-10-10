@@ -78,3 +78,46 @@ Writes happen only for new jobs, a hard wait (permit), or a needed runner reserv
 ## To be filled in by 08
 
 Runner lifecycle, source client and recovery table. See the ticket plans.
+
+## Runner (ticket 08-B)
+
+Code: `api/app/price_runner.py` (supervisor and worker), `api/app/price_launcher.py` (spawn, reclaim, shared cleanup), `scripts/price_runners.py` (operator). Design rationale: [ADR 0008](adr/0008-price-runner-liveness.md). The runner never imports psycopg, `app.main`, `app.prices` or `app.public_catalog`, and its environment never contains `DATABASE_URL`, `INTERNAL_AUTH_SECRET` or `BETTER_AUTH_SECRET`.
+
+### Launch
+
+`price_launcher.spawn(slot, owner)` opens `$PRICE_RUNNER_LOCK_DIR/slot-<n>-<owner>.lock`, takes `flock(LOCK_EX|LOCK_NB)`, starts `python -m app.price_runner --slot n --owner <owner>` with `pass_fds`, `start_new_session`, null stdio, `cwd=api`, and closes the API's copy of the descriptor. A reaper thread waits on the child. The child environment is `PATH`, `LANG`, `NODE_ENV`, `PYTHONPATH`, `PUBLIC_PROJECTION_*` and the absolute `PRICE_RUNNER_LOCK_DIR`. A failed launch returns `False` and leaves no lock file. The lock directory (default `.local/price-runners`) must be host-local; `host-id` in it is created once, atomically.
+
+### Slot lifecycle
+
+1. The supervisor forks the worker (before any thread), then its first store action is the claim CAS: the lease must be `reserved`, owner-matched and at most 5 s old. It becomes `running` with both pids, `host`, `claimed_ms`, `lease_until_ms = now + 10 s` and `hard_stop_ms = claimed + 65 s`. A failed claim kills the parked worker and exits 0 with no source I/O.
+2. A supervisor thread renews the lease every 3 s with a CAS on the slot key only (owner-fenced, not time-fenced).
+3. The worker claims jobs, fetches, writes, and releases (below). After 2 s with nothing runnable and nothing in flight it sets the lease to `exiting` (a CAS that also expects the scheduler version) and exits.
+4. When the worker exits, or is killed with SIGKILL at `hard_stop_ms`, the supervisor runs the cleanup CAS (release the owner's source permits, requeue unexpired running jobs, drop expired ones, rewrite their `work:` records, free the slot), retrying until `hard_stop + 60 s`. It then removes its lock file and, if runnable jobs remain and no other slot can serve them, reserves a slot and spawns a successor.
+
+### Worker
+
+- **Selection.** Walk `ring` from `cursor`; a caller with fewer than 2 source permits supplies its fifo head. All queued, unexpired jobs for that head's card (at most 16) are claimed together. Requirements: fewer than 8 source permits globally and 4 for this slot, no source backoff, at least 1 token (bucket refills 1/s, capacity 8), `now + 2 s <= expires_ms` and `now + 2.5 s <= hard_stop_ms`. Expired queued jobs and jobs that fail validation are cancelled (scheduler entry and `work:` removed) with no backoff and no check-age change.
+- **Pre-validation.** `work:` must be `queued` and agree with the scheduler job; `catalog:edition` and `quarantine:edition` must pass the marketplace rules (verified, clear, same `mapping_revision`, `product_id` equal to the work copy compared as text, `quote_lookup` equal to the work's card/variant); the Edition must not be in per-Edition backoff.
+- **Claim CAS.** Expects the scheduler, this slot's lease, `backoff:price:source` and, per Edition, `work:`, `fence:`, `result:`, `quote:`, `catalog:edition:`, `quarantine:edition:`. Takes a token, adds the source permit, marks jobs running with `attempt = fence.attempt + 1`, advances the cursor, bumps each fence and rewrites each `work:`. No source I/O happens before this commits.
+- **Per-Edition write.** One CAS per Edition with `operation_id = price:<ref>:<rev>:<attempt>`, expecting `result:`, `quote:`, `fence:`, `work:`, `catalog:edition:`, `quarantine:edition:`, `backoff:price:edition:`. Quote: `result` and `quote` with the new attempt, `work:` and the backoff deleted (an unchanged price is rewritten the same way). Absent: `result` absent and `quote` deleted in the same CAS. Failure: only `backoff:price:edition:` is written and `work:` deleted; `result:` and `quote:` are never touched. A 429, or a valid Retry-After, additionally sets `backoff:price:source` in a separate CAS.
+- **Conflicts.** The writer re-reads. If `work:` or `fence:` no longer shows this claim (owner, slot, attempt), or the Edition is no longer eligible, it abandons silently (counted in `stats.fenced`). If only `quote:` (an eviction) moved it retries, up to three tries. An unknown outcome is resolved with `operation_status`, then by re-reading.
+- **Release.** After the writes, a scheduler CAS removes the permit and the claim's jobs. It is retried until the hard stop and never replaced by time.
+
+### Reclaim and operator recovery
+
+`price_launcher.reclaim_slot(store, slot)` returns `reclaimed`, `uncertain` or `not_applicable` as described in ADR 0008. Admission calls it only when no usable slot exists, as its own bounded step, and records `runner_uncertain` itself when it gets `uncertain`. `scripts/price_runners.py status` prints the leases and scheduler counts; `scripts/price_runners.py release --slot n --confirm-terminated` frees a slot without any liveness check, for another-host or lock-less cases.
+
+### Source seam
+
+The worker imports `app.price_source` and `app.tcgdex_record` lazily (08-A). It assumes `price_source.fetch_card(card, may_retry)` returns an object with `ok`, `record` (parsed dict) or `reason`/`status`/`retry_after_s`/`rate_limited`, and `tcgdex_record.select_quote(record, descriptor, lookup, product_id)` returns an object with `kind` (`quote`, `absent`, `failure`), `amount`, `provider_updated_at`, `reason`.
+
+### Recovery table
+
+| Event                                        | Recovery                                                                    |
+| -------------------------------------------- | --------------------------------------------------------------------------- |
+| API dies after the reservation, before Popen | Reservation expires after 5 s and is replaced.                              |
+| Spawn fails                                  | `spawn` returns `False`; admission frees the slot; jobs stay queued.        |
+| Worker dies or hangs                         | Supervisor cleans up (SIGKILL at 65 s if hung).                             |
+| Both processes die (SIGKILL)                 | Lock is free; same-host reclaim requeues the jobs; one extra fetch.         |
+| Runner stopped (SIGSTOP)                     | Lock is held; reclaim returns `uncertain`; the runner resumes and finishes. |
+| Another host dies                            | `uncertain`; operator release.                                              |
