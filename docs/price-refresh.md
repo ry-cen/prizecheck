@@ -84,6 +84,10 @@ Writes happen only for new jobs, a hard wait (permit), or a needed runner reserv
 
 `GET /api/decks/{id}/cost` is one access over the whole Deck: one capture, one `private_edition_quotes` call, so one `evaluate_and_admit` over every row, one interactive permit at most and one wait. Rows beyond the 32 new jobs answer `busy` (`job_cap`) and keep their cached view; nothing is dropped from the count. Scenarios: `api/tests/test_deck_cost.py` (signed HTTP), `auth/tests/deck-cost.test.ts` (the 08-C stack: gateways, relay, real runners, timing margins in `price-runners-metrics.log`) and `web/tests/deck-cost.spec.ts`.
 
+### Published Deck cost (ticket 12)
+
+One anonymous access is one `evaluate_and_admit` over every price-eligible frozen row, with caller `anon:<digest>` (the anonymous ledger applies) and eligibility read from `catalog:edition` and `quarantine:edition` (`public_catalog.marketplace_states`), never from PostgreSQL. A full ledger refuses a new anonymous caller without waiting: the cached quote is labelled `busy` and no job is created. Scenarios: `api/tests/test_published_cost.py`, `auth/tests/published-cost.test.ts`, `web/tests/published-cost.spec.ts`.
+
 ## To be filled in by 08
 
 Runner lifecycle, source client and recovery table. See the ticket plans.

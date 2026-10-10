@@ -24,7 +24,7 @@ def ts_type(value):
 
 schema = app.openapi()["components"]["schemas"]
 lines = ["// Generated from FastAPI OpenAPI by scripts/generate_prices_client.py. Do not edit."]
-for name in ("PriceRow", "PricesResponse", "DeckCost"):
+for name in ("PriceRow", "PricesResponse", "DeckCost", "PublishedDeckCost"):
     definition = schema[name]
     # The route always serializes every field, so every field is present even where the model has a default.
     fields = [f"{field}: {ts_type(value)}" for field, value in definition["properties"].items()]
@@ -52,6 +52,16 @@ export async function getDeckCost(deckId: string, signal?: AbortSignal): Promise
     throw new PriceError(response.status, payload?.detail?.code ?? 'PRICE_REQUEST_FAILED');
   }}
   return response.json() as Promise<DeckCost>;
+}}
+// One anonymous access prices every frozen copy of one Published Deck snapshot version. Only the token and the version
+// are sent, and no cookie: the gateway treats every /api/public/ route as anonymous anyway.
+export async function getPublishedDeckCost(token: string, version: number, signal?: AbortSignal): Promise<PublishedDeckCost> {{
+  const response = await fetch(`/api/public/decks/${{encodeURIComponent(token)}}/versions/${{version}}/cost`, {{ method: 'GET', credentials: 'omit', signal }});
+  if (!response.ok) {{
+    const payload = await response.json().catch(() => ({{}}));
+    throw new PriceError(response.status, payload?.detail?.code ?? 'PRICE_REQUEST_FAILED');
+  }}
+  return response.json() as Promise<PublishedDeckCost>;
 }}
 """)
 content = "\n".join(lines)

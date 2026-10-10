@@ -67,7 +67,7 @@ The gateway takes a monotonic receipt time before it reads the body or looks up 
 
 - `x-internal-budget-ms`: milliseconds left when sent. The API clamps it to 3000.
 - `x-internal-budget-time`: epoch seconds, 30 s replay window.
-- `x-internal-caller`: `user:<id>`. Ticket 12 adds `anon:<keyed digest>`.
+- `x-internal-caller`: `user:<id>`, or `anon:<keyed digest>` on public routes (ticket 12).
 - `x-internal-budget-signature = HMAC(secret, "budget\n{method}\n{path}\n{bodyhash}\n{caller}\n{ms}\n{time}")`.
 
 The existing `x-internal-*` identity message is unchanged. Client-supplied `x-internal-*` headers never reach the API (the gateway builds its upstream headers from scratch), and the API ignores any other deadline header.
@@ -76,7 +76,7 @@ The existing `x-internal-*` identity message is unchanged. Client-supplied `x-in
 
 - `Budget(hard, caller, wait_until=hard-0.5)` with `remaining()`, `wait_remaining()`, `expired()` and `pg_timeout_ms(final=False)`. The timeout is never 0, because PostgreSQL reads 0 as "no timeout". The final phase leaves a 50 ms margin to answer.
 - `trusted_budget(request)` is the FastAPI dependency. It verifies the budget signature against the exact method, path, body hash, caller, milliseconds and time. A route that identifies a user also depends on `verified_user` and checks `budget.caller == f"user:{user_id}"`.
-- `BUDGETED_ROUTES` / `is_budgeted(method, path)` list the budgeted routes. Keep them in step with `BUDGETED_ROUTES` in `auth/src/server.ts`. Today they are `POST /api/prices/editions` and `GET /api/decks/{id}/cost`; 12 adds one line to each.
+- `BUDGETED_ROUTES` / `is_budgeted(method, path)` list the budgeted routes. Keep them in step with `BUDGETED_ROUTES` in `auth/src/server.ts`. Today they are `POST /api/prices/editions`, `GET /api/decks/{id}/cost` and `GET /api/public/decks/{token}/versions/{version}/cost`.
 
 Read order in `private_edition_quotes(edition_ids, budget)`:
 
@@ -109,7 +109,7 @@ For any `/api/` response whose `content-disposition` starts with `attachment`, t
 | `backoff`    | not admitted: the Edition or the source is in backoff                                                 |
 | `failed`     | the job left the queue without a result (see `refresh_failed_at`)                                     |
 
-Age bands use `result.checked_at` and the module wall clock: under 1 h nothing happens; 1 h to under 24 h returns the cached view and admits in the background; 24 h or older, a missing, garbled or future (> 5 min) `checked_at`, and unknown/invalid/pending rows are admitted and the response waits for them. Joining a job already in flight never extends its 60 s lifetime and never re-queues it. Reloading never forces anything. Admission is `app.price_refresh.evaluate_and_admit`. The Deck cost route (09) calls it once per access over all Deck rows; 12 will do the same for Published Decks.
+Age bands use `result.checked_at` and the module wall clock: under 1 h nothing happens; 1 h to under 24 h returns the cached view and admits in the background; 24 h or older, a missing, garbled or future (> 5 min) `checked_at`, and unknown/invalid/pending rows are admitted and the response waits for them. Joining a job already in flight never extends its 60 s lifetime and never re-queues it. Reloading never forces anything. Admission is `app.price_refresh.evaluate_and_admit`. The Deck cost route (09) calls it once per access over all Deck rows; the Published Deck cost route (12) does the same for the frozen rows of a Published Deck.
 
 ## Deck cost (ticket 09)
 
@@ -136,6 +136,42 @@ Answer (`DeckCost`, `cache-control: no-store`; every count is a base-10 string):
 - A Deck owned by someone else is 404 once the capture runs; an exhausted budget or a failed capture answers `incomplete` without checking ownership.
 
 The client (`web/src/DeckCost.tsx`) asks once per Deck and inventory revision, gives up after about 3.5 s, and renders: `$1.61 · 5/6 cards priced · Incomplete subtotal: …`, the stale and unknown-age counts, `$0.00 · No cards`, `Price unavailable · 0/N cards priced`, or `Price unavailable; coverage unavailable; N cards total` (also for a client timeout or a 504). It always states that the estimate excludes shipping and taxes.
+
+## Published Deck cost (ticket 12)
+
+`GET /api/public/decks/{token}/versions/{version}/cost` (`app.published_cost`) answers Estimated Deck Cost and Pricing Coverage for the active frozen snapshot of one Published Deck. It is budgeted (same gateway signing and three seconds from receipt) and anonymous: the gateway classifies every `/api/public/` path as anonymous, never looks up a session for it and signs the budget with `anon:<keyed digest>`. The API refuses any other caller (a `user:` caller or a malformed `anon:` caller is 401).
+
+The only inputs are the token and the version in the path. The version sits in the path because the budget signature binds the path and not the query. Any query string, any non-zero `content-length` and any `transfer-encoding` header is 422 `INVALID_REQUEST`; the token must match the publication token syntax and the version `[1-9][0-9]{0,17}`, otherwise 404. Rows, references and quantities are derived server-side from the snapshot (`app.public_deck`); the request cannot name an Edition or a quantity.
+
+| status | code                            | when                                                                                                                 |
+| ------ | ------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| 404    | `PUBLISHED_DECK_NOT_FOUND`      | bad syntax, token not active at entry, or token no longer active at the final check (a revoke during the wait)       |
+| 409    | `PUBLISHED_DECK_CHANGED`        | the active version is not the requested one at entry or at the final check, or the frozen content changed in between |
+| 503    | `PUBLIC_PROJECTION_UNAVAILABLE` | the manifest is unreadable or invalid at entry (including a malformed frozen quantity)                               |
+| 422    | `INVALID_REQUEST`               | a query string or a body                                                                                             |
+| 401    |                                 | missing or forged budget, `user:` caller, malformed `anon:` caller                                                   |
+
+Every error body is `{"detail": {"code": ...}}` with `cache-control: no-store` and `x-robots-tag: noindex, nofollow`. POST is 405.
+
+Answer (`PublishedDeckCost`): `version, digest, status, reason, total_copies, priced_copies, stale_copies, unknown_age_copies, fallback_copies, amount, display_amount, currency`. `status`, the counts and the labels are exactly those of the private Deck cost: `deck_cost.summarize` is the one fold behind both routes (an empty snapshot is `$0.00` with every count `"0"`; `no_quotes` is `0/N`; `incomplete` carries a reason and no coverage).
+
+The pipeline for one access:
+
+1. Read the snapshot (`public_deck.read_active`): the manifest only, bounded by the request's own clock (the projection adapter's five-second timeout never applies). Compute the digest.
+2. `public_catalog.marketplace_states` over the distinct Edition references that can be proven, then one `price_refresh.evaluate_and_admit` over every price-eligible row (caller `anon:<digest>`, so the anonymous ledger applies), then at most one wait.
+3. Inside the 0.5 s reserve: re-read eligibility (`marketplace_states` again; a row whose state, revision, lookup or Printing changed is unpriced) and revalidate the snapshot (token, version, digest). Only then is the answer built.
+
+Withheld answers. If the entry deadline, the final-check deadline or the final manifest read fails, the answer is `incomplete` with `reason` (`deadline`, or `validation_unavailable`) and `digest`, `total_copies` and every count null: nothing unvalidated is returned. A store read failure with the snapshot revalidated is `incomplete` with the frozen `total_copies` and the digest, as for the private route.
+
+The digest is `sha256(json.dumps(record['snapshot'], sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode('utf-8'))` over the stored snapshot. It is computed per request, never stored (no migration), never a request input, and checked server-side only: the server refuses a digest change within one request (409). The client guards by version: it discards an answer for another version, and a 409 or 404 makes the page read its snapshot again and price the new version.
+
+Reference proof. A row is price-eligible only if its `edition_ref` and `printing_ref` are both present, the store's `catalog:edition:<edition_ref>` record names the same `printing_ref`, and the Edition is verified, has a `quote_lookup` and passes the public catalog checks. Otherwise it is unpriced and still counts in `total_copies`. Legacy rows (no `edition_ref`) are unproven: readable, unpriced and counted in the total; no lookup by set, number or name is attempted, and a republish is the only way to capture references. A row whose reference resolves to another Printing, or is unknown to the public catalog, is treated the same way. Rows repeating one reference have their quantities summed; if they disagree on `printing_ref`, the Edition is unproven. A malformed frozen quantity makes the whole snapshot invalid (503 at entry, `validation_unavailable` at the final check); a row is never dropped silently.
+
+Eligibility comes from the store's `catalog:edition` and `quarantine:edition` records, never from PostgreSQL. A quarantine committed in PostgreSQL hides private prices at once but reaches Published Deck pages only after outbox delivery (`catalog_outbox_pending` shows the lag).
+
+Isolation. The route never touches a session, the gateway's auth database, the API's PostgreSQL or private inventory, and it writes no record: a per-Deck quote or total is never stored, and the record-store generation is unchanged by a cost access over fresh quotes. The tests prove it: `api/tests/test_published_cost.py` patches `psycopg.connect` to raise and sets an unreachable `DATABASE_URL` for every public call, and `auth/tests/published-cost.test.ts` runs an isolated gateway and API whose database URLs are counting listeners (absent, forged and valid cookies cause zero connections to either, with controls showing the counters are live).
+
+Launch gate. Published Deck prices are behind the same physical Edition and quote-variant evidence gate as every other price. This ticket activates no rule and claims no deployed acceptance; the launch checklist stays open.
 
 ## Client
 

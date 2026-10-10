@@ -14,6 +14,8 @@ Coverage is numeric only after every row was evaluated. A row whose cache could 
 no coverage, only the copy total. Refresh labels (``busy``, ``timeout``, ...) never make it incomplete: those rows keep
 their labelled cached view and are counted like any other.
 
+The fold (`summarize`) is shared with the Published Deck route (`published_cost`).
+
 Contract: docs/prices.md ("Deck cost").
 """
 from typing import Literal
@@ -73,17 +75,23 @@ def _display(micros: int) -> str:
     return f'${cents // 100:,}.{cents % 100:02d}'
 
 
-def _summary(deck_id, contents, views) -> DeckCost:
-    quantities = {row.edition_id: int(row.quantity) for row in contents.editions}
+def summarize(quantities: dict, views: dict) -> dict:
+    """Estimated Deck Cost and Pricing Coverage fields for ``{key: positive int quantity}`` and ``{key: QuoteView}``.
+
+    Shared by the private Deck route (ticket 09) and the Published Deck route (ticket 12); keys are opaque (Edition ids or
+    public references). An empty mapping is the empty Deck. Coverage is numeric only when no row failed with deadline,
+    store_unavailable or validation_unavailable."""
+    if not quantities:
+        return {'status': 'empty', 'total_copies': '0', 'priced_copies': '0', 'stale_copies': '0',
+                'unknown_age_copies': '0', 'fallback_copies': '0', 'amount': '0', 'display_amount': _display(0)}
     total = sum(quantities.values())
-    base = {'deck_id': deck_id, 'owner_revision': contents.owner_revision, 'total_copies': str(total)}
+    base = {'total_copies': str(total)}
     failed = [view.reason for view in views.values() if view.status == 'failed' and view.reason in _INCOMPLETE]
     if failed:
-        reason = 'deadline' if 'deadline' in failed else failed[0]
-        return DeckCost(status='incomplete', reason=reason, **base)
+        return {'status': 'incomplete', 'reason': 'deadline' if 'deadline' in failed else failed[0], **base}
     priced = stale = unknown = fallback = micros = 0
-    for edition_id, quantity in quantities.items():
-        view = views[edition_id]
+    for key, quantity in quantities.items():
+        view = views[key]
         if view.status != 'quote':
             continue
         priced += quantity
@@ -97,8 +105,13 @@ def _summary(deck_id, contents, views) -> DeckCost:
     counts = {'priced_copies': str(priced), 'stale_copies': str(stale), 'unknown_age_copies': str(unknown),
               'fallback_copies': str(fallback)}
     if priced == 0:
-        return DeckCost(status='no_quotes', **base, **counts)
-    return DeckCost(status='priced', amount=_exact(micros), display_amount=_display(micros), **base, **counts)
+        return {'status': 'no_quotes', **base, **counts}
+    return {'status': 'priced', 'amount': _exact(micros), 'display_amount': _display(micros), **base, **counts}
+
+
+def _summary(deck_id, contents, views) -> DeckCost:
+    quantities = {row.edition_id: int(row.quantity) for row in contents.editions}
+    return DeckCost(deck_id=deck_id, owner_revision=contents.owner_revision, **summarize(quantities, views))
 
 
 def private_deck_cost(deck_id: UUID, user_id: str, budget: Budget, releases: list) -> DeckCost:
@@ -114,9 +127,7 @@ def private_deck_cost(deck_id: UUID, user_id: str, budget: Budget, releases: lis
         return DeckCost(deck_id=deck_id, status='incomplete', reason='inventory_unavailable')
     # The capture committed: no inventory lock or connection is held from here on.
     if not contents.editions:
-        return DeckCost(deck_id=deck_id, status='empty', owner_revision=contents.owner_revision, total_copies='0',
-                        priced_copies='0', stale_copies='0', unknown_age_copies='0', fallback_copies='0',
-                        amount='0', display_amount=_display(0))
+        return DeckCost(deck_id=deck_id, owner_revision=contents.owner_revision, **summarize({}, {}))
     views = prices.private_edition_quotes([row.edition_id for row in contents.editions], budget, releases)
     return _summary(deck_id, contents, views)
 

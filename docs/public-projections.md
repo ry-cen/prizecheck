@@ -28,6 +28,10 @@ Listed visibility changes reuse the same atomic manifest switch and private outb
 
 The local auth gateway can enforce anonymous public-read budgets with `PublicReadLimiter` from `auth/src/publicReads.ts`. Mount it before proxying snapshot, discovery, and sitemap GET requests, using the existing trusted-proxy client address derivation. It retains only randomly salted caller digests in a bounded in-memory one-minute window, clears them on expiry, and writes no IP addresses or caller counts to PostgreSQL. The default is 120 reads per caller per minute. Return 429 with Retry-After when exhausted. Production edge selection must provide equivalent rate limiting across replicas; the local helper protects the single gateway process.
 
+### Nested anonymous routes
+
+The gateway treats every `/api/public/` path as anonymous: no session lookup, no identity forwarded, whatever cookies arrive. A budgeted public route is signed with an `anon:` caller. Enrichment routes under a snapshot (`/api/public/decks/{token}/versions/{version}/...`, the Published Deck cost first) reach a snapshot only through `api/app/public_deck.py`: it validates the token and version syntax and rejects any query string or body, reads the active frozen snapshot from the manifest under the caller's deadline (derived rows, opaque references, quantities, and a digest of the frozen content), and re-reads it before a response so that a revoke (404), a republish or a rewritten snapshot (409) is never answered with enrichment computed for other content. Enrichment never writes the manifest, so the discovery revision is unchanged by quote updates and runner writes.
+
 ## Shared public records
 
 Public catalog metadata, quotes, quarantine, and refresh coordination live in `PUBLIC_PROJECTION_DIR/records`, separate from the Deck manifest. Record writes never change the manifest, its revision, or discovery cursors. `api/app/public_records.py` defines the typed key families and the store API. The HTTP relay equivalent is in `docs/http-public-projection.md`.

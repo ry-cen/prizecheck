@@ -589,6 +589,7 @@ class MarketplaceState:
     quote_lookup: dict | None = None
     quote: object = None            # QuoteState when a price lookup is allowed, else None
     generation: str | None = None
+    printing_ref: str | None = None
 
     @property
     def product_eligible(self):
@@ -656,6 +657,7 @@ def marketplace_states(store, edition_refs, deadline, *, generation=None):
     quarantined or not verified. A verified Edition is product-eligible when a product ID
     is published and price-eligible when a quote lookup is. Quote state, when allowed, is
     read at the same generation. ProjectionUnavailable propagates when the store is down.
+    ``printing_ref`` is the Edition record's Printing, so public callers can prove a frozen row's reference.
     """
     refs = list(dict.fromkeys(edition_refs))
     if not refs:
@@ -664,12 +666,14 @@ def marketplace_states(store, edition_refs, deadline, *, generation=None):
     snapshot = store.read_all(keys, deadline=deadline, generation=generation)
     states, pairs = {}, []
     for ref in refs:
-        checked = _marketplace(ref, snapshot.records[catalog_edition_key(ref)].value, snapshot.records[quarantine_key(ref)].value)
+        edition = snapshot.records[catalog_edition_key(ref)].value
+        checked = _marketplace(ref, edition, snapshot.records[quarantine_key(ref)].value)
         if checked is None:
             states[ref] = MarketplaceState('unknown', generation=snapshot.generation)
             continue
         state, reason, mapping_revision, product, lookup = checked
-        states[ref] = MarketplaceState(state, reason, mapping_revision, product, lookup, None, snapshot.generation)
+        states[ref] = MarketplaceState(state, reason, mapping_revision, product, lookup, None, snapshot.generation,
+                                       edition['printing_ref'] if isinstance(edition['printing_ref'], str) else None)
         if state == 'verified' and lookup is not None and mapping_revision >= 1:
             pairs.append((ref, mapping_revision))
     if pairs:

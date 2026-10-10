@@ -1,4 +1,4 @@
-"""Trusted request budget for deadline-bound routes (Edition prices, private Deck cost; public quotes later).
+"""Trusted request budget for deadline-bound routes (Edition prices, private Deck cost, Published Deck cost).
 
 The gateway takes the receipt time, spends part of the three seconds on its own work, and signs what is
 left for the API: milliseconds remaining, a timestamp, and the caller. A client can neither extend that
@@ -25,10 +25,11 @@ MAX_BODY_BYTES = 16 * 1024
 FINAL_MARGIN_MS = 50              # Left after the final validation times out, to build the response.
 
 # (method, path pattern) for every route that carries a gateway budget. Keep in step with BUDGETED_ROUTES in
-# auth/src/server.ts: ticket 12 adds one line to both lists.
+# auth/src/server.ts.
 BUDGETED_ROUTES = (
     ('POST', re.compile(r'^/api/prices/editions$')),
     ('GET', re.compile(r'^/api/decks/[^/]+/cost$')),
+    ('GET', re.compile(r'^/api/public/decks/[^/]+/versions/[^/]+/cost$')),
 )
 
 
@@ -39,7 +40,7 @@ def is_budgeted(method: str, path: str) -> bool:
 @dataclass(frozen=True)
 class Budget:
     hard: float                       # Absolute time.monotonic() value the response must beat.
-    caller: str                       # 'user:<id>' (ticket 12 adds 'anon:<keyed digest>').
+    caller: str                       # 'user:<id>' or 'anon:<keyed digest>' (public routes).
     wait_until: float = field(default=None)  # type: ignore[assignment]
 
     def __post_init__(self):

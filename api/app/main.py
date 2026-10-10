@@ -204,6 +204,8 @@ from .deck_mass_entry import router as deck_mass_entry_router  # noqa: E402
 app.include_router(deck_mass_entry_router)
 from .deck_cost import router as deck_cost_router  # noqa: E402
 app.include_router(deck_cost_router)
+from .published_cost import router as published_cost_router  # noqa: E402
+app.include_router(published_cost_router)
 
 
 from .price_budget import is_budgeted  # noqa: E402

@@ -21,7 +21,7 @@ class FilePublicProjection:
         self.directory = Path(os.environ.get('PUBLIC_PROJECTION_DIR', '.local/public-projections')).resolve()
         self.path = self.directory / 'current.json'
 
-    def read_state(self):
+    def read_state(self, timeout=None):
         try:
             with self.path.open() as stream:
                 value = json.load(stream)
@@ -97,18 +97,18 @@ class HttpPublicProjection:
         ):
             raise ProjectionUnavailable()
 
-    def _request(self, method, **kwargs):
+    def _request(self, method, timeout=5, **kwargs):
         import httpx
         try:
             response = httpx.request(method,self.url,headers={
                 'Authorization':'Bearer '+self.token,'Cache-Control':'no-cache, no-store',**kwargs.pop('headers',{})
-            },timeout=5,follow_redirects=False,trust_env=False,**kwargs)
+            },timeout=timeout,follow_redirects=False,trust_env=False,**kwargs)
             return response
         except (httpx.HTTPError,ValueError) as exc:
             raise ProjectionUnavailable() from exc
 
-    def _load(self, initialize=False):
-        response = self._request('GET')
+    def _load(self, initialize=False, timeout=5):
+        response = self._request('GET', timeout=timeout)
         if initialize and response.status_code == 404:
             return {},-1,None
         if response.status_code != 200:
@@ -125,8 +125,8 @@ class HttpPublicProjection:
         except (ValueError,KeyError,TypeError) as exc:
             raise ProjectionUnavailable() from exc
 
-    def read_state(self):
-        decks,revision,_ = self._load()
+    def read_state(self, timeout=5):
+        decks,revision,_ = self._load(timeout=timeout)
         return decks,revision
 
     def read(self):
