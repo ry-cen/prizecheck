@@ -17,6 +17,7 @@ from psycopg.rows import dict_row
 
 from .catalog_targets import IDENTITY_REVIEW_KINDS, MatchingRulesV1, TargetContext, refresh_editions, refresh_printing
 from .public_catalog import publish_catalog_best_effort
+from .tcgdex_record import source_descriptor
 
 BASE_URL = "https://api.tcgdex.net/v2/en/cards"
 MAX_WORKERS = 8
@@ -104,16 +105,6 @@ def source_metadata(record):
             for item in variants]},
         "export_candidate": export,
     }
-
-
-def source_descriptor(variant: dict) -> dict:
-    # Existing descriptor correspondence stays intact until the target-datastore
-    # preflight: no cleaned keys, aliases or compatibility mapping are applied.
-    descriptor = {key: value for key, value in variant.items()
-                  if key not in ("variantId", "pricing", "cardmarket", "tcgplayer") and value is not None}
-    if isinstance(descriptor.get("stamps"), list):
-        descriptor["stamps"] = sorted(descriptor["stamps"], key=lambda value: json.dumps(value, sort_keys=True))
-    return descriptor
 
 
 def variant_descriptors(record: dict) -> tuple[list[dict], bool]:
