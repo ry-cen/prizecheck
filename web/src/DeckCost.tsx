@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { getDeckCost, PriceError, type DeckCost } from "./prices_generated";
+import { getDeckCost, type DeckCost } from "./prices_generated";
 
 // Estimated Deck Cost and Pricing Coverage come from one server-side access over every copy in the Deck, never from
 // the rows this page happens to render. A result belongs to one inventory revision: an answer for another revision is
@@ -41,11 +41,11 @@ export function DeckCostSummary({
         )
           setSettled({ kind: "cost", cost });
         else if (cost.owner_revision > latest.current) onNewerRevision();
-        // An older revision is simply dropped: the request for the current one is already on its way.
+        // An older revision belongs to no live request: end the check instead of waiting for an answer that never comes.
+        else setSettled({ kind: "unavailable" });
       })
-      .catch((cause) => {
+      .catch(() => {
         if (!live) return;
-        if (cause instanceof PriceError && cause.status === 404) return;
         setSettled({ kind: "unavailable" });
       })
       .finally(() => clearTimeout(timer));

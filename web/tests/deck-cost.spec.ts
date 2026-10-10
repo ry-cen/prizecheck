@@ -204,6 +204,53 @@ test("an empty Deck is $0.00 with No cards, and a Deck with no eligible quote is
   await expect(cost).not.toContainText("$0.00");
 });
 
+test("an incomplete 200 answer without a total falls back to the checks total, and a 404 answer ends the check instead of waiting forever", async ({
+  page,
+}) => {
+  const ids = seed();
+  sixCopies(ids);
+  await signIn(page);
+  const deck = await deckWith(page, {
+    [ids.normal]: 3,
+    [ids["reverse-holofoil"]]: 2,
+    [ids.unspecified]: 1,
+  });
+  await page.route("**/api/decks/*/cost", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      headers: { "cache-control": "no-store" },
+      body: JSON.stringify({
+        deck_id: deck.id,
+        status: "incomplete",
+        reason: "deadline",
+        owner_revision: null,
+        total_copies: null,
+        currency: "USD",
+      }),
+    })
+  );
+  let cost = await openDeck(page, deck.name);
+  await expect(cost).toContainText(
+    "Price unavailable; coverage unavailable; 6 cards total"
+  );
+  await expect(cost).not.toContainText("cards priced");
+  await page.unroute("**/api/decks/*/cost");
+
+  await page.route("**/api/decks/*/cost", (route) =>
+    route.fulfill({
+      status: 404,
+      contentType: "application/json",
+      body: JSON.stringify({ detail: { code: "DECK_NOT_FOUND" } }),
+    })
+  );
+  cost = await openDeck(page, deck.name);
+  await expect(cost).toContainText(
+    "Price unavailable; coverage unavailable; 6 cards total"
+  );
+  await expect(cost).not.toContainText("Checking prices…");
+});
+
 // @slow (wall-clock): the stalled request waits 6 s of real time before the fallback.
 test(
   "a deadline answer or a stalled request shows no numeric coverage, only the total, and the page stays usable",
