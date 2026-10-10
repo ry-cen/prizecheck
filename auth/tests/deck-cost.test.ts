@@ -230,7 +230,7 @@ describe("a complete private Deck through the gateways", () => {
       amount: "5",
       priced_copies: "3",
       total_copies: "6",
-      fallback_copies: "4", // the failed refreshes: one cached copy, three never cached
+      fallback_copies: "1", // only the cached copy: the three never-cached copies have no cached data to show
     });
 
     for (const edition of [down, never]) source.behaviour.delete(edition.card);

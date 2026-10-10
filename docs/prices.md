@@ -131,9 +131,9 @@ Answer (`DeckCost`, `cache-control: no-store`; every count is a base-10 string):
 | `incomplete` | a row failed with `deadline`, `store_unavailable` or `validation_unavailable`, or the capture failed (`inventory_unavailable`, `deadline`) | `reason` and `total_copies` (null when the capture itself failed); no amount and no coverage                         |
 
 - Only `status: quote` rows count. Confirmed absence, quarantine, unverified, Unspecified Variant, `not_cached`, invalid and pending rows are evaluated but unpriced, so an absent or invalidated quote never enters the subtotal.
-- `stale_copies` and `unknown_age_copies` count priced copies by provider age (strictly over 48 h, or unknown). `fallback_copies` counts copies whose refresh label is `timeout`, `busy`, `backoff` or `failed`: they are shown from the labelled cache and still counted.
+- `stale_copies` and `unknown_age_copies` count priced copies by provider age (strictly over 48 h, or unknown). `fallback_copies` counts priced copies (`status: quote`) whose refresh label is `timeout`, `busy`, `backoff` or `failed`: they are shown from the labelled cache. Copies with no cached quote are unpriced and are not counted here.
 - `owner_revision` is the captured inventory revision. The client discards an answer for any other revision; a newer one makes the page reload its checks and ask again.
-- A Deck owned by someone else is 404 before any price work.
+- A Deck owned by someone else is 404 once the capture runs; an exhausted budget or a failed capture answers `incomplete` without checking ownership.
 
 The client (`web/src/DeckCost.tsx`) asks once per Deck and inventory revision, gives up after about 3.5 s, and renders: `$1.61 · 5/6 cards priced · Incomplete subtotal: …`, the stale and unknown-age counts, `$0.00 · No cards`, `Price unavailable · 0/N cards priced`, or `Price unavailable; coverage unavailable; N cards total` (also for a client timeout or a 504). It always states that the estimate excludes shipping and taxes.
 

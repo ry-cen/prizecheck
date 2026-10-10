@@ -48,7 +48,7 @@ class DeckCost(BaseModel):
     priced_copies: str | None = None         # The coverage numerator; None unless every row was evaluated.
     stale_copies: str | None = None          # Priced copies whose provider quote is over 48 hours old.
     unknown_age_copies: str | None = None    # Priced copies whose provider quote time is unknown.
-    fallback_copies: str | None = None       # Copies whose refresh did not finish: shown from the labelled cache.
+    fallback_copies: str | None = None       # Priced copies whose refresh did not finish: shown from the labelled cache.
     amount: str | None = None                # Exact decimal subtotal of the priced copies.
     display_amount: str | None = None        # The only rounded form.
     currency: Literal['USD'] = 'USD'
@@ -84,11 +84,11 @@ def _summary(deck_id, contents, views) -> DeckCost:
     priced = stale = unknown = fallback = micros = 0
     for edition_id, quantity in quantities.items():
         view = views[edition_id]
-        if view.refresh in _FALLBACK:
-            fallback += quantity
         if view.status != 'quote':
             continue
         priced += quantity
+        if view.refresh in _FALLBACK:
+            fallback += quantity
         micros += _micros(view.amount) * quantity
         if view.age == 'unknown':
             unknown += quantity
