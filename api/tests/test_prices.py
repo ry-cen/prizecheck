@@ -789,6 +789,9 @@ def test_an_unavailable_store_during_admission_still_returns_the_cached_quote(st
         def read_all(self, *a, **k):
             return real.read_all(*a, **k)
 
+        def read_records(self, *a, **k):
+            return real.read_records(*a, **k)
+
         def compare_and_swap(self, *a, **k):
             raise ProjectionUnavailable()
 
