@@ -364,9 +364,11 @@ test("an export that changed before it arrived is discarded", async ({
 });
 
 // @slow (capacity): builds and downloads more than 256 KiB of export text.
+// @serial: with four stacks loading the host, the Deck detail query over 1,500 SQL-seeded Holdings sometimes ran for
+// over a minute (CPU, no lock wait) instead of milliseconds; it runs alone, after a fresh ANALYZE.
 test(
   "output beyond 256 KiB is not shown inline and downloads complete",
-  { tag: "@slow" },
+  { tag: ["@serial", "@slow"] },
   async ({ page }) => {
     test.setTimeout(240_000);
     const long = "X".repeat(200);
@@ -386,6 +388,8 @@ test(
       page,
       cards.map((card) => [world[card.key].editions[0], "1"])
     );
+    // The fixture bulk-loads by SQL; give the planner current statistics, as a long-lived database would have.
+    await pool.query("ANALYZE");
     const live = await openDeck(page, deck.name);
     await live
       .getByRole("button", { name: "Export to Live", exact: true })

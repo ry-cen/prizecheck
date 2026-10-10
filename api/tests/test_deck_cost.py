@@ -200,6 +200,7 @@ def test_an_exhausted_budget_reports_incomplete_without_touching_the_store(store
 
 
 @pytest.mark.serial(reason='wall-clock: asserts an upper bound on elapsed time')
+@pytest.mark.slow(reason='wall-clock: waits out a real ~1 s lock timeout')
 def test_a_held_inventory_lock_answers_inside_the_budget_without_a_count(store):
     normal = world()["normal"]
     seed(store, normal)
