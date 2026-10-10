@@ -76,7 +76,7 @@ The existing `x-internal-*` identity message is unchanged. Client-supplied `x-in
 
 - `Budget(hard, caller, wait_until=hard-0.5)` with `remaining()`, `wait_remaining()`, `expired()` and `pg_timeout_ms(final=False)`. The timeout is never 0, because PostgreSQL reads 0 as "no timeout". The final phase leaves a 50 ms margin to answer.
 - `trusted_budget(request)` is the FastAPI dependency. It verifies the budget signature against the exact method, path, body hash, caller, milliseconds and time. A route that identifies a user also depends on `verified_user` and checks `budget.caller == f"user:{user_id}"`.
-- `BUDGETED_ROUTES` / `is_budgeted(method, path)` list the budgeted routes. Keep them in step with `BUDGETED_ROUTES` in `auth/src/server.ts`; 09 and 12 add one line to each.
+- `BUDGETED_ROUTES` / `is_budgeted(method, path)` list the budgeted routes. Keep them in step with `BUDGETED_ROUTES` in `auth/src/server.ts`. Today they are `POST /api/prices/editions` and `GET /api/decks/{id}/cost`; 12 adds one line to each.
 
 Read order in `private_edition_quotes(edition_ids, budget)`:
 
@@ -109,7 +109,33 @@ For any `/api/` response whose `content-disposition` starts with `attachment`, t
 | `backoff`    | not admitted: the Edition or the source is in backoff                                                 |
 | `failed`     | the job left the queue without a result (see `refresh_failed_at`)                                     |
 
-Age bands use `result.checked_at` and the module wall clock: under 1 h nothing happens; 1 h to under 24 h returns the cached view and admits in the background; 24 h or older, a missing, garbled or future (> 5 min) `checked_at`, and unknown/invalid/pending rows are admitted and the response waits for them. Joining a job already in flight never extends its 60 s lifetime and never re-queues it. Reloading never forces anything. Admission is `app.price_refresh.evaluate_and_admit`; 09 and 12 call it once per access over all Deck rows.
+Age bands use `result.checked_at` and the module wall clock: under 1 h nothing happens; 1 h to under 24 h returns the cached view and admits in the background; 24 h or older, a missing, garbled or future (> 5 min) `checked_at`, and unknown/invalid/pending rows are admitted and the response waits for them. Joining a job already in flight never extends its 60 s lifetime and never re-queues it. Reloading never forces anything. Admission is `app.price_refresh.evaluate_and_admit`. The Deck cost route (09) calls it once per access over all Deck rows; 12 will do the same for Published Decks.
+
+## Deck cost (ticket 09)
+
+`GET /api/decks/{deck_id}/cost` (`app.deck_cost`) answers Estimated Deck Cost and Pricing Coverage for every copy of one private Deck. It is budgeted like the Edition route (same gateway signing, same three seconds from receipt) and takes no body and no options; query parameters and cache headers change nothing.
+
+One access:
+
+1. Captures the complete Deck with `decks.capture_deck_contents` under the budget (`statement_timeout`/`lock_timeout` from `pg_timeout_ms()`, run under `_bounded`). The capture locks the owner row like every inventory reader of record and commits before any store I/O, so no inventory lock or connection is held while prices are read or awaited.
+2. Calls `private_edition_quotes` **once** with every distinct Edition in the Deck. That one call reads every cache row (in 128-key store batches), calls `evaluate_and_admit` once (at most 32 new jobs; the other rows are labelled and still counted), waits at most once until `wait_until`, and validates once. The Deck is never split into 64-id requests.
+3. Folds the views with the captured quantities. Quantities are Python integers and amounts are integer micro-dollars, so the subtotal is exact for any bigint quantity; the only rounding is the final display (half-up to cents, `<$0.01` for a positive sub-cent subtotal).
+
+Answer (`DeckCost`, `cache-control: no-store`; every count is a base-10 string):
+
+| status       | when                                                                                                                                       | fields                                                                                                               |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
+| `empty`      | the Deck holds no copies (no store read, no admission)                                                                                     | `amount: "0"`, `display_amount: "$0.00"`, all counts `"0"`                                                           |
+| `priced`     | every row was evaluated and at least one copy has a valid quote                                                                            | `amount`, `display_amount`, `priced_copies`, `total_copies`, `stale_copies`, `unknown_age_copies`, `fallback_copies` |
+| `no_quotes`  | every row was evaluated and no copy has a valid quote                                                                                      | counts with `priced_copies: "0"`; no amount                                                                          |
+| `incomplete` | a row failed with `deadline`, `store_unavailable` or `validation_unavailable`, or the capture failed (`inventory_unavailable`, `deadline`) | `reason` and `total_copies` (null when the capture itself failed); no amount and no coverage                         |
+
+- Only `status: quote` rows count. Confirmed absence, quarantine, unverified, Unspecified Variant, `not_cached`, invalid and pending rows are evaluated but unpriced, so an absent or invalidated quote never enters the subtotal.
+- `stale_copies` and `unknown_age_copies` count priced copies by provider age (strictly over 48 h, or unknown). `fallback_copies` counts copies whose refresh label is `timeout`, `busy`, `backoff` or `failed`: they are shown from the labelled cache and still counted.
+- `owner_revision` is the captured inventory revision. The client discards an answer for any other revision; a newer one makes the page reload its checks and ask again.
+- A Deck owned by someone else is 404 before any price work.
+
+The client (`web/src/DeckCost.tsx`) asks once per Deck and inventory revision, gives up after about 3.5 s, and renders: `$1.61 · 5/6 cards priced · Incomplete subtotal: …`, the stale and unknown-age counts, `$0.00 · No cards`, `Price unavailable · 0/N cards priced`, or `Price unavailable; coverage unavailable; N cards total` (also for a client timeout or a 504). It always states that the estimate excludes shipping and taxes.
 
 ## Client
 

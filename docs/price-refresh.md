@@ -79,6 +79,10 @@ Real-process boundary scenarios (ticket 08-C) live in `auth/tests/price-runners.
 
 Writes happen only for new jobs, a hard wait (permit), or a needed runner reservation. Refusal reasons are exposed on `Admission.outcomes[key].reason` and `Admission.refused`, and are added to `stats.refused` only inside a CAS that is happening anyway. Pruned expired queued jobs leave their `work:` record behind; the next admission of that Edition overwrites it. Never user-forced: nothing in a request (route, field, header, role) changes the outcome.
 
+### Deck cost (ticket 09)
+
+`GET /api/decks/{id}/cost` is one access over the whole Deck: one capture, one `private_edition_quotes` call, so one `evaluate_and_admit` over every row, one interactive permit at most and one wait. Rows beyond the 32 new jobs answer `busy` (`job_cap`) and keep their cached view; nothing is dropped from the count. Scenarios: `api/tests/test_deck_cost.py` (signed HTTP), `auth/tests/deck-cost.test.ts` (the 08-C stack: gateways, relay, real runners, timing margins in `price-runners-metrics.log`) and `web/tests/deck-cost.spec.ts`.
+
 ## To be filled in by 08
 
 Runner lifecycle, source client and recovery table. See the ticket plans.
