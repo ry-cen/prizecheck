@@ -289,7 +289,9 @@ def test_every_copy_of_a_large_deck_is_evaluated_with_one_admission_and_one_budg
     elapsed = time.monotonic() - started
     assert calls == [70]                      # one access, every Deck row, one admission
     assert max(batches) >= 140
-    assert 2.0 < elapsed < 3.0, elapsed       # the hard rows used one wait window for the whole Deck
+    # The hard rows used one wait window for the whole Deck: 70 per-Edition waits would take multiples of it. The gateway
+    # tests own the 3.0 s contract; this clock also covers final validation and the permit release after the budget.
+    assert 2.4 < elapsed < 3.5, elapsed
     assert (result["status"], result["priced_copies"], result["total_copies"]) == ("priced", "140", "140")
     assert (result["amount"], result["display_amount"]) == ("22", "$22.00")   # 60 x 0.10 + 80 x 0.20, nothing omitted
     assert result["fallback_copies"] == "80"  # the day-old copies kept their labelled cached quote
@@ -324,7 +326,15 @@ def test_inventory_locks_are_released_before_the_wait_and_the_answer_names_its_r
     answer = {}
     waiting = threading.Thread(target=lambda: answer.setdefault("response", cost(deck)))
     waiting.start()
-    time.sleep(0.6)                                                  # the request is inside its wait window now
+    deadline = time.monotonic() + 3                                  # wait until the request holds its interactive permit
+    while True:
+        try:
+            if scheduler(store)["interactive"]:
+                break
+        except (KeyError, TypeError):
+            pass
+        assert time.monotonic() < deadline, "the cost request never reached its wait window"
+        time.sleep(0.05)
     started = time.monotonic()
     added = add(USER, deck, str(plain["id"]), "1")
     checks = call("GET", f"/api/decks/{deck}", USER)
