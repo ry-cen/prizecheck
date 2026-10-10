@@ -124,6 +124,13 @@ promote({'card-1': 'Pikachu'})`,
     const dropTarget = page
       .getByRole("navigation", { name: "Location tree" })
       .getByRole("button", { name: destination });
+    // Playwright scrolls the target into view after the mouse is already down.
+    // The Location tree grows with every Location the owner has created, so a
+    // scroll at that point moves the handle away from the press point and
+    // Chromium never starts the drag. Make both ends visible first.
+    await dropTarget.scrollIntoViewIfNeeded();
+    await expect(dropTarget).toBeInViewport();
+    await expect(dragHandle).toBeInViewport();
     await dragHandle.dragTo(dropTarget);
     await expect(selection.getByRole("status")).toContainText("Moved 1 copies");
     await expect(panel.locator(".holding-stack")).toContainText("×1");
