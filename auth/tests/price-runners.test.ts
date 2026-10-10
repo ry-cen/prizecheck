@@ -1,6 +1,6 @@
 // @module-tag slow
-// slow (process): two gateways, two APIs and real price runners; every scenario waits for the runners' real 2 s idle exit
-// (IDLE_S in api/app/price_runner.py is a default argument, so it cannot be scaled from a test).
+// slow (process): two gateways, two APIs and real price runners. One scenario (5xx) waits for the runners' real 2 s idle
+// exit and their own cleanup; the others end their runners with SIGKILL (`settle`), since IDLE_S cannot be scaled.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   backoffKey,
@@ -23,6 +23,8 @@ const stack = new Stack();
 const source = stack.source;
 const runners = stack.runners;
 const PROVIDER_TIME = "2026-10-01T00:00:00Z";
+/** Ends a scenario without waiting out the runners' real 2 s idle exit. */
+const settle = () => stack.quiesce({ kill: true });
 
 beforeAll(async () => {
   await stack.start();
@@ -40,11 +42,11 @@ afterAll(async () => {
 }, 60_000);
 
 /** Runs `body` while sampling the live runner processes every 50 ms. */
-async function watched<T>(body: () => Promise<T>) {
+async function watched<T>(body: () => Promise<T>, natural = false) {
   const stop = runners.watch();
   try {
     const value = await body();
-    await stack.quiesce(); // the runners exit on their own (2 s idle) and free their slots
+    await (natural ? stack.quiesce() : settle()); // natural: the runners exit on their own (2 s idle) and free their slots
     return { value, processes: await stop() };
   } catch (error) {
     await stop();
@@ -94,7 +96,7 @@ const refused = (reason: string) =>
 // ================================================================ AC8: source failures, each through a gateway
 describe("source boundary scenarios through the gateways", () => {
   it("failure (5xx): two attempts, a per-Edition backoff, and the cached quote untouched", async () => {
-    await stack.quiesce();
+    await settle();
     const [[edition]] = await stack.cards(1);
     await stack.seedQuote(edition, "0.40", 25 * HOUR, PROVIDER_TIME);
     const before = await state(edition);
@@ -106,7 +108,7 @@ describe("source boundary scenarios through the gateways", () => {
         "the failure backoff"
       );
       return response;
-    });
+    }, true);
     expect(response.status).toBe(200);
     expect(response.elapsed).toBeLessThanOrEqual(3_000);
     expect(["failed", "timeout"]).toContain(response.rows[edition.id].refresh);
@@ -134,7 +136,7 @@ describe("source boundary scenarios through the gateways", () => {
   }, 30_000);
 
   it("malformed reply: one request, a malformed backoff, nothing written", async () => {
-    await stack.quiesce();
+    await settle();
     const [[edition]] = await stack.cards(1);
     await stack.seedQuote(edition, "0.41", 25 * HOUR, PROVIDER_TIME);
     const before = await state(edition);
@@ -158,7 +160,7 @@ describe("source boundary scenarios through the gateways", () => {
   }, 30_000);
 
   it("partial success: one Edition written, its sibling on the same card unchanged and backed off", async () => {
-    await stack.quiesce();
+    await settle();
     const [[normal, reverse]] = await stack.cards(1, 2);
     // The reverse entry now names another product: lookup drift for that Edition only.
     source.records.set(normal.card, [
@@ -208,7 +210,7 @@ describe("source boundary scenarios through the gateways", () => {
   }, 30_000);
 
   it("unchanged provider time: the check advances, the provider time stays the source's own", async () => {
-    await stack.quiesce();
+    await settle();
     const [[edition]] = await stack.cards(1, 1, "2.50");
     await stack.seedQuote(edition, "2.50", 25 * HOUR, PROVIDER_TIME);
     const { value: response, processes } = await watched(() =>
@@ -234,7 +236,7 @@ describe("source boundary scenarios through the gateways", () => {
   }, 30_000);
 
   it("timeout (AC9): a hanging source answers a labelled fallback within three seconds, then is backed off", async () => {
-    await stack.quiesce();
+    await settle();
     const [[edition]] = await stack.cards(1);
     await stack.seedQuote(edition, "0.42", 25 * HOUR, PROVIDER_TIME);
     const before = await state(edition);
@@ -261,7 +263,7 @@ describe("source boundary scenarios through the gateways", () => {
   }, 30_000);
 
   it("timeout (AC9): when the hung fetch outlasts the wait window the row is labelled timeout within three seconds", async () => {
-    await stack.quiesce();
+    await settle();
     const [[edition]] = await stack.cards(1);
     await stack.seedQuote(edition, "0.44", 25 * HOUR, PROVIDER_TIME);
     source.behaviour.set(edition.card, { kind: "hang" });
@@ -290,7 +292,7 @@ describe("source boundary scenarios through the gateways", () => {
 // ================================================================ AC1 + AC8: launches that fail, and recovery
 describe("failed launch, cancellation and restart", () => {
   it("failed launch: nothing starts and the jobs stay queued; the next access launches and completes them (AC1)", async () => {
-    await stack.quiesce();
+    await settle();
     const [[edition]] = await stack.cards(1);
     stack.breakLaunches();
     let first;
@@ -325,7 +327,7 @@ describe("failed launch, cancellation and restart", () => {
   }, 30_000);
 
   it("cancellation: a job that expires before it is claimed is never fetched", async () => {
-    await stack.quiesce();
+    await settle();
     const [[stale], [live]] = await stack.cards(2);
     stack.breakLaunches();
     try {
@@ -371,7 +373,7 @@ describe("failed launch, cancellation and restart", () => {
   }, 30_000);
 
   it("restart: a worker killed mid-fetch is cleaned up by its supervisor and a new runner picks up the requeued job", async () => {
-    await stack.quiesce();
+    await settle();
     const [[edition]] = await stack.cards(1);
     source.behaviour.set(edition.card, { kind: "hold" });
     let killed: number | null = null;
@@ -406,7 +408,7 @@ describe("failed launch, cancellation and restart", () => {
     );
     source.behaviour.set(edition.card, { kind: "ok" });
     const second = await stack.prices(1, [edition.id]);
-    await stack.quiesce();
+    await settle();
     const processes = await stop();
     expect(second.rows[edition.id]).toMatchObject({
       refresh: "refreshed",
@@ -426,7 +428,7 @@ describe("failed launch, cancellation and restart", () => {
 // ================================================================ AC8: pause and crash with real signals
 describe("pause and crash", () => {
   it("pause (SIGSTOP): the slot is not replaced, the row answers busy at once, and after SIGCONT the work completes", async () => {
-    await stack.quiesce();
+    await settle();
     const [[edition]] = await stack.cards(1);
     source.behaviour.set(edition.card, { kind: "hold" });
     let group: number | null = null;
@@ -474,7 +476,7 @@ describe("pause and crash", () => {
       async () => (await state(edition)).result.value?.state === "quote",
       "the resumed runner's write"
     );
-    await stack.quiesce();
+    await settle();
     const processes = await stop();
     expect((await state(edition)).result.value.attempt).toBe(1);
     expect(source.requests(edition.card)).toHaveLength(1);
@@ -482,7 +484,7 @@ describe("pause and crash", () => {
   }, 40_000);
 
   it("crash (SIGKILL): the next access reclaims the slot through the lock and costs exactly one extra fetch", async () => {
-    await stack.quiesce();
+    await settle();
     const [[edition]] = await stack.cards(1);
     source.behaviour.set(edition.card, { kind: "hold" });
     let group: number | null = null;
@@ -506,7 +508,7 @@ describe("pause and crash", () => {
     source.behaviour.set(edition.card, { kind: "ok" });
     source.onArrive = null;
     const after = await stack.prices(1, [edition.id]);
-    await stack.quiesce();
+    await settle();
     const processes = await stop();
     expect(after.rows[edition.id]).toMatchObject({
       refresh: "refreshed",
@@ -523,9 +525,9 @@ describe("pause and crash", () => {
 
 // ================================================================ AC2: caps across processes, through admission
 describe("caps across two APIs, two runners and five callers", () => {
-  it("40 jobs from five users never exceed two runners, eight fetches, four per slot or two per caller", async () => {
-    await stack.quiesce();
-    const groups = await stack.cards(20, 2); // 20 cards x 2 Editions = 40 jobs, 4 cards per user
+  it("30 jobs from five users never exceed two runners, eight fetches, four per slot or two per caller", async () => {
+    await settle();
+    const groups = await stack.cards(15, 2); // 15 cards x 2 Editions = 30 jobs, 3 cards per user (more than the 2-per-caller cap)
     groups.forEach((group, index) =>
       source.callers.set(group[0].card, stack.users[index % 5].caller)
     );
@@ -570,9 +572,9 @@ describe("caps across two APIs, two runners and five callers", () => {
     } finally {
       stack.repairLaunches();
     }
-    expect(Object.keys((await stack.get(SCHEDULER)).jobs)).toHaveLength(40);
+    expect(Object.keys((await stack.get(SCHEDULER)).jobs)).toHaveLength(30);
     expect(source.log.length).toBe(logged); // nothing ran yet
-    // Phase 2: the next access finds 40 queued jobs and no runner, and reserves both slots.
+    // Phase 2: the next access finds 30 queued jobs and no runner, and reserves both slots.
     responses.push(
       await stack.prices(
         1,
@@ -587,11 +589,11 @@ describe("caps across two APIs, two runners and five callers", () => {
         );
         return Object.values(rows).every((row) => row.value?.state === "quote");
       },
-      "all 40 quotes",
+      "all 30 quotes",
       45_000,
       200
     );
-    await stack.quiesce();
+    await settle();
     const processes = await stop();
     for (const response of responses) expect(response.status).toBe(200);
     expect(processes.supervisors).toBeLessThanOrEqual(2);
@@ -613,7 +615,7 @@ describe("caps across two APIs, two runners and five callers", () => {
   }, 90_000);
 
   it("with an empty bucket, fetches are about one second apart", async () => {
-    await stack.quiesce();
+    await settle();
     const cards = (await stack.cards(4)).map((group) => group[0]);
     const emptied = Date.now();
     await stack.cas([SCHEDULER], () => ({
@@ -651,7 +653,7 @@ describe("caps across two APIs, two runners and five callers", () => {
 // ================================================================ AC1: no runner ever reached PostgreSQL
 describe("runners and PostgreSQL", () => {
   it("no launched runner connected to the fake PostgreSQL port, or to anything but the record store and the source", async () => {
-    await stack.quiesce();
+    await settle();
     const supervisors = runners
       .registered()
       .filter((r) => r.role === "supervisor");

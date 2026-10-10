@@ -633,22 +633,26 @@ serve_relay({'adapter': 'http', 'directory': sys.argv[1]}, Out())`,
     throw new Error("could not commit to the record store");
   }
 
-  /** Waits until no runner of ours is alive and no lease is held, then clears the scheduler, leases and source backoff. */
-  async quiesce() {
+  /** Waits until no runner of ours is alive and no lease is held, then clears the scheduler, leases and source backoff.
+   * `kill` ends our runners with SIGKILL instead of waiting out their real 2 s idle exit; clearing the leases below then
+   * stands in for their own cleanup. */
+  async quiesce(options: { kill?: boolean } = {}) {
+    if (options.kill) await this.runners.killAll();
     await waitFor(
       async () => (await this.runners.live()).length === 0,
       "our runners to exit",
       15_000,
       50
     );
-    await waitFor(
-      async () => {
-        const rows = await this.read(LEASES);
-        return LEASES.every((key) => rows[key].value === null);
-      },
-      "both runner slots to be free",
-      5_000
-    );
+    if (!options.kill)
+      await waitFor(
+        async () => {
+          const rows = await this.read(LEASES);
+          return LEASES.every((key) => rows[key].value === null);
+        },
+        "both runner slots to be free",
+        5_000
+      );
     await this.cas([SCHEDULER, ...LEASES, SOURCE_BACKOFF], () => ({
       [SCHEDULER]: null,
       [LEASES[0]]: null,
