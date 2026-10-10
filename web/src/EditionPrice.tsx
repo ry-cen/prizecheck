@@ -26,7 +26,11 @@ let scheduled: ReturnType<typeof setTimeout> | null = null;
 
 // Batches wait here (never more than MAX_IN_FLIGHT on the wire); there is no polling and no retry.
 function pump() {
-  while (inFlight < MAX_IN_FLIGHT && queue.length) send(queue.shift()!);
+  while (inFlight < MAX_IN_FLIGHT && queue.length) {
+    const batch = queue.shift()!;
+    for (const [id, set] of batch) if (!set.size) batch.delete(id); // unmounted while queued
+    if (batch.size) send(batch);
+  }
 }
 
 function send(waiters: Map<string, Set<Waiter>>) {
