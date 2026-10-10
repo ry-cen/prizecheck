@@ -308,6 +308,7 @@ def test_sums_exceeding_signed_64_bit_are_exact():
     assert body["text"] == f"Pokémon: {2**64 - 2}\n{2**64 - 2} Gholdengo ex PAR 139" and body["total_copies"] == str(2**64 - 2)
 
 
+@pytest.mark.slow(reason='capacity: more than one page of Editions')
 def test_more_than_one_page_of_editions_is_complete():
     cards = [{"key": f"c{index:02}", "name": f"Card {index:02}", "number": str(index + 1), "category": "Trainer",
               "live": live(f"Card {index:02}", "TST", str(index + 1))} for index in range(52)]

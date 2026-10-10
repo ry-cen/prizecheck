@@ -96,6 +96,8 @@ def test_redirect_is_never_followed(fake):
         target.close()
 
 
+@pytest.mark.serial(reason='wall-clock: asserts an upper bound on elapsed time')
+@pytest.mark.slow(reason='wall-clock: waits out the real 2 s fetch deadline')
 def test_drip_fed_body_fails_within_the_deadline(fake):
     def drip(handler):
         handler.send_response(200)
@@ -142,6 +144,8 @@ def test_exactly_the_cap_is_read_and_one_more_byte_fails(fake):
     assert price_source.fetch('x').reason == 'too_large'
 
 
+@pytest.mark.serial(reason='wall-clock: asserts an upper bound on elapsed time')
+@pytest.mark.slow(reason='wall-clock: waits a real retry interval')
 def test_503_then_200_retries_after_a_bounded_wait(fake):
     fake.script = [respond(503), respond(200, GOOD)]
     start = time.monotonic()
@@ -152,6 +156,7 @@ def test_503_then_200_retries_after_a_bounded_wait(fake):
     assert len(fake.requests) == 2
 
 
+@pytest.mark.slow(reason='wall-clock: waits real retry intervals')
 def test_two_503s_stop_and_report_the_status(fake):
     fake.script = [respond(503), respond(503), respond(200, GOOD)]
     result = price_source.fetch('x')

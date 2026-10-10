@@ -410,6 +410,8 @@ def test_lost_lease_stops_claims(env):
 
 
 # --- Worker: caps ---------------------------------------------------------------------------------------------------------
+@pytest.mark.serial(reason='wall-clock: concurrency peaks depend on real thread timing')
+@pytest.mark.slow(reason='wall-clock: holds real fetches open across threads')
 def test_concurrency_caps_hold_per_slot_and_per_caller(env):
     lock = threading.Lock()
     live, peak = {}, {'all': 0, 'caller': 0}
@@ -430,6 +432,8 @@ def test_concurrency_caps_hold_per_slot_and_per_caller(env):
     assert all(state_of(env, i)['result']['state'] == 'quote' for i in range(8))
 
 
+@pytest.mark.serial(reason='wall-clock: asserts fetches about one second apart')
+@pytest.mark.slow(reason='wall-clock: waits for real one-second token refills')
 def test_empty_bucket_spaces_fetches_about_a_second_apart(fs_env):
     owner = owner_nonce()
     scheduler = qc.new_scheduler(qc.wall_ms())
@@ -446,6 +450,8 @@ def test_empty_bucket_spaces_fetches_about_a_second_apart(fs_env):
     assert len(times) == 3 and all(0.8 <= gap <= 1.6 for gap in gaps), gaps
 
 
+@pytest.mark.serial(reason='wall-clock: asserts the idle exit within 1.9-2.4 s')
+@pytest.mark.slow(reason='wall-clock: waits the real 2 s idle window')
 def test_idle_exit_follows_two_seconds_of_nothing(fs_env):
     owner = owner_nonce()
     seed(fs_env, [], lease=running_lease(owner))
@@ -513,6 +519,7 @@ def claimed_scene(env, *, expired=False, host=None):
     return owner, jobs
 
 
+@pytest.mark.slow(reason='sleep: sleeps 1.1 s past a real expiry')
 def test_cleanup_requeues_unexpired_drops_expired_and_bumps_work_versions(env):
     owner, jobs = claimed_scene(env)
     keys = [qc.work_record_key(*qc.split_job_id(job)) for job in jobs]
@@ -720,15 +727,24 @@ def select_quote(record, descriptor, lookup, product_id):
     return Quote(record["price"], lookup["card"], lookup["variant"], record.get("updated"))
 '''
 SITECUSTOMIZE = '''
-import os, sys, types
+import json, os, sys, types
 sys.path.insert(0, {fixture!r})
 import price_fixture
 price_fixture.install()
-if os.path.exists(os.path.join(os.environ.get("PRICE_RUNNER_LOCK_DIR", "/nonexistent"), "fake-source.json")):
+_fake = os.path.join(os.environ.get("PRICE_RUNNER_LOCK_DIR", "/nonexistent"), "fake-source.json")
+if os.path.exists(_fake):
     for name, source in (("app.price_source", {source!r}), ("app.tcgdex_record", {record!r})):
         module = types.ModuleType(name)
         exec(compile(source, name, "exec"), module.__dict__)
         sys.modules[name] = module
+    # Test-only time scaling for the runners this test launches; production constants are untouched.
+    _scaled = json.load(open(_fake)).get("scaled_contract") or {{}}
+    if _scaled:
+        import app.quote_contract as _contract
+        for _name, _value in _scaled.items():
+            if _name not in ("HARD_STOP_MS", "LEASE_TTL_MS", "LEASE_RENEW_MS"):
+                raise RuntimeError("unsupported scaled contract constant: " + _name)
+            setattr(_contract, _name, int(_value))
 '''
 
 
@@ -854,6 +870,8 @@ def alive(pid):
     return True
 
 
+@pytest.mark.serial(reason='process: asserts the real idle exit within 2.3 s')
+@pytest.mark.slow(reason='process: a real runner exits after its real 2 s idle window')
 def test_launched_runner_serves_a_job_with_a_clean_environment_and_exits_when_idle(env, proc, lock_directory):
     source, started = proc
     seed(env, [{'index': 1, 'card': 'base1-1'}])
@@ -873,6 +891,8 @@ def test_launched_runner_serves_a_job_with_a_clean_environment_and_exits_when_id
     assert '192.0.2.1' in (lock_directory / 'guard-violations.log').read_text()
 
 
+@pytest.mark.serial(reason='process: a real supervisor must stay silent for 1.5 s')
+@pytest.mark.slow(reason='process: launches a real supervisor and watches it for 1.5 s')
 def test_late_or_foreign_claim_exits_without_any_source_io(fs_env, proc):
     source, started = proc
     seed(fs_env, [{'index': 1, 'card': 'base1-1'}])
@@ -884,6 +904,8 @@ def test_late_or_foreign_claim_exits_without_any_source_io(fs_env, proc):
     assert not price_launcher.lock_path(0, owner).exists()      # F6: a supervisor whose claim failed removes its lock file
 
 
+@pytest.mark.serial(reason='process: measures real cold-start latency (p95 <= 0.6 s)')
+@pytest.mark.slow(reason='process: 20 real cold starts; the 2 s idle exit between them is a default argument (IDLE_S) and cannot be scaled from outside')
 def test_cold_start_from_admission_commit_to_first_request(fs_env, proc):
     source, started = proc
     samples = []
@@ -904,6 +926,8 @@ def test_cold_start_from_admission_commit_to_first_request(fs_env, proc):
     assert p95 <= 0.6, samples
 
 
+@pytest.mark.serial(reason='process: kills a real runner process group')
+@pytest.mark.slow(reason='process: launches real runner processes')
 def test_sigkilled_group_is_reclaimed_through_the_lock_with_one_extra_fetch(env, proc, monkeypatch):
     source, started = proc
     source.hold['kill-1'] = threading.Event()
@@ -928,8 +952,17 @@ def test_sigkilled_group_is_reclaimed_through_the_lock_with_one_extra_fetch(env,
     wait_for(lambda: env.get(qc.runner_lease_key(0)) is None, timeout=6)
 
 
-def test_sigstopped_runner_is_not_replaced_and_completes_after_sigcont(fs_env, proc, monkeypatch):
+@pytest.mark.serial(reason='process: stops a real runner past its lease')
+@pytest.mark.slow(reason='process: real SIGSTOP past a scaled 2 s lease')
+def test_sigstopped_runner_is_not_replaced_and_completes_after_sigcont(fs_env, proc, monkeypatch, lock_directory):
+    """Real SIGSTOP past the lease. Production is a 10 s lease renewed every 3 s (``qc.LEASE_TTL_MS``,
+    ``qc.LEASE_RENEW_MS``); this launch scales them to 2 s / 0.5 s through the test sitecustomize, so the runner is
+    stopped past its lease in 2.6 s of real time instead of 11.2 s. The lock, the signals and the renewal are real."""
+    assert qc.LEASE_TTL_MS == 10_000 and qc.LEASE_RENEW_MS == 3_000
+    ttl_ms = 2_000
     source, started = proc
+    (lock_directory / 'fake-source.json').write_text(json.dumps(
+        {'origin': source.origin, 'scaled_contract': {'LEASE_TTL_MS': ttl_ms, 'LEASE_RENEW_MS': 500}}))
     source.hold['stop-1'] = threading.Event()
     seed(fs_env, [{'index': 1, 'card': 'stop-1'}])
     owner, _ = reserve_and_spawn(fs_env, started)
@@ -939,20 +972,22 @@ def test_sigstopped_runner_is_not_replaced_and_completes_after_sigcont(fs_env, p
     before = fs_env.get(qc.runner_lease_key(0))['lease_until_ms']
     os.killpg(supervisor, signal.SIGSTOP)
     stopped = time.monotonic()
-    time.sleep(11.2)  # Past the 10 s lease, in real time.
+    time.sleep(ttl_ms / 1000 + 0.6)  # Past the (scaled) lease, in real time.
     assert fs_env.get(qc.runner_lease_key(0))['lease_until_ms'] < qc.wall_ms()
     assert price_launcher.reclaim_slot(fs_env.store, 0) == 'uncertain'  # The lock is still held: never replaced.
-    assert fs_env.get(qc.runner_lease_key(0))['owner'] == owner and time.monotonic() - stopped > 11
+    assert fs_env.get(qc.runner_lease_key(0))['owner'] == owner and time.monotonic() - stopped > ttl_ms / 1000 + 0.5
     os.killpg(supervisor, signal.SIGCONT)
-    # Renewal resumes at once: the lease runs out again no sooner than ten seconds from now, not from the claim.
+    # Renewal resumes at once: the lease now runs out a full (scaled) lease from the resume, not from the claim.
     renewed = wait_for(lambda: fs_env.get(qc.runner_lease_key(0))['lease_until_ms'] > qc.wall_ms() and fs_env.get(qc.runner_lease_key(0)), timeout=5)
-    assert renewed['lease_until_ms'] > before + 10_000 and renewed['owner'] == owner
+    assert renewed['lease_until_ms'] > before + ttl_ms and renewed['owner'] == owner
     source.hold['stop-1'].set()
     wait_for(lambda: fs_env.get(result_key(ref(1), 1)))
     assert fs_env.get(result_key(ref(1), 1))['attempt'] == 1 and len(source.requests) == 1
     wait_for(lambda: fs_env.get(qc.runner_lease_key(0)) is None, timeout=6)  # Cleanup still frees the slot normally.
 
 
+@pytest.mark.serial(reason='process: samples real process counts and source concurrency')
+@pytest.mark.slow(reason='process: two real runners serve 12 jobs')
 def test_two_runner_processes_respect_slot_caller_and_global_caps(env, proc):
     source, started = proc
     source.delay = 0.4
@@ -988,23 +1023,32 @@ def test_two_runner_processes_respect_slot_caller_and_global_caps(env, proc):
     assert sorted(card for card, _ in source.requests) == sorted(callers)  # One fetch per card.
 
 
+@pytest.mark.serial(reason='process: asserts when a real supervisor kills its worker')
+@pytest.mark.slow(reason='process: waits out a scaled 8 s hard stop')
 def test_hanging_worker_is_killed_at_the_sixty_five_second_hard_stop(fs_env, proc, lock_directory):
+    """The real supervisor SIGKILLs a hanging worker at its hard stop. Production is ``qc.HARD_STOP_MS`` (65 s); this
+    launch scales it to 8 s through the test sitecustomize, so the processes, the hang and the kill stay real without a
+    65 s wait. The job is seeded to expire 5 s from now, before the scaled stop, as the 60 s job does before the real one."""
+    assert qc.HARD_STOP_MS == 65_000 and qc.JOB_TTL_MS == 60_000
+    scaled_ms = 8_000
     source, started = proc
     source.hold['hang-1'] = threading.Event()
-    (lock_directory / 'fake-source.json').write_text(json.dumps({'origin': source.origin, 'timeout': 200}))
-    seed(fs_env, [{'index': 1, 'card': 'hang-1'}])
+    (lock_directory / 'fake-source.json').write_text(json.dumps(
+        {'origin': source.origin, 'timeout': 200, 'scaled_contract': {'HARD_STOP_MS': scaled_ms}}))
+    seed(fs_env, [{'index': 1, 'card': 'hang-1', 'admitted_offset': 5_000 - qc.JOB_TTL_MS}])
     owner, _ = reserve_and_spawn(fs_env, started)
     supervisor, worker = supervisor_pid(fs_env)
     started.append(supervisor)
-    claimed = fs_env.get(qc.runner_lease_key(0))['claimed_ms']
-    assert fs_env.get(qc.runner_lease_key(0))['hard_stop_ms'] - claimed == 65_000
-    start = time.monotonic()
-    wait_for(lambda: not alive(worker), timeout=75, step=0.2)
-    elapsed = time.monotonic() - start
-    assert 55 <= elapsed <= 72
+    lease = fs_env.get(qc.runner_lease_key(0))
+    assert lease['hard_stop_ms'] - lease['claimed_ms'] == scaled_ms
+    assert source.arrived.wait(10)                                  # the claimed fetch is hanging at the source
+    time.sleep(max(0.0, (lease['hard_stop_ms'] - 1_000 - qc.wall_ms()) / 1000))
+    assert alive(worker)                                            # still hanging one second before the hard stop
+    wait_for(lambda: not alive(worker), timeout=10, step=0.05)
+    assert lease['hard_stop_ms'] <= qc.wall_ms() <= lease['hard_stop_ms'] + 5_000
     wait_for(lambda: fs_env.get(qc.runner_lease_key(0)) is None, timeout=10)
     scheduler = fs_env.get(SCHEDULER)
-    assert scheduler['source'] == {} and scheduler['jobs'] == {}  # The 60 s job expired and was dropped by the cleanup CAS.
+    assert scheduler['source'] == {} and scheduler['jobs'] == {}  # The job expired before the stop and was dropped by the cleanup CAS.
     # The supervisor exits right after freeing the slot; until this process's reaper thread collects it, it is a zombie
     # that os.kill(pid, 0) still reports as alive, so its exit is awaited (briefly) rather than sampled.
     wait_for(lambda: not alive(supervisor), timeout=5)
@@ -1041,6 +1085,8 @@ def kill_runner(env, started, source, card):
     return owner
 
 
+@pytest.mark.serial(reason='process: asserts the reclaim completes within 2.4 s')
+@pytest.mark.slow(reason='process: launches real runner processes')
 def test_the_next_access_reclaims_a_sigkilled_runner_and_the_hard_row_completes(env, proc):
     source, started = proc
     seed(env, [{'index': 1, 'card': 'kill-1'}])
@@ -1060,6 +1106,8 @@ def test_the_next_access_reclaims_a_sigkilled_runner_and_the_hard_row_completes(
     assert env.get(SCHEDULER)['source'] == {}
 
 
+@pytest.mark.serial(reason='process: kills a real runner process group')
+@pytest.mark.slow(reason='process: launches real runner processes')
 def test_a_runner_killed_before_its_write_and_reclaimed_never_resurrects_the_old_quote(env, proc):
     source, started = proc
     source.prices['kill-2'] = None                                         # the source now says the Edition has no price
@@ -1078,6 +1126,8 @@ def test_a_runner_killed_before_its_write_and_reclaimed_never_resurrects_the_old
     admission.release()
 
 
+@pytest.mark.serial(reason='process: asserts an answer within 0.3 s while a real runner is stopped')
+@pytest.mark.slow(reason='process: launches real runner processes')
 def test_a_stopped_runner_with_an_expired_lease_is_uncertain_at_once_and_recorded(fs_env, proc):
     source, started = proc
     source.hold['stop-2'] = threading.Event()
@@ -1101,6 +1151,8 @@ def test_a_stopped_runner_with_an_expired_lease_is_uncertain_at_once_and_recorde
     wait_for(lambda: fs_env.get(result_key(ref(1), 1)))
 
 
+@pytest.mark.serial(reason='process: a real supervisor must not hand off within 2.5 s')
+@pytest.mark.slow(reason='process: launches a real runner and watches it for 2.5 s')
 def test_a_crashed_worker_leaves_its_jobs_queued_and_hands_off_to_nobody(fs_env, proc, lock_directory):
     source, started = proc
     (lock_directory / 'fake-source.json').write_text(json.dumps({'origin': source.origin, 'crash_once': ['crash-1']}))
@@ -1137,6 +1189,8 @@ class Stalled:
         self._stall(deadline)
 
 
+@pytest.mark.serial(reason='wall-clock: asserts the helpers stop within 0.7 s')
+@pytest.mark.slow(reason='wall-clock: waits out real store deadlines')
 def test_launcher_helpers_stop_at_an_absolute_deadline(env):
     owner, _ = claimed_scene(env, expired=True)
     stalled = Stalled(env.store, 5.0)

@@ -219,6 +219,7 @@ def test_a_soft_row_returns_background_and_queues_one_job_and_one_runner(env):
     assert env.scheduler()['interactive'] == {}
 
 
+@pytest.mark.serial(reason='wall-clock: asserts an upper bound on elapsed time')
 def test_a_failed_launch_frees_the_slot_keeps_the_jobs_and_answers_at_once(env, monkeypatch):
     monkeypatch.setattr(price_launcher, 'spawn', lambda slot, owner: False)
     started = time.monotonic()
@@ -238,6 +239,7 @@ def test_the_day_boundary_decides_whether_a_row_waits(env, age, klass):
     assert admission.outcomes[1].klass == klass and admission.outcomes[1].awaiting == (klass == 'hard')
 
 
+@pytest.mark.serial(reason='wall-clock: asserts an upper bound on elapsed time')
 def test_a_hard_row_that_a_runner_writes_mid_wait_is_refreshed(env):
     env.seed(1, 25 * HOUR)
     admission = env.admit([1], seconds=3.0)
@@ -253,6 +255,7 @@ def test_a_hard_row_that_a_runner_writes_mid_wait_is_refreshed(env):
     assert changed == {1} and labels(admission) == {1: 'refreshed'} and time.monotonic() - started < 1.5
 
 
+@pytest.mark.serial(reason='wall-clock: asserts an upper bound on elapsed time')
 def test_a_hard_row_that_nobody_refreshes_times_out_at_wait_until_and_keeps_the_cache(env):
     env.seed(1, 25 * HOUR)
     before = env.value(result_key(ref(1), 1))
@@ -369,6 +372,7 @@ def test_sixty_four_hard_rows_admit_the_32_least_recent_and_a_follow_up_admits_n
     assert len(env.scheduler()['jobs']) == 32 and {i for i, o in again.outcomes.items() if o.refresh == 'busy'} == set(range(1, 33))
 
 
+@pytest.mark.slow(reason='capacity: 100 rows over four admissions')
 def test_one_hundred_rows_progress_over_four_accesses(env):
     for i in range(1, 101):
         env.seed(i, (i + 25) * HOUR)
@@ -433,6 +437,7 @@ def test_a_new_digest_is_counted_once_and_expired_entries_are_pruned(env):
 
 
 # ------------------------------------------------------------------ AC8 backoff
+@pytest.mark.serial(reason='wall-clock: asserts an upper bound on elapsed time')
 def test_a_future_edition_backoff_blocks_admission_and_writes_nothing(env):
     env.seed(1, 25 * HOUR)
     now = qc.wall_ms()
@@ -547,6 +552,7 @@ def test_concurrent_requests_of_one_caller_never_exceed_the_caller_caps(env):
 
 
 # ------------------------------------------------------------------ relay faults and committed versions
+@pytest.mark.serial(reason='wall-clock: asserts an upper bound on elapsed time')
 def test_a_slow_relay_bounds_admission_and_labels_rows_busy(env):
     if env.relay_config is None:
         pytest.skip('relay-only fault')
@@ -617,6 +623,7 @@ def dead_scene(env, lock='free', *, index=1, slot=0, expired=True, lease_owner=N
 
 
 @pytest.mark.parametrize('lock', ['held', 'missing'])
+@pytest.mark.serial(reason='wall-clock: asserts an upper bound on elapsed time')
 def test_an_uncertain_dead_slot_answers_busy_at_once_and_is_recorded_in_stats(env, lock):
     env.seed(1, 25 * HOUR)
     descriptor = dead_scene(env, lock)
@@ -682,6 +689,7 @@ def test_an_uncertain_slot_never_turns_a_row_on_a_live_slot_busy(env):
             os.close(descriptor)
 
 
+@pytest.mark.serial(reason='wall-clock: asserts an upper bound on elapsed time')
 def test_a_reclaimed_slot_and_an_uncertain_slot_each_settle_their_own_rows(env):
     env.seed(1, 25 * HOUR)
     env.seed(2, 25 * HOUR)
@@ -714,6 +722,7 @@ def test_one_runner_is_spawned_for_a_short_queue_even_when_two_slots_are_reclaim
     admission.release()
 
 
+@pytest.mark.serial(reason='wall-clock: asserts an upper bound on elapsed time')
 def test_a_slot_freed_by_someone_else_without_a_runner_answers_at_once(env, monkeypatch):
     env.seed(1, 25 * HOUR)
     dead_scene(env, 'free')
@@ -780,6 +789,7 @@ def test_a_dead_slot_with_a_free_lock_is_reclaimed_and_a_runner_is_spawned_for_t
     admission.release()
 
 
+@pytest.mark.serial(reason='wall-clock: asserts an upper bound on elapsed time')
 def test_a_dead_slot_whose_spawn_fails_answers_busy_and_frees_the_reservation(env, monkeypatch):
     monkeypatch.setattr(price_launcher, 'spawn', lambda slot, owner: False)
     env.seed(1, 25 * HOUR)
@@ -790,6 +800,7 @@ def test_a_dead_slot_whose_spawn_fails_answers_busy_and_frees_the_reservation(en
     assert env.value(qc.runner_lease_key(0)) is None and env.scheduler()['jobs'][f'{ref(1)}:1']['state'] == 'queued'
 
 
+@pytest.mark.serial(reason='wall-clock: asserts an upper bound on elapsed time')
 def test_a_running_job_whose_slot_belongs_to_someone_else_is_busy_without_waiting(env):
     env.seed(1, 25 * HOUR)
     dead_scene(env, 'free', lease_owner='e' * 32, expired=False)
@@ -808,6 +819,7 @@ def test_a_running_job_on_a_live_slot_is_still_awaited(env):
     admission.release()
 
 
+@pytest.mark.serial(reason='wall-clock: asserts an upper bound on elapsed time')
 def test_a_reclaim_against_a_delayed_store_stays_inside_the_budget(env):
     if env.relay_config is None:
         pytest.skip('relay-only fault')
@@ -845,6 +857,7 @@ def test_slot_status_is_one_predicate_for_admission_and_handoff():
 
 
 # ------------------------------------------------------------------ F1: hard joins wait only when a runner is coming
+@pytest.mark.serial(reason='wall-clock: asserts an upper bound on elapsed time')
 def test_source_backoff_with_queued_joins_answers_at_once_and_writes_nothing(env):
     env.seed(1, 25 * HOUR)
     env.admit([1]).release()                                              # a queued job with a reserved slot
@@ -858,6 +871,7 @@ def test_source_backoff_with_queued_joins_answers_at_once_and_writes_nothing(env
     assert time.monotonic() - started < 0.3 and env.generation() == generation
 
 
+@pytest.mark.serial(reason='wall-clock: asserts an upper bound on elapsed time')
 def test_a_queued_hard_join_with_no_runner_coming_is_busy_at_once(env):
     env.seed(1, 25 * HOUR)
     env.admit([1]).release()

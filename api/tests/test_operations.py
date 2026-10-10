@@ -1,6 +1,7 @@
 import os
 from uuid import uuid4
 from fastapi.testclient import TestClient
+import pytest
 from app.main import app, connect
 from test_catalog import headers
 
@@ -27,6 +28,7 @@ def test_operational_health_is_owner_only_and_reports_unverified_metrics():
         assert body['backup_state'] == 'unverified'
         assert owner not in response.text and other not in response.text
 
+@pytest.mark.slow(reason='process: runs the real backup job')
 def test_real_backup_watchdog_deduplicates_stale_condition(tmp_path):
     import json
     import subprocess

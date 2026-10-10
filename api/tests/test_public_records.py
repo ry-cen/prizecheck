@@ -294,6 +294,7 @@ def test_operation_log_expires_to_unknown(adapter):
 
 
 @store_options(operation_ttl=0.2, generation_retention=0.2, tombstone_ttl=0.2)
+@pytest.mark.slow(reason='capacity: churns keys under lease renewal')
 def test_storage_stays_bounded_under_lease_renewal_and_key_churn(adapter):
     store, config = adapter
     key = lease_key('runner-1')
@@ -464,6 +465,7 @@ def test_active_generation_remains_pinned_through_many_concurrent_commits(adapte
 
 
 @store_options(generation_retention=1.0)
+@pytest.mark.slow(reason='sleep: sleeps 1.1 s past a pin expiry')
 def test_pinned_generation_keeps_evicted_payloads_until_pin_expiry_then_fails_closed(adapter):
     store, _ = adapter
     quote = quote_key(REF, 1)
@@ -531,6 +533,7 @@ def _stop_paused(process, writer):
             writer.join(5)
 
 
+@pytest.mark.serial(reason='wall-clock: asserts an upper bound on elapsed time')
 def test_reads_are_not_blocked_by_an_in_flight_commit(adapter):
     store, config = adapter
     result, quote = result_key(CRASH_REF, 1), quote_key(CRASH_REF, 1)
@@ -629,6 +632,7 @@ def test_record_work_does_not_advance_publication_revision(tmp_path, monkeypatch
 
 
 # --- HTTP transport ------------------------------------------------------------
+@pytest.mark.serial(reason='wall-clock: asserts an upper bound on elapsed time')
 def test_http_total_deadline_cuts_off_trickling_response(adapter):
     store, config = adapter
     if config['adapter'] != 'http':
@@ -766,6 +770,8 @@ def _p95(samples):
 
 
 @pytest.mark.parametrize('adapter_name', ['filesystem', 'http'])
+@pytest.mark.serial(reason='capacity: asserts read latency percentiles at 20k records')
+@pytest.mark.slow(reason='capacity: builds 20k records')
 def test_cached_reads_at_20k_records_are_well_under_the_500ms_budget(populated, adapter_name):
     config, keys, populate = populated
     relay = None

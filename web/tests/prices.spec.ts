@@ -278,33 +278,36 @@ test("Deck, leaf and Collection rows price their exact Edition, including after 
   );
 });
 
-test("a slow price route never blocks the rest of the page, then falls back to a labelled message", async ({
-  page,
-}) => {
-  const ids = seed();
-  apply([
-    { op: "quote", edition: ids.normal, amount: "0.25", updated: ago(1) },
-  ]);
-  await signIn(page);
-  await hold([ids.normal, ids["reverse-holofoil"]]);
-  await page.reload();
-  await page.route("**/api/prices/editions", async (route) => {
-    await new Promise((resolve) => setTimeout(resolve, 6_000));
-    await route.continue().catch(() => undefined);
-  });
-  await page.getByRole("button", { name: "Unsorted" }).first().click();
-  const panel = page.getByRole("region", { name: "Cards in Unsorted" });
-  // The cards are there at once; only the price slots wait.
-  await expect(panel.locator(".holding-grid > li")).toHaveCount(2);
-  await expect(panel.getByText("Furret").first()).toBeVisible();
-  await expect(panel.getByText("Checking prices…").first()).toBeVisible();
-  await expect(panel.getByRole("button", { name: "Search" })).toHaveCount(0);
-  await expect(panel.getByText("Price check timed out").first()).toBeVisible({
-    timeout: 8_000,
-  });
-  await expect(panel.getByText("Checking prices…")).toHaveCount(0);
-  await expect(panel.locator(".holding-grid > li")).toHaveCount(2);
-});
+// @slow (wall-clock): the stalled route waits 6 s of real time before the fallback.
+test(
+  "a slow price route never blocks the rest of the page, then falls back to a labelled message",
+  { tag: "@slow" },
+  async ({ page }) => {
+    const ids = seed();
+    apply([
+      { op: "quote", edition: ids.normal, amount: "0.25", updated: ago(1) },
+    ]);
+    await signIn(page);
+    await hold([ids.normal, ids["reverse-holofoil"]]);
+    await page.reload();
+    await page.route("**/api/prices/editions", async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 6_000));
+      await route.continue().catch(() => undefined);
+    });
+    await page.getByRole("button", { name: "Unsorted" }).first().click();
+    const panel = page.getByRole("region", { name: "Cards in Unsorted" });
+    // The cards are there at once; only the price slots wait.
+    await expect(panel.locator(".holding-grid > li")).toHaveCount(2);
+    await expect(panel.getByText("Furret").first()).toBeVisible();
+    await expect(panel.getByText("Checking prices…").first()).toBeVisible();
+    await expect(panel.getByRole("button", { name: "Search" })).toHaveCount(0);
+    await expect(panel.getByText("Price check timed out").first()).toBeVisible({
+      timeout: 8_000,
+    });
+    await expect(panel.getByText("Checking prices…")).toHaveCount(0);
+    await expect(panel.locator(".holding-grid > li")).toHaveCount(2);
+  }
+);
 
 test("a gateway deadline answer becomes the same labelled fallback", async ({
   page,
@@ -378,49 +381,52 @@ test("each refresh outcome has its own label and never changes the cached price 
   }
 });
 
-test("at most two price batches are in flight, later ones queue, and nothing is polled or retried", async ({
-  page,
-}) => {
-  const ids = seed(110);
-  await signIn(page);
-  await hold([
-    ...ids.pagers,
-    ids.normal,
-    ids["reverse-holofoil"],
-    ids.unspecified,
-  ]);
-  await page.reload();
-  const seen: string[][] = [];
-  let live = 0;
-  let peak = 0;
-  let release: () => void = () => undefined;
-  const gate = new Promise<void>((resolve) => (release = resolve));
-  await page.route("**/api/prices/editions", async (route) => {
-    seen.push(route.request().postDataJSON().edition_ids);
-    live += 1;
-    peak = Math.max(peak, live);
-    await gate;
-    live -= 1;
-    await route.continue().catch(() => undefined);
-  });
-  await page.getByRole("button", { name: "Unsorted" }).first().click();
-  const panel = page.getByRole("region", { name: "Cards in Unsorted" });
-  await expect(panel.locator(".holding-grid > li")).toHaveCount(48);
-  await panel.getByRole("button", { name: "More cards" }).click();
-  await expect(panel.locator(".holding-grid > li")).toHaveCount(96);
-  await panel.getByRole("button", { name: "More cards" }).click();
-  await expect(panel.locator(".holding-grid > li")).toHaveCount(113);
-  await page.waitForTimeout(800);
-  expect(seen).toHaveLength(2);
-  expect(peak).toBe(2);
-  release();
-  await expect.poll(() => seen.length).toBe(3);
-  await page.waitForTimeout(1_000);
-  expect(peak).toBeLessThanOrEqual(2);
-  expect(seen.every((batch) => batch.length <= 64)).toBe(true);
-  expect(seen.flat()).toHaveLength(113);
-  expect(new Set(seen.flat()).size).toBe(113);
-});
+// @slow (sleep): waits 1.8 s of real time while batches queue.
+test(
+  "at most two price batches are in flight, later ones queue, and nothing is polled or retried",
+  { tag: "@slow" },
+  async ({ page }) => {
+    const ids = seed(110);
+    await signIn(page);
+    await hold([
+      ...ids.pagers,
+      ids.normal,
+      ids["reverse-holofoil"],
+      ids.unspecified,
+    ]);
+    await page.reload();
+    const seen: string[][] = [];
+    let live = 0;
+    let peak = 0;
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    await page.route("**/api/prices/editions", async (route) => {
+      seen.push(route.request().postDataJSON().edition_ids);
+      live += 1;
+      peak = Math.max(peak, live);
+      await gate;
+      live -= 1;
+      await route.continue().catch(() => undefined);
+    });
+    await page.getByRole("button", { name: "Unsorted" }).first().click();
+    const panel = page.getByRole("region", { name: "Cards in Unsorted" });
+    await expect(panel.locator(".holding-grid > li")).toHaveCount(48);
+    await panel.getByRole("button", { name: "More cards" }).click();
+    await expect(panel.locator(".holding-grid > li")).toHaveCount(96);
+    await panel.getByRole("button", { name: "More cards" }).click();
+    await expect(panel.locator(".holding-grid > li")).toHaveCount(113);
+    await page.waitForTimeout(800);
+    expect(seen).toHaveLength(2);
+    expect(peak).toBe(2);
+    release();
+    await expect.poll(() => seen.length).toBe(3);
+    await page.waitForTimeout(1_000);
+    expect(peak).toBeLessThanOrEqual(2);
+    expect(seen.every((batch) => batch.length <= 64)).toBe(true);
+    expect(seen.flat()).toHaveLength(113);
+    expect(new Set(seen.flat()).size).toBe(113);
+  }
+);
 
 test("following a link does not prefetch prices for unrendered cards", async ({
   page,

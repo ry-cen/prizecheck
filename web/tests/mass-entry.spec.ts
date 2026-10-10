@@ -222,66 +222,72 @@ test("an empty Deck is disabled with No cards", async ({ page }) => {
   ).toBeDisabled();
 });
 
-test("every page of a large Deck is exported and an inventory change discards the result", async ({
-  page,
-}) => {
-  seed(51, {});
-  await signIn(page);
-  const deck = await createDeck(page);
-  for (let number = 1; number <= 51; number++)
-    await put(page, deck.id, number, 1);
-  const region = await openDeck(page, deck.name);
-  await region
-    .getByRole("button", { name: "Prepare TCGplayer export" })
-    .click();
-  const text = region.getByLabel("TCGplayer Mass Entry text");
-  await expect(text).toContainText("1 Furret");
-  expect(((await text.textContent()) ?? "").split("\n")).toHaveLength(51);
+// @slow (capacity): exports a multi-page Deck.
+test(
+  "every page of a large Deck is exported and an inventory change discards the result",
+  { tag: "@slow" },
+  async ({ page }) => {
+    seed(51, {});
+    await signIn(page);
+    const deck = await createDeck(page);
+    for (let number = 1; number <= 51; number++)
+      await put(page, deck.id, number, 1);
+    const region = await openDeck(page, deck.name);
+    await region
+      .getByRole("button", { name: "Prepare TCGplayer export" })
+      .click();
+    const text = region.getByLabel("TCGplayer Mass Entry text");
+    await expect(text).toContainText("1 Furret");
+    expect(((await text.textContent()) ?? "").split("\n")).toHaveLength(51);
 
-  // Another tab-equivalent change: the Deck's revision moves, so the old export must not stay.
-  await put(page, deck.id, 1, 1);
-  await page.getByRole("button", { name: "Refresh checks" }).click();
-  await expect(region).toContainText("Deck changed; export again");
-  await expect(region.getByLabel("TCGplayer Mass Entry text")).toHaveCount(0);
-  await region
-    .getByRole("button", { name: "Prepare TCGplayer export" })
-    .click();
-  await expect(region.getByLabel("TCGplayer Mass Entry text")).toContainText(
-    "2 Furret"
-  );
-});
+    // Another tab-equivalent change: the Deck's revision moves, so the old export must not stay.
+    await put(page, deck.id, 1, 1);
+    await page.getByRole("button", { name: "Refresh checks" }).click();
+    await expect(region).toContainText("Deck changed; export again");
+    await expect(region.getByLabel("TCGplayer Mass Entry text")).toHaveCount(0);
+    await region
+      .getByRole("button", { name: "Prepare TCGplayer export" })
+      .click();
+    await expect(region.getByLabel("TCGplayer Mass Entry text")).toContainText(
+      "2 Furret"
+    );
+  }
+);
 
-test("a link over 2,000 bytes is withheld and the complete text is offered", async ({
-  page,
-}) => {
-  test.setTimeout(240_000); // 130 sequential Holding writes
-  const cards = 130;
-  const mapped = Object.fromEntries(
-    Array.from({ length: cards }, (_, index) => [
-      index + 1,
-      2_000_000_000 - index,
-    ])
-  );
-  seed(cards, mapped);
-  await signIn(page);
-  const deck = await createDeck(page);
-  for (let number = 1; number <= cards; number++)
-    await put(page, deck.id, number, 1);
-  const region = await openDeck(page, deck.name);
-  await region
-    .getByRole("button", { name: "Prepare TCGplayer export" })
-    .click();
-  await expect(region).toContainText("longer than 2,000 characters");
-  await expect(
-    region.getByRole("button", { name: "Open in TCGplayer" })
-  ).toHaveCount(0);
-  const api = await (
-    await page.request.get(`${ORIGIN}/api/decks/${deck.id}/exports/tcgplayer`)
-  ).json();
-  expect(api).toMatchObject({
-    status: "text",
-    fallback_reason: "encoded_length",
-    url: null,
-  });
-  expect(api.lines).toHaveLength(cards);
-});
+// @slow (capacity): 130 sequential Holding writes.
+test(
+  "a link over 2,000 bytes is withheld and the complete text is offered",
+  { tag: "@slow" },
+  async ({ page }) => {
+    test.setTimeout(240_000); // 130 sequential Holding writes
+    const cards = 130;
+    const mapped = Object.fromEntries(
+      Array.from({ length: cards }, (_, index) => [
+        index + 1,
+        2_000_000_000 - index,
+      ])
+    );
+    seed(cards, mapped);
+    await signIn(page);
+    const deck = await createDeck(page);
+    for (let number = 1; number <= cards; number++)
+      await put(page, deck.id, number, 1);
+    const region = await openDeck(page, deck.name);
+    await region
+      .getByRole("button", { name: "Prepare TCGplayer export" })
+      .click();
+    await expect(region).toContainText("longer than 2,000 characters");
+    await expect(
+      region.getByRole("button", { name: "Open in TCGplayer" })
+    ).toHaveCount(0);
+    const api = await (
+      await page.request.get(`${ORIGIN}/api/decks/${deck.id}/exports/tcgplayer`)
+    ).json();
+    expect(api).toMatchObject({
+      status: "text",
+      fallback_reason: "encoded_length",
+      url: null,
+    });
+    expect(api.lines).toHaveLength(cards);
+  }
+);

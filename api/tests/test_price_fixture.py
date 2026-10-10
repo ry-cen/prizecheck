@@ -168,6 +168,7 @@ def test_a_bad_origin_file_is_refused_loudly(tmp_path, origin):
     assert out.returncode != 0 and 'loopback' in out.stderr and 'api.tcgdex.net' not in out.stdout
 
 
+@pytest.mark.slow(reason='process: runner-like processes against a hanging source')
 def test_a_redirected_runner_names_its_slot_pid_and_group_and_a_hang_is_still_a_timeout(tmp_path, recorder):
     origin, seen, state = recorder
     (tmp_path / price_fixture.ORIGIN_FILE).write_text(origin)

@@ -111,6 +111,7 @@ def test_failed_http_write_retries_durable_command_without_new_token(relay):
     assert client.get('/api/public/decks/'+token).json()['total'] == '2'
 
 
+@pytest.mark.slow(reason='wall-clock: waits out a hanging manifest relay')
 def test_http_manifest_timeout_is_safe_unavailable(relay):
     relay['hang'] = True
     response = client.get('/api/public/discovery')

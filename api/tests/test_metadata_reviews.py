@@ -509,6 +509,7 @@ def test_only_the_owner_decides_and_a_collector_gets_nothing_from_the_admin_surf
     assert edition_row(world["normal"])["mapping_reason"] == "no_matching_rule"
 
 
+@pytest.mark.serial(reason='wall-clock: asserts an upper bound on elapsed time')
 def test_a_busy_catalog_clock_is_a_409_rather_than_a_hang(world, monkeypatch):
     item = evidence("editions", world["normal"])
     code_for(target_of(item), "resolve_metadata")

@@ -234,6 +234,7 @@ def test_catalog_and_quote_record_writes_leave_snapshots_discovery_revision_and_
     assert client.get('/api/public/discovery', params={'cursor': cursor}).status_code == 200
 
 
+@pytest.mark.slow(reason='capacity: a full-scale catalog')
 def test_full_catalog_scale_publishes_in_bounded_batches_without_a_whole_run_deadline(monkeypatch):
     from app import public_catalog
     cards = {f'card-{index}': f'Card {index}' for index in range(1, 301)}

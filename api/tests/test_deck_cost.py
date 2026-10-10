@@ -156,6 +156,7 @@ def test_an_empty_deck_is_zero_dollars_with_no_cards_and_reads_no_price(store, m
     assert result["owner_revision"] == revision_of()
 
 
+@pytest.mark.slow(reason='wall-clock: waits out the real 2.5 s wait window for an uncached row')
 def test_a_complete_scan_with_no_eligible_quote_is_price_unavailable_and_zero_of_n(store):
     editions = world()
     normal, reverse, plain = editions["normal"], editions["reverse-holofoil"], editions["unspecified"]
@@ -185,6 +186,7 @@ def test_a_store_outage_reports_no_numeric_coverage_only_the_total(store, monkey
         assert result[field] is None, field
 
 
+@pytest.mark.serial(reason='wall-clock: asserts an upper bound on elapsed time')
 def test_an_exhausted_budget_reports_incomplete_without_touching_the_store(store, monkeypatch):
     normal = world()["normal"]
     seed(store, normal)
@@ -197,6 +199,7 @@ def test_an_exhausted_budget_reports_incomplete_without_touching_the_store(store
     assert result["priced_copies"] is None and result["amount"] is None
 
 
+@pytest.mark.serial(reason='wall-clock: asserts an upper bound on elapsed time')
 def test_a_held_inventory_lock_answers_inside_the_budget_without_a_count(store):
     normal = world()["normal"]
     seed(store, normal)
@@ -260,6 +263,8 @@ def verified_editions(count):
     return made
 
 
+@pytest.mark.serial(reason='wall-clock: asserts an upper bound on elapsed time')
+@pytest.mark.slow(reason='wall-clock: waits out the real 2.5 s wait window')
 def test_every_copy_of_a_large_deck_is_evaluated_with_one_admission_and_one_budget(store, monkeypatch):
     from app import public_records
     editions = verified_editions(70)          # 140 store keys: more than one 128-key read
@@ -307,6 +312,8 @@ def test_bounded_admission_never_drops_copies_on_a_later_access(store):
 # ------------------------------------------------------------------ locks, revisions and the rest of the page
 
 
+@pytest.mark.serial(reason='wall-clock: asserts an upper bound on elapsed time')
+@pytest.mark.slow(reason='wall-clock: writes inside the real wait window')
 def test_inventory_locks_are_released_before_the_wait_and_the_answer_names_its_revision(store):
     editions = world()
     normal, plain = editions["normal"], editions["unspecified"]

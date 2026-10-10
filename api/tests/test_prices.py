@@ -491,6 +491,7 @@ def test_a_client_supplied_deadline_is_ignored(store):
     assert response.status_code == 200 and response.json()["withheld"] is True
 
 
+@pytest.mark.serial(reason='wall-clock: asserts an upper bound on elapsed time')
 def test_an_exhausted_budget_withholds_immediately_without_touching_postgres_or_the_store(store, monkeypatch):
     normal = world()["normal"]
     seed(store, normal)
@@ -517,6 +518,8 @@ class Hanging(BaseHTTPRequestHandler):
         pass
 
 
+@pytest.mark.serial(reason='wall-clock: asserts an upper bound on elapsed time')
+@pytest.mark.slow(reason='wall-clock: a stalled relay holds the request up to its 3 s budget')
 def test_a_relay_that_stalls_cannot_hold_the_answer_past_three_seconds(store, monkeypatch):
     editions = world()
     normal, plain = editions["normal"], editions["unspecified"]
@@ -563,6 +566,8 @@ def test_the_http_adapter_works_from_the_synchronous_route(store, monkeypatch, t
     assert (row["status"], row["amount"], row["display_amount"]) == ("quote", "3.10", "$3.10")
 
 
+@pytest.mark.serial(reason='wall-clock: asserts an upper bound on elapsed time')
+@pytest.mark.slow(reason='wall-clock: waits out a stalled final validation')
 def test_a_stalled_final_validation_withholds_the_quote_inside_the_budget(store, monkeypatch):
     editions = world()
     normal = editions["normal"]
@@ -729,6 +734,7 @@ def test_cache_control_and_pragma_headers_change_nothing(store, launches):
     assert row["refresh"] is None and launches == [] and scheduler(store) is None
 
 
+@pytest.mark.serial(reason='wall-clock: asserts an upper bound on elapsed time')
 def test_a_stale_quote_is_returned_now_and_refreshed_in_the_background(store, launches):
     normal = world()["normal"]
     seed(store, normal, checked=ago(timedelta(minutes=61)))
@@ -741,6 +747,7 @@ def test_a_stale_quote_is_returned_now_and_refreshed_in_the_background(store, la
     assert len(launches) == 1
 
 
+@pytest.mark.serial(reason='wall-clock: asserts an upper bound on elapsed time')
 def test_a_day_old_quote_waits_for_the_runner_and_returns_the_new_quote(store, launches):
     normal = world()["normal"]
     seed(store, normal, checked=ago(timedelta(hours=25)))
@@ -757,6 +764,8 @@ def test_a_day_old_quote_waits_for_the_runner_and_returns_the_new_quote(store, l
     assert (row["amount"], row["refresh"]) == ("0.99", "refreshed")
 
 
+@pytest.mark.serial(reason='wall-clock: asserts an upper bound on elapsed time')
+@pytest.mark.slow(reason='wall-clock: waits out the real 2.5 s wait window')
 def test_a_day_old_quote_with_no_runner_times_out_inside_the_budget_and_keeps_the_cache(store, launches):
     normal = world()["normal"]
     checked = ago(timedelta(hours=25))
@@ -771,6 +780,7 @@ def test_a_day_old_quote_with_no_runner_times_out_inside_the_budget_and_keeps_th
     assert scheduler(store)["interactive"] == {}      # the permit is released after the response
 
 
+@pytest.mark.serial(reason='wall-clock: asserts an upper bound on elapsed time')
 def test_a_launch_failure_answers_busy_at_once_and_never_errors(store, monkeypatch):
     monkeypatch.setattr(price_launcher, "spawn", lambda slot, owner: False)
     normal = world()["normal"]

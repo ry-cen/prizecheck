@@ -363,45 +363,48 @@ test("an export that changed before it arrived is discarded", async ({
   await expect(live.getByLabel("Live export text")).toHaveCount(0);
 });
 
-test("output beyond 256 KiB is not shown inline and downloads complete", async ({
-  page,
-}) => {
-  test.setTimeout(240_000);
-  const long = "X".repeat(200);
-  const cards: Card[] = Array.from({ length: 1500 }, (_, index) => {
-    const name = `${long} ${String(index).padStart(4, "0")}`;
-    return {
-      key: `b${index}`,
-      name,
-      number: String(index + 1),
-      category: "Trainer",
-      live: { name, set_code: "BIG", number: String(index + 1) },
-    };
-  });
-  const world = seed(cards, true);
-  await signIn(page);
-  const deck = await makeDeck(
-    page,
-    cards.map((card) => [world[card.key].editions[0], "1"])
-  );
-  const live = await openDeck(page, deck.name);
-  await live
-    .getByRole("button", { name: "Export to Live", exact: true })
-    .click();
-  await expect(live.getByLabel("Live export text")).toHaveCount(0);
-  await expect(live).toContainText("too large to show here");
-  const meta = await (
-    await page.request.get(`${ORIGIN}/api/decks/${deck.id}/exports/live`)
-  ).json();
-  expect(meta.inline).toBe(false);
-  expect(meta.byte_length).toBeGreaterThan(256 * 1024);
-  const downloading = page.waitForEvent("download");
-  await live.getByRole("link", { name: "Download Live export" }).click();
-  const download = await downloading;
-  expect(download.suggestedFilename()).toBe("deck-live-export.txt");
-  const path = await download.path();
-  expect(statSync(path).size).toBe(meta.byte_length);
-  const body = readFileSync(path, "utf8");
-  expect(body.startsWith("Trainer: 1500\n")).toBe(true);
-  expect(body.split("\n")).toHaveLength(1501);
-});
+// @slow (capacity): builds and downloads more than 256 KiB of export text.
+test(
+  "output beyond 256 KiB is not shown inline and downloads complete",
+  { tag: "@slow" },
+  async ({ page }) => {
+    test.setTimeout(240_000);
+    const long = "X".repeat(200);
+    const cards: Card[] = Array.from({ length: 1500 }, (_, index) => {
+      const name = `${long} ${String(index).padStart(4, "0")}`;
+      return {
+        key: `b${index}`,
+        name,
+        number: String(index + 1),
+        category: "Trainer",
+        live: { name, set_code: "BIG", number: String(index + 1) },
+      };
+    });
+    const world = seed(cards, true);
+    await signIn(page);
+    const deck = await makeDeck(
+      page,
+      cards.map((card) => [world[card.key].editions[0], "1"])
+    );
+    const live = await openDeck(page, deck.name);
+    await live
+      .getByRole("button", { name: "Export to Live", exact: true })
+      .click();
+    await expect(live.getByLabel("Live export text")).toHaveCount(0);
+    await expect(live).toContainText("too large to show here");
+    const meta = await (
+      await page.request.get(`${ORIGIN}/api/decks/${deck.id}/exports/live`)
+    ).json();
+    expect(meta.inline).toBe(false);
+    expect(meta.byte_length).toBeGreaterThan(256 * 1024);
+    const downloading = page.waitForEvent("download");
+    await live.getByRole("link", { name: "Download Live export" }).click();
+    const download = await downloading;
+    expect(download.suggestedFilename()).toBe("deck-live-export.txt");
+    const path = await download.path();
+    expect(statSync(path).size).toBe(meta.byte_length);
+    const body = readFileSync(path, "utf8");
+    expect(body.startsWith("Trainer: 1500\n")).toBe(true);
+    expect(body.split("\n")).toHaveLength(1501);
+  }
+);

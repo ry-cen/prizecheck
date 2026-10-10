@@ -846,6 +846,7 @@ def test_spawn_background_drain_starts_a_detached_unbounded_drain_and_never_rais
     assert public_catalog.spawn_background_drain() is False
 
 
+@pytest.mark.slow(reason='process: runs the detached drain entry point')
 def test_the_detached_drain_entry_delivers_everything_pending_and_reports_the_result(tmp_path):
     import subprocess
     import sys

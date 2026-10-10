@@ -204,50 +204,55 @@ test("an empty Deck is $0.00 with No cards, and a Deck with no eligible quote is
   await expect(cost).not.toContainText("$0.00");
 });
 
-test("a deadline answer or a stalled request shows no numeric coverage, only the total, and the page stays usable", async ({
-  page,
-}) => {
-  const ids = seed();
-  sixCopies(ids);
-  await signIn(page);
-  const deck = await deckWith(page, {
-    [ids.normal]: 3,
-    [ids["reverse-holofoil"]]: 2,
-    [ids.unspecified]: 1,
-  });
-  await page.route("**/api/decks/*/cost", (route) =>
-    route.fulfill({
-      status: 504,
-      contentType: "application/json",
-      body: JSON.stringify({ detail: { code: "PRICE_DEADLINE" } }),
-    })
-  );
-  let cost = await openDeck(page, deck.name);
-  await expect(cost).toContainText(
-    "Price unavailable; coverage unavailable; 6 cards total"
-  );
-  await expect(cost).not.toContainText("cards priced");
-  await page.unroute("**/api/decks/*/cost");
+// @slow (wall-clock): the stalled request waits 6 s of real time before the fallback.
+test(
+  "a deadline answer or a stalled request shows no numeric coverage, only the total, and the page stays usable",
+  { tag: "@slow" },
+  async ({ page }) => {
+    const ids = seed();
+    sixCopies(ids);
+    await signIn(page);
+    const deck = await deckWith(page, {
+      [ids.normal]: 3,
+      [ids["reverse-holofoil"]]: 2,
+      [ids.unspecified]: 1,
+    });
+    await page.route("**/api/decks/*/cost", (route) =>
+      route.fulfill({
+        status: 504,
+        contentType: "application/json",
+        body: JSON.stringify({ detail: { code: "PRICE_DEADLINE" } }),
+      })
+    );
+    let cost = await openDeck(page, deck.name);
+    await expect(cost).toContainText(
+      "Price unavailable; coverage unavailable; 6 cards total"
+    );
+    await expect(cost).not.toContainText("cards priced");
+    await page.unroute("**/api/decks/*/cost");
 
-  // A response that never comes: checks and rows render at once, only the cost waits, then falls back.
-  await page.route("**/api/decks/*/cost", async (route) => {
-    await new Promise((resolve) => setTimeout(resolve, 6_000));
-    await route.continue().catch(() => undefined);
-  });
-  cost = await openDeck(page, deck.name);
-  const checks = page.getByRole("region", { name: `Checks for ${deck.name}` });
-  await expect(checks).toContainText("6 cards");
-  await expect(cost).toContainText("Checking prices…");
-  await expect(
-    page
-      .getByRole("region", { name: `Cards in ${deck.name}` })
-      .locator(".holding-grid > li")
-  ).toHaveCount(3);
-  await expect(cost).toContainText(
-    "Price unavailable; coverage unavailable; 6 cards total",
-    { timeout: 6_000 }
-  );
-});
+    // A response that never comes: checks and rows render at once, only the cost waits, then falls back.
+    await page.route("**/api/decks/*/cost", async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 6_000));
+      await route.continue().catch(() => undefined);
+    });
+    cost = await openDeck(page, deck.name);
+    const checks = page.getByRole("region", {
+      name: `Checks for ${deck.name}`,
+    });
+    await expect(checks).toContainText("6 cards");
+    await expect(cost).toContainText("Checking prices…");
+    await expect(
+      page
+        .getByRole("region", { name: `Cards in ${deck.name}` })
+        .locator(".holding-grid > li")
+    ).toHaveCount(3);
+    await expect(cost).toContainText(
+      "Price unavailable; coverage unavailable; 6 cards total",
+      { timeout: 6_000 }
+    );
+  }
+);
 
 test("a cost for an older inventory revision is discarded and a concurrent change is priced from the new revision", async ({
   page,

@@ -12,6 +12,7 @@ from uuid import uuid4
 
 import httpx
 
+import pytest
 from app.main import connect
 from test_catalog import headers
 from test_catalog_dispatch import owner_fixture, PATH
@@ -33,6 +34,8 @@ def eventually(predicate, timeout=15):
     raise AssertionError('Process seam did not reach expected durable state')
 
 
+@pytest.mark.serial(reason='process: starts real API and importer processes and asserts response times')
+@pytest.mark.slow(reason='process: starts real API and importer processes')
 def test_detached_child_survives_api_restart_and_exits_after_exact_run(tmp_path):
     owner = owner_fixture()
     entered, release = Event(), Event()
@@ -111,6 +114,8 @@ def test_detached_child_survives_api_restart_and_exits_after_exact_run(tmp_path)
         release.set(); api.terminate(); api.wait(timeout=5); source.shutdown(); source.server_close()
 
 
+@pytest.mark.serial(reason='process: starts real importer processes and asserts their exits')
+@pytest.mark.slow(reason='process: starts real importer processes')
 def test_exact_child_exit_codes_and_safe_terminal_failures(tmp_path):
     import signal
     owner_fixture()

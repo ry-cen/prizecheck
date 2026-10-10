@@ -288,6 +288,7 @@ def test_a_non_60_deck_exports_without_legality_claims():
     assert not {"legal", "valid", "price", "checkout", "cart", "total_price"} & set(view)
 
 
+@pytest.mark.slow(reason='capacity: a multi-page Deck')
 def test_every_page_of_a_large_deck_is_exported_not_just_the_first():
     world = World(51)
     for number in range(1, 52):

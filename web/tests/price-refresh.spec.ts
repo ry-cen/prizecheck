@@ -136,43 +136,50 @@ test.afterAll(async () => {
   await pool.end();
 });
 
-test("the page renders at once, price slots show their pending text, then the server's labelled fallback", async ({
-  page,
-}) => {
-  const ids = seed();
-  await signIn(page);
-  await hold([ids.normal, ids["reverse-holofoil"]]);
-  await page.reload();
-  const answers: number[] = [];
-  page.on("response", (response) => {
-    if (response.url().endsWith("/api/prices/editions"))
-      answers.push(response.status());
-  });
-  await page.getByRole("button", { name: "Unsorted" }).first().click();
-  const panel = page.getByRole("region", { name: "Cards in Unsorted" });
-  // Non-price content is there while every price slot is still pending.
-  await expect(panel.locator(".holding-grid > li")).toHaveCount(2);
-  await expect(panel.getByText("Furret").first()).toBeVisible();
-  await expect(panel.getByText("Checking prices…")).toHaveCount(2);
-  await expect(panel.locator('[data-price-status="checking"]')).toHaveCount(2);
-  // Then the labelled fallback from the server (not the client's own timeout), inside the gateway deadline.
-  const slots = panel.locator(".edition-price");
-  await expect(panel.getByText("Checking prices…")).toHaveCount(0, {
-    timeout: 5_000,
-  });
-  await expect(slots).toHaveCount(2);
-  for (const slot of await slots.all()) {
-    await expect(slot).toContainText("No cached price yet");
-    await expect(slot.locator(".price-refresh")).toHaveAttribute(
-      "data-refresh",
-      /^(timeout|failed)$/
+// @serial: the label depends on a real runner's 2 s source deadline ending inside the server's 2.5 s wait window and
+// 3 s budget; CPU load from parallel stacks could push the answer past the client's own timeout.
+// @slow (process): a real runner against a hanging source.
+test(
+  "the page renders at once, price slots show their pending text, then the server's labelled fallback",
+  { tag: ["@serial", "@slow"] },
+  async ({ page }) => {
+    const ids = seed();
+    await signIn(page);
+    await hold([ids.normal, ids["reverse-holofoil"]]);
+    await page.reload();
+    const answers: number[] = [];
+    page.on("response", (response) => {
+      if (response.url().endsWith("/api/prices/editions"))
+        answers.push(response.status());
+    });
+    await page.getByRole("button", { name: "Unsorted" }).first().click();
+    const panel = page.getByRole("region", { name: "Cards in Unsorted" });
+    // Non-price content is there while every price slot is still pending.
+    await expect(panel.locator(".holding-grid > li")).toHaveCount(2);
+    await expect(panel.getByText("Furret").first()).toBeVisible();
+    await expect(panel.getByText("Checking prices…")).toHaveCount(2);
+    await expect(panel.locator('[data-price-status="checking"]')).toHaveCount(
+      2
     );
-    await expect(slot).toContainText(/Refresh timed out|Last refresh failed/);
+    // Then the labelled fallback from the server (not the client's own timeout), inside the gateway deadline.
+    const slots = panel.locator(".edition-price");
+    await expect(panel.getByText("Checking prices…")).toHaveCount(0, {
+      timeout: 5_000,
+    });
+    await expect(slots).toHaveCount(2);
+    for (const slot of await slots.all()) {
+      await expect(slot).toContainText("No cached price yet");
+      await expect(slot.locator(".price-refresh")).toHaveAttribute(
+        "data-refresh",
+        /^(timeout|failed)$/
+      );
+      await expect(slot).toContainText(/Refresh timed out|Last refresh failed/);
+    }
+    await expect(panel).not.toContainText("Price check timed out");
+    await expect(panel).not.toContainText("$0.00");
+    expect(answers).toEqual([200]);
+    // A real runner fetched the card once for both Editions (one claim per source card).
+    expect(fetched).toEqual(["/v2/en/cards/meta-1"]);
+    await expect(panel.locator(".holding-grid > li")).toHaveCount(2);
   }
-  await expect(panel).not.toContainText("Price check timed out");
-  await expect(panel).not.toContainText("$0.00");
-  expect(answers).toEqual([200]);
-  // A real runner fetched the card once for both Editions (one claim per source card).
-  expect(fetched).toEqual(["/v2/en/cards/meta-1"]);
-  await expect(panel.locator(".holding-grid > li")).toHaveCount(2);
-});
+);
