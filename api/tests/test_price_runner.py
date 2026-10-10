@@ -790,17 +790,30 @@ def proc(tmp_path, lock_directory, monkeypatch):
     monkeypatch.setenv('PYTHONPATH', f'{hooks}{os.pathsep}{API_DIR}')
     monkeypatch.setenv('DATABASE_URL', 'postgresql://secret@127.0.0.1:1/none')
     monkeypatch.setenv('INTERNAL_AUTH_SECRET', 'must-not-leak')
-    started = []
+    started = []  # Process-group ids (each runner is its own session leader) of runners THIS test launched.
+    real_popen = subprocess.Popen
+
+    class Recording(real_popen):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            started.append(self.pid)
+    monkeypatch.setattr(subprocess, 'Popen', Recording)
     yield source, started
     source.close()
-    for pid in started:
+    for pid in set(started):
         try:
             os.killpg(pid, signal.SIGCONT)
             os.killpg(pid, signal.SIGKILL)
         except (ProcessLookupError, PermissionError):
             pass
-    # A runner started by this test (not registered above) must not outlive it or skew the next test's process counts.
-    subprocess.run(['pkill', '-9', '-f', 'app.price_runner --slot'], capture_output=True)
+    wait_for(lambda: not group_processes(started), timeout=5)  # Only this test's processes; other runs' runners are untouched.
+
+
+def group_processes(groups):
+    """Pids currently alive in the given process groups."""
+    out = subprocess.run(['ps', '-ax', '-o', 'pid=,pgid='], capture_output=True, text=True).stdout.split()
+    wanted = {int(group) for group in groups}
+    return [int(pid) for pid, pgid in zip(out[::2], out[1::2]) if int(pgid) in wanted]
 
 
 def reserve_and_spawn(env, started, slot=0, *, reserved_ms=None):
@@ -947,8 +960,7 @@ def test_two_runner_processes_respect_slot_caller_and_global_caps(env, proc):
 
     def sample():
         while not sampling.is_set():
-            out = subprocess.run(['pgrep', '-f', 'app.price_runner --slot'], capture_output=True, text=True).stdout.split()
-            counts.append(len(out))
+            counts.append(len(group_processes(started)))
             time.sleep(0.05)
     sampler = threading.Thread(target=sample)
     sampler.start()
