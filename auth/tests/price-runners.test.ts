@@ -1,3 +1,6 @@
+// @module-tag slow
+// slow (process): two gateways, two APIs and real price runners; every scenario waits for the runners' real 2 s idle exit
+// (IDLE_S in api/app/price_runner.py is a default argument, so it cannot be scaled from a test).
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   backoffKey,

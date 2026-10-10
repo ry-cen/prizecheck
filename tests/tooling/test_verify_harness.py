@@ -183,7 +183,21 @@ class VerifyReportTest(unittest.TestCase):
             self.assertEqual(totals['phases'], {'setup': 20, 'pytest': 180})
             self.assertEqual(totals['pytest'], {'passed': 2, 'failed': 0, 'errors': 0, 'skipped': 0})
             self.assertIsNone(totals['playwright'])
+            self.assertIsNone(totals['vitest'])
             self.assertIn('api.tests.test_a::test_x | parallel | 3.5', (run / 'verification.log').read_text())
+
+    def test_vitest_counts_include_tests_left_out_by_fast_as_skipped(self):
+        with tempfile.TemporaryDirectory() as directory:
+            run = Path(directory)
+            (run / 'vitest.xml').write_text('<testsuites><testsuite name="auth/tests/a.test.ts" tests="3" failures="0" errors="0" skipped="2">'
+                                            '<testcase classname="auth/tests/a.test.ts" name="fast" time="0.25"/>'
+                                            '<testcase classname="auth/tests/a.test.ts" name="slow" time="0"><skipped/></testcase>'
+                                            '<testcase classname="auth/tests/a.test.ts" name="slower" time="0"><skipped/></testcase>'
+                                            '</testsuite></testsuites>')
+            (run / 'verification.log').write_text('')
+            totals = verify_report.summarize(run)
+            self.assertEqual(totals['vitest'], {'passed': 1, 'failed': 0, 'errors': 0, 'skipped': 2})
+            self.assertIn('vitest: 1 passed, 0 failed, 0 errors, 2 skipped (one run)', (run / 'verification.log').read_text())
 
 
 if __name__ == '__main__':

@@ -1,3 +1,5 @@
+// @module-tag slow
+// slow (process): the 08-C stack (two gateways, two APIs, real price runners) and the real 3 s price budget.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";

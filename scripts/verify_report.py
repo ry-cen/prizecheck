@@ -1,7 +1,7 @@
 """Timing and count summary of one verification run directory (.scratch/verification/<run>/).
 
-Reads phases.tsv (scripts/ci.sh), pytest-parallel.xml and pytest-serial.xml (scripts/run_pytest.py), and
-playwright-parallel.json and playwright-serial.json (scripts/run_playwright.py). scripts/verify.py calls summarize()
+Reads phases.tsv (scripts/ci.sh), pytest-parallel.xml and pytest-serial.xml (scripts/run_pytest.py), vitest.xml
+(scripts/ci.sh), and playwright-parallel.json and playwright-serial.json (scripts/run_playwright.py). scripts/verify.py calls summarize()
 after every run: it writes timings.json and timings.md and appends the same summary to verification.log.
 ``python scripts/verify_report.py <run-dir>`` prints the summary of an earlier run.
 """
@@ -50,6 +50,25 @@ def pytest_results(directory):
     return counts, cases
 
 
+def vitest_results(directory):
+    """(counts or None when vitest did not run, [(seconds, test, file)] slowest first). With --fast, the tests left out
+    by --tags-filter=!slow count as skipped."""
+    path = Path(directory) / 'vitest.xml'
+    if not path.exists():
+        return None, []
+    counts, cases = {'passed': 0, 'failed': 0, 'errors': 0, 'skipped': 0}, []
+    for suite in ET.parse(path).getroot().iter('testsuite'):
+        tests, failures, errors, skipped = (int(suite.get(key, 0)) for key in ('tests', 'failures', 'errors', 'skipped'))
+        counts['passed'] += tests - failures - errors - skipped
+        counts['failed'] += failures
+        counts['errors'] += errors
+        counts['skipped'] += skipped
+        for case in suite.iter('testcase'):
+            cases.append((float(case.get('time', 0)), f"{case.get('classname')} › {case.get('name')}", 'vitest'))
+    cases.sort(key=lambda case: -case[0])
+    return counts, cases
+
+
 def playwright_results(directory):
     """(counts summed over both passes or None when Playwright did not run, [(seconds, test, pass)] slowest first)."""
     counts, cases = None, []
@@ -78,11 +97,12 @@ def playwright_results(directory):
 def markdown(summary):
     lines = ['| Phase | Seconds |', '| --- | ---: |']
     lines += [f'| {name} | {seconds} |' for name, seconds in summary['phases'].items()]
-    for suite in ('pytest', 'playwright'):
+    for suite in ('pytest', 'vitest', 'playwright'):
         counts = summary[suite]['counts']
         if counts is None:
             continue
-        lines += ['', f'{suite}: ' + ', '.join(f'{value} {key}' for key, value in counts.items()) + ' (both passes)', '',
+        scope = ' (one run)' if suite == 'vitest' else ' (both passes)'
+        lines += ['', f'{suite}: ' + ', '.join(f'{value} {key}' for key, value in counts.items()) + scope, '',
                   f'| Slowest {suite} tests | Pass | Seconds |', '| --- | --- | ---: |']
         lines += [f'| {name} | {group} | {seconds:.1f} |' for seconds, name, group in summary[suite]['slowest']]
     return '\n'.join(lines) + '\n'
@@ -90,9 +110,11 @@ def markdown(summary):
 
 def collect(directory):
     pytest_counts, pytest_cases = pytest_results(directory)
+    vitest_counts, vitest_cases = vitest_results(directory)
     playwright_counts, playwright_cases = playwright_results(directory)
     return {'phases': phases(directory),
             'pytest': {'counts': pytest_counts, 'slowest': pytest_cases[:30]},
+            'vitest': {'counts': vitest_counts, 'slowest': vitest_cases[:20]},
             'playwright': {'counts': playwright_counts, 'slowest': playwright_cases[:20]}}
 
 
@@ -105,7 +127,8 @@ def summarize(directory):
     (directory / 'timings.md').write_text(text)
     with (directory / 'verification.log').open('a') as log:
         log.write('\n== verification summary\n' + text)
-    return {'phases': summary['phases'], 'pytest': summary['pytest']['counts'], 'playwright': summary['playwright']['counts']}
+    return {'phases': summary['phases'], 'pytest': summary['pytest']['counts'], 'vitest': summary['vitest']['counts'],
+            'playwright': summary['playwright']['counts']}
 
 
 if __name__ == '__main__':

@@ -217,65 +217,39 @@ describe("budgeted price route", () => {
       expect(seen[0].headers[name]).toBeUndefined();
   });
 
-  it("answers 504 PRICE_DEADLINE inside three seconds when the API hangs", async () => {
-    behaviour = (_, response) => {
-      setTimeout(() => response.end("{}"), 5_000).unref();
-    };
-    const started = performance.now();
-    const response = await gatewayPost(
-      "/api/prices/editions",
-      JSON.stringify({ edition_ids: [randomUUID()] })
-    );
-    const elapsed = performance.now() - started;
-    expect(response.status).toBe(504);
-    expect(await response.json()).toEqual({
-      detail: { code: "PRICE_DEADLINE" },
-    });
-    expect(elapsed).toBeLessThanOrEqual(3_000);
-    expect(elapsed).toBeGreaterThan(2_000);
-  }, 10_000);
+  // slow (wall-clock): waits out the gateway's real 3 s budget (BUDGET_MS in auth/src/server.ts has no test seam).
+  it(
+    "answers 504 PRICE_DEADLINE inside three seconds when the API hangs",
+    { tags: ["slow"], timeout: 10_000 },
+    async () => {
+      behaviour = (_, response) => {
+        setTimeout(() => response.end("{}"), 5_000).unref();
+      };
+      const started = performance.now();
+      const response = await gatewayPost(
+        "/api/prices/editions",
+        JSON.stringify({ edition_ids: [randomUUID()] })
+      );
+      const elapsed = performance.now() - started;
+      expect(response.status).toBe(504);
+      expect(await response.json()).toEqual({
+        detail: { code: "PRICE_DEADLINE" },
+      });
+      expect(elapsed).toBeLessThanOrEqual(3_000);
+      expect(elapsed).toBeGreaterThan(2_000);
+    }
+  );
 
-  it("answers 504 when the API stalls mid-body, before any status line is sent", async () => {
-    behaviour = (_, response) => {
-      response.writeHead(200, { "content-type": "application/json" });
-      response.write('{"prices":');
-      setTimeout(() => response.end("[]}"), 5_000).unref();
-    };
-    const started = performance.now();
-    const response = await gatewayPost(
-      "/api/prices/editions",
-      JSON.stringify({ edition_ids: [randomUUID()] })
-    );
-    expect(response.status).toBe(504);
-    expect(performance.now() - started).toBeLessThanOrEqual(3_000);
-  }, 10_000);
-
-  it("takes the receipt time before a slow session lookup, so the API sees only what is left", async () => {
-    behaviour = ok;
-    seen.length = 0;
-    const blocker = await pool.connect();
-    await blocker.query("BEGIN");
-    await blocker.query('LOCK TABLE "session" IN ACCESS EXCLUSIVE MODE');
-    const pending = gatewayPost(
-      "/api/prices/editions",
-      JSON.stringify({ edition_ids: [randomUUID()] })
-    );
-    await sleep(1_200);
-    await blocker.query("ROLLBACK");
-    blocker.release();
-    expect((await pending).status).toBe(200);
-    const milliseconds = Number(seen[0].headers["x-internal-budget-ms"]);
-    expect(milliseconds).toBeLessThanOrEqual(1_800);
-    expect(milliseconds).toBeGreaterThan(0);
-  }, 10_000);
-
-  it("gives up with 504 when the session lookup alone spends the budget", async () => {
-    behaviour = ok;
-    seen.length = 0;
-    const blocker = await pool.connect();
-    await blocker.query("BEGIN");
-    await blocker.query('LOCK TABLE "session" IN ACCESS EXCLUSIVE MODE');
-    try {
+  // slow (wall-clock): waits out the gateway's real 3 s budget (BUDGET_MS in auth/src/server.ts has no test seam).
+  it(
+    "answers 504 when the API stalls mid-body, before any status line is sent",
+    { tags: ["slow"], timeout: 10_000 },
+    async () => {
+      behaviour = (_, response) => {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.write('{"prices":');
+        setTimeout(() => response.end("[]}"), 5_000).unref();
+      };
       const started = performance.now();
       const response = await gatewayPost(
         "/api/prices/editions",
@@ -283,12 +257,58 @@ describe("budgeted price route", () => {
       );
       expect(response.status).toBe(504);
       expect(performance.now() - started).toBeLessThanOrEqual(3_000);
-      expect(seen).toHaveLength(0);
-    } finally {
+    }
+  );
+
+  // slow (wall-clock): a real slow session lookup inside the 3 s budget.
+  it(
+    "takes the receipt time before a slow session lookup, so the API sees only what is left",
+    { tags: ["slow"], timeout: 10_000 },
+    async () => {
+      behaviour = ok;
+      seen.length = 0;
+      const blocker = await pool.connect();
+      await blocker.query("BEGIN");
+      await blocker.query('LOCK TABLE "session" IN ACCESS EXCLUSIVE MODE');
+      const pending = gatewayPost(
+        "/api/prices/editions",
+        JSON.stringify({ edition_ids: [randomUUID()] })
+      );
+      await sleep(1_200);
       await blocker.query("ROLLBACK");
       blocker.release();
+      expect((await pending).status).toBe(200);
+      const milliseconds = Number(seen[0].headers["x-internal-budget-ms"]);
+      expect(milliseconds).toBeLessThanOrEqual(1_800);
+      expect(milliseconds).toBeGreaterThan(0);
     }
-  }, 10_000);
+  );
+
+  // slow (wall-clock): waits out the gateway's real 3 s budget (BUDGET_MS in auth/src/server.ts has no test seam).
+  it(
+    "gives up with 504 when the session lookup alone spends the budget",
+    { tags: ["slow"], timeout: 10_000 },
+    async () => {
+      behaviour = ok;
+      seen.length = 0;
+      const blocker = await pool.connect();
+      await blocker.query("BEGIN");
+      await blocker.query('LOCK TABLE "session" IN ACCESS EXCLUSIVE MODE');
+      try {
+        const started = performance.now();
+        const response = await gatewayPost(
+          "/api/prices/editions",
+          JSON.stringify({ edition_ids: [randomUUID()] })
+        );
+        expect(response.status).toBe(504);
+        expect(performance.now() - started).toBeLessThanOrEqual(3_000);
+        expect(seen).toHaveLength(0);
+      } finally {
+        await blocker.query("ROLLBACK");
+        blocker.release();
+      }
+    }
+  );
 
   it("rejects bodies over 16 KiB by byte length with 413 and never reaches the API", async () => {
     behaviour = ok;

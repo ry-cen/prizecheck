@@ -10,7 +10,7 @@ The runner checks the current working-tree source, including staged changes. Git
 | ------------------------------------------------------------- | ---------------------------------------------------------------------------------- | --------------------------------------------- |
 | `npm run verify -- --suite api -- <pytest selectors>`         | the selected `api/tests` tests; without selectors all of `api/tests`, nothing else | iterating on API code and its tests           |
 | `npm run verify -- --suite browser -- <Playwright selectors>` | the selected Playwright specs against fresh stacks                                 | reproducing a browser failure                 |
-| `npm run verify -- --fast`                                    | the whole gate without `slow` pytest tests and `@slow` Playwright tests            | a worker's check before handing a change back |
+| `npm run verify -- --fast`                                    | the whole gate without `slow` pytest and vitest tests and `@slow` Playwright tests | a worker's check before handing a change back |
 | `npm run verify`                                              | everything                                                                         | acceptance; CI runs this                      |
 
 ```sh
@@ -18,7 +18,7 @@ npm run verify -- --suite api -- api/tests/test_prices.py -k stale
 npm run verify -- --suite browser -- web/tests/moves.spec.ts
 ```
 
-API selectors are pytest node ids, paths and options such as `-k`, `-x` or `--lf`; the runner sets `-m`, `-n`, `-p` and `--dist` itself. Browser selectors are spec files or `file:line` locations. `--fast` combines with `--suite api` and `--suite browser`. A bare `pytest <nodeid>` does not work for most API tests: they need the gate's migrated database and environment. `npm run test:fast` is unchanged: it is the guardrails-only check the pre-commit hook runs, not the fast tier.
+API selectors are pytest node ids, paths and options such as `-k`, `-x` or `--lf`; the runner sets `-m`, `-n`, `-p` and `--dist` itself. Browser selectors are spec files or `file:line` locations. `--fast` combines with `--suite api`, `--suite auth` and `--suite browser`. A bare `pytest <nodeid>` does not work for most API tests: they need the gate's migrated database and environment. `npm run test:fast` is unchanged: it is the guardrails-only check the pre-commit hook runs, not the fast tier.
 
 The narrow and fast loops are for iteration. A ticket's final acceptance runs the full default gate once, and the ticket evidence quotes the counts from that run's `verification.log` summary.
 
@@ -34,16 +34,18 @@ Playwright runs one application stack per worker: its own database, API, auth an
 
 Worker counts follow the host: pytest `min(6, max(2, cores / 2))`, browser stacks `min(4, max(2, cores / 3))`. `--pytest-workers N` and `--browser-workers N` override them; `1` runs that suite in one process as before.
 
-Timing tests use real time only where they say why. The hard-stop and SIGSTOP runner scenarios scale the runner's contract constants through the test sitecustomize (see `docs/price-refresh.md`); the cold-start measurement and the idle-exit checks keep real time. Vitest (`auth/tests`) is not tiered: the fast tier still runs all of it.
+Vitest (`auth/tests`) runs its files in parallel, as before; each file's tests run in order. A whole file is slow with a `// @module-tag slow` line, a single test with `{ tags: ["slow"] }`; either carries a `// slow (<category>): why` comment, and the `slow` tag is defined in `vitest.config.ts`. `--fast` passes `--tags-filter=!slow`, so those tests count as skipped and a fully slow file starts none of its servers. The price-runner, deck-cost and price-refresh files are slow (they start the multi-process price stacks), as are the public-records rebuild test (real API and auth processes) and the tests that wait out the gateway's 3 s budget or the mail relay's 5 s timeout. Those two limits are production constants with no test seam, so their tests keep real time.
+
+Timing tests use real time only where they say why. The hard-stop and SIGSTOP runner scenarios scale the runner's contract constants through the test sitecustomize (see `docs/price-refresh.md`); the cold-start measurement and the idle-exit checks keep real time.
 
 ## Artifacts
 
 Each run prints its `.scratch/verification/<run>/` directory. It holds:
 
-- `verification.log`, ending with a summary: phase seconds, pytest and Playwright totals over both passes, and the slowest tests;
+- `verification.log`, ending with a summary: phase seconds, pytest, vitest and Playwright totals, and the slowest tests;
 - service logs: `api.log`, `auth.log` and `web.log` for the first stack, `stack-<n>/` for the others;
 - `browser/parallel/` and `browser/serial/` (Playwright output), `playwright-parallel.json`, `playwright-serial.json`;
-- `pytest-parallel.xml`, `pytest-serial.xml` (per-test times), `phases.tsv`, `timings.md`, `timings.json`;
+- `pytest-parallel.xml`, `pytest-serial.xml`, `vitest.xml` (per-test times), `phases.tsv`, `timings.md`, `timings.json`;
 - `result.json`: exit code, suite, selectors, `fast`, worker counts, databases, timings.
 
 Read counts from `verification.log`, not from the exit code. Failed runs keep the same diagnostics. These logs contain synthetic fixture data. `--suite auth` and `--suite operations` isolate those checks for diagnosis.

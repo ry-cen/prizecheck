@@ -1,3 +1,5 @@
+// @module-tag slow
+// slow (process): two gateways and two APIs; most scenarios wait out the real 2.5 s admission wait window.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createHmac, randomBytes, randomUUID } from "node:crypto";

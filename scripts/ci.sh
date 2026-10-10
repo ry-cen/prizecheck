@@ -98,7 +98,8 @@ esac
 case "$VERIFY_SUITE" in
   all|auth)
     phase vitest start
-    npm run test:auth
+    # --fast leaves out vitest files and tests tagged slow (vitest.config.ts); vitest.xml holds per-test times.
+    npm run test:auth -- --reporter=default --reporter=junit --outputFile.junit="$TEST_LOG_DIR/vitest.xml" ${VERIFY_FAST:+--tags-filter=!slow}
     phase vitest end
     ;;
 esac
