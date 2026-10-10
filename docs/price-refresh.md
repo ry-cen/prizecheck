@@ -62,6 +62,19 @@ Backoff schedule: failure k waits `min(60 * 2^(k-1), 900)` s times a jitter in 0
 
 `PRICE_RUNNER_LOCK_DIR` is the host-local directory for runner lock files (default `.local/price-runners`, gitignored). CI points it at a private temporary directory.
 
-## To be filled in by 07 and 08
+## Admission (ticket 07)
 
-Admission algorithm, classification bands, runner lifecycle, source client and recovery table. See the ticket plans.
+`app.price_refresh.evaluate_and_admit(rows, caller, budget, store=None) -> Admission`. `rows` are `Row(key, edition_ref, mapping_revision, lookup, product_id, state)` with `state` from `quote_states`. It is PostgreSQL-free so ticket 12 can reuse it anonymously.
+
+1. Classify each row by `result.checked_at` against `quote_contract.wall_ms()`: `< 1 h` fresh; `1 h .. < 24 h` soft; `>= 24 h`, missing/garbled/future (> 5 min) `checked_at`, unknown, invalid, pending: hard. All fresh: no store call at all.
+2. Otherwise one snapshot read at the generation of the state read: scheduler, both runner leases, source backoff, the anonymous ledger shard, and the `result:` versions of the open rows. Candidates (not already in `scheduler.jobs`) are ordered least recent first; `work:` and `backoff:` are read in chunks of 64 rows (at most 4 chunks) until the room is filled.
+3. Caps: source backoff blocks everything; room = min(32 new per access, 32 - the caller's outstanding jobs, 256 - all jobs); an interactive permit (32 global, 2 per caller, unexpired only) is required when anything is admitted or a hard row is awaited; the anonymous ledger (10000 new callers per hour) refuses only new digests. A refused permit or ledger refuses the whole request as `busy`. Joins (a queued unexpired job or any running job) are free: no write, no re-queue, no lifetime change. An expired queued job is pruned and re-admitted with a new lifetime.
+4. One CAS (at most 2 tries, each with deadline `min(wait_until, now + 0.6 s)`, explicit operation id, `operation_status` after an interrupted commit): expects the scheduler, source backoff, both leases, the ledger shard and each new job's `work:`, `result:`, `backoff:` (at most 101 keys); writes the scheduler, new `work:` records, the ledger entry and a `reserved` lease. The second try re-reads the latest state and reclassifies. Every written scheduler passes `validate_scheduler`; a stored scheduler that fails it is never overwritten (rows are `busy`).
+5. A slot is reserved when queued jobs exist, the source is not in backoff and no slot is usable (running with a live lease and `hard_stop_ms > now + 3 s`, or reserved less than 5 s ago); a second slot when more than 4 jobs are queued. Only a free slot or a reservation older than 5 s is taken; `running` and `exiting` slots are left to the 08 reclaim. After the commit `price_launcher.spawn(slot, owner)` is called; if it fails the slot is freed best effort and the jobs stay queued. If nothing is running or coming, rows answer `busy` (`launch_failed`) at once instead of waiting.
+6. `Admission.wait()` polls every 100 ms until each awaited hard row's `result:` version changes or its job leaves `scheduler.jobs`, and never past `wait_until`. `Admission.release()` removes the interactive permit with its own 1 s deadline (route: `BackgroundTask`); the permit's `until_ms` is `now + budget.remaining() + 500 ms`, so a TTL reclaims it otherwise.
+
+Writes happen only for new jobs, a hard wait (permit), or a needed runner reservation. Refusal reasons are exposed on `Admission.outcomes[key].reason` and `Admission.refused`, and are added to `stats.refused` only inside a CAS that is happening anyway. Pruned expired queued jobs leave their `work:` record behind; the next admission of that Edition overwrites it. Never user-forced: nothing in a request (route, field, header, role) changes the outcome.
+
+## To be filled in by 08
+
+Runner lifecycle, source client and recovery table. See the ticket plans.

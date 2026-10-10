@@ -1,6 +1,6 @@
 # Cached exact-Edition prices
 
-Ticket 06 shows cached USD TCGplayer market quotes (supplied through TCGdex) for one exact reviewed Edition, or an honest unavailable state. It only reads. Nothing here fetches a source, writes PostgreSQL or the record store, or offers a refresh.
+Ticket 06 shows cached USD TCGplayer market quotes (supplied through TCGdex) for one exact reviewed Edition, or an honest unavailable state. The route never writes PostgreSQL, never fetches a source in-request, and writes nothing at all for rows checked under one hour ago. Older rows are admitted for background refresh by ticket 07 (coordination records only; see `docs/price-refresh.md`). There is no refresh or force route.
 
 **Launch gate.** Pricing stays closed for production. The launch checklist still requires exact physical Edition and quote-variant evidence and an activated matching rule before any price is enabled, and nothing writes quotes until ticket 08. Until then every production Edition reads as unavailable or "No cached price yet". Tests seed `quote:` and `result:` records through the store.
 
@@ -95,6 +95,21 @@ PostgreSQL work runs in a worker thread that the request waits on with its own c
 ## Gateway attachment pass-through
 
 For any `/api/` response whose `content-disposition` starts with `attachment`, the gateway forwards that header, `content-type`, `x-robots-tag` and `cache-control: no-store`, and pipes the body with back-pressure instead of buffering it. A client disconnect cancels the upstream read, and a failure after the status line destroys the connection. This carries the Live and Mass Entry `.txt` downloads. All other responses are buffered as before and forward only `content-type` and `x-robots-tag`. Only budgeted routes carry an abort deadline, so downloads are not cut at three seconds.
+
+## Refresh label (ticket 07)
+
+`refresh` is an optional field beside `status`/`reason` (null when nothing was done), with `refresh_failed_at` (ISO time of the last failed attempt, only with `failed`). It never changes `status`, `reason`, `amount` or `checked_at`; the cached view is always returned (no 429/503).
+
+| refresh      | meaning                                                                                               |
+| ------------ | ----------------------------------------------------------------------------------------------------- |
+| `background` | checked 1 h to under 24 h ago: returned now, a refresh is queued or already in flight                 |
+| `refreshed`  | the row needed a refresh first (24 h or older, unknown, pending): the runner finished while it waited |
+| `timeout`    | waited until the wait window (2.5 s from receipt) ended; the cached view is unchanged                 |
+| `busy`       | not admitted: a cap, the ledger, no runner could be launched, or the store was busy                   |
+| `backoff`    | not admitted: the Edition or the source is in backoff                                                 |
+| `failed`     | the job left the queue without a result (see `refresh_failed_at`)                                     |
+
+Age bands use `result.checked_at` and the module wall clock: under 1 h nothing happens; 1 h to under 24 h returns the cached view and admits in the background; 24 h or older, a missing, garbled or future (> 5 min) `checked_at`, and unknown/invalid/pending rows are admitted and the response waits for them. Joining a job already in flight never extends its 60 s lifetime and never re-queues it. Reloading never forces anything. Admission is `app.price_refresh.evaluate_and_admit`; 09 and 12 call it once per access over all Deck rows.
 
 ## Client
 

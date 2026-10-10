@@ -77,8 +77,16 @@ def install_faults(directory, active=()):
     os._records_faults_installed = True
 
 
+def fault_value(directory, name):
+    """The text a fault marker carries (for example a delay in seconds), or None when the fault is off."""
+    marker = _fault_dir(directory) / name
+    return marker.read_text() if marker.exists() else None
+
+
 @contextmanager
-def fault(config, name):
+def fault(config, name, value=''):
+    """Turn a fault on. ``value`` is stored in the marker file for relay faults that take a parameter
+    (``delay-transact``: seconds to sleep inside the relay before executing a transact)."""
     if config['adapter'] == 'filesystem':
         install_faults(None, {name})
         try:
@@ -88,7 +96,7 @@ def fault(config, name):
         return
     marker = _fault_dir(config) / name
     marker.parent.mkdir(exist_ok=True)
-    marker.touch()
+    marker.write_text(str(value))
     try:
         yield
     finally:
@@ -252,7 +260,13 @@ def serve_relay(config, connection, phase=None, reached=None):
                 elif action == 'status':
                     response = {'committed': store.operation_status(body['operation_id'], deadline=deadline)}
                 elif action == 'transact':
+                    delay = fault_value(config['directory'], 'delay-transact')
+                    if delay:
+                        time.sleep(float(delay))
                     response = {'committed': store.compare_and_swap(body['expected'], body['changes'], operation_id=body['operation_id'], deadline=deadline)}
+                    if response['committed'] and 'admission:price:scheduler' in body['changes']:
+                        with (Path(config['directory']) / 'scheduler-commits.log').open('a') as log:
+                            log.write(json.dumps(body['changes']['admission:price:scheduler']) + '\n')
                     if body['operation_id'] == 'lost-response':
                         self.connection.shutdown(2)
                         self.connection.close()

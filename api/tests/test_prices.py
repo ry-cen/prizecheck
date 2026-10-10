@@ -691,3 +691,116 @@ def test_an_under_one_hour_read_writes_nothing_and_contacts_nothing_but_postgres
 def test_there_is_no_refresh_or_force_route():
     paths = {path: set(methods) for path, methods in app.openapi()["paths"].items() if path.startswith("/api/prices")}
     assert paths == {PATH: {"post"}}
+
+
+# ------------------------------------------------------------------ ticket 07: access-triggered refresh
+import re  # noqa: E402
+
+from app import price_launcher, quote_contract  # noqa: E402
+from app.public_projection import ProjectionUnavailable  # noqa: E402
+
+
+@pytest.fixture
+def launches(monkeypatch):
+    calls = []
+    monkeypatch.setattr(price_launcher, "spawn", lambda slot, owner: calls.append((slot, owner)) or True)
+    return calls
+
+
+def scheduler(store):
+    key = quote_contract.scheduler_key()
+    return store.read_records([key], deadline=time.monotonic() + 5).records[key].value
+
+
+def test_no_api_route_can_refresh_or_force_a_price():
+    for path in app.openapi()["paths"]:
+        assert not re.search(r"refresh|force|reload|revalidate|max.?age|no.?cache", path, re.I), path
+    assert not any(re.search(r"refresh|force", name, re.I) for name in prices.PriceRequest.model_fields)
+    for extra in ({"force": True}, {"refresh": True}, {"max_age": 0}, {"no_cache": True}):
+        assert post({**ids(uuid4()), **extra}).status_code == 422
+
+
+def test_cache_control_and_pragma_headers_change_nothing(store, launches):
+    normal = world()["normal"]
+    seed(store, normal, checked=ago(timedelta(minutes=30)))
+    raw = json.dumps(ids(normal["id"]), separators=(",", ":")).encode()
+    headers = {**headers_for(raw), "cache-control": "no-cache, max-age=0", "pragma": "no-cache", "x-refresh": "1"}
+    row = client.post(PATH, content=raw, headers=headers).json()["prices"][0]
+    assert row["refresh"] is None and launches == [] and scheduler(store) is None
+
+
+def test_a_stale_quote_is_returned_now_and_refreshed_in_the_background(store, launches):
+    normal = world()["normal"]
+    seed(store, normal, checked=ago(timedelta(minutes=61)))
+    started = time.monotonic()
+    row = prices_of(post(ids(normal["id"])))[str(normal["id"])]
+    assert time.monotonic() - started < 1.5
+    assert (row["status"], row["amount"], row["refresh"]) == ("quote", "0.43", "background")
+    sched = scheduler(store)
+    assert list(sched["jobs"]) == [f"{normal['public_ref']}:{normal['mapping_revision']}"] and sched["interactive"] == {}
+    assert len(launches) == 1
+
+
+def test_a_day_old_quote_waits_for_the_runner_and_returns_the_new_quote(store, launches):
+    normal = world()["normal"]
+    seed(store, normal, checked=ago(timedelta(hours=25)))
+
+    def runner():
+        time.sleep(0.4)
+        seed(store, normal, "0.99", checked=ago(timedelta(0)))
+    thread = threading.Thread(target=runner)
+    thread.start()
+    started = time.monotonic()
+    row = prices_of(post(ids(normal["id"])))[str(normal["id"])]
+    thread.join()
+    assert time.monotonic() - started < 2.0
+    assert (row["amount"], row["refresh"]) == ("0.99", "refreshed")
+
+
+def test_a_day_old_quote_with_no_runner_times_out_inside_the_budget_and_keeps_the_cache(store, launches):
+    normal = world()["normal"]
+    checked = ago(timedelta(hours=25))
+    seed(store, normal, checked=checked)
+    started = time.monotonic()
+    response = post(ids(normal["id"]))
+    elapsed = time.monotonic() - started
+    row = prices_of(response)[str(normal["id"])]
+    assert 2.0 < elapsed < 3.0, elapsed
+    assert (row["status"], row["amount"], row["refresh"], row["checked_at"]) == ("quote", "0.43", "timeout", checked)
+    assert response.json()["withheld"] is False
+    assert scheduler(store)["interactive"] == {}      # the permit is released after the response
+
+
+def test_a_launch_failure_answers_busy_at_once_and_never_errors(store, monkeypatch):
+    monkeypatch.setattr(price_launcher, "spawn", lambda slot, owner: False)
+    normal = world()["normal"]
+    started = time.monotonic()
+    row = prices_of(post(ids(normal["id"])))[str(normal["id"])]
+    assert time.monotonic() - started < 1.5
+    assert (row["status"], row["reason"], row["refresh"]) == ("unavailable", "not_cached", "busy")
+
+
+def test_an_unavailable_store_during_admission_still_returns_the_cached_quote(store, monkeypatch, launches):
+    normal = world()["normal"]
+    seed(store, normal, checked=ago(timedelta(minutes=90)))
+    real = prices.public_record_store()
+
+    class Flaky:
+        def read_all(self, *a, **k):
+            return real.read_all(*a, **k)
+
+        def compare_and_swap(self, *a, **k):
+            raise ProjectionUnavailable()
+
+        def operation_status(self, *a, **k):
+            raise ProjectionUnavailable()
+    monkeypatch.setattr(prices, "public_record_store", lambda: Flaky())
+    row = prices_of(post(ids(normal["id"])))[str(normal["id"])]
+    assert (row["status"], row["amount"], row["refresh"]) == ("quote", "0.43", "busy")
+
+
+def test_different_users_are_treated_alike(store, launches):
+    normal = world()["normal"]
+    seed(store, normal, checked=ago(timedelta(minutes=90)))
+    rows = [prices_of(post(ids(normal["id"]), user=user))[str(normal["id"])]["refresh"] for user in ("price-reader", "owner")]
+    assert rows == ["background", "background"]
