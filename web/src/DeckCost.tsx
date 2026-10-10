@@ -6,8 +6,19 @@ import { getDeckCost, type DeckCost } from "./prices_generated";
 // discarded, and a newer one asks the page to reload its checks (which re-renders this with the new revision).
 const CLIENT_TIMEOUT_MS = 3_500;
 
-type Settled =
-  { kind: "cost"; cost: DeckCost } | { kind: "unavailable" } | null;
+/** The figures both surfaces render: a private Deck (DeckCost) and a Published Deck snapshot (PublishedDeckCost). */
+export type CostFigures = Pick<
+  DeckCost,
+  | "status"
+  | "total_copies"
+  | "priced_copies"
+  | "stale_copies"
+  | "unknown_age_copies"
+  | "fallback_copies"
+  | "display_amount"
+>;
+export type CostSettled =
+  { kind: "cost"; cost: CostFigures } | { kind: "unavailable" } | null;
 
 const plural = (count: string, word: string) =>
   `${count} ${word}${count === "1" ? "" : "s"}`;
@@ -23,7 +34,7 @@ export function DeckCostSummary({
   totalCopies: string;
   onNewerRevision: () => void;
 }) {
-  const [settled, setSettled] = useState<Settled>(null);
+  const [settled, setSettled] = useState<CostSettled>(null);
   const latest = useRef(ownerRevision);
 
   useEffect(() => {
@@ -57,6 +68,17 @@ export function DeckCostSummary({
     // onNewerRevision is a fresh closure on every render; only the Deck and its revision start a new access.
   }, [deckId, ownerRevision]);
 
+  return <CostSection settled={settled} totalCopies={totalCopies} />;
+}
+
+// Renders a settled cost, or "Checking prices…" while it is null; it never fetches and never sums rows.
+export function CostSection({
+  settled,
+  totalCopies,
+}: {
+  settled: CostSettled;
+  totalCopies: string;
+}) {
   let content;
   let status = "checking";
   const unavailable = (total: string) =>
