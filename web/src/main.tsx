@@ -169,7 +169,7 @@ function App() {
   if (session === null)
     return (
       <main>
-        <h1>TCG Collection</h1>
+        <h1>PrizeCheck</h1>
         <p>Loading…</p>
         <p role="alert">{message}</p>
       </main>
@@ -177,7 +177,7 @@ function App() {
   if (!session.signedIn)
     return (
       <main className="auth">
-        <h1>TCG Collection</h1>
+        <h1>PrizeCheck</h1>
         <p>Sign in with a code sent to your email.</p>
         <form onSubmit={requestCode}>
           <label>

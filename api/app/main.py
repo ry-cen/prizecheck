@@ -90,7 +90,7 @@ async def verified_user(
     return x_internal_user
 
 
-app = FastAPI(title="TCG Collection API", version="0.1.0")
+app = FastAPI(title="PrizeCheck API", version="0.1.0")
 
 
 @app.get("/api/health", response_model=HealthResponse)
