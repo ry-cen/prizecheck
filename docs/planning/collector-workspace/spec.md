@@ -1,8 +1,8 @@
 # Collector workspace — specification
 
-**Status:** ready for implementation planning. A revision is expected once `feature/card-prices-and-deck-exports` merges into `dev` (see Further Notes).
+**Status:** ready for implementation planning. Revised 2026-10-11 for prices, Deck cost and exports after they merged into `dev`. Location management (rename, move, delete) will be added when [Decide drag and Location ordering](https://github.com/ry-cen/prizecheck/issues/46) is resolved.
 
-**Sources:** [Collector workspace selection and presentation](../tcg-collection-tracker/wayfinder/resolutions/29-decide-collector-workspace-selection-and-presentation.md) (product rules, owner-confirmed 2026-10-09), [ADR 0005](../../adr/0005-collector-workspace-multi-source-direction.md) (multi-source direction), the [collector workspace prototype](../tcg-collection-tracker/wayfinder/prototypes/collector-workspace/README.md) (Variant A), and the [UI redesign map](../tcg-collection-tracker/wayfinder/ui-redesign-map.md). This spec resolves [Decide atomic multi-source inventory operations](https://github.com/ry-cen/prizecheck/issues/49).
+**Sources:** [Collector workspace selection and presentation](../tcg-collection-tracker/wayfinder/resolutions/29-decide-collector-workspace-selection-and-presentation.md) (product rules, owner-confirmed 2026-10-09), [ADR 0005](../../adr/0005-collector-workspace-multi-source-direction.md) (multi-source direction), the [collector workspace prototype](../tcg-collection-tracker/wayfinder/prototypes/collector-workspace/README.md) (Variant A), the [UI redesign map](../tcg-collection-tracker/wayfinder/ui-redesign-map.md), and the [card prices and Deck exports spec](../card-prices-and-deck-exports/spec.md), whose pricing and export rules this workspace must keep. This spec resolves [Decide atomic multi-source inventory operations](https://github.com/ry-cen/prizecheck/issues/49).
 
 ## Problem Statement
 
@@ -10,7 +10,7 @@ My cards live in many physical places: binders, boxes, Decks. Today I manage the
 
 ## Solution
 
-A redesigned collector workspace shows the Collection as a gallery of small card tiles, one tile per copy. The desktop keeps the Location sidebar visible. Above the gallery, one aligned toolbar holds Search and Filters on the left and Sort, card size and name visibility on the right. I can select tiles across any number of Storage Leaves by click, Ctrl/Cmd-click, Shift-click, marquee or (on mobile) Select mode. Then I can Move them to one destination or remove them from the Collection in a single all-or-nothing operation that one Undo reverses. I can add Locations directly from the sidebar tree. On mobile, a left drawer holds the Location tree and a right drawer holds Filters & display.
+A redesigned collector workspace shows the Collection as a gallery of small card tiles, one tile per copy. The desktop keeps the Location sidebar visible. Above the gallery, one aligned toolbar holds Search and Filters on the left and Sort, card size and name visibility on the right. I can select tiles across any number of Storage Leaves by click, Ctrl/Cmd-click, Shift-click, marquee or (on mobile) Select mode. Then I can Move them to one destination or remove them from the Collection in a single all-or-nothing operation that one Undo reverses. I can add Locations directly from the sidebar tree. On mobile, a left drawer holds the Location tree and a right drawer holds Filters & display. The inspector shows the inspected card's price, an opt-in Prices toggle adds prices under the tiles, and an open Deck shows its Estimated Deck Cost and Export menu in the heading.
 
 Holdings stay fungible quantities. A tile is a selectable unit of a Holding's quantity, not a durable record of a physical copy.
 
@@ -129,6 +129,19 @@ Holdings stay fungible quantities. A tile is a selectable unit of a Holding's qu
 82. As a collector on a flaky connection, I want a retried commit to apply once, so that a retry never doubles a Move.
 83. As a collector, I want existing single-source Move, Removal and Undo to keep working, so that nothing I rely on regresses.
 
+### Prices, Deck cost and exports
+
+84. As a collector, I want the inspector to show the exact Card Edition's USD price with its age, a stale label or an explicit unavailable state, so that I can judge the value without mistaking a missing quote for $0.
+85. As a collector, I want a Prices display toggle, off by default, that shows each visible tile's Card Edition price under it, so that I can browse by value when I want to.
+86. As a collector, I want prices loaded only for tiles on screen, so that browsing a large Collection doesn't fetch prices for cards I haven't looked at.
+87. As a collector, I want the Prices toggle remembered with my other display preferences, so that the gallery opens the way I left it.
+88. As a collector viewing a Deck, I want its Estimated Deck Cost with Pricing Coverage and stale and unknown-age counts in the heading, so that I see what the Deck is worth and how complete that figure is.
+89. As a collector viewing a Deck, I want an Export menu with Pokémon TCG Live text and TCGplayer Mass Entry, so that I can export without leaving the gallery.
+90. As a collector, I want Deck exports in the workspace to block, fall back and warn exactly as they do on the Decks page, so that no card is dropped or substituted.
+91. As a collector on the Decks page, I want an Open in workspace link for each Deck, so that I can go from checks and publishing to the Deck's cards.
+92. As a collector, I want a "Report a problem with this card's data" link in the inspector, so that I can report a wrong price mapping or export detail where I notice it.
+93. As a collector on a large screen, I want the gallery to use the full width beside the sidebar, with more cards per row as the screen grows, so that space isn't wasted.
+
 ## Implementation Decisions
 
 ### Domain boundary
@@ -169,7 +182,18 @@ The existing manifest flow is extended rather than replaced: start, stage in bou
 - **Sidebar sizing.** The desktop sidebar is 212 px at every desktop width, Add child overlays the row end rather than reserving width, and names carry a hover title. Mobile header controls and Add child controls are at least 44 px tall, and the mobile header Location control is 44×44 px.
 - **Counts.** All copy, Card Edition, Location and selection counts use singular and plural forms.
 - **Visuals.** The visual presentation follows prototype Variant A (dark theme). The final responsive visual system is tracked separately in [Decide responsive visual system](https://github.com/ry-cen/prizecheck/issues/47) and doesn't block this work.
+- **Layout width.** The app-wide stylesheet caps `main` at 900 px and centres it. The workspace must not inherit that cap. The gallery fills the width beside the sidebar, side padding shrinks on large screens (30 px, then 20 px from 1550 px, then 16 px from 2200 px), and cards per row follow the available width at a fixed tile size.
 - **Prototype code.** The development-only prototype modules are removed once the production workspace lands. The production build must not include prototype code or styles.
+
+### Prices, Deck cost and exports
+
+- The [card prices and Deck exports spec](../card-prices-and-deck-exports/spec.md) stays authoritative for every pricing and export rule. The workspace reuses its existing price, Deck cost, export and metadata-report components and contracts; it adds no new pricing or export API.
+- **Inspector.** It shows the inspected Card Edition's price through the existing price component, with age, stale and unavailable labels.
+- **Prices toggle.** A Prices display preference, off by default and stored with the other display preferences, adds the Card Edition price under each tile. Copies of the same Card Edition share one price. Only tiles mounted by the virtualized gallery render a price, so only those count as price access. The existing component's batching (at most 64 Editions per request, two requests in flight) is kept.
+- **No price sort, filter or totals.** Each of these would need a price for every Card Edition in view, which the access-only refresh rule forbids. A selection subtotal with coverage is a possible follow-up that needs its own server endpoint.
+- **Deck heading.** When the open Storage Leaf is a Deck, the heading shows the existing Estimated Deck Cost summary (subtotal, Pricing Coverage, stale and unknown-age counts) and an Export menu that opens the existing TCG Live and TCGplayer Mass Entry panels. Cost and exports use the server's complete Deck read, not the tiles currently loaded.
+- **Decks page.** It keeps Deck checks, cost, exports and Publish, and adds an Open in workspace link per Deck.
+- **Metadata reports.** The inspector links to the existing metadata report form, preset to the inspected Card Edition. The catalog search entry point is unchanged.
 
 ### Prototype-derived shapes
 
@@ -191,6 +215,15 @@ type MovePreview = {
 
 - **What a good test is.** Tests check external behaviour only. In the browser, that means what a collector sees and can do. At the API, it means HTTP responses and resulting Holding quantities. Tests never assert component internals, CSS class names, the selection data structure or SQL.
 - **Seam 1 — browser.** Playwright page tests against the real local stack: auth, API, database. They cover the gallery, filters and sort, preference persistence, every selection gesture (including Shift-range and marquee across virtualized offscreen rows), inspection precedence, Move via Actions and via drag, multi-source Move and Removal, Undo, Location creation from the tree, mobile drawers and Select mode at 375×812, keyboard-only Move, and the singular-count copy. Prior art: `moves.spec.ts` (Move by drag and by control), `location-conversion.spec.ts`, `location-tree.spec.ts`, `mobile-journey.spec.ts`, `holdings.spec.ts` and `collection.spec.ts`.
+- **Prices and Deck tools in the browser.** Playwright tests cover:
+  - the inspector price with stale and unavailable states
+  - the Prices toggle, its persistence, and that only on-screen tiles request prices
+  - the Deck heading's cost and coverage
+  - TCG Live and Mass Entry exports opened from the Deck heading, including a blocked export
+  - Open in workspace from the Decks page
+  - the inspector's metadata report link
+
+  Prior art: `prices.spec.ts`, `price-refresh.spec.ts`, `live-export.spec.ts`, `mass-entry.spec.ts` and `metadata-review.spec.ts`. The existing API tests for prices and exports stay as they are, since no API changes.
 - **Seam 2 — HTTP API.** Pytest against the API covers the multi-source contract:
   - atomic success across three sources
   - already-at-destination exclusion and the all-no-op rejection
@@ -213,7 +246,9 @@ type MovePreview = {
 - Account-bound display preferences (card size, name visibility, sort, filters persist only in the browser).
 - A broad light theme, and the final responsive visual system ([Decide responsive visual system](https://github.com/ry-cen/prizecheck/issues/47)).
 - Drag-to-reorder Locations and custom Location ordering ([Decide drag and Location ordering](https://github.com/ry-cen/prizecheck/issues/46)). The tree keeps today's ordering.
-- Extending the workspace to catalog search, reporting, publishing and discovery, pricing and export presentation, and owner controls.
+- Extending the workspace to catalog search, reporting, publishing and discovery, and owner controls.
+- Price sorting, price filters, and value totals for a selection, a Location or the Collection.
+- Changes to pricing, Deck cost or export rules, and Published Deck pricing and exports.
 - Changes to Deck construction checks, Published Decks, or catalog import beyond storing category and elemental type.
 
 ## Further Notes
@@ -221,5 +256,5 @@ type MovePreview = {
 - Native HTML drag-and-drop and real touch gestures couldn't be automated in the prototype harness, so the browser tests must actually exercise drop and touch. Playwright drag and touch emulation are the minimum; record any remaining gap as a manual check in the launch checklist.
 - Screen-reader output, contrast and full keyboard traversal weren't verified in the prototype. They are acceptance items here.
 - The prototype's four owner-review observations (sidebar truncation, the duplicated mobile drawer title, the 36 px mobile control, and "1 editions") were fixed in the prototype on 2026-10-10. The corresponding rules are carried into the decisions above.
-- **Pending revision: prices and Deck exports.** `feature/card-prices-and-deck-exports` adds card prices and Deck exports that this spec doesn't yet account for. Once that branch merges into `dev`, this spec will be revised to cover how the workspace shows prices (tiles, inspector, sorting or totals) and where Deck export is offered. Until then, pricing and export presentation stay out of scope, and implementation should not start on the parts of the UI they touch.
+- **Revision 2026-10-11.** Prices, Deck cost and exports merged into `dev` in [ry-cen/prizecheck#78](https://github.com/ry-cen/prizecheck/pull/78). The owner chose: the inspector plus an opt-in Prices toggle for tiles, no price sort, filter or totals, Deck cost and Export in the Deck heading, the Decks page kept with an Open in workspace link, and a metadata report link in the inspector.
 - The MVP specification's single-source Move/Removal/Undo text should be updated to point here when this spec is accepted. Per ADR 0005, the current single-source behavior stays authoritative until this work lands.
