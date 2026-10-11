@@ -7,12 +7,8 @@ export const MAX_LOCATION_DEPTH = 12;
 /** A drop or picker target: a Location id, or null for Top level. */
 export type ParentTarget = string | null;
 
-/** Decks reject Location edits until ticket 110 adds the Deck rename and move command.
- * This is the one switch that ticket flips. Deck deletion stays disabled either way. */
-export function canEditLocation(node: TreeLocation): boolean {
-  return node.kind !== "deck";
-}
-
+/** Decks are renamed and moved through their own command (PATCH /api/decks/{id}), every other
+ * Location through the Location edit. Both enforce the same rules. Decks can't be deleted here. */
 export function isDeck(node: TreeLocation): boolean {
   return node.kind === "deck";
 }
@@ -135,6 +131,7 @@ export function buildManageModel(nodes: TreeLocation[]): ManageModel {
 export const STALE_CODES = new Set([
   "STALE_LOCATION",
   "LOCATION_NOT_FOUND",
+  "DECK_NOT_FOUND",
   "STOCKED_LOCATION_REQUIRES_CONVERSION",
   "INVALID_LOCATION_CONVERSION",
   "LOCATION_CYCLE",
@@ -164,7 +161,7 @@ export function locationErrorMessage(
     case "DECK_CANNOT_HAVE_CHILDREN":
       return "A Deck can't contain Locations.";
     case "DECK_REQUIRES_DECK_COMMAND":
-      return "Decks can't be renamed, moved or deleted here yet.";
+      return "Decks can't be deleted here.";
     case "LOCATION_NOT_EMPTY":
       return context.action === "delete"
         ? "Only an empty Location with no children can be deleted."
