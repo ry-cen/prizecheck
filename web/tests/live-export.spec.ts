@@ -183,7 +183,8 @@ test("Copy reports success only after the clipboard write resolves, with exact t
   await expect(output.getByLabel("Live export text")).toHaveText(MIXED_TEXT);
   await expect(output).toContainText("This Deck has 18 cards, not 60.");
   await expect(output).toContainText("Basic deck checks only.");
-  await expect(output).not.toContainText(/legal/i);
+  // The disclaimer points to format checks; the export itself never claims a card or deck is legal.
+  await expect(output).not.toContainText(/\blegal\b/i);
   await output.getByRole("button", { name: "Copy for Live" }).click();
   await expect
     .poll(() => page.evaluate(() => (window as any).__clip.texts.length))
