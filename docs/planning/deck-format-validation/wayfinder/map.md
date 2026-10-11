@@ -2,7 +2,7 @@
 
 **Label:** wayfinder:map
 
-**Status:** charted 2026-10-10; research tickets running
+**Status:** complete planning 2026-10-10; ready for owner-invoked `/to-spec`, then `/to-ticket`
 
 ## Destination
 
@@ -10,11 +10,11 @@ An agreed plan for Deck Lists, the intended cards of a Deck including cards the 
 
 ## Notes
 
-- Owner request on 2026-10-10: validate decks for Standard, Expanded and GLC. All three formats are in scope; research decides whether GLC needs a later phase.
+- Owner request on 2026-10-10: validate decks for Standard, Expanded and GLC. All three formats are in scope and in the first phase.
 - Results are advisory. Each format yields legal, not legal with per-card reasons, or unknown with reasons. Missing or unreliable catalog data produces unknown, never legal. Nothing is blocked by a result, matching the existing rule that an invalid Deck may still be published.
 - Deck building allows cards the collector doesn't own through the Deck's Deck List (see Decisions so far). Format checks run on Deck List lines.
 - Backend only. The owner plans a UI overhaul after the prices feature lands on `dev`; web changes, including replacing the "not evaluated" disclaimer, belong to that work.
-- This effort reverses a recorded exclusion: the [MVP spec](../../tcg-collection-tracker/spec.md) lists full format legality as out of scope, user story 72 promises the disclaimer, and `api/app/construction_checks.py` hard-codes it. The owner approved recording the reversal in an ADR, written when the result contract is decided.
+- This effort reverses a recorded exclusion: the [MVP spec](../../tcg-collection-tracker/spec.md) lists full format legality as out of scope, user story 72 promises the disclaimer, and `api/app/construction_checks.py` hard-codes it. The reversal is recorded in [ADR 0010](../../../adr/0010-advisory-format-legality-in-scope.md).
 - Branch: `feature/deck-format-validation`, stacked on `feature/card-prices-and-deck-exports` (agent's call, delegated by the owner). Legality needs the TCGdex source metadata (`regulationMark`, the stored source record) and migrations 021–023 that exist only on the prices branch; a fresh branch from `dev` would collide on migration numbers and `api/app/decks.py`. Rebase onto `dev` once the prices branch lands.
 - Use grilling and domain-modeling for decision tickets and research for factual investigation. Use `CONTEXT.md` vocabulary (Deck, Card Printing, Card Identity, Published Deck); record new terms there as they are resolved. Consult Laya before delegation. Commit and push only with owner approval; stage explicit paths.
 - Tickets are GitHub Issues labelled `wayfinder` and `feature: format validation`, blocked with GitHub's native dependencies and a "Blocked by" body line. Research findings live in `research/` beside this map.
@@ -23,6 +23,7 @@ An agreed plan for Deck Lists, the intended cards of a Deck including cards the 
 
 <!-- One line per closed ticket: link plus a one-line gist. -->
 
+- [Decide the format check result and endpoint contract](https://github.com/ry-cen/tcg-tracker/issues/75): `GET /api/decks/{id}/format-checks` plus results returned with every Deck List edit; per-format legal / not_legal / unknown with coded issues; saved results keyed by list, rules, attribute revisions and date; Published Decks recompute anonymously from the public projection; `as_of` dates; ten acceptance criteria. [Resolution](resolutions/decide-format-check-contract.md) · [ADR 0010](../../../adr/0010-advisory-format-legality-in-scope.md)
 - [Decide how existing Decks and Deck features move onto Deck Lists](https://github.com/ry-cen/tcg-tracker/issues/76): existing Decks get a Deck List from their Holdings; construction checks, cost (Deck List cost and cost to complete), exports (Mass Entry defaults to not-owned lines) and publishing read the Deck List; cutting a held card leaves surplus to put away; a publication outlives its Deck and is managed by token. [Resolution](resolutions/decide-deck-list-migration.md)
 - [Decide where format rules live and who updates them](https://github.com/ry-cen/tcg-tracker/issues/74): Format Rules live in a dated, versioned rules file per format, updated by commit; card attributes are derived from TCGdex by rule and corrected by maintainer-reviewed records; gaps in the rules yield unknown, never not legal; GLC stays in the first phase. [Resolution](resolutions/decide-format-rules-source.md)
 - [Decide which printings count as the same card for format legality](https://github.com/ry-cen/tcg-tracker/issues/73): copy limits count by Card Identity (subtitles stripped); legality and bans apply to a Reprint Group of functionally identical printings, built automatically from identical text plus maintainer merges and splits; only Trainers and Energy inherit legality from a legal reprint. [Resolution](resolutions/decide-reprint-groups.md)
@@ -33,7 +34,7 @@ An agreed plan for Deck Lists, the intended cards of a Deck including cards the 
 
 ## Not yet specified
 
-- Whether ban-list or rotation changes need re-evaluation or notification for existing Decks and Published Decks.
+No known decision remains. The next step is owner-invoked `/to-spec`, then `/to-ticket`. Rule changes need no re-evaluation, because saved results are keyed by rules and date (see the result contract).
 
 ## Out of scope
 
@@ -44,3 +45,4 @@ An agreed plan for Deck Lists, the intended cards of a Deck including cards the 
 - Any guarantee of tournament legality; results stay advisory.
 - Database-editable Format Rules with an owner API, a later effort if someone other than the owner maintains rules.
 - Reporting catalog data errors upstream to TCGdex.
+- Notifying collectors when a rule change alters a Deck's legality.
