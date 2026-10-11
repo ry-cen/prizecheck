@@ -273,6 +273,8 @@ def test_migration_merges_subtitled_identities_and_keeps_every_reference(project
                 legacy.setattr(catalog_module, "card_identity_key", lambda value: value)
                 # Card attributes arrive with migration 026, after the schema this legacy import runs on.
                 legacy.setattr(catalog_module, "refresh_card_attributes", lambda conn: 0)
+                # So do Reprint Groups, with migration 031.
+                legacy.setattr(catalog_module, "refresh_reprint_groups", lambda conn, generation_id=None: 0)
                 import_into(conn, *LEGACY_RECORDS)
             ids = seed_legacy_extras(conn)
             conn.commit()
