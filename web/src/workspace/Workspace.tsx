@@ -7,8 +7,11 @@ import React, {
 } from "react";
 import { getLocationTree, type TreeNode } from "../location_generated";
 import { CreateLocationDialog } from "./CreateLocationDialog";
+import { Gallery } from "./Gallery";
+import { DEFAULT_DISPLAY, plural, type DisplayPrefs } from "./galleryModel";
 import { LocationNav, type WorkspaceView } from "./LocationNav";
 import { indexLocations } from "./locationTree";
+import { useGalleryData } from "./useGalleryData";
 import "./Workspace.css";
 
 const MOBILE_QUERY = "(max-width: 760px)";
@@ -38,6 +41,8 @@ export function Workspace({ onOpenLocations, onSignOut }: Props) {
   const [createFor, setCreateFor] = useState<string | null | undefined>(
     undefined
   );
+  // Ticket 104 persists these and adds sort and filters.
+  const [display, setDisplay] = useState<DisplayPrefs>(DEFAULT_DISPLAY);
   const drawerOpener = useRef<HTMLButtonElement>(null);
   const drawerRef = useRef<HTMLDivElement>(null);
 
@@ -60,6 +65,20 @@ export function Workspace({ onOpenLocations, onSignOut }: Props) {
   const current = view === "all" ? undefined : index.byId.get(view);
   // A Location that disappeared from the tree falls back to All owned.
   const heading = current?.name ?? "All owned";
+  const galleryView: WorkspaceView = current ? view : "all";
+  const gallery = useGalleryData({ view: galleryView });
+  const locationPath = useCallback(
+    (id: string) => (index.byId.has(id) ? index.path(id) : undefined),
+    [index]
+  );
+  const locationName = useCallback(
+    (id: string) => index.byId.get(id)?.name,
+    [index]
+  );
+  // A new view starts at the top of its gallery.
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [galleryView]);
 
   function toggleFolder(id: string) {
     setExpanded((previous) => {
@@ -232,11 +251,56 @@ export function Workspace({ onOpenLocations, onSignOut }: Props) {
           <main className="ws-main" aria-labelledby="ws-heading">
             <div className="ws-heading">
               <h1 id="ws-heading">{heading}</h1>
+              {gallery.totals && (
+                <p className="ws-heading-counts">
+                  {plural(gallery.totals.copies, "copy", "copies")} ·{" "}
+                  {plural(gallery.totals.editions, "edition", "editions")}
+                </p>
+              )}
             </div>
             <div className="ws-toolbar ws-desktop-only">
               {search("ws-toolbar-search")}
+              <div className="ws-display-controls">
+                <label className="ws-display-field">
+                  <span>Card size</span>
+                  <select
+                    value={display.size}
+                    onChange={(event) =>
+                      setDisplay({
+                        ...display,
+                        size:
+                          event.target.value === "medium" ? "medium" : "small",
+                      })
+                    }
+                  >
+                    <option value="small">Small</option>
+                    <option value="medium">Medium</option>
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  aria-pressed={display.names}
+                  onClick={() =>
+                    setDisplay({ ...display, names: !display.names })
+                  }
+                >
+                  Names
+                </button>
+              </div>
             </div>
-            <section className="ws-gallery" aria-label="Cards" />
+            <Gallery
+              data={gallery}
+              display={display}
+              caption={galleryView === "all"}
+              locationPath={locationPath}
+              locationName={locationName}
+              emptyMessage={
+                galleryView === "all"
+                  ? "Your Collection has no cards yet."
+                  : "This Location has no cards."
+              }
+              onRetry={gallery.reload}
+            />
           </main>
         </div>
       </div>
