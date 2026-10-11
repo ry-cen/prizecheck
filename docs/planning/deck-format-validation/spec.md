@@ -263,7 +263,7 @@ Each Deck List is checked against Standard, Expanded and Gym Leader Challenge.
   4. **Pure format evaluator** (new, the only new seam): the rules matrix is covered with fixture rules and attributes. HTTP tests then prove one or two cases of each kind end to end. Prior art: the existing pure construction-check evaluator.
 - **Rules-file check in the test gate:** each real rules file parses, every entry is dated, and every imported set has a legal-from date or an explicit exclusion.
 - **Acceptance criteria:**
-  1. Rare Candy sm1-129 is Standard legal through its Reprint Group (me01-125 carries mark I).
+  1. Rare Candy sv01-191 (mark G), swsh1-180 (mark D) and swsh12.5-141 (no mark) share Rare Candy me01-125's text, so they are in its Reprint Group and are Standard legal through it (me01-125 carries mark I). Rare Candy sm1-129's text differs from me01-125's, so sm1-129, sm2-165 and sm7-142 form their own group and are not legal until a maintainer merges that group into me01-125's through a reviewed Reprint Group merge (ticket 14, #95); after the merge sm1-129 is Standard legal.
   2. A Pokémon printing that isn't legal on its own mark is Standard not legal even when an identical reprint is legal. This uses a fixture, since no real case may exist.
   3. A card from a set with no recorded legal date yields unknown with the reason "set legality date not recorded".
   4. An identical reprint of a banned Expanded printing is Expanded not legal.
@@ -294,8 +294,8 @@ Each Deck List is checked against Standard, Expanded and Gym Leader Challenge.
 - **Branch.** This builds on the card prices and Deck exports feature, now on `dev`, which supplies the catalog source metadata, Deck cost, both exports, metadata reviews and the public projection. `feature/deck-format-validation` is based on `dev`, rebased on 2026-10-10 after the prices branch landed.
 - **Collector workspace.** The [Collector workspace spec](https://github.com/ry-cen/prizecheck/issues/79) plans atomic multi-source Moves. Pick List "confirm all" gathers copies from several Locations, so it should use that operation if it lands first, or stay compatible with it.
 - **Open rules facts**, to settle when writing the initial rules files:
-  - the J mark's exact legal date;
-  - the full Expanded set list (settled on 2026-10-11 from the Tournament Handbook revision of 2026-09-01; see `api/app/format_rules/expanded.toml`, where Classic Collection sets stay unknown);
+  - the J mark's exact legal date (settled: 2026-03-06, when Ascended Heroes entered Standard; see `api/app/format_rules/standard.toml`);
+  - the full Expanded set list (settled on 2026-10-11 from the Tournament Handbook revision of 2026-09-01; see `api/app/format_rules/expanded.toml`, where the Classic Collection sets `cel25cc` and `30th-c` stay unknown);
   - marks on the physical 30th Celebration and McDonald's 2021–2024 cards;
   - Basic Fairy Energy in Standard;
   - Expanded legality of SM promos 1–157 (still open: the handbook lists SM 158 and higher, but the ban list names Marshadow SM85, so these promos check unknown);
