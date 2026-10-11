@@ -1,6 +1,6 @@
 /* Collector workspace gallery: display controls, heading counts and card tiles (ticket 103).
    Every colour, space, radius and size comes from web/src/tokens.css. No colour literals.
-   Tile positions and the grid height are set inline from the layout model in gallery.ts, so the
+   Tile positions and the grid height are set inline from the layout model in galleryModel.ts, so the
    heights below (--tile-names-height, --tile-caption-height) must stay fixed. */
 
 /* Display controls at the right end of the desktop toolbar. */

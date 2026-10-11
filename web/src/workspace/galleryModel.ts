@@ -1,21 +1,27 @@
+import type { CollectionHoldingView } from "../collection_generated";
 import type { HoldingView } from "../holdings_generated";
 import type { WorkspaceView } from "./LocationNav";
 
 /** Card size choice. Ticket 104 persists it with the other display preferences. */
 export type CardSize = "small" | "medium";
 
-/** Display preferences. Ticket 104 adds sort and filter values and persists them; ticket 111 adds prices. */
+/** Display preferences: presentation only (size, names, and later prices). Sort, search and filters belong in `GalleryQuery`. */
 export type DisplayPrefs = { size: CardSize; names: boolean };
 export const DEFAULT_DISPLAY: DisplayPrefs = { size: "small", names: false };
 
-/** What the gallery lists. Ticket 104 adds search text, filters and sort. */
+/** What the gallery lists. Ticket 104 adds search text, filters and sort here; map each new field in `queryToParams` so it refetches. */
 export type GalleryQuery = { view: WorkspaceView };
+
+/** The listing request parameters for a query. The gallery refetches whenever this changes. */
+export function queryToParams(query: GalleryQuery): { location_id?: string } {
+  return query.view === "all" ? {} : { location_id: query.view };
+}
 
 /** One Holding in display order. A tile is (Holding, ordinal); no per-copy records exist anywhere. */
 export type GalleryHolding = {
   /** `${location_id}:${edition_id}`. Ticket 105 keys selected counts by this. */
   key: string;
-  holding: HoldingView;
+  holding: CollectionHoldingView;
   /** The Holding's quantity: one tile per copy. */
   copies: number;
   /** Display index of this Holding's first tile (running sum of earlier copies). */
@@ -68,7 +74,7 @@ export const tileKey = (
 export function appendHoldings(
   previous: GalleryHolding[],
   loadedCopies: number,
-  rows: HoldingView[]
+  rows: CollectionHoldingView[]
 ): { holdings: GalleryHolding[]; loadedCopies: number } {
   const holdings = previous.slice();
   let start = loadedCopies;

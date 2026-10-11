@@ -6,6 +6,7 @@ import {
   EMPTY_GALLERY,
   type GalleryData,
   type GalleryQuery,
+  queryToParams,
 } from "./galleryModel";
 
 /** A cursor became stale mid-walk; the walk restarts from the first page at most this many times. */
@@ -22,15 +23,25 @@ const stale = (error: unknown) =>
 export function useGalleryData(
   query: GalleryQuery
 ): GalleryData & { reload: () => void } {
-  const [data, setData] = useState<GalleryData>(EMPTY_GALLERY);
+  // Data is tagged with the query key it was loaded for, so a view change never shows the old frame.
+  const [loaded, setLoaded] = useState<{ key: string; data: GalleryData }>({
+    key: "",
+    data: EMPTY_GALLERY,
+  });
   const [attempt, setAttempt] = useState(0);
   const generation = useRef(0);
-  const locationId = query.view === "all" ? undefined : query.view;
+  const key = JSON.stringify(queryToParams(query));
 
   useEffect(() => {
     const id = ++generation.current;
     const live = () => generation.current === id;
-    setData(EMPTY_GALLERY);
+    const params = JSON.parse(key) as ReturnType<typeof queryToParams>;
+    const setData = (update: (previous: GalleryData) => GalleryData) =>
+      setLoaded((previous) => ({
+        key,
+        data: update(previous.key === key ? previous.data : EMPTY_GALLERY),
+      }));
+    setLoaded({ key, data: EMPTY_GALLERY });
     void (async () => {
       for (let restarts = 0; ; restarts++) {
         let holdings: GalleryData["holdings"] = [];
@@ -38,10 +49,7 @@ export function useGalleryData(
         let cursor: string | undefined;
         try {
           do {
-            const page = await getCollectionHoldings(
-              locationId ? { location_id: locationId } : {},
-              cursor
-            );
+            const page = await getCollectionHoldings(params, cursor);
             if (!live()) return;
             const first = cursor === undefined;
             ({ holdings, loadedCopies } = appendHoldings(
@@ -92,8 +100,8 @@ export function useGalleryData(
     return () => {
       generation.current++;
     };
-  }, [locationId, attempt]);
+  }, [key, attempt]);
 
   const reload = useCallback(() => setAttempt((n) => n + 1), []);
-  return { ...data, reload };
+  return { ...(loaded.key === key ? loaded.data : EMPTY_GALLERY), reload };
 }
