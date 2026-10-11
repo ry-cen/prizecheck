@@ -15,7 +15,6 @@ type Ids = {
   normal: string;
   "reverse-holofoil": string;
   unspecified: string;
-  pagers: string[];
 };
 const python = (code: string, argument: unknown) => {
   const path = `${process.env.TMPDIR || "/tmp"}/published-mass-entry-${randomUUID()}.json`;
@@ -25,12 +24,12 @@ const python = (code: string, argument: unknown) => {
     maxBuffer: 64 * 1024 * 1024,
   }).toString();
 };
-function seed(pagers = 0): Ids {
+function seed(): Ids {
   const out = python(
     `import json, sys
 from test_prices import ui_world
-print('WORLD' + json.dumps(ui_world(json.load(open(sys.argv[1]))['pagers'])))`,
-    { pagers }
+print('WORLD' + json.dumps(ui_world()))`,
+    {}
   );
   return JSON.parse(out.slice(out.lastIndexOf("WORLD") + 5));
 }

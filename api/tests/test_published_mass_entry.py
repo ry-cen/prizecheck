@@ -13,6 +13,7 @@ import pytest
 
 from app.main import app, connect  # noqa: F401  (main first: it includes every router while loading)
 from app import deck_mass_entry, public_deck, published_mass_entry
+from app.public_catalog import MarketplaceState
 from app.public_projection import ProjectionUnavailable
 from test_catalog_targets import isolated_rules  # noqa: F401  (autouse: clears rule activations)
 from test_prices import client, world
@@ -209,3 +210,21 @@ def test_republish_rewrite_revoke_and_replay_during_a_mass_entry_export_are_neve
     for version in (1, 2, 3):
         for kind in ("tcgplayer", "tcgplayer.txt"):
             refused(public_get(path_of(token, version, kind)), 404, "PUBLISHED_DECK_NOT_FOUND")
+
+
+def test_an_unspecified_variant_never_gets_a_product_even_when_its_edition_is_verified():
+    ref, printing = "a" * 48, "b" * 48
+
+    def rows_for(variant):
+        row = public_deck.FrozenRow(name="Pikachu", set_id="s", set_name="Set", collector_number="1", variant=variant,
+                                    image_url=None, quantity=1, edition_ref=ref, printing_ref=printing)
+        active = public_deck.ActiveSnapshot(token="t", version=1, digest="d", visibility="public", snapshot=None,
+                                            rows=(row,))
+        states = {ref: MarketplaceState("verified", product_id=1001, printing_ref=printing)}
+        return published_mass_entry._rows(active, states)
+
+    (unspecified,) = rows_for({"kind": "unspecified", "label": "Unspecified Variant"})
+    assert unspecified.product_id is None
+    assert unspecified.printing_key == printing
+    (known,) = rows_for({"finish": "normal"})
+    assert known.product_id == 1001
