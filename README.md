@@ -1,6 +1,6 @@
-# Pokémon TCG Collection Tracker
+# PrizeCheck
 
-A web app for tracking the physical Pokémon cards you own, how many copies you
+PrizeCheck is a web app for tracking the physical Pokémon cards you own, how many copies you
 have, and where they are stored. Organize boxes, binders, and shelves into a
 location tree, move cards between them, and build decks from your actual inventory.
 
