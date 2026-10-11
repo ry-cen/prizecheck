@@ -49,11 +49,23 @@ A Location with child Locations that cannot directly contain Holdings.
 _Avoid_: Storage Leaf, mixed-content Location
 
 **Deck**:
-A specialized Storage Leaf whose physically stored Holdings form a deck and receive deck-construction checks.
-_Avoid_: Deck list, virtual deck
+A specialized Storage Leaf with two parts: its Holdings, the cards physically in it, and its Deck List, the cards the collector intends it to contain. A Deck may hold no cards yet. Deleting a Deck returns its Holdings to Unsorted.
+_Avoid_: Virtual deck, linked deck
+
+**Deck List**:
+The part of a Deck that names its intended Card Editions and quantities, whether the collector owns them, stores them elsewhere, or does not own them. It is not a separate object and never counts toward the Collection.
+_Avoid_: Deck Plan, wishlist, standalone list
+
+**Pick List**:
+The cards in a Deck's Deck List that are stored elsewhere in the Collection, each with a suggested source Location. Confirming a pick moves those copies into the Deck.
+_Avoid_: Pull list, retrieval list
+
+**Unsorted**:
+The collector's root Storage Leaf that receives cards without a chosen Location. It always exists and cannot be renamed or moved.
+_Avoid_: Inbox, default Location
 
 **Published Deck**:
-A sanitized public snapshot intentionally created from a Deck. It is not a live view of the private Deck or its Location.
+A sanitized public snapshot intentionally created from a Deck's Deck List. It is not a live view of the private Deck or its Location, does not depend on the Deck's physical cards, and outlives deletion of the Deck until its owner revokes it.
 _Avoid_: Shared Deck, public Location, live deck
 
 **Listed Published Deck**:
