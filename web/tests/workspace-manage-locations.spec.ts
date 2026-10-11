@@ -291,6 +291,10 @@ test.describe("desktop", () => {
     await gear.click();
     const panel = panelOf(page);
     await expect(panel).toBeVisible();
+    // The page behind the open panel doesn't scroll.
+    expect(
+      await page.evaluate(() => document.documentElement.style.overflow)
+    ).toBe("hidden");
     await expect(row(panel, f.shelf)).toBeVisible();
     // The panel's handles use pointer events, not native drag and drop.
     await expect(panel.locator('[draggable="true"]')).toHaveCount(0);
@@ -343,6 +347,9 @@ test.describe("desktop", () => {
     await page.keyboard.press("Escape");
     await expect(panel).toBeHidden();
     await expect(gear).toBeFocused();
+    expect(
+      await page.evaluate(() => document.documentElement.style.overflow)
+    ).toBe("");
   });
 
   test("a mouse drag on the handle nests a Location in a row or moves it to Top level, after confirmation", async ({
@@ -532,6 +539,38 @@ test.describe("desktop", () => {
     expect(nodes.find((n) => n.id === f.ids.binder1)?.parent_id).toBe(
       f.ids.box
     );
+  });
+
+  test("the gallery shows the new path after a move through the panel, without a reload", async ({
+    page,
+  }) => {
+    await signIn(page);
+    const f = await seed(page);
+    await page.reload();
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+      "All owned"
+    );
+    await expect(
+      page.getByRole("button", {
+        name: new RegExp(`, ${f.shelf} / Box$`),
+      })
+    ).toHaveCount(3);
+    const panel = await openFromSidebar(page, f.shelf);
+    await handle(panel, `${f.shelf} / Binder 1`).focus();
+    await page.keyboard.press("Enter");
+    await button(
+      panel.getByRole("list", { name: "New parent", exact: true }),
+      `${f.shelf} / Box`
+    ).click();
+    await button(panel, "Move here").click();
+    await expect(row(panel, `${f.shelf} / Box / Unsorted`)).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(panel).toBeHidden();
+    await expect(
+      page.getByRole("button", {
+        name: new RegExp(`, ${f.shelf} / Box / Unsorted$`),
+      })
+    ).toHaveCount(3);
   });
 
   test("Rename rejects a duplicate sibling name ignoring case, then renames", async ({

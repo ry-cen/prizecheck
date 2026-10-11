@@ -171,6 +171,7 @@ export function ManageLocations({ onClose, onChanged }: Props) {
     await reload();
     setError("");
     setNotice({ tone: "status", text: message });
+    setBusy(false);
     setStep({ kind: "list" });
     onChanged();
   }
@@ -178,6 +179,7 @@ export function ManageLocations({ onClose, onChanged }: Props) {
     await reload();
     setError("");
     setNotice({ tone: "alert", text: STALE_MESSAGE });
+    setBusy(false);
     setStep({ kind: "list" });
     onChanged();
   }
@@ -756,16 +758,14 @@ export function ManageLocations({ onClose, onChanged }: Props) {
           </button>
         </div>
         <div className="ws-manage-body" ref={listRef}>
-          {notice && (
-            <p
-              className={
-                notice.tone === "alert" ? "ws-manage-error" : "ws-manage-notice"
-              }
-              role={notice.tone}
-            >
-              {notice.text}
-            </p>
-          )}
+          <p
+            className={
+              notice?.tone === "alert" ? "ws-manage-error" : "ws-manage-notice"
+            }
+            role={notice?.tone ?? "status"}
+          >
+            {notice?.text ?? ""}
+          </p>
           {body}
           {error && (
             <p className="ws-manage-error" role="alert">
