@@ -1,6 +1,7 @@
 // Generated from FastAPI OpenAPI by scripts/generate_location_client.py. Do not edit.
 export type TreeNode = { id: string; name: string; kind: string; parent_id: string | null; version: number; depth: number };
-export type TreeResponse = { locations: TreeNode[]; owner_revision: number };
+export type TreeLocation = { id: string; name: string; kind: string; parent_id: string | null; version: number; depth: number; copy_count: string };
+export type TreeResponse = { locations: TreeLocation[]; owner_revision: number };
 export type LocationCommandResult = { location: TreeNode; owner_revision: number };
 export type CreateLocation = { name: string; parent_id?: string | null; parent_version?: number | null; conversion?: string | null; idempotency_key: string };
 export type EditLocation = { name?: string | null; parent_id?: string | null; parent_version?: number | null; conversion?: string | null; version: number; idempotency_key: string };

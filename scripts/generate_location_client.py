@@ -7,7 +7,7 @@ sys.path.insert(0, str(root / "api"))
 from app.main import app  # noqa: E402
 
 schema = app.openapi()
-names = ("TreeNode", "TreeResponse", "LocationCommandResult", "CreateLocation", "EditLocation", "DeleteLocation", "DeleteLocationResult")
+names = ("TreeNode", "TreeLocation", "TreeResponse", "LocationCommandResult", "CreateLocation", "EditLocation", "DeleteLocation", "DeleteLocationResult")
 
 
 def ts_type(value):

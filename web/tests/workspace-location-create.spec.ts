@@ -489,6 +489,8 @@ test.describe("mobile", () => {
 
     await opener.click();
     await expect(drawer).toBeVisible();
+    // Geometry below is measured after the drawer's slide-in has finished.
+    await expect.poll(async () => (await drawer.boundingBox())?.x).toBe(0);
     // The heading's Close stays the first focus stop; the + sits below it.
     await expect(
       drawer.getByRole("button", { name: "Close locations" })

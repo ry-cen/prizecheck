@@ -144,3 +144,21 @@ def test_failed_holding_transfer_rolls_back_location_conversion():
         with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
             conn.execute(f"DROP TRIGGER {trigger_name} ON holding")
             conn.execute(f"DROP FUNCTION {function_name}()")
+
+
+def test_tree_reports_copies_stored_in_each_location():
+    owner, root, edition = stocked_owner()
+    stocked_owner()  # Another owner's three copies never count.
+    empty = make(owner, "Empty").json()["location"]
+    folder = make(owner, "Folder").json()["location"]
+    assert make(owner, "Inside", folder).status_code == 201
+    deck_id = uuid4()
+    with psycopg.connect(os.environ["DATABASE_URL"]) as conn:
+        conn.execute("INSERT INTO location(id,owner_id,name,kind) VALUES (%s,%s,'Deck','deck')", (deck_id, owner))
+        conn.execute("INSERT INTO holding(owner_id,location_id,edition_id,quantity,version) VALUES (%s,%s,%s,2,1)", (owner, deck_id, edition))
+    assert {node["name"]: node["copy_count"] for node in tree(owner)} == {
+        "Unsorted": "3", "Empty": "0", "Folder": "0", "Inside": "0", "Deck": "2"}
+    # Command results keep their shape; only the tree read carries copy counts.
+    renamed = change(owner, empty, name="Still empty")
+    assert renamed.status_code == 200, renamed.text
+    assert "copy_count" not in renamed.json()["location"]

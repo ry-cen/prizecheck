@@ -10,6 +10,7 @@ import { CreateLocationDialog } from "./CreateLocationDialog";
 import { Gallery } from "./Gallery";
 import { DEFAULT_DISPLAY, plural, type DisplayPrefs } from "./galleryModel";
 import { LocationNav, type WorkspaceView } from "./LocationNav";
+import { ManageLocations, ManageLocationsButton } from "./ManageLocations";
 import { indexLocations } from "./locationTree";
 import { useGalleryData } from "./useGalleryData";
 import "./Workspace.css";
@@ -43,6 +44,7 @@ export function Workspace({ onOpenLocations, onSignOut }: Props) {
   );
   // Presentation only; ticket 104 persists it. Sort, search and filters belong in the gallery query.
   const [display, setDisplay] = useState<DisplayPrefs>(DEFAULT_DISPLAY);
+  const [manageOpen, setManageOpen] = useState(false);
   const drawerOpener = useRef<HTMLButtonElement>(null);
   const drawerRef = useRef<HTMLDivElement>(null);
 
@@ -95,6 +97,10 @@ export function Workspace({ onOpenLocations, onSignOut }: Props) {
   function openCreate(parentId: string | null) {
     setDrawerOpen(false);
     setCreateFor(parentId);
+  }
+  function openManage() {
+    setDrawerOpen(false);
+    setManageOpen(true);
   }
   // Select the new Location with its ancestor path expanded. The parent was a leaf or a folder
   // before, so its own ancestors are already in the index; the reload adds the new node.
@@ -243,7 +249,7 @@ export function Workspace({ onOpenLocations, onSignOut }: Props) {
                 >
                   <span aria-hidden="true">+</span>
                 </button>
-                {/* Ticket 109 adds the Manage locations gear here. */}
+                <ManageLocationsButton onClick={openManage} />
               </span>
             </div>
             {tree("ws-sidebar")}
@@ -338,7 +344,7 @@ export function Workspace({ onOpenLocations, onSignOut }: Props) {
               >
                 <span aria-hidden="true">+</span>
               </button>
-              {/* Ticket 109 adds the Manage locations gear here. */}
+              <ManageLocationsButton onClick={openManage} />
             </div>
             {tree("ws-drawer")}
             <nav aria-label="App" className="ws-drawer-app-nav">
@@ -359,6 +365,12 @@ export function Workspace({ onOpenLocations, onSignOut }: Props) {
           onCreated={created}
           onCancel={() => setCreateFor(undefined)}
           onTreeChanged={loadTree}
+        />
+      )}
+      {manageOpen && (
+        <ManageLocations
+          onClose={() => setManageOpen(false)}
+          onChanged={() => void loadTree()}
         />
       )}
     </div>
