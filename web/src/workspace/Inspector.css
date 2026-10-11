@@ -118,6 +118,9 @@
   color: var(--color-warning);
 }
 .ws-root .ws-details-report {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--target-pointer);
   color: var(--color-accent);
   text-underline-offset: 2px;
 }

@@ -143,6 +143,7 @@
   }
 }
 
+/* Contrast (ticket 114): text roles ≥ 4.5:1 and outline roles ≥ 3:1 on bg, surface, raised and selected; checked by web/tests/workspace-accessibility.spec.ts. */
 /* Prize gold: default and only shipped theme (dark). */
 :root,
 :root[data-theme="prize-gold"] {
@@ -152,14 +153,14 @@
   --color-surface-selected: #352c1c;
   --color-border: #38322a;
   --color-border-strong: #56493a;
-  --color-control-outline: #7d705f;
+  --color-control-outline: #847766;
   --color-text: #efebe4;
   --color-text-muted: #b9b0a3;
-  --color-text-subtle: #958b7e;
+  --color-text-subtle: #9e9588;
   --color-accent: #e6bd57;
   --color-accent-strong: #f5dc94;
   --color-accent-border: #b8913a;
-  --color-accent-outline: #8a6c2c;
+  --color-accent-outline: #93732f;
   --color-accent-fill: #5a4519;
   --color-accent-wash: #e6bd5726;
   --color-on-accent: #211803;
@@ -167,7 +168,7 @@
   --color-art-end: #221e19;
   --color-warning: #f0c987;
   --color-danger: #eba79f;
-  --color-danger-border: #97524a;
+  --color-danger-border: #b0625a;
   --color-danger-fill: #6f3a35;
   --color-scrim: #00000099;
   --color-shadow: #00000044;
