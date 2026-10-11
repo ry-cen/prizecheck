@@ -163,6 +163,29 @@
   font-weight: 600;
   color: var(--color-text);
 }
+.ws-root .ws-tile-price .edition-price-line {
+  display: flex;
+  min-width: 0;
+  white-space: nowrap;
+}
+.ws-root .ws-tile-price .edition-price-amount {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ws-root .ws-tile-price .edition-price-label {
+  flex-shrink: 0;
+  white-space: pre;
+}
+/* Full wording for the tile's description only. */
+.ws-root .ws-tile-price .edition-price-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
 /* Card-shaped placeholder: before the first page, and for tiles whose page hasn't arrived. */
 .ws-tile-placeholder {
   position: absolute;

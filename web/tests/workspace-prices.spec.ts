@@ -240,6 +240,66 @@ test.describe("desktop", () => {
     await expect(inspector(page)).not.toContainText("Stale");
   });
 
+  test("tiles keep the freshness label whole on a small tile, say No age while the description says Age unknown, and word a timed-out row like the inspector", async ({
+    page,
+  }) => {
+    const ids = priceWorld();
+    await signIn(page);
+    await hold(await createLeaf(page, `Small ${randomUUID().slice(0, 6)}`), [
+      ids["reverse-holofoil"],
+      ids.unspecified,
+    ]);
+    // No provider time: the quote has an unknown age. The second Edition's row is a server-side deadline.
+    quote([
+      {
+        op: "quote",
+        edition: ids["reverse-holofoil"],
+        amount: "0.43",
+        updated: null,
+      },
+    ]);
+    await page.route("**/api/prices/editions", async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      for (const row of body.prices)
+        if (row.edition_id === ids.unspecified) {
+          row.status = "unavailable";
+          row.reason = "deadline";
+        }
+      await route.fulfill({ response, json: body });
+    });
+    await page.mouse.move(0, 0);
+    await page.reload();
+    await expect(tiles(page)).toHaveCount(2);
+    await pricesToggle(page).click();
+
+    const unknown = tiles(page).filter({ hasText: "$0.43" });
+    await expect(unknown).toContainText("No age");
+    await expect(unknown).not.toContainText("Age unknown");
+    await expect(unknown).toHaveAccessibleDescription(/^\$0\.43 · Age unknown/);
+    await expect(
+      tile(page, "Furret, Darkness Ablaze 2, ")
+    ).toHaveAccessibleDescription("Price check timed out");
+    await expect(tile(page, "Furret, Darkness Ablaze 2, ")).toContainText(
+      "Price check timed out"
+    );
+
+    // At the smallest tile width the label span stays inside the tile.
+    await unknown.evaluate((element) => {
+      (element as HTMLElement).style.width = "110px";
+    });
+    const label = unknown.locator(".edition-price-label");
+    await expect(label).toHaveText(/No age/);
+    const box = (await unknown.boundingBox())!;
+    const labelBox = (await label.boundingBox())!;
+    expect(box.width).toBeCloseTo(110, 0);
+    expect(labelBox.width).toBeGreaterThan(0);
+    expect(labelBox.x + labelBox.width).toBeLessThanOrEqual(
+      box.x + box.width + 0.5
+    );
+    expect(labelBox.x).toBeGreaterThanOrEqual(box.x);
+  });
+
   test("a price check that runs out of time is labelled in the inspector and the card details still show", async ({
     page,
   }) => {

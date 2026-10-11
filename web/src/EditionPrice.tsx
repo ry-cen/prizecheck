@@ -152,13 +152,29 @@ function compactContent(settled: Settled | null) {
   if (settled.kind === "error") return "Price unavailable";
   const { row } = settled;
   if (row.status === "pending") return "Price check in progress";
+  if (row.reason === "deadline" || row.reason === "validation_unavailable")
+    return "Price check timed out";
   if (row.status !== "quote" || !row.display_amount) return "Price unavailable";
+  const unknownAge = !(row.age === "known" && row.provider_updated_at);
+  // The visible label is short so it is never cut off on a small tile; the description keeps the full wording.
   return (
-    <>
-      <strong>{row.display_amount}</strong>
-      {!(row.age === "known" && row.provider_updated_at) && <> · Age unknown</>}
-      {row.stale && <> · Stale</>}
-    </>
+    <span className="edition-price-line">
+      <span className="edition-price-amount">
+        <strong>{row.display_amount}</strong>
+      </span>
+      {(unknownAge || row.stale) && (
+        <span className="edition-price-label" aria-hidden="true">
+          {unknownAge && <> · No age</>}
+          {row.stale && <> · Stale</>}
+        </span>
+      )}
+      {(unknownAge || row.stale) && (
+        <span className="edition-price-sr">
+          {unknownAge && <> · Age unknown</>}
+          {row.stale && <> · Stale</>}
+        </span>
+      )}
+    </span>
   );
 }
 
