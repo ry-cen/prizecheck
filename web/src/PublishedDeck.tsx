@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { PublishedDeckCost } from "./PublishedDeckCost";
+import { PublishedLiveExport } from "./PublishedLiveExport";
+import { PublishedMassEntryExport } from "./PublishedMassEntryExport";
 import {
   getPublicDeckPage,
   PublicationError,
@@ -66,6 +68,7 @@ export function PublishedDeck({ token }: { token: string }) {
       robots.remove();
     };
   }, [token, reload]);
+  const reRead = () => setReload((count) => count + 1);
   return (
     <main aria-label="Published Deck">
       {snapshot ? (
@@ -96,7 +99,31 @@ export function PublishedDeck({ token }: { token: string }) {
             token={token}
             version={snapshot.version}
             totalCopies={snapshot.total}
-            onChanged={() => setReload((count) => count + 1)}
+            onChanged={reRead}
+          />
+          <PublishedLiveExport
+            token={token}
+            version={snapshot.version}
+            checks={{
+              total: snapshot.total,
+              size_status: snapshot.checks.size_status,
+              shortage: snapshot.checks.shortage,
+              excess: snapshot.checks.excess,
+              disclaimer: snapshot.checks.disclaimer,
+            }}
+            onChanged={reRead}
+          />
+          <PublishedMassEntryExport
+            token={token}
+            version={snapshot.version}
+            checks={{
+              total: snapshot.total,
+              size_status: snapshot.checks.size_status,
+              shortage: snapshot.checks.shortage,
+              excess: snapshot.checks.excess,
+              disclaimer: snapshot.checks.disclaimer,
+            }}
+            onChanged={reRead}
           />
           <section aria-label="Published cards">
             {snapshot.identities.map((identity, index) => (

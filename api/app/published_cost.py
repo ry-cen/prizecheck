@@ -48,7 +48,7 @@ class PublishedDeckCost(BaseModel):
 
 def _label(state, printing_ref):
     """Why a frozen row has no price lookup, or None when it has one. Fails closed for unproven references."""
-    if state.state == 'unknown' or printing_ref is None or state.printing_ref != printing_ref:
+    if state.state == 'unknown' or not public_deck.printing_matches(printing_ref, state.printing_ref):
         return prices._unavailable('not_found')
     if state.state == 'quarantined':
         return prices._unavailable('quarantined')

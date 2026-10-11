@@ -1,5 +1,6 @@
 """The active frozen Published Deck snapshot behind anonymous enrichment routes (ticket 12 cost; tickets 13 and 14 reuse
-it for the Live and Mass Entry exports).
+it for the Live and Mass Entry exports). The export routes (tickets 13 and 14) use
+`read_for_export` and `revalidate_for_export`, which turn every failure into an HTTP error.
 
 A public enrichment route's only inputs are the token and the snapshot version in its path. Everything else (rows, opaque
 references, frozen quantities and the frozen-content digest) is derived here from the active public projection, and the
@@ -56,7 +57,7 @@ class ActiveSnapshot:
     digest: str
     visibility: str
     snapshot: PublicSnapshot
-    rows: tuple
+    rows: tuple[FrozenRow, ...]
 
     @property
     def total_copies(self) -> int:
@@ -122,6 +123,42 @@ def revalidate(active: ActiveSnapshot, *, deadline: float) -> None:
         raise SnapshotChanged()
 
 
+def printing_matches(frozen_printing_ref, catalog_printing_ref) -> bool:
+    """The one reference-proof rule: a frozen Printing reference is present and the public Edition record names it."""
+    return frozen_printing_ref is not None and catalog_printing_ref == frozen_printing_ref
+
+
 def same_printing(row: FrozenRow, printing_ref) -> bool:
     """The row's opaque reference resolves to the Printing frozen with it (False for legacy rows and any mismatch)."""
-    return row.edition_ref is not None and row.printing_ref is not None and printing_ref == row.printing_ref
+    return row.edition_ref is not None and printing_matches(row.printing_ref, printing_ref)
+
+
+# --- Shared by the export routes (tickets 13 and 14): unbudgeted, so every failure is an HTTP error -----------------
+EXPORT_SECONDS = 5.0  # Never slower than the snapshot route's own adapter timeout.
+
+
+def export_deadline() -> float:
+    return time.monotonic() + EXPORT_SECONDS
+
+
+def _raise_for(exc: Exception):
+    if isinstance(exc, SnapshotGone):
+        raise error(404, 'PUBLISHED_DECK_NOT_FOUND') from None
+    if isinstance(exc, SnapshotChanged):
+        raise error(409, 'PUBLISHED_DECK_CHANGED') from None
+    raise error(503, 'PUBLIC_PROJECTION_UNAVAILABLE') from None
+
+
+def read_for_export(token: str, version: int, *, deadline: float) -> ActiveSnapshot:
+    try:
+        return read_active(token, version, deadline=deadline)
+    except (SnapshotGone, SnapshotChanged, SnapshotLate, ProjectionUnavailable) as exc:
+        _raise_for(exc)
+
+
+def revalidate_for_export(active: ActiveSnapshot, *, deadline: float) -> None:
+    """Before any export answer, including before a .txt stream starts: same token, version and frozen content."""
+    try:
+        revalidate(active, deadline=deadline)
+    except (SnapshotGone, SnapshotChanged, SnapshotLate, ProjectionUnavailable) as exc:
+        _raise_for(exc)
