@@ -861,12 +861,46 @@
   min-height: 44px;
   padding-right: 4px;
   border-radius: 8px;
-  cursor: grab;
 }
 .mw-manage-row:hover {
   background: #1f2729;
 }
+.mw-root .mw-drag-handle {
+  flex: 0 0 32px;
+  width: 32px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #83908a;
+  font-size: 16px;
+  cursor: grab;
+  touch-action: none;
+}
+.mw-root .mw-drag-handle:hover {
+  color: #e9ece8;
+}
+.mw-root .mw-drag-handle:active {
+  cursor: grabbing;
+}
+.mw-manage-row.mw-manage-lifted {
+  opacity: 0.35;
+}
+.mw-drag-ghost {
+  position: fixed;
+  z-index: 200;
+  pointer-events: none;
+  padding: 6px 11px;
+  border: 1px solid #c5dc9a;
+  border-radius: 8px;
+  background: #29332b;
+  color: #d2e6b5;
+  font-size: 12px;
+  box-shadow: 0 6px 18px #0008;
+  white-space: nowrap;
+}
 .mw-manage-name {
+  flex: 1;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -1002,6 +1036,11 @@
   }
   .mw-manage-actions {
     width: 100%;
+  }
+  .mw-root .mw-drag-handle {
+    flex-basis: 44px;
+    width: 44px;
+    height: 44px;
   }
   .mw-manage-row {
     flex-wrap: wrap;

@@ -77,6 +77,24 @@ The owner confirmed the toolbar, drawer, name-visibility, source-caption, and Lo
 - Counts read "1 editions". Counts now use singular forms in the heading, selection bar, drag badge, inspector, Move and Removal dialogs and result messages, for example "1 selected · 1 edition · 1 location".
 - Checked with `npx tsc`, `npm run build` (no prototype markers in `dist/`) and the browser at 800 px and 375×812 with sample data.
 
+## Drag handle in Manage locations — 2026-10-11
+
+At the owner's request, each row in Manage locations has a ☰ drag handle, which replaces whole-row dragging and the Move text button.
+
+- Dragging the handle onto another row nests the Location there. Dragging it onto Top level, now shown on mobile too, moves it to the top level. Every drop opens the existing confirmation. Sibling order stays natural A–Z; dropping between rows does not set a position.
+- The drag uses pointer events, so it works with touch as well as a mouse. A floating label with the Location's name follows the pointer, the lifted row dims, valid targets are outlined, and invalid ones (itself, descendants, Decks, the current parent) are dimmed and refuse the drop. The panel scrolls when you drag near its top or bottom edge.
+- Tapping the handle without dragging, or activating it with Enter or Space, opens the Move picker. That keeps a non-drag path on every device.
+- The handle is 32×40 px on desktop and 44×44 px on mobile, with `touch-action: none` so dragging it doesn't scroll the page.
+
+Checked at 1280×860 and 375×812:
+
+- A real mouse drag of Bulk box 10's handle onto Decks opened the "Decks / Bulk box 10" confirmation. This is the first real-mouse drag the harness has completed in this prototype.
+- Scripted pointer events checked the rest: a tap opened the picker, keyboard activation opened the picker, and a touch drag onto a Deck showed the label with the Deck dimmed and Top level valid. Releasing on the Deck changed nothing and removed the label. A touch drag onto Top level and one onto 151 display binder confirmed, the latter with the 22-copy Unsorted conversion.
+- On mobile the handle is 44×44 px with no horizontal overflow. Real finger input wasn't available; the touch checks used synthetic `pointerType: touch` events.
+- Screenshot: [mobile handle drag](manage-locations-handle-drag-mobile.jpg).
+
+**Open for later (owner, 2026-10-11):** the "Move here" confirmation button looks a bit odd next to "Choose another". It's not blocking; revisit with the visual system in [#47](https://github.com/ry-cen/prizecheck/issues/47).
+
 ## Full-width gallery — 2026-10-11
 
 The app-wide stylesheet caps every `main` element at 900 px and centres it. The prototype's gallery inherited that cap, so wide screens showed a narrow centred column (2 small tiles per row at 1920 px). The gallery now overrides the cap and fills the width beside the sidebar, and its side padding shrinks on large screens: 30 px up to 1549 px, 20 px from 1550 px, and 16 px from 2200 px. Cards per row follow the available width at the same tile sizes. Production work must not inherit the global cap either.
