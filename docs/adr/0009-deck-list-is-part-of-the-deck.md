@@ -17,4 +17,4 @@ Collectors need to build decks that include cards they don't own. A Deck therefo
 - A Published Deck snapshots the Deck List, so it may show cards the owner doesn't own. It remains live after its Deck is deleted until the owner revokes it. The current non-cascading reference from a publication to its Deck must change.
 - Deck List lines always name a Card Edition. Lines that accept any Edition or any printing are left to a future card-request feature.
 
-See the [resolution](../planning/deck-format-validation/wayfinder/resolutions/decide-deck-list-model.md) and [Decide how a Deck holds cards the collector doesn't own](https://github.com/ry-cen/tcg-tracker/issues/72).
+See the [resolution](../planning/deck-format-validation/wayfinder/resolutions/decide-deck-list-model.md) and [Decide how a Deck holds cards the collector doesn't own](https://github.com/ry-cen/prizecheck/issues/72).

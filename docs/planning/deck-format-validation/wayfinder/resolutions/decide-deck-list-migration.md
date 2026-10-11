@@ -1,6 +1,6 @@
 # Resolution: Decide how existing Decks and Deck features move onto Deck Lists
 
-**Ticket:** [Decide how existing Decks and Deck features move onto Deck Lists](https://github.com/ry-cen/tcg-tracker/issues/76)
+**Ticket:** [Decide how existing Decks and Deck features move onto Deck Lists](https://github.com/ry-cen/prizecheck/issues/76)
 
 **Resolved:** 2026-10-10, grilled with the owner.
 
