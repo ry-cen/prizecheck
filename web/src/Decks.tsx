@@ -13,6 +13,7 @@ import { PublishDeck } from "./PublishDeck";
 import { DeckLiveExport } from "./DeckLiveExport";
 import { DeckMassEntryExport } from "./DeckMassEntryExport";
 import { DeckCostSummary } from "./DeckCost";
+import { workspaceHref } from "./workspace/workspaceLink";
 
 export function Decks() {
   const [cursor, setCursor] = useState<string | null>(null);
@@ -124,14 +125,22 @@ export function Decks() {
       </form>
       <nav aria-label="Deck index">
         {decks.map((deck) => (
-          <button
-            type="button"
-            key={deck.id}
-            onClick={() => setSelected(deck.id)}
-            aria-current={selected === deck.id ? "page" : undefined}
-          >
-            {deck.name}
-          </button>
+          <span key={deck.id}>
+            <button
+              type="button"
+              onClick={() => setSelected(deck.id)}
+              aria-current={selected === deck.id ? "page" : undefined}
+            >
+              {deck.name}
+            </button>{" "}
+            {/* The accessible name starts with the visible text and names the Deck. */}
+            <a
+              href={workspaceHref(deck.id)}
+              aria-label={`Open in workspace: ${deck.name}`}
+            >
+              Open in workspace
+            </a>{" "}
+          </span>
         ))}
       </nav>
       {cursor && (
