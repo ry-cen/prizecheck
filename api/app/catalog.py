@@ -15,6 +15,7 @@ import httpx
 import psycopg
 from psycopg.rows import dict_row
 
+from .card_identity import card_identity_key
 from .catalog_targets import IDENTITY_REVIEW_KINDS, MatchingRulesV1, TargetContext, refresh_editions, refresh_printing
 from .public_catalog import publish_catalog_best_effort
 from .tcgdex_record import source_descriptor
@@ -230,7 +231,7 @@ def normalize(record: dict) -> dict:
     image = record.get("image")
     return {
         "source_id": source_id, "set_id": set_data["id"], "set_name": set_data["name"],
-        "collector_number": str(number), "name": name, "identity_key": name,
+        "collector_number": str(number), "name": name, "identity_key": card_identity_key(name),
         "search_name": name.casefold(), "image_url": image if isinstance(image, str) and image.startswith("https://") else None,
         "descriptors": descriptors,
         "ambiguous": ambiguous, "basic_energy": basic, "fingerprint": fingerprint(physical_review_evidence(record)),
@@ -561,7 +562,7 @@ def execute_run(conn, run_id: UUID, source=None, before_promotion=None):
                                  existing["printing_id"] if existing else None)
                 identity_id = existing["identity_id"] if existing else conn.execute("""INSERT INTO catalog_identity(identity_key,display_name)
                   VALUES (%s,%s) ON CONFLICT(identity_key) DO UPDATE SET identity_key=EXCLUDED.identity_key RETURNING id""",
-                  (item["identity_key"], item["name"])).fetchone()["id"]
+                  (item["identity_key"], item["identity_key"])).fetchone()["id"]
                 printing_id = existing["printing_id"] if existing else get_or_insert(conn,
                   "SELECT id FROM catalog_printing WHERE source_id=%s", (source_id,),
                   """INSERT INTO catalog_printing(source,source_id,identity_id) VALUES ('tcgdex',%s,%s)

@@ -11,6 +11,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, HttpUrl
 
+from .card_identity import card_identity_key
 from .main import connect, require_owner, verified_user
 from .public_catalog import publish_catalog_best_effort
 
@@ -253,9 +254,9 @@ def decide_report(report_id: UUID, payload: DecisionInput, user_id: str = Depend
             # Take the commit-ordered public revision before any catalog or metadata row is written.
             conn.execute("SELECT catalog_begin_correction()")
             if report["kind"] == "printing":
-                key = name # Conservative Card Identity normalization keeps punctuation and case.
+                key = card_identity_key(name)  # Card Identity folds apostrophes and ignores a trailing subtitle.
                 identity = conn.execute("""INSERT INTO catalog_identity(identity_key,display_name) VALUES (%s,%s)
-                  ON CONFLICT(identity_key) DO UPDATE SET identity_key=EXCLUDED.identity_key RETURNING id""", (key, name)).fetchone()
+                  ON CONFLICT(identity_key) DO UPDATE SET identity_key=EXCLUDED.identity_key RETURNING id""", (key, key)).fetchone()
                 printing_id = conn.execute("""INSERT INTO catalog_printing(source,identity_id)
                   VALUES ('manual',%s) RETURNING id""", (identity["id"],)).fetchone()["id"]
                 conn.execute("""INSERT INTO catalog_generation_printing
