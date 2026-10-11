@@ -360,7 +360,7 @@ promote({'card-1': 'Pikachu'})`,
     );
     await expect(stack).toContainText("×4");
 
-    // Removal asks first; Cancel leaves the count alone, Confirm removes and Undo restores.
+    // Removal asks first; Cancel leaves the count alone. The refresh keeps the 3 selected copies of the 4 now held, so Confirm removes 3 and Undo restores them.
     await selection
       .getByRole("button", { name: "Remove selected", exact: true })
       .click();
@@ -374,9 +374,9 @@ promote({'card-1': 'Pikachu'})`,
       .click();
     await confirmation.getByRole("button", { name: "Confirm removal" }).click();
     await expect(selection.getByRole("status")).toContainText(
-      "Removed 4 copies"
+      "Removed 3 copies"
     );
-    await expect(stack).toHaveCount(0);
+    await expect(stack).toContainText("×1");
     await selection
       .getByRole("button", { name: "Undo", exact: true })
       .first()
