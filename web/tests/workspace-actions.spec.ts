@@ -345,6 +345,8 @@ test.describe("desktop", () => {
     ).toHaveCount(0);
     await expect(toast(page)).toHaveText(`Moved 2 copies to 0 Dest ${s}.`);
     await expect(bar(page)).toHaveCount(0);
+    // The dragged tile unmounted with the selection: focus lands on the heading, not the page.
+    expect(await focusedId(page)).toBe("ws-heading");
     await expect(
       page.getByRole("button", { name: "Undo", exact: true })
     ).toBeVisible();
