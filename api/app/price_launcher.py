@@ -122,17 +122,21 @@ def spawn(slot: int, owner: str) -> bool:
         raise ValueError('invalid runner reservation')
     descriptor = None
     path = None
+    locked = False
     try:
         directory = lock_dir()
         path = lock_path(slot, owner, directory)
         descriptor = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
         fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        locked = True
         child = subprocess.Popen(
             [sys.executable, '-m', 'app.price_runner', '--slot', str(slot), '--owner', owner],
             cwd=API_DIR, env=runner_environment(directory), pass_fds=(descriptor,), start_new_session=True,
             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True)
     except (OSError, ValueError, subprocess.SubprocessError):
-        if path is not None:
+        # Remove the lock file only while this call holds its lock (``finally`` closes the descriptor afterwards). A
+        # failed flock means another process holds it: leave it, because reclaim reads a missing lock file as "unknown".
+        if locked:
             try:
                 path.unlink(missing_ok=True)
             except OSError:

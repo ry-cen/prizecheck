@@ -5,6 +5,7 @@ supervisor through ``price_launcher.spawn`` with a test-local ``sitecustomize`` 
 ``app.tcgdex_record`` modules which talk to a real local HTTP server, so the runner is exercised end to end without
 08-A. Admission (07-A) is simulated by seeding records with the ``quote_contract`` builders.
 """
+import fcntl
 import json
 import multiprocessing
 import os
@@ -622,6 +623,21 @@ def test_spawn_reports_failure_without_raising_and_leaves_no_lock(monkeypatch, l
     assert not price_launcher.lock_path(0, owner).exists()
     with pytest.raises(ValueError):
         price_launcher.spawn(2, owner)
+
+
+def test_spawn_leaves_a_lock_another_process_holds(monkeypatch, lock_directory):
+    def forbidden(*args, **kwargs):
+        raise AssertionError('a runner was started while another process holds the lock')
+    monkeypatch.setattr(subprocess, 'Popen', forbidden)
+    owner = owner_nonce()
+    path = price_launcher.lock_path(0, owner)
+    held = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)  # A second open file description: flock conflicts in-process.
+    try:
+        fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        assert price_launcher.spawn(0, owner) is False
+        assert path.exists() and os.stat(path).st_ino == os.fstat(held).st_ino
+    finally:
+        os.close(held)
 
 
 def test_handoff_reserves_a_slot_only_for_runnable_jobs(env, monkeypatch):
