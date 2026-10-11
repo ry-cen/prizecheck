@@ -287,8 +287,8 @@ def test_migration_merges_subtitled_identities_and_keeps_every_reference(project
             # calling them conflicts.
             conn.execute("""CREATE TEMP VIEW catalog_card_attribute AS SELECT NULL::uuid AS printing_id,
               NULL::text AS regulation_mark,NULL::text AS card_kind,NULL::boolean AS basic_energy,NULL::text[] AS types,
-              NULL::boolean AS rule_box,NULL::boolean AS ace_spec,NULL::boolean AS radiant,NULL::boolean AS prism_star
-              WHERE false""")
+              NULL::boolean AS rule_box,NULL::boolean AS ace_spec,NULL::boolean AS radiant,NULL::boolean AS prism_star,
+              NULL::boolean AS basic_pokemon WHERE false""")
             conn.execute("""CREATE TEMP VIEW catalog_reprint_group_member AS SELECT NULL::uuid AS printing_id,
               NULL::uuid AS group_id WHERE false""")
             conn.commit()

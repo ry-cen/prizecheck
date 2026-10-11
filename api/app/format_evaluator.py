@@ -28,9 +28,14 @@ type; a dual-type Pokémon fits either type, and Colorless is a type of its own)
 Boss's Orders and Lysandre: official rulings, not a shared copy count, so 2 Boss's Orders and 2 Lysandre are not legal
 in Expanded although each stays within 4 copies. A deck holding two or more of them is not legal (a deck issue).
 
+Every format also applies the rulebook's deck-building rule that a deck holds at least one Basic Pokémon (ticket 20).
+It is in no rules file: the Pokémon TCG Rules state it for every deck ("your deck must have at least one Basic Pokémon
+in it"), so it changes with the evaluator's code, not with a format's revision.
+
 A result is advisory. Any definite violation makes it ``not_legal``; otherwise any gap in the rules or the card data
 makes it ``unknown``; otherwise it is ``legal``. A gap is reported only when the missing fact could change the answer:
-an unknown ACE SPEC status matters only if it could put the deck over its ACE SPEC limit.
+an unknown ACE SPEC status matters only if it could put the deck over its ACE SPEC limit, and an unknown Basic Pokémon
+status only if no line is a known Basic Pokémon.
 """
 import bisect
 import hashlib
@@ -57,6 +62,7 @@ IssueKind = Literal["deck", "card"]
 
 # Stable issue codes. Violations make a result not_legal:
 DECK_SIZE = "deck_size"
+NO_BASIC_POKEMON = "no_basic_pokemon"
 NOT_IN_CARD_POOL = "not_in_card_pool"
 COPY_LIMIT = "copy_limit"
 ACE_SPEC_LIMIT = "ace_spec_limit"
@@ -721,6 +727,20 @@ def _limit(issues: _Issues, lines, attribute: str, limit: int, code: str, too_ma
         issues.add(ATTRIBUTE_UNKNOWN, unknown, "card", False, unsure)
 
 
+def _basic_pokemon(issues: _Issues, lines, rules: FormatRules):
+    """At least one line is a Basic Pokémon. Lines whose Basic Pokémon status is unknown are a gap only when no line is
+    a known Basic Pokémon; a known Trainer or Energy is never one, whatever its status says."""
+    if any(line.printing.attributes.basic_pokemon is True for line in lines):
+        return
+    unsure = [line for line in lines if line.printing.attributes.basic_pokemon is None
+              and line.printing.attributes.card_kind not in ("trainer", "energy")]
+    if unsure:
+        issues.add(ATTRIBUTE_UNKNOWN, "Basic Pokémon status unknown", "card", False, unsure)
+    else:
+        issues.add(NO_BASIC_POKEMON, f"{_a(rules.name)} {rules.name} deck has at least one Basic Pokémon; this one has "
+                                     "none", "deck", True, lines)
+
+
 def _exclusions(issues: _Issues, line: ResolvedLine, rules: FormatRules):
     """A card whose excluded attribute is true is not legal; one whose excluded attribute is unknown is a gap."""
     for attribute in rules.excluded_attributes:
@@ -768,6 +788,7 @@ def evaluate_format(lines: Sequence[ResolvedLine], rules: FormatRules, on: date,
     if total != limits.deck_size:
         issues.add(DECK_SIZE, f"{_a(rules.name)} {rules.name} deck has exactly {limits.deck_size} cards; this one has "
                               f"{total}", "deck", True, lines)
+    _basic_pokemon(issues, lines, rules)
     for line in lines:
         for finding in line_standing(line, rules, on, reprint_groups or {}).findings:
             issues.add(finding.code, finding.reason, "card", finding.violation, (line,))

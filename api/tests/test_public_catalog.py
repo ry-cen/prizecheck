@@ -25,7 +25,8 @@ EDITION_KEYS = {'edition_ref', 'printing_ref', 'descriptor', 'revision', 'market
 MARKETPLACE_KEYS = {'state', 'reason', 'mapping_revision', 'product_id', 'quote_lookup'}
 QUARANTINE_KEYS = {'edition_ref', 'revision', 'mapping_revision', 'state'}
 FORMAT_KEYS = {'printing_ref', 'revision', 'set_id', 'collector_number', 'identity', 'reprint_group', 'attributes'}
-ATTRIBUTE_KEYS = {'regulation_mark', 'card_kind', 'basic_energy', 'types', 'rule_box', 'ace_spec', 'radiant', 'prism_star'}
+ATTRIBUTE_KEYS = {'regulation_mark', 'card_kind', 'basic_energy', 'types', 'rule_box', 'ace_spec', 'radiant', 'prism_star',
+                  'basic_pokemon'}
 
 
 @pytest.fixture(autouse=True)
@@ -78,7 +79,7 @@ def test_rebuild_publishes_exact_allowlisted_records_and_is_idempotent():
                      'identity': {'key': row['identity_key'], 'name': 'Pikachu'}, 'reprint_group': None,
                      'attributes': {'regulation_mark': None, 'card_kind': 'pokemon', 'basic_energy': False,
                                     'types': ['Lightning'], 'rule_box': False, 'ace_spec': False, 'radiant': False,
-                                    'prism_star': False}}
+                                    'prism_star': False, 'basic_pokemon': True}}
     assert printing == {'printing_ref': row['printing_ref'], 'name': 'Pikachu', 'set_id': 'base', 'set_name': 'Base Set',
                         'collector_number': '25', 'image_url': None, 'revision': row['printing_revision'],
                         'live': {'state': 'unsupported', 'reason': 'no_active_rule', 'rule_version': None, 'identity': None}}

@@ -38,10 +38,10 @@ def fixture():
         conn.execute("""INSERT INTO catalog_generation_printing
           (generation_id,printing_id,source_id,set_id,set_name,collector_number,display_name,search_name,source_fingerprint,basic_energy)
           VALUES (%s,%s,%s,'base','Base Set','25','Pikachu','pikachu','test','not_basic')""", (generation, printing, str(uuid4())))
-        # The card attributes an import derives for a Pokémon (migration 026); Deck checks read them.
+        # The card attributes an import derives for a Basic Pokémon (migrations 026 and 034); Deck checks read them.
         conn.execute("""INSERT INTO catalog_derived_attribute
-          (printing_id,rules_version,card_kind,basic_energy,types,rule_box,ace_spec,radiant,prism_star)
-          VALUES (%s,1,'pokemon',false,'{Lightning}',false,false,false,false)""", (printing,))
+          (printing_id,rules_version,card_kind,basic_energy,types,rule_box,ace_spec,radiant,prism_star,basic_pokemon)
+          VALUES (%s,2,'pokemon',false,'{Lightning}',false,false,false,false,true)""", (printing,))
         conn.execute("INSERT INTO catalog_generation_edition(generation_id,edition_id,printing_id) VALUES (%s,%s,%s)", (generation, edition, printing))
         conn.execute("UPDATE catalog_state SET active_generation=%s,revision=revision+1 WHERE singleton", (generation,))
     return owner, other, str(leaf), str(other_leaf), str(edition), str(generation)

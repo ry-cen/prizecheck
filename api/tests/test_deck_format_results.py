@@ -62,14 +62,14 @@ def codes(result):
 def test_cutting_a_line_returns_updated_results_and_an_unchanged_read_reuses_them():
     reset_catalog()
     run(Records(*CARDS))
-    owner, deck, added = build([("fixture-sv01-901", 3), ("fixture-sv01-902", 2), ("sv02-278", 56)])
+    owner, deck, added = build([("me01-001", 1), ("fixture-sv01-901", 3), ("fixture-sv01-902", 2), ("sv02-278", 55)])
     before = added["format_checks"]
-    assert before["deck_id"] == deck and before["deck_list_revision"] == added["deck_list"]["revision"] == 4
+    assert before["deck_id"] == deck and before["deck_list_revision"] == added["deck_list"]["revision"] == 5
     assert (standard(before)["status"], codes(standard(before))) == ("not_legal", {"copy_limit", "deck_size"})
-    cut = change_line(owner, deck, edition_of("fixture-sv01-902"), "1", 4)
+    cut = change_line(owner, deck, edition_of("fixture-sv01-902"), "1", 5)
     assert cut.status_code == 200, cut.text
     after = cut.json()["format_checks"]
-    assert after["deck_list_revision"] == cut.json()["deck_list"]["revision"] == 5
+    assert after["deck_list_revision"] == cut.json()["deck_list"]["revision"] == 6
     result = standard(after)
     assert (result["status"], result["issues"], result["evaluated_on"], result["notes"]) == (
         "legal", [], "2026-10-11", [])
@@ -80,7 +80,7 @@ def test_cutting_a_line_returns_updated_results_and_an_unchanged_read_reuses_the
     assert format_checks(owner, deck, "?format=standard") == {**after, "results": [standard(after)]}
     assert format_checks(owner, deck, "?as_of=2026-10-11") == after
     # Removing a line returns updated results too.
-    removed = remove_line(owner, deck, edition_of("fixture-sv01-902"), 5)
+    removed = remove_line(owner, deck, edition_of("fixture-sv01-902"), 6)
     assert removed.status_code == 200, removed.text
     assert codes(standard(removed.json()["format_checks"])) == {"deck_size"}
     assert format_checks(owner, deck) == removed.json()["format_checks"]
@@ -89,21 +89,21 @@ def test_cutting_a_line_returns_updated_results_and_an_unchanged_read_reuses_the
 def test_a_replayed_command_returns_the_results_it_computed_then():
     reset_catalog()
     run(Records(*CARDS))
-    owner, deck, _ = build([("me01-125", 4)])
+    owner, deck, _ = build([("me01-001", 1), ("me01-125", 4)])
     key = uuid4()
-    first = add_line(owner, deck, edition_of("sv02-278"), "56", 2, key)
+    first = add_line(owner, deck, edition_of("sv02-278"), "55", 3, key)
     assert first.status_code == 200, first.text
     assert standard(first.json()["format_checks"])["status"] == "legal"
-    assert change_line(owner, deck, edition_of("sv02-278"), "50", 3).status_code == 200
+    assert change_line(owner, deck, edition_of("sv02-278"), "50", 4).status_code == 200
     assert standard(format_checks(owner, deck))["status"] == "not_legal"
-    replayed = add_line(owner, deck, edition_of("sv02-278"), "56", 2, key)
+    replayed = add_line(owner, deck, edition_of("sv02-278"), "55", 3, key)
     assert replayed.status_code == 200 and replayed.json() == first.json()
 
 
 def test_a_move_into_the_deck_makes_the_next_read_recompute():
     reset_catalog()
     run(Records(*CARDS))
-    owner, deck, added = build([("me01-125", 4), ("sv02-278", 56)])
+    owner, deck, added = build([("me01-001", 1), ("me01-125", 4), ("sv02-278", 55)])
     saved = added["format_checks"]
     assert format_checks(owner, deck) == saved
     # Copies the Deck List does not cover extend it (migration 027) without a Deck List command.
@@ -119,7 +119,7 @@ def test_a_move_into_the_deck_makes_the_next_read_recompute():
 def test_a_rules_deploy_makes_the_next_read_recompute(monkeypatch):
     reset_catalog()
     run(Records(*CARDS))
-    owner, deck, added = build([("me01-125", 4), ("sv02-278", 56)])
+    owner, deck, added = build([("me01-001", 1), ("me01-125", 4), ("sv02-278", 55)])
     before = standard(added["format_checks"])
     current = format_evaluator.format_rules("standard")
     assert before["rules_version"] == current.version
@@ -137,7 +137,7 @@ def test_a_rules_deploy_makes_the_next_read_recompute(monkeypatch):
 
 def test_a_reviewed_attribute_correction_makes_the_next_read_recompute():
     printings = seed(*CARDS)
-    owner, deck, added = build([("me01-125", 4), ("fixture-me05-901", 4), ("sv02-278", 52)])
+    owner, deck, added = build([("me01-001", 1), ("me01-125", 4), ("fixture-me05-901", 4), ("sv02-278", 51)])
     before = added["format_checks"]
     assert codes(standard(before)) == {"regulation_mark_not_in_rules"}
     assert format_checks(owner, deck) == before
@@ -155,7 +155,7 @@ def test_a_reviewed_attribute_correction_makes_the_next_read_recompute():
 def test_a_catalog_import_makes_the_next_read_recompute():
     reset_catalog()
     run(Records(*CARDS))
-    owner, deck, added = build([("me01-125", 4), ("sv02-278", 56)])
+    owner, deck, added = build([("me01-001", 1), ("me01-125", 4), ("sv02-278", 55)])
     before = added["format_checks"]
     # An unchanged import still activates a new catalog generation, which could have moved a Printing's set.
     run(Records(*CARDS))
@@ -170,7 +170,7 @@ def test_a_saved_result_is_reused_until_the_next_rule_date(today):
     reset_catalog()
     run(Records(*CARDS))
     today(date(2026, 4, 8))
-    owner, deck, added = build([("sv01-172", 4), ("me01-125", 4), ("sv02-278", 52)])
+    owner, deck, added = build([("me01-001", 1), ("sv01-172", 4), ("me01-125", 4), ("sv02-278", 51)])
     saved = standard(added["format_checks"])
     assert (saved["status"], saved["evaluated_on"]) == ("legal", "2026-04-08")
     # G rotates on 2026-04-10, the next rule date: the day before reuses the saved result, for its own date.
@@ -194,7 +194,7 @@ def test_a_saved_result_is_reused_until_the_next_rule_date(today):
 def test_a_read_never_waits_for_a_deck_list_writer():
     reset_catalog()
     run(Records(*CARDS))
-    owner, deck, _ = build([("me01-125", 4), ("sv02-278", 56)])
+    owner, deck, _ = build([("me01-001", 1), ("me01-125", 4), ("sv02-278", 55)])
     # Hold the Deck's saved result rows as a Deck List command does while it saves. The table is named only to take
     # that lock.
     with connect() as writer, writer.transaction():

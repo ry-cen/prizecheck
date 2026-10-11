@@ -800,7 +800,7 @@ _MARK = re.compile(r'[A-Z]')
 _REF = re.compile(r'[0-9a-f]{48}')
 MAX_REPRINT_PRINTINGS = 1024    # far above any real group; a longer list is malformed
 _KINDS = (None, 'pokemon', 'trainer', 'energy')
-_FLAGS = ('basic_energy', 'rule_box', 'ace_spec', 'radiant', 'prism_star')
+_FLAGS = ('basic_energy', 'rule_box', 'ace_spec', 'radiant', 'prism_star', 'basic_pokemon')
 
 
 def format_facts(store, printing_refs, deadline, *, generation=None):
