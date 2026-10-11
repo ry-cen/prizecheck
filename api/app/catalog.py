@@ -20,6 +20,9 @@ from .public_catalog import publish_catalog_best_effort
 from .tcgdex_record import source_descriptor
 
 BASE_URL = "https://api.tcgdex.net/v2/en/cards"
+# Pokémon TCG Pocket is digital-only; its cards are not physical Card Printings.
+EXCLUDED_SERIES = ("tcgp",)
+SOURCE_ID_PATTERN = r"[A-Za-z0-9_.!%~-]{1,128}"
 MAX_WORKERS = 8
 MAX_CARDS = 100_000
 
@@ -144,6 +147,7 @@ class TCGdexSource:
     def __init__(self):
         self.client = httpx.Client(timeout=20, follow_redirects=False,
                                    limits=httpx.Limits(max_connections=MAX_WORKERS, max_keepalive_connections=MAX_WORKERS))
+        self.excluded_sets, self.excluded_ids = frozenset(), frozenset()
 
     def _get(self, url: str):
         for attempt in range(12):
@@ -162,11 +166,37 @@ class TCGdexSource:
         if not isinstance(data, list) or not data or len(data) > MAX_CARDS:
             raise CatalogError("Invalid English enumeration")
         ids = [item.get("id") for item in data if isinstance(item, dict)]
-        if len(ids) != len(data) or any(not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9_.!%~-]{1,128}", value) for value in ids):
+        if len(ids) != len(data) or any(not isinstance(value, str) or not re.fullmatch(SOURCE_ID_PATTERN, value) for value in ids):
             raise CatalogError("Invalid English source ID")
         if len(set(ids)) != len(ids):
             raise CatalogError("Duplicate English source ID")
-        return set(ids)
+        self.excluded_sets, self.excluded_ids = self._excluded_series()
+        return set(ids) - self.excluded_ids
+
+    def _excluded_series(self) -> tuple[frozenset[str], frozenset[str]]:
+        """Set and card IDs of excluded series, read from TCGdex. Any doubt fails the run."""
+        root = BASE_URL.rsplit("/", 1)[0]
+        set_ids, card_ids = set(), set()
+        for series_id in EXCLUDED_SERIES:
+            series = self._get(f"{root}/series/{series_id}")
+            sets = series.get("sets") if isinstance(series, dict) and series.get("id") == series_id else None
+            if not isinstance(sets, list) or not sets:
+                raise CatalogError("Invalid excluded series listing")
+            for item in sets:
+                set_id = item.get("id") if isinstance(item, dict) else None
+                if not isinstance(set_id, str) or not re.fullmatch(SOURCE_ID_PATTERN, set_id) or not set_id.strip("."):
+                    raise CatalogError("Invalid excluded series listing")
+                detail = self._get(f"{root}/sets/{quote(set_id, safe='-._~')}")
+                cards = detail.get("cards") if isinstance(detail, dict) else None
+                if (detail.get("id") if isinstance(detail, dict) else None) != set_id or not isinstance(cards, list) \
+                        or not isinstance(detail.get("serie"), dict) or detail["serie"].get("id") != series_id:
+                    raise CatalogError("Invalid excluded set listing")
+                for card in cards:
+                    if not isinstance(card, dict) or not isinstance(card.get("id"), str):
+                        raise CatalogError("Invalid excluded set listing")
+                    card_ids.add(card["id"])
+                set_ids.add(set_id)
+        return frozenset(set_ids), frozenset(card_ids)
 
     def fetch(self, source_id: str) -> dict:
         data = self._get(f"{BASE_URL}/{quote(source_id, safe='-._~')}")
@@ -418,13 +448,17 @@ def execute_run(conn, run_id: UUID, source=None, before_promotion=None):
         if first != second:
             raise CatalogError("English enumeration changed during the run")
         normalized = [normalize(records[source_id]) for source_id in sorted(first)]
+        excluded_sets = getattr(source, "excluded_sets", frozenset())
+        if any(item["set_id"] in excluded_sets for item in normalized):
+            raise CatalogError("Excluded-series record outside its set listing")
         refs = [(item["set_id"], item["collector_number"]) for item in normalized]
         if len(set(refs)) != len(refs):
             raise CatalogError("Duplicate set and collector reference")
+        # Printings of an excluded series are withdrawn on purpose, so they are not a source drop.
         previous_ids={row['source_id'] for row in conn.execute("""SELECT gp.source_id
           FROM catalog_generation_printing gp JOIN catalog_printing p ON p.id=gp.printing_id
           WHERE gp.generation_id=(SELECT active_generation FROM catalog_state WHERE singleton)
-            AND p.source='tcgdex' AND NOT gp.tombstoned""").fetchall()}
+            AND p.source='tcgdex' AND NOT gp.tombstoned""").fetchall()}-getattr(source,"excluded_ids",frozenset())
         if previous_ids and len(previous_ids-first)>len(previous_ids)*0.01:
             raise CatalogError('English source ID count dropped by more than 1%')
         raw = gzip.compress(json.dumps([records[key] for key in sorted(first)], ensure_ascii=False, separators=(",", ":")).encode(), mtime=0)
