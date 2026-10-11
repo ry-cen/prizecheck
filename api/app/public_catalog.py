@@ -110,7 +110,8 @@ def build_values(conn, targets):
         ids[kind].append(target)
     built = {}
     if ids['printing']:
-        for row in conn.execute("""SELECT p.id,p.public_ref AS printing_ref,ci.display_name,
+        # A Printing record carries the Printing's own name; the Card Identity name is folded and drops subtitles (migration 024).
+        for row in conn.execute("""SELECT p.id,p.public_ref AS printing_ref,coalesce(pd.display_name,ci.display_name) AS display_name,
           coalesce(pd.set_id,'') AS set_id,coalesce(pd.set_name,'') AS set_name,
           coalesce(pd.collector_number,'') AS collector_number,pd.image_url,
           m.public_revision,m.live_state,m.live_reason,m.live_identity,a.version AS rule_version

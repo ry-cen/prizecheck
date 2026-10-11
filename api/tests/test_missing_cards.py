@@ -204,3 +204,19 @@ def test_approved_printing_and_edition_are_published_as_public_catalog_records(t
     printing = records[catalog_printing_key(row["printing_ref"])].value
     assert printing["name"] == "Pikachu" and printing["set_id"] == "jungle"
     assert records[catalog_edition_key(row["edition_ref"])].value["printing_ref"] == row["printing_ref"]
+
+
+def test_subtitled_manual_printing_joins_the_card_identity_of_its_base_name(seeded_catalog):
+    response = report({"kind": "printing", "set_id": "jungle", "set_name": "Jungle", "collector_number": "99",
+                       "english_name": "Pikachu (Jungle Promo)", "evidence_url": "https://example.org/evidence",
+                       "note": "Card in hand"})
+    assert response.status_code == 201, response.text
+    report_id = response.json()["id"]
+    issue_code(report_id)
+    approved = approve(report_id)
+    assert approved.status_code == 200, approved.text
+    approved_id = approved.json()["approved_printing_id"]
+    found = {row["id"]: row for row in request("GET", "/api/catalog/search", OTHER, name="Pikachu").json()["printings"]}
+    imported, manual = found[str(seeded_catalog)], found[approved_id]
+    assert manual["name"] == "Pikachu (Jungle Promo)"
+    assert manual["identity_name"] == "Pikachu" and manual["identity_id"] == imported["identity_id"]
