@@ -157,7 +157,10 @@ def test_migrating_a_populated_catalog_assigns_distinct_references_without_chang
         through_022 = snapshot()
         subprocess.run([sys.executable, str(ROOT / "scripts/migrate.py")], env={**os.environ, "DATABASE_URL": url},
                        check=True, capture_output=True)
-        after = snapshot()
+        # Later migrations may add columns (033's merged_into, left null here); compare the columns 022 had.
+        assert all(row["merged_into"] is None for row in snapshot()["catalog_identity"])
+        after = {table: [{key: row[key] for key in through_022[table][0]} for row in rows]
+                 for table, rows in snapshot().items()}
         # Migration 023 rewrites no ID, descriptor, public reference or correspondence.
         assert after == through_022
         for table in tables:
