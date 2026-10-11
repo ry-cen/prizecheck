@@ -435,6 +435,9 @@ def rederive_card_attributes(conn) -> int:
     conn.commit()
     try:
         with conn.transaction():
+            # Lock order, as in an import and an attribute decision: the public clock first. Changed attributes and
+            # Reprint Groups re-stamp their Printings' public format facts (migration 032), which takes the clock.
+            conn.execute("SELECT catalog_begin_correction()")
             changed = refresh_card_attributes(conn)
             refresh_reprint_groups(conn)
             return changed

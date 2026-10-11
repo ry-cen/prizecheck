@@ -1,6 +1,7 @@
 // @module-tag slow
 // slow (process): two gateways and two APIs (one pair on a disposable database, one isolated pair whose databases are
-// counting listeners) and one wait through the real 3 s price budget; the Published Deck exports (tickets 13 and 14) reuse the same stacks.
+// counting listeners) and one wait through the real 3 s price budget; the Published Deck exports (tickets 13 and 14) and
+// format results (Deck Lists 18) reuse the same stacks.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -952,6 +953,69 @@ describe("the Published Deck cost through the real gateway", () => {
         expect(gone.status, kind).toBe(404);
         expect(gone.json.detail.code).toBe("PUBLISHED_DECK_NOT_FOUND");
       }
+      expect(wakeups).toEqual(baseline);
+    }
+  );
+  it(
+    "serves Published Deck format results without waking either database for absent, forged or valid cookies, and follows republish and revoke",
+    { timeout: 45_000 },
+    async () => {
+      const [card] = await printing("pf-format", ["normal"], false);
+      await deliver();
+      const deck = await deckWith([[card, 4]]);
+      const { token } = await publication("POST", deck);
+      const manifest = readFileSync(currentJson);
+      const baseline = { ...wakeups };
+      const path = (version: number) =>
+        `/api/public/decks/${token}/versions/${version}/format-checks?as_of=2026-10-11`;
+
+      const texts: string[] = [];
+      let answer: Awaited<ReturnType<typeof anonymous>> | undefined;
+      for (const cookie of [
+        undefined,
+        "better-auth.session_token=forged",
+        owner.cookie,
+      ]) {
+        answer = await anonymous(path(1), cookie ? { cookie } : {});
+        expect(answer.status, `${cookie}`).toBe(200);
+        texts.push(answer.text);
+      }
+      // Each answer computes its results when asked (computed_at); everything else is identical.
+      const timeless = (text: string) => {
+        const parsed = JSON.parse(text);
+        return JSON.stringify({
+          ...parsed,
+          results: parsed.results.map(
+            ({ computed_at, ...result }: any) => result
+          ),
+        });
+      };
+      expect(new Set(texts.map(timeless)).size).toBe(1);
+      const body = answer!.json;
+      expect(body.version).toBe(1);
+      expect(body.digest).toMatch(/^[0-9a-f]{64}$/);
+      expect(body.results.map((result: any) => result.format)).toEqual([
+        "standard",
+      ]);
+      // Four copies of a card with no set or attributes: not legal on size, never legal.
+      expect(body.results[0].status).toBe("not_legal");
+      expect(answer!.headers.get("cache-control")).toBe("no-store");
+      expect(answer!.headers.get("x-robots-tag")).toBe("noindex, nofollow");
+      for (const text of texts)
+        for (const secret of [owner.id, deck, card.id])
+          expect(text).not.toContain(secret);
+      expect(wakeups).toEqual(baseline);
+      expect(readFileSync(currentJson).equals(manifest)).toBe(true);
+
+      expect((await publication("PUT", deck)).version).toBe(2);
+      const old = await anonymous(path(1));
+      expect(old.status).toBe(409);
+      expect(old.json.detail.code).toBe("PUBLISHED_DECK_CHANGED");
+      expect((await anonymous(path(2))).status).toBe(200);
+      expect((await publication("DELETE", deck)).revoked).toBe(true);
+      const gone = await anonymous(path(2));
+      expect(gone.status).toBe(404);
+      expect(gone.json.detail.code).toBe("PUBLISHED_DECK_NOT_FOUND");
       expect(wakeups).toEqual(baseline);
     }
   );

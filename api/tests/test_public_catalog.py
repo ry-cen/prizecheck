@@ -8,7 +8,7 @@ import pytest
 
 from app.main import connect
 from app.public_projection import FilePublicProjection, ProjectionUnavailable, public_record_store
-from app.public_records import FilePublicRecords, catalog_edition_key, catalog_printing_key
+from app.public_records import FilePublicRecords, catalog_edition_key, catalog_format_key, catalog_printing_key
 from app.catalog_targets import LIVE, MATCHING
 from app.public_records import quarantine_key
 from test_catalog import reset_catalog
@@ -24,6 +24,8 @@ LIVE_KEYS = {'state', 'reason', 'rule_version', 'identity'}
 EDITION_KEYS = {'edition_ref', 'printing_ref', 'descriptor', 'revision', 'marketplace'}
 MARKETPLACE_KEYS = {'state', 'reason', 'mapping_revision', 'product_id', 'quote_lookup'}
 QUARANTINE_KEYS = {'edition_ref', 'revision', 'mapping_revision', 'state'}
+FORMAT_KEYS = {'printing_ref', 'revision', 'set_id', 'collector_number', 'identity', 'reprint_group', 'attributes'}
+ATTRIBUTE_KEYS = {'regulation_mark', 'card_kind', 'basic_energy', 'types', 'rule_box', 'ace_spec', 'radiant', 'prism_star'}
 
 
 @pytest.fixture(autouse=True)
@@ -53,19 +55,30 @@ def test_rebuild_publishes_exact_allowlisted_records_and_is_idempotent():
     owner, _, _, _, edition, _ = fixture()
     with connect() as conn:
         row = conn.execute("""SELECT p.id,p.public_ref AS printing_ref,e.public_ref AS edition_ref,pm.public_revision AS printing_revision,
-          em.public_revision AS edition_revision,em.mapping_revision FROM catalog_edition e
+          em.public_revision AS edition_revision,em.mapping_revision,ci.identity_key FROM catalog_edition e
           JOIN catalog_printing p ON p.id=e.printing_id JOIN catalog_printing_metadata pm ON pm.printing_id=p.id
+          JOIN catalog_identity ci ON ci.id=p.identity_id
           JOIN catalog_edition_metadata em ON em.edition_id=e.id WHERE e.id=%s""", (edition,)).fetchone()
         result = rebuild(conn)
     assert result.written == 2 and result.unchanged == 0
     printing_key, edition_key, quarantine = (catalog_printing_key(row['printing_ref']), catalog_edition_key(row['edition_ref']),
                                              quarantine_key(row['edition_ref']))
-    records = read(printing_key, edition_key, quarantine)
+    format_key = catalog_format_key(row['printing_ref'])
+    records = read(printing_key, edition_key, quarantine, format_key)
     printing, published, held = records[printing_key].value, records[edition_key].value, records[quarantine].value
+    facts = records[format_key].value
     # Allowlist: exactly these keys, no internal identifier, owner, source or inventory field.
     assert set(printing) == PRINTING_KEYS and set(printing['live']) == LIVE_KEYS
     assert set(published) == EDITION_KEYS and set(published['marketplace']) == MARKETPLACE_KEYS
     assert set(held) == QUARANTINE_KEYS
+    assert set(facts) == FORMAT_KEYS and set(facts['identity']) == {'key', 'name'} and set(facts['attributes']) == ATTRIBUTE_KEYS
+    # Format facts: the immutable display set, the Card Identity, the Reprint Group slot and the effective attributes.
+    assert facts == {'printing_ref': row['printing_ref'], 'revision': row['printing_revision'], 'set_id': 'base',
+                     'collector_number': '25',
+                     'identity': {'key': row['identity_key'], 'name': 'Pikachu'}, 'reprint_group': None,
+                     'attributes': {'regulation_mark': None, 'card_kind': 'pokemon', 'basic_energy': False,
+                                    'types': ['Lightning'], 'rule_box': False, 'ace_spec': False, 'radiant': False,
+                                    'prism_star': False}}
     assert printing == {'printing_ref': row['printing_ref'], 'name': 'Pikachu', 'set_id': 'base', 'set_name': 'Base Set',
                         'collector_number': '25', 'image_url': None, 'revision': row['printing_revision'],
                         'live': {'state': 'unsupported', 'reason': 'no_active_rule', 'rule_version': None, 'identity': None}}
@@ -75,7 +88,7 @@ def test_rebuild_publishes_exact_allowlisted_records_and_is_idempotent():
                                          'mapping_revision': row['mapping_revision'], 'product_id': None, 'quote_lookup': None}}
     assert held == {'edition_ref': row['edition_ref'], 'revision': row['edition_revision'],
                     'mapping_revision': row['mapping_revision'], 'state': 'clear'}
-    serialized = json.dumps(printing) + json.dumps(published) + json.dumps(held)
+    serialized = json.dumps(printing) + json.dumps(published) + json.dumps(held) + json.dumps(facts)
     for internal in (str(row['id']), edition, owner):
         assert internal not in serialized
     versions = {key: record.version for key, record in records.items()}
@@ -250,7 +263,8 @@ def test_full_catalog_scale_publishes_in_bounded_batches_without_a_whole_run_dea
     promote(cards)
     elapsed = time.monotonic() - started
     with connect() as conn:
-        total = conn.execute("SELECT (SELECT count(*) FROM catalog_printing)+2*(SELECT count(*) FROM catalog_edition) AS n").fetchone()['n']
+        # Two records per Printing (catalog and format facts) and two per Edition (catalog and quarantine).
+        total = conn.execute("SELECT 2*(SELECT count(*) FROM catalog_printing)+2*(SELECT count(*) FROM catalog_edition) AS n").fetchone()['n']
     assert total >= 900 and sum(calls) == total and max(calls) <= 128
     assert public_catalog.backfill().written == 0
     assert elapsed < 60
@@ -361,3 +375,149 @@ def test_readers_fail_closed_on_missing_malformed_or_inconsistent_records():
     swap({pkey: {**published, 'live': {**published['live'], 'state': 'suspended', 'reason': 'source_changed', 'identity': None}}})
     suspended = live_states(store, [pref], deadline())[pref]
     assert (suspended.state, suspended.reason, suspended.eligible) == ('suspended', 'source_changed', False)
+
+
+# ------------------------------------------------------------------ format facts (Deck Lists 18)
+
+
+def printing_state(source_id='meta-1'):
+    with connect() as conn:
+        return conn.execute("""SELECT p.id,p.public_ref,m.public_revision FROM catalog_printing p
+          JOIN catalog_printing_metadata m ON m.printing_id=p.id WHERE p.source_id=%s""", (source_id,)).fetchone()
+
+
+def printing_outbox(printing_id):
+    with connect() as conn:
+        return [row['revision'] for row in conn.execute("""SELECT revision FROM catalog_public_outbox
+          WHERE target_kind='printing' AND target_id=%s ORDER BY revision""", (printing_id,))]
+
+
+def test_format_facts_are_restamped_only_when_a_published_fact_changes():
+    from app.public_catalog import drain
+    reset_catalog()
+    run(Records(card(1)))
+    with connect() as conn:
+        drain(conn)
+    before = printing_state()
+    key = catalog_format_key(before['public_ref'])
+    assert read(key)[key].value['attributes']['regulation_mark'] is None
+    # A rules-version-only rewrite of the derived row changes no fact: no stamp, nothing enqueued.
+    with connect() as conn, conn.transaction():
+        conn.execute("SELECT catalog_begin_correction()")
+        conn.execute("UPDATE catalog_derived_attribute SET rules_version=rules_version+1 WHERE printing_id=%s", (before['id'],))
+    assert printing_state()['public_revision'] == before['public_revision']
+    assert printing_outbox(before['id']) == [revision for revision in printing_outbox(before['id'])
+                                            if revision <= before['public_revision']]
+    # A derived value change and an identity rename each re-stamp the Printing once and are delivered. (Corrections
+    # need a decision row; the HTTP decision path in test_published_format_checks covers them.)
+    changes = (
+        ("UPDATE catalog_derived_attribute SET regulation_mark='H' WHERE printing_id=%s", ('attributes', 'regulation_mark'), 'H'),
+        ("UPDATE catalog_identity SET display_name='Furret Renamed' WHERE id=(SELECT identity_id FROM catalog_printing WHERE id=%s)",
+         ('identity', 'name'), 'Furret Renamed'),
+    )
+    for statement, path, expected in changes:
+        stamped = printing_state()['public_revision']
+        with connect() as conn, conn.transaction():
+            conn.execute("SELECT catalog_begin_correction()")
+            conn.execute(statement, (before['id'],))
+        after = printing_state()['public_revision']
+        assert after > stamped and printing_outbox(before['id'])[-1] == after
+        with connect() as conn:
+            drain(conn)
+        value = read(key)[key].value
+        assert value['revision'] == after and value[path[0]][path[1]] == expected
+        printing = read(catalog_printing_key(before['public_ref']))[catalog_printing_key(before['public_ref'])].value
+        assert printing['revision'] == after and printing['live']['state'] == 'unsupported'
+
+
+def test_backfill_publishes_format_facts_into_a_store_written_before_them():
+    from app.public_catalog import rebuild
+    reset_catalog()
+    fixture()
+    with connect() as conn:
+        rebuild(conn)
+        refs = [row['public_ref'] for row in conn.execute('SELECT public_ref FROM catalog_printing')]
+        edition_keys = [key for row in catalog_rows(conn) for key in (catalog_edition_key(row['edition_ref']),
+                                                                       quarantine_key(row['edition_ref']))]
+    # The store a release before Deck Lists 18 wrote: catalog records, no format facts.
+    format_keys = [catalog_format_key(ref) for ref in refs]
+    current = read(*format_keys)
+    assert public_record_store().compare_and_swap({key: current[key].version for key in format_keys},
+                                                  {key: None for key in format_keys}, deadline=deadline())
+    printing_keys = [catalog_printing_key(ref) for ref in refs]
+    printings = {key: record.value for key, record in read(*printing_keys).items()}
+    editions = {key: record.version for key, record in read(*edition_keys).items()}
+    with connect() as conn:
+        result = rebuild(conn)
+    assert (result.conflicts, result.written) == (0, len(refs))
+    assert all(record.value['printing_ref'] == ref for ref, record in zip(refs, read(*format_keys).values()))
+    assert {key: record.value for key, record in read(*printing_keys).items()} == printings  # Live state unchanged
+    assert {key: record.version for key, record in read(*edition_keys).items()} == editions  # Editions untouched
+    with connect() as conn:
+        assert rebuild(conn).written == 0
+
+
+def test_a_format_record_that_differs_at_the_same_revision_is_rewritten_not_stuck():
+    from app.public_catalog import drain
+    reset_catalog()
+    fixture()
+    with connect() as conn:
+        drain(conn)
+    with connect() as conn:
+        state = conn.execute("SELECT id,public_ref FROM catalog_printing").fetchone()
+    key = catalog_format_key(state['public_ref'])
+    good = read(key)[key]
+    drifted = {**good.value, 'attributes': {**good.value['attributes'], 'regulation_mark': 'Z'}}
+    assert public_record_store().compare_and_swap({key: good.version}, {key: drifted}, deadline=deadline())
+    with connect() as conn:
+        conn.execute("UPDATE catalog_public_outbox SET delivered_at=NULL WHERE target_kind='printing' AND target_id=%s",
+                     (state['id'],))
+        conn.commit()
+        drain(conn)
+        stuck = conn.execute("""SELECT count(*) AS n FROM catalog_public_outbox WHERE delivered_at IS NULL
+          OR last_error IN ('RevisionValueMismatch','StoreAhead')""").fetchone()['n']
+    assert stuck == 0 and read(key)[key].value == good.value
+
+
+def test_format_facts_reader_fails_closed_on_missing_or_malformed_records():
+    from app.public_catalog import FormatFacts, format_facts
+    pref, _ = staged_refs()
+    store = public_record_store()
+    key = catalog_format_key(pref)
+    good = read(key)[key].value
+    facts = format_facts(store, [pref], deadline())[pref]
+    assert isinstance(facts, FormatFacts) and facts.identity_name == good['identity']['name']
+    assert facts.identity_key == good['identity']['key'] and facts.set_id == good['set_id']
+    assert facts.collector_number == good['collector_number']
+    assert format_facts(store, [], deadline()) == {}
+    attributes = good['attributes']
+    for broken in (None, 'not a record', {**good, 'extra': 1}, {k: v for k, v in good.items() if k != 'set_id'},
+                   {**good, 'printing_ref': 'e' * 48}, {**good, 'revision': -1}, {**good, 'revision': '3'},
+                   {**good, 'reprint_group': 'a' * 48}, {**good, 'set_id': ''}, {**good, 'set_id': 7},
+                   {**good, 'collector_number': ''}, {k: v for k, v in good.items() if k != 'collector_number'},
+                   {**good, 'identity': {'key': 'Furret'}}, {**good, 'identity': {'key': '', 'name': 'Furret'}},
+                   {**good, 'attributes': {**attributes, 'regulation_mark': 'h'}},
+                   {**good, 'attributes': {**attributes, 'regulation_mark': 'HH'}},
+                   {**good, 'attributes': {**attributes, 'card_kind': 'item'}},
+                   {**good, 'attributes': {**attributes, 'basic_energy': 'false'}},
+                   {**good, 'attributes': {**attributes, 'rule_box': 0}},
+                   {**good, 'attributes': {**attributes, 'types': ['Fire', 'Fire']}},
+                   {**good, 'attributes': {**attributes, 'types': ['Fairy Energy']}},
+                   {**good, 'attributes': {**attributes, 'types': 'Fire'}},
+                   {**good, 'attributes': {k: v for k, v in attributes.items() if k != 'radiant'}}):
+        swap({key: broken})
+        assert format_facts(store, [pref], deadline())[pref] is None, broken
+    # A Reprint Group: a well-formed reference and a sorted list of distinct printing references.
+    group = {'ref': 'c' * 48, 'printings': sorted([pref, 'd' * 48])}
+    swap({key: {**good, 'reprint_group': group}})
+    grouped = format_facts(store, [pref], deadline())[pref]
+    assert (grouped.reprint_group, grouped.reprint_printings) == ('c' * 48, tuple(group['printings']))
+    assert (facts.reprint_group, facts.reprint_printings) == (None, ())
+    for broken in ({'ref': 'c' * 48}, {**group, 'extra': 1}, {**group, 'ref': 'C' * 48}, {**group, 'ref': 'c' * 47},
+                   {**group, 'printings': list(reversed(group['printings']))}, {**group, 'printings': [pref, pref]},
+                   {**group, 'printings': ['e' * 49]}, {**group, 'printings': pref}, 'c' * 48,
+                   {**group, 'printings': sorted('%048x' % n for n in range(1025))}):
+        swap({key: {**good, 'reprint_group': broken}})
+        assert format_facts(store, [pref], deadline())[pref] is None, broken
+    swap({key: good})
+    assert format_facts(store, [pref], deadline())[pref].attributes == facts.attributes

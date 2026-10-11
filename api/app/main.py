@@ -220,6 +220,8 @@ from .published_live_export import router as published_live_export_router  # noq
 app.include_router(published_live_export_router)
 from .published_mass_entry import router as published_mass_entry_router  # noqa: E402
 app.include_router(published_mass_entry_router)
+from .published_format_checks import router as published_format_checks_router  # noqa: E402
+app.include_router(published_format_checks_router)
 
 
 from .price_budget import is_budgeted  # noqa: E402

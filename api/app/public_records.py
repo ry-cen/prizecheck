@@ -1,7 +1,7 @@
 """Independent public-safe shared records; never mutates publication/discovery.
 
-Keys are typed (see ``key_family``): catalog Printing/Edition metadata,
-quarantine, and -- keyed by public Edition reference plus mapping revision --
+Keys are typed (see ``key_family``): catalog Printing/Edition metadata, Printing
+format facts, quarantine, and -- keyed by public Edition reference plus mapping revision --
 quote payloads, current-result/supersession markers, fences and coalesced
 in-flight work; plus admission, lease and backoff scopes. Only ``quote`` payloads are evictable; every other family is protected
 and never counted against or removed by payload capacity.
@@ -119,6 +119,7 @@ class KeyFamily:
 _FAMILIES = (
     ('catalog_printing', re.compile(r'catalog:printing:([0-9a-f]{48})'), False),
     ('catalog_edition', re.compile(r'catalog:edition:([0-9a-f]{48})'), False),
+    ('catalog_format', re.compile(r'catalog:format:([0-9a-f]{48})'), False),
     ('quarantine', re.compile(r'quarantine:edition:([0-9a-f]{48})'), False),
     ('quote', re.compile(r'quote:([0-9a-f]{48}):([1-9][0-9]{0,18})'), True),
     ('result', re.compile(r'result:([0-9a-f]{48}):([1-9][0-9]{0,18})'), False),
@@ -165,6 +166,11 @@ def catalog_printing_key(printing_ref):
 
 def catalog_edition_key(edition_ref):
     return 'catalog:edition:' + _ref(edition_ref)
+
+
+def catalog_format_key(printing_ref):
+    """A Printing's public format facts (Deck Lists 18): set, Card Identity, Reprint Group slot and card attributes."""
+    return 'catalog:format:' + _ref(printing_ref)
 
 
 def quarantine_key(edition_ref):

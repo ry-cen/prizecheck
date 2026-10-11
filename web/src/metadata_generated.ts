@@ -23,7 +23,7 @@ export type AttributeEvidence = { printing_id: string; source: string; source_id
 export type AttributeQueuePage = { items: (AttributeEvidence)[]; next_cursor: string | null };
 export type AttributeDecisionRow = { id: string; printing_id: string; decision: string; correction: Record<string, unknown>; previous_correction: Record<string, unknown> | null; derived: Record<string, unknown> | null; rules_version: number | null; evidence_url: string; reason: string; reviewer_id: string; reviewed_at: string; clock_revision: number; attribute_revision: number };
 export type AttributeDecisionInput = { printing_id: string; decision: "correct" | "remove"; correction?: AttributeValues | null; evidence_digest: string; evidence_url: string; reason: string; report_ids?: (string)[]; code?: string | null };
-export type AttributeDecisionResult = { decision_id: string; printing_id: string; decision: string; correction: AttributeValues | null; effective: AttributeValues; attribute_revision: number; closed_report_ids: (string)[] };
+export type AttributeDecisionResult = { decision_id: string; printing_id: string; decision: string; correction: AttributeValues | null; effective: AttributeValues; attribute_revision: number; closed_report_ids: (string)[]; public_delivery: "delivered" | "pending" };
 
 type Method='GET'|'POST'|'PATCH';
 async function request<T>(method: Method,path: string,body?: object): Promise<T> {

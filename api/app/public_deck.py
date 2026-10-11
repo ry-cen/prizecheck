@@ -68,10 +68,15 @@ def error(status: int, code: str) -> HTTPException:
     return HTTPException(status, {'code': code}, headers=dict(PUBLIC_HEADERS))
 
 
-def public_path(request: Request, token: str, version: str) -> int:
-    """The only accepted inputs: no query string and no body, then token and version syntax. Returns the version."""
-    if request.url.query or request.headers.get('content-length', '0') != '0' or 'transfer-encoding' in request.headers:
+def public_path(request: Request, token: str, version: str, *, query: frozenset[str] = frozenset()) -> int:
+    """The only accepted inputs: no body, no query string except the parameters a route names in ``query`` (each at most
+    once), then token and version syntax. Returns the version; the route reads its named parameters itself."""
+    if request.headers.get('content-length', '0') != '0' or 'transfer-encoding' in request.headers:
         raise error(422, 'INVALID_REQUEST')
+    if request.url.query:
+        names = [name for name, _ in request.query_params.multi_items()]
+        if not query or not names or len(names) != len(set(names)) or not set(names) <= query:
+            raise error(422, 'INVALID_REQUEST')
     if not TOKEN.fullmatch(token) or not VERSION.fullmatch(version):
         raise error(404, 'PUBLISHED_DECK_NOT_FOUND')
     return int(version)

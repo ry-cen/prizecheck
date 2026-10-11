@@ -9,8 +9,9 @@ A correction is per attribute and replaces derivation for exactly the attributes
 replaces or removes it; re-derivation on import never touches it. A decision states the Printing's whole correction:
 ``correct`` replaces the stored correction with the given values and ``remove`` deletes it. A correction sets known
 values only; there is no "corrected to unknown". Manually approved Printings have no derived attributes, so a
-correction is their only source. Corrections are not public yet: the public catalog projection gains attributes in a
-later ticket, so a decision neither enqueues nor publishes anything.
+correction is their only source. Effective attributes are public format facts (Deck Lists 18): writing or removing a
+correction re-stamps the Printing at the decision's public revision and enqueues it (migration 032's trigger), and the
+decision delivers it after its commit and reports ``public_delivery``, like a metadata decision.
 """
 import hashlib
 import hmac
@@ -28,7 +29,8 @@ from .card_attributes import ATTRIBUTE_COLUMNS, SOURCE_FIELDS, CardAttributes, a
     attribute_revision
 from .holdings import fail
 from .main import connect, require_owner, verified_user
-from .metadata_reviews import consume_metadata_code
+from .metadata_reviews import consume_metadata_code, delivery_status
+from .public_catalog import publish_catalog_best_effort
 
 router = APIRouter()
 
@@ -385,6 +387,9 @@ class AttributeDecisionResult(BaseModel):
     effective: AttributeValues
     attribute_revision: int
     closed_report_ids: list[UUID]
+    # Whether the Printing's public format facts reached the shared records store; "pending" ones are delivered by
+    # the next drain or scripts/backfill_public_catalog.py.
+    public_delivery: Literal["delivered", "pending"]
 
 
 def _closable_reports(conn, command: AttributeDecisionInput):
@@ -468,6 +473,10 @@ def decide(command: AttributeDecisionInput, user_id: str = Depends(verified_user
         fail(409, "CATALOG_BUSY")
     if bad_code:
         fail(403, "INVALID_APPROVAL_CODE")
+    # Committed. The Printing's public records are a derived copy: delivery is best effort and recoverable.
+    publish_catalog_best_effort(printing_ids=[command.printing_id])
     return AttributeDecisionResult(decision_id=decision_id, printing_id=command.printing_id, decision=command.decision,
                                    correction=_values(correction), effective=_values(result),
-                                   attribute_revision=revision, closed_report_ids=closing)
+                                   attribute_revision=revision, closed_report_ids=closing,
+                                   public_delivery=delivery_status(target_kind="printing",
+                                                                   target_id=command.printing_id))
