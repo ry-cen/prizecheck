@@ -358,3 +358,75 @@
   display: revert;
   font-weight: inherit;
 }
+
+/* Location creation (ticket 108): the + beside the Locations heading and each non-Deck row's Add child +.
+   On desktop Add child overlays the row end and shows on row hover or keyboard focus; in the
+   mobile drawer it is always visible at full touch size. */
+.ws-location-tools {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.ws-root .ws-location-tools > button,
+.ws-root .ws-add-child {
+  min-height: 0;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-color: transparent;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-lg);
+  line-height: 1;
+}
+.ws-root .ws-location-tools > button {
+  width: var(--space-7);
+  height: var(--space-7);
+  background: transparent;
+}
+.ws-root .ws-location-tools > button:hover,
+.ws-root .ws-add-child:hover {
+  color: var(--color-accent-strong);
+}
+.ws-drawer-tools {
+  justify-content: flex-end;
+}
+.ws-root .ws-drawer-tools > button {
+  width: var(--target-touch);
+  height: var(--target-touch);
+}
+.ws-tree-entry {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.ws-root .ws-tree-entry > .ws-tree-row {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+}
+.ws-root .ws-add-child {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: var(--space-7);
+  background: var(--color-surface-raised);
+  opacity: 0;
+}
+.ws-tree-entry:hover > .ws-add-child,
+.ws-tree-entry:focus-within > .ws-add-child {
+  opacity: 1;
+}
+.ws-root .ws-tree-row[aria-current="page"] + .ws-add-child {
+  background: var(--color-surface-selected);
+}
+.ws-root .ws-drawer .ws-add-child {
+  position: static;
+  flex: 0 0 var(--target-touch);
+  width: var(--target-touch);
+  min-height: var(--target-touch);
+  background: transparent;
+  opacity: 1;
+}

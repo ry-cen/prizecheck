@@ -6,6 +6,7 @@ import React, {
   useState,
 } from "react";
 import { getLocationTree, type TreeNode } from "../location_generated";
+import { CreateLocationDialog } from "./CreateLocationDialog";
 import { LocationNav, type WorkspaceView } from "./LocationNav";
 import { indexLocations } from "./locationTree";
 import "./Workspace.css";
@@ -33,6 +34,10 @@ export function Workspace({ onOpenLocations, onSignOut }: Props) {
   );
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [query, setQuery] = useState("");
+  // The create form's preselected parent: undefined while closed, null for Top level.
+  const [createFor, setCreateFor] = useState<string | null | undefined>(
+    undefined
+  );
   const drawerOpener = useRef<HTMLButtonElement>(null);
   const drawerRef = useRef<HTMLDivElement>(null);
 
@@ -67,6 +72,23 @@ export function Workspace({ onOpenLocations, onSignOut }: Props) {
   function choose(next: WorkspaceView) {
     setView(next);
     setDrawerOpen(false);
+  }
+  function openCreate(parentId: string | null) {
+    setDrawerOpen(false);
+    setCreateFor(parentId);
+  }
+  // Select the new Location with its ancestor path expanded. The parent was a leaf or a folder
+  // before, so its own ancestors are already in the index; the reload adds the new node.
+  async function created(location: TreeNode) {
+    const parentId = location.parent_id;
+    if (parentId)
+      setExpanded(
+        (previous) =>
+          new Set([...previous, parentId, ...index.ancestors(parentId)])
+      );
+    await loadTree();
+    setView(location.id);
+    setCreateFor(undefined);
   }
 
   // The drawer only exists on mobile; widening the window closes it.
@@ -154,6 +176,7 @@ export function Workspace({ onOpenLocations, onSignOut }: Props) {
         onToggle={toggleFolder}
         onChoose={choose}
         idPrefix={idPrefix}
+        onAddChild={openCreate}
       />
     );
 
@@ -192,7 +215,17 @@ export function Workspace({ onOpenLocations, onSignOut }: Props) {
           <aside className="ws-sidebar ws-desktop-only" aria-label="Sidebar">
             <div className="ws-location-heading">
               <h2>Locations</h2>
-              {/* Ticket 108 adds the root plus here; ticket 109 adds the Manage locations gear. */}
+              <span className="ws-location-tools">
+                <button
+                  type="button"
+                  aria-label="Add location"
+                  title="Add top-level location"
+                  onClick={() => openCreate(null)}
+                >
+                  <span aria-hidden="true">+</span>
+                </button>
+                {/* Ticket 109 adds the Manage locations gear here. */}
+              </span>
             </div>
             {tree("ws-sidebar")}
           </aside>
@@ -231,6 +264,18 @@ export function Workspace({ onOpenLocations, onSignOut }: Props) {
                 <span aria-hidden="true">✕</span>
               </button>
             </div>
+            {/* After the heading so Close locations stays the drawer's first focus stop. */}
+            <div className="ws-location-tools ws-drawer-tools">
+              <button
+                type="button"
+                aria-label="Add location"
+                title="Add top-level location"
+                onClick={() => openCreate(null)}
+              >
+                <span aria-hidden="true">+</span>
+              </button>
+              {/* Ticket 109 adds the Manage locations gear here. */}
+            </div>
             {tree("ws-drawer")}
             <nav aria-label="App" className="ws-drawer-app-nav">
               <button type="button" onClick={onOpenLocations}>
@@ -242,6 +287,15 @@ export function Workspace({ onOpenLocations, onSignOut }: Props) {
             </nav>
           </div>
         </div>
+      )}
+      {createFor !== undefined && (
+        <CreateLocationDialog
+          index={index}
+          initialParentId={createFor}
+          onCreated={created}
+          onCancel={() => setCreateFor(undefined)}
+          onTreeChanged={loadTree}
+        />
       )}
     </div>
   );

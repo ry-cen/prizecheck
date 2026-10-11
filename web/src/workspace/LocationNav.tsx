@@ -13,6 +13,8 @@ type Props = {
   onChoose: (view: WorkspaceView) => void;
   /** Distinguishes element ids when the tree renders twice (sidebar and drawer). */
   idPrefix: string;
+  /** Opens the create form with this parent preselected. Deck rows get no Add child control. */
+  onAddChild?: (parentId: string) => void;
 };
 
 /** The Location tree shared by the desktop sidebar and the mobile drawer.
@@ -24,6 +26,7 @@ export function LocationNav({
   onToggle,
   onChoose,
   idPrefix,
+  onAddChild,
 }: Props) {
   const branch = (node: TreeNode, level: number): React.ReactNode => {
     const folder = isFolder(node);
@@ -32,21 +35,34 @@ export function LocationNav({
     const active = !folder && view === node.id;
     return (
       <li key={node.id}>
-        <button
-          type="button"
-          className={`ws-tree-row ${folder ? "ws-tree-folder" : "ws-tree-leaf"}`}
-          style={{ "--ws-tree-level": level } as React.CSSProperties}
-          title={index.path(node.id)}
-          aria-expanded={folder ? open : undefined}
-          aria-controls={folder && open ? listId : undefined}
-          aria-current={active ? "page" : undefined}
-          onClick={() => (folder ? onToggle(node.id) : onChoose(node.id))}
-        >
-          <span className="ws-tree-chevron" aria-hidden="true">
-            {folder ? (open ? "⌄" : "›") : ""}
-          </span>
-          <span className="ws-tree-name">{node.name}</span>
-        </button>
+        <div className="ws-tree-entry">
+          <button
+            type="button"
+            className={`ws-tree-row ${folder ? "ws-tree-folder" : "ws-tree-leaf"}`}
+            style={{ "--ws-tree-level": level } as React.CSSProperties}
+            title={index.path(node.id)}
+            aria-expanded={folder ? open : undefined}
+            aria-controls={folder && open ? listId : undefined}
+            aria-current={active ? "page" : undefined}
+            onClick={() => (folder ? onToggle(node.id) : onChoose(node.id))}
+          >
+            <span className="ws-tree-chevron" aria-hidden="true">
+              {folder ? (open ? "⌄" : "›") : ""}
+            </span>
+            <span className="ws-tree-name">{node.name}</span>
+          </button>
+          {onAddChild && node.kind !== "deck" && (
+            <button
+              type="button"
+              className="ws-add-child"
+              aria-label={`Add child location to ${index.path(node.id)}`}
+              title="Add child location"
+              onClick={() => onAddChild(node.id)}
+            >
+              <span aria-hidden="true">+</span>
+            </button>
+          )}
+        </div>
         {open && (
           <ul id={listId} aria-label={node.name}>
             {index.children(node.id).map((child) => branch(child, level + 1))}
