@@ -36,7 +36,8 @@ promote({'card-1': 'Pikachu'})`,
     await page.getByRole("button", { name: "Sign in" }).click();
     await page
       .getByRole("navigation", { name: "Location tree" })
-      .getByRole("button", { name: "Unsorted" })
+      // Top-level row only: specs that ran earlier on this stack can leave nested Locations named "Unsorted".
+      .locator(":scope > ul > li > button", { hasText: /^Unsorted$/ })
       .click();
     const panel = page.getByRole("region", { name: "Cards in Unsorted" });
     await panel.getByRole("button", { name: "Add cards" }).focus();

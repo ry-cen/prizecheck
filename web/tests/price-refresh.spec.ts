@@ -92,12 +92,14 @@ async function hold(editions: string[]) {
   const user = (
     await pool.query('SELECT id FROM "user" WHERE email=$1', [OWNER_EMAIL])
   ).rows[0].id;
+  // The top-level Unsorted leaf that openRootUnsorted() opens; there is one per owner (one_unsorted_root_per_owner).
   const leaf = (
     await pool.query(
-      "SELECT id FROM location WHERE owner_id=$1 AND kind='storage_leaf' ORDER BY created_at LIMIT 1",
+      "SELECT id FROM location WHERE owner_id=$1 AND parent_id IS NULL AND name='Unsorted' AND kind='storage_leaf'",
       [user]
     )
-  ).rows[0].id;
+  ).rows[0]?.id;
+  if (!leaf) throw new Error("The owner has no top-level Unsorted leaf");
   for (const edition of editions)
     await pool.query(
       "INSERT INTO holding(owner_id,location_id,edition_id,quantity,version) VALUES($1,$2,$3,1,1) ON CONFLICT(owner_id,location_id,edition_id) DO NOTHING",
@@ -107,6 +109,20 @@ async function hold(editions: string[]) {
     "UPDATE inventory_owner SET revision=revision+1 WHERE user_id=$1",
     [user]
   );
+}
+
+/** Opens the owner's top-level Unsorted leaf, the one hold() stocks. Specs that ran earlier on this stack can leave
+ * nested Locations named "Unsorted" that sort ahead of it in the tree, so only a top-level row counts. */
+async function openRootUnsorted(page: Page) {
+  await page
+    .getByRole("navigation", { name: "Location tree" })
+    .locator(":scope > ul > li > button", { hasText: /^Unsorted$/ })
+    .click();
+  await expect(
+    page
+      .getByRole("navigation", { name: "Location breadcrumbs" })
+      .getByRole("button")
+  ).toHaveText(["All Locations", "Unsorted"]);
 }
 
 test.beforeAll(async () => {
@@ -152,7 +168,7 @@ test(
       if (response.url().endsWith("/api/prices/editions"))
         answers.push(response.status());
     });
-    await page.getByRole("button", { name: "Unsorted" }).first().click();
+    await openRootUnsorted(page);
     const panel = page.getByRole("region", { name: "Cards in Unsorted" });
     // Non-price content is there while every price slot is still pending.
     await expect(panel.locator(".holding-grid > li")).toHaveCount(2);
