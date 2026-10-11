@@ -219,6 +219,7 @@ def reassign(command: ReassignHolding,user_id: str=Depends(verified_user)):
         else:
             conn.execute('UPDATE holding SET quantity=quantity-%s,version=%s WHERE owner_id=%s AND location_id=%s AND edition_id=%s',
               (amount,new_revision,user_id,command.location_id,command.edition_id))
+        # In a Deck, migration 027's holding trigger covers the replacement copies; the old Edition's line stays.
         conn.execute('''INSERT INTO holding(owner_id,location_id,edition_id,quantity,version) VALUES (%s,%s,%s,%s,%s)
           ON CONFLICT(owner_id,location_id,edition_id) DO UPDATE SET quantity=holding.quantity+EXCLUDED.quantity,version=EXCLUDED.version''',
           (user_id,command.location_id,command.replacement_edition_id,amount,new_revision))

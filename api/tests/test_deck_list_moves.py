@@ -1,0 +1,201 @@
+"""Deck Lists follow Moves (ADR 0009): copies arriving in a Deck are covered by its Deck List, and copies leaving it
+never shrink the list. Exercised through the real Holding, Move, undo and reassignment routes over signed HTTP."""
+import os
+from concurrent.futures import ThreadPoolExecutor
+from uuid import uuid4
+
+import psycopg
+
+from test_deck_lists import add_line, change_line, detail, remove_line
+from test_decks import create
+from test_holdings import add, call, fixture
+from test_moves import commit, edition_like, leaf, selected, stage, start
+
+
+def deck_list(owner, deck):
+    """The Deck List's revision and its lines as {edition_id: (quantity, in_deck)}."""
+    body = detail(owner, deck)['deck_list']
+    return body['revision'], {line['edition_id']: (line['quantity'], line['in_deck']) for line in body['lines']}
+
+
+def held(owner, location):
+    return {row['edition_id']: row['quantity'] for row in call('GET', f'/api/holdings/{location}', owner).json()['holdings']}
+
+
+def staged(owner, source, items):
+    """A Move manifest from ``source`` with each (Edition, copies) pair staged at its current Holding version."""
+    versions = {row['edition_id']: row['version'] for row in call('GET', f'/api/holdings/{source}', owner).json()['holdings']}
+    manifest = start(owner, source)
+    response = stage(owner, manifest, [selected(edition, amount, versions[edition]) for edition, amount in items])
+    assert response.status_code == 200, response.text
+    return manifest
+
+
+def move(owner, source, destination, items):
+    response = commit(owner, staged(owner, source, items), destination)
+    assert response.status_code == 200, response.text
+
+
+def remove(owner, source, items):
+    response = call('POST', f'/api/moves/manifests/{staged(owner, source, items)}/remove', owner,
+                    {'idempotency_key': str(uuid4())})
+    assert response.status_code == 200, response.text
+
+
+def newest_undo(owner):
+    return call('GET', '/api/moves/undo', owner).json()[0]['id']
+
+
+def undo(owner, undo_id, key=None):
+    response = call('POST', f'/api/moves/undo/{undo_id}', owner, {'idempotency_key': str(key or uuid4())})
+    assert response.status_code == 200, response.text
+    return response
+
+
+def test_a_move_into_a_deck_lists_the_editions_it_does_not_list_yet():
+    owner, other, binder, other_leaf, first, generation = fixture()
+    second = edition_like(first, generation)
+    deck = create(owner).json()['location']['id']
+    theirs = create(other).json()['location']['id']
+    assert add(owner, binder, first, '5').status_code == 200
+    assert add(owner, binder, second, '2').status_code == 200
+    move(owner, binder, deck, [(first, 3), (second, 2)])
+    assert deck_list(owner, deck) == (2, {first: ('3', '3'), second: ('2', '2')})
+    # Another owner's copies arriving in their own Deck reach only their Deck List.
+    assert add(other, other_leaf, first, '1').status_code == 200
+    move(other, other_leaf, theirs, [(first, 1)])
+    assert deck_list(other, theirs) == (2, {first: ('1', '1')})
+    # A Move between ordinary Storage Leaves changes no Deck List.
+    move(owner, binder, leaf(owner, 'Shelf'), [(first, 2)])
+    assert deck_list(owner, deck) == (2, {first: ('3', '3'), second: ('2', '2')})
+
+
+def test_a_move_into_a_deck_raises_a_line_only_for_copies_it_does_not_cover():
+    owner, _, binder, _, edition, _ = fixture()
+    deck = create(owner).json()['location']['id']
+    assert add(owner, binder, edition, '7').status_code == 200
+    assert add_line(owner, deck, edition, '4', 1).status_code == 200
+    # Filling a line, as a Pick List does, leaves the Deck List and its revision alone.
+    move(owner, binder, deck, [(edition, 3)])
+    assert deck_list(owner, deck) == (2, {edition: ('4', '3')})
+    # Copies beyond the line raise it to cover them.
+    move(owner, binder, deck, [(edition, 2)])
+    assert deck_list(owner, deck) == (3, {edition: ('5', '5')})
+    # Cutting the line never moves cards; the cut copies stay surplus and only the arriving copy is covered.
+    contents = call('GET', f'/api/decks/{deck}/contents', owner).json()
+    assert change_line(owner, deck, edition, '2', 3).status_code == 200
+    assert call('GET', f'/api/decks/{deck}/contents', owner).json() == contents
+    move(owner, binder, deck, [(edition, 1)])
+    assert deck_list(owner, deck) == (5, {edition: ('3', '3')})
+    # Once the line is removed, arriving copies start a new line for themselves alone.
+    assert remove_line(owner, deck, edition, 5).status_code == 200
+    move(owner, binder, deck, [(edition, 1)])
+    assert deck_list(owner, deck) == (7, {edition: ('1', '1')})
+    assert held(owner, deck) == {edition: '7'}
+
+
+def test_adding_copies_straight_into_a_deck_covers_them_once_per_command():
+    owner, _, _, _, edition, _ = fixture()
+    deck = create(owner).json()['location']['id']
+    key = uuid4()
+    first = add(owner, deck, edition, '2', key)
+    assert first.status_code == 200, first.text
+    assert deck_list(owner, deck) == (2, {edition: ('2', '2')})
+    # A replayed Add returns its stored result and raises nothing again.
+    assert add(owner, deck, edition, '2', key).json() == first.json()
+    assert deck_list(owner, deck) == (2, {edition: ('2', '2')})
+    assert add(owner, deck, edition, '3').status_code == 200
+    assert deck_list(owner, deck) == (3, {edition: ('5', '5')})
+
+
+def test_moves_out_and_removals_leave_the_deck_list_unchanged():
+    owner, _, binder, _, edition, _ = fixture()
+    deck = create(owner).json()['location']['id']
+    assert add(owner, deck, edition, '4').status_code == 200
+    assert deck_list(owner, deck) == (2, {edition: ('4', '4')})
+    move(owner, deck, binder, [(edition, 3)])
+    assert deck_list(owner, deck) == (2, {edition: ('4', '1')})
+    remove(owner, deck, [(edition, 1)])
+    assert held(owner, deck) == {}
+    assert deck_list(owner, deck) == (2, {edition: ('4', '0')})
+
+
+def test_undoing_moves_and_removals_never_shrinks_the_deck_list():
+    owner, _, binder, _, edition, _ = fixture()
+    deck = create(owner).json()['location']['id']
+    assert add(owner, binder, edition, '5').status_code == 200
+    move(owner, binder, deck, [(edition, 3)])
+    assert deck_list(owner, deck) == (2, {edition: ('3', '3')})
+    # Undoing the Move takes the copies back out of the Deck; the line stays.
+    undo(owner, newest_undo(owner))
+    assert held(owner, deck) == {} and held(owner, binder) == {edition: '5'}
+    assert deck_list(owner, deck) == (2, {edition: ('3', '0')})
+    # Undoing a Move out of the Deck returns copies the line still covers.
+    move(owner, binder, deck, [(edition, 3)])
+    move(owner, deck, binder, [(edition, 2)])
+    undo(owner, newest_undo(owner))
+    assert held(owner, deck) == {edition: '3'}
+    assert deck_list(owner, deck) == (2, {edition: ('3', '3')})
+    # Undoing a Removal from the Deck does the same.
+    remove(owner, deck, [(edition, 3)])
+    assert deck_list(owner, deck) == (2, {edition: ('3', '0')})
+    undo(owner, newest_undo(owner))
+    assert held(owner, deck) == {edition: '3'}
+    assert deck_list(owner, deck) == (2, {edition: ('3', '3')})
+
+
+def test_reassigning_an_edition_inside_a_deck_covers_the_replacement():
+    owner, _, _, _, edition, generation = fixture()
+    deck = create(owner).json()['location']['id']
+    replacement = edition_like(edition, generation)
+    with psycopg.connect(os.environ['DATABASE_URL']) as conn:
+        conn.execute("""INSERT INTO catalog_edition_replacement(edition_id,replacement_edition_id,reviewer_id,evidence_url,reason)
+          VALUES (%s,%s,%s,'https://example.org/finish','Finish corrected')""", (edition, replacement, owner))
+    assert add(owner, deck, edition, '4').status_code == 200
+    version = call('GET', f'/api/holdings/{deck}', owner).json()['holdings'][0]['version']
+    body = {'location_id': deck, 'edition_id': edition, 'replacement_edition_id': replacement, 'quantity': '3',
+            'expected_version': version, 'idempotency_key': str(uuid4())}
+    first = call('POST', '/api/holdings/reassign', owner, body)
+    assert first.status_code == 200, first.text
+    # The old Edition's line stays, like any line whose copies leave the Deck.
+    assert deck_list(owner, deck) == (3, {edition: ('4', '1'), replacement: ('3', '3')})
+    assert call('POST', '/api/holdings/reassign', owner, body).json() == first.json()
+    assert deck_list(owner, deck) == (3, {edition: ('4', '1'), replacement: ('3', '3')})
+
+
+def test_replayed_and_concurrent_commands_raise_lines_once():
+    owner, _, binder, _, edition, _ = fixture()
+    deck = create(owner).json()['location']['id']
+    assert add(owner, binder, edition, '6').status_code == 200
+    manifest = staged(owner, binder, [(edition, 2)])
+    key = uuid4()
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        responses = list(pool.map(lambda _: commit(owner, manifest, deck, key), range(2)))
+    assert [response.status_code for response in responses] == [200, 200]
+    assert responses[0].json() == responses[1].json()
+    assert commit(owner, manifest, deck, key).json() == responses[0].json()
+    assert held(owner, deck) == {edition: '2'}
+    assert deck_list(owner, deck) == (2, {edition: ('2', '2')})
+    # An undo that restores copies the list no longer covers raises the line once, however often it is retried.
+    remove(owner, deck, [(edition, 2)])
+    assert remove_line(owner, deck, edition, 2).status_code == 200
+    entry, undo_key = newest_undo(owner), uuid4()
+    first = undo(owner, entry, undo_key)
+    assert undo(owner, entry, undo_key).json() == first.json()
+    assert held(owner, deck) == {edition: '2'}
+    assert deck_list(owner, deck) == (4, {edition: ('2', '2')})
+
+
+def test_holdings_written_without_the_current_routes_still_extend_the_deck_list():
+    """An older application serving during a release or after a rollback writes Holdings without Deck Lists."""
+    owner, _, _, _, edition, generation = fixture()
+    deck = create(owner).json()['location']['id']
+    second = edition_like(edition, generation)
+    with psycopg.connect(os.environ['DATABASE_URL']) as conn:
+        conn.execute('INSERT INTO holding(owner_id,location_id,edition_id,quantity,version) VALUES (%s,%s,%s,2,1),(%s,%s,%s,1,1)',
+                     (owner, deck, edition, owner, deck, second))
+    assert deck_list(owner, deck) == (2, {edition: ('2', '2'), second: ('1', '1')})
+    with psycopg.connect(os.environ['DATABASE_URL']) as conn:
+        conn.execute('UPDATE holding SET quantity=quantity+3,version=version+1 WHERE owner_id=%s AND location_id=%s AND edition_id=%s',
+                     (owner, deck, edition))
+    assert deck_list(owner, deck) == (3, {edition: ('5', '5'), second: ('1', '1')})
