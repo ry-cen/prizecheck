@@ -552,6 +552,31 @@ test.describe("desktop", () => {
     ).toHaveCount(0);
   });
 
+  test("a focused tile stays mounted when it scrolls out of the window, so Space still toggles it", async ({
+    page,
+  }) => {
+    promoteCatalog({ "card-1": "Focus Abra" });
+    await signIn(page);
+    const leaf = await createLocation(
+      page,
+      `Focus ${randomUUID().slice(0, 8)}`,
+      null
+    );
+    await addCopies(page, leaf, await editionOf("card-1"), 600);
+    await page.reload();
+    await copy(page, 1).focus();
+    await expect(copy(page, 1)).toBeFocused();
+    await page.evaluate(() =>
+      window.scrollTo(0, document.documentElement.scrollHeight)
+    );
+    await expect(copy(page, 600)).toBeVisible();
+    await expect(copy(page, 1)).toBeFocused();
+    await page.keyboard.press("Space");
+    await expect(copy(page, 1)).toHaveAttribute("aria-pressed", "true");
+    await expect(copy(page, 1)).toBeFocused();
+    await expect(bar(page)).toContainText("1 copy selected");
+  });
+
   test("the inspector keeps its space while idle, previews on hover only without a selection, and shows the last clicked selected card", async ({
     page,
   }) => {
@@ -571,6 +596,15 @@ test.describe("desktop", () => {
     // Order: Pikachu·Binder 2 ×2, Pikachu·Box, Zubat·Box.
     await expect(tiles(page)).toHaveCount(4);
     const panel = inspector(page);
+    const pikachuReads: string[] = [];
+    page.on("request", (request) => {
+      if (
+        request.method() === "GET" &&
+        new URL(request.url()).pathname ===
+          `/api/collection/editions/${pikachu}`
+      )
+        pikachuReads.push(request.url());
+    });
 
     // Idle: the column is there, at the reserved width, and empty.
     await expect(panel).toBeAttached();
@@ -593,6 +627,23 @@ test.describe("desktop", () => {
     await expect(panel).toContainText(`${shelf} / Binder 2`);
     await expect(panel).toContainText("2 copies here");
     await expect(panel).toContainText("3 copies owned");
+    await page.mouse.move(5, 5);
+    await expect(panel).toBeEmpty();
+
+    // Totals already read are kept while the inspector empties between tiles: coming back to a
+    // card shows its total at once and asks the server nothing more.
+    expect(pikachuReads).toHaveLength(1);
+    await tiles(page).nth(0).hover();
+    await expect(panel).toContainText("3 copies owned");
+    await tiles(page).nth(3).hover();
+    await expect(panel).toContainText("1 copy owned");
+    await tiles(page).nth(0).hover();
+    await expect(
+      panel.getByRole("heading", { name: "Insp Pikachu" })
+    ).toBeVisible();
+    await expect(panel).toContainText("3 copies owned");
+    await expect(panel).not.toContainText("Counting copies owned");
+    expect(pikachuReads).toHaveLength(1);
     await page.mouse.move(5, 5);
     await expect(panel).toBeEmpty();
 
@@ -706,6 +757,7 @@ test.describe("mobile", () => {
     await expect(pressed(page)).toHaveCount(0);
     await sheet.getByRole("button", { name: "Close details" }).tap();
     await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(tiles(page).nth(0)).toBeFocused();
 
     // Select mode: taps toggle, across Locations, and the strip keeps the count in reach.
     const select = page.getByRole("button", { name: "Select", exact: true });

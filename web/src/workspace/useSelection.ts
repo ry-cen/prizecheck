@@ -155,6 +155,7 @@ export function useSelection({
   const marquee = useCallback(
     (event: MarqueeEvent) => {
       if (event.phase === "start") {
+        if (!event.additive) anchor.current = null;
         marqueeBase.current = event.additive
           ? latest.current.selected
           : EMPTY_SELECTION;
