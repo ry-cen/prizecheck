@@ -14,6 +14,16 @@ export type ActiveRuleView = { activation_id: string; version: number | null; ac
 export type MetadataRuleView = { kind: "live_derivation" | "marketplace_matching"; versions: (RuleVersionView)[]; active: ActiveRuleView | null };
 export type MetadataRuleActivation = { version?: number | null; evidence_url: string; reason: string; code?: string | null };
 export type MetadataRuleResult = { kind: string; version: number | null; printings: number; editions: number; public_revision: number; public_delivery: "delivered" | "pending" };
+export type AttributeValues = { regulation_mark?: string | null; card_kind?: "pokemon" | "trainer" | "energy" | null; basic_energy?: boolean | null; types?: ("Grass" | "Fire" | "Water" | "Lightning" | "Psychic" | "Fighting" | "Darkness" | "Metal" | "Fairy" | "Dragon" | "Colorless")[] | null; rule_box?: boolean | null; ace_spec?: boolean | null; radiant?: boolean | null; prism_star?: boolean | null };
+export type AttributeReportInput = { printing_id: string; proposed: AttributeValues; evidence_url?: string | null; note?: string };
+export type AttributeReportView = { id: string; printing_id: string; proposed: Record<string, unknown>; evidence_url: string | null; note: string; status: string; review_reason: string | null; created_at: string; updated_at: string };
+export type AttributeReportUpdate = { note: string; evidence_url?: string | null };
+export type AttributeReportDecision = { decision: "needs_info" | "reject"; reason: string };
+export type AttributeEvidence = { printing_id: string; source: string; source_id: string | null; set_id: string | null; collector_number: string | null; name: string | null; source_fields: Record<string, unknown> | null; derived: AttributeValues | null; rules_version: number | null; correction: AttributeValues | null; correction_decision_id: string | null; effective: AttributeValues; reports: (AttributeReportView)[]; report_ids: (string)[]; attribute_revision: number; evidence_digest: string };
+export type AttributeQueuePage = { items: (AttributeEvidence)[]; next_cursor: string | null };
+export type AttributeDecisionRow = { id: string; printing_id: string; decision: string; correction: Record<string, unknown>; previous_correction: Record<string, unknown> | null; derived: Record<string, unknown> | null; rules_version: number | null; evidence_url: string; reason: string; reviewer_id: string; reviewed_at: string; clock_revision: number; attribute_revision: number };
+export type AttributeDecisionInput = { printing_id: string; decision: "correct" | "remove"; correction?: AttributeValues | null; evidence_digest: string; evidence_url: string; reason: string; report_ids?: (string)[]; code?: string | null };
+export type AttributeDecisionResult = { decision_id: string; printing_id: string; decision: string; correction: AttributeValues | null; effective: AttributeValues; attribute_revision: number; closed_report_ids: (string)[] };
 
 type Method='GET'|'POST'|'PATCH';
 async function request<T>(method: Method,path: string,body?: object): Promise<T> {
@@ -34,5 +44,14 @@ export const decideMetadata=(body: MetadataDecisionInput)=>request<MetadataDecis
 export const decideMetadataReport=(reportId: string,body: MetadataReportDecision)=>request<MetadataReportView>('POST',`/api/admin/catalog-metadata/reports/${id(reportId)}/decision`,body);
 export const getMetadataRules=()=>request<MetadataRuleView[]>('GET','/api/admin/catalog-rules');
 export const activateMetadataRule=(kind: MetadataRuleView['kind'],body: MetadataRuleActivation)=>request<MetadataRuleResult>('POST',`/api/admin/catalog-rules/${kind}/activate`,body);
-export const requestMetadataCode=(metadataTarget: string,action:'resolve_metadata'|'activate_rule')=>request<{message:string}>('POST','/auth/approval-code',{metadataTarget,action});
+export const requestMetadataCode=(metadataTarget: string,action:'resolve_metadata'|'activate_rule'|'correct_attributes')=>request<{message:string}>('POST','/auth/approval-code',{metadataTarget,action});
+export const submitAttributeReport=(body: AttributeReportInput)=>request<AttributeReportView>('POST','/api/catalog/attribute-reports',body);
+export const getMyAttributeReports=()=>request<AttributeReportView[]>('GET','/api/catalog/attribute-reports');
+export const getMyAttributeReport=(reportId: string)=>request<AttributeReportView>('GET',`/api/catalog/attribute-reports/${id(reportId)}`);
+export const answerAttributeReport=(reportId: string,body: AttributeReportUpdate)=>request<AttributeReportView>('PATCH',`/api/catalog/attribute-reports/${id(reportId)}`,body);
+export const getAttributeQueue=(cursor?: string)=>request<AttributeQueuePage>('GET',`/api/admin/card-attributes/queue${cursor?`?cursor=${id(cursor)}`:''}`);
+export const getAttributeEvidence=(printingId: string)=>request<AttributeEvidence>('GET',`/api/admin/card-attributes/${id(printingId)}`);
+export const getAttributeHistory=(printingId: string)=>request<AttributeDecisionRow[]>('GET',`/api/admin/card-attributes/${id(printingId)}/history`);
+export const decideAttributeReport=(reportId: string,body: AttributeReportDecision)=>request<AttributeReportView>('POST',`/api/admin/card-attributes/reports/${id(reportId)}/decision`,body);
+export const decideAttributes=(body: AttributeDecisionInput)=>request<AttributeDecisionResult>('POST','/api/admin/card-attributes/decisions',body);
 

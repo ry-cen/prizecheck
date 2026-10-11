@@ -190,6 +190,8 @@ from .catalog_reconciliation import router as catalog_reconciliation_router  # n
 app.include_router(catalog_reconciliation_router)
 from .metadata_reviews import router as metadata_reviews_router  # noqa: E402
 app.include_router(metadata_reviews_router)
+from .attribute_corrections import router as attribute_corrections_router  # noqa: E402
+app.include_router(attribute_corrections_router)
 
 from .publications import router as publications_router  # noqa: E402
 app.include_router(publications_router)

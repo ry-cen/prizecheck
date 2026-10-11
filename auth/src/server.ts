@@ -328,10 +328,13 @@ const server = createServer(async (request, response) => {
       const validTarget = isMetadata
         ? !!metadataMatch
         : typeof targetId === "string" && idPattern.test(targetId);
+      // A Printing target also takes card attribute corrections, under their own action so neither code spends on the other.
       const validAction = isMetadata
-        ? metadataMatch?.[1]
-          ? action === "resolve_metadata"
-          : action === "activate_rule"
+        ? metadataMatch?.[1] === "printing"
+          ? action === "resolve_metadata" || action === "correct_attributes"
+          : metadataMatch?.[1]
+            ? action === "resolve_metadata"
+            : action === "activate_rule"
         : isReview
           ? action === "confirm_source" || action === "resolve_catalog"
           : action === "approve_printing" || action === "approve_edition";
