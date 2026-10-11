@@ -1,4 +1,5 @@
 """The pure format evaluator (Deck Lists 12, issue #93): the Standard rule matrix with fixture rules and attributes.
+Reprint Group legality and bans (Deck Lists 13, issue #94) use the same fixture rules, with a fixture ban.
 
 No database: these tests run with plain pytest (``PYTHONPATH=api .venv/bin/pytest api/tests/test_format_evaluator.py``).
 """
@@ -6,12 +7,13 @@ from datetime import date
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from app.card_attributes import UNKNOWN, CardAttributes
-from app.format_evaluator import (ACE_SPEC_LIMIT, ATTRIBUTE_UNKNOWN, BEFORE_RULES_COVERAGE, COPY_LIMIT, DECK_SIZE,
-                                  NOT_IN_CARD_POOL, PRISM_STAR_LIMIT, RADIANT_LIMIT, REGULATION_MARK_NOT_IN_RULES,
-                                  REGULATION_MARK_NOT_RECORDED, RULES_FACT_UNSETTLED, SET_DATE_NOT_RECORDED,
-                                  PrintingFacts, ResolvedLine, evaluate_format, format_rules, load_rules)
+from app.format_evaluator import (ACE_SPEC_LIMIT, ATTRIBUTE_UNKNOWN, BANNED, BEFORE_RULES_COVERAGE, COPY_LIMIT,
+                                  DECK_SIZE, NOT_IN_CARD_POOL, PRISM_STAR_LIMIT, RADIANT_LIMIT,
+                                  REGULATION_MARK_NOT_IN_RULES, REGULATION_MARK_NOT_RECORDED, REPRINT_LEGALITY_UNKNOWN,
+                                  RULES_FACT_UNSETTLED, SET_DATE_NOT_RECORDED, PrintingFacts, ResolvedLine,
+                                  evaluate_format, format_rules, load_rules)
 
-RULES = load_rules(b"""
+RULES_TOML = b"""
 format = "standard"
 name = "Standard"
 revision = 7
@@ -71,7 +73,13 @@ sets = ["vintage"]
 identity = "Fairy Energy"
 reason = "whether Basic Fairy Energy is legal is not settled"
 noted_on = 2026-10-11
-""")
+"""
+RULES = load_rules(RULES_TOML)
+BANNED_RULES = load_rules(RULES_TOML.replace(b"bans = []", b"""bans = [
+  { set = "old", number = "7", name = "Banned Card", banned_from = 2026-01-02, lifted_on = 2026-07-03 },
+]"""))
+INHERITING_RULES = load_rules(RULES_TOML.replace(b"pokemon_reprint_inheritance = false",
+                                                 b"pokemon_reprint_inheritance = true"))
 DAY = date(2026, 10, 11)
 
 
@@ -96,8 +104,19 @@ def deck(*lines):
     return [*lines, energy(filler)] if filler else list(lines)
 
 
-def check(lines, on=DAY, rules=RULES):
-    return evaluate_format(lines, rules, on)
+def check(lines, on=DAY, rules=RULES, groups=None):
+    return evaluate_format(lines, rules, on, groups)
+
+
+def printing(set_id="old", number=None, **attribute_values):
+    raw = attribute_values.pop("raw", None)
+    return PrintingFacts(uuid4(), set_id, raw if raw is not None else attributes(**attribute_values), number)
+
+
+def reprinted(name, quantity, own, *reprints):
+    """A line of the ``own`` printing in a fresh Reprint Group with ``reprints``, and the group facts."""
+    group = uuid4()
+    return ResolvedLine(uuid4(), quantity, uuid5(NAMESPACE_URL, name), name, own, group), {group: (own, *reprints)}
 
 
 def issues(result):
@@ -306,3 +325,92 @@ def test_the_standard_rules_file_rotates_g_and_dates_its_sets():
     assert check(deck(line("Rare Candy", 4, set_id="sm1", mark=None)), DAY, rules).status == "not_legal"
     assert check(deck(line("Delta Card", 4, set_id="me06", mark="J")), DAY, rules).status == "unknown"
     assert check(deck(energy(4, "Fairy Energy", set_id="xy1")), DAY, rules).status == "unknown"
+
+
+VINTAGE = "not in the Standard card pool: printed before regulation marks"
+
+
+def test_an_old_trainer_is_legal_through_a_legal_printing_in_its_reprint_group():
+    old = printing("vintage", "129", mark=None)
+    candy, groups = reprinted("Rare Candy", 4, old, printing("old", "125", mark="H"))
+    assert check(deck(candy), groups=groups).status == "legal"
+    # Judged alone, the same printing is out of the card pool.
+    assert issues(check(deck(candy))) == {(NOT_IN_CARD_POOL, VINTAGE, "card", "not_legal", edition(candy))}
+    # When no other printing in the group is legal, the printing's own reasons stand.
+    rotated, rotated_groups = reprinted("Rare Candy", 4, old, printing("old", "191", mark="G"))
+    assert issues(check(deck(rotated), groups=rotated_groups)) == {
+        (NOT_IN_CARD_POOL, VINTAGE, "card", "not_legal", edition(rotated))}
+
+
+def test_special_energy_inherits_legality_like_a_trainer():
+    old = printing("vintage", "17", mark=None, kind="energy")
+    reversal, groups = reprinted("Reversal Energy", 4, old, printing("old", "192", mark="H", kind="energy"))
+    assert check(deck(reversal), groups=groups).status == "legal"
+
+
+def test_a_pokemon_is_legal_only_on_its_own_mark_unless_the_rules_allow_inheritance():
+    rotated = printing("old", "101", mark="G", kind="pokemon")
+    pikachu, groups = reprinted("Pikachu", 4, rotated, printing("old", "225", mark="H", kind="pokemon"))
+    assert issues(check(deck(pikachu), groups=groups)) == {
+        (NOT_IN_CARD_POOL, "regulation mark G not legal in Standard on 2026-10-11", "card", "not_legal",
+         edition(pikachu))}
+    assert check(deck(pikachu), rules=INHERITING_RULES, groups=groups).status == "legal"
+
+
+def test_an_unknown_reprint_makes_a_printing_that_is_not_legal_on_its_own_unknown():
+    old = printing("vintage", "129", mark=None)
+    candy, groups = reprinted("Rare Candy", 4, old, printing("old", "191", mark="G"), printing("old", "141", mark=None))
+    result = check(deck(candy), groups=groups)
+    assert result.status == "unknown"
+    assert issues(result) == {(REPRINT_LEGALITY_UNKNOWN, "not legal on its own; identical reprint old 141 is unknown: "
+                                                         "regulation mark not recorded", "card", "unknown",
+                               edition(candy))}
+
+
+def test_a_printing_unknown_on_its_own_stays_unknown_when_no_reprint_is_legal():
+    unmarked = printing("old", "141", mark=None)
+    candy, groups = reprinted("Rare Candy", 4, unmarked, printing("old", "191", mark="G"))
+    assert issues(check(deck(candy), groups=groups)) == {
+        (REGULATION_MARK_NOT_RECORDED, "regulation mark not recorded", "card", "unknown", edition(candy))}
+
+
+def test_a_card_of_unknown_kind_with_a_legal_reprint_is_unknown():
+    odd = printing("vintage", "1", raw=CardAttributes(None, None, False, None, False, False, False, False))
+    card, groups = reprinted("Odd Card", 1, odd, printing("old", "2", mark="H"))
+    assert issues(check(deck(card), groups=groups)) == {
+        (ATTRIBUTE_UNKNOWN, "card kind unknown", "card", "unknown", edition(card))}
+
+
+def test_ban_entries_name_one_printing_and_carry_their_dates():
+    ban = BANNED_RULES.bans[("old", "7")]
+    assert (ban.name, ban.banned_from, ban.lifted_on) == ("Banned Card", date(2026, 1, 2), date(2026, 7, 3))
+    assert [ban.in_force(day) for day in (date(2026, 1, 1), date(2026, 1, 2), date(2026, 7, 2), date(2026, 7, 3))] == [
+        False, True, True, False]
+    assert RULES.bans == {}
+
+
+def test_a_ban_on_one_printing_covers_its_whole_reprint_group():
+    banned, reprint = printing("old", "7", mark="H"), printing("new", "8", mark="J")
+    group, identity = uuid4(), uuid5(NAMESPACE_URL, "Banned Card")
+    first = ResolvedLine(uuid4(), 1, identity, "Banned Card", banned, group)
+    second = ResolvedLine(uuid4(), 1, identity, "Banned Card", reprint, group)
+    # Same name, different text: another Reprint Group, untouched by the ban.
+    unrelated = line("Banned Card", 1, identity=identity)
+    lines, groups = deck(first, second, unrelated), {group: (banned, reprint)}
+    assert issues(check(lines, date(2026, 5, 1), BANNED_RULES, groups)) == {
+        (BANNED, "banned in Standard from 2026-01-02", "card", "not_legal", edition(first)),
+        (BANNED, "banned in Standard from 2026-01-02 as an identical reprint of Banned Card (old 7)", "card",
+         "not_legal", edition(second))}
+    # Before the ban the new set's printing is legal only through the banned one; after the ban is lifted, both are.
+    assert check(lines, date(2026, 1, 1), BANNED_RULES, groups).status == "legal"
+    assert check(lines, date(2026, 7, 3), BANNED_RULES, groups).status == "legal"
+    # Without its Reprint Group the reprint escapes the ban.
+    assert check(deck(second, unrelated), date(2026, 5, 1), BANNED_RULES).status == "legal"
+
+
+def test_a_ban_beats_legality_and_covers_pokemon_reprints_too():
+    banned = printing("old", "7", mark="H", kind="pokemon")
+    sableye, groups = reprinted("Banned Card", 4, printing("old", "9", mark="H", kind="pokemon"), banned)
+    assert issues(check(deck(sableye), date(2026, 5, 1), BANNED_RULES, groups)) == {
+        (BANNED, "banned in Standard from 2026-01-02 as an identical reprint of Banned Card (old 7)", "card",
+         "not_legal", edition(sableye))}

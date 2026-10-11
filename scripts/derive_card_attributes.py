@@ -1,8 +1,11 @@
-"""Derive every catalog Printing's card attributes from its stored source record, without fetching anything.
+"""Derive every catalog Printing's card attributes and Reprint Group from its stored source record, without fetching
+anything.
 
-Run it once after applying migration 026: until it or the next catalog import runs, the Printings imported before
-026 have unknown card attributes, so Deck checks report their Basic Energy exemption as unresolved. Every catalog
-import re-derives all Printings itself, so it is never needed again; rerunning it changes nothing.
+Run it once after applying migration 026, and again after applying migration 031. Until it or the next catalog import
+runs, the Printings imported before 026 have unknown card attributes, so Deck checks report their Basic Energy
+exemption as unresolved; and the Printings imported before 031 are in no Reprint Group, so format checks judge an old
+Trainer or Energy printing on its own mark and set alone. Every catalog import re-derives all Printings itself, so it
+is never needed again; rerunning it changes nothing.
 
 Exit codes: 0 derived, 1 the database is unreachable, 3 a catalog import is running (retry when it has finished;
 nothing was changed).
@@ -26,7 +29,7 @@ def main():
     except psycopg.Error:
         print('Card attributes could not be derived; check the database.', file=sys.stderr)
         return 1
-    print(f'Card attributes derived: {changed} Printings changed')
+    print(f'Card attributes derived: {changed} Printings changed; Reprint Groups refreshed')
     return 0
 
 

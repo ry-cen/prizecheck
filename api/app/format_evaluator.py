@@ -7,6 +7,10 @@ reports is the file's revision and publication date.
 ``evaluate_format`` checks resolved Deck List lines against one format's rules on one date. Like the construction
 checks, it is pure: it reads no database and no network, so private Decks and, later, Published Decks share it.
 
+Legality and bans follow Reprint Groups (``app.reprint_groups``). A Trainer or Energy printing that is not legal on its
+own is legal when any printing in its group is; a Pokémon printing is not, unless the rules set
+``pokemon_reprint_inheritance``. A ban names one printing and applies to every printing in its group.
+
 A result is advisory. Any definite violation makes it ``not_legal``; otherwise any gap in the rules or the card data
 makes it ``unknown``; otherwise it is ``legal``. A gap is reported only when the missing fact could change the answer:
 an unknown ACE SPEC status matters only if it could put the deck over its ACE SPEC limit.
@@ -38,6 +42,7 @@ COPY_LIMIT = "copy_limit"
 ACE_SPEC_LIMIT = "ace_spec_limit"
 RADIANT_LIMIT = "radiant_limit"
 PRISM_STAR_LIMIT = "prism_star_limit"
+BANNED = "banned"
 # Gaps make a result unknown:
 SET_DATE_NOT_RECORDED = "set_date_not_recorded"
 REGULATION_MARK_NOT_RECORDED = "regulation_mark_not_recorded"
@@ -45,6 +50,7 @@ REGULATION_MARK_NOT_IN_RULES = "regulation_mark_not_in_rules"
 ATTRIBUTE_UNKNOWN = "attribute_unknown"
 RULES_FACT_UNSETTLED = "rules_fact_unsettled"
 BEFORE_RULES_COVERAGE = "before_rules_coverage"
+REPRINT_LEGALITY_UNKNOWN = "reprint_legality_unknown"
 
 
 class FormatRulesError(ValueError):
@@ -90,6 +96,18 @@ class UnsettledCard:
 
 
 @dataclass(frozen=True)
+class BanRule:
+    set_id: str
+    number: str                 # collector number, as the catalog records it
+    name: str                   # the banned card's name, for reasons
+    banned_from: date           # first banned day
+    lifted_on: date | None      # first day legal again; None while the ban stands
+
+    def in_force(self, on: date) -> bool:
+        return self.banned_from <= on and (self.lifted_on is None or on < self.lifted_on)
+
+
+@dataclass(frozen=True)
 class Limits:
     deck_size: int              # exact
     copies: int                 # per Card Identity
@@ -115,6 +133,7 @@ class FormatRules:
     exclusions: tuple[SetExclusion, ...]
     excluded: Mapping[str, SetExclusion]        # by set ID
     unsettled: Mapping[str, UnsettledCard]      # by Card Identity name
+    bans: Mapping[tuple[str, str], BanRule]     # by (set ID, collector number)
     sha256: str                                 # of the file bytes
 
     @property
@@ -129,6 +148,8 @@ _TOP = {"format", "name", "revision", "published", "covers_from", "pool", "basic
 _TOP_OPTIONAL = {"excluded_sets", "unsettled_cards"}
 _LIMITS = {"deck_size", "copies", "basic_energy_exempt", "ace_spec_per_deck", "radiant_per_deck",
            "prism_star_per_name"}
+_BAN = {"set", "number", "name", "banned_from"}
+_BAN_OPTIONAL = {"lifted_on"}
 
 
 def second_friday_after(day: date) -> date:
@@ -192,8 +213,6 @@ def load_rules(data: bytes) -> FormatRules:
         raise FormatRulesError("covers_from: later than published")
     if raw["pool"] not in POOLS:
         raise FormatRulesError(f"pool: expected one of {', '.join(POOLS)}")
-    if _list(raw["bans"], "bans"):
-        raise FormatRulesError("bans: ban lists are not supported yet (Expanded, ticket 15)")
     limits = _keys(raw["limits"], "limits", _LIMITS)
     limits = Limits(_int(limits["deck_size"], "limits.deck_size", 1), _int(limits["copies"], "limits.copies", 1),
                     _bool(limits["basic_energy_exempt"], "limits.basic_energy_exempt"),
@@ -267,6 +286,23 @@ def load_rules(data: bytes) -> FormatRules:
         unsettled[identity] = UnsettledCard(identity, _text(entry["reason"], f"{where}.reason"),
                                             _date(entry["noted_on"], f"{where}.noted_on"))
 
+    bans = {}
+    for index, entry in enumerate(_list(raw["bans"], "bans")):
+        where = f"bans[{index}]"
+        _keys(entry, where, _BAN, _BAN_OPTIONAL)
+        key = (_text(entry["set"], f"{where}.set"), _text(entry["number"], f"{where}.number"))
+        if any(part != part.strip() for part in key):
+            raise FormatRulesError(f"{where}: set and number must not have surrounding whitespace")
+        if key in bans:
+            raise FormatRulesError(f"{where}: {key[0]} {key[1]} listed twice")
+        banned_from = _date(entry["banned_from"], f"{where}.banned_from")
+        lifted_on = _date(entry["lifted_on"], f"{where}.lifted_on") if "lifted_on" in entry else None
+        if banned_from < covers_from:
+            raise FormatRulesError(f"{where}.banned_from: before covers_from (use covers_from)")
+        if lifted_on is not None and lifted_on <= banned_from:
+            raise FormatRulesError(f"{where}.lifted_on: not after banned_from")
+        bans[key] = BanRule(key[0], key[1], _text(entry["name"], f"{where}.name"), banned_from, lifted_on)
+
     return FormatRules(format=_text(raw["format"], "format"), name=name,
                        revision=_int(raw["revision"], "revision", 1), published=published, covers_from=covers_from,
                        pool=raw["pool"],
@@ -274,7 +310,7 @@ def load_rules(data: bytes) -> FormatRules:
                        pokemon_reprint_inheritance=_bool(raw["pokemon_reprint_inheritance"],
                                                          "pokemon_reprint_inheritance"),
                        limits=limits, marks=marks, sets=sets, exclusions=tuple(exclusions), excluded=excluded,
-                       unsettled=unsettled, sha256=hashlib.sha256(data).hexdigest())
+                       unsettled=unsettled, bans=bans, sha256=hashlib.sha256(data).hexdigest())
 
 
 @cache
@@ -294,22 +330,22 @@ def format_rules(format_name: str) -> FormatRules:
 
 @dataclass(frozen=True)
 class PrintingFacts:
-    """What decides one Card Printing's own legality: its set and its effective card attributes."""
+    """What decides one Card Printing's own legality: its set, collector number and effective card attributes."""
     printing_id: UUID
     set_id: str | None          # None when the active catalog generation has no row for the Printing
     attributes: CardAttributes
+    collector_number: str | None = None  # matches ban entries; None like set_id
 
 
 @dataclass(frozen=True)
 class ResolvedLine:
-    """One Deck List line resolved to its Card Printing, Card Identity and attributes."""
+    """One Deck List line resolved to its Card Printing, Card Identity, Reprint Group and attributes."""
     edition_id: UUID
     quantity: int
     identity_id: UUID
     identity_name: str
     printing: PrintingFacts
-    # Reprint Groups arrive with ticket 13. Until then every line has None and ``reprint_groups`` is empty.
-    reprint_group_id: UUID | None = None
+    reprint_group_id: UUID | None = None  # None when the printing is in no Reprint Group
 
 
 @dataclass(frozen=True)
@@ -349,7 +385,7 @@ class FormatResult:
 def own_standing(printing: PrintingFacts, identity_name: str, rules: FormatRules, on: date) -> Standing:
     """Whether one Card Printing is in the format's card pool on ``on`` by its own set and regulation mark.
 
-    Ticket 13 reuses this for every printing of a Reprint Group, so all date logic stays here.
+    ``line_standing`` reuses this for every printing of a Reprint Group, so all date logic stays here.
     """
     unsettled = rules.unsettled.get(identity_name)
     if unsettled is not None:
@@ -386,15 +422,62 @@ def own_standing(printing: PrintingFacts, identity_name: str, rules: FormatRules
     return Standing("unknown", tuple(gaps)) if gaps else LEGAL
 
 
+def _ban(printing: PrintingFacts, rules: FormatRules, on: date) -> BanRule | None:
+    if printing.set_id is None or printing.collector_number is None:
+        return None
+    ban = rules.bans.get((printing.set_id, printing.collector_number))
+    return ban if ban is not None and ban.in_force(on) else None
+
+
+def _label(printing: PrintingFacts) -> str:
+    return " ".join(part for part in (printing.set_id, printing.collector_number) if part) or "in an unknown set"
+
+
+def _reprint_order(printing: PrintingFacts):
+    return (printing.set_id or "", printing.collector_number or "", str(printing.printing_id))
+
+
 def line_standing(line: ResolvedLine, rules: FormatRules, on: date,
                   reprint_groups: Mapping[UUID, Sequence[PrintingFacts]]) -> Standing:
     """A Deck List line's standing in the card pool.
 
-    Ticket 13 extends only this function: when the line's printing is not legal on its own, a Trainer or Energy (and a
-    Pokémon when ``rules.pokemon_reprint_inheritance``) is legal if ``own_standing`` finds any printing in
-    ``reprint_groups[line.reprint_group_id]`` legal.
+    1. A ban in force on the line's printing, or on any printing in its Reprint Group, makes it not legal. A ban beats
+       legality through a reprint.
+    2. A printing legal on its own (``own_standing``) is legal.
+    3. A Trainer or Energy (and a Pokémon when ``rules.pokemon_reprint_inheritance``) is legal when any other printing
+       in its group is legal on its own. If none is, but the printing is not legal on its own and some reprint's
+       legality is unknown, it is unknown. A printing whose card kind is unknown is unknown when a reprint could have
+       made it legal.
+    4. Otherwise the printing's own standing stands.
     """
-    return own_standing(line.printing, line.identity_name, rules, on)
+    printing = line.printing
+    group = reprint_groups.get(line.reprint_group_id, ()) if line.reprint_group_id is not None else ()
+    reprints = sorted((member for member in group if member.printing_id != printing.printing_id), key=_reprint_order)
+    for candidate in (printing, *reprints):
+        ban = _ban(candidate, rules, on)
+        if ban is not None:
+            reason = f"banned in {rules.name} from {ban.banned_from.isoformat()}"
+            if candidate is not printing:
+                reason += f" as an identical reprint of {ban.name} ({ban.set_id} {ban.number})"
+            return Standing("not_legal", (Finding(BANNED, reason, True),))
+    own = own_standing(printing, line.identity_name, rules, on)
+    kind = printing.attributes.card_kind
+    if own.status == "legal" or not reprints or kind == "pokemon" and not rules.pokemon_reprint_inheritance:
+        return own
+    standings = [(reprint, own_standing(reprint, line.identity_name, rules, on)) for reprint in reprints]
+    if kind is None:
+        if own.status == "not_legal" and any(standing.status != "not_legal" for _, standing in standings):
+            return Standing("unknown", (Finding(ATTRIBUTE_UNKNOWN, "card kind unknown", False),))
+        return own
+    if any(standing.status == "legal" for _, standing in standings):
+        return LEGAL
+    if own.status == "not_legal":
+        for reprint, standing in standings:
+            if standing.status == "unknown":
+                reason = (f"not legal on its own; identical reprint {_label(reprint)} is unknown: "
+                          f"{standing.findings[0].reason}")
+                return Standing("unknown", (Finding(REPRINT_LEGALITY_UNKNOWN, reason, False),))
+    return own
 
 
 class _Issues:
@@ -434,7 +517,8 @@ def evaluate_format(lines: Sequence[ResolvedLine], rules: FormatRules, on: date,
                     reprint_groups: Mapping[UUID, Sequence[PrintingFacts]] | None = None) -> FormatResult:
     """Check resolved Deck List lines against one format's rules on ``on``.
 
-    ``reprint_groups`` maps a Reprint Group ID to the facts of its printings; it is empty until ticket 13.
+    ``reprint_groups`` maps a Reprint Group ID to the facts of its printings (the line's own printing may be among
+    them); a line whose group is missing from it is judged on its own printing.
     """
     issues = _Issues()
     if on < rules.covers_from:
