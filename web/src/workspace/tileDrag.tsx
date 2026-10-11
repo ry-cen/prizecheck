@@ -13,6 +13,9 @@ import "./InventoryActions.css";
 
 /** Pointer travel, in px, that turns a press on a tile into a drag. Less is a click. */
 const DRAG_THRESHOLD = 6;
+/** The badge sits just below and right of the pointer. */
+const BADGE_OFFSET_X = 14;
+const BADGE_OFFSET_Y = 10;
 
 type Options = {
   /** Desktop only, and not while an action runs. */
@@ -73,6 +76,22 @@ export function useTileDrag({ enabled, index, selection, onDrop }: Options) {
       let over: string | null = null;
       let text = "";
       let cancelled = false;
+      // The badge follows the pointer through its element, not React state: state changes only when
+      // the drag begins or the target under the pointer changes.
+      let shown = false;
+      let frame = 0;
+      let pointer = { x: startX, y: startY };
+      const placeBadge = () => {
+        frame = 0;
+        const badge = document.querySelector<HTMLElement>(".ws-drag-badge");
+        if (!badge) return;
+        badge.style.left = `${pointer.x + BADGE_OFFSET_X}px`;
+        badge.style.top = `${pointer.y + BADGE_OFFSET_Y}px`;
+      };
+      const stopBadge = () => {
+        if (frame) window.cancelAnimationFrame(frame);
+        frame = 0;
+      };
 
       const begin = () => {
         const { selection: current, index: tree } = live.current;
@@ -96,12 +115,12 @@ export function useTileDrag({ enabled, index, selection, onDrop }: Options) {
         }
         const carried = groups;
         // A Storage Leaf is a valid drop when at least one carried copy isn't already there.
+        const sources = new Set(carried.map((group) => group.source_id));
         valid = new Set(
           Array.from(tree.byId.values())
             .filter(
               (node) =>
-                !isFolder(node) &&
-                carried.some((group) => group.source_id !== node.id)
+                !isFolder(node) && (sources.size > 1 || !sources.has(node.id))
             )
             .map((node) => node.id)
         );
@@ -122,8 +141,14 @@ export function useTileDrag({ enabled, index, selection, onDrop }: Options) {
           .elementFromPoint(move.clientX, move.clientY)
           ?.closest<HTMLElement>("[data-ws-drop]");
         const id = row?.dataset.wsDrop ?? null;
-        over = id && valid.has(id) ? id : null;
-        setDragging({ valid, over, x: move.clientX, y: move.clientY, text });
+        const next = id && valid.has(id) ? id : null;
+        pointer = { x: move.clientX, y: move.clientY };
+        if (!shown || next !== over) {
+          shown = true;
+          over = next;
+          stopBadge();
+          setDragging({ valid, over, x: pointer.x, y: pointer.y, text });
+        } else if (!frame) frame = window.requestAnimationFrame(placeBadge);
       };
       const stop = () => {
         window.removeEventListener("pointermove", onMove);
@@ -131,6 +156,7 @@ export function useTileDrag({ enabled, index, selection, onDrop }: Options) {
         window.removeEventListener("pointercancel", onCancel);
         window.removeEventListener("keydown", onKey, true);
         document.body.classList.remove("ws-tile-dragging");
+        stopBadge();
         stopActive.current = null;
         setDragging(null);
       };
@@ -152,6 +178,7 @@ export function useTileDrag({ enabled, index, selection, onDrop }: Options) {
         key.preventDefault();
         cancelled = true;
         document.body.classList.remove("ws-tile-dragging");
+        stopBadge();
         setDragging(null);
       };
       window.addEventListener("pointermove", onMove);
@@ -180,7 +207,7 @@ export function DragBadge({
     <div
       className="ws-drag-badge"
       aria-hidden="true"
-      style={{ left: badge.x + 14, top: badge.y + 10 }}
+      style={{ left: badge.x + BADGE_OFFSET_X, top: badge.y + BADGE_OFFSET_Y }}
     >
       {badge.text}
     </div>

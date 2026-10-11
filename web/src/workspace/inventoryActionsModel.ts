@@ -174,9 +174,15 @@ export function describeFailure(
       return result(
         `This ${noun} took too long to prepare. ${nothing} Try again; ${kept.toLowerCase()}.`
       );
+    case "REPLAY_OUTCOME_UNAVAILABLE":
+      return result(
+        `The ${noun} may have already finished, and the cards have been refreshed. Review them before trying again.`,
+        true,
+        true
+      );
     default:
       return result(
-        `The ${noun} couldn't be completed. ${nothing} ${kept}.`,
+        `The ${noun} couldn't be completed. ${nothing} ${refreshed}`,
         true
       );
   }
