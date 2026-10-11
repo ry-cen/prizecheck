@@ -717,18 +717,18 @@ test.describe("desktop", () => {
       .nth(1)
       .click({ modifiers: ["ControlOrMeta"] });
     await expect(bar(page)).toContainText("2 copies selected");
+    // The heading shows the same counts; only the badge is hidden from assistive technology.
+    const badge = page
+      .getByText("2 copies · 1 edition", { exact: true })
+      .and(page.locator('[aria-hidden="true"]'));
     const from = await center(tiles(page).nth(0));
     const to = await center(row);
     await page.mouse.move(from.x, from.y);
     await page.mouse.down();
     await page.mouse.move(to.x, to.y, { steps: 12 });
-    await expect(
-      page.getByText("2 copies · 1 edition", { exact: true })
-    ).toBeVisible();
+    await expect(badge).toBeVisible();
     await page.keyboard.press("Escape");
-    await expect(
-      page.getByText("2 copies · 1 edition", { exact: true })
-    ).toHaveCount(0);
+    await expect(badge).toHaveCount(0);
     await page.mouse.up();
     await expect(bar(page)).toContainText("2 copies selected");
     await expect(pressed(page)).toHaveCount(2);
