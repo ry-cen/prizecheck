@@ -637,12 +637,36 @@ test.describe("desktop", () => {
     await expect(panel).toContainText("3 copies owned");
     await tiles(page).nth(3).hover();
     await expect(panel).toContainText("1 copy owned");
+    // From here, record whether "Counting copies owned…" ever appears in the inspector.
+    await panel.evaluate((element) => {
+      const win = window as unknown as { sawCounting: boolean };
+      win.sawCounting = false;
+      const seen = (text?: string | null) => {
+        if (text?.includes("Counting copies owned")) win.sawCounting = true;
+      };
+      new MutationObserver((records) => {
+        for (const record of records) {
+          seen(record.oldValue);
+          record.addedNodes.forEach((node) => seen(node.textContent));
+        }
+        seen(element.textContent);
+      }).observe(element, {
+        subtree: true,
+        childList: true,
+        characterData: true,
+        characterDataOldValue: true,
+      });
+    });
     await tiles(page).nth(0).hover();
     await expect(
       panel.getByRole("heading", { name: "Insp Pikachu" })
     ).toBeVisible();
     await expect(panel).toContainText("3 copies owned");
-    await expect(panel).not.toContainText("Counting copies owned");
+    expect(
+      await page.evaluate(
+        () => (window as unknown as { sawCounting: boolean }).sawCounting
+      )
+    ).toBe(false);
     expect(pikachuReads).toHaveLength(1);
     await page.mouse.move(5, 5);
     await expect(panel).toBeEmpty();
