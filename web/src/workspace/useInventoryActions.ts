@@ -12,13 +12,20 @@ import {
   stageMove,
   startMove,
 } from "../moves_generated";
-import { EMPTY_GALLERY, plural, type GalleryHolding } from "./galleryModel";
+import {
+  appendedFrom,
+  EMPTY_GALLERY,
+  plural,
+  type GalleryHolding,
+  type GalleryStatus,
+} from "./galleryModel";
 import {
   cardLabel,
   cardText,
   countText,
   describeFailure,
   STAGE_BATCH,
+  trimOldest,
   type ActionTarget,
   type CardLabel,
   type RemovalRow,
@@ -33,6 +40,9 @@ import {
 } from "./selectionModel";
 import type { SelectionState } from "./useSelection";
 
+/** The fewest names and paths kept after trimming; see the labels effect. */
+const LABEL_CACHE_FLOOR = 1_000;
+
 /** The success and Undo toast. `entry` is the newest Undo record, or null when none is offered. */
 export type ToastState = {
   id: number;
@@ -45,6 +55,9 @@ export type ToastState = {
 type Options = {
   selection: SelectionState;
   holdings: GalleryHolding[];
+  /** The gallery's Holdings by key (GalleryData.byKey). */
+  byKey: ReadonlyMap<string, GalleryHolding>;
+  status: GalleryStatus;
   index: LocationIndex;
   reloadGallery: () => void;
   reloadTree: () => void | Promise<void>;
@@ -63,6 +76,8 @@ type Carried = { toastText: string; selection: Selection };
 export function useInventoryActions({
   selection,
   holdings,
+  byKey,
+  status,
   index,
   reloadGallery,
   reloadTree,
@@ -85,6 +100,8 @@ export function useInventoryActions({
   const carried = useRef<Carried | null>(null);
   const holdingsRef = useRef(holdings);
   holdingsRef.current = holdings;
+  const byKeyRef = useRef(byKey);
+  byKeyRef.current = byKey;
   const actionsButton = useRef<HTMLButtonElement>(null);
   const toastRef = useRef<HTMLDivElement>(null);
   // Names and paths outlive a gallery reload, which empties the listing while it refetches.
@@ -93,12 +110,27 @@ export function useInventoryActions({
   const live = useRef({ selection, index, reloadGallery, reloadTree });
   live.current = { selection, index, reloadGallery, reloadTree };
 
+  const seen = useRef<GalleryHolding[]>([]);
   useEffect(() => {
-    for (const entry of holdings) {
+    // Only the rows a new page added: earlier pages of this walk are already cached.
+    const from = appendedFrom(seen.current, holdings);
+    seen.current = holdings;
+    for (let index = from; index < holdings.length; index++) {
+      const entry = holdings[index];
+      // Re-inserting moves a key to the newest end, so trimming drops the longest-unlisted entries first.
+      labels.delete(entry.key);
       labels.set(entry.key, cardLabel(entry.holding));
+      paths.delete(entry.holding.location_id);
       paths.set(entry.holding.location_id, entry.holding.location_path);
     }
-  }, [holdings, labels, paths]);
+    // Once the listing is complete, keep at most twice its size (never fewer than the floor). Every listed and
+    // selected key is among the newest, and recent older names still cover an Undo's former sources.
+    if (status === "ready") {
+      const limit = Math.max(LABEL_CACHE_FLOOR, 2 * holdings.length);
+      trimOldest(labels, limit);
+      trimOldest(paths, limit);
+    }
+  }, [holdings, status, labels, paths]);
 
   const place = useCallback(
     (id: string) => {
@@ -204,16 +236,22 @@ export function useInventoryActions({
         void live.current.reloadTree();
         const id = toastId.current;
         const entries = await listUndo().catch(() => [] as UndoEntry[]);
-        // Offer Undo only for the record this action made, never an older one.
+        // Offer Undo only for the record this action made, and only while it is the newest (Undo applies the
+        // newest record alone). The result names its record; only a previous-release API process during a deploy
+        // omits the id, and then the record is recognised by its shape as before.
         const newest = entries[0];
-        const mine =
-          newest &&
-          newest.action === target.kind &&
-          newest.source_count === result.source_count &&
-          (target.kind !== "move" ||
-            newest.destination_id === target.destinationId)
-            ? newest
-            : null;
+        const mine = !newest
+          ? null
+          : result.undo_id
+            ? newest.id === result.undo_id
+              ? newest
+              : null
+            : newest.action === target.kind &&
+                newest.source_count === result.source_count &&
+                (target.kind !== "move" ||
+                  newest.destination_id === target.destinationId)
+              ? newest
+              : null;
         setToast((current) =>
           current && current.id === id ? { ...current, entry: mine } : current
         );
@@ -479,10 +517,7 @@ export function useInventoryActions({
     if (
       failure &&
       listing !== EMPTY_GALLERY.holdings &&
-      reconcileSelection(
-        failure.selection,
-        new Map(listing.map((holding) => [holding.key, holding]))
-      ).size === 0
+      reconcileSelection(failure.selection, byKeyRef.current).size === 0
     ) {
       showToast({
         message: failure.toastText,

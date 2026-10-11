@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { AddCardsForm } from "../AddCardsForm";
+import { focusWorkspaceHeading } from "./SelectionBar";
 import "./CreateLocationDialog.css";
 import "./AddCardsDialog.css";
 
@@ -28,7 +29,7 @@ export function AddCardsDialog({
   const titleId = useId();
   const [message, setMessage] = useState("");
 
-  // As in CreateLocationDialog: open modally, focus the search field, return focus to the opener on close.
+  // As in CreateLocationDialog: open modally, focus the search field, return focus to the opener on close, or to the heading when the opener is gone.
   useEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog) return;
@@ -41,6 +42,12 @@ export function AddCardsDialog({
     return () => {
       if (dialog.open) dialog.close();
       if (opener?.isConnected && opener.getClientRects().length) opener.focus();
+      else {
+        // The Add cards button goes with its Location (deleted, or now a folder): keep focus off the page body.
+        const active = document.activeElement;
+        if (!active || active === document.body || !active.isConnected)
+          focusWorkspaceHeading();
+      }
     };
   }, []);
 

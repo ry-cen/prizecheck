@@ -947,6 +947,131 @@ test.describe("desktop", () => {
     await expect(page.getByRole("dialog")).toHaveCount(0);
     expect(await focusedId(page)).toBe("ws-heading");
   });
+
+  test("a Move to a destination deleted meanwhile keeps the selection and refreshes both views, with no stale banner", async ({
+    page,
+  }) => {
+    const { s, dest } = await seedAlphaAndDest(page, "Gone Abra");
+    await tiles(page).nth(0).click();
+    await openActions(page, "Move…");
+    const dialog = page.getByRole("dialog", { name: "Move 1 copy" });
+    await dialog
+      .getByRole("searchbox", { name: "Search locations" })
+      .fill(`0 Dest ${s}`);
+    await dialog
+      .getByRole("button", { name: `0 Dest ${s}`, exact: true })
+      .click();
+    // Another session deletes the chosen destination before the collector confirms.
+    const api = (path: string) => new URL(path, page.url()).href;
+    const tree = await page.request.get(api("/api/location-tree"));
+    const version = (
+      (await tree.json()) as { locations: TreeNode[] }
+    ).locations.find((node) => node.id === dest)!.version;
+    const deleted = await page.request.delete(
+      api(`/api/location-tree/${dest}`),
+      {
+        headers: { origin: new URL(page.url()).origin },
+        data: { name: `0 Dest ${s}`, version, idempotency_key: randomUUID() },
+      }
+    );
+    expect(deleted.status(), await deleted.text()).toBe(200);
+    await dialog.getByRole("button", { name: "Move 1 copy" }).click();
+    await expect(page.getByRole("dialog").getByRole("alert")).toContainText(
+      `0 Dest ${s} can no longer hold cards. Nothing moved.`
+    );
+    await page
+      .getByRole("dialog")
+      .getByRole("button", { name: "Cancel" })
+      .click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    // The tree has caught up (Dest is gone) before the banner is checked, so the check isn't vacuous.
+    await expect(
+      sidebar(page).getByRole("button", { name: `0 Dest ${s}`, exact: true })
+    ).toHaveCount(0);
+    await expect(tiles(page)).toHaveCount(2);
+    await expect(
+      page.getByRole("status").filter({
+        hasText: "Your collection changed in another tab or session.",
+      })
+    ).toHaveCount(0);
+    await expect(bar(page)).toContainText("1 copy selected");
+  });
+
+  test("Undo is offered only for this tab's own record, never for another tab's same-shaped Move made just after it", async ({
+    page,
+  }) => {
+    const { s, alpha, dest, edition } = await seedAlphaAndDest(
+      page,
+      "Race Abra"
+    );
+    // Between this tab's commit and its Undo list read, another tab moves the other copy the same way:
+    // one source, the same destination, so the newest record has the same shape as this tab's.
+    let raced = false;
+    await page.route("**/api/moves/undo", async (route) => {
+      if (!raced && route.request().method() === "GET") {
+        raced = true;
+        const api = (path: string) => new URL(path, page.url()).href;
+        const headers = { origin: new URL(page.url()).origin };
+        const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+        let version: number;
+        try {
+          version = (
+            await pool.query(
+              "SELECT version FROM holding WHERE location_id=$1 AND edition_id=$2",
+              [alpha, edition]
+            )
+          ).rows[0].version;
+        } finally {
+          await pool.end();
+        }
+        const manifest = await (
+          await page.request.post(api("/api/moves/manifests"), {
+            headers,
+            data: {},
+          })
+        ).json();
+        const staged = await page.request.put(
+          api(`/api/moves/manifests/${manifest.id}/items`),
+          {
+            headers,
+            data: {
+              items: [
+                {
+                  source_id: alpha,
+                  edition_id: edition,
+                  quantity: "1",
+                  expected_version: Number(version),
+                },
+              ],
+            },
+          }
+        );
+        expect(staged.status(), await staged.text()).toBe(200);
+        const committed = await page.request.post(
+          api(`/api/moves/manifests/${manifest.id}/commit`),
+          {
+            headers,
+            data: { destination_id: dest, idempotency_key: randomUUID() },
+          }
+        );
+        expect(committed.status(), await committed.text()).toBe(200);
+      }
+      await route.continue();
+    });
+    const listed = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname === "/api/moves/undo" &&
+        response.request().method() === "GET"
+    );
+    await moveFirstTileToDest(page, s);
+    await expect(toast(page)).toHaveText(`Moved 1 copy to 0 Dest ${s}.`);
+    await listed;
+    // Let the list's answer render before checking that no Undo was attached.
+    await page.waitForTimeout(300);
+    await expect(
+      page.getByRole("button", { name: "Undo", exact: true })
+    ).toHaveCount(0);
+  });
 });
 
 test.describe("mobile", () => {

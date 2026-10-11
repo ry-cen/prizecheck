@@ -30,6 +30,8 @@ export type Inspected = { holding: GalleryHolding; ordinal: number };
 
 type Options = {
   holdings: GalleryHolding[];
+  /** The gallery's Holdings by key (GalleryData.byKey). */
+  byKey: ReadonlyMap<string, GalleryHolding>;
   status: GalleryStatus;
   /** selectionScope(query): the selection clears whenever this changes. */
   scope: string;
@@ -59,6 +61,7 @@ export type SelectionState = {
  * Callbacks are stable, so memoized tiles don't re-render when the selection changes elsewhere. */
 export function useSelection({
   holdings,
+  byKey,
   status,
   scope,
   mobile,
@@ -73,10 +76,6 @@ export function useSelection({
   const anchor = useRef<{ key: string; ordinal: number } | null>(null);
   const marqueeBase = useRef<Selection>(EMPTY_SELECTION);
 
-  const byKey = useMemo(
-    () => new Map(holdings.map((holding) => [holding.key, holding])),
-    [holdings]
-  );
   const latest = useRef({
     selected,
     holdings,

@@ -336,8 +336,13 @@ test.describe("desktop", () => {
     // Another session (here the API, which no tab of this browser hears about) adds a Pikachu.
     await addCopies(page, beta, pikachu, 1);
     await expect(banner(page)).toHaveCount(0);
-    // Coming back to the tab checks the owner revision.
+    // Coming back to the tab checks the owner revision with a one-row read.
+    const probe = page.waitForRequest(
+      (request) =>
+        new URL(request.url()).pathname === "/api/collection/revision"
+    );
     await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await probe;
     await expect(banner(page)).toHaveText(STALE);
     await expect(tiles(page)).toHaveCount(2);
 
@@ -352,6 +357,152 @@ test.describe("desktop", () => {
     ).toHaveCount(0);
     await expect(note(page)).toHaveCount(0);
     expect(await focusedId(page)).toBe("ws-heading");
+  });
+
+  const sidebarButton = (page: Page, name: string) =>
+    page
+      .getByRole("complementary", { name: "Sidebar" })
+      .getByRole("navigation", { name: "Locations" })
+      .getByRole("button", { name, exact: true });
+
+  test("a Location that became a folder elsewhere opens All owned after Reload instead of failing", async ({
+    page,
+  }) => {
+    promoteCatalog({ "card-1": "Banner Abra" });
+    await signIn(page);
+    const s = randomUUID().slice(0, 8);
+    const alpha = await createLocation(page, `Alpha ${s}`, null);
+    const beta = await createLocation(page, `Beta ${s}`, null);
+    await addCopies(page, beta, await editionOf("card-1"), 1);
+    await page.reload();
+    await sidebarButton(page, `Alpha ${s}`).click();
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+      `Alpha ${s}`
+    );
+    await expect(page.getByRole("main")).toContainText(
+      "This Location has no cards."
+    );
+    // Another session nests a new Location under the empty Alpha, which makes Alpha a folder.
+    await createLocation(page, `Inner ${s}`, alpha);
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect(banner(page)).toHaveText(STALE);
+    await reload(page).click();
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+      "All owned"
+    );
+    await expect(tiles(page)).toHaveCount(1);
+    await expect(page.getByRole("main")).not.toContainText(
+      "temporarily unavailable"
+    );
+  });
+
+  test("Add cards closes when its Location becomes a folder: the workspace opens All owned and focuses the heading", async ({
+    page,
+  }) => {
+    promoteCatalog({ "card-1": "Banner Abra" });
+    await signIn(page);
+    const s = randomUUID().slice(0, 8);
+    const alpha = await createLocation(page, `Alpha ${s}`, null);
+    await page.reload();
+    await sidebarButton(page, `Alpha ${s}`).click();
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+      `Alpha ${s}`
+    );
+    await page.getByRole("button", { name: "Add cards", exact: true }).click();
+    const add = page.getByRole("dialog", { name: `Add cards to Alpha ${s}` });
+    await expect(add).toBeVisible();
+    // Another session nests a Location under Alpha just as this Add reloads the tree: Alpha becomes a folder.
+    let nested = false;
+    await page.route("**/api/location-tree", async (route) => {
+      if (!nested && route.request().method() === "GET") {
+        nested = true;
+        const api = (path: string) => new URL(path, page.url()).href;
+        const tree = await page.request.get(api("/api/location-tree"));
+        const version = (
+          (await tree.json()) as { locations: TreeNode[] }
+        ).locations.find((node) => node.id === alpha)!.version;
+        const created = await page.request.post(api("/api/location-tree"), {
+          headers: { origin: new URL(page.url()).origin },
+          data: {
+            name: `Inner ${s}`,
+            parent_id: alpha,
+            parent_version: version,
+            conversion: "move_holdings_to_child",
+            idempotency_key: randomUUID(),
+          },
+        });
+        expect(created.status(), await created.text()).toBe(201);
+      }
+      await route.continue();
+    });
+    await add.getByLabel("Search English card name").fill("Banner");
+    await add.getByRole("button", { name: "Search", exact: true }).click();
+    await add.getByLabel("Card Edition").selectOption({
+      label: "Banner Abra · Fixture Set #1 · finish: normal",
+    });
+    await add.getByLabel("Quantity", { exact: true }).fill("1");
+    await add.getByRole("button", { name: "Add to Location" }).click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+      "All owned"
+    );
+    await expect(tiles(page)).toHaveCount(1);
+    await expect.poll(() => focusedId(page)).toBe("ws-heading");
+    await expect(
+      page.getByRole("button", { name: "Add cards", exact: true })
+    ).toHaveCount(0);
+  });
+
+  test("a Reload keeps a Reviewed Edition correction's typed amount and reads the corrections once for the new revision", async ({
+    page,
+  }) => {
+    promoteCatalog({ "card-1": "Banner Abra" });
+    await signIn(page);
+    const s = randomUUID().slice(0, 8);
+    const alpha = await createLocation(page, `Alpha ${s}`, null);
+    const abra = await editionOf("card-1");
+    await addCopies(page, alpha, abra, 3);
+    // A reviewed correction for Abra, stubbed: the review pipeline is covered by catalog-reconciliation.spec.ts.
+    let reads = 0;
+    await page.route("**/api/catalog/edition-replacements", async (route) => {
+      reads += 1;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify([
+          {
+            edition_id: abra,
+            replacement_edition_id: randomUUID(),
+            evidence_url: "https://example.org/evidence",
+            reason: "Fixture correction.",
+          },
+        ]),
+      });
+    });
+    await page.reload();
+    await expect(tiles(page)).toHaveCount(3);
+    const correction = page.getByRole("region", {
+      name: "Reviewed Edition corrections",
+    });
+    const amount = correction.getByLabel("Copies to reassign");
+    await amount.fill("2");
+    // Another session changes the Collection; the banner's Reload refetches the gallery.
+    await createLocation(page, `Elsewhere ${s}`, null);
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect(banner(page)).toHaveText(STALE);
+    reads = 0;
+    const relisted = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname === "/api/collection/holdings"
+    );
+    await reload(page).click();
+    await relisted;
+    await expect(banner(page)).toHaveCount(0);
+    await expect(tiles(page)).toHaveCount(3);
+    await expect(amount).toHaveValue("2");
+    // Let any late read land before counting: one read for the new revision, none while the gallery reloaded.
+    await page.waitForTimeout(300);
+    expect(reads).toBe(1);
   });
 });
 
