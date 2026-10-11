@@ -11,9 +11,14 @@ import type { WorkspaceView } from "./LocationNav";
 /** Card size choice, remembered with the other preferences (galleryPrefs.ts). */
 export type CardSize = "small" | "medium";
 
-/** Display preferences: presentation only (size, names, and later prices). Sort, search and filters belong in `GalleryQuery`. */
-export type DisplayPrefs = { size: CardSize; names: boolean };
-export const DEFAULT_DISPLAY: DisplayPrefs = { size: "small", names: false };
+/** Display preferences: presentation only (size, names and prices). Sort, search and filters belong in `GalleryQuery`.
+ * `prices` shows each mounted tile's Card Edition price under it (ticket 111); it is off by default. */
+export type DisplayPrefs = { size: CardSize; names: boolean; prices: boolean };
+export const DEFAULT_DISPLAY: DisplayPrefs = {
+  size: "small",
+  names: false,
+  prices: false,
+};
 
 /** Sort choice: a key and a direction, sent to the listing as is. Name A–Z is the default. */
 export type GallerySort = HoldingSort;
@@ -195,6 +200,7 @@ export type TileMetrics = {
   gapColumn: number;
   namesHeight: number;
   captionHeight: number;
+  priceHeight: number;
 };
 
 export function readTileMetrics(element: Element): TileMetrics {
@@ -210,6 +216,7 @@ export function readTileMetrics(element: Element): TileMetrics {
     gapColumn: px("--tile-gap-column", 12),
     namesHeight: px("--tile-names-height", 34),
     captionHeight: px("--tile-caption-height", 18),
+    priceHeight: px("--tile-price-height", 18),
   };
 }
 
@@ -243,6 +250,7 @@ export function computeLayout(
   const tileHeight =
     artHeight +
     (display.names ? metrics.namesHeight : 0) +
+    (display.prices ? metrics.priceHeight : 0) +
     (caption ? metrics.captionHeight : 0);
   const rowHeight = tileHeight + metrics.gapRow;
   const rows = Math.ceil(tiles / columns);

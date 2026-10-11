@@ -2,11 +2,13 @@ import React, {
   memo,
   useCallback,
   useEffect,
+  useId,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
+import { EditionPrice } from "../EditionPrice";
 import type { HoldingView } from "../holdings_generated";
 import {
   computeLayout,
@@ -350,6 +352,7 @@ export function Gallery({
         top={rect.y}
         width={rect.width}
         names={display.names}
+        prices={display.prices}
         caption={
           caption
             ? (locationName(holding.location_id) ?? holding.location_name)
@@ -458,6 +461,8 @@ type TileProps = {
   top: number;
   width: number;
   names: boolean;
+  /** Ticket 111: show the Card Edition's price under the tile. Only mounted tiles render it, so only they request it. */
+  prices: boolean;
   /** The source Location's name in All owned; null inside a Storage Leaf. */
   caption: string | null;
   path: string;
@@ -477,10 +482,12 @@ const Tile = memo(function Tile({
   top,
   width,
   names,
+  prices,
   caption,
   path,
 }: TileProps) {
   const { holding } = entry;
+  const priceId = useId();
   const ref = (): TileRef => ({ holding: entry, ordinal, index });
   return (
     <button
@@ -488,6 +495,7 @@ const Tile = memo(function Tile({
       className="ws-tile"
       style={{ left, top, width }}
       aria-label={tileLabel(holding, ordinal, path)}
+      aria-describedby={prices ? priceId : undefined}
       title={tileTitle(holding, ordinal, path)}
       aria-pressed={selected}
       onClick={(event) =>
@@ -528,6 +536,11 @@ const Tile = memo(function Tile({
           <span className="ws-tile-set">
             {holding.set_name} · {holding.collector_number}
           </span>
+        </span>
+      )}
+      {prices && (
+        <span className="ws-tile-price" id={priceId}>
+          <EditionPrice compact editionId={holding.edition_id} />
         </span>
       )}
       {caption !== null && <span className="ws-tile-caption">{caption}</span>}

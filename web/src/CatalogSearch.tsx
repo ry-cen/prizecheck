@@ -8,6 +8,10 @@ import {
 import { MissingCardReports } from "./MissingCardReports";
 import { MetadataReport, MyMetadataReports } from "./MetadataReport";
 import { EditionPrice } from "./EditionPrice";
+import {
+  clearMetadataReportLink,
+  readMetadataReportLink,
+} from "./metadataReportLink";
 import "./CatalogSearch.css";
 
 function CardArt({ url, name }: { url: string | null; name: string }) {
@@ -63,6 +67,45 @@ export function CatalogSearch() {
   } | null>(null);
   const [reportsKey, setReportsKey] = useState(0);
   const request = useRef(0);
+  // The workspace inspector's report link (/catalog?printing=…&edition=…): read once, then removed from the address.
+  const [reportLink] = useState(readMetadataReportLink);
+  const reportRef = useRef<HTMLDivElement>(null);
+  const focusReport = useRef(false);
+
+  useEffect(() => {
+    clearMetadataReportLink();
+    if (!reportLink) return;
+    const id = ++request.current;
+    getPrinting(reportLink.printingId)
+      .then((response) => {
+        if (id !== request.current) return;
+        const printing = response.printing;
+        setDetail(printing);
+        setSelectedEdition(null);
+        setReportEdition(false);
+        // Preset to the linked Card Edition; an Edition this Printing doesn't have opens the Printing report.
+        setMetadataReport({
+          editionId: printing.editions.some(
+            (edition) => edition.id === reportLink.editionId
+          )
+            ? reportLink.editionId
+            : null,
+        });
+        focusReport.current = true;
+      })
+      .catch(() => {
+        if (id === request.current)
+          setMessage("Printing details are unavailable. Please retry.");
+      });
+    // Runs once: the link is read once per mount.
+  }, []);
+
+  // The linked report form takes focus once it is shown, so it is in view and keyboard-ready.
+  useEffect(() => {
+    if (!focusReport.current || !metadataReport) return;
+    focusReport.current = false;
+    reportRef.current?.querySelector<HTMLElement>("select")?.focus();
+  }, [metadataReport]);
 
   async function search(
     nextFilters: { name?: string; set_id?: string; number?: string },
@@ -302,17 +345,19 @@ export function CatalogSearch() {
             Report Printing metadata
           </button>
           {metadataReport && (
-            <MetadataReport
-              key={metadataReport.editionId ?? "printing"}
-              printingId={detail.id}
-              printingName={detail.name}
-              editions={detail.editions.map((edition) => ({
-                id: edition.id,
-                label: descriptorLabel(edition.descriptor),
-              }))}
-              initialEditionId={metadataReport.editionId}
-              onSubmitted={() => setReportsKey((value) => value + 1)}
-            />
+            <div ref={reportRef}>
+              <MetadataReport
+                key={metadataReport.editionId ?? "printing"}
+                printingId={detail.id}
+                printingName={detail.name}
+                editions={detail.editions.map((edition) => ({
+                  id: edition.id,
+                  label: descriptorLabel(edition.descriptor),
+                }))}
+                initialEditionId={metadataReport.editionId}
+                onSubmitted={() => setReportsKey((value) => value + 1)}
+              />
+            </div>
           )}
         </article>
       ) : (

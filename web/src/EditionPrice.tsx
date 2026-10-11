@@ -144,12 +144,53 @@ function Refresh({ row }: { row: PriceRow }) {
   );
 }
 
-export function EditionPrice({ editionId }: { editionId: string }) {
+/** One line for a gallery tile: the amount with its Stale or Age unknown label, or a short state. It never
+ * shows $0 for a missing quote. The full sentence (price time, last check, refresh) is in card information. */
+function compactContent(settled: Settled | null) {
+  if (!settled) return "Checking prices…";
+  if (settled.kind === "timeout") return "Price check timed out";
+  if (settled.kind === "error") return "Price unavailable";
+  const { row } = settled;
+  if (row.status === "pending") return "Price check in progress";
+  if (row.status !== "quote" || !row.display_amount) return "Price unavailable";
+  return (
+    <>
+      <strong>{row.display_amount}</strong>
+      {!(row.age === "known" && row.provider_updated_at) && <> · Age unknown</>}
+      {row.stale && <> · Stale</>}
+    </>
+  );
+}
+
+/** The cached price of one Card Edition. `compact` renders one short line (workspace tiles); the default
+ * renders the full sentence. Both share the same batched request queue. */
+export function EditionPrice({
+  editionId,
+  compact = false,
+}: {
+  editionId: string;
+  compact?: boolean;
+}) {
   const [settled, setSettled] = useState<Settled | null>(null);
   useEffect(() => {
     setSettled(null);
     return request(editionId, setSettled);
   }, [editionId]);
+  if (compact)
+    return (
+      <span
+        className="edition-price"
+        data-price-status={
+          !settled
+            ? "checking"
+            : settled.kind === "row"
+              ? settled.row.status
+              : settled.kind
+        }
+      >
+        {compactContent(settled)}
+      </span>
+    );
   let content;
   let status = "checking";
   if (!settled) content = "Checking prices…";

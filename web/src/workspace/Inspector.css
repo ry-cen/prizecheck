@@ -85,6 +85,53 @@
   font-variant-numeric: var(--numeric);
 }
 
+/* The inspected Edition's price and the metadata report link (ticket 111). The price is the existing
+   EditionPrice component; its EditionPrice.css colours are replaced here with tokens. */
+.ws-details-price {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border);
+  font-size: var(--font-size-sm);
+  font-variant-numeric: var(--numeric);
+  overflow-wrap: anywhere;
+}
+.ws-root .ws-details-price .edition-price {
+  font-size: inherit;
+  color: var(--color-text-muted);
+}
+.ws-root .ws-details-price .edition-price strong {
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  color: var(--color-accent);
+}
+.ws-root .ws-details-price .edition-price .price-refresh {
+  color: var(--color-text-subtle);
+}
+.ws-root
+  .ws-details-price
+  .edition-price
+  .price-refresh[data-refresh="failed"] {
+  color: var(--color-warning);
+}
+.ws-root .ws-details-report {
+  color: var(--color-accent);
+  text-underline-offset: 2px;
+}
+.ws-root .ws-details-report:hover {
+  color: var(--color-accent-strong);
+}
+@media (max-width: 760px) {
+  .ws-root .ws-details-report {
+    display: inline-flex;
+    align-items: center;
+    min-height: var(--target-touch);
+  }
+}
+
 /* Mobile details sheet: a modal dialog from the bottom edge. */
 .ws-sheet-backdrop {
   position: fixed;

@@ -139,6 +139,30 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Price line under the tile when Prices is on (ticket 111). Fixed height for the layout model. The line
+   holds the existing EditionPrice component's compact form; EditionPrice.css colours are replaced here. */
+.ws-tile-price {
+  display: block;
+  height: var(--tile-price-height);
+  padding-top: var(--space-1);
+  overflow: hidden;
+  font-size: var(--font-size-xs);
+  line-height: 14px;
+  font-variant-numeric: var(--numeric);
+}
+.ws-root .ws-tile-price .edition-price {
+  display: block;
+  overflow: hidden;
+  font-size: inherit;
+  font-style: normal;
+  color: var(--color-text-subtle);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ws-root .ws-tile-price .edition-price strong {
+  font-weight: 600;
+  color: var(--color-text);
+}
 /* Card-shaped placeholder: before the first page, and for tiles whose page hasn't arrived. */
 .ws-tile-placeholder {
   position: absolute;

@@ -1,6 +1,8 @@
 import React, { useEffect, useId, useRef, useState } from "react";
 import { getEditionDistribution } from "../collection_generated";
+import { EditionPrice } from "../EditionPrice";
 import type { HoldingView } from "../holdings_generated";
+import { metadataReportHref } from "../metadataReportLink";
 import { CATEGORY_OPTIONS, plural } from "./galleryModel";
 import type { Inspected } from "./useSelection";
 import "./Inspector.css";
@@ -8,8 +10,9 @@ import "./Inspector.css";
 const FOCUSABLE =
   'button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex="-1"])';
 
-/** Hover and selection change quickly; wait this long before asking for an Edition's total. */
+/** Hover and selection change quickly; wait this long before asking for an Edition's total or price. */
 const TOTAL_DELAY_MS = 150;
+const PRICE_DELAY_MS = TOTAL_DELAY_MS;
 
 type DetailsProps = {
   card: Inspected;
@@ -121,8 +124,36 @@ export function CardDetails({
               : "Counting copies owned…"}
         </p>
       </div>
-      {/* Ticket 111 adds the inspected Edition's price and the metadata report link here. */}
+      <div className="ws-details-price">
+        <InspectorPrice editionId={holding.edition_id} />
+        <a
+          className="ws-details-report"
+          href={metadataReportHref(holding.printing_id, holding.edition_id)}
+        >
+          Report a problem with this card's data
+        </a>
+      </div>
     </div>
+  );
+}
+
+/** The inspected Card Edition's price through the existing EditionPrice component (full labels: age, stale,
+ * unavailable, refresh). Hover moves quickly, so the price is asked for only once the same Edition has stayed
+ * inspected for PRICE_DELAY_MS; until then the slot shows the component's own checking label. */
+function InspectorPrice({ editionId }: { editionId: string }) {
+  const [settledId, setSettledId] = useState<string | null>(null);
+  useEffect(() => {
+    const timer = window.setTimeout(
+      () => setSettledId(editionId),
+      PRICE_DELAY_MS
+    );
+    return () => window.clearTimeout(timer);
+  }, [editionId]);
+  if (settledId === editionId) return <EditionPrice editionId={editionId} />;
+  return (
+    <span className="edition-price" data-price-status="checking">
+      Checking prices…
+    </span>
   );
 }
 
