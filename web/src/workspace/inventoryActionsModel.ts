@@ -93,7 +93,11 @@ export function groupRemovalRows(rows: RemovalRow[]) {
 
 /** How a failed Move or Removal is reported and recovered. */
 export type Failure = {
+  /** Shown where the action ran (dialog or selection bar), next to the kept selection. */
   text: string;
+  /** The same report without any word about the selection, for the toast when the refresh after
+   * the failure leaves nothing selected. */
+  toastText: string;
   /** Reload the gallery so the kept selection takes the current versions and quantities. */
   reloadGallery: boolean;
   reloadTree: boolean;
@@ -124,6 +128,7 @@ export function describeFailure(
   if (!(error instanceof MoveError) || error.status >= 500)
     return {
       text: `The ${noun} may not have finished. Try again to check safely; ${kept.toLowerCase()}.`,
+      toastText: `The ${noun} may not have finished. Check your cards before trying again.`,
       reloadGallery: false,
       reloadTree: false,
       retrySame: true,
@@ -132,8 +137,15 @@ export function describeFailure(
   const card =
     sourceId && editionId ? names.card(sourceId, editionId) : "a card";
   const source = sourceId ? names.place(sourceId) : "A source Location";
-  const result = (text: string, reloadGallery = false, reloadTree = false) => ({
-    text,
+  /** `lead` says what happened; `tail` adds the selection advice shown beside the kept selection. */
+  const result = (
+    lead: string,
+    tail: string,
+    reloadGallery = false,
+    reloadTree = false
+  ) => ({
+    text: tail ? `${lead} ${tail}` : lead,
+    toastText: reloadGallery ? `${lead} The cards have been refreshed.` : lead,
     reloadGallery,
     reloadTree,
     retrySame: false,
@@ -141,48 +153,58 @@ export function describeFailure(
   switch (error.code) {
     case "STALE_HOLDING":
       return result(
-        `${card.charAt(0).toUpperCase()}${card.slice(1)} in ${source} changed since you selected it. ${nothing} ${refreshed}`,
+        `${card.charAt(0).toUpperCase()}${card.slice(1)} in ${source} changed since you selected it. ${nothing}`,
+        refreshed,
         true
       );
     case "INSUFFICIENT_QUANTITY":
       return result(
-        `${source} no longer has enough copies of ${card}. ${nothing} ${refreshed}`,
+        `${source} no longer has enough copies of ${card}. ${nothing}`,
+        refreshed,
         true
       );
     case "QUANTITY_OVERFLOW":
       return result(
-        `${destination} can't hold that many copies of ${card}. ${nothing} ${kept}.`
+        `${destination} can't hold that many copies of ${card}. ${nothing}`,
+        `${kept}.`
       );
     case "SAME_LOCATION":
       return result(
-        `Every selected copy is already in ${destination}. ${nothing}`
+        `Every selected copy is already in ${destination}. ${nothing}`,
+        ""
       );
     case "LOCATION_NOT_FOUND":
       if (error.detail.destination_id)
         return result(
-          `${destination} can no longer hold cards. ${nothing} Choose another destination; ${kept.toLowerCase()}.`,
+          `${destination} can no longer hold cards. ${nothing}`,
+          `Choose another destination; ${kept.toLowerCase()}.`,
           false,
           true
         );
       return result(
-        `${source} can no longer hold cards. ${nothing} ${refreshed}`,
+        `${source} can no longer hold cards. ${nothing}`,
+        refreshed,
         true,
         true
       );
     case "MOVE_MANIFEST_EXPIRED":
     case "MOVE_MANIFEST_NOT_FOUND":
       return result(
-        `This ${noun} took too long to prepare. ${nothing} Try again; ${kept.toLowerCase()}.`
+        `This ${noun} took too long to prepare. ${nothing}`,
+        `Try again; ${kept.toLowerCase()}.`
       );
     case "REPLAY_OUTCOME_UNAVAILABLE":
-      return result(
-        `The ${noun} may have already finished, and the cards have been refreshed. Review them before trying again.`,
-        true,
-        true
-      );
+      return {
+        text: `The ${noun} may have already finished, and the cards have been refreshed. Review them before trying again.`,
+        toastText: `The ${noun} may have already finished, and the cards have been refreshed. Review them before trying again.`,
+        reloadGallery: true,
+        reloadTree: true,
+        retrySame: false,
+      };
     default:
       return result(
-        `The ${noun} couldn't be completed. ${nothing} ${refreshed}`,
+        `The ${noun} couldn't be completed. ${nothing}`,
+        refreshed,
         true
       );
   }

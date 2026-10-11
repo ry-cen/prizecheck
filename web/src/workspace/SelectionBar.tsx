@@ -110,7 +110,7 @@ export function SelectionBar({
             type="button"
             aria-expanded={open}
             aria-controls={open ? menuId : undefined}
-            aria-disabled={busy}
+            aria-disabled={busy || undefined}
             onClick={() => {
               if (!busy) setOpen(!open);
             }}
