@@ -388,6 +388,7 @@ test("an open Deck's heading shows its cost and coverage, and other views show n
   await expect(cost).toContainText("Excludes shipping and taxes");
   await expect(cost).not.toContainText("$0.00");
   await expect(exportButton(page)).toBeEnabled();
+  await expect(page.getByText("6 copies · 3 editions")).toBeVisible();
   expect(requested).toHaveLength(1);
 
   await page
@@ -644,4 +645,65 @@ test("the Decks page links each Deck to the workspace, and the link opens that D
   await expect(page).toHaveURL(/\/workspace$/);
   await expect(heading(page)).toHaveText("All owned");
   await expect(costOf(page)).toHaveCount(0);
+});
+
+test("Escape and the backdrop close an export and return focus to Export", async ({
+  page,
+}) => {
+  massWorld(2, { 1: 5001, 2: 5002 });
+  await signIn(page);
+  const deck = await deckWith(page, []);
+  await put(page, deck.id, await massEdition(1), 2);
+  await openInWorkspace(page, deck.name);
+  const dialog = await openExport(page, "TCGplayer Mass Entry");
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(exportButton(page)).toBeFocused();
+
+  await openExport(page, "TCGplayer Mass Entry");
+  const box = (await dialog.boundingBox())!;
+  // Just outside the dialog box, inside the viewport.
+  await page.mouse.click(Math.max(1, box.x / 2), Math.max(1, box.y / 2));
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(exportButton(page)).toBeFocused();
+});
+
+test("a link to a folder opens All owned, and a link to its child Deck opens the Deck with the folder expanded", async ({
+  page,
+}) => {
+  await signIn(page);
+  const folderName = `Folder ${randomUUID().slice(0, 8)}`;
+  const created = await page.request.post(`${ORIGIN}/api/location-tree`, {
+    headers: { origin: ORIGIN },
+    data: {
+      name: folderName,
+      parent_id: null,
+      parent_version: null,
+      idempotency_key: randomUUID(),
+    },
+  });
+  expect(created.status()).toBe(201);
+  const folderId = (await created.json()).location.id as string;
+  const deck = await deckWith(page, [], "Child");
+  await pool.query("UPDATE location SET parent_id=$1 WHERE id=$2", [
+    folderId,
+    deck.id,
+  ]);
+  await pool.query("UPDATE location SET kind='organization' WHERE id=$1", [
+    folderId,
+  ]);
+
+  await page.goto(`${ORIGIN}/workspace?location=${folderId}`);
+  await expect(heading(page)).toHaveText("All owned");
+  await expect(page).toHaveURL(/\/workspace$/);
+
+  await page.goto(`${ORIGIN}/workspace?location=${deck.id}`);
+  await expect(heading(page)).toHaveText(deck.name);
+  const nav = page.getByRole("navigation", { name: "Locations" });
+  await expect(
+    nav.getByRole("button", { name: deck.name, exact: true })
+  ).toHaveAttribute("aria-current", "page");
+  await expect(
+    nav.getByRole("button", { name: folderName, exact: true })
+  ).toHaveAttribute("aria-expanded", "true");
 });

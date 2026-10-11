@@ -277,7 +277,16 @@ function ExportDialog({
     closeRef.current?.focus();
     return () => {
       if (dialog.open) dialog.close();
-      if (opener?.isConnected && opener.getClientRects().length) opener.focus();
+      if (opener?.isConnected && opener.getClientRects().length) {
+        if (opener.disabled) {
+          // A Deck that became empty disables Export: focus the Deck heading instead.
+          const title = document.getElementById("ws-heading");
+          if (title) {
+            title.tabIndex = -1;
+            title.focus();
+          }
+        } else opener.focus();
+      }
     };
     // Opens once per mount; the opener is fixed for the dialog's life.
   }, []);
