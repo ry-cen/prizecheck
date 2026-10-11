@@ -374,7 +374,8 @@ export function Workspace({
     ).find((element) => element.getClientRects().length > 0);
     target?.focus();
   }
-  const dockHasControls = actions.toast !== null || selection.summary.copies > 0;
+  const dockHasControls =
+    actions.toast !== null || selection.summary.copies > 0;
 
   return (
     <div className="ws-root">

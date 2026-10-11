@@ -89,7 +89,7 @@ test("mobile collector can search, Add, Move, Undo, check and publish a physical
       .getByRole("button", { name: "Move selected", exact: true })
       .tap();
     await page
-    // Destinations are labelled by full path, so exact "Unsorted" is the top-level leaf, never "Box / Unsorted".
+      // Destinations are labelled by full path, so exact "Unsorted" is the top-level leaf, never "Box / Unsorted".
       .getByRole("dialog", { name: "Choose Move destination" })
       .getByRole("button", { name: "Unsorted", exact: true })
       .tap();

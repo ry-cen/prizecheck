@@ -152,7 +152,9 @@ export function DeckHeading({ deckId, deckName, inventoryRevision }: Props) {
           headingLevel={2}
         />
       ) : (
-        !failed && <CostSection settled={null} totalCopies="0" headingLevel={2} />
+        !failed && (
+          <CostSection settled={null} totalCopies="0" headingLevel={2} />
+        )
       )}
       <div className="ws-deck-export">
         <button

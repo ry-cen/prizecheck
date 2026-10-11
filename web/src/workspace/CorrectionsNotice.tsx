@@ -35,7 +35,9 @@ export function CorrectionsNotice({
     };
   }, [ownerRevision]);
   const relevant = useMemo(() => {
-    const byEdition = new Map(corrections.map((item) => [item.edition_id, item]));
+    const byEdition = new Map(
+      corrections.map((item) => [item.edition_id, item])
+    );
     return holdings.flatMap((entry) => {
       const correction = byEdition.get(entry.holding.edition_id);
       return correction ? [{ entry, correction }] : [];

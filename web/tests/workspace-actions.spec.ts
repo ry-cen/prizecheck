@@ -766,7 +766,9 @@ test.describe("desktop", () => {
     await page.mouse.down();
     await page.mouse.move(to.x, to.y, { steps: 12 });
     // As in browsers where a click doesn't focus a button: nothing on the bar holds focus when the failure lands.
-    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await page.evaluate(() =>
+      (document.activeElement as HTMLElement | null)?.blur()
+    );
     await page.mouse.up();
     // The refresh empties the selection: the bar and Actions unmount, the failure stays on screen.
     await expect(
