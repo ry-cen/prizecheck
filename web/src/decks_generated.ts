@@ -20,6 +20,8 @@ export type LineOwnership = { edition_id: string; quantity: string; in_deck: str
 export type SurplusHolding = { edition_id: string; quantity: string };
 export type CompetingDeck = { deck_id: string; name: string; in_deck: string; elsewhere: string };
 export type CompetitionWarning = { edition_id: string; spare: string; counted_elsewhere: string; decks: CompetingDeck[] };
+export type AddDeckListPrinting = { printing_id: string; quantity: string; revision: number; idempotency_key: string };
+export type DeckListPrintingResult = { deck_id: string; deck_list: DeckList; edition_id: string; chosen_by: string };
 
 export class DeckError extends Error {
   constructor(public status: number, public code: string) { super(code); }
@@ -52,3 +54,5 @@ export const changeDeckListLine = (deckId: string, editionId: string, body: Chan
   request<DeckListCommandResult>(`${deckListLines(deckId)}/${encodeURIComponent(editionId)}`, 'PATCH', body);
 export const removeDeckListLine = (deckId: string, editionId: string, body: RemoveDeckListLine) =>
   request<DeckListCommandResult>(`${deckListLines(deckId)}/${encodeURIComponent(editionId)}`, 'DELETE', body);
+export const addDeckListPrinting = (deckId: string, body: AddDeckListPrinting) =>
+  request<DeckListPrintingResult>(`/api/decks/${encodeURIComponent(deckId)}/deck-list/printings`, 'POST', body);

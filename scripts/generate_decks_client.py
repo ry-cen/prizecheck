@@ -20,7 +20,8 @@ def ts_type(value):
 schema = app.openapi()["components"]["schemas"]
 names = ("TreeNode", "LocationCommandResult", "CreateDeck", "EditDeck", "DeckIndex", "IdentityCheck", "DeckChecks", "DeckDetail", "DeckEditionQuantity", "DeckContents",
          "DeckListLine", "DeckList", "AddDeckListLine", "ChangeDeckListLine", "RemoveDeckListLine", "DeckListCommandResult",
-         "ElsewhereLocation", "LineOwnership", "SurplusHolding", "CompetingDeck", "CompetitionWarning")
+         "ElsewhereLocation", "LineOwnership", "SurplusHolding", "CompetingDeck", "CompetitionWarning",
+         "AddDeckListPrinting", "DeckListPrintingResult")
 lines = ["// Generated from FastAPI OpenAPI by scripts/generate_decks_client.py. Do not edit."]
 for name in names:
     definition = schema[name]
@@ -59,6 +60,8 @@ export const changeDeckListLine = (deckId: string, editionId: string, body: Chan
   request<DeckListCommandResult>(`${deckListLines(deckId)}/${encodeURIComponent(editionId)}`, 'PATCH', body);
 export const removeDeckListLine = (deckId: string, editionId: string, body: RemoveDeckListLine) =>
   request<DeckListCommandResult>(`${deckListLines(deckId)}/${encodeURIComponent(editionId)}`, 'DELETE', body);
+export const addDeckListPrinting = (deckId: string, body: AddDeckListPrinting) =>
+  request<DeckListPrintingResult>(`/api/decks/${encodeURIComponent(deckId)}/deck-list/printings`, 'POST', body);
 """)
 content = "\n".join(lines)
 target = root / "web/src/decks_generated.ts"

@@ -173,6 +173,12 @@ Isolation. The route never touches a session, the gateway's auth database, the A
 
 Launch gate. Published Deck prices are behind the same physical Edition and quote-variant evidence gate as every other price. This ticket activates no rule and claims no deployed acceptance; the launch checklist stays open.
 
+## Stored reads on write paths (Deck Lists 06)
+
+`prices.stored_edition_quotes` reads what the cache holds now, for a write that chooses by price but displays none: adding a card to a Deck List by its Card Printing (`POST /api/decks/{deck_id}/deck-list/printings`, `app.deck_list_printing`). It labels and validates rows exactly as the Edition route does, but it never admits a refresh, waits for a runner or writes a record, whatever a row's check age: ADR 0006 counts only displayed prices and complete Deck costs as accesses. The route carries no gateway budget. The read bounds its own PostgreSQL and store work to `STORED_READ_SECONDS` (1 s) and runs before the command takes the owner lock, so no inventory lock is held while the store is read. It returns `None` when the reviewed state or the store could not be read; the command then answers 503 `PRICES_UNAVAILABLE` and writes nothing.
+
+Every `status: quote` row is a price, whatever its provider or check age; everything else is unpriced. The command chooses the lowest amount (exact decimal comparison; ties go to catalog order, `descriptor_key, id`), or the first Edition in catalog order when none is priced, and says which in `chosen_by` (`cheapest_price` or `catalog_order`). The line stores only the Edition.
+
 ## Client
 
 `EditionPrice` is mounted for rendered rows only: card detail Editions and catalog result rows, leaf and Deck Holdings rows (including pages added by "More cards"), and Collection rows. It batches the slots of one render into requests of at most 64 ids, shows "Checking prices…" only in the price slot, and gives up after about 3.5 s with a labelled fallback. It renders `display_amount` as given and never shows an amount for a non-quote status.
