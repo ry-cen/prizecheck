@@ -1,10 +1,13 @@
-"""GET /api/decks/{deck_id}/format-checks against Standard (Deck Lists 12, issue #93), through signed HTTP.
+"""GET /api/decks/{deck_id}/format-checks against Standard (Deck Lists 12, issue #93), through signed HTTP. The Expanded
+and Gym Leader Challenge results of the same route are in test_expanded_format_checks.py and test_glc_format_checks.py.
 
 The cards are imported from minimal TCGdex records, so their attributes come from the real derivation rules, and the
 rules are the real Standard rules file. Every check passes an explicit ``as_of`` except the one about the default date.
 """
 from datetime import date, datetime, timedelta, timezone
 from uuid import uuid4
+
+from app.format_evaluator import FORMATS
 
 from test_card_attributes import (ACE_SPEC_ENERGY, ACE_SPEC_SV, ENERGY_SEARCH, ENERGY_SV, RARE_CANDY_ME, SWITCH_ME,
                                   card, edition_of)
@@ -53,7 +56,7 @@ def format_checks(owner, deck, query=""):
 
 
 def standard(owner, deck, as_of):
-    body = format_checks(owner, deck, f"?as_of={as_of}")
+    body = format_checks(owner, deck, f"?format=standard&as_of={as_of}")
     assert [result["format"] for result in body["results"]] == ["standard"]
     return body["results"][0]
 
@@ -74,10 +77,16 @@ def test_a_legal_deck_is_standard_legal():
     body = format_checks(owner, deck, "?as_of=2026-10-11")
     assert body["deck_id"] == deck and body["deck_list_revision"] == 4
     assert isinstance(body["attribute_revision"], int) and body["disclaimer"].startswith("Advisory format checks")
-    assert [{**result, "computed_at": None} for result in body["results"]] == [
-        {"format": "standard", "status": "legal", "issues": [], "rules_version": "1 (2026-10-11)",
-         "evaluated_on": "2026-10-11", "notes": [], "computed_at": None}]
-    assert format_checks(owner, deck, "?format=standard&as_of=2026-10-11") == body
+    assert [result["format"] for result in body["results"]] == list(FORMATS)
+    assert [{**result, "computed_at": None} for result in body["results"][:2]] == [
+        {"format": name, "status": "legal", "issues": [], "rules_version": version, "evaluated_on": "2026-10-11",
+         "notes": [], "computed_at": None} for name, version in (("standard", "1 (2026-10-11)"),
+                                                                  ("expanded", "2 (2026-10-11)"))]
+    # Four Rare Candy and four Switch break Gym Leader Challenge's one-copy rule.
+    assert (body["results"][2]["status"], {issue["code"] for issue in body["results"][2]["issues"]}) == (
+        "not_legal", {"copy_limit"})
+    # One format narrows the response; its saved result is reused.
+    assert format_checks(owner, deck, "?format=standard&as_of=2026-10-11") == {**body, "results": body["results"][:1]}
 
 
 def test_a_deck_over_its_copy_and_ace_spec_limits_is_not_legal():
@@ -124,11 +133,11 @@ def test_checks_default_to_today_and_a_future_date_carries_a_note():
     run(Records(*CARDS))
     owner, deck = deck_with([("me01-125", 4), ("sv02-278", 56)])
     before = datetime.now(timezone.utc).date()
-    [result] = format_checks(owner, deck)["results"]
+    [result] = format_checks(owner, deck, "?format=standard")["results"]
     after = datetime.now(timezone.utc).date()
     assert result["evaluated_on"] in (before.isoformat(), after.isoformat()) and result["notes"] == []
     future = (after + timedelta(days=400)).isoformat()
-    [ahead] = format_checks(owner, deck, f"?as_of={future}")["results"]
+    [ahead] = format_checks(owner, deck, f"?format=standard&as_of={future}")["results"]
     assert ahead["evaluated_on"] == future and ahead["status"] == "legal"
     assert ahead["notes"] == [f"{future} is in the future: rules published after this rules file (2026-10-11) are "
                               "unknown, so this result assumes no later rule changes."]
@@ -144,7 +153,7 @@ def test_format_checks_are_private_and_validate_their_query():
     for user, target in ((other, deck), (owner, binder), (owner, str(uuid4()))):
         response = call("GET", f"/api/decks/{target}/format-checks?as_of=2026-10-11", user)
         assert response.status_code == 404 and response.json()["detail"]["code"] == "DECK_NOT_FOUND"
-    response = call("GET", f"/api/decks/{deck}/format-checks?format=expanded", owner)
+    response = call("GET", f"/api/decks/{deck}/format-checks?format=unlimited", owner)
     assert response.status_code == 422 and response.json()["detail"]["code"] == "UNKNOWN_FORMAT"
     response = call("GET", f"/api/decks/{deck}/format-checks?format={'x' * 100}", owner)
     assert response.status_code == 422 and response.json()["detail"]["code"] == "UNKNOWN_FORMAT"

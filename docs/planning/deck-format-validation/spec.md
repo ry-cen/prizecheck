@@ -295,10 +295,10 @@ Each Deck List is checked against Standard, Expanded and Gym Leader Challenge.
 - **Collector workspace.** The [Collector workspace spec](https://github.com/ry-cen/prizecheck/issues/79) plans atomic multi-source Moves. Pick List "confirm all" gathers copies from several Locations, so it should use that operation if it lands first, or stay compatible with it.
 - **Open rules facts**, to settle when writing the initial rules files:
   - the J mark's exact legal date;
-  - the full Expanded set list;
+  - the full Expanded set list (settled on 2026-10-11 from the Tournament Handbook revision of 2026-09-01; see `api/app/format_rules/expanded.toml`, where Classic Collection sets stay unknown);
   - marks on the physical 30th Celebration and McDonald's 2021–2024 cards;
   - Basic Fairy Energy in Standard;
-  - Expanded legality of SM promos 1–157;
+  - Expanded legality of SM promos 1–157 (still open: the handbook lists SM 158 and higher, but the ban list names Marshadow SM85, so these promos check unknown);
   - ACE SPECs in Mega Evolution sets.
 
   Until a fact is settled, the affected cards yield unknown.

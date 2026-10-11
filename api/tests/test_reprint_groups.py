@@ -4,14 +4,19 @@ checks over signed HTTP.
 The records are minimal copies of real TCGdex English records from the 2026-10-10 crawl, cut down to the fields the
 attribute and rules-text rules read. Records whose ID starts with "fixture-" are made up for one rule.
 """
+from datetime import date
+from uuid import uuid4
+
 from app.catalog import rederive_card_attributes
 from app.main import connect
 from app.reprint_groups import RULES, ReprintTextRules, read_reprint_groups, rules_digest
-from test_card_attributes import ENERGY_SV, SWITCH_ME, card, printing_ids, revision
+from test_card_attributes import ENERGY_SV, SWITCH_ME, card, edition_of, printing_ids, revision
 from test_catalog import reset_catalog
 from test_catalog_metadata import Records
 from test_catalog_reconciliation import run, seed_manual
-from test_deck_format_checks import deck_with, issues, lines, standard
+from test_deck_format_checks import deck_with, format_checks, issues, lines, standard
+from test_deck_lists import add_line
+from test_holdings import call
 
 # Changing a rules-text rule changes this digest: bump ReprintTextRules.VERSION and pin the new pair here.
 PINNED_RULES = (1, "4c41cbb597dd1b97d2f00bef3476b3342a85e43e6f0e8774b721f381444b9d55")
@@ -324,3 +329,26 @@ def test_a_pokemon_with_a_legal_identical_reprint_stays_not_legal():
     assert standard(owner, deck, "2026-10-11")["status"] == "legal"
     owner, deck = deck_with([("svp-101", 4), ("sv02-278", 56)])
     assert standard(owner, deck, "2026-04-09")["status"] == "legal"
+
+
+def test_a_command_adding_a_card_legal_through_its_reprint_group_returns_legal_and_a_read_reuses_it(monkeypatch):
+    """The command path (Deck Lists 17) judges Reprint Groups like the read path, and the read reuses what it saved."""
+    from app import deck_format_checks  # Imported here: the module imports app.main's routers.
+    monkeypatch.setattr(deck_format_checks, "today", lambda: date(2026, 10, 11))
+    reset_catalog()
+    run(Records(*CARDS))
+    owner = f"reprint-command-{uuid4()}"
+    created = call("POST", "/api/decks", owner, {"name": "Reprint deck", "idempotency_key": str(uuid4())})
+    assert created.status_code == 201, created.text
+    deck = created.json()["location"]["id"]
+    assert add_line(owner, deck, edition_of("sv02-278"), "56", 1).status_code == 200
+    # Crown Zenith's Rare Candy has no regulation mark: legal only through me01-125 (mark I) in its Reprint Group.
+    response = add_line(owner, deck, edition_of("swsh12.5-141"), "4", 2)
+    assert response.status_code == 200, response.text
+    checks = response.json()["format_checks"]
+    assert {result["format"]: (result["status"], result["issues"]) for result in checks["results"]} == {
+        "standard": ("legal", []), "expanded": ("legal", []),
+        "glc": ("not_legal", [{"code": "copy_limit", "reason": "more than 1 copy of Rare Candy (4)", "kind": "card",
+                               "effect": "not_legal", "lines": [edition_of("swsh12.5-141")]}])}
+    # The next read reuses every saved result: the same body, computed at the same times.
+    assert format_checks(owner, deck) == checks
