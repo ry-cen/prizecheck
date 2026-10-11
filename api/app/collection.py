@@ -1,4 +1,5 @@
 """Derived Collection totals; no mutable summary inventory."""
+from decimal import Decimal
 from uuid import UUID
 from fastapi import APIRouter, Depends, Query, HTTPException
 from typing import Literal
@@ -47,7 +48,8 @@ def encode_cursor(context, key):
     return base64.urlsafe_b64encode(data+signature).decode().rstrip('=')
 
 
-def decode_cursor(token,context):
+def cursor_key(token,context):
+    """The key of a cursor signed for this context. 409 when only a revision moved; otherwise 400 INVALID_CURSOR."""
     try:
         raw=base64.urlsafe_b64decode(token+'='*(-len(token)%4))
         data,signature=raw[:-32],raw[-32:]
@@ -58,12 +60,19 @@ def decode_cursor(token,context):
         if old[:-2]!=context[:-2]: raise ValueError
         if old[-2]!=context[-2]: fail(409,'INVENTORY_CHANGED')
         if old[-1]!=context[-1]: fail(409,'CATALOG_CHANGED')
-        key=payload['key']
+        return payload['key']
+    except HTTPException: raise
+    except (ValueError,KeyError,TypeError,UnicodeDecodeError): fail(400,'INVALID_CURSOR')
+
+
+def decode_cursor(token,context):
+    """The Collection page cursor: [sort value, Edition id]."""
+    key=cursor_key(token,context)
+    try:
         if not isinstance(key,list) or len(key)!=2: raise ValueError
         UUID(key[1])
         return key
-    except HTTPException: raise
-    except (ValueError,KeyError,TypeError,UnicodeDecodeError): fail(400,'INVALID_CURSOR')
+    except (ValueError,TypeError,AttributeError): fail(400,'INVALID_CURSOR')
 
 
 @router.get('',response_model=CollectionPage)
@@ -192,6 +201,39 @@ def keyset_after(keys):
     return 'WHERE ' + ' OR '.join(terms), columns
 
 
+# A holding cursor carries the last row's sort values, so the next page never re-runs the listing to find
+# its anchor. The signed context binds both revisions, so the values are still current when it returns.
+# The Location path is left out (up to 12 × 120 characters); the next page re-reads it for one Location.
+ANCHOR_TYPES = {'edition_id': UUID, 'location_id': UUID, 'number_missing': bool,
+                'number_value': Decimal, 'edition_total': Decimal}
+
+
+def anchor_columns(keys):
+    """The sort columns a holding cursor carries, in key order."""
+    return [column for column, _ in keys if column != 'location_key']
+
+
+def anchor_json(value):
+    return value if isinstance(value, (bool, str)) else str(value)
+
+
+def anchor_value(column, raw):
+    """One carried sort value, back in the type the listing compares it as. Raises on a wrong shape."""
+    kind = ANCHOR_TYPES.get(column, str)
+    if kind is bool:
+        if not isinstance(raw, bool):
+            raise ValueError
+        return raw
+    if not isinstance(raw, str):
+        raise ValueError
+    if kind is Decimal:
+        value = Decimal(raw)
+        if not value.is_finite():
+            raise ValueError
+        return value
+    return UUID(raw) if kind is UUID else raw
+
+
 class CollectionTotals(BaseModel):
     holdings: int
     editions: int
@@ -221,7 +263,7 @@ def collection_holdings(location_id: UUID | None = None,
                         set_id: str = Query(default='', max_length=80),
                         category: CardCategory | None = None,
                         elemental_type: ElementalType | None = None,
-                        cursor: str | None = Query(default=None, max_length=2048),
+                        cursor: str | None = Query(default=None, max_length=4096),
                         user_id: str = Depends(verified_user)):
     with connect() as conn, conn.transaction():
         # One repeatable snapshot binds rows, totals and both revisions.
@@ -258,17 +300,22 @@ def collection_holdings(location_id: UUID | None = None,
         order = ','.join(f"{column} {'DESC' if descending else 'ASC'}" for column, descending in keys)
         after, after_params = '', []
         if cursor:
-            key = decode_cursor(cursor, context)
+            carried = anchor_columns(keys)
+            key = cursor_key(cursor, context)
             try:
-                anchor_edition, anchor_location = UUID(key[0]), UUID(key[1])
-            except (ValueError, TypeError, AttributeError):
+                if not isinstance(key, list) or len(key) != len(carried):
+                    raise ValueError
+                anchor = {column: anchor_value(column, raw) for column, raw in zip(carried, key)}
+            except (ValueError, TypeError, ArithmeticError):
                 fail(400, 'INVALID_CURSOR')
-            # The cursor names the last Holding sent. Its sort values are re-read in this snapshot;
-            # the revision check above guarantees it still exists unchanged.
-            anchor = conn.execute(f"""{HOLDING_PATHS} SELECT * FROM ({listed}) listed
-              WHERE edition_id=%s AND location_id=%s""", [*base, anchor_edition, anchor_location]).fetchone()
-            if not anchor:
+            # The anchor's Location path, from the Location tree alone; the revision check above guarantees
+            # that Location still exists under the same path.
+            place = conn.execute(f"""{HOLDING_PATHS} SELECT lower(coalesce(lp.path,l.name)) AS location_key
+              FROM location l LEFT JOIN paths lp ON lp.id=l.id WHERE l.owner_id=%s AND l.id=%s""",
+                                 [user_id, user_id, user_id, anchor['location_id']]).fetchone()
+            if not place:
                 fail(409, 'INVENTORY_CHANGED')
+            anchor['location_key'] = place['location_key']
             after, columns = keyset_after(keys)
             after_params = [anchor[column] for column in columns]
         rows = conn.execute(f"""{HOLDING_PATHS} SELECT * FROM ({listed}) listed
@@ -281,7 +328,7 @@ def collection_holdings(location_id: UUID | None = None,
               {HOLDING_FROM}{conditions}""", base).fetchone()
             totals = CollectionTotals(holdings=counted['holdings'], editions=counted['editions'],
                                       copies=str(counted['copies']))
-        next_cursor = (encode_cursor(context, [str(page[-1]['edition_id']), str(page[-1]['location_id'])])
+        next_cursor = (encode_cursor(context, [anchor_json(page[-1][column]) for column in anchor_columns(keys)])
                        if len(rows) > HOLDING_PAGE_SIZE else None)
         return CollectionHoldingPage(holdings=views(page, CollectionHoldingView), owner_revision=revision,
                                      catalog_revision=state['revision'], next_cursor=next_cursor, totals=totals)
@@ -318,3 +365,16 @@ def collection_sets(location_id: UUID | None = None, user_id: str = Depends(veri
                             [user_id, *([location_id] if location_id else [])]).fetchall()
         return CollectionSetList(sets=[CollectionSet(**row) for row in rows],
                                  owner_revision=owner['revision'] if owner else 1)
+
+
+class CollectionRevision(BaseModel):
+    owner_revision: int
+
+
+@router.get('/revision', response_model=CollectionRevision)
+def collection_revision(user_id: str = Depends(verified_user)):
+    """The owner revision alone: one row, no lock. The workspace reads it when a tab regains focus to
+    notice changes made elsewhere."""
+    with connect() as conn:
+        owner = conn.execute('SELECT revision FROM inventory_owner WHERE user_id=%s', (user_id,)).fetchone()
+        return CollectionRevision(owner_revision=owner['revision'] if owner else 1)

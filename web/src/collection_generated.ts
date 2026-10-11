@@ -8,6 +8,7 @@ export type CollectionHoldingView = { edition_id: string; quantity: string; vers
 export type CollectionHoldingPage = { holdings: CollectionHoldingView[]; owner_revision: number; catalog_revision: number; next_cursor?: string | null; totals?: CollectionTotals | null };
 export type CollectionSet = { set_id: string; set_name: string };
 export type CollectionSetList = { sets: CollectionSet[]; owner_revision: number };
+export type CollectionRevision = { owner_revision: number };
 
 export type CollectionFilters = { name?: string; set_id?: string; collector_number?: string; sort?: 'name' | 'quantity'; location_id?: string };
 async function read<T>(path: string): Promise<T> {
@@ -29,4 +30,5 @@ export const getCollectionHoldings = (query: CollectionHoldingQuery={},cursor?: 
   return read<CollectionHoldingPage>(`/api/collection/holdings?${params}`);
 };
 export const getCollectionSets = (locationId?: string) => read<CollectionSetList>(`/api/collection/sets${locationId ? `?location_id=${encodeURIComponent(locationId)}` : ''}`);
+export const getCollectionRevision = () => read<CollectionRevision>('/api/collection/revision');
 
