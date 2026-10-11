@@ -44,7 +44,6 @@ export function Gallery({
   data,
   display,
   caption,
-  locationPath,
   locationName,
   emptyMessage,
   onRetry,
@@ -164,7 +163,7 @@ export function Gallery({
               ? (locationName(holding.location_id) ?? holding.location_name)
               : null
           }
-          path={locationPath(holding.location_id) ?? holding.location_name}
+          path={holding.location_path}
         />
       );
     }

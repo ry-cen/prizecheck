@@ -4,7 +4,8 @@ export type CollectionEntry = { edition_id: string; quantity: string; printing_i
 export type CollectionPage = { entries: CollectionEntry[]; owner_revision: number; catalog_revision: number; next_cursor?: string | null };
 export type Distribution = { holdings: HoldingView[] };
 export type CollectionTotals = { holdings: number; editions: number; copies: string };
-export type CollectionHoldingPage = { holdings: HoldingView[]; owner_revision: number; catalog_revision: number; next_cursor?: string | null; totals?: CollectionTotals | null };
+export type CollectionHoldingView = { edition_id: string; quantity: string; version: number; printing_id: string; printing_name: string; set_id: string; set_name: string; collector_number: string; descriptor: Record<string, unknown>; image_url: string | null; location_id: string; location_name: string; location_path: string };
+export type CollectionHoldingPage = { holdings: CollectionHoldingView[]; owner_revision: number; catalog_revision: number; next_cursor?: string | null; totals?: CollectionTotals | null };
 
 export type CollectionFilters = { name?: string; set_id?: string; collector_number?: string; sort?: 'name' | 'quantity'; location_id?: string };
 async function read<T>(path: string): Promise<T> {

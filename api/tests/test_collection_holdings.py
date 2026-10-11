@@ -64,6 +64,9 @@ def test_holdings_list_by_edition_then_location_path_for_all_owned_and_one_leaf(
                                    ('Raichu', 'Unsorted', '1'), ('Zubat', 'deck one', '2'), ('Zubat', 'alpha', '1')]
     assert [row['location_id'] for row in body['holdings']] == [unsorted, alpha, beta, unsorted, deck, alpha]
     assert [row['edition_id'] for row in body['holdings']] == [abra, raichu, raichu, raichu, zubat, zubat]
+    # Nested Locations list their full path; top-level ones list just their name.
+    assert [row['location_path'] for row in body['holdings']] == [
+        'Unsorted', 'shelf / alpha', 'shelf / beta', 'Unsorted', 'deck one', 'shelf / alpha']
     first = body['holdings'][0]
     assert first['set_name'] == 'Base Set' and first['collector_number'] == '1' and first['image_url'] is None
     assert all(row['version'] >= 1 for row in body['holdings'])

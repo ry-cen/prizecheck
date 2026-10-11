@@ -41,7 +41,7 @@ export function Workspace({ onOpenLocations, onSignOut }: Props) {
   const [createFor, setCreateFor] = useState<string | null | undefined>(
     undefined
   );
-  // Ticket 104 persists these and adds sort and filters.
+  // Presentation only; ticket 104 persists it. Sort, search and filters belong in the gallery query.
   const [display, setDisplay] = useState<DisplayPrefs>(DEFAULT_DISPLAY);
   const drawerOpener = useRef<HTMLButtonElement>(null);
   const drawerRef = useRef<HTMLDivElement>(null);

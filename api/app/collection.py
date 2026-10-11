@@ -135,7 +135,7 @@ HOLDING_PATHS = """WITH RECURSIVE paths AS (
   SELECT child.id,parent.path||' / '||child.name,parent.depth+1
   FROM location child JOIN paths parent ON child.parent_id=parent.id
   WHERE child.owner_id=%s AND parent.depth<32)"""
-HOLDING_COLUMNS = """h.edition_id,h.location_id,l.name AS location_name,h.quantity,h.version,
+HOLDING_COLUMNS = """h.edition_id,h.location_id,l.name AS location_name,coalesce(lp.path,l.name) AS location_path,h.quantity,h.version,
   p.id AS printing_id,coalesce(pd.display_name,ci.display_name) AS printing_name,
   coalesce(pd.set_id,'') AS set_id,coalesce(pd.set_name,'') AS set_name,
   coalesce(pd.collector_number,'') AS collector_number,e.descriptor,pd.image_url,
@@ -158,8 +158,13 @@ class CollectionTotals(BaseModel):
     copies: str
 
 
+class CollectionHoldingView(HoldingView):
+    # Full Location path such as "Shelf / Binder 2"; listing-only, other endpoints keep HoldingView.
+    location_path: str
+
+
 class CollectionHoldingPage(BaseModel):
-    holdings: list[HoldingView]
+    holdings: list[CollectionHoldingView]
     owner_revision: int
     catalog_revision: int
     next_cursor: str | None = None
@@ -214,5 +219,5 @@ def collection_holdings(location_id: UUID | None = None,
                                       copies=str(counted['copies']))
         next_cursor = (encode_cursor(context, [str(page[-1]['edition_id']), str(page[-1]['location_id'])])
                        if len(rows) > HOLDING_PAGE_SIZE else None)
-        return CollectionHoldingPage(holdings=views(page), owner_revision=revision,
+        return CollectionHoldingPage(holdings=views(page, CollectionHoldingView), owner_revision=revision,
                                      catalog_revision=state['revision'], next_cursor=next_cursor, totals=totals)
