@@ -2,7 +2,7 @@
 
 **Label:** wayfinder:map
 
-**Status:** complete planning 2026-10-10; ready for owner-invoked `/to-spec`, then `/to-ticket`
+**Status:** complete planning 2026-10-10; [spec](../spec.md) written; next step is owner-invoked `/to-ticket`
 
 ## Destination
 
