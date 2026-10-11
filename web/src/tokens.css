@@ -164,4 +164,14 @@
   --color-shadow: #00000044;
   --color-shadow-strong: #00000088;
   --color-focus: var(--color-accent);
+
+  --layer-base: 0;
+  --layer-sticky: 10;
+  --layer-drawer: 100;
+  --layer-sheet: 200;
+  --layer-panel: 300;
+  --layer-toast: 400;
+  --layer-modal: 500;
+
+  --layout-inspector-width: 310px;
 }
