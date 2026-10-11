@@ -103,6 +103,11 @@ const editions: Edition[] = [
     art: "sv03/230",
   },
 ];
+type ManageMode =
+  | { kind: "list" }
+  | { kind: "rename"; id: string }
+  | { kind: "move"; id: string; target?: string | null }
+  | { kind: "delete"; id: string };
 type SampleLocation = {
   id: string;
   name: string;
@@ -114,6 +119,8 @@ const initialLocations = (): SampleLocation[] => [
   { id: "decks", name: "Decks", parent: null },
   { id: "binder", name: "151 display binder", parent: "storage" },
   { id: "box", name: "Trade box", parent: "storage" },
+  { id: "bulk2", name: "Bulk box 2", parent: "storage" },
+  { id: "bulk10", name: "Bulk box 10", parent: "storage" },
   { id: "deck", name: "Crimson flight", parent: "decks", deck: true },
   { id: "psychic", name: "Psychic current", parent: "decks", deck: true },
 ];
@@ -210,8 +217,16 @@ const plural = (n: number, one: string, many: string) =>
   `${n} ${n === 1 ? one : many}`;
 export default function MinimalWorkspace() {
   const [locations, setLocations] = useState(initialLocations);
+  // Siblings sort naturally A–Z ("Binder 2" before "Binder 10"); there is no stored order.
   const children = (id: string | null) =>
-    locations.filter((l) => l.parent === id);
+    locations
+      .filter((l) => l.parent === id)
+      .sort((a, b) =>
+        a.name.localeCompare(b.name, undefined, {
+          numeric: true,
+          sensitivity: "base",
+        })
+      );
   const leaves = locations.filter((l) => !children(l.id).length);
   const path = (id: string): string => {
     const location = locations.find((l) => l.id === id);
@@ -238,12 +253,26 @@ export default function MinimalWorkspace() {
   const [hover, setHover] = useState<Tile | null>(null);
   const [selectMode, setSelectMode] = useState(false);
   const [dialog, setDialog] = useState<
-    "move" | "remove" | "detail" | "nav" | "filters" | "create" | null
+    | "move"
+    | "remove"
+    | "detail"
+    | "nav"
+    | "filters"
+    | "create"
+    | "manage"
+    | null
   >(null);
   const [createParent, setCreateParent] = useState<string | null>(null);
   const [locationName, setLocationName] = useState("");
   const [conversion, setConversion] = useState("");
   const [createError, setCreateError] = useState("");
+  const [createFromManage, setCreateFromManage] = useState(false);
+  const [manage, setManage] = useState<ManageMode>({ kind: "list" });
+  const [manageName, setManageName] = useState("");
+  const [manageError, setManageError] = useState("");
+  const draggedLocation = useRef<string | null>(null);
+  const [manageDropHover, setManageDropHover] = useState<string | null>(null);
+  const [draggingLocation, setDraggingLocation] = useState(false);
   const [actions, setActions] = useState(false);
   const [destination, setDestination] = useState("");
   const [destinationQuery, setDestinationQuery] = useState("");
@@ -575,7 +604,8 @@ export default function MinimalWorkspace() {
     setExpanded((current) =>
       current.includes(id) ? current.filter((f) => f !== id) : [...current, id]
     );
-  function openCreate(parent: string | null) {
+  function openCreate(parent: string | null, fromManage = false) {
+    setCreateFromManage(fromManage);
     setCreateParent(parent);
     setLocationName("");
     setConversion("");
@@ -651,8 +681,149 @@ export default function MinimalWorkspace() {
     setExpanded((current) => [...new Set([...current, ...ancestors])]);
     clear();
     setView(id);
-    setDialog(null);
+    setDialog(createFromManage ? "manage" : null);
     setMessage(`Created ${name}.`);
+  }
+  const validName = (name: string) =>
+    !!name && name.length <= 120 && !/[\x00-\x1f]/.test(name);
+  const nameTaken = (name: string, parent: string | null, except?: string) =>
+    children(parent).some(
+      (l) =>
+        l.id !== except && l.name.trim().toLowerCase() === name.toLowerCase()
+    );
+  const subtree = (id: string): string[] => [
+    id,
+    ...children(id).flatMap((c) => subtree(c.id)),
+  ];
+  // Valid new parents for a Location: never itself, a descendant, a Deck, its
+  // current parent, or a parent that would push the subtree past 12 levels.
+  const parentTargets = (id: string): (string | null)[] => {
+    const moving = locations.find((l) => l.id === id);
+    if (!moving) return [];
+    const branch = subtree(id);
+    const height = Math.max(...branch.map((b) => depth(b) - depth(id) + 1));
+    const candidates: (string | null)[] = [
+      null,
+      ...locations
+        .filter((l) => !l.deck && !branch.includes(l.id))
+        .map((l) => l.id),
+    ];
+    return candidates
+      .filter((c) => c !== moving.parent && (c ? depth(c) : 0) + height <= 12)
+      .sort((a, b) =>
+        a === null
+          ? -1
+          : b === null
+            ? 1
+            : path(a).localeCompare(path(b), undefined, {
+                numeric: true,
+                sensitivity: "base",
+              })
+      );
+  };
+  function openManage() {
+    setManage({ kind: "list" });
+    setManageError("");
+    setDialog("manage");
+  }
+  function startManage(mode: ManageMode) {
+    setManageError("");
+    setManageName(
+      mode.kind === "rename"
+        ? locations.find((l) => l.id === mode.id)?.name || ""
+        : ""
+    );
+    setManage(mode);
+  }
+  function renameLocation(id: string) {
+    const location = locations.find((l) => l.id === id);
+    const name = manageName.trim();
+    if (!location) return;
+    if (!validName(name)) {
+      setManageError("Enter a location name of 1–120 characters.");
+      return;
+    }
+    if (nameTaken(name, location.parent, id)) {
+      setManageError(
+        "A location with that name already exists under this parent."
+      );
+      return;
+    }
+    setLocations(locations.map((l) => (l.id === id ? { ...l, name } : l)));
+    setManage({ kind: "list" });
+    setMessage(`Renamed ${location.name} to ${name}.`);
+  }
+  function reparentLocation(id: string, target: string | null) {
+    const location = locations.find((l) => l.id === id);
+    if (!location || !parentTargets(id).includes(target)) {
+      setManageError("That location can't be moved there.");
+      return;
+    }
+    if (nameTaken(location.name, target)) {
+      setManageError(
+        `${target ? path(target) : "Top level"} already has a location named ${location.name}.`
+      );
+      return;
+    }
+    const stocked = !!target && total(target) > 0;
+    if (stocked && location.name.trim().toLowerCase() === "unsorted") {
+      setManageError(
+        "The destination's cards go to a new Unsorted child, so rename this location first."
+      );
+      return;
+    }
+    const next = Object.fromEntries(
+      Object.entries(inventoryRef.current).map(([source, holdings]) => [
+        source,
+        { ...holdings },
+      ])
+    );
+    let moved = locations.map((l) =>
+      l.id === id ? { ...l, parent: target } : l
+    );
+    if (stocked && target) {
+      // A stocked leaf becomes a folder, so its cards move to a new Unsorted child in the same step.
+      const unsorted = crypto.randomUUID();
+      moved = [...moved, { id: unsorted, name: "Unsorted", parent: target }];
+      next[unsorted] = { ...next[target] };
+      next[target] = {};
+      if (view === target) setView(unsorted);
+    }
+    setLocations(moved);
+    inventoryRef.current = next;
+    setInventory(next);
+    const ancestors: string[] = [];
+    for (
+      let a: string | null = target;
+      a;
+      a = locations.find((l) => l.id === a)?.parent || null
+    )
+      ancestors.push(a);
+    setExpanded((current) => [...new Set([...current, ...ancestors])]);
+    setManage({ kind: "list" });
+    setMessage(
+      `Moved ${location.name} to ${target ? path(target) : "Top level"}.`
+    );
+  }
+  function deleteLocation(id: string) {
+    const location = locations.find((l) => l.id === id);
+    if (!location) return;
+    if (children(id).length || total(id) > 0) {
+      setManageError("Only an empty location with no children can be deleted.");
+      return;
+    }
+    if (manageName.trim() !== location.name) {
+      setManageError(`Type ${location.name} to confirm.`);
+      return;
+    }
+    setLocations(locations.filter((l) => l.id !== id));
+    const next = { ...inventoryRef.current };
+    delete next[id];
+    inventoryRef.current = next;
+    setInventory(next);
+    if (view === id) setView("all");
+    setManage({ kind: "list" });
+    setMessage(`Deleted ${location.name}.`);
   }
   const navigation = (picker = false) => {
     const matching = leaves.filter(
@@ -824,13 +995,266 @@ export default function MinimalWorkspace() {
   const locationHeading = (label = true) => (
     <div className="mw-location-heading">
       {label && <span className="mw-section-label">LOCATIONS</span>}
-      <button
-        aria-label="Add location"
-        title="Add top-level location"
-        onClick={() => openCreate(null)}
-      >
-        +
-      </button>
+      <span className="mw-location-tools">
+        <button
+          aria-label="Add location"
+          title="Add top-level location"
+          onClick={() => openCreate(null)}
+        >
+          +
+        </button>
+        <button
+          aria-label="Manage locations"
+          title="Manage locations"
+          onClick={openManage}
+        >
+          ⚙
+        </button>
+      </span>
+    </div>
+  );
+  const kindLabel = (l: SampleLocation) =>
+    l.deck
+      ? `Deck · ${plural(total(l.id), "copy", "copies")}`
+      : children(l.id).length
+        ? "Folder"
+        : plural(total(l.id), "copy", "copies");
+  const manageTarget = manage.kind === "move" ? manage.target : undefined;
+  const managed =
+    manage.kind === "list"
+      ? undefined
+      : locations.find((l) => l.id === manage.id);
+  const locationDragProps = (target: string | null) => ({
+    onDragOver: (e: React.DragEvent) => {
+      const id = draggedLocation.current;
+      if (id && parentTargets(id).includes(target)) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+        setManageDropHover(target ?? "top");
+      }
+    },
+    onDragLeave: () => setManageDropHover(null),
+    onDrop: (e: React.DragEvent) => {
+      const id = draggedLocation.current;
+      e.preventDefault();
+      setManageDropHover(null);
+      if (id && parentTargets(id).includes(target)) {
+        setManageError("");
+        setManage({ kind: "move", id, target });
+      }
+    },
+  });
+  const dropTargetClass = (target: string | null) =>
+    draggingLocation && draggedLocation.current
+      ? parentTargets(draggedLocation.current).includes(target)
+        ? manageDropHover === (target ?? "top")
+          ? "mw-drop-hover"
+          : "mw-drop-valid"
+        : "mw-drop-invalid"
+      : "";
+  const manageRows = (parent: string | null, level: number): React.ReactNode =>
+    children(parent).map((l) => (
+      <li key={l.id}>
+        <div
+          className={`mw-manage-row ${dropTargetClass(l.id)}`}
+          draggable
+          onDragStart={(e) => {
+            draggedLocation.current = l.id;
+            setDraggingLocation(true);
+            e.dataTransfer.effectAllowed = "move";
+            e.dataTransfer.setData("application/x-location", l.id);
+          }}
+          onDragEnd={() => {
+            draggedLocation.current = null;
+            setDraggingLocation(false);
+            setManageDropHover(null);
+          }}
+          {...locationDragProps(l.id)}
+          style={{ paddingLeft: 10 + level * 16 }}
+        >
+          <span className="mw-manage-name">
+            <span title={path(l.id)}>{l.name}</span>
+            <small>{kindLabel(l)}</small>
+          </span>
+          <span className="mw-manage-actions">
+            <button
+              onClick={() => startManage({ kind: "rename", id: l.id })}
+              aria-label={`Rename ${path(l.id)}`}
+            >
+              Rename
+            </button>
+            <button
+              onClick={() => startManage({ kind: "move", id: l.id })}
+              aria-label={`Move ${path(l.id)}`}
+            >
+              Move
+            </button>
+            {l.deck ? (
+              // Decks can't have children; the spacer keeps action columns aligned.
+              <span className="mw-manage-spacer" aria-hidden="true">
+                Add child
+              </span>
+            ) : (
+              <button
+                onClick={() => openCreate(l.id, true)}
+                aria-label={`Add child location to ${path(l.id)}`}
+              >
+                Add child
+              </button>
+            )}
+            <button
+              disabled={children(l.id).length > 0 || total(l.id) > 0}
+              title={
+                children(l.id).length || total(l.id)
+                  ? "Only an empty location with no children can be deleted"
+                  : undefined
+              }
+              onClick={() => startManage({ kind: "delete", id: l.id })}
+              aria-label={`Delete ${path(l.id)}`}
+            >
+              Delete
+            </button>
+          </span>
+        </div>
+        {children(l.id).length > 0 && <ul>{manageRows(l.id, level + 1)}</ul>}
+      </li>
+    ));
+  const managePanel = (
+    <div className="mw-manage">
+      {manage.kind === "list" && (
+        <>
+          <p className="mw-manage-hint">
+            <span className="mw-desktop">
+              Drag a location onto another to nest it, or onto Top level. Every
+              move asks you to confirm.
+            </span>
+            <span className="mw-mobile">
+              Use Move to nest a location or bring it to the top level.
+            </span>
+          </p>
+          <div
+            className={`mw-manage-top mw-desktop ${dropTargetClass(null)}`}
+            {...locationDragProps(null)}
+          >
+            Top level
+          </div>
+          <ul className="mw-manage-tree">{manageRows(null, 0)}</ul>
+          <button className="mw-primary" onClick={() => openCreate(null, true)}>
+            Add top-level location
+          </button>
+        </>
+      )}
+      {manage.kind === "rename" && managed && (
+        <form
+          className="mw-create-form"
+          onSubmit={(e) => {
+            e.preventDefault();
+            renameLocation(managed.id);
+          }}
+        >
+          <p>{path(managed.id)}</p>
+          <label>
+            New name
+            <input
+              data-autofocus
+              value={manageName}
+              onChange={(e) => setManageName(e.target.value)}
+            />
+          </label>
+          <div className="mw-create-actions">
+            <button className="mw-primary">Save name</button>
+            <button type="button" onClick={() => startManage({ kind: "list" })}>
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
+      {manage.kind === "move" && managed && (
+        <div className="mw-create-form">
+          <p>
+            Move <strong>{path(managed.id)}</strong>
+            {children(managed.id).length > 0 &&
+              ` and its ${plural(subtree(managed.id).length - 1, "nested location", "nested locations")}`}
+          </p>
+          {manageTarget === undefined ? (
+            <ul className="mw-manage-targets" aria-label="New parent">
+              {parentTargets(managed.id).map((t) => (
+                <li key={t ?? "top"}>
+                  <button onClick={() => setManage({ ...manage, target: t })}>
+                    {t ? path(t) : "Top level"}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <div className="mw-move-summary">
+              <p>
+                New path:{" "}
+                <strong>
+                  {manageTarget ? `${path(manageTarget)} / ` : ""}
+                  {managed.name}
+                </strong>
+              </p>
+              {manageTarget && total(manageTarget) > 0 && (
+                <p className="mw-manage-warning">
+                  {locations.find((l) => l.id === manageTarget)?.name} holds{" "}
+                  {plural(total(manageTarget), "copy", "copies")}. They move
+                  into a new Unsorted child so that every card stays in a
+                  storage location.
+                </p>
+              )}
+              <div className="mw-create-actions">
+                <button
+                  className="mw-primary"
+                  data-autofocus
+                  onClick={() => reparentLocation(managed.id, manageTarget)}
+                >
+                  Move here
+                </button>
+                <button
+                  onClick={() => setManage({ kind: "move", id: managed.id })}
+                >
+                  Choose another
+                </button>
+              </div>
+            </div>
+          )}
+          <button onClick={() => startManage({ kind: "list" })}>Cancel</button>
+        </div>
+      )}
+      {manage.kind === "delete" && managed && (
+        <form
+          className="mw-create-form"
+          onSubmit={(e) => {
+            e.preventDefault();
+            deleteLocation(managed.id);
+          }}
+        >
+          <p>
+            Delete <strong>{path(managed.id)}</strong>? It is empty and has no
+            children.
+          </p>
+          <label>
+            Type {managed.name} to confirm
+            <input
+              data-autofocus
+              value={manageName}
+              onChange={(e) => setManageName(e.target.value)}
+            />
+          </label>
+          <div className="mw-create-actions">
+            <button className="mw-danger">Delete location</button>
+            <button type="button" onClick={() => startManage({ kind: "list" })}>
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
+      {manageError && (
+        <p className="mw-create-error" role="alert">
+          {manageError}
+        </p>
+      )}
     </div>
   );
   const search = (className: string) => (
@@ -895,7 +1319,7 @@ export default function MinimalWorkspace() {
             Filters &amp; display{setFilter || category || element ? " •" : ""}
           </button>
           <span className="mw-brand mw-desktop">
-            ◈ <b>CARD ATLAS</b>
+            ✦ <b>PRIZECHECK</b>
           </span>
           <small>Collection</small>
           <span className="mw-header-right mw-desktop">
@@ -922,7 +1346,69 @@ export default function MinimalWorkspace() {
             {locationHeading()}
             {navigation()}
           </aside>
-          <main className="mw-main">
+          <main
+            className="mw-main"
+            onPointerDown={(e) => {
+              // Any empty part of the gallery area starts a marquee; controls and panels don't.
+              if (
+                e.button !== 0 ||
+                e.pointerType === "touch" ||
+                !grid.current ||
+                (e.target as HTMLElement).closest(
+                  "button, input, select, textarea, label, a, .mw-heading, .mw-toolbar, .mw-filters, .mw-inspection, .mw-selection-bar, .mw-toast"
+                )
+              )
+                return;
+              const bounds = grid.current.getBoundingClientRect();
+              const x = e.clientX - bounds.left;
+              const y = e.clientY - bounds.top;
+              const base =
+                e.ctrlKey || e.metaKey ? [...selectionRef.current] : [];
+              marquee.current = { x, y, base };
+              updateSelection(base);
+              setRectangle({ x, y, width: 0, height: 0 });
+              e.currentTarget.setPointerCapture(e.pointerId);
+              e.preventDefault();
+            }}
+            onPointerMove={(e) => {
+              const start = marquee.current;
+              if (!start || !grid.current) return;
+              const bounds = grid.current.getBoundingClientRect();
+              const x = e.clientX - bounds.left;
+              const y = e.clientY - bounds.top;
+              const box = {
+                x: Math.min(start.x, x),
+                y: Math.min(start.y, y),
+                width: Math.abs(x - start.x),
+                height: Math.abs(y - start.y),
+              };
+              setRectangle(box);
+              const hits = Array.from(
+                grid.current.querySelectorAll<HTMLElement>("[data-tile-key]")
+              )
+                .filter((node) => {
+                  const rect = node.getBoundingClientRect();
+                  return (
+                    rect.left < bounds.left + box.x + box.width &&
+                    rect.right > bounds.left + box.x &&
+                    rect.top < bounds.top + box.y + box.height &&
+                    rect.bottom > bounds.top + box.y
+                  );
+                })
+                .map((node) => node.dataset.tileKey!);
+              updateSelection([...new Set([...start.base, ...hits])]);
+            }}
+            onPointerUp={(e) => {
+              marquee.current = null;
+              setRectangle(null);
+              if (e.currentTarget.hasPointerCapture(e.pointerId))
+                e.currentTarget.releasePointerCapture(e.pointerId);
+            }}
+            onPointerCancel={() => {
+              marquee.current = null;
+              setRectangle(null);
+            }}
+          >
             <div className="mw-heading">
               <h1>
                 {view === "all"
@@ -967,64 +1453,6 @@ export default function MinimalWorkspace() {
                 <div
                   ref={grid}
                   className={`mw-grid mw-size-${prefs.size} ${selectMode ? "mw-select-mode" : ""}`}
-                  onPointerDown={(e) => {
-                    if (
-                      e.button !== 0 ||
-                      e.pointerType === "touch" ||
-                      (e.target as HTMLElement).closest("button")
-                    )
-                      return;
-                    const bounds = e.currentTarget.getBoundingClientRect();
-                    const x = e.clientX - bounds.left;
-                    const y = e.clientY - bounds.top;
-                    const base =
-                      e.ctrlKey || e.metaKey ? [...selectionRef.current] : [];
-                    marquee.current = { x, y, base };
-                    updateSelection(base);
-                    setRectangle({ x, y, width: 0, height: 0 });
-                    e.currentTarget.setPointerCapture(e.pointerId);
-                    e.preventDefault();
-                  }}
-                  onPointerMove={(e) => {
-                    const start = marquee.current;
-                    if (!start) return;
-                    const bounds = e.currentTarget.getBoundingClientRect();
-                    const x = e.clientX - bounds.left;
-                    const y = e.clientY - bounds.top;
-                    const box = {
-                      x: Math.min(start.x, x),
-                      y: Math.min(start.y, y),
-                      width: Math.abs(x - start.x),
-                      height: Math.abs(y - start.y),
-                    };
-                    setRectangle(box);
-                    const hits = Array.from(
-                      e.currentTarget.querySelectorAll<HTMLElement>(
-                        "[data-tile-key]"
-                      )
-                    )
-                      .filter((node) => {
-                        const rect = node.getBoundingClientRect();
-                        return (
-                          rect.left < bounds.left + box.x + box.width &&
-                          rect.right > bounds.left + box.x &&
-                          rect.top < bounds.top + box.y + box.height &&
-                          rect.bottom > bounds.top + box.y
-                        );
-                      })
-                      .map((node) => node.dataset.tileKey!);
-                    updateSelection([...new Set([...start.base, ...hits])]);
-                  }}
-                  onPointerUp={(e) => {
-                    marquee.current = null;
-                    setRectangle(null);
-                    if (e.currentTarget.hasPointerCapture(e.pointerId))
-                      e.currentTarget.releasePointerCapture(e.pointerId);
-                  }}
-                  onPointerCancel={() => {
-                    marquee.current = null;
-                    setRectangle(null);
-                  }}
                 >
                   {tiles.map((tile) => (
                     <button
@@ -1244,7 +1672,9 @@ export default function MinimalWorkspace() {
                       ? "Filters & display"
                       : dialog === "create"
                         ? "Add location"
-                        : "Card details"
+                        : dialog === "manage"
+                          ? "Manage locations"
+                          : "Card details"
             }
             ref={dialogRef}
             onClick={(e) => e.stopPropagation()}
@@ -1261,7 +1691,9 @@ export default function MinimalWorkspace() {
                         ? "Filters & display"
                         : dialog === "create"
                           ? "Add location"
-                          : "Card details"}
+                          : dialog === "manage"
+                            ? "Manage locations"
+                            : "Card details"}
               </h2>
               <button onClick={() => setDialog(null)} aria-label="Close dialog">
                 ✕
@@ -1329,6 +1761,7 @@ export default function MinimalWorkspace() {
             {dialog === "detail" && (
               <div className="mw-sheet-details">{details}</div>
             )}
+            {dialog === "manage" && managePanel}
             {dialog === "nav" && (
               <>
                 {locationHeading(false)}
@@ -1420,7 +1853,12 @@ export default function MinimalWorkspace() {
                   </p>
                 )}
                 <div className="mw-create-actions">
-                  <button type="button" onClick={() => setDialog(null)}>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setDialog(createFromManage ? "manage" : null)
+                    }
+                  >
                     Cancel
                   </button>
                   <button className="mw-primary" type="submit">

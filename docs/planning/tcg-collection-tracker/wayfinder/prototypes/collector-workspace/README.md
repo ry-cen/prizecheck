@@ -77,6 +77,56 @@ The owner confirmed the toolbar, drawer, name-visibility, source-caption, and Lo
 - Counts read "1 editions". Counts now use singular forms in the heading, selection bar, drag badge, inspector, Move and Removal dialogs and result messages, for example "1 selected · 1 edition · 1 location".
 - Checked with `npx tsc`, `npm run build` (no prototype markers in `dist/`) and the browser at 800 px and 375×812 with sample data.
 
+## Full-width gallery — 2026-10-11
+
+The app-wide stylesheet caps every `main` element at 900 px and centres it. The prototype's gallery inherited that cap, so wide screens showed a narrow centred column (2 small tiles per row at 1920 px). The gallery now overrides the cap and fills the width beside the sidebar, and its side padding shrinks on large screens: 30 px up to 1549 px, 20 px from 1550 px, and 16 px from 2200 px. Cards per row follow the available width at the same tile sizes. Production work must not inherit the global cap either.
+
+Measured with small cards and sample data, with no horizontal overflow at any size:
+
+| Viewport | Side padding | Tiles per row |
+| --- | --- | --- |
+| 375×812 | 14 px | 3 |
+| 1024×768 | 20 px | 4 |
+| 1280×860 | 30 px | 6 |
+| 1920×1080 | 20 px | 11 |
+| 2560×1440 | 16 px | 16 |
+
+Screenshot: [1920 px gallery](full-width-gallery-1920.jpg). Desktop checks recorded earlier in this README ran with the cap in place, so they measured a narrower gallery.
+
+## Larger marquee area — 2026-10-11
+
+At the owner's request, a marquee can start from any empty part of the gallery area, not only the gaps inside the grid: the side margins, the gap beside the inspector and the space below the tiles. The grid's minimum height grows to the viewport. Presses on tiles, controls, the heading, toolbar, filters, inspector, selection bar or toast don't start a marquee. Hit-testing is unchanged and measured against the grid.
+
+Checked at 1280×860 with real mouse drags: a drag starting in the left margin selected 4 tiles across 3 locations, and a reverse drag starting in the gap beside the inspector selected 2 tiles. A press on the toolbar left the selection unchanged, and a plain click on an unselected tile still selected exactly one.
+
+## Manage locations panel — 2026-10-10
+
+Supports [Decide drag and Location ordering](https://github.com/ry-cen/tcg-tracker/issues/46). The owner asked to see this panel before the decision is accepted. **Owner review pending.**
+
+**What it shows**
+
+- A settings gear next to the root plus beside LOCATIONS opens **Manage locations**. It is a centred panel on desktop and a full-screen sheet on mobile, where the gear is also in the Location drawer at 44×44 px.
+- The panel lists the full tree. Each row has Rename, Move, Add child (not on Decks) and Delete. Delete is enabled only for an empty location with no children and asks you to type its name.
+- Reparenting on desktop: drag a row onto another row to nest it, or onto the Top level zone. Valid targets are outlined; itself, its descendants, Decks and its current parent are dimmed and refuse the drop. Every drop opens a confirmation with the new path. A stocked Storage Leaf target explains that its cards move into a new Unsorted child.
+- Move is the non-drag path, on desktop and the only one on mobile. It lists valid parents by full path (Top level first), then shows the same confirmation.
+- Decks can be renamed and moved but never become parents. Add child from the panel uses the existing create form with the parent preselected, and Cancel or Create returns to the panel.
+- Siblings sort naturally A–Z everywhere (sample Bulk box 2 before Bulk box 10). There is no stored order.
+- No Location Undo. Card Undo records invalidated by a conversion keep the existing "Undo unavailable" behaviour.
+
+**Measured — passed** (sample data, scripted DOM events)
+
+- `npx tsc` and `npm run build` passed; `dist/` contains no panel markers.
+- Desktop 1280×860:
+  - Move Trade box → 151 display binder confirmed the 22-copy conversion; the binder became a folder containing Trade box and Unsorted (22).
+  - Rename to a case-insensitive sibling duplicate was rejected, then a rename succeeded.
+  - Delete rejected a wrong typed name, then deleted an empty leaf. Delete was disabled on stocked and parent rows.
+  - Dragging Bulk box 10 marked Decks and Top level valid and Crimson flight and itself invalid. A Deck refused dragover; a drop on Decks confirmed and moved it, and a drop on Top level showed the top-level path.
+  - Crimson flight's Move targets excluded Decks.
+- Mobile 375×812: the panel fills the screen with no horizontal overflow; the drag hint and Top level zone are hidden; all action buttons are at least 44 px tall. Move Crimson flight → Top level worked. Add child from the panel preselected its parent, and Cancel returned to the panel.
+- Screenshots: [desktop panel](manage-locations-desktop.jpg), [Move confirmation with conversion](manage-locations-move-confirm.jpg), [mobile sheet](manage-locations-mobile.jpg).
+
+**Not verified**: native drag with a real mouse (synthetic drag events only), stale-version recovery (the sample has no server), screen reader output.
+
 ## Historical evidence
 
 Variants A, B, and C, including the vertical-fan screenshots and selection checks, remain useful historical evidence. The fan-based Variant B interaction is superseded. The prior checks used sample data only and did not validate a production multi-source transaction, persistence, or full accessibility.
