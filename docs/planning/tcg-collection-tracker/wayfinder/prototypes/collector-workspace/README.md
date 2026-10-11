@@ -2,15 +2,9 @@
 
 Supports [Prototype collector workspace](https://github.com/ry-cen/prizecheck/issues/45). This is development-only design evidence, not production behavior or an accepted backend contract.
 
-## Run
+## Archived
 
-From the isolated UI worktree root on `feature/ui-workspace-redesign`:
-
-```sh
-npm run dev:web -- --port 5184 --strictPort
-```
-
-Open [the preferred prototype](http://127.0.0.1:5184/locations?prototype=collector&variant=A). The preview uses in-memory samples; it requires no backend or sign-in.
+The prototype code (`web/src/prototypes/collector-workspace/`) and its `/locations?prototype=collector` preview were removed when the production workspace replaced the Locations view ([#114](https://github.com/ry-cen/prizecheck/issues/114)). The notes and screenshots below stay as design evidence for the spec and resolutions 27 and 28. The code is last present at commit `206d18c`; run it from a checkout of that commit with `npm run dev:web -- --port 5184 --strictPort`, then open `/locations?prototype=collector&variant=A`.
 
 ## Current direction
 
