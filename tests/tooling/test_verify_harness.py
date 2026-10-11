@@ -1,12 +1,15 @@
-"""Pure parts of the verification harness: scripts/verify.py, run_pytest.py, run_playwright.py, verify_resources.py and
-verify_report.py. Nothing here needs a database, a browser or a network."""
+"""Pure parts of the verification harness: scripts/verify.py, run_pytest.py, run_playwright.py, verify_resources.py,
+verify_report.py, verify_discard.py and verify_reaper.py. Nothing here needs a database, a browser or a network;
+api/tests/test_verify_reaper.py checks the reaper against PostgreSQL."""
 import importlib.util
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 SCRIPTS = Path(__file__).resolve().parents[2] / 'scripts'
 sys.path.insert(0, str(SCRIPTS))
@@ -25,6 +28,7 @@ run_playwright = load('run_playwright')
 verify_resources = load('verify_resources')
 verify_report = load('verify_report')
 verify_discard = load('verify_discard')
+verify_reaper = load('verify_reaper')
 ADMIN = 'postgresql://tcg@127.0.0.1:5432/postgres'
 
 
@@ -247,6 +251,115 @@ class VerifyReportTest(unittest.TestCase):
             totals = verify_report.summarize(run)
             self.assertEqual(totals['vitest'], {'passed': 1, 'failed': 0, 'errors': 0, 'skipped': 2})
             self.assertIn('vitest: 1 passed, 0 failed, 0 errors, 2 skipped (one run)', (run / 'verification.log').read_text())
+
+
+class VerifyReaperTest(unittest.TestCase):
+    RUN = '20261010T195314Z-28c6ae5f'
+    BASE = 'tcg_verify_0123456789abcdef'
+    HOST = 'host-a'
+    NOW = 1_000_000.0
+
+    def owner(self, **changes):
+        values = dict(run=self.RUN, host=self.HOST, pid=4242, started='Sat Oct 10 19:53:14 2026', created=self.NOW - 3600)
+        values.update(changes)
+        return verify_reaper.Owner(**values)
+
+    def member(self, name=None, owner=None, sessions=0, comment=None):
+        if owner is not None:
+            comment = verify_reaper.owner_record(owner)
+        return verify_reaper.Member(name or self.BASE, comment, sessions)
+
+    def decide(self, members, probe=lambda pid: None, **options):
+        return verify_reaper.decide(members, host=self.HOST, now=self.NOW, probe=probe, **options)
+
+    def test_only_names_verify_makes_are_grouped_by_run(self):
+        names = verify.database_names(self.BASE, 3, 3)
+        runs, strays = verify_reaper.group_candidates([verify_reaper.Member(name, None, 0) for name in names])
+        self.assertEqual(list(runs), [self.BASE])
+        self.assertEqual([member.name for member in runs[self.BASE]], names)
+        self.assertEqual(strays, [])
+        others = ['tcg_verify_', 'tcg_verify_0123456789abcde', 'tcg_verify_0123456789ABCDEF', self.BASE + '_x',
+                  self.BASE + '_gw', self.BASE + '_s', 'tcg_release_0123456789abcdef', 'tcg_prices_' + 'a' * 32]
+        runs, strays = verify_reaper.group_candidates([verify_reaper.Member(name, None, 0) for name in others])
+        self.assertEqual((runs, [member.name for member in strays]), ({}, others))
+
+    def test_owner_records_round_trip_and_foreign_comments_are_refused(self):
+        owner = self.owner()
+        self.assertEqual(verify_reaper.parse_owner(verify_reaper.owner_record(owner)), owner)
+        self.assertEqual(verify_reaper.parse_owner(verify_reaper.owner_record(self.owner(started=None))), self.owner(started=None))
+        record = json.loads(verify_reaper.owner_record(owner))
+        for changes in ({'tool': 'other'}, {'version': 2}, {'run': 'x'}, {'host': ''}, {'pid': True}, {'pid': 1},
+                        {'pid': '4242'}, {'started': ''}, {'created': 'now'}, {'created': float('nan')}):
+            self.assertIsNone(verify_reaper.parse_owner(json.dumps({**record, **changes})), changes)
+        for comment in (None, '', 'a note', '[]', '{}'):
+            self.assertIsNone(verify_reaper.parse_owner(comment), comment)
+
+    def test_owner_state_is_dead_only_for_a_missing_or_reused_pid(self):
+        owner = self.owner()
+        self.assertEqual(verify_reaper.owner_state(owner, lambda pid: None), 'dead')
+        self.assertEqual(verify_reaper.owner_state(owner, lambda pid: 'Sun Oct 11 04:00:00 2026'), 'dead')
+        self.assertEqual(verify_reaper.owner_state(owner, lambda pid: owner.started), 'alive')
+        self.assertEqual(verify_reaper.owner_state(self.owner(started=None), lambda pid: 'any'), 'alive')
+        self.assertEqual(verify_reaper.owner_state(owner, lambda pid: verify_reaper.UNKNOWN), 'unknown')
+
+    def test_a_dead_owners_unused_old_run_is_dropped_whole(self):
+        verdict = self.decide([self.member(owner=self.owner()), self.member(self.BASE + '_gw0')])
+        self.assertTrue(verdict.drop)
+        self.assertIn('has exited', verdict.reason)
+
+    def test_every_other_run_is_kept(self):
+        dead = self.owner()
+        kept = {
+            'session': [self.member(owner=dead), self.member(self.BASE + '_gw0', sessions=1)],
+            'untagged': [self.member(), self.member(self.BASE + '_gw0')],
+            'foreign comment': [self.member(owner=dead), self.member(self.BASE + '_s1', comment='a note')],
+            'disagreeing owners': [self.member(owner=dead), self.member(self.BASE + '_gw0', owner=self.owner(pid=4343))],
+            'other host': [self.member(owner=self.owner(host='host-b'))],
+            'young': [self.member(owner=self.owner(created=self.NOW - 30))],
+            'future': [self.member(owner=self.owner(created=self.NOW + 600))],
+        }
+        for case, members in kept.items():
+            self.assertFalse(self.decide(members).drop, case)
+        self.assertFalse(self.decide([self.member(owner=dead)], probe=lambda pid: dead.started).drop)
+        self.assertFalse(self.decide([self.member(owner=dead)], probe=lambda pid: verify_reaper.UNKNOWN).drop)
+        self.assertTrue(self.decide([self.member(owner=self.owner(created=self.NOW - 30))], min_age=10).drop)
+
+    def test_drop_never_forces_and_a_late_session_keeps_the_database(self):
+        class Connection:
+            def __init__(self, error=None):
+                self.error, self.statements = error, []
+
+            def execute(self, statement, *args):
+                self.statements.append(statement)
+                if self.error:
+                    raise self.error
+
+        connection = Connection()
+        self.assertIsNone(verify_reaper.drop_if_unused(connection, self.BASE))
+        shown = repr(connection.statements[0])
+        self.assertIn('DROP DATABASE IF EXISTS', shown)
+        self.assertNotIn('FORCE', shown)
+        self.assertIn('session connected', verify_reaper.drop_if_unused(Connection(verify_reaper.psycopg.errors.ObjectInUse()), self.BASE))
+        self.assertIn('LockNotAvailable', verify_reaper.drop_if_unused(Connection(verify_reaper.psycopg.errors.LockNotAvailable()), self.BASE))
+
+    def test_ps_tells_a_running_process_from_an_exited_one(self):
+        started = verify_reaper.process_started(os.getpid())
+        self.assertIsInstance(started, str)
+        self.assertEqual(verify_reaper.process_started(os.getpid()), started)
+        child = subprocess.Popen([sys.executable, '-c', 'pass'])
+        child.wait()
+        self.assertIsNone(verify_reaper.process_started(child.pid))
+
+    def test_host_identity_is_stable_and_hashed(self):
+        identity = verify_reaper.host_identity()
+        self.assertRegex(identity, r'^[0-9a-f]{16}$')
+        self.assertEqual(verify_reaper.host_identity.__wrapped__(), identity)
+
+    def test_an_unreachable_server_is_reported_not_raised(self):
+        with mock.patch.object(verify_reaper.psycopg, 'connect', side_effect=verify_reaper.psycopg.OperationalError('refused')):
+            lines, dropped = verify_reaper.reap(ADMIN)
+        self.assertEqual(dropped, [])
+        self.assertEqual(lines, ['== reaper: skipped: database error (OperationalError)'])
 
 
 if __name__ == '__main__':

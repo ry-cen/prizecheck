@@ -16,6 +16,7 @@ import psycopg
 from psycopg import sql
 from psycopg.conninfo import conninfo_to_dict
 
+from verify_reaper import create_databases, current_owner, reap
 from verify_report import summarize
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -137,6 +138,11 @@ def main(argv=None):
     ports = []
     reservations = []
     try:
+        # Before this run creates anything: drop the databases of verification runs that were killed (scripts/verify_reaper.py).
+        reaper, reaped = reap(args.admin_url)
+        for line in reaper:
+            print(line, flush=True)
+        (artifacts/'verification.log').write_text(''.join(line + '\n' for line in reaper))
         for _ in range(port_count(browser_workers)):
             sock = socket.socket()
             sock.bind(('127.0.0.1', 0))
@@ -169,14 +175,12 @@ def main(argv=None):
               VERIFY_PYTEST_DATABASE_URLS=json.dumps(workers), VERIFY_EXTRA_STACKS=json.dumps(stacks),
               TEST_LOG_DIR=str(artifacts), TEST_BROWSER_OUTPUT=str(artifacts/'browser'), RELEASE_TEST_HISTORY_ROOT=str(ROOT))
             with psycopg.connect(args.admin_url, autocommit=True) as conn:
-                for database in names:
-                    conn.execute(sql.SQL('CREATE DATABASE {}').format(sql.Identifier(database)))
-                    created.append(database)
+                create_databases(conn, names, current_owner(identifier), created)
             for sock in reservations:
                 sock.close()
             skews = {'start': database_skew(args.admin_url)}
             wall, steady = time.time(), time.monotonic()
-            with (artifacts/'verification.log').open('w') as log:
+            with (artifacts/'verification.log').open('a') as log:
                 result = subprocess.run(gate_command(args.selectors), cwd=checkout, env=env, stdout=log, stderr=subprocess.STDOUT).returncode
             suspended = round(max(0.0, (time.time() - wall) - (time.monotonic() - steady)), 1)
             skews['end'] = database_skew(args.admin_url)
@@ -193,7 +197,8 @@ def main(argv=None):
                 'run': identifier, 'exit_code': result, 'suite': args.suite, 'selectors': args.selectors,
                 'browser_args': args.selectors if args.suite == 'browser' else [], 'fast': args.fast,
                 'pytest_workers': pytest_workers, 'browser_workers': browser_workers, 'ports': ports, 'databases': names,
-                'database_removed': False, 'timings': timings, 'host_suspended_seconds': suspended,
+                'database_removed': False, 'reaper': reaper, 'reaped_databases': reaped, 'timings': timings,
+                'host_suspended_seconds': suspended,
                 'database_clock_skew_seconds': skews, 'clock_warnings': warnings}))
     finally:
         for sock in reservations:
