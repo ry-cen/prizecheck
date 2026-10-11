@@ -358,6 +358,7 @@ promote({'card-1': 'Pikachu'})`,
     await expect(selection.getByRole("status")).toContainText(
       "Editions refreshed"
     );
+    await expect(selection).toContainText("3 copies · 1 Editions selected");
     await expect(stack).toContainText("×4");
 
     // Removal asks first; Cancel leaves the count alone. The refresh keeps the 3 selected copies of the 4 now held, so Confirm removes 3 and Undo restores them.
@@ -367,6 +368,9 @@ promote({'card-1': 'Pikachu'})`,
     const confirmation = page.getByRole("dialog", {
       name: "Confirm Inventory Removal",
     });
+    await expect(confirmation).toContainText(
+      "Remove 3 copies from your tracked Collection?"
+    );
     await confirmation.getByRole("button", { name: "Cancel removal" }).click();
     await expect(stack).toContainText("×4");
     await selection
