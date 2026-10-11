@@ -4,6 +4,7 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
+import { listHoldings } from "./support/deck-list";
 
 test("owner resolves source drift with evidence and a fresh action-bound email code", async ({
   page,
@@ -225,6 +226,8 @@ run(MetadataSource({'card-1': 'Correction Pikachu'}))`,
         })
       ).status()
     ).toBe(200);
+    // Publishing freezes the Deck List; list the cards just added.
+    await listHoldings(pool, `Published ${location}`, 3);
     const published = await page.request.post(
       gateway(`/api/decks/${deckId}/publication`),
       {
@@ -421,6 +424,7 @@ print(json.dumps({'edition':rows[keys[0]].value,'printing':rows[keys[1]].value})
         })
       ).status()
     ).toBe(200);
+    await listHoldings(pool, `Published ${location}`, 5);
     expect(await (await page.request.get(publicPath)).json()).toEqual(snapshot);
     // Durable recovery: a failed object write is queued with its references and replays exactly.
     const republishKey = randomUUID();

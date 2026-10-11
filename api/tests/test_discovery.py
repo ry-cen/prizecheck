@@ -2,9 +2,9 @@
 from uuid import uuid4
 import os
 import pytest
-from test_holdings import fixture, call, add, client
+from test_holdings import fixture, call, client
 from test_decks import create
-from test_publications import command, public_objects
+from test_publications import command, list_cards, public_objects
 
 
 def visibility(owner, deck, value, key=None):
@@ -15,7 +15,7 @@ def visibility(owner, deck, value, key=None):
 def test_listing_changes_next_public_request_without_mutating_snapshot(monkeypatch):
     owner, other, _, _, edition, _ = fixture()
     deck = create(owner, 'Secret private box').json()['location']['id']
-    add(owner, deck, edition, '59')
+    list_cards(owner, deck, {edition: 59})
     token = command(owner, deck, title='Friends & rivals').json()['token']
     path = f'/api/public/decks/{token}'
     before = client.get(path).json()
@@ -36,7 +36,7 @@ def test_listing_changes_next_public_request_without_mutating_snapshot(monkeypat
     assert client.get('/api/public/discovery?q=Secret').json()['decks'] == []
     sitemap = client.get('/api/public/sitemap.xml').text
     assert f'/published/{token}' in sitemap and owner not in sitemap and deck not in sitemap
-    add(owner, deck, edition, '2')
+    list_cards(owner, deck, {edition: 61})
     assert client.get('/api/public/discovery').json()['decks'][0]['total'] == '59'
     with monkeypatch.context() as patch:
         patch.setenv('DATABASE_URL', 'postgresql://unreachable:1/private')
@@ -55,7 +55,7 @@ def test_discovery_pages_are_bounded_recent_and_revision_query_bound():
     decks = []
     for index in range(32):
         deck = create(owner, f'Private {index}').json()['location']['id']
-        add(owner, deck, edition, '1')
+        list_cards(owner, deck, {edition: 1})
         token = command(owner, deck, title=f'Public {index:02}').json()['token']
         assert visibility(owner, deck, 'listed').status_code == 200
         decks.append((deck,token))
@@ -77,7 +77,7 @@ def test_discovery_pages_are_bounded_recent_and_revision_query_bound():
 def test_failed_visibility_object_write_is_atomic_and_idempotently_recoverable(monkeypatch):
     owner, _, _, _, edition, _ = fixture()
     deck = create(owner).json()['location']['id']
-    add(owner, deck, edition, '1')
+    list_cards(owner, deck, {edition: 1})
     token = command(owner, deck).json()['token']
     key = uuid4()
     with monkeypatch.context() as patch:

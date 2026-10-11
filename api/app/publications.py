@@ -34,6 +34,9 @@ class PublicEdition(PublicModel):
     quantity: str
     edition_ref: str | None = Field(default=None, pattern=r'^[0-9a-f]{48}$')
     printing_ref: str | None = Field(default=None, pattern=r'^[0-9a-f]{48}$')
+    # The row's own Card Printing name, subtitle included ("Professor's Research (Professor Juniper)"). Snapshots
+    # published before Deck Lists 09 have none; readers then use the Card Identity name of the row's group.
+    printing_name: str | None = None
 
 
 class PublicIdentity(PublicModel):
@@ -112,19 +115,24 @@ def owned_deck(conn, owner, deck_id):
 
 
 def snapshot(conn, owner, deck_id, title, version):
-    # Inventory-owner lock prevents Add/Move/Removal during this snapshot.
+    """Freeze the Deck's Deck List lines (ADR 0009), never its Holdings: a line may name a card the owner does not own,
+    and nothing about ownership or Locations is read. Rows group by Card Identity, which drives copy counts and checks;
+    each row keeps its own Card Printing name."""
+    # The inventory-owner lock serializes this snapshot with Deck List commands (owner_and_rows) and with Holding
+    # writes into the Deck, which may extend its Deck List.
     conn.execute('SELECT revision FROM inventory_owner WHERE user_id=%s FOR UPDATE', (owner,))
     state = conn.execute('SELECT active_generation FROM catalog_state WHERE singleton FOR SHARE').fetchone()
-    rows = conn.execute("""SELECT ci.id,ci.display_name,h.quantity,e.descriptor,
+    rows = conn.execute("""SELECT ci.id,ci.display_name,l.quantity,e.descriptor,
       e.public_ref AS edition_ref,p.public_ref AS printing_ref,
+      coalesce(pd.display_name,ci.display_name) AS printing_name,
       coalesce(pd.set_id,'') AS set_id,coalesce(pd.set_name,'') AS set_name,
       coalesce(pd.collector_number,'') AS collector_number,pd.image_url,
       coalesce(gp.basic_energy,'unresolved') AS basic_energy
-      FROM holding h JOIN catalog_edition e ON e.id=h.edition_id
+      FROM deck_list_line l JOIN catalog_edition e ON e.id=l.edition_id
       JOIN catalog_printing p ON p.id=e.printing_id JOIN catalog_identity ci ON ci.id=p.identity_id
       LEFT JOIN catalog_printing_display pd ON pd.printing_id=p.id
       LEFT JOIN catalog_generation_printing gp ON gp.printing_id=p.id AND gp.generation_id=%s
-      WHERE h.owner_id=%s AND h.location_id=%s
+      WHERE l.owner_id=%s AND l.deck_id=%s
       ORDER BY ci.display_name,ci.id,pd.set_id,pd.collector_number,e.descriptor_key""",
       (state['active_generation'], owner, deck_id)).fetchall()
     groups = {}
@@ -134,7 +142,7 @@ def snapshot(conn, owner, deck_id, title, version):
         group['classes'].append(row['basic_energy'])
         group['editions'].append(PublicEdition(set_id=row['set_id'], set_name=row['set_name'], collector_number=row['collector_number'],
             variant=row['descriptor'], image_url=f"{row['image_url']}/low.webp" if row['image_url'] else None, quantity=str(row['quantity']),
-            edition_ref=row['edition_ref'], printing_ref=row['printing_ref']))
+            edition_ref=row['edition_ref'], printing_ref=row['printing_ref'], printing_name=row['printing_name']))
     evaluated = evaluate_checks([IdentityCount(g['amount'],all(value=='supported' for value in g['classes']),
                                              'unresolved' in g['classes']) for g in groups.values()])
     identities, checks = [], []

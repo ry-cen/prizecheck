@@ -140,6 +140,7 @@ describe("live Better Auth boundary", () => {
       quantity: "3",
       edition_ref: "a".repeat(48),
       printing_ref: "b".repeat(48),
+      printing_name: "Pikachu",
     };
     const snapshot = {
       title: "Boundary deck",
@@ -266,6 +267,7 @@ describe("live Better Auth boundary", () => {
       expect(shown.identities[0].editions[0]).toMatchObject({
         edition_ref: edition.edition_ref,
         printing_ref: edition.printing_ref,
+        printing_name: edition.printing_name,
       });
       expect(bodies[0]).not.toMatch(/owner|location_id|holding|session|email/i);
       for (const cookie of [

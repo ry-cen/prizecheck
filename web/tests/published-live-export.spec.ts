@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { Pool } from "pg";
+import { listCards, raiseLine } from "./support/deck-list";
 
 // Ticket 13: a Published Deck's Pokémon TCG Live export, read by an anonymous visitor (second browser context, no
 // cookie) against the real stack. Live eligibility is a maintainer `correct` decision under the shipped rule v1,
@@ -52,7 +53,7 @@ const owner = async () =>
   (await pool.query('SELECT id FROM "user" WHERE email=$1', [OWNER_EMAIL]))
     .rows[0].id as string;
 
-/** A Deck holding `{edition: quantity}`, written straight to PostgreSQL with one inventory revision bump. */
+/** A Deck whose Deck List is `{edition: quantity}` and which holds none of those cards, written straight to PostgreSQL. */
 async function deckWith(page: Page, quantities: Record<string, number>) {
   const name = `Live ${randomUUID().slice(0, 8)}`;
   const created = await page.request.post(`${ORIGIN}/api/decks`, {
@@ -61,16 +62,7 @@ async function deckWith(page: Page, quantities: Record<string, number>) {
   });
   expect(created.status()).toBe(201);
   const id = (await created.json()).location.id as string;
-  const user = await owner();
-  for (const [edition, quantity] of Object.entries(quantities))
-    await pool.query(
-      "INSERT INTO holding(owner_id,location_id,edition_id,quantity,version) VALUES($1,$2,$3,$4,1)",
-      [user, id, edition, quantity]
-    );
-  await pool.query(
-    "UPDATE inventory_owner SET revision=revision+1 WHERE user_id=$1",
-    [user]
-  );
+  await listCards(pool, await owner(), id, quantities);
   return { id, name };
 }
 test.afterEach(async () => {
@@ -139,17 +131,11 @@ test("an anonymous visitor copies complete Live text of the frozen snapshot, kee
   });
   const token = (await publication(page, "POST", deck.id)).token as string;
   const addNormal = async () => {
-    await pool.query(
-      "UPDATE holding SET quantity=quantity+1 WHERE location_id=$1 AND edition_id=$2",
-      [deck.id, ids.normal]
-    );
+    await raiseLine(pool, deck.id, ids.normal, 1);
     await bump();
   };
   // A private edit after publishing changes nothing the visitor sees.
-  await pool.query(
-    "UPDATE holding SET quantity=quantity+4 WHERE location_id=$1 AND edition_id=$2",
-    [deck.id, ids.normal]
-  );
+  await raiseLine(pool, deck.id, ids.normal, 4);
   await bump();
 
   const anonymous = await browser.newContext();

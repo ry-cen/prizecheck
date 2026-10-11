@@ -16,6 +16,7 @@ from test_decks import create
 from test_holdings import add, call, client
 from test_missing_cards import OWNER, REPORTER, approve, issue_code, report
 from test_moves import commit, leaf, selected, stage, start
+from test_publications import list_cards
 
 
 @pytest.fixture(autouse=True)
@@ -91,6 +92,7 @@ def test_quote_and_target_metadata_imports_preserve_every_existing_relationship(
                                      (binder, twin_normal, "4"), (binder, split_one, "2"), (binder, split_two, "7"),
                                      (deck, reverse, "3"), (spare, twin_reverse, "6")):
         assert add(collector, location, item, quantity).status_code == 200
+    list_cards(collector, deck, {reverse: 3})  # a Published Deck freezes the Deck List
 
     # Replacement/deprecation decided through the owner endpoint; Holdings stay put.
     with connect() as conn:

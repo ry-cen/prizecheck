@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { Pool } from "pg";
+import { listCards } from "./support/deck-list";
 
 // Ticket 14: a Published Deck's TCGplayer Mass Entry export, read by an anonymous visitor against the real stack.
 // Real TCGplayer is never contacted.
@@ -65,7 +66,7 @@ const owner = async () =>
   (await pool.query('SELECT id FROM "user" WHERE email=$1', [OWNER_EMAIL]))
     .rows[0].id as string;
 
-/** A Deck holding `{edition: quantity}`, written straight to PostgreSQL with one inventory revision bump. */
+/** A Deck whose Deck List is `{edition: quantity}` and which holds none of those cards, written straight to PostgreSQL. */
 async function deckWith(page: Page, quantities: Record<string, number>) {
   const name = `Mass ${randomUUID().slice(0, 8)}`;
   const created = await page.request.post(`${ORIGIN}/api/decks`, {
@@ -74,16 +75,7 @@ async function deckWith(page: Page, quantities: Record<string, number>) {
   });
   expect(created.status()).toBe(201);
   const id = (await created.json()).location.id as string;
-  const user = await owner();
-  for (const [edition, quantity] of Object.entries(quantities))
-    await pool.query(
-      "INSERT INTO holding(owner_id,location_id,edition_id,quantity,version) VALUES($1,$2,$3,$4,1)",
-      [user, id, edition, quantity]
-    );
-  await pool.query(
-    "UPDATE inventory_owner SET revision=revision+1 WHERE user_id=$1",
-    [user]
-  );
+  await listCards(pool, await owner(), id, quantities);
   return { id, name };
 }
 

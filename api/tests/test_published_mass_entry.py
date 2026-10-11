@@ -76,9 +76,10 @@ def test_mass_entry_links_only_when_every_frozen_copy_has_a_current_verified_pro
     _, linked = publish({normal["id"]: 3, reverse["id"]: 2})
     deck, mixed = publish({normal["id"]: 3, reverse["id"]: 2, plain["id"]: 1})
     _, empty = publish({})
-    with connect() as conn:  # a private edit after publishing changes nothing
-        conn.execute("UPDATE holding SET quantity=quantity+10 WHERE location_id=%s AND edition_id=%s", (deck, normal["id"]))
-        conn.execute("UPDATE inventory_owner SET revision=revision+1 WHERE user_id=%s", (USER,))
+    with connect() as conn:  # a private Deck List edit after publishing changes nothing
+        conn.execute("UPDATE deck_list_line SET quantity=quantity+10 WHERE owner_id=%s AND deck_id=%s AND edition_id=%s",
+                     (USER, deck, normal["id"]))
+        conn.execute("UPDATE deck_list SET revision=revision+1 WHERE owner_id=%s AND deck_id=%s", (USER, deck))
     ids = products(normal, reverse)
     totals = {}
     for edition, quantity in ((normal, 3), (reverse, 2)):

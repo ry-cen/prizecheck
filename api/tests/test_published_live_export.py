@@ -99,10 +99,11 @@ def test_live_exports_every_frozen_copy_from_current_reviewed_rules_for_the_same
     deck, token = publish({normal["id"]: 3, reverse["id"]: 2, plain["id"]: 1})
     _, empty = publish({})
 
-    # A private edit after publishing changes nothing.
+    # A private Deck List edit after publishing changes nothing.
     with connect() as conn, conn.transaction():
-        conn.execute("UPDATE holding SET quantity=quantity+10 WHERE location_id=%s AND edition_id=%s", (deck, normal["id"]))
-        conn.execute("UPDATE inventory_owner SET revision=revision+1 WHERE user_id=%s", (USER,))
+        conn.execute("UPDATE deck_list_line SET quantity=quantity+10 WHERE owner_id=%s AND deck_id=%s AND edition_id=%s",
+                     (USER, deck, normal["id"]))
+        conn.execute("UPDATE deck_list SET revision=revision+1 WHERE owner_id=%s AND deck_id=%s", (USER, deck))
         reason = conn.execute("SELECT live_reason FROM catalog_printing_metadata WHERE printing_id=%s",
                               (printing_of(plain["id"]),)).fetchone()["live_reason"]
     frozen = stored_decks()["decks"][token]["snapshot"]
