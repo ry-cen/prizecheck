@@ -413,14 +413,22 @@
   bottom: 0;
   width: var(--space-7);
   background: var(--color-surface-raised);
-  opacity: 0;
-}
-.ws-tree-entry:hover > .ws-add-child,
-.ws-tree-entry:focus-within > .ws-add-child {
   opacity: 1;
 }
-.ws-root .ws-tree-row[aria-current="page"] + .ws-add-child {
+.ws-root .ws-sidebar .ws-tree-row[aria-current="page"] + .ws-add-child {
   background: var(--color-surface-selected);
+}
+.ws-root .ws-tree-entry:hover > .ws-tree-row:not([aria-current="page"]) {
+  background: var(--color-surface-raised);
+}
+@media (hover: hover) {
+  .ws-root .ws-sidebar .ws-add-child {
+    opacity: 0;
+  }
+  .ws-root .ws-sidebar .ws-tree-entry:hover > .ws-add-child,
+  .ws-root .ws-sidebar .ws-tree-entry:has(:focus-visible) > .ws-add-child {
+    opacity: 1;
+  }
 }
 .ws-root .ws-drawer .ws-add-child {
   position: static;
