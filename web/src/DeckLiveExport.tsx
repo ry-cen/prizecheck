@@ -4,6 +4,7 @@ import { ExportOutput } from "./ExportOutput";
 import {
   getLiveExport,
   liveExportDownloadHref,
+  type LiveBlockerView,
   type LiveExportView,
 } from "./live_export_generated";
 
@@ -14,6 +15,21 @@ export type DeckExportProps = {
 };
 
 const CHANGED = "Deck changed; export again";
+
+/** What the Live panel renders; the private view and the Published Deck view both carry these fields. */
+export type LiveResult = Pick<
+  LiveExportView,
+  "status" | "text" | "byte_length"
+> & {
+  blockers: Pick<
+    LiveBlockerView,
+    "name" | "set_name" | "collector_number" | "quantity" | "reason"
+  >[];
+};
+export type LiveChecks = Pick<
+  DeckChecks,
+  "total" | "size_status" | "shortage" | "excess" | "disclaimer"
+>;
 
 export function DeckLiveExport({
   deckId,
@@ -52,6 +68,41 @@ export function DeckLiveExport({
     }
   }
 
+  return (
+    <LiveExportPanel
+      checks={checks}
+      busy={busy}
+      onPrepare={() => void prepare()}
+      result={result}
+      resultKey={result ? `${result.owner_revision}` : ""}
+      downloadHref={
+        result
+          ? liveExportDownloadHref(deckId, result.owner_revision)
+          : undefined
+      }
+      status={status}
+    />
+  );
+}
+
+// Renders the Live export: empty Deck, the prepare button, complete text with Copy and Download, or every blocker. It never fetches.
+export function LiveExportPanel({
+  checks,
+  busy,
+  onPrepare,
+  result,
+  resultKey,
+  downloadHref,
+  status,
+}: {
+  checks: LiveChecks;
+  busy: boolean;
+  onPrepare: () => void;
+  result: LiveResult | null;
+  resultKey: string;
+  downloadHref?: string;
+  status: string;
+}) {
   const empty = checks.total === "0";
   const warnings =
     checks.size_status === "complete" ? undefined : (
@@ -77,16 +128,16 @@ export function DeckLiveExport({
   return (
     <section aria-label="Pokémon TCG Live export">
       <h3>Pokémon TCG Live</h3>
-      <button type="button" disabled={busy} onClick={() => void prepare()}>
+      <button type="button" disabled={busy} onClick={onPrepare}>
         Export to Live
       </button>
       {result?.status === "ok" && (
         <ExportOutput
-          key={`${result.owner_revision}`}
+          key={resultKey}
           label="Live export"
           text={result.text}
           byteLength={result.byte_length}
-          downloadHref={liveExportDownloadHref(deckId, result.owner_revision)}
+          downloadHref={downloadHref}
           downloadName="deck-live-export.txt"
           copyLabel="Copy for Live"
           downloadLabel="Download Live export"
@@ -103,8 +154,8 @@ export function DeckLiveExport({
             Nothing was left out of a partial list.
           </p>
           <ul>
-            {result.blockers.map((blocker) => (
-              <li key={blocker.edition_id}>
+            {result.blockers.map((blocker, index) => (
+              <li key={index}>
                 {blocker.name} · {blocker.set_name} #{blocker.collector_number}{" "}
                 · ×{blocker.quantity} · {blocker.reason}
               </li>

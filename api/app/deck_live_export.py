@@ -90,12 +90,18 @@ def measured(export: LiveExport) -> tuple[int, str | None]:
     return size, ''.join(parts) if parts is not None else None
 
 
+def export_fields(export: LiveExport) -> dict:
+    """The fields the private and the Published Deck views share: one inline/download decision for both."""
+    size, text = measured(export)
+    return {'status': export.status, 'text': text, 'inline': text is not None, 'byte_length': size,
+            'total_copies': str(export.total_copies)}
+
+
 @router.get('/{deck_id}/exports/live', response_model=LiveExportView)
 def live_export(deck_id: UUID, user_id: str = Depends(verified_user)):
     contents, export = capture_export(deck_id, user_id)
-    size, text = measured(export)
     return LiveExportView(
-        status=export.status, text=text, inline=text is not None, byte_length=size, total_copies=str(export.total_copies),
+        **export_fields(export),
         blockers=[LiveBlockerView(edition_id=UUID(b.key), name=b.display_name, set_name=b.set_label,
                                   collector_number=b.collector_number, descriptor=b.descriptor,
                                   quantity=str(b.quantity), reason=b.reason) for b in export.blockers],
@@ -105,6 +111,13 @@ def live_export(deck_id: UUID, user_id: str = Depends(verified_user)):
 def attachment(export: LiveExport) -> Iterator[bytes]:
     for piece in iter_live_text(export):
         yield piece.encode()
+
+
+def text_download(export: LiveExport, headers=None) -> StreamingResponse:
+    """The complete text as a streamed attachment; ``headers`` adds to the defaults (public routes add PUBLIC_HEADERS)."""
+    return StreamingResponse(attachment(export), media_type='text/plain; charset=utf-8', headers={
+        'Content-Disposition': 'attachment; filename="deck-live-export.txt"', 'Cache-Control': 'no-store',
+        **(headers or {})})
 
 
 @router.get('/{deck_id}/exports/live.txt')
@@ -117,5 +130,4 @@ def live_export_text(deck_id: UUID, owner_revision: int, user_id: str = Depends(
         error(422, 'DECK_EMPTY')
     if export.status == 'blocked':
         error(409, 'LIVE_EXPORT_BLOCKED')
-    return StreamingResponse(attachment(export), media_type='text/plain; charset=utf-8', headers={
-        'Content-Disposition': 'attachment; filename="deck-live-export.txt"', 'Cache-Control': 'no-store'})
+    return text_download(export)

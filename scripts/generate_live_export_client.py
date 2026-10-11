@@ -23,7 +23,7 @@ def ts_type(value):
 
 schema = app.openapi()["components"]["schemas"]
 lines = ["// Generated from FastAPI OpenAPI by scripts/generate_live_export_client.py. Do not edit."]
-for name in ("LiveBlockerView", "LiveExportView"):
+for name in ("LiveBlockerView", "LiveExportView", "PublishedLiveBlockerView", "PublishedLiveExportView"):
     definition = schema[name]
     fields = [f"{field}{'' if field in definition.get('required', []) else '?'}: {ts_type(value)}"
               for field, value in definition["properties"].items()]
@@ -42,6 +42,18 @@ export async function getLiveExport(deckId: string): Promise<LiveExportView> {
 }
 export const liveExportDownloadHref = (deckId: string, ownerRevision: number) =>
   `/api/decks/${encodeURIComponent(deckId)}/exports/live.txt?owner_revision=${ownerRevision}`;
+
+// A Published Deck's Live export: only the token and the snapshot version are sent, and no cookie.
+export async function getPublishedLiveExport(token: string, version: number, signal?: AbortSignal): Promise<PublishedLiveExportView> {
+  const response = await fetch(`/api/public/decks/${encodeURIComponent(token)}/versions/${version}/exports/live`, { credentials: 'omit', signal });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new LiveExportError(response.status, payload?.detail?.code ?? 'LIVE_EXPORT_FAILED');
+  }
+  return response.json() as Promise<PublishedLiveExportView>;
+}
+export const publishedLiveExportDownloadHref = (token: string, version: number) =>
+  `/api/public/decks/${encodeURIComponent(token)}/versions/${version}/exports/live.txt`;
 """)
 content = "\n".join(lines)
 target = root / "web/src/live_export_generated.ts"
