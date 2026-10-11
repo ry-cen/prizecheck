@@ -996,9 +996,12 @@ describe("the Published Deck cost through the real gateway", () => {
       expect(body.digest).toMatch(/^[0-9a-f]{64}$/);
       expect(body.results.map((result: any) => result.format)).toEqual([
         "standard",
+        "expanded",
+        "glc",
       ]);
       // Four copies of a card with no set or attributes: not legal on size, never legal.
-      expect(body.results[0].status).toBe("not_legal");
+      for (const result of body.results)
+        expect(result.status).toBe("not_legal");
       expect(answer!.headers.get("cache-control")).toBe("no-store");
       expect(answer!.headers.get("x-robots-tag")).toBe("noindex, nofollow");
       for (const text of texts)

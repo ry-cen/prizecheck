@@ -12,6 +12,7 @@ import pytest
 
 from app.main import app, connect  # noqa: F401  (main first: it includes every router while loading)
 from app import price_launcher, prices, quote_contract
+from app.format_evaluator import FORMATS
 from app.public_projection import ProjectionUnavailable
 from app.public_records import public_record_store, result_key
 from test_catalog_targets import isolated_rules  # noqa: F401  (autouse)
@@ -152,8 +153,8 @@ def test_adding_by_printing_returns_the_decks_format_results(store):
     body = response.json()
     checks = body["format_checks"]
     assert checks["deck_id"] == deck and checks["deck_list_revision"] == body["deck_list"]["revision"] == 2
-    assert [result["format"] for result in checks["results"]] == ["standard"]
-    assert checks["results"][0]["status"] == "not_legal"  # two cards are not a 60-card deck
+    assert [result["format"] for result in checks["results"]] == list(FORMATS)
+    assert {result["status"] for result in checks["results"]} == {"not_legal"}  # two cards are not a 60-card deck
     # The results are saved with the Deck: an unchanged read reuses them (Deck Lists 17).
     read = call("GET", f"/api/decks/{deck}/format-checks", owner)
     assert read.status_code == 200, read.text

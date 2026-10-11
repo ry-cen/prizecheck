@@ -77,7 +77,7 @@ def test_cutting_a_line_returns_updated_results_and_an_unchanged_read_reuses_the
     assert after["disclaimer"].startswith("Advisory format checks")
     # An unchanged read reuses the saved result: the same answer, computed at the same time.
     assert format_checks(owner, deck) == after
-    assert format_checks(owner, deck, "?format=standard") == after
+    assert format_checks(owner, deck, "?format=standard") == {**after, "results": [standard(after)]}
     assert format_checks(owner, deck, "?as_of=2026-10-11") == after
     # Removing a line returns updated results too.
     removed = remove_line(owner, deck, edition_of("fixture-sv01-902"), 5)
@@ -127,7 +127,8 @@ def test_a_rules_deploy_makes_the_next_read_recompute(monkeypatch):
     source = (format_evaluator.RULES_DIR / "standard.toml").read_text()
     revised = re.sub(r"^revision = \d+$", f"revision = {current.revision + 1}", source, count=1, flags=re.M)
     deployed = format_evaluator.load_rules(revised.encode())
-    monkeypatch.setattr(format_evaluator, "format_rules", lambda name: {"standard": deployed}[name])
+    real = format_evaluator.format_rules
+    monkeypatch.setattr(format_evaluator, "format_rules", lambda name: deployed if name == "standard" else real(name))
     result = standard(format_checks(owner, deck))
     assert result["rules_version"] == f"{current.revision + 1} ({current.published.isoformat()})"
     assert result["computed_at"] != before["computed_at"] and result["status"] == "legal"

@@ -1,0 +1,1091 @@
+# Gym Leader Challenge format rules, read by api/app/format_evaluator.py.
+#
+# Maintenance (by commit only), as in standard.toml: every change bumps `revision`, sets `published`, and re-pins the
+# file in api/tests/test_format_rules.py (PINNED_RULES). Every set in imported_sets.txt is listed exactly once: in
+# [[sets]], [[excluded_sets]] or [[unsettled_sets]].
+#
+# Gym Leader Challenge is a fan-made format maintained by Andrew Mahone (Tricky Gym). Sources (read 2026-10-11):
+#   - Rules (gymleaderchallenge.com/rules): one Pokémon type; one copy of each card name except Basic Energy; no Rule
+#     Box cards; no ACE SPEC cards; Black & White onward plus a short ban list; 60 cards.
+#   - FAQ and Rulings (gymleaderchallenge.com/faq): Rule Box covers Pokémon V, EX, GX, BREAK, Radiant Pokémon, ACE SPECs
+#     and Prism Star cards; dual-type Pokémon fit either type; one Boss's Orders OR Lysandre, and one Professor's
+#     Research OR Professor Sycamore OR Professor Juniper ("the only cards affected"); the official Reprint and Errata
+#     Legality List applies; Classic Collection cards only when they reprint Black & White-onward cards; set legality
+#     follows the event region (organizers may allow new sets at once).
+#   - Colorless page (gymleaderchallenge.com/colorless): "Colorless is its own type".
+#   - Ban List (gymleaderchallenge.com/ban-list), each ban with its effective date; the news index lists no change after
+#     "Dimension Valley Banned" (2026-04-06, effective 2026-04-20).
+#   - Research notes in docs/planning/deck-format-validation/wayfinder/research/gym-leader-challenge-rules.md.
+
+format = "glc"
+name = "Gym Leader Challenge"
+revision = 1
+published = 2026-10-11
+# GLC Update 1.6 took effect on 2025-04-24; every later change (Dimension Valley) is on the ban list with its date.
+covers_from = 2025-04-24
+
+# "by_set": every Black & White-onward set admits its printings by itself once its legal-from date (the official one)
+# has passed; regulation marks play no part, and GLC does not rotate. Products the official pool admits only by a
+# regulation mark that TCGdex does not record are unsettled below.
+pool = "by_set"
+basic_energy_always_legal = true
+pokemon_reprint_inheritance = false
+regulation_marks = []
+
+# Cards whose Rule Box or ACE SPEC status is true are not legal (Rule Box includes Radiant and Prism Star cards).
+excluded_attributes = ["rule_box", "ace_spec"]
+# Every Pokémon shares one type; Trainers and Energy have none. A dual-type Pokémon fits either type.
+single_pokemon_type = true
+
+# GLC's own ban list, by TCGdex set ID and collector number; Expanded's list does not apply. Bans in force before
+# covers_from carry covers_from as banned_from; their reasons then name no date.
+bans = [
+  # Lysandre's Trump Card: effective 2021-11-16 (Update 1.0).
+  { set = "xy4", number = "99", name = "Lysandre's Trump Card", banned_from = 2025-04-24 },
+  { set = "xy4", number = "118", name = "Lysandre's Trump Card", banned_from = 2025-04-24 },
+  # Oranguru: effective 2021-11-16 (Update 1.0).
+  { set = "sm5", number = "114", name = "Oranguru", banned_from = 2025-04-24 },
+  # Forest of Giant Plants: effective 2022-01-10 (Update 1.1).
+  { set = "xy7", number = "74", name = "Forest of Giant Plants", banned_from = 2025-04-24 },
+  # Chip-Chip Ice Axe: effective 2022-06-08 (Update 1.2).
+  { set = "sm10", number = "165", name = "Chip-Chip Ice Axe", banned_from = 2025-04-24 },
+  # Hiker: effective 2022-06-08 (Update 1.2).
+  { set = "sm7", number = "133", name = "Hiker", banned_from = 2025-04-24 },
+  { set = "sma", number = "SV85", name = "Hiker", banned_from = 2025-04-24 },
+  # Kyogre: effective 2022-11-11 (Update 1.3); Shining Fates 021 only.
+  { set = "swsh4.5", number = "21", name = "Kyogre", banned_from = 2025-04-24 },
+  # Pokémon Research Lab: effective 2023-11-01 (Update 1.4).
+  { set = "sm11", number = "205", name = "Pokémon Research Lab", banned_from = 2025-04-24 },
+  # Raikou: effective 2024-09-01 (Update 1.5); Vivid Voltage 050 only.
+  { set = "swsh4", number = "50", name = "Raikou", banned_from = 2025-04-24 },
+  # Marshadow: effective 2024-09-01 (Update 1.5).
+  { set = "sm3.5", number = "45", name = "Marshadow", banned_from = 2025-04-24 },
+  { set = "smp", number = "SM85", name = "Marshadow", banned_from = 2025-04-24 },
+  # Duskull: effective 2024-09-01 (Update 1.5).
+  { set = "sm12", number = "83", name = "Duskull", banned_from = 2025-04-24 },
+  # Double Colorless Energy: effective 2025-04-24 (Update 1.6): Shining Legends 69 "and all other versions", so every Black & White-onward printing.
+  { set = "sm3.5", number = "69", name = "Double Colorless Energy", banned_from = 2025-04-24 },
+  { set = "bw4", number = "92", name = "Double Colorless Energy", banned_from = 2025-04-24 },
+  { set = "bw11", number = "113", name = "Double Colorless Energy", banned_from = 2025-04-24 },
+  { set = "xy1", number = "130", name = "Double Colorless Energy", banned_from = 2025-04-24 },
+  { set = "xy4", number = "111", name = "Double Colorless Energy", banned_from = 2025-04-24 },
+  { set = "g1", number = "74", name = "Double Colorless Energy", banned_from = 2025-04-24 },
+  { set = "xy10", number = "114", name = "Double Colorless Energy", banned_from = 2025-04-24 },
+  { set = "xy12", number = "90", name = "Double Colorless Energy", banned_from = 2025-04-24 },
+  { set = "sm1", number = "136", name = "Double Colorless Energy", banned_from = 2025-04-24 },
+  { set = "sm2", number = "166", name = "Double Colorless Energy", banned_from = 2025-04-24 },
+  # Twin Energy: effective 2025-04-24 (Update 1.6).
+  { set = "swsh2", number = "174", name = "Twin Energy", banned_from = 2025-04-24 },
+  { set = "swsh2", number = "209", name = "Twin Energy", banned_from = 2025-04-24 },
+  # Dimension Valley: effective 2026-04-20 ("Dimension Valley Banned", 2026-04-06).
+  { set = "xy4", number = "93", name = "Dimension Valley", banned_from = 2026-04-20 },
+]
+
+[limits]
+deck_size = 60            # exactly
+copies = 1                # per Card Identity, or per copy group below
+basic_energy_exempt = true
+ace_spec_per_deck = 0     # ACE SPEC cards are excluded outright
+radiant_per_deck = 0      # Radiant Pokémon have a Rule Box
+prism_star_per_name = 0   # Prism Star cards have a Rule Box
+
+# Card Identities that share one copy (FAQ: official Pokémon TCG rulings).
+[[copy_groups]]
+names = ["Boss's Orders", "Lysandre"]
+
+[[copy_groups]]
+names = ["Professor's Research", "Professor Sycamore", "Professor Juniper"]
+
+# Sets, oldest first, with the official legal-from dates (TCGdex releaseDate, second Friday; sets also in standard.toml
+# copy its entries). Every date before covers_from only has to parse.
+
+[[sets]]
+id = "bw1"
+name = "Black & White"
+released = 2011-04-25
+legal_from = 2011-05-06
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "bwp"
+name = "BW Black Star Promos"
+released = 2011-04-26
+legal_from = 2011-05-06
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "2011bw"
+name = "McDonald's Collection 2011"
+released = 2011-06-17
+legal_from = 2011-07-01
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "bw2"
+name = "Emerging Powers"
+released = 2011-08-31
+legal_from = 2011-09-09
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "tk-bw-e"
+name = "BW trainer Kit (Excadrill)"
+released = 2011-09-01
+legal_from = 2011-09-09
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "tk-bw-z"
+name = "BW trainer Kit (Zoroark)"
+released = 2011-09-01
+legal_from = 2011-09-09
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "bw3"
+name = "Noble Victories"
+released = 2011-11-16
+legal_from = 2011-11-25
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "bw4"
+name = "Next Destinies"
+released = 2012-02-08
+legal_from = 2012-02-17
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "bw5"
+name = "Dark Explorers"
+released = 2012-05-09
+legal_from = 2012-05-18
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "2012bw"
+name = "McDonald's Collection 2012"
+released = 2012-06-15
+legal_from = 2012-06-29
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "bw6"
+name = "Dragons Exalted"
+released = 2012-08-15
+legal_from = 2012-08-24
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "dv1"
+name = "Dragon Vault"
+released = 2012-10-05
+legal_from = 2012-10-19
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "bw7"
+name = "Boundaries Crossed"
+released = 2012-11-07
+legal_from = 2012-11-16
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "bw8"
+name = "Plasma Storm"
+released = 2013-02-06
+legal_from = 2013-02-15
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "bw9"
+name = "Plasma Freeze"
+released = 2013-05-08
+legal_from = 2013-05-17
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "bw10"
+name = "Plasma Blast"
+released = 2013-08-14
+legal_from = 2013-08-23
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "xyp"
+name = "XY Black Star Promos"
+released = 2013-10-12
+legal_from = 2013-10-25
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "bw11"
+name = "Legendary Treasures"
+released = 2013-11-06
+legal_from = 2013-11-15
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "xy0"
+name = "Kalos Starter Set"
+released = 2013-11-08
+legal_from = 2013-11-22
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "xy1"
+name = "XY"
+released = 2014-02-05
+legal_from = 2014-02-14
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "xya"
+name = "Yellow A Alternate"
+released = 2014-02-05
+legal_from = 2014-02-14
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "tk-xy-n"
+name = "XY trainer Kit (Noivern)"
+released = 2014-03-12
+legal_from = 2014-03-21
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "tk-xy-sy"
+name = "XY trainer Kit (Sylveon)"
+released = 2014-03-12
+legal_from = 2014-03-21
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "xy2"
+name = "Flashfire"
+released = 2014-05-07
+legal_from = 2014-05-16
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "2014xy"
+name = "McDonald's Collection 2014"
+released = 2014-05-23
+legal_from = 2014-06-06
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "xy3"
+name = "Furious Fists"
+released = 2014-08-13
+legal_from = 2014-08-22
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "tk-xy-b"
+name = "XY trainer Kit (Bisharp)"
+released = 2014-11-01
+legal_from = 2014-11-14
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "tk-xy-w"
+name = "XY trainer Kit (Wigglytuff)"
+released = 2014-11-01
+legal_from = 2014-11-14
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "xy4"
+name = "Phantom Forces"
+released = 2014-11-05
+legal_from = 2014-11-14
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "xy5"
+name = "Primal Clash"
+released = 2015-02-04
+legal_from = 2015-02-13
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "dc1"
+name = "Double Crisis"
+released = 2015-03-25
+legal_from = 2015-04-03
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "tk-xy-latia"
+name = "XY trainer Kit (Latias)"
+released = 2015-04-29
+legal_from = 2015-05-08
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "tk-xy-latio"
+name = "XY trainer Kit (Latios)"
+released = 2015-04-29
+legal_from = 2015-05-08
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "xy6"
+name = "Roaring Skies"
+released = 2015-05-06
+legal_from = 2015-05-15
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "xy7"
+name = "Ancient Origins"
+released = 2015-08-12
+legal_from = 2015-08-21
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "xy8"
+name = "BREAKthrough"
+released = 2015-11-04
+legal_from = 2015-11-13
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "2015xy"
+name = "McDonald's Collection 2015"
+released = 2015-11-27
+legal_from = 2015-12-11
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "xy9"
+name = "BREAKpoint"
+released = 2016-02-03
+legal_from = 2016-02-12
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "g1"
+name = "Generations"
+released = 2016-02-22
+legal_from = 2016-03-04
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "tk-xy-p"
+name = "XY trainer Kit (Pikachu Libre)"
+released = 2016-04-27
+legal_from = 2016-05-06
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "tk-xy-su"
+name = "XY trainer Kit (Suicune)"
+released = 2016-04-27
+legal_from = 2016-05-06
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "xy10"
+name = "Fates Collide"
+released = 2016-05-02
+legal_from = 2016-05-13
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "xy11"
+name = "Steam Siege"
+released = 2016-08-03
+legal_from = 2016-08-12
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "2016xy"
+name = "McDonald's Collection 2016"
+released = 2016-08-20
+legal_from = 2016-09-02
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "xy12"
+name = "Evolutions"
+released = 2016-11-02
+legal_from = 2016-11-11
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "sm1"
+name = "Sun & Moon"
+released = 2017-02-03
+legal_from = 2017-02-17
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "smp"
+name = "SM Black Star Promos"
+released = 2017-02-03
+legal_from = 2017-02-17
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "tk-sm-l"
+name = "SM trainer Kit (Lycanroc)"
+released = 2017-04-21
+legal_from = 2017-05-05
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "tk-sm-r"
+name = "SM trainer Kit (Alolan Raichu)"
+released = 2017-04-21
+legal_from = 2017-05-05
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "sm2"
+name = "Guardians Rising"
+released = 2017-05-05
+legal_from = 2017-05-19
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "2017sm"
+name = "McDonald's Collection 2017"
+released = 2017-08-03
+legal_from = 2017-08-11
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "sm3"
+name = "Burning Shadows"
+released = 2017-08-04
+legal_from = 2017-08-18
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "sm3.5"
+name = "Shining Legends"
+released = 2017-10-06
+legal_from = 2017-10-20
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "sm4"
+name = "Crimson Invasion"
+released = 2017-11-03
+legal_from = 2017-11-17
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "sm5"
+name = "Ultra Prism"
+released = 2018-02-02
+legal_from = 2018-02-16
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "sm6"
+name = "Forbidden Light"
+released = 2018-05-04
+legal_from = 2018-05-18
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "sm7"
+name = "Celestial Storm"
+released = 2018-08-03
+legal_from = 2018-08-17
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "sm7.5"
+name = "Dragon Majesty"
+released = 2018-09-07
+legal_from = 2018-09-21
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "2018sm"
+name = "McDonald's Collection 2018"
+released = 2018-10-19
+legal_from = 2018-11-02
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "sm8"
+name = "Lost Thunder"
+released = 2018-11-02
+legal_from = 2018-11-16
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "sm9"
+name = "Team Up"
+released = 2019-01-31
+legal_from = 2019-02-08
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "det1"
+name = "Detective Pikachu"
+released = 2019-03-29
+legal_from = 2019-04-12
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "sm10"
+name = "Unbroken Bonds"
+released = 2019-05-03
+legal_from = 2019-05-17
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "sm11"
+name = "Unified Minds"
+released = 2019-08-02
+legal_from = 2019-08-16
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "sm115"
+name = "Hidden Fates"
+released = 2019-08-23
+legal_from = 2019-09-06
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "sma"
+name = "Hidden Fates Shiny Vault"
+released = 2019-08-23
+legal_from = 2019-09-06
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "2019sm"
+name = "McDonald's Collection 2019"
+released = 2019-10-15
+legal_from = 2019-10-25
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "sm12"
+name = "Cosmic Eclipse"
+released = 2019-11-01
+legal_from = 2019-11-15
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "swshp"
+name = "SWSH Black Star Promos"
+released = 2019-11-15
+legal_from = 2019-11-29
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "swsh1"
+name = "Sword & Shield"
+released = 2020-02-07
+legal_from = 2020-02-21
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "swsh2"
+name = "Rebel Clash"
+released = 2020-05-01
+legal_from = 2020-05-15
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "swsh3"
+name = "Darkness Ablaze"
+released = 2020-08-14
+legal_from = 2020-08-28
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "fut2020"
+name = "Pokémon Futsal 2020"
+released = 2020-09-11
+legal_from = 2020-09-25
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "swsh3.5"
+name = "Champion's Path"
+released = 2020-09-25
+legal_from = 2020-10-09
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "swsh4"
+name = "Vivid Voltage"
+released = 2020-11-13
+legal_from = 2020-11-27
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "2021swsh"
+name = "McDonald's Collection 2021"
+released = 2021-02-09
+legal_from = 2021-02-19
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "swsh4.5"
+name = "Shining Fates"
+released = 2021-02-19
+legal_from = 2021-03-05
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "swsh4.5sv"
+name = "Shining Fates Shiny Vault"
+released = 2021-02-19
+legal_from = 2021-03-05
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "swsh5"
+name = "Battle Styles"
+released = 2021-03-19
+legal_from = 2021-04-02
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "swsh6"
+name = "Chilling Reign"
+released = 2021-06-18
+legal_from = 2021-07-02
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "swsh7"
+name = "Evolving Skies"
+released = 2021-08-27
+legal_from = 2021-09-10
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "cel25"
+name = "Celebrations"
+released = 2021-10-08
+legal_from = 2021-10-22
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "swsh8"
+name = "Fusion Strike"
+released = 2021-11-12
+legal_from = 2021-11-26
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "swsh9"
+name = "Brilliant Stars"
+released = 2022-02-25
+legal_from = 2022-03-11
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "swsh9tg"
+name = "Brilliant Stars Trainer Gallery"
+released = 2022-02-25
+legal_from = 2022-03-11
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "swsh10"
+name = "Astral Radiance"
+released = 2022-05-27
+legal_from = 2022-06-10
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "swsh10tg"
+name = "Astral Radiance Trainer Gallery"
+released = 2022-05-27
+legal_from = 2022-06-10
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "swsh10.5"
+name = "Pokémon GO"
+released = 2022-07-01
+legal_from = 2022-07-15
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "swsh11"
+name = "Lost Origin"
+released = 2022-09-09
+legal_from = 2022-09-23
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "swsh11tg"
+name = "Lost Origin Trainer Gallery"
+released = 2022-09-09
+legal_from = 2022-09-23
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "swsh12"
+name = "Silver Tempest"
+released = 2022-11-11
+legal_from = 2022-11-25
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "swsh12tg"
+name = "Silver Tempest Trainer Gallery"
+released = 2022-11-11
+legal_from = 2022-11-25
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "swsh12.5"
+name = "Crown Zenith"
+released = 2023-01-20
+legal_from = 2023-02-03
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "swsh12.5gg"
+name = "Crown Zenith Galarian Gallery"
+released = 2023-01-20
+legal_from = 2023-02-03
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "sv01"
+name = "Scarlet & Violet"
+released = 2023-03-31
+legal_from = 2023-04-14
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "sve"
+name = "Scarlet & Violet Energy"
+released = 2023-03-31
+legal_from = 2023-04-14
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "svp"
+name = "SVP Black Star Promos"
+released = 2023-03-31
+legal_from = 2023-04-14
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "sv02"
+name = "Paldea Evolved"
+released = 2023-06-09
+legal_from = 2023-06-23
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "sv03"
+name = "Obsidian Flames"
+released = 2023-08-11
+legal_from = 2023-08-25
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "sv03.5"
+name = "151"
+released = 2023-09-22
+legal_from = 2023-10-06
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "sv04"
+name = "Paradox Rift"
+released = 2023-11-03
+legal_from = 2023-11-17
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "sv04.5"
+name = "Paldean Fates"
+released = 2024-01-26
+legal_from = 2024-02-09
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "sv05"
+name = "Temporal Forces"
+released = 2024-03-22
+legal_from = 2024-04-05
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "sv06"
+name = "Twilight Masquerade"
+released = 2024-05-24
+legal_from = 2024-06-07
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "sv06.5"
+name = "Shrouded Fable"
+released = 2024-08-02
+legal_from = 2024-08-16
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "sv07"
+name = "Stellar Crown"
+released = 2024-09-13
+legal_from = 2024-09-27
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "sv08"
+name = "Surging Sparks"
+released = 2024-11-08
+legal_from = 2024-11-22
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "sv08.5"
+name = "Prismatic Evolutions"
+released = 2025-01-17
+legal_from = 2025-01-31
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "sv09"
+name = "Journey Together"
+released = 2025-03-28
+legal_from = 2025-04-11
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "sv10"
+name = "Destined Rivals"
+released = 2025-05-30
+legal_from = 2025-06-13
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "sv10.5b"
+name = "Black Bolt"
+released = 2025-07-17
+legal_from = 2025-07-25
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "sv10.5w"
+name = "White Flare"
+released = 2025-07-17
+legal_from = 2025-07-25
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "mee"
+name = "Mega Evolution Energy"
+released = 2025-09-25
+legal_from = 2025-10-03
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "me01"
+name = "Mega Evolution"
+released = 2025-09-26
+legal_from = 2025-10-10
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "mep"
+name = "MEP Black Star Promos"
+released = 2025-09-26
+legal_from = 2025-10-10
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "me02"
+name = "Phantasmal Flames"
+released = 2025-11-14
+legal_from = 2025-11-28
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "me02.5"
+name = "Ascended Heroes"
+released = 2026-01-30
+legal_from = 2026-03-06
+basis = "announced"
+reference = "Play! Pokémon, 2026-01-28: Ascended Heroes legal from 2026-03-06, after the European International Championships (reported by Bulbapedia, VGC and Wargamer)"
+legal_by = "set"
+
+[[sets]]
+id = "me03"
+name = "Perfect Order"
+released = 2026-03-27
+legal_from = 2026-04-10
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "me04"
+name = "Chaos Rising"
+released = 2026-05-22
+legal_from = 2026-06-05
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "me05"
+name = "Pitch Black"
+released = 2026-07-17
+legal_from = 2026-07-31
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "30th"
+name = "30th Celebration"
+released = 2026-09-16
+legal_from = 2026-09-25
+basis = "second_friday"
+legal_by = "set"
+
+[[unsettled_sets]]
+reason = "whether these cards are Gym Leader Challenge legal is not settled: GLC follows official set legality, which admits them only by a regulation mark that TCGdex does not record (My First Battle and McDonald's Collection 2022 to 2024 are not in the Tournament Handbook's Expanded tables)"
+noted_on = 2026-10-11
+sets = ["mfb", "2022swsh", "2023sv", "2024sv"]
+
+[[unsettled_sets]]
+reason = "whether a Classic Collection card is legal in Gym Leader Challenge is not settled: the GLC FAQ allows Celebrations Classic Collection cards only when they reprint Black & White-onward cards, and the 30th Celebration card gallery says its Classic Collection subset will not be tournament legal"
+noted_on = 2026-10-11
+sets = ["cel25cc", "30th-c"]
+
+[[excluded_sets]]
+reason = "printed before Black & White"
+noted_on = 2026-10-11
+sets = [
+  "base1", "base2", "base3", "base4", "base5", "basep", "bog", "col1", "dp1", "dp2", "dp3", "dp4", "dp5", "dp6",
+  "dp7", "dpp", "ecard1", "ecard2", "ecard3", "ex1", "ex10", "ex11", "ex12", "ex13", "ex14", "ex15", "ex16", "ex2",
+  "ex3", "ex4", "ex5", "ex5.5", "ex6", "ex7", "ex8", "ex9", "exu", "gym1", "gym2", "hgss1", "hgss2", "hgss3", "hgss4",
+  "hgssp", "lc", "miscp", "neo1", "neo2", "neo3", "neo4", "np", "pl1", "pl2", "pl3", "pl4", "pop1", "pop2", "pop3",
+  "pop4", "pop5", "pop6", "pop7", "pop8", "pop9", "ru1", "si1", "tk-dp-l", "tk-dp-m", "tk-ex-latia", "tk-ex-latio",
+  "tk-ex-m", "tk-ex-p", "tk-hs-g", "tk-hs-r",
+]

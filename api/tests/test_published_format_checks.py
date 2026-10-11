@@ -35,7 +35,7 @@ LEGAL = (("me01-125", 4), ("me01-130", 4), ("sv02-278", 52))
 OVER = (("fixture-sv01-901", 3), ("fixture-sv01-902", 2), ("sv05-157", 1), ("sv05-162", 1), ("sv02-278", 53))
 UNKNOWN = (("fixture-me06-3", 4), ("fixture-me05-901", 4), ("sv02-278", 52))
 ROTATING = (("sv01-172", 4), ("me01-125", 4), ("sv02-278", 52))
-ON = "?as_of=2026-10-11"
+ON = "?format=standard&as_of=2026-10-11"  # Narrowed: the Expanded and GLC results have their own tests.
 
 
 def path_of(token, version, query=""):
@@ -70,7 +70,7 @@ def published(cards):
 
 def standard(token, version=1, query=ON, **options):
     body = body_of(public_get(path_of(token, version, query), **options))
-    [result] = body["results"]
+    [result] = [result for result in body["results"] if result["format"] == "standard"]
     return result
 
 
@@ -89,7 +89,7 @@ def public_lines(private_results):
                                            for issue in result["issues"]]} for result in private_results])
 
 
-def matches_private(token, deck, query=ON):
+def matches_private(token, deck, query="?as_of=2026-10-11"):  # Every format, unlike ON.
     """The public results for ``token`` equal the private route's for ``deck``, line references mapped; returns the
     public Standard result."""
     public = body_of(public_get(path_of(token, 1, query)))["results"]
@@ -148,11 +148,11 @@ def test_results_follow_a_rotation_without_republishing(store, monkeypatch):
     _, token = published(ROTATING)
     snapshot = stored_decks()["decks"][token]
     monkeypatch.setattr(published_format_checks, "today", lambda: date(2026, 4, 9))
-    before = body_of(public_get(path_of(token, 1)))
+    before = body_of(public_get(path_of(token, 1, "?format=standard")))
     assert [(r["status"], r["evaluated_on"], r["issues"], r["notes"]) for r in before["results"]] == [
         ("legal", "2026-04-09", [], [])]
     monkeypatch.setattr(published_format_checks, "today", lambda: date(2026, 4, 10))
-    after = body_of(public_get(path_of(token, 1)))
+    after = body_of(public_get(path_of(token, 1, "?format=standard")))
     [result] = after["results"]
     assert (result["status"], result["evaluated_on"]) == ("not_legal", "2026-04-10")
     assert issues(result) == [("not_in_card_pool", "regulation mark G rotated out of Standard on 2026-04-10", "card",
@@ -273,13 +273,13 @@ def test_query_body_and_syntax_are_validated_with_public_headers(store):
                   "?printing_ref=" + "a" * 48):
         refused(public_get(path_of(token, 1, query)), 422, "INVALID_REQUEST")
     refused(client.request("GET", path_of(token, 1), content=b"{}"), 422, "INVALID_REQUEST")
-    for query in ("?format=expanded", "?format=", "?format=" + "x" * 100):
+    for query in ("?format=unlimited", "?format=", "?format=" + "x" * 100):
         refused(public_get(path_of(token, 1, query)), 422, "UNKNOWN_FORMAT")
     for as_of in ("2026-4-10", "20260410", "2026-02-30", "today", "2026-04-10T00:00", "", "2026-04-10" + "0" * 50):
         refused(public_get(path_of(token, 1, f"?as_of={as_of}")), 422, "INVALID_AS_OF")
     refused(public_get(path_of(token, "01")), 404, "PUBLISHED_DECK_NOT_FOUND")
     refused(public_get(path_of("Z" * 32, 1)), 404, "PUBLISHED_DECK_NOT_FOUND")
-    refused(public_get(path_of("short", 1, "?format=expanded")), 404, "PUBLISHED_DECK_NOT_FOUND")
+    refused(public_get(path_of("short", 1, "?format=unlimited")), 404, "PUBLISHED_DECK_NOT_FOUND")
     refused(public_get(path_of(token, 2)), 409, "PUBLISHED_DECK_CHANGED")
     assert client.post(path_of(token, 1)).status_code == 405
 
@@ -401,7 +401,9 @@ def test_a_ban_on_one_printing_reaches_its_identical_reprints_like_the_private_r
     assert source.count("bans = []") == 1
     banned = format_evaluator.load_rules(source.replace("bans = []", 'bans = [\n  { set = "me01", number = "125", '
                                                         'name = "Rare Candy", banned_from = 2026-10-01 },\n]').encode())
-    monkeypatch.setattr(format_evaluator, "format_rules", lambda name: {"standard": banned}[name])
+    real_rules = format_evaluator.format_rules
+    monkeypatch.setattr(format_evaluator, "format_rules",
+                        lambda name: banned if name == "standard" else real_rules(name))
     result = matches_private(token, deck)
     assert issues(result) == [("banned", "banned in Standard from 2026-10-01 as an identical reprint of Rare Candy "
                                          "(me01 125)", "card", "not_legal", [ref_of("sv01-191")])]

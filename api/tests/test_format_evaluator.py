@@ -1,20 +1,24 @@
 """The pure format evaluator (Deck Lists 12, issue #93): the Standard rule matrix with fixture rules and attributes.
-Reprint Group legality and bans (Deck Lists 13, issue #94) use the same fixture rules, with a fixture ban.
+Reprint Group legality and bans (Deck Lists 13, issue #94) use the same fixture rules, with a fixture ban. Expanded's
+by-set card pool, unsettled sets and promo ranges, and its real ban list (Deck Lists 15, issue #96) follow, then Gym
+Leader Challenge's singleton, cross-name groups, exclusions and single-type rule (Deck Lists 16, issue #97).
 
 No database: these tests run with plain pytest (``PYTHONPATH=api .venv/bin/pytest api/tests/test_format_evaluator.py``).
 """
 from collections import defaultdict
+from itertools import chain
 from datetime import date, timedelta
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
 import pytest
 
 from app.card_attributes import UNKNOWN, CardAttributes
-from app.format_evaluator import (ACE_SPEC_LIMIT, ATTRIBUTE_UNKNOWN, BANNED, BEFORE_RULES_COVERAGE, COPY_LIMIT,
-                                  DECK_SIZE, FORMATS, NOT_IN_CARD_POOL, PRISM_STAR_LIMIT, RADIANT_LIMIT,
-                                  REGULATION_MARK_NOT_IN_RULES, REGULATION_MARK_NOT_RECORDED, REPRINT_LEGALITY_UNKNOWN,
-                                  RULES_FACT_UNSETTLED, SET_DATE_NOT_RECORDED, PrintingFacts, ResolvedLine,
-                                  evaluate_format, format_rules, load_rules, next_rule_date, rule_dates)
+from app.format_evaluator import (ACE_SPEC_LIMIT, ACE_SPEC_NOT_ALLOWED, ATTRIBUTE_UNKNOWN, BANNED,
+                                  BEFORE_RULES_COVERAGE, COPY_LIMIT, DECK_SIZE, FORMATS, NOT_IN_CARD_POOL,
+                                  EXCLUSIVE_CARDS, PRISM_STAR_LIMIT, RADIANT_LIMIT, REGULATION_MARK_NOT_IN_RULES,
+                                  REGULATION_MARK_NOT_RECORDED, REPRINT_LEGALITY_UNKNOWN, RULE_BOX_NOT_ALLOWED,
+                                  RULES_FACT_UNSETTLED, SET_DATE_NOT_RECORDED, SINGLE_TYPE, PrintingFacts,
+                                  ResolvedLine, evaluate_format, format_rules, load_rules, next_rule_date, rule_dates)
 
 RULES_TOML = b"""
 format = "standard"
@@ -344,25 +348,72 @@ def test_the_next_rule_date_ends_a_results_window():
     assert next_rule_date(RULES, date(2026, 4, 10)) is None
 
 
+def window_deck(rules):
+    """A deck that exercises every dated rule in ``rules``, and the Reprint Groups it needs: a Trainer from each set and
+    with each regulation mark; each set and mark again as the only legal printing in a Reprint Group of an excluded
+    printing; one group whose members cross every set and mark date; and each ban, both as the banned printing and as an
+    identical reprint from the newest set."""
+    by_mark = [set_rule for set_rule in rules.sets.values() if set_rule.legal_by == "mark"] or list(rules.sets.values())
+    earliest = min(by_mark, key=lambda set_rule: set_rule.legal_from).set_id
+    newest = max(rules.sets.values(), key=lambda set_rule: set_rule.legal_from).set_id
+    old = sorted(rules.excluded)[0]
+    lines = [line(f"Trainer from {set_id}", set_id=set_id) for set_id in rules.sets]
+    lines += [line(f"Trainer marked {mark}", set_id=earliest, mark=mark) for mark in (*rules.marks, "Z", None)]
+    lines += [line(f"Trainer from {old}", set_id=old), line("Trainer from an unrecorded set", set_id="unrecorded"),
+              energy(4)]
+    groups = {}
+
+    def grouped(name, own, *reprints):
+        item, found = reprinted(name, 1, own, *reprints)
+        lines.append(item)
+        groups.update(found)
+
+    for set_id in rules.sets:
+        grouped(f"Reprinted from {set_id}", printing(old, "1", mark=None), printing(set_id, "2"))
+    for mark in rules.marks:
+        grouped(f"Reprinted marked {mark}", printing(old, "1", mark=None), printing(earliest, "2", mark=mark))
+    grouped("Reprinted everywhere", printing(old, "1", mark=None), *(printing(set_id, "2") for set_id in rules.sets),
+            *(printing(earliest, "3", mark=mark) for mark in rules.marks))
+    for set_id, number in rules.bans:
+        grouped(f"Banned {set_id} {number}", printing(set_id, number), printing(newest, f"{number}r"))
+        grouped(f"Reprint of {set_id} {number}", printing(newest, f"{number}r"), printing(set_id, number))
+    return lines, groups
+
+
 @pytest.mark.parametrize("name", FORMATS)
 def test_a_result_changes_only_on_a_rule_date(name):
     """Saved results (Deck Lists 17) are reused until the next rule date, so every day before it must give the same
-    answer. A rules field that adds a dated fact without adding it to ``rule_dates`` fails here."""
+    answer. A rules field that adds a dated fact without adding it to ``rule_dates`` fails here, because the deck
+    exercises every dated rule. Every day before ``covers_from`` is unknown for the same reason, so the scan starts a
+    week before it."""
     rules = format_rules(name)
     dates = rule_dates(rules)
-    earliest = min(rules.sets.values(), key=lambda set_rule: set_rule.legal_from).set_id
-    lines = [line(f"Trainer from {set_id}", set_id=set_id) for set_id in rules.sets]
-    lines += [line(f"Trainer marked {mark}", set_id=earliest, mark=mark) for mark in (*rules.marks, "Z", None)]
-    lines += [line(f"Trainer from {set_id}", set_id=set_id) for set_id in sorted(rules.excluded)[:1]]
-    lines += [line("Trainer from an unrecorded set", set_id="unrecorded"), energy(4)]
+    lines, groups = window_deck(rules)
+    start = rules.covers_from - timedelta(days=7)
+    # The scan's end comes from the rules fields, not from ``rule_dates`` under test, so a dropped last date is caught.
+    end = max(chain([rules.covers_from], (entry.legal_from for entry in rules.sets.values()),
+                    (mark.legal_from for mark in rules.marks.values()),
+                    (mark.rotates_on for mark in rules.marks.values() if mark.rotates_on),
+                    (ban.banned_from for ban in rules.bans.values()),
+                    (ban.lifted_on for ban in rules.bans.values() if ban.lifted_on)))
     answers = defaultdict(set)
-    day = dates[0] - timedelta(days=7)
-    while day <= dates[-1] + timedelta(days=7):
-        result = check(lines, day, rules)
+    day = start
+    while day <= end + timedelta(days=7):
+        result = check(lines, day, rules, groups)
         answers[next_rule_date(rules, day)].add((result.status, result.issues))
         day += timedelta(days=1)
-    assert set(answers) == {*dates, None}
+    assert set(answers) == {*(rule_date for rule_date in dates if rule_date > start), None}
     assert {until: len(found) for until, found in answers.items() if len(found) != 1} == {}
+
+
+def test_the_window_deck_exercises_every_ban():
+    rules = load_rules(RULES_TOML.replace(b"bans = []", b"""bans = [
+  { set = "old", number = "7", name = "Banned Card", banned_from = 2026-01-02, lifted_on = 2026-07-03 },
+]"""))
+    lines, groups = window_deck(rules)
+    found = {issue.reason for issue in check(lines, date(2026, 5, 1), rules, groups).issues if issue.code == BANNED}
+    assert found == {"banned in Standard from 2026-01-02",
+                     "banned in Standard from 2026-01-02 as an identical reprint of Banned Card (old 7)"}
 
 
 VINTAGE = "not in the Standard card pool: printed before regulation marks"
@@ -457,3 +508,511 @@ def test_a_ban_beats_legality_and_covers_pokemon_reprints_too():
 def test_ban_dates_are_rule_dates():
     assert next_rule_date(BANNED_RULES, date(2026, 1, 1)) == date(2026, 1, 2)
     assert next_rule_date(BANNED_RULES, date(2026, 5, 1)) == date(2026, 7, 3)
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Expanded (Deck Lists 15, issue #96)
+
+EXPANDED_TOML = b"""
+format = "expanded"
+name = "Expanded"
+revision = 3
+published = 2026-10-11
+covers_from = 2026-04-10
+pool = "by_set"
+basic_energy_always_legal = true
+pokemon_reprint_inheritance = false
+bans = [
+  { set = "bw", number = "62", name = "Sableye", banned_from = 2026-04-10 },
+  { set = "swsh", number = "83", name = "Medicham V", banned_from = 2026-05-01 },
+]
+
+[limits]
+deck_size = 60
+copies = 4
+basic_energy_exempt = true
+ace_spec_per_deck = 1
+radiant_per_deck = 1
+prism_star_per_name = 1
+
+[[exclusive_groups]]
+names = ["Boss's Orders", "Lysandre"]
+
+[[exclusive_groups]]
+names = ["Professor's Research", "Professor Sycamore", "Professor Juniper"]
+
+[[regulation_marks]]
+mark = "D"
+legal_from = 2026-04-10
+
+[[regulation_marks]]
+mark = "J"
+legal_from = 2026-04-10
+
+[[sets]]
+id = "bw"
+name = "Black & White"
+released = 2011-04-25
+legal_from = 2011-05-06
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "promo"
+name = "SM Black Star Promos"
+released = 2017-02-03
+legal_from = 2017-02-17
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "swsh"
+name = "Sword & Shield"
+released = 2020-02-07
+legal_from = 2020-02-21
+basis = "second_friday"
+legal_by = "mark"
+
+[[sets]]
+id = "next"
+name = "Next Set"
+released = 2026-05-22
+legal_from = 2026-06-05
+basis = "second_friday"
+legal_by = "mark"
+
+[[excluded_sets]]
+reason = "printed before Black & White"
+noted_on = 2026-10-11
+sets = ["vintage"]
+
+[[unsettled_sets]]
+reason = "whether Classic Collection reprints are legal is not settled"
+noted_on = 2026-10-11
+sets = ["classic"]
+
+[[unsettled_printings]]
+set = "promo"
+prefix = "SM"
+from = 1
+to = 157
+reason = "whether SM01 to SM157 are legal is not settled"
+noted_on = 2026-10-11
+"""
+EXPANDED = load_rules(EXPANDED_TOML)
+PROMO_UNSETTLED = "whether SM01 to SM157 are legal is not settled"
+
+
+def expanded_check(lines, on=DAY, groups=None):
+    return evaluate_format(lines, EXPANDED, on, groups)
+
+
+def test_a_set_admitted_by_set_needs_no_mark():
+    bw = line("Black & White Trainer", 4, set_id="bw", mark=None)
+    marked = line("Odd Marked Trainer", 4, set_id="bw", mark="K")
+    result = expanded_check(deck(bw, marked))
+    assert (result.format, result.status, result.issues, result.rules_version) == (
+        "expanded", "legal", (), "3 (2026-10-11)")
+
+
+def test_a_set_admitted_by_mark_needs_a_legal_mark():
+    marked = line("Marked Trainer", 4, set_id="swsh", mark="D")
+    assert expanded_check(deck(marked)).status == "legal"
+    unmarked, future = line("Unmarked Trainer", 4, set_id="swsh", mark=None), line("Future", 4, set_id="swsh", mark="K")
+    assert issues(expanded_check(deck(unmarked, future))) == {
+        (REGULATION_MARK_NOT_RECORDED, "regulation mark not recorded", "card", "unknown", edition(unmarked)),
+        (REGULATION_MARK_NOT_IN_RULES, "regulation mark K not in rules", "card", "unknown", edition(future))}
+
+
+def test_a_set_is_legal_in_expanded_from_its_legal_from_date_whatever_its_mark():
+    fresh = line("Fresh Trainer", 4, set_id="next", mark="J")
+    assert issues(expanded_check(deck(fresh), date(2026, 6, 4))) == {
+        (NOT_IN_CARD_POOL, "Next Set (next) not legal in Expanded until 2026-06-05", "card", "not_legal",
+         edition(fresh))}
+    assert expanded_check(deck(fresh), date(2026, 6, 5)).status == "legal"
+
+
+def test_an_unrecorded_set_in_a_by_set_pool_is_one_gap():
+    unrecorded = line("Delta Card", 4, set_id="me06", mark="Z")
+    assert issues(expanded_check(deck(unrecorded))) == {
+        (SET_DATE_NOT_RECORDED, "set legality date not recorded for me06", "card", "unknown", edition(unrecorded))}
+
+
+def test_cards_printed_before_black_and_white_are_out_unless_a_reprint_is_in():
+    old = line("Old Trainer", 4, set_id="vintage", mark=None)
+    assert issues(expanded_check(deck(old))) == {
+        (NOT_IN_CARD_POOL, "not in the Expanded card pool: printed before Black & White", "card", "not_legal",
+         edition(old))}
+    candy, groups = reprinted("Rare Candy", 4, printing("vintage", "103", mark=None), printing("bw", "100", mark=None))
+    assert expanded_check(deck(candy), groups=groups).status == "legal"
+    # A Pokémon does not inherit.
+    pokemon, groups = reprinted("Old Pokémon", 4, printing("vintage", "1", kind="pokemon", mark=None),
+                                printing("bw", "1", kind="pokemon", mark=None))
+    assert expanded_check(deck(pokemon), groups=groups).status == "not_legal"
+
+
+def test_an_unsettled_set_is_unknown_and_a_trainer_there_inherits_from_a_legal_reprint():
+    classic = line("Classic Pokémon", 1, set_id="classic", kind="pokemon", mark=None)
+    assert issues(expanded_check(deck(classic))) == {
+        (RULES_FACT_UNSETTLED, "whether Classic Collection reprints are legal is not settled", "card", "unknown",
+         edition(classic))}
+    trainer, groups = reprinted("Classic Trainer", 1, printing("classic", "CC1", mark=None),
+                                printing("bw", "9", mark=None))
+    assert expanded_check(deck(trainer), groups=groups).status == "legal"
+
+
+@pytest.mark.parametrize("number, status", [
+    ("SM01", "unknown"), ("SM85", "unknown"), ("SM157", "unknown"), ("SM158", "legal"), ("SM248", "legal"),
+    ("SM85a", "unknown"), (None, "unknown")])
+def test_sm_promos_before_sm158_are_unknown(number, status):
+    promo = ResolvedLine(uuid4(), 1, uuid5(NAMESPACE_URL, "Promo"), "Promo",
+                         PrintingFacts(uuid4(), "promo", attributes(mark=None, kind="pokemon"), number))
+    result = expanded_check(deck(promo))
+    assert result.status == status
+    if status == "unknown":
+        assert issues(result) == {(RULES_FACT_UNSETTLED, PROMO_UNSETTLED, "card", "unknown", edition(promo))}
+
+
+def test_an_expanded_ban_covers_identical_reprints_and_a_ban_in_force_from_the_start_names_no_date():
+    banned, reprint = printing("bw", "62", kind="pokemon", mark=None), printing("swsh", "9", kind="pokemon", mark="D")
+    group, identity = uuid4(), uuid5(NAMESPACE_URL, "Sableye")
+    first = ResolvedLine(uuid4(), 1, identity, "Sableye", banned, group)
+    second = ResolvedLine(uuid4(), 1, identity, "Sableye", reprint, group)
+    assert issues(expanded_check(deck(first, second), groups={group: (banned, reprint)})) == {
+        (BANNED, "banned in Expanded", "card", "not_legal", edition(first)),
+        (BANNED, "banned in Expanded as an identical reprint of Sableye (bw 62)", "card", "not_legal",
+         edition(second))}
+    medicham = ResolvedLine(uuid4(), 1, uuid5(NAMESPACE_URL, "Medicham V"), "Medicham V",
+                            PrintingFacts(uuid4(), "swsh", attributes(mark="D", kind="pokemon"), "83"))
+    assert expanded_check(deck(medicham), date(2026, 4, 30)).status == "legal"
+    assert issues(expanded_check(deck(medicham), date(2026, 5, 1))) == {
+        (BANNED, "banned in Expanded from 2026-05-01", "card", "not_legal", edition(medicham))}
+
+
+def test_expanded_limits_match_standard():
+    computer, cyclone = line("Computer Search", set_id="bw", mark=None, ace=True), line("Scoop Up Cyclone", set_id="bw",
+                                                                                        mark=None, ace=True)
+    assert {issue.code for issue in expanded_check(deck(computer, cyclone)).issues} == {ACE_SPEC_LIMIT}
+    assert {issue.code for issue in expanded_check(deck(line("Ultra Ball", 5, set_id="bw", mark=None))).issues} == {
+        COPY_LIMIT}
+
+
+def test_dates_before_the_expanded_rules_begin_are_unknown():
+    assert issues(expanded_check(deck(line("Trainer", 4, set_id="bw", mark=None)), date(2026, 4, 9))) == {
+        (BEFORE_RULES_COVERAGE, "Expanded rules start on 2026-04-10; earlier dates are unknown", "deck", "unknown", ())}
+
+
+def real_line(set_id, number, name, kind="trainer", mark=None, quantity=1):
+    return ResolvedLine(uuid4(), quantity, uuid5(NAMESPACE_URL, name), name,
+                        PrintingFacts(uuid4(), set_id, attributes(mark=mark, kind=kind), number))
+
+
+def test_the_expanded_rules_file_holds_the_pool_edges_and_bans():
+    rules = format_rules("expanded")
+
+    def status(set_id, number="1", kind="trainer", mark=None, on=DAY):
+        return check(deck(real_line(set_id, number, f"Card {set_id} {number}", kind, mark)), on,
+                     rules).status
+    # The pool's edges: Black & White onward by set, Sword & Shield onward by mark, extras by set, older sets out.
+    assert [status(set_id) for set_id in ("bw1", "bw10", "bw11", "dv1", "bwp", "xy0", "xya", "g1", "sma", "det1",
+                                          "2011bw", "2021swsh", "tk-bw-e", "tk-xy-sy", "tk-sm-r")] == ["legal"] * 15
+    assert [status(set_id) for set_id in ("col1", "hgss4", "tk-hs-g", "tk-dp-l", "base1")] == ["not_legal"] * 5
+    assert [status(set_id, mark="D") for set_id in ("swsh1", "swshp", "fut2020", "cel25", "2022swsh", "sv01",
+                                                    "me05")] == ["legal"] * 7
+    assert [status(set_id) for set_id in ("swsh12.5", "2023sv", "2024sv", "30th")] == ["unknown"] * 4
+    assert [status(set_id) for set_id in ("cel25cc", "30th-c", "me06")] == ["unknown"] * 3
+    assert [status("smp", number) for number in ("SM01", "SM157", "SM158")] == ["unknown", "unknown", "legal"]
+    assert (status("30th", mark="J", on=date(2026, 9, 24)), status("30th", mark="J")) == ("not_legal", "legal")
+    # Bans name TCGdex collector numbers; a reprint of a banned printing is banned too.
+    for set_id, number, name, kind in (("swsh2", "22", "Flapple", "pokemon"), ("smp", "SM85", "Marshadow", "pokemon"),
+                                       ("swsh7", "83", "Medicham V", "pokemon"), ("xy9", "98a", "Delinquent",
+                                                                                   "trainer")):
+        banned = real_line(set_id, number, name, kind, mark="E")
+        assert issues(check(deck(banned), DAY, rules)) == {
+            (BANNED, "banned in Expanded", "card", "not_legal", edition(banned))}
+    net, groups = reprinted("Scoop Up Net", 1, printing("sv01", "999", mark="G"), printing("swsh2", "165", mark="D"))
+    assert issues(check(deck(net), DAY, rules, groups)) == {
+        (BANNED, "banned in Expanded as an identical reprint of Scoop Up Net (swsh2 165)", "card", "not_legal",
+         edition(net))}
+    assert check(deck(line("Rare Candy", 4, set_id="bw1", mark=None)), date(2026, 4, 9), rules).status == "unknown"
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Gym Leader Challenge (Deck Lists 16, issue #97)
+
+GLC_TOML = b"""
+format = "glc"
+name = "Gym Leader Challenge"
+revision = 4
+published = 2026-10-11
+covers_from = 2025-04-24
+pool = "by_set"
+basic_energy_always_legal = true
+pokemon_reprint_inheritance = false
+regulation_marks = []
+excluded_attributes = ["rule_box", "ace_spec"]
+single_pokemon_type = true
+bans = [
+  { set = "bw", number = "93", name = "Dimension Valley", banned_from = 2026-04-20 },
+]
+
+[limits]
+deck_size = 60
+copies = 1
+basic_energy_exempt = true
+ace_spec_per_deck = 0
+radiant_per_deck = 0
+prism_star_per_name = 0
+
+[[copy_groups]]
+names = ["Boss's Orders", "Lysandre"]
+
+[[copy_groups]]
+names = ["Professor's Research", "Professor Sycamore", "Professor Juniper"]
+
+[[sets]]
+id = "bw"
+name = "Black & White"
+released = 2011-04-25
+legal_from = 2011-05-06
+basis = "second_friday"
+legal_by = "set"
+
+[[sets]]
+id = "sv"
+name = "Scarlet & Violet"
+released = 2023-03-31
+legal_from = 2023-04-14
+basis = "second_friday"
+legal_by = "set"
+
+[[excluded_sets]]
+reason = "printed before Black & White"
+noted_on = 2026-10-11
+sets = ["vintage"]
+"""
+GLC = load_rules(GLC_TOML)
+RULE_BOX_REASON = "Rule Box cards, including Radiant and Prism Star cards, are not allowed in Gym Leader Challenge"
+ACE_SPEC_REASON = "ACE SPEC cards are not allowed in Gym Leader Challenge"
+TWO_TYPES = "every Pokémon in a Gym Leader Challenge deck shares one type; these Pokémon have no type in common"
+
+
+def glc(lines, on=DAY, groups=None):
+    return evaluate_format(lines, GLC, on, groups)
+
+
+def card_line(name, quantity=1, kind="trainer", types=(), rule_box=False, ace=False, radiant=False, prism=False,
+              basic=False, set_id="sv", raw=None):
+    facts = raw if raw is not None else CardAttributes(None, kind, basic, types, rule_box, ace, radiant, prism)
+    return ResolvedLine(uuid4(), quantity, uuid5(NAMESPACE_URL, name), name, PrintingFacts(uuid4(), set_id, facts))
+
+
+def mon(name, *types, **values):
+    return card_line(name, kind="pokemon", types=types or ("Fire",), **values)
+
+
+def lines_of(*items):
+    return tuple(sorted((item.edition_id for item in items), key=str))
+
+
+def test_a_glc_deck_has_one_copy_of_each_card_except_basic_energy():
+    result = glc(deck(mon("Charmander"), card_line("Ultra Ball")))
+    assert (result.format, result.status, result.issues, result.rules_version) == (
+        "glc", "legal", (), "4 (2026-10-11)")
+    balls, special = card_line("Ultra Ball", 2), card_line("Double Turbo Energy", 2, kind="energy")
+    assert issues(glc(deck(balls, special))) == {
+        (COPY_LIMIT, "more than 1 copy of Ultra Ball (2)", "card", "not_legal", edition(balls)),
+        (COPY_LIMIT, "more than 1 copy of Double Turbo Energy (2)", "card", "not_legal", edition(special))}
+    # Basic Energy in any quantity, of any type.
+    assert glc([mon("Charmander"), energy(30, "Water Energy"), energy(29, "Psychic Energy")]).status == "legal"
+
+
+def test_boss_and_lysandre_and_the_three_professors_share_one_copy():
+    boss, lysandre = card_line("Boss's Orders"), card_line("Lysandre")
+    research, sycamore = card_line("Professor's Research"), card_line("Professor Sycamore")
+    juniper = card_line("Professor Juniper")
+    assert issues(glc(deck(boss, lysandre, research, sycamore))) == {
+        (COPY_LIMIT, "more than 1 copy of Boss's Orders or Lysandre (2)", "card", "not_legal",
+         lines_of(boss, lysandre)),
+        (COPY_LIMIT, "more than 1 copy of Professor's Research, Professor Sycamore or Professor Juniper (2)", "card",
+         "not_legal", lines_of(research, sycamore))}
+    assert glc(deck(lysandre, juniper)).status == "legal"
+    # Only these groups: other cards with related names are separate cards.
+    others = (card_line("Gloria"), card_line("Brigette"), card_line("Hop"), card_line("Cheren"))
+    assert glc(deck(*others)).status == "legal"
+
+
+def test_the_single_type_rule_covers_pokemon_only():
+    assert glc(deck(mon("Charmander"), mon("Charizard"), card_line("Ultra Ball"),
+                    energy(10, "Water Energy"))).status == "legal"
+
+
+def test_a_dual_type_pokemon_fits_either_of_its_types():
+    volcarona = mon("Volcarona", "Fire", "Grass")
+    assert glc(deck(mon("Charmander", "Fire"), volcarona)).status == "legal"
+    assert glc(deck(mon("Bulbasaur", "Grass"), volcarona)).status == "legal"
+    water, fire = mon("Squirtle", "Water"), mon("Charmander", "Fire")
+    assert issues(glc(deck(water, fire, volcarona))) == {
+        (SINGLE_TYPE, TWO_TYPES, "deck", "not_legal", lines_of(water, fire, volcarona))}
+
+
+def test_colorless_is_a_type_of_its_own():
+    fire, snorlax = mon("Charmander", "Fire"), mon("Snorlax", "Colorless")
+    assert issues(glc(deck(fire, snorlax))) == {(SINGLE_TYPE, TWO_TYPES, "deck", "not_legal", lines_of(fire, snorlax))}
+    assert glc(deck(snorlax, mon("Eevee", "Colorless"))).status == "legal"
+
+
+def test_an_unknown_type_is_a_gap_only_when_it_could_break_the_rule():
+    untyped = mon("Mystery", raw=CardAttributes(None, "pokemon", False, None, False, False, False, False))
+    assert glc(deck(untyped)).status == "legal"
+    fire = mon("Charmander", "Fire")
+    assert issues(glc(deck(untyped, fire))) == {
+        (ATTRIBUTE_UNKNOWN, "Pokémon type unknown", "card", "unknown", edition(untyped))}
+    water = mon("Squirtle", "Water")
+    assert issues(glc(deck(untyped, fire, water))) == {
+        (SINGLE_TYPE, TWO_TYPES, "deck", "not_legal", lines_of(fire, water))}
+    odd = card_line("Odd Card", raw=CardAttributes(None, None, None, None, None, None, None, None))
+    assert issues(glc(deck(odd, fire))) == {
+        (ATTRIBUTE_UNKNOWN, "card kind unknown", "card", "unknown", edition(odd)),
+        (ATTRIBUTE_UNKNOWN, "Rule Box status unknown", "card", "unknown", edition(odd)),
+        (ATTRIBUTE_UNKNOWN, "ACE SPEC status unknown", "card", "unknown", edition(odd))}
+
+
+def test_rule_box_ace_spec_and_prism_star_cards_are_not_legal():
+    ex, radiant = mon("Arcanine ex", rule_box=True), mon("Radiant Charizard", rule_box=True, radiant=True)
+    prism, catcher = card_line("Cyrus ◇", rule_box=True, prism=True), card_line("Prime Catcher", ace=True)
+    upper = card_line("Neo Upper Energy", kind="energy", ace=True)
+    assert issues(glc(deck(ex, radiant, prism, catcher, upper))) == {
+        (RULE_BOX_NOT_ALLOWED, RULE_BOX_REASON, "card", "not_legal", lines_of(ex, radiant, prism)),
+        (ACE_SPEC_NOT_ALLOWED, ACE_SPEC_REASON, "card", "not_legal", lines_of(catcher, upper))}
+    # The exclusions replace the per-deck ACE SPEC, Radiant and Prism Star limits.
+    assert not {issue.code for issue in glc(deck(catcher, upper, radiant, prism)).issues} & {
+        ACE_SPEC_LIMIT, RADIANT_LIMIT, PRISM_STAR_LIMIT}
+
+
+def test_an_unknown_rule_box_or_ace_spec_status_is_unknown():
+    unsure_box = mon("Mystery ex", raw=CardAttributes(None, "pokemon", False, ("Fire",), None, False, False, False))
+    unsure_ace = card_line("New Trainer", raw=CardAttributes(None, "trainer", False, (), False, None, False, False))
+    assert issues(glc(deck(unsure_box, unsure_ace))) == {
+        (ATTRIBUTE_UNKNOWN, "Rule Box status unknown", "card", "unknown", edition(unsure_box)),
+        (ATTRIBUTE_UNKNOWN, "ACE SPEC status unknown", "card", "unknown", edition(unsure_ace))}
+
+
+def test_the_glc_pool_is_black_and_white_onward_by_set_whatever_the_mark():
+    assert glc(deck(mon("Charmander", set_id="bw"), card_line("Rare Candy", set_id="sv"))).status == "legal"
+    old = card_line("Old Trainer", set_id="vintage")
+    assert issues(glc(deck(old))) == {
+        (NOT_IN_CARD_POOL, "not in the Gym Leader Challenge card pool: printed before Black & White", "card",
+         "not_legal", edition(old))}
+    candy, groups = reprinted("Rare Candy", 1, printing("vintage", "1", mark=None), printing("sv", "2", mark=None))
+    assert glc(deck(candy), groups=groups).status == "legal"
+    unrecorded = card_line("Delta Card", set_id="me06")
+    assert issues(glc(deck(unrecorded))) == {
+        (SET_DATE_NOT_RECORDED, "set legality date not recorded for me06", "card", "unknown", edition(unrecorded))}
+
+
+def test_glc_bans_name_one_printing_with_its_date_and_cover_its_reprint_group():
+    valley = ResolvedLine(uuid4(), 1, uuid5(NAMESPACE_URL, "Dimension Valley"), "Dimension Valley",
+                          PrintingFacts(uuid4(), "bw", attributes(mark=None), "93"))
+    assert glc(deck(valley), date(2026, 4, 19)).status == "legal"
+    assert issues(glc(deck(valley), date(2026, 4, 20))) == {
+        (BANNED, "banned in Gym Leader Challenge from 2026-04-20", "card", "not_legal", edition(valley))}
+    reprint, groups = reprinted("Dimension Valley", 1, printing("sv", "9", mark=None), printing("bw", "93", mark=None))
+    assert issues(glc(deck(reprint), date(2026, 4, 20), groups)) == {
+        (BANNED, "banned in Gym Leader Challenge from 2026-04-20 as an identical reprint of Dimension Valley (bw 93)",
+         "card", "not_legal", edition(reprint))}
+
+
+def test_the_glc_rules_file_holds_its_bans_groups_and_pool():
+    rules = format_rules("glc")
+
+    def result(*items, on=DAY):
+        return evaluate_format(deck(*items), rules, on)
+
+    def at(set_id, number, name, kind="trainer", types=()):
+        return ResolvedLine(uuid4(), 1, uuid5(NAMESPACE_URL, name), name,
+                            PrintingFacts(uuid4(), set_id, CardAttributes(None, kind, False, types, False, False,
+                                                                          False, False), number))
+    # A printing-specific ban: Kyogre Shining Fates 021 only.
+    banned = at("swsh4.5", "21", "Kyogre", "pokemon", ("Water",))
+    assert issues(result(banned)) == {(BANNED, "banned in Gym Leader Challenge", "card", "not_legal", edition(banned))}
+    assert result(at("sv06", "999", "Kyogre", "pokemon", ("Water",))).status == "legal"
+    # Every printing of Double Colorless Energy, and Dimension Valley from 2026-04-20.
+    assert {result(at(set_id, number, "Double Colorless Energy", "energy")).status
+            for set_id, number in (("sm3.5", "69"), ("bw4", "92"), ("xy1", "130"), ("sm1", "136"))} == {"not_legal"}
+    valley = at("xy4", "93", "Dimension Valley")
+    assert (result(valley, on=date(2026, 4, 19)).status, result(valley, on=date(2026, 4, 20)).status) == (
+        "legal", "not_legal")
+    # Expanded's ban list does not apply; GLC does not rotate; marks play no part.
+    assert result(at("bw3", "67", "Archeops", "pokemon", ("Colorless",))).status == "legal"
+    assert result(at("bw1", "1", "Snivy", "pokemon", ("Grass",)), at("me05", "1", "Fixture Grass", "pokemon",
+                                                                    ("Grass",))).status == "legal"
+    assert (result(at("30th", "1", "Fixture", "pokemon"), on=date(2026, 9, 24)).status,
+            result(at("30th", "1", "Fixture", "pokemon")).status) == ("not_legal", "legal")
+    assert [result(at(set_id, "1", "Fixture")).status for set_id in ("cel25cc", "30th-c", "mfb", "2023sv", "base1",
+                                                                     "me06")] == [
+        "unknown", "unknown", "unknown", "unknown", "not_legal", "unknown"]
+    assert {issue.code for issue in result(at("sv02", "172", "Boss's Orders"), at("xy2", "90", "Lysandre")).issues} == {
+        COPY_LIMIT}
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Expanded cards that may not share a deck (Deck Lists 15, revision 2)
+
+BOSS_OR_LYSANDRE = "an Expanded deck may hold only one of Boss's Orders or Lysandre"
+PROFESSORS = "an Expanded deck may hold only one of Professor's Research, Professor Sycamore or Professor Juniper"
+
+
+def test_boss_and_lysandre_may_not_share_an_expanded_deck_whatever_the_copies():
+    boss, lysandre = line("Boss's Orders", 1, set_id="bw", mark=None), line("Lysandre", 1, set_id="bw", mark=None)
+    assert issues(expanded_check(deck(boss, lysandre))) == {
+        (EXCLUSIVE_CARDS, BOSS_OR_LYSANDRE, "deck", "not_legal", lines_of(boss, lysandre))}
+    # Each stays within its own four copies, so the only issue is the exclusion.
+    two_boss = line("Boss's Orders", 2, set_id="bw", mark=None)
+    two_lysandre = line("Lysandre", 2, set_id="bw", mark=None)
+    assert [issue.code for issue in expanded_check(deck(two_boss, two_lysandre)).issues] == [EXCLUSIVE_CARDS]
+    # One of them alone, up to four copies, is legal; the copy limit still counts each Card Identity.
+    assert expanded_check(deck(line("Boss's Orders", 4, set_id="bw", mark=None))).status == "legal"
+    assert {issue.code for issue in expanded_check(deck(line("Lysandre", 5, set_id="bw", mark=None))).issues} == {
+        COPY_LIMIT}
+
+
+def test_the_three_professors_may_not_share_an_expanded_deck():
+    # "Professor's Research (Professor Juniper)" is the Card Identity "Professor's Research".
+    research = line("Professor's Research", 2, set_id="bw", mark=None)
+    sycamore = line("Professor Sycamore", 1, set_id="bw", mark=None)
+    juniper = line("Professor Juniper", 1, set_id="bw", mark=None)
+    assert issues(expanded_check(deck(research, sycamore, juniper))) == {
+        (EXCLUSIVE_CARDS, PROFESSORS, "deck", "not_legal", lines_of(research, sycamore, juniper))}
+    assert expanded_check(deck(research, line("Boss's Orders", set_id="bw", mark=None))).status == "legal"
+
+
+def test_two_printings_of_one_exclusive_card_are_not_an_exclusion():
+    identity = uuid5(NAMESPACE_URL, "Boss's Orders")
+    first = line("Boss's Orders", 2, set_id="bw", mark=None, identity=identity)
+    second = line("Boss's Orders", 2, set_id="swsh", mark="D", identity=identity)
+    assert expanded_check(deck(first, second)).status == "legal"
+
+
+def test_an_expanded_deck_size_reason_reads_an_expanded_deck():
+    short = line("Rare Candy", 4, set_id="bw", mark=None)
+    assert issues(expanded_check([short])) == {
+        (DECK_SIZE, "an Expanded deck has exactly 60 cards; this one has 4", "deck", "not_legal", edition(short))}
+
+
+def test_glc_copy_groups_already_cover_the_exclusions():
+    """GLC's one-copy copy groups subsume Expanded's exclusion: one Boss's Orders and one Lysandre break the shared copy
+    limit, so GLC needs no exclusive groups."""
+    assert GLC.exclusive_groups == ()
+    boss, lysandre = card_line("Boss's Orders"), card_line("Lysandre")
+    assert [issue.code for issue in glc(deck(boss, lysandre)).issues] == [COPY_LIMIT]
+
+
+def test_the_real_expanded_rules_keep_boss_and_lysandre_apart():
+    rules = format_rules("expanded")
+    boss = ResolvedLine(uuid4(), 1, uuid5(NAMESPACE_URL, "Boss's Orders"), "Boss's Orders",
+                        PrintingFacts(uuid4(), "sv02", attributes(mark="G"), "172"))
+    lysandre = ResolvedLine(uuid4(), 1, uuid5(NAMESPACE_URL, "Lysandre"), "Lysandre",
+                            PrintingFacts(uuid4(), "xy2", attributes(mark=None), "90"))
+    assert issues(check(deck(boss, lysandre), DAY, rules)) == {
+        (EXCLUSIVE_CARDS, BOSS_OR_LYSANDRE, "deck", "not_legal", lines_of(boss, lysandre))}

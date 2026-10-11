@@ -13,16 +13,32 @@ Legality and bans follow Reprint Groups (``app.reprint_groups``). A Trainer or E
 own is legal when any printing in its group is; a Pokémon printing is not, unless the rules set
 ``pokemon_reprint_inheritance``. A ban names one printing and applies to every printing in its group.
 
+Two card pools exist. In ``mark_and_set`` (Standard) a printing needs a legal regulation mark and a set past its
+legal-from date. In ``by_set`` (Expanded, ticket 15) each set says whether it admits its printings by itself
+(``legal_by = "set"``: the Black & White to Sun & Moon sets and the extras) or only with a legal mark
+(``legal_by = "mark"``). Facts the research could not settle make a printing unknown: a whole set (``unsettled_sets``)
+or a numbered range within one (``unsettled_printings``).
+
+Gym Leader Challenge (ticket 16) adds three optional rules: ``copy_groups`` (Card Identities that share one copy count,
+such as Boss's Orders and Lysandre), ``excluded_attributes`` (cards whose Rule Box or ACE SPEC status is true are not
+legal; the per-deck limits those exclusions cover are skipped) and ``single_pokemon_type`` (every Pokémon shares one
+type; a dual-type Pokémon fits either type, and Colorless is a type of its own).
+
+``exclusive_groups`` (Expanded, ticket 15 revision 2) name Card Identities that may not share a deck at all, such as
+Boss's Orders and Lysandre: official rulings, not a shared copy count, so 2 Boss's Orders and 2 Lysandre are not legal
+in Expanded although each stays within 4 copies. A deck holding two or more of them is not legal (a deck issue).
+
 A result is advisory. Any definite violation makes it ``not_legal``; otherwise any gap in the rules or the card data
 makes it ``unknown``; otherwise it is ``legal``. A gap is reported only when the missing fact could change the answer:
 an unknown ACE SPEC status matters only if it could put the deck over its ACE SPEC limit.
 """
 import bisect
 import hashlib
+import re
 import tomllib
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, timedelta
 from functools import cache
 from pathlib import Path
@@ -30,10 +46,11 @@ from typing import Literal
 from uuid import UUID
 
 from .card_attributes import CardAttributes
+from .card_identity import card_identity_key
 
 RULES_DIR = Path(__file__).resolve().parent / "format_rules"
-# Formats with a rules file, in response order. Expanded (ticket 15) and Gym Leader Challenge (ticket 16) add theirs.
-FORMATS = ("standard",)
+# Formats with a rules file, in response order.
+FORMATS = ("standard", "expanded", "glc")
 
 Status = Literal["legal", "not_legal", "unknown"]
 IssueKind = Literal["deck", "card"]
@@ -46,6 +63,10 @@ ACE_SPEC_LIMIT = "ace_spec_limit"
 RADIANT_LIMIT = "radiant_limit"
 PRISM_STAR_LIMIT = "prism_star_limit"
 BANNED = "banned"
+SINGLE_TYPE = "single_type"
+EXCLUSIVE_CARDS = "exclusive_cards"
+RULE_BOX_NOT_ALLOWED = "rule_box_not_allowed"
+ACE_SPEC_NOT_ALLOWED = "ace_spec_not_allowed"
 # Gaps make a result unknown:
 SET_DATE_NOT_RECORDED = "set_date_not_recorded"
 REGULATION_MARK_NOT_RECORDED = "regulation_mark_not_recorded"
@@ -82,6 +103,7 @@ class SetRule:
     legal_from: date            # first legal day
     basis: str                  # 'second_friday' or 'announced'
     reference: str | None       # the announcement, when basis is 'announced'
+    legal_by: str = "mark"      # 'mark': its printings also need a legal mark; 'set': the set admits them (by_set)
 
 
 @dataclass(frozen=True)
@@ -89,6 +111,23 @@ class SetExclusion:
     reason: str
     noted_on: date
     set_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class UnsettledPrintings:
+    """A numbered range within one set whose legality the research has not settled, such as SM01 to SM157."""
+    set_id: str
+    prefix: str                 # the collector number's text before its digits, such as "SM"
+    first: int
+    last: int
+    reason: str
+    noted_on: date
+
+    def covers(self, number: str | None) -> bool:
+        """Whether ``number`` is in the range. A number that does not read as the prefix and digits is covered too:
+        the rules cannot tell where it falls."""
+        match = re.fullmatch(re.escape(self.prefix) + r"(\d+)", number or "")
+        return match is None or self.first <= int(match.group(1)) <= self.last
 
 
 @dataclass(frozen=True)
@@ -121,6 +160,30 @@ class Limits:
 
 
 @dataclass(frozen=True)
+class CopyGroup:
+    """Card Identities whose copies count together toward the copy limit."""
+    names: tuple[str, ...]      # Card Identity names, in rules-file order
+
+    @property
+    def label(self) -> str:
+        return f"{', '.join(self.names[:-1])} or {self.names[-1]}"
+
+
+def _a(name: str) -> str:
+    """The indefinite article before a format name: "a Standard deck", "an Expanded deck"."""
+    return "an" if name[:1] in "AEIOU" else "a"
+
+
+# Attributes a format may exclude: the issue code, the cards it names, and the gap when the attribute is unknown. Rule
+# Box covers Radiant Pokémon and every Prism Star card (card_attributes.CardAttributeRules).
+EXCLUDABLE = {
+    "rule_box": (RULE_BOX_NOT_ALLOWED, "Rule Box cards, including Radiant and Prism Star cards,",
+                 "Rule Box status unknown"),
+    "ace_spec": (ACE_SPEC_NOT_ALLOWED, "ACE SPEC cards", "ACE SPEC status unknown"),
+}
+
+
+@dataclass(frozen=True)
 class FormatRules:
     format: str
     name: str
@@ -138,17 +201,28 @@ class FormatRules:
     unsettled: Mapping[str, UnsettledCard]      # by Card Identity name
     bans: Mapping[tuple[str, str], BanRule]     # by (set ID, collector number)
     sha256: str                                 # of the file bytes
+    unsettled_set_groups: tuple[SetExclusion, ...] = ()
+    unsettled_sets: Mapping[str, SetExclusion] = field(default_factory=dict)          # by set ID
+    unsettled_printings: Mapping[str, tuple[UnsettledPrintings, ...]] = field(default_factory=dict)  # by set ID
+    copy_groups: tuple[CopyGroup, ...] = ()
+    copy_group_of: Mapping[str, CopyGroup] = field(default_factory=dict)  # by Card Identity name
+    exclusive_groups: tuple[CopyGroup, ...] = ()  # at most one Card Identity of each group per deck
+    excluded_attributes: tuple[str, ...] = ()  # keys of EXCLUDABLE
+    single_pokemon_type: bool = False
 
     @property
     def version(self) -> str:
         return f"{self.revision} ({self.published.isoformat()})"
 
 
-POOLS = ("mark_and_set",)
+POOLS = ("mark_and_set", "by_set")
 SET_BASES = ("second_friday", "announced")
+LEGAL_BY = ("set", "mark")
 _TOP = {"format", "name", "revision", "published", "covers_from", "pool", "basic_energy_always_legal",
         "pokemon_reprint_inheritance", "bans", "limits", "regulation_marks", "sets"}
-_TOP_OPTIONAL = {"excluded_sets", "unsettled_cards"}
+_TOP_OPTIONAL = {"excluded_sets", "unsettled_cards", "unsettled_sets", "unsettled_printings", "copy_groups",
+                 "exclusive_groups",
+                 "excluded_attributes", "single_pokemon_type"}
 _LIMITS = {"deck_size", "copies", "basic_energy_exempt", "ace_spec_per_deck", "radiant_per_deck",
            "prism_star_per_name"}
 _BAN = {"set", "number", "name", "banned_from"}
@@ -202,6 +276,28 @@ def _list(value, where):
     return value
 
 
+def _identity_groups(raw, key: str) -> tuple[tuple[CopyGroup, ...], dict[str, CopyGroup]]:
+    """The ``[[copy_groups]]`` or ``[[exclusive_groups]]`` of a rules file, and each named Card Identity's group: two or
+    more Card Identity names per group, each name in at most one group."""
+    groups, group_of = [], {}
+    for index, entry in enumerate(_list(raw.get(key, []), key)):
+        where = f"{key}[{index}]"
+        _keys(entry, where, {"names"})
+        names = tuple(_text(value, f"{where}.names") for value in _list(entry["names"], f"{where}.names"))
+        if len(names) < 2:
+            raise FormatRulesError(f"{where}.names: expected at least two Card Identity names")
+        group = CopyGroup(names)
+        for identity in names:
+            if card_identity_key(identity) != identity:
+                raise FormatRulesError(f"{where}.names: {identity!r} is not a Card Identity name (no subtitle, ASCII "
+                                       "apostrophes)")
+            if identity in group_of:
+                raise FormatRulesError(f"{where}.names: {identity} listed twice")
+            group_of[identity] = group
+        groups.append(group)
+    return tuple(groups), group_of
+
+
 def load_rules(data: bytes) -> FormatRules:
     """Parse and validate one rules file's bytes."""
     try:
@@ -243,7 +339,7 @@ def load_rules(data: bytes) -> FormatRules:
     sets = {}
     for index, entry in enumerate(_list(raw["sets"], "sets")):
         where = f"sets[{index}]"
-        _keys(entry, where, {"id", "name", "released", "legal_from", "basis"}, {"reference"})
+        _keys(entry, where, {"id", "name", "released", "legal_from", "basis"}, {"reference", "legal_by"})
         set_id = _text(entry["id"], f"{where}.id")
         if set_id in sets:
             raise FormatRulesError(f"{where}.id: {set_id} listed twice")
@@ -262,7 +358,16 @@ def load_rules(data: bytes) -> FormatRules:
         if (basis == "announced") != ("reference" in entry):
             raise FormatRulesError(f"{where}.reference: required exactly when basis is announced")
         reference = _text(entry["reference"], f"{where}.reference") if "reference" in entry else None
-        sets[set_id] = SetRule(set_id, _text(entry["name"], f"{where}.name"), released, legal_from, basis, reference)
+        if raw["pool"] == "by_set":
+            if entry.get("legal_by") not in LEGAL_BY:
+                raise FormatRulesError(f"{where}.legal_by: expected one of {', '.join(LEGAL_BY)} in a by_set pool")
+            legal_by = entry["legal_by"]
+        elif "legal_by" in entry:
+            raise FormatRulesError(f"{where}.legal_by: only a by_set pool takes legal_by")
+        else:
+            legal_by = "mark"
+        sets[set_id] = SetRule(set_id, _text(entry["name"], f"{where}.name"), released, legal_from, basis, reference,
+                               legal_by)
 
     exclusions, excluded = [], {}
     for index, entry in enumerate(_list(raw.get("excluded_sets", []), "excluded_sets")):
@@ -278,6 +383,37 @@ def load_rules(data: bytes) -> FormatRules:
                 raise FormatRulesError(f"{where}.sets: {set_id} listed twice")
             excluded[set_id] = exclusion
         exclusions.append(exclusion)
+
+    unsettled_set_groups, unsettled_sets = [], {}
+    for index, entry in enumerate(_list(raw.get("unsettled_sets", []), "unsettled_sets")):
+        where = f"unsettled_sets[{index}]"
+        _keys(entry, where, {"reason", "noted_on", "sets"})
+        ids = tuple(_text(value, f"{where}.sets") for value in _list(entry["sets"], f"{where}.sets"))
+        if not ids:
+            raise FormatRulesError(f"{where}.sets: empty")
+        group = SetExclusion(_text(entry["reason"], f"{where}.reason"), _date(entry["noted_on"], f"{where}.noted_on"),
+                             ids)
+        for set_id in ids:
+            if set_id in sets or set_id in excluded or set_id in unsettled_sets:
+                raise FormatRulesError(f"{where}.sets: {set_id} listed twice")
+            unsettled_sets[set_id] = group
+        unsettled_set_groups.append(group)
+
+    unsettled_printings = {}
+    for index, entry in enumerate(_list(raw.get("unsettled_printings", []), "unsettled_printings")):
+        where = f"unsettled_printings[{index}]"
+        _keys(entry, where, {"set", "prefix", "from", "to", "reason", "noted_on"})
+        set_id = _text(entry["set"], f"{where}.set")
+        if set_id not in sets:
+            raise FormatRulesError(f"{where}.set: {set_id} is not in [[sets]]")
+        prefix = entry["prefix"]
+        if not isinstance(prefix, str) or prefix != prefix.strip():
+            raise FormatRulesError(f"{where}.prefix: expected text without surrounding whitespace")
+        first = _int(entry["from"], f"{where}.from", 0)
+        last = _int(entry["to"], f"{where}.to", first)
+        unsettled_printings.setdefault(set_id, []).append(UnsettledPrintings(
+            set_id, prefix, first, last, _text(entry["reason"], f"{where}.reason"),
+            _date(entry["noted_on"], f"{where}.noted_on")))
 
     unsettled = {}
     for index, entry in enumerate(_list(raw.get("unsettled_cards", []), "unsettled_cards")):
@@ -306,6 +442,24 @@ def load_rules(data: bytes) -> FormatRules:
             raise FormatRulesError(f"{where}.lifted_on: not after banned_from")
         bans[key] = BanRule(key[0], key[1], _text(entry["name"], f"{where}.name"), banned_from, lifted_on)
 
+    excluded_attributes = []
+    for index, value in enumerate(_list(raw.get("excluded_attributes", []), "excluded_attributes")):
+        where = f"excluded_attributes[{index}]"
+        if not isinstance(value, str) or value not in EXCLUDABLE:
+            raise FormatRulesError(f"{where}: expected one of {', '.join(EXCLUDABLE)}")
+        if value in excluded_attributes:
+            raise FormatRulesError(f"{where}: {value} listed twice")
+        excluded_attributes.append(value)
+    # A format that excludes a kind of card outright keeps no per-deck allowance for it.
+    if "ace_spec" in excluded_attributes and limits.ace_spec_per_deck != 0:
+        raise FormatRulesError("limits.ace_spec_per_deck: must be 0 when ace_spec is excluded")
+    if "rule_box" in excluded_attributes and (limits.radiant_per_deck, limits.prism_star_per_name) != (0, 0):
+        raise FormatRulesError("limits.radiant_per_deck and limits.prism_star_per_name: must be 0 when rule_box is "
+                               "excluded")
+
+    copy_groups, copy_group_of = _identity_groups(raw, "copy_groups")
+    exclusive_groups, _ = _identity_groups(raw, "exclusive_groups")
+
     return FormatRules(format=_text(raw["format"], "format"), name=name,
                        revision=_int(raw["revision"], "revision", 1), published=published, covers_from=covers_from,
                        pool=raw["pool"],
@@ -313,7 +467,12 @@ def load_rules(data: bytes) -> FormatRules:
                        pokemon_reprint_inheritance=_bool(raw["pokemon_reprint_inheritance"],
                                                          "pokemon_reprint_inheritance"),
                        limits=limits, marks=marks, sets=sets, exclusions=tuple(exclusions), excluded=excluded,
-                       unsettled=unsettled, bans=bans, sha256=hashlib.sha256(data).hexdigest())
+                       unsettled=unsettled, bans=bans, sha256=hashlib.sha256(data).hexdigest(),
+                       unsettled_set_groups=tuple(unsettled_set_groups), unsettled_sets=unsettled_sets,
+                       unsettled_printings={set_id: tuple(found) for set_id, found in unsettled_printings.items()},
+                       copy_groups=copy_groups, copy_group_of=copy_group_of, exclusive_groups=exclusive_groups,
+                       excluded_attributes=tuple(excluded_attributes),
+                       single_pokemon_type=_bool(raw.get("single_pokemon_type", False), "single_pokemon_type"))
 
 
 @cache
@@ -429,16 +588,25 @@ def own_standing(printing: PrintingFacts, identity_name: str, rules: FormatRules
     violations, gaps = [], []
     set_id = printing.set_id
     exclusion = rules.excluded.get(set_id) if set_id else None
+    unsettled_set = rules.unsettled_sets.get(set_id) if set_id else None
     set_rule = rules.sets.get(set_id) if set_id else None
+    unsettled_numbers = next((entry for entry in rules.unsettled_printings.get(set_id, ())
+                              if entry.covers(printing.collector_number)), None) if set_rule else None
     if exclusion is not None:
         violations.append(Finding(NOT_IN_CARD_POOL, f"not in the {rules.name} card pool: {exclusion.reason}", True))
+    elif unsettled_set is not None:
+        gaps.append(Finding(RULES_FACT_UNSETTLED, unsettled_set.reason, False))
     elif set_rule is None:
         gaps.append(Finding(SET_DATE_NOT_RECORDED, f"set legality date not recorded for {set_id or 'an unknown set'}",
                             False))
     elif on < set_rule.legal_from:
         violations.append(Finding(NOT_IN_CARD_POOL, f"{set_rule.name} ({set_id}) not legal in {rules.name} until "
                                                     f"{set_rule.legal_from.isoformat()}", True))
-    if not violations:
+    elif unsettled_numbers is not None:
+        gaps.append(Finding(RULES_FACT_UNSETTLED, unsettled_numbers.reason, False))
+    # A mark_and_set pool always reads the mark; a by_set pool reads it only for a set that admits by mark.
+    by_mark = rules.pool == "mark_and_set" or (set_rule is not None and set_rule.legal_by == "mark")
+    if not violations and by_mark and unsettled_set is None and unsettled_numbers is None:
         mark = attributes.regulation_mark
         if mark is None:
             gaps.append(Finding(REGULATION_MARK_NOT_RECORDED, "regulation mark not recorded", False))
@@ -493,7 +661,10 @@ def line_standing(line: ResolvedLine, rules: FormatRules, on: date,
     for candidate in (printing, *reprints):
         ban = _ban(candidate, rules, on)
         if ban is not None:
-            reason = f"banned in {rules.name} from {ban.banned_from.isoformat()}"
+            # A ban already in force when the rules begin carries covers_from as its date, so its reason names none.
+            reason = f"banned in {rules.name}"
+            if ban.banned_from > rules.covers_from:
+                reason += f" from {ban.banned_from.isoformat()}"
             if candidate is not printing:
                 reason += f" as an identical reprint of {ban.name} ({ban.set_id} {ban.number})"
             return Standing("not_legal", (Finding(BANNED, reason, True),))
@@ -550,6 +721,36 @@ def _limit(issues: _Issues, lines, attribute: str, limit: int, code: str, too_ma
         issues.add(ATTRIBUTE_UNKNOWN, unknown, "card", False, unsure)
 
 
+def _exclusions(issues: _Issues, line: ResolvedLine, rules: FormatRules):
+    """A card whose excluded attribute is true is not legal; one whose excluded attribute is unknown is a gap."""
+    for attribute in rules.excluded_attributes:
+        code, cards, unknown = EXCLUDABLE[attribute]
+        value = getattr(line.printing.attributes, attribute)
+        if value is True:
+            issues.add(code, f"{cards} are not allowed in {rules.name}", "card", True, (line,))
+        elif value is None:
+            issues.add(ATTRIBUTE_UNKNOWN, unknown, "card", False, (line,))
+
+
+def _single_type(issues: _Issues, lines, rules: FormatRules):
+    """Every Pokémon shares at least one type. A dual-type Pokémon fits either of its types; Colorless is a type like
+    any other. A Pokémon of unknown type, or a card of unknown kind, is a gap only when the deck has another Pokémon it
+    could clash with and the known Pokémon do share a type."""
+    pokemon = [line for line in lines if line.printing.attributes.card_kind == "pokemon"]
+    typed = [line for line in pokemon if line.printing.attributes.types]
+    untyped = [line for line in pokemon if not line.printing.attributes.types]
+    unknown_kind = [line for line in lines if line.printing.attributes.card_kind is None]
+    shared = set.intersection(*(set(line.printing.attributes.types) for line in typed)) if typed else None
+    if shared is not None and not shared:
+        issues.add(SINGLE_TYPE, f"every Pokémon in {_a(rules.name)} {rules.name} deck shares one type; these Pokémon "
+                                "have no type in common", "deck", True, typed)
+    elif len(typed) + len(untyped) + len(unknown_kind) > 1:
+        if untyped:
+            issues.add(ATTRIBUTE_UNKNOWN, "Pokémon type unknown", "card", False, untyped)
+        if unknown_kind:
+            issues.add(ATTRIBUTE_UNKNOWN, "card kind unknown", "card", False, unknown_kind)
+
+
 def evaluate_format(lines: Sequence[ResolvedLine], rules: FormatRules, on: date,
                     reprint_groups: Mapping[UUID, Sequence[PrintingFacts]] | None = None) -> FormatResult:
     """Check resolved Deck List lines against one format's rules on ``on``.
@@ -565,30 +766,48 @@ def evaluate_format(lines: Sequence[ResolvedLine], rules: FormatRules, on: date,
     limits = rules.limits
     total = _quantity(lines)
     if total != limits.deck_size:
-        issues.add(DECK_SIZE, f"a {rules.name} deck has exactly {limits.deck_size} cards; this one has {total}",
-                   "deck", True, lines)
+        issues.add(DECK_SIZE, f"{_a(rules.name)} {rules.name} deck has exactly {limits.deck_size} cards; this one has "
+                              f"{total}", "deck", True, lines)
     for line in lines:
         for finding in line_standing(line, rules, on, reprint_groups or {}).findings:
             issues.add(finding.code, finding.reason, "card", finding.violation, (line,))
-    identities = defaultdict(list)
+        _exclusions(issues, line, rules)
+    # Copies count by Card Identity, or by copy group for the identities in one.
+    copies = defaultdict(list)
     for line in lines:
-        identities[line.identity_id].append(line)
-    for group in identities.values():
-        name = group[0].identity_name
+        copies[rules.copy_group_of.get(line.identity_name, line.identity_id)].append(line)
+    noun = "copy" if limits.copies == 1 else "copies"
+    for key, group in copies.items():
+        name = key.label if isinstance(key, CopyGroup) else group[0].identity_name
         if limits.basic_energy_exempt:
             counted = [line for line in group if line.printing.attributes.basic_energy is False]
             unsure = [line for line in group if line.printing.attributes.basic_energy is None]
         else:
             counted, unsure = group, []
         if _quantity(counted) > limits.copies:
-            issues.add(COPY_LIMIT, f"more than {limits.copies} copies of {name} ({_quantity(counted)})", "card",
+            issues.add(COPY_LIMIT, f"more than {limits.copies} {noun} of {name} ({_quantity(counted)})", "card",
                        True, counted)
         elif _quantity(counted) + _quantity(unsure) > limits.copies:
             issues.add(ATTRIBUTE_UNKNOWN, "Basic Energy status unknown", "card", False, unsure)
-        _limit(issues, group, "prism_star", limits.prism_star_per_name, PRISM_STAR_LIMIT,
-               f"more than {limits.prism_star_per_name} Prism Star {name}", "Prism Star status unknown", "card")
-    _limit(issues, lines, "ace_spec", limits.ace_spec_per_deck, ACE_SPEC_LIMIT,
-           f"more than {limits.ace_spec_per_deck} ACE SPEC in the deck", "ACE SPEC status unknown", "deck")
-    _limit(issues, lines, "radiant", limits.radiant_per_deck, RADIANT_LIMIT,
-           f"more than {limits.radiant_per_deck} Radiant Pokémon in the deck", "Radiant status unknown", "deck")
+    # Per-deck limits a format's exclusions already cover are skipped: an excluded card is reported once, per card.
+    if "rule_box" not in rules.excluded_attributes:
+        identities = defaultdict(list)
+        for line in lines:
+            identities[line.identity_id].append(line)
+        for group in identities.values():
+            _limit(issues, group, "prism_star", limits.prism_star_per_name, PRISM_STAR_LIMIT,
+                   f"more than {limits.prism_star_per_name} Prism Star {group[0].identity_name}",
+                   "Prism Star status unknown", "card")
+        _limit(issues, lines, "radiant", limits.radiant_per_deck, RADIANT_LIMIT,
+               f"more than {limits.radiant_per_deck} Radiant Pokémon in the deck", "Radiant status unknown", "deck")
+    if "ace_spec" not in rules.excluded_attributes:
+        _limit(issues, lines, "ace_spec", limits.ace_spec_per_deck, ACE_SPEC_LIMIT,
+               f"more than {limits.ace_spec_per_deck} ACE SPEC in the deck", "ACE SPEC status unknown", "deck")
+    for group in rules.exclusive_groups:
+        found = [line for line in lines if line.identity_name in group.names]
+        if len({line.identity_name for line in found}) > 1:
+            issues.add(EXCLUSIVE_CARDS, f"{_a(rules.name)} {rules.name} deck may hold only one of {group.label}",
+                       "deck", True, found)
+    if rules.single_pokemon_type:
+        _single_type(issues, lines, rules)
     return issues.result(rules, on)
