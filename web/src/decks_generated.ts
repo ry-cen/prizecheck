@@ -6,9 +6,15 @@ export type EditDeck = { name?: string | null; parent_id?: string | null; parent
 export type DeckIndex = { decks: TreeNode[]; owner_revision: number; next_cursor: string | null };
 export type IdentityCheck = { identity_id: string; name: string; quantity: string; status: string };
 export type DeckChecks = { total: string; shortage: string; excess: string; size_status: string; identities: IdentityCheck[]; disclaimer?: string };
-export type DeckDetail = { deck: TreeNode; checks: DeckChecks; owner_revision: number; catalog_revision: number };
+export type DeckDetail = { deck: TreeNode; checks: DeckChecks; deck_list_checks: DeckChecks; deck_list: DeckList; owner_revision: number; catalog_revision: number };
 export type DeckEditionQuantity = { edition_id: string; quantity: string };
 export type DeckContents = { editions: DeckEditionQuantity[]; owner_revision: number; catalog_revision: number };
+export type DeckListLine = { edition_id: string; quantity: string; in_deck: string };
+export type DeckList = { revision: number; lines: DeckListLine[] };
+export type AddDeckListLine = { edition_id: string; quantity: string; revision: number; idempotency_key: string };
+export type ChangeDeckListLine = { quantity: string; revision: number; idempotency_key: string };
+export type RemoveDeckListLine = { revision: number; idempotency_key: string };
+export type DeckListCommandResult = { deck_id: string; deck_list: DeckList };
 
 export class DeckError extends Error {
   constructor(public status: number, public code: string) { super(code); }
@@ -34,3 +40,10 @@ export async function getDeckContents(id: string, currentRevision?: () => number
   return contents;
 }
 export const getDeck = (id: string) => request<DeckDetail>(`/api/decks/${encodeURIComponent(id)}`, 'GET');
+const deckListLines = (deckId: string) => `/api/decks/${encodeURIComponent(deckId)}/deck-list/lines`;
+export const addDeckListLine = (deckId: string, body: AddDeckListLine) =>
+  request<DeckListCommandResult>(deckListLines(deckId), 'POST', body);
+export const changeDeckListLine = (deckId: string, editionId: string, body: ChangeDeckListLine) =>
+  request<DeckListCommandResult>(`${deckListLines(deckId)}/${encodeURIComponent(editionId)}`, 'PATCH', body);
+export const removeDeckListLine = (deckId: string, editionId: string, body: RemoveDeckListLine) =>
+  request<DeckListCommandResult>(`${deckListLines(deckId)}/${encodeURIComponent(editionId)}`, 'DELETE', body);
