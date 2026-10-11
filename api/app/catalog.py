@@ -19,6 +19,7 @@ from .card_attributes import refresh_card_attributes
 from .card_identity import card_identity_key
 from .catalog_targets import IDENTITY_REVIEW_KINDS, MatchingRulesV1, TargetContext, refresh_editions, refresh_printing
 from .public_catalog import publish_catalog_best_effort
+from .reprint_groups import refresh_reprint_groups
 from .tcgdex_record import source_descriptor
 
 BASE_URL = "https://api.tcgdex.net/v2/en/cards"
@@ -421,7 +422,9 @@ def claim_run(conn, run_id: UUID) -> UUID | None:
 
 
 def rederive_card_attributes(conn) -> int:
-    """Re-derive every Printing's card attributes from its stored source record, fetching nothing.
+    """Re-derive every Printing's card attributes, and the Reprint Groups of the active catalog generation, from their
+    stored source records, fetching nothing. Both happen in one transaction, so the attribute revision advances at most
+    once.
 
     For ``scripts/derive_card_attributes.py``. It holds the importer's lock, so it never interleaves with an import;
     RunnerBusy means an import is running. Returns the number of Printings whose attributes changed.
@@ -432,7 +435,9 @@ def rederive_card_attributes(conn) -> int:
     conn.commit()
     try:
         with conn.transaction():
-            return refresh_card_attributes(conn)
+            changed = refresh_card_attributes(conn)
+            refresh_reprint_groups(conn)
+            return changed
     finally:
         conn.execute("SELECT pg_advisory_unlock(914703)")
         conn.commit()
@@ -650,6 +655,9 @@ def execute_run(conn, run_id: UUID, source=None, before_promotion=None):
             # Every Printing's card attributes are re-derived from the source records stored above, so a change
             # to the derivation rules also reaches records that did not change.
             refresh_card_attributes(conn)
+            # Reprint Groups of this generation's Printings, from the same stored source records. Attribute and group
+            # changes in this transaction advance the attribute revision once.
+            refresh_reprint_groups(conn, run_id)
             conn.execute("UPDATE catalog_state SET active_generation=%s, revision=revision+1, last_success=now() WHERE singleton", (run_id,))
             conn.execute("UPDATE catalog_run SET phase='complete', outcome='succeeded', finished_at=now(), lease_until=NULL WHERE id=%s", (run_id,))
             # Keep current and previous successful compressed raw generations.

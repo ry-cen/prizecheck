@@ -1,9 +1,15 @@
 """Advisory format checks of a Deck's Deck List (ADR 0010): ``GET /api/decks/{deck_id}/format-checks``.
 
-One REPEATABLE READ snapshot reads the Deck List, each line's Card Printing, Card Identity and set in the active
-catalog generation, and the effective card attributes (``catalog_card_attribute``). The pure evaluator in
-``format_evaluator`` decides. Results are computed on every read and never stored; saved results and results returned
-by Deck List commands arrive with ticket 17.
+One REPEATABLE READ snapshot reads:
+
+- the Deck List;
+- each line's Card Printing, Card Identity, Reprint Group (``catalog_reprint_group_member``), and set and collector
+  number in the active catalog generation;
+- the other printings of those Reprint Groups that the active generation holds and has not withdrawn;
+- the effective card attributes of all of them (``catalog_card_attribute``).
+
+The pure evaluator in ``format_evaluator`` decides. Results are computed on every read and never stored; saved results
+and results returned by Deck List commands arrive with ticket 17.
 """
 import re
 from datetime import date, datetime, timezone
@@ -24,18 +30,26 @@ DISCLAIMER = ('Advisory format checks: a result is not a guarantee of tournament
               'makes a result unknown, never legal.')
 ISO_DATE = re.compile(r'\d{4}-\d{2}-\d{2}')
 
-# Each line's Printing, Card Identity and set. The set comes from the active catalog generation; a Printing without a
-# row there has no set and checks as "set legality date not recorded".
+# Each line's Printing, Card Identity, Reprint Group, set and collector number. The set comes from the active catalog
+# generation; a Printing without a row there has no set and checks as "set legality date not recorded".
 LINES = """SELECT l.edition_id,l.quantity,p.id AS printing_id,ci.id AS identity_id,ci.display_name AS identity_name,
-    gp.set_id
+    gp.set_id,gp.collector_number,g.group_id
   FROM deck_list_line l
   JOIN catalog_edition e ON e.id=l.edition_id
   JOIN catalog_printing p ON p.id=e.printing_id
   JOIN catalog_identity ci ON ci.id=p.identity_id
   LEFT JOIN catalog_state s ON s.singleton
   LEFT JOIN catalog_generation_printing gp ON gp.generation_id=s.active_generation AND gp.printing_id=p.id
+  LEFT JOIN catalog_reprint_group_member g ON g.printing_id=p.id
   WHERE l.owner_id=%s AND l.deck_id=%s
   ORDER BY l.edition_id"""
+# The printings of those Reprint Groups that the active catalog generation holds and has not withdrawn.
+MEMBERS = """SELECT g.group_id,g.printing_id,gp.set_id,gp.collector_number
+  FROM catalog_reprint_group_member g
+  JOIN catalog_state s ON s.singleton
+  JOIN catalog_generation_printing gp ON gp.generation_id=s.active_generation AND gp.printing_id=g.printing_id
+  WHERE g.group_id=ANY(%s) AND NOT gp.tombstoned
+  ORDER BY g.group_id,gp.set_id,gp.collector_number"""
 
 
 class FormatIssue(BaseModel):
@@ -92,14 +106,24 @@ def format_check(result: evaluator.FormatResult, rules: evaluator.FormatRules, c
                                            lines=list(issue.lines)) for issue in result.issues])
 
 
-def read_lines(conn, user_id: str, deck_id: UUID) -> list[evaluator.ResolvedLine]:
+def read_lines(conn, user_id: str, deck_id: UUID) -> tuple[list[evaluator.ResolvedLine], dict]:
+    """The Deck List's resolved lines, and the facts of every printing in their Reprint Groups by group ID."""
     rows = conn.execute(LINES, (user_id, deck_id)).fetchall()
-    attributes = read_card_attributes(conn, [row['printing_id'] for row in rows])
-    return [evaluator.ResolvedLine(
-                edition_id=row['edition_id'], quantity=int(row['quantity']), identity_id=row['identity_id'],
-                identity_name=row['identity_name'],
-                printing=evaluator.PrintingFacts(row['printing_id'], row['set_id'], attributes[row['printing_id']]))
-            for row in rows]
+    groups = sorted({row['group_id'] for row in rows if row['group_id'] is not None}, key=str)
+    members = conn.execute(MEMBERS, (groups,)).fetchall() if groups else []
+    attributes = read_card_attributes(conn, {row['printing_id'] for row in (*rows, *members)})
+    reprint_groups = {}
+    for row in members:
+        reprint_groups.setdefault(row['group_id'], []).append(evaluator.PrintingFacts(
+            row['printing_id'], row['set_id'], attributes[row['printing_id']], row['collector_number']))
+    lines = [evaluator.ResolvedLine(
+                 edition_id=row['edition_id'], quantity=int(row['quantity']), identity_id=row['identity_id'],
+                 identity_name=row['identity_name'],
+                 printing=evaluator.PrintingFacts(row['printing_id'], row['set_id'], attributes[row['printing_id']],
+                                                  row['collector_number']),
+                 reprint_group_id=row['group_id'])
+             for row in rows]
+    return lines, reprint_groups
 
 
 @router.get('/{deck_id}/format-checks', response_model=DeckFormatChecks)
@@ -120,11 +144,11 @@ def deck_format_checks(deck_id: UUID, format_name: str | None = Query(default=No
                               (user_id, deck_id)).fetchone()
         if header is None:
             raise RuntimeError('Deck has no Deck List')  # Migration 025 gives every Deck a Deck List.
-        lines = read_lines(conn, user_id, deck_id)
+        lines, reprint_groups = read_lines(conn, user_id, deck_id)
         revision = attribute_revision(conn)
     results = []
     for name in names:
         rules = evaluator.format_rules(name)
-        results.append(format_check(evaluator.evaluate_format(lines, rules, on), rules, current))
+        results.append(format_check(evaluator.evaluate_format(lines, rules, on, reprint_groups), rules, current))
     return DeckFormatChecks(deck_id=deck_id, deck_list_revision=header['revision'], attribute_revision=revision,
                             results=results)

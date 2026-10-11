@@ -36,7 +36,9 @@ cd - && .venv/bin/python scripts/release.py activate \
   --runtime-url http://127.0.0.1:5173 --commit FULL_GATED_COMMIT
 ```
 
-The previous release keeps serving meanwhile; it ignores the new tables, and `activate` then finds no migration left to apply. The derivation fetches nothing and takes about a second for the whole catalog. It exits 3 without changes while a catalog import is running (retry when the import has finished) and 1 when the database is unreachable; rerunning it changes nothing. Skipping it leaves every existing Printing's attributes unknown until the next catalog import: Deck checks report the Basic Energy exemption as unresolved for every card, and a Deck published during that gap freezes those unresolved checks into its Published Deck until the owner republishes it.
+The previous release keeps serving meanwhile; it ignores the new tables, and `activate` then finds no migration left to apply. The derivation fetches nothing and takes a few seconds for the whole catalog. It exits 3 without changes while a catalog import is running (retry when the import has finished) and 1 when the database is unreachable; rerunning it changes nothing. Skipping it leaves every existing Printing's attributes unknown until the next catalog import: Deck checks report the Basic Energy exemption as unresolved for every card, and a Deck published during that gap freezes those unresolved checks into its Published Deck until the owner republishes it.
+
+Run the same script, the same way, when activating the first release that contains `migrations/031_reprint_groups.sql`: a catalog imported before 031 has no Reprint Groups, so until the script or the next catalog import runs, format checks judge every old Trainer and Energy printing on its own mark and set and call it not legal where an identical legal reprint would make it legal.
 
 The bundled adapter binds only loopback, uses local HTTP/development cookies and serves a real FastAPI process, Better Auth gateway and built SPA. Run it in the foreground under a supervisor:
 

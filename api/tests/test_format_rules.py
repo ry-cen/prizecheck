@@ -1,4 +1,4 @@
-"""The rules-file check in the test gate (Deck Lists 12, issue #93).
+"""The rules-file check in the test gate (Deck Lists 12, issue #93; ban entries, Deck Lists 13, issue #94).
 
 Every rules file in api/app/format_rules parses, every entry is dated, and every imported set has a legal-from date or
 an explicit exclusion. No database: these tests run with plain pytest.
@@ -56,6 +56,9 @@ def test_every_entry_is_dated():
                 assert entry.reference, entry.set_id
         for entry in (*rules.exclusions, *rules.unsettled.values()):
             assert type(entry.noted_on) is date and entry.noted_on <= rules.published
+        for ban in rules.bans.values():
+            assert type(ban.banned_from) is date and rules.covers_from <= ban.banned_from
+            assert ban.lifted_on is None or (type(ban.lifted_on) is date and ban.banned_from < ban.lifted_on)
 
 
 def test_standard_rules_hold_the_settled_facts():
@@ -74,6 +77,7 @@ def test_standard_rules_hold_the_settled_facts():
         "sv09": date(2025, 4, 11), "me02.5": date(2026, 3, 6), "me03": date(2026, 4, 10),
         "me04": date(2026, 6, 5), "me05": date(2026, 7, 31)}
     assert set(rules.unsettled) == {"Fairy Energy"}
+    assert rules.bans == {}  # No card is banned in Standard.
 
 
 def test_second_friday_after_a_release():
@@ -93,7 +97,19 @@ STANDARD = (RULES_DIR / "standard.toml").read_text()
     ("legal_from = 2023-06-23", "legal_from = 2023-06-30", "second Friday after 2023-06-09 is 2023-06-23"),
     ("legal_from = 2026-03-06\nbasis", "legal_from = 2026-03-07\nbasis", "not a Friday"),
     ("rotates_on = 2026-04-10", "rotates_on = 2025-01-01", "rotates_on: before legal_from"),
-    ("bans = []", 'bans = [{ set = "sv01", number = "1" }]', "ban lists are not supported"),
+    ("bans = []", 'bans = [{ set = "sv01", number = "1" }]', "missing banned_from, name"),
+    ("bans = []", 'bans = [{ set = "sv01", number = "1", name = "X", banned_from = 2026-01-02, reason = "x" }]',
+     "unknown key reason"),
+    ("bans = []", 'bans = [{ set = "sv01", number = "1", name = "X", banned_from = 2025-01-02 }]',
+     "banned_from: before covers_from"),
+    ("bans = []", 'bans = [{ set = "sv01", number = "1", name = "X", banned_from = 2026-01-02, '
+                  'lifted_on = 2026-01-02 }]', "lifted_on: not after banned_from"),
+    ("bans = []", 'bans = [{ set = "sv01", number = "1", name = "X", banned_from = 2026-01-02 }, '
+                  '{ set = "sv01", number = "1", name = "Y", banned_from = 2026-02-06 }]', "sv01 1 listed twice"),
+    ("bans = []", 'bans = [{ set = "sv01", number = 1, name = "X", banned_from = 2026-01-02 }]',
+     "number: expected non-empty text"),
+    ("bans = []", 'bans = [{ set = "sv01 ", number = "1", name = "X", banned_from = 2026-01-02 }]',
+     "must not have surrounding whitespace"),
     ("published = 2026-10-11", "published = 2026-10-11T00:00:00", "published: expected a date"),
     ('pool = "mark_and_set"', 'pool = "anything"', "pool: expected one of"),
     ('mark = "H"', 'mark = "h"', "one upper-case letter"),
