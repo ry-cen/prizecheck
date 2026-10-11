@@ -6,7 +6,7 @@ import {
 } from "node:http";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { auth, deliverCode, pool } from "./auth.js";
+import { auth, budgetedAuth, deliverCode, pool } from "./auth.js";
 import { callerFor, trustedClientIp } from "./caller.js";
 import { PublicReadLimiter } from "./publicReads.js";
 import { signupEnabled } from "./signup.js";
@@ -76,7 +76,8 @@ async function readBudgetedBody(request: IncomingMessage): Promise<string> {
 }
 
 // Rejects when the budget is spent. The wrapped work cannot always be cancelled (the session lookup takes no
-// signal), so it is abandoned rather than awaited.
+// signal), so it is abandoned rather than awaited. An abandoned session lookup runs on budgetedAuth's own pool, whose
+// statement, lock and acquire timeouts end it in PostgreSQL (auth/src/auth.ts).
 function withinBudget<T>(work: Promise<T>, milliseconds: number): Promise<T> {
   work.catch(() => undefined);
   if (milliseconds <= 0) return Promise.reject(new BudgetExceeded());
@@ -193,6 +194,13 @@ async function relay(response: ServerResponse, result: Response) {
 
 async function session(request: IncomingMessage) {
   return auth.api.getSession({
+    headers: new Headers({ cookie: request.headers.cookie || "" }),
+  });
+}
+
+// The session lookup for a budgeted route: the same session rules on a separate, bounded pool (auth/src/auth.ts).
+async function budgetedSession(request: IncomingMessage) {
+  return budgetedAuth.api.getSession({
     headers: new Headers({ cookie: request.headers.cookie || "" }),
   });
 }
@@ -410,10 +418,16 @@ const server = createServer(async (request, response) => {
         !sameOrigin(request)
       )
         return json(response, 403, { error: "Origin required" });
-      // Every route under /api/public/ is anonymous: the gateway never looks up a session for it and never forwards an
-      // identity, whatever cookies arrive (Published Deck snapshots, discovery, the sitemap and nested routes such as
-      // the Published Deck cost).
+      // Every route under /api/public/ is an anonymous GET: the gateway never looks up a session for it and never
+      // forwards an identity, whatever cookies arrive (Published Deck snapshots, discovery, the sitemap and nested routes
+      // such as the Published Deck cost). No public route takes another method, so any other method (HEAD included) is
+      // refused here, before a session lookup, the read limiter or a body read; the unread body closes the connection.
       const publicPath = path.startsWith("/api/public/");
+      if (publicPath && request.method !== "GET") {
+        response.setHeader("allow", "GET");
+        response.setHeader("connection", "close");
+        return json(response, 405, { error: "Method not allowed" });
+      }
       const publicRead = request.method === "GET" && publicPath;
       if (publicRead && !publicReadLimiter.take(trustedClientIp(request))) {
         response.setHeader(
@@ -433,7 +447,7 @@ const server = createServer(async (request, response) => {
         publicPath || path === "/api/health"
           ? null
           : budgeted
-            ? await withinBudget(session(request), left())
+            ? await withinBudget(budgetedSession(request), left())
             : await session(request);
       if (!current && !publicPath && path !== "/api/health")
         return json(response, 401, { error: "Authentication required" });
@@ -465,16 +479,20 @@ const server = createServer(async (request, response) => {
         // A public read is always an anonymous caller (anon:<keyed digest>), even with a valid session cookie.
         const milliseconds = Math.floor(left());
         if (milliseconds <= 0) throw new BudgetExceeded();
+        // Epoch milliseconds, taken before the abort timer below is armed: the API counts the time since then (transit,
+        // queueing, its own body read) against the budget, because the abort runs from here. The identity stamp above
+        // stays in seconds.
+        const budgetStamp = Date.now().toString();
         const caller = callerFor(request, current);
         headers["x-internal-budget-ms"] = String(milliseconds);
-        headers["x-internal-budget-time"] = stamp;
+        headers["x-internal-budget-time"] = budgetStamp;
         headers["x-internal-caller"] = caller;
         headers["x-internal-budget-signature"] = createHmac(
           "sha256",
           internalSecret
         )
           .update(
-            `budget\n${request.method}\n${path}\n${bodyHash}\n${caller}\n${milliseconds}\n${stamp}`
+            `budget\n${request.method}\n${path}\n${bodyHash}\n${caller}\n${milliseconds}\n${budgetStamp}`
           )
           .digest("hex");
         controller = new AbortController();

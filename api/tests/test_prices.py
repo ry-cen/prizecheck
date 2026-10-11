@@ -182,8 +182,11 @@ def sign(message):
     return hmac.new(os.environ["INTERNAL_AUTH_SECRET"].encode(), message.encode(), hashlib.sha256).hexdigest()
 
 
-def headers_for(raw, *, method="POST", path=PATH, user=USER, ms=3000, caller=None, stamp=None, budget=True, forge=None):
+def headers_for(raw, *, method="POST", path=PATH, user=USER, ms=3000, caller=None, stamp=None, budget_stamp_ms=None,
+                budget=True, forge=None):
+    """Gateway headers: the identity stamp is epoch seconds, the budget stamp epoch milliseconds (when it signed)."""
     stamp = str(int(time.time()) if stamp is None else stamp)
+    budget_stamp = str(int(time.time() * 1000) if budget_stamp_ms is None else budget_stamp_ms)
     body_hash = hashlib.sha256(raw).hexdigest()
     headers = {"content-type": "application/json"}
     if user:
@@ -191,8 +194,8 @@ def headers_for(raw, *, method="POST", path=PATH, user=USER, ms=3000, caller=Non
                         "x-internal-signature": sign(f"{method}\n{path}\n{body_hash}\n{user}\n{stamp}")})
     if budget:
         caller = caller or f"user:{user}"
-        signature = sign(f"budget\n{method}\n{path}\n{body_hash}\n{caller}\n{ms}\n{stamp}")
-        headers.update({"x-internal-budget-ms": str(ms), "x-internal-budget-time": stamp, "x-internal-caller": caller,
+        signature = sign(f"budget\n{method}\n{path}\n{body_hash}\n{caller}\n{ms}\n{budget_stamp}")
+        headers.update({"x-internal-budget-ms": str(ms), "x-internal-budget-time": budget_stamp, "x-internal-caller": caller,
                         "x-internal-budget-signature": forge or signature})
     return headers
 
@@ -467,9 +470,10 @@ def test_missing_or_forged_budget_metadata_is_401_and_reads_nothing(store, monke
     assert post(None, raw=body, forge="0" * 64).status_code == 401
     assert post(None, raw=body, user=None, budget=True).status_code == 401  # no user headers at all
     assert post(None, raw=body, stamp=int(time.time()) - 31).status_code == 401
+    assert post(None, raw=body, budget_stamp_ms=int(time.time() * 1000) - 31_000).status_code == 401
     valid = headers_for(body)
     for change in ({"x-internal-budget-ms": "99999"}, {"x-internal-budget-ms": "1"}, {"x-internal-caller": "user:someone-else"},
-                   {"x-internal-budget-time": str(int(time.time()) + 1)}):
+                   {"x-internal-budget-time": str(int(time.time() * 1000) + 1)}):
         assert client.post(PATH, content=body, headers={**valid, **change}).status_code == 401
     other = json.dumps(ids(uuid4()), separators=(",", ":")).encode()
     assert client.post(PATH, content=other, headers=valid).status_code == 401  # a budget is bound to its body
@@ -489,6 +493,20 @@ def test_a_client_supplied_deadline_is_ignored(store):
     headers = {**headers_for(body, ms=0), "x-deadline": "60", "x-internal-budget": "60000", "timeout": "60"}
     response = client.post(PATH, content=body, headers=headers)
     assert response.status_code == 200 and response.json()["withheld"] is True
+
+
+def test_time_since_the_gateway_signed_is_spent_budget(store, monkeypatch):
+    normal = world()["normal"]
+    seed(store, normal)
+    body = json.dumps(ids(normal["id"]), separators=(",", ":")).encode()
+    fresh = client.post(PATH, content=body, headers=headers_for(body))
+    assert fresh.status_code == 200 and fresh.json()["withheld"] is False
+    # Signed 3.5 s ago with 3000 ms granted: the gateway has already aborted, so no work may start.
+    monkeypatch.setattr(prices, "quote_states", lambda *a, **k: pytest.fail("a spent budget started a store read"))
+    aged = headers_for(body, budget_stamp_ms=int(time.time() * 1000) - 3_500)
+    response = client.post(PATH, content=body, headers=aged)
+    assert response.status_code == 200 and response.json()["withheld"] is True
+    assert response.json()["prices"][0]["reason"] == "deadline"
 
 
 @pytest.mark.serial(reason='wall-clock: asserts an upper bound on elapsed time')

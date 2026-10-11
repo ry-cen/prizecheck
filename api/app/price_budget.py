@@ -1,13 +1,18 @@
 """Trusted request budget for deadline-bound routes (Edition prices, private Deck cost, Published Deck cost).
 
 The gateway takes the receipt time, spends part of the three seconds on its own work, and signs what is
-left for the API: milliseconds remaining, a timestamp, and the caller. A client can neither extend that
-deadline nor pick the caller, because the headers are stripped at the gateway and the signature is checked
-here with the internal secret. The existing user/time/signature message that ``verified_user`` checks is
-unchanged; this is a second, separately signed message.
+left for the API: milliseconds remaining, the epoch millisecond it signed at, and the caller. A client can
+neither extend that deadline nor pick the caller, because the headers are stripped at the gateway and the
+signature is checked here with the internal secret. The existing user/time/signature message that
+``verified_user`` checks is unchanged (its time stays in seconds); this is a second, separately signed message.
+
+The gateway aborts ``ms`` after it signed, so the time since the signing stamp (transit, queueing in this process,
+the body read) is already spent: ``hard`` is now plus ``ms`` minus that elapsed time. Gateway and API share a host
+clock, so no skew allowance is added; a clock running ahead only ends the budget early, with the labelled fallback.
 
 ``wait_until`` is the point where blocking waits stop (hard minus a 0.5 s reserve for the final
-validation and the response). All arithmetic uses ``time.monotonic``.
+validation and the response). Budget arithmetic uses ``time.monotonic``; only the elapsed time since the signing
+stamp is read from the wall clock.
 """
 from dataclasses import dataclass, field
 import hashlib
@@ -79,15 +84,16 @@ async def trusted_budget(request: Request) -> Budget:
     caller, signature = headers.get('x-internal-caller'), headers.get('x-internal-budget-signature')
     if not secret or not all((ms, stamp, caller, signature)):
         raise unauthorized()
-    if not re.fullmatch(r'[0-9]{1,5}', ms) or not re.fullmatch(r'[0-9]{1,12}', stamp) \
+    if not re.fullmatch(r'[0-9]{1,5}', ms) or not re.fullmatch(r'[0-9]{1,15}', stamp) \
             or not re.fullmatch(r'(user|anon):[A-Za-z0-9._:-]{1,200}', caller):
         raise unauthorized()
-    if abs(time.time() - int(stamp)) > REPLAY_WINDOW_SECONDS:
+    if abs(time.time() * 1000 - int(stamp)) > REPLAY_WINDOW_SECONDS * 1000:  # The budget stamp is epoch milliseconds.
         raise unauthorized()
     body_hash = hashlib.sha256(await request.body()).hexdigest()
     expected = hmac.new(secret.encode(), budget_message(request.method, request.url.path, body_hash, caller, ms, stamp),
                         hashlib.sha256).hexdigest()
     if not hmac.compare_digest(expected, signature):
         raise unauthorized()
-    seconds = min(int(ms) / 1000, HARD_SECONDS)
-    return Budget(hard=time.monotonic() + seconds, caller=caller)
+    granted_ms = min(int(ms), HARD_SECONDS * 1000)
+    spent_ms = max(0.0, time.time() * 1000 - int(stamp))  # Since the gateway signed; a future stamp counts as 0.
+    return Budget(hard=time.monotonic() + max(0.0, granted_ms - spent_ms) / 1000, caller=caller)

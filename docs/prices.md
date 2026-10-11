@@ -63,10 +63,10 @@ result:<ref>:<rev> = {state: "quote", attempt, checked_at, last_failure_at?}
 
 ## Budget (shared by tickets 07, 08, 09, 12)
 
-The gateway takes a monotonic receipt time before it reads the body or looks up the session, and gives budgeted routes three seconds from there (it aborts at 2.9 s so the 504 is written by 3.0 s). It signs what is left:
+The gateway takes a monotonic receipt time before it reads the body or looks up the session, and gives budgeted routes three seconds from there (it aborts at 2.9 s so the 504 is written by 3.0 s). The session lookup on a budgeted route runs on its own pool (four connections, with 3 s statement, lock and acquire timeouts; `auth/src/auth.ts`), so a lookup the gateway abandons at the deadline ends in PostgreSQL and never holds a connection that sign-in or another route needs. It signs what is left:
 
 - `x-internal-budget-ms`: milliseconds left when sent. The API clamps it to 3000.
-- `x-internal-budget-time`: epoch seconds, 30 s replay window.
+- `x-internal-budget-time`: epoch milliseconds when the gateway signed, 30 s replay window. The gateway aborts `x-internal-budget-ms` after this moment, so the API subtracts the time elapsed since it (transit, queueing, the body read) from the budget. The identity stamp `x-internal-time` stays in epoch seconds.
 - `x-internal-caller`: `user:<id>`, or `anon:<keyed digest>` on public routes (ticket 12).
 - `x-internal-budget-signature = HMAC(secret, "budget\n{method}\n{path}\n{bodyhash}\n{caller}\n{ms}\n{time}")`.
 

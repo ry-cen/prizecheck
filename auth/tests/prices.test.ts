@@ -186,10 +186,10 @@ describe("budgeted price route", () => {
     const milliseconds = Number(headers["x-internal-budget-ms"]);
     expect(milliseconds).toBeGreaterThan(2_000);
     expect(milliseconds).toBeLessThanOrEqual(3_000);
-    expect(
-      Math.abs(Number(headers["x-internal-budget-time"]) - Date.now() / 1000)
-    ).toBeLessThan(30);
+    // The budget stamp is epoch milliseconds (the API subtracts the time since it); the identity stamp stays seconds.
     const stamp = headers["x-internal-budget-time"] as string;
+    expect(stamp).toMatch(/^\d{13}$/);
+    expect(Math.abs(Number(stamp) - Date.now())).toBeLessThan(30_000);
     expect(headers["x-internal-budget-signature"]).toBe(
       sign(
         `budget\nPOST\n/api/prices/editions\n${hex(body)}\nuser:${userId}\n${headers["x-internal-budget-ms"]}\n${stamp}`
@@ -286,7 +286,7 @@ describe("budgeted price route", () => {
 
   // slow (wall-clock): waits out the gateway's real 3 s budget (BUDGET_MS in auth/src/server.ts has no test seam).
   it(
-    "gives up with 504 when the session lookup alone spends the budget",
+    "gives up with 504 when the session lookup alone spends the budget, and PostgreSQL ends the abandoned lookup",
     { tags: ["slow"], timeout: 10_000 },
     async () => {
       behaviour = ok;
@@ -303,6 +303,21 @@ describe("budgeted price route", () => {
         expect(response.status).toBe(504);
         expect(performance.now() - started).toBeLessThanOrEqual(3_000);
         expect(seen).toHaveLength(0);
+        // The abandoned lookup is cancelled by its own pool's statement timeout while the lock is still held, rather
+        // than keeping a connection until the lock goes.
+        const waiting = async () =>
+          (
+            await pool.query(
+              "SELECT count(*)::int AS count FROM pg_stat_activity WHERE datname=$1 AND wait_event_type='Lock'",
+              [database]
+            )
+          ).rows[0].count;
+        let blocked = await waiting();
+        for (let n = 0; n < 30 && blocked > 0; n++) {
+          await sleep(50);
+          blocked = await waiting();
+        }
+        expect(blocked).toBe(0);
       } finally {
         await blocker.query("ROLLBACK");
         blocker.release();
@@ -335,6 +350,35 @@ describe("budgeted price route", () => {
     });
     expect(response.status).toBe(401);
     expect(seen).toHaveLength(0);
+  });
+});
+
+describe("public routes", () => {
+  it("refuses every method but GET with 405 before a session lookup, a body read or the API", async () => {
+    behaviour = ok;
+    seen.length = 0;
+    const path = `/api/public/decks/${"T".repeat(32)}/versions/1/cost`;
+    for (const method of ["POST", "PUT", "PATCH", "DELETE"])
+      for (const extra of [{}, { cookie }]) {
+        const response = await fetch(base + path, {
+          method,
+          headers: { origin, "content-type": "application/json", ...extra },
+          body: "{}",
+        });
+        expect(response.status).toBe(405);
+        expect(response.headers.get("allow")).toBe("GET");
+      }
+    const head = await fetch(base + "/api/public/sitemap.xml", {
+      method: "HEAD",
+    });
+    expect(head.status).toBe(405);
+    expect(seen).toHaveLength(0);
+    // A GET still goes through, anonymously.
+    expect((await fetch(base + path, { headers: { cookie } })).status).toBe(
+      200
+    );
+    expect(seen).toHaveLength(1);
+    expect(seen[0].headers["x-internal-user"]).toBeUndefined();
   });
 });
 
