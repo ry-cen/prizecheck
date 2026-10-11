@@ -65,7 +65,7 @@ def backup(url, destination):
                 query = sql.SQL('SELECT * FROM {}').format(sql.Identifier(table))
                 if table in EXPIRING:
                     query += sql.SQL(' WHERE expires_at > {}').format(sql.Literal(cutoff))
-                elif table == 'move_manifest_item':
+                elif table in {'move_manifest_item', 'move_manifest_entry'}:
                     query += sql.SQL(' WHERE owner_id IN (SELECT owner_id FROM move_manifest WHERE expires_at > {})').format(sql.Literal(cutoff))
                 elif table in {'mutation_response', 'move_response'}:
                     query += sql.SQL(' WHERE (owner_id,request_key) IN (SELECT owner_id,request_key FROM mutation_request WHERE expires_at > {})').format(sql.Literal(cutoff))
