@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
+import { listHoldings } from "./support/deck-list";
 
 function messages(path: string): string[] {
   try {
@@ -66,6 +67,8 @@ promote({'card-1': ${JSON.stringify(hostileName)}})`,
     await holdings
       .getByRole("button", { name: "Add to Location", exact: true })
       .click();
+    // Publishing freezes the Deck List; list the cards just added.
+    await listHoldings(pool, privateName, 59);
     const publishing = page.getByRole("region", {
       name: "Publish Deck",
       exact: true,

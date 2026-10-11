@@ -162,6 +162,12 @@ def exercise(count, store, tmp_path, monkeypatch, *, complete, accesses):
           SELECT %s,%s,q.id,q.quantity,1 FROM unnest(%s::uuid[],%s::bigint[]) AS q(id,quantity)""",
                      (owner, deck, [e["id"] for e in editions], [e["quantity"] for e in editions]))
         conn.execute("UPDATE inventory_owner SET revision=revision+1 WHERE user_id=%s", (owner,))
+        # Publication freezes the Deck List: the same lines, whether or not Holdings already extended it.
+        conn.execute("""INSERT INTO deck_list_line(owner_id,deck_id,edition_id,quantity)
+          SELECT %s,%s,q.id,q.quantity FROM unnest(%s::uuid[],%s::bigint[]) AS q(id,quantity)
+          ON CONFLICT (owner_id,deck_id,edition_id) DO UPDATE SET quantity=EXCLUDED.quantity""",
+                     (owner, deck, [e["id"] for e in editions], [e["quantity"] for e in editions]))
+        conn.execute("UPDATE deck_list SET revision=revision+1 WHERE owner_id=%s AND deck_id=%s", (owner, deck))
     with connect() as conn:
         delivered, deliver = timed(lambda: public_catalog.drain(conn))
     assert delivered.state == "delivered", delivered

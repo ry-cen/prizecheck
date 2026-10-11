@@ -21,7 +21,7 @@ from app import price_launcher, public_deck, published_cost
 from app.public_projection import FilePublicProjection, ProjectionUnavailable
 from app.public_records import public_record_store, quarantine_key
 from test_catalog_targets import isolated_rules, owner  # noqa: F401  (isolated_rules is autouse)
-from test_deck_cost import deck_with, scheduler
+from test_deck_cost import scheduler
 from test_holdings import add
 from test_prices import ago, client, headers_for, seed, world
 from test_publications import command, legacy_snapshot, stored_decks
@@ -72,8 +72,26 @@ def body_of(response):
     return response.json()
 
 
+def listed_deck(quantities, user=USER):
+    """A private Deck whose Deck List is ``{edition_id: quantity}`` and which holds no cards, so every line is not owned
+    (and an owner with one storage leaf); returns its id."""
+    deck = uuid4()
+    with connect() as conn:
+        conn.execute("INSERT INTO inventory_owner(user_id) VALUES (%s) ON CONFLICT DO NOTHING", (user,))
+        if not conn.execute("SELECT 1 FROM location WHERE owner_id=%s AND kind='storage_leaf'", (user,)).fetchone():
+            conn.execute("INSERT INTO location(id,owner_id,name,kind) VALUES (%s,%s,'Unsorted','storage_leaf')", (uuid4(), user))
+        # Migration 025's trigger gives the new Deck its empty Deck List.
+        conn.execute("INSERT INTO location(id,owner_id,name,kind) VALUES (%s,%s,%s,'deck')", (deck, user, f"Deck {deck}"))
+        for edition, quantity in quantities.items():
+            conn.execute("INSERT INTO deck_list_line(owner_id,deck_id,edition_id,quantity) VALUES (%s,%s,%s,%s)",
+                         (user, deck, edition, quantity))
+        conn.execute("UPDATE deck_list SET revision=revision+1 WHERE owner_id=%s AND deck_id=%s", (user, deck))
+    return str(deck)
+
+
 def publish(quantities):
-    deck = deck_with(quantities, user=USER)
+    """Publish a Deck whose Deck List is ``quantities`` and which holds none of those cards."""
+    deck = listed_deck(quantities)
     response = command(USER, deck)
     assert response.status_code == 200, response.text
     return deck, response.json()["token"]

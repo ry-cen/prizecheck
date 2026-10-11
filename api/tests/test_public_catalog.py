@@ -16,8 +16,8 @@ from test_catalog_metadata import Records
 from test_catalog_search import promote
 from test_catalog_targets import activate, card, isolated_rules, metadata, run  # noqa: F401  (isolated_rules is an autouse fixture)
 from test_decks import create
-from test_holdings import add, fixture
-from test_publications import command
+from test_holdings import fixture
+from test_publications import command, list_cards
 
 PRINTING_KEYS = {'printing_ref', 'name', 'set_id', 'set_name', 'collector_number', 'image_url', 'revision', 'live'}
 LIVE_KEYS = {'state', 'reason', 'rule_version', 'identity'}
@@ -146,7 +146,7 @@ def test_catalog_import_publishes_every_printing_and_edition_after_commit():
 def test_records_store_failure_does_not_roll_back_import_or_change_publication(monkeypatch):
     owner, _, _, _, edition, _ = fixture()
     deck = create(owner).json()['location']['id']
-    add(owner, deck, edition, '1')
+    list_cards(owner, deck, {edition: 1})
     assert command(owner, deck).status_code == 200
     current = Path(os.environ['PUBLIC_PROJECTION_DIR']) / 'current.json'
     published = current.read_bytes()
@@ -212,7 +212,7 @@ def test_catalog_and_quote_record_writes_leave_snapshots_discovery_revision_and_
     from test_holdings import client
     owner, _, _, _, edition, _ = fixture()
     deck = create(owner).json()['location']['id']
-    add(owner, deck, edition, '4')
+    list_cards(owner, deck, {edition: 4})
     token = command(owner, deck).json()['token']
     assert visibility(owner, deck, 'listed').status_code == 200
     projection = Path(os.environ['PUBLIC_PROJECTION_DIR']) / 'current.json'

@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
+import { listHoldings } from "./support/deck-list";
 
 test.use({
   viewport: { width: 390, height: 844 },
@@ -101,6 +102,8 @@ test("mobile collector can search, Add, Move, Undo, check and publish a physical
     ).toBeVisible();
     await move.getByRole("button", { name: "Undo", exact: true }).first().tap();
     await expect(checks).toContainText("3 cards · 57 cards short of 60");
+    // Publishing freezes the Deck List; list the cards the Deck holds.
+    await listHoldings(pool, name, 3);
     const publishing = page.getByRole("region", {
       name: "Publish Deck",
       exact: true,
@@ -128,6 +131,7 @@ test("mobile collector can search, Add, Move, Undo, check and publish a physical
     ).toBe(401);
     await add("1");
     await expect(checks).toContainText("4 cards · 56 cards short of 60");
+    await listHoldings(pool, name, 4);
     await publicPage.reload();
     await expect(publicPage.getByRole("main")).toContainText("3 cards");
     await publishing

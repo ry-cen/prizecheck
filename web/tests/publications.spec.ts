@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
+import { listHoldings } from "./support/deck-list";
 
 function messages(path: string): string[] {
   try {
@@ -65,6 +66,8 @@ promote({'card-1': 'Pikachu'})`,
     await holdings
       .getByRole("button", { name: "Add to Location", exact: true })
       .click();
+    // Publishing freezes the Deck List; list the cards just added.
+    await listHoldings(pool, privateName, 59);
     const publishing = page.getByRole("region", {
       name: "Publish Deck",
       exact: true,
@@ -108,10 +111,12 @@ promote({'card-1': 'Pikachu'})`,
     expect(reference.edition_ref).toMatch(/^[0-9a-f]{48}$/);
     expect(reference.printing_ref).toMatch(/^[0-9a-f]{48}$/);
     expect(reference.edition_ref).not.toBe(reference.printing_ref);
+    expect(reference.printing_name).toBe("Pikachu");
     expect(Object.keys(reference).sort()).toEqual([
       "collector_number",
       "edition_ref",
       "image_url",
+      "printing_name",
       "printing_ref",
       "quantity",
       "set_id",
@@ -137,6 +142,7 @@ promote({'card-1': 'Pikachu'})`,
     await holdings
       .getByRole("button", { name: "Add to Location", exact: true })
       .click();
+    await listHoldings(pool, privateName, 61);
     await publicPage.reload();
     await expect(publicPage.getByRole("main")).toContainText("59 cards");
     const stillFrozen = await anonymous.request.get(

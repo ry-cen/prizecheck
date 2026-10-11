@@ -7,9 +7,9 @@ import time
 from uuid import uuid4
 import threading
 import pytest
-from test_holdings import fixture, add, client
+from test_holdings import fixture, client
 from test_decks import create
-from test_publications import command
+from test_publications import command, list_cards
 from test_discovery import visibility
 
 @pytest.fixture
@@ -54,7 +54,7 @@ def relay(monkeypatch, tmp_path):
 
 def test_http_manifest_publication_cas_revoke_discovery_and_no_private_database(relay,monkeypatch):
     owner,_,_,_,edition,_ = fixture()
-    deck = create(owner).json()['location']['id'];add(owner,deck,edition,'4')
+    deck = create(owner).json()['location']['id'];list_cards(owner,deck,{edition:4})
     published = command(owner,deck)
     assert published.status_code == 200,published.text
     token = published.json()['token']
@@ -75,7 +75,7 @@ def test_http_manifest_publication_cas_revoke_discovery_and_no_private_database(
 def test_concurrent_http_writers_preserve_both_decks_and_ordered_revocation(relay):
     owner,other,_,_,edition,_ = fixture()
     first = create(owner).json()['location']['id'];second = create(other).json()['location']['id']
-    add(owner,first,edition,'3');add(other,second,edition,'5')
+    list_cards(owner,first,{edition:3});list_cards(other,second,{edition:5})
     with ThreadPoolExecutor(2) as workers:
         results = list(workers.map(lambda pair:command(*pair),[(owner,first),(other,second)]))
     assert [result.status_code for result in results] == [200,200]
@@ -100,7 +100,7 @@ def test_weak_etag_fails_closed_before_publication(relay):
 
 def test_failed_http_write_retries_durable_command_without_new_token(relay):
     owner,_,_,_,edition,_ = fixture()
-    deck = create(owner).json()['location']['id'];add(owner,deck,edition,'2')
+    deck = create(owner).json()['location']['id'];list_cards(owner,deck,{edition:2})
     key = uuid4();relay['put_failed'] = True
     assert command(owner,deck,key=key).status_code == 503
     relay['put_failed'] = False

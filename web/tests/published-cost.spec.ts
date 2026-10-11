@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { Pool } from "pg";
+import { listCards, raiseLine } from "./support/deck-list";
 
 // Ticket 12: the Estimated Deck Cost on a Published Deck page, read by an anonymous visitor in a second browser context
 // (no cookie) against the real stack. Quotes are checked under an hour ago, so nothing waits for a runner.
@@ -62,7 +63,7 @@ const owner = async () =>
   (await pool.query('SELECT id FROM "user" WHERE email=$1', [OWNER_EMAIL]))
     .rows[0].id as string;
 
-/** A Deck holding `{edition: quantity}`, written straight to PostgreSQL with one inventory revision bump. */
+/** A Deck whose Deck List is `{edition: quantity}` and which holds none of those cards, written straight to PostgreSQL. */
 async function deckWith(page: Page, quantities: Record<string, number>) {
   const name = `Cost ${randomUUID().slice(0, 8)}`;
   const created = await page.request.post(`${ORIGIN}/api/decks`, {
@@ -71,16 +72,7 @@ async function deckWith(page: Page, quantities: Record<string, number>) {
   });
   expect(created.status()).toBe(201);
   const id = (await created.json()).location.id as string;
-  const user = await owner();
-  for (const [edition, quantity] of Object.entries(quantities))
-    await pool.query(
-      "INSERT INTO holding(owner_id,location_id,edition_id,quantity,version) VALUES($1,$2,$3,$4,1)",
-      [user, id, edition, quantity]
-    );
-  await pool.query(
-    "UPDATE inventory_owner SET revision=revision+1 WHERE user_id=$1",
-    [user]
-  );
+  await listCards(pool, await owner(), id, quantities);
   return { id, name };
 }
 const sixCopies = (ids: Ids) => {
@@ -172,10 +164,7 @@ test("an anonymous visitor sees $1.61 and 5/6 for the frozen snapshot, which sta
   await expect(cost).toContainText("2 stale cards (price over 48 hours old)");
   await expect(cost).toContainText("Excludes shipping and taxes");
   // A private edit after publishing changes nothing the visitor sees.
-  await pool.query(
-    "UPDATE holding SET quantity=quantity+4 WHERE location_id=$1 AND edition_id=$2",
-    [deck.id, ids.normal]
-  );
+  await raiseLine(pool, deck.id, ids.normal, 4);
   await bump();
   await visitor.unroute(pattern);
   await visitor.reload();
@@ -206,10 +195,7 @@ test("a cost answer held across a republish is discarded and the page prices the
   await visitor.route("**/versions/1/cost", async (route) => {
     if (!republished) {
       republished = true;
-      await pool.query(
-        "UPDATE holding SET quantity=quantity+1 WHERE location_id=$1 AND edition_id=$2",
-        [deck.id, ids.normal]
-      );
+      await raiseLine(pool, deck.id, ids.normal, 1);
       await bump();
       await publication(page, "PUT", deck.id);
     }

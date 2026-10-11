@@ -107,8 +107,11 @@ def read_active(token: str, version: int, *, deadline: float) -> ActiveSnapshot:
         if visibility not in ('listed', 'unlisted'):
             raise ValueError('visibility')
         snapshot = PublicSnapshot.model_validate(stored)
-        rows = tuple(FrozenRow(identity.name, edition.set_id, edition.set_name, edition.collector_number, edition.variant,
-                               edition.image_url, _quantity(edition.quantity), edition.edition_ref, edition.printing_ref)
+        # A row's name is its own Card Printing name; a snapshot published before Deck Lists 09 has only its group's
+        # Card Identity name.
+        rows = tuple(FrozenRow(edition.printing_name or identity.name, edition.set_id, edition.set_name,
+                               edition.collector_number, edition.variant, edition.image_url, _quantity(edition.quantity),
+                               edition.edition_ref, edition.printing_ref)
                      for identity in snapshot.identities for edition in identity.editions)
     except (KeyError, TypeError, ValueError, ValidationError):
         raise ProjectionUnavailable() from None

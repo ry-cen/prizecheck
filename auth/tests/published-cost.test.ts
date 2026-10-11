@@ -246,12 +246,17 @@ async function deckWith(quantities: Array<[Edition, number]>) {
   );
   for (const [edition, quantity] of quantities)
     await pool.query(
-      "INSERT INTO holding(owner_id,location_id,edition_id,quantity,version) VALUES ($1,$2,$3,$4,1)",
+      "INSERT INTO deck_list_line(owner_id,deck_id,edition_id,quantity) VALUES ($1,$2,$3,$4)",
       [owner.id, deck, edition.id, quantity]
     );
+  await bumpList(deck);
   await bump();
   return deck;
 }
+const bumpList = (deck: string) =>
+  pool.query("UPDATE deck_list SET revision=revision+1 WHERE deck_id=$1", [
+    deck,
+  ]);
 const bump = () =>
   pool.query(
     "UPDATE inventory_owner SET revision=revision+1 WHERE user_id=$1",
@@ -259,9 +264,10 @@ const bump = () =>
   );
 async function addCopies(deck: string, edition: Edition, count: number) {
   await pool.query(
-    "UPDATE holding SET quantity=quantity+$3,version=version+1 WHERE location_id=$1 AND edition_id=$2",
+    "UPDATE deck_list_line SET quantity=quantity+$3 WHERE deck_id=$1 AND edition_id=$2",
     [deck, edition.id, count]
   );
+  await bumpList(deck);
   await bump();
 }
 

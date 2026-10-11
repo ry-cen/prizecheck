@@ -97,6 +97,15 @@ def summary(token, public):
              unresolved_groups=sum(item.status=='unresolved' for item in checks.identities)), image_url=images[0] if images else None)
 
 
+def matches_query(public, query):
+    """Title, Card Identity name, or any row's own Card Printing name, so a subtitled card ("Professor's Research
+    (Professor Juniper)") stays findable by its subtitle after Card Identity dropped it."""
+    return (query in public.title.casefold()
+            or any(query in identity.name.casefold() for identity in public.identities)
+            or any(edition.printing_name is not None and query in edition.printing_name.casefold()
+                   for identity in public.identities for edition in identity.editions))
+
+
 @router.get('/api/public/discovery', response_model=DiscoveryPage)
 def discover(response: Response, q: str = '', cursor: str | None = None):
     response.headers.update(HEADERS)
@@ -105,8 +114,7 @@ def discover(response: Response, q: str = '', cursor: str | None = None):
         raise HTTPException(422, {'code':'INVALID_SEARCH'}, headers=HEADERS)
     objects, revision = listed_snapshots()
     key = cursor_decode(cursor, query, revision) if cursor else None
-    matches = [(token, public) for token, public in objects if not query or query in public.title.casefold()
-               or any(query in identity.name.casefold() for identity in public.identities)]
+    matches = [(token, public) for token, public in objects if not query or matches_query(public, query)]
     ordered = sorted(matches, key=lambda item: (item[1].published_at.isoformat(),item[0]), reverse=True)
     if key:
         ordered = [item for item in ordered if (item[1].published_at.isoformat(),item[0]) < key]
