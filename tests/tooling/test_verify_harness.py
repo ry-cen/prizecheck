@@ -289,7 +289,7 @@ class VerifyReaperTest(unittest.TestCase):
         self.assertEqual(verify_reaper.parse_owner(verify_reaper.owner_record(self.owner(started=None))), self.owner(started=None))
         record = json.loads(verify_reaper.owner_record(owner))
         for changes in ({'tool': 'other'}, {'version': 2}, {'run': 'x'}, {'host': ''}, {'pid': True}, {'pid': 1},
-                        {'pid': '4242'}, {'started': ''}, {'created': 'now'}, {'created': float('nan')}):
+                        {'pid': '4242'}, {'started': ''}, {'created': 'now'}, {'created': float('nan')}, {'created': 10 ** 400}):
             self.assertIsNone(verify_reaper.parse_owner(json.dumps({**record, **changes})), changes)
         for comment in (None, '', 'a note', '[]', '{}'):
             self.assertIsNone(verify_reaper.parse_owner(comment), comment)
@@ -301,6 +301,14 @@ class VerifyReaperTest(unittest.TestCase):
         self.assertEqual(verify_reaper.owner_state(owner, lambda pid: owner.started), 'alive')
         self.assertEqual(verify_reaper.owner_state(self.owner(started=None), lambda pid: 'any'), 'alive')
         self.assertEqual(verify_reaper.owner_state(owner, lambda pid: verify_reaper.UNKNOWN), 'unknown')
+
+    def test_a_changed_start_string_is_dead_only_when_the_process_began_after_the_record(self):
+        owner = self.owner(started='Sat Oct 10 19:53:14 2026', created=1791662000.0)  # 19:53:20 UTC
+        self.assertEqual(verify_reaper.owner_state(owner, lambda pid: 'Sat Oct 10 19:53:14 2026'), 'alive')
+        self.assertEqual(verify_reaper.owner_state(owner, lambda pid: 'Sat Oct 10 19:53:15 2026'), 'unknown')
+        self.assertEqual(verify_reaper.owner_state(owner, lambda pid: 'Sat Oct 10 19:53:24 2026'), 'unknown')
+        self.assertEqual(verify_reaper.owner_state(owner, lambda pid: 'Sat Oct 10 19:53:30 2026'), 'dead')
+        self.assertEqual(verify_reaper.owner_state(owner, lambda pid: 'not a date'), 'unknown')
 
     def test_a_dead_owners_unused_old_run_is_dropped_whole(self):
         verdict = self.decide([self.member(owner=self.owner()), self.member(self.BASE + '_gw0')])

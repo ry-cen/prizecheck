@@ -6,8 +6,8 @@ scripts/verify.py tags every database it creates (``tcg_verify_<16 hex>``, ``...
 host, the verify.py pid and that process's start time. reap() drops one run's databases, all of them or none, only when:
 
 - at least one carries an owner record, every record names the same owner, and no comment is foreign;
-- the owner ran on this host and its process has exited: no process has its pid, or the one that has it started at
-  another time (the pid was reused);
+- the owner ran on this host and its process has exited: no process has its pid, or the one that has it started after the
+  owner record was written (the pid was reused);
 - the owner record is at least MIN_AGE_S old;
 - no session is connected to any of them, and DROP DATABASE (never WITH (FORCE)) finds none either.
 
@@ -15,6 +15,7 @@ Untagged databases (an older harness, or a run killed between CREATE DATABASE an
 that scripts/verify.py does not make are kept and reported. An advisory lock on the admin database serializes reaping
 with creating and tagging, so a reaper never sees a database its creator has not tagged yet.
 """
+import calendar
 from dataclasses import dataclass
 import functools
 import hashlib
@@ -37,6 +38,8 @@ PREFIX = 'tcg_verify_'
 TOOL = 'tcg-verify'
 VERSION = 1
 LOCK = 914790          # advisory lock key on the admin database; reaping and creating+tagging never interleave
+START_SLACK_S = 5      # a ps start time this much after the owner record was written is a different process
+LOCK_TIMEOUT = '10s'   # how long the reaper and create_databases wait for the advisory lock
 MIN_AGE_S = 60         # an owner record younger than this is never reaped
 HARNESS_NAME = re.compile(r'(tcg_verify_[0-9a-f]{16})(?:_gw\d+|_s\d+)?')  # scripts/verify.py database_names()
 UNKNOWN = object()     # process_started() could not tell
@@ -141,25 +144,41 @@ def parse_owner(comment):
     if not isinstance(record, dict) or record.get('tool') != TOOL or record.get('version') != VERSION:
         return None
     run, host, pid, started, created = (record.get(key) for key in ('run', 'host', 'pid', 'started', 'created'))
+    try:
+        finite = type(created) in (int, float) and math.isfinite(created)
+    except OverflowError:
+        return None
     if not (isinstance(run, str) and RUN_ID.fullmatch(run) and isinstance(host, str) and host
             and type(pid) is int and 1 < pid < 2 ** 22
             and (started is None or (isinstance(started, str) and started))
-            and type(created) in (int, float) and math.isfinite(created)):
+            and finite):
         return None
     return Owner(run, host, pid, started, float(created))
 
 
+def _start_epoch(shown):
+    """Seconds since the epoch for a ps lstart string (ps runs with LC_ALL=C TZ=UTC), or None when it does not parse."""
+    try:
+        return calendar.timegm(time.strptime(shown, '%a %b %d %H:%M:%S %Y'))
+    except (ValueError, OverflowError):
+        return None
+
+
 def owner_state(owner, probe=process_started):
-    """'alive', 'dead' or 'unknown'. Dead only when no process has the pid, or the one that has it started at another
-    time; anything ps cannot answer is 'unknown', which keeps the databases."""
+    """'alive', 'dead' or 'unknown'. Dead only when no process has the pid, or the one that has it started after the
+    owner record was written (the pid was reused). A start time that merely differs (Linux derives it from the boot time,
+    which moves when the clock is stepped) or does not parse is 'unknown', which keeps the databases."""
     shown = probe(owner.pid)
     if shown is UNKNOWN:
         return 'unknown'
     if shown is None:
         return 'dead'
-    if owner.started is not None and shown != owner.started:
+    if owner.started is None or shown == owner.started:
+        return 'alive'
+    started = _start_epoch(shown)
+    if started is not None and started > owner.created + START_SLACK_S:
         return 'dead'
-    return 'alive'
+    return 'unknown'
 
 
 def group_candidates(members):
@@ -210,7 +229,13 @@ def create_databases(conn, names, owner, created):
     """CREATE DATABASE and tag each of names under the reaper lock, so no reaper sees one untagged. Each name is
     appended to created as soon as it exists, so the caller's cleanup drops it even when tagging fails."""
     record = owner_record(owner)
-    conn.execute('SELECT pg_advisory_lock(%s)', (LOCK,))
+    conn.execute(f"SET lock_timeout = '{LOCK_TIMEOUT}'")
+    try:
+        conn.execute('SELECT pg_advisory_lock(%s)', (LOCK,))
+    except psycopg.errors.LockNotAvailable as error:
+        raise RuntimeError('cannot create the verification databases: another verification run holds the reaper lock '
+                           f'for more than {LOCK_TIMEOUT}') from error
+    conn.execute('SET lock_timeout = 0')
     try:
         for database in names:
             conn.execute(sql.SQL('CREATE DATABASE {}').format(sql.Identifier(database)))
@@ -240,7 +265,7 @@ def reap(admin_url, *, prefix=PREFIX, host=None, now=None, probe=process_started
     lines, dropped = [], []
     try:
         with psycopg.connect(admin_url, autocommit=True, connect_timeout=10) as conn:
-            conn.execute("SET lock_timeout = '10s'")
+            conn.execute(f"SET lock_timeout = '{LOCK_TIMEOUT}'")
             conn.execute('SELECT pg_advisory_lock(%s)', (LOCK,))
             members = [Member(name, comment, int(sessions)) for name, comment, sessions in conn.execute(CANDIDATES, (prefix,))]
             runs, strays = group_candidates(members)

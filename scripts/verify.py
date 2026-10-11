@@ -139,7 +139,10 @@ def main(argv=None):
     reservations = []
     try:
         # Before this run creates anything: drop the databases of verification runs that were killed (scripts/verify_reaper.py).
-        reaper, reaped = reap(args.admin_url)
+        try:
+            reaper, reaped = reap(args.admin_url)
+        except Exception as error:
+            reaper, reaped = [f'== reaper: skipped: reaper error ({type(error).__name__})'], []
         for line in reaper:
             print(line, flush=True)
         (artifacts/'verification.log').write_text(''.join(line + '\n' for line in reaper))
