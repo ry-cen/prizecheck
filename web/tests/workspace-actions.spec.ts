@@ -137,7 +137,7 @@ async function editionOf(sourceId: string): Promise<string> {
   }
 }
 
-/** Runs SQL against this worker's database (another tab's change, as moves.spec.ts does). */
+/** Runs SQL against this worker's database (another tab's change). */
 async function sql(text: string, values: unknown[]) {
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });
   try {
