@@ -732,7 +732,7 @@ test.describe("desktop", () => {
     await page.mouse.up();
     await expect(bar(page)).toContainText("2 copies selected");
     await expect(pressed(page)).toHaveCount(2);
-    await expect(toast(page)).toHaveText("");
+    await expect(toast(page)).toHaveCount(0);
     expect(commits).toBe(0);
     await expectCounts(page, `0 Dest ${s}`, "This Location has no cards.");
     await expectCounts(page, `0 Alpha ${s}`, "2 copies · 1 edition");
