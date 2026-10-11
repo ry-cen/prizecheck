@@ -23,6 +23,7 @@ An agreed plan for a backend endpoint that checks a deck against the Pokémon TC
 
 <!-- One line per closed ticket: link plus a one-line gist. -->
 
+- [Research Standard and Expanded construction rules](https://github.com/ry-cen/tcg-tracker/issues/69): Standard allows regulation marks H and later (G rotated April 2026, next rotation unannounced); Expanded is Black & White onward plus marks D and later, with a 27-entry printing-specific ban list; older printings count when name and text are functionally identical to a legal printing, but whether that covers Pokémon is officially unclear. [Findings](https://github.com/ry-cen/tcg-tracker/blob/feature/deck-format-validation/docs/planning/deck-format-validation/wayfinder/research/standard-and-expanded-rules.md)
 - [Research Gym Leader Challenge construction rules](https://github.com/ry-cen/tcg-tracker/issues/70): fan-made format (Andrew Mahone / Tricky Gym), Black & White-onward pool with no rotation and its own 13-card ban list (some bans name a single printing); singleton by name except Basic Energy, one Pokémon type, no Rule Box or ACE SPEC; a validator needs per-printing type, Rule Box and ACE SPEC flags. [Findings](https://github.com/ry-cen/tcg-tracker/blob/feature/deck-format-validation/docs/planning/deck-format-validation/wayfinder/research/gym-leader-challenge-rules.md)
 
 ## Not yet specified
