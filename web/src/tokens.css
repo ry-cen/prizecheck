@@ -96,6 +96,10 @@
   --tile-medium: 145px;
   --tile-gap-row: 20px;
   --tile-gap-column: 12px;
+  /* Fixed heights under the art, so the gallery's layout model matches the DOM:
+     Names block = 4 px gap + 16 px name line + 14 px set line; caption = 4 px gap + 14 px line. */
+  --tile-names-height: 34px;
+  --tile-caption-height: 18px;
 
   /* Workspace layout */
   --layout-header-height: 64px;
