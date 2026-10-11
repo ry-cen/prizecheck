@@ -8,7 +8,6 @@ Ticket 15, [#64](https://github.com/ry-cen/tcg-tracker/issues/64). Recorded 2026
 
 - Branch `feature/card-prices-and-deck-exports`, commit `826cf66ce2abf74ff6be225e0587696bbe57f8c8`, with a clean working tree when the gate ran.
 - Full gate run `20261011T033001Z-77f500fa` (`npm run verify`, every suite, not `--fast`).
-- Opt-in 25,000-Edition measurement: commit `826cf66ce2abf74ff6be225e0587696bbe57f8c8`, recorded at `2026-10-11T03:39:42Z` in [the sanitized JSON](../validation/deck-capacity-25000.json).
 
 ## Procedure
 
@@ -16,12 +15,9 @@ From the integration checkout, with Node and Python dependencies installed and `
 
 ```sh
 npm run verify
-.venv/bin/python scripts/deck_capacity.py \
-  --admin-url "$TEST_ADMIN_DATABASE_URL" \
-  --report "$PWD/docs/planning/card-prices-and-deck-exports/validation/deck-capacity-25000.json"
 ```
 
-The gate copies the working tree, creates and drops its own databases, ports and directories, and writes its artifacts to `.scratch/verification/20261011T033001Z-77f500fa/`. The capacity script creates one disposable `tcg_deck_capacity_` database, migrates it, runs only `api/tests/test_deck_capacity.py::test_a_25000_edition_deck_counts_every_copy_or_labels_its_cost_incomplete`, writes the JSON and drops the database. The two commands never ran at the same time.
+The gate copies the working tree, creates and drops its own databases, ports and directories, and writes its artifacts to `.scratch/verification/20261011T033001Z-77f500fa/`.
 
 ## Environment
 
@@ -44,7 +40,7 @@ From the `verification.log` summary of `20261011T033001Z-77f500fa`:
 - operations: Ran 11 tests in 40.348s, OK (skipped=1; the skipped test is the opt-in disposable-runtime release drill). No `== WARNING:` line
 - phase seconds: setup 17, pytest 158, vitest 50, browser 98, operations 40
 
-The one skipped pytest test added by this ticket is the opt-in 25,000-Edition measurement above.
+The one skipped pytest test added at this commit was a 25,000-Edition measurement, removed afterwards (see owner decision Q1).
 
 ## Recorded measurements
 
@@ -58,16 +54,14 @@ Every value below is copied from a log line or JSON field named in the Source co
 | Queue age | `oldest queued job 2401 ms` (`waited 14 (cap 32)`; `p50 239 ms, p95 2428 ms, max 2431 ms`; `stats {"admitted":5,"expired":0,"fenced":0,"joined":65,"refused":{}}`) | same line, `oldest queued job` |
 | Retries | `5xx: failed after 1358 ms (bound 3000), retry gap 826 ms [450, 1600), backoff answer 163 ms (bound 1500)`; `malformed: failed after 279 ms (must beat the ~2500 ms wait)` | `price-runners-metrics.log`, lines starting `5xx:` and `malformed:` |
 | Storage, 1,000 Editions | `"bytes": {"live_text": 29907, "manifest": 395325, "mass_entry_text": 21999, "records_directory": 8262728}` | `deck-capacity-metrics.log`, `bytes` (records directory, manifest, Live and Mass Entry text) |
-| Storage, 25,000 Editions | `{"live_text": 788909, "manifest": 9914328, "mass_entry_text": 549999, "records_directory": 276378333}` | `validation/deck-capacity-25000.json`, `result.bytes` |
 | Full coverage, 1,000 Editions | 2,000 copies, 1,800 priced. `"private_cost": [["priced", null, 0.28]]`, `"public_cost": [["priced", null, 0.116]]` (status, reason, seconds) | `deck-capacity-metrics.log`, `private_cost` and `public_cost` |
-| Full coverage, 25,000 Editions | 50,000 copies, 45,000 priced. `private_cost`: `["incomplete", "deadline", 3.232]`, `["priced", null, 2.769]`, `["priced", null, 2.923]`. `public_cost`: `["incomplete", "validation_unavailable", 3.023]`, `["incomplete", "deadline", 3.038]`, `["incomplete", "validation_unavailable", 3.035]`. Every answer is the exact numeric one or the labelled `incomplete` one (see F1, F2 and the owner decisions) | `validation/deck-capacity-25000.json`, `result.private_cost` and `result.public_cost` (three accesses each) |
 | Full coverage, 100 callers | every one of 200 answers had the exact frozen total, priced copies and amount (assertion in the test) | `published-cost.test.ts` › "keeps cached prices under 500 ms p95 …" |
 | Cached ordinary-price p95 | `edition route p95 32 ms (bound 500); published cost p95 6 ms` | `published-cost-metrics.log`, line starting `cached prices one at a time:` (through gateway G0; bound 500 ms) |
 | 100 simultaneous callers | `100 simultaneous callers, cached: p50 227 ms, p95 240 ms, max 243 ms (bound 3500)`; `100 simultaneous callers, 5 shared day-old Editions: jobs 5 for 67 accesses; waited 14 (cap 32); launches 2 (cap 2); oldest queued job 2401 ms; p50 239 ms, p95 2428 ms, max 2431 ms; stats {"admitted":5,"expired":0,"fenced":0,"joined":65,"refused":{}}` | `published-cost-metrics.log`, both `100 simultaneous callers` lines |
 | Private hard expiry | `deck hard expiry, 34 Editions, hanging source: 2502 ms (bound 3000); checks 63 ms, inventory write 45 ms (bound 1000)` | `price-runners-metrics.log`, line starting `deck hard expiry, 34 Editions` |
 | Public hard expiry | `published cost hard row: 2381 ms (gate abort 3000); snapshot meanwhile: 3 ms (bound 1500)` | `published-cost-metrics.log`, line starting `published cost hard row:` |
 | Slow relay | `deck outage: 1267 ms; stalled store writes: 729 ms (bound 3000)` | `price-runners-metrics.log`, line starting `deck outage:` |
-| Large-Deck latency | 1,000 Editions: `"seconds": {"build": 1.884, "deliver": 1.765, "private_live": 0.068, "private_mass_entry": 0.067, "public_live": 0.045, "public_mass_entry": 0.069, "publish": 0.128, "seed_quotes": 0.784}`. 25,000 Editions: `"seconds": {"build": 10.41, "deliver": 62.992, "seed_quotes": 35.558, "private_live": 1.114, "private_mass_entry": 0.929, "publish": 1.645, "public_live": 1.787, "public_mass_entry": 2.671}`| `deck-capacity-metrics.log` `seconds`, and `result.seconds` in the 25,000 JSON |
+| Large-Deck latency | 1,000 Editions: `"seconds": {"build": 1.884, "deliver": 1.765, "private_live": 0.068, "private_mass_entry": 0.067, "public_live": 0.045, "public_mass_entry": 0.069, "publish": 0.128, "seed_quotes": 0.784}``| `deck-capacity-metrics.log` `seconds` |
 
 ## Criterion coverage
 
@@ -118,9 +112,9 @@ The bodies of #58, #61, #62 and #63 still show unchecked boxes, so cite their co
 | --- | --- | --- |
 | 60-copy Deck | `auth/tests/published-cost.test.ts` › new fifth test, Deck A (exactly 60 copies) | New |
 | 1,000-distinct-Edition Deck | `api/tests/test_deck_capacity.py::test_a_1000_edition_deck_is_priced_and_exported_completely_privately_and_publicly`: private cost through the HTTP relay, both private exports, publish, public cost and both public exports, all asserting every copy | New |
-| 25,000-distinct-Edition Deck | `api/tests/test_deck_capacity.py::test_a_25000_edition_deck_counts_every_copy_or_labels_its_cost_incomplete`, opt-in through `scripts/deck_capacity.py`, recorded in `validation/deck-capacity-25000.json`. See the owner decisions Q1 and Q2 below | New (opt-in) |
+| 25,000-distinct-Edition Deck | Not tested: a Deck holds at most 60 cards in play, so the owner dropped this case (owner decision Q1). The 1,000-Edition test above is the large-Deck check | Dropped by the owner |
 | 100 simultaneous callers, overlapping and disjoint Decks, across replicas | `auth/tests/published-cost.test.ts` › new fifth test (100 `x-real-ip` callers, alternating G0/G1, Decks A/B overlapping and C disjoint, cached and day-old phases) | New |
-| Complete cache coverage and quantity behavior preserved | Each new test asserts exact `total_copies`, `priced_copies` and `amount` for every answer, or the labelled `incomplete` answer at 25,000. See also `api/tests/test_deck_cost.py::test_every_copy_of_a_large_deck_is_evaluated_with_one_admission_and_one_budget` (70 Editions, more than 128 keys) and `::test_bounded_admission_never_drops_copies_on_a_later_access` | Covered and New |
+| Complete cache coverage and quantity behavior preserved | Each new test asserts exact `total_copies`, `priced_copies` and `amount` for every answer. See also `api/tests/test_deck_cost.py::test_every_copy_of_a_large_deck_is_evaluated_with_one_admission_and_one_budget` (70 Editions, more than 128 keys) and `::test_bounded_admission_never_drops_copies_on_a_later_access` | Covered and New |
 
 ### C4. Failure and recovery scenarios; nothing superseded reappears
 
@@ -202,7 +196,7 @@ The bodies of #58, #61, #62 and #63 still show unchecked boxes, so cite their co
 | Independent targets | `metadata-review.spec.ts` › "quarantining the Edition mapping leaves a reviewed Live identity eligible"; `test_catalog_targets.py::test_a_rule_input_change_suspends_only_the_affected_printing_and_its_marketplace_state_is_untouched` | Covered |
 | Complete exports | `live-export.spec.ts` › "Copy reports success only after the clipboard write resolves, with exact text and non-60 warnings"; `mass-entry.spec.ts` › "an all-mapped Deck opens TCGplayer only after the explanation …"; the published specs; new `test_deck_capacity.py` (1,000 rows) | Covered and New |
 | Clipboard failure | `live-export.spec.ts` › "a denied clipboard shows the failure and the complete selectable text"; `mass-entry.spec.ts` (denial keeps selectable text); `published-live-export.spec.ts`; `published-mass-entry.spec.ts` (`stubClipboard(visitor, "reject")`) | Covered |
-| Oversized fallback | `live-export.spec.ts` › "output beyond 256 KiB is not shown inline and downloads complete"; `mass-entry.spec.ts` › "a link over 2,000 bytes is withheld and the complete text is offered"; new 1,000 test (`encoded_length`); 25,000 opt-in (789 KB and 550 KB streamed) | Covered |
+| Oversized fallback | `live-export.spec.ts` › "output beyond 256 KiB is not shown inline and downloads complete"; `mass-entry.spec.ts` › "a link over 2,000 bytes is withheld and the complete text is offered"; new 1,000 test (`encoded_length`) | Covered |
 | Legacy proof | `test_published_cost.py::test_legacy_and_unproven_rows_stay_readable_and_unpriced_until_a_republish_captures_them`; `test_published_live_export.py::test_legacy_and_unresolved_printings_block_the_complete_live_export_while_the_snapshot_stays_readable`; `test_published_mass_entry.py::test_legacy_and_unproven_rows_keep_complete_name_text_and_never_get_a_product`; `published-cost.test.ts` test 1 (legacy through the gateway) | Covered |
 | Claimed supported rule cases | `test_deck_live_export.py::test_complete_text_covers_every_claimed_rule_case_and_groups_by_identity_only` (ordinary, promo, Trainer, Special Energy, Basic Energy, subset, manual, retired); `::test_blocked_deck_lists_every_blocker_and_withholds_all_text` (ALT unsupported); `live-export.spec.ts` › "blocked Decks list every blocker and offer no text" | Covered |
 
@@ -221,11 +215,8 @@ The bodies of #58, #61, #62 and #63 still show unchecked boxes, so cite their co
 
 ## Findings and limits
 
-- **F1. 25,000-Edition private cost is borderline.** In `validation/deck-capacity-25000.json` (`result.private_cost`, three accesses) the first access answered `incomplete`/`deadline` in 3.232 s, and the second and third completed as `priced` in 2.769 s and 2.923 s (45,000 of 50,000 copies). The label is honest; coverage is never false.
-- **F2. 25,000-Edition Published Deck cost never completes.** All three accesses in `result.public_cost` answered `incomplete`, with reasons `validation_unavailable` (3.023 s), `deadline` (3.038 s) and `validation_unavailable` (3.035 s), and the total withheld. The client then shows "coverage unavailable" with the snapshot's total.
-- **F2a. The API overruns its own hard deadline, narrowly.** The in-process public requests took 3.023-3.038 s and the first private access 3.232 s, past the API's 3 s hard deadline (by 23-38 ms for the public path, 232 ms for the private first access). This deviates from spec line 105 ("every blocking operation has a timeout no greater than the remaining budget"), which tickets 06 and 12 claimed: at this size the manifest parse and the eligibility reads are not bounded by the remaining budget. The recorded overrun is small in this run. The measurement is in-process through the FastAPI TestClient and excludes the gateway; the gateway's 2.9 s abort still answers the visitor within 3 s, so criterion 7 holds at the gateway. It is recorded here as a deviation from a closed ticket's criterion.
-- **F3. Large publications bloat the shared manifest.** One 25,000-row publication makes the single shared manifest 9,914,328 bytes (about 9.9 MB), against 395,325 bytes at 1,000 Editions. Every anonymous snapshot, discovery, cost and export read parses it.
-- **F4. Storage.** The records directory takes 8,262,728 bytes at 1,000 Editions (about 8.3 KB per Edition) and 276,378,333 bytes at 25,000 (about 11 KB per Edition, about 276 MB), mostly retained generations and per-record files. At 25,000, catalog delivery took 62.992 s and quote seeding 35.558 s (1,000 Editions: 1.765 s and 0.784 s). These figures are synthetic and local, not a provider estimate.
+- **F1-F3. Removed.** They recorded a 25,000-Edition measurement that the owner later dropped (owner decision Q1).
+- **F4. Storage.** The records directory takes 8,262,728 bytes at 1,000 Editions (about 8.3 KB per Edition), mostly retained generations and per-record files. Catalog delivery took 1.765 s and quote seeding 0.784 s. These figures are synthetic and local, not a provider estimate.
 - **F5. `busy` refusals are invisible in stats.** In the 100-caller day-old burst, `stats.refused` stayed `{}` (`stats {"admitted":5,"expired":0,"fenced":0,"joined":65,"refused":{}}`) even though admission CAS contention answers some accesses `busy` without recording a reason. This is the known follow-up from #56 and #57. The same line records `waited 14 (cap 32)`: `admitted 5 + joined 65 = 70` is 14 accesses of 5 rows each, so 53 of the 67 A/B accesses (67 minus 14) answered without waiting. The `published-cost-metrics.log` and `verification.log` both record 14.
 - **F6. Two clauses are proven below the gateway.** Fairness beyond 32 jobs and stalled final validation are proven at the admission and signed-HTTP seams, not through the gateway (C5 and C7, Partial (accepted)).
 - **F7. The new vitest bounds run under parallel load, and the day-old margin is thin.** The p95 < 500 ms and <= 3,500 ms bounds run alongside the other vitest files, because #68 (a vitest serial pass) is still open. Recorded: Edition-route p95 32 ms against 500 ms (about 15 times); cached burst max 243 ms against 3,500 ms (about 14 times). The day-old burst is the real exposure: its max was 2,431 ms, but a slow answer there fails at the gateway abort, `BUDGET_MS - RESPONSE_MARGIN_MS` = 2.9 s (`auth/src/server.ts`), which returns 504 and fails `expect(status).toBe(200)` before the 3,500 ms bound can be reached. The margin is therefore 2,431 ms against 2,900 ms, about 1.2 times. The API's wait is relative to the signed budget (`wait_until = hard - 0.5 s`, `api/app/price_budget.py`), so each waiter has about 0.5 s after its wait to finish its reads and respond, and about 14 waiters finish their waits together in each API process. Under load from other vitest files this can fail; #68 is the remedy. The bound is not loosened.
@@ -240,9 +231,8 @@ The bodies of #58, #61, #62 and #63 still show unchecked boxes, so cite their co
 
 The owner answered the open questions as follows.
 
-- **Q1.** The 25,000-distinct-Edition case stays an opt-in measurement, run once by `scripts/deck_capacity.py` and not in the gate. The gate keeps the 1,000-Edition test.
-- **Q2 and Q2a.** The labelled `incomplete` answer at 25,000 Editions (F1, F2), and the API finishing after its own hard deadline while the gateway's 2.9 s abort still answers in time (F2a), are accepted as known deviations. A follow-up performance ticket will be opened (follow-up issue to be opened).
-- **Q3.** The roughly 9.9 MB shared manifest (F3) folds into that follow-up.
+- **Q1.** A Deck holds at most 60 cards in play, so the 25,000-distinct-Edition case is out of scope. The opt-in 25,000 test, its script and its recorded JSON were measured once at `826cf66` and then removed; no performance follow-up is opened for it. The gate keeps the 1,000-Edition test as headroom far beyond a playable Deck.
+- **Q2, Q2a and Q3.** Withdrawn with Q1: they asked whether the 25,000-Edition `incomplete` answers, the API's narrow deadline overrun at that size and the resulting 9.9 MB manifest were acceptable.
 - **Q4.** The two "Partial (accepted)" clauses (fairness beyond 32 jobs; stalled final validation) are accepted without gateway duplicates.
 
 ## Launch gates

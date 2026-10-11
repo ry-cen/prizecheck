@@ -1,7 +1,6 @@
 """Deck capacity (ticket 15): one large Deck priced and exported privately and publicly, at the signed HTTP seam.
 
-The gate runs a 1,000-distinct-Edition Deck. The 25,000-distinct-Edition Deck is an explicit opt-in measurement
-(``scripts/deck_capacity.py`` sets DECK_CAPACITY_REPORT); the gate skips it. The private cost reads its quotes through
+The gate runs a 1,000-distinct-Edition Deck, far beyond a playable 60-card Deck. The private cost reads its quotes through
 the HTTP records relay; publication, the public cost and the public exports use the filesystem adapter over the same
 records directory. The gateway-level capacity proof (100 simultaneous callers on two gateways and two APIs) is in
 auth/tests/published-cost.test.ts.
@@ -10,7 +9,6 @@ from datetime import timedelta
 from decimal import Decimal
 import json
 import os
-import platform
 import time
 from pathlib import Path
 from uuid import uuid4
@@ -247,17 +245,3 @@ def metric(line):
 def test_a_1000_edition_deck_is_priced_and_exported_completely_privately_and_publicly(store, tmp_path, monkeypatch):
     metric(json.dumps(exercise(1000, store, tmp_path, monkeypatch, complete=True, accesses=1), sort_keys=True))
 
-
-@pytest.mark.skipif(not os.environ.get("DECK_CAPACITY_REPORT"), reason="explicit disposable capacity command only")
-@pytest.mark.slow(reason="capacity: builds, prices and exports a 25,000-Edition Deck")
-def test_a_25000_edition_deck_counts_every_copy_or_labels_its_cost_incomplete(store, tmp_path, monkeypatch):
-    result = exercise(25000, store, tmp_path, monkeypatch, complete=False, accesses=3)
-    report = {"fixture": "SYNTHETIC: one private Deck of 25,000 distinct Editions (one per Printing, quantities 1-3), "
-                         "published once; every tenth Edition a confirmed absence, every other a fresh $0.25 quote",
-              "environment": {"platform": platform.platform(), "python": platform.python_version(),
-                              "cpus": os.cpu_count()},
-              "transport": "FastAPI TestClient in process; private cost through the HTTP records relay, public routes on "
-                           "the filesystem adapter; excludes the gateway, sockets and browser",
-              "result": result}
-    Path(os.environ["DECK_CAPACITY_REPORT"]).write_text(json.dumps(report, indent=2) + "\n")
-    metric(json.dumps(result, sort_keys=True))
