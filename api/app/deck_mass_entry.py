@@ -73,21 +73,37 @@ def text_bytes(export: MassEntryExport) -> int:
     return sum(len(chunk.encode()) for chunk in iter_mass_entry_text(export))
 
 
+def formatted(rows) -> MassEntryExport:
+    """The JSON views' one formatter call, with this module's link limits (read at call time, so tests can patch them)."""
+    return format_mass_entry(rows, max_url_bytes=MAX_URL_BYTES, max_link_quantity=MAX_LINK_QUANTITY)
+
+
+def view_fields(export: MassEntryExport) -> dict:
+    """The fields the private and the Published Deck views share: one inline/text/lines decision for both."""
+    size = text_bytes(export)
+    inline = size <= INLINE_LIMIT_BYTES
+    return {'status': export.status, 'url': export.url, 'fallback_reason': export.fallback_reason,
+            'text': mass_entry_text(export) if inline and export.status == 'text' else None,
+            'inline': inline, 'byte_length': size,
+            'lines': [MassEntryLineView(quantity=str(line.quantity), text=line.text, less_specific=line.less_specific)
+                      for line in export.lines] if inline else [],
+            'line_count': len(export.lines), 'less_specific_count': sum(line.less_specific for line in export.lines),
+            'total_copies': str(export.total_copies)}
+
+
+def text_download(export: MassEntryExport, headers=None) -> StreamingResponse:
+    return StreamingResponse((chunk.encode() for chunk in iter_mass_entry_text(export)),
+                             media_type='text/plain; charset=utf-8',
+                             headers={**NO_STORE, 'Content-Disposition': 'attachment; filename="tcgplayer-mass-entry.txt"',
+                                      **(headers or {})})
+
+
 @router.get('/{deck_id}/exports/tcgplayer', response_model=MassEntryView)
 def tcgplayer_export(deck_id: UUID, user_id: str = Depends(verified_user)):
     contents, rows = captured_rows(deck_id, user_id)
-    export = format_mass_entry(rows, max_url_bytes=MAX_URL_BYTES, max_link_quantity=MAX_LINK_QUANTITY)
-    size = text_bytes(export)
-    inline = size <= INLINE_LIMIT_BYTES
-    return MassEntryView(
-        status=export.status, url=export.url, fallback_reason=export.fallback_reason,
-        text=mass_entry_text(export) if inline and export.status == 'text' else None,
-        inline=inline, byte_length=size,
-        lines=[MassEntryLineView(quantity=str(line.quantity), text=line.text, less_specific=line.less_specific)
-               for line in export.lines] if inline else [],
-        line_count=len(export.lines), less_specific_count=sum(line.less_specific for line in export.lines),
-        total_copies=str(export.total_copies), owner_revision=contents.owner_revision,
-        catalog_revision=contents.catalog_revision)
+    export = formatted(rows)
+    return MassEntryView(**view_fields(export), owner_revision=contents.owner_revision,
+                         catalog_revision=contents.catalog_revision)
 
 
 @router.get('/{deck_id}/exports/tcgplayer.txt')
@@ -98,6 +114,4 @@ def tcgplayer_download(deck_id: UUID, owner_revision: int = Query(ge=0), user_id
     export = format_mass_entry(rows)
     if export.status == 'empty':
         error(422, 'DECK_EMPTY')
-    return StreamingResponse((chunk.encode() for chunk in iter_mass_entry_text(export)),
-                             media_type='text/plain; charset=utf-8',
-                             headers={**NO_STORE, 'Content-Disposition': 'attachment; filename="tcgplayer-mass-entry.txt"'})
+    return text_download(export)

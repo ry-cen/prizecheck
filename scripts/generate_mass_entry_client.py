@@ -22,7 +22,7 @@ def ts_type(value):
 
 schema = app.openapi()["components"]["schemas"]
 lines = ["// Generated from FastAPI OpenAPI by scripts/generate_mass_entry_client.py. Do not edit."]
-for name in ("MassEntryLineView", "MassEntryView"):
+for name in ("MassEntryLineView", "MassEntryView", "PublishedMassEntryView"):
     definition = schema[name]
     fields = [f"{field}{'' if field in definition.get('required', []) else '?'}: {ts_type(value)}"
               for field, value in definition["properties"].items()]
@@ -42,6 +42,17 @@ export async function getMassEntryExport(id: string, signal?: AbortSignal): Prom
 }
 export const massEntryDownloadHref = (id: string, ownerRevision: number) => `${base(id)}.txt?owner_revision=${ownerRevision}`;
 export const MASS_ENTRY_DOWNLOAD_NAME = 'tcgplayer-mass-entry.txt';
+// A Published Deck's Mass Entry export: only the token and the snapshot version are sent, and no cookie.
+const publishedBase = (token: string, version: number) => `/api/public/decks/${encodeURIComponent(token)}/versions/${version}/exports/tcgplayer`;
+export async function getPublishedMassEntry(token: string, version: number, signal?: AbortSignal): Promise<PublishedMassEntryView> {
+  const response = await fetch(publishedBase(token, version), { credentials: 'omit', signal });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new MassEntryError(response.status, payload?.detail?.code ?? 'MASS_ENTRY_REQUEST_FAILED');
+  }
+  return response.json() as Promise<PublishedMassEntryView>;
+}
+export const publishedMassEntryDownloadHref = (token: string, version: number) => `${publishedBase(token, version)}.txt`;
 """)
 content = "\n".join(lines)
 target = root / "web/src/mass_entry_generated.ts"

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { DeckExportProps } from "./DeckLiveExport";
+import type { DeckChecks } from "./decks_generated";
 import { ExportOutput } from "./ExportOutput";
 import {
   MASS_ENTRY_DOWNLOAD_NAME,
@@ -17,50 +18,35 @@ const REASONS: Record<NonNullable<MassEntryView["fallback_reason"]>, string> = {
     "No TCGplayer link is offered because one product needs more than 999 copies, more than this app puts in a link. The complete text below keeps every quantity.",
 };
 
-export function DeckMassEntryExport({
-  deckId,
-  ownerRevision,
+/** What the Mass Entry panel renders; the private view and the Published Deck view both carry these fields. */
+export type MassEntryResult = Omit<
+  MassEntryView,
+  "owner_revision" | "catalog_revision"
+>;
+export type MassEntryChecks = Pick<
+  DeckChecks,
+  "total" | "size_status" | "shortage" | "excess" | "disclaimer"
+>;
+
+export function MassEntryPanel({
   checks,
-}: DeckExportProps) {
-  const [view, setView] = useState<MassEntryView | null>(null);
-  const [notice, setNotice] = useState("");
-  const [busy, setBusy] = useState(false);
+  busy,
+  onPrepare,
+  view,
+  downloadHref,
+  notice,
+}: {
+  checks: MassEntryChecks;
+  busy: boolean;
+  onPrepare: () => void;
+  view: MassEntryResult | null;
+  downloadHref?: string;
+  notice: string;
+}) {
   const [confirming, setConfirming] = useState(false);
-  const revision = useRef(ownerRevision);
-  const latest = useRef(0);
-  revision.current = ownerRevision;
+  // A new or discarded export never inherits an open confirmation.
+  useEffect(() => setConfirming(false), [view]);
   const empty = checks.total === "0";
-
-  // An inventory change makes a prepared export untrustworthy; discard it instead of showing old quantities.
-  useEffect(() => {
-    if (view && view.owner_revision !== ownerRevision) {
-      setView(null);
-      setConfirming(false);
-      setNotice("Deck changed; export again");
-    }
-  }, [ownerRevision, view]);
-
-  async function prepare() {
-    const attempt = ++latest.current;
-    setBusy(true);
-    setNotice("");
-    setConfirming(false);
-    setView(null);
-    try {
-      const result = await getMassEntryExport(deckId);
-      if (attempt !== latest.current) return;
-      if (result.owner_revision !== revision.current) {
-        setNotice("Deck changed; export again");
-      } else {
-        setView(result);
-      }
-    } catch {
-      if (attempt === latest.current)
-        setNotice("The export could not be prepared. Try again.");
-    } finally {
-      if (attempt === latest.current) setBusy(false);
-    }
-  }
 
   const size =
     checks.size_status === "complete" ? null : (
@@ -103,11 +89,7 @@ export function DeckMassEntryExport({
   return (
     <section aria-label="TCGplayer export">
       <h3>TCGplayer Mass Entry</h3>
-      <button
-        type="button"
-        disabled={busy || empty}
-        onClick={() => void prepare()}
-      >
+      <button type="button" disabled={busy || empty} onClick={onPrepare}>
         {busy ? "Preparing…" : "Prepare TCGplayer export"}
       </button>
       {view?.status === "link" && view.url && (
@@ -156,11 +138,7 @@ export function DeckMassEntryExport({
         label="TCGplayer Mass Entry"
         text={view?.status === "text" ? view.text : null}
         byteLength={view?.status === "text" ? view.byte_length : 0}
-        downloadHref={
-          view?.status === "text"
-            ? massEntryDownloadHref(deckId, view.owner_revision)
-            : undefined
-        }
+        downloadHref={downloadHref}
         downloadName={MASS_ENTRY_DOWNLOAD_NAME}
         empty={empty}
         emptyMessage="No cards"
@@ -171,5 +149,62 @@ export function DeckMassEntryExport({
         downloadLabel="Download text"
       />
     </section>
+  );
+}
+
+export function DeckMassEntryExport({
+  deckId,
+  ownerRevision,
+  checks,
+}: DeckExportProps) {
+  const [view, setView] = useState<MassEntryView | null>(null);
+  const [notice, setNotice] = useState("");
+  const [busy, setBusy] = useState(false);
+  const revision = useRef(ownerRevision);
+  const latest = useRef(0);
+  revision.current = ownerRevision;
+
+  // An inventory change makes a prepared export untrustworthy; discard it instead of showing old quantities.
+  useEffect(() => {
+    if (view && view.owner_revision !== ownerRevision) {
+      setView(null);
+      setNotice("Deck changed; export again");
+    }
+  }, [ownerRevision, view]);
+
+  async function prepare() {
+    const attempt = ++latest.current;
+    setBusy(true);
+    setNotice("");
+    setView(null);
+    try {
+      const result = await getMassEntryExport(deckId);
+      if (attempt !== latest.current) return;
+      if (result.owner_revision !== revision.current) {
+        setNotice("Deck changed; export again");
+      } else {
+        setView(result);
+      }
+    } catch {
+      if (attempt === latest.current)
+        setNotice("The export could not be prepared. Try again.");
+    } finally {
+      if (attempt === latest.current) setBusy(false);
+    }
+  }
+
+  return (
+    <MassEntryPanel
+      checks={checks}
+      busy={busy}
+      onPrepare={() => void prepare()}
+      view={view}
+      downloadHref={
+        view?.status === "text"
+          ? massEntryDownloadHref(deckId, view.owner_revision)
+          : undefined
+      }
+      notice={notice}
+    />
   );
 }
