@@ -104,6 +104,12 @@ def test_catalog_printing_and_edition_keys_are_namespaced_and_protected():
     assert not records.key_family(printing).evictable
     assert not records.key_family(edition).evictable
     assert not records.key_family(records.quarantine_key(REF)).evictable
+    # Deck Lists 18: a Printing's format facts are their own protected family under the same reference.
+    format_key = records.catalog_format_key(REF)
+    assert format_key not in (printing, edition)
+    assert records.key_family(format_key).name == 'catalog_format' and not records.key_family(format_key).evictable
+    with pytest.raises(ValueError):
+        records.catalog_format_key('A' * 48)
 
 
 def test_quote_keys_are_exact_to_edition_and_mapping_revision_and_only_quotes_are_evictable():
@@ -140,7 +146,8 @@ def test_invalid_coordination_scopes_are_rejected(scope):
 
 
 @pytest.mark.parametrize('key', ['catalog:one', 'payload:x', 'quote:' + REF, 'quote:' + REF + ':0',
-                                 'result:' + REF + ':01', 'unknown:' + REF, 'catalog:edition:' + REF + ':1'])
+                                 'result:' + REF + ':01', 'unknown:' + REF, 'catalog:edition:' + REF + ':1',
+                                 'catalog:format:' + REF + ':1', 'catalog:format:' + REF.upper()])
 def test_untyped_or_malformed_keys_are_rejected_by_the_store_boundary(key, tmp_path):
     with pytest.raises(ValueError):
         records.key_family(key)

@@ -1,10 +1,12 @@
 """Trusted PostgreSQL-to-shared-records writer for public-safe catalog records.
 
-Anonymous readers resolve opaque Edition/Printing references, Live eligibility and
-marketplace eligibility only through these records. Values are a strict allowlist
-(see ``printing_value``/``edition_value``/``quarantine_value``): public references,
-display fields, the physical descriptor, the public review revision and the effective
-Live/marketplace state with its fixed reason code. The one source identifier published is
+Anonymous readers resolve opaque Edition/Printing references, Live eligibility,
+marketplace eligibility and format facts only through these records. Values are a strict
+allowlist (see ``printing_value``/``format_value``/``edition_value``/``quarantine_value``):
+public references, display fields, the physical descriptor, the public review revision,
+the effective Live/marketplace state with its fixed reason code, and a Printing's format
+facts (its set, Card Identity key and name, Reprint Group reference and printings, and
+effective card attributes, all public card facts). The one source identifier published is
 the TCGdex card ID inside ``quote_lookup.card`` (with the quote variant key), and only for a
 verified, priced Edition. Internal UUIDs, owners, Holdings, sessions, reviewer identity,
 evidence, free-text reasons, reports, rejected fingerprints, source candidates and quote
@@ -19,8 +21,10 @@ repaired by ``rebuild``. The records store is derived and rebuildable: a failed 
 rolls back the PostgreSQL commit that triggered it and never touches Published Deck
 snapshots, visibility or the discovery revision.
 """
+import hashlib
 import logging
 import os
+import re
 import subprocess
 import sys
 import time
@@ -29,13 +33,14 @@ from pathlib import Path
 
 from psycopg.pq import TransactionStatus
 
+from .card_attributes import ATTRIBUTE_COLUMNS, CardAttributeRules, CardAttributes
 from .public_projection import ProjectionUnavailable, public_record_store
-from .public_records import (catalog_edition_key, catalog_printing_key, quarantine_key, quote_states)
+from .public_records import (catalog_edition_key, catalog_format_key, catalog_printing_key, quarantine_key, quote_states)
 
 log = logging.getLogger(__name__)
 LOCK = 914706               # Session advisory lock: one drainer at a time. Correctness never depends on it.
 EDITION_CAS = 64            # Editions per CAS: catalog + quarantine key each, so 128 keys.
-PRINTING_CAS = 128
+PRINTING_CAS = 64           # Printings per CAS: catalog + format key each, so 128 keys.
 CHUNK_TARGETS = 64          # Pending targets taken per snapshot, in (priority, sequence) order.
 ATTEMPTS = 4                # Rebuild-and-retry rounds when a CAS loses or the store looks ahead.
 CHUNK_SECONDS = 10          # Per store call, so a full catalog is never bounded by one deadline.
@@ -43,6 +48,7 @@ LOCK_WAITS = 100            # Rebuild retries a busy drain lock for up to ~20 s.
 LOCK_WAIT_SECONDS = 0.2
 REQUEST_BUDGET = 2.0        # Seconds a request path may spend draining after its own commit.
 LIVE_IDENTITY_KEYS = ('category', 'name', 'set_code', 'number')
+FORMAT_PREFIX = 'catalog:format:'
 BEHIND_PROBE = 5            # Most recently delivered targets whose stored revision proves the store was not rolled back.
 
 
@@ -82,6 +88,36 @@ def printing_value(row):
                      'identity': None if identity is None else {key: identity.get(key) for key in LIVE_IDENTITY_KEYS}}}
 
 
+def reprint_group_ref(group_id) -> str:
+    """The public reference of a Reprint Group: 48 hex characters derived from its ID, which is never published. Group
+    IDs are stable across re-imports (``app.reprint_groups.group_id``), so the reference is too."""
+    return hashlib.sha256(f'reprint-group:{group_id}'.encode()).hexdigest()[:48]
+
+
+def format_value(row):
+    """A Printing's format facts: what a Published Deck format check reads instead of PostgreSQL (Deck Lists 18).
+
+    ``set_id`` and ``collector_number`` are the Printing's immutable display set and number (the ones its active
+    generation row also keeps; ban lists name printings by them). The Card Identity ``key`` is its unique identity key
+    and groups copy limits; ``name`` is its display name. ``reprint_group`` is null for a Printing in no Reprint Group;
+    otherwise ``ref`` is the group's public reference and ``printings`` the sorted public references of the group's
+    printings that the active catalog generation holds and has not withdrawn (the private check's ``MEMBERS``), whose
+    own format records carry their facts. Attributes are the effective ones (``catalog_card_attribute``); null means
+    unknown. Every field changes only together with a Printing stamp (migration 032), so the record shares the
+    Printing's revision.
+    """
+    attributes = {column: row[column] for column in ATTRIBUTE_COLUMNS}
+    if attributes['types'] is not None:
+        attributes['types'] = list(attributes['types'])
+    group = None
+    if row['reprint_group_id'] is not None:
+        group = {'ref': reprint_group_ref(row['reprint_group_id']), 'printings': list(row['reprint_printings'] or [])}
+    return {'printing_ref': row['printing_ref'], 'revision': row['public_revision'], 'set_id': row['format_set_id'],
+            'collector_number': row['format_collector_number'],
+            'identity': {'key': row['identity_key'], 'name': row['identity_name']}, 'reprint_group': group,
+            'attributes': attributes}
+
+
 def edition_value(row):
     verified = row['mapping_state'] == 'verified'
     lookup = ({'source': 'tcgdex', 'card': row['source_id'], 'variant': row['quote_variant']}
@@ -111,17 +147,30 @@ def build_values(conn, targets):
     built = {}
     if ids['printing']:
         # A Printing record carries the Printing's own name; the Card Identity name is folded and drops subtitles (migration 024).
-        for row in conn.execute("""SELECT p.id,p.public_ref AS printing_ref,coalesce(pd.display_name,ci.display_name) AS display_name,
+        # Its format record (Deck Lists 18) carries the facts format checks read, at the same revision.
+        for row in conn.execute(f"""SELECT p.id,p.public_ref AS printing_ref,coalesce(pd.display_name,ci.display_name) AS display_name,
           coalesce(pd.set_id,'') AS set_id,coalesce(pd.set_name,'') AS set_name,
           coalesce(pd.collector_number,'') AS collector_number,pd.image_url,
-          m.public_revision,m.live_state,m.live_reason,m.live_identity,a.version AS rule_version
+          m.public_revision,m.live_state,m.live_reason,m.live_identity,a.version AS rule_version,
+          nullif(pd.set_id,'') AS format_set_id,nullif(pd.collector_number,'') AS format_collector_number,
+          ci.identity_key,ci.display_name AS identity_name,
+          {', '.join('ca.' + column for column in ATTRIBUTE_COLUMNS)},
+          rg.group_id AS reprint_group_id,
+          (SELECT array_agg(mp.public_ref ORDER BY mp.public_ref COLLATE "C") FROM catalog_reprint_group_member mg
+           JOIN catalog_state s ON s.singleton
+           JOIN catalog_generation_printing gp ON gp.generation_id=s.active_generation AND gp.printing_id=mg.printing_id
+           JOIN catalog_printing mp ON mp.id=mg.printing_id
+           WHERE mg.group_id=rg.group_id AND NOT gp.tombstoned) AS reprint_printings
           FROM catalog_printing p JOIN catalog_identity ci ON ci.id=p.identity_id
           JOIN catalog_printing_metadata m ON m.printing_id=p.id
           LEFT JOIN catalog_printing_display pd ON pd.printing_id=p.id
           LEFT JOIN catalog_rule_activation a ON a.id=m.live_activation_id
+          LEFT JOIN catalog_card_attribute ca ON ca.printing_id=p.id
+          LEFT JOIN catalog_reprint_group_member rg ON rg.printing_id=p.id
           WHERE p.id=ANY(%s::uuid[])""", (ids['printing'],)):
-            built[('printing', row['id'])] = Built(row['public_revision'],
-                                                   {catalog_printing_key(row['printing_ref']): printing_value(row)})
+            built[('printing', row['id'])] = Built(row['public_revision'], {
+                catalog_printing_key(row['printing_ref']): printing_value(row),
+                catalog_format_key(row['printing_ref']): format_value(row)})
     if ids['edition']:
         for row in conn.execute("""SELECT e.id,e.public_ref AS edition_ref,p.public_ref AS printing_ref,e.descriptor,
           p.source,p.source_id,m.public_revision,m.mapping_state,m.mapping_reason,m.mapping_revision,m.product_id,m.quote_variant
@@ -143,12 +192,21 @@ def stored_revision(value):
 
 
 def classify(built, records):
-    """Compare one target with the store: 'write', 'current', 'ahead' (store newer) or 'mismatch' (same revision, other value)."""
+    """Compare one target with the store: 'write', 'current', 'ahead' (store newer) or 'mismatch' (same revision, other value).
+
+    A format record that differs at the same revision is written, not a mismatch: format facts have no fail-closed
+    state, PostgreSQL is their only source, and such a difference can only be a fact that changed without a Printing
+    stamp (for example on a runtime rolled back below migration 032's triggers). Live and marketplace records keep the
+    mismatch rule.
+    """
     stored = [stored_revision(records[key].value) for key in built.values]
     if any(revision > built.revision for revision in stored):
         return 'ahead'
     if all(revision == built.revision for revision in stored):
-        return 'current' if all(records[key].value == value for key, value in built.values.items()) else 'mismatch'
+        differing = [key for key, value in built.values.items() if records[key].value != value]
+        if not differing:
+            return 'current'
+        return 'write' if all(key.startswith(FORMAT_PREFIX) for key in differing) else 'mismatch'
     return 'write'
 
 
@@ -719,7 +777,82 @@ def _live(ref, value, generation):
         return unknown
 
 
+@dataclass(frozen=True)
+class FormatFacts:
+    """A Printing's validated public format facts (``format_value``)."""
+    set_id: str | None
+    collector_number: str | None
+    identity_key: str
+    identity_name: str
+    attributes: CardAttributes
+    reprint_group: str | None = None            # the group's public reference; None in no Reprint Group
+    reprint_printings: tuple[str, ...] = ()     # its printings' public references, sorted
+    generation: str | None = None
+
+
+_MARK = re.compile(r'[A-Z]')
+_REF = re.compile(r'[0-9a-f]{48}')
+MAX_REPRINT_PRINTINGS = 1024    # far above any real group; a longer list is malformed
+_KINDS = (None, 'pokemon', 'trainer', 'energy')
+_FLAGS = ('basic_energy', 'rule_box', 'ace_spec', 'radiant', 'prism_star')
+
+
+def format_facts(store, printing_refs, deadline, *, generation=None):
+    """Format facts per Printing reference, read at one pinned generation; ``None`` where the record is missing or malformed.
+
+    Fails closed: a reader never guesses a fact. A Reprint Group must have a well-formed reference and a sorted list of
+    distinct printing references. The facts of those printings are in their own records: read them with another call
+    pinned to ``generation`` (``app.published_format_checks``). ProjectionUnavailable propagates.
+    """
+    refs = list(dict.fromkeys(printing_refs))
+    if not refs:
+        return {}
+    snapshot = store.read_all([catalog_format_key(ref) for ref in refs], deadline=deadline, generation=generation)
+    return {ref: _format(ref, snapshot.records[catalog_format_key(ref)].value, snapshot.generation) for ref in refs}
+
+
+def _format(ref, value, generation):
+    try:
+        if not isinstance(value, dict) or set(value) != FORMAT_KEYS or value['printing_ref'] != ref \
+                or not _int(value['revision']):
+            return None
+        group = value['reprint_group']
+        if group is not None:
+            if not isinstance(group, dict) or set(group) != {'ref', 'printings'} or not isinstance(group['ref'], str) \
+                    or not _REF.fullmatch(group['ref']) or not isinstance(group['printings'], list) \
+                    or len(group['printings']) > MAX_REPRINT_PRINTINGS:
+                return None
+            printings = group['printings']
+            if not all(isinstance(item, str) and _REF.fullmatch(item) for item in printings) \
+                    or printings != sorted(set(printings)):
+                return None
+        set_id, number, identity, attributes = value['set_id'], value['collector_number'], value['identity'], value['attributes']
+        if not all(text is None or isinstance(text, str) and text for text in (set_id, number)):
+            return None
+        if not isinstance(identity, dict) or set(identity) != {'key', 'name'} \
+                or not all(isinstance(identity[key], str) and identity[key] for key in identity):
+            return None
+        if not isinstance(attributes, dict) or set(attributes) != set(ATTRIBUTE_COLUMNS):
+            return None
+        mark, kind, types = attributes['regulation_mark'], attributes['card_kind'], attributes['types']
+        if not (mark is None or isinstance(mark, str) and _MARK.fullmatch(mark)) or kind not in _KINDS:
+            return None
+        if any(attributes[flag] is not None and type(attributes[flag]) is not bool for flag in _FLAGS):
+            return None
+        if types is not None and (not isinstance(types, list) or len(set(types)) != len(types)
+                                  or not all(item in CardAttributeRules.POKEMON_TYPES for item in types)):
+            return None
+    except (KeyError, TypeError):
+        return None
+    values = {column: attributes[column] for column in ATTRIBUTE_COLUMNS}
+    values['types'] = tuple(types) if types is not None else None
+    return FormatFacts(set_id, number, identity['key'], identity['name'], CardAttributes(**values),
+                       None if group is None else group['ref'], () if group is None else tuple(group['printings']),
+                       generation)
+
+
 PRINTING_KEYS = {'printing_ref', 'name', 'set_id', 'set_name', 'collector_number', 'image_url', 'revision', 'live'}
+FORMAT_KEYS = {'printing_ref', 'revision', 'set_id', 'collector_number', 'identity', 'reprint_group', 'attributes'}
 EDITION_KEYS = {'edition_ref', 'printing_ref', 'descriptor', 'revision', 'marketplace'}
 MARKETPLACE_KEYS = {'state', 'reason', 'mapping_revision', 'product_id', 'quote_lookup'}
 QUARANTINE_KEYS = {'edition_ref', 'revision', 'mapping_revision', 'state'}

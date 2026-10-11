@@ -371,7 +371,9 @@ def test_source_enrichment_the_rules_never_read_closes_nothing_and_publishes_not
     run(Records(enriched))
     after, rows_after = metadata()
     assert (after["live_state"], after["live_reason"]) == ("eligible", None)
-    assert after["public_revision"] == before["public_revision"]
+    # The regulation mark is a derived card attribute and so a public format fact (Deck Lists 18): the Printing is
+    # re-stamped once with its Live state unchanged. Its Editions and their mapping revisions do not move.
+    assert after["public_revision"] > before["public_revision"]
     assert after["export_candidate"] != before["export_candidate"]
     assert after["live_accepted_fingerprint"] == fingerprint(after["export_candidate"])  # silently moved to the new source state
     for key in rows:
@@ -381,7 +383,8 @@ def test_source_enrichment_the_rules_never_read_closes_nothing_and_publishes_not
         assert outbox(rows[key]["id"]) == outbox_before(rows, key)
     assert rows_after["normal"]["mapping_candidate"] != rows["normal"]["mapping_candidate"]
     assert rows_after["normal"]["accepted_fingerprint"] == fingerprint(rows_after["normal"]["mapping_candidate"])
-    assert outbox(after["printing_id"]) == [row for row in outbox(after["printing_id"]) if row["revision"] <= before["public_revision"]]
+    assert [row["revision"] for row in outbox(after["printing_id"]) if row["revision"] > before["public_revision"]] == [
+        after["public_revision"]]
     # A later change to an input the rules do read still closes the target.
     conflicting = card(1)
     conflicting["variants_detailed"][0]["pricing"]["tcgplayer"]["holofoil"] = {"productId": 9999}

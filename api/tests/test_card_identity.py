@@ -278,6 +278,17 @@ def test_migration_merges_subtitled_identities_and_keeps_every_reference(project
                 import_into(conn, *LEGACY_RECORDS)
             ids = seed_legacy_extras(conn)
             conn.commit()
+            # Today's rebuild also publishes format facts (Deck Lists 18), which read the effective card attributes of
+            # migration 026 and the Reprint Groups of migration 031. This session gets empty stand-ins, so the legacy
+            # store holds format records whose identity predates 024; the final rebuild must rewrite them without
+            # calling them conflicts.
+            conn.execute("""CREATE TEMP VIEW catalog_card_attribute AS SELECT NULL::uuid AS printing_id,
+              NULL::text AS regulation_mark,NULL::text AS card_kind,NULL::boolean AS basic_energy,NULL::text[] AS types,
+              NULL::boolean AS rule_box,NULL::boolean AS ace_spec,NULL::boolean AS radiant,NULL::boolean AS prism_star
+              WHERE false""")
+            conn.execute("""CREATE TEMP VIEW catalog_reprint_group_member AS SELECT NULL::uuid AS printing_id,
+              NULL::uuid AS group_id WHERE false""")
+            conn.commit()
             rebuild(conn)
             owner_before = identity_by_printing(conn)
             legacy_identities = identities(conn)

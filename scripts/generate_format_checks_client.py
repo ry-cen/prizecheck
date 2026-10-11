@@ -23,7 +23,8 @@ def ts_type(value):
 
 schema = app.openapi()["components"]["schemas"]
 lines = ["// Generated from FastAPI OpenAPI by scripts/generate_format_checks_client.py. Do not edit."]
-for name in ("FormatIssue", "FormatCheck", "DeckFormatChecks"):
+for name in ("FormatIssue", "FormatCheck", "DeckFormatChecks", "PublishedFormatIssue", "PublishedFormatCheck",
+             "PublishedDeckFormatChecks"):
     definition = schema[name]
     # The route always serializes every field, so every field is present even where the model has a default.
     fields = [f"{field}: {ts_type(value)}" for field, value in definition["properties"].items()]
@@ -47,6 +48,25 @@ export async function getDeckFormatChecks(deckId: string, options: { format?: st
     throw new FormatCheckError(response.status, payload?.detail?.code ?? 'FORMAT_CHECK_REQUEST_FAILED');
   }
   return response.json() as Promise<DeckFormatChecks>;
+}
+// A Published Deck's advisory results, recomputed from current public card facts: only the token, the snapshot version
+// and the same optional ``format``/``asOf`` are sent, and no cookie. An issue's ``lines`` are the frozen rows' public
+// Edition references ("row:<n>" for a legacy row without one).
+export async function getPublishedFormatChecks(token: string, version: number,
+                                               options: { format?: string; asOf?: string } = {},
+                                               signal?: AbortSignal): Promise<PublishedDeckFormatChecks> {
+  const query = new URLSearchParams();
+  if (options.format) query.set('format', options.format);
+  if (options.asOf) query.set('as_of', options.asOf);
+  const suffix = query.toString() ? '?' + query.toString() : '';
+  const response = await fetch(
+    `/api/public/decks/${encodeURIComponent(token)}/versions/${version}/format-checks${suffix}`,
+    { method: 'GET', credentials: 'omit', signal });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new FormatCheckError(response.status, payload?.detail?.code ?? 'FORMAT_CHECK_REQUEST_FAILED');
+  }
+  return response.json() as Promise<PublishedDeckFormatChecks>;
 }
 """)
 content = "\n".join(lines)

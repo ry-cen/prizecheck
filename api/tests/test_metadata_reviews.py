@@ -622,7 +622,9 @@ def test_live_verify_source_uses_only_a_rule_covered_source_and_unsupported_stay
     assert (row["live_state"], row["live_reason"], row["live_auto_closed"]) == ("unsupported", "reviewed_unsupported", True)
     run(Records(card(1, regulationMark="E")))  # any later source value leaves a reviewed decision alone
     after = printing_row(world["printing"])
-    assert (after["public_revision"], after["live_state"]) == (row["public_revision"], "unsupported")
+    assert (after["live_state"], after["live_reason"], after["live_auto_closed"]) == ("unsupported", "reviewed_unsupported", True)
+    # The new regulation mark is a public format fact (Deck Lists 18), so only the Printing's revision moves.
+    assert after["public_revision"] > row["public_revision"]
 
 
 def test_live_verify_source_accepts_a_rule_derived_identity_as_a_maintainer_decision(world):
