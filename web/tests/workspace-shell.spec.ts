@@ -30,6 +30,8 @@ async function signIn(page: Page) {
   await page.goto(
     `${process.env.TEST_ORIGIN || "http://localhost:5173"}/workspace`
   );
+  await expect(page).toHaveURL(/\/workspace$/);
+  await expect(page.getByLabel("Email")).toBeVisible();
   await page
     .getByLabel("Email")
     .fill(process.env.OWNER_EMAIL || "owner@example.test");
@@ -106,6 +108,7 @@ test("desktop workspace shows the Location tree in natural order and opens Stora
   await signIn(page);
   const shelf = await seedShelf(page);
   await page.reload();
+  await expect(page).toHaveURL(/\/workspace$/);
   const heading = page.getByRole("heading", { level: 1 });
   await expect(heading).toHaveText("All owned");
   await expect(page.locator("html")).toHaveAttribute(
@@ -206,6 +209,7 @@ test.describe("mobile", () => {
     await signIn(page);
     const shelf = await seedShelf(page);
     await page.reload();
+    await expect(page).toHaveURL(/\/workspace$/);
     const heading = page.getByRole("heading", { level: 1 });
     const header = page.getByRole("banner");
     await expect(
@@ -255,7 +259,15 @@ test.describe("mobile", () => {
     await opener.click();
     await drawer.getByRole("button", { name: "Close locations" }).click();
     await expect(drawer).toBeHidden();
+    await expect(opener).toBeFocused();
     await expect(heading).toHaveText("Box");
+
+    // The backdrop closes it.
+    await opener.click();
+    await expect(drawer).toBeVisible();
+    await page.mouse.click(360, 400);
+    await expect(drawer).toBeHidden();
+    await expect(opener).toBeFocused();
 
     // No motion under reduced motion.
     await page.emulateMedia({ reducedMotion: "reduce" });

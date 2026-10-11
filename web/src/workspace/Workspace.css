@@ -240,7 +240,7 @@
 .ws-drawer-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 100;
+  z-index: var(--layer-drawer);
   background: var(--color-scrim);
 }
 .ws-drawer {
@@ -340,4 +340,21 @@
     animation: none !important;
     transition: none !important;
   }
+}
+
+/* Reset element rules inherited from style.css. */
+.ws-root form,
+.ws-root article {
+  background: none;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  margin: 0;
+}
+.ws-root article h2 {
+  margin-top: revert;
+}
+.ws-root label {
+  display: revert;
+  font-weight: inherit;
 }
