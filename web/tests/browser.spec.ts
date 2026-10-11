@@ -24,15 +24,23 @@ test("owner signs in, sees Unsorted, follows safe destination, then signs out", 
   const code = JSON.parse(lines.at(-1)!).otp;
   await page.getByLabel("Six-digit code").fill(code);
   await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByRole("heading", { name: "Locations" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Unsorted" })).toBeVisible();
   await expect(page).toHaveURL(
-    `${process.env.TEST_ORIGIN || "http://localhost:5173"}/locations`
+    `${process.env.TEST_ORIGIN || "http://localhost:5173"}/workspace`
   );
+  await expect(page.getByRole("heading", { name: "All owned" })).toBeVisible();
+  await expect(
+    page
+      .getByRole("navigation", { name: "Locations" })
+      .getByRole("button", { name: "Unsorted", exact: true })
+      .first()
+  ).toBeVisible();
   await page.reload();
-  await expect(page.getByRole("heading", { name: "Unsorted" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "All owned" })).toBeVisible();
   await page.getByRole("button", { name: "Sign out" }).click();
   await expect(page.getByRole("button", { name: "Send code" })).toBeVisible();
+  await expect(page).toHaveURL(
+    `${process.env.TEST_ORIGIN || "http://localhost:5173"}/workspace`
+  );
   await pool.end();
 });
 
@@ -55,7 +63,7 @@ test("external return destinations are discarded", async ({ page }) => {
   await page.getByLabel("Six-digit code").fill(JSON.parse(lines.at(-1)!).otp);
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page).toHaveURL(
-    `${process.env.TEST_ORIGIN || "http://localhost:5173"}/locations`
+    `${process.env.TEST_ORIGIN || "http://localhost:5173"}/workspace`
   );
   await pool.end();
 });
@@ -96,7 +104,7 @@ test("bound owner starts one catalog run from the private panel", async ({
     .split("\n");
   await page.getByLabel("Six-digit code").fill(JSON.parse(lines.at(-1)!).otp);
   await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page.getByRole("heading", { name: "Locations" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "All owned" })).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Owner controls" })
   ).toHaveCount(0);

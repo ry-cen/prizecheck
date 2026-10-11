@@ -2,15 +2,10 @@ import { OperationsHealth } from "./OperationsHealth";
 import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
-  getLocations,
-  getCatalogStatus,
   getOwnerCatalogStatus,
   startCatalogRun,
-  type Location,
-  type CatalogStatus,
   type OwnerCatalogStatus,
 } from "./generated";
-import { LocationTree } from "./LocationTree";
 import { Collection } from "./Collection";
 import { Decks } from "./Decks";
 import { PublishedDeck } from "./PublishedDeck";
@@ -27,7 +22,6 @@ import "./style.css";
 import "./tokens.css";
 
 type View =
-  | "locations"
   | "workspace"
   | "collection"
   | "decks"
@@ -35,7 +29,6 @@ type View =
   | "reports"
   | "owner";
 const protectedViews: View[] = [
-  "locations",
   "workspace",
   "collection",
   "decks",
@@ -43,30 +36,34 @@ const protectedViews: View[] = [
   "reports",
   "owner",
 ];
+/** The workspace replaced the old Locations page (ticket 114): old /locations links and the bare origin open it. */
+function canonicalPath(path: string): string {
+  return path === "/" || path === "/locations" ? "/workspace" : path;
+}
 function pathView(): View {
   const candidate = location.pathname.slice(1) as View;
-  return protectedViews.includes(candidate) ? candidate : "locations";
+  return protectedViews.includes(candidate) ? candidate : "workspace";
 }
 
 type Session = { signedIn: boolean; userId: string | null };
 function safeDestination(): string {
   const value = new URLSearchParams(location.search).get("next");
   if (!value)
-    return protectedViews.includes(location.pathname.slice(1) as View)
-      ? `${location.pathname}${location.search}${location.hash}`
-      : "/locations";
+    return protectedViews.includes(
+      canonicalPath(location.pathname).slice(1) as View
+    )
+      ? `${canonicalPath(location.pathname)}${location.search}${location.hash}`
+      : "/workspace";
   if (!value.startsWith("/") || value.startsWith("//") || value.includes("\\"))
-    return "/locations";
+    return "/workspace";
   const url = new URL(value, location.origin);
   return url.origin === location.origin
-    ? `${url.pathname}${url.search}${url.hash}`
-    : "/locations";
+    ? `${canonicalPath(url.pathname)}${url.search}${url.hash}`
+    : "/workspace";
 }
 
 function App() {
   const [session, setSession] = useState<Session | null>(null);
-  const [locations, setLocations] = useState<Location[]>([]);
-  const [catalog, setCatalog] = useState<CatalogStatus | null>(null);
   const [ownerCatalog, setOwnerCatalog] = useState<OwnerCatalogStatus | null>(
     null
   );
@@ -85,8 +82,6 @@ function App() {
       const result = (await response.json()) as Session;
       setSession(result);
       if (result.signedIn) {
-        setLocations((await getLocations()).locations);
-        setCatalog(await getCatalogStatus());
         setOwnerCatalog(await getOwnerCatalogStatus());
       }
     } catch {
@@ -109,7 +104,6 @@ function App() {
       void getOwnerCatalogStatus()
         .then((result) => {
           setOwnerCatalog(result);
-          if (result) setCatalog(result.catalog);
         })
         .catch(() => setMessage("Catalog status temporarily unavailable."));
     }, 5000);
@@ -167,16 +161,23 @@ function App() {
     });
     if (response.ok) {
       setSession({ signedIn: false, userId: null });
-      setLocations([]);
-      setCatalog(null);
       setOwnerCatalog(null);
-      setView("locations");
-      history.replaceState(null, "", "/locations");
+      setView("workspace");
+      history.replaceState(null, "", "/workspace");
     }
   }
 
   if (session === null)
-    return (
+    return view === "workspace" ? (
+      // The workspace's dark page while the session loads, so /workspace never flashes the light screen.
+      <div className="ws-root">
+        <main className="ws-main ws-boot">
+          <h1>PrizeCheck</h1>
+          <p role="status">Loading…</p>
+          <p role="alert">{message}</p>
+        </main>
+      </div>
+    ) : (
       <main>
         <h1>PrizeCheck</h1>
         <p>Loading…</p>
@@ -225,7 +226,8 @@ function App() {
     return (
       <Workspace
         userId={session.userId ?? ""}
-        onOpenLocations={() => navigate("locations")}
+        onNavigate={navigate}
+        ownerControls={ownerCatalog !== null}
         onSignOut={() => void signOut()}
       />
     );
@@ -235,7 +237,6 @@ function App() {
         <h1>
           {
             {
-              locations: "Locations",
               collection: "Collection",
               decks: "Decks",
               catalog: "Catalog",
@@ -249,7 +250,6 @@ function App() {
       <nav aria-label="Main views">
         {(
           [
-            "locations",
             "workspace",
             "collection",
             "decks",
@@ -264,7 +264,6 @@ function App() {
           >
             {
               {
-                locations: "Locations",
                 workspace: "Workspace",
                 collection: "Collection",
                 decks: "Decks",
@@ -306,7 +305,6 @@ function App() {
               void getOwnerCatalogStatus()
                 .then((result) => {
                   setOwnerCatalog(result);
-                  if (result) setCatalog(result.catalog);
                 })
                 .catch(() =>
                   setMessage("Catalog status temporarily unavailable.")
@@ -356,39 +354,22 @@ function App() {
         <Collection />
       ) : view === "decks" ? (
         <Decks />
-      ) : (
-        <>
-          <p>Your private physical storage.</p>
-          <p>
-            {catalog?.available
-              ? `English catalog last pulled ${new Date(catalog.last_success!).toLocaleString()}.`
-              : "Catalog unavailable until the first complete import."}
-          </p>
-          <LocationTree />
-        </>
-      )}
+      ) : null}
       <p role="alert">{message}</p>
     </main>
   );
 }
 
-const collectorPreview =
-  import.meta.env.DEV &&
-  location.pathname === "/locations" &&
-  new URLSearchParams(location.search).get("prototype") === "collector";
-const CollectorPreview = import.meta.env.DEV
-  ? React.lazy(
-      () => import("./prototypes/collector-workspace/CollectorWorkspace")
-    )
-  : () => null;
+if (location.pathname === "/" || location.pathname === "/locations")
+  history.replaceState(
+    null,
+    "",
+    `/workspace${location.search}${location.hash}`
+  );
 
 const publishedRoute = /^\/published\/([^/]+)$/.exec(location.pathname);
 createRoot(document.getElementById("root")!).render(
-  collectorPreview ? (
-    <React.Suspense fallback={<p>Loading sample workspace…</p>}>
-      <CollectorPreview />
-    </React.Suspense>
-  ) : publishedRoute ? (
+  publishedRoute ? (
     <PublishedDeck token={publishedRoute[1]} />
   ) : location.pathname === "/discover" ? (
     <Discovery />

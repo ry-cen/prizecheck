@@ -92,7 +92,7 @@ async function hold(editions: string[]) {
   const user = (
     await pool.query('SELECT id FROM "user" WHERE email=$1', [OWNER_EMAIL])
   ).rows[0].id;
-  // The top-level Unsorted leaf that openRootUnsorted() opens; there is one per owner (one_unsorted_root_per_owner).
+  // The top-level Unsorted leaf, which the Collection page lists; there is one per owner (one_unsorted_root_per_owner).
   const leaf = (
     await pool.query(
       "SELECT id FROM location WHERE owner_id=$1 AND parent_id IS NULL AND name='Unsorted' AND kind='storage_leaf'",
@@ -111,18 +111,13 @@ async function hold(editions: string[]) {
   );
 }
 
-/** Opens the owner's top-level Unsorted leaf, the one hold() stocks. Specs that ran earlier on this stack can leave
- * nested Locations named "Unsorted" that sort ahead of it in the tree, so only a top-level row counts. */
-async function openRootUnsorted(page: Page) {
-  await page
-    .getByRole("navigation", { name: "Location tree" })
-    .locator(":scope > ul > li > button", { hasText: /^Unsorted$/ })
-    .click();
-  await expect(
-    page
-      .getByRole("navigation", { name: "Location breadcrumbs" })
-      .getByRole("button")
-  ).toHaveText(["All Locations", "Unsorted"]);
+/** Opens the Collection page. seed() replaces the catalog, which clears every Holding, so its rows are exactly what
+ * hold() added. Unlike the Decks page it reads no Deck cost, so the runner and /api/prices/editions counts stay as before. */
+async function openCollection(page: Page) {
+  await page.getByRole("button", { name: "Collection", exact: true }).click();
+  const panel = page.getByRole("region", { name: "Collection", exact: true });
+  await expect(panel).toBeVisible();
+  return panel;
 }
 
 test.beforeAll(async () => {
@@ -168,8 +163,7 @@ test(
       if (response.url().endsWith("/api/prices/editions"))
         answers.push(response.status());
     });
-    await openRootUnsorted(page);
-    const panel = page.getByRole("region", { name: "Cards in Unsorted" });
+    const panel = await openCollection(page);
     // Non-price content is there while every price slot is still pending.
     await expect(panel.locator(".holding-grid > li")).toHaveCount(2);
     await expect(panel.getByText("Furret").first()).toBeVisible();

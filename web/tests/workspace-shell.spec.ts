@@ -179,19 +179,19 @@ test("desktop workspace shows the Location tree in natural order and opens Stora
   await nav.getByRole("button", { name: "All owned", exact: true }).click();
   await expect(heading).toHaveText("All owned");
 
-  // The existing Locations view still works, and its main nav links back here.
+  // The workspace is the inventory page: Main views opens the other pages and returns here, and /locations opens it.
   await page
-    .getByRole("navigation", { name: "App" })
-    .getByRole("button", { name: "Locations view" })
+    .getByRole("navigation", { name: "Main views" })
+    .getByRole("button", { name: "Decks", exact: true })
     .click();
-  await expect(page).toHaveURL(/\/locations$/);
-  await expect(
-    page.getByRole("navigation", { name: "Location tree" })
-  ).toBeVisible();
+  await expect(page).toHaveURL(/\/decks$/);
   await page
     .getByRole("navigation", { name: "Main views" })
     .getByRole("button", { name: "Workspace", exact: true })
     .click();
+  await expect(page).toHaveURL(/\/workspace$/);
+  await expect(heading).toHaveText("All owned");
+  await page.goto(new URL("/locations", page.url()).href);
   await expect(page).toHaveURL(/\/workspace$/);
   await expect(heading).toHaveText("All owned");
 });

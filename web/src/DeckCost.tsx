@@ -28,11 +28,13 @@ export function DeckCostSummary({
   ownerRevision,
   totalCopies,
   onNewerRevision,
+  headingLevel = 4,
 }: {
   deckId: string;
   ownerRevision: number;
   totalCopies: string;
   onNewerRevision: () => void;
+  headingLevel?: 2 | 4;
 }) {
   const [settled, setSettled] = useState<CostSettled>(null);
   const latest = useRef(ownerRevision);
@@ -68,17 +70,26 @@ export function DeckCostSummary({
     // onNewerRevision is a fresh closure on every render; only the Deck and its revision start a new access.
   }, [deckId, ownerRevision]);
 
-  return <CostSection settled={settled} totalCopies={totalCopies} />;
+  return (
+    <CostSection
+      settled={settled}
+      totalCopies={totalCopies}
+      headingLevel={headingLevel}
+    />
+  );
 }
 
 // Renders a settled cost, or "Checking prices…" while it is null; it never fetches and never sums rows.
 export function CostSection({
   settled,
   totalCopies,
+  headingLevel = 4,
 }: {
   settled: CostSettled;
   totalCopies: string;
+  headingLevel?: 2 | 4;
 }) {
+  const Heading = headingLevel === 2 ? "h2" : "h4";
   let content;
   let status = "checking";
   const unavailable = (total: string) =>
@@ -151,7 +162,7 @@ export function CostSection({
       className="deck-cost"
       data-cost-status={status}
     >
-      <h4>Estimated Deck Cost</h4>
+      <Heading>Estimated Deck Cost</Heading>
       {content}
       <p>
         Cached TCGplayer market prices (USD) for the exact Editions in this
