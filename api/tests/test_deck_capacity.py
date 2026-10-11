@@ -54,8 +54,9 @@ def launches(monkeypatch):
 def capacity_world(count, owner):
     """``count`` Printings with one verified, Live-eligible Edition each, written set-based (the importer is too slow).
 
-    Edition n (1-based) has its own product and Live identity. Returns the rows in n order, each with its Deck quantity
-    1 + n % 3."""
+    Edition n (1-based) has its own product and Live identity. Returns the rows in n order, each with its Deck List
+    quantity 1 + n % 3 and its held quantity: one copy fewer for every fourth Edition, so those lines each have one copy
+    not owned (none of them is held anywhere else)."""
     reset_catalog()
     with connect() as conn:
         conn.execute("INSERT INTO inventory_owner(user_id) VALUES (%s) ON CONFLICT DO NOTHING", (owner,))
@@ -94,7 +95,7 @@ def capacity_world(count, owner):
         rows = conn.execute("""SELECT c.n,c.edition_id AS id,e.public_ref,m.mapping_revision,'capacity-'||c.printing_id AS source_id
           FROM capacity c JOIN catalog_edition e ON e.id=c.edition_id JOIN catalog_edition_metadata m ON m.edition_id=c.edition_id
           ORDER BY c.n""").fetchall()
-    return [{**row, "quantity": 1 + row["n"] % 3} for row in rows]
+    return [{**row, "quantity": 1 + row["n"] % 3, "held": 1 + row["n"] % 3 - (row["n"] % 4 == 0)} for row in rows]
 
 
 def seed_quotes(store, editions):
@@ -160,9 +161,9 @@ def exercise(count, store, tmp_path, monkeypatch, *, complete, accesses):
     with connect() as conn, conn.transaction():
         conn.execute("""INSERT INTO holding(owner_id,location_id,edition_id,quantity,version)
           SELECT %s,%s,q.id,q.quantity,1 FROM unnest(%s::uuid[],%s::bigint[]) AS q(id,quantity)""",
-                     (owner, deck, [e["id"] for e in editions], [e["quantity"] for e in editions]))
+                     (owner, deck, [e["id"] for e in editions if e["held"]], [e["held"] for e in editions if e["held"]]))
         conn.execute("UPDATE inventory_owner SET revision=revision+1 WHERE user_id=%s", (owner,))
-        # Publication freezes the Deck List: the same lines, whether or not Holdings already extended it.
+        # The Deck List lines, above the Holdings that already extended it. Publication freezes these lines.
         conn.execute("""INSERT INTO deck_list_line(owner_id,deck_id,edition_id,quantity)
           SELECT %s,%s,q.id,q.quantity FROM unnest(%s::uuid[],%s::bigint[]) AS q(id,quantity)
           ON CONFLICT (owner_id,deck_id,edition_id) DO UPDATE SET quantity=EXCLUDED.quantity""",
@@ -175,6 +176,11 @@ def exercise(count, store, tmp_path, monkeypatch, *, complete, accesses):
     total = sum(e["quantity"] for e in editions)
     priced = sum(e["quantity"] for e in editions if e["n"] % 10)
     amount = PRICE * priced
+    # The top-level figures cost the Holdings; deck_list_cost every line; cost_to_complete the not-owned copies.
+    held = sum(e["held"] for e in editions)
+    held_priced = sum(e["held"] for e in editions if e["n"] % 10)
+    missing = sum(e["quantity"] - e["held"] for e in editions)
+    missing_priced = sum(e["quantity"] - e["held"] for e in editions if e["n"] % 10)
 
     # Private cost: its quotes are read through the HTTP records relay over the same directory.
     private = []
@@ -188,7 +194,11 @@ def exercise(count, store, tmp_path, monkeypatch, *, complete, accesses):
             for _ in range(accesses):
                 response, seconds = timed(lambda: client.get(path, headers=headers_for(b"", method="GET", path=path, user=owner)))
                 assert response.status_code == 200, response.text
-                private.append(counted(response.json(), total, priced, amount, complete=complete) + [seconds])
+                body = response.json()
+                private.append(counted(body, held, held_priced, PRICE * held_priced, complete=complete)
+                               + counted(body["deck_list_cost"], total, priced, amount, complete=complete)
+                               + counted(body["cost_to_complete"], missing, missing_priced, PRICE * missing_priced,
+                                         complete=complete) + [seconds])
     finally:
         stop(relay)
 
@@ -227,8 +237,9 @@ def exercise(count, store, tmp_path, monkeypatch, *, complete, accesses):
         ("text", "encoded_length", str(total))
     directory = Path(os.environ["PUBLIC_PROJECTION_DIR"])
     return {
-        "editions": count, "copies": total, "priced_copies": priced,
-        "private_cost": private, "public_cost": public,  # [status, reason, seconds] per access
+        "editions": count, "copies": total, "priced_copies": priced, "held_copies": held, "missing_copies": missing,
+        # [status, reason] of the Holdings cost, deck_list_cost and cost_to_complete, then seconds, per access
+        "private_cost": private, "public_cost": public,  # public: [status, reason, seconds] per access
         "seconds": {"build": build, "deliver": deliver, "seed_quotes": seeding, "private_live": private_live,
                     "private_mass_entry": private_mass, "publish": publish, "public_live": public_live_seconds,
                     "public_mass_entry": public_mass_seconds},

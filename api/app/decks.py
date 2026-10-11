@@ -11,7 +11,7 @@ from .main import connect, verified_user
 from .holdings import parse_quantity
 from .location_tree import (TreeNode, LocationCommandResult, EditLocation, apply_edit, cleaned_name,
                             owner_and_rows, replay, check_name, store_result, error, node_model)
-from .deck_ownership import CompetitionWarning, LineOwnership, SurplusHolding, read_ownership
+from .deck_ownership import CompetitionWarning, LineOwnership, SurplusHolding, held_in, read_ownership
 from .deck_format_checks import DeckFormatChecks, command_format_checks
 
 router = APIRouter(prefix='/api/decks', tags=['decks'])
@@ -224,12 +224,13 @@ def read_deck_list(conn, user_id: str, deck_id: UUID) -> DeckList:
     if header is None:
         # Migration 025 and its location trigger give every Deck a Deck List.
         raise RuntimeError('Deck has no Deck List')
-    lines = conn.execute("""SELECT l.edition_id,l.quantity,least(l.quantity,coalesce(h.quantity,0)) AS in_deck
-      FROM deck_list_line l LEFT JOIN holding h
-        ON h.owner_id=l.owner_id AND h.location_id=l.deck_id AND h.edition_id=l.edition_id
-      WHERE l.owner_id=%s AND l.deck_id=%s ORDER BY l.edition_id""", (user_id, deck_id)).fetchall()
+    # Two primary-key range reads paired here, never a join (see deck_ownership.read_ownership).
+    lines = conn.execute('SELECT edition_id,quantity FROM deck_list_line WHERE owner_id=%s AND deck_id=%s '
+                         'ORDER BY edition_id', (user_id, deck_id)).fetchall()
+    held = held_in(conn, user_id, deck_id)
     return DeckList(revision=header['revision'], lines=[
-        DeckListLine(edition_id=row['edition_id'], quantity=str(row['quantity']), in_deck=str(row['in_deck']))
+        DeckListLine(edition_id=row['edition_id'], quantity=str(row['quantity']),
+                     in_deck=str(min(row['quantity'], held.get(row['edition_id'], 0))))
         for row in lines])
 
 

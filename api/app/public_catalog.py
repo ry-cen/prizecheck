@@ -112,6 +112,12 @@ def format_value(row):
     group = None
     if row['reprint_group_id'] is not None:
         group = {'ref': reprint_group_ref(row['reprint_group_id']), 'printings': list(row['reprint_printings'] or [])}
+        if len(group['printings']) > MAX_REPRINT_PRINTINGS:
+            # Readers refuse a longer list (``_format``), so every printing of the group checks as unknown on Published
+            # Decks. It is still published: the record stays the database's truth, and the warning names the group.
+            log.warning('Reprint Group %s has %d printings, more than the %d a public reader accepts: its printings '
+                        'check as unknown on Published Decks', group['ref'], len(group['printings']),
+                        MAX_REPRINT_PRINTINGS)
     return {'printing_ref': row['printing_ref'], 'revision': row['public_revision'], 'set_id': row['format_set_id'],
             'collector_number': row['format_collector_number'],
             'identity': {'key': row['identity_key'], 'name': row['identity_name']}, 'reprint_group': group,
