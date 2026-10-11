@@ -692,11 +692,11 @@ test.describe("desktop", () => {
     await choose();
     await expect(toast(page)).toHaveText(`Moved 1 copy to 0 Dest ${s}.`);
     expect(manifests).toHaveLength(2);
-    const keys = commits.map((commit) => commit.key);
-    expect(new Set(keys).size).toBe(keys.length);
-    expect(commits.at(-1)!.url).toContain(manifests[1]);
-    for (const commit of commits.slice(0, -1))
-      expect(commit.url).not.toContain(manifests[1]);
+    // The stale attempt reached commit, so there are two commits, each with its own manifest and key.
+    expect(commits).toHaveLength(2);
+    expect(commits[0].url).toContain(manifests[0]);
+    expect(commits[1].url).toContain(manifests[1]);
+    expect(commits[1].key).not.toBe(commits[0].key);
   });
 
   test("Escape during a drag cancels it, keeps the selection and moves nothing", async ({

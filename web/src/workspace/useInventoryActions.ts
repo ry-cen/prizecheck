@@ -429,7 +429,7 @@ export function useInventoryActions({
       showToast({
         message: failure,
         entry: toastLive.current?.entry ?? null,
-        unavailable: false,
+        unavailable: toastLive.current?.unavailable ?? false,
       });
     setBarError("");
     if (dialogRef.current && !busyRef.current) {
