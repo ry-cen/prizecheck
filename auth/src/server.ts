@@ -199,6 +199,8 @@ async function session(request: IncomingMessage) {
 }
 
 // The session lookup for a budgeted route: the same session rules on a separate, bounded pool (auth/src/auth.ts).
+// Call it outside any auth.handler context: better-auth's adapter context is global, and inside one this lookup would
+// quietly use the shared pool.
 async function budgetedSession(request: IncomingMessage) {
   return budgetedAuth.api.getSession({
     headers: new Headers({ cookie: request.headers.cookie || "" }),
