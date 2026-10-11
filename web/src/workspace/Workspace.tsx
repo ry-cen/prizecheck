@@ -8,14 +8,23 @@ import React, {
 import { getLocationTree, type TreeNode } from "../location_generated";
 import { CreateLocationDialog } from "./CreateLocationDialog";
 import { Gallery } from "./Gallery";
-import { DEFAULT_DISPLAY, plural, type DisplayPrefs } from "./galleryModel";
+import {
+  DEFAULT_DISPLAY,
+  plural,
+  type DisplayPrefs,
+  type GalleryQuery,
+} from "./galleryModel";
+import { DetailsSheet, Inspector } from "./Inspector";
 import { LocationNav, type WorkspaceView } from "./LocationNav";
 import { ManageLocations, ManageLocationsButton } from "./ManageLocations";
 import { indexLocations } from "./locationTree";
+import { MOBILE_QUERY, useMediaQuery } from "./media";
+import { SelectionBar } from "./SelectionBar";
+import { selectionScope } from "./selectionModel";
 import { useGalleryData } from "./useGalleryData";
+import { useSelection } from "./useSelection";
 import "./Workspace.css";
 
-const MOBILE_QUERY = "(max-width: 760px)";
 const FOCUSABLE =
   'button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex="-1"])';
 
@@ -68,7 +77,16 @@ export function Workspace({ onOpenLocations, onSignOut }: Props) {
   // A Location that disappeared from the tree falls back to All owned.
   const heading = current?.name ?? "All owned";
   const galleryView: WorkspaceView = current ? view : "all";
-  const gallery = useGalleryData({ view: galleryView });
+  // Ticket 104 adds search, filters and sort here; the selection scope ignores `sort`.
+  const galleryQuery: GalleryQuery = { view: galleryView };
+  const gallery = useGalleryData(galleryQuery);
+  const mobile = useMediaQuery(MOBILE_QUERY);
+  const selection = useSelection({
+    holdings: gallery.holdings,
+    status: gallery.status,
+    scope: selectionScope(galleryQuery),
+    mobile,
+  });
   const locationPath = useCallback(
     (id: string) => (index.byId.has(id) ? index.path(id) : undefined),
     [index]
@@ -207,7 +225,10 @@ export function Workspace({ onOpenLocations, onSignOut }: Props) {
 
   return (
     <div className="ws-root">
-      <div className="ws-surface" inert={drawerOpen}>
+      <div
+        className="ws-surface"
+        inert={drawerOpen || selection.details !== null}
+      >
         <header className="ws-header">
           <button
             ref={drawerOpener}
@@ -263,6 +284,14 @@ export function Workspace({ onOpenLocations, onSignOut }: Props) {
                   {plural(gallery.totals.editions, "edition", "editions")}
                 </p>
               )}
+              <button
+                type="button"
+                className="ws-select-toggle ws-mobile-only"
+                aria-pressed={selection.selectMode}
+                onClick={() => selection.setSelectMode(!selection.selectMode)}
+              >
+                Select
+              </button>
             </div>
             <div className="ws-toolbar ws-desktop-only">
               {search("ws-toolbar-search")}
@@ -294,21 +323,40 @@ export function Workspace({ onOpenLocations, onSignOut }: Props) {
                 </button>
               </div>
             </div>
-            <Gallery
-              data={gallery}
-              display={display}
-              caption={galleryView === "all"}
-              locationPath={locationPath}
-              locationName={locationName}
-              emptyMessage={
-                galleryView === "all"
-                  ? "Your Collection has no cards yet."
-                  : "This Location has no cards."
-              }
-              onRetry={gallery.reload}
-            />
+            <div className="ws-gallery-layout">
+              <Gallery
+                data={gallery}
+                display={display}
+                caption={galleryView === "all"}
+                locationPath={locationPath}
+                locationName={locationName}
+                emptyMessage={
+                  galleryView === "all"
+                    ? "Your Collection has no cards yet."
+                    : "This Location has no cards."
+                }
+                onRetry={gallery.reload}
+                selected={selection.selected}
+                selectMode={selection.selectMode}
+                onTile={selection.activate}
+                onHover={selection.hover}
+                onMarquee={selection.marquee}
+              />
+              <Inspector
+                card={selection.inspected}
+                locationPath={locationPath}
+                ownerRevision={gallery.ownerRevision}
+              />
+            </div>
           </main>
         </div>
+        {selection.summary.copies > 0 && (
+          <SelectionBar
+            summary={selection.summary}
+            onClear={selection.clear}
+            onDetails={selection.openDetails}
+          />
+        )}
       </div>
       {drawerOpen && (
         <div
@@ -374,6 +422,14 @@ export function Workspace({ onOpenLocations, onSignOut }: Props) {
             void loadTree();
             gallery.reload();
           }}
+        />
+      )}
+      {selection.details && (
+        <DetailsSheet
+          card={selection.details}
+          locationPath={locationPath}
+          ownerRevision={gallery.ownerRevision}
+          onClose={selection.closeDetails}
         />
       )}
     </div>

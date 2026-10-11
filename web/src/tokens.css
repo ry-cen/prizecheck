@@ -100,6 +100,9 @@
      Names block = 4 px gap + 16 px name line + 14 px set line; caption = 4 px gap + 14 px line. */
   --tile-names-height: 34px;
   --tile-caption-height: 18px;
+  /* Selected tile (#105): a dark gap, then an accent ring, outside the card art. */
+  --tile-ring-gap: 3px;
+  --tile-ring-width: 3px;
 
   /* Workspace layout */
   --layout-header-height: 64px;
@@ -178,4 +181,6 @@
   --layer-modal: 500;
 
   --layout-inspector-width: 310px;
+  /* The inspector column from the compact breakpoint (max-width: 1100px) down to mobile. */
+  --layout-inspector-width-compact: 220px;
 }
