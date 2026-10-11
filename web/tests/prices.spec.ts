@@ -63,7 +63,7 @@ const owner = async () =>
   (await pool.query('SELECT id FROM "user" WHERE email=$1', [OWNER_EMAIL]))
     .rows[0].id as string;
 
-/** Stocks a new Deck with one copy of each Edition, through the Decks page's Holdings panel (the Locations view
+/** Stocks a new Deck with one copy of each Edition, through the Decks page's Holdings panel (the old Locations page
  * that showed leaf rows is gone, ticket 114). The "0 " prefix keeps it on the first page of 30 Decks by name. */
 async function hold(page: Page, editions: string[]): Promise<string> {
   const name = `0 Held ${randomUUID().slice(0, 8)}`;

@@ -1,4 +1,4 @@
-// Add moved from the Locations view to the workspace in ticket 114.
+// Add moved from the old Locations page to the workspace in ticket 114.
 import { test, expect } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
