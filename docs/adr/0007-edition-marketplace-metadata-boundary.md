@@ -1,0 +1,9 @@
+# Preserve physical Edition identity while separating marketplace metadata
+
+**Status:** accepted — owner decisions, 2026-10-08.
+
+Marketplace IDs currently enter physical Variant Descriptor keys, while raw quote changes can alter fingerprints used by identity reviews. The owner accepted separate mutable provider/marketplace lookup data and quote state, with physical facets defining Card Editions. Existing immutable Edition IDs and all inventory/override/public references are preserved; cleaned physical correspondence may recognize an existing Edition only when proven one-to-one, while ambiguous collisions require maintainer review and never automatically merge quantities.
+
+Changed or conflicting marketplace mappings become unverified and lose quote/product-ID export eligibility until catalog-maintainer verification. Unknown source information is retained for classification rather than silently treated as physical identity or discarded. This refines [the original Edition identity contract](../planning/tcg-collection-tracker/wayfinder/resolutions/04-decide-card-edition-identity.md) without relaxing its explicit collector reassignment and frozen published-content rules.
+
+The owner also accepted an actual-datastore read-only preflight before any data correction is selected or executed. The available local connection refused access, so persisted impact remains unknown and no migration is selected here. [The compatibility resolution](../planning/tcg-collection-tracker/wayfinder/resolutions/23-decide-marketplace-metadata-separation.md) records the complete policy and later handoff requirements. Concrete storage, aliases, correction procedures and target-mapping verification evidence belong to the later spec and existing export/public decisions.

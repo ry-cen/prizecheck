@@ -1,0 +1,91 @@
+{
+  "source": "TCGdex official API v2 English",
+  "fetched_at": "2026-10-08T17:11:00Z",
+  "scope": "Bounded live fixtures for the remaining pricing cases: special illustration rare, English promo, and unavailable per-variant TCGplayer price. No full catalog was downloaded.",
+  "records": [
+    {
+      "source_url": "https://api.tcgdex.net/v2/en/cards/sv03-223",
+      "http_status": 200,
+      "id": "sv03-223",
+      "name": "Charizard ex",
+      "category": "Pokemon",
+      "rarity": "Special illustration rare",
+      "set": { "id": "sv03", "name": "Obsidian Flames" },
+      "localId": "223",
+      "variants_detailed": [
+        {
+          "type": "holo",
+          "size": "standard",
+          "thirdParty": { "cardmarket": 725303, "tcgplayer": 509980, "cardtrader": 255402 },
+          "pricing": {
+            "cardmarket": { "updated": "2026-10-07T22:54:33.002Z", "unit": "EUR", "idProduct": 725303, "avg": 98.17, "low": 47.94, "trend": 77 },
+            "tcgplayer": { "unit": "USD", "updated": "2026-10-07T22:55:06.584Z", "holofoil": { "productId": 509980, "marketPrice": 99.18, "lowPrice": 71, "midPrice": 106, "highPrice": 999.99, "directLowPrice": 78.32 } }
+          }
+        }
+      ]
+    },
+    {
+      "source_url": "https://api.tcgdex.net/v2/en/cards/svp-085",
+      "http_status": 200,
+      "id": "svp-085",
+      "name": "Pikachu with Grey Felt Hat",
+      "category": "Pokemon",
+      "rarity": "Promo",
+      "set": { "id": "svp", "name": "SVP Black Star Promos" },
+      "localId": "085",
+      "variants_detailed": [
+        {
+          "type": "normal",
+          "size": "standard",
+          "thirdParty": { "cardmarket": 735302, "tcgplayer": 518861 },
+          "pricing": {
+            "cardmarket": { "updated": "2026-10-07T22:54:32.999Z", "unit": "EUR", "idProduct": 735302, "avg": 893.49, "low": 520, "trend": 602.86 },
+            "tcgplayer": null
+          }
+        }
+      ]
+    },
+    {
+      "source_url": "https://api.tcgdex.net/v2/en/cards/base1-98",
+      "http_status": 200,
+      "fixture_source": "Previously fetched and captured in tcgdex-pricing-samples.json; reused to avoid repeating an ordinary Energy request.",
+      "id": "base1-98",
+      "name": "Fire Energy",
+      "category": "Energy",
+      "set": { "id": "base1", "name": "Base Set" },
+      "localId": "98",
+      "variants_detailed": [
+        {
+          "type": "normal",
+          "subtype": "unlimited",
+          "thirdParty": { "tcgplayer": 42442 },
+          "pricing": { "tcgplayer": { "unit": "USD", "updated": "2026-10-07T22:54:34.695Z", "normal": { "productId": 42442, "marketPrice": 0.46 } } }
+        },
+        {
+          "type": "normal",
+          "subtype": "shadowless",
+          "stamp": ["1st-edition"],
+          "thirdParty": { "tcgplayer": 107094 },
+          "pricing": { "tcgplayer": null }
+        },
+        {
+          "type": "normal",
+          "subtype": "shadowless",
+          "thirdParty": { "tcgplayer": 107094 },
+          "pricing": { "tcgplayer": null }
+        },
+        {
+          "type": "normal",
+          "subtype": "1999-2000-copyright",
+          "pricing_field_present": false
+        }
+      ]
+    }
+  ],
+  "interpretation": {
+    "tcgplayer_market_price": "For sv03-223, the detailed variant includes a USD marketPrice of 99.18 and productId 509980. This is what TCGdex currently returns; it does not independently confirm the marketplace listing's physical variant mapping.",
+    "explicit_null": "For svp-085 and two base1-98 variants, the detailed variant has pricing.tcgplayer explicitly null. This means no TCGplayer quote is present at that nesting point; it does not mean the entire card or variant record is absent.",
+    "missing_field": "The base1-98 1999-2000-copyright variant has no pricing field in the captured detailed entry. The fixture records that absence separately from explicit null.",
+    "product_id_caution": "thirdParty.tcgplayer is a marketplace product reference. It is not proof that the associated listing describes this exact physical printing; verify the listing before treating a quote as exact-edition value."
+  }
+}

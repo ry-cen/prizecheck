@@ -18,7 +18,7 @@ def ts_type(value):
 
 
 schema = app.openapi()["components"]["schemas"]
-names = ("TreeNode", "LocationCommandResult", "CreateDeck", "DeckIndex", "IdentityCheck", "DeckChecks", "DeckDetail")
+names = ("TreeNode", "LocationCommandResult", "CreateDeck", "DeckIndex", "IdentityCheck", "DeckChecks", "DeckDetail", "DeckEditionQuantity", "DeckContents")
 lines = ["// Generated from FastAPI OpenAPI by scripts/generate_decks_client.py. Do not edit."]
 for name in names:
     definition = schema[name]
@@ -41,6 +41,13 @@ async function request<T>(path: string, method: string, body?: object): Promise<
 }
 export const getDecks = (cursor?: string) => request<DeckIndex>('/api/decks' + (cursor ? '?cursor=' + encodeURIComponent(cursor) : ''), 'GET');
 export const createDeck = (body: CreateDeck) => request<LocationCommandResult>('/api/decks', 'POST', body);
+export async function getDeckContents(id: string, currentRevision?: () => number): Promise<DeckContents> {
+  const contents = await request<DeckContents>(`/api/decks/${encodeURIComponent(id)}/contents`, 'GET');
+  if (currentRevision && contents.owner_revision !== currentRevision()) {
+    throw new DeckError(409, 'INVENTORY_CHANGED');
+  }
+  return contents;
+}
 export const getDeck = (id: string) => request<DeckDetail>(`/api/decks/${encodeURIComponent(id)}`, 'GET');
 """)
 content = "\n".join(lines)

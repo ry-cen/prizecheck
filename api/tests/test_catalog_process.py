@@ -12,6 +12,7 @@ from uuid import uuid4
 
 import httpx
 
+import pytest
 from app.main import connect
 from test_catalog import headers
 from test_catalog_dispatch import owner_fixture, PATH
@@ -33,6 +34,8 @@ def eventually(predicate, timeout=15):
     raise AssertionError('Process seam did not reach expected durable state')
 
 
+@pytest.mark.serial(reason='process: starts real API and importer processes and asserts response times')
+@pytest.mark.slow(reason='process: starts real API and importer processes')
 def test_detached_child_survives_api_restart_and_exits_after_exact_run(tmp_path):
     owner = owner_fixture()
     entered, release = Event(), Event()
@@ -51,7 +54,7 @@ def test_detached_child_survives_api_restart_and_exits_after_exact_run(tmp_path)
         def log_message(self,*args):
             pass
     source = ThreadingHTTPServer(('127.0.0.1',0),FixtureSource)
-    Thread(target=source.serve_forever,daemon=True).start()
+    Thread(target=source.serve_forever,kwargs={'poll_interval':0.02},daemon=True).start()
     # Trusted interpreter bootstrap redirects the external source HTTP boundary,
     # without adding test source/fixture switches to the production importer.
     (tmp_path/'sitecustomize.py').write_text(f"import os, app.catalog\napp.catalog.BASE_URL='http://127.0.0.1:{source.server_port}/cards'\n_original=app.catalog.TCGdexSource.__init__\ndef _fixture_init(self):\n _original(self)\n self.client.headers['x-process-fixture']=str(os.getpid())\napp.catalog.TCGdexSource.__init__=_fixture_init\n")
@@ -111,6 +114,8 @@ def test_detached_child_survives_api_restart_and_exits_after_exact_run(tmp_path)
         release.set(); api.terminate(); api.wait(timeout=5); source.shutdown(); source.server_close()
 
 
+@pytest.mark.serial(reason='process: starts real importer processes and asserts their exits')
+@pytest.mark.slow(reason='process: starts real importer processes')
 def test_exact_child_exit_codes_and_safe_terminal_failures(tmp_path):
     import signal
     owner_fixture()

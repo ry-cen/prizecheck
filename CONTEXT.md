@@ -67,3 +67,15 @@ _Avoid_: Private Deck, secret Deck
 **Inventory Removal**:
 An explicit decrease that takes selected copies out of the tracked Collection without moving them to another Location.
 _Avoid_: Move, delete card
+
+**Estimated Deck Cost**:
+The sum of available unit market-price estimates multiplied by the quantities of the physical Card Editions in a Deck. It may cover only part of the Deck and excludes shipping and taxes.
+_Avoid_: Purchase price, checkout total, guaranteed value
+
+**Pricing Coverage**:
+The number of copies in a Deck with an included price estimate compared with the Deck's total number of copies. It describes completeness, not the freshness or certainty of a quote.
+_Avoid_: Priced Editions count, price accuracy
+
+**Marketplace Mapping**:
+A proposed or verified correspondence between a Card Edition and a marketplace product, including the relevant physical finish. It supports pricing and marketplace exports without defining the Card Edition's physical identity.
+_Avoid_: Card Edition ID, physical equivalence

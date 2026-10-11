@@ -2,6 +2,7 @@
 from uuid import uuid4
 import os
 import psycopg
+import pytest
 from test_holdings import call, fixture, add
 
 
@@ -65,6 +66,7 @@ def test_leaf_filters_and_catalog_cursor_invalidation():
     assert changed.status_code==409 and changed.json()['detail']['code']=='CATALOG_CHANGED'
 
 
+@pytest.mark.slow(reason='capacity: a large Collection')
 def test_large_collection_retains_exact_totals_and_indexed_distribution(tmp_path):
     owner,_,leaf,_,edition,generation=fixture()
     with psycopg.connect(os.environ['DATABASE_URL']) as conn:

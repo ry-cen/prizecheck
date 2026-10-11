@@ -103,6 +103,21 @@ promote({'card-1': 'Pikachu'})`,
     expect(snapshotResponse.headers()["x-robots-tag"]).toBe(
       "noindex, nofollow"
     );
+    const frozen = await snapshotResponse.json();
+    const reference = frozen.identities[0].editions[0];
+    expect(reference.edition_ref).toMatch(/^[0-9a-f]{48}$/);
+    expect(reference.printing_ref).toMatch(/^[0-9a-f]{48}$/);
+    expect(reference.edition_ref).not.toBe(reference.printing_ref);
+    expect(Object.keys(reference).sort()).toEqual([
+      "collector_number",
+      "edition_ref",
+      "image_url",
+      "printing_ref",
+      "quantity",
+      "set_id",
+      "set_name",
+      "variant",
+    ]);
     expect(
       (
         await anonymous.request.get(
@@ -124,6 +139,10 @@ promote({'card-1': 'Pikachu'})`,
       .click();
     await publicPage.reload();
     await expect(publicPage.getByRole("main")).toContainText("59 cards");
+    const stillFrozen = await anonymous.request.get(
+      `${process.env.TEST_ORIGIN || "http://localhost:5173"}/api/public/decks/${token}`
+    );
+    expect(await stillFrozen.json()).toEqual(frozen);
     await publishing
       .getByRole("button", { name: "Republish snapshot", exact: true })
       .click();
@@ -132,6 +151,13 @@ promote({'card-1': 'Pikachu'})`,
     await expect(publicPage.getByRole("main")).toContainText(
       "61 cards · 1 cards over 60"
     );
+    const republished = await anonymous.request.get(
+      `${process.env.TEST_ORIGIN || "http://localhost:5173"}/api/public/decks/${token}`
+    );
+    const newReference = (await republished.json()).identities[0].editions[0];
+    expect(newReference.edition_ref).toBe(reference.edition_ref);
+    expect(newReference.printing_ref).toBe(reference.printing_ref);
+    expect(newReference.quantity).toBe("61");
     await publishing
       .getByRole("button", { name: "Revoke public link", exact: true })
       .click();

@@ -19,3 +19,6 @@ if os.environ.get('CATALOG_PROCESS_FIXTURE_DIR'):
         def fetch(self, source_id):
             return {'id':source_id,'name':'Pikachu','localId':'1','set':{'id':'fixture','name':'Fixture Set'},'category':'Pokemon','variants':{'normal':True}}
     app.catalog.TCGdexSource = FixtureSource
+
+import price_fixture
+price_fixture.install()

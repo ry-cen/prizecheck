@@ -20,7 +20,7 @@ test("physical Deck creation, actual Holdings checks, and Move out", async ({
     [
       "-c",
       `from test_catalog_search import promote
-promote({'card-1': 'Pikachu'})`,
+promote({'card-1': 'Pikachu', **{f'card-{i}': f'Pikachu {i:02}' for i in range(2, 52)}})`,
     ],
     { env: { ...process.env, PYTHONPATH: "api:api/tests" } }
   );
@@ -88,6 +88,178 @@ promote({'card-1': 'Pikachu'})`,
     await expect(
       page.getByRole("region", { name: `Cards in ${name}` })
     ).toContainText("×59");
+    // Fixture catalog setup may use SQL; all inventory behavior uses the real gateway.
+    const gateway = (path: string) => new URL(path, page.url()).toString();
+    const deckResponse = await page.request.get(gateway("/api/decks"));
+    const deck = (await deckResponse.json()).decks.find(
+      (item: { name: string }) => item.name === name
+    );
+    const catalog = await pool.query(
+      `SELECT e.id, p.source_id FROM catalog_edition e
+       JOIN catalog_printing p ON p.id=e.printing_id
+       WHERE e.descriptor->>'finish'='normal' ORDER BY p.source_id`
+    );
+    const firstEdition = catalog.rows.find(
+      (row) => row.source_id === "card-1"
+    ).id;
+    for (const edition of catalog.rows.filter(
+      (row) => row.source_id !== "card-1"
+    )) {
+      const added = await page.request.post(gateway("/api/holdings"), {
+        headers: { origin: new URL(page.url()).origin },
+        data: {
+          location_id: deck.id,
+          edition_id: edition.id,
+          quantity: "1",
+          idempotency_key: randomUUID(),
+        },
+      });
+      expect(added.status()).toBe(200);
+    }
+    const firstPage = await (
+      await page.request.get(gateway(`/api/holdings/${deck.id}`))
+    ).json();
+    expect(firstPage.holdings).toHaveLength(48);
+    expect(firstPage.next_cursor).toBeTruthy();
+    const contentsPath = gateway(`/api/decks/${deck.id}/contents`);
+    const beforeResponse = await page.request.get(contentsPath);
+    expect(beforeResponse.status()).toBe(200);
+    const beforeContents = await beforeResponse.json();
+    expect(beforeContents.editions).toHaveLength(51);
+    expect(
+      beforeContents.editions.find(
+        (row: { edition_id: string }) => row.edition_id === firstEdition
+      ).quantity
+    ).toBe("59");
+    const tree = await (
+      await page.request.get(gateway("/api/location-tree"))
+    ).json();
+    const unsorted = tree.locations.find(
+      (row: { name: string }) => row.name === "Unsorted"
+    );
+    const headers = { origin: new URL(page.url()).origin };
+    const manifestResponse = await page.request.post(
+      gateway("/api/moves/manifests"),
+      {
+        headers,
+        data: { source_id: deck.id },
+      }
+    );
+    expect(manifestResponse.status()).toBe(201);
+    const manifest = await manifestResponse.json();
+    const firstHolding = firstPage.holdings.find(
+      (row: { edition_id: string }) => row.edition_id === firstEdition
+    );
+    const secondHolding = firstPage.holdings.find(
+      (row: { edition_id: string }) => row.edition_id !== firstEdition
+    );
+    const staged = await page.request.put(
+      gateway(`/api/moves/manifests/${manifest.id}/items`),
+      {
+        headers,
+        data: {
+          items: [firstHolding, secondHolding].map((holding) => ({
+            edition_id: holding.edition_id,
+            quantity: "1",
+            expected_version: holding.version,
+          })),
+        },
+      }
+    );
+    expect(staged.status()).toBe(200);
+    // One atomic Move changes two Edition quantities, so any mixture is observable.
+    const [duringResponse, mutation] = await Promise.all([
+      page.request.get(contentsPath),
+      page.request.post(gateway(`/api/moves/manifests/${manifest.id}/commit`), {
+        headers,
+        data: { destination_id: unsorted.id, idempotency_key: randomUUID() },
+      }),
+    ]);
+    expect(mutation.status()).toBe(200);
+    expect(duringResponse.status()).toBe(200);
+    const afterContents = await (await page.request.get(contentsPath)).json();
+    expect(afterContents.owner_revision).toBe(
+      beforeContents.owner_revision + 1
+    );
+    expect(
+      afterContents.editions.find(
+        (row: { edition_id: string }) => row.edition_id === firstEdition
+      ).quantity
+    ).toBe("58");
+    expect(afterContents.editions).toHaveLength(50);
+    expect(
+      afterContents.editions.some(
+        (row: { edition_id: string }) =>
+          row.edition_id === secondHolding.edition_id
+      )
+    ).toBe(false);
+    const duringContents = await duringResponse.json();
+    expect([
+      beforeContents.owner_revision,
+      afterContents.owner_revision,
+    ]).toContain(duringContents.owner_revision);
+    expect(duringContents).toEqual(
+      duringContents.owner_revision === beforeContents.owner_revision
+        ? beforeContents
+        : afterContents
+    );
+    // Delay an authentic gateway response until a later inventory revision is known.
+    let releaseResponse: () => void = () => {};
+    let responseCaptured: () => void = () => {};
+    const released = new Promise<void>((resolve) => {
+      releaseResponse = resolve;
+    });
+    const captured = new Promise<void>((resolve) => {
+      responseCaptured = resolve;
+    });
+    await page.route(contentsPath, async (route) => {
+      const response = await route.fetch();
+      responseCaptured();
+      await released;
+      await route.fulfill({ response });
+    });
+    const staleRead = page.evaluate(
+      async ({ deckId, initialRevision }) => {
+        let currentRevision = initialRevision;
+        Object.assign(globalThis, {
+          advanceDeckRevision: () => {
+            currentRevision += 1;
+          },
+        });
+        const modulePath = "/src/decks_generated.ts";
+        const { getDeckContents } = await import(modulePath);
+        try {
+          await getDeckContents(deckId, () => currentRevision);
+          return "accepted";
+        } catch (cause) {
+          return cause instanceof Error ? cause.message : "unknown failure";
+        }
+      },
+      { deckId: deck.id, initialRevision: afterContents.owner_revision }
+    );
+    await captured;
+    try {
+      const laterMutation = await page.request.post(gateway("/api/holdings"), {
+        headers: { origin: new URL(page.url()).origin },
+        data: {
+          location_id: deck.id,
+          edition_id: firstEdition,
+          quantity: "1",
+          idempotency_key: randomUUID(),
+        },
+      });
+      expect(laterMutation.status()).toBe(200);
+      await page.evaluate(() =>
+        Reflect.get(globalThis, "advanceDeckRevision")()
+      );
+    } finally {
+      releaseResponse();
+    }
+    expect(await staleRead).toBe("INVENTORY_CHANGED");
+    await page.unroute(contentsPath);
+    await page.evaluate(() =>
+      Reflect.deleteProperty(globalThis, "advanceDeckRevision")
+    );
   } finally {
     await pool.end();
   }

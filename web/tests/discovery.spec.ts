@@ -165,15 +165,17 @@ promote({'card-1': ${JSON.stringify(hostileName)}})`,
   }
 });
 
-test("anonymous discovery pages and refreshes a stale cursor", async ({
-  page,
-}) => {
-  const prefix = `Paging ${randomUUID().slice(0, 8)}`;
-  execFileSync(
-    ".venv/bin/python",
-    [
-      "-c",
-      `from test_holdings import fixture, add
+// @slow (capacity): publishes 32 Decks.
+test(
+  "anonymous discovery pages and refreshes a stale cursor",
+  { tag: "@slow" },
+  async ({ page }) => {
+    const prefix = `Paging ${randomUUID().slice(0, 8)}`;
+    execFileSync(
+      ".venv/bin/python",
+      [
+        "-c",
+        `from test_holdings import fixture, add
 from test_decks import create
 from test_publications import command
 from test_discovery import visibility
@@ -183,26 +185,26 @@ for index in range(32):
     add(owner, deck, edition, '1')
     command(owner, deck, title=${JSON.stringify(prefix)} + f' {index:02}')
     visibility(owner, deck, 'listed')`,
-    ],
-    { env: { ...process.env, PYTHONPATH: "api:api/tests" } }
-  );
-  await page.goto(
-    `${process.env.TEST_ORIGIN || "http://localhost:5173"}/discover`
-  );
-  await page.getByLabel("Public title or card name").fill(prefix);
-  await page.getByRole("button", { name: "Search Published Decks" }).click();
-  await expect(page.locator("article")).toHaveCount(30);
-  await page
-    .getByRole("button", { name: "More Published Decks", exact: true })
-    .click();
-  await expect(page.locator("article")).toHaveCount(32);
-  await page.getByRole("button", { name: "Search Published Decks" }).click();
-  await expect(page.locator("article")).toHaveCount(30);
-  execFileSync(
-    ".venv/bin/python",
-    [
-      "-c",
-      `from test_holdings import fixture
+      ],
+      { env: { ...process.env, PYTHONPATH: "api:api/tests" } }
+    );
+    await page.goto(
+      `${process.env.TEST_ORIGIN || "http://localhost:5173"}/discover`
+    );
+    await page.getByLabel("Public title or card name").fill(prefix);
+    await page.getByRole("button", { name: "Search Published Decks" }).click();
+    await expect(page.locator("article")).toHaveCount(30);
+    await page
+      .getByRole("button", { name: "More Published Decks", exact: true })
+      .click();
+    await expect(page.locator("article")).toHaveCount(32);
+    await page.getByRole("button", { name: "Search Published Decks" }).click();
+    await expect(page.locator("article")).toHaveCount(30);
+    execFileSync(
+      ".venv/bin/python",
+      [
+        "-c",
+        `from test_holdings import fixture
 from test_decks import create
 from test_publications import command
 from test_discovery import visibility
@@ -210,17 +212,18 @@ owner, _, _, _, _, _ = fixture()
 deck = create(owner, ${JSON.stringify(prefix)} + 'new').json()['location']['id']
 command(owner, deck, title=${JSON.stringify(prefix)} + ' new')
 visibility(owner, deck, 'listed')`,
-    ],
-    { env: { ...process.env, PYTHONPATH: "api:api/tests" } }
-  );
-  await page
-    .getByRole("button", { name: "More Published Decks", exact: true })
-    .click();
-  await expect(page.getByRole("status")).toContainText(
-    "Published Decks changed. Showing the first page."
-  );
-  await expect(page.locator("article")).toHaveCount(30);
-  await expect(
-    page.getByRole("link", { name: prefix + " new", exact: true })
-  ).toBeVisible();
-});
+      ],
+      { env: { ...process.env, PYTHONPATH: "api:api/tests" } }
+    );
+    await page
+      .getByRole("button", { name: "More Published Decks", exact: true })
+      .click();
+    await expect(page.getByRole("status")).toContainText(
+      "Published Decks changed. Showing the first page."
+    );
+    await expect(page.locator("article")).toHaveCount(30);
+    await expect(
+      page.getByRole("link", { name: prefix + " new", exact: true })
+    ).toBeVisible();
+  }
+);

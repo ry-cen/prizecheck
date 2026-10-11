@@ -1,19 +1,61 @@
 # Verification
 
-Run `npm run verify` for the required application, recovery and release-runtime regression gate. Supply `TEST_ADMIN_DATABASE_URL` as a loopback PostgreSQL URI with permission to create/drop disposable databases. The runner allocates its own database, six ports, copied workspace and private artifact directory; it removes its processes/database after the run. Installed Node/Python dependencies are reused; build output and test fixtures belong to the copied workspace. Concurrent runs have separate build output and logs.
+Run `npm run verify` for the required application, recovery and release-runtime regression gate. Supply `TEST_ADMIN_DATABASE_URL` as a loopback PostgreSQL URI with permission to create/drop disposable databases. The runner copies the working tree, allocates its own databases, ports and private artifact directory, and removes its processes and databases after the run. Installed Node/Python dependencies are reused; build output and test fixtures belong to the copied workspace. Runs have separate build output and logs, but run one gate at a time on one host: a gate already uses most of the host's cores, and a second gate's load would reach the tests that must run alone. Keep the host awake for the whole run (on power, lid open): the runner holds off idle sleep with `caffeinate` where it exists, but a sleeping host stops the tests' processes while wall-clock time runs on, and Docker's database clock lags the host's after a wake. When that happens `verification.log` ends with a `== WARNING:` line and `result.json` records `host_suspended_seconds` and `database_clock_skew_seconds`; timing and approval-code expiry failures from such a run are not evidence, so rerun it.
 
 The runner checks the current working-tree source, including staged changes. Git history is read only to build the historical runtime regression fixture; a fresh clone needs full history. The repository workflow checks this gate on pushes and pull requests. Making that job a protected-branch requirement remains repository-host configuration.
 
-For a browser failure, rerun the same gate with the Playwright selector:
+## Loops
+
+| Command                                                       | Runs                                                                                                                            | Enough for                                    |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
+| `npm run verify -- --suite api -- <pytest selectors>`         | the selected `api/tests` tests; without selectors all of `api/tests`, nothing else                                              | iterating on API code and its tests           |
+| `npm run verify -- --suite browser -- <Playwright selectors>` | the selected Playwright specs against fresh stacks                                                                              | reproducing a browser failure                 |
+| `npm run verify -- --fast`                                    | the whole gate without `slow` pytest and vitest tests, `@slow` Playwright tests and the operations (release and recovery) suite | a worker's check before handing a change back |
+| `npm run verify`                                              | everything                                                                                                                      | acceptance; CI runs this                      |
 
 ```sh
+npm run verify -- --suite api -- api/tests/test_prices.py -k stale
 npm run verify -- --suite browser -- web/tests/moves.spec.ts
 ```
 
-Each run prints its `.scratch/verification/<run>/` directory. `verification.log`, service logs, browser output and `result.json` stay there; failed runs retain the same diagnostics. These logs contain synthetic fixture data. The browser suite gives a shorter reproduction loop with its own services and build. Use the default full suite for acceptance; `--suite auth` and `--suite operations` isolate those checks for diagnosis.
+API selectors are pytest node ids, paths and options such as `-k`, `-x` or `--lf`; the runner sets `-m`, `-n`, `-p` and `--dist` itself. Browser selectors are spec files or `file:line` locations. `--fast` combines with `--suite api`, `--suite auth` and `--suite browser`. A bare `pytest <nodeid>` does not work for most API tests: they need the gate's migrated database and environment. `npm run test:fast` is unchanged: it is the guardrails-only check the pre-commit hook runs, not the fast tier.
+
+The narrow and fast loops are for iteration. A ticket's final acceptance runs the full default gate once, and the ticket evidence quotes the counts from that run's `verification.log` summary.
+
+## Parallelism and tiers
+
+pytest runs in two passes. The first runs every test not marked `serial` with pytest-xdist, one worker per prepared database; `--dist loadfile` keeps each file's tests together and in order. Each worker has its own database, projection directory, runner lock directory, catalog fixture directory and mail file (`scripts/verify_resources.py`, applied by `api/tests/conftest.py`). The second pass runs the `serial` tests in one process with nothing else running.
+
+- Mark a test `serial` when it asserts an upper bound on elapsed time or a latency percentile, or launches real runner processes. Tickets that add price or budget tests with elapsed-time bounds mark them `serial`.
+- Mark a test `slow` when it launches real processes, waits out real wall-clock intervals, sleeps a second or more, or builds a capacity-sized data set.
+- Both marks take a `reason`; a `slow` reason starts with `process:`, `wall-clock:`, `capacity:` or `sleep:`. `scripts/check_guardrails.py` checks the reasons and requires both marks on tests that use the `proc` runner fixture.
+
+Playwright runs one application stack per worker: its own database, API, auth and web servers, mail file, projection, runner lock and catalog fixture directories. `web/tests/support/browser-stack.ts` points each worker at its stack, so specs in different workers never share data; the tests of one file still run in order in one worker. Tests tagged `@serial` run afterwards with one worker and say why in a comment; `price-refresh.spec.ts` is serial because its label depends on a real runner's deadline inside the server's wait window. Tests tagged `@slow` say their category in a comment.
+
+Worker counts follow the host: pytest `min(6, max(2, cores / 2))`, browser stacks `min(4, max(2, cores / 3))`. `--pytest-workers N` and `--browser-workers N` override them; `1` runs that suite in one process as before.
+
+Vitest (`auth/tests`) runs its files in parallel, as before; each file's tests run in order. A whole file is slow with a `// @module-tag slow` line, a single test with `{ tags: ["slow"] }`; either carries a `// slow (<category>): why` comment, and the `slow` tag is defined in `vitest.config.ts`. `--fast` passes `--tags-filter=!slow`, so those tests count as skipped and a fully slow file starts none of its servers. The price-runner, deck-cost, price-refresh and published-cost files are slow (they start the multi-process price stacks), as are the public-records rebuild test (real API and auth processes) and the tests that wait out the gateway's 3 s budget or the mail relay's 5 s timeout. Those two limits are production constants with no test seam, so their tests keep real time.
+
+Timing tests use real time only where they say why. The hard-stop and SIGSTOP runner scenarios scale the runner's contract constants through the test sitecustomize (see `docs/price-refresh.md`); the cold-start measurement and the idle-exit checks keep real time.
+
+## Artifacts
+
+Each run prints its `.scratch/verification/<run>/` directory. It holds:
+
+- `verification.log`, ending with a summary: phase seconds, pytest, vitest and Playwright totals, and the slowest tests;
+- service logs: `api.log`, `auth.log` and `web.log` for the first stack, `stack-<n>/` for the others;
+- `browser/parallel/` and `browser/serial/` (Playwright output), `playwright-parallel.json`, `playwright-serial.json`;
+- `pytest-parallel.xml`, `pytest-serial.xml`, `vitest.xml` (per-test times), `phases.tsv`, `timings.md`, `timings.json`;
+- `result.json`: exit code, suite, selectors, `fast`, worker counts, databases, timings.
+
+The runner prints `Verification run: <id>` before anything else, so a run that is stopped early still names its directory. Remove a run with `.venv/bin/python scripts/verify_discard.py <id>`, which refuses anything but one existing run directory; never `rm -rf` a path built from a captured id, because an empty id removes every run's evidence.
+
+Before it creates anything, each run drops the databases of verification runs that were killed before their own cleanup (`scripts/verify_reaper.py`). The runner tags every database it creates with an owner record in the database comment: the run id, a hashed id of the host, the `verify.py` pid and that process's start time. A run's databases are dropped together, and only when its owner ran on this host and has exited, the record is at least a minute old, and no session is connected to any of them; the drop never uses `WITH (FORCE)`, so a session that connects late keeps its database. The console and the first lines of `verification.log` report each decision as `== reaper:` lines, and `result.json` records them as `reaper` and `reaped_databases`. Untagged `tcg_verify_*` databases, made by an older harness on another branch or by a run killed while creating them, are kept and reported: drop one by hand only when no gate is running on any checkout. Databases that tests create themselves (`tcg_prices_*`, `tcg_recovery_*`, `tcg_release_*` and others) are not reaped.
+
+Read counts from `verification.log`, not from the exit code. Failed runs keep the same diagnostics. These logs contain synthetic fixture data. `--suite auth` and `--suite operations` isolate those checks for diagnosis.
 
 The pre-commit hook runs staged Prettier, TypeScript/generated-contract checks and database-free privacy guardrails. Generated clients remain generator-owned and are excluded from formatting. The hook does not require a running database; the full gate belongs in CI.
 
-Recovery, runtime readiness, activation/rollback/tamper, proxy-isolation, key-redaction and release-failure regressions run in the ordinary gate. Runtime fixtures are built in a temporary directory from repository history and current source. Their synthetic integrity receipts are test-only fixtures, not CI attestations or deployable releases. They never depend on artifacts left by an earlier agent session. The expensive exact-commit predecessor/successor release drill remains an explicit opt-in command documented in `docs/operations/release.md`; its skip is not a passing drill.
+Recovery, runtime readiness, activation/rollback/tamper, proxy-isolation, key-redaction and release-failure regressions run in the ordinary gate. Runtime fixtures are built in a temporary directory from repository history and current source. Their synthetic integrity receipts are test-only fixtures, not CI attestations or deployable releases. They never depend on artifacts left by an earlier agent session. The expensive exact-commit predecessor/successor release drill remains an explicit opt-in command documented in `docs/operations/release.md`; its skip is not a passing drill. `--fast` leaves the operations suite out; the full gate and `--suite operations` run it. A change to release, recovery or `tests/operations` code should also run `npm run verify -- --suite operations` before it is handed back.
 
-For changes to verification, also run `npm run guardrails`. Mechanical release-transport and exception-output rules live in `scripts/check_guardrails.py`; extending those rules requires positive and negative examples in `tests/tooling` rather than duplicating them in AGENTS.md.
+For changes to verification, also run `npm run guardrails`. Mechanical release-transport, exception-output, process-scope and test-tier rules live in `scripts/check_guardrails.py`; extending those rules requires positive and negative examples in `tests/tooling` rather than duplicating them in AGENTS.md. Harness logic has unit tests in `tests/tooling/test_verify_harness.py`; the reaper also has a PostgreSQL test in `api/tests/test_verify_reaper.py`, which runs in the gate's pytest pass.

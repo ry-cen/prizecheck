@@ -1,6 +1,8 @@
 import { defineConfig } from "vite";
 export default defineConfig({
   root: "web",
+  // The verification gate gives each concurrent dev server its own dependency cache.
+  cacheDir: process.env.VITE_CACHE_DIR || undefined,
   server: {
     host: "127.0.0.1",
     port: Number(process.env.WEB_PORT || 5173),

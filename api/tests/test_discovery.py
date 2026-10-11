@@ -49,6 +49,7 @@ def test_listing_changes_next_public_request_without_mutating_snapshot(monkeypat
     assert client.get(path).json() == before
 
 
+@pytest.mark.slow(reason='capacity: publishes 32 Decks')
 def test_discovery_pages_are_bounded_recent_and_revision_query_bound():
     owner, _, _, _, edition, _ = fixture()
     decks = []

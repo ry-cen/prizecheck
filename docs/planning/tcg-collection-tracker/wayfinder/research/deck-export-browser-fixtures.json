@@ -1,0 +1,573 @@
+{
+  "observed_date": "2026-10-08",
+  "environment": "Codex in-app browser on macOS",
+  "clipboard": {
+    "action": "Copy to Clipboard on reference deck",
+    "ui_result": "Copied!",
+    "raw_text_capture": "unavailable; readText returned empty and read returned no items",
+    "owner_authorized_replacement": true
+  },
+  "reference": {
+    "url": "https://limitlesstcg.com/decks/list/17168",
+    "title": "Gholdengo by Cody Graham – Limitless",
+    "columns": [
+      {
+        "cards": [
+          {
+            "language": "en",
+            "name": "Gimmighoul",
+            "number": "97",
+            "quantity": 4,
+            "set": "SSP"
+          },
+          {
+            "language": "en",
+            "name": "Gholdengo ex",
+            "number": "139",
+            "quantity": 4,
+            "set": "PAR"
+          },
+          {
+            "language": "en",
+            "name": "Gholdengo",
+            "number": "131",
+            "quantity": 1,
+            "set": "SSP"
+          },
+          {
+            "language": "en",
+            "name": "N's Zoroark ex",
+            "number": "98",
+            "quantity": 1,
+            "set": "JTG"
+          },
+          {
+            "language": "en",
+            "name": "N's Zorua",
+            "number": "97",
+            "quantity": 1,
+            "set": "JTG"
+          },
+          {
+            "language": "en",
+            "name": "Fezandipiti ex",
+            "number": "38",
+            "quantity": 1,
+            "set": "SFA"
+          },
+          {
+            "language": "en",
+            "name": "Munkidori",
+            "number": "95",
+            "quantity": 1,
+            "set": "TWM"
+          },
+          {
+            "language": "en",
+            "name": "Iron Bundle",
+            "number": "56",
+            "quantity": 1,
+            "set": "PAR"
+          }
+        ],
+        "heading": "Pokémon (14)"
+      },
+      {
+        "cards": [
+          {
+            "language": "en",
+            "name": "Arven",
+            "number": "186",
+            "quantity": 4,
+            "set": "OBF"
+          },
+          {
+            "language": "en",
+            "name": "Ciphermaniac's Codebreaking",
+            "number": "145",
+            "quantity": 2,
+            "set": "TEF"
+          },
+          {
+            "language": "en",
+            "name": "Professor Turo's Scenario",
+            "number": "171",
+            "quantity": 2,
+            "set": "PAR"
+          },
+          {
+            "language": "en",
+            "name": "Boss's Orders",
+            "number": "172",
+            "quantity": 2,
+            "set": "PAL"
+          },
+          {
+            "language": "en",
+            "name": "Iono",
+            "number": "185",
+            "quantity": 1,
+            "set": "PAL"
+          },
+          {
+            "language": "en",
+            "name": "Buddy-Buddy Poffin",
+            "number": "144",
+            "quantity": 4,
+            "set": "TEF"
+          },
+          {
+            "language": "en",
+            "name": "Superior Energy Retrieval",
+            "number": "189",
+            "quantity": 4,
+            "set": "PAL"
+          },
+          {
+            "language": "en",
+            "name": "Nest Ball",
+            "number": "181",
+            "quantity": 2,
+            "set": "SVI"
+          },
+          {
+            "language": "en",
+            "name": "Night Stretcher",
+            "number": "61",
+            "quantity": 2,
+            "set": "SFA"
+          },
+          {
+            "language": "en",
+            "name": "Ultra Ball",
+            "number": "196",
+            "quantity": 1,
+            "set": "SVI"
+          },
+          {
+            "language": "en",
+            "name": "Super Rod",
+            "number": "188",
+            "quantity": 1,
+            "set": "PAL"
+          },
+          {
+            "language": "en",
+            "name": "Counter Catcher",
+            "number": "160",
+            "quantity": 1,
+            "set": "PAR"
+          },
+          {
+            "language": "en",
+            "name": "Switch",
+            "number": "194",
+            "quantity": 1,
+            "set": "SVI"
+          },
+          {
+            "language": "en",
+            "name": "Earthen Vessel",
+            "number": "163",
+            "quantity": 1,
+            "set": "PAR"
+          },
+          {
+            "language": "en",
+            "name": "Energy Search Pro",
+            "number": "176",
+            "quantity": 1,
+            "set": "SSP"
+          },
+          {
+            "language": "en",
+            "name": "Technical Machine: Evolution",
+            "number": "178",
+            "quantity": 2,
+            "set": "PAR"
+          },
+          {
+            "language": "en",
+            "name": "Rescue Board",
+            "number": "159",
+            "quantity": 1,
+            "set": "TEF"
+          },
+          {
+            "language": "en",
+            "name": "Levincia",
+            "number": "150",
+            "quantity": 1,
+            "set": "JTG"
+          },
+          {
+            "language": "en",
+            "name": "Jamming Tower",
+            "number": "153",
+            "quantity": 1,
+            "set": "TWM"
+          }
+        ],
+        "heading": "Trainer (34)"
+      },
+      {
+        "cards": [
+          {
+            "language": "en",
+            "name": "Metal Energy",
+            "number": "8",
+            "quantity": 3,
+            "set": "SVE"
+          },
+          {
+            "language": "en",
+            "name": "Lightning Energy",
+            "number": "4",
+            "quantity": 2,
+            "set": "SVE"
+          },
+          {
+            "language": "en",
+            "name": "Darkness Energy",
+            "number": "7",
+            "quantity": 2,
+            "set": "SVE"
+          },
+          {
+            "language": "en",
+            "name": "Grass Energy",
+            "number": "1",
+            "quantity": 1,
+            "set": "SVE"
+          },
+          {
+            "language": "en",
+            "name": "Fire Energy",
+            "number": "2",
+            "quantity": 1,
+            "set": "SVE"
+          },
+          {
+            "language": "en",
+            "name": "Water Energy",
+            "number": "3",
+            "quantity": 1,
+            "set": "SVE"
+          },
+          {
+            "language": "en",
+            "name": "Psychic Energy",
+            "number": "5",
+            "quantity": 1,
+            "set": "SVE"
+          },
+          {
+            "language": "en",
+            "name": "Fighting Energy",
+            "number": "6",
+            "quantity": 1,
+            "set": "SVE"
+          }
+        ],
+        "heading": "Energy (12)"
+      }
+    ]
+  },
+  "comparison": {
+    "url": "https://limitlesstcg.com/decks/list/17105",
+    "title": "Gholdengo by Armando Cervantes – Limitless",
+    "columns": [
+      {
+        "cards": [
+          {
+            "language": "en",
+            "name": "Gimmighoul",
+            "number": "97",
+            "quantity": 4,
+            "set": "SSP"
+          },
+          {
+            "language": "en",
+            "name": "Gholdengo ex",
+            "number": "139",
+            "quantity": 4,
+            "set": "PAR"
+          },
+          {
+            "language": "en",
+            "name": "Gholdengo",
+            "number": "131",
+            "quantity": 1,
+            "set": "SSP"
+          },
+          {
+            "language": "en",
+            "name": "Scyther",
+            "number": "123",
+            "quantity": 1,
+            "set": "MEW"
+          },
+          {
+            "language": "en",
+            "name": "Scizor",
+            "number": "141",
+            "quantity": 1,
+            "set": "OBF"
+          },
+          {
+            "language": "en",
+            "name": "Munkidori",
+            "number": "95",
+            "quantity": 1,
+            "set": "TWM"
+          },
+          {
+            "language": "en",
+            "name": "Iron Bundle",
+            "number": "56",
+            "quantity": 1,
+            "set": "PAR"
+          },
+          {
+            "language": "en",
+            "name": "Fezandipiti ex",
+            "number": "38",
+            "quantity": 1,
+            "set": "SFA"
+          }
+        ],
+        "heading": "Pokémon (14)"
+      },
+      {
+        "cards": [
+          {
+            "language": "en",
+            "name": "Arven",
+            "number": "186",
+            "quantity": 4,
+            "set": "OBF"
+          },
+          {
+            "language": "en",
+            "name": "Ciphermaniac's Codebreaking",
+            "number": "145",
+            "quantity": 3,
+            "set": "TEF"
+          },
+          {
+            "language": "en",
+            "name": "Boss's Orders",
+            "number": "172",
+            "quantity": 2,
+            "set": "PAL"
+          },
+          {
+            "language": "en",
+            "name": "Iono",
+            "number": "185",
+            "quantity": 1,
+            "set": "PAL"
+          },
+          {
+            "language": "en",
+            "name": "Professor Turo's Scenario",
+            "number": "171",
+            "quantity": 1,
+            "set": "PAR"
+          },
+          {
+            "language": "en",
+            "name": "Buddy-Buddy Poffin",
+            "number": "144",
+            "quantity": 4,
+            "set": "TEF"
+          },
+          {
+            "language": "en",
+            "name": "Superior Energy Retrieval",
+            "number": "189",
+            "quantity": 4,
+            "set": "PAL"
+          },
+          {
+            "language": "en",
+            "name": "Ultra Ball",
+            "number": "196",
+            "quantity": 2,
+            "set": "SVI"
+          },
+          {
+            "language": "en",
+            "name": "Nest Ball",
+            "number": "181",
+            "quantity": 2,
+            "set": "SVI"
+          },
+          {
+            "language": "en",
+            "name": "Night Stretcher",
+            "number": "61",
+            "quantity": 2,
+            "set": "SFA"
+          },
+          {
+            "language": "en",
+            "name": "Pokégear 3.0",
+            "number": "186",
+            "quantity": 2,
+            "set": "SVI"
+          },
+          {
+            "language": "en",
+            "name": "Counter Catcher",
+            "number": "160",
+            "quantity": 1,
+            "set": "PAR"
+          },
+          {
+            "language": "en",
+            "name": "Switch",
+            "number": "194",
+            "quantity": 1,
+            "set": "SVI"
+          },
+          {
+            "language": "en",
+            "name": "Earthen Vessel",
+            "number": "163",
+            "quantity": 1,
+            "set": "PAR"
+          },
+          {
+            "language": "en",
+            "name": "Energy Search Pro",
+            "number": "176",
+            "quantity": 1,
+            "set": "SSP"
+          },
+          {
+            "language": "en",
+            "name": "Technical Machine: Evolution",
+            "number": "178",
+            "quantity": 2,
+            "set": "PAR"
+          },
+          {
+            "language": "en",
+            "name": "Jamming Tower",
+            "number": "153",
+            "quantity": 1,
+            "set": "TWM"
+          }
+        ],
+        "heading": "Trainer (34)"
+      },
+      {
+        "cards": [
+          {
+            "language": "en",
+            "name": "Metal Energy",
+            "number": "8",
+            "quantity": 3,
+            "set": "SVE"
+          },
+          {
+            "language": "en",
+            "name": "Darkness Energy",
+            "number": "7",
+            "quantity": 2,
+            "set": "SVE"
+          },
+          {
+            "language": "en",
+            "name": "Lightning Energy",
+            "number": "4",
+            "quantity": 2,
+            "set": "SVE"
+          },
+          {
+            "language": "en",
+            "name": "Grass Energy",
+            "number": "1",
+            "quantity": 1,
+            "set": "SVE"
+          },
+          {
+            "language": "en",
+            "name": "Fire Energy",
+            "number": "2",
+            "quantity": 1,
+            "set": "SVE"
+          },
+          {
+            "language": "en",
+            "name": "Psychic Energy",
+            "number": "5",
+            "quantity": 1,
+            "set": "SVE"
+          },
+          {
+            "language": "en",
+            "name": "Water Energy",
+            "number": "3",
+            "quantity": 1,
+            "set": "SVE"
+          },
+          {
+            "language": "en",
+            "name": "Fighting Energy",
+            "number": "6",
+            "quantity": 1,
+            "set": "SVE"
+          }
+        ],
+        "heading": "Energy (12)"
+      }
+    ]
+  },
+  "mass_entry": {
+    "source_href": "https://partner.tcgplayer.com/LIMITLESS?u=https%3A%2F%2Fwww.tcgplayer.com%2Fmassentry%3Fproductline%3DPokemon%26c%3D4-589955%7C%7C4-523818%7C%7C1-589954%7C%7C1-623525%7C%7C1-623524%7C%7C1-560348%7C%7C1-550139%7C%7C1-523666%7C%7C4-509778%7C%7C2-542660%7C%7C2-523852%7C%7C2-497544%7C%7C1-497557%7C%7C4-542659%7C%7C4-497562%7C%7C2-488087%7C%7C2-560372%7C%7C1-488105%7C%7C1-497560%7C%7C1-523841%7C%7C1-488102%7C%7C1-523844%7C%7C1-589933%7C%7C2-523859%7C%7C1-542677%7C%7C1-623577%7C%7C1-550197%7C%7C3-475432%7C%7C2-475428%7C%7C2-475431%7C%7C1-475425%7C%7C1-475426%7C%7C1-475427%7C%7C1-475429%7C%7C1-475430",
+    "destination_url": "https://www.tcgplayer.com/massentry?productline=Pokemon&c=4-589955||4-523818||1-589954||1-623525||1-623524||1-560348||1-550139||1-523666||4-509778||2-542660||2-523852||2-497544||1-497557||4-542659||4-497562||2-488087||2-560372||1-488105||1-497560||1-523841||1-488102||1-523844||1-589933||2-523859||1-542677||1-623577||1-550197||3-475432||2-475428||2-475431||1-475425||1-475426||1-475427||1-475429||1-475430",
+    "observed_prefilled_rows": 35,
+    "submitted": false,
+    "observed_named_rows": [
+      "1 Basic Grass Energy - 001 [SVE] 001",
+      "1 Basic Fire Energy - 002 [SVE] 002",
+      "1 Basic Water Energy - 003 [SVE] 003",
+      "2 Basic Lightning Energy - 004 [SVE] 004",
+      "1 Basic Psychic Energy - 005 [SVE] 005",
+      "1 Basic Fighting Energy - 006 [SVE] 006",
+      "2 Basic Darkness Energy - 007 [SVE] 007",
+      "3 Basic Metal Energy - 008 [SVE] 008",
+      "2 Nest Ball - 181/198 [SVI] 181/198",
+      "1 Switch [SVI] 194/198",
+      "1 Ultra Ball [SVI] 196/198",
+      "2 Boss's Orders - 172/193 [PAL] 172/193",
+      "1 Iono - 185/193 [PAL] 185/193",
+      "1 Super Rod - 188/193 [PAL] 188/193",
+      "4 Superior Energy Retrieval - 189/193 [PAL] 189/193",
+      "4 Arven [OBF] 186/197",
+      "1 Iron Bundle [PAR] 056/182",
+      "4 Gholdengo ex - 139/182 [PAR] 139/182",
+      "1 Counter Catcher [PAR] 160/182",
+      "1 Earthen Vessel [PAR] 163/182",
+      "2 Professor Turo's Scenario [PAR] 171/182",
+      "2 Technical Machine: Evolution [PAR] 178/182",
+      "4 Buddy-Buddy Poffin [TEF] 144/162",
+      "2 Ciphermaniac's Codebreaking - 145/162 [TEF] 145/162",
+      "1 Rescue Board [TEF] 159/162",
+      "1 Munkidori [TWM] 095/167",
+      "1 Jamming Tower [TWM] 153/167",
+      "1 Fezandipiti ex - 038/064 [SFA] 038/064",
+      "2 Night Stretcher [SFA] 061/064",
+      "1 Energy Search Pro [SSP] 176/191",
+      "1 Gholdengo [SSP] 131/191",
+      "4 Gimmighoul [SSP] 097/191",
+      "1 N's Zorua [JTG] 097/159",
+      "1 N's Zoroark ex - 098/159 [JTG] 098/159",
+      "1 Levincia [JTG] 150/159"
+    ],
+    "observation": "Initially quantity-productId rows; subsequently resolved readable names/set/numbers in editor after options panel dismissed. No cart submission."
+  },
+  "live_import": "not tested; owner requested similar Limitless deck comparison instead"
+}

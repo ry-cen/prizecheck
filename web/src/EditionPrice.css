@@ -1,0 +1,18 @@
+.edition-price {
+  display: block;
+  font-size: 0.85em;
+  color: #2c3a40;
+}
+.edition-price[data-price-status="checking"] {
+  color: #566;
+  font-style: italic;
+}
+.edition-price[data-price-status="quote"] strong {
+  color: #143e55;
+}
+.edition-price .price-refresh {
+  color: #566;
+}
+.edition-price .price-refresh[data-refresh="failed"] {
+  color: #7a3a14;
+}

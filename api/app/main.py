@@ -184,6 +184,8 @@ from .decks import router as decks_router  # noqa: E402
 app.include_router(decks_router)
 from .catalog_reconciliation import router as catalog_reconciliation_router  # noqa: E402
 app.include_router(catalog_reconciliation_router)
+from .metadata_reviews import router as metadata_reviews_router  # noqa: E402
+app.include_router(metadata_reviews_router)
 
 from .publications import router as publications_router  # noqa: E402
 app.include_router(publications_router)
@@ -194,13 +196,34 @@ app.include_router(discovery_router)
 from .operations import router as operations_router  # noqa: E402
 app.include_router(operations_router)
 
+from .prices import router as prices_router  # noqa: E402
+app.include_router(prices_router)
+from .deck_live_export import router as deck_live_export_router  # noqa: E402
+app.include_router(deck_live_export_router)
+from .deck_mass_entry import router as deck_mass_entry_router  # noqa: E402
+app.include_router(deck_mass_entry_router)
+from .deck_cost import router as deck_cost_router  # noqa: E402
+app.include_router(deck_cost_router)
+from .published_cost import router as published_cost_router  # noqa: E402
+app.include_router(published_cost_router)
+from .published_live_export import router as published_live_export_router  # noqa: E402
+app.include_router(published_live_export_router)
+from .published_mass_entry import router as published_mass_entry_router  # noqa: E402
+app.include_router(published_mass_entry_router)
+
+
+from .price_budget import is_budgeted  # noqa: E402
+
 
 @app.middleware('http')
 async def bounded_operational_counts(request: Request,call_next):
     started = time.perf_counter()
     response = await call_next(request)
     # Anonymous projection requests must never wake the private database.
-    if request.url.path.startswith('/api/') and not request.url.path.startswith('/api/public/') and request.url.path!='/api/health':
+    # Budgeted routes (prices) are exempt: this write is a synchronous PostgreSQL connect on the event loop before the
+    # response is sent, which would spend their three seconds and make a read route write.
+    if request.url.path.startswith('/api/') and not request.url.path.startswith('/api/public/') and request.url.path!='/api/health' \
+            and not is_budgeted(request.method, request.url.path):
         try:
             with connect() as conn:
                 conn.execute("""INSERT INTO operations_hour(hour,requests,failures,authorization_denials,elapsed_ms)
