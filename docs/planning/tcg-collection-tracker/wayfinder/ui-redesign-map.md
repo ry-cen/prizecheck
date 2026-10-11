@@ -19,6 +19,12 @@ An owner-agreed, spec-ready collector-workspace direction. This map indexes deci
 
 - [Decide collector workspace selection and presentation](https://github.com/ry-cen/tcg-tracker/issues/48) — Use small, separate visual tiles for fungible quantities, an aligned desktop toolbar, mobile Location and Filters & display drawers, contextual location creation, and minimal inspection/action surfaces; no durable per-copy identity is introduced.
 
+- [Decide atomic multi-source inventory operations](https://github.com/ry-cen/tcg-tracker/issues/49) — Resolved by the [collector workspace spec](../../collector-workspace/spec.md) ([issue](https://github.com/ry-cen/tcg-tracker/issues/79)): extend the existing manifest flow with a per-item source Storage Leaf, commit all-or-nothing to one destination, exclude copies already there, and restore every source with one atomic Undo.
+
+## Specification
+
+- [Collector workspace spec](../../collector-workspace/spec.md) ([Spec: Collector workspace](https://github.com/ry-cen/tcg-tracker/issues/79)), ready for implementation planning.
+
 ## Not yet specified
 
 - How this workspace extends to catalog search, reporting, publishing/discovery, pricing/export presentation, and owner controls.
