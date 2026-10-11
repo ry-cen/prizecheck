@@ -370,7 +370,10 @@ export function Workspace({ onOpenLocations, onSignOut }: Props) {
       {manageOpen && (
         <ManageLocations
           onClose={() => setManageOpen(false)}
-          onChanged={() => void loadTree()}
+          onChanged={() => {
+            void loadTree();
+            gallery.reload();
+          }}
         />
       )}
     </div>
