@@ -2,7 +2,7 @@
 
 **Status:** ready for implementation planning. A revision is expected once `feature/card-prices-and-deck-exports` merges into `dev` (see Further Notes).
 
-**Sources:** [Collector workspace selection and presentation](../tcg-collection-tracker/wayfinder/resolutions/29-decide-collector-workspace-selection-and-presentation.md) (product rules, owner-confirmed 2026-10-09), [ADR 0005](../../adr/0005-collector-workspace-multi-source-direction.md) (multi-source direction), the [collector workspace prototype](../tcg-collection-tracker/wayfinder/prototypes/collector-workspace/README.md) (Variant A), and the [UI redesign map](../tcg-collection-tracker/wayfinder/ui-redesign-map.md). This spec resolves [Decide atomic multi-source inventory operations](https://github.com/ry-cen/tcg-tracker/issues/49).
+**Sources:** [Collector workspace selection and presentation](../tcg-collection-tracker/wayfinder/resolutions/29-decide-collector-workspace-selection-and-presentation.md) (product rules, owner-confirmed 2026-10-09), [ADR 0005](../../adr/0005-collector-workspace-multi-source-direction.md) (multi-source direction), the [collector workspace prototype](../tcg-collection-tracker/wayfinder/prototypes/collector-workspace/README.md) (Variant A), and the [UI redesign map](../tcg-collection-tracker/wayfinder/ui-redesign-map.md). This spec resolves [Decide atomic multi-source inventory operations](https://github.com/ry-cen/prizecheck/issues/49).
 
 ## Problem Statement
 
@@ -168,7 +168,7 @@ The existing manifest flow is extended rather than replaced: start, stage in bou
 - **Preferences.** Sort, filters, card size and name visibility persist in browser storage per user on that device. Account-bound preferences are deferred. Search text and selection aren't persisted.
 - **Sidebar sizing.** The desktop sidebar is 212 px at every desktop width, Add child overlays the row end rather than reserving width, and names carry a hover title. Mobile header controls and Add child controls are at least 44 px tall, and the mobile header Location control is 44×44 px.
 - **Counts.** All copy, Card Edition, Location and selection counts use singular and plural forms.
-- **Visuals.** The visual presentation follows prototype Variant A (dark theme). The final responsive visual system is tracked separately in [Decide responsive visual system](https://github.com/ry-cen/tcg-tracker/issues/47) and doesn't block this work.
+- **Visuals.** The visual presentation follows prototype Variant A (dark theme). The final responsive visual system is tracked separately in [Decide responsive visual system](https://github.com/ry-cen/prizecheck/issues/47) and doesn't block this work.
 - **Prototype code.** The development-only prototype modules are removed once the production workspace lands. The production build must not include prototype code or styles.
 
 ### Prototype-derived shapes
@@ -211,8 +211,8 @@ type MovePreview = {
 - Durable per-copy records, copy IDs or copy-specific metadata.
 - Dedicated deck-building UI.
 - Account-bound display preferences (card size, name visibility, sort, filters persist only in the browser).
-- A broad light theme, and the final responsive visual system ([Decide responsive visual system](https://github.com/ry-cen/tcg-tracker/issues/47)).
-- Drag-to-reorder Locations and custom Location ordering ([Decide drag and Location ordering](https://github.com/ry-cen/tcg-tracker/issues/46)). The tree keeps today's ordering.
+- A broad light theme, and the final responsive visual system ([Decide responsive visual system](https://github.com/ry-cen/prizecheck/issues/47)).
+- Drag-to-reorder Locations and custom Location ordering ([Decide drag and Location ordering](https://github.com/ry-cen/prizecheck/issues/46)). The tree keeps today's ordering.
 - Extending the workspace to catalog search, reporting, publishing and discovery, pricing and export presentation, and owner controls.
 - Changes to Deck construction checks, Published Decks, or catalog import beyond storing category and elemental type.
 
