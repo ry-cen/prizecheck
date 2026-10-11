@@ -58,13 +58,17 @@ def test_a_new_deck_has_an_empty_deck_list_and_its_detail_is_private():
 def test_add_change_and_remove_lines_return_the_deck_list_with_in_deck_counts():
     owner, _, _, _, edition, generation = fixture()
     deck = create(owner).json()['location']['id']
-    assert add(owner, deck, edition, '3').status_code == 200
-    contents = call('GET', f'/api/decks/{deck}/contents', owner).json()
     not_owned = edition_like(edition, generation)
     added = add_line(owner, deck, edition, '4', 1)
     assert added.status_code == 200, added.text
     assert added.json() == {'deck_id': deck, 'deck_list': {'revision': 2, 'lines': [
-        {'edition_id': edition, 'quantity': '4', 'in_deck': '3'}]}}
+        {'edition_id': edition, 'quantity': '4', 'in_deck': '0'}]}}
+    # Copies the line already covers leave the Deck List and its revision alone (moves extending a list are in
+    # test_deck_list_moves.py).
+    assert add(owner, deck, edition, '3').status_code == 200
+    assert detail(owner, deck)['deck_list'] == {'revision': 2, 'lines': [
+        {'edition_id': edition, 'quantity': '4', 'in_deck': '3'}]}
+    contents = call('GET', f'/api/decks/{deck}/contents', owner).json()
     second = add_line(owner, deck, not_owned, '2', 2).json()['deck_list']
     assert second['revision'] == 3
     assert {line['edition_id']: (line['quantity'], line['in_deck']) for line in second['lines']} == {
@@ -184,9 +188,14 @@ def test_deck_list_checks_count_every_line_including_cards_not_owned():
     assert body['deck_list_checks']['identities'][0]['quantity'] == '5' and body['deck_list_checks']['identities'][0]['status'] == 'over_limit'
     assert body['checks']['total'] == '0'
     assert all(line['in_deck'] == '0' for line in body['deck_list']['lines'])
-    # Holdings that are not on the Deck List do not count.
+    # Adding copies to the Deck lists them; once that line is cut, the Holdings left off the Deck List do not count.
     unlisted = edition_like(first, generation)
     assert add(owner, deck, unlisted, '7').status_code == 200
+    listed = detail(owner, deck)['deck_list']
+    assert {'edition_id': unlisted, 'quantity': '7', 'in_deck': '7'} in listed['lines']
+    cut = remove_line(owner, deck, unlisted, listed['revision'])
+    assert cut.status_code == 200, cut.text
+    revision = cut.json()['deck_list']['revision']
     body = detail(owner, deck)
     assert body['deck_list_checks']['total'] == '5' and body['checks']['total'] == '7'
     # The 60-card check follows line quantities.
