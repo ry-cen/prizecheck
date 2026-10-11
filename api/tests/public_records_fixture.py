@@ -214,6 +214,9 @@ def serve_relay(config, connection, phase=None, reached=None):
 
     class Handler(BaseHTTPRequestHandler):
         protocol_version = 'HTTP/1.1'
+        # Headers and body go out as separate writes; with Nagle on, the body
+        # waits ~40 ms for the client's delayed ACK on every response.
+        disable_nagle_algorithm = True
 
         def log_message(self, *args):
             pass
