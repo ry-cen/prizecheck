@@ -50,7 +50,7 @@ promote({'card-1': 'Pikachu', **{f'card-{i}': f'Pikachu {i:02}' for i in range(2
     const checks = page.getByRole("region", { name: `Checks for ${name}` });
     await expect(checks).toContainText("0 cards · 60 cards short of 60");
     await expect(checks).toContainText(
-      "Basic deck checks only. Standard format eligibility, rotation, banned cards, and special card rules are not evaluated."
+      "Basic deck checks only. Format legality, including rotation and banned cards, is reported by the advisory format checks."
     );
     const holdings = page.getByRole("region", { name: `Cards in ${name}` });
     await holdings

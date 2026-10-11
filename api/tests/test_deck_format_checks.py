@@ -74,8 +74,9 @@ def test_a_legal_deck_is_standard_legal():
     body = format_checks(owner, deck, "?as_of=2026-10-11")
     assert body["deck_id"] == deck and body["deck_list_revision"] == 4
     assert isinstance(body["attribute_revision"], int) and body["disclaimer"].startswith("Advisory format checks")
-    assert body["results"] == [{"format": "standard", "status": "legal", "issues": [],
-                                "rules_version": "1 (2026-10-11)", "evaluated_on": "2026-10-11", "notes": []}]
+    assert [{**result, "computed_at": None} for result in body["results"]] == [
+        {"format": "standard", "status": "legal", "issues": [], "rules_version": "1 (2026-10-11)",
+         "evaluated_on": "2026-10-11", "notes": [], "computed_at": None}]
     assert format_checks(owner, deck, "?format=standard&as_of=2026-10-11") == body
 
 
@@ -112,7 +113,7 @@ def test_standard_legality_flips_on_the_2026_rotation_date():
     assert standard(owner, deck, "2026-04-09")["status"] == "legal"
     rotated = standard(owner, deck, "2026-04-10")
     assert rotated["status"] == "not_legal"
-    assert issues(rotated) == {("not_in_card_pool", "regulation mark G not legal in Standard on 2026-04-10", "card",
+    assert issues(rotated) == {("not_in_card_pool", "regulation mark G rotated out of Standard on 2026-04-10", "card",
                                 "not_legal", lines("sv01-172"))}
     before = standard(owner, deck, "2025-04-10")
     assert (before["status"], [issue["code"] for issue in before["issues"]]) == ("unknown", ["before_rules_coverage"])

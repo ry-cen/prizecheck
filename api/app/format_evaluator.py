@@ -6,6 +6,8 @@ reports is the file's revision and publication date.
 
 ``evaluate_format`` checks resolved Deck List lines against one format's rules on one date. Like the construction
 checks, it is pure: it reads no database and no network, so private Decks and, later, Published Decks share it.
+``rule_dates`` and ``next_rule_date`` say how long a result holds: it changes only on a rule date, so a saved result
+stays valid until the next one.
 
 Legality and bans follow Reprint Groups (``app.reprint_groups``). A Trainer or Energy printing that is not legal on its
 own is legal when any printing in its group is; a Pokémon printing is not, unless the rules set
@@ -15,6 +17,7 @@ A result is advisory. Any definite violation makes it ``not_legal``; otherwise a
 makes it ``unknown``; otherwise it is ``legal``. A gap is reported only when the missing fact could change the answer:
 an unknown ACE SPEC status matters only if it could put the deck over its ACE SPEC limit.
 """
+import bisect
 import hashlib
 import tomllib
 from collections import defaultdict
@@ -324,6 +327,36 @@ def format_rules(format_name: str) -> FormatRules:
     return rules
 
 
+def rule_dates(rules: FormatRules) -> tuple[date, ...]:
+    """Every date on which a result under ``rules`` can change, sorted: ``covers_from``, each regulation mark's
+    ``legal_from`` and ``rotates_on``, each set's ``legal_from``, and each ban's ``banned_from`` and ``lifted_on``.
+
+    The evaluator compares the check date only with these dates (``on < d`` or ``d <= on``) and no reason names the
+    check date, so two dates with no rule date between them get the same result apart from ``evaluated_on``. Saved
+    results rely on this. A rules field that adds a dated fact adds its dates here, and the window test in
+    test_format_evaluator.py checks every format's rules file.
+    """
+    dates = {rules.covers_from}
+    for mark in rules.marks.values():
+        dates.add(mark.legal_from)
+        if mark.rotates_on is not None:
+            dates.add(mark.rotates_on)
+    dates.update(set_rule.legal_from for set_rule in rules.sets.values())
+    for ban in rules.bans.values():
+        dates.add(ban.banned_from)
+        if ban.lifted_on is not None:
+            dates.add(ban.lifted_on)
+    return tuple(sorted(dates))
+
+
+def next_rule_date(rules: FormatRules, on: date) -> date | None:
+    """The first rule date after ``on``: a result for ``on`` holds on every date before it. None when no rule date
+    follows ``on``."""
+    dates = rule_dates(rules)
+    index = bisect.bisect_right(dates, on)
+    return dates[index] if index < len(dates) else None
+
+
 # ---------------------------------------------------------------------------------------------------------------------
 # Evaluator
 
@@ -412,8 +445,12 @@ def own_standing(printing: PrintingFacts, identity_name: str, rules: FormatRules
         elif mark not in rules.marks:
             gaps.append(Finding(REGULATION_MARK_NOT_IN_RULES, f"regulation mark {mark} not in rules", False))
         elif not rules.marks[mark].legal_on(on):
-            violations.append(Finding(NOT_IN_CARD_POOL, f"regulation mark {mark} not legal in {rules.name} on "
-                                                        f"{on.isoformat()}", True))
+            # The reason names a rule date, never the check date, so it holds until the next rule date.
+            window = rules.marks[mark]
+            reason = (f"regulation mark {mark} not legal in {rules.name} until {window.legal_from.isoformat()}"
+                      if on < window.legal_from else
+                      f"regulation mark {mark} rotated out of {rules.name} on {window.rotates_on.isoformat()}")
+            violations.append(Finding(NOT_IN_CARD_POOL, reason, True))
     if violations:
         if attributes.basic_energy is None and rules.basic_energy_always_legal:
             # A Basic Energy would be legal anyway, so an unknown Basic Energy status leaves the card unknown.

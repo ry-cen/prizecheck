@@ -3,15 +3,18 @@ Reprint Group legality and bans (Deck Lists 13, issue #94) use the same fixture 
 
 No database: these tests run with plain pytest (``PYTHONPATH=api .venv/bin/pytest api/tests/test_format_evaluator.py``).
 """
-from datetime import date
+from collections import defaultdict
+from datetime import date, timedelta
 from uuid import NAMESPACE_URL, uuid4, uuid5
+
+import pytest
 
 from app.card_attributes import UNKNOWN, CardAttributes
 from app.format_evaluator import (ACE_SPEC_LIMIT, ATTRIBUTE_UNKNOWN, BANNED, BEFORE_RULES_COVERAGE, COPY_LIMIT,
-                                  DECK_SIZE, NOT_IN_CARD_POOL, PRISM_STAR_LIMIT, RADIANT_LIMIT,
+                                  DECK_SIZE, FORMATS, NOT_IN_CARD_POOL, PRISM_STAR_LIMIT, RADIANT_LIMIT,
                                   REGULATION_MARK_NOT_IN_RULES, REGULATION_MARK_NOT_RECORDED, REPRINT_LEGALITY_UNKNOWN,
                                   RULES_FACT_UNSETTLED, SET_DATE_NOT_RECORDED, PrintingFacts, ResolvedLine,
-                                  evaluate_format, format_rules, load_rules)
+                                  evaluate_format, format_rules, load_rules, next_rule_date, rule_dates)
 
 RULES_TOML = b"""
 format = "standard"
@@ -225,10 +228,13 @@ def test_regulation_marks_are_legal_inside_their_window():
     g = line("Old Trainer", 4, mark="G")
     assert check(deck(g), date(2026, 4, 9)).status == "legal"
     result = check(deck(g), date(2026, 4, 10))
-    assert issues(result) == {(NOT_IN_CARD_POOL, "regulation mark G not legal in Standard on 2026-04-10", "card",
+    assert issues(result) == {(NOT_IN_CARD_POOL, "regulation mark G rotated out of Standard on 2026-04-10", "card",
                                "not_legal", edition(g))}
+    # Reasons name the rule date, never the check date, so a result holds until the next rule date.
+    assert issues(check(deck(g), date(2026, 5, 1))) == issues(result)
     j = line("New Trainer", 4, mark="J")
-    assert check(deck(j), date(2026, 3, 5)).status == "not_legal"
+    assert issues(check(deck(j), date(2026, 3, 5))) == {
+        (NOT_IN_CARD_POOL, "regulation mark J not legal in Standard until 2026-03-06", "card", "not_legal", edition(j))}
     assert check(deck(j), date(2026, 3, 6)).status == "legal"
     assert check(deck(line("Rotated", mark="F")), date(2025, 4, 11)).status == "not_legal"
 
@@ -327,6 +333,38 @@ def test_the_standard_rules_file_rotates_g_and_dates_its_sets():
     assert check(deck(energy(4, "Fairy Energy", set_id="xy1")), DAY, rules).status == "unknown"
 
 
+def test_the_next_rule_date_ends_a_results_window():
+    # The fixture's rule dates: 2023-04-14 (Old Set), 2025-04-11 (coverage, F, G, H), 2026-03-06 (J) and 2026-04-10
+    # (G rotates, New Set).
+    assert rule_dates(RULES) == (date(2023, 4, 14), date(2025, 4, 11), date(2026, 3, 6), date(2026, 4, 10))
+    assert next_rule_date(RULES, date(2020, 1, 1)) == date(2023, 4, 14)
+    assert next_rule_date(RULES, date(2026, 3, 5)) == date(2026, 3, 6)
+    assert next_rule_date(RULES, date(2026, 3, 6)) == date(2026, 4, 10)
+    assert next_rule_date(RULES, date(2026, 4, 9)) == date(2026, 4, 10)
+    assert next_rule_date(RULES, date(2026, 4, 10)) is None
+
+
+@pytest.mark.parametrize("name", FORMATS)
+def test_a_result_changes_only_on_a_rule_date(name):
+    """Saved results (Deck Lists 17) are reused until the next rule date, so every day before it must give the same
+    answer. A rules field that adds a dated fact without adding it to ``rule_dates`` fails here."""
+    rules = format_rules(name)
+    dates = rule_dates(rules)
+    earliest = min(rules.sets.values(), key=lambda set_rule: set_rule.legal_from).set_id
+    lines = [line(f"Trainer from {set_id}", set_id=set_id) for set_id in rules.sets]
+    lines += [line(f"Trainer marked {mark}", set_id=earliest, mark=mark) for mark in (*rules.marks, "Z", None)]
+    lines += [line(f"Trainer from {set_id}", set_id=set_id) for set_id in sorted(rules.excluded)[:1]]
+    lines += [line("Trainer from an unrecorded set", set_id="unrecorded"), energy(4)]
+    answers = defaultdict(set)
+    day = dates[0] - timedelta(days=7)
+    while day <= dates[-1] + timedelta(days=7):
+        result = check(lines, day, rules)
+        answers[next_rule_date(rules, day)].add((result.status, result.issues))
+        day += timedelta(days=1)
+    assert set(answers) == {*dates, None}
+    assert {until: len(found) for until, found in answers.items() if len(found) != 1} == {}
+
+
 VINTAGE = "not in the Standard card pool: printed before regulation marks"
 
 
@@ -352,7 +390,7 @@ def test_a_pokemon_is_legal_only_on_its_own_mark_unless_the_rules_allow_inherita
     rotated = printing("old", "101", mark="G", kind="pokemon")
     pikachu, groups = reprinted("Pikachu", 4, rotated, printing("old", "225", mark="H", kind="pokemon"))
     assert issues(check(deck(pikachu), groups=groups)) == {
-        (NOT_IN_CARD_POOL, "regulation mark G not legal in Standard on 2026-10-11", "card", "not_legal",
+        (NOT_IN_CARD_POOL, "regulation mark G rotated out of Standard on 2026-04-10", "card", "not_legal",
          edition(pikachu))}
     assert check(deck(pikachu), rules=INHERITING_RULES, groups=groups).status == "legal"
 
@@ -414,3 +452,8 @@ def test_a_ban_beats_legality_and_covers_pokemon_reprints_too():
     assert issues(check(deck(sableye), date(2026, 5, 1), BANNED_RULES, groups)) == {
         (BANNED, "banned in Standard from 2026-01-02 as an identical reprint of Banned Card (old 7)", "card",
          "not_legal", edition(sableye))}
+
+
+def test_ban_dates_are_rule_dates():
+    assert next_rule_date(BANNED_RULES, date(2026, 1, 1)) == date(2026, 1, 2)
+    assert next_rule_date(BANNED_RULES, date(2026, 5, 1)) == date(2026, 7, 3)

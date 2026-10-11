@@ -5,7 +5,8 @@ can enter public serialization through this evaluator.
 """
 from dataclasses import dataclass
 
-DISCLAIMER = 'Basic deck checks only. Standard format eligibility, rotation, banned cards, and special card rules are not evaluated.'
+DISCLAIMER = ('Basic deck checks only. Format legality, including rotation and banned cards, is reported by the '
+              'advisory format checks.')
 
 
 @dataclass(frozen=True)

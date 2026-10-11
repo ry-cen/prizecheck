@@ -12,6 +12,7 @@ from .holdings import parse_quantity
 from .location_tree import (TreeNode, LocationCommandResult, EditLocation, apply_edit, cleaned_name,
                             owner_and_rows, replay, check_name, store_result, error, node_model)
 from .deck_ownership import CompetitionWarning, LineOwnership, SurplusHolding, read_ownership
+from .deck_format_checks import DeckFormatChecks, command_format_checks
 
 router = APIRouter(prefix='/api/decks', tags=['decks'])
 from .construction_checks import DISCLAIMER, IdentityCount, evaluate_checks
@@ -91,6 +92,9 @@ class RemoveDeckListLine(BaseModel):
 class DeckListCommandResult(BaseModel):
     deck_id: UUID
     deck_list: DeckList
+    # The Deck's format results as of today (UTC) after the edit. A replay returns them as computed then; a response
+    # stored before format results existed has none, so it replays as null instead of failing validation.
+    format_checks: DeckFormatChecks | None = None
 
 
 class DeckDetail(BaseModel):
@@ -258,14 +262,27 @@ def line_exists(conn, user_id: str, deck_id: UUID, edition_id: UUID) -> bool:
                              (user_id, deck_id, edition_id)).fetchone())
 
 
-def store_deck_list_result(conn, user_id: str, deck_id: UUID, key: UUID, digest: str) -> dict:
-    """Advance the Deck List revision and keep the response for replay. The inventory revision does not move:
-    a Deck List never counts toward the Collection."""
+def advance_deck_list(conn, user_id: str, deck_id: UUID) -> dict:
+    """Advance the Deck List revision and return the fields every Deck List command response carries: the Deck List
+    and its format results, which are saved with the Deck. The inventory revision does not move: a Deck List never
+    counts toward the Collection."""
     conn.execute('UPDATE deck_list SET revision=revision+1 WHERE owner_id=%s AND deck_id=%s', (user_id, deck_id))
-    result = DeckListCommandResult(deck_id=deck_id, deck_list=read_deck_list(conn, user_id, deck_id)).model_dump(mode='json')
+    deck_list = read_deck_list(conn, user_id, deck_id)
+    return {'deck_id': deck_id, 'deck_list': deck_list,
+            'format_checks': command_format_checks(conn, user_id, deck_id, deck_list.revision)}
+
+
+def keep_response(conn, user_id: str, key: UUID, digest: str, result: BaseModel) -> dict:
+    """Store a Deck List command's response for replay and return it."""
+    response = result.model_dump(mode='json')
     conn.execute('INSERT INTO location_command(owner_id,request_key,request_digest,response) VALUES (%s,%s,%s,%s)',
-                 (user_id, key, digest, json.dumps(result)))
-    return result
+                 (user_id, key, digest, json.dumps(response)))
+    return response
+
+
+def store_deck_list_result(conn, user_id: str, deck_id: UUID, key: UUID, digest: str) -> dict:
+    """Advance the Deck List revision and keep the response for replay."""
+    return keep_response(conn, user_id, key, digest, DeckListCommandResult(**advance_deck_list(conn, user_id, deck_id)))
 
 
 @router.post('/{deck_id}/deck-list/lines', response_model=DeckListCommandResult)
