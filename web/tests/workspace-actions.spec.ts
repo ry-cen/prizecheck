@@ -742,6 +742,43 @@ test.describe("desktop", () => {
     expect(await focusedId(page)).toBe("ws-heading");
   });
 
+  test("a drag failure whose refresh empties the selection moves to the toast and focuses the heading", async ({
+    page,
+  }) => {
+    const { s, alpha, edition } = await seedAlphaAndDest(page, "Dragzero Abra");
+    const row = sidebar(page).getByRole("button", {
+      name: `0 Dest ${s}`,
+      exact: true,
+    });
+    await tiles(page).nth(0).click();
+    await expect(bar(page)).toContainText("1 copy selected");
+    // Another tab removes every copy of the selected Holding.
+    await sql(
+      `WITH changed AS (
+         UPDATE inventory_owner SET revision=revision+1
+         WHERE user_id=(SELECT owner_id FROM location WHERE id=$1) RETURNING revision
+       ) DELETE FROM holding WHERE location_id=$1 AND edition_id=$2`,
+      [alpha, edition]
+    );
+    const from = await center(tiles(page).nth(0));
+    const to = await center(row);
+    await page.mouse.move(from.x, from.y);
+    await page.mouse.down();
+    await page.mouse.move(to.x, to.y, { steps: 12 });
+    await page.mouse.up();
+    // The refresh empties the selection: the bar and Actions unmount, the failure stays on screen.
+    await expect(
+      page.getByText("Your Collection has no cards yet.")
+    ).toBeVisible();
+    await expect(bar(page)).toHaveCount(0);
+    const notice = page
+      .getByRole("status")
+      .filter({ hasText: "Nothing moved." });
+    await expect(notice).toContainText("Nothing moved.");
+    await expect(notice).not.toContainText("selection");
+    expect(await focusedId(page)).toBe("ws-heading");
+  });
+
   test("clearing the selection after a failure doesn't move the failure to the toast", async ({
     page,
   }) => {

@@ -193,14 +193,16 @@ export function describeFailure(
         `This ${noun} took too long to prepare. ${nothing}`,
         `Try again; ${kept.toLowerCase()}.`
       );
-    case "REPLAY_OUTCOME_UNAVAILABLE":
+    case "REPLAY_OUTCOME_UNAVAILABLE": {
+      const replayUnavailable = `The ${noun} may have already finished, and the cards have been refreshed. Review them before trying again.`;
       return {
-        text: `The ${noun} may have already finished, and the cards have been refreshed. Review them before trying again.`,
-        toastText: `The ${noun} may have already finished, and the cards have been refreshed. Review them before trying again.`,
+        text: replayUnavailable,
+        toastText: replayUnavailable,
         reloadGallery: true,
         reloadTree: true,
         retrySame: false,
       };
+    }
     default:
       return result(
         `The ${noun} couldn't be completed. ${nothing}`,

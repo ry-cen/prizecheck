@@ -232,7 +232,10 @@ export function useInventoryActions({
           if (surface === "bar") keepFocus("actions");
           live.current.reloadGallery();
         }
-        if (failure.reloadTree) void live.current.reloadTree();
+        // A reload after a failure refreshes the tree too, so the workspace catches up with the
+        // newest owner revision and no stale-collection banner (ticket 113) follows this message.
+        if (failure.reloadTree || failure.reloadGallery)
+          void live.current.reloadTree();
         if (surface === "dialog" && dialogRef.current)
           setDialogError(failure.text);
         else setBarError(failure.text);
@@ -480,12 +483,15 @@ export function useInventoryActions({
         failure.selection,
         new Map(listing.map((holding) => [holding.key, holding]))
       ).size === 0
-    )
+    ) {
       showToast({
         message: failure.toastText,
         entry: toastLive.current?.entry ?? null,
         unavailable: toastLive.current?.unavailable ?? false,
       });
+      // The bar and Actions unmount with the selection; focus would fall to <body>.
+      focusAfter.current = "heading";
+    }
     setBarError("");
     if (dialogRef.current && !busyRef.current) {
       focusAfter.current = "heading";
