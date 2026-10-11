@@ -610,4 +610,43 @@ test.describe("mobile", () => {
     await expect(tiles(page)).toHaveCount(15);
     await expectEditions(page, [...ALL].reverse());
   });
+
+  test("the drawer closes with Escape, the close button or the backdrop, returns focus to its opener and keeps the selection", async ({
+    page,
+  }) => {
+    promoteCatalog();
+    await signIn(page);
+    await seed(page);
+    const opener = page
+      .getByRole("banner")
+      .getByRole("button", { name: /^Filters & display/ });
+    const drawer = page.getByRole("dialog", { name: "Filters & display" });
+
+    await page.getByRole("button", { name: "Select", exact: true }).tap();
+    await tiles(page).nth(0).tap();
+    await expect(selectionBar(page)).toContainText("1 copy selected");
+
+    await opener.click();
+    await expect(drawer).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(drawer).toBeHidden();
+    await expect(opener).toBeFocused();
+    await expect(selectionBar(page)).toContainText("1 copy selected");
+
+    await opener.click();
+    await expect(drawer).toBeVisible();
+    await drawer
+      .getByRole("button", { name: "Close filters & display" })
+      .click();
+    await expect(drawer).toBeHidden();
+    await expect(opener).toBeFocused();
+    await expect(selectionBar(page)).toContainText("1 copy selected");
+
+    await opener.click();
+    await expect(drawer).toBeVisible();
+    await page.mouse.click(10, 400);
+    await expect(drawer).toBeHidden();
+    await expect(opener).toBeFocused();
+    await expect(selectionBar(page)).toContainText("1 copy selected");
+  });
 });

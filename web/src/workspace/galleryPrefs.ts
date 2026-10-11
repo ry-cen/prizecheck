@@ -74,6 +74,23 @@ export function parsePrefs(raw: string | null): GalleryPrefs {
   };
 }
 
+/** The text to store: the known preferences written over whatever is stored now, so keys a newer
+ * release added (at the top level, in `filters` or in `display`) survive this release's write. */
+export function mergePrefs(raw: string | null, prefs: GalleryPrefs): string {
+  let stored: Record<string, unknown> = {};
+  try {
+    stored = fields(JSON.parse(raw ?? "null"));
+  } catch {
+    stored = {};
+  }
+  return JSON.stringify({
+    ...stored,
+    ...prefs,
+    filters: { ...fields(stored.filters), ...prefs.filters },
+    display: { ...fields(stored.display), ...prefs.display },
+  });
+}
+
 function readPrefs(userId: string): GalleryPrefs {
   try {
     return parsePrefs(window.localStorage.getItem(prefsStorageKey(userId)));
@@ -89,9 +106,10 @@ export function useGalleryPrefs(userId: string) {
   const [prefs, setPrefs] = useState<GalleryPrefs>(() => readPrefs(userId));
   useEffect(() => {
     try {
+      const key = prefsStorageKey(userId);
       window.localStorage.setItem(
-        prefsStorageKey(userId),
-        JSON.stringify(prefs)
+        key,
+        mergePrefs(window.localStorage.getItem(key), prefs)
       );
     } catch {
       /* Preferences stay in memory for this visit. */

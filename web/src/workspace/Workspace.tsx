@@ -122,7 +122,7 @@ export function Workspace({ userId, onOpenLocations, onSignOut }: Props) {
   const selection = useSelection({
     holdings: gallery.holdings,
     status: gallery.status,
-    scope: selectionScope(galleryQuery),
+    scope: selectionScope({ ...galleryQuery, search: searchText.trim() }),
     mobile,
   });
   const locationPath = useCallback(

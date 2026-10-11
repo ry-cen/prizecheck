@@ -11,10 +11,9 @@ import {
   type GallerySort,
 } from "./galleryModel";
 import type { GalleryPrefs } from "./galleryPrefs";
+import { MOBILE_QUERY } from "./media";
 import "./GalleryControls.css";
 
-/** Matches MOBILE_QUERY in Workspace.tsx and the 760 px breakpoint in tokens.css. */
-const MOBILE_QUERY = "(max-width: 760px)";
 const FOCUSABLE =
   'button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex="-1"])';
 
