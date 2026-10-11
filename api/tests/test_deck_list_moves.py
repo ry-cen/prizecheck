@@ -1,10 +1,12 @@
 """Deck Lists follow Moves (ADR 0009): copies arriving in a Deck are covered by its Deck List, and copies leaving it
 never shrink the list. Exercised through the real Holding, Move, undo and reassignment routes over signed HTTP."""
 import os
+import time
 from concurrent.futures import ThreadPoolExecutor
 from uuid import uuid4
 
 import psycopg
+import pytest
 
 from test_deck_lists import add_line, change_line, detail, remove_line
 from test_decks import create
@@ -199,3 +201,45 @@ def test_holdings_written_without_the_current_routes_still_extend_the_deck_list(
         conn.execute('UPDATE holding SET quantity=quantity+3,version=version+1 WHERE owner_id=%s AND location_id=%s AND edition_id=%s',
                      (owner, deck, edition))
     assert deck_list(owner, deck) == (3, {edition: ('5', '5'), second: ('1', '1')})
+
+
+@pytest.mark.serial(reason='wall-clock: bounds the Deck List trigger statements at 25,000 Holdings')
+@pytest.mark.slow(reason='capacity: 25,000 Holdings in one Deck')
+def test_25000_holdings_extend_the_deck_list_after_plans_cached_from_empty_statements():
+    """The trigger's dangerous path (ticket 05 review). PL/pgSQL caches a trigger statement's plan for the session, so
+    the plans below come from empty transition tables; then one statement inserts 25,000 Holdings into a Deck and
+    another raises every one of them. Joining the transition tables took 31 s here, against 0.96 s for pairing rows by
+    aggregation (migration 027); the bound catches a return of the join."""
+    owner, _, _, _, edition, _ = fixture()
+    deck = create(owner).json()['location']['id']
+    upsert = """INSERT INTO holding(owner_id,location_id,edition_id,quantity,version)
+      SELECT %s,%s,e.id,1+e.n%%3,1 FROM unnest(%s::uuid[]) WITH ORDINALITY AS e(id,n)
+      ON CONFLICT (owner_id,location_id,edition_id)
+      DO UPDATE SET quantity=holding.quantity+EXCLUDED.quantity,version=holding.version+1"""
+    with psycopg.connect(os.environ['DATABASE_URL'], autocommit=True) as conn:
+        printing = conn.execute('SELECT printing_id FROM catalog_edition WHERE id=%s', (edition,)).fetchone()[0]
+        ids = [row[0] for row in conn.execute("""INSERT INTO catalog_edition(printing_id,descriptor_key,descriptor)
+          SELECT %s,'bulk-' || %s || '-' || n,'{}'::jsonb FROM generate_series(1,25000) AS n
+          RETURNING id""", (printing, str(uuid4()))).fetchall()]
+        # An empty INSERT ... ON CONFLICT DO UPDATE fires both statement triggers (holding_deck_list_insert and
+        # holding_deck_list_update). Seven calls pass PL/pgSQL's five custom plans, so later calls reuse a cached plan.
+        for _ in range(7):
+            conn.execute(upsert, (owner, deck, []))
+        started = time.monotonic()
+        conn.execute(upsert, (owner, deck, ids))
+        inserted = time.monotonic() - started
+        started = time.monotonic()
+        conn.execute('UPDATE holding SET quantity=quantity+1,version=version+1 WHERE owner_id=%s AND location_id=%s',
+                     (owner, deck))
+        raised = time.monotonic() - started
+    line = f'25,000 Holdings: insert {inserted:.2f} s, raise {raised:.2f} s (bound 10 s each)'
+    print(f'[deck-list-trigger] {line}')
+    if os.environ.get('TEST_LOG_DIR'):
+        with open(os.path.join(os.environ['TEST_LOG_DIR'], 'deck-list-trigger-metrics.log'), 'a') as log:
+            log.write(f"{time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} {line}\n")
+    assert inserted < 10 and raised < 10, (inserted, raised)
+    revision, lines = deck_list(owner, deck)
+    assert revision == 3 and len(lines) == 25000
+    # n = 12345 arrived with 1 + 12345 % 3 = 1 copy and was raised to 2: its line covers both.
+    assert lines[str(ids[12344])] == ('2', '2')
+    assert lines[str(ids[0])] == ('3', '3')

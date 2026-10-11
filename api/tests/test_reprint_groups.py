@@ -260,6 +260,26 @@ def test_a_pending_reference_review_keeps_the_established_group():
     assert groups_of(*all_ids()) == before
 
 
+def test_the_pending_review_query_reads_by_the_status_index():
+    """refresh_reprint_groups reads the Printings with a pending name or reference review once, with PENDING, instead
+    of looking reviews up per Printing: catalog_review has no printing_id index (Deck Lists 19, from #94). This checks
+    PENDING's plan: it is keyed by catalog_review_pending (its status prefix). Seq scans are priced out, as row counts
+    would at catalog scale. The pending-review tests above cover the behaviour."""
+    from app.reprint_groups import PENDING
+    with connect() as conn, conn.transaction():
+        conn.execute("SET LOCAL enable_seqscan=off")
+        plan = conn.execute("EXPLAIN (FORMAT JSON) " + PENDING).fetchone()["QUERY PLAN"][0]["Plan"]
+    keyed = []
+
+    def walk(node):
+        if node.get("Index Name") == "catalog_review_pending" and "status" in node.get("Index Cond", ""):
+            keyed.append(node["Node Type"])
+        for child in node.get("Plans", []):
+            walk(child)
+    walk(plan)
+    assert keyed, plan
+
+
 def test_rederiving_forms_groups_for_a_catalog_imported_before_reprint_groups():
     reset_catalog()
     run(Records(*CARDS))

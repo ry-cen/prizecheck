@@ -62,22 +62,30 @@ class DeckOwnership:
     competition: list[CompetitionWarning]
 
 
+def held_in(conn, user_id: str, deck_id: UUID) -> dict[UUID, int]:
+    """The Deck's Holdings: quantity by Edition."""
+    return {row['edition_id']: row['quantity'] for row in conn.execute(
+        'SELECT edition_id,quantity FROM holding WHERE owner_id=%s AND location_id=%s', (user_id, deck_id))}
+
+
 def read_ownership(conn, user_id: str, deck_id: UUID) -> DeckOwnership:
     """Read one Deck's ownership states.
 
     The caller holds the owner row lock (``owner_and_rows``), as every Holding and Deck List writer does, so all
     statements see the same Holdings and Deck Lists. Reads are bounded by this Deck's lines and Holdings, the owner's
     Holdings of the Editions it is short of, and the owner's Deck List lines naming those Editions.
+
+    The Deck's lines and Holdings are two primary-key range reads paired here, never a join: without fresh statistics
+    for a large Deck the planner estimated one row per side and joined them by filter, quadratic in the Deck's size
+    (96 ms per join at 1,000 lines; Deck Lists 19).
     """
-    lines = conn.execute("""SELECT l.edition_id,l.quantity,coalesce(h.quantity,0) AS held
-      FROM deck_list_line l LEFT JOIN holding h
-        ON h.owner_id=l.owner_id AND h.location_id=l.deck_id AND h.edition_id=l.edition_id
-      WHERE l.owner_id=%s AND l.deck_id=%s ORDER BY l.edition_id""", (user_id, deck_id)).fetchall()
-    surplus = conn.execute("""SELECT h.edition_id,h.quantity-coalesce(l.quantity,0) AS quantity
-      FROM holding h LEFT JOIN deck_list_line l
-        ON l.owner_id=h.owner_id AND l.deck_id=h.location_id AND l.edition_id=h.edition_id
-      WHERE h.owner_id=%s AND h.location_id=%s AND h.quantity>coalesce(l.quantity,0)
-      ORDER BY h.edition_id""", (user_id, deck_id)).fetchall()
+    holdings = held_in(conn, user_id, deck_id)
+    lines = [{**row, 'held': holdings.get(row['edition_id'], 0)} for row in conn.execute(
+        'SELECT edition_id,quantity FROM deck_list_line WHERE owner_id=%s AND deck_id=%s ORDER BY edition_id',
+        (user_id, deck_id))]
+    listed = {row['edition_id']: row['quantity'] for row in lines}
+    surplus = [{'edition_id': edition, 'quantity': quantity - listed.get(edition, 0)}
+               for edition, quantity in sorted(holdings.items()) if quantity > listed.get(edition, 0)]
     short = [row['edition_id'] for row in lines if row['quantity'] > row['held']]
     elsewhere: dict[UUID, list[dict]] = {}
     if short:

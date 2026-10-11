@@ -133,6 +133,13 @@ def group_id(identity_id, key: str) -> UUID:
     return uuid5(GROUP_NAMESPACE, f"{identity_id}:{key}")
 
 
+# The Printings with a pending name or reference review: read once per refresh through catalog_review_pending (its status
+# prefix). catalog_review has no printing_id index, so a per-Printing lookup would rescan the pending reviews for every
+# Printing of the catalog (Deck Lists 19, from #94).
+PENDING = """SELECT DISTINCT printing_id FROM catalog_review
+  WHERE status = 'pending' AND kind IN ('name_change', 'reference_change') AND printing_id IS NOT NULL"""
+
+
 def refresh_reprint_groups(conn, generation_id=None, printing_ids=None) -> int:
     """Re-derive the Reprint Group of every TCGdex Printing in a catalog generation (default: the active one) from its
     stored source record, inside the caller's transaction. ``printing_ids`` limits it to those Printings (a Card
@@ -149,9 +156,8 @@ def refresh_reprint_groups(conn, generation_id=None, printing_ids=None) -> int:
         if generation_id is None:
             return 0
     scope = None if printing_ids is None else [UUID(str(value)) for value in printing_ids]
+    pending = {row["printing_id"] for row in conn.execute(PENDING)}
     sources = conn.execute("""SELECT p.id AS printing_id, p.identity_id,
-        EXISTS (SELECT 1 FROM catalog_review r WHERE r.printing_id = p.id AND r.status = 'pending'
-                AND r.kind IN ('name_change', 'reference_change')) AS pending,
         (SELECT coalesce(jsonb_object_agg(f.key, f.value), '{}'::jsonb) FROM jsonb_each(m.source_record) f
          WHERE f.key = ANY(%s)) AS fields
       FROM catalog_generation_printing gp
@@ -165,7 +171,7 @@ def refresh_reprint_groups(conn, generation_id=None, printing_ids=None) -> int:
           WHERE %s::uuid[] IS NULL OR printing_id = ANY(%s::uuid[])""", (scope, scope))}
     kept, wanted = set(), {}
     for source in sources:
-        if source["pending"]:
+        if source["printing_id"] in pending:
             kept.add(source["printing_id"])
             continue
         texts = RULES.rules_text(source["fields"])

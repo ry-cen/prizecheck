@@ -358,7 +358,7 @@ def test_a_rule_input_change_suspends_only_the_affected_printing_and_its_marketp
     assert {row["mapping_revision"] for row in rows_one.values()} == {2}
 
 
-def test_source_enrichment_the_rules_never_read_closes_nothing_and_publishes_nothing():
+def test_source_enrichment_the_rules_never_read_closes_nothing_and_republishes_only_format_facts():
     reset_catalog(); activate(MATCHING, 1); activate(LIVE, 99)
     run(Records(card(1)))
     before, rows = metadata()

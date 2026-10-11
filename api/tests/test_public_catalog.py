@@ -521,3 +521,25 @@ def test_format_facts_reader_fails_closed_on_missing_or_malformed_records():
         assert format_facts(store, [pref], deadline())[pref] is None, broken
     swap({key: good})
     assert format_facts(store, [pref], deadline())[pref].attributes == facts.attributes
+
+
+def test_a_reprint_group_longer_than_readers_accept_is_published_with_a_warning(monkeypatch, caplog):
+    """The writer publishes every member, but a reader refuses a list over MAX_REPRINT_PRINTINGS and the group's
+    printings check as unknown publicly, so the writer logs the group (Deck Lists 19, from #99)."""
+    from app import public_catalog
+    from app.card_attributes import ATTRIBUTE_COLUMNS
+    monkeypatch.setattr(public_catalog, 'MAX_REPRINT_PRINTINGS', 2)
+    row = {'printing_ref': 'a' * 48, 'public_revision': 3, 'format_set_id': 'sv01', 'format_collector_number': '191',
+           'identity_key': 'rare-candy', 'identity_name': 'Rare Candy', 'reprint_group_id': 'f' * 32,
+           **{column: None for column in ATTRIBUTE_COLUMNS}}
+    for count, warned in ((2, False), (3, True)):
+        printings = sorted('%048x' % n for n in range(count))
+        caplog.clear()
+        with caplog.at_level('WARNING', logger='app.public_catalog'):
+            value = public_catalog.format_value({**row, 'reprint_printings': printings})
+        assert value['reprint_group']['printings'] == printings      # published whole either way
+        ref = value['reprint_group']['ref']
+        warnings = [record.getMessage() for record in caplog.records if record.levelname == 'WARNING']
+        assert warnings == ([f'Reprint Group {ref} has 3 printings, more than the 2 a public reader accepts: its '
+                             'printings check as unknown on Published Decks'] if warned else []), warnings
+        assert (public_catalog._format(row['printing_ref'], value, None) is None) is warned
