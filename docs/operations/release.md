@@ -25,6 +25,19 @@ A private SHA256 receipt binds the exact commit, selected ref, files, previous c
 
 Inject DATABASE_URL, INTERNAL_AUTH_SECRET, BETTER_AUTH_SECRET, OWNER_EMAIL, MAIL_MODE/MAIL_FILE or the mail adapter configuration, PUBLIC_PROJECTION_DIR, and a private RELEASE_CONTROL_KEY of at least 32 characters. Initialize the projection store explicitly with `scripts/init_public_projection.py`, which also initializes the shared public records store. For an install that already has a publication store but no shared records, run only `scripts/init_public_records.py`. It leaves the publication/discovery manifest untouched, is idempotent, and exits 1 without changes if established records are missing or corrupt or a legacy records store holds data (restore from backup). With `PUBLIC_PROJECTION_ADAPTER=http` both scripts call the relay's `initialize` action, so the deployment-owned relay defines its own upgrade behavior (see `docs/http-public-projection.md`). After initializing records on an existing install, run `scripts/backfill_public_catalog.py` once; catalog imports and approvals publish their catalog records best effort, and rerunning the backfill repairs any missed writes (it exits 1 when the store or database is unreachable, and 3 when another drain still holds the delivery lock; retry in the second case). Dependencies must match the gated fingerprint; changing the runtime requires a fresh gate in that environment.
 
+Card attributes (migration 026) have no fallback to the old source energy type: a Printing has a Basic Energy status only once its attributes are derived from its stored catalog source record. Every catalog import derives them, but a catalog imported before 026 has none. When activating the first release that contains `migrations/026_card_attributes.sql`, run the candidate's scripts with the gated runtime's Python and the runtime's `DATABASE_URL` first, then activate:
+
+```sh
+cd /private/release-store/FULL_GATED_COMMIT
+/private/installed-runtime/.venv/bin/python scripts/migrate.py
+/private/installed-runtime/.venv/bin/python scripts/derive_card_attributes.py
+cd - && .venv/bin/python scripts/release.py activate \
+  --store /private/release-store --runtime /private/installed-runtime \
+  --runtime-url http://127.0.0.1:5173 --commit FULL_GATED_COMMIT
+```
+
+The previous release keeps serving meanwhile; it ignores the new tables, and `activate` then finds no migration left to apply. The derivation fetches nothing and takes about a second for the whole catalog. It exits 3 without changes while a catalog import is running (retry when the import has finished) and 1 when the database is unreachable; rerunning it changes nothing. Skipping it leaves every existing Printing's attributes unknown until the next catalog import: Deck checks report the Basic Energy exemption as unresolved for every card, and a Deck published during that gap freezes those unresolved checks into its Published Deck until the owner republishes it.
+
 The bundled adapter binds only loopback, uses local HTTP/development cookies and serves a real FastAPI process, Better Auth gateway and built SPA. Run it in the foreground under a supervisor:
 
 ```sh

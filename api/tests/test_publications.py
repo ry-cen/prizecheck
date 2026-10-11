@@ -270,12 +270,13 @@ def test_private_and_public_checks_share_rules_without_private_identity_serializ
     owner,_,_,_,edition,generation=fixture()
     deck=create(owner,'Private rules fixture').json()['location']['id']
     list_cards(owner,deck,{edition:5})
-    for classification,status in [('not_basic','over_limit'),('unresolved','unresolved'),('supported','basic_energy_exempt')]:
+    # Both read the Basic Energy card attribute (migration 026).
+    for basic_energy,status in [(False,'over_limit'),(None,'unresolved'),(True,'basic_energy_exempt')]:
         with psycopg.connect(os.environ['DATABASE_URL']) as conn:
-            conn.execute('UPDATE catalog_generation_printing SET basic_energy=%s WHERE generation_id=%s',(classification,generation))
+            conn.execute('UPDATE catalog_derived_attribute SET basic_energy=%s WHERE printing_id=(SELECT printing_id FROM catalog_edition WHERE id=%s)',(basic_energy,edition))
         # Publication checks the Deck List, so the private Deck List checks are the comparison.
         private=call('GET',f'/api/decks/{deck}',owner).json()['deck_list_checks']
-        publication=command(owner,deck,'POST' if classification=='not_basic' else 'PUT').json()
+        publication=command(owner,deck,'POST' if basic_energy is False else 'PUT').json()
         public=client.get(f"/api/public/decks/{publication['token']}").json()['checks']
         expected={'size_status':'shortage','shortage':'55','excess':'0'}
         assert {key:private[key] for key in expected}==expected
