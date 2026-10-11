@@ -38,6 +38,7 @@ import { indexLocations } from "./locationTree";
 import { MOBILE_QUERY, useMediaQuery } from "./media";
 import { SelectionBar } from "./SelectionBar";
 import { selectedGroups, selectionScope } from "./selectionModel";
+import { StaleBanner } from "./StaleBanner";
 import { DragBadge, useTileDrag } from "./tileDrag";
 import { UndoToast } from "./UndoToast";
 import { useDebouncedValue } from "./useDebouncedValue";
@@ -45,6 +46,7 @@ import { useGalleryData } from "./useGalleryData";
 import { useInventoryActions } from "./useInventoryActions";
 import { useOwnedSets } from "./useOwnedSets";
 import { useSelection } from "./useSelection";
+import { useStaleCollection } from "./useStaleCollection";
 import { clearLinkedLocation, readLinkedLocation } from "./workspaceLink";
 import "./Workspace.css";
 
@@ -92,14 +94,20 @@ export function Workspace({ userId, onOpenLocations, onSignOut }: Props) {
   const drawerOpener = useRef<HTMLButtonElement>(null);
   const drawerRef = useRef<HTMLDivElement>(null);
 
+  // Reloads can overlap (Reload, an action, Manage locations); only the newest one's answer lands,
+  // so an older tree never replaces a newer one.
+  const treeGeneration = useRef(0);
   const loadTree = useCallback(async () => {
+    const generation = ++treeGeneration.current;
     setTreeState("loading");
     try {
       const result = await getLocationTree();
+      if (generation !== treeGeneration.current) return;
       setNodes(result.locations);
       setOwnerRevision(result.owner_revision);
       setTreeState("ready");
     } catch {
+      if (generation !== treeGeneration.current) return;
       setTreeState("error");
     }
   }, []);
@@ -146,6 +154,22 @@ export function Workspace({ userId, onOpenLocations, onSignOut }: Props) {
     index,
     selection,
     onDrop: actions.dropMove,
+  });
+  // Ticket 113: the stale-collection banner. Changes made elsewhere show a banner with Reload;
+  // nothing refreshes by itself.
+  const staleness = useStaleCollection({
+    userId,
+    galleryRevision: gallery.ownerRevision,
+    galleryStatus: gallery.status,
+    holdings: gallery.holdings,
+    galleryKey,
+    reloadGallery: gallery.reload,
+    treeRevision: ownerRevision,
+    treeReady: treeState === "ready",
+    reloadTree: loadTree,
+    selected: selection.selected,
+    clearSelection: actions.clearSelection,
+    busy: actions.busy,
   });
   const locationPath = useCallback(
     (id: string) => (index.byId.has(id) ? index.path(id) : undefined),
@@ -417,6 +441,13 @@ export function Workspace({ userId, onOpenLocations, onSignOut }: Props) {
                 />
               </section>
             )}
+            <StaleBanner
+              stale={staleness.stale}
+              note={staleness.note}
+              busy={actions.busy}
+              onReload={staleness.reload}
+              onDismissNote={staleness.dismissNote}
+            />
             <div className="ws-gallery-layout">
               <Gallery
                 data={gallery}

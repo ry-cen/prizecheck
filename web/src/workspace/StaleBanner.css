@@ -1,0 +1,73 @@
+/* Collector workspace stale-collection banner (ticket 113): a slim strip above the gallery that
+   stays in view while the gallery scrolls. Every colour, space, radius and size comes from
+   web/src/tokens.css. No colour literals. The message is text, never colour alone. */
+.ws-stale {
+  position: sticky;
+  top: 0;
+  z-index: var(--layer-sticky);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-3);
+  padding: var(--space-1) var(--space-1) var(--space-1) var(--space-4);
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-panel);
+  background: var(--color-surface-raised);
+  box-shadow: 0 var(--space-1) var(--space-4) var(--color-shadow);
+}
+/* Idle: no box, and the status line below is visually hidden but still announced when filled. */
+.ws-stale-idle {
+  position: static;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+}
+.ws-stale-text {
+  flex: 1 1 auto;
+  margin: 0;
+  font-size: var(--font-size-sm);
+}
+.ws-stale-text:empty {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.ws-root .ws-stale-reload {
+  flex: 0 0 auto;
+  height: var(--control-height);
+  padding-top: 0;
+  padding-bottom: 0;
+  border-color: var(--color-accent-border);
+  color: var(--color-accent-strong);
+  font-weight: 600;
+}
+.ws-root .ws-stale-reload[aria-disabled="true"] {
+  cursor: default;
+  opacity: 0.6;
+}
+.ws-root .ws-stale-dismiss {
+  flex: 0 0 auto;
+  width: var(--control-height);
+  height: var(--control-height);
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  color: var(--color-text-muted);
+}
+@media (max-width: 760px) {
+  .ws-stale {
+    padding-left: var(--space-3);
+  }
+  .ws-root .ws-stale-reload,
+  .ws-root .ws-stale-dismiss {
+    height: var(--target-touch);
+  }
+  .ws-root .ws-stale-dismiss {
+    width: var(--target-touch);
+  }
+}
