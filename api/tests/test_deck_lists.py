@@ -273,3 +273,208 @@ def test_migration_converts_each_existing_deck_from_its_holdings(monkeypatch):
     finally:
         with psycopg.connect(admin, autocommit=True) as conn:
             conn.execute(sql.SQL('DROP DATABASE IF EXISTS {} WITH (FORCE)').format(sql.Identifier(name)))
+
+
+# Ownership states (ticket 04). Each test adds a Deck List line before putting copies into that Deck, and makes
+# surplus only by cutting or removing lines, so Moves that extend Deck Lists (ticket 05) leave these cases unchanged.
+def deck_revision(owner, deck):
+    return detail(owner, deck)['deck_list']['revision']
+
+
+def put_line(owner, deck, edition, quantity):
+    response = add_line(owner, deck, edition, quantity, deck_revision(owner, deck))
+    assert response.status_code == 200, response.text
+
+
+def states(body):
+    return {line['edition_id']: (line['quantity'], line['in_deck'], line['elsewhere'], line['not_owned'])
+            for line in body['ownership']}
+
+
+def places(body, edition):
+    line = next(line for line in body['ownership'] if line['edition_id'] == edition)
+    return [(entry['location_id'], entry['name'], entry['kind'], entry['quantity']) for entry in line['locations']]
+
+
+def test_each_line_splits_into_in_this_deck_elsewhere_and_not_owned_from_current_holdings():
+    owner, _, unsorted, _, edition, generation = fixture()
+    binder = leaf(owner)
+    deck = create(owner).json()['location']['id']
+    missing, built = edition_like(edition, generation), edition_like(edition, generation)
+    put_line(owner, deck, edition, '4')
+    put_line(owner, deck, missing, '2')
+    put_line(owner, deck, built, '3')
+    for location, held, quantity in ((deck, edition, '1'), (binder, edition, '2'), (deck, built, '3'), (binder, built, '5')):
+        assert add(owner, location, held, quantity).status_code == 200
+    body = detail(owner, deck)
+    assert states(body) == {edition: ('4', '1', '2', '1'), missing: ('2', '0', '0', '2'), built: ('3', '3', '0', '0')}
+    assert [(line['edition_id'], line['in_deck']) for line in body['ownership']] == [
+        (line['edition_id'], line['in_deck']) for line in body['deck_list']['lines']]
+    assert places(body, edition) == [(binder, 'Binder', 'storage_leaf', '2')]
+    # Only a line that still needs copies names other Locations.
+    assert places(body, missing) == places(body, built) == []
+    assert body['surplus'] == [] and body['competition'] == []
+    # Ownership is detail-only: Deck List lines keep their shape.
+    assert all(set(line) == {'edition_id', 'quantity', 'in_deck'} for line in body['deck_list']['lines'])
+    # Every read follows current Holdings; the Deck List itself does not change.
+    revision = body['deck_list']['revision']
+    assert add(owner, unsorted, edition, '5').status_code == 200
+    assert add(owner, unsorted, missing, '1').status_code == 200
+    body = detail(owner, deck)
+    assert states(body) == {edition: ('4', '1', '3', '0'), missing: ('2', '0', '1', '1'), built: ('3', '3', '0', '0')}
+    assert places(body, edition) == [(binder, 'Binder', 'storage_leaf', '2'), (unsorted, 'Unsorted', 'storage_leaf', '5')]
+    assert places(body, missing) == [(unsorted, 'Unsorted', 'storage_leaf', '1')]
+    # Spare copies that only this Deck counts raise no warning, even when the line stays partly not owned.
+    assert body['competition'] == []
+    assert body['deck_list']['revision'] == revision
+
+
+def test_elsewhere_names_each_other_location_including_decks_but_never_another_owners():
+    owner, other, _, other_leaf, edition, _ = fixture()
+    deck = create(owner).json()['location']['id']
+    attic, binder = leaf(owner, 'attic box'), leaf(owner, 'Binder')
+    other_deck = create(owner, 'Other Deck').json()['location']['id']
+    put_line(owner, deck, edition, '10')
+    put_line(owner, other_deck, edition, '3')
+    for location, quantity in ((binder, '1'), (attic, '2'), (other_deck, '3')):
+        assert add(owner, location, edition, quantity).status_code == 200
+    theirs = create(other).json()['location']['id']
+    put_line(other, theirs, edition, '4')
+    assert add(other, other_leaf, edition, '6').status_code == 200
+    body = detail(owner, deck)
+    assert states(body) == {edition: ('10', '0', '6', '4')}
+    # Locations sort by case-insensitive name, then id; kind tells loose storage from Decks.
+    assert places(body, edition) == [(attic, 'attic box', 'storage_leaf', '2'), (binder, 'Binder', 'storage_leaf', '1'),
+                                     (other_deck, 'Other Deck', 'deck', '3')]
+    # Other Deck's copies cover its own line, so only 3 of the 6 copies counted elsewhere are spare.
+    assert body['competition'] == [{'edition_id': edition, 'spare': '3', 'counted_elsewhere': '6',
+                                    'decks': [{'deck_id': other_deck, 'name': 'Other Deck', 'in_deck': '3',
+                                               'elsewhere': '0'}]}]
+    assert detail(owner, other_deck)['competition'] == []
+    theirs_body = detail(other, theirs)
+    assert states(theirs_body) == {edition: ('4', '0', '4', '0')}
+    assert places(theirs_body, edition) == [(other_leaf, 'Unsorted', 'storage_leaf', '6')]
+    assert theirs_body['competition'] == []
+
+
+def test_surplus_shows_held_copies_beyond_the_deck_list_after_cuts():
+    owner, _, _, _, edition, generation = fixture()
+    deck = create(owner).json()['location']['id']
+    cut = edition_like(edition, generation)
+    put_line(owner, deck, edition, '5')
+    put_line(owner, deck, cut, '2')
+    assert add(owner, deck, edition, '5').status_code == 200
+    assert add(owner, deck, cut, '2').status_code == 200
+    contents = call('GET', f'/api/decks/{deck}/contents', owner).json()
+    assert detail(owner, deck)['surplus'] == []
+    # Cutting a quantity below the held copies leaves the rest as surplus; the line itself is complete.
+    assert change_line(owner, deck, edition, '2', deck_revision(owner, deck)).status_code == 200
+    body = detail(owner, deck)
+    assert body['surplus'] == [{'edition_id': edition, 'quantity': '3'}]
+    assert states(body)[edition] == ('2', '2', '0', '0')
+    # Removing a line makes every held copy of it surplus.
+    assert remove_line(owner, deck, cut, deck_revision(owner, deck)).status_code == 200
+    body = detail(owner, deck)
+    assert body['surplus'] == sorted([{'edition_id': edition, 'quantity': '3'}, {'edition_id': cut, 'quantity': '2'}],
+                                     key=lambda row: row['edition_id'])
+    assert set(states(body)) == {edition}
+    # Cuts never move cards.
+    assert call('GET', f'/api/decks/{deck}/contents', owner).json() == contents
+    # Raising the line again absorbs its surplus.
+    assert change_line(owner, deck, edition, '9', deck_revision(owner, deck)).status_code == 200
+    body = detail(owner, deck)
+    assert body['surplus'] == [{'edition_id': cut, 'quantity': '2'}]
+    assert states(body)[edition] == ('9', '5', '0', '4')
+
+
+def test_ownership_matches_the_exact_card_edition():
+    owner, _, _, _, unspecified, generation = fixture()
+    deck = create(owner).json()['location']['id']
+    specific = edition_like(unspecified, generation)
+    put_line(owner, deck, unspecified, '2')
+    assert add(owner, deck, unspecified, '2').status_code == 200
+    assert remove_line(owner, deck, unspecified, deck_revision(owner, deck)).status_code == 200
+    put_line(owner, deck, specific, '2')
+    body = detail(owner, deck)
+    # Unspecified Variant copies of the same Printing do not fill a line naming another variant.
+    assert states(body) == {specific: ('2', '0', '0', '2')}
+    assert body['surplus'] == [{'edition_id': unspecified, 'quantity': '2'}]
+
+
+def test_decks_short_of_the_same_spare_copies_are_warned_and_nothing_is_reserved():
+    owner, other, _, _, edition, _ = fixture()
+    binder = leaf(owner)
+    first, second, built, retired = (create(owner, name).json()['location']['id']
+                                     for name in ('Deck A', 'Deck B', 'Deck C', 'Deck D'))
+    # Deck C holds the one copy its line wants, so that copy is not spare.
+    put_line(owner, built, edition, '1')
+    assert add(owner, built, edition, '1').status_code == 200
+    assert add(owner, binder, edition, '3').status_code == 200
+    put_line(owner, first, edition, '2')
+    put_line(owner, second, edition, '2')
+    # Another owner short of the same Edition never competes.
+    put_line(other, create(other).json()['location']['id'], edition, '9')
+    first_body, second_body = detail(owner, first), detail(owner, second)
+    # Both Decks count the same copies elsewhere: nothing is reserved.
+    assert states(first_body) == states(second_body) == {edition: ('2', '0', '2', '0')}
+    deck_c = {'deck_id': built, 'name': 'Deck C', 'in_deck': '1', 'elsewhere': '0'}
+    assert first_body['competition'] == [{'edition_id': edition, 'spare': '3', 'counted_elsewhere': '4', 'decks': [
+        {'deck_id': second, 'name': 'Deck B', 'in_deck': '0', 'elsewhere': '2'}, deck_c]}]
+    assert second_body['competition'] == [{'edition_id': edition, 'spare': '3', 'counted_elsewhere': '4', 'decks': [
+        {'deck_id': first, 'name': 'Deck A', 'in_deck': '0', 'elsewhere': '2'}, deck_c]}]
+    # A Deck that is not short is never warned.
+    assert detail(owner, built)['competition'] == []
+    # A copy Deck D holds beyond its Deck List is spare, and four spare copies cover both Decks' counts.
+    put_line(owner, retired, edition, '1')
+    assert add(owner, retired, edition, '1').status_code == 200
+    assert remove_line(owner, retired, edition, deck_revision(owner, retired)).status_code == 200
+    first_body, second_body = detail(owner, first), detail(owner, second)
+    assert first_body['competition'] == second_body['competition'] == []
+    assert states(first_body) == states(second_body) == {edition: ('2', '0', '2', '0')}
+
+
+def test_copies_another_deck_holds_for_its_own_list_are_never_spare():
+    owner, _, _, _, edition, _ = fixture()
+    built, planned = (create(owner, name).json()['location']['id'] for name in ('Deck X', 'Deck Y'))
+    put_line(owner, built, edition, '2')
+    assert add(owner, built, edition, '2').status_code == 200
+    put_line(owner, planned, edition, '2')
+    body = detail(owner, planned)
+    # Deck Y counts Deck X's copies as elsewhere, and the warning says that taking them leaves nothing spare.
+    assert states(body) == {edition: ('2', '0', '2', '0')}
+    assert places(body, edition) == [(built, 'Deck X', 'deck', '2')]
+    assert body['competition'] == [{'edition_id': edition, 'spare': '0', 'counted_elsewhere': '2', 'decks': [
+        {'deck_id': built, 'name': 'Deck X', 'in_deck': '2', 'elsewhere': '0'}]}]
+    assert detail(owner, built)['competition'] == []
+
+
+def test_short_decks_counting_a_built_decks_copies_are_each_warned():
+    owner, _, _, _, edition, _ = fixture()
+    first, second, built = (create(owner, name).json()['location']['id'] for name in ('Deck A', 'Deck B', 'Deck C'))
+    put_line(owner, built, edition, '2')
+    assert add(owner, built, edition, '2').status_code == 200
+    put_line(owner, first, edition, '2')
+    put_line(owner, second, edition, '2')
+    deck_c = {'deck_id': built, 'name': 'Deck C', 'in_deck': '2', 'elsewhere': '0'}
+    for mine, theirs, name in ((first, second, 'Deck B'), (second, first, 'Deck A')):
+        body = detail(owner, mine)
+        assert states(body) == {edition: ('2', '0', '2', '0')}
+        assert body['competition'] == [{'edition_id': edition, 'spare': '0', 'counted_elsewhere': '4', 'decks': [
+            {'deck_id': theirs, 'name': name, 'in_deck': '0', 'elsewhere': '2'}, deck_c]}]
+    assert detail(owner, built)['competition'] == []
+
+
+def test_ownership_counts_stay_exact_beyond_the_bigint_range():
+    owner, _, unsorted, _, edition, _ = fixture()
+    binder = leaf(owner)
+    most = '9223372036854775807'
+    first, second = (create(owner, name).json()['location']['id'] for name in ('Deck A', 'Deck B'))
+    put_line(owner, first, edition, most)
+    put_line(owner, second, edition, most)
+    assert add(owner, binder, edition, most).status_code == 200
+    assert add(owner, unsorted, edition, '1').status_code == 200
+    body = detail(owner, first)
+    assert states(body) == {edition: (most, '0', most, '0')}
+    assert body['competition'] == [{'edition_id': edition, 'spare': '9223372036854775808',
+                                    'counted_elsewhere': '18446744073709551614',
+                                    'decks': [{'deck_id': second, 'name': 'Deck B', 'in_deck': '0', 'elsewhere': most}]}]

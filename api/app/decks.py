@@ -11,6 +11,7 @@ from .main import connect, verified_user
 from .holdings import parse_quantity
 from .location_tree import (TreeNode, LocationCommandResult, EditLocation, apply_edit, cleaned_name,
                             owner_and_rows, replay, check_name, store_result, error, node_model)
+from .deck_ownership import CompetitionWarning, LineOwnership, SurplusHolding, read_ownership
 
 router = APIRouter(prefix='/api/decks', tags=['decks'])
 from .construction_checks import DISCLAIMER, IdentityCount, evaluate_checks
@@ -98,6 +99,11 @@ class DeckDetail(BaseModel):
     # The same basic checks over the Deck List lines, owned or not; ``checks`` still reads the Deck's Holdings.
     deck_list_checks: DeckChecks
     deck_list: DeckList
+    # Ownership states of each Deck List line, Holdings beyond the Deck List, and copies counted elsewhere by more
+    # than one Deck. Computed from current Holdings on every read and never stored.
+    ownership: list[LineOwnership]
+    surplus: list[SurplusHolding]
+    competition: list[CompetitionWarning]
     owner_revision: int
     catalog_revision: int
 
@@ -227,10 +233,12 @@ def deck_detail(deck_id: UUID, user_id: str = Depends(verified_user)):
         deck = require_deck(rows, deck_id)
         state = conn.execute('SELECT active_generation,revision FROM catalog_state WHERE singleton FOR SHARE').fetchone()
         generation = state['active_generation']
+        ownership = read_ownership(conn, user_id, deck_id)
         return DeckDetail(deck=node_model(deck, rows), owner_revision=revision, catalog_revision=state['revision'],
                           checks=basic_checks(conn, generation, user_id, deck_id, 'holdings'),
                           deck_list_checks=basic_checks(conn, generation, user_id, deck_id, 'deck_list'),
-                          deck_list=read_deck_list(conn, user_id, deck_id))
+                          deck_list=read_deck_list(conn, user_id, deck_id),
+                          ownership=ownership.lines, surplus=ownership.surplus, competition=ownership.competition)
 
 
 def check_revision(conn, user_id: str, deck_id: UUID, expected: int):
