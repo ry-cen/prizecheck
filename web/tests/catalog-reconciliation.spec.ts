@@ -143,7 +143,9 @@ promote({'card-1':'Correction Pikachu'})`,
         page.getByRole("heading", { level: 1, name: location })
       ).toBeVisible();
     };
-    await page.getByRole("button", { name: "Add location", exact: true }).click();
+    await page
+      .getByRole("button", { name: "Add location", exact: true })
+      .click();
     const create = page.getByRole("dialog", { name: "Add location" });
     await create.getByLabel("Name", { exact: true }).fill(location);
     await create.getByRole("button", { name: "Create location" }).click();

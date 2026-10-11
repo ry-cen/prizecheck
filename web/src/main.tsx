@@ -22,12 +22,7 @@ import "./style.css";
 import "./tokens.css";
 
 type View =
-  | "workspace"
-  | "collection"
-  | "decks"
-  | "catalog"
-  | "reports"
-  | "owner";
+  "workspace" | "collection" | "decks" | "catalog" | "reports" | "owner";
 const protectedViews: View[] = [
   "workspace",
   "collection",
@@ -249,13 +244,7 @@ function App() {
       </header>
       <nav aria-label="Main views">
         {(
-          [
-            "workspace",
-            "collection",
-            "decks",
-            "catalog",
-            "reports",
-          ] as const
+          ["workspace", "collection", "decks", "catalog", "reports"] as const
         ).map((item) => (
           <button
             key={item}

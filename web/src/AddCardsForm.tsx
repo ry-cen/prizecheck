@@ -1,10 +1,6 @@
 import { useRef, useState, type FormEvent } from "react";
 import { searchCatalog, type PrintingView } from "./generated";
-import {
-  addHolding,
-  HoldingError,
-  type AddResult,
-} from "./holdings_generated";
+import { addHolding, HoldingError, type AddResult } from "./holdings_generated";
 
 /** A Variant Descriptor as one line of text. */
 export function descriptorText(descriptor: Record<string, unknown>) {
@@ -114,65 +110,65 @@ export function AddCardsForm({
 
   return (
     <>
-          <form onSubmit={search}>
-            <label>
-              Search English card name{" "}
-              <input
-                value={query}
-                onChange={(event) => {
-                  setQuery(event.target.value);
-                  pendingKey.current = null;
-                }}
-                required
-                maxLength={120}
-              />
-            </label>
-            <button disabled={busy}>Search</button>
-          </form>
-          {matches.length > 0 && (
-            <form onSubmit={add}>
-              <label>
-                Card Edition{" "}
-                <select
-                  required
-                  value={editionId}
-                  onChange={(event) => {
-                    setEditionId(event.target.value);
-                    pendingKey.current = null;
-                  }}
-                >
-                  <option value="">Choose a Printing and Edition</option>
-                  {matches.flatMap((printing) =>
-                    printing.editions
-                      .filter((edition) => edition.active)
-                      .map((edition) => (
-                        <option key={edition.id} value={edition.id}>
-                          {printing.name} · {printing.set_name} #
-                          {printing.collector_number} ·{" "}
-                          {descriptorText(edition.descriptor)}
-                        </option>
-                      ))
-                  )}
-                </select>
-              </label>
-              <label>
-                Quantity{" "}
-                <input
-                  inputMode="numeric"
-                  pattern="[0-9]+"
-                  required
-                  value={quantity}
-                  onChange={(event) => {
-                    setQuantity(event.target.value);
-                    pendingKey.current = null;
-                  }}
-                />
-              </label>
-              <button disabled={busy || !editionId}>
-                {busy ? "Adding…" : "Add to Location"}
-              </button>
-            </form>
-          )}
+      <form onSubmit={search}>
+        <label>
+          Search English card name{" "}
+          <input
+            value={query}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              pendingKey.current = null;
+            }}
+            required
+            maxLength={120}
+          />
+        </label>
+        <button disabled={busy}>Search</button>
+      </form>
+      {matches.length > 0 && (
+        <form onSubmit={add}>
+          <label>
+            Card Edition{" "}
+            <select
+              required
+              value={editionId}
+              onChange={(event) => {
+                setEditionId(event.target.value);
+                pendingKey.current = null;
+              }}
+            >
+              <option value="">Choose a Printing and Edition</option>
+              {matches.flatMap((printing) =>
+                printing.editions
+                  .filter((edition) => edition.active)
+                  .map((edition) => (
+                    <option key={edition.id} value={edition.id}>
+                      {printing.name} · {printing.set_name} #
+                      {printing.collector_number} ·{" "}
+                      {descriptorText(edition.descriptor)}
+                    </option>
+                  ))
+              )}
+            </select>
+          </label>
+          <label>
+            Quantity{" "}
+            <input
+              inputMode="numeric"
+              pattern="[0-9]+"
+              required
+              value={quantity}
+              onChange={(event) => {
+                setQuantity(event.target.value);
+                pendingKey.current = null;
+              }}
+            />
+          </label>
+          <button disabled={busy || !editionId}>
+            {busy ? "Adding…" : "Add to Location"}
+          </button>
+        </form>
+      )}
     </>
   );
 }
