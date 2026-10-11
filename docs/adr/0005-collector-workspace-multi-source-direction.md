@@ -2,6 +2,8 @@
 
 **Status:** accepted future scope — owner instruction, 2026-10-09.
 
+**Implementation status:** the multi-source API contract is implemented by migration 026 (`migrations/026_multi_source_moves.sql`) and the `/api/moves` endpoints. See the "Multi-source Move, Removal and Undo" section of [the collector workspace spec](../planning/collector-workspace/spec.md).
+
 The owner approved a redesigned collector workspace in which visual selection may span multiple source Storage Leaves. The canonical product requirements are in the linked workspace resolution.
 
 This is a scope direction, not a change to the current MVP implementation contract. The MVP specification, generated client, API Move manifest, and Undo flow currently use one `source_id` per Move/Removal. Their current behavior remains authoritative until a separate backend decision and specification revision define migration, concurrency, idempotency, response, persistence, and verification details.

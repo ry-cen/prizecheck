@@ -100,6 +100,9 @@ class RecoveryTest(unittest.TestCase):
                 conn.execute("INSERT INTO publication_command(owner_id,request_key,request_digest,token,result) VALUES ('owner',%s,'digest','burned-test-token','{}')", (uuid.uuid4(),))
                 conn.execute("INSERT INTO inventory_undo(id,owner_id,action,source_id,payload) VALUES (%s,'owner','remove',%s,'{}')", (uuid.uuid4(),location))
                 conn.execute("INSERT INTO inventory_undo(id,owner_id,action,source_id,expires_at,payload) VALUES (%s,'owner','remove',%s,now()-interval '1 minute','{\"private\":\"expired\"}')", (uuid.uuid4(), location))
+                # Expired staging is left out, including multi-source manifest entries.
+                conn.execute("INSERT INTO move_manifest(owner_id,id,source_id,expires_at) VALUES ('owner',%s,NULL,now()-interval '1 minute')", (uuid.uuid4(),))
+                conn.execute("INSERT INTO move_manifest_entry(owner_id,source_id,edition_id,quantity,expected_version) VALUES ('owner',%s,%s,1,3)", (location, edition))
             with psycopg.connect(source_url) as conn:
                 references = conn.execute("SELECT p.public_ref,e.public_ref FROM catalog_printing p JOIN catalog_edition e ON e.printing_id=p.id").fetchall()
             run = subprocess.run([str(ROOT / '.venv/bin/python'), str(ROOT / 'scripts/recovery.py'), 'backup', str(backup)], env=env, capture_output=True)
@@ -107,6 +110,7 @@ class RecoveryTest(unittest.TestCase):
             self.assertEqual(backup.stat().st_mode & 0o777, 0o700)
             manifest = json.loads((backup/'manifest.json').read_text())
             self.assertEqual(manifest['rows']['inventory_undo'], 1)
+            self.assertEqual((manifest['rows']['move_manifest'], manifest['rows']['move_manifest_entry']), (0, 0))
             restored_env = dict(os.environ, DATABASE_URL=admin)
             cmd = [str(ROOT / '.venv/bin/python'), str(ROOT / 'scripts/recovery.py'), 'restore', str(backup), target]
             restored = subprocess.run(cmd, env=restored_env, capture_output=True)

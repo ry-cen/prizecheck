@@ -39,7 +39,7 @@ try:
     subprocess.run([sys.executable,'-m','pytest','-q','api/tests/test_moves.py::test_failed_25000_edition_move_is_wholly_rejected','api/tests/test_moves.py::test_rollback_when_destination_write_fails'],env=env,cwd=root,check=True)
     report = json.loads(args.report.read_text())
     report['recorded_at_utc'] = datetime.now(timezone.utc).isoformat()
-    report['boundary_checks'] = ['five successful atomic 25000-Edition Moves with exact source/destination balances', 'stale 25000-Edition Move rejected without any changes', 'forced destination write failure rolls back and retry succeeds']
+    report['boundary_checks'] = ['five successful atomic 25000-Edition Moves spanning five sources with exact source/destination balances', 'stale 25000-Edition Move rejected without any changes', 'forced destination write failure rolls back and retry succeeds']
     args.report.write_text(json.dumps(report,indent=2))
     print(f'Sanitized report: {args.report}')
 finally:
