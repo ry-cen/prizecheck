@@ -110,8 +110,10 @@ export function SelectionBar({
             type="button"
             aria-expanded={open}
             aria-controls={open ? menuId : undefined}
-            disabled={busy}
-            onClick={() => setOpen(!open)}
+            aria-disabled={busy}
+            onClick={() => {
+              if (!busy) setOpen(!open);
+            }}
           >
             Actions <span aria-hidden="true">▾</span>
           </button>

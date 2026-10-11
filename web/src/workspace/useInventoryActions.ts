@@ -62,8 +62,12 @@ export function useInventoryActions({
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState("");
   const [barError, setBarError] = useState("");
+  const barErrorRef = useRef("");
+  barErrorRef.current = barError;
   const [dialog, setDialog] = useState<"move" | "remove" | null>(null);
   const [dialogError, setDialogError] = useState("");
+  const dialogErrorRef = useRef("");
+  dialogErrorRef.current = dialogError;
   const [toast, setToast] = useState<ToastState | null>(null);
   const busyRef = useRef(false);
   const dialogRef = useRef(dialog);
@@ -110,6 +114,15 @@ export function useInventoryActions({
     toastId.current += 1;
     setToast({ ...next, id: toastId.current });
   }, []);
+
+  /** A tile that holds focus unmounts when the gallery reloads or the selection clears: move focus
+   * to a stable control first. */
+  const keepFocus = (to: "heading" | "actions") => {
+    if (!document.activeElement?.closest(".ws-tile")) return;
+    if (to === "actions" && actionsButton.current?.isConnected)
+      actionsButton.current.focus({ preventScroll: true });
+    else focusWorkspaceHeading();
+  };
 
   const finish = () => {
     busyRef.current = false;
@@ -175,6 +188,7 @@ export function useInventoryActions({
         // One batch: the selection clears, the dialog closes and the toast shows. Focus then goes to
         // the heading if it was in the dialog or the bar, which are gone.
         focusAfter.current = "heading";
+        keepFocus("heading");
         live.current.selection.clear();
         setDialog(null);
         showToast({ message, entry: null, unavailable: false });
@@ -182,15 +196,25 @@ export function useInventoryActions({
         void live.current.reloadTree();
         const id = toastId.current;
         const entries = await listUndo().catch(() => [] as UndoEntry[]);
+        // Offer Undo only for the record this action made, never an older one.
+        const newest = entries[0];
+        const mine =
+          newest &&
+          newest.action === target.kind &&
+          (target.kind !== "move" ||
+            newest.destination_id === target.destinationId)
+            ? newest
+            : null;
         setToast((current) =>
-          current && current.id === id
-            ? { ...current, entry: entries[0] ?? null }
-            : current
+          current && current.id === id ? { ...current, entry: mine } : current
         );
       } catch (cause) {
         const failure = describeFailure(target, cause, { place, card });
         if (!failure.retrySame) pending.current = null;
-        if (failure.reloadGallery) live.current.reloadGallery();
+        if (failure.reloadGallery) {
+          if (surface === "bar") keepFocus("actions");
+          live.current.reloadGallery();
+        }
         if (failure.reloadTree) void live.current.reloadTree();
         if (surface === "dialog" && dialogRef.current)
           setDialogError(failure.text);
@@ -300,11 +324,29 @@ export function useInventoryActions({
           entry: entries[0] ?? null,
           unavailable: false,
         });
-      } else {
-        // Unknown outcome: the same key makes a retry apply once.
+      } else if (!(cause instanceof MoveError) || cause.status >= 500) {
+        // Unknown outcome (no response or a server error): the same key makes a retry apply once.
         showToast({
           ...current,
           message: "Undo may not have finished. Try again to check safely.",
+        });
+      } else if (code === "REPLAY_OUTCOME_UNAVAILABLE") {
+        undoKeys.current.delete(entry.id);
+        focusAfter.current = "toast";
+        showToast({
+          message:
+            "Undo may have already finished, and your collection was refreshed. Review it before trying again.",
+          entry: null,
+          unavailable: false,
+        });
+        live.current.reloadGallery();
+        void live.current.reloadTree();
+      } else {
+        // Any other refusal is definite: nothing was restored, and a retry takes a new key.
+        undoKeys.current.delete(entry.id);
+        showToast({
+          ...current,
+          message: "Undo couldn't be completed. Nothing was restored.",
         });
       }
     } finally {
@@ -379,13 +421,23 @@ export function useInventoryActions({
   const empty = selection.summary.copies === 0;
   useEffect(() => {
     if (!empty) return;
+    // A failure the collector hasn't dismissed outlives the selection it was about (a reload can
+    // trim the kept selection to nothing), so it moves to the toast.
+    const failure =
+      barErrorRef.current || (dialogRef.current ? dialogErrorRef.current : "");
+    if (failure)
+      showToast({
+        message: failure,
+        entry: toastLive.current?.entry ?? null,
+        unavailable: false,
+      });
     setBarError("");
     if (dialogRef.current && !busyRef.current) {
       focusAfter.current = "heading";
       setDialog(null);
       setDialogError("");
     }
-  }, [empty]);
+  }, [empty, showToast]);
 
   // Runs after the commit that closed a dialog or changed the toast, once the dialog has left the
   // top layer, so the page is no longer inert and focus can move.

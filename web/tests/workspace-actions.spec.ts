@@ -550,6 +550,194 @@ test.describe("desktop", () => {
     await expectCounts(page, `Dest ${s}`, "3 copies · 2 editions");
   });
 
+  /** Seeds two Alpha copies of one card and an empty "0 Dest" leaf. Names starting "0 " sort first,
+   * so the sidebar rows are in view whatever earlier specs left in this worker's database. */
+  async function seedAlphaAndDest(page: Page, card: string) {
+    promoteCatalog({ "card-1": card });
+    await signIn(page);
+    const s = randomUUID().slice(0, 8);
+    const alpha = await createLocation(page, `0 Alpha ${s}`, null);
+    const dest = await createLocation(page, `0 Dest ${s}`, null);
+    const edition = await editionOf("card-1");
+    await addCopies(page, alpha, edition, 2);
+    await page.reload();
+    await expect(tiles(page)).toHaveCount(2);
+    return { s, alpha, dest, edition };
+  }
+
+  async function moveFirstTileToDest(page: Page, s: string) {
+    await tiles(page).nth(0).click();
+    await openActions(page, "Move…");
+    const dialog = page.getByRole("dialog", { name: "Move 1 copy" });
+    await dialog
+      .getByRole("searchbox", { name: "Search locations" })
+      .fill(`0 Dest ${s}`);
+    await dialog
+      .getByRole("button", { name: `0 Dest ${s}`, exact: true })
+      .click();
+    await dialog.getByRole("button", { name: "Move 1 copy" }).click();
+    return dialog;
+  }
+
+  test("a drag Move that fails keeps the selection, shows the error in the bar and leaves focus on Actions", async ({
+    page,
+  }) => {
+    const { s, alpha, edition } = await seedAlphaAndDest(page, "Dragfail Abra");
+    const row = (name: string) =>
+      sidebar(page).getByRole("button", { name, exact: true });
+    // Another tab adds a copy, so the dragged Holding's version is stale.
+    await sql(
+      `WITH changed AS (
+         UPDATE inventory_owner SET revision=revision+1
+         WHERE user_id=(SELECT owner_id FROM location WHERE id=$1) RETURNING revision
+       ) UPDATE holding SET quantity=quantity+1,version=(SELECT revision FROM changed)
+         WHERE location_id=$1 AND edition_id=$2`,
+      [alpha, edition]
+    );
+    const from = await center(tiles(page).nth(0));
+    const to = await center(row(`0 Dest ${s}`));
+    await page.mouse.move(from.x, from.y);
+    await page.mouse.down();
+    await page.mouse.move(to.x, to.y, { steps: 12 });
+    await page.mouse.up();
+    const alert = bar(page).getByRole("alert");
+    await expect(alert).toContainText(`0 Alpha ${s}`);
+    await expect(alert).toContainText("Nothing moved.");
+    await expect(bar(page)).toContainText("1 copy selected");
+    await expect(tiles(page)).toHaveCount(3);
+    await expect(
+      bar(page).getByRole("button", { name: "Actions" })
+    ).toBeFocused();
+  });
+
+  test("a Move whose response is lost retries with the same manifest and key and applies once", async ({
+    page,
+  }) => {
+    const { s } = await seedAlphaAndDest(page, "Lost Abra");
+    const commits: { url: string; key: string }[] = [];
+    let first = true;
+    await page.route("**/api/moves/manifests/*/commit", async (route) => {
+      const request = route.request();
+      commits.push({
+        url: request.url(),
+        key: request.postDataJSON().idempotency_key,
+      });
+      if (first) {
+        first = false;
+        // The server applies the Move, but the collector never hears back.
+        await route.fetch();
+        await route.fulfill({ status: 503, body: "" });
+        return;
+      }
+      await route.continue();
+    });
+    const dialog = await moveFirstTileToDest(page, s);
+    await expect(dialog.getByRole("alert")).toContainText(
+      "may not have finished"
+    );
+    await dialog.getByRole("button", { name: "Move 1 copy" }).click();
+    await expect(toast(page)).toHaveText(`Moved 1 copy to 0 Dest ${s}.`);
+    expect(commits).toHaveLength(2);
+    expect(commits[1]).toEqual(commits[0]);
+    await expectCounts(page, `0 Dest ${s}`, "1 copy · 1 edition");
+    await expectCounts(page, `0 Alpha ${s}`, "1 copy · 1 edition");
+  });
+
+  test("a definite failure retries with a new manifest and a new key", async ({
+    page,
+  }) => {
+    const { s, alpha, edition } = await seedAlphaAndDest(page, "Fresh Abra");
+    const manifests: string[] = [];
+    const commits: { url: string; key: string }[] = [];
+    await page.route("**/api/moves/manifests", async (route) => {
+      const response = await route.fetch();
+      if (route.request().method() === "POST")
+        manifests.push((await response.json()).id);
+      await route.fulfill({ response });
+    });
+    await page.route("**/api/moves/manifests/*/commit", async (route) => {
+      const request = route.request();
+      commits.push({
+        url: request.url(),
+        key: request.postDataJSON().idempotency_key,
+      });
+      await route.continue();
+    });
+    await tiles(page).nth(0).click();
+    // Another tab adds a copy, so the selected Holding's version is stale.
+    await sql(
+      `WITH changed AS (
+         UPDATE inventory_owner SET revision=revision+1
+         WHERE user_id=(SELECT owner_id FROM location WHERE id=$1) RETURNING revision
+       ) UPDATE holding SET quantity=quantity+1,version=(SELECT revision FROM changed)
+         WHERE location_id=$1 AND edition_id=$2`,
+      [alpha, edition]
+    );
+    await openActions(page, "Move…");
+    const dialog = page.getByRole("dialog", { name: "Move 1 copy" });
+    const choose = async () => {
+      await dialog
+        .getByRole("searchbox", { name: "Search locations" })
+        .fill(`0 Dest ${s}`);
+      await dialog
+        .getByRole("button", { name: `0 Dest ${s}`, exact: true })
+        .click();
+      await dialog.getByRole("button", { name: "Move 1 copy" }).click();
+    };
+    await choose();
+    await expect(dialog.getByRole("alert")).toContainText("Nothing moved.");
+    await dialog.getByRole("button", { name: "Cancel" }).click();
+    await expect(bar(page)).toContainText("1 copy selected");
+    await openActions(page, "Move…");
+    await choose();
+    await expect(toast(page)).toHaveText(`Moved 1 copy to 0 Dest ${s}.`);
+    expect(manifests).toHaveLength(2);
+    const keys = commits.map((commit) => commit.key);
+    expect(new Set(keys).size).toBe(keys.length);
+    expect(commits.at(-1)!.url).toContain(manifests[1]);
+    for (const commit of commits.slice(0, -1))
+      expect(commit.url).not.toContain(manifests[1]);
+  });
+
+  test("Escape during a drag cancels it, keeps the selection and moves nothing", async ({
+    page,
+  }) => {
+    const { s } = await seedAlphaAndDest(page, "Escape Abra");
+    let commits = 0;
+    await page.route("**/api/moves/manifests/*/commit", (route) => {
+      commits += 1;
+      return route.continue();
+    });
+    const row = sidebar(page).getByRole("button", {
+      name: `0 Dest ${s}`,
+      exact: true,
+    });
+    await tiles(page).nth(0).click();
+    await tiles(page)
+      .nth(1)
+      .click({ modifiers: ["ControlOrMeta"] });
+    await expect(bar(page)).toContainText("2 copies selected");
+    const from = await center(tiles(page).nth(0));
+    const to = await center(row);
+    await page.mouse.move(from.x, from.y);
+    await page.mouse.down();
+    await page.mouse.move(to.x, to.y, { steps: 12 });
+    await expect(
+      page.getByText("2 copies · 1 edition", { exact: true })
+    ).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(
+      page.getByText("2 copies · 1 edition", { exact: true })
+    ).toHaveCount(0);
+    await page.mouse.up();
+    await expect(bar(page)).toContainText("2 copies selected");
+    await expect(pressed(page)).toHaveCount(2);
+    await expect(toast(page)).toHaveText("");
+    expect(commits).toBe(0);
+    await expectCounts(page, `0 Dest ${s}`, "This Location has no cards.");
+    await expectCounts(page, `0 Alpha ${s}`, "2 copies · 1 edition");
+  });
+
   test("a keyboard-only Move: Space selects, Actions opens the explorer, and focus never falls to the page", async ({
     page,
   }) => {
