@@ -136,7 +136,7 @@ type Fixture = {
  *     Binder 1, binder 2   (empty leaves)
  *     Binder 10 / Page 1   (folder with one empty leaf)
  *     Box                  (Storage Leaf with 3 copies)
- *   Shelf s Deck           (an empty Deck; Decks are always top level)
+ *   Shelf s Deck           (an empty top-level Deck)
  *   Shelf s Deep / Level 2 / … / Level 11   (only with deep: true; Level 11 sits 11 levels deep)
  *   Shelf s Spare          (empty top-level leaf)
  * Every top-level name starts with "Shelf s", so the fixture's rows sit together in the panel.
@@ -332,9 +332,9 @@ test.describe("desktop", () => {
       button(panel, `Add child location to ${binder1}`)
     ).toBeEnabled();
     await expect(button(panel, `Delete ${binder1}`)).toBeEnabled();
-    // Deck rename and move arrive with ticket 110; Deck deletion is not offered.
-    await expect(handle(panel, f.deck)).toBeDisabled();
-    await expect(button(panel, `Rename ${f.deck}`)).toBeDisabled();
+    // Decks can be renamed and moved; Deck deletion is not offered.
+    await expect(handle(panel, f.deck)).toBeEnabled();
+    await expect(button(panel, `Rename ${f.deck}`)).toBeEnabled();
     await expect(button(panel, `Delete ${f.deck}`)).toBeDisabled();
     await expect(
       row(panel, f.deck).getByRole("button", { name: /^Add child/ })
@@ -605,6 +605,94 @@ test.describe("desktop", () => {
       "Renamed Binder 1 to Binder 1a."
     );
     expect((await client.node(f.ids.binder1))!.name).toBe("Binder 1a");
+  });
+
+  test("a Deck is renamed, moved into a folder by drag and back to Top level by the picker, and stays a Deck", async ({
+    page,
+  }) => {
+    await signIn(page);
+    const client = api(page);
+    const f = await seed(page);
+    const otherDeck = `${f.shelf} Other Deck`;
+    const otherDeckId = await client.deck(otherDeck);
+    await page.reload();
+    const panel = await openFromSidebar(page, f.shelf);
+
+    // Rename refuses a sibling's name in another case, then renames.
+    await button(panel, `Rename ${f.deck}`).click();
+    const form = panel.getByRole("form", { name: `Rename ${f.deck}` });
+    const field = form.getByLabel("New name");
+    await expect(field).toHaveValue(f.deck);
+    await field.fill(otherDeck.toUpperCase());
+    await button(form, "Save name").click();
+    await expect(panel.getByRole("alert")).toHaveText(
+      "A sibling already has that name."
+    );
+    const renamed = `${f.shelf} Battle Deck`;
+    await field.fill(renamed);
+    await button(form, "Save name").click();
+    await expect(row(panel, renamed)).toBeVisible();
+    await expect(panel.getByRole("status")).toHaveText(
+      `Renamed ${f.deck} to ${renamed}.`
+    );
+    expect(await client.node(f.ids.deck)).toMatchObject({
+      name: renamed,
+      kind: "deck",
+      parent_id: null,
+    });
+
+    // A handle drag nests it in a folder after confirmation. Decks, itself included, refuse it.
+    await reveal(panel, f.shelf);
+    await lift(page, handle(panel, renamed));
+    await expect(row(panel, renamed)).toHaveCSS("opacity", "0.4");
+    await expect(row(panel, otherDeck)).toHaveCSS("opacity", "0.4");
+    await hover(page, row(panel, `${f.shelf} / Binder 1`));
+    await expect(row(panel, `${f.shelf} / Binder 1`)).toHaveCSS(
+      "outline-style",
+      "solid"
+    );
+    await page.mouse.up();
+    await expect(panel.getByText("New path:")).toHaveText(
+      `New path: ${f.shelf} / Binder 1 / ${renamed}`
+    );
+    expect((await client.node(f.ids.deck))!.parent_id).toBeNull();
+    await button(panel, "Move here").click();
+    const nested = `${f.shelf} / Binder 1 / ${renamed}`;
+    await expect(row(panel, nested)).toBeVisible();
+    await expect(panel.getByRole("status")).toHaveText(
+      `Moved ${renamed} to ${f.shelf} / Binder 1.`
+    );
+    await expect(row(panel, nested)).toContainText("Deck · 0 copies");
+    await expect(
+      row(panel, nested).getByRole("button", { name: /^Add child/ })
+    ).toHaveCount(0);
+    await expect(button(panel, `Delete ${nested}`)).toBeDisabled();
+    expect(await client.node(f.ids.deck)).toMatchObject({
+      kind: "deck",
+      parent_id: f.ids.binder1,
+    });
+    expect((await client.node(f.ids.binder1))!.kind).toBe("organization");
+
+    // The picker offers Top level first and never a Deck or the current parent.
+    await handle(panel, nested).focus();
+    await page.keyboard.press("Enter");
+    const picker = panel.getByRole("list", { name: "New parent", exact: true });
+    const options = await picker.getByRole("button").allTextContents();
+    expect(options[0]).toBe("Top level");
+    expect(options).toContain(f.spare);
+    expect(options).not.toContain(otherDeck);
+    expect(options).not.toContain(`${f.shelf} / Binder 1`);
+    await button(picker, "Top level").click();
+    await expect(panel.getByText("New path:")).toHaveText(
+      `New path: ${renamed}`
+    );
+    await button(panel, "Move here").click();
+    await expect(row(panel, renamed)).toBeVisible();
+    await expect(row(panel, nested)).toHaveCount(0);
+    expect((await client.node(f.ids.deck))!.parent_id).toBeNull();
+    // Binder 1 lost its only child and is an empty Storage Leaf again.
+    expect((await client.node(f.ids.binder1))!.kind).toBe("storage_leaf");
+    expect((await client.node(otherDeckId))!.name).toBe(otherDeck);
   });
 
   test("Delete needs an empty Location without children and its typed name", async ({

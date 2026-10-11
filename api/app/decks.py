@@ -8,8 +8,8 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from .main import connect, verified_user
-from .location_tree import (TreeNode, LocationCommandResult, cleaned_name, owner_and_rows,
-                            replay, check_name, store_result, error, node_model)
+from .location_tree import (TreeNode, LocationCommandResult, EditLocation, apply_edit, cleaned_name,
+                            owner_and_rows, replay, check_name, store_result, error, node_model)
 
 router = APIRouter(prefix='/api/decks', tags=['decks'])
 from .construction_checks import DISCLAIMER, IdentityCount, evaluate_checks
@@ -18,6 +18,10 @@ from .construction_checks import DISCLAIMER, IdentityCount, evaluate_checks
 class CreateDeck(BaseModel):
     name: str
     idempotency_key: UUID
+
+
+class EditDeck(EditLocation):
+    """Rename a Deck, move it to another parent, or both. The fields and rules are the Location edit's."""
 
 
 class DeckIndex(BaseModel):
@@ -75,6 +79,11 @@ def create_deck(command: CreateDeck, user_id: str = Depends(verified_user)):
           (uuid4(), user_id, name)).fetchone()
         rows[row['id']] = row
         return store_result(conn, user_id, command.idempotency_key, digest, row, rows)
+
+
+@router.patch('/{deck_id}', response_model=LocationCommandResult)
+def edit_deck(deck_id: UUID, command: EditDeck, user_id: str = Depends(verified_user)):
+    return apply_edit(deck_id, command, user_id, deck=True)
 
 
 def deck_cursor_encode(user_id, revision, row):

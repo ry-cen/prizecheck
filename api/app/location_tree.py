@@ -205,17 +205,36 @@ def create_location(command: CreateLocation, user_id: str = Depends(verified_use
 
 @router.patch("/{location_id}", response_model=LocationCommandResult)
 def edit_location(location_id: UUID, command: EditLocation, user_id: str = Depends(verified_user)):
+    return apply_edit(location_id, command, user_id, deck=False)
+
+
+def apply_edit(location_id: UUID, command: EditLocation, user_id: str, *, deck: bool):
+    """Rename and/or reparent one Location in one transaction.
+
+    The Location command (deck=False) and the Deck command (deck=True, ``PATCH /api/decks/{id}``)
+    share every rule here: stale versions, sibling names, depth, cycles, stocked-leaf conversion and
+    idempotent replay. Each command accepts only its own kind. A Deck never gains children, because
+    ``check_parent`` refuses a Deck as the new parent."""
     name = cleaned_name(command.name) if command.name is not None else None
     with connect() as conn, conn.transaction():
         revision, rows = owner_and_rows(conn, user_id)
-        digest, previous = replay(conn, user_id, command.idempotency_key, {"location_id": str(location_id), **command.model_dump(mode="json", exclude_unset=True)})
+        fields = command.model_dump(mode="json", exclude_unset=True)
+        # The Location digest payload is unchanged so stored Location commands keep replaying.
+        # The Deck payload is tagged, so one key can't replay across the two commands.
+        request = ({"action": "edit_deck", "deck_id": str(location_id), **fields} if deck
+                   else {"location_id": str(location_id), **fields})
+        digest, previous = replay(conn, user_id, command.idempotency_key, request)
         if previous:
             return previous
         current = rows.get(location_id)
-        if current is None:
-            error(404, "LOCATION_NOT_FOUND")
-        if current["kind"] == "deck":
-            error(409, "DECK_REQUIRES_DECK_COMMAND")
+        if deck:
+            if current is None or current["kind"] != "deck":
+                error(404, "DECK_NOT_FOUND")
+        else:
+            if current is None:
+                error(404, "LOCATION_NOT_FOUND")
+            if current["kind"] == "deck":
+                error(409, "DECK_REQUIRES_DECK_COMMAND")
         if current["version"] != command.version:
             error(409, "STALE_LOCATION")
         if command.name is None and "parent_id" not in command.model_fields_set:
@@ -224,7 +243,7 @@ def edit_location(location_id: UUID, command: EditLocation, user_id: str = Depen
         moving = destination != current["parent_id"]
         if command.conversion and not moving:
             error(409, "INVALID_LOCATION_CONVERSION")
-        if current["name"] == "Unsorted" and current["parent_id"] is None and (moving or (name is not None and name != current["name"])):
+        if not deck and current["name"] == "Unsorted" and current["parent_id"] is None and (moving or (name is not None and name != current["name"])):
             if has_holdings(conn, location_id) or any(row["parent_id"] == location_id for row in rows.values()):
                 error(409, "LOCATION_NOT_EMPTY")
         if moving:

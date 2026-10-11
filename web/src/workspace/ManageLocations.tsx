@@ -5,17 +5,18 @@ import React, {
   useRef,
   useState,
 } from "react";
+import { DeckError, editDeck } from "../decks_generated";
 import {
   deleteLocation,
   editLocation,
   getLocationTree,
   LocationError,
+  type EditLocation,
   type TreeLocation,
 } from "../location_generated";
 import { CreateLocationDialog } from "./CreateLocationDialog";
 import {
   buildManageModel,
-  canEditLocation,
   cleanLocationName,
   copiesLabel,
   isDeck,
@@ -46,6 +47,10 @@ type DragState = { id: string; x: number; y: number; hover: string | null };
 
 /** "top" stands for Top level wherever a target needs a string key. */
 const targetKey = (target: ParentTarget) => target ?? "top";
+
+/** Rename or move: Decks use the Deck command, every other Location the Location edit. */
+const editNode = (node: TreeLocation, body: EditLocation) =>
+  isDeck(node) ? editDeck(node.id, body) : editLocation(node.id, body);
 
 type Props = {
   onClose: () => void;
@@ -196,7 +201,10 @@ export function ManageLocations({ onClose, onChanged }: Props) {
       await request();
       await finish(message);
     } catch (cause) {
-      const code = cause instanceof LocationError ? cause.code : "";
+      const code =
+        cause instanceof LocationError || cause instanceof DeckError
+          ? cause.code
+          : "";
       if (STALE_CODES.has(code)) await stale();
       else setError(locationErrorMessage(code, { action, ...context }));
     } finally {
@@ -348,7 +356,6 @@ export function ManageLocations({ onClose, onChanged }: Props) {
     model.index.children(parentId).map((child) => {
       const node = model.get(child.id)!;
       const path = model.index.path(node.id);
-      const editable = canEditLocation(node);
       const deletable = model.deletable(node);
       const children = model.index.children(node.id);
       return (
@@ -365,14 +372,10 @@ export function ManageLocations({ onClose, onChanged }: Props) {
               type="button"
               className="ws-manage-handle"
               aria-label={`Move ${path}`}
-              title={
-                editable
-                  ? "Drag onto another location to nest it, or tap to choose"
-                  : "Decks can't be moved here yet"
-              }
-              disabled={!editable || busy}
+              title="Drag onto another location to nest it, or tap to choose"
+              disabled={busy}
               data-manage-focus={`move:${node.id}`}
-              {...(editable ? handleProps(node) : {})}
+              {...handleProps(node)}
             >
               <span aria-hidden="true">☰</span>
             </button>
@@ -386,8 +389,7 @@ export function ManageLocations({ onClose, onChanged }: Props) {
               <button
                 type="button"
                 aria-label={`Rename ${path}`}
-                title={editable ? undefined : "Decks can't be renamed here yet"}
-                disabled={!editable || busy}
+                disabled={busy}
                 data-manage-focus={`rename:${node.id}`}
                 onClick={() =>
                   begin({ kind: "rename", id: node.id }, `rename:${node.id}`)
@@ -476,7 +478,7 @@ export function ManageLocations({ onClose, onChanged }: Props) {
       void run(
         "rename",
         () =>
-          editLocation(node.id, {
+          editNode(node, {
             name: cleaned,
             version: node.version,
             idempotency_key: crypto.randomUUID(),
@@ -525,7 +527,7 @@ export function ManageLocations({ onClose, onChanged }: Props) {
       void run(
         "move",
         () =>
-          editLocation(node.id, {
+          editNode(node, {
             parent_id: target,
             parent_version: parent?.version ?? null,
             version: node.version,

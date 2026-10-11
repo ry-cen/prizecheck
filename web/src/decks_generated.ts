@@ -2,6 +2,7 @@
 export type TreeNode = { id: string; name: string; kind: string; parent_id: string | null; version: number; depth: number };
 export type LocationCommandResult = { location: TreeNode; owner_revision: number };
 export type CreateDeck = { name: string; idempotency_key: string };
+export type EditDeck = { name?: string | null; parent_id?: string | null; parent_version?: number | null; conversion?: string | null; version: number; idempotency_key: string };
 export type DeckIndex = { decks: TreeNode[]; owner_revision: number; next_cursor: string | null };
 export type IdentityCheck = { identity_id: string; name: string; quantity: string; status: string };
 export type DeckChecks = { total: string; shortage: string; excess: string; size_status: string; identities: IdentityCheck[]; disclaimer?: string };
@@ -24,6 +25,7 @@ async function request<T>(path: string, method: string, body?: object): Promise<
 }
 export const getDecks = (cursor?: string) => request<DeckIndex>('/api/decks' + (cursor ? '?cursor=' + encodeURIComponent(cursor) : ''), 'GET');
 export const createDeck = (body: CreateDeck) => request<LocationCommandResult>('/api/decks', 'POST', body);
+export const editDeck = (id: string, body: EditDeck) => request<LocationCommandResult>(`/api/decks/${encodeURIComponent(id)}`, 'PATCH', body);
 export async function getDeckContents(id: string, currentRevision?: () => number): Promise<DeckContents> {
   const contents = await request<DeckContents>(`/api/decks/${encodeURIComponent(id)}/contents`, 'GET');
   if (currentRevision && contents.owner_revision !== currentRevision()) {
