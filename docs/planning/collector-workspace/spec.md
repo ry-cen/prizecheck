@@ -1,8 +1,8 @@
 # Collector workspace — specification
 
-**Status:** ready for implementation planning. Revised 2026-10-11 for prices, Deck cost and exports after they merged into `dev`. Revised again the same day for Location management from [Decide drag and Location ordering](https://github.com/ry-cen/prizecheck/issues/46).
+**Status:** ready for implementation planning. Revised 2026-10-11 for prices, Deck cost and exports after they merged into `dev`. Revised again the same day for Location management from [Decide drag and Location ordering](https://github.com/ry-cen/prizecheck/issues/46) and for the visual system from [Decide responsive visual system](https://github.com/ry-cen/prizecheck/issues/47).
 
-**Sources:** [Collector workspace selection and presentation](../tcg-collection-tracker/wayfinder/resolutions/29-decide-collector-workspace-selection-and-presentation.md) (product rules, owner-confirmed 2026-10-09), [ADR 0005](../../adr/0005-collector-workspace-multi-source-direction.md) (multi-source direction), the [collector workspace prototype](../tcg-collection-tracker/wayfinder/prototypes/collector-workspace/README.md) (Variant A), the [UI redesign map](../tcg-collection-tracker/wayfinder/ui-redesign-map.md), and the [card prices and Deck exports spec](../card-prices-and-deck-exports/spec.md), whose pricing and export rules this workspace must keep. Location ordering and management follow [the drag and Location ordering resolution](../tcg-collection-tracker/wayfinder/resolutions/27-decide-drag-and-location-ordering.md). This spec resolves [Decide atomic multi-source inventory operations](https://github.com/ry-cen/prizecheck/issues/49).
+**Sources:** [Collector workspace selection and presentation](../tcg-collection-tracker/wayfinder/resolutions/29-decide-collector-workspace-selection-and-presentation.md) (product rules, owner-confirmed 2026-10-09), [ADR 0005](../../adr/0005-collector-workspace-multi-source-direction.md) (multi-source direction), the [collector workspace prototype](../tcg-collection-tracker/wayfinder/prototypes/collector-workspace/README.md) (Variant A), the [UI redesign map](../tcg-collection-tracker/wayfinder/ui-redesign-map.md), and the [card prices and Deck exports spec](../card-prices-and-deck-exports/spec.md), whose pricing and export rules this workspace must keep. Location ordering and management follow [the drag and Location ordering resolution](../tcg-collection-tracker/wayfinder/resolutions/27-decide-drag-and-location-ordering.md), and the visual system follows [the responsive visual system resolution](../tcg-collection-tracker/wayfinder/resolutions/28-decide-responsive-visual-system.md). This spec resolves [Decide atomic multi-source inventory operations](https://github.com/ry-cen/prizecheck/issues/49).
 
 ## Problem Statement
 
@@ -159,6 +159,19 @@ Holdings stay fungible quantities. A tile is a selectable unit of a Holding's qu
 106. As a collector, I want to rename a Deck and move it to another folder, so that its record follows the physical box.
 107. As a collector, I want sidebar rows to accept only card drops, so that dragging cards never moves a Location by mistake.
 
+### Look and feel
+
+108. As a collector, I want the workspace in the Prize gold dark theme, so that PrizeCheck has a consistent look.
+109. As a collector, I want the Names toggle to also show each card's set and collector number on a second line, so that I can tell printings apart without opening the inspector.
+110. As a collector, I want every tile's hover title and screen-reader label to include its set and number, so that the information is there even with Names off.
+111. As a collector, I want selected tiles marked by a ring separated from the card by a dark gap, plus a check badge, so that selection is obvious even on yellow-bordered cards and doesn't rely on colour.
+112. As a collector, I want card-shaped placeholders while the gallery loads, so that the layout doesn't jump.
+113. As a collector, I want a banner with Reload when my collection changed in another tab, so that I never act on out-of-date tiles without knowing.
+114. As a collector, I want errors shown where they happened, so that I know what to fix.
+115. As a keyboard user, I want a visible focus ring on every control and tile, so that I always know where I am.
+116. As a collector who prefers reduced motion, I want transitions turned off, so that the interface doesn't animate.
+117. As a collector with low vision, I want text and control outlines to meet WCAG 2.2 AA contrast, so that I can read and find everything.
+
 ## Implementation Decisions
 
 ### Domain boundary
@@ -203,7 +216,14 @@ The existing manifest flow is extended rather than replaced: start, stage in bou
 - **Preferences.** Sort, filters, card size and name visibility persist in browser storage per user on that device. Account-bound preferences are deferred. Search text and selection aren't persisted.
 - **Sidebar sizing.** The desktop sidebar is 212 px at every desktop width, Add child overlays the row end rather than reserving width, and names carry a hover title. Mobile header controls and Add child controls are at least 44 px tall, and the mobile header Location control is 44×44 px.
 - **Counts.** All copy, Card Edition, Location and selection counts use singular and plural forms.
-- **Visuals.** The visual presentation follows prototype Variant A (dark theme). The final responsive visual system is tracked separately in [Decide responsive visual system](https://github.com/ry-cen/prizecheck/issues/47) and doesn't block this work.
+- **Design variables.** The workspace introduces the app's shared design variables, defined in [the responsive visual system resolution](../tcg-collection-tracker/wayfinder/resolutions/28-decide-responsive-visual-system.md): colour roles, a 4 px spacing scale, corner radii and tile sizes. No component uses a hardcoded colour. Other pages move onto the variables when they are redesigned.
+- **Themes.** Dark only. Prize gold is the default and only shipped theme; a theme is one set of colour-role values selected by an attribute on the app root, so the Grass and Water values from the prototype and later energy-type presets can be added without touching components. A user-facing theme picker is not part of this work.
+- **Type.** The system font, with tabular numerals for counts, prices, collector numbers and quantities.
+- **Accessibility baseline.** WCAG 2.2 AA contrast in every theme, with a separate control-outline colour at 3:1 or better. Visible focus rings everywhere. Targets at least 44 px on mobile and 24 px on desktop. Transitions of 150 ms or less, and none under `prefers-reduced-motion`. Selected, stale, unavailable and error states never rely on colour alone.
+- **Selected tiles.** A dark gap, an accent ring and a filled check badge inside the card's top-right corner.
+- **Names line.** The Names toggle shows the card name and, on a second line, its set name and collector number. Hover titles and accessible labels always include set and number.
+- **Feedback states.** Card-shaped placeholder tiles while loading. Inline errors in the dialog or form where they happened. A stale-data banner with Reload above the gallery, using the owner revision the reads already return. The success and Undo toast at the bottom centre on desktop and above the Actions strip on mobile.
+- **Visual pass.** The "Move here" confirmation button in Manage locations is restyled; the owner flagged it as looking odd.
 - **Layout width.** The app-wide stylesheet caps `main` at 900 px and centres it. The workspace must not inherit that cap. The gallery fills the width beside the sidebar, side padding shrinks on large screens (30 px, then 20 px from 1550 px, then 16 px from 2200 px), and cards per row follow the available width at a fixed tile size.
 - **Prototype code.** The development-only prototype modules are removed once the production workspace lands. The production build must not include prototype code or styles.
 
@@ -258,6 +278,16 @@ type MovePreview = {
   - a stale edit from a second tab failing without changes
 
   Prior art: `location-tree.spec.ts` and `location-conversion.spec.ts`.
+- **Look and feel in the browser.** Playwright tests cover:
+  - the Names toggle showing name, set and number, and labels including set and number with Names off
+  - the selected state showing a badge, not only a colour change
+  - placeholder tiles before the gallery's first data arrives
+  - the stale-data banner after a change from a second tab, and Reload
+  - focus rings visible on tiles and controls during keyboard navigation
+  - no transitions under emulated reduced motion
+  - an automated contrast check, such as axe, on the workspace with no AA violations
+
+  Prior art: `mobile-journey.spec.ts` for viewport emulation, and `review-fixes.spec.ts`.
 - **Seam 2 — HTTP API.** Pytest against the API covers the multi-source contract:
   - atomic success across three sources
   - already-at-destination exclusion and the all-no-op rejection
@@ -279,7 +309,9 @@ type MovePreview = {
 - Durable per-copy records, copy IDs or copy-specific metadata.
 - Dedicated deck-building UI.
 - Account-bound display preferences (card size, name visibility, sort, filters persist only in the browser).
-- A broad light theme, and the final responsive visual system ([Decide responsive visual system](https://github.com/ry-cen/prizecheck/issues/47)).
+- A light theme, a user-facing theme picker, the energy-type preset themes, and custom colours.
+- Moving pages other than the workspace onto the shared design variables.
+- A wordmark font or logo.
 - Manual sibling ordering and drag-to-reorder. Order is natural A–Z.
 - Undo for Location changes.
 - Deleting Decks, including what happens to their Published Decks.
