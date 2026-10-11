@@ -45,6 +45,8 @@ It restores an existing active release on startup, verifies artifacts/dependenci
 
 The coordinator takes an exclusive filesystem lock, checks receipt/current/previous relationships and runtime identity, applies forward migrations, asks the adapter to activate, and checks health, unauthenticated protected rejection, unknown public not-found, exact HTML and referenced asset bytes. Only then does it atomically update the active symlink and retain the compatible previous release. A failed candidate smoke asks the adapter to restore the prior runtime, rechecks it and leaves the active record unchanged. An initial failed activation clears the runtime. Rollback loads previous auth/API/assets against the current schema, without reverse migrations. Missing configuration, altered artifacts, runtime mismatch or stale release relationships fail closed. A failed adapter recovery requires operator attention; no successful release is reported.
 
+After rolling back past migration 026, or for any backup taken while a pre-026 release is serving, the old `scripts/recovery.py` copies `move_manifest_entry` without filtering but drops expired `move_manifest` parents, so restoring that backup fails on the foreign key. Take such backups with the candidate's `scripts/recovery.py`, or run `DELETE FROM move_manifest WHERE expires_at <= now()` immediately before the backup.
+
 ## Adapter contract
 
 The configured origin can be HTTPS or loopback HTTP; control redirects are refused so the private key is not forwarded elsewhere. The coordinator never executes arbitrary provider shell callbacks. Implement these authenticated HTTP endpoints using `x-release-key`:

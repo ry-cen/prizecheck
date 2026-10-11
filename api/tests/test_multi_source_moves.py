@@ -94,7 +94,7 @@ def test_staging_requires_owned_sources_and_unique_source_edition_pairs():
     owner, other, other_leaf, (a, b, _, _), (one, _), versions = three_sources()
     manifest_id = begin(owner)["id"]
     unsourced = stage(owner, manifest_id, [{"edition_id": one, "quantity": "1", "expected_version": versions[(a, one)]}])
-    assert unsourced.status_code == 422 and unsourced.json()["detail"]["code"] == "SOURCE_REQUIRED"
+    assert unsourced.status_code == 422 and unsourced.json()["detail"] == {"code": "SOURCE_REQUIRED", "edition_id": one}
     foreign = stage(owner, manifest_id, [item(other_leaf, one, 1, 1)])
     assert foreign.status_code == 404 and foreign.json()["detail"] == {"code": "LOCATION_NOT_FOUND", "source_id": other_leaf}
     twice = stage(owner, manifest_id, [item(a, one, 1, versions[(a, one)]), item(a, one, 1, versions[(a, one)])])
@@ -253,8 +253,63 @@ def test_multi_source_undo_is_incompatible_when_destination_lacks_the_summed_qua
     assert call("DELETE", f"/api/moves/undo/{newer['id']}", owner).status_code == 204
     before = inventory(owner)
     response = undo(owner, multi["id"])
-    assert response.status_code == 409 and response.json()["detail"]["code"] == "UNDO_INCOMPATIBLE"
+    assert response.status_code == 409
+    assert response.json()["detail"] == {"code": "UNDO_INCOMPATIBLE", "source_id": min(a, b), "edition_id": one}
     assert inventory(owner) == before
+
+
+def test_multi_source_undo_is_incompatible_when_restoring_would_overflow_a_source():
+    owner, _, _, (a, b, c, d), (one, two), versions = three_sources()
+    manifest_id = begin(owner)["id"]
+    stage(owner, manifest_id, [item(a, one, 2, versions[(a, one)]), item(b, one, 2, versions[(b, one)]), item(c, two, 1, versions[(c, two)])])
+    assert commit(owner, manifest_id, d).status_code == 200
+    entry = undo_entries(owner)[0]
+    add(owner, b, one, str(MAX - 3))  # B now holds MAX - 1, so restoring 2 more overflows
+    before = inventory(owner)
+    response = undo(owner, entry["id"])
+    assert response.status_code == 409
+    assert response.json()["detail"] == {"code": "UNDO_INCOMPATIBLE", "source_id": b, "edition_id": one}
+    assert inventory(owner) == before
+
+
+def test_multi_source_undo_is_incompatible_when_the_destination_stopped_being_a_leaf():
+    owner, _, _, (a, b, c, d), (one, two), versions = three_sources()
+    manifest_id = begin(owner)["id"]
+    stage(owner, manifest_id, [item(a, one, 2, versions[(a, one)]), item(b, one, 2, versions[(b, one)]), item(c, two, 1, versions[(c, two)])])
+    assert commit(owner, manifest_id, d).status_code == 200
+    entry = undo_entries(owner)[0]
+    node = next(n for n in tree(owner) if n["id"] == d)
+    converted = call("POST", "/api/location-tree", owner, {"name": "Pages", "parent_id": d, "parent_version": node["version"],
+                                                          "conversion": "move_holdings_to_child", "idempotency_key": str(uuid4())})
+    assert converted.status_code == 201, converted.text
+    before = inventory(owner)
+    response = undo(owner, entry["id"])
+    assert response.status_code == 409 and response.json()["detail"] == {"code": "UNDO_INCOMPATIBLE", "destination_id": d}
+    assert inventory(owner) == before
+
+
+def test_commit_to_an_unowned_destination_names_the_destination():
+    owner, _, other_leaf, (a, _, _, _), (one, _), versions = three_sources()
+    manifest_id = begin(owner)["id"]
+    stage(owner, manifest_id, [item(a, one, 1, versions[(a, one)])])
+    before = inventory(owner)
+    response = commit(owner, manifest_id, other_leaf)
+    assert response.status_code == 404
+    assert response.json()["detail"] == {"code": "LOCATION_NOT_FOUND", "destination_id": other_leaf}
+    assert inventory(owner) == before
+    assert undo_entries(owner) == []
+
+
+def test_starting_a_manifest_validates_the_default_source():
+    owner, _, other_leaf, (_, _, _, d), _, _ = three_sources()
+    foreign = call("POST", "/api/moves/manifests", owner, {"source_id": other_leaf})
+    assert foreign.status_code == 404 and foreign.json()["detail"] == {"code": "LOCATION_NOT_FOUND", "source_id": other_leaf}
+    assert make(owner, "Pages", next(n for n in tree(owner) if n["id"] == d)).status_code == 201  # D is now Organizational
+    organizational = call("POST", "/api/moves/manifests", owner, {"source_id": d})
+    assert organizational.status_code == 404 and organizational.json()["detail"] == {"code": "LOCATION_NOT_FOUND", "source_id": d}
+    unsourced = call("POST", "/api/moves/manifests", owner, {"source_id": None})
+    assert unsourced.status_code == 201, unsourced.text
+    assert unsourced.json()["source_id"] is None
 
 
 def test_previous_application_records_keep_working_after_migration():

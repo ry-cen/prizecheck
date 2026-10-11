@@ -1,8 +1,13 @@
 -- Multi-source Move, Removal and Undo (collector workspace spec, ADR 0005).
 -- Expand-only: the previous application keeps working against this schema,
 -- because the release gate runs its CI here and rollback runs it here too.
--- Wait for in-flight staging so no item is missed by the copy below.
-LOCK TABLE move_manifest, move_manifest_item IN SHARE ROW EXCLUSIVE MODE;
+-- Take every lock this migration needs now, in one statement, in the order the
+-- previous application first touches these tables (move_response, then
+-- move_manifest, move_manifest_item, inventory_undo). Waiting here for in-flight
+-- transactions to finish means no staged item is missed by the copy below, and
+-- no later ALTER upgrades a weaker lock, which could deadlock with a writer.
+-- New requests queue behind the lock until the migration commits.
+LOCK TABLE move_response, move_manifest, move_manifest_item, inventory_undo IN ACCESS EXCLUSIVE MODE;
 
 -- A manifest may start without a default source.
 ALTER TABLE move_manifest ALTER COLUMN source_id DROP NOT NULL;
