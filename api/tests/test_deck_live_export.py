@@ -206,8 +206,37 @@ def view(owner, deck):
     return call("GET", f"/api/decks/{deck}/exports/live", owner)
 
 
-def stream(owner, deck, revision):
-    return call("GET", f"/api/decks/{deck}/exports/live.txt?owner_revision={revision}", owner)
+def stream(owner, deck, revision, deck_list_revision=None):
+    pinned = "" if deck_list_revision is None else f"&deck_list_revision={deck_list_revision}"
+    return call("GET", f"/api/decks/{deck}/exports/live.txt?owner_revision={revision}{pinned}", owner)
+
+
+def deck_list_revision(owner, deck):
+    response = call("GET", f"/api/decks/{deck}", owner)
+    assert response.status_code == 200, response.text
+    return response.json()["deck_list"]["revision"]
+
+
+def line(owner, deck, edition, quantity=None):
+    """Add a Deck List line, change its quantity, or (``quantity=None``) remove it, through the Deck List routes."""
+    revision = deck_list_revision(owner, deck)
+    key = str(uuid4())
+    if quantity is None:
+        response = call("DELETE", f"/api/decks/{deck}/deck-list/lines/{edition}", owner, {"revision": revision, "idempotency_key": key})
+    else:
+        listed = any(entry["edition_id"] == edition for entry in call("GET", f"/api/decks/{deck}", owner).json()["deck_list"]["lines"])
+        response = call("PATCH", f"/api/decks/{deck}/deck-list/lines/{edition}", owner,
+                        {"quantity": quantity, "revision": revision, "idempotency_key": key}) if listed else call(
+            "POST", f"/api/decks/{deck}/deck-list/lines", owner,
+            {"edition_id": edition, "quantity": quantity, "revision": revision, "idempotency_key": key})
+    assert response.status_code == 200, response.text
+
+
+def binder(owner):
+    """Another Storage Leaf of the owner: copies held there are elsewhere, not in the Deck."""
+    with connect() as conn:
+        return conn.execute("INSERT INTO location(id,owner_id,name,kind) VALUES (%s,%s,'Binder','storage_leaf') RETURNING id",
+                            (uuid4(), owner)).fetchone()["id"]
 
 
 MIXED = [
@@ -243,6 +272,7 @@ def test_complete_text_covers_every_claimed_rule_case_and_groups_by_identity_onl
     assert body["text"] == EXPECTED_MIXED
     assert body["byte_length"] == len(EXPECTED_MIXED.encode()) and body["total_copies"] == str(BIG + 13)
     assert body["owner_revision"] and body["catalog_revision"]
+    assert body["deck_list_revision"] == deck_list_revision(owner, deck)
     streamed = stream(owner, deck, body["owner_revision"])
     assert streamed.status_code == 200 and streamed.text == EXPECTED_MIXED
     assert "charset=utf-8" in streamed.headers["content-type"] and streamed.headers["content-type"].startswith("text/plain")
@@ -395,3 +425,47 @@ def test_no_live_identifier_is_persisted_and_the_shipped_set_table_stays_empty()
         columns = {row["column_name"] for row in conn.execute("""SELECT column_name FROM information_schema.columns
           WHERE table_name LIKE 'catalog\\_%' AND (column_name LIKE '%live%' OR column_name LIKE '%tcg_online%')""")}
     assert {name for name in columns if name.endswith("_id")} == {"live_decision_id", "live_activation_id"}
+
+
+# ------------------------------------------------------------------ the whole Deck List (Deck Lists 08)
+
+
+def test_the_export_is_the_whole_deck_list_whether_owned_elsewhere_or_not_owned():
+    owner, deck, world = make_deck(MIXED, {("trainer", 0): "1"})
+    line(owner, deck, world["mon"]["editions"][0], "2")      # not owned
+    line(owner, deck, world["basic"]["editions"][0], "3")    # owned, elsewhere
+    put(owner, binder(owner), world["basic"]["editions"][0], "3")
+    body = view(owner, deck).json()
+    expected = "Pokémon: 2\n2 Gholdengo ex PAR 139\n\nTrainer: 1\n1 Ultra Ball SVI 196\n\nEnergy: 3\n3 Metal Energy SVE 8"
+    assert (body["status"], body["text"], body["total_copies"]) == ("ok", expected, "6")
+    assert body["deck_list_revision"] == deck_list_revision(owner, deck)
+    streamed = stream(owner, deck, body["owner_revision"], body["deck_list_revision"])
+    assert streamed.status_code == 200 and streamed.text == expected
+
+
+def test_copies_cut_from_the_deck_list_are_left_out():
+    owner, deck, world = make_deck(MIXED, {("trainer", 0): "4", ("mon", 0): "1"})
+    line(owner, deck, world["trainer"]["editions"][0], "1")
+    line(owner, deck, world["mon"]["editions"][0])
+    body = view(owner, deck).json()
+    assert (body["status"], body["text"], body["total_copies"]) == ("ok", "Trainer: 1\n1 Ultra Ball SVI 196", "1")
+    line(owner, deck, world["trainer"]["editions"][0])
+    body = view(owner, deck).json()
+    assert (body["status"], body["text"], body["total_copies"]) == ("empty", None, "0")
+    refused = stream(owner, deck, body["owner_revision"])
+    assert refused.status_code == 422 and refused.json()["detail"]["code"] == "DECK_EMPTY"
+
+
+def test_a_deck_list_edit_refuses_a_download_pinned_to_the_older_deck_list():
+    owner, deck, world = make_deck(MIXED, {("trainer", 0): "1"})
+    before = view(owner, deck).json()
+    line(owner, deck, world["mon"]["editions"][0], "2")
+    after = view(owner, deck).json()
+    assert after["owner_revision"] == before["owner_revision"]          # a Deck List edit moves no inventory
+    assert after["deck_list_revision"] > before["deck_list_revision"]
+    stale = stream(owner, deck, before["owner_revision"], before["deck_list_revision"])
+    assert stale.status_code == 409 and stale.json()["detail"]["code"] == "DECK_LIST_CHANGED"
+    current = stream(owner, deck, after["owner_revision"], after["deck_list_revision"])
+    assert current.status_code == 200 and current.text == after["text"]
+    assert stream(owner, deck, before["owner_revision"]).text == after["text"]   # unpinned, as today's client asks
+    assert stream(owner, deck, before["owner_revision"], 0).status_code == 422

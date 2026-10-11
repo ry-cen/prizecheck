@@ -40,8 +40,8 @@ export async function getLiveExport(deckId: string): Promise<LiveExportView> {
   }
   return response.json() as Promise<LiveExportView>;
 }
-export const liveExportDownloadHref = (deckId: string, ownerRevision: number) =>
-  `/api/decks/${encodeURIComponent(deckId)}/exports/live.txt?owner_revision=${ownerRevision}`;
+export const liveExportDownloadHref = (deckId: string, ownerRevision: number, deckListRevision?: number | null) =>
+  `/api/decks/${encodeURIComponent(deckId)}/exports/live.txt?owner_revision=${ownerRevision}${deckListRevision == null ? '' : `&deck_list_revision=${deckListRevision}`}`;
 
 // A Published Deck's Live export: only the token and the snapshot version are sent, and no cookie.
 export async function getPublishedLiveExport(token: string, version: number, signal?: AbortSignal): Promise<PublishedLiveExportView> {

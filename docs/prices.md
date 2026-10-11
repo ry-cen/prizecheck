@@ -96,6 +96,14 @@ PostgreSQL work runs in a worker thread that the request waits on with its own c
 
 For any `/api/` response whose `content-disposition` starts with `attachment`, the gateway forwards that header, `content-type`, `x-robots-tag` and `cache-control: no-store`, and pipes the body with back-pressure instead of buffering it. A client disconnect cancels the upstream read, and a failure after the status line destroys the connection. This carries the private and Published Deck Live and Mass Entry `.txt` downloads (the published ones are unbudgeted anonymous reads). All other responses are buffered as before and forward only `content-type` and `x-robots-tag`. Only budgeted routes carry an abort deadline, so downloads are not cut at three seconds.
 
+## Private Deck exports read the Deck List (Deck Lists 08)
+
+`GET /api/decks/{deck_id}/exports/live` and `GET /api/decks/{deck_id}/exports/tcgplayer` read the same capture as Deck cost (`capture_deck_list`), not the Deck's Holdings. Both views add `deck_list_revision`.
+
+- **Pokémon TCG Live** exports the whole Deck List: every line at its full quantity, whether owned, elsewhere or not owned. Copies the Deck holds beyond its list are left out. `empty` (and 422 `DECK_EMPTY` from `live.txt`) means the Deck List has no lines.
+- **TCGplayer Mass Entry** takes `?scope=not_owned` (the default) or `?scope=deck_list`; any other value is 422. `not_owned` sends each line's not-owned copies, `deck_list` every line at its full quantity. The view echoes `scope`. From `tcgplayer.txt` an empty selection is 422 `DECK_EMPTY` for `deck_list` and 422 `NOTHING_NOT_OWNED` for `not_owned`. The generated client's `getMassEntryExport` and `massEntryDownloadHref` default to `deck_list`, so today's Deck panel keeps exporting the whole Deck List; a client offering the choice passes the scope.
+- Both `.txt` downloads keep the required `owner_revision` (409 `INVENTORY_CHANGED`) and take an optional `deck_list_revision` (409 `DECK_LIST_CHANGED` on a mismatch); `tcgplayer.txt` takes the same `scope` as its view.
+
 ## Refresh label (ticket 07)
 
 `refresh` is an optional field beside `status`/`reason` (null when nothing was done), with `refresh_failed_at` (ISO time of the last failed attempt, only with `failed`). It never changes `status`, `reason`, `amount` or `checked_at`; the cached view is always returned (no 429/503).
@@ -117,8 +125,8 @@ Age bands use `result.checked_at` and the module wall clock: under 1 h nothing h
 
 One access:
 
-1. Captures the complete Deck with `decks.capture_deck_contents` under the budget (`statement_timeout`/`lock_timeout` from `pg_timeout_ms()`, run under `_bounded`). The capture locks the owner row like every inventory reader of record and commits before any store I/O, so no inventory lock or connection is held while prices are read or awaited.
-2. Calls `private_edition_quotes` **once** with every distinct Edition in the Deck. That one call reads every cache row (in 128-key store batches), calls `evaluate_and_admit` once (at most 32 new jobs; the other rows are labelled and still counted), waits at most once until `wait_until`, and validates once. The Deck is never split into 64-id requests.
+1. Captures the complete Deck, its Holdings and its Deck List with each line's ownership states, with `deck_list_capture.capture_deck_list` under the budget (`statement_timeout`/`lock_timeout` from `pg_timeout_ms()`, run under `_bounded`). The capture locks the owner row like every inventory reader of record and commits before any store I/O, so no inventory lock or connection is held while prices are read or awaited.
+2. Calls `private_edition_quotes` **once** with every distinct Edition the Deck holds or lists. That one call reads every cache row (in 128-key store batches), calls `evaluate_and_admit` once (at most 32 new jobs; the other rows are labelled and still counted), waits at most once until `wait_until`, and validates once. The Deck is never split into 64-id requests.
 3. Folds the views with the captured quantities. Quantities are Python integers and amounts are integer micro-dollars, so the subtotal is exact for any bigint quantity; the only rounding is the final display (half-up to cents, `<$0.01` for a positive sub-cent subtotal).
 
 Answer (`DeckCost`, `cache-control: no-store`; every count is a base-10 string):
@@ -134,6 +142,18 @@ Answer (`DeckCost`, `cache-control: no-store`; every count is a base-10 string):
 - `stale_copies` and `unknown_age_copies` count priced copies by provider age (strictly over 48 h, or unknown). `fallback_copies` counts priced copies (`status: quote`) whose refresh label is `timeout`, `busy`, `backoff` or `failed`: they are shown from the labelled cache. Copies with no cached quote are unpriced and are not counted here.
 - `owner_revision` is the captured inventory revision. The client discards an answer for any other revision; a newer one makes the page reload its checks and ask again.
 - A Deck owned by someone else is 404 once the capture runs; an exhausted budget or a failed capture answers `incomplete` without checking ownership.
+
+### Deck List cost and cost to complete (Deck Lists 08)
+
+The answer also carries `deck_list_revision`, `deck_list_cost` and `cost_to_complete`. The top-level fields above stay the Estimated Deck Cost of the Deck's Holdings, unchanged for today's client (its Deck cost summary pairs them with the Holdings-based `checks.total`); the planned UI overhaul moves to the new figures and retires them, as it does `checks` for `deck_list_checks`.
+
+- `deck_list_cost` covers every Deck List line at its full quantity, owned or not.
+- `cost_to_complete` covers only each line's _not owned_ copies, exactly the Deck detail's `not_owned`. Copies _elsewhere_ in the Collection, including copies another Deck holds, cost nothing here: they would be moved in rather than bought.
+- Each is a `DeckCostFigures` object: `status, reason, total_copies, priced_copies, stale_copies, unknown_age_copies, fallback_copies, amount, display_amount, currency`, with the statuses, counts, labels and arithmetic of the table above (`deck_cost.summarize`). An unknown price is never $0: an unpriced not-owned copy leaves the cost to complete `no_quotes` or partly covered.
+- `cost_to_complete` is `empty` (`$0.00`, every count `"0"`) when no copy needs buying, a real zero. `deck_list_cost` is `empty` when the Deck List has no lines.
+- The three figures share the one quote read, admission and wait, and each is folded from its own rows only: a failed row makes incomplete only the figures that contain it.
+- When nothing was captured (an exhausted budget or a failed capture), both objects are `incomplete` with the top-level reason and no total, and `deck_list_revision` is null.
+- `deck_list_revision` is the captured Deck List revision. A Deck List edit does not move `owner_revision`, so a client showing the new figures discards an answer for another Deck List revision too.
 
 The client (`web/src/DeckCost.tsx`) asks once per Deck and inventory revision, gives up after about 3.5 s, and renders: `$1.61 · 5/6 cards priced · Incomplete subtotal: …`, the stale and unknown-age counts, `$0.00 · No cards`, `Price unavailable · 0/N cards priced`, or `Price unavailable; coverage unavailable; N cards total` (also for a client timeout or a 504). It always states that the estimate excludes shipping and taxes.
 

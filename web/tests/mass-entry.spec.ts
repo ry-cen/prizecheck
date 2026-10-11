@@ -168,7 +168,7 @@ test("an all-mapped Deck opens TCGplayer only after the explanation, in a new ta
     (
       await (
         await page.request.get(
-          `${ORIGIN}/api/decks/${deck.id}/exports/tcgplayer`
+          `${ORIGIN}/api/decks/${deck.id}/exports/tcgplayer?scope=deck_list`
         )
       ).json()
     ).url
@@ -304,7 +304,9 @@ test(
       region.getByRole("button", { name: "Open in TCGplayer" })
     ).toHaveCount(0);
     const api = await (
-      await page.request.get(`${ORIGIN}/api/decks/${deck.id}/exports/tcgplayer`)
+      await page.request.get(
+        `${ORIGIN}/api/decks/${deck.id}/exports/tcgplayer?scope=deck_list`
+      )
     ).json();
     expect(api).toMatchObject({
       status: "text",

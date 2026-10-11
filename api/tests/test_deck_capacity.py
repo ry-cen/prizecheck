@@ -201,13 +201,13 @@ def exercise(count, store, tmp_path, monkeypatch, *, complete, accesses):
     lines = live_text.split("\n")
     assert lines[0] == f"Pokémon: {total}" and len(lines) == count + 1 and len(live_text.encode()) == live["byte_length"]
 
-    mass, private_mass = timed(lambda: call("GET", f"/api/decks/{deck}/exports/tcgplayer", owner))
+    mass, private_mass = timed(lambda: call("GET", f"/api/decks/{deck}/exports/tcgplayer?scope=deck_list", owner))
     assert mass.status_code == 200, mass.text
     mass = mass.json()
     assert (mass["status"], mass["url"], mass["fallback_reason"], mass["line_count"], mass["total_copies"]) == \
         ("text", None, "encoded_length", count, str(total))
     mass_text = mass["text"] if mass["inline"] else call(
-        "GET", f"/api/decks/{deck}/exports/tcgplayer.txt?owner_revision={mass['owner_revision']}", owner).text
+        "GET", f"/api/decks/{deck}/exports/tcgplayer.txt?owner_revision={mass['owner_revision']}&scope=deck_list", owner).text
     assert sum(int(line.split(" ", 1)[0]) for line in mass_text.split("\n")) == total
 
     published, publish = timed(lambda: command(owner, deck))

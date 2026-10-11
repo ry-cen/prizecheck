@@ -162,11 +162,33 @@ class World:
     def put(self, edition_id, quantity):
         assert add(self.owner, self.deck, edition_id, str(quantity)).status_code == 200
 
-    def export(self, user=None):
-        return call("GET", f"/api/decks/{self.deck}/exports/tcgplayer", user or self.owner)
+    def export(self, user=None, scope="deck_list"):
+        """``scope=None`` sends no scope and gets the default (not-owned copies)."""
+        query = f"?scope={scope}" if scope else ""
+        return call("GET", f"/api/decks/{self.deck}/exports/tcgplayer{query}", user or self.owner)
 
-    def stream(self, revision, user=None):
-        return call("GET", f"/api/decks/{self.deck}/exports/tcgplayer.txt?owner_revision={revision}", user or self.owner)
+    def stream(self, revision, user=None, scope="deck_list", deck_list_revision=None):
+        query = (f"&scope={scope}" if scope else "") + (
+            f"&deck_list_revision={deck_list_revision}" if deck_list_revision is not None else "")
+        return call("GET", f"/api/decks/{self.deck}/exports/tcgplayer.txt?owner_revision={revision}{query}",
+                    user or self.owner)
+
+    def line(self, edition_id, quantity):
+        """Add a Deck List line through the Deck List route."""
+        revision = call("GET", f"/api/decks/{self.deck}", self.owner).json()["deck_list"]["revision"]
+        response = call("POST", f"/api/decks/{self.deck}/deck-list/lines", self.owner,
+                        {"edition_id": edition_id, "quantity": str(quantity), "revision": revision,
+                         "idempotency_key": str(uuid4())})
+        assert response.status_code == 200, response.text
+
+    def binder(self, edition_id, quantity):
+        """Holds copies in another Storage Leaf of the owner: elsewhere, not in the Deck."""
+        with connect() as conn:
+            leaf = conn.execute("SELECT id FROM location WHERE owner_id=%s AND name='Binder'", (self.owner,)).fetchone()
+            leaf = leaf["id"] if leaf else conn.execute(
+                "INSERT INTO location(id,owner_id,name,kind) VALUES (%s,%s,'Binder','storage_leaf') RETURNING id",
+                (uuid4(), self.owner)).fetchone()["id"]
+        assert add(self.owner, str(leaf), edition_id, str(quantity)).status_code == 200
 
 
 def lines_of(text):
@@ -190,6 +212,7 @@ def test_all_mapped_rows_give_the_exact_link_from_the_complete_deck_composition(
     assert sorted((line["quantity"], line["text"], line["less_specific"]) for line in view["lines"]) == [
         ("2", "2 Furret", True), ("4", "4 Furret", True)]
     assert isinstance(view["owner_revision"], int) and isinstance(view["catalog_revision"], int)
+    assert view["scope"] == "deck_list" and isinstance(view["deck_list_revision"], int)
 
 
 def test_sibling_editions_on_one_product_are_summed_and_one_printing_is_one_text_line():
@@ -369,3 +392,63 @@ def test_exports_are_private_and_authenticated():
         assert (response.status_code, response.json()["detail"]["code"]) == (404, "DECK_NOT_FOUND")
     assert call("GET", f"/api/decks/{uuid4()}/exports/tcgplayer", world.owner).status_code == 404
     assert client.get(f"/api/decks/{world.deck}/exports/tcgplayer").status_code in (401, 403)
+
+
+# ------------------------------------------------------------------ scope (Deck Lists 08)
+
+
+def test_the_default_scope_sends_only_the_not_owned_copies():
+    world = World(3)
+    one, two, three = (world.editions(number)["normal"] for number in (1, 2, 3))
+    for edition, product in ((one, 5001), (two, 5002), (three, 5003)):
+        world.verify(edition, product)
+    world.line(one, 4)
+    world.put(one, 1)          # one: 1 in the Deck, 1 elsewhere, 2 not owned
+    world.binder(one, 1)
+    world.line(two, 2)         # two: 2 not owned
+    world.put(three, 3)        # three: all 3 in the Deck
+    view = world.export(scope=None).json()
+    assert (view["scope"], view["status"], view["total_copies"]) == ("not_owned", "link", "4")
+    assert view["url"] == BASE + "2-5001%7C%7C2-5002"
+    assert world.export(scope="not_owned").json()["url"] == view["url"]
+    streamed = world.stream(view["owner_revision"], scope=None)
+    assert streamed.status_code == 200 and lines_of(streamed.text) == ["2 Furret", "2 Furret"]
+    whole = world.export().json()
+    assert (whole["scope"], whole["status"], whole["total_copies"]) == ("deck_list", "link", "9")
+    assert whole["url"] == BASE + "4-5001%7C%7C2-5002%7C%7C3-5003"
+
+
+def test_a_fully_owned_deck_list_has_nothing_to_buy():
+    world = World(2)
+    held, elsewhere = world.editions(1)["normal"], world.editions(2)["normal"]
+    world.put(held, 3)
+    world.line(elsewhere, 2)
+    world.binder(elsewhere, 2)
+    view = world.export(scope=None).json()
+    assert (view["scope"], view["status"], view["url"], view["text"], view["lines"], view["total_copies"]) == (
+        "not_owned", "empty", None, None, [], "0")
+    denied = world.stream(view["owner_revision"], scope=None)
+    assert (denied.status_code, denied.json()["detail"]["code"]) == (422, "NOTHING_NOT_OWNED")
+    whole = world.stream(view["owner_revision"])
+    assert whole.status_code == 200 and lines_of(whole.text) == ["2 Furret", "3 Furret"]
+
+
+def test_an_unknown_scope_is_refused():
+    world = World(1)
+    world.put(world.editions(1)["normal"], 1)
+    revision = world.export().json()["owner_revision"]
+    assert world.export(scope="everything").status_code == 422
+    assert world.stream(revision, scope="everything").status_code == 422
+
+
+def test_a_deck_list_edit_refuses_a_download_pinned_to_the_older_deck_list():
+    world = World(2)
+    world.put(world.editions(1)["normal"], 1)
+    before = world.export().json()
+    world.line(world.editions(2)["normal"], 2)
+    after = world.export().json()
+    assert after["owner_revision"] == before["owner_revision"] and after["deck_list_revision"] > before["deck_list_revision"]
+    stale = world.stream(before["owner_revision"], deck_list_revision=before["deck_list_revision"])
+    assert (stale.status_code, stale.json()["detail"]["code"]) == (409, "DECK_LIST_CHANGED")
+    current = world.stream(after["owner_revision"], deck_list_revision=after["deck_list_revision"])
+    assert current.status_code == 200 and lines_of(current.text) == ["1 Furret", "2 Furret"]
