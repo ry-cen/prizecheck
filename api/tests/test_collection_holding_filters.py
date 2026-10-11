@@ -6,7 +6,6 @@ from urllib.parse import urlencode
 from uuid import uuid4
 
 import psycopg
-import pytest
 
 from test_collection_holdings import PAGE, location
 from test_holdings import add, call, fixture
@@ -195,7 +194,6 @@ def test_sorted_and_filtered_pages_walk_every_holding_once_and_bind_cursors_to_t
     assert listing(other, cursor=second, sort='quantity-desc', category='Pokemon').status_code == 400
 
 
-@pytest.mark.slow(reason='capacity: seeds over 500 Holdings and walks all six sorts page by page')
 def test_every_sort_walks_a_realistic_collection_in_reference_order():
     owner, _, _, _, _, generation = fixture()
     sets = (('base', 'Base Set'), ('jungle', 'Jungle'), ('promo', 'Promo'))
