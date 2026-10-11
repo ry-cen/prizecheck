@@ -30,7 +30,7 @@ The owner rejected a separate "Deck Plan" object and a link between a list and a
 
 ## Keeping Holdings and Deck List in step
 
-- Moving a card into a Deck adds it to the Deck List if no line covers it. So the Deck List always covers the Deck's Holdings.
+- Moving a card into a Deck adds it to the Deck List if no line covers it. A later cut can leave surplus copies; see [the migration resolution](decide-deck-list-migration.md).
 - Moving a card out leaves its line, which then shows *elsewhere* or *not owned*.
 - Editing a Deck List never moves physical cards on its own.
 - **Pick List.** For a Deck, this is the cards in its Deck List that are elsewhere in the Collection, each with a suggested source Location.
