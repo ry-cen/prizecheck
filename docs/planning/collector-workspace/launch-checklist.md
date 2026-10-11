@@ -18,7 +18,7 @@ The workspace's Add cards dialog and its Reviewed Edition corrections notice are
 - [ ] Owner to confirm: the `set-desc` sort reverses the set order fully, so collector numbers without leading digits come first.
 - [ ] Decks links open with the remembered gallery filters applied.
 - [ ] A gallery cursor issued before the deploy returns `INVALID_CURSOR` once, and Retry recovers (#104).
-- [ ] Release-overlap residual (accepted in [#106](https://github.com/ry-cen/prizecheck/issues/106)): migration 026 mirrors staged Move items one way only. During activation overlap or after a rollback, a Move or Inventory Removal staged by the new code and committed by an old process fails with nothing changed (`LOCATION_NOT_FOUND` for a workspace selection, `EMPTY_MOVE_SELECTION` for the Decks page panel); selecting again and retrying works. See [the release runbook](../../operations/release.md).
+- [ ] Release-overlap residual (accepted in [#106](https://github.com/ry-cen/prizecheck/issues/106)): migration 026 mirrors staged Move items one way only. During activation overlap or after a rollback, a Move or Inventory Removal staged by the new code and committed by an old process fails with nothing changed (`LOCATION_NOT_FOUND` for a workspace Move, `SAME_LOCATION` for a workspace Inventory Removal, `EMPTY_MOVE_SELECTION` for the Decks page panel); selecting again and retrying works. See [the release runbook](../../operations/release.md).
 - [ ] `/workspace` is now the default page, the sign-in landing and the sign-out redirect. `/` and `/locations` redirect to it (#114).
 - [ ] Four Prize gold tokens are slightly lighter for contrast: subtle text, control outline, drop outline and danger border (#114).
 

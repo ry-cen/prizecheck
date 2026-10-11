@@ -47,7 +47,10 @@ export function CorrectionsNotice({
         if (requested.current === key)
           setCorrections(Array.isArray(list) ? list : []);
       })
-      .catch(() => undefined);
+      .catch(() => {
+        // Forget a failed read so the next reload (revisions null, then back) retries it.
+        if (requested.current === key) requested.current = "";
+      });
   }, [ownerRevision, catalogRevision]);
   const relevant = useMemo(() => {
     if (!corrections.length) return NONE;
