@@ -1,7 +1,7 @@
 # Research: TCGdex legality data and catalog coverage (as of 2026-10-10)
 
 **Label:** wayfinder:research
-**Ticket:** [#71 Research TCGdex legality data and catalog coverage](https://github.com/ry-cen/tcg-tracker/issues/71)
+**Ticket:** [#71 Research TCGdex legality data and catalog coverage](https://github.com/ry-cen/prizecheck/issues/71)
 **Researched:** 2026-10-10
 
 ## Question

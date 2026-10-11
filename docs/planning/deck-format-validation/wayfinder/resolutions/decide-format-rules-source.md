@@ -1,6 +1,6 @@
 # Resolution: Decide where format rules live and who updates them
 
-**Ticket:** [Decide where format rules live and who updates them](https://github.com/ry-cen/tcg-tracker/issues/74)
+**Ticket:** [Decide where format rules live and who updates them](https://github.com/ry-cen/prizecheck/issues/74)
 
 **Resolved:** 2026-10-10, grilled with the owner.
 
@@ -37,7 +37,7 @@ Each printing needs a regulation mark, card kind, Basic Energy status, types, an
 
 ## Dates
 
-Every rule carries an effective date: a mark's legal window, a set's legal-from date (the second Friday after release), and each ban's start. A check is correct across rotations, bans and new-set releases without same-day edits. Whether the endpoint can check as of an arbitrary date is left to [Decide the format check result and endpoint contract](https://github.com/ry-cen/tcg-tracker/issues/75).
+Every rule carries an effective date: a mark's legal window, a set's legal-from date (the second Friday after release), and each ban's start. A check is correct across rotations, bans and new-set releases without same-day edits. Whether the endpoint can check as of an arbitrary date is left to [Decide the format check result and endpoint contract](https://github.com/ry-cen/prizecheck/issues/75).
 
 ## When the rules don't know
 

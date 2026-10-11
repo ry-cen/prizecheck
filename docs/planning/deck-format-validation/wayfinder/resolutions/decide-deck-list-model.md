@@ -1,6 +1,6 @@
 # Resolution: Decide how a Deck holds cards the collector doesn't own
 
-**Ticket:** [Decide how a Deck holds cards the collector doesn't own](https://github.com/ry-cen/tcg-tracker/issues/72)
+**Ticket:** [Decide how a Deck holds cards the collector doesn't own](https://github.com/ry-cen/prizecheck/issues/72)
 
 **Resolved:** 2026-10-10, grilled with the owner.
 

@@ -1,6 +1,6 @@
 # Resolution: Decide the format check result and endpoint contract
 
-**Ticket:** [Decide the format check result and endpoint contract](https://github.com/ry-cen/tcg-tracker/issues/75)
+**Ticket:** [Decide the format check result and endpoint contract](https://github.com/ry-cen/prizecheck/issues/75)
 
 **Resolved:** 2026-10-10, grilled with the owner.
 

@@ -1,6 +1,6 @@
 # Research: Gym Leader Challenge construction rules
 
-**Ticket:** [#70 Research Gym Leader Challenge construction rules](https://github.com/ry-cen/tcg-tracker/issues/70)
+**Ticket:** [#70 Research Gym Leader Challenge construction rules](https://github.com/ry-cen/prizecheck/issues/70)
 
 **Researched:** 2026-10-10
 

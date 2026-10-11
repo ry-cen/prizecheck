@@ -1,7 +1,7 @@
 # Research: Standard and Expanded construction rules (as of 2026-10-10)
 
 **Label:** wayfinder:research
-**Ticket:** [#69 Research Standard and Expanded construction rules](https://github.com/ry-cen/tcg-tracker/issues/69)
+**Ticket:** [#69 Research Standard and Expanded construction rules](https://github.com/ry-cen/prizecheck/issues/69)
 **Researched:** 2026-10-10
 
 ## Question
