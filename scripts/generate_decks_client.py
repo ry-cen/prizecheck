@@ -18,7 +18,8 @@ def ts_type(value):
 
 
 schema = app.openapi()["components"]["schemas"]
-names = ("TreeNode", "LocationCommandResult", "CreateDeck", "EditDeck", "DeckIndex", "IdentityCheck", "DeckChecks", "DeckDetail", "DeckEditionQuantity", "DeckContents")
+names = ("TreeNode", "LocationCommandResult", "CreateDeck", "EditDeck", "DeckIndex", "IdentityCheck", "DeckChecks", "DeckDetail", "DeckEditionQuantity", "DeckContents",
+         "DeckListLine", "DeckList", "AddDeckListLine", "ChangeDeckListLine", "RemoveDeckListLine", "DeckListCommandResult")
 lines = ["// Generated from FastAPI OpenAPI by scripts/generate_decks_client.py. Do not edit."]
 for name in names:
     definition = schema[name]
@@ -50,6 +51,13 @@ export async function getDeckContents(id: string, currentRevision?: () => number
   return contents;
 }
 export const getDeck = (id: string) => request<DeckDetail>(`/api/decks/${encodeURIComponent(id)}`, 'GET');
+const deckListLines = (deckId: string) => `/api/decks/${encodeURIComponent(deckId)}/deck-list/lines`;
+export const addDeckListLine = (deckId: string, body: AddDeckListLine) =>
+  request<DeckListCommandResult>(deckListLines(deckId), 'POST', body);
+export const changeDeckListLine = (deckId: string, editionId: string, body: ChangeDeckListLine) =>
+  request<DeckListCommandResult>(`${deckListLines(deckId)}/${encodeURIComponent(editionId)}`, 'PATCH', body);
+export const removeDeckListLine = (deckId: string, editionId: string, body: RemoveDeckListLine) =>
+  request<DeckListCommandResult>(`${deckListLines(deckId)}/${encodeURIComponent(editionId)}`, 'DELETE', body);
 """)
 content = "\n".join(lines)
 target = root / "web/src/decks_generated.ts"

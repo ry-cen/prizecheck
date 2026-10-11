@@ -6,8 +6,9 @@ import json
 import os
 from uuid import UUID, uuid4
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from .main import connect, verified_user
+from .holdings import parse_quantity
 from .location_tree import (TreeNode, LocationCommandResult, EditLocation, apply_edit, cleaned_name,
                             owner_and_rows, replay, check_name, store_result, error, node_model)
 
@@ -57,9 +58,46 @@ class DeckContents(BaseModel):
     catalog_revision: int
 
 
+class DeckListLine(BaseModel):
+    edition_id: UUID
+    quantity: str
+    in_deck: str
+
+
+class DeckList(BaseModel):
+    revision: int
+    lines: list[DeckListLine]
+
+
+class AddDeckListLine(BaseModel):
+    edition_id: UUID
+    quantity: str
+    revision: int = Field(ge=1)
+    idempotency_key: UUID
+
+
+class ChangeDeckListLine(BaseModel):
+    quantity: str
+    revision: int = Field(ge=1)
+    idempotency_key: UUID
+
+
+class RemoveDeckListLine(BaseModel):
+    revision: int = Field(ge=1)
+    idempotency_key: UUID
+
+
+class DeckListCommandResult(BaseModel):
+    deck_id: UUID
+    deck_list: DeckList
+
+
 class DeckDetail(BaseModel):
     deck: TreeNode
     checks: DeckChecks
+    # The same basic checks over the Deck List lines, owned or not; ``checks`` still reads the Deck's Holdings.
+    deck_list_checks: DeckChecks
+    deck_list: DeckList
     owner_revision: int
     catalog_revision: int
 
@@ -137,28 +175,151 @@ def deck_index(cursor: str | None = None, user_id: str = Depends(verified_user))
                          next_cursor=deck_cursor_encode(user_id, revision, page[29]) if len(page)>30 else None)
 
 
+# Basic checks read one quantity source: the Deck's Holdings (``checks``) or its Deck List (``deck_list_checks``).
+CHECK_SOURCES = {
+    'deck_list': 'SELECT edition_id,quantity FROM deck_list_line WHERE owner_id=%s AND deck_id=%s',
+    'holdings': 'SELECT edition_id,quantity FROM holding WHERE owner_id=%s AND location_id=%s',
+}
+
+
+def basic_checks(conn, generation_id, user_id: str, deck_id: UUID, source: str) -> DeckChecks:
+    groups = conn.execute(f"""SELECT ci.id,ci.display_name,sum(c.quantity) AS quantity,
+      bool_and(coalesce(gp.basic_energy,'unresolved')='supported') AS exempt,
+      bool_or(coalesce(gp.basic_energy,'unresolved')='unresolved') AS unresolved
+      FROM ({CHECK_SOURCES[source]}) c JOIN catalog_edition e ON e.id=c.edition_id
+      JOIN catalog_printing p ON p.id=e.printing_id JOIN catalog_identity ci ON ci.id=p.identity_id
+      LEFT JOIN catalog_generation_printing gp ON gp.printing_id=p.id AND gp.generation_id=%s
+      GROUP BY ci.id,ci.display_name
+      ORDER BY ci.display_name,ci.id""", (user_id, deck_id, generation_id)).fetchall()
+    evaluated = evaluate_checks([IdentityCount(int(g['quantity']),g['exempt'],g['unresolved']) for g in groups])
+    identities = [IdentityCheck(identity_id=g['id'],name=g['display_name'],quantity=str(g['quantity']),status=status)
+                  for g,status in zip(groups,evaluated.identity_statuses)]
+    return DeckChecks(total=str(evaluated.total),shortage=str(evaluated.shortage),excess=str(evaluated.excess),
+                      size_status=evaluated.size_status,identities=identities)
+
+
+def require_deck(rows, deck_id: UUID):
+    deck = rows.get(deck_id)
+    if not deck or deck['kind'] != 'deck':
+        error(404, 'DECK_NOT_FOUND')
+    return deck
+
+
+def read_deck_list(conn, user_id: str, deck_id: UUID) -> DeckList:
+    header = conn.execute('SELECT revision FROM deck_list WHERE owner_id=%s AND deck_id=%s',
+                          (user_id, deck_id)).fetchone()
+    if header is None:
+        # Migration 025 and its location trigger give every Deck a Deck List.
+        raise RuntimeError('Deck has no Deck List')
+    lines = conn.execute("""SELECT l.edition_id,l.quantity,least(l.quantity,coalesce(h.quantity,0)) AS in_deck
+      FROM deck_list_line l LEFT JOIN holding h
+        ON h.owner_id=l.owner_id AND h.location_id=l.deck_id AND h.edition_id=l.edition_id
+      WHERE l.owner_id=%s AND l.deck_id=%s ORDER BY l.edition_id""", (user_id, deck_id)).fetchall()
+    return DeckList(revision=header['revision'], lines=[
+        DeckListLine(edition_id=row['edition_id'], quantity=str(row['quantity']), in_deck=str(row['in_deck']))
+        for row in lines])
+
+
 @router.get('/{deck_id}', response_model=DeckDetail)
 def deck_detail(deck_id: UUID, user_id: str = Depends(verified_user)):
     with connect() as conn, conn.transaction():
         revision, rows = owner_and_rows(conn, user_id)
-        deck = rows.get(deck_id)
-        if not deck or deck['kind'] != 'deck':
-            error(404, 'DECK_NOT_FOUND')
+        deck = require_deck(rows, deck_id)
         state = conn.execute('SELECT active_generation,revision FROM catalog_state WHERE singleton FOR SHARE').fetchone()
-        groups = conn.execute("""SELECT ci.id,ci.display_name,sum(h.quantity) AS quantity,
-          bool_and(coalesce(gp.basic_energy,'unresolved')='supported') AS exempt,
-          bool_or(coalesce(gp.basic_energy,'unresolved')='unresolved') AS unresolved
-          FROM holding h JOIN catalog_edition e ON e.id=h.edition_id
-          JOIN catalog_printing p ON p.id=e.printing_id JOIN catalog_identity ci ON ci.id=p.identity_id
-          LEFT JOIN catalog_generation_printing gp ON gp.printing_id=p.id AND gp.generation_id=%s
-          WHERE h.owner_id=%s AND h.location_id=%s GROUP BY ci.id,ci.display_name
-          ORDER BY ci.display_name,ci.id""", (state['active_generation'], user_id, deck_id)).fetchall()
-        evaluated = evaluate_checks([IdentityCount(int(g['quantity']),g['exempt'],g['unresolved']) for g in groups])
-        identities = [IdentityCheck(identity_id=g['id'],name=g['display_name'],quantity=str(g['quantity']),status=status)
-                      for g,status in zip(groups,evaluated.identity_statuses)]
+        generation = state['active_generation']
         return DeckDetail(deck=node_model(deck, rows), owner_revision=revision, catalog_revision=state['revision'],
-             checks=DeckChecks(total=str(evaluated.total),shortage=str(evaluated.shortage),excess=str(evaluated.excess),
-                               size_status=evaluated.size_status,identities=identities))
+                          checks=basic_checks(conn, generation, user_id, deck_id, 'holdings'),
+                          deck_list_checks=basic_checks(conn, generation, user_id, deck_id, 'deck_list'),
+                          deck_list=read_deck_list(conn, user_id, deck_id))
+
+
+def check_revision(conn, user_id: str, deck_id: UUID, expected: int):
+    current = conn.execute('SELECT revision FROM deck_list WHERE owner_id=%s AND deck_id=%s',
+                           (user_id, deck_id)).fetchone()
+    if current is None:
+        raise RuntimeError('Deck has no Deck List')
+    if current['revision'] != expected:
+        error(409, 'STALE_DECK_LIST')
+
+
+def line_exists(conn, user_id: str, deck_id: UUID, edition_id: UUID) -> bool:
+    return bool(conn.execute('SELECT 1 FROM deck_list_line WHERE owner_id=%s AND deck_id=%s AND edition_id=%s',
+                             (user_id, deck_id, edition_id)).fetchone())
+
+
+def store_deck_list_result(conn, user_id: str, deck_id: UUID, key: UUID, digest: str) -> dict:
+    """Advance the Deck List revision and keep the response for replay. The inventory revision does not move:
+    a Deck List never counts toward the Collection."""
+    conn.execute('UPDATE deck_list SET revision=revision+1 WHERE owner_id=%s AND deck_id=%s', (user_id, deck_id))
+    result = DeckListCommandResult(deck_id=deck_id, deck_list=read_deck_list(conn, user_id, deck_id)).model_dump(mode='json')
+    conn.execute('INSERT INTO location_command(owner_id,request_key,request_digest,response) VALUES (%s,%s,%s,%s)',
+                 (user_id, key, digest, json.dumps(result)))
+    return result
+
+
+@router.post('/{deck_id}/deck-list/lines', response_model=DeckListCommandResult)
+def add_deck_list_line(deck_id: UUID, command: AddDeckListLine, user_id: str = Depends(verified_user)):
+    quantity = parse_quantity(command.quantity)
+    payload = {'action': 'add_deck_list_line', 'deck_id': str(deck_id), 'edition_id': str(command.edition_id),
+               'quantity': str(quantity), 'revision': command.revision}
+    with connect() as conn, conn.transaction():
+        _, rows = owner_and_rows(conn, user_id)
+        digest, previous = replay(conn, user_id, command.idempotency_key, payload)
+        if previous:
+            return previous
+        require_deck(rows, deck_id)
+        check_revision(conn, user_id, deck_id, command.revision)
+        state = conn.execute('SELECT active_generation FROM catalog_state WHERE singleton FOR SHARE').fetchone()
+        available = conn.execute("""SELECT 1 FROM catalog_generation_edition ge
+          JOIN catalog_generation_printing gp ON gp.generation_id=ge.generation_id AND gp.printing_id=ge.printing_id
+          WHERE ge.generation_id=%s AND ge.edition_id=%s AND ge.active AND NOT gp.tombstoned""",
+                                 (state['active_generation'], command.edition_id)).fetchone()
+        if not available:
+            error(422, 'EDITION_UNAVAILABLE')
+        if line_exists(conn, user_id, deck_id, command.edition_id):
+            error(409, 'DECK_LIST_LINE_EXISTS')
+        conn.execute('INSERT INTO deck_list_line(owner_id,deck_id,edition_id,quantity) VALUES (%s,%s,%s,%s)',
+                     (user_id, deck_id, command.edition_id, quantity))
+        return store_deck_list_result(conn, user_id, deck_id, command.idempotency_key, digest)
+
+
+@router.patch('/{deck_id}/deck-list/lines/{edition_id}', response_model=DeckListCommandResult)
+def change_deck_list_line(deck_id: UUID, edition_id: UUID, command: ChangeDeckListLine,
+                          user_id: str = Depends(verified_user)):
+    quantity = parse_quantity(command.quantity)
+    payload = {'action': 'change_deck_list_line', 'deck_id': str(deck_id), 'edition_id': str(edition_id),
+               'quantity': str(quantity), 'revision': command.revision}
+    with connect() as conn, conn.transaction():
+        _, rows = owner_and_rows(conn, user_id)
+        digest, previous = replay(conn, user_id, command.idempotency_key, payload)
+        if previous:
+            return previous
+        require_deck(rows, deck_id)
+        check_revision(conn, user_id, deck_id, command.revision)
+        if not line_exists(conn, user_id, deck_id, edition_id):
+            error(404, 'DECK_LIST_LINE_NOT_FOUND')
+        conn.execute('UPDATE deck_list_line SET quantity=%s WHERE owner_id=%s AND deck_id=%s AND edition_id=%s',
+                     (quantity, user_id, deck_id, edition_id))
+        return store_deck_list_result(conn, user_id, deck_id, command.idempotency_key, digest)
+
+
+@router.delete('/{deck_id}/deck-list/lines/{edition_id}', response_model=DeckListCommandResult)
+def remove_deck_list_line(deck_id: UUID, edition_id: UUID, command: RemoveDeckListLine,
+                          user_id: str = Depends(verified_user)):
+    payload = {'action': 'remove_deck_list_line', 'deck_id': str(deck_id), 'edition_id': str(edition_id),
+               'revision': command.revision}
+    with connect() as conn, conn.transaction():
+        _, rows = owner_and_rows(conn, user_id)
+        digest, previous = replay(conn, user_id, command.idempotency_key, payload)
+        if previous:
+            return previous
+        require_deck(rows, deck_id)
+        check_revision(conn, user_id, deck_id, command.revision)
+        if not line_exists(conn, user_id, deck_id, edition_id):
+            error(404, 'DECK_LIST_LINE_NOT_FOUND')
+        conn.execute('DELETE FROM deck_list_line WHERE owner_id=%s AND deck_id=%s AND edition_id=%s',
+                     (user_id, deck_id, edition_id))
+        return store_deck_list_result(conn, user_id, deck_id, command.idempotency_key, digest)
 
 
 def capture_deck_contents(deck_id: UUID, user_id: str, timeout_ms: int | None = None) -> DeckContents:
