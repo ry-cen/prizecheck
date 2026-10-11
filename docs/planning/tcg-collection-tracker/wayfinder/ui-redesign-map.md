@@ -21,6 +21,7 @@ An owner-agreed, spec-ready collector-workspace direction. This map indexes deci
 - [Decide collector workspace selection and presentation](https://github.com/ry-cen/prizecheck/issues/48) — Use small, separate visual tiles for fungible quantities, an aligned desktop toolbar, mobile Location and Filters & display drawers, contextual location creation, and minimal inspection/action surfaces; no durable per-copy identity is introduced.
 
 - [Decide atomic multi-source inventory operations](https://github.com/ry-cen/prizecheck/issues/49) — Resolved by the [collector workspace spec](../../collector-workspace/spec.md) ([issue](https://github.com/ry-cen/prizecheck/issues/79)): extend the existing manifest flow with a per-item source Storage Leaf, commit all-or-nothing to one destination, exclude copies already there, and restore every source with one atomic Undo.
+- [Decide drag and Location ordering](https://github.com/ry-cen/prizecheck/issues/46) — [Resolution](resolutions/27-decide-drag-and-location-ordering.md): natural A–Z sibling order with nothing stored; a gear opens Manage locations, where a ☰ handle drags a Location onto another (mouse or touch) or a tap opens a Move picker, always with a confirmation; sidebar rows take card drops only; no Location Undo; Decks can be renamed and moved.
 
 ## Specification
 

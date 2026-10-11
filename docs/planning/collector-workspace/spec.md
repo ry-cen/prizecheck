@@ -1,8 +1,8 @@
 # Collector workspace — specification
 
-**Status:** ready for implementation planning. Revised 2026-10-11 for prices, Deck cost and exports after they merged into `dev`. Location management (rename, move, delete) will be added when [Decide drag and Location ordering](https://github.com/ry-cen/prizecheck/issues/46) is resolved.
+**Status:** ready for implementation planning. Revised 2026-10-11 for prices, Deck cost and exports after they merged into `dev`. Revised again the same day for Location management from [Decide drag and Location ordering](https://github.com/ry-cen/prizecheck/issues/46).
 
-**Sources:** [Collector workspace selection and presentation](../tcg-collection-tracker/wayfinder/resolutions/29-decide-collector-workspace-selection-and-presentation.md) (product rules, owner-confirmed 2026-10-09), [ADR 0005](../../adr/0005-collector-workspace-multi-source-direction.md) (multi-source direction), the [collector workspace prototype](../tcg-collection-tracker/wayfinder/prototypes/collector-workspace/README.md) (Variant A), the [UI redesign map](../tcg-collection-tracker/wayfinder/ui-redesign-map.md), and the [card prices and Deck exports spec](../card-prices-and-deck-exports/spec.md), whose pricing and export rules this workspace must keep. This spec resolves [Decide atomic multi-source inventory operations](https://github.com/ry-cen/prizecheck/issues/49).
+**Sources:** [Collector workspace selection and presentation](../tcg-collection-tracker/wayfinder/resolutions/29-decide-collector-workspace-selection-and-presentation.md) (product rules, owner-confirmed 2026-10-09), [ADR 0005](../../adr/0005-collector-workspace-multi-source-direction.md) (multi-source direction), the [collector workspace prototype](../tcg-collection-tracker/wayfinder/prototypes/collector-workspace/README.md) (Variant A), the [UI redesign map](../tcg-collection-tracker/wayfinder/ui-redesign-map.md), and the [card prices and Deck exports spec](../card-prices-and-deck-exports/spec.md), whose pricing and export rules this workspace must keep. Location ordering and management follow [the drag and Location ordering resolution](../tcg-collection-tracker/wayfinder/resolutions/27-decide-drag-and-location-ordering.md). This spec resolves [Decide atomic multi-source inventory operations](https://github.com/ry-cen/prizecheck/issues/49).
 
 ## Problem Statement
 
@@ -142,6 +142,23 @@ Holdings stay fungible quantities. A tile is a selectable unit of a Holding's qu
 92. As a collector, I want a "Report a problem with this card's data" link in the inspector, so that I can report a wrong price mapping or export detail where I notice it.
 93. As a collector on a large screen, I want the gallery to use the full width beside the sidebar, with more cards per row as the screen grows, so that space isn't wasted.
 
+### Managing Locations
+
+94. As a collector, I want sibling Locations sorted naturally A–Z, so that "Binder 2" comes before "Binder 10".
+95. As a collector, I want a settings gear beside the Locations heading that opens Manage locations, so that all Location upkeep is in one place.
+96. As a collector, I want Manage locations to list my whole tree with Rename, Add child and Delete on each row, so that I can edit any Location without opening it first.
+97. As a collector, I want to drag a Location by its ☰ handle onto another Location to nest it there, so that reorganizing storage is direct.
+98. As a collector, I want a Top level drop zone, so that I can move a Location out of every folder.
+99. As a mobile collector, I want the handle drag to work with touch, so that I can reorganize on my phone.
+100. As a collector, I want invalid targets (the Location itself, its descendants, Decks, its current parent, anything past 12 levels) dimmed and refusing the drop, so that I can't make an impossible move.
+101. As a collector, I want every Location move confirmed with the new full path, so that a stray drop never reorganizes my storage.
+102. As a collector moving a Location into a stocked Storage Leaf, I want the confirmation to explain that its cards move into a new Unsorted child, so that no card is left in a folder.
+103. As a keyboard or touch user, I want tapping or activating the handle to open a Move picker of valid parents, so that I never need to drag.
+104. As a collector, I want Rename to reject a name already used by a sibling, ignoring case, so that the tree stays unambiguous.
+105. As a collector, I want Delete limited to empty Locations with no children and confirmed by typing the name, so that I can't lose cards or structure by accident.
+106. As a collector, I want to rename a Deck and move it to another folder, so that its record follows the physical box.
+107. As a collector, I want sidebar rows to accept only card drops, so that dragging cards never moves a Location by mistake.
+
 ## Implementation Decisions
 
 ### Domain boundary
@@ -178,6 +195,11 @@ The existing manifest flow is extended rather than replaced: start, stage in bou
 - **Interactions.** Every rule in [the workspace resolution](../tcg-collection-tracker/wayfinder/resolutions/29-decide-collector-workspace-selection-and-presentation.md) is normative for interactions: selection, inspection precedence, Actions, the Move explorer, drag, mobile drawers, Select mode, keyboard paths and Location creation.
 - **Move paths.** A drag-drop onto a valid Storage Leaf commits immediately and offers Undo. Actions → Move goes through the explorer with a full path and actual moving count before confirmation. This adopts the reviewed picker confirmation that the resolution left to specification.
 - **Location creation.** This reuses the existing Name-and-parent create contract, including the existing atomic stocked-leaf conversion choices. No backend change is needed.
+- **Location order.** Every Location tree (sidebar, mobile drawer, Move explorer, Manage locations) sorts siblings in natural A–Z order, numeric-aware and case-insensitive. No order is stored.
+- **Manage locations.** A gear beside the root + opens a centred panel on desktop and a full-screen sheet on mobile. Each row has a ☰ handle, Rename, Add child (not on Decks) and Delete. The panel's drag, confirmation and picker rules are those of [the drag and Location ordering resolution](../tcg-collection-tracker/wayfinder/resolutions/27-decide-drag-and-location-ordering.md). Reparenting uses the existing Location edit command, including its stale-version check and stocked-leaf Unsorted conversion. Rename and Delete use the existing commands and rules.
+- **Handle drag.** The handle drag uses pointer events, not native HTML drag-and-drop, so the same code serves mouse and touch. A press that doesn't pass a small movement threshold is a tap and opens the Move picker; Enter and Space do the same. The handle sets `touch-action: none` and is at least 44×44 px on mobile.
+- **Deck edit command.** Decks currently reject Location edits (`DECK_REQUIRES_DECK_COMMAND`). A Deck rename and move command is added with the same stale-version, sibling-name, depth and idempotency rules as Location edits. A Deck can't become a parent. Deck deletion is not part of this command.
+- **No Location Undo.** Location changes have no Undo. Card Undo records that a Location change invalidates show "Undo unavailable" and can be dismissed, as today.
 - **Preferences.** Sort, filters, card size and name visibility persist in browser storage per user on that device. Account-bound preferences are deferred. Search text and selection aren't persisted.
 - **Sidebar sizing.** The desktop sidebar is 212 px at every desktop width, Add child overlays the row end rather than reserving width, and names carry a hover title. Mobile header controls and Add child controls are at least 44 px tall, and the mobile header Location control is 44×44 px.
 - **Counts.** All copy, Card Edition, Location and selection counts use singular and plural forms.
@@ -224,12 +246,25 @@ type MovePreview = {
   - the inspector's metadata report link
 
   Prior art: `prices.spec.ts`, `price-refresh.spec.ts`, `live-export.spec.ts`, `mass-entry.spec.ts` and `metadata-review.spec.ts`. The existing API tests for prices and exports stay as they are, since no API changes.
+- **Managing Locations in the browser.** Playwright tests cover:
+  - natural sibling order
+  - handle drag onto a row and onto Top level with a mouse, and with touch emulation at 375×812
+  - invalid targets refusing a drop
+  - the confirmation, including the stocked-leaf Unsorted conversion
+  - a tap and a keypress opening the Move picker
+  - Rename with a duplicate sibling name rejected
+  - Delete with the typed-name confirmation
+  - Deck rename and move
+  - a stale edit from a second tab failing without changes
+
+  Prior art: `location-tree.spec.ts` and `location-conversion.spec.ts`.
 - **Seam 2 — HTTP API.** Pytest against the API covers the multi-source contract:
   - atomic success across three sources
   - already-at-destination exclusion and the all-no-op rejection
   - stale-version, insufficient-quantity, overflow and non-leaf failures with no mutation and the affected source named in the error
   - idempotent replay and key reuse
   - multi-source Removal
+  - the Deck rename and move command: success, stale version, duplicate sibling name, Deck or descendant as the target parent, depth limit, stocked-leaf conversion and idempotent replay (prior art: `test_location_tree.py`, `test_location_conversion.py`, `test_decks.py`)
   - multi-source Undo, including incompatibility when one source became Organizational
   - coexistence with single-source manifests and pre-existing single-source Undo records after migration
   - the Holding-level Collection listing with category and elemental type filters and the specified sort order
@@ -245,7 +280,9 @@ type MovePreview = {
 - Dedicated deck-building UI.
 - Account-bound display preferences (card size, name visibility, sort, filters persist only in the browser).
 - A broad light theme, and the final responsive visual system ([Decide responsive visual system](https://github.com/ry-cen/prizecheck/issues/47)).
-- Drag-to-reorder Locations and custom Location ordering ([Decide drag and Location ordering](https://github.com/ry-cen/prizecheck/issues/46)). The tree keeps today's ordering.
+- Manual sibling ordering and drag-to-reorder. Order is natural A–Z.
+- Undo for Location changes.
+- Deleting Decks, including what happens to their Published Decks.
 - Extending the workspace to catalog search, reporting, publishing and discovery, and owner controls.
 - Price sorting, price filters, and value totals for a selection, a Location or the Collection.
 - Changes to pricing, Deck cost or export rules, and Published Deck pricing and exports.
