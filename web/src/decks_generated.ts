@@ -30,6 +30,8 @@ export type PickList = { deck_id: string; deck_list_revision: number; owner_revi
 export type PickItem = { source_id: string; edition_id: string; quantity: string; expected_version: number };
 export type ConfirmPicks = { items: PickItem[]; deck_list_revision: number; idempotency_key: string };
 export type PickConfirmResult = { edition_count: number; copy_count: string; owner_revision: number };
+export type DeleteDeck = { name: string; version: number; idempotency_key: string };
+export type DeleteDeckResult = { deleted_id: string; unsorted_id: string | null; edition_count: number; copy_count: string; owner_revision: number };
 
 export class DeckError extends Error {
   constructor(public status: number, public code: string) { super(code); }
@@ -68,3 +70,5 @@ export const getPickList = (deckId: string) =>
   request<PickList>(`/api/decks/${encodeURIComponent(deckId)}/pick-list`, 'GET');
 export const confirmPicks = (deckId: string, body: ConfirmPicks) =>
   request<PickConfirmResult>(`/api/decks/${encodeURIComponent(deckId)}/pick-list/confirm`, 'POST', body);
+export const deleteDeck = (id: string, body: DeleteDeck) =>
+  request<DeleteDeckResult>(`/api/decks/${encodeURIComponent(id)}`, 'DELETE', body);

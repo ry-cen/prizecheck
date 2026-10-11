@@ -105,6 +105,20 @@ class PublicationResult(BaseModel):
     revoked: bool
 
 
+class OwnedPublication(BaseModel):
+    token: str
+    version: int
+    title: str
+    visibility: str
+    # The Deck it was published from; null once that Deck has been deleted (the publication stays live).
+    deck_id: UUID | None
+    projection_pending: bool
+
+
+class OwnedPublications(BaseModel):
+    publications: list[OwnedPublication]
+
+
 def fail(status, code):
     raise HTTPException(status, {'code': code})
 
@@ -112,6 +126,14 @@ def fail(status, code):
 def owned_deck(conn, owner, deck_id):
     if not conn.execute("SELECT 1 FROM location WHERE id=%s AND owner_id=%s AND kind='deck'", (deck_id, owner)).fetchone():
         fail(404, 'DECK_NOT_FOUND')
+
+
+def owned_publication(conn, owner, token):
+    """A malformed token, an unknown one and another owner's are the same 404. Revoked publications stay found, so a
+    command on one can replay or report PUBLICATION_REVOKED."""
+    if not TOKEN.fullmatch(token) or not conn.execute('SELECT 1 FROM deck_publication WHERE token=%s AND owner_id=%s',
+                                                      (token, owner)).fetchone():
+        fail(404, 'PUBLICATION_NOT_FOUND')
 
 
 def snapshot(conn, owner, deck_id, title, version):
@@ -167,9 +189,9 @@ def drain(conn, store):
 
 
 @contextmanager
-def authorized_writer(owner, deck_id):
+def authorized_writer(authorize):
     with connect() as conn:
-        owned_deck(conn, owner, deck_id)
+        authorize(conn)
         conn.commit()
         # Session lock spans transaction commits and serializes durable outbox
         # replay for every adapter. CAS alone cannot prevent old PUT replay after DELETE.
@@ -184,53 +206,97 @@ def authorized_writer(owner, deck_id):
             conn.commit()
 
 
-def mutate(deck_id, command, owner, action):
-    payload = {'deck_id': str(deck_id), 'action': action, **command.model_dump(mode='json')}
+def mutate(deck_id, command, owner, action, token=None):
+    """One publication command, addressed by its Deck, or by its public ``token`` for revoke and visibility, which work
+    whether or not the Deck still exists. Publishing and republishing need the Deck: a publication whose Deck was deleted
+    has no Deck List left to snapshot.
+
+    Lock order: the session advisory lock (authorized_writer), then the inventory-owner row, then the Deck's row and its
+    publications. Deck deletion and every inventory command take the owner row first too, and every publication command
+    inserts rows whose foreign keys key-share lock the owner row, so taking it any later could deadlock with a Deck
+    deletion that is unlinking this Deck's publications."""
+    # Deck-keyed digests stay exactly as before, so stored commands keep replaying.
+    scope = {'deck_id': str(deck_id)} if token is None else {'token': token}
+    payload = {**scope, 'action': action, **command.model_dump(mode='json')}
     digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+
+    def authorize(conn, deck_id=deck_id, token=token):
+        """Ownership of the Deck or the publication, unless this exact command already ran: a stored command replays its
+        result whatever has happened to its Deck since, such as a lost response retried after the Deck was deleted."""
+        previous = conn.execute('SELECT request_digest FROM publication_command WHERE owner_id=%s AND request_key=%s',
+                                (owner, command.idempotency_key)).fetchone()
+        if previous:
+            if previous['request_digest'] != digest:
+                fail(409, 'IDEMPOTENCY_KEY_REUSED')
+            return
+        if token is None:
+            owned_deck(conn, owner, deck_id)
+        else:
+            owned_publication(conn, owner, token)
     try:
-        with authorized_writer(owner, deck_id) as (store, conn):
+        with authorized_writer(authorize) as (store, conn):
             # Session writer ownership spans commits and serialized outbox recovery.
             drain(conn, store)
+            read_token, frozen = None, None
+            if action == 'visibility':
+                # Read and validate the public object before the transaction, so no row lock (the owner's included) is
+                # held across store I/O. The advisory lock is held and the outbox drained, so no publication command
+                # can change this token's object before the transaction re-checks the token.
+                current = conn.execute(
+                    'SELECT token FROM deck_publication WHERE deck_id=%s AND NOT revoked' if token is None
+                    else 'SELECT token FROM deck_publication WHERE token=%s AND NOT revoked',
+                    (deck_id if token is None else token,)).fetchone()
+                conn.commit()
+                if current:
+                    read_token = current['token']
+                    record = store.read().get(read_token)
+                    # Validate only: visibility never reinterprets frozen contents, so legacy
+                    # objects keep their exact stored bytes (no inferred or null references).
+                    try:
+                        PublicSnapshot.model_validate(record['snapshot'])
+                        frozen = record['snapshot']
+                    except (KeyError, TypeError, ValueError, ValidationError):
+                        frozen = None
             with conn.transaction():
-                owned_deck(conn, owner, deck_id)
+                conn.execute('SELECT 1 FROM inventory_owner WHERE user_id=%s FOR UPDATE', (owner,))
+                authorize(conn)
                 previous = conn.execute('SELECT request_digest,result FROM publication_command WHERE owner_id=%s AND request_key=%s', (owner, command.idempotency_key)).fetchone()
                 if previous:
                     if previous['request_digest'] != digest:
                         fail(409, 'IDEMPOTENCY_KEY_REUSED')
                     return previous['result']
-                active = conn.execute('SELECT * FROM deck_publication WHERE deck_id=%s AND NOT revoked FOR UPDATE', (deck_id,)).fetchone()
+                if token is None:
+                    active = conn.execute('SELECT * FROM deck_publication WHERE deck_id=%s AND NOT revoked FOR UPDATE', (deck_id,)).fetchone()
+                else:
+                    active = conn.execute('SELECT * FROM deck_publication WHERE token=%s AND NOT revoked FOR UPDATE', (token,)).fetchone()
+                    if not active:
+                        fail(409, 'PUBLICATION_REVOKED')
                 if action == 'publish' and active:
                     fail(409, 'DECK_ALREADY_PUBLISHED')
                 if action != 'publish' and not active:
                     fail(409, 'DECK_NOT_PUBLISHED')
                 if action == 'publish':
-                    token, version = secrets.token_urlsafe(24), 1
-                    conn.execute('INSERT INTO deck_publication(token,owner_id,deck_id,title) VALUES (%s,%s,%s,%s)', (token, owner, deck_id, command.title))
+                    target, version = secrets.token_urlsafe(24), 1
+                    conn.execute('INSERT INTO deck_publication(token,owner_id,deck_id,title) VALUES (%s,%s,%s,%s)', (target, owner, deck_id, command.title))
                 else:
-                    token = active['token']
+                    target = active['token']
                     version = active['version'] + (1 if action == 'republish' else 0)
                 if action == 'visibility':
-                    record = store.read().get(token)
-                    if not record:
+                    # A missing or invalid object, or a token that changed since it was read, is retried, never guessed.
+                    if frozen is None or target != read_token:
                         raise ProjectionUnavailable()
-                    # Validate only: visibility never reinterprets frozen contents, so legacy
-                    # objects keep their exact stored bytes (no inferred or null references).
-                    try:
-                        PublicSnapshot.model_validate(record['snapshot'])
-                    except (KeyError, TypeError, ValueError, ValidationError):
-                        raise ProjectionUnavailable() from None
-                    projection = {'visibility': command.visibility, 'snapshot': record['snapshot']}
-                    conn.execute('UPDATE deck_publication SET visibility=%s WHERE token=%s', (command.visibility, token))
+                    projection = {'visibility': command.visibility, 'snapshot': frozen}
+                    conn.execute('UPDATE deck_publication SET visibility=%s WHERE token=%s', (command.visibility, target))
                 elif action == 'revoke':
                     projection = None
-                    conn.execute('UPDATE deck_publication SET revoked=true WHERE token=%s', (token,))
+                    conn.execute('UPDATE deck_publication SET revoked=true WHERE token=%s', (target,))
                 else:
                     public = snapshot(conn, owner, deck_id, command.title, version)
                     projection = {'visibility': active['visibility'] if active else 'unlisted', 'snapshot': public.model_dump(mode='json')}
-                    conn.execute('UPDATE deck_publication SET version=%s,title=%s WHERE token=%s', (version, command.title, token))
-                result = PublicationResult(token=token, version=version, revoked=action == 'revoke').model_dump(mode='json')
+                    conn.execute('UPDATE deck_publication SET version=%s,title=%s WHERE token=%s', (version, command.title, target))
+                result = PublicationResult(token=target, version=version, revoked=action == 'revoke').model_dump(mode='json')
                 conn.execute('INSERT INTO publication_command(owner_id,request_key,request_digest,token,projection,result) VALUES (%s,%s,%s,%s,%s,%s)',
-                             (owner, command.idempotency_key, digest, token, json.dumps(projection), json.dumps(result)))
+                             (owner, command.idempotency_key, digest, target, json.dumps(projection), json.dumps(result)))
             drain(conn, store)
             return result
     except (ProjectionUnavailable, psycopg.Error):
@@ -266,6 +332,27 @@ def revoke(deck_id: UUID, command: RevokeCommand, user_id: str = Depends(verifie
 @router.patch('/api/decks/{deck_id}/publication/visibility', response_model=PublicationResult)
 def set_visibility(deck_id: UUID, command: VisibilityCommand, user_id: str = Depends(verified_user)):
     return mutate(deck_id, command, user_id, 'visibility')
+
+
+@router.get('/api/publications', response_model=OwnedPublications)
+def owned_publications(user_id: str = Depends(verified_user)):
+    """The owner's active publications, including those whose Deck was deleted (``deck_id`` null)."""
+    with connect() as conn:
+        rows = conn.execute("""SELECT p.token,p.version,p.title,p.visibility,p.deck_id,
+          EXISTS(SELECT 1 FROM publication_command c WHERE c.token=p.token AND NOT c.projected) AS projection_pending
+          FROM deck_publication p WHERE p.owner_id=%s AND NOT p.revoked ORDER BY p.created_at,p.token""",
+                            (user_id,)).fetchall()
+        return OwnedPublications(publications=[OwnedPublication(**row) for row in rows])
+
+
+@router.delete('/api/publications/{token}', response_model=PublicationResult)
+def revoke_publication(token: str, command: RevokeCommand, user_id: str = Depends(verified_user)):
+    return mutate(None, command, user_id, 'revoke', token=token)
+
+
+@router.patch('/api/publications/{token}/visibility', response_model=PublicationResult)
+def set_publication_visibility(token: str, command: VisibilityCommand, user_id: str = Depends(verified_user)):
+    return mutate(None, command, user_id, 'visibility', token=token)
 
 
 @router.get('/api/public/decks/{token}', response_model=PublicSnapshot)

@@ -22,7 +22,7 @@ def ts_type(value):
 
 
 schema = app.openapi()["components"]["schemas"]
-names = ("VisibilityCommand", "PublishCommand", "RevokeCommand", "PublicationStatus", "PublicationResult", "PublicEdition", "PublicIdentity", "PublicIdentityCheck", "PublicChecks", "PublicSnapshot")
+names = ("VisibilityCommand", "PublishCommand", "RevokeCommand", "PublicationStatus", "PublicationResult", "OwnedPublication", "OwnedPublications", "PublicEdition", "PublicIdentity", "PublicIdentityCheck", "PublicChecks", "PublicSnapshot")
 lines = ["// Generated from FastAPI OpenAPI by scripts/generate_publications_client.py. Do not edit."]
 for name in names:
     definition = schema[name]
@@ -49,6 +49,9 @@ export const publishDeck = (id: string, body: PublishCommand) => request<Publica
 export const republishDeck = (id: string, body: PublishCommand) => request<PublicationResult>(`/api/decks/${encodeURIComponent(id)}/publication`, 'PUT', body);
 export const revokeDeck = (id: string, body: RevokeCommand) => request<PublicationResult>(`/api/decks/${encodeURIComponent(id)}/publication`, 'DELETE', body);
 export const setPublicationVisibility = (id: string, body: VisibilityCommand) => request<PublicationResult>(`/api/decks/${encodeURIComponent(id)}/publication/visibility`, 'PATCH', body);
+export const getOwnedPublications = () => request<OwnedPublications>('/api/publications', 'GET');
+export const revokePublication = (token: string, body: RevokeCommand) => request<PublicationResult>(`/api/publications/${encodeURIComponent(token)}`, 'DELETE', body);
+export const setPublishedDeckVisibility = (token: string, body: VisibilityCommand) => request<PublicationResult>(`/api/publications/${encodeURIComponent(token)}/visibility`, 'PATCH', body);
 export async function getPublicDeckPage(token: string) {
   let robots = 'noindex, nofollow';
   const snapshot = await request<PublicSnapshot>(`/api/public/decks/${encodeURIComponent(token)}`, 'GET', undefined, response => { robots = response.headers.get('x-robots-tag') ?? robots; });
