@@ -7,6 +7,7 @@ import React, {
 } from "react";
 import { getLocationTree, type TreeNode } from "../location_generated";
 import { CreateLocationDialog } from "./CreateLocationDialog";
+import { DeckHeading } from "./DeckHeading";
 import { Gallery } from "./Gallery";
 import {
   DEFAULT_DISPLAY,
@@ -23,6 +24,7 @@ import { SelectionBar } from "./SelectionBar";
 import { selectionScope } from "./selectionModel";
 import { useGalleryData } from "./useGalleryData";
 import { useSelection } from "./useSelection";
+import { clearLinkedLocation, readLinkedLocation } from "./workspaceLink";
 import "./Workspace.css";
 
 const FOCUSABLE =
@@ -100,6 +102,23 @@ export function Workspace({ onOpenLocations, onSignOut }: Props) {
   useEffect(() => {
     window.scrollTo(0, 0);
   }, [galleryView]);
+
+  // A link from the Decks page (/workspace?location=<id>) opens that Storage Leaf or Deck once the tree
+  // has loaded, with its folders expanded. The address is cleaned at once, so a reload opens All owned.
+  // A missing id or a folder id leaves the workspace at All owned.
+  const linked = useRef<string | null>(readLinkedLocation());
+  useEffect(() => {
+    clearLinkedLocation();
+  }, []);
+  useEffect(() => {
+    const id = linked.current;
+    if (!id || treeState !== "ready") return;
+    linked.current = null;
+    const node = index.byId.get(id);
+    if (!node || node.kind === "organization") return;
+    setExpanded((previous) => new Set([...previous, ...index.ancestors(id)]));
+    setView(id);
+  }, [index, treeState]);
 
   function toggleFolder(id: string) {
     setExpanded((previous) => {
@@ -294,6 +313,14 @@ export function Workspace({ onOpenLocations, onSignOut }: Props) {
                 Select
               </button>
             </div>
+            {current?.kind === "deck" && (
+              <DeckHeading
+                key={current.id}
+                deckId={current.id}
+                deckName={current.name}
+                inventoryRevision={gallery.ownerRevision}
+              />
+            )}
             <div className="ws-toolbar ws-desktop-only">
               {search("ws-toolbar-search")}
               <div className="ws-display-controls">
