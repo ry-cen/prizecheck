@@ -59,22 +59,21 @@ const row = (n: number, quantity: number) => ({
   location_path: "Fake Shelf / Fake Binder",
 });
 
+/** One page of the listing. The first page carries the totals for the whole listing, which
+ * size the grid, so `totalCopies` counts the copies on all pages. */
 const pageBody = (
   rows: ReturnType<typeof row>[],
   nextCursor: string | null,
-  first: boolean
+  totalCopies: number | null
 ) => ({
   holdings: rows,
   owner_revision: 1,
   catalog_revision: 1,
   next_cursor: nextCursor,
-  totals: first
-    ? {
-        holdings: rows.length,
-        editions: rows.length,
-        copies: String(rows.reduce((sum, r) => sum + Number(r.quantity), 0)),
-      }
-    : null,
+  totals:
+    totalCopies === null
+      ? null
+      : { holdings: 2, editions: 2, copies: String(totalCopies) },
 });
 
 const ok = (route: Route, body: unknown) =>
@@ -87,7 +86,8 @@ const fail = (route: Route, status: number, detail: unknown = {}) =>
   });
 
 const cards = (page: Page) => page.getByRole("region", { name: "Cards" });
-const tiles = (page: Page) => cards(page).getByRole("button");
+const tiles = (page: Page) =>
+  cards(page).getByRole("button", { name: /^Fake Card/ });
 
 test("a failed first page shows the unavailable message, and Retry loads the tiles", async ({
   page,
@@ -97,7 +97,7 @@ test("a failed first page shows the unavailable message, and Retry loads the til
   await page.route(LISTING, (route) =>
     ++requests === 1
       ? fail(route, 500)
-      : ok(route, pageBody([row(1, 2)], null, true))
+      : ok(route, pageBody([row(1, 2)], null, 2))
   );
   await page.reload();
 
@@ -125,14 +125,14 @@ test("a stale cursor restarts the walk from the first page", async ({
       // Page 1 always points at a page 2; only the first page 2 reports the change.
       return ok(
         route,
-        pageBody([row(1, 1)], conflicts === 0 ? "cursor-1" : "cursor-2", true)
+        pageBody([row(1, 1)], conflicts === 0 ? "cursor-1" : "cursor-2", 3)
       );
     }
     if (cursor === "cursor-1") {
       conflicts++;
       return fail(route, 409, { code: "INVENTORY_CHANGED" });
     }
-    return ok(route, pageBody([row(2, 2)], null, false));
+    return ok(route, pageBody([row(2, 2)], null, null));
   });
   await page.reload();
 
@@ -150,7 +150,7 @@ test("a failed later page keeps the loaded tiles and says some cards couldn't be
     const cursor = new URL(route.request().url()).searchParams.get("cursor");
     return cursor
       ? fail(route, 500)
-      : ok(route, pageBody([row(1, 2)], "cursor-1", true));
+      : ok(route, pageBody([row(1, 2)], "cursor-1", 4));
   });
   await page.reload();
 
