@@ -3,6 +3,8 @@ import { HoldingError, type HoldingView } from './holdings_generated';
 export type CollectionEntry = { edition_id: string; quantity: string; printing_id: string; printing_name: string; set_id: string; set_name: string; collector_number: string; descriptor: Record<string, unknown>; image_url: string | null };
 export type CollectionPage = { entries: CollectionEntry[]; owner_revision: number; catalog_revision: number; next_cursor?: string | null };
 export type Distribution = { holdings: HoldingView[] };
+export type CollectionTotals = { holdings: number; editions: number; copies: string };
+export type CollectionHoldingPage = { holdings: HoldingView[]; owner_revision: number; catalog_revision: number; next_cursor?: string | null; totals?: CollectionTotals | null };
 
 export type CollectionFilters = { name?: string; set_id?: string; collector_number?: string; sort?: 'name' | 'quantity'; location_id?: string };
 async function read<T>(path: string): Promise<T> {
@@ -15,4 +17,9 @@ export const getCollection = (filters: CollectionFilters={},cursor?: string) => 
   return read<CollectionPage>(`/api/collection?${query}`);
 };
 export const getEditionDistribution = (editionId: string) => read<Distribution>(`/api/collection/editions/${encodeURIComponent(editionId)}`);
+export type CollectionHoldingQuery = { location_id?: string };
+export const getCollectionHoldings = (query: CollectionHoldingQuery={},cursor?: string) => {
+  const params=new URLSearchParams(Object.entries({...query,...(cursor ? {cursor} : {})}).filter(([,value])=>value !== undefined).map(([key,value])=>[key,value as string]));
+  return read<CollectionHoldingPage>(`/api/collection/holdings?${params}`);
+};
 
