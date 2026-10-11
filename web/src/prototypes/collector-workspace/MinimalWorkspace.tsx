@@ -153,6 +153,21 @@ type Prefs = {
   element: string;
 };
 const preferenceKey = "tcg-prototype:collector-workspace:preferences:v1";
+// Theme choices. Prize gold is the default (#47). Later presets are named after TCG energy types.
+const paletteKey = "tcg-prototype:collector-workspace:palette:v1";
+const palettes = [
+  { id: "gold", label: "Prize gold" },
+  { id: "sage", label: "Grass" },
+  { id: "blue", label: "Water" },
+];
+function storedPalette() {
+  try {
+    const value = localStorage.getItem(paletteKey);
+    return palettes.some((p) => p.id === value) ? value! : "gold";
+  } catch {
+    return "gold";
+  }
+}
 const sortValues = [
   "name-asc",
   "name-desc",
@@ -217,6 +232,14 @@ const plural = (n: number, one: string, many: string) =>
   `${n} ${n === 1 ? one : many}`;
 export default function MinimalWorkspace() {
   const [locations, setLocations] = useState(initialLocations);
+  const [palette, setPalette] = useState(storedPalette);
+  useEffect(() => {
+    try {
+      localStorage.setItem(paletteKey, palette);
+    } catch {
+      /* The palette remains available in memory. */
+    }
+  }, [palette]);
   // Siblings sort naturally A–Z ("Binder 2" before "Binder 10"); there is no stored order.
   const children = (id: string | null) =>
     locations
@@ -1359,7 +1382,7 @@ export default function MinimalWorkspace() {
     setActions(false);
   };
   return (
-    <div className="mw-root">
+    <div className="mw-root" data-palette={palette}>
       <div className="mw-surface" inert={!!dialog}>
         <header className="mw-header">
           <button
@@ -1519,8 +1542,8 @@ export default function MinimalWorkspace() {
                       data-tile-key={tile.key}
                       className={`mw-tile ${selection.includes(tile.key) ? "mw-selected" : ""}`}
                       aria-pressed={selection.includes(tile.key)}
-                      aria-label={`${tile.edition.name}, copy ${tile.ordinal + 1}, ${path(tile.source)}`}
-                      title={`${tile.edition.name} · ${path(tile.source)}`}
+                      aria-label={`${tile.edition.name}, ${tile.edition.set} ${tile.edition.number}, copy ${tile.ordinal + 1}, ${path(tile.source)}`}
+                      title={`${tile.edition.name} · ${tile.edition.set} ${tile.edition.number} · ${path(tile.source)}`}
                       draggable
                       onMouseEnter={() => {
                         if (!selectionRef.current.length) setHover(tile);
@@ -1556,7 +1579,10 @@ export default function MinimalWorkspace() {
                         const badge = document.createElement("div");
                         badge.className = "mw-drag-badge";
                         badge.textContent = `${plural(counts, "copy", "copies")} · ${plural(new Set(dragItems.current.map((i) => i.id)).size, "edition", "editions")}`;
-                        document.body.append(badge);
+                        // Inside the root so the badge picks up the palette's colour variables.
+                        (
+                          e.currentTarget.closest(".mw-root") || document.body
+                        ).append(badge);
                         e.dataTransfer.setDragImage(badge, 16, 16);
                         e.dataTransfer.setData(
                           "application/x-collector-move",
@@ -1576,6 +1602,9 @@ export default function MinimalWorkspace() {
                       {prefs.names && (
                         <span className="mw-tile-name">
                           {tile.edition.name}
+                          <small className="mw-tile-set">
+                            {tile.edition.set} · {tile.edition.number}
+                          </small>
                         </span>
                       )}
                       {view === "all" && (
@@ -1712,6 +1741,19 @@ export default function MinimalWorkspace() {
           <a href="?prototype=collector&variant=B" aria-label="Next variant">
             →
           </a>
+          <label className="mw-palette-picker">
+            <span>Theme</span>
+            <select
+              value={palette}
+              onChange={(e) => setPalette(e.target.value)}
+            >
+              {palettes.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.label}
+                </option>
+              ))}
+            </select>
+          </label>
         </nav>
       </div>
       {dialog && (

@@ -77,6 +77,18 @@ The owner confirmed the toolbar, drawer, name-visibility, source-caption, and Lo
 - Counts read "1 editions". Counts now use singular forms in the heading, selection bar, drag badge, inspector, Move and Removal dialogs and result messages, for example "1 selected · 1 edition · 1 location".
 - Checked with `npx tsc`, `npm run build` (no prototype markers in `dist/`) and the browser at 800 px and 375×812 with sample data.
 
+## Themes and selected tiles — 2026-10-11
+
+Supports [Decide responsive visual system](https://github.com/ry-cen/prizecheck/issues/47).
+
+- **Colour variables.** Every colour in the prototype now goes through a CSS variable for a colour role: background, surfaces, borders, a control outline, three text levels, accent shades, warning and danger. That replaced 66 hardcoded colours, many of them near-duplicates. A theme is one set of values selected by `data-palette` on the root.
+- **Themes.** Prize gold is the default. Grass (the original sage green) and Water (a blue) are alternatives. A Theme picker in the bottom-left prototype bar switches between them and is remembered in this browser. Later presets will be named after Pokémon TCG energy types.
+- **Contrast.** All three themes pass WCAG AA for body, muted and subtle text, accent text and text on accent buttons. Control outlines got their own `--control-border` variable at 3:1 or better against every surface. Panel dividers are decorative and stay subtler.
+- **Selected tiles.** A gold ring blended into yellow-bordered cards. A selected tile now shows a 3 px dark gap, then a 3 px accent ring, and a filled check badge inside the card's top-right corner with a dark outline. The badge first sat outside the corner, but it then looked like it belonged to the neighbouring card.
+- **Set and number.** At the owner's request, the Names toggle now also shows each tile's set and collector number on a second, smaller line under the name, for example "Pokémon 151 · 201". Numbers use tabular figures. Each tile's hover title and accessible label include the set and number whether or not Names is on. At 1280 px with small tiles, all 44 names showed with no set line cut off.
+- **Drag badge.** The card drag badge is now attached inside the workspace root, so it picks up the theme's colours.
+- Screenshot: [Prize gold with three selected tiles](theme-prize-gold.jpg).
+
 ## Drag handle in Manage locations — 2026-10-11
 
 At the owner's request, each row in Manage locations has a ☰ drag handle, which replaces whole-row dragging and the Move text button.
