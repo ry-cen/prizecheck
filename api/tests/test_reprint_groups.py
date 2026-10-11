@@ -296,7 +296,7 @@ def test_old_rare_candy_is_standard_legal_through_its_reprint_group():
     result = standard(owner, deck, "2026-10-11")
     assert result["status"] == "not_legal"
     assert issues(result) == {
-        ("not_in_card_pool", "regulation mark G not legal in Standard on 2026-10-11", "card", "not_legal",
+        ("not_in_card_pool", "regulation mark G rotated out of Standard on 2026-04-10", "card", "not_legal",
          lines("sv01-191")),
         ("not_in_card_pool", "not in the Standard card pool: Sword & Shield era, regulation marks D to F, all rotated "
                              "out by 2025-04-11", "card", "not_legal", lines("swsh1-180", "swsh12.5-141"))}
@@ -318,7 +318,7 @@ def test_a_pokemon_with_a_legal_identical_reprint_stays_not_legal():
     assert groups["svp-101"] == groups["svp-225"] is not None
     owner, deck = deck_with([("svp-101", 4), ("sv02-278", 56)])
     result = standard(owner, deck, "2026-10-11")
-    assert issues(result) == {("not_in_card_pool", "regulation mark G not legal in Standard on 2026-10-11", "card",
+    assert issues(result) == {("not_in_card_pool", "regulation mark G rotated out of Standard on 2026-04-10", "card",
                                "not_legal", lines("svp-101"))}
     owner, deck = deck_with([("svp-225", 4), ("sv02-278", 56)])
     assert standard(owner, deck, "2026-10-11")["status"] == "legal"

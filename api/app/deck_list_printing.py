@@ -14,7 +14,6 @@ Adding a card is not a price access (ADR 0006): the read never admits a refresh,
 the record store. No connection or lock is held while the store is read.
 """
 from decimal import Decimal
-import json
 from typing import Literal
 from uuid import UUID
 
@@ -22,7 +21,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from . import prices
-from .decks import DeckListCommandResult, check_revision, line_exists, read_deck_list, require_deck
+from .decks import DeckListCommandResult, advance_deck_list, check_revision, keep_response, line_exists, require_deck
 from .holdings import parse_quantity
 from .location_tree import error, owner_and_rows, replay
 from .main import connect, verified_user
@@ -118,11 +117,7 @@ def add_deck_list_printing(deck_id: UUID, command: AddDeckListPrinting, user_id:
 
 def store_printing_result(conn, user_id: str, deck_id: UUID, key: UUID, digest: str, edition_id: UUID,
                           chosen_by: ChosenBy) -> dict:
-    """``decks.store_deck_list_result`` plus the chosen Edition and rule. Keep the two in step: a field added to every
-    Deck List command response there belongs here too."""
-    conn.execute('UPDATE deck_list SET revision=revision+1 WHERE owner_id=%s AND deck_id=%s', (user_id, deck_id))
-    result = DeckListPrintingResult(deck_id=deck_id, deck_list=read_deck_list(conn, user_id, deck_id),
-                                    edition_id=edition_id, chosen_by=chosen_by).model_dump(mode='json')
-    conn.execute('INSERT INTO location_command(owner_id,request_key,request_digest,response) VALUES (%s,%s,%s,%s)',
-                 (user_id, key, digest, json.dumps(result)))
-    return result
+    """``decks.store_deck_list_result`` plus the chosen Edition and rule. ``decks.advance_deck_list`` supplies the
+    fields every Deck List command response carries, format results included."""
+    return keep_response(conn, user_id, key, digest, DeckListPrintingResult(
+        **advance_deck_list(conn, user_id, deck_id), edition_id=edition_id, chosen_by=chosen_by))

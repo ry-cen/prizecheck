@@ -61,7 +61,9 @@ def test_add_change_and_remove_lines_return_the_deck_list_with_in_deck_counts():
     not_owned = edition_like(edition, generation)
     added = add_line(owner, deck, edition, '4', 1)
     assert added.status_code == 200, added.text
-    assert added.json() == {'deck_id': deck, 'deck_list': {'revision': 2, 'lines': [
+    body = added.json()
+    assert body.pop('format_checks')['deck_list_revision'] == 2  # format results: test_deck_format_results.py
+    assert body == {'deck_id': deck, 'deck_list': {'revision': 2, 'lines': [
         {'edition_id': edition, 'quantity': '4', 'in_deck': '0'}]}}
     # Copies the line already covers leave the Deck List and its revision alone (moves extending a list are in
     # test_deck_list_moves.py).

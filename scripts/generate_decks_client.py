@@ -24,7 +24,8 @@ names = ("TreeNode", "LocationCommandResult", "CreateDeck", "EditDeck", "DeckInd
          "AddDeckListPrinting", "DeckListPrintingResult",
          "PickWarning", "PickSource", "PickRow", "PutAwayHolding", "PickList", "PickItem", "ConfirmPicks",
          "PickConfirmResult", "DeleteDeck", "DeleteDeckResult")
-lines = ["// Generated from FastAPI OpenAPI by scripts/generate_decks_client.py. Do not edit."]
+lines = ["// Generated from FastAPI OpenAPI by scripts/generate_decks_client.py. Do not edit.",
+         "import type { DeckFormatChecks } from './format_checks_generated';"]
 for name in names:
     definition = schema[name]
     fields = [f"{field}{'' if field in definition.get('required', []) else '?'}: {ts_type(value)}"

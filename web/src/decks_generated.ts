@@ -1,4 +1,5 @@
 // Generated from FastAPI OpenAPI by scripts/generate_decks_client.py. Do not edit.
+import type { DeckFormatChecks } from './format_checks_generated';
 export type TreeNode = { id: string; name: string; kind: string; parent_id: string | null; version: number; depth: number };
 export type LocationCommandResult = { location: TreeNode; owner_revision: number };
 export type CreateDeck = { name: string; idempotency_key: string };
@@ -14,14 +15,14 @@ export type DeckList = { revision: number; lines: DeckListLine[] };
 export type AddDeckListLine = { edition_id: string; quantity: string; revision: number; idempotency_key: string };
 export type ChangeDeckListLine = { quantity: string; revision: number; idempotency_key: string };
 export type RemoveDeckListLine = { revision: number; idempotency_key: string };
-export type DeckListCommandResult = { deck_id: string; deck_list: DeckList };
+export type DeckListCommandResult = { deck_id: string; deck_list: DeckList; format_checks?: DeckFormatChecks | null };
 export type ElsewhereLocation = { location_id: string; name: string; kind: string; quantity: string };
 export type LineOwnership = { edition_id: string; quantity: string; in_deck: string; elsewhere: string; not_owned: string; locations: ElsewhereLocation[] };
 export type SurplusHolding = { edition_id: string; quantity: string };
 export type CompetingDeck = { deck_id: string; name: string; in_deck: string; elsewhere: string };
 export type CompetitionWarning = { edition_id: string; spare: string; counted_elsewhere: string; decks: CompetingDeck[] };
 export type AddDeckListPrinting = { printing_id: string; quantity: string; revision: number; idempotency_key: string };
-export type DeckListPrintingResult = { deck_id: string; deck_list: DeckList; edition_id: string; chosen_by: string };
+export type DeckListPrintingResult = { deck_id: string; deck_list: DeckList; format_checks?: DeckFormatChecks | null; edition_id: string; chosen_by: string };
 export type PickWarning = { deck_id: string; name: string; short_by: string };
 export type PickSource = { location_id: string; name: string; kind: string; available: string; committed: string; version: number; suggested: string; warning: PickWarning | null };
 export type PickRow = { edition_id: string; quantity: string; in_deck: string; elsewhere: string; not_owned: string; sources: PickSource[] };

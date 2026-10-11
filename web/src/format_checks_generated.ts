@@ -1,7 +1,7 @@
 // Generated from FastAPI OpenAPI by scripts/generate_format_checks_client.py. Do not edit.
 export type FormatIssue = { code: string; reason: string; kind: 'deck' | 'card'; effect: 'not_legal' | 'unknown'; lines: string[] };
-export type FormatCheck = { format: string; status: 'legal' | 'not_legal' | 'unknown'; issues: FormatIssue[]; rules_version: string; evaluated_on: string; notes: string[] };
-export type DeckFormatChecks = { deck_id: string; deck_list_revision: number; attribute_revision: number; results: FormatCheck[]; disclaimer: string };
+export type FormatCheck = { format: string; status: 'legal' | 'not_legal' | 'unknown'; issues: FormatIssue[]; rules_version: string; evaluated_on: string; notes: string[]; computed_at: string };
+export type DeckFormatChecks = { deck_id: string; deck_list_revision: number; attribute_revision: number; catalog_revision: number; results: FormatCheck[]; disclaimer: string };
 
 export class FormatCheckError extends Error {
   constructor(public status: number, public code: string) { super(code); }

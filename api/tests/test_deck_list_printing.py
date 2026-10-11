@@ -143,6 +143,23 @@ def test_a_printing_with_only_an_unspecified_variant_edition_uses_it(store):
     assert lines(response.json()) == {only: "4"}
 
 
+def test_adding_by_printing_returns_the_decks_format_results(store):
+    owner = str(uuid4())
+    printing, (first, _), _ = furret_world(owner)
+    deck = deck_of(owner)
+    response = add_printing(owner, deck, printing, "2", 1)
+    assert chosen(response) == (first, "catalog_order")
+    body = response.json()
+    checks = body["format_checks"]
+    assert checks["deck_id"] == deck and checks["deck_list_revision"] == body["deck_list"]["revision"] == 2
+    assert [result["format"] for result in checks["results"]] == ["standard"]
+    assert checks["results"][0]["status"] == "not_legal"  # two cards are not a 60-card deck
+    # The results are saved with the Deck: an unchanged read reuses them (Deck Lists 17).
+    read = call("GET", f"/api/decks/{deck}/format-checks", owner)
+    assert read.status_code == 200, read.text
+    assert read.json() == checks
+
+
 def test_the_chosen_edition_never_changes_when_prices_change_later(store):
     owner = str(uuid4())
     printing, (first, second), by_id = furret_world(owner)
