@@ -291,7 +291,7 @@ Each Deck List is checked against Standard, Expanded and Gym Leader Challenge.
 
 ## Further Notes
 
-- **Branch.** This builds on `feature/card-prices-and-deck-exports`, which supplies the catalog source metadata, Deck cost, both exports, metadata reviews and the public projection. The branch `feature/deck-format-validation` is stacked on it and rebases onto `dev` once the prices branch lands. Implementation should not start before that rebase unless the owner decides otherwise.
+- **Branch.** This builds on the card prices and Deck exports feature, now on `dev`, which supplies the catalog source metadata, Deck cost, both exports, metadata reviews and the public projection. `feature/deck-format-validation` is based on `dev`, rebased on 2026-10-10 after the prices branch landed.
 - **Collector workspace.** The [Collector workspace spec](https://github.com/ry-cen/tcg-tracker/issues/79) plans atomic multi-source Moves. Pick List "confirm all" gathers copies from several Locations, so it should use that operation if it lands first, or stay compatible with it.
 - **Open rules facts**, to settle when writing the initial rules files:
   - the J mark's exact legal date;
