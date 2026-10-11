@@ -189,14 +189,17 @@ CHECK_SOURCES = {
 
 
 def basic_checks(conn, generation_id, user_id: str, deck_id: UUID, source: str) -> DeckChecks:
+    # The Basic Energy exemption reads the effective card attributes (migration 026), not the source energy type:
+    # an identity is exempt only when every printing is Basic Energy, and unresolved when any printing's Basic
+    # Energy status is unknown. ``generation_id`` is no longer read.
     groups = conn.execute(f"""SELECT ci.id,ci.display_name,sum(c.quantity) AS quantity,
-      bool_and(coalesce(gp.basic_energy,'unresolved')='supported') AS exempt,
-      bool_or(coalesce(gp.basic_energy,'unresolved')='unresolved') AS unresolved
+      bool_and(a.basic_energy IS TRUE) AS exempt,
+      bool_or(a.basic_energy IS NULL) AS unresolved
       FROM ({CHECK_SOURCES[source]}) c JOIN catalog_edition e ON e.id=c.edition_id
       JOIN catalog_printing p ON p.id=e.printing_id JOIN catalog_identity ci ON ci.id=p.identity_id
-      LEFT JOIN catalog_generation_printing gp ON gp.printing_id=p.id AND gp.generation_id=%s
+      LEFT JOIN catalog_card_attribute a ON a.printing_id=p.id
       GROUP BY ci.id,ci.display_name
-      ORDER BY ci.display_name,ci.id""", (user_id, deck_id, generation_id)).fetchall()
+      ORDER BY ci.display_name,ci.id""", (user_id, deck_id)).fetchall()
     evaluated = evaluate_checks([IdentityCount(int(g['quantity']),g['exempt'],g['unresolved']) for g in groups])
     identities = [IdentityCheck(identity_id=g['id'],name=g['display_name'],quantity=str(g['quantity']),status=status)
                   for g,status in zip(groups,evaluated.identity_statuses)]

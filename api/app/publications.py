@@ -121,20 +121,21 @@ def snapshot(conn, owner, deck_id, title, version):
     # The inventory-owner lock serializes this snapshot with Deck List commands (owner_and_rows) and with Holding
     # writes into the Deck, which may extend its Deck List.
     conn.execute('SELECT revision FROM inventory_owner WHERE user_id=%s FOR UPDATE', (owner,))
-    state = conn.execute('SELECT active_generation FROM catalog_state WHERE singleton FOR SHARE').fetchone()
+    conn.execute('SELECT active_generation FROM catalog_state WHERE singleton FOR SHARE')
+    # The Basic Energy class reads the effective card attributes (migration 026), as Deck detail checks do.
     rows = conn.execute("""SELECT ci.id,ci.display_name,l.quantity,e.descriptor,
       e.public_ref AS edition_ref,p.public_ref AS printing_ref,
       coalesce(pd.display_name,ci.display_name) AS printing_name,
       coalesce(pd.set_id,'') AS set_id,coalesce(pd.set_name,'') AS set_name,
       coalesce(pd.collector_number,'') AS collector_number,pd.image_url,
-      coalesce(gp.basic_energy,'unresolved') AS basic_energy
+      CASE a.basic_energy WHEN true THEN 'supported' WHEN false THEN 'not_basic' ELSE 'unresolved' END AS basic_energy
       FROM deck_list_line l JOIN catalog_edition e ON e.id=l.edition_id
       JOIN catalog_printing p ON p.id=e.printing_id JOIN catalog_identity ci ON ci.id=p.identity_id
       LEFT JOIN catalog_printing_display pd ON pd.printing_id=p.id
-      LEFT JOIN catalog_generation_printing gp ON gp.printing_id=p.id AND gp.generation_id=%s
+      LEFT JOIN catalog_card_attribute a ON a.printing_id=p.id
       WHERE l.owner_id=%s AND l.deck_id=%s
       ORDER BY ci.display_name,ci.id,pd.set_id,pd.collector_number,e.descriptor_key""",
-      (state['active_generation'], owner, deck_id)).fetchall()
+      (owner, deck_id)).fetchall()
     groups = {}
     for row in rows:
         group = groups.setdefault(row['id'], {'name': row['display_name'], 'amount': 0, 'editions': [], 'classes': []})

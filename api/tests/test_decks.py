@@ -53,17 +53,19 @@ def test_four_copy_groups_printings_and_editions_and_requires_supported_energy()
         third = conn.execute("INSERT INTO catalog_edition(printing_id,descriptor_key,descriptor) VALUES (%s,'normal','{}') RETURNING id", (other_printing,)).fetchone()[0]
         conn.execute("""INSERT INTO catalog_generation_printing(generation_id,printing_id,source_id,set_id,set_name,collector_number,display_name,search_name,source_fingerprint,basic_energy)
           VALUES (%s,%s,%s,'other','Other Set','4','Pikachu','pikachu','test','not_basic')""", (generation, other_printing, str(uuid4())))
+        conn.execute("INSERT INTO catalog_derived_attribute(printing_id,rules_version,card_kind,basic_energy) VALUES (%s,1,'pokemon',false)", (other_printing,))
         conn.execute('INSERT INTO catalog_generation_edition(generation_id,edition_id,printing_id) VALUES (%s,%s,%s),(%s,%s,%s)', (generation, second, printing, generation, third, other_printing))
     for edition, amount in ((first, '2'), (str(second), '1'), (str(third), '2')):
         assert add(owner, deck, edition, amount).status_code == 200
     result = call('GET', f'/api/decks/{deck}', owner).json()['checks']
     assert len(result['identities']) == 1
     assert result['identities'][0]['quantity'] == '5' and result['identities'][0]['status'] == 'over_limit'
+    # The exemption reads the Basic Energy card attribute: unknown is unresolved, and only Basic Energy is exempt.
     with psycopg.connect(os.environ['DATABASE_URL']) as conn:
-        conn.execute("UPDATE catalog_generation_printing SET basic_energy='unresolved' WHERE generation_id=%s", (generation,))
+        conn.execute('UPDATE catalog_derived_attribute SET basic_energy=NULL WHERE printing_id IN (%s,%s)', (printing, other_printing))
     assert call('GET', f'/api/decks/{deck}', owner).json()['checks']['identities'][0]['status'] == 'unresolved'
     with psycopg.connect(os.environ['DATABASE_URL']) as conn:
-        conn.execute("UPDATE catalog_generation_printing SET basic_energy='supported' WHERE generation_id=%s", (generation,))
+        conn.execute('UPDATE catalog_derived_attribute SET basic_energy=true WHERE printing_id IN (%s,%s)', (printing, other_printing))
     assert call('GET', f'/api/decks/{deck}', owner).json()['checks']['identities'][0]['status'] == 'basic_energy_exempt'
 
 

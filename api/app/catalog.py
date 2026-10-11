@@ -15,6 +15,7 @@ import httpx
 import psycopg
 from psycopg.rows import dict_row
 
+from .card_attributes import refresh_card_attributes
 from .card_identity import card_identity_key
 from .catalog_targets import IDENTITY_REVIEW_KINDS, MatchingRulesV1, TargetContext, refresh_editions, refresh_printing
 from .public_catalog import publish_catalog_best_effort
@@ -419,6 +420,24 @@ def claim_run(conn, run_id: UUID) -> UUID | None:
     return run_id
 
 
+def rederive_card_attributes(conn) -> int:
+    """Re-derive every Printing's card attributes from its stored source record, fetching nothing.
+
+    For ``scripts/derive_card_attributes.py``. It holds the importer's lock, so it never interleaves with an import;
+    RunnerBusy means an import is running. Returns the number of Printings whose attributes changed.
+    """
+    if not conn.execute("SELECT pg_try_advisory_lock(914703) AS acquired").fetchone()["acquired"]:
+        conn.rollback()
+        raise RunnerBusy("Catalog importer already running")
+    conn.commit()
+    try:
+        with conn.transaction():
+            return refresh_card_attributes(conn)
+    finally:
+        conn.execute("SELECT pg_advisory_unlock(914703)")
+        conn.commit()
+
+
 def execute_run(conn, run_id: UUID, source=None, before_promotion=None):
     try:
         source = source or TCGdexSource()
@@ -628,6 +647,9 @@ def execute_run(conn, run_id: UUID, source=None, before_promotion=None):
                       (run_id, old_id, prior["printing_id"]))
             conn.execute("""UPDATE catalog_generation_edition ge SET active=false
               FROM catalog_edition_replacement er WHERE ge.generation_id=%s AND ge.edition_id=er.edition_id""",(run_id,))
+            # Every Printing's card attributes are re-derived from the source records stored above, so a change
+            # to the derivation rules also reaches records that did not change.
+            refresh_card_attributes(conn)
             conn.execute("UPDATE catalog_state SET active_generation=%s, revision=revision+1, last_success=now() WHERE singleton", (run_id,))
             conn.execute("UPDATE catalog_run SET phase='complete', outcome='succeeded', finished_at=now(), lease_until=NULL WHERE id=%s", (run_id,))
             # Keep current and previous successful compressed raw generations.
