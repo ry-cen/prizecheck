@@ -45,6 +45,11 @@ type Props = {
   onTile: (tile: TileRef, gesture: TileGesture) => void;
   onHover: (tile: TileRef | null) => void;
   onMarquee: (event: MarqueeEvent) => void;
+  /** Ticket 107: a press on a tile that may become a drag (see useTileDrag). Must be stable. */
+  onTilePointerDown?: (
+    tile: TileRef,
+    event: React.PointerEvent<HTMLElement>
+  ) => void;
 };
 
 /** Rows mounted beyond the viewport, as a fraction of the viewport height, above and below. */
@@ -72,6 +77,7 @@ export function Gallery({
   onTile,
   onHover,
   onMarquee,
+  onTilePointerDown,
 }: Props) {
   const sectionRef = useRef<HTMLElement>(null);
   const gridRef = useRef<HTMLDivElement>(null);
@@ -346,6 +352,7 @@ export function Gallery({
         selected={isTileSelected(selected, tile.holding.key, tile.ordinal)}
         onTile={onTile}
         onHover={onHover}
+        onPointerDown={onTilePointerDown}
         onFocusTile={focusTile}
         onBlurTile={blurTile}
         left={rect.x}
@@ -454,6 +461,10 @@ type TileProps = {
   selected: boolean;
   onTile: (tile: TileRef, gesture: TileGesture) => void;
   onHover: (tile: TileRef | null) => void;
+  onPointerDown?: (
+    tile: TileRef,
+    event: React.PointerEvent<HTMLElement>
+  ) => void;
   /** Keyboard focus entered or left this tile (display index, Holding key). */
   onFocusTile: (index: number, key: string) => void;
   onBlurTile: (index: number) => void;
@@ -476,6 +487,7 @@ const Tile = memo(function Tile({
   selected,
   onTile,
   onHover,
+  onPointerDown,
   onFocusTile,
   onBlurTile,
   left,
@@ -514,6 +526,7 @@ const Tile = memo(function Tile({
       onKeyUp={(event) => {
         if (event.key === " ") event.preventDefault();
       }}
+      onPointerDown={(event) => onPointerDown?.(ref(), event)}
       onPointerEnter={(event) => {
         if (event.pointerType === "mouse") onHover(ref());
       }}

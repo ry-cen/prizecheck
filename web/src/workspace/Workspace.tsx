@@ -27,14 +27,22 @@ import {
 } from "./galleryModel";
 import { useGalleryPrefs } from "./galleryPrefs";
 import { DetailsSheet, Inspector } from "./Inspector";
-import { LocationNav, type WorkspaceView } from "./LocationNav";
+import { MoveDialog, RemovalDialog } from "./InventoryDialogs";
+import {
+  LocationNav,
+  type DropTargets,
+  type WorkspaceView,
+} from "./LocationNav";
 import { ManageLocations, ManageLocationsButton } from "./ManageLocations";
 import { indexLocations } from "./locationTree";
 import { MOBILE_QUERY, useMediaQuery } from "./media";
 import { SelectionBar } from "./SelectionBar";
-import { selectionScope } from "./selectionModel";
+import { selectedGroups, selectionScope } from "./selectionModel";
+import { DragBadge, useTileDrag } from "./tileDrag";
+import { UndoToast } from "./UndoToast";
 import { useDebouncedValue } from "./useDebouncedValue";
 import { useGalleryData } from "./useGalleryData";
+import { useInventoryActions } from "./useInventoryActions";
 import { useOwnedSets } from "./useOwnedSets";
 import { useSelection } from "./useSelection";
 import { clearLinkedLocation, readLinkedLocation } from "./workspaceLink";
@@ -124,6 +132,20 @@ export function Workspace({ userId, onOpenLocations, onSignOut }: Props) {
     status: gallery.status,
     scope: selectionScope({ ...galleryQuery, search: searchText.trim() }),
     mobile,
+  });
+  // Ticket 107: Move, Inventory Removal and Undo, and the desktop tile drag.
+  const actions = useInventoryActions({
+    selection,
+    holdings: gallery.holdings,
+    index,
+    reloadGallery: gallery.reload,
+    reloadTree: loadTree,
+  });
+  const drag = useTileDrag({
+    enabled: !mobile && !actions.busy,
+    index,
+    selection,
+    onDrop: actions.dropMove,
   });
   const locationPath = useCallback(
     (id: string) => (index.byId.has(id) ? index.path(id) : undefined),
@@ -256,7 +278,7 @@ export function Workspace({ userId, onOpenLocations, onSignOut }: Props) {
     />
   );
 
-  const tree = (idPrefix: string) =>
+  const tree = (idPrefix: string, drop?: DropTargets | null) =>
     treeState === "error" ? (
       <div className="ws-tree-status" role="alert">
         <p>Locations are temporarily unavailable.</p>
@@ -277,6 +299,7 @@ export function Workspace({ userId, onOpenLocations, onSignOut }: Props) {
         onChoose={choose}
         idPrefix={idPrefix}
         onAddChild={openCreate}
+        drop={drop}
       />
     );
 
@@ -336,7 +359,7 @@ export function Workspace({ userId, onOpenLocations, onSignOut }: Props) {
                 <ManageLocationsButton onClick={openManage} />
               </span>
             </div>
-            {tree("ws-sidebar")}
+            {tree("ws-sidebar", drag.drop)}
           </aside>
           <main className="ws-main" aria-labelledby="ws-heading">
             <div className="ws-heading">
@@ -413,6 +436,7 @@ export function Workspace({ userId, onOpenLocations, onSignOut }: Props) {
                 onTile={selection.activate}
                 onHover={selection.hover}
                 onMarquee={selection.marquee}
+                onTilePointerDown={drag.start}
               />
               <Inspector
                 card={selection.inspected}
@@ -423,13 +447,30 @@ export function Workspace({ userId, onOpenLocations, onSignOut }: Props) {
             </div>
           </main>
         </div>
-        {selection.summary.copies > 0 && (
-          <SelectionBar
-            summary={selection.summary}
-            onClear={selection.clear}
-            onDetails={selection.openDetails}
+        {/* The bottom dock: the success and Undo toast sits above the selection bar. */}
+        <div className="ws-dock">
+          <UndoToast
+            toast={actions.toast}
+            busy={actions.busy}
+            onUndo={actions.undo}
+            onDismiss={actions.dismiss}
+            onClose={actions.closeToast}
+            toastRef={actions.toastRef}
           />
-        )}
+          {selection.summary.copies > 0 && (
+            <SelectionBar
+              summary={selection.summary}
+              onClear={actions.clearSelection}
+              onDetails={selection.openDetails}
+              onMove={actions.openMove}
+              onRemove={actions.openRemoval}
+              busy={actions.busy}
+              status={actions.dialog ? "" : actions.progress}
+              error={actions.barError}
+              actionsRef={actions.actionsButton}
+            />
+          )}
+        </div>
       </div>
       {drawerOpen && (
         <div
@@ -515,6 +556,31 @@ export function Workspace({ userId, onOpenLocations, onSignOut }: Props) {
           onClose={selection.closeDetails}
         />
       )}
+      {actions.dialog === "move" && (
+        <MoveDialog
+          index={index}
+          initialExpanded={expanded}
+          groups={selectedGroups(selection.selected)}
+          copies={selection.summary.copies}
+          busy={actions.busy}
+          progress={actions.progress}
+          error={actions.dialogError}
+          onConfirm={actions.confirmMove}
+          onCancel={actions.closeDialog}
+        />
+      )}
+      {actions.dialog === "remove" && (
+        <RemovalDialog
+          rows={actions.removalRows}
+          copies={selection.summary.copies}
+          busy={actions.busy}
+          progress={actions.progress}
+          error={actions.dialogError}
+          onConfirm={actions.confirmRemoval}
+          onCancel={actions.closeDialog}
+        />
+      )}
+      <DragBadge badge={drag.badge} />
     </div>
   );
 }

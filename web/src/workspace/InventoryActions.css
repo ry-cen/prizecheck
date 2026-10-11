@@ -1,0 +1,414 @@
+/* Collector workspace Move, Inventory Removal and Undo (ticket 107): the bottom dock, the Actions list,
+   the Move explorer and Removal dialogs, the toast, the drag badge and sidebar drop targets.
+   Every colour, space, radius and size comes from web/src/tokens.css. No colour literals.
+   Breakpoints: see the list at the top of tokens.css. */
+
+/* Bottom dock: the toast stacks above the selection bar, at the bottom centre on desktop and above
+   the Actions strip on mobile. The bar (Selection.css) is positioned by the dock here. */
+.ws-dock {
+  position: fixed;
+  left: 50%;
+  bottom: var(--space-6);
+  transform: translateX(-50%);
+  z-index: var(--layer-sticky);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: max-content;
+  max-width: calc(100vw - 2 * var(--space-4));
+  pointer-events: none;
+}
+.ws-dock > * {
+  pointer-events: auto;
+}
+.ws-dock .ws-selection-bar {
+  position: relative;
+  left: auto;
+  bottom: auto;
+  transform: none;
+  max-width: 100%;
+  flex-wrap: wrap;
+}
+.ws-toast:not(.ws-toast-idle) + .ws-selection-bar {
+  margin-top: var(--space-2);
+}
+@media (max-width: 760px) {
+  .ws-dock {
+    left: var(--space-2);
+    right: var(--space-2);
+    bottom: var(--space-2);
+    transform: none;
+    width: auto;
+    max-width: none;
+    align-items: stretch;
+  }
+  .ws-dock .ws-selection-bar {
+    left: auto;
+    right: auto;
+    bottom: auto;
+  }
+}
+
+/* Selection bar additions: the Actions list opens upwards; drag progress and errors take a full row. */
+.ws-actions {
+  position: relative;
+  display: inline-flex;
+}
+.ws-actions-list {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + var(--space-2));
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 200px;
+  padding: var(--space-1);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-panel);
+  background: var(--color-surface-raised);
+  box-shadow: 0 var(--space-2) var(--space-6) var(--color-shadow-strong);
+}
+.ws-root .ws-actions-list button {
+  width: 100%;
+  justify-content: flex-start;
+  text-align: left;
+  border-color: transparent;
+  background: transparent;
+}
+.ws-root .ws-actions-list button:hover {
+  background: var(--color-surface-selected);
+}
+.ws-selection-status,
+.ws-selection-error {
+  flex: 1 0 100%;
+  max-width: 420px;
+  font-size: var(--font-size-sm);
+  white-space: normal;
+}
+.ws-selection-status {
+  color: var(--color-text-muted);
+}
+/* An empty live region stays in the accessibility tree but takes no space. */
+.ws-selection-status:empty,
+.ws-toast-text:empty,
+.ws-action-progress:empty {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.ws-selection-error,
+.ws-action-error {
+  color: var(--color-danger);
+}
+.ws-selection-error::before,
+.ws-action-error::before {
+  content: "⚠ ";
+}
+@media (max-width: 760px) {
+  .ws-actions-list {
+    min-width: 220px;
+  }
+  .ws-root .ws-actions-list button,
+  .ws-root .ws-selection-actions .ws-actions > button {
+    min-height: var(--target-touch);
+  }
+  .ws-selection-status,
+  .ws-selection-error {
+    max-width: none;
+  }
+}
+
+/* Toast */
+.ws-toast {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  max-width: 560px;
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-4);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-panel);
+  background: var(--color-surface-raised);
+  box-shadow: 0 var(--space-2) var(--space-8) var(--color-shadow-strong);
+}
+.ws-toast-idle {
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+}
+.ws-toast-text {
+  font-size: var(--font-size-sm);
+  font-variant-numeric: var(--numeric);
+}
+.ws-toast-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 0 0 auto;
+}
+.ws-root .ws-toast-actions button {
+  height: var(--control-height);
+  padding-top: 0;
+  padding-bottom: 0;
+}
+.ws-root .ws-toast-undo {
+  border-color: var(--color-accent-border);
+  color: var(--color-accent-strong);
+  font-weight: 600;
+}
+.ws-root .ws-toast-close {
+  width: var(--control-height);
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  color: var(--color-text-muted);
+}
+@media (max-width: 760px) {
+  .ws-toast {
+    max-width: none;
+    flex-wrap: wrap;
+    padding-left: var(--space-3);
+  }
+  .ws-toast-idle {
+    padding: 0;
+  }
+  .ws-toast-text {
+    flex: 1 1 160px;
+  }
+  .ws-root .ws-toast-actions button {
+    height: var(--target-touch);
+  }
+  .ws-root .ws-toast-close {
+    width: var(--target-touch);
+  }
+}
+
+/* Move explorer and Removal dialogs: native modal dialogs, a centred panel on desktop and a bottom
+   sheet on mobile, like the Add location dialog. */
+.ws-root .ws-action-dialog {
+  width: min(560px, calc(100vw - 2 * var(--space-4)));
+  max-width: none;
+  max-height: 85dvh;
+  margin: auto;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-dialog);
+  background: var(--color-surface);
+  color: var(--color-text);
+  box-shadow: 0 var(--space-2) var(--space-6) var(--color-shadow-strong);
+}
+.ws-root .ws-action-dialog[open] {
+  display: flex;
+  flex-direction: column;
+}
+.ws-root .ws-action-dialog::backdrop {
+  background: var(--color-scrim);
+}
+.ws-action-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-height: 0;
+  padding: var(--space-6);
+}
+.ws-root .ws-action-body h2 {
+  font-size: var(--font-size-lg);
+  font-weight: 550;
+}
+.ws-root .ws-explorer-search {
+  height: var(--control-height);
+}
+.ws-explorer,
+.ws-removal-list {
+  flex: 1 1 auto;
+  min-height: 120px;
+  max-height: 40dvh;
+  overflow: auto;
+  padding: var(--space-1);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-panel);
+}
+.ws-explorer ul,
+.ws-removal-list ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.ws-explorer ul ul {
+  margin-top: var(--space-1);
+}
+.ws-root .ws-explorer-row {
+  width: 100%;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  padding-left: calc(var(--space-2) + var(--ws-tree-level, 0) * var(--space-3));
+  border-color: transparent;
+  background: transparent;
+  font-size: var(--font-size-sm);
+  text-align: left;
+}
+.ws-root .ws-explorer-row:hover {
+  background: var(--color-surface-raised);
+}
+.ws-root .ws-explorer-folder {
+  color: var(--color-text-muted);
+}
+.ws-root .ws-explorer-leaf[aria-pressed="true"] {
+  background: var(--color-surface-selected);
+  border-color: var(--color-accent-border);
+  color: var(--color-accent-strong);
+  font-weight: 600;
+}
+/* The check mark is an aria-hidden span, so it never joins the accessible name. */
+.ws-explorer-check {
+  margin-left: auto;
+}
+.ws-explorer-chevron {
+  flex: 0 0 10px;
+  text-align: center;
+  color: var(--color-text-subtle);
+}
+.ws-explorer-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.ws-explorer-kind {
+  padding: 0 var(--space-1);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  font-weight: 400;
+}
+.ws-explorer-empty,
+.ws-removal-note {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+.ws-explorer-empty {
+  padding: var(--space-2);
+}
+.ws-move-summary {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: var(--font-size-sm);
+  font-variant-numeric: var(--numeric);
+}
+.ws-move-path {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.ws-removal-group {
+  padding: var(--space-2);
+}
+.ws-root .ws-removal-group h3 {
+  margin: 0 0 var(--space-1);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.ws-removal-list li {
+  font-size: var(--font-size-sm);
+}
+.ws-removal-quantity {
+  font-variant-numeric: var(--numeric);
+  font-weight: 600;
+}
+.ws-action-progress {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+.ws-action-error {
+  font-size: var(--font-size-sm);
+}
+.ws-action-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+.ws-root .ws-action-buttons button {
+  min-height: var(--control-height);
+}
+.ws-root .ws-action-primary {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: var(--color-on-accent);
+  font-weight: 600;
+}
+.ws-root .ws-action-danger {
+  background: var(--color-danger-fill);
+  border-color: var(--color-danger-border);
+  color: var(--color-text);
+  font-weight: 600;
+}
+.ws-root .ws-action-buttons [aria-disabled="true"] {
+  opacity: 0.6;
+  cursor: progress;
+}
+@media (max-width: 760px) {
+  .ws-root .ws-action-dialog {
+    width: 100%;
+    max-height: 88dvh;
+    margin: auto 0 0;
+    border-radius: var(--radius-dialog) var(--radius-dialog) 0 0;
+  }
+  .ws-action-body {
+    padding: var(--space-5);
+  }
+  .ws-root .ws-explorer-search,
+  .ws-root .ws-explorer-row,
+  .ws-root .ws-action-buttons button {
+    height: auto;
+    min-height: var(--target-touch);
+  }
+}
+
+/* Tile drag: the count badge follows the pointer; valid sidebar Storage Leaves show a dashed outline,
+   the one under the pointer a solid ring and a wash (shape as well as colour). */
+.ws-drag-badge {
+  position: fixed;
+  z-index: var(--layer-toast);
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-round);
+  background: var(--color-surface-raised);
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  font-variant-numeric: var(--numeric);
+  white-space: nowrap;
+  box-shadow: 0 var(--space-1) var(--space-3) var(--color-shadow-strong);
+  pointer-events: none;
+}
+body.ws-tile-dragging {
+  cursor: grabbing;
+}
+body.ws-tile-dragging .ws-root {
+  user-select: none;
+}
+.ws-root .ws-tree-row.ws-drop-valid {
+  outline: 2px dashed var(--color-accent-outline);
+  outline-offset: -2px;
+}
+.ws-root .ws-tree-row.ws-drop-over {
+  outline: 2px solid var(--color-accent);
+  background: var(--color-accent-wash);
+}
+
+/* The sidebar tree stays in view while the gallery scrolls, so a drag can always reach a leaf. */
+.ws-sidebar .ws-tree {
+  position: sticky;
+  top: var(--space-4);
+}

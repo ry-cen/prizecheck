@@ -5,6 +5,10 @@ import { isFolder, type LocationIndex } from "./locationTree";
 /** The workspace view: All owned or one Storage Leaf (including a Deck) by id. */
 export type WorkspaceView = "all" | string;
 
+/** While tiles are dragged (ticket 107): the Storage Leaves a drop can move them to, and the one
+ * under the pointer. */
+export type DropTargets = { valid: ReadonlySet<string>; over: string | null };
+
 type Props = {
   index: LocationIndex;
   view: WorkspaceView;
@@ -15,6 +19,8 @@ type Props = {
   idPrefix: string;
   /** Opens the create form with this parent preselected. Deck rows get no Add child control. */
   onAddChild?: (parentId: string) => void;
+  /** Set during a tile drag: valid leaves are highlighted and marked as drop targets. */
+  drop?: DropTargets | null;
 };
 
 /** The Location tree shared by the desktop sidebar and the mobile drawer.
@@ -27,18 +33,21 @@ export function LocationNav({
   onChoose,
   idPrefix,
   onAddChild,
+  drop,
 }: Props) {
   const branch = (node: TreeNode, level: number): React.ReactNode => {
     const folder = isFolder(node);
     const open = folder && expanded.has(node.id);
     const listId = `${idPrefix}-children-${node.id}`;
     const active = !folder && view === node.id;
+    const droppable = !folder && !!drop?.valid.has(node.id);
     return (
       <li key={node.id}>
         <div className="ws-tree-entry">
           <button
             type="button"
-            className={`ws-tree-row ${folder ? "ws-tree-folder" : "ws-tree-leaf"}`}
+            className={`ws-tree-row ${folder ? "ws-tree-folder" : "ws-tree-leaf"}${droppable ? " ws-drop-valid" : ""}${droppable && drop?.over === node.id ? " ws-drop-over" : ""}`}
+            data-ws-drop={droppable ? node.id : undefined}
             style={{ "--ws-tree-level": level } as React.CSSProperties}
             title={index.path(node.id)}
             aria-expanded={folder ? open : undefined}
