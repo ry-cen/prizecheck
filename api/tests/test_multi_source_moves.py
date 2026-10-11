@@ -78,8 +78,10 @@ def test_atomic_move_across_three_sources_with_replay_and_key_reuse():
     key = uuid4()
     result = commit(owner, started["id"], d, key)
     assert result.status_code == 200, result.text
-    assert result.json() == {"edition_count": 2, "copy_count": "9", "owner_revision": before_revision + 1,
-                             "source_count": 3, "already_at_destination_count": "0"}
+    body = result.json()
+    assert body.pop("undo_id")  # the Undo record this Move created; checked against the list below
+    assert body == {"edition_count": 2, "copy_count": "9", "owner_revision": before_revision + 1,
+                    "source_count": 3, "already_at_destination_count": "0"}
     assert (held(owner, a, one), held(owner, b, one), held(owner, c, two)) == (3, 0, 0)
     assert (held(owner, d, one), held(owner, d, two)) == (6, 3)
     assert commit(owner, started["id"], d, key).json() == result.json()
@@ -88,6 +90,8 @@ def test_atomic_move_across_three_sources_with_replay_and_key_reuse():
     assert commit(other, started["id"], other_leaf).status_code == 404
     entry = undo_entries(owner)[0]
     assert (entry["action"], entry["source_id"], entry["destination_id"], entry["source_count"]) == ("move", None, d, 3)
+    # The result names its own record, so a client never has to guess from the list.
+    assert entry["id"] == result.json()["undo_id"]
 
 
 def test_staging_requires_owned_sources_and_unique_source_edition_pairs():
@@ -190,9 +194,11 @@ def test_multi_source_removal_is_atomic_and_one_undo_restores_every_source():
     assert (held(owner, a, one), held(owner, b, one), held(owner, c, two)) == (0, 3, 1)
     entry = undo_entries(owner)[0]
     assert (entry["action"], entry["source_id"], entry["destination_id"], entry["source_count"]) == ("remove", None, None, 3)
+    assert entry["id"] == body["undo_id"]
     restored = undo(owner, entry["id"])
     assert restored.status_code == 200, restored.text
     assert (restored.json()["edition_count"], restored.json()["copy_count"], restored.json()["source_count"]) == (2, "8", 3)
+    assert restored.json()["undo_id"] is None  # Undo makes no Undo record
     assert (held(owner, a, one), held(owner, b, one), held(owner, c, two)) == (5, 4, 3)
 
 
@@ -345,8 +351,11 @@ def test_previous_application_records_keep_working_after_migration():
     assert (entry["source_id"], entry["source_count"]) == (a, 1)
     assert undo(owner, entry["id"]).status_code == 200
     assert (held(owner, a, one), held(owner, a, two), held(owner, d, one), held(owner, d, two)) == (5, 2, 0, 0)
-    assert commit(owner, str(legacy_manifest), d, legacy_key).json() == {
-        "edition_count": 1, "copy_count": "2", "owner_revision": 7, "source_count": 1, "already_at_destination_count": "0"}
+    legacy = commit(owner, str(legacy_manifest), d, legacy_key).json()
+    # Derived from the owner and key; a Move the previous application made has no record with this id.
+    assert legacy.pop("undo_id")
+    assert legacy == {"edition_count": 1, "copy_count": "2", "owner_revision": 7, "source_count": 1,
+                      "already_at_destination_count": "0"}
 
 
 @pytest.mark.serial(reason='wall-clock: asserts the two-minute 25,000-Edition Move budget')
