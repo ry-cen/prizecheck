@@ -6,7 +6,7 @@ export type EditDeck = { name?: string | null; parent_id?: string | null; parent
 export type DeckIndex = { decks: TreeNode[]; owner_revision: number; next_cursor: string | null };
 export type IdentityCheck = { identity_id: string; name: string; quantity: string; status: string };
 export type DeckChecks = { total: string; shortage: string; excess: string; size_status: string; identities: IdentityCheck[]; disclaimer?: string };
-export type DeckDetail = { deck: TreeNode; checks: DeckChecks; deck_list_checks: DeckChecks; deck_list: DeckList; owner_revision: number; catalog_revision: number };
+export type DeckDetail = { deck: TreeNode; checks: DeckChecks; deck_list_checks: DeckChecks; deck_list: DeckList; ownership: LineOwnership[]; surplus: SurplusHolding[]; competition: CompetitionWarning[]; owner_revision: number; catalog_revision: number };
 export type DeckEditionQuantity = { edition_id: string; quantity: string };
 export type DeckContents = { editions: DeckEditionQuantity[]; owner_revision: number; catalog_revision: number };
 export type DeckListLine = { edition_id: string; quantity: string; in_deck: string };
@@ -15,6 +15,11 @@ export type AddDeckListLine = { edition_id: string; quantity: string; revision: 
 export type ChangeDeckListLine = { quantity: string; revision: number; idempotency_key: string };
 export type RemoveDeckListLine = { revision: number; idempotency_key: string };
 export type DeckListCommandResult = { deck_id: string; deck_list: DeckList };
+export type ElsewhereLocation = { location_id: string; name: string; kind: string; quantity: string };
+export type LineOwnership = { edition_id: string; quantity: string; in_deck: string; elsewhere: string; not_owned: string; locations: ElsewhereLocation[] };
+export type SurplusHolding = { edition_id: string; quantity: string };
+export type CompetingDeck = { deck_id: string; name: string; in_deck: string; elsewhere: string };
+export type CompetitionWarning = { edition_id: string; spare: string; counted_elsewhere: string; decks: CompetingDeck[] };
 
 export class DeckError extends Error {
   constructor(public status: number, public code: string) { super(code); }
