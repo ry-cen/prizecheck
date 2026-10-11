@@ -48,7 +48,8 @@
     border-color var(--motion-duration) var(--motion-ease),
     color var(--motion-duration) var(--motion-ease);
 }
-.ws-root button:disabled {
+.ws-root button:disabled,
+.ws-root button[aria-disabled="true"] {
   opacity: 0.4;
   cursor: default;
 }
