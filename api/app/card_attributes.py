@@ -6,11 +6,12 @@ commit here, and the next catalog import (or ``scripts/derive_card_attributes.py
 
 ``None`` means unknown. Missing, malformed or contradictory source data leaves an attribute unknown; it is never
 guessed. Manually approved Printings have no source record, so every attribute is unknown until a reviewed
-correction supplies it (ticket 11).
+correction supplies it (``app.attribute_corrections``).
 
 Readers use the effective attributes in the ``catalog_card_attribute`` view (``read_card_attributes``), never the
-derived table, so reviewed corrections can override derivation without changing any reader. One revision counter,
-``catalog_attribute_state.revision``, advances whenever any Printing's attributes change.
+derived table: a reviewed correction overrides each attribute it sets until it is removed, and re-derivation never
+touches it. One revision counter, ``catalog_attribute_state.revision``, advances at most once per transaction that
+changes any Printing's attributes (``advance_attribute_revision``).
 """
 import hashlib
 import inspect
@@ -246,10 +247,14 @@ def _attributes(row) -> CardAttributes:
 
 
 def advance_attribute_revision(conn) -> int:
-    """Advance the one counter that covers card attributes (and, later, Reprint Groups). Callers run it once per
-    transaction that changed any Printing's attributes."""
-    return conn.execute("UPDATE catalog_attribute_state SET revision=revision+1 WHERE singleton RETURNING revision"
-                        ).fetchone()["revision"]
+    """Advance the one revision that covers card attributes and Reprint Groups, at most once per transaction.
+
+    Every call in one transaction returns the revision the first call took (``catalog_advance_attribute_revision``,
+    migration 029), so derivation, a reviewed correction and Reprint Group changes in one transaction advance it once.
+    Call it in every transaction that changes any Printing's effective attributes or Reprint Group. The revision row
+    stays locked until commit, so revisions are commit-ordered.
+    """
+    return conn.execute("SELECT catalog_advance_attribute_revision() AS revision").fetchone()["revision"]
 
 
 def attribute_revision(conn) -> int:

@@ -472,6 +472,12 @@ assert store.compare_and_swap({k: rows[k].version for k in keys}, {
         },
         { metadataTarget: "rule:live_derivation:-1", action: "activate_rule" },
         { metadataTarget: target, action: "approve_printing" },
+        // Card attribute corrections name a Printing, never an Edition or a rule.
+        { metadataTarget: target, action: "correct_attributes" },
+        {
+          metadataTarget: "rule:live_derivation:1",
+          action: "correct_attributes",
+        },
         { metadataTarget: target, action: "resolve_catalog" },
         {
           metadataTarget: target,
@@ -510,6 +516,7 @@ assert store.compare_and_swap({k: rows[k].version for k in keys}, {
       expect(await count()).toBe(before);
 
       for (const [metadataTarget, action] of [
+        [`printing:${ids.printing}`, "correct_attributes"],
         [`printing:${ids.printing}`, "resolve_metadata"],
         ["rule:live_derivation:1", "activate_rule"],
         ["rule:marketplace_matching:0", "activate_rule"],
