@@ -1,7 +1,85 @@
+/* Colour roles. Every colour goes through these variables so themes can be added or chosen later.
+   Prize gold is the default theme (#47); sage and card-back blue stay as alternative themes. */
+.mw-root[data-palette="sage"] {
+  --bg: #101416;
+  --surface: #161c1e;
+  --surface-raised: #1f2728;
+  --surface-selected: #29332b;
+  --border: #323b37;
+  --border-strong: #4a5746;
+  --control-border: #6e7b74;
+  --text: #e9ece8;
+  --text-muted: #a6b2ab;
+  --text-subtle: #8b9791;
+  --accent: #b9d18a;
+  --accent-strong: #d2e6b5;
+  --accent-border: #93ac71;
+  --accent-dashed: #647d4d;
+  --accent-fill: #415a32;
+  --accent-wash: #a7ce7225;
+  --on-accent: #17200e;
+  --art-a: #323a2f;
+  --art-b: #1f292d;
+  --warning: #e8d49a;
+  --danger: #e6aaa4;
+  --danger-border: #92534c;
+  --danger-bg: #743e3d;
+}
+.mw-root,
+.mw-root[data-palette="gold"] {
+  --bg: #121110;
+  --surface: #1a1816;
+  --surface-raised: #23201c;
+  --surface-selected: #352c1c;
+  --border: #38322a;
+  --border-strong: #56493a;
+  --control-border: #7d705f;
+  --text: #efebe4;
+  --text-muted: #b9b0a3;
+  --text-subtle: #958b7e;
+  --accent: #e6bd57;
+  --accent-strong: #f5dc94;
+  --accent-border: #b8913a;
+  --accent-dashed: #8a6c2c;
+  --accent-fill: #5a4519;
+  --accent-wash: #e6bd5726;
+  --on-accent: #211803;
+  --art-a: #3a3122;
+  --art-b: #221e19;
+  --warning: #f0c987;
+  --danger: #eba79f;
+  --danger-border: #97524a;
+  --danger-bg: #6f3a35;
+}
+.mw-root[data-palette="blue"] {
+  --bg: #0d1220;
+  --surface: #131a2b;
+  --surface-raised: #1a2337;
+  --surface-selected: #22305a;
+  --border: #2a3550;
+  --border-strong: #3e4d70;
+  --control-border: #5f6f94;
+  --text: #e8edf7;
+  --text-muted: #a9b4cc;
+  --text-subtle: #8592ad;
+  --accent: #86aefc;
+  --accent-strong: #c3d6ff;
+  --accent-border: #5f86d6;
+  --accent-dashed: #3f5f9e;
+  --accent-fill: #263f78;
+  --accent-wash: #86aefc26;
+  --on-accent: #0a1430;
+  --art-a: #25304d;
+  --art-b: #151d30;
+  --warning: #ecd08e;
+  --danger: #f0a8a8;
+  --danger-border: #9a5060;
+  --danger-bg: #6b3442;
+}
 .mw-root {
   min-height: 100vh;
-  background: #101416;
-  color: #e9ece8;
+  background: var(--bg);
+  color: var(--text);
   font:
     14px/1.45 Inter,
     system-ui,
@@ -16,9 +94,10 @@
 .mw-root select {
   font: inherit;
   color: inherit;
-  border: 1px solid #303837;
+  /* Control outlines identify the control, so they need 3:1 against their background. */
+  border: 1px solid var(--control-border);
   border-radius: 7px;
-  background: #191f21;
+  background: var(--surface-raised);
 }
 .mw-root button {
   cursor: pointer;
@@ -27,7 +106,7 @@
   line-height: 1.45;
 }
 .mw-root button:hover {
-  background: #26302e;
+  background: var(--surface-raised);
 }
 .mw-root button:disabled {
   opacity: 0.4;
@@ -36,7 +115,7 @@
 .mw-root button:focus-visible,
 .mw-root input:focus-visible,
 .mw-root select:focus-visible {
-  outline: 2px solid #b9d18a;
+  outline: 2px solid var(--accent);
   outline-offset: 3px;
 }
 .mw-root input,
@@ -50,18 +129,18 @@
   display: flex;
   align-items: center;
   gap: 24px;
-  border-bottom: 1px solid #283031;
+  border-bottom: 1px solid var(--border);
 }
 .mw-brand {
   letter-spacing: 2px;
   font-size: 13px;
 }
 .mw-brand:first-letter {
-  color: #bbd493;
+  color: var(--accent);
 }
 .mw-header > small,
 .mw-header-right {
-  color: #8e9995;
+  color: var(--text-subtle);
   font-size: 11px;
 }
 .mw-header-right {
@@ -83,12 +162,12 @@
 }
 .mw-navigation {
   padding: 28px 15px;
-  border-right: 1px solid #283031;
+  border-right: 1px solid var(--border);
 }
 .mw-section-label {
   font-size: 10px;
   letter-spacing: 1.7px;
-  color: #8b9791;
+  color: var(--text-subtle);
   margin: 0;
   display: block;
 }
@@ -115,16 +194,16 @@
 .mw-tree button small {
   margin-left: auto;
   flex-shrink: 0;
-  color: #83908a;
+  color: var(--text-subtle);
   font-size: 11px;
 }
 .mw-tree button.active {
-  background: #29332b;
-  color: #d2e6b5;
+  background: var(--surface-selected);
+  color: var(--accent-strong);
 }
 .mw-tree .mw-folder {
   font-size: 12px;
-  color: #a1ada7;
+  color: var(--text-muted);
   margin-top: 0;
 }
 .mw-tree .mw-leaf {
@@ -132,11 +211,11 @@
   font-size: 12px;
 }
 .mw-tree button.mw-drop-valid {
-  outline: 1px dashed #647d4d;
+  outline: 1px dashed var(--accent-dashed);
 }
 .mw-tree button.mw-drop-hover {
-  background: #415a32;
-  outline: 2px solid #bfd992;
+  background: var(--accent-fill);
+  outline: 2px solid var(--accent);
 }
 .mw-root .mw-main {
   /* Override the app-wide main width cap so the gallery fills the screen. */
@@ -158,7 +237,7 @@
   margin: 0;
 }
 .mw-heading > span {
-  color: #819088;
+  color: var(--text-subtle);
   font-size: 12px;
 }
 .mw-toolbar {
@@ -183,13 +262,13 @@
   font-size: 12px;
 }
 .mw-toolbar button[aria-pressed="true"] {
-  border-color: #93ac71;
-  color: #c4dba9;
+  border-color: var(--accent-border);
+  color: var(--accent-strong);
 }
 .mw-filters {
   margin: 14px 0;
   padding: 15px;
-  background: #151b1d;
+  background: var(--surface);
   border-radius: 8px;
 }
 .mw-filter-controls {
@@ -202,7 +281,7 @@
   display: flex;
   flex-direction: column;
   gap: 5px;
-  color: #9aa89f;
+  color: var(--text-muted);
   font-size: 11px;
   flex: 1;
 }
@@ -255,7 +334,7 @@
   position: relative;
   aspect-ratio: 245/342;
   border-radius: 7px;
-  background: linear-gradient(135deg, #323a2f, #1f292d);
+  background: linear-gradient(135deg, var(--art-a), var(--art-b));
   overflow: hidden;
   box-shadow: 0 4px 12px #0004;
 }
@@ -288,9 +367,19 @@
   white-space: nowrap;
   margin: 7px 1px 1px;
 }
+.mw-tile-name .mw-tile-set {
+  display: block;
+  margin-top: 1px;
+  color: var(--text-subtle);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .mw-tile > small {
   display: block;
-  color: #839089;
+  color: var(--text-subtle);
   font-size: 10px;
   white-space: nowrap;
   overflow: hidden;
@@ -298,20 +387,26 @@
   margin: 5px 1px 0;
 }
 .mw-tile.mw-selected .mw-art {
-  outline: 3px solid #b6d18a;
-  outline-offset: 2px;
+  /* A dark gap between the card and the ring keeps it visible on yellow or gold card borders. */
+  box-shadow:
+    0 0 0 3px var(--bg),
+    0 0 0 6px var(--accent);
 }
 .mw-check {
   position: absolute;
-  right: 5px;
-  top: 5px;
+  right: 4px;
+  top: 4px;
+  z-index: 1;
   border-radius: 50%;
-  background: #b6d18a;
-  color: #192212;
-  width: 22px;
-  height: 22px;
+  background: var(--accent);
+  color: var(--on-accent);
+  border: 2px solid var(--bg);
+  box-shadow: 0 1px 4px #0009;
+  width: 26px;
+  height: 26px;
   text-align: center;
   line-height: 22px;
+  font-weight: 700;
   font-size: 13px;
   font-weight: 700;
 }
@@ -325,11 +420,11 @@
 }
 .mw-inspection p {
   font-size: 11px;
-  color: #98a59e;
+  color: var(--text-muted);
   margin: 5px 0;
 }
 .mw-detail-location {
-  border-top: 1px solid #2c3531;
+  border-top: 1px solid var(--border);
   margin-top: 18px;
   padding-top: 15px;
   font-size: 12px;
@@ -337,19 +432,19 @@
 .mw-detail-location small {
   display: block;
   margin-top: 5px;
-  color: #95a298;
+  color: var(--text-subtle);
   font-size: 11px;
 }
 .mw-marquee {
   position: absolute;
   pointer-events: none;
-  border: 1px solid #c5dc9a;
-  background: #a7ce7225;
+  border: 1px solid var(--accent);
+  background: var(--accent-wash);
   z-index: 5;
 }
 .mw-empty {
   grid-column: 1/-1;
-  color: #a4b1a7;
+  color: var(--text-muted);
   text-align: center;
   padding: 45px 10px;
 }
@@ -365,8 +460,8 @@
   display: flex;
   align-items: center;
   gap: 18px;
-  background: #202a25;
-  border: 1px solid #4c5c47;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-strong);
   box-shadow: 0 10px 35px #0008;
   border-radius: 11px;
   padding: 10px 14px;
@@ -374,7 +469,7 @@
 }
 .mw-selection-editions {
   font-size: 11px;
-  color: #a4b49f;
+  color: var(--text-muted);
 }
 .mw-actions {
   position: relative;
@@ -383,8 +478,8 @@
   position: absolute;
   right: 0;
   bottom: 45px;
-  background: #242d28;
-  border: 1px solid #4a5746;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-strong);
   border-radius: 9px;
   min-width: 185px;
   padding: 5px;
@@ -406,8 +501,8 @@
   display: flex;
   gap: 12px;
   align-items: center;
-  background: #202728;
-  border: 1px solid #3a4540;
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
   border-radius: 9px;
   padding: 10px 13px;
   font-size: 11px;
@@ -425,14 +520,14 @@
   align-items: center;
   gap: 15px;
   padding: 6px 10px;
-  border: 1px solid #3b4440;
-  background: #1a2020;
+  border: 1px solid var(--border);
+  background: var(--surface-raised);
   border-radius: 20px;
   z-index: 12;
-  color: #909d94;
+  color: var(--text-subtle);
 }
 .mw-prototype-bar a {
-  color: #cad6c7;
+  color: var(--text-muted);
   text-decoration: none;
   padding: 2px 5px;
 }
@@ -444,8 +539,8 @@
   top: 0;
   left: 0;
   z-index: 9999;
-  background: #b9d18a;
-  color: #17220f;
+  background: var(--accent);
+  color: var(--on-accent);
   padding: 12px 17px;
   border-radius: 9px;
   font: 600 13px system-ui;
@@ -466,8 +561,8 @@
   width: min(480px, 100%);
   max-height: 85vh;
   overflow: auto;
-  background: #181f20;
-  border: 1px solid #455047;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
   border-radius: 15px;
   padding: 22px;
 }
@@ -496,25 +591,25 @@
   overflow: auto;
 }
 .mw-move-summary {
-  border-top: 1px solid #35403a;
+  border-top: 1px solid var(--border);
   padding: 18px 0 8px;
   margin-top: 16px;
   font-size: 12px;
 }
 .mw-move-summary p {
-  color: #a9b7ad;
+  color: var(--text-muted);
 }
 .mw-root .mw-primary {
-  background: #b5cf87;
-  color: #17200e;
-  border-color: #b5cf87;
+  background: var(--accent);
+  color: var(--on-accent);
+  border-color: var(--accent);
   width: 100%;
   font-weight: 600;
 }
 .mw-root .mw-danger {
-  background: #743e3d;
+  background: var(--danger-bg);
   width: 100%;
-  border-color: #92534c;
+  border-color: var(--danger-border);
 }
 .mw-removal-list {
   list-style: none;
@@ -524,12 +619,12 @@
 }
 .mw-removal-list li {
   padding: 10px 0;
-  border-bottom: 1px solid #323b35;
+  border-bottom: 1px solid var(--border);
   font-size: 12px;
 }
 .mw-removal-list small {
   display: block;
-  color: #99a79d;
+  color: var(--text-muted);
   margin-top: 3px;
 }
 .mw-sheet-details .mw-art {
@@ -540,7 +635,7 @@
   font-size: 21px;
 }
 .mw-sheet-details p {
-  color: #a1afa5;
+  color: var(--text-muted);
   font-size: 12px;
 }
 .mw-mobile {
@@ -760,10 +855,10 @@
   justify-content: center;
   opacity: 0;
   font-size: 18px;
-  background: #101416;
+  background: var(--bg);
 }
 .mw-tree button.active + .mw-add-child {
-  background: #29332b;
+  background: var(--surface-selected);
 }
 .mw-location-row:hover .mw-add-child,
 .mw-location-row:focus-within .mw-add-child {
@@ -786,12 +881,12 @@
   gap: 7px;
 }
 .mw-create-form fieldset {
-  border: 1px solid #35413a;
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 15px;
 }
 .mw-create-form legend {
-  color: #e9ece8;
+  color: var(--text);
   font-size: 12px;
 }
 .mw-create-form fieldset label {
@@ -810,7 +905,7 @@
   gap: 10px;
 }
 .mw-create-error {
-  color: #e6aaa4;
+  color: var(--danger);
   margin: 0;
   font-size: 12px;
 }
@@ -837,14 +932,14 @@
 .mw-manage-hint {
   margin: 0;
   font-size: 12px;
-  color: #8b9791;
+  color: var(--text-subtle);
 }
 .mw-manage-top {
   padding: 9px 10px;
-  border: 1px dashed #35413a;
+  border: 1px dashed var(--control-border);
   border-radius: 8px;
   font-size: 12px;
-  color: #a1ada7;
+  color: var(--text-muted);
 }
 .mw-manage-tree,
 .mw-manage-tree ul,
@@ -863,7 +958,7 @@
   border-radius: 8px;
 }
 .mw-manage-row:hover {
-  background: #1f2729;
+  background: var(--surface-raised);
 }
 .mw-root .mw-drag-handle {
   flex: 0 0 32px;
@@ -872,13 +967,13 @@
   padding: 0;
   border: 0;
   background: transparent;
-  color: #83908a;
+  color: var(--text-subtle);
   font-size: 16px;
   cursor: grab;
   touch-action: none;
 }
 .mw-root .mw-drag-handle:hover {
-  color: #e9ece8;
+  color: var(--text);
 }
 .mw-root .mw-drag-handle:active {
   cursor: grabbing;
@@ -891,10 +986,10 @@
   z-index: 200;
   pointer-events: none;
   padding: 6px 11px;
-  border: 1px solid #c5dc9a;
+  border: 1px solid var(--accent);
   border-radius: 8px;
-  background: #29332b;
-  color: #d2e6b5;
+  background: var(--surface-selected);
+  color: var(--accent-strong);
   font-size: 12px;
   box-shadow: 0 6px 18px #0008;
   white-space: nowrap;
@@ -912,7 +1007,7 @@
   white-space: nowrap;
 }
 .mw-manage-name small {
-  color: #83908a;
+  color: var(--text-subtle);
   font-size: 11px;
 }
 .mw-manage-actions {
@@ -925,7 +1020,7 @@
   border: 0;
   background: transparent;
   font-size: 12px;
-  color: #b8c2bd;
+  color: var(--text-muted);
 }
 .mw-manage-spacer {
   visibility: hidden;
@@ -933,11 +1028,11 @@
   font-size: 12px;
 }
 .mw-manage .mw-drop-valid {
-  outline: 1px dashed #647d4d;
+  outline: 1px dashed var(--accent-dashed);
 }
 .mw-manage .mw-drop-hover {
-  background: #415a32;
-  outline: 2px solid #bfd992;
+  background: var(--accent-fill);
+  outline: 2px solid var(--accent);
 }
 .mw-manage .mw-drop-invalid {
   opacity: 0.45;
@@ -957,28 +1052,28 @@
   font-size: 13px;
 }
 .mw-manage-warning {
-  color: #e8d49a;
+  color: var(--warning);
 }
 .mw-drawer-display {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  border-top: 1px solid #35413a;
+  border-top: 1px solid var(--border);
   margin-top: 24px;
   padding-top: 16px;
 }
 .mw-drawer-display h3 {
   font-size: 12px;
   margin: 0;
-  color: #9baaa0;
+  color: var(--text-muted);
 }
 .mw-drawer-display select,
 .mw-drawer-display button {
   min-height: 40px;
 }
 .mw-drawer-display button[aria-pressed="true"] {
-  border-color: #93ac71;
-  color: #c4dba9;
+  border-color: var(--accent-border);
+  color: var(--accent-strong);
 }
 @media (max-width: 760px) {
   .mw-header {
@@ -1074,4 +1169,15 @@
     justify-content: flex-end;
     margin-left: 11px;
   }
+}
+.mw-palette-picker {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+}
+.mw-root .mw-palette-picker select {
+  height: 26px;
+  padding: 0 6px;
+  font-size: 11px;
 }
