@@ -12,7 +12,7 @@ import {
   stageMove,
   startMove,
 } from "../moves_generated";
-import { plural, type GalleryHolding } from "./galleryModel";
+import { EMPTY_GALLERY, plural, type GalleryHolding } from "./galleryModel";
 import {
   cardLabel,
   cardText,
@@ -25,7 +25,12 @@ import {
 } from "./inventoryActionsModel";
 import type { LocationIndex } from "./locationTree";
 import { focusWorkspaceHeading } from "./SelectionBar";
-import { selectedGroups, type SelectedGroup } from "./selectionModel";
+import {
+  reconcileSelection,
+  selectedGroups,
+  type SelectedGroup,
+  type Selection,
+} from "./selectionModel";
 import type { SelectionState } from "./useSelection";
 
 /** The success and Undo toast. `entry` is the newest Undo record, or null when none is offered. */
@@ -51,6 +56,9 @@ type Pending = { manifestId: string; key: string; signature: string };
 
 type FocusTarget = "heading" | "actions" | "toast";
 
+/** A failure whose refresh may empty the selection: its toast text and the selection it was about. */
+type Carried = { toastText: string; selection: Selection };
+
 /** Move, Inventory Removal and Undo for the workspace (ticket 107), on the multi-source manifest API. */
 export function useInventoryActions({
   selection,
@@ -62,12 +70,8 @@ export function useInventoryActions({
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState("");
   const [barError, setBarError] = useState("");
-  const barErrorRef = useRef("");
-  barErrorRef.current = barError;
   const [dialog, setDialog] = useState<"move" | "remove" | null>(null);
   const [dialogError, setDialogError] = useState("");
-  const dialogErrorRef = useRef("");
-  dialogErrorRef.current = dialogError;
   const [toast, setToast] = useState<ToastState | null>(null);
   const busyRef = useRef(false);
   const dialogRef = useRef(dialog);
@@ -78,6 +82,9 @@ export function useInventoryActions({
   const pending = useRef<Pending | null>(null);
   const undoKeys = useRef(new Map<string, string>());
   const focusAfter = useRef<FocusTarget | null>(null);
+  const carried = useRef<Carried | null>(null);
+  const holdingsRef = useRef(holdings);
+  holdingsRef.current = holdings;
   const actionsButton = useRef<HTMLButtonElement>(null);
   const toastRef = useRef<HTMLDivElement>(null);
   // Names and paths outlive a gallery reload, which empties the listing while it refetches.
@@ -141,6 +148,7 @@ export function useInventoryActions({
       setBusy(true);
       setBarError("");
       setDialogError("");
+      carried.current = null;
       const signature = JSON.stringify([target, groups]);
       try {
         let attempt =
@@ -201,6 +209,7 @@ export function useInventoryActions({
         const mine =
           newest &&
           newest.action === target.kind &&
+          newest.source_count === result.source_count &&
           (target.kind !== "move" ||
             newest.destination_id === target.destinationId)
             ? newest
@@ -211,6 +220,14 @@ export function useInventoryActions({
       } catch (cause) {
         const failure = describeFailure(target, cause, { place, card });
         if (!failure.retrySame) pending.current = null;
+        // Only a refresh can empty the kept selection; then the empty-selection effect below moves
+        // this failure to the toast.
+        carried.current = failure.reloadGallery
+          ? {
+              toastText: failure.toastText,
+              selection: live.current.selection.selected,
+            }
+          : null;
         if (failure.reloadGallery) {
           if (surface === "bar") keepFocus("actions");
           live.current.reloadGallery();
@@ -227,11 +244,13 @@ export function useInventoryActions({
   );
 
   const openMove = useCallback(() => {
+    carried.current = null;
     setBarError("");
     setDialogError("");
     setDialog("move");
   }, []);
   const openRemoval = useCallback(() => {
+    carried.current = null;
     setBarError("");
     setDialogError("");
     setDialog("remove");
@@ -268,6 +287,7 @@ export function useInventoryActions({
     [run]
   );
   const clearSelection = useCallback(() => {
+    carried.current = null;
     setBarError("");
     live.current.selection.clear();
   }, []);
@@ -416,29 +436,6 @@ export function useInventoryActions({
     return () => window.clearTimeout(timer);
   }, [entryId, entryExpires]);
 
-  // An empty selection has no bar and nothing to act on: its error goes, and an idle dialog closes
-  // (another tab can empty the selection by removing every selected copy).
-  const empty = selection.summary.copies === 0;
-  useEffect(() => {
-    if (!empty) return;
-    // A failure the collector hasn't dismissed outlives the selection it was about (a reload can
-    // trim the kept selection to nothing), so it moves to the toast.
-    const failure =
-      barErrorRef.current || (dialogRef.current ? dialogErrorRef.current : "");
-    if (failure)
-      showToast({
-        message: failure,
-        entry: toastLive.current?.entry ?? null,
-        unavailable: toastLive.current?.unavailable ?? false,
-      });
-    setBarError("");
-    if (dialogRef.current && !busyRef.current) {
-      focusAfter.current = "heading";
-      setDialog(null);
-      setDialogError("");
-    }
-  }, [empty, showToast]);
-
   // Runs after the commit that closed a dialog or changed the toast, once the dialog has left the
   // top layer, so the page is no longer inert and focus can move.
   useEffect(() => {
@@ -462,6 +459,40 @@ export function useInventoryActions({
     if (!active || active === document.body || !active.isConnected)
       focusWorkspaceHeading();
   });
+
+  // An empty selection has no bar and nothing to act on: its error goes, and an idle dialog closes
+  // (another tab can empty the selection by removing every selected copy). Declared after the focus
+  // effect on purpose: the focus it asks for is applied in the next commit, once the dialog is gone.
+  const empty = selection.summary.copies === 0;
+  useEffect(() => {
+    if (!empty) return;
+    // A failure stays on screen when its refresh is what emptied the selection: the settled listing
+    // (not the loading placeholder, EMPTY_GALLERY.holdings) has none of the copies it was about.
+    // A clear by the collector (Escape, empty space, another view) leaves those copies listed, or
+    // happens while a new view loads, so the failure goes with the bar.
+    const failure = carried.current;
+    carried.current = null;
+    const listing = holdingsRef.current;
+    if (
+      failure &&
+      listing !== EMPTY_GALLERY.holdings &&
+      reconcileSelection(
+        failure.selection,
+        new Map(listing.map((holding) => [holding.key, holding]))
+      ).size === 0
+    )
+      showToast({
+        message: failure.toastText,
+        entry: toastLive.current?.entry ?? null,
+        unavailable: toastLive.current?.unavailable ?? false,
+      });
+    setBarError("");
+    if (dialogRef.current && !busyRef.current) {
+      focusAfter.current = "heading";
+      setDialog(null);
+      setDialogError("");
+    }
+  }, [empty, showToast]);
 
   // The Removal confirmation lists the current selection; names come from the cache, so a reload
   // after a failure doesn't blank them.
