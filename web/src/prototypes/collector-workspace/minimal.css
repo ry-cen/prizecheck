@@ -138,7 +138,10 @@
   background: #415a32;
   outline: 2px solid #bfd992;
 }
-.mw-main {
+.mw-root .mw-main {
+  /* Override the app-wide main width cap so the gallery fills the screen. */
+  max-width: none;
+  margin: 0;
   padding: 27px 30px 140px;
   min-width: 0;
 }
@@ -225,7 +228,7 @@
   gap: 20px 13px;
   align-content: start;
   padding: 4px 4px 60px;
-  min-height: 60vh;
+  min-height: calc(100vh - 220px);
   touch-action: pan-y;
   user-select: none;
 }
@@ -544,15 +547,25 @@
   display: none !important;
 }
 @media (min-width: 1550px) {
-  .mw-grid {
-    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  .mw-root .mw-main {
+    padding-left: 20px;
+    padding-right: 20px;
+  }
+  .mw-gallery-layout {
+    gap: 22px;
+  }
+}
+@media (min-width: 2200px) {
+  .mw-root .mw-main {
+    padding-left: 16px;
+    padding-right: 16px;
   }
 }
 @media (max-width: 1100px) {
   .mw-layout {
     grid-template-columns: 212px minmax(0, 1fr);
   }
-  .mw-main {
+  .mw-root .mw-main {
     padding-left: 20px;
     padding-right: 20px;
   }
@@ -597,7 +610,7 @@
   .mw-brand {
     font-size: 11px;
   }
-  .mw-main {
+  .mw-root .mw-main {
     padding: 22px 14px 170px;
   }
   .mw-heading {
@@ -801,6 +814,117 @@
   margin: 0;
   font-size: 12px;
 }
+.mw-location-tools {
+  display: flex;
+  gap: 2px;
+}
+.mw-location-tools > button {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  font-size: 18px;
+}
+.mw-dialog-manage {
+  width: min(640px, 100%);
+}
+.mw-manage {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.mw-manage-hint {
+  margin: 0;
+  font-size: 12px;
+  color: #8b9791;
+}
+.mw-manage-top {
+  padding: 9px 10px;
+  border: 1px dashed #35413a;
+  border-radius: 8px;
+  font-size: 12px;
+  color: #a1ada7;
+}
+.mw-manage-tree,
+.mw-manage-tree ul,
+.mw-manage-targets {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.mw-manage-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 44px;
+  padding-right: 4px;
+  border-radius: 8px;
+  cursor: grab;
+}
+.mw-manage-row:hover {
+  background: #1f2729;
+}
+.mw-manage-name {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  font-size: 13px;
+}
+.mw-manage-name > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mw-manage-name small {
+  color: #83908a;
+  font-size: 11px;
+}
+.mw-manage-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 2px;
+}
+.mw-root .mw-manage-actions button {
+  padding: 6px 8px;
+  border: 0;
+  background: transparent;
+  font-size: 12px;
+  color: #b8c2bd;
+}
+.mw-manage-spacer {
+  visibility: hidden;
+  padding: 6px 8px;
+  font-size: 12px;
+}
+.mw-manage .mw-drop-valid {
+  outline: 1px dashed #647d4d;
+}
+.mw-manage .mw-drop-hover {
+  background: #415a32;
+  outline: 2px solid #bfd992;
+}
+.mw-manage .mw-drop-invalid {
+  opacity: 0.45;
+}
+.mw-manage-targets {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 45vh;
+  overflow: auto;
+}
+.mw-root .mw-manage-targets button {
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  font-size: 13px;
+}
+.mw-manage-warning {
+  color: #e8d49a;
+}
 .mw-drawer-display {
   display: flex;
   flex-direction: column;
@@ -859,6 +983,32 @@
     opacity: 1;
     flex: 0 0 36px;
     width: 36px;
+    min-height: 44px;
+  }
+  .mw-dialog-manage {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    max-height: 100dvh;
+    border-radius: 0;
+    padding: 24px 14px;
+  }
+  .mw-manage-spacer {
+    display: none;
+  }
+  .mw-location-tools > button {
+    width: 44px;
+    height: 44px;
+  }
+  .mw-manage-actions {
+    width: 100%;
+  }
+  .mw-manage-row {
+    flex-wrap: wrap;
+    padding-top: 6px;
+    padding-bottom: 6px;
+  }
+  .mw-root .mw-manage-actions button {
     min-height: 44px;
   }
   .mw-dialog-nav,

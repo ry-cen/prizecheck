@@ -10,6 +10,7 @@ An owner-agreed, spec-ready collector-workspace direction. This map indexes deci
 
 ## Notes
 
+- The working app name is **PrizeCheck** (owner, 2026-10-11), replacing the earlier working name Starbirth. "Prize check" is the player habit of working out which cards are in your Prize cards, which fits a tool for knowing what you own and where. The visual theme is input to [Decide responsive visual system](https://github.com/ry-cen/tcg-tracker/issues/47).
 - Preserve the existing domain: a Collection is an aggregate, Holdings retain fungible quantities, organizational Locations cannot hold Holdings, and a Deck is a specialized Storage Leaf.
 - The approved workspace direction is minimal: the desktop Location sidebar remains visible, while filters use the aligned toolbar and mobile controls use left/right drawers. Search remains accessible and dedicated deck-building UI is deferred.
 - The approved UI rules, including the 2026-10-09 toolbar, mobile drawer, location-creation, and contextual tile-label refinement, are in [collector workspace selection and presentation](resolutions/29-decide-collector-workspace-selection-and-presentation.md). [ADR 0005](../../../adr/0005-collector-workspace-multi-source-direction.md) records the accepted future multi-source direction without changing the MVP contract.
