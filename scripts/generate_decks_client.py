@@ -21,7 +21,9 @@ schema = app.openapi()["components"]["schemas"]
 names = ("TreeNode", "LocationCommandResult", "CreateDeck", "EditDeck", "DeckIndex", "IdentityCheck", "DeckChecks", "DeckDetail", "DeckEditionQuantity", "DeckContents",
          "DeckListLine", "DeckList", "AddDeckListLine", "ChangeDeckListLine", "RemoveDeckListLine", "DeckListCommandResult",
          "ElsewhereLocation", "LineOwnership", "SurplusHolding", "CompetingDeck", "CompetitionWarning",
-         "AddDeckListPrinting", "DeckListPrintingResult")
+         "AddDeckListPrinting", "DeckListPrintingResult",
+         "PickWarning", "PickSource", "PickRow", "PutAwayHolding", "PickList", "PickItem", "ConfirmPicks",
+         "PickConfirmResult")
 lines = ["// Generated from FastAPI OpenAPI by scripts/generate_decks_client.py. Do not edit."]
 for name in names:
     definition = schema[name]
@@ -62,6 +64,10 @@ export const removeDeckListLine = (deckId: string, editionId: string, body: Remo
   request<DeckListCommandResult>(`${deckListLines(deckId)}/${encodeURIComponent(editionId)}`, 'DELETE', body);
 export const addDeckListPrinting = (deckId: string, body: AddDeckListPrinting) =>
   request<DeckListPrintingResult>(`/api/decks/${encodeURIComponent(deckId)}/deck-list/printings`, 'POST', body);
+export const getPickList = (deckId: string) =>
+  request<PickList>(`/api/decks/${encodeURIComponent(deckId)}/pick-list`, 'GET');
+export const confirmPicks = (deckId: string, body: ConfirmPicks) =>
+  request<PickConfirmResult>(`/api/decks/${encodeURIComponent(deckId)}/pick-list/confirm`, 'POST', body);
 """)
 content = "\n".join(lines)
 target = root / "web/src/decks_generated.ts"

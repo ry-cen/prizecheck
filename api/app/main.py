@@ -184,6 +184,8 @@ from .decks import router as decks_router  # noqa: E402
 app.include_router(decks_router)
 from .deck_list_printing import router as deck_list_printing_router  # noqa: E402
 app.include_router(deck_list_printing_router)
+from .deck_pick_list import router as deck_pick_list_router  # noqa: E402
+app.include_router(deck_pick_list_router)
 from .catalog_reconciliation import router as catalog_reconciliation_router  # noqa: E402
 app.include_router(catalog_reconciliation_router)
 from .metadata_reviews import router as metadata_reviews_router  # noqa: E402
