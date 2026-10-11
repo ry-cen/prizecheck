@@ -239,6 +239,17 @@ test.describe("desktop", () => {
     await expect(addShelf).toHaveCSS("opacity", "0");
     await shelfRow.hover();
     await expect(addShelf).toHaveCSS("opacity", "1");
+    const rowBox = (await shelfRow.boundingBox())!;
+    const addBox = (await addShelf.boundingBox())!;
+    const entryBox = (await shelfRow
+      .locator("xpath=ancestor::*[contains(@class,'ws-tree-entry')][1]")
+      .boundingBox())!;
+    expect(Math.abs(addBox.width - 28)).toBeLessThanOrEqual(1);
+    expect(Math.abs(addBox.height - rowBox.height)).toBeLessThanOrEqual(1);
+    expect(
+      Math.abs(addBox.x + addBox.width - (rowBox.x + rowBox.width))
+    ).toBeLessThanOrEqual(1);
+    expect(Math.abs(entryBox.width - rowBox.width)).toBeLessThanOrEqual(1);
     await page.mouse.move(1500, 850);
     await expect(addShelf).toHaveCSS("opacity", "0");
     await shelfRow.focus();
@@ -495,6 +506,10 @@ test.describe("mobile", () => {
     const size = await addShelf.boundingBox();
     expect(size!.height).toBeGreaterThanOrEqual(44);
     expect(size!.width).toBeGreaterThanOrEqual(44);
+    const shelfBox = (await row(nav, shelf).boundingBox())!;
+    expect(size!.x).toBeGreaterThanOrEqual(shelfBox.x + shelfBox.width - 1);
+    expect(Math.abs(size!.y - shelfBox.y)).toBeLessThanOrEqual(1);
+    expect(Math.abs(size!.height - shelfBox.height)).toBeLessThanOrEqual(1);
     await expect(row(nav, deck)).toBeVisible();
     await expect(addChild(nav, deck)).toHaveCount(0);
 
