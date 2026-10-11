@@ -38,7 +38,7 @@ const fields = (value: unknown): Record<string, unknown> =>
     : {};
 
 /** Stored preferences, field by field: anything missing, unknown or malformed takes its default,
- * and unknown keys are ignored (ticket 111 adds `display.prices`). */
+ * and unknown keys are ignored. `display.prices` (ticket 111) is on only when stored as `true`. */
 export function parsePrefs(raw: string | null): GalleryPrefs {
   let stored: Record<string, unknown> = {};
   try {
@@ -70,6 +70,7 @@ export function parsePrefs(raw: string | null): GalleryPrefs {
     display: {
       size: display.size === "medium" ? "medium" : "small",
       names: display.names === true,
+      prices: display.prices === true,
     },
   };
 }

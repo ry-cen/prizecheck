@@ -191,7 +191,7 @@ export function SortControl({
   );
 }
 
-/** Card size and Names. */
+/** Card size, Names and Prices (ticket 111). */
 export function DisplayControls({
   display,
   onChange,
@@ -223,6 +223,13 @@ export function DisplayControls({
         onClick={() => onChange({ ...display, names: !display.names })}
       >
         Names
+      </button>
+      <button
+        type="button"
+        aria-pressed={display.prices}
+        onClick={() => onChange({ ...display, prices: !display.prices })}
+      >
+        Prices
       </button>
     </>
   );
