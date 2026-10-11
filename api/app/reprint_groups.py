@@ -6,14 +6,16 @@ and the same rules text share a group. A group's ID is a pure function of the tw
 across re-imports, and a new reprint joins its existing group. Missing or malformed text puts a Printing in no group:
 absent text is never "equal".
 
-Only ``refresh_reprint_groups`` writes groups. Every catalog import runs it, and so does
+Only ``refresh_reprint_groups`` writes derived groups. Every catalog import runs it, and so does
 ``scripts/derive_card_attributes.py``. It groups the TCGdex Printings of one catalog generation that are not
 tombstoned, so withdrawn and digital-only Printings are in no group. Manually approved Printings have no source text;
-they join a group only through maintainer review (ticket 14).
+they join a group only through maintainer review (``app.reprint_group_reviews``).
 
-Readers use the ``catalog_reprint_group_member`` view, never the derived table, so reviewed merges and splits can
-redefine it without changing any reader. A change to any Printing's group advances the shared attribute revision
-(``advance_attribute_revision``), at most once per transaction.
+Reviewed records override derivation (migration 033): a link puts a Printing's derived group into a reviewed group, and
+an assignment puts one Printing into a group. Both name Printings, so they survive re-imports, re-derivation and
+renamed derived groups. Database triggers keep the effective membership current after every write to the derived or
+reviewed tables. Readers use the ``catalog_reprint_group_member`` view of it, never the derived table. A change to any
+Printing's group advances the shared attribute revision (``advance_attribute_revision``), at most once per transaction.
 """
 import hashlib
 import inspect
@@ -131,20 +133,22 @@ def group_id(identity_id, key: str) -> UUID:
     return uuid5(GROUP_NAMESPACE, f"{identity_id}:{key}")
 
 
-def refresh_reprint_groups(conn, generation_id=None) -> int:
+def refresh_reprint_groups(conn, generation_id=None, printing_ids=None) -> int:
     """Re-derive the Reprint Group of every TCGdex Printing in a catalog generation (default: the active one) from its
-    stored source record, inside the caller's transaction.
+    stored source record, inside the caller's transaction. ``printing_ids`` limits it to those Printings (a Card
+    Identity merge re-derives only the Printings it moved).
 
     A Printing that is tombstoned, absent from the generation, manually approved or without rules text leaves its
-    group. A Printing with a pending name or reference review keeps its current group: its source record may no longer
-    describe the established Printing. Only changed rows are written, and the attribute revision advances when any
-    Printing's group changed. Returns the number of Printings whose group changed.
+    derived group. A Printing with a pending name or reference review keeps its current group: its source record may
+    no longer describe the established Printing. Only changed rows are written, and the attribute revision advances
+    when any Printing's derived group changed. Returns the number of Printings whose derived group changed.
     """
     if generation_id is None:
         generation_id = conn.execute("SELECT active_generation FROM catalog_state WHERE singleton"
                                      ).fetchone()["active_generation"]
         if generation_id is None:
             return 0
+    scope = None if printing_ids is None else [UUID(str(value)) for value in printing_ids]
     sources = conn.execute("""SELECT p.id AS printing_id, p.identity_id,
         EXISTS (SELECT 1 FROM catalog_review r WHERE r.printing_id = p.id AND r.status = 'pending'
                 AND r.kind IN ('name_change', 'reference_change')) AS pending,
@@ -154,9 +158,11 @@ def refresh_reprint_groups(conn, generation_id=None) -> int:
       JOIN catalog_printing p ON p.id = gp.printing_id
       JOIN catalog_printing_metadata m ON m.printing_id = p.id
       WHERE gp.generation_id = %s AND NOT gp.tombstoned AND p.source = 'tcgdex'
-        AND jsonb_typeof(m.source_record) = 'object'""", (list(SOURCE_FIELDS), generation_id)).fetchall()
+        AND jsonb_typeof(m.source_record) = 'object' AND (%s::uuid[] IS NULL OR p.id = ANY(%s::uuid[]))""",
+                           (list(SOURCE_FIELDS), generation_id, scope, scope)).fetchall()
     current = {row["printing_id"]: row for row in conn.execute(
-        "SELECT printing_id, group_id, text_key, rules_version FROM catalog_derived_reprint_group")}
+        """SELECT printing_id, group_id, text_key, rules_version FROM catalog_derived_reprint_group
+          WHERE %s::uuid[] IS NULL OR printing_id = ANY(%s::uuid[])""", (scope, scope))}
     kept, wanted = set(), {}
     for source in sources:
         if source["pending"]:

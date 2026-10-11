@@ -246,6 +246,20 @@ def test_a_pending_name_review_keeps_the_established_group():
     assert groups_of(*all_ids()) == before
 
 
+def test_a_pending_reference_review_keeps_the_established_group():
+    reset_catalog()
+    run(Records(*CARDS))
+    before = groups_of(*all_ids())
+    # The source reference now names another set and number, with other text: until the owner reviews it, the record
+    # may describe another physical Printing, so it must not move the established Printing to another group.
+    moved = edited(CANDY_SV, set={"id": "sv02", "name": "Paldea Evolved"}, localId="999", effect=SM_CANDY)
+    run(Records(*(moved if record is CANDY_SV else record for record in CARDS)))
+    with connect() as conn:
+        assert conn.execute("SELECT count(*) AS n FROM catalog_review WHERE kind='reference_change' AND status='pending'"
+                            ).fetchone()["n"] == 1
+    assert groups_of(*all_ids()) == before
+
+
 def test_rederiving_forms_groups_for_a_catalog_imported_before_reprint_groups():
     reset_catalog()
     run(Records(*CARDS))
@@ -259,18 +273,24 @@ def test_rederiving_forms_groups_for_a_catalog_imported_before_reprint_groups():
     assert (groups_of(*all_ids()), revision()) == (before, imported + 1)
 
 
+# Every table Reprint Group membership is stored or derived in. Readers must reach only the stored effective membership.
+GROUP_TABLES = ("catalog_reprint_group_membership", "catalog_derived_reprint_group", "catalog_reprint_group_link",
+                "catalog_reprint_group_assignment")
+
+
 def scans(query, params):
-    """Every scan of the derived group table in the query's plan as (node type, keyed), where keyed means the scan
-    looks rows up by an index condition. Seq scans are priced out, as row counts would at catalog scale."""
+    """Every scan of a Reprint Group table in the query's plan as (relation, node type, keyed), where keyed means the
+    scan looks rows up by an index condition. Seq scans are priced out, as row counts would at catalog scale."""
     with connect() as conn, conn.transaction():
         conn.execute("SET LOCAL enable_seqscan=off")
         plan = conn.execute("EXPLAIN (FORMAT JSON) " + query, params).fetchone()["QUERY PLAN"][0]["Plan"]
     found = []
 
     def walk(node):
-        if node.get("Relation Name") == "catalog_derived_reprint_group":
+        if node.get("Relation Name") in GROUP_TABLES:
             children = node.get("Plans", [])
-            found.append((node["Node Type"], "Index Cond" in node or any("Index Cond" in child for child in children)))
+            found.append((node["Relation Name"], node["Node Type"],
+                          "Index Cond" in node or any("Index Cond" in child for child in children)))
         for child in node.get("Plans", []):
             walk(child)
     walk(plan)
@@ -285,7 +305,8 @@ def test_format_checks_look_reprint_groups_up_by_index():
     group = groups_of("sv01-191")["sv01-191"]
     for query, params in ((LINES, (owner, deck)), (MEMBERS, ([group],))):
         found = scans(query, params)
-        assert found and all(keyed and "Seq" not in kind for kind, keyed in found), (query, found)
+        assert {relation for relation, _, _ in found} == {"catalog_reprint_group_membership"}, (query, found)
+        assert all(keyed and "Seq" not in kind for _, kind, keyed in found), (query, found)
 
 
 def test_old_rare_candy_is_standard_legal_through_its_reprint_group():

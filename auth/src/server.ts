@@ -321,7 +321,7 @@ const server = createServer(async (request, response) => {
         /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
       const metadataMatch =
         isMetadata && typeof targetId === "string"
-          ? /^(?:(edition|printing):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|rule:(live_derivation|marketplace_matching):[0-9]{1,6})$/.exec(
+          ? /^(?:(edition|printing|card_identity):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|rule:(live_derivation|marketplace_matching):[0-9]{1,6})$/.exec(
               targetId
             )
           : null;
@@ -329,12 +329,16 @@ const server = createServer(async (request, response) => {
         ? !!metadataMatch
         : typeof targetId === "string" && idPattern.test(targetId);
       // A Printing target also takes card attribute corrections, under their own action so neither code spends on the other.
+      // A Card Identity target takes only Reprint Group reviews and identity merges, each under its own action.
       const validAction = isMetadata
         ? metadataMatch?.[1] === "printing"
           ? action === "resolve_metadata" || action === "correct_attributes"
-          : metadataMatch?.[1]
-            ? action === "resolve_metadata"
-            : action === "activate_rule"
+          : metadataMatch?.[1] === "card_identity"
+            ? action === "review_reprint_groups" ||
+              action === "merge_card_identities"
+            : metadataMatch?.[1]
+              ? action === "resolve_metadata"
+              : action === "activate_rule"
         : isReview
           ? action === "confirm_source" || action === "resolve_catalog"
           : action === "approve_printing" || action === "approve_edition";
@@ -358,7 +362,7 @@ const server = createServer(async (request, response) => {
         // The code is only issued for a target that exists; the API re-checks versions and evidence when it is spent.
         const exists = metadataMatch![1]
           ? await pool.query(
-              `SELECT 1 FROM ${metadataMatch![1] === "edition" ? "catalog_edition" : "catalog_printing"} WHERE id=$1`,
+              `SELECT 1 FROM ${metadataMatch![1] === "edition" ? "catalog_edition" : metadataMatch![1] === "card_identity" ? "catalog_identity" : "catalog_printing"} WHERE id=$1`,
               [targetId.split(":")[1]]
             )
           : await pool.query(`SELECT 1 FROM catalog_rule_state WHERE kind=$1`, [

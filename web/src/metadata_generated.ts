@@ -24,6 +24,16 @@ export type AttributeQueuePage = { items: (AttributeEvidence)[]; next_cursor: st
 export type AttributeDecisionRow = { id: string; printing_id: string; decision: string; correction: Record<string, unknown>; previous_correction: Record<string, unknown> | null; derived: Record<string, unknown> | null; rules_version: number | null; evidence_url: string; reason: string; reviewer_id: string; reviewed_at: string; clock_revision: number; attribute_revision: number };
 export type AttributeDecisionInput = { printing_id: string; decision: "correct" | "remove"; correction?: AttributeValues | null; evidence_digest: string; evidence_url: string; reason: string; report_ids?: (string)[]; code?: string | null };
 export type AttributeDecisionResult = { decision_id: string; printing_id: string; decision: string; correction: AttributeValues | null; effective: AttributeValues; attribute_revision: number; closed_report_ids: (string)[]; public_delivery: "delivered" | "pending" };
+export type ReprintGroupPrinting = { printing_id: string; source: string; source_id: string | null; set_id: string | null; collector_number: string | null; name: string | null; in_catalog: boolean; derived_group_id: string | null; linked_group_id: string | null; assigned_group_id: string | null; group_id: string | null };
+export type ReprintGroupView = { group_id: string; printing_ids: (string)[] };
+export type CardIdentityEvidence = { identity_id: string; identity_key: string; display_name: string; merged_into: string | null; printings: (ReprintGroupPrinting)[]; groups: (ReprintGroupView)[]; attribute_revision: number; evidence_digest: string };
+export type CardIdentityQueueItem = { printing_id: string; identity_id: string; identity_name: string; name: string | null; set_id: string | null; collector_number: string | null };
+export type CardIdentityQueuePage = { items: (CardIdentityQueueItem)[]; next_cursor: string | null };
+export type CardIdentityDecisionRow = { id: string; identity_id: string; decision: string; group_id: string | null; target_group_id: string | null; into_identity_id: string | null; printing_ids: (string)[]; affected_printing_ids: (string)[]; evidence_url: string; reason: string; reviewer_id: string; reviewed_at: string; clock_revision: number; attribute_revision: number };
+export type ReprintGroupDecisionInput = { identity_id: string; decision: "merge" | "split" | "join" | "restore"; group_id?: string | null; target_group_id?: string | null; printing_ids?: (string)[]; evidence_digest: string; evidence_url: string; reason: string; code?: string | null };
+export type ReprintGroupDecisionResult = { decision_id: string; identity_id: string; decision: string; group_id: string | null; affected_printing_ids: (string)[]; attribute_revision: number; public_delivery: "delivered" | "pending" };
+export type CardIdentityMergeInput = { identity_id: string; into_identity_id: string; evidence_digest: string; into_evidence_digest: string; evidence_url: string; reason: string; code?: string | null };
+export type CardIdentityMergeResult = { decision_id: string; identity_id: string; into_identity_id: string; moved_printing_ids: (string)[]; affected_printing_ids: (string)[]; attribute_revision: number; public_delivery: "delivered" | "pending" };
 
 type Method='GET'|'POST'|'PATCH';
 async function request<T>(method: Method,path: string,body?: object): Promise<T> {
@@ -44,7 +54,7 @@ export const decideMetadata=(body: MetadataDecisionInput)=>request<MetadataDecis
 export const decideMetadataReport=(reportId: string,body: MetadataReportDecision)=>request<MetadataReportView>('POST',`/api/admin/catalog-metadata/reports/${id(reportId)}/decision`,body);
 export const getMetadataRules=()=>request<MetadataRuleView[]>('GET','/api/admin/catalog-rules');
 export const activateMetadataRule=(kind: MetadataRuleView['kind'],body: MetadataRuleActivation)=>request<MetadataRuleResult>('POST',`/api/admin/catalog-rules/${kind}/activate`,body);
-export const requestMetadataCode=(metadataTarget: string,action:'resolve_metadata'|'activate_rule'|'correct_attributes')=>request<{message:string}>('POST','/auth/approval-code',{metadataTarget,action});
+export const requestMetadataCode=(metadataTarget: string,action:'resolve_metadata'|'activate_rule'|'correct_attributes'|'review_reprint_groups'|'merge_card_identities')=>request<{message:string}>('POST','/auth/approval-code',{metadataTarget,action});
 export const submitAttributeReport=(body: AttributeReportInput)=>request<AttributeReportView>('POST','/api/catalog/attribute-reports',body);
 export const getMyAttributeReports=()=>request<AttributeReportView[]>('GET','/api/catalog/attribute-reports');
 export const getMyAttributeReport=(reportId: string)=>request<AttributeReportView>('GET',`/api/catalog/attribute-reports/${id(reportId)}`);
@@ -54,4 +64,10 @@ export const getAttributeEvidence=(printingId: string)=>request<AttributeEvidenc
 export const getAttributeHistory=(printingId: string)=>request<AttributeDecisionRow[]>('GET',`/api/admin/card-attributes/${id(printingId)}/history`);
 export const decideAttributeReport=(reportId: string,body: AttributeReportDecision)=>request<AttributeReportView>('POST',`/api/admin/card-attributes/reports/${id(reportId)}/decision`,body);
 export const decideAttributes=(body: AttributeDecisionInput)=>request<AttributeDecisionResult>('POST','/api/admin/card-attributes/decisions',body);
+export const getCardIdentityQueue=(cursor?: string)=>request<CardIdentityQueuePage>('GET',`/api/admin/card-identities/queue${cursor?`?cursor=${id(cursor)}`:''}`);
+export const getCardIdentityOfPrinting=(printingId: string)=>request<CardIdentityEvidence>('GET',`/api/admin/card-identities?printing_id=${id(printingId)}`);
+export const getCardIdentityEvidence=(identityId: string)=>request<CardIdentityEvidence>('GET',`/api/admin/card-identities/${id(identityId)}`);
+export const getCardIdentityHistory=(identityId: string)=>request<CardIdentityDecisionRow[]>('GET',`/api/admin/card-identities/${id(identityId)}/history`);
+export const decideReprintGroups=(body: ReprintGroupDecisionInput)=>request<ReprintGroupDecisionResult>('POST','/api/admin/reprint-groups/decisions',body);
+export const mergeCardIdentities=(body: CardIdentityMergeInput)=>request<CardIdentityMergeResult>('POST','/api/admin/card-identities/decisions',body);
 

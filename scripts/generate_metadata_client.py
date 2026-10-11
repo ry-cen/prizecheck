@@ -1,4 +1,4 @@
-"""Generate metadata and card attribute report and review types from the API contract."""
+"""Generate metadata, card attribute and Reprint Group review types from the API contract."""
 from pathlib import Path
 import sys,json
 root=Path(__file__).resolve().parents[1];sys.path.insert(0,str(root/'api'))
@@ -16,7 +16,9 @@ for name in ('MetadataReportInput','MetadataReportView','MetadataReportUpdate','
              'MetadataDecisionRow','MetadataDecisionInput','MetadataDecisionResult','RuleVersionView','ActiveRuleView','MetadataRuleView',
              'MetadataRuleActivation','MetadataRuleResult','AttributeValues','AttributeReportInput','AttributeReportView',
              'AttributeReportUpdate','AttributeReportDecision','AttributeEvidence','AttributeQueuePage','AttributeDecisionRow',
-             'AttributeDecisionInput','AttributeDecisionResult'):
+             'AttributeDecisionInput','AttributeDecisionResult','ReprintGroupPrinting','ReprintGroupView',
+             'CardIdentityEvidence','CardIdentityQueueItem','CardIdentityQueuePage','CardIdentityDecisionRow',
+             'ReprintGroupDecisionInput','ReprintGroupDecisionResult','CardIdentityMergeInput','CardIdentityMergeResult'):
     d=schema[name];fields=[f"{key}{'' if key in d.get('required',[]) else '?'}: {ts(value)}" for key,value in d['properties'].items()]
     lines.append(f"export type {name} = {{ {'; '.join(fields)} }};")
 lines.append('''
@@ -39,7 +41,7 @@ export const decideMetadata=(body: MetadataDecisionInput)=>request<MetadataDecis
 export const decideMetadataReport=(reportId: string,body: MetadataReportDecision)=>request<MetadataReportView>('POST',`/api/admin/catalog-metadata/reports/${id(reportId)}/decision`,body);
 export const getMetadataRules=()=>request<MetadataRuleView[]>('GET','/api/admin/catalog-rules');
 export const activateMetadataRule=(kind: MetadataRuleView['kind'],body: MetadataRuleActivation)=>request<MetadataRuleResult>('POST',`/api/admin/catalog-rules/${kind}/activate`,body);
-export const requestMetadataCode=(metadataTarget: string,action:'resolve_metadata'|'activate_rule'|'correct_attributes')=>request<{message:string}>('POST','/auth/approval-code',{metadataTarget,action});
+export const requestMetadataCode=(metadataTarget: string,action:'resolve_metadata'|'activate_rule'|'correct_attributes'|'review_reprint_groups'|'merge_card_identities')=>request<{message:string}>('POST','/auth/approval-code',{metadataTarget,action});
 export const submitAttributeReport=(body: AttributeReportInput)=>request<AttributeReportView>('POST','/api/catalog/attribute-reports',body);
 export const getMyAttributeReports=()=>request<AttributeReportView[]>('GET','/api/catalog/attribute-reports');
 export const getMyAttributeReport=(reportId: string)=>request<AttributeReportView>('GET',`/api/catalog/attribute-reports/${id(reportId)}`);
@@ -49,6 +51,12 @@ export const getAttributeEvidence=(printingId: string)=>request<AttributeEvidenc
 export const getAttributeHistory=(printingId: string)=>request<AttributeDecisionRow[]>('GET',`/api/admin/card-attributes/${id(printingId)}/history`);
 export const decideAttributeReport=(reportId: string,body: AttributeReportDecision)=>request<AttributeReportView>('POST',`/api/admin/card-attributes/reports/${id(reportId)}/decision`,body);
 export const decideAttributes=(body: AttributeDecisionInput)=>request<AttributeDecisionResult>('POST','/api/admin/card-attributes/decisions',body);
+export const getCardIdentityQueue=(cursor?: string)=>request<CardIdentityQueuePage>('GET',`/api/admin/card-identities/queue${cursor?`?cursor=${id(cursor)}`:''}`);
+export const getCardIdentityOfPrinting=(printingId: string)=>request<CardIdentityEvidence>('GET',`/api/admin/card-identities?printing_id=${id(printingId)}`);
+export const getCardIdentityEvidence=(identityId: string)=>request<CardIdentityEvidence>('GET',`/api/admin/card-identities/${id(identityId)}`);
+export const getCardIdentityHistory=(identityId: string)=>request<CardIdentityDecisionRow[]>('GET',`/api/admin/card-identities/${id(identityId)}/history`);
+export const decideReprintGroups=(body: ReprintGroupDecisionInput)=>request<ReprintGroupDecisionResult>('POST','/api/admin/reprint-groups/decisions',body);
+export const mergeCardIdentities=(body: CardIdentityMergeInput)=>request<CardIdentityMergeResult>('POST','/api/admin/card-identities/decisions',body);
 ''')
 content='\n'.join(lines)+'\n';target=root/'web/src/metadata_generated.ts'
 if '--check' in sys.argv:
