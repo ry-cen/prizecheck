@@ -5,6 +5,7 @@ import {
   appendHoldings,
   EMPTY_GALLERY,
   type GalleryData,
+  type GalleryHolding,
   type GalleryQuery,
   queryToParams,
 } from "./galleryModel";
@@ -46,6 +47,8 @@ export function useGalleryData(
       for (let restarts = 0; ; restarts++) {
         let holdings: GalleryData["holdings"] = [];
         let loadedCopies = 0;
+        // One Map per walk, filled page by page and published with each page (GalleryData.byKey).
+        const byKey = new Map<string, GalleryHolding>();
         let cursor: string | undefined;
         try {
           do {
@@ -55,11 +58,12 @@ export function useGalleryData(
             ({ holdings, loadedCopies } = appendHoldings(
               holdings,
               loadedCopies,
-              page.holdings
+              page.holdings,
+              byKey
             ));
             cursor = page.next_cursor ?? undefined;
             const done = cursor === undefined;
-            const snapshot = { holdings, loadedCopies };
+            const snapshot = { holdings, loadedCopies, byKey };
             setData((previous) => ({
               ...snapshot,
               totals:

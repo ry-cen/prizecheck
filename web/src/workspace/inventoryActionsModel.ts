@@ -175,10 +175,11 @@ export function describeFailure(
       );
     case "LOCATION_NOT_FOUND":
       if (error.detail.destination_id)
+        // The destination went elsewhere, which moved the owner revision: refresh the cards too, so the tree and the gallery agree and no stale banner follows.
         return result(
           `${destination} can no longer hold cards. ${nothing}`,
           `Choose another destination; ${kept.toLowerCase()}.`,
-          false,
+          true,
           true
         );
       return result(
@@ -209,5 +210,13 @@ export function describeFailure(
         refreshed,
         true
       );
+  }
+}
+
+/** Drops the oldest entries (Map insertion order) until at most `limit` remain. */
+export function trimOldest<K, V>(map: Map<K, V>, limit: number) {
+  for (const key of map.keys()) {
+    if (map.size <= limit) return;
+    map.delete(key);
   }
 }

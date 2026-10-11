@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getCollectionSets } from "../collection_generated";
+import { getCollectionRevision } from "../collection_generated";
 import type { GalleryHolding, GalleryStatus } from "./galleryModel";
 import { focusWorkspaceHeading } from "./SelectionBar";
 import { reconcileSelection, type Selection } from "./selectionModel";
@@ -30,7 +30,8 @@ type Options = {
   userId: string;
   galleryRevision: number | null;
   galleryStatus: GalleryStatus;
-  holdings: GalleryHolding[];
+  /** The gallery's Holdings by key (GalleryData.byKey). */
+  byKey: ReadonlyMap<string, GalleryHolding>;
   /** The gallery query's key: a note waiting for a reload is dropped when the view changes. */
   galleryKey: string;
   reloadGallery: () => void;
@@ -55,7 +56,7 @@ export function useStaleCollection({
   userId,
   galleryRevision,
   galleryStatus,
-  holdings,
+  byKey,
   galleryKey,
   reloadGallery,
   treeRevision,
@@ -109,15 +110,14 @@ export function useStaleCollection({
     if (treeReady && treeRevision !== null) observe(treeRevision, true);
   }, [treeReady, treeRevision, observe]);
 
-  // A revision-only read when the collector comes back to this tab. The Set list is lock-free and
-  // independent of the view; its sets are discarded, so nothing on screen changes.
+  // A revision-only read when the collector comes back to this tab: one row, no lock, nothing on screen changes.
   useEffect(() => {
     let alive = true;
     let inFlight = false;
     const probe = () => {
       if (inFlight || document.visibilityState !== "visible") return;
       inFlight = true;
-      getCollectionSets()
+      getCollectionRevision()
         .then((result) => {
           if (alive && Number.isSafeInteger(result.owner_revision))
             observe(result.owner_revision, true);
@@ -207,11 +207,10 @@ export function useStaleCollection({
     )
       return;
     pending.current = null;
-    const byKey = new Map(holdings.map((holding) => [holding.key, holding]));
     // reconcileSelection returns the same object when every selected copy is unchanged.
     if (reconcileSelection(wait.snapshot, byKey) !== wait.snapshot)
       setNote(RELOAD_NOTE);
-  }, [galleryKey, galleryStatus, galleryRevision, holdings]);
+  }, [galleryKey, galleryStatus, galleryRevision, byKey]);
 
   const dismissNote = useCallback(() => {
     setNote("");

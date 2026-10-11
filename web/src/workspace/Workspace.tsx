@@ -36,7 +36,7 @@ import {
   type WorkspaceView,
 } from "./LocationNav";
 import { ManageLocations, ManageLocationsButton } from "./ManageLocations";
-import { indexLocations } from "./locationTree";
+import { indexLocations, isFolder } from "./locationTree";
 import { MOBILE_QUERY, useMediaQuery } from "./media";
 import { focusWorkspaceHeading, SelectionBar } from "./SelectionBar";
 import { selectedGroups, selectionScope } from "./selectionModel";
@@ -136,10 +136,17 @@ export function Workspace({
   }, [loadTree]);
 
   const index = useMemo(() => indexLocations(nodes), [nodes]);
-  const current = view === "all" ? undefined : index.byId.get(view);
-  // A Location that disappeared from the tree falls back to All owned.
+  const chosen = view === "all" ? undefined : index.byId.get(view);
+  // Only a Storage Leaf or Deck opens. A Location that disappeared from the tree, or became a folder (Add child,
+  // a nesting move, another tab), falls back to All owned; the gallery can't list a folder.
+  const current = chosen && !isFolder(chosen) ? chosen : undefined;
   const heading = current?.name ?? "All owned";
   const galleryView: WorkspaceView = current ? view : "all";
+  // A chosen Location that became a folder is left for good: if it later becomes a leaf again (its last child
+  // moved out), the workspace must not jump back to it on its own. created() still ends on the new child.
+  useEffect(() => {
+    if (chosen && isFolder(chosen)) setView("all");
+  }, [chosen]);
   // Typing settles for 250 ms before the gallery reloads. The selection scope ignores `sort`, so
   // sorting keeps the selection and search or filter changes clear it.
   const searchText = useDebouncedValue(query, 250);
@@ -157,6 +164,7 @@ export function Workspace({
   const mobile = useMediaQuery(MOBILE_QUERY);
   const selection = useSelection({
     holdings: gallery.holdings,
+    byKey: gallery.byKey,
     status: gallery.status,
     scope: selectionScope({ ...galleryQuery, search: searchText.trim() }),
     mobile,
@@ -165,6 +173,8 @@ export function Workspace({
   const actions = useInventoryActions({
     selection,
     holdings: gallery.holdings,
+    byKey: gallery.byKey,
+    status: gallery.status,
     index,
     reloadGallery: gallery.reload,
     reloadTree: loadTree,
@@ -181,7 +191,7 @@ export function Workspace({
     userId,
     galleryRevision: gallery.ownerRevision,
     galleryStatus: gallery.status,
-    holdings: gallery.holdings,
+    byKey: gallery.byKey,
     galleryKey,
     reloadGallery: gallery.reload,
     treeRevision: ownerRevision,
@@ -191,6 +201,20 @@ export function Workspace({
     clearSelection: actions.clearSelection,
     busy: actions.busy,
   });
+  // Inspector totals are cached per owner revision ("<revision>:<edition>"). Older revisions' entries can't be
+  // asked for again, so drop them whenever the gallery reads a new revision.
+  useEffect(() => {
+    const revision = gallery.ownerRevision;
+    if (revision === null) return;
+    const prefix = `${revision}:`;
+    for (const key of ownedTotals.keys())
+      if (!key.startsWith(prefix)) ownedTotals.delete(key);
+  }, [gallery.ownerRevision, ownedTotals]);
+  // Add cards belongs to the open Storage Leaf or Deck. When that Location is gone, became a folder or is no longer
+  // open, forget it, so the dialog never reopens by itself if the Location becomes a leaf again.
+  useEffect(() => {
+    if (addFor !== null && current?.id !== addFor) setAddFor(null);
+  }, [addFor, current]);
   const locationPath = useCallback(
     (id: string) => (index.byId.has(id) ? index.path(id) : undefined),
     [index]
@@ -337,7 +361,7 @@ export function Workspace({
     ) : (
       <LocationNav
         index={index}
-        view={current ? view : "all"}
+        view={galleryView}
         expanded={expanded}
         onToggle={toggleFolder}
         onChoose={choose}
@@ -447,7 +471,7 @@ export function Workspace({
                   {plural(gallery.totals.editions, "edition", "editions")}
                 </p>
               )}
-              {current && current.kind !== "organization" && (
+              {current && (
                 <button
                   type="button"
                   className="ws-add-cards-button"
@@ -512,7 +536,10 @@ export function Workspace({
             />
             <CorrectionsNotice
               holdings={gallery.holdings}
+              status={gallery.status}
+              galleryKey={galleryKey}
               ownerRevision={gallery.ownerRevision}
+              catalogRevision={gallery.catalogRevision}
               onChanged={async () => {
                 gallery.reload();
                 await loadTree();
@@ -644,7 +671,7 @@ export function Workspace({
           onTreeChanged={loadTree}
         />
       )}
-      {current && addFor === current.id && current.kind !== "organization" && (
+      {current && addFor === current.id && (
         <AddCardsDialog
           key={current.id}
           locationId={current.id}

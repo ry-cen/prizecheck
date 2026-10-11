@@ -1,16 +1,25 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Correction } from "../EditionCorrections";
 import {
   getEditionReplacements,
   type ReplacementView,
 } from "../reconciliation_generated";
-import type { GalleryHolding } from "./galleryModel";
+import type { GalleryHolding, GalleryStatus } from "./galleryModel";
 import "./CorrectionsNotice.css";
+
+type Relevant = { entry: GalleryHolding; correction: ReplacementView }[];
+/** One empty list, so a view without corrections never re-renders or re-walks for them. */
+const NONE: Relevant = [];
 
 type Props = {
   holdings: GalleryHolding[];
-  /** The gallery's owner revision. The reviewed corrections are read again whenever it changes. */
+  /** The gallery's status. While it loads (or is partial), the last settled list for this query stays shown. */
+  status: GalleryStatus;
+  /** The gallery query's key: a kept list belongs to one query. */
+  galleryKey: string;
+  /** The gallery's owner and catalog revisions; the reviewed corrections are read once per pair. Null while it reloads. */
   ownerRevision: number | null;
+  catalogRevision: number | null;
   /** Reloads the gallery and the tree after a reassignment. */
   onChanged: () => Promise<void>;
 };
@@ -19,22 +28,29 @@ type Props = {
  * per Storage Leaf). One reassignment control per Holding whose Edition has a reviewed replacement. */
 export function CorrectionsNotice({
   holdings,
+  status,
+  galleryKey,
   ownerRevision,
+  catalogRevision,
   onChanged,
 }: Props) {
   const [corrections, setCorrections] = useState<ReplacementView[]>([]);
+  // As useOwnedSets: the newest request wins, and a reload (revisions null) neither reads nor cancels.
+  const requested = useRef("");
   useEffect(() => {
-    let live = true;
+    if (ownerRevision === null || catalogRevision === null) return;
+    const key = `${ownerRevision}:${catalogRevision}`;
+    if (requested.current === key) return;
+    requested.current = key;
     getEditionReplacements()
       .then((list) => {
-        if (live) setCorrections(Array.isArray(list) ? list : []);
+        if (requested.current === key)
+          setCorrections(Array.isArray(list) ? list : []);
       })
       .catch(() => undefined);
-    return () => {
-      live = false;
-    };
-  }, [ownerRevision]);
+  }, [ownerRevision, catalogRevision]);
   const relevant = useMemo(() => {
+    if (!corrections.length) return NONE;
     const byEdition = new Map(
       corrections.map((item) => [item.edition_id, item])
     );
@@ -43,14 +59,24 @@ export function CorrectionsNotice({
       return correction ? [{ entry, correction }] : [];
     });
   }, [corrections, holdings]);
-  if (!relevant.length) return null;
+  // A reload empties the listing until its pages return. Keep showing the last settled list for this query, so
+  // a Correction isn't unmounted and keeps what the collector typed.
+  const settled = status === "ready" || status === "error";
+  const [kept, setKept] = useState({ key: galleryKey, list: relevant });
+  if (settled && (kept.key !== galleryKey || kept.list !== relevant))
+    setKept({ key: galleryKey, list: relevant });
+  const shown =
+    !settled && kept.key === galleryKey && kept.list.length
+      ? kept.list
+      : relevant;
+  if (!shown.length) return null;
   return (
     <section
       className="ws-corrections"
       aria-label="Reviewed Edition corrections"
     >
       <h2 className="ws-corrections-title">Reviewed Edition corrections</h2>
-      {relevant.map(({ entry, correction }) => (
+      {shown.map(({ entry, correction }) => (
         <Correction
           key={entry.key}
           holding={entry.holding}

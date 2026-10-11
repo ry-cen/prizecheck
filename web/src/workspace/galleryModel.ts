@@ -112,6 +112,9 @@ export type GalleryStatus = "loading" | "partial" | "ready" | "error";
 
 export type GalleryData = {
   holdings: GalleryHolding[];
+  /** The loaded Holdings by key. One Map per walk, extended in place as pages arrive, so a page costs only its
+   * own rows; its identity changes only when a new walk (a query change or a reload) starts. Read it, never write it. */
+  byKey: ReadonlyMap<string, GalleryHolding>;
   /** Tiles covered by the loaded Holdings. Indexes at or past this render placeholders. */
   loadedCopies: number;
   /** From the first page; null until it arrives. */
@@ -125,6 +128,7 @@ export type GalleryData = {
 
 export const EMPTY_GALLERY: GalleryData = {
   holdings: [],
+  byKey: new Map(),
   loadedCopies: 0,
   totals: null,
   ownerRevision: null,
@@ -143,25 +147,45 @@ export const tileKey = (
   ordinal: number
 ) => `${locationId}:${editionId}:${ordinal}`;
 
-/** Appends one page of Holdings after `previous`, continuing the running tile index. */
+/** Appends one page of Holdings after `previous`, continuing the running tile index. Only the page's rows are
+ * processed (earlier entries are copied by reference); `byKey`, when given, gains each new entry. */
 export function appendHoldings(
   previous: GalleryHolding[],
   loadedCopies: number,
-  rows: CollectionHoldingView[]
+  rows: CollectionHoldingView[],
+  byKey?: Map<string, GalleryHolding>
 ): { holdings: GalleryHolding[]; loadedCopies: number } {
   const holdings = previous.slice();
   let start = loadedCopies;
   for (const holding of rows) {
     const copies = Math.max(0, Number(holding.quantity) || 0);
-    holdings.push({
+    const entry: GalleryHolding = {
       key: holdingKey(holding.location_id, holding.edition_id),
       holding,
       copies,
       start,
-    });
+    };
+    holdings.push(entry);
+    byKey?.set(entry.key, entry);
     start += copies;
   }
   return { holdings, loadedCopies: start };
+}
+
+/** How many leading entries of `next` were already in `previous`: all of them when `next` is `previous` plus
+ * later pages of the same walk (appendHoldings keeps each earlier entry object), otherwise 0. Per-page work
+ * then touches only the new rows. */
+export function appendedFrom(
+  previous: readonly GalleryHolding[],
+  next: readonly GalleryHolding[]
+): number {
+  const count = previous.length;
+  return count > 0 &&
+    next.length >= count &&
+    next[0] === previous[0] &&
+    next[count - 1] === previous[count - 1]
+    ? count
+    : 0;
 }
 
 export type TileRef = {
