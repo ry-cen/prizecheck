@@ -54,6 +54,7 @@ export function Workspace({ onOpenLocations, onSignOut }: Props) {
   // Presentation only; ticket 104 persists it. Sort, search and filters belong in the gallery query.
   const [display, setDisplay] = useState<DisplayPrefs>(DEFAULT_DISPLAY);
   const [manageOpen, setManageOpen] = useState(false);
+  const ownedTotals = useRef(new Map<string, number>()).current;
   const drawerOpener = useRef<HTMLButtonElement>(null);
   const drawerRef = useRef<HTMLDivElement>(null);
 
@@ -346,6 +347,7 @@ export function Workspace({ onOpenLocations, onSignOut }: Props) {
                 card={selection.inspected}
                 locationPath={locationPath}
                 ownerRevision={gallery.ownerRevision}
+                ownedTotals={ownedTotals}
               />
             </div>
           </main>
@@ -429,6 +431,7 @@ export function Workspace({ onOpenLocations, onSignOut }: Props) {
           card={selection.details}
           locationPath={locationPath}
           ownerRevision={gallery.ownerRevision}
+          ownedTotals={ownedTotals}
           onClose={selection.closeDetails}
         />
       )}

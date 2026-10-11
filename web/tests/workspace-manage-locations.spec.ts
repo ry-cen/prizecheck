@@ -347,9 +347,9 @@ test.describe("desktop", () => {
     await page.keyboard.press("Escape");
     await expect(panel).toBeHidden();
     await expect(gear).toBeFocused();
-    expect(
-      await page.evaluate(() => document.documentElement.style.overflow)
-    ).toBe("");
+    await expect
+      .poll(() => page.evaluate(() => document.documentElement.style.overflow))
+      .toBe("");
   });
 
   test("a mouse drag on the handle nests a Location in a row or moves it to Top level, after confirmation", async ({

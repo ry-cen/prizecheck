@@ -1,5 +1,6 @@
 import React, {
   memo,
+  useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -285,55 +286,94 @@ export function Gallery({
     []
   );
 
+  // The tile that has keyboard focus stays mounted even when scrolled out of the window, so focus
+  // isn't lost and Space still reaches it. Tracked by display index and Holding key.
+  const [focused, setFocused] = useState<{ index: number; key: string } | null>(
+    null
+  );
+  const focusTile = useCallback(
+    (index: number, key: string) => setFocused({ index, key }),
+    []
+  );
+  const blurTile = useCallback(
+    (index: number) =>
+      setFocused((current) => (current?.index === index ? null : current)),
+    []
+  );
+  const focusedTile =
+    focused && layout && !loading && focused.index < data.loadedCopies
+      ? tileAt(data.holdings, focused.index)
+      : null;
+  const focusRenderable =
+    !!focused &&
+    !!focusedTile &&
+    focusedTile.holding.key === focused.key &&
+    focused.index < (data.totals?.copies ?? 0);
+  // A reload or view change can remove the focused copy; the browser doesn't blur an unmounted tile.
+  useEffect(() => {
+    if (focused && !focusRenderable) {
+      setFocused(null);
+      onHover(null);
+    }
+  }, [focused, focusRenderable, onHover]);
+
+  const renderCell = (index: number, layout: GridLayout) => {
+    const rect = tileRect(layout, index);
+    const tile =
+      index < data.loadedCopies ? tileAt(data.holdings, index) : null;
+    if (!tile) {
+      return (
+        <div
+          key={`pending-${index}`}
+          className="ws-tile-placeholder"
+          aria-hidden="true"
+          style={{
+            left: rect.x,
+            top: rect.y,
+            width: rect.width,
+            height: layout.artHeight,
+          }}
+        />
+      );
+    }
+    const { holding } = tile.holding;
+    return (
+      <Tile
+        key={tileKey(holding.location_id, holding.edition_id, tile.ordinal)}
+        entry={tile.holding}
+        ordinal={tile.ordinal}
+        index={index}
+        selected={isTileSelected(selected, tile.holding.key, tile.ordinal)}
+        onTile={onTile}
+        onHover={onHover}
+        onFocusTile={focusTile}
+        onBlurTile={blurTile}
+        left={rect.x}
+        top={rect.y}
+        width={rect.width}
+        names={display.names}
+        caption={
+          caption
+            ? (locationName(holding.location_id) ?? holding.location_name)
+            : null
+        }
+        path={holding.location_path}
+      />
+    );
+  };
+
   const cells: React.ReactNode[] = [];
   if (layout && !loading) {
+    const start = rows.first * layout.columns;
     const end = Math.min(
       data.totals?.copies ?? 0,
       (rows.last + 1) * layout.columns
     );
-    for (let index = rows.first * layout.columns; index < end; index++) {
-      const rect = tileRect(layout, index);
-      const tile =
-        index < data.loadedCopies ? tileAt(data.holdings, index) : null;
-      if (!tile) {
-        cells.push(
-          <div
-            key={`pending-${index}`}
-            className="ws-tile-placeholder"
-            aria-hidden="true"
-            style={{
-              left: rect.x,
-              top: rect.y,
-              width: rect.width,
-              height: layout.artHeight,
-            }}
-          />
-        );
-        continue;
-      }
-      const { holding } = tile.holding;
-      cells.push(
-        <Tile
-          key={tileKey(holding.location_id, holding.edition_id, tile.ordinal)}
-          entry={tile.holding}
-          ordinal={tile.ordinal}
-          index={index}
-          selected={isTileSelected(selected, tile.holding.key, tile.ordinal)}
-          onTile={onTile}
-          onHover={onHover}
-          left={rect.x}
-          top={rect.y}
-          width={rect.width}
-          names={display.names}
-          caption={
-            caption
-              ? (locationName(holding.location_id) ?? holding.location_name)
-              : null
-          }
-          path={holding.location_path}
-        />
-      );
-    }
+    const pinned = focusRenderable ? focused.index : -1;
+    if (pinned >= 0 && pinned < start) cells.push(renderCell(pinned, layout));
+    for (let index = start; index < end; index++)
+      cells.push(renderCell(index, layout));
+    if (pinned >= end) cells.push(renderCell(pinned, layout));
   }
 
   const empty = data.status === "ready" && (data.totals?.copies ?? 0) === 0;
@@ -413,6 +453,9 @@ type TileProps = {
   selected: boolean;
   onTile: (tile: TileRef, gesture: TileGesture) => void;
   onHover: (tile: TileRef | null) => void;
+  /** Keyboard focus entered or left this tile (display index, Holding key). */
+  onFocusTile: (index: number, key: string) => void;
+  onBlurTile: (index: number) => void;
   left: number;
   top: number;
   width: number;
@@ -430,6 +473,8 @@ const Tile = memo(function Tile({
   selected,
   onTile,
   onHover,
+  onFocusTile,
+  onBlurTile,
   left,
   top,
   width,
@@ -469,8 +514,14 @@ const Tile = memo(function Tile({
       onPointerLeave={(event) => {
         if (event.pointerType === "mouse") onHover(null);
       }}
-      onFocus={() => onHover(ref())}
-      onBlur={() => onHover(null)}
+      onFocus={() => {
+        onFocusTile(index, entry.key);
+        onHover(ref());
+      }}
+      onBlur={() => {
+        onBlurTile(index);
+        onHover(null);
+      }}
     >
       <TileArt holding={holding} />
       {names && (

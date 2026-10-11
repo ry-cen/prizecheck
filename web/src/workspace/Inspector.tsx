@@ -17,6 +17,8 @@ type DetailsProps = {
   locationPath: (id: string) => string | undefined;
   /** The gallery listing's owner revision; a new revision re-reads totals. */
   ownerRevision: number | null;
+  /** Totals already read, kept by the Workspace so they outlive the details panel's mounts. */
+  ownedTotals: Map<string, number>;
   headingId?: string;
 };
 
@@ -40,20 +42,21 @@ type Total =
   | { state: "failed" };
 
 /** Copies of an Edition owned across every Location. The gallery may show one Location only, so
- * this reads the Edition's distribution. Totals are cached per owner revision. */
-function useOwnedTotal(editionId: string, ownerRevision: number | null): Total {
-  const cache = useRef(new Map<string, number>());
+ * this reads the Edition's distribution. Totals are cached per owner revision in the Workspace's
+ * map; with no owner revision yet, nothing is read from or written to the cache. */
+function useOwnedTotal(
+  editionId: string,
+  ownerRevision: number | null,
+  cache: Map<string, number>
+): Total {
   const key = `${ownerRevision ?? ""}:${editionId}`;
+  const cached = ownerRevision === null ? undefined : cache.get(key);
   const [total, setTotal] = useState<{ key: string; value: Total }>({
     key: "",
     value: { state: "loading" },
   });
   useEffect(() => {
-    const cached = cache.current.get(key);
-    if (cached !== undefined) {
-      setTotal({ key, value: { state: "ready", copies: cached } });
-      return;
-    }
+    if (ownerRevision !== null && cache.has(key)) return;
     setTotal({ key, value: { state: "loading" } });
     let live = true;
     const timer = window.setTimeout(() => {
@@ -63,7 +66,7 @@ function useOwnedTotal(editionId: string, ownerRevision: number | null): Total {
             (sum, holding) => sum + (Number(holding.quantity) || 0),
             0
           );
-          cache.current.set(key, copies);
+          if (ownerRevision !== null) cache.set(key, copies);
           if (live) setTotal({ key, value: { state: "ready", copies } });
         })
         .catch(() => {
@@ -74,7 +77,8 @@ function useOwnedTotal(editionId: string, ownerRevision: number | null): Total {
       live = false;
       window.clearTimeout(timer);
     };
-  }, [key, editionId]);
+  }, [key, editionId, ownerRevision, cache]);
+  if (cached !== undefined) return { state: "ready", copies: cached };
   return total.key === key ? total.value : { state: "loading" };
 }
 
@@ -83,10 +87,11 @@ export function CardDetails({
   card,
   locationPath,
   ownerRevision,
+  ownedTotals,
   headingId,
 }: DetailsProps) {
   const { holding } = card.holding;
-  const total = useOwnedTotal(holding.edition_id, ownerRevision);
+  const total = useOwnedTotal(holding.edition_id, ownerRevision, ownedTotals);
   const kind = cardKindLine(holding);
   return (
     <div className="ws-details">
