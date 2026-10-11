@@ -1,0 +1,248 @@
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { getLocationTree, type TreeNode } from "../location_generated";
+import { LocationNav, type WorkspaceView } from "./LocationNav";
+import { indexLocations } from "./locationTree";
+import "./Workspace.css";
+
+const MOBILE_QUERY = "(max-width: 760px)";
+const FOCUSABLE =
+  'button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex="-1"])';
+
+type Props = {
+  /** Opens the existing Locations view. */
+  onOpenLocations: () => void;
+  onSignOut: () => void;
+};
+
+/** The collector workspace: header, Location sidebar (desktop) or drawer (mobile), and the gallery area. */
+export function Workspace({ onOpenLocations, onSignOut }: Props) {
+  const [nodes, setNodes] = useState<TreeNode[]>([]);
+  const [ownerRevision, setOwnerRevision] = useState<number | null>(null);
+  const [treeState, setTreeState] = useState<"loading" | "ready" | "error">(
+    "loading"
+  );
+  const [view, setView] = useState<WorkspaceView>("all");
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(
+    () => new Set()
+  );
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const drawerOpener = useRef<HTMLButtonElement>(null);
+  const drawerRef = useRef<HTMLDivElement>(null);
+
+  const loadTree = useCallback(async () => {
+    setTreeState("loading");
+    try {
+      const result = await getLocationTree();
+      setNodes(result.locations);
+      setOwnerRevision(result.owner_revision);
+      setTreeState("ready");
+    } catch {
+      setTreeState("error");
+    }
+  }, []);
+  useEffect(() => {
+    void loadTree();
+  }, [loadTree]);
+
+  const index = useMemo(() => indexLocations(nodes), [nodes]);
+  const current = view === "all" ? undefined : index.byId.get(view);
+  // A Location that disappeared from the tree falls back to All owned.
+  const heading = current?.name ?? "All owned";
+
+  function toggleFolder(id: string) {
+    setExpanded((previous) => {
+      const next = new Set(previous);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+  function choose(next: WorkspaceView) {
+    setView(next);
+    setDrawerOpen(false);
+  }
+
+  // The drawer only exists on mobile; widening the window closes it.
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const media = window.matchMedia(MOBILE_QUERY);
+    const onChange = () => {
+      if (!media.matches) setDrawerOpen(false);
+    };
+    media.addEventListener("change", onChange);
+    return () => media.removeEventListener("change", onChange);
+  }, [drawerOpen]);
+
+  // Modal drawer: focus moves in, Tab stays inside, Escape closes, focus returns to the opener.
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const opener = drawerOpener.current;
+    const focusables = () =>
+      Array.from(
+        drawerRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? []
+      );
+    focusables()[0]?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setDrawerOpen(false);
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const items = focusables();
+      if (!items.length) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      const inside = drawerRef.current?.contains(document.activeElement);
+      if (event.shiftKey && (document.activeElement === first || !inside)) {
+        event.preventDefault();
+        last.focus();
+      } else if (
+        !event.shiftKey &&
+        (document.activeElement === last || !inside)
+      ) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.body.style.overflow = overflow;
+      if (opener?.isConnected && opener.getClientRects().length) opener.focus();
+    };
+  }, [drawerOpen]);
+
+  const search = (className: string) => (
+    <input
+      type="search"
+      className={`ws-search ${className}`}
+      aria-label="Search cards"
+      placeholder="Search your cards…"
+      autoComplete="off"
+      value={query}
+      onChange={(event) => setQuery(event.target.value)}
+    />
+  );
+
+  const tree = (idPrefix: string) =>
+    treeState === "error" ? (
+      <div className="ws-tree-status" role="alert">
+        <p>Locations are temporarily unavailable.</p>
+        <button type="button" onClick={() => void loadTree()}>
+          Retry
+        </button>
+      </div>
+    ) : treeState === "loading" && ownerRevision === null ? (
+      <p className="ws-tree-status" role="status">
+        Loading locations…
+      </p>
+    ) : (
+      <LocationNav
+        index={index}
+        view={current ? view : "all"}
+        expanded={expanded}
+        onToggle={toggleFolder}
+        onChoose={choose}
+        idPrefix={idPrefix}
+      />
+    );
+
+  return (
+    <div className="ws-root">
+      <div className="ws-surface" inert={drawerOpen}>
+        <header className="ws-header">
+          <button
+            ref={drawerOpener}
+            type="button"
+            className="ws-header-icon ws-mobile-only"
+            aria-label="Open locations"
+            aria-haspopup="dialog"
+            aria-expanded={drawerOpen}
+            onClick={() => setDrawerOpen(true)}
+          >
+            <span aria-hidden="true">☰</span>
+          </button>
+          <span className="ws-brand">
+            <span className="ws-brand-mark" aria-hidden="true">
+              ✦
+            </span>
+            PrizeCheck
+          </span>
+          {search("ws-mobile-only ws-header-search")}
+          <nav aria-label="App" className="ws-app-nav ws-desktop-only">
+            <button type="button" onClick={onOpenLocations}>
+              Locations view
+            </button>
+            <button type="button" onClick={onSignOut}>
+              Sign out
+            </button>
+          </nav>
+        </header>
+        <div className="ws-layout">
+          <aside className="ws-sidebar ws-desktop-only" aria-label="Sidebar">
+            <div className="ws-location-heading">
+              <h2>Locations</h2>
+              {/* Ticket 108 adds the root plus here; ticket 109 adds the Manage locations gear. */}
+            </div>
+            {tree("ws-sidebar")}
+          </aside>
+          <main className="ws-main" aria-labelledby="ws-heading">
+            <div className="ws-heading">
+              <h1 id="ws-heading">{heading}</h1>
+            </div>
+            <div className="ws-toolbar ws-desktop-only">
+              {search("ws-toolbar-search")}
+            </div>
+            <section className="ws-gallery" aria-label="Cards" />
+          </main>
+        </div>
+      </div>
+      {drawerOpen && (
+        <div
+          className="ws-drawer-backdrop"
+          onClick={() => setDrawerOpen(false)}
+        >
+          <div
+            ref={drawerRef}
+            className="ws-drawer"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="ws-drawer-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="ws-drawer-heading">
+              <h2 id="ws-drawer-title">Locations</h2>
+              <button
+                type="button"
+                className="ws-header-icon"
+                aria-label="Close locations"
+                onClick={() => setDrawerOpen(false)}
+              >
+                <span aria-hidden="true">✕</span>
+              </button>
+            </div>
+            {tree("ws-drawer")}
+            <nav aria-label="App" className="ws-drawer-app-nav">
+              <button type="button" onClick={onOpenLocations}>
+                Locations view
+              </button>
+              <button type="button" onClick={onSignOut}>
+                Sign out
+              </button>
+            </nav>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

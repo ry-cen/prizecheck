@@ -1,0 +1,167 @@
+/*
+ * PrizeCheck design variables: the app's shared visual system.
+ * Source: docs/planning/tcg-collection-tracker/wayfinder/resolutions/28-decide-responsive-visual-system.md
+ *
+ * Rules
+ * - Components never hardcode a colour. They use the --color-* roles below.
+ * - A theme is one set of --color-* values selected by data-theme on <html> (web/index.html).
+ *   Prize gold is the default and only shipped theme. A new theme adds one
+ *   :root[data-theme="<name>"] block with every --color-* role and touches no component.
+ * - Spacing follows a 4 px scale (--space-*). Values that are not on the scale are
+ *   named layout variables (--layout-*) because the spec fixes them.
+ * - Transitions and animations use --motion-duration, which is 0 ms under prefers-reduced-motion.
+ * - Breakpoints cannot be variables in media queries. Use these literals everywhere:
+ *     mobile        (max-width: 760px)
+ *     compact       (max-width: 1100px)
+ *     wide          (min-width: 1550px)
+ *     extra wide    (min-width: 2200px)
+ * - Pages other than the collector workspace move onto these variables when they are redesigned.
+ *   Until then nothing in this file may change how an existing page looks: never set
+ *   color, background or color-scheme on :root here.
+ *
+ * Colour roles (resolution name -> variable)
+ *   background          --color-bg
+ *   surface             --color-surface
+ *   raised surface      --color-surface-raised
+ *   selected surface    --color-surface-selected
+ *   border              --color-border
+ *   strong border       --color-border-strong
+ *   control outline     --color-control-outline   (3:1 or better against every surface)
+ *   text                --color-text
+ *   muted text          --color-text-muted
+ *   subtle text         --color-text-subtle
+ *   accent              --color-accent
+ *   strong accent       --color-accent-strong
+ *   accent border       --color-accent-border
+ *   accent outline      --color-accent-outline    (dashed valid-drop outlines)
+ *   accent fill         --color-accent-fill
+ *   accent wash         --color-accent-wash
+ *   text on accent      --color-on-accent
+ *   artwork placeholder --color-art-start, --color-art-end (gradient stops)
+ *   warning             --color-warning
+ *   danger              --color-danger, --color-danger-border, --color-danger-fill
+ *   (supporting)        --color-scrim, --color-shadow, --color-shadow-strong, --color-focus
+ */
+
+:root {
+  /* Type */
+  --font-sans:
+    system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
+    sans-serif;
+  --font-size-2xs: 10px;
+  --font-size-xs: 11px;
+  --font-size-sm: 12px;
+  --font-size-md: 14px;
+  --font-size-lg: 18px;
+  --font-size-xl: 24px;
+  --line-height: 1.45;
+  /* Counts, prices, collector numbers and quantities use font-variant-numeric: var(--numeric). */
+  --numeric: tabular-nums;
+
+  /* Spacing: 4 px scale */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 28px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+
+  /* Corner radii */
+  --radius-control: 7px;
+  --radius-card: 7px;
+  --radius-panel: 10px;
+  --radius-dialog: 14px;
+  --radius-round: 999px;
+
+  /* Targets and controls */
+  --target-touch: 44px;
+  --target-pointer: 24px;
+  --control-height: 36px;
+
+  /* Focus */
+  --focus-width: 2px;
+  --focus-offset: 2px;
+
+  /* Motion: 150 ms or less; 0 ms under reduced motion (below) */
+  --motion-duration: 120ms;
+  --motion-ease: cubic-bezier(0.2, 0, 0, 1);
+
+  /* Card tiles (gallery, #103). Cards per row follow the available width. */
+  --tile-aspect: 245 / 342;
+  --tile-small: 110px;
+  --tile-medium: 145px;
+  --tile-gap-row: 20px;
+  --tile-gap-column: 12px;
+
+  /* Workspace layout */
+  --layout-header-height: 64px;
+  --layout-sidebar-width: 212px;
+  --layout-drawer-width: min(340px, 92vw);
+  /* Gallery side padding fixed by the spec: 30 px, then 20 px from 1550 px, then 16 px from 2200 px.
+     Workspace.css applies it to the workspace main area; ticket 103 tests it. */
+  --layout-gutter: 30px;
+}
+
+@media (min-width: 1550px) {
+  :root {
+    --layout-gutter: 20px;
+  }
+}
+
+@media (min-width: 2200px) {
+  :root {
+    --layout-gutter: 16px;
+  }
+}
+
+@media (max-width: 760px) {
+  :root {
+    --tile-small: 90px;
+    --tile-medium: 120px;
+    --tile-gap-row: 16px;
+    --tile-gap-column: 8px;
+    --layout-gutter: 14px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-duration: 0ms;
+  }
+}
+
+/* Prize gold: default and only shipped theme (dark). */
+:root,
+:root[data-theme="prize-gold"] {
+  --color-bg: #121110;
+  --color-surface: #1a1816;
+  --color-surface-raised: #23201c;
+  --color-surface-selected: #352c1c;
+  --color-border: #38322a;
+  --color-border-strong: #56493a;
+  --color-control-outline: #7d705f;
+  --color-text: #efebe4;
+  --color-text-muted: #b9b0a3;
+  --color-text-subtle: #958b7e;
+  --color-accent: #e6bd57;
+  --color-accent-strong: #f5dc94;
+  --color-accent-border: #b8913a;
+  --color-accent-outline: #8a6c2c;
+  --color-accent-fill: #5a4519;
+  --color-accent-wash: #e6bd5726;
+  --color-on-accent: #211803;
+  --color-art-start: #3a3122;
+  --color-art-end: #221e19;
+  --color-warning: #f0c987;
+  --color-danger: #eba79f;
+  --color-danger-border: #97524a;
+  --color-danger-fill: #6f3a35;
+  --color-scrim: #00000099;
+  --color-shadow: #00000044;
+  --color-shadow-strong: #00000088;
+  --color-focus: var(--color-accent);
+}
