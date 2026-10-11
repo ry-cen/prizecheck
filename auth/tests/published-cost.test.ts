@@ -321,6 +321,57 @@ const KINDS = ["live", "live.txt", "tcgplayer", "tcgplayer.txt"];
 const costPath = (token: string, version: number) =>
   `/api/public/decks/${token}/versions/${version}/cost`;
 
+/** Seeds many quotes in one process: [edition, amount, checkedAgoMs, providerUpdated], 64 Editions per commit. */
+async function seedQuotes(entries: Array<[Edition, string, number, string]>) {
+  await python(
+    STORE +
+      `for offset in range(0, len(argument), 64):
+    changes = {}
+    for row in argument[offset:offset + 64]:
+        changes[result_key(row['ref'], row['revision'])] = {'state': 'quote', 'attempt': row['attempt'], 'checked_at': row['checked']}
+        changes[quote_key(row['ref'], row['revision'])] = {'attempt': row['attempt'], 'amount': row['amount'], 'currency': 'USD',
+            'source': 'tcgdex', 'card': row['card'], 'variant': row['finish'], 'provider_updated_at': row['updated']}
+    snapshot = store.read_records(list(changes), deadline=deadline())
+    assert store.compare_and_swap({key: snapshot.records[key].version for key in changes}, changes, deadline=deadline())
+`,
+    entries.map(([edition, amount, checkedAgoMs, updated]) => ({
+      ref: edition.ref,
+      revision: edition.revision,
+      attempt: ++attempt,
+      amount,
+      checked: iso(checkedAgoMs),
+      card: edition.card,
+      finish: edition.finish,
+      updated,
+    }))
+  );
+}
+
+/** An anonymous call through gateway `gateway` (G0 or G1) from client address `ip` (the gateways trust 127.0.0.1's x-real-ip). */
+async function anonymousFrom(gateway: string, path: string, ip: string) {
+  const started = performance.now();
+  const response = await fetch(gateway + path, {
+    headers: { "x-real-ip": ip },
+  });
+  const text = await response.text();
+  let json: any = null;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    /* not JSON */
+  }
+  return {
+    status: response.status,
+    elapsed: performance.now() - started,
+    json,
+  };
+}
+
+const percentile = (values: number[], p: number) => {
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.ceil(sorted.length * p) - 1];
+};
+
 const launches = () =>
   existsSync(launchLog)
     ? readFileSync(launchLog, "utf8").split("\n").filter(Boolean).length
@@ -413,6 +464,7 @@ beforeAll(async () => {
   spawnProcess("node", ["--import", "tsx", "auth/src/server.ts"], {
     ...env,
     AUTH_PORT: String(g0),
+    TRUSTED_PROXY_IPS: "127.0.0.1",
     API_ORIGIN: `http://127.0.0.1:${a0}`,
   });
   uvicorn(a1, apiEnv({ ...env, DATABASE_URL: isolated(apiWakeups) }));
@@ -420,6 +472,7 @@ beforeAll(async () => {
     ...env,
     DATABASE_URL: isolated(gatewayWakeups),
     AUTH_PORT: String(g1),
+    TRUSTED_PROXY_IPS: "127.0.0.1",
     API_ORIGIN: `http://127.0.0.1:${a1}`,
   });
   G0 = `http://127.0.0.1:${g0}`;
@@ -893,6 +946,160 @@ describe("the Published Deck cost through the real gateway", () => {
         expect(gone.status, kind).toBe(404);
         expect(gone.json.detail.code).toBe("PUBLISHED_DECK_NOT_FOUND");
       }
+      expect(wakeups).toEqual(baseline);
+    }
+  );
+  it(
+    "keeps cached prices under 500 ms p95 through the gateway, and answers 100 simultaneous callers on both gateways over overlapping and disjoint Published Decks with every frozen copy counted, shared work deduplicated and the interactive cap held",
+    { timeout: 90_000 },
+    async () => {
+      const made: Edition[] = [];
+      for (let n = 0; n < 30; n++)
+        made.push(...(await printing(`pc-cap-${n}`, ["normal"], true)));
+      const [plain] = await printing("pc-cap-plain", ["normal"], false);
+      await deliver();
+      await seedQuotes(
+        made.map((e) => [e, "0.25", 10 * 60_000, iso(3_600_000)])
+      );
+      // A: 60 copies. B overlaps A on five Editions. C is disjoint, with one unverified copy.
+      const decks = {
+        A: await deckWith(
+          made.slice(0, 15).map((e) => [e, 4] as [Edition, number])
+        ),
+        B: await deckWith(
+          made.slice(10, 25).map((e) => [e, 2] as [Edition, number])
+        ),
+        C: await deckWith([
+          ...made.slice(25, 30).map((e) => [e, 1] as [Edition, number]),
+          [plain, 1],
+        ]),
+      };
+      const expected = {
+        A: { total: "60", priced: "60", amount: "15", fallback: "20" },
+        B: { total: "30", priced: "30", amount: "7.5", fallback: "10" },
+        C: { total: "6", priced: "5", amount: "1.25", fallback: "0" },
+      };
+      const tokens: Record<string, string> = {};
+      for (const [name, deck] of Object.entries(decks))
+        tokens[name] = (await publication("POST", deck)).token;
+      await resetScheduler(0);
+      const baseline = { ...wakeups };
+
+      // Cached ordinary prices, one at a time: the card price route (signed in, G0) and the Published Deck cost (G1).
+      const editionTimes: number[] = [];
+      const costTimes: number[] = [];
+      for (let n = 0; n <= 20; n++) {
+        const started = performance.now();
+        const response = await fetch(G0 + "/api/prices/editions", {
+          method: "POST",
+          headers: {
+            origin,
+            "content-type": "application/json",
+            cookie: owner.cookie,
+          },
+          body: JSON.stringify({
+            edition_ids: made.slice(0, 4).map((e) => e.id),
+          }),
+        });
+        const body = await response.json();
+        const elapsed = performance.now() - started;
+        expect(response.status).toBe(200);
+        expect(body.prices.map((row: any) => row.status)).toEqual([
+          "quote",
+          "quote",
+          "quote",
+          "quote",
+        ]);
+        const cost = await anonymousFrom(
+          G1,
+          costPath(tokens.C, 1),
+          "198.51.100.250"
+        );
+        expect(cost.status).toBe(200);
+        if (n === 0) continue; // warm-up
+        editionTimes.push(elapsed);
+        costTimes.push(cost.elapsed);
+      }
+      const editionP95 = percentile(editionTimes, 0.95);
+      const costP95 = percentile(costTimes, 0.95);
+      metric(
+        `cached prices one at a time: edition route p95 ${editionP95.toFixed(0)} ms (bound 500); published cost p95 ${costP95.toFixed(0)} ms`
+      );
+      expect(editionP95).toBeLessThan(500);
+
+      const names = ["A", "B", "C"] as const;
+      const burst = async (prefix: string) =>
+        Promise.all(
+          Array.from({ length: 100 }, async (_, i) => {
+            const name = names[i % 3];
+            const answer = await anonymousFrom(
+              i % 2 ? G1 : G0,
+              costPath(tokens[name], 1),
+              `${prefix}.${i + 1}`
+            );
+            return { name, ...answer };
+          })
+        );
+      const check = (
+        answers: Awaited<ReturnType<typeof burst>>,
+        hard: boolean
+      ) => {
+        for (const answer of answers) {
+          expect(answer.status, JSON.stringify(answer.json)).toBe(200);
+          const want = expected[answer.name];
+          expect(answer.json).toMatchObject({
+            status: "priced",
+            total_copies: want.total,
+            priced_copies: want.priced,
+            amount: want.amount,
+            fallback_copies: hard ? want.fallback : "0",
+          });
+          expect(answer.elapsed).toBeLessThanOrEqual(3_500);
+        }
+      };
+      const launchesBefore = launches();
+
+      // 100 callers, every row cached: no work, no launch.
+      const cached = await burst("198.51.100");
+      check(cached, false);
+      const times = cached.map((a) => a.elapsed);
+      expect(Object.keys((await scheduler()).jobs)).toEqual([]);
+      metric(
+        `100 simultaneous callers, cached: p50 ${percentile(times, 0.5).toFixed(0)} ms, p95 ${percentile(times, 0.95).toFixed(0)} ms, max ${Math.max(...times).toFixed(0)} ms (bound 3500)`
+      );
+
+      // 100 callers again (new addresses), the five Editions A and B share now a day old: one job each, whoever asks.
+      await seedQuotes(
+        made
+          .slice(10, 15)
+          .map((e) => [e, "0.25", 25 * 3_600_000, iso(3_600_000)])
+      );
+      await resetScheduler(0);
+      const hard = await burst("203.0.113");
+      check(hard, true);
+      const waited = hard.filter(
+        (a) => a.name !== "C" && a.elapsed >= 2_000
+      ).length;
+      const after = await scheduler();
+      const jobs = Object.entries(after.jobs) as Array<[string, any]>;
+      expect(jobs.map(([key]) => key).sort()).toEqual(
+        made
+          .slice(10, 15)
+          .map((e) => `${e.ref}:${e.revision}`)
+          .sort()
+      );
+      for (const [, job] of jobs)
+        expect(job.caller).toMatch(/^anon:[0-9a-f]{32}$/);
+      expect(waited).toBeGreaterThanOrEqual(1);
+      expect(waited).toBeLessThanOrEqual(32);
+      expect(launches() - launchesBefore).toBeLessThanOrEqual(2);
+      const queueAge = Math.max(
+        ...jobs.map(([, job]) => Date.now() - job.admitted_ms)
+      );
+      const hardTimes = hard.map((a) => a.elapsed);
+      metric(
+        `100 simultaneous callers, 5 shared day-old Editions: jobs ${jobs.length} for ${hard.filter((a) => a.name !== "C").length} accesses; waited ${waited} (cap 32); launches ${launches() - launchesBefore} (cap 2); oldest queued job ${queueAge} ms; p50 ${percentile(hardTimes, 0.5).toFixed(0)} ms, p95 ${percentile(hardTimes, 0.95).toFixed(0)} ms, max ${Math.max(...hardTimes).toFixed(0)} ms; stats ${JSON.stringify(after.stats)}`
+      );
       expect(wakeups).toEqual(baseline);
     }
   );
