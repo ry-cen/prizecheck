@@ -194,6 +194,8 @@ from .metadata_reviews import router as metadata_reviews_router  # noqa: E402
 app.include_router(metadata_reviews_router)
 from .attribute_corrections import router as attribute_corrections_router  # noqa: E402
 app.include_router(attribute_corrections_router)
+from .reprint_group_reviews import router as reprint_group_reviews_router  # noqa: E402
+app.include_router(reprint_group_reviews_router)
 
 from .publications import router as publications_router  # noqa: E402
 app.include_router(publications_router)

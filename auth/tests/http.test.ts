@@ -478,6 +478,20 @@ assert store.compare_and_swap({k: rows[k].version for k in keys}, {
           metadataTarget: "rule:live_derivation:1",
           action: "correct_attributes",
         },
+        // Reprint Group reviews and identity merges name a Card Identity, and a Card Identity takes nothing else.
+        {
+          metadataTarget: `card_identity:${ids.identity}`,
+          action: "resolve_metadata",
+        },
+        {
+          metadataTarget: `card_identity:${ids.identity}`,
+          action: "correct_attributes",
+        },
+        {
+          metadataTarget: `printing:${ids.printing}`,
+          action: "review_reprint_groups",
+        },
+        { metadataTarget: target, action: "merge_card_identities" },
         { metadataTarget: target, action: "resolve_catalog" },
         {
           metadataTarget: target,
@@ -513,9 +527,19 @@ assert store.compare_and_swap({k: rows[k].version for k in keys}, {
             })
           ).status
         ).toBe(404);
+      expect(
+        (
+          await approval({
+            metadataTarget: `card_identity:${randomUUID()}`,
+            action: "review_reprint_groups",
+          })
+        ).status
+      ).toBe(404);
       expect(await count()).toBe(before);
 
       for (const [metadataTarget, action] of [
+        [`card_identity:${ids.identity}`, "review_reprint_groups"],
+        [`card_identity:${ids.identity}`, "merge_card_identities"],
         [`printing:${ids.printing}`, "correct_attributes"],
         [`printing:${ids.printing}`, "resolve_metadata"],
         ["rule:live_derivation:1", "activate_rule"],

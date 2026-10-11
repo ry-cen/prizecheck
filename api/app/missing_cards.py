@@ -255,8 +255,10 @@ def decide_report(report_id: UUID, payload: DecisionInput, user_id: str = Depend
             conn.execute("SELECT catalog_begin_correction()")
             if report["kind"] == "printing":
                 key = card_identity_key(name)  # Card Identity folds apostrophes and ignores a trailing subtitle.
+                # A Card Identity merged by review keeps its key; the new Printing joins the survivor.
                 identity = conn.execute("""INSERT INTO catalog_identity(identity_key,display_name) VALUES (%s,%s)
-                  ON CONFLICT(identity_key) DO UPDATE SET identity_key=EXCLUDED.identity_key RETURNING id""", (key, key)).fetchone()
+                  ON CONFLICT(identity_key) DO UPDATE SET identity_key=EXCLUDED.identity_key
+                  RETURNING coalesce(merged_into,id) AS id""", (key, key)).fetchone()
                 printing_id = conn.execute("""INSERT INTO catalog_printing(source,identity_id)
                   VALUES ('manual',%s) RETURNING id""", (identity["id"],)).fetchone()["id"]
                 conn.execute("""INSERT INTO catalog_generation_printing

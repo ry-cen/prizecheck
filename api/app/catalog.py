@@ -421,6 +421,12 @@ def claim_run(conn, run_id: UUID) -> UUID | None:
     return run_id
 
 
+# The Card Identity of a new Printing. A Card Identity merged by review keeps its key, so a new Printing with that key
+# joins the surviving identity (migration 033).
+IDENTITY_UPSERT = """INSERT INTO catalog_identity(identity_key,display_name) VALUES (%s,%s)
+  ON CONFLICT(identity_key) DO UPDATE SET identity_key=EXCLUDED.identity_key RETURNING coalesce(merged_into,id) AS id"""
+
+
 def rederive_card_attributes(conn) -> int:
     """Re-derive every Printing's card attributes, and the Reprint Groups of the active catalog generation, from their
     stored source records, fetching nothing. Both happen in one transaction, so the attribute revision advances at most
@@ -587,9 +593,8 @@ def execute_run(conn, run_id: UUID, source=None, before_promotion=None):
                 if item["ambiguous"]:
                     queue_review('variant_ambiguity', 'Variant flags require review', candidate,
                                  existing["printing_id"] if existing else None)
-                identity_id = existing["identity_id"] if existing else conn.execute("""INSERT INTO catalog_identity(identity_key,display_name)
-                  VALUES (%s,%s) ON CONFLICT(identity_key) DO UPDATE SET identity_key=EXCLUDED.identity_key RETURNING id""",
-                  (item["identity_key"], item["identity_key"])).fetchone()["id"]
+                identity_id = existing["identity_id"] if existing else conn.execute(
+                  IDENTITY_UPSERT, (item["identity_key"], item["identity_key"])).fetchone()["id"]
                 printing_id = existing["printing_id"] if existing else get_or_insert(conn,
                   "SELECT id FROM catalog_printing WHERE source_id=%s", (source_id,),
                   """INSERT INTO catalog_printing(source,source_id,identity_id) VALUES ('tcgdex',%s,%s)
