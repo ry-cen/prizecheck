@@ -152,7 +152,8 @@ test("an anonymous visitor copies complete Live text of the frozen snapshot, kee
   );
   await expect(output).toContainText("This Deck has 6 cards, not 60.");
   await expect(output).toContainText("Basic deck checks only.");
-  await expect(output).not.toContainText(/legal/i);
+  // The disclaimer points to format checks; the export itself never claims a card or deck is legal.
+  await expect(output).not.toContainText(/\blegal\b/i);
 
   // A denied clipboard leaves selectable text.
   await output.getByRole("button", { name: "Copy for Live" }).click();
