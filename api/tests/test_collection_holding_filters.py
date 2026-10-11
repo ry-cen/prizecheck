@@ -1,10 +1,12 @@
 """Search, filters and sort on the workspace Holding listing, and the owned-set list (ticket #104)."""
+import itertools
 import json
 import os
 from urllib.parse import urlencode
 from uuid import uuid4
 
 import psycopg
+import pytest
 
 from test_collection_holdings import PAGE, location
 from test_holdings import add, call, fixture
@@ -193,6 +195,74 @@ def test_sorted_and_filtered_pages_walk_every_holding_once_and_bind_cursors_to_t
     assert listing(other, cursor=second, sort='quantity-desc', category='Pokemon').status_code == 400
 
 
+@pytest.mark.slow(reason='capacity: seeds over 500 Holdings and walks all six sorts page by page')
+def test_every_sort_walks_a_realistic_collection_in_reference_order():
+    owner, _, _, _, _, generation = fixture()
+    sets = (('base', 'Base Set'), ('jungle', 'Jungle'), ('promo', 'Promo'))
+    # Numbers collide on their leading digits (1, 01, 001, 10, 100) and one is not numeric.
+    numbers = ('1', '01', '10', '001', '100', 'SWSH001', '2', '20')
+    info, held = {}, {}
+    with psycopg.connect(os.environ['DATABASE_URL']) as conn:
+        leaves = {name: location(conn, owner, name) for name in ('alpha', 'beta', 'gamma')}
+        for index in range(270):
+            set_id, set_name = sets[index % 3]
+            number = numbers[(index // 3 + index) % len(numbers)]
+            name = f'Card {index % 50:02d}'
+            edition = card(conn, generation, name, set_id, set_name, number, 'Pokemon', ['Fire'])
+            info[edition] = {'name': name.lower(), 'set_key': set_name.lower(), 'set_id': set_id, 'number': number}
+            places = [('alpha', 1 + index % 4)]
+            if index % 3:
+                places.append(('beta', 1 + index % 5))
+            if index % 3 == 2:
+                places.append(('gamma', 2))
+            held[edition] = places
+            for place, quantity in places:
+                conn.execute('INSERT INTO holding(owner_id,location_id,edition_id,quantity,version) VALUES (%s,%s,%s,%s,1)',
+                             (owner, leaves[place], edition, quantity))
+    expected_pairs = {(edition, leaves[place]) for edition, places in held.items() for place, _ in places}
+    assert len(expected_pairs) > PAGE
+    total = {edition: sum(quantity for _, quantity in places) for edition, places in held.items()}
+    order = ('alpha', 'beta', 'gamma')
+
+    def number_key(number):
+        digits = ''.join(itertools.takewhile(str.isdigit, number))
+        return (not digits, int(digits or 0), number.lower())
+
+    def reference(sort):
+        key, direction = sort.split('-')
+        down = direction == 'desc'
+        if key == 'name':
+            ranked = sorted(info, key=lambda e: (info[e]['name'], e), reverse=down)
+        elif key == 'set':
+            ranked = sorted(info, key=lambda e: (info[e]['set_key'], info[e]['set_id'], *number_key(info[e]['number']), e),
+                            reverse=down)
+        else:  # Ties read A-Z in both directions.
+            ranked = sorted(info, key=lambda e: (-total[e] if down else total[e], info[e]['name'], e))
+        return [(edition, leaves[place]) for edition in ranked
+                for place in sorted((place for place, _ in held[edition]), key=order.index)]
+
+    for sort in ('name-asc', 'name-desc', 'set-asc', 'set-desc', 'quantity-asc', 'quantity-desc'):
+        walked, cursor, pages = [], None, 0
+        while True:
+            response = listing(owner, sort=sort, cursor=cursor)
+            assert response.status_code == 200, (sort, response.text)
+            body = response.json()
+            pages += 1
+            walked += [(row['edition_id'], row['location_id']) for row in body['holdings']]
+            cursor = body['next_cursor']
+            if not cursor:
+                break
+        assert pages >= 2, sort
+        assert len(walked) == len(set(walked)), sort  # no duplicate (edition, location) pair
+        assert set(walked) == expected_pairs, sort  # every Holding, once
+        seen = []
+        for edition_id, _ in walked:
+            if not seen or seen[-1] != edition_id:
+                seen.append(edition_id)
+        assert len(seen) == len(set(seen)), sort  # each Edition's Holdings are adjacent
+        assert walked == reference(sort), sort  # Location order within an Edition and the whole order
+
+
 def test_owned_sets_list_each_set_once_by_name_for_the_view():
     owner, other, alpha, beta, _ = seed()
     sets = call('GET', '/api/collection/sets', owner)
@@ -206,5 +276,9 @@ def test_owned_sets_list_each_set_once_by_name_for_the_view():
     for missing in (call('GET', f'/api/collection/sets?location_id={alpha}', other),
                     call('GET', f'/api/collection/sets?location_id={uuid4()}', owner)):
         assert missing.status_code == 404 and missing.json()['detail']['code'] == 'LOCATION_NOT_FOUND'
+    with psycopg.connect(os.environ['DATABASE_URL']) as conn:
+        shelf = location(conn, owner, 'shelf', 'organization')
+    folder = call('GET', f'/api/collection/sets?location_id={shelf}', owner)
+    assert folder.status_code == 409 and folder.json()['detail']['code'] == 'NOT_STORAGE_LEAF', folder.text
     newcomer = call('GET', '/api/collection/sets', str(uuid4())).json()
     assert newcomer == {'sets': [], 'owner_revision': 1}
