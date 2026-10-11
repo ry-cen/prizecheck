@@ -106,7 +106,8 @@ export function Workspace({ onOpenLocations, onSignOut }: Props) {
   // A link from the Decks page (/workspace?location=<id>) opens that Storage Leaf or Deck once the tree
   // has loaded, with its folders expanded. The address is cleaned at once, so a reload opens All owned.
   // A missing id or a folder id leaves the workspace at All owned.
-  const linked = useRef<string | null>(readLinkedLocation());
+  const [initialLink] = useState(readLinkedLocation);
+  const linked = useRef<string | null>(initialLink);
   useEffect(() => {
     clearLinkedLocation();
   }, []);
