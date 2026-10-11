@@ -108,7 +108,7 @@ export function Workspace({
   const filtersOpener = useRef<HTMLButtonElement>(null);
   const closeFiltersDrawer = useCallback(() => setFiltersDrawerOpen(false), []);
   const [manageOpen, setManageOpen] = useState(false);
-  const [addOpen, setAddOpen] = useState(false);
+  const [addFor, setAddFor] = useState<string | null>(null);
   const dockRef = useRef<HTMLDivElement>(null);
   const ownedTotals = useRef(new Map<string, number>()).current;
   const drawerOpener = useRef<HTMLButtonElement>(null);
@@ -451,7 +451,7 @@ export function Workspace({
                 <button
                   type="button"
                   className="ws-add-cards-button"
-                  onClick={() => setAddOpen(true)}
+                  onClick={() => current && setAddFor(current.id)}
                 >
                   Add cards
                 </button>
@@ -644,7 +644,7 @@ export function Workspace({
           onTreeChanged={loadTree}
         />
       )}
-      {addOpen && current && current.kind !== "organization" && (
+      {current && addFor === current.id && current.kind !== "organization" && (
         <AddCardsDialog
           key={current.id}
           locationId={current.id}
@@ -654,7 +654,7 @@ export function Workspace({
             gallery.reload();
             await loadTree();
           }}
-          onClose={() => setAddOpen(false)}
+          onClose={() => setAddFor(null)}
         />
       )}
       {manageOpen && (

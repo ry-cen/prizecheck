@@ -1,3 +1,4 @@
+import AxeBuilder from "@axe-core/playwright";
 import { test, expect } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 import { chmodSync, readFileSync } from "node:fs";
@@ -502,6 +503,21 @@ print(json.dumps({'edition':rows[keys[0]].value,'printing':rows[keys[1]].value})
     const correction = page.getByRole("region", {
       name: "Reviewed Edition corrections",
     });
+    await expect(correction).toBeVisible();
+    const axe = await new AxeBuilder({ page })
+      .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
+      .analyze();
+    expect(
+      axe.violations.map((v) => v.id),
+      "WCAG violations with the corrections notice shown"
+    ).toEqual([]);
+    const order = await new AxeBuilder({ page })
+      .withRules(["heading-order"])
+      .analyze();
+    expect(
+      order.violations.map((v) => v.id),
+      "heading order with the corrections notice shown"
+    ).toEqual([]);
     await expect(correction).toContainText(
       "Your 4 copies still use the original Edition"
     );

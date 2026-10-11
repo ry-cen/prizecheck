@@ -272,3 +272,117 @@ promote({'card-1': 'Pikachu', **{f'card-{i}': f'Pikachu {i:02}' for i in range(2
     await pool.end();
   }
 });
+
+test("Deck Cards panel refreshes a stale selection, then Removes and Undoes", async ({
+  page,
+}) => {
+  execFileSync(
+    ".venv/bin/python",
+    [
+      "-c",
+      `from test_catalog_search import promote
+promote({'card-1': 'Pikachu'})`,
+    ],
+    { env: { ...process.env, PYTHONPATH: "api:api/tests" } }
+  );
+  const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+  try {
+    await pool.query("DELETE FROM auth_send_event");
+    const mail = process.env.MAIL_FILE || "/tmp/tcg-ticket01-mail";
+    const before = messages(mail).length;
+    await page.goto(
+      `${process.env.TEST_ORIGIN || "http://localhost:5173"}/locations`
+    );
+    await page
+      .getByLabel("Email")
+      .fill(process.env.OWNER_EMAIL || "owner@example.test");
+    await page.getByRole("button", { name: "Send code" }).click();
+    await expect.poll(() => messages(mail).length).toBeGreaterThan(before);
+    await page
+      .getByLabel("Six-digit code")
+      .fill(JSON.parse(messages(mail).at(-1)!).otp);
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await page.getByRole("button", { name: "Decks", exact: true }).click();
+    const name = `Deck ${randomUUID().slice(0, 8)}`;
+    await page.getByLabel("Deck name").fill(name);
+    await page
+      .getByRole("button", { name: "Create Deck", exact: true })
+      .click();
+    const holdings = page.getByRole("region", { name: `Cards in ${name}` });
+    await holdings
+      .getByRole("button", { name: "Add cards", exact: true })
+      .click();
+    await holdings.getByLabel("Search English card name").fill("Pika");
+    await holdings.getByRole("button", { name: "Search", exact: true }).click();
+    await holdings
+      .getByLabel("Card Edition")
+      .selectOption({ label: "Pikachu · Fixture Set #1 · finish: normal" });
+    await holdings.getByLabel("Quantity", { exact: true }).fill("3");
+    await holdings
+      .getByRole("button", { name: "Add to Location", exact: true })
+      .click();
+    const selection = holdings.getByRole("region", { name: "Move cards" });
+    const stack = holdings.locator(".holding-stack");
+    await expect(stack).toContainText("×3");
+
+    // Another tab changes the Holding after it is selected, so Move reports it and keeps the selection.
+    await selection
+      .getByRole("button", { name: "Select stack", exact: true })
+      .click();
+    const row = await pool.query(
+      `SELECT l.id AS location_id, h.edition_id FROM location l
+       JOIN holding h ON h.location_id=l.id WHERE l.name=$1 LIMIT 1`,
+      [name]
+    );
+    await pool.query(
+      `WITH changed AS (
+         UPDATE inventory_owner SET revision=revision+1
+         WHERE user_id=(SELECT owner_id FROM location WHERE id=$1) RETURNING revision
+       ) UPDATE holding SET quantity=quantity+1,version=(SELECT revision FROM changed)
+         WHERE location_id=$1 AND edition_id=$2`,
+      [row.rows[0].location_id, row.rows[0].edition_id]
+    );
+    await selection
+      .getByRole("button", { name: "Move selected", exact: true })
+      .click();
+    await page
+      .getByRole("dialog", { name: "Choose Move destination" })
+      .getByRole("button", { name: "Unsorted", exact: true })
+      .click();
+    await expect(selection.getByRole("status")).toContainText(
+      "selection is saved"
+    );
+    await selection
+      .getByRole("button", { name: "Refresh selection", exact: true })
+      .click();
+    await expect(selection.getByRole("status")).toContainText(
+      "Editions refreshed"
+    );
+    await expect(stack).toContainText("×4");
+
+    // Removal asks first; Cancel leaves the count alone, Confirm removes and Undo restores.
+    await selection
+      .getByRole("button", { name: "Remove selected", exact: true })
+      .click();
+    const confirmation = page.getByRole("dialog", {
+      name: "Confirm Inventory Removal",
+    });
+    await confirmation.getByRole("button", { name: "Cancel removal" }).click();
+    await expect(stack).toContainText("×4");
+    await selection
+      .getByRole("button", { name: "Remove selected", exact: true })
+      .click();
+    await confirmation.getByRole("button", { name: "Confirm removal" }).click();
+    await expect(selection.getByRole("status")).toContainText(
+      "Removed 4 copies"
+    );
+    await expect(stack).toHaveCount(0);
+    await selection
+      .getByRole("button", { name: "Undo", exact: true })
+      .first()
+      .click();
+    await expect(stack).toContainText("×4");
+  } finally {
+    await pool.end();
+  }
+});

@@ -15,7 +15,7 @@ The runner checks the current working-tree source, including staged changes. Git
 
 ```sh
 npm run verify -- --suite api -- api/tests/test_prices.py -k stale
-npm run verify -- --suite browser -- web/tests/moves.spec.ts
+npm run verify -- --suite browser -- web/tests/workspace-actions.spec.ts
 ```
 
 API selectors are pytest node ids, paths and options such as `-k`, `-x` or `--lf`; the runner sets `-m`, `-n`, `-p` and `--dist` itself. Browser selectors are spec files or `file:line` locations. `--fast` combines with `--suite api`, `--suite auth` and `--suite browser`. A bare `pytest <nodeid>` does not work for most API tests: they need the gate's migrated database and environment. `npm run test:fast` is unchanged: it is the guardrails-only check the pre-commit hook runs, not the fast tier.
