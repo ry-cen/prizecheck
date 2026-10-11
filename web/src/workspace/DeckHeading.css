@@ -27,7 +27,7 @@
   font-size: var(--font-size-sm);
   font-variant-numeric: var(--numeric);
 }
-.ws-root .ws-deck-heading .deck-cost h4 {
+.ws-root .ws-deck-heading .deck-cost :is(h2, h4) {
   margin: 0;
   font-size: var(--font-size-2xs);
   font-weight: 600;

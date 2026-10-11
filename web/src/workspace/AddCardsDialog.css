@@ -1,0 +1,56 @@
+/* Add cards dialog (ticket 114). The shell is .ws-create-dialog from CreateLocationDialog.css.
+   Every colour, space and radius comes from web/src/tokens.css. No colour literals in this file. */
+.ws-root .ws-add-cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-6);
+}
+.ws-root .ws-add-cards h2 {
+  font-size: var(--font-size-lg);
+  font-weight: 550;
+  overflow-wrap: anywhere;
+}
+.ws-root .ws-add-cards form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3);
+}
+.ws-root .ws-add-cards label {
+  display: flex;
+  flex: 1 1 200px;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+.ws-root .ws-add-cards input,
+.ws-root .ws-add-cards select {
+  width: 100%;
+  height: var(--control-height);
+  color: var(--color-text);
+  font-size: var(--font-size-md);
+}
+.ws-root .ws-add-cards button {
+  height: var(--control-height);
+}
+/* Always in the layout, never display:none, so screen readers announce each message. */
+.ws-root .ws-add-status {
+  min-height: 1lh;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+.ws-add-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+@media (max-width: 760px) {
+  .ws-root .ws-add-cards input,
+  .ws-root .ws-add-cards select,
+  .ws-root .ws-add-cards button {
+    height: auto;
+    min-height: var(--target-touch);
+  }
+}

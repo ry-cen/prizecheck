@@ -52,7 +52,12 @@ test("mobile collector can search, Add, Move, Undo, check and publish a physical
       .getByLabel("Six-digit code")
       .fill(JSON.parse(messages(mail).at(-1)!).otp);
     await page.getByRole("button", { name: "Sign in" }).tap();
-    await page.getByRole("button", { name: "Decks", exact: true }).tap();
+    await page.getByRole("button", { name: "Open locations" }).tap();
+    await page
+      .getByRole("dialog", { name: "Locations", exact: true })
+      .getByRole("navigation", { name: "Main views" })
+      .getByRole("button", { name: "Decks", exact: true })
+      .tap();
     const name = "Mobile private " + randomUUID().slice(0, 8);
     await page.getByLabel("Deck name").fill(name);
     await page.getByRole("button", { name: "Create Deck", exact: true }).tap();
@@ -84,6 +89,7 @@ test("mobile collector can search, Add, Move, Undo, check and publish a physical
       .getByRole("button", { name: "Move selected", exact: true })
       .tap();
     await page
+    // Destinations are labelled by full path, so exact "Unsorted" is the top-level leaf, never "Box / Unsorted".
       .getByRole("dialog", { name: "Choose Move destination" })
       .getByRole("button", { name: "Unsorted", exact: true })
       .tap();

@@ -444,3 +444,65 @@
   background: transparent;
   opacity: 1;
 }
+
+/* Ticket 114: skip links, hidden above the viewport until focused. */
+.ws-root .ws-skip-link {
+  position: fixed;
+  top: var(--space-2);
+  left: var(--space-2);
+  z-index: var(--layer-modal);
+  min-height: var(--target-touch);
+  padding: var(--space-2) var(--space-3);
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--color-control-outline);
+  border-radius: var(--radius-control);
+  background: var(--color-surface-raised);
+  color: var(--color-text);
+  font-weight: 600;
+  text-decoration: none;
+  transform: translateY(calc(-100% - var(--space-4)));
+}
+.ws-root .ws-skip-link:focus {
+  transform: none;
+}
+/* Ticket 114: Main views in the header never wrap or squeeze at the narrowest desktop width. */
+.ws-root .ws-app-nav button {
+  white-space: nowrap;
+}
+@media (max-width: 1100px) {
+  .ws-app-nav {
+    gap: var(--space-1);
+  }
+  .ws-root .ws-app-nav button {
+    padding: var(--space-2);
+  }
+}
+/* Ticket 114: Add cards in the heading. */
+.ws-root .ws-add-cards-button {
+  margin-left: auto;
+  align-self: center;
+}
+.ws-root .ws-add-cards-button + .ws-select-toggle {
+  margin-left: 0;
+}
+@media (max-width: 760px) {
+  .ws-heading {
+    flex-wrap: wrap;
+    row-gap: var(--space-2);
+  }
+  .ws-root .ws-add-cards-button {
+    min-height: var(--target-touch);
+  }
+}
+/* Ticket 114: the signed-in boot screen. */
+.ws-root .ws-boot {
+  gap: var(--space-2);
+}
+.ws-root .ws-boot h1 {
+  font-size: var(--font-size-xl);
+  font-weight: 550;
+}
+.ws-root .ws-boot p {
+  color: var(--color-text-muted);
+}

@@ -132,23 +132,38 @@ promote({'card-1':'Correction Pikachu'})`,
       ).otp as string;
     await page.getByLabel("Six-digit code").fill(mail());
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
-    await page.getByRole("button", { name: "New top-level Location" }).click();
-    await page.getByLabel("Name", { exact: true }).fill(location);
-    await page.getByRole("button", { name: "Save", exact: true }).click();
-    await page
-      .getByRole("navigation", { name: "Location tree" })
-      .getByRole("button", { name: location, exact: true })
-      .click();
-    const panel = page.getByRole("region", { name: `Cards in ${location}` });
-    await panel.getByRole("button", { name: "Add cards" }).click();
-    await panel.getByLabel("Search English card name").fill("Correction");
-    await panel.getByRole("button", { name: "Search", exact: true }).click();
-    await panel.getByLabel("Card Edition").selectOption({
+    const cards = page.getByRole("region", { name: "Cards" });
+    const openLocation = async () => {
+      await page
+        .getByRole("complementary", { name: "Sidebar" })
+        .getByRole("navigation", { name: "Locations" })
+        .getByRole("button", { name: location, exact: true })
+        .click();
+      await expect(
+        page.getByRole("heading", { level: 1, name: location })
+      ).toBeVisible();
+    };
+    await page.getByRole("button", { name: "Add location", exact: true }).click();
+    const create = page.getByRole("dialog", { name: "Add location" });
+    await create.getByLabel("Name", { exact: true }).fill(location);
+    await create.getByRole("button", { name: "Create location" }).click();
+    await expect(
+      page.getByRole("heading", { level: 1, name: location })
+    ).toBeVisible();
+    await page.getByRole("button", { name: "Add cards", exact: true }).click();
+    const add = page.getByRole("dialog", { name: `Add cards to ${location}` });
+    await add.getByLabel("Search English card name").fill("Correction");
+    await add.getByRole("button", { name: "Search", exact: true }).click();
+    await add.getByLabel("Card Edition").selectOption({
       label: "Correction Pikachu · Fixture Set #1 · finish: normal",
     });
-    await panel.getByLabel("Quantity", { exact: true }).fill("4");
-    await panel.getByRole("button", { name: "Add to Location" }).click();
-    await expect(panel.locator(".holding-stack")).toContainText("×4");
+    await add.getByLabel("Quantity", { exact: true }).fill("4");
+    await add.getByRole("button", { name: "Add to Location" }).click();
+    await expect(add.getByRole("status")).toContainText(
+      "This stack now has 4 copies"
+    );
+    await add.getByRole("button", { name: "Close" }).click();
+    await expect(page.getByRole("main")).toContainText("4 copies · 1 edition");
     // Catalog imports are fixture work; observations go through the real gateway.
     const refresh = (amount: string, onlineCode = "FIXTURE") =>
       execFileSync(
@@ -448,15 +463,12 @@ print(json.dumps({'edition':rows[keys[0]].value,'printing':rows[keys[1]].value})
     expect(revoked.status()).toBe(200);
     expect((await page.request.get(publicPath)).status()).toBe(404);
     await page.reload();
-    await page
-      .getByRole("navigation", { name: "Location tree" })
-      .getByRole("button", { name: location, exact: true })
-      .click();
-    await expect(panel.locator(".holding-stack")).toHaveCount(1);
-    await expect(panel.locator(".holding-stack")).toContainText(
-      "Correction Pikachu"
-    );
-    await expect(panel.locator(".holding-stack")).toContainText("×4");
+    await openLocation();
+    await expect(cards.getByRole("button")).toHaveCount(4);
+    await expect(
+      cards.getByRole("button", { name: /^Correction Pikachu,/ })
+    ).toHaveCount(4);
+    await expect(page.getByRole("main")).toContainText("4 copies · 1 edition");
     const editions = (
       await pool.query(
         "SELECT e.id,e.descriptor->>'finish' AS finish,p.id AS printing FROM catalog_edition e JOIN catalog_printing p ON p.id=e.printing_id WHERE p.source_id='card-1'"
@@ -484,10 +496,7 @@ print(json.dumps({'edition':rows[keys[0]].value,'printing':rows[keys[1]].value})
       [original.id]
     );
     await page.reload();
-    await page
-      .getByRole("navigation", { name: "Location tree" })
-      .getByRole("button", { name: location, exact: true })
-      .click();
+    await openLocation();
     const correction = page.getByRole("region", {
       name: "Reviewed Edition corrections",
     });
@@ -504,9 +513,8 @@ print(json.dumps({'edition':rows[keys[0]].value,'printing':rows[keys[1]].value})
     await correction
       .getByRole("button", { name: "Confirm reassignment" })
       .click();
-    await expect(panel.locator(".holding-stack")).toHaveCount(2);
-    await expect(panel.locator(".holding-stack").nth(0)).toContainText("×2");
-    await expect(panel.locator(".holding-stack").nth(1)).toContainText("×2");
+    await expect(page.getByRole("main")).toContainText("4 copies · 2 editions");
+    await expect(cards.getByRole("button")).toHaveCount(4);
     await expect(correction).toContainText(
       "Your 2 copies still use the original Edition"
     );

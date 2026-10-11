@@ -1,4 +1,6 @@
+// Add moved from the Locations view to the workspace in ticket 114.
 import { test, expect } from "@playwright/test";
+import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { Pool } from "pg";
@@ -19,7 +21,7 @@ promote({'card-1': 'Pikachu'})`,
   await pool.query("DELETE FROM auth_send_event");
   try {
     await page.goto(
-      `${process.env.TEST_ORIGIN || "http://localhost:5173"}/locations`
+      `${process.env.TEST_ORIGIN || "http://localhost:5173"}/workspace`
     );
     await page
       .getByLabel("Email")
@@ -34,36 +36,43 @@ promote({'card-1': 'Pikachu'})`,
       .split("\n");
     await page.getByLabel("Six-digit code").fill(JSON.parse(lines.at(-1)!).otp);
     await page.getByRole("button", { name: "Sign in" }).click();
-    await page
-      .getByRole("navigation", { name: "Location tree" })
-      // Top-level row only: specs that ran earlier on this stack can leave nested Locations named "Unsorted".
-      .locator(":scope > ul > li > button", { hasText: /^Unsorted$/ })
-      .click();
-    const panel = page.getByRole("region", { name: "Cards in Unsorted" });
-    await panel.getByRole("button", { name: "Add cards" }).focus();
+    await expect(page.getByRole("heading", { name: "All owned" })).toBeVisible();
+    const leaf = `Keys ${randomUUID().slice(0, 8)}`;
+    await page.getByRole("button", { name: "Add location", exact: true }).focus();
     await page.keyboard.press("Enter");
-    await panel.getByLabel("Search English card name").fill("Pika");
-    await panel.getByRole("button", { name: "Search" }).click();
-    await panel
-      .getByLabel("Card Edition")
-      .selectOption({ label: "Pikachu · Fixture Set #1 · finish: normal" });
-    await panel.getByLabel("Quantity").fill("3");
-    await panel.getByRole("button", { name: "Add to Location" }).click();
-    await expect(panel.getByRole("status")).toContainText(
-      "This stack now has 3 copies"
+    await page.keyboard.type(leaf);
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("heading", { level: 1, name: leaf })).toBeVisible();
+    await page.getByRole("button", { name: "Add cards", exact: true }).focus();
+    await page.keyboard.press("Enter");
+    const dialog = page.getByRole("dialog", { name: `Add cards to ${leaf}` });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByLabel("Search English card name")).toBeFocused();
+    await page.keyboard.type("Pika");
+    await page.keyboard.press("Enter");
+    const edition = dialog.getByLabel("Card Edition");
+    await edition.selectOption({ label: "Pikachu · Fixture Set #1 · finish: normal" });
+    await edition.focus();
+    await page.keyboard.press("Tab");
+    await expect(dialog.getByLabel("Quantity")).toBeFocused();
+    await dialog.getByLabel("Quantity").fill("3");
+    await page.keyboard.press("Enter");
+    await expect(dialog.getByRole("status")).toHaveText(
+      `Added. This stack now has 3 copies in ${leaf}.`
     );
-    await expect(panel.locator(".holding-stack")).toHaveCount(1);
-    await expect(panel.locator(".holding-stack")).toContainText("×3");
-    await panel.getByRole("button", { name: "Add cards" }).click();
-    await panel.getByLabel("Search English card name").fill("Pika");
-    await panel.getByRole("button", { name: "Search" }).click();
-    await panel
-      .getByLabel("Card Edition")
-      .selectOption({ label: "Pikachu · Fixture Set #1 · finish: normal" });
-    await panel.getByLabel("Quantity").fill("2");
-    await panel.getByRole("button", { name: "Add to Location" }).click();
-    await expect(panel.locator(".holding-stack")).toHaveCount(1);
-    await expect(panel.locator(".holding-stack")).toContainText("×5");
+    await edition.selectOption({ label: "Pikachu · Fixture Set #1 · finish: normal" });
+    await dialog.getByLabel("Quantity").fill("2");
+    await page.keyboard.press("Enter");
+    await expect(dialog.getByRole("status")).toHaveText(
+      `Added. This stack now has 5 copies in ${leaf}.`
+    );
+    await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Add cards", exact: true })).toBeFocused();
+    await expect(page.getByRole("main")).toContainText("5 copies · 1 edition");
+    await expect(
+      page.getByRole("region", { name: "Cards" }).getByRole("button")
+    ).toHaveCount(5);
   } finally {
     await pool.end();
   }

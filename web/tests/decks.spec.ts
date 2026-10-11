@@ -75,19 +75,27 @@ promote({'card-1': 'Pikachu', **{f'card-{i}': f'Pikachu {i:02}' for i in range(2
     await move
       .getByRole("button", { name: "Move selected", exact: true })
       .click();
+    // Destinations are labelled by full path, so exact "Unsorted" is the top-level leaf, never "Box / Unsorted".
     await page
       .getByRole("dialog", { name: "Choose Move destination" })
       .getByRole("button", { name: "Unsorted", exact: true })
       .click();
     await expect(checks).toContainText("59 cards · 1 cards short of 60");
-    await page.getByRole("button", { name: "Locations", exact: true }).click();
     await page
-      .getByRole("navigation", { name: "Location tree" })
+      .getByRole("link", { name: `Open in workspace: ${name}` })
+      .click();
+    await expect(page).toHaveURL(/\/workspace$/);
+    await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
+    await expect(page.getByRole("main")).toContainText("59 copies · 1 edition");
+    // "Open in workspace" is a full navigation, so go back through Main views rather than goBack().
+    await page.getByRole("button", { name: "Decks", exact: true }).click();
+    await page
+      .getByRole("navigation", { name: "Deck index" })
       .getByRole("button", { name, exact: true })
       .click();
     await expect(
-      page.getByRole("region", { name: `Cards in ${name}` })
-    ).toContainText("×59");
+      page.getByRole("region", { name: `Checks for ${name}` })
+    ).toBeVisible();
     // Fixture catalog setup may use SQL; all inventory behavior uses the real gateway.
     const gateway = (path: string) => new URL(path, page.url()).toString();
     const deckResponse = await page.request.get(gateway("/api/decks"));

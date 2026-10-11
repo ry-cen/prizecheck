@@ -149,9 +149,10 @@ export function DeckHeading({ deckId, deckName, inventoryRevision }: Props) {
           ownerRevision={detail.owner_revision}
           totalCopies={detail.checks.total}
           onNewerRevision={() => void load()}
+          headingLevel={2}
         />
       ) : (
-        !failed && <CostSection settled={null} totalCopies="0" />
+        !failed && <CostSection settled={null} totalCopies="0" headingLevel={2} />
       )}
       <div className="ws-deck-export">
         <button

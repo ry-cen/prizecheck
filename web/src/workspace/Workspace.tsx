@@ -6,6 +6,8 @@ import React, {
   useState,
 } from "react";
 import { getLocationTree, type TreeNode } from "../location_generated";
+import { AddCardsDialog } from "./AddCardsDialog";
+import { CorrectionsNotice } from "./CorrectionsNotice";
 import { CreateLocationDialog } from "./CreateLocationDialog";
 import { DeckHeading } from "./DeckHeading";
 import { Gallery } from "./Gallery";
@@ -36,7 +38,7 @@ import {
 import { ManageLocations, ManageLocationsButton } from "./ManageLocations";
 import { indexLocations } from "./locationTree";
 import { MOBILE_QUERY, useMediaQuery } from "./media";
-import { SelectionBar } from "./SelectionBar";
+import { focusWorkspaceHeading, SelectionBar } from "./SelectionBar";
 import { selectedGroups, selectionScope } from "./selectionModel";
 import { StaleBanner } from "./StaleBanner";
 import { DragBadge, useTileDrag } from "./tileDrag";
@@ -53,16 +55,32 @@ import "./Workspace.css";
 const FOCUSABLE =
   'button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex="-1"])';
 
+/** The other signed-in pages, opened from Main views. */
+export type AppPage = "collection" | "decks" | "catalog" | "reports" | "owner";
+const PAGES: { view: AppPage; label: string }[] = [
+  { view: "collection", label: "Collection" },
+  { view: "decks", label: "Decks" },
+  { view: "catalog", label: "Catalog" },
+  { view: "reports", label: "Missing cards" },
+];
+
 type Props = {
   /** The signed-in user; their gallery preferences are stored under it in this browser. */
   userId: string;
-  /** Opens the existing Locations view. */
-  onOpenLocations: () => void;
+  /** Opens another signed-in page. */
+  onNavigate: (page: AppPage) => void;
+  /** The owner sees Owner controls in Main views. */
+  ownerControls: boolean;
   onSignOut: () => void;
 };
 
 /** The collector workspace: header, Location sidebar (desktop) or drawer (mobile), and the gallery area. */
-export function Workspace({ userId, onOpenLocations, onSignOut }: Props) {
+export function Workspace({
+  userId,
+  onNavigate,
+  ownerControls,
+  onSignOut,
+}: Props) {
   const [nodes, setNodes] = useState<TreeNode[]>([]);
   const [ownerRevision, setOwnerRevision] = useState<number | null>(null);
   const [treeState, setTreeState] = useState<"loading" | "ready" | "error">(
@@ -90,6 +108,8 @@ export function Workspace({ userId, onOpenLocations, onSignOut }: Props) {
   const filtersOpener = useRef<HTMLButtonElement>(null);
   const closeFiltersDrawer = useCallback(() => setFiltersDrawerOpen(false), []);
   const [manageOpen, setManageOpen] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
+  const dockRef = useRef<HTMLDivElement>(null);
   const ownedTotals = useRef(new Map<string, number>()).current;
   const drawerOpener = useRef<HTMLButtonElement>(null);
   const drawerRef = useRef<HTMLDivElement>(null);
@@ -327,12 +347,51 @@ export function Workspace({ userId, onOpenLocations, onSignOut }: Props) {
       />
     );
 
+  const pages = ownerControls
+    ? [...PAGES, { view: "owner" as const, label: "Owner controls" }]
+    : PAGES;
+  const mainViews = (className: string) => (
+    <nav aria-label="Main views" className={className}>
+      {pages.map((page) => (
+        <button
+          key={page.view}
+          type="button"
+          onClick={() => onNavigate(page.view)}
+        >
+          {page.label}
+        </button>
+      ))}
+      <button type="button" onClick={onSignOut}>
+        Sign out
+      </button>
+    </nav>
+  );
+  // The skip link past the cards: focus the dock's first visible control (the toast's Undo, or the
+  // selection bar). #107 sends focus to the heading after a Move, which is otherwise a Tab through every tile away.
+  function focusDock() {
+    const target = Array.from(
+      dockRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? []
+    ).find((element) => element.getClientRects().length > 0);
+    target?.focus();
+  }
+  const dockHasControls = actions.toast !== null || selection.summary.copies > 0;
+
   return (
     <div className="ws-root">
       <div
         className="ws-surface"
         inert={drawerOpen || filtersDrawerOpen || selection.details !== null}
       >
+        <a
+          className="ws-skip-link"
+          href="#ws-heading"
+          onClick={(event) => {
+            event.preventDefault();
+            focusWorkspaceHeading();
+          }}
+        >
+          Skip to main content
+        </a>
         <header className="ws-header">
           <button
             ref={drawerOpener}
@@ -358,14 +417,7 @@ export function Workspace({ userId, onOpenLocations, onSignOut }: Props) {
             open={filtersDrawerOpen}
             onOpen={() => setFiltersDrawerOpen(true)}
           />
-          <nav aria-label="App" className="ws-app-nav ws-desktop-only">
-            <button type="button" onClick={onOpenLocations}>
-              Locations view
-            </button>
-            <button type="button" onClick={onSignOut}>
-              Sign out
-            </button>
-          </nav>
+          {mainViews("ws-app-nav ws-desktop-only")}
         </header>
         <div className="ws-layout">
           <aside className="ws-sidebar ws-desktop-only" aria-label="Sidebar">
@@ -393,6 +445,15 @@ export function Workspace({ userId, onOpenLocations, onSignOut }: Props) {
                   {plural(gallery.totals.copies, "copy", "copies")} ·{" "}
                   {plural(gallery.totals.editions, "edition", "editions")}
                 </p>
+              )}
+              {current && current.kind !== "organization" && (
+                <button
+                  type="button"
+                  className="ws-add-cards-button"
+                  onClick={() => setAddOpen(true)}
+                >
+                  Add cards
+                </button>
               )}
               <button
                 type="button"
@@ -448,6 +509,26 @@ export function Workspace({ userId, onOpenLocations, onSignOut }: Props) {
               onReload={staleness.reload}
               onDismissNote={staleness.dismissNote}
             />
+            <CorrectionsNotice
+              holdings={gallery.holdings}
+              ownerRevision={gallery.ownerRevision}
+              onChanged={async () => {
+                gallery.reload();
+                await loadTree();
+              }}
+            />
+            {dockHasControls && (
+              <a
+                className="ws-skip-link"
+                href="#ws-dock"
+                onClick={(event) => {
+                  event.preventDefault();
+                  focusDock();
+                }}
+              >
+                Skip to selection actions and Undo
+              </a>
+            )}
             <div className="ws-gallery-layout">
               <Gallery
                 data={gallery}
@@ -479,7 +560,7 @@ export function Workspace({ userId, onOpenLocations, onSignOut }: Props) {
           </main>
         </div>
         {/* The bottom dock: the success and Undo toast sits above the selection bar. */}
-        <div className="ws-dock">
+        <div className="ws-dock" id="ws-dock" ref={dockRef}>
           <UndoToast
             toast={actions.toast}
             busy={actions.busy}
@@ -540,14 +621,7 @@ export function Workspace({ userId, onOpenLocations, onSignOut }: Props) {
               <ManageLocationsButton onClick={openManage} />
             </div>
             {tree("ws-drawer")}
-            <nav aria-label="App" className="ws-drawer-app-nav">
-              <button type="button" onClick={onOpenLocations}>
-                Locations view
-              </button>
-              <button type="button" onClick={onSignOut}>
-                Sign out
-              </button>
-            </nav>
+            {mainViews("ws-drawer-app-nav")}
           </div>
         </div>
       )}
@@ -567,6 +641,19 @@ export function Workspace({ userId, onOpenLocations, onSignOut }: Props) {
           onCreated={created}
           onCancel={() => setCreateFor(undefined)}
           onTreeChanged={loadTree}
+        />
+      )}
+      {addOpen && current && current.kind !== "organization" && (
+        <AddCardsDialog
+          key={current.id}
+          locationId={current.id}
+          locationName={current.name}
+          path={index.path(current.id)}
+          onAdded={async () => {
+            gallery.reload();
+            await loadTree();
+          }}
+          onClose={() => setAddOpen(false)}
         />
       )}
       {manageOpen && (

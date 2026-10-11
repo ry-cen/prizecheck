@@ -63,40 +63,39 @@ const owner = async () =>
   (await pool.query('SELECT id FROM "user" WHERE email=$1', [OWNER_EMAIL]))
     .rows[0].id as string;
 
-async function hold(editions: string[]) {
+/** Stocks a new Deck with one copy of each Edition, through the Decks page's Holdings panel (the Locations view
+ * that showed leaf rows is gone, ticket 114). The "0 " prefix keeps it on the first page of 30 Decks by name. */
+async function hold(page: Page, editions: string[]): Promise<string> {
+  const name = `0 Held ${randomUUID().slice(0, 8)}`;
+  const created = await page.request.post(`${ORIGIN}/api/decks`, {
+    headers: { origin: ORIGIN },
+    data: { name, idempotency_key: randomUUID() },
+  });
+  expect(created.status()).toBe(201);
+  const deck = (await created.json()).location.id as string;
   const user = await owner();
-  // The top-level Unsorted leaf that openRootUnsorted() opens; there is one per owner (one_unsorted_root_per_owner).
-  const leaf = (
-    await pool.query(
-      "SELECT id FROM location WHERE owner_id=$1 AND parent_id IS NULL AND name='Unsorted' AND kind='storage_leaf'",
-      [user]
-    )
-  ).rows[0]?.id;
-  if (!leaf) throw new Error("The owner has no top-level Unsorted leaf");
   for (const edition of editions)
     await pool.query(
       "INSERT INTO holding(owner_id,location_id,edition_id,quantity,version) VALUES($1,$2,$3,1,1) ON CONFLICT(owner_id,location_id,edition_id) DO NOTHING",
-      [user, leaf, edition]
+      [user, deck, edition]
     );
   await pool.query(
     "UPDATE inventory_owner SET revision=revision+1 WHERE user_id=$1",
     [user]
   );
-  return leaf as string;
+  return name;
 }
 
-/** Opens the owner's top-level Unsorted leaf, the one hold() stocks. Specs that ran earlier on this stack can leave
- * nested Locations named "Unsorted" that sort ahead of it in the tree, so only a top-level row counts. */
-async function openRootUnsorted(page: Page) {
+/** Opens the held Deck's Holdings rows on the Decks page. */
+async function openHeld(page: Page, name: string) {
+  await page.getByRole("button", { name: "Decks", exact: true }).click();
   await page
-    .getByRole("navigation", { name: "Location tree" })
-    .locator(":scope > ul > li > button", { hasText: /^Unsorted$/ })
+    .getByRole("navigation", { name: "Deck index" })
+    .getByRole("button", { name, exact: true })
     .click();
-  await expect(
-    page
-      .getByRole("navigation", { name: "Location breadcrumbs" })
-      .getByRole("button")
-  ).toHaveText(["All Locations", "Unsorted"]);
+  const panel = page.getByRole("region", { name: `Cards in ${name}` });
+  await expect(panel).toBeVisible();
+  return panel;
 }
 
 /** Prices are read when a slot mounts, so each check starts from a fresh page load. */
@@ -200,7 +199,7 @@ test("card information shows each Edition's own price with age, stale and finish
   await expect(results).not.toContainText("$0.25");
 });
 
-test("Deck, leaf and Collection rows price their exact Edition, including after More cards", async ({
+test("Deck and Collection rows price their exact Edition, including after More cards", async ({
   page,
 }) => {
   const ids = seed(52);
@@ -231,12 +230,11 @@ test("Deck, leaf and Collection rows price their exact Edition, including after 
     ids["reverse-holofoil"],
     ids.unspecified,
   ];
-  await hold(everything);
+  const held = await hold(page, everything);
   await page.reload();
 
-  // Leaf Holdings: 48 rows on the first page; only rendered rows are requested, 64 at a time at most.
-  await openRootUnsorted(page);
-  const panel = page.getByRole("region", { name: "Cards in Unsorted" });
+  // Deck Holdings: 48 rows on the first page; only rendered rows are requested, 64 at a time at most.
+  const panel = await openHeld(page, held);
   await expect(panel.locator(".holding-grid > li")).toHaveCount(48);
   await expect(panel.locator(".edition-price").first()).not.toContainText(
     "Checking prices"
@@ -304,14 +302,13 @@ test(
       { op: "quote", edition: ids.normal, amount: "0.25", updated: ago(1) },
     ]);
     await signIn(page);
-    await hold([ids.normal, ids["reverse-holofoil"]]);
+    const held = await hold(page, [ids.normal, ids["reverse-holofoil"]]);
     await page.reload();
     await page.route("**/api/prices/editions", async (route) => {
       await new Promise((resolve) => setTimeout(resolve, 6_000));
       await route.continue().catch(() => undefined);
     });
-    await openRootUnsorted(page);
-    const panel = page.getByRole("region", { name: "Cards in Unsorted" });
+    const panel = await openHeld(page, held);
     // The cards are there at once; only the price slots wait.
     await expect(panel.locator(".holding-grid > li")).toHaveCount(2);
     await expect(panel.getByText("Furret").first()).toBeVisible();
@@ -330,7 +327,7 @@ test("a gateway deadline answer becomes the same labelled fallback", async ({
 }) => {
   const ids = seed();
   await signIn(page);
-  await hold([ids.normal]);
+  const held = await hold(page, [ids.normal]);
   await page.reload();
   await page.route("**/api/prices/editions", (route) =>
     route.fulfill({
@@ -339,8 +336,7 @@ test("a gateway deadline answer becomes the same labelled fallback", async ({
       body: JSON.stringify({ detail: { code: "PRICE_DEADLINE" } }),
     })
   );
-  await openRootUnsorted(page);
-  const panel = page.getByRole("region", { name: "Cards in Unsorted" });
+  const panel = await openHeld(page, held);
   await expect(panel.getByText("Price check timed out").first()).toBeVisible();
   await expect(panel.locator(".holding-grid > li")).toHaveCount(1);
 });
@@ -373,7 +369,7 @@ test("each refresh outcome has its own label and never changes the cached price 
     },
   ]);
   await signIn(page);
-  await hold([ids.normal]);
+  const held = await hold(page, [ids.normal]);
   for (const [refresh, failedAt, label] of REFRESH_LABELS) {
     await page.route("**/api/prices/editions", async (route) => {
       const response = await route.fetch();
@@ -385,8 +381,7 @@ test("each refresh outcome has its own label and never changes the cached price 
       await route.fulfill({ response, json: body });
     });
     await page.reload();
-    await openRootUnsorted(page);
-    const panel = page.getByRole("region", { name: "Cards in Unsorted" });
+    const panel = await openHeld(page, held);
     const slot = panel.locator(".edition-price").first();
     await expect(slot).toContainText("$0.25");
     if (label) await expect(slot).toContainText(label);
@@ -404,7 +399,7 @@ test(
   async ({ page }) => {
     const ids = seed(110);
     await signIn(page);
-    await hold([
+    const held = await hold(page, [
       ...ids.pagers,
       ids.normal,
       ids["reverse-holofoil"],
@@ -424,8 +419,7 @@ test(
       live -= 1;
       await route.continue().catch(() => undefined);
     });
-    await openRootUnsorted(page);
-    const panel = page.getByRole("region", { name: "Cards in Unsorted" });
+    const panel = await openHeld(page, held);
     await expect(panel.locator(".holding-grid > li")).toHaveCount(48);
     await panel.getByRole("button", { name: "More cards" }).click();
     await expect(panel.locator(".holding-grid > li")).toHaveCount(96);
@@ -449,15 +443,14 @@ test("following a link does not prefetch prices for unrendered cards", async ({
 }) => {
   const ids = seed();
   await signIn(page);
-  await hold([ids.normal]);
+  const held = await hold(page, [ids.normal]);
   await page.reload();
   const seen: string[][] = [];
   await page.route("**/api/prices/editions", async (route) => {
     seen.push(route.request().postDataJSON().edition_ids);
     await route.continue();
   });
-  await openRootUnsorted(page);
-  const panel = page.getByRole("region", { name: "Cards in Unsorted" });
+  const panel = await openHeld(page, held);
   await expect(panel.locator(".edition-price").first()).not.toContainText(
     "Checking prices"
   );

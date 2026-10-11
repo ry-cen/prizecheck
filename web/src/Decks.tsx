@@ -8,6 +8,8 @@ import {
   type TreeNode,
 } from "./decks_generated";
 import { getLocationTree } from "./location_generated";
+import { indexLocations } from "./workspace/locationTree";
+import type { MoveDestination } from "./MoveHoldings";
 import { Holdings } from "./Holdings";
 import { PublishDeck } from "./PublishDeck";
 import { DeckLiveExport } from "./DeckLiveExport";
@@ -18,7 +20,7 @@ import { workspaceHref } from "./workspace/workspaceLink";
 export function Decks() {
   const [cursor, setCursor] = useState<string | null>(null);
   const [decks, setDecks] = useState<TreeNode[]>([]);
-  const [leaves, setLeaves] = useState<TreeNode[]>([]);
+  const [leaves, setLeaves] = useState<MoveDestination[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [detail, setDetail] = useState<DeckDetail | null>(null);
   const [name, setName] = useState("");
@@ -32,7 +34,12 @@ export function Decks() {
     const [index, tree] = await Promise.all([getDecks(), getLocationTree()]);
     setDecks(index.decks);
     setCursor(index.next_cursor);
-    setLeaves(tree.locations.filter((item) => item.kind !== "organization"));
+    const paths = indexLocations(tree.locations);
+    setLeaves(
+      tree.locations
+        .filter((item) => item.kind !== "organization")
+        .map((item) => ({ id: item.id, name: paths.path(item.id) }))
+    );
   }
   async function moreDecks() {
     if (!cursor) return;
