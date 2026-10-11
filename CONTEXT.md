@@ -28,6 +28,10 @@ _Avoid_: User override, custom card
 The application-owned English card-name concept under which Card Printings count together for deck-construction limits. It groups the same rules-relevant English name even when the cards have different artwork, attacks, abilities, or other text. A parenthetical subtitle, such as "(Professor Juniper)" in "Professor's Research (Professor Juniper)", is not part of the name.
 _Avoid_: Gameplay Identity, identical card, translated printing
 
+**Format**:
+A named set of deck-construction rules, such as Standard, Expanded, or Gym Leader Challenge, that a Deck List can be checked against. A format check is advisory and never blocks the collector.
+_Avoid_: Mode, ruleset, legality
+
 **Reprint Group**:
 The Card Printings within one Card Identity whose rules text is functionally identical. Format legality and bans apply to the whole group; copy limits still count by Card Identity.
 _Avoid_: Gameplay Identity, reprint set, equivalent card

@@ -23,6 +23,7 @@ An agreed plan for Deck Lists, the intended cards of a Deck including cards the 
 
 <!-- One line per closed ticket: link plus a one-line gist. -->
 
+- [Decide where format rules live and who updates them](https://github.com/ry-cen/tcg-tracker/issues/74): Format Rules live in a dated, versioned rules file per format, updated by commit; card attributes are derived from TCGdex by rule and corrected by maintainer-reviewed records; gaps in the rules yield unknown, never not legal; GLC stays in the first phase. [Resolution](resolutions/decide-format-rules-source.md)
 - [Decide which printings count as the same card for format legality](https://github.com/ry-cen/tcg-tracker/issues/73): copy limits count by Card Identity (subtitles stripped); legality and bans apply to a Reprint Group of functionally identical printings, built automatically from identical text plus maintainer merges and splits; only Trainers and Energy inherit legality from a legal reprint. [Resolution](resolutions/decide-reprint-groups.md)
 - [Research TCGdex legality data and catalog coverage](https://github.com/ry-cen/tcg-tracker/issues/71): TCGdex `legal.*` is a mark-and-series rule, current with the G rotation, but it ignores reprint equivalence, McDonald's and Trainer Kit pool extras, and has 9 Expanded ban errors; Rule Box and ACE SPEC have no single field, `regulationMark` covers 96% of Sword & Shield-onward printings, and manual Printings carry no metadata. [Findings](https://github.com/ry-cen/tcg-tracker/blob/feature/deck-format-validation/docs/planning/deck-format-validation/wayfinder/research/tcgdex-legality-data.md)
 - [Decide how a Deck holds cards the collector doesn't own](https://github.com/ry-cen/tcg-tracker/issues/72): a Deck is one object, its Holdings plus a Deck List of intended Card Editions (owned, elsewhere or not owned). Moves keep the list covering the Holdings, a Pick List confirms retrievals as Moves, deleting a Deck spills its cards to Unsorted, and a Published Deck snapshots the Deck List and outlives the Deck. [Resolution](resolutions/decide-deck-list-model.md) · [ADR 0009](../../../adr/0009-deck-list-is-part-of-the-deck.md)
@@ -31,7 +32,6 @@ An agreed plan for Deck Lists, the intended cards of a Deck including cards the 
 
 ## Not yet specified
 
-- Whether GLC needs its own later phase, depending on what research finds about its data needs.
 - Whether ban-list or rotation changes need re-evaluation or notification for existing Decks and Published Decks.
 
 ## Out of scope
@@ -41,3 +41,5 @@ An agreed plan for Deck Lists, the intended cards of a Deck including cards the 
 - Formats other than Standard, Expanded and GLC.
 - A social network where collectors request the cards their Deck Lists don't own. This is a future effort; the Deck List design must not rule it out, and identity-level ("any printing") lines belong to it.
 - Any guarantee of tournament legality; results stay advisory.
+- Database-editable Format Rules with an owner API, a later effort if someone other than the owner maintains rules.
+- Reporting catalog data errors upstream to TCGdex.
