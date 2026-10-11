@@ -22,6 +22,14 @@ export type CompetingDeck = { deck_id: string; name: string; in_deck: string; el
 export type CompetitionWarning = { edition_id: string; spare: string; counted_elsewhere: string; decks: CompetingDeck[] };
 export type AddDeckListPrinting = { printing_id: string; quantity: string; revision: number; idempotency_key: string };
 export type DeckListPrintingResult = { deck_id: string; deck_list: DeckList; edition_id: string; chosen_by: string };
+export type PickWarning = { deck_id: string; name: string; short_by: string };
+export type PickSource = { location_id: string; name: string; kind: string; available: string; committed: string; version: number; suggested: string; warning: PickWarning | null };
+export type PickRow = { edition_id: string; quantity: string; in_deck: string; elsewhere: string; not_owned: string; sources: PickSource[] };
+export type PutAwayHolding = { edition_id: string; quantity: string; version: number };
+export type PickList = { deck_id: string; deck_list_revision: number; owner_revision: number; rows: PickRow[]; put_away: PutAwayHolding[]; competition: CompetitionWarning[] };
+export type PickItem = { source_id: string; edition_id: string; quantity: string; expected_version: number };
+export type ConfirmPicks = { items: PickItem[]; deck_list_revision: number; idempotency_key: string };
+export type PickConfirmResult = { edition_count: number; copy_count: string; owner_revision: number };
 
 export class DeckError extends Error {
   constructor(public status: number, public code: string) { super(code); }
@@ -56,3 +64,7 @@ export const removeDeckListLine = (deckId: string, editionId: string, body: Remo
   request<DeckListCommandResult>(`${deckListLines(deckId)}/${encodeURIComponent(editionId)}`, 'DELETE', body);
 export const addDeckListPrinting = (deckId: string, body: AddDeckListPrinting) =>
   request<DeckListPrintingResult>(`/api/decks/${encodeURIComponent(deckId)}/deck-list/printings`, 'POST', body);
+export const getPickList = (deckId: string) =>
+  request<PickList>(`/api/decks/${encodeURIComponent(deckId)}/pick-list`, 'GET');
+export const confirmPicks = (deckId: string, body: ConfirmPicks) =>
+  request<PickConfirmResult>(`/api/decks/${encodeURIComponent(deckId)}/pick-list/confirm`, 'POST', body);
