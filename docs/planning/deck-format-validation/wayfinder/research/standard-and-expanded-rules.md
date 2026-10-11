@@ -49,7 +49,7 @@ The Pokémon TCG Rulebook PDF ([30c_rulebook_en.pdf](https://www.pokemon.com/sta
   - S1, citing a @playpokemon post of 28 Jan 2026: two weeks after the earliest release of the Sleeved Booster, Booster Display or Booster Bundle; for special sets, two weeks after the earliest release of the Booster Bundle or Elite Trainer Box.
   - Promos (P8): "legal on the first or third Friday of the month after the product is released". P8 lists the legal SVP and MEP promos, plus four SWSH promos that are still legal through reprint (Poké Ball SWSH146; Professor's Research SWSH152 and SWSH178; Boss's Orders SWSH251). P7 says P8 is updated monthly.
   - A new printing of an already-legal card is legal **immediately on release** (P7). S1, citing a @playpokemon post of 21 May 2026, says reprints obtained at a Prerelease may be used as soon as they are obtained. Search snippets show that the 21 May 2026 handbook revision added this Prerelease-reprint clarification.
-- **First legal date of the J mark: unverified.** Search snippets of the May 2026 handbook table show a "March 6, 2026 | J" row, but that extraction was garbled.
+- **First legal date of the J mark: settled as 2026-03-06** (*2026-10-11:* `api/app/format_rules/standard.toml` records it, from the Play! Pokémon announcement of 2026-01-28 that Ascended Heroes is legal from that date). The original note read: unverified. Search snippets of the May 2026 handbook table show a "March 6, 2026 | J" row, but that extraction was garbled.
 
 ### 2. Expanded card pool cutoff
 
@@ -126,7 +126,7 @@ The same section also says that if a card meets those criteria, "a newer version
 
 **Standard-specific statement (P1):** "Older versions of cards that don't have a regulation mark can still be used if the card is currently legal for play." P1 gives two examples, and both are Trainers:
 
-- Rare Candy from Sun & Moon (no mark) is playable because the Mega Evolution Rare Candy carries I.
+- Rare Candy from Sun & Moon (no mark) is playable because the Mega Evolution Rare Candy carries I. *Implementation finding, 2026-10-11:* TCGdex's text for Rare Candy sm1-129 differs from me01-125's, so exact-text grouping does not join them. The official rule calls sm1-129 legal; the catalog reaches that only through a reviewed Reprint Group merge. The printings that do share me01-125's text are sv01-191, swsh1-180 and swsh12.5-141.
 - Boss's Orders from Rebel Clash carries D, which has rotated, and is still playable because the Mega Evolution printing carries I.
 
 So the rule extends to marked cards whose own mark has rotated, not only to unmarked ones. P1 sends readers to the handbook "for further clarification on which reprints are OK to use."
@@ -199,8 +199,8 @@ Other once-per-game mechanics (GX attacks, VSTAR Powers) are gameplay rules, not
 ## Open uncertainties
 
 1. Pokémon versus Trainer reprint substitution across rotated marks: the primary text and Bulbapedia disagree. *Low confidence either way.*
-2. The current (21 May 2026) handbook text could not be read in full. The Standard and Expanded tables, J's legality date, and any wording changes since Nov 2025 are unverified beyond search snippets.
-3. Exact Expanded set list: Plasma Blast and Legendary Treasures are missing from the mirror's table, and the SM promo range starts at SM158.
+2. The current (21 May 2026) handbook text could not be read in full. The Standard and Expanded tables (J's legality date is since settled as 2026-03-06, see the "First legal date of the J mark" note under section 1), and any wording changes since Nov 2025 are unverified beyond search snippets.
+3. Exact Expanded set list: Plasma Blast and Legendary Treasures are missing from the mirror's table, and the SM promo range starts at SM158. *Since 2026-10-11:* the set list is settled in `api/app/format_rules/expanded.toml` from the handbook revision of 2026-09-01. SM promos 1–157 and the Classic Collections (`cel25cc`, `30th-c`) remain unknown.
 4. The per-deck limit wording for ACE SPEC, Radiant and Prism Star was not verified against card scans or the Rulebook this session.
 5. Whether subtitled reprints (Professor's Research, Boss's Orders) share a name for the 4-copy count: widely understood, not primary-verified here.
 6. No announcement of the next rotation was found. Its timing is inferred from past years.

@@ -42,7 +42,7 @@ Checks are computed in full. Incremental checking is added only if a measurement
 
 ## Acceptance criteria
 
-1. Rare Candy sm1-129 is Standard legal through its Reprint Group (me01-125 carries mark I).
+1. Rare Candy sv01-191 (mark G), swsh1-180 (mark D) and swsh12.5-141 (no mark) share Rare Candy me01-125's text, so they are in its Reprint Group and are Standard legal through it (me01-125 carries mark I). Rare Candy sm1-129's text differs from me01-125's, so sm1-129, sm2-165 and sm7-142 form their own group and are not legal until a maintainer merges that group into me01-125's through a reviewed Reprint Group merge (ticket 14, #95); after the merge sm1-129 is Standard legal.
 2. A Pokémon printing that isn't legal on its own mark is Standard not legal even when an identical reprint is legal. This uses a fixture, since no real case may exist.
 3. A card from a set with no recorded legal date yields unknown with the reason "set legality date not recorded".
 4. An identical reprint of a banned Expanded printing is Expanded not legal.

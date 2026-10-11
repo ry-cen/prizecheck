@@ -23,7 +23,7 @@ Copy limits never count by Reprint Group. Two Pikachu with different attacks are
 
 ## Legality inheritance
 
-- **Trainer and Energy printings** are legal in a format if any printing in their Reprint Group is legal there. For example, Rare Candy sm1-129 is Standard-legal because Rare Candy me01-125 is.
+- **Trainer and Energy printings** are legal in a format if any printing in their Reprint Group is legal there. For example, Rare Candy sv01-191 is Standard-legal because Rare Candy me01-125, which has the same text, is. Rare Candy sm1-129 is worded differently, so it forms its own group and becomes legal only through a reviewed Reprint Group merge ([ticket 14](https://github.com/ry-cen/prizecheck/issues/95)).
 - **Pokémon printings** are grouped, so they share bans and appear as one card. They do not inherit legality: each Pokémon printing must be legal on its own mark or set. N's Zoroark ex from Journey Together and from Ascended Heroes are one Reprint Group, and both are legal on their own marks. Primary sources don't settle whether Pokémon may inherit. The owner judged the case rare, so allowing it later is a single rule change (see [Decide where format rules live and who updates them](https://github.com/ry-cen/prizecheck/issues/74)).
 
 ## Bans
