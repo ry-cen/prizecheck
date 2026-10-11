@@ -4,7 +4,7 @@ from uuid import uuid4
 
 import psycopg
 
-from test_holdings import add, call, fixture
+from test_holdings import add, call, client, fixture
 
 PAGE = 500  # app.collection.HOLDING_PAGE_SIZE
 
@@ -139,3 +139,74 @@ def test_holding_pages_walk_every_holding_once_and_bind_cursors():
         conn.execute('UPDATE catalog_state SET revision=revision+1 WHERE singleton')
     changed = listing(owner, cursor=fresh)
     assert changed.status_code == 409 and changed.json()['detail']['code'] == 'CATALOG_CHANGED'
+
+
+def test_a_cursor_carries_its_anchor_so_the_next_page_does_not_reread_it():
+    owner, _, unsorted, _, edition, _ = fixture()
+    with psycopg.connect(os.environ['DATABASE_URL']) as conn:
+        printing = conn.execute('SELECT printing_id FROM catalog_edition WHERE id=%s', (edition,)).fetchone()[0]
+        editions = sorted(str(row[0]) for row in conn.execute("""INSERT INTO catalog_edition(printing_id,descriptor_key,descriptor)
+          SELECT %s,'anchor-'||n,'{}'::jsonb FROM generate_series(1,%s) n RETURNING id""", (printing, PAGE + 5)).fetchall())
+        conn.execute("""INSERT INTO holding(owner_id,location_id,edition_id,quantity,version)
+          SELECT %s,%s,id,1,1 FROM unnest(%s::uuid[]) id""", (owner, unsorted, editions))
+    first = listing(owner).json()
+    anchor = first['holdings'][-1]
+    assert anchor['edition_id'] == editions[PAGE - 1]  # same name everywhere, so Edition id order
+    # A white-box probe: drop the anchor Holding without moving the owner revision. A server that re-reads
+    # the anchor row answers INVENTORY_CHANGED; one that carries the anchor's sort values continues after it.
+    with psycopg.connect(os.environ['DATABASE_URL']) as conn:
+        conn.execute('DELETE FROM holding WHERE owner_id=%s AND location_id=%s AND edition_id=%s',
+                     (owner, anchor['location_id'], anchor['edition_id']))
+        catalog_revision = conn.execute('SELECT revision FROM catalog_state WHERE singleton').fetchone()[0]
+    second = listing(owner, cursor=first['next_cursor'])
+    assert second.status_code == 200, second.text
+    assert [row['edition_id'] for row in second.json()['holdings']] == editions[PAGE:]
+    # A cursor in the earlier shape (the anchor's Edition and Location only), correctly signed, is refused.
+    from app.collection import encode_cursor
+    context = ['collection-holdings', owner, None, 'name-asc', '', '', None, None,
+               first['owner_revision'], catalog_revision]
+    legacy = listing(owner, cursor=encode_cursor(context, [anchor['edition_id'], anchor['location_id']]))
+    assert legacy.status_code == 400 and legacy.json()['detail']['code'] == 'INVALID_CURSOR', legacy.text
+
+
+def test_a_page_boundary_inside_deep_non_ascii_paths_walks_every_holding_once():
+    owner, _, _, _, edition, _ = fixture()
+    with psycopg.connect(os.environ['DATABASE_URL']) as conn:
+        printing = conn.execute('SELECT printing_id FROM catalog_edition WHERE id=%s', (edition,)).fetchone()[0]
+        # Eleven folders of 120-character non-ASCII names, then three Storage Leaves: the deepest legal paths.
+        parent = None
+        for level in range(11):
+            parent = location(conn, owner, f'Ünïcødé {level:02d} ' + 'ß' * 108, 'organization', parent)
+        leaves = [location(conn, owner, 'Ä' * 119 + suffix, parent=parent) for suffix in 'abc']
+        editions = sorted(str(row[0]) for row in conn.execute("""INSERT INTO catalog_edition(printing_id,descriptor_key,descriptor)
+          SELECT %s,'deep-'||n,'{}'::jsonb FROM generate_series(1,167) n RETURNING id""", (printing,)).fetchall())
+        for leaf in leaves:
+            conn.execute("""INSERT INTO holding(owner_id,location_id,edition_id,quantity,version)
+              SELECT %s,%s,id,1,1 FROM unnest(%s::uuid[]) id""", (owner, leaf, editions))
+    # 501 Holdings: the first page ends after the second of the last Edition's three Holdings.
+    expected = [(edition_id, leaf) for edition_id in editions for leaf in leaves]
+    walked, cursor = [], None
+    while True:
+        response = listing(owner, cursor=cursor)
+        assert response.status_code == 200, response.text
+        body = response.json()
+        walked += [(row['edition_id'], row['location_id']) for row in body['holdings']]
+        cursor = body['next_cursor']
+        if not cursor:
+            break
+        assert len(cursor) <= 2048  # the Location path never rides in the cursor
+    assert walked == expected
+
+
+def test_owner_revision_read_follows_each_change_for_its_owner_only():
+    owner, other, unsorted, _, edition, _ = fixture()
+    before = call('GET', '/api/collection/revision', owner)
+    assert before.status_code == 200, before.text
+    added = add(owner, unsorted, edition, '1')
+    assert added.status_code == 200, added.text
+    after = call('GET', '/api/collection/revision', owner).json()
+    assert after == {'owner_revision': added.json()['owner_revision']}
+    assert after['owner_revision'] > before.json()['owner_revision']
+    assert call('GET', '/api/collection/revision', other).json() == {'owner_revision': listing(other).json()['owner_revision']}
+    assert call('GET', '/api/collection/revision', str(uuid4())).json() == {'owner_revision': 1}
+    assert client.get('/api/collection/revision').status_code == 401
