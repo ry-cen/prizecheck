@@ -306,7 +306,8 @@ test.describe("desktop", () => {
     expect(await ring(selected)).toContain("rgb(230, 189, 87)");
     expect(await ring(tile(1))).not.toContain("rgb(230, 189, 87)");
 
-    // The bar's Clear empties the selection.
+    // Actions → Clear selection empties the selection.
+    await bar(page).getByRole("button", { name: "Actions" }).click();
     await bar(page).getByRole("button", { name: "Clear selection" }).click();
     expect(await pressedIndexes()).toEqual([]);
     await expect(bar(page)).toHaveCount(0);
@@ -800,7 +801,7 @@ test.describe("mobile", () => {
     expect(stripBox.y + stripBox.height).toBeLessThanOrEqual(812);
     expect(stripBox.x).toBeGreaterThanOrEqual(0);
     expect(stripBox.x + stripBox.width).toBeLessThanOrEqual(375);
-    for (const name of ["Details", "Clear selection"])
+    for (const name of ["Details", "Actions"])
       expect(
         (await box(strip.getByRole("button", { name }))).height
       ).toBeGreaterThanOrEqual(44);
@@ -829,6 +830,7 @@ test.describe("mobile", () => {
       page.getByRole("dialog", { name: "Pocket Abra" })
     ).toBeVisible();
     await page.getByRole("button", { name: "Close details" }).tap();
+    await strip.getByRole("button", { name: "Actions" }).tap();
     await strip.getByRole("button", { name: "Clear selection" }).tap();
     await expect(pressed(page)).toHaveCount(0);
     await expect(strip).toHaveCount(0);
