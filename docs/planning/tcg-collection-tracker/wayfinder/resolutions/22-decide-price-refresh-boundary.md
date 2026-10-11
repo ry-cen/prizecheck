@@ -1,6 +1,6 @@
 # Resolution — Access-triggered prices with bounded refresh
 
-**Ticket:** [Decide price refresh scope and workload bounds](https://github.com/ry-cen/tcg-tracker/issues/41).
+**Ticket:** [Decide price refresh scope and workload bounds](https://github.com/ry-cen/prizecheck/issues/41).
 
 **Decision:** the owner selected access-only refresh, accepted the one-hour/24-hour/three-second policy with “yes lets go with that”, and accepted the remaining access/absence choices with “yes to all”. Recorded on 2026-10-08. The owner then explicitly removed manual price refreshing for every user; this supersedes the earlier manual-control answer.
 
@@ -26,7 +26,7 @@ A confirmed unavailable result is a validated cache result, not an uninitialized
 
 Fetching unchanged prices successfully resets cache-check age, not provider quote age. Continue using the provider pricing timestamp for per-card and aggregate freshness: more than 48 hours is stale; absent/unusable source time is Age unknown. These quote states and defensible retained quotes remain included in the priced subtotal and coverage under the accepted [card-price contract](18-decide-price-contract.md). A failed attempt never becomes a successful check.
 
-Unspecified Variants and uncertain marketplace matches remain unpriced. Cache freshness or another Edition's quote cannot validate a physical match. Price refresh must not change Variant Descriptors, Card Edition identity, Holdings, quantities, reviewed corrections or Deck construction. It is separate from catalog identity import/reconciliation scheduling. [Marketplace metadata separation and existing Edition compatibility](https://github.com/ry-cen/tcg-tracker/issues/42) owns that correction/mapping contract.
+Unspecified Variants and uncertain marketplace matches remain unpriced. Cache freshness or another Edition's quote cannot validate a physical match. Price refresh must not change Variant Descriptors, Card Edition identity, Holdings, quantities, reviewed corrections or Deck construction. It is separate from catalog identity import/reconciliation scheduling. [Marketplace metadata separation and existing Edition compatibility](https://github.com/ry-cen/prizecheck/issues/42) owns that correction/mapping contract.
 
 ## Shared and bounded work
 
@@ -42,7 +42,7 @@ No users, including Deck owners and site administrators, have a manual Refresh p
 
 Published Deck visitors can trigger the same automatic access policy. Use only the active published snapshot's sanitized cards and quantities and a public quote projection/cache, with **zero PostgreSQL wakeups and no private inventory reads** for anonymous access. The public page and non-price contents remain available independently of TCGdex; its price display may wait up to the accepted three seconds before fallback. Anonymous refresh eligibility must be validated and rate-limited; it is not an arbitrary card-fetch endpoint or a manual-force refresh control.
 
-The owner has selected this public behavior, not its mechanism. [Published Deck prices and snapshot compatibility](https://github.com/ry-cen/tcg-tracker/issues/39) remains responsible for public-only coordination/storage, safe old snapshots, privacy, revocation and publication-version correctness, and architect review of the concrete design. Delayed results must not resurrect revoked publications, overwrite newer content/visibility or attach a total to the wrong snapshot. A global per-card quote and a snapshot-specific aggregate are different data needs.
+The owner has selected this public behavior, not its mechanism. [Published Deck prices and snapshot compatibility](https://github.com/ry-cen/prizecheck/issues/39) remains responsible for public-only coordination/storage, safe old snapshots, privacy, revocation and publication-version correctness, and architect review of the concrete design. Delayed results must not resurrect revoked publications, overwrite newer content/visibility or attach a total to the wrong snapshot. A global per-card quote and a snapshot-specific aggregate are different data needs.
 
 ## Later handoff acceptance examples
 

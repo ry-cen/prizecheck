@@ -6,7 +6,7 @@ Use `dev` as the integration branch. Update `main` from `dev` when the user auth
 
 ### Issue tracker
 
-Tickets are GitHub Issues on `ry-cen/tcg-tracker`; specs and Wayfinder artifacts are Markdown under `docs/planning/`. See `docs/agents/issue-tracker.md`.
+Tickets are GitHub Issues on `ry-cen/prizecheck`; specs and Wayfinder artifacts are Markdown under `docs/planning/`. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 

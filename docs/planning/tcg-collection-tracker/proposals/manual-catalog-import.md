@@ -2,7 +2,7 @@
 
 **Status:** implemented and locally integration-validated; production validation pending.
 
-**Implementation ticket:** [19 — Control-panel catalog imports on demand](https://github.com/ry-cen/tcg-tracker/issues/34)
+**Implementation ticket:** [19 — Control-panel catalog imports on demand](https://github.com/ry-cen/prizecheck/issues/34)
 
 **Decision:** [ADR 0003](../../../adr/0003-on-demand-catalog-imports.md)
 
@@ -67,7 +67,7 @@ Reuse the existing importer, bounded fetch concurrency, per-request retry/backof
 
 Publication remains one PostgreSQL transaction that records the complete generation, active revision, last-success time, and successful run outcome together. A failed fetch, invalid source data, interruption, or publication failure preserves the previous active catalog. A failed first import leaves search unavailable. No import changes the identity or placement of Holdings.
 
-Safe refresh and reconciliation requirements not yet implemented remain scoped to [ticket 14](https://github.com/ry-cen/tcg-tracker/issues/29). This execution-model change does not complete that ticket.
+Safe refresh and reconciliation requirements not yet implemented remain scoped to [ticket 14](https://github.com/ry-cen/prizecheck/issues/29). This execution-model change does not complete that ticket.
 
 ## Failure and process lifetime
 

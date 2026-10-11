@@ -1,6 +1,6 @@
 # Export metadata provenance and correction paths
 
-Research date: 2026-10-08. This is bounded source and repository inspection for [ticket 24](https://github.com/ry-cen/tcg-tracker/issues/43), not a product decision, mapping verification, importer test, or implementation.
+Research date: 2026-10-08. This is bounded source and repository inspection for [ticket 24](https://github.com/ry-cen/prizecheck/issues/43), not a product decision, mapping verification, importer test, or implementation.
 
 ## Findings
 

@@ -2,7 +2,7 @@
 
 **Decision:** accepted by the owner on 2026-10-08 with “yes to all” for the price-contract round.
 
-**Ticket:** [Decide card-price presentation and Deck cost](https://github.com/ry-cen/tcg-tracker/issues/37).
+**Ticket:** [Decide card-price presentation and Deck cost](https://github.com/ry-cen/prizecheck/issues/37).
 
 ## Price meaning and surfaces
 
@@ -32,9 +32,9 @@ A six-card Deck contains three copies quoted at $0.25 with a fresh source timest
 
 ## Boundaries and remaining decisions
 
-Published Decks support these prices and aggregate semantics. The owner already chose refreshed quotes for the fixed published cards. Private edits must not change public card quantities. [Published Deck prices and compatibility](https://github.com/ry-cen/tcg-tracker/issues/39) owns the public-object behavior and migration; this resolution does not replace that contract.
+Published Decks support these prices and aggregate semantics. The owner already chose refreshed quotes for the fixed published cards. Private edits must not change public card quantities. [Published Deck prices and compatibility](https://github.com/ry-cen/prizecheck/issues/39) owns the public-object behavior and migration; this resolution does not replace that contract.
 
-[Price refresh scope and workload bounds](https://github.com/ry-cen/tcg-tracker/issues/41) is now unblocked. [Marketplace metadata separation and Edition compatibility](https://github.com/ry-cen/tcg-tracker/issues/42) owns defensible mapping rules and preservation of existing identities. [Live price and export fixtures](https://github.com/ry-cen/tcg-tracker/issues/40) retains unverified source/destination evidence. Export defaults and fallbacks remain in [Deck export precision and fallback](https://github.com/ry-cen/tcg-tracker/issues/38).
+[Price refresh scope and workload bounds](https://github.com/ry-cen/prizecheck/issues/41) is now unblocked. [Marketplace metadata separation and Edition compatibility](https://github.com/ry-cen/prizecheck/issues/42) owns defensible mapping rules and preservation of existing identities. [Live price and export fixtures](https://github.com/ry-cen/prizecheck/issues/40) retains unverified source/destination evidence. Export defaults and fallbacks remain in [Deck export precision and fallback](https://github.com/ry-cen/prizecheck/issues/38).
 
 This is an accepted product decision, not application implementation, a validated production feed, or a completed specification. The existing three live price samples and earlier architect review remain evidence with their stated limitations. No additional agent delegation or application tests were necessary to record the owner's answers.
 

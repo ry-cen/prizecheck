@@ -1,6 +1,6 @@
 # Resolution — Physical Edition identity and mutable marketplace references
 
-**Ticket:** [Decide marketplace metadata separation and existing Edition compatibility](https://github.com/ry-cen/tcg-tracker/issues/42).
+**Ticket:** [Decide marketplace metadata separation and existing Edition compatibility](https://github.com/ry-cen/prizecheck/issues/42).
 
 **Decision:** accepted by the owner on 2026-10-08. The owner answered “Yes, invalidate and verify the replacement” for changed marketplace mappings, then “yes to all” for metadata separation, preserved-ID compatibility and actual-datastore preflight.
 
@@ -22,7 +22,7 @@ Correspondence must preserve language, Printing identity, every classified physi
 
 If several old Editions or source variants collapse to the same cleaned descriptor, preserve the records and quantities and hold the ambiguous case for catalog-maintainer review. Keep their current effective catalog state until that review establishes an appropriate correction. Do not automatically pick one ID, merge Holdings, retarget Edition references or lose source variants to make a uniqueness constraint pass. Any subsequent quantity reassignment remains an explicit version-checked collector operation under the [existing identity contract](04-decide-card-edition-identity.md).
 
-Versioned reviewed Catalog Overrides, replacements/deprecations, pending move data and Undo semantics must survive compatibility handling. Published snapshots already embed descriptor text and omit private Edition IDs: private metadata cleanup must not silently rewrite their cards, quantities or descriptor contents. Public quote/reference coordination is separately owned by [Published Deck prices and snapshot compatibility](https://github.com/ry-cen/tcg-tracker/issues/39).
+Versioned reviewed Catalog Overrides, replacements/deprecations, pending move data and Undo semantics must survive compatibility handling. Published snapshots already embed descriptor text and omit private Edition IDs: private metadata cleanup must not silently rewrite their cards, quantities or descriptor contents. Public quote/reference coordination is separately owned by [Published Deck prices and snapshot compatibility](https://github.com/ry-cen/prizecheck/issues/39).
 
 ## Mapping changes and current quotes
 
@@ -30,7 +30,7 @@ When a marketplace product mapping changes or conflicts with its known physical 
 
 Use the accepted complete TCGplayer text fallback when any required product mapping is unavailable; do not generate a partial product-ID link or omit copies. Marketplace invalidation does not itself invalidate a separately verified Pokémon TCG Live identifier. Pricing, marketplace products and Live mapping are separate facts. Holdings, Edition identity and published card quantities remain intact.
 
-Catalog-maintainer mapping review is catalog correction, not a manual price-refresh feature for ordinary users or site operators. Price acquisition continues through the accepted automatic access policy. [Export metadata provenance and correction](https://github.com/ry-cen/tcg-tracker/issues/43) will decide verification evidence, initial mapping provenance, reviewer responsibility, corrections and how approved mappings remain usable for published snapshots. It must respect the invalidation behavior selected here.
+Catalog-maintainer mapping review is catalog correction, not a manual price-refresh feature for ordinary users or site operators. Price acquisition continues through the accepted automatic access policy. [Export metadata provenance and correction](https://github.com/ry-cen/prizecheck/issues/43) will decide verification evidence, initial mapping provenance, reviewer responsibility, corrections and how approved mappings remain usable for published snapshots. It must respect the invalidation behavior selected here.
 
 ## Required actual-datastore preflight
 
