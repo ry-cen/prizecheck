@@ -1,6 +1,6 @@
 // @module-tag slow
 // slow (process): two gateways and two APIs (one pair on a disposable database, one isolated pair whose databases are
-// counting listeners) and one wait through the real 3 s price budget.
+// counting listeners) and one wait through the real 3 s price budget; the Published Deck exports (tickets 13 and 14) reuse the same stacks.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -23,7 +23,7 @@ import { Pool } from "pg";
 // Ticket 12: the Published Deck cost through the real gateway. Two stacks share one projection directory. G0/A0 use a
 // disposable database and publish. G1/A1 are the anonymous pair: their DATABASE_URL points at counting listeners, so any
 // session lookup or PostgreSQL write on a public route shows up as a connection. Every elapsed time is measured outside
-// the gateway.
+// the gateway. The exports are unbudgeted; they share the stacks to prove the same zero-database routing.
 const run = promisify(execFile);
 const ownerEmail = "owner@example.test";
 const origin = process.env.TEST_ORIGIN || "http://localhost:5173";
@@ -43,6 +43,7 @@ let G1 = "";
 let A1 = "";
 let owner = { id: "", cookie: "" };
 let activation = "";
+let liveActivation = "";
 let sequence = 0;
 let attempt = 0;
 
@@ -300,8 +301,23 @@ async function anonymous(path: string, headers: Record<string, string> = {}) {
     elapsed: performance.now() - started,
     text,
     json,
+    headers: response.headers,
   };
 }
+/** Fixture Live eligibility for the Printing of `edition` (rule basis under the fixture activation). Call before deliver(). */
+async function liveEligible(
+  edition: Edition,
+  identity: { category: string; name: string; set_code: string; number: string }
+) {
+  await pool.query(
+    `UPDATE catalog_printing_metadata SET live_state='eligible',live_reason=NULL,live_identity=$2,live_basis='rule',
+     live_activation_id=$3,live_auto_closed=true WHERE printing_id=(SELECT printing_id FROM catalog_edition WHERE id=$1)`,
+    [edition.id, JSON.stringify(identity), liveActivation]
+  );
+}
+const exportPath = (token: string, version: number, kind: string) =>
+  `/api/public/decks/${token}/versions/${version}/exports/${kind}`;
+const KINDS = ["live", "live.txt", "tcgplayer", "tcgplayer.txt"];
 const costPath = (token: string, version: number) =>
   `/api/public/decks/${token}/versions/${version}/cost`;
 
@@ -456,6 +472,13 @@ beforeAll(async () => {
     await pool.query(
       `INSERT INTO catalog_rule_activation(kind,reviewer_id,evidence_url,reason,clock_revision)
        VALUES ('marketplace_matching',$1,'https://example.org/rule','Fixture activation',1) RETURNING id`,
+      [id]
+    )
+  ).rows[0].id;
+  liveActivation = (
+    await pool.query(
+      `INSERT INTO catalog_rule_activation(kind,reviewer_id,evidence_url,reason,clock_revision)
+       VALUES ('live_derivation',$1,'https://example.org/rule','Fixture activation',1) RETURNING id`,
       [id]
     )
   ).rows[0].id;
@@ -740,6 +763,136 @@ describe("the Published Deck cost through the real gateway", () => {
       const text = JSON.stringify(work);
       expect(text).not.toContain(owner.id);
       expect(text).not.toContain(deck);
+      expect(wakeups).toEqual(baseline);
+    }
+  );
+
+  it(
+    "serves both exports of every frozen copy without waking either database for absent, forged or valid cookies, and follows republish and revoke without moving the manifest or discovery",
+    { timeout: 45_000 },
+    async () => {
+      const [normal, reverse] = await printing(
+        "pe-mapped",
+        ["normal", "reverse-holofoil"],
+        true
+      );
+      const [plain] = await printing("pe-plain", ["normal"], false);
+      await liveEligible(normal, {
+        category: "Pokemon",
+        name: "Gateway Mon",
+        set_code: "GWY",
+        number: "1",
+      });
+      await liveEligible(plain, {
+        category: "Trainer",
+        name: "Gateway Ball",
+        set_code: "GWY",
+        number: "2",
+      });
+      await deliver();
+      const deck = await deckWith([
+        [normal, 3],
+        [reverse, 2],
+        [plain, 1],
+      ]);
+      const { token } = await publication("POST", deck);
+      await addCopies(deck, normal, 10);
+
+      const manifest = readFileSync(currentJson);
+      const revision = (await anonymous("/api/public/discovery")).json.revision;
+      const baseline = { ...wakeups };
+
+      const texts: Record<string, string[]> = {};
+      const answers: Record<string, any> = {};
+      for (const cookie of [
+        undefined,
+        "better-auth.session_token=forged",
+        owner.cookie,
+      ])
+        for (const kind of KINDS) {
+          const answer = await anonymous(
+            exportPath(token, 1, kind),
+            cookie ? { cookie } : {}
+          );
+          expect(answer.status, `${kind} ${cookie}`).toBe(200);
+          (texts[kind] ??= []).push(answer.text);
+          answers[kind] = answer;
+        }
+      for (const kind of KINDS) expect(new Set(texts[kind]).size).toBe(1);
+
+      const live = answers["live"].json;
+      const liveText =
+        "Pokémon: 5\n5 Gateway Mon GWY 1\n\nTrainer: 1\n1 Gateway Ball GWY 2";
+      expect(live).toMatchObject({ status: "ok", version: 1, text: liveText });
+      expect(live.digest).toMatch(/^[0-9a-f]{64}$/);
+      expect(answers["live.txt"].text).toBe(liveText);
+
+      const mass = answers["tcgplayer"].json;
+      expect(mass).toMatchObject({
+        status: "text",
+        fallback_reason: "missing_mapping",
+        total_copies: "6",
+      });
+      expect(mass.lines.map((line: any) => line.quantity).sort()).toEqual([
+        "1",
+        "5",
+      ]);
+      for (const line of mass.lines)
+        expect(line.text).toMatch(/^\d+ Published Card \d+$/);
+      expect(answers["tcgplayer.txt"].text).toBe(mass.text);
+
+      for (const kind of ["live", "tcgplayer"]) {
+        expect(answers[kind].headers.get("cache-control")).toBe("no-store");
+        expect(answers[kind].headers.get("x-robots-tag")).toBe(
+          "noindex, nofollow"
+        );
+      }
+      for (const kind of ["live.txt", "tcgplayer.txt"]) {
+        expect(answers[kind].headers.get("content-disposition")).toMatch(
+          /^attachment/
+        );
+        expect(answers[kind].headers.get("cache-control")).toBe("no-store");
+        expect(answers[kind].headers.get("x-robots-tag")).toBe(
+          "noindex, nofollow"
+        );
+      }
+
+      for (const kind of KINDS)
+        for (const secret of [owner.id, deck, normal.id, reverse.id, plain.id])
+          expect(texts[kind][0]).not.toContain(secret);
+      expect(wakeups).toEqual(baseline);
+      expect(readFileSync(currentJson).equals(manifest)).toBe(true);
+      expect((await anonymous("/api/public/discovery")).json.revision).toBe(
+        revision
+      );
+
+      const deck2 = await deckWith([
+        [normal, 3],
+        [reverse, 2],
+      ]);
+      const second = await publication("POST", deck2);
+      const linked = await anonymous(exportPath(second.token, 1, "tcgplayer"));
+      expect(linked.json.status).toBe("link");
+      expect(linked.json.url).toMatch(
+        /^https:\/\/www\.tcgplayer\.com\/massentry\?productline=Pokemon&c=5-\d+$/
+      );
+
+      expect((await publication("PUT", deck)).version).toBe(2);
+      for (const kind of KINDS) {
+        const old = await anonymous(exportPath(token, 1, kind));
+        expect(old.status, kind).toBe(409);
+        expect(old.json.detail.code).toBe("PUBLISHED_DECK_CHANGED");
+      }
+      expect((await anonymous(exportPath(token, 2, "live"))).json.text).toBe(
+        "Pokémon: 15\n15 Gateway Mon GWY 1\n\nTrainer: 1\n1 Gateway Ball GWY 2"
+      );
+
+      expect((await publication("DELETE", deck)).revoked).toBe(true);
+      for (const kind of KINDS) {
+        const gone = await anonymous(exportPath(token, 2, kind));
+        expect(gone.status, kind).toBe(404);
+        expect(gone.json.detail.code).toBe("PUBLISHED_DECK_NOT_FOUND");
+      }
       expect(wakeups).toEqual(baseline);
     }
   );

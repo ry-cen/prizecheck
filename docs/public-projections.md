@@ -30,7 +30,50 @@ The local auth gateway can enforce anonymous public-read budgets with `PublicRea
 
 ### Nested anonymous routes
 
-The gateway treats every `/api/public/` path as anonymous: no session lookup, no identity forwarded, whatever cookies arrive. A budgeted public route is signed with an `anon:` caller. Enrichment routes under a snapshot (`/api/public/decks/{token}/versions/{version}/...`, the Published Deck cost first) reach a snapshot only through `api/app/public_deck.py`. A route calls `public_path` (query, body and syntax), then `read_active`, then its own eligibility read, then `revalidate` before it responds; `same_printing` proves a frozen row's reference against the Printing the public catalog records name. `SnapshotGone` is 404 `PUBLISHED_DECK_NOT_FOUND`, `SnapshotChanged` is 409 `PUBLISHED_DECK_CHANGED`, `SnapshotLate` is a withheld `deadline` answer, and `ProjectionUnavailable` is 503 at entry but a withheld `validation_unavailable` answer at the final check. The module validates the token and version syntax and rejects any query string or body, reads the active frozen snapshot from the manifest under the caller's deadline (derived rows, opaque references, quantities, and a digest of the frozen content), and re-reads it before a response so that a revoke (404), a republish or a rewritten snapshot (409) is never answered with enrichment computed for other content. Enrichment never writes the manifest, so the discovery revision is unchanged by quote updates and runner writes.
+The gateway treats every `/api/public/` path as anonymous: no session lookup, no identity forwarded, whatever cookies arrive. A budgeted public route is signed with an `anon:` caller. Enrichment routes under a snapshot (`/api/public/decks/{token}/versions/{version}/...`: the Published Deck cost and the four Published Deck export routes) reach a snapshot only through `api/app/public_deck.py`. A route calls `public_path` (query, body and syntax), then `read_active`, then its own eligibility read, then `revalidate` before it responds; `same_printing` proves a frozen row's reference against the Printing the public catalog records name. `public_deck.printing_matches` is the one proof rule behind both `same_printing` and `published_cost`. `SnapshotGone` is 404 `PUBLISHED_DECK_NOT_FOUND`, `SnapshotChanged` is 409 `PUBLISHED_DECK_CHANGED`, `SnapshotLate` is a withheld `deadline` answer, and `ProjectionUnavailable` is 503 at entry but a withheld `validation_unavailable` answer at the final check. The module validates the token and version syntax and rejects any query string or body, reads the active frozen snapshot from the manifest under the caller's deadline (derived rows, opaque references, quantities, and a digest of the frozen content), and re-reads it before a response so that a revoke (404), a republish or a rewritten snapshot (409) is never answered with enrichment computed for other content. Enrichment never writes the manifest, so the discovery revision is unchanged by quote updates and runner writes.
+
+Export routes are unbudgeted and use `read_for_export`/`revalidate_for_export`, which map every failure to an HTTP error (no withheld answer).
+
+### Published Deck exports (tickets 13 and 14)
+
+Four anonymous routes export the active frozen snapshot, and take only a token and a version:
+
+- `GET /api/public/decks/{token}/versions/{version}/exports/live` answers `PublishedLiveExportView` (`version, digest, status, text, inline, byte_length, total_copies, blockers`);
+- `.../exports/live.txt` streams the Live text;
+- `.../exports/tcgplayer` answers `PublishedMassEntryView` (`version, digest, status, url, fallback_reason, text, inline, byte_length, lines, line_count, less_specific_count, total_copies`);
+- `.../exports/tcgplayer.txt` streams the Mass Entry text.
+
+Any query string or body is `422 INVALID_REQUEST`; POST is the framework's 405. Every answer and every route-raised error carries `PUBLIC_HEADERS` (`Cache-Control: no-store`, `X-Robots-Tag: noindex, nofollow`). No answer contains an internal UUID, owner id or Deck id.
+
+| status | code                            | when                                                                                             |
+| ------ | ------------------------------- | ------------------------------------------------------------------------------------------------ |
+| 422    | `INVALID_REQUEST`               | a query string or a body                                                                         |
+| 404    | `PUBLISHED_DECK_NOT_FOUND`      | bad token or version syntax, a token not active at entry, or no longer active at the final check |
+| 409    | `PUBLISHED_DECK_CHANGED`        | another active version, or the digest changed between entry and the final check                  |
+| 503    | `PUBLIC_PROJECTION_UNAVAILABLE` | the manifest is unreadable, invalid or late, at entry or at the final check                      |
+| 503    | `PUBLIC_CATALOG_UNAVAILABLE`    | the record store is unreadable or late while eligibility is read                                 |
+| 422    | `DECK_EMPTY`                    | `.txt` of an empty snapshot                                                                      |
+| 409    | `LIVE_EXPORT_BLOCKED`           | `live.txt` while any row blocks                                                                  |
+
+Exports have no withheld answer: a failure is an error, and the snapshot route stays available.
+
+**Deadline.** One deadline of `EXPORT_SECONDS` (5 s) is computed per request and bounds the entry read, the eligibility read and revalidation. The routes are synchronous, because the HTTP record adapter refuses to run on an event loop. Each route reads the snapshot, reads eligibility, builds the export, then revalidates (token, version, digest) before it answers, including before a `.txt` stream starts, so a revoke gives 404 and a republish or same-version rewrite gives 409.
+
+**Live.** A row's Printing is proven when its frozen Printing reference is present and `live_states` resolves it to a well-formed public Printing record. Marketplace state is never read, so a quarantine of the Edition never changes or blocks Live. The text uses the current reviewed identity of that Printing; blockers show the frozen name, set, number and descriptor. An unproven row blocks with reason `unproven_reference` and the snapshot stays readable; an unsupported or suspended Printing blocks every row with its reviewed reason.
+
+**Mass Entry.** A row gets a product only when `marketplace_states` says the Edition is `product_eligible`, `same_printing` holds against the Edition record's Printing, and the frozen variant is known (not the Unspecified Variant). A quarantine turns the link into complete `missing_mapping` text at once. There is one line per proven Printing; unproven rows stay on their own name-only lines, labelled less specific. There is no specificity crosswalk, so the frozen Card Identity name is the line name.
+
+**Reuse.** Formatting, grouping, blocking, fallback, the inline limit, the URL limit and the downloads come from the private formatters (`live_export.format_live`, `mass_entry_export.format_mass_entry`) and the shared `export_fields`/`view_fields`/`text_download` helpers in `deck_live_export` and `deck_mass_entry`. The private routes are unchanged.
+
+**Legacy rows.** A snapshot row without references is never proven, because no store of preserved reviewed publication evidence exists and association sidecars and private lookups are forbidden. Live blocks it with `unproven_reference`, Mass Entry uses a name-only line, and a republish recaptures the references.
+
+**Digest.** The digest is returned for diagnostics and checked server-side within a request (a change is 409); it is never an input. The client discards an answer for another version and re-reads the snapshot on 409 or 404. The snapshot route and its allowlist are unchanged (an owner decision).
+
+**Eligibility lag.** Eligibility comes from the store's `catalog:*` and `quarantine:*` records, so a PostgreSQL decision, suspension or quarantine reaches the exports only after outbox delivery, as for prices.
+
+**Isolation.** The routes make zero session, PostgreSQL and private-inventory access, write no record, and leave the manifest bytes and the discovery revision unchanged. They are proven by `api/tests/test_published_live_export.py`, `api/tests/test_published_mass_entry.py`, the export test in `auth/tests/published-cost.test.ts` (zero gateway and API database connections for absent, forged and valid cookies), `web/tests/published-live-export.spec.ts` and `web/tests/published-mass-entry.spec.ts`.
+
+**Launch gates.** Actual Live import per supported case and actual Mass Entry product and text acceptance remain separate, independent launch-checklist gates. Automated tests are not destination acceptance. No rule is activated.
 
 ## Shared public records
 
