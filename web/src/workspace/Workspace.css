@@ -145,6 +145,9 @@
   margin: 0;
   padding: var(--space-7) var(--layout-gutter) var(--space-12);
   min-width: 0;
+  /* The gallery area takes the remaining height (ticket 105: empty space below it starts a marquee). */
+  display: flex;
+  flex-direction: column;
 }
 .ws-heading {
   display: flex;
@@ -325,6 +328,8 @@
   }
   .ws-root .ws-main {
     padding-top: var(--space-5);
+    /* Room for the selection strip, so it never covers the last row. */
+    padding-bottom: calc(var(--space-12) * 2);
   }
   .ws-heading h1 {
     font-size: var(--font-size-xl);
