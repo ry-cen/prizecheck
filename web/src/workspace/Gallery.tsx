@@ -33,8 +33,6 @@ type Props = {
   display: DisplayPrefs;
   /** True in All owned: each tile shows its source Location's name. */
   caption: boolean;
-  /** Full path such as "Shelf / Binder 2", or undefined when the tree doesn't know the Location. */
-  locationPath: (id: string) => string | undefined;
   /** The Location's own name, or undefined when the tree doesn't know it. */
   locationName: (id: string) => string | undefined;
   emptyMessage: string;

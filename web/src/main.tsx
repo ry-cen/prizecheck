@@ -224,6 +224,7 @@ function App() {
   if (view === "workspace")
     return (
       <Workspace
+        userId={session.userId ?? ""}
         onOpenLocations={() => navigate("locations")}
         onSignOut={() => void signOut()}
       />

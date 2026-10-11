@@ -10,11 +10,22 @@ import { CreateLocationDialog } from "./CreateLocationDialog";
 import { DeckHeading } from "./DeckHeading";
 import { Gallery } from "./Gallery";
 import {
-  DEFAULT_DISPLAY,
+  DisplayControls,
+  FilterControls,
+  FiltersDrawer,
+  FiltersDrawerButton,
+  FiltersToggle,
+  SortControl,
+} from "./GalleryControls";
+import {
+  activeFilterCount,
   plural,
+  queryToParams,
   type DisplayPrefs,
+  type GalleryFilters,
   type GalleryQuery,
 } from "./galleryModel";
+import { useGalleryPrefs } from "./galleryPrefs";
 import { DetailsSheet, Inspector } from "./Inspector";
 import { LocationNav, type WorkspaceView } from "./LocationNav";
 import { ManageLocations, ManageLocationsButton } from "./ManageLocations";
@@ -22,7 +33,9 @@ import { indexLocations } from "./locationTree";
 import { MOBILE_QUERY, useMediaQuery } from "./media";
 import { SelectionBar } from "./SelectionBar";
 import { selectionScope } from "./selectionModel";
+import { useDebouncedValue } from "./useDebouncedValue";
 import { useGalleryData } from "./useGalleryData";
+import { useOwnedSets } from "./useOwnedSets";
 import { useSelection } from "./useSelection";
 import { clearLinkedLocation, readLinkedLocation } from "./workspaceLink";
 import "./Workspace.css";
@@ -31,13 +44,15 @@ const FOCUSABLE =
   'button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex="-1"])';
 
 type Props = {
+  /** The signed-in user; their gallery preferences are stored under it in this browser. */
+  userId: string;
   /** Opens the existing Locations view. */
   onOpenLocations: () => void;
   onSignOut: () => void;
 };
 
 /** The collector workspace: header, Location sidebar (desktop) or drawer (mobile), and the gallery area. */
-export function Workspace({ onOpenLocations, onSignOut }: Props) {
+export function Workspace({ userId, onOpenLocations, onSignOut }: Props) {
   const [nodes, setNodes] = useState<TreeNode[]>([]);
   const [ownerRevision, setOwnerRevision] = useState<number | null>(null);
   const [treeState, setTreeState] = useState<"loading" | "ready" | "error">(
@@ -53,8 +68,17 @@ export function Workspace({ onOpenLocations, onSignOut }: Props) {
   const [createFor, setCreateFor] = useState<string | null | undefined>(
     undefined
   );
-  // Presentation only; ticket 104 persists it. Sort, search and filters belong in the gallery query.
-  const [display, setDisplay] = useState<DisplayPrefs>(DEFAULT_DISPLAY);
+  // Sort, filter values and display choices, remembered per user in this browser. Search text isn't.
+  const [prefs, setPrefs] = useGalleryPrefs(userId);
+  const display = prefs.display;
+  const setDisplay = (next: DisplayPrefs) =>
+    setPrefs((previous) => ({ ...previous, display: next }));
+  const setFilters = (next: GalleryFilters) =>
+    setPrefs((previous) => ({ ...previous, filters: next }));
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [filtersDrawerOpen, setFiltersDrawerOpen] = useState(false);
+  const filtersOpener = useRef<HTMLButtonElement>(null);
+  const closeFiltersDrawer = useCallback(() => setFiltersDrawerOpen(false), []);
   const [manageOpen, setManageOpen] = useState(false);
   const ownedTotals = useRef(new Map<string, number>()).current;
   const drawerOpener = useRef<HTMLButtonElement>(null);
@@ -80,9 +104,20 @@ export function Workspace({ onOpenLocations, onSignOut }: Props) {
   // A Location that disappeared from the tree falls back to All owned.
   const heading = current?.name ?? "All owned";
   const galleryView: WorkspaceView = current ? view : "all";
-  // Ticket 104 adds search, filters and sort here; the selection scope ignores `sort`.
-  const galleryQuery: GalleryQuery = { view: galleryView };
+  // Typing settles for 250 ms before the gallery reloads. The selection scope ignores `sort`, so
+  // sorting keeps the selection and search or filter changes clear it.
+  const searchText = useDebouncedValue(query, 250);
+  const galleryQuery: GalleryQuery = {
+    view: galleryView,
+    search: searchText,
+    filters: prefs.filters,
+    sort: prefs.sort,
+  };
   const gallery = useGalleryData(galleryQuery);
+  const galleryKey = JSON.stringify(queryToParams(galleryQuery));
+  const sets = useOwnedSets(galleryView, gallery.ownerRevision);
+  const narrowed =
+    searchText.trim() !== "" || activeFilterCount(prefs.filters) > 0;
   const mobile = useMediaQuery(MOBILE_QUERY);
   const selection = useSelection({
     holdings: gallery.holdings,
@@ -98,10 +133,10 @@ export function Workspace({ onOpenLocations, onSignOut }: Props) {
     (id: string) => index.byId.get(id)?.name,
     [index]
   );
-  // A new view starts at the top of its gallery.
+  // A new view, search, filter or sort starts at the top of its gallery.
   useEffect(() => {
     window.scrollTo(0, 0);
-  }, [galleryView]);
+  }, [galleryKey]);
 
   // A link from the Decks page (/workspace?location=<id>) opens that Storage Leaf or Deck once the tree
   // has loaded, with its folders expanded. The address is cleaned at once, so a reload opens All owned.
@@ -215,6 +250,7 @@ export function Workspace({ onOpenLocations, onSignOut }: Props) {
       aria-label="Search cards"
       placeholder="Search your cards…"
       autoComplete="off"
+      maxLength={120}
       value={query}
       onChange={(event) => setQuery(event.target.value)}
     />
@@ -248,7 +284,7 @@ export function Workspace({ onOpenLocations, onSignOut }: Props) {
     <div className="ws-root">
       <div
         className="ws-surface"
-        inert={drawerOpen || selection.details !== null}
+        inert={drawerOpen || filtersDrawerOpen || selection.details !== null}
       >
         <header className="ws-header">
           <button
@@ -269,6 +305,12 @@ export function Workspace({ onOpenLocations, onSignOut }: Props) {
             PrizeCheck
           </span>
           {search("ws-mobile-only ws-header-search")}
+          <FiltersDrawerButton
+            ref={filtersOpener}
+            filters={prefs.filters}
+            open={filtersDrawerOpen}
+            onOpen={() => setFiltersDrawerOpen(true)}
+          />
           <nav aria-label="App" className="ws-app-nav ws-desktop-only">
             <button type="button" onClick={onOpenLocations}>
               Locations view
@@ -324,45 +366,46 @@ export function Workspace({ onOpenLocations, onSignOut }: Props) {
             )}
             <div className="ws-toolbar ws-desktop-only">
               {search("ws-toolbar-search")}
+              <FiltersToggle
+                filters={prefs.filters}
+                open={filtersOpen}
+                onToggle={() => setFiltersOpen((open) => !open)}
+              />
               <div className="ws-display-controls">
-                <label className="ws-display-field">
-                  <span>Card size</span>
-                  <select
-                    value={display.size}
-                    onChange={(event) =>
-                      setDisplay({
-                        ...display,
-                        size:
-                          event.target.value === "medium" ? "medium" : "small",
-                      })
-                    }
-                  >
-                    <option value="small">Small</option>
-                    <option value="medium">Medium</option>
-                  </select>
-                </label>
-                <button
-                  type="button"
-                  aria-pressed={display.names}
-                  onClick={() =>
-                    setDisplay({ ...display, names: !display.names })
+                <SortControl
+                  sort={prefs.sort}
+                  onChange={(sort) =>
+                    setPrefs((previous) => ({ ...previous, sort }))
                   }
-                >
-                  Names
-                </button>
+                />
+                <DisplayControls display={display} onChange={setDisplay} />
               </div>
             </div>
+            {filtersOpen && (
+              <section
+                id="ws-filter-panel"
+                className="ws-filter-panel ws-desktop-only"
+                aria-label="Card filters"
+              >
+                <FilterControls
+                  filters={prefs.filters}
+                  sets={sets}
+                  onChange={setFilters}
+                />
+              </section>
+            )}
             <div className="ws-gallery-layout">
               <Gallery
                 data={gallery}
                 display={display}
                 caption={galleryView === "all"}
-                locationPath={locationPath}
                 locationName={locationName}
                 emptyMessage={
-                  galleryView === "all"
-                    ? "Your Collection has no cards yet."
-                    : "This Location has no cards."
+                  narrowed
+                    ? "No cards match your search or filters."
+                    : galleryView === "all"
+                      ? "Your Collection has no cards yet."
+                      : "This Location has no cards."
                 }
                 onRetry={gallery.reload}
                 selected={selection.selected}
@@ -435,6 +478,15 @@ export function Workspace({ onOpenLocations, onSignOut }: Props) {
             </nav>
           </div>
         </div>
+      )}
+      {filtersDrawerOpen && (
+        <FiltersDrawer
+          opener={filtersOpener}
+          prefs={prefs}
+          sets={sets}
+          onChange={setPrefs}
+          onClose={closeFiltersDrawer}
+        />
       )}
       {createFor !== undefined && (
         <CreateLocationDialog
