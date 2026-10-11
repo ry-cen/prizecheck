@@ -274,8 +274,10 @@ test.describe("desktop", () => {
     await pricesToggle(page).click();
 
     const unknown = tiles(page).filter({ hasText: "$0.43" });
-    await expect(unknown).toContainText("No age");
-    await expect(unknown).not.toContainText("Age unknown");
+    // The visible label is the short one; "Age unknown" is only in the (visually hidden) description text.
+    await expect(unknown.locator(".edition-price-label")).toHaveText(
+      "· No age"
+    );
     await expect(unknown).toHaveAccessibleDescription(/^\$0\.43 · Age unknown/);
     await expect(
       tile(page, "Furret, Darkness Ablaze 2, ")
