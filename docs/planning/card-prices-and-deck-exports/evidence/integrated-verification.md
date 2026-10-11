@@ -1,6 +1,6 @@
 # Card prices and Deck exports: integrated verification evidence
 
-Ticket 15, [#64](https://github.com/ry-cen/tcg-tracker/issues/64). Recorded 2026-10-11 (UTC).
+Ticket 15, [#64](https://github.com/ry-cen/prizecheck/issues/64). Recorded 2026-10-11 (UTC).
 
 **Status:** implementation evidence only. This is not launch acceptance. Every item in the [launch checklist](../launch-checklist.md) stays pending. The fixtures are synthetic: no real catalog, provider, destination, deployment or owner walkthrough is involved.
 

@@ -2,7 +2,7 @@
 
 **Decision:** owner accepted Q1 by directing rule-based derivation without per-card stored Live mappings, then accepted Q2–Q5 individually with “yes” on 2026-10-08.
 
-**Ticket:** [Decide export metadata provenance and correction](https://github.com/ry-cen/tcg-tracker/issues/43).
+**Ticket:** [Decide export metadata provenance and correction](https://github.com/ry-cen/prizecheck/issues/43).
 
 ## Live derivation
 
@@ -30,7 +30,7 @@ Apply this policy to source-derived Printings, manual Catalog Overrides and reti
 
 Published Decks automatically use the latest verified export metadata and Live derivation rules applicable to their fixed published Printings/Editions, without owner republishing. Published names/card identity, physical descriptors and quantities remain frozen; private Deck edits cannot supply replacement export inputs. A correction must still represent the same published physical card. This does not authorize silently rewriting the snapshot to a different Printing or Edition.
 
-Invalidated or unsupported target information follows the existing blocked Live export or complete Mass Entry text fallback. Old cached eligibility cannot bypass invalidation. The public-only lookup/projection, legacy snapshots, propagation/version correctness and zero anonymous PostgreSQL wakeups remain with [Published Deck prices and snapshot compatibility](https://github.com/ry-cen/tcg-tracker/issues/39); this decision selects behavior, not storage architecture.
+Invalidated or unsupported target information follows the existing blocked Live export or complete Mass Entry text fallback. Old cached eligibility cannot bypass invalidation. The public-only lookup/projection, legacy snapshots, propagation/version correctness and zero anonymous PostgreSQL wakeups remain with [Published Deck prices and snapshot compatibility](https://github.com/ry-cen/prizecheck/issues/39); this decision selects behavior, not storage architecture.
 
 ## Active completion criteria and remaining evidence
 

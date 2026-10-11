@@ -12,9 +12,9 @@ A minor stale cross-reference in the earlier price resolution was identified; th
 
 ## Deferred requirements with explicit owners
 
-- [Published Deck prices and snapshot compatibility](https://github.com/ry-cen/tcg-tracker/issues/39): concrete public storage/coordination, old snapshots, snapshot-specific totals, revocation/version correctness and architect review of that design. The policy does not prove an eventual public architecture satisfies zero PostgreSQL wakeups.
+- [Published Deck prices and snapshot compatibility](https://github.com/ry-cen/prizecheck/issues/39): concrete public storage/coordination, old snapshots, snapshot-specific totals, revocation/version correctness and architect review of that design. The policy does not prove an eventual public architecture satisfies zero PostgreSQL wakeups.
 - `/to-spec`: numeric request/concurrency/backoff limits, queue lifetime, in-flight coordination, and protection against late/out-of-order shared-cache writes. The three-second display limit is not a provider execution or throughput guarantee.
-- [Marketplace metadata separation and existing Edition compatibility](https://github.com/ry-cen/tcg-tracker/issues/42): exact mapping and validation that distinguishes confirmed source absence from malformed/ambiguous responses.
+- [Marketplace metadata separation and existing Edition compatibility](https://github.com/ry-cen/prizecheck/issues/42): exact mapping and validation that distinguishes confirmed source absence from malformed/ambiguous responses.
 
 These are later design/implementation prerequisites, not unanswered product choices in the refresh decision. No runtime, provider, capacity, privacy/race or destination tests were performed by this review. The earlier latency sample measures only nine source requests.
 

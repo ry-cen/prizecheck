@@ -2,7 +2,7 @@
 
 **Deployment amendment:** [ADR 0002](../../../../adr/0002-defer-deployment-provider-selection.md) defers the named GitHub Actions, R2, and Neon choices below. The manual pull, private raw-generation retention, atomic promotion, and search behavior remain approved.
 
-**Execution amendment:** [ADR 0003](../../../../adr/0003-on-demand-catalog-imports.md) specifies one import process launched on demand by the owner panel, which exits after its supplied run. No permanently polling catalog worker is required. See [ticket 19](https://github.com/ry-cen/tcg-tracker/issues/34).
+**Execution amendment:** [ADR 0003](../../../../adr/0003-on-demand-catalog-imports.md) specifies one import process launched on demand by the owner panel, which exits after its supplied run. No permanently polling catalog worker is required. See [ticket 19](https://github.com/ry-cen/prizecheck/issues/34).
 
 The owner confirmed the catalog and search contract below. Earlier Card Identity and hosting resolutions apply.
 

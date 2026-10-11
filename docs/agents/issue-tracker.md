@@ -1,6 +1,6 @@
 # Issue tracker: GitHub Issues
 
-Tickets for this repository are GitHub Issues on [ry-cen/tcg-tracker](https://github.com/ry-cen/tcg-tracker/issues). Specifications, Wayfinder maps, research, prototypes, resolutions and evidence are tracked Markdown under `docs/planning/`. Use the `gh` CLI for issue operations.
+Tickets for this repository are GitHub Issues on [ry-cen/prizecheck](https://github.com/ry-cen/prizecheck/issues). Specifications, Wayfinder maps, research, prototypes, resolutions and evidence are tracked Markdown under `docs/planning/`. Use the `gh` CLI for issue operations.
 
 `.scratch/` is ignored local working space. Do not store anything there that must be shared or kept.
 
@@ -18,9 +18,9 @@ Tickets for this repository are GitHub Issues on [ry-cen/tcg-tracker](https://gi
 The active effort is `docs/planning/tcg-collection-tracker/`.
 
 - Specification: `docs/planning/tcg-collection-tracker/spec.md`
-- Implementation tickets: [issues labelled `implementation`](https://github.com/ry-cen/tcg-tracker/issues?q=label%3Aimplementation)
+- Implementation tickets: [issues labelled `implementation`](https://github.com/ry-cen/prizecheck/issues?q=label%3Aimplementation)
 - Wayfinder map: `docs/planning/tcg-collection-tracker/wayfinder/map.md`
-- Wayfinder decision tickets: [issues labelled `wayfinder`](https://github.com/ry-cen/tcg-tracker/issues?q=label%3Awayfinder)
+- Wayfinder decision tickets: [issues labelled `wayfinder`](https://github.com/ry-cen/prizecheck/issues?q=label%3Awayfinder)
 - Research: `docs/planning/tcg-collection-tracker/wayfinder/research/`
 - Prototypes: `docs/planning/tcg-collection-tracker/wayfinder/prototypes/`
 - Resolutions: `docs/planning/tcg-collection-tracker/wayfinder/resolutions/`

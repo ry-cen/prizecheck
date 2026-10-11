@@ -1,6 +1,6 @@
 # Edition marketplace-metadata compatibility audit
 
-Inspected on 2026-10-08 by a scoped read-only architect; findings integrated by the primary. Scope: [marketplace metadata separation and existing Edition compatibility](https://github.com/ry-cen/tcg-tracker/issues/42). No migration, application implementation, database write or server startup occurred.
+Inspected on 2026-10-08 by a scoped read-only architect; findings integrated by the primary. Scope: [marketplace metadata separation and existing Edition compatibility](https://github.com/ry-cen/prizecheck/issues/42). No migration, application implementation, database write or server startup occurred.
 
 ## Persisted impact is unavailable
 

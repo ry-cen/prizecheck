@@ -2,7 +2,7 @@
 
 **Status:** accepted planning proposal; no implementation approved or performed.
 
-**Ticket:** [Decide Published Deck prices and snapshot compatibility](https://github.com/ry-cen/tcg-tracker/issues/39).
+**Ticket:** [Decide Published Deck prices and snapshot compatibility](https://github.com/ry-cen/prizecheck/issues/39).
 
 **Latest review routing:** task `a514454542f348a28273eca75f185a03`; completed attempt `3c49162f1b73494d875bcc25628f54d2`.
 

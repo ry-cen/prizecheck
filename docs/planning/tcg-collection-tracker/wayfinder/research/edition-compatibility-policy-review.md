@@ -11,8 +11,8 @@ The owner-approved actual-datastore preflight and reviewed correction plan are m
 ## Requirements retained for the handoff
 
 - `/to-spec` and later implementation: target-datastore census, compatibility storage/alias representation, reviewed correction procedure, atomicity/recovery and regression evidence. These must account for references outside current Holdings.
-- [Export metadata provenance and correction](https://github.com/ry-cen/tcg-tracker/issues/43): initial/replacement mapping verification evidence, provenance, correction responsibility and maintenance. Changed mappings remain ineligible pending catalog-maintainer verification under the accepted policy.
-- [Published Deck prices and snapshot compatibility](https://github.com/ry-cen/tcg-tracker/issues/39): public coordination/storage, legacy snapshot compatibility, revocation and version-safe totals using reviewed mappings.
+- [Export metadata provenance and correction](https://github.com/ry-cen/prizecheck/issues/43): initial/replacement mapping verification evidence, provenance, correction responsibility and maintenance. Changed mappings remain ineligible pending catalog-maintainer verification under the accepted policy.
+- [Published Deck prices and snapshot compatibility](https://github.com/ry-cen/prizecheck/issues/39): public coordination/storage, legacy snapshot compatibility, revocation and version-safe totals using reviewed mappings.
 
 The local database's refused connection and small/synthetic source observations are not passing persisted-data, rollout or concurrency evidence. This was a read-only document review, not implementation or runtime testing.
 
