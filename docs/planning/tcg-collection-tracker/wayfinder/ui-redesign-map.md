@@ -10,7 +10,7 @@ An owner-agreed, spec-ready collector-workspace direction. This map indexes deci
 
 ## Notes
 
-- The working app name is **PrizeCheck** (owner, 2026-10-11), replacing the earlier working name Starbirth. "Prize check" is the player habit of working out which cards are in your Prize cards, which fits a tool for knowing what you own and where. The visual theme is input to [Decide responsive visual system](https://github.com/ry-cen/tcg-tracker/issues/47).
+- The working app name is **PrizeCheck** (owner, 2026-10-11), replacing the earlier working name Starbirth. "Prize check" is the player habit of working out which cards are in your Prize cards, which fits a tool for knowing what you own and where. The visual theme is input to [Decide responsive visual system](https://github.com/ry-cen/prizecheck/issues/47).
 - Preserve the existing domain: a Collection is an aggregate, Holdings retain fungible quantities, organizational Locations cannot hold Holdings, and a Deck is a specialized Storage Leaf.
 - The approved workspace direction is minimal: the desktop Location sidebar remains visible, while filters use the aligned toolbar and mobile controls use left/right drawers. Search remains accessible and dedicated deck-building UI is deferred.
 - The approved UI rules, including the 2026-10-09 toolbar, mobile drawer, location-creation, and contextual tile-label refinement, are in [collector workspace selection and presentation](resolutions/29-decide-collector-workspace-selection-and-presentation.md). [ADR 0005](../../../adr/0005-collector-workspace-multi-source-direction.md) records the accepted future multi-source direction without changing the MVP contract.
@@ -18,13 +18,13 @@ An owner-agreed, spec-ready collector-workspace direction. This map indexes deci
 
 ## Decisions so far
 
-- [Decide collector workspace selection and presentation](https://github.com/ry-cen/tcg-tracker/issues/48) — Use small, separate visual tiles for fungible quantities, an aligned desktop toolbar, mobile Location and Filters & display drawers, contextual location creation, and minimal inspection/action surfaces; no durable per-copy identity is introduced.
+- [Decide collector workspace selection and presentation](https://github.com/ry-cen/prizecheck/issues/48) — Use small, separate visual tiles for fungible quantities, an aligned desktop toolbar, mobile Location and Filters & display drawers, contextual location creation, and minimal inspection/action surfaces; no durable per-copy identity is introduced.
 
-- [Decide atomic multi-source inventory operations](https://github.com/ry-cen/tcg-tracker/issues/49) — Resolved by the [collector workspace spec](../../collector-workspace/spec.md) ([issue](https://github.com/ry-cen/tcg-tracker/issues/79)): extend the existing manifest flow with a per-item source Storage Leaf, commit all-or-nothing to one destination, exclude copies already there, and restore every source with one atomic Undo.
+- [Decide atomic multi-source inventory operations](https://github.com/ry-cen/prizecheck/issues/49) — Resolved by the [collector workspace spec](../../collector-workspace/spec.md) ([issue](https://github.com/ry-cen/prizecheck/issues/79)): extend the existing manifest flow with a per-item source Storage Leaf, commit all-or-nothing to one destination, exclude copies already there, and restore every source with one atomic Undo.
 
 ## Specification
 
-- [Collector workspace spec](../../collector-workspace/spec.md) ([Spec: Collector workspace](https://github.com/ry-cen/tcg-tracker/issues/79)), ready for implementation planning.
+- [Collector workspace spec](../../collector-workspace/spec.md) ([Spec: Collector workspace](https://github.com/ry-cen/prizecheck/issues/79)), ready for implementation planning.
 
 ## Not yet specified
 

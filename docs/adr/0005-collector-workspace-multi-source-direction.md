@@ -10,4 +10,4 @@ Alternatives considered: retaining single-source selection would avoid contract 
 
 Organizational Locations remain unable to hold cards. Decks remain physical Storage Leaves and eligible destinations. Dedicated deck-building UI is deferred.
 
-See [the canonical workspace resolution](../planning/tcg-collection-tracker/wayfinder/resolutions/29-decide-collector-workspace-selection-and-presentation.md) and [the pending backend decision](https://github.com/ry-cen/tcg-tracker/issues/49).
+See [the canonical workspace resolution](../planning/tcg-collection-tracker/wayfinder/resolutions/29-decide-collector-workspace-selection-and-presentation.md) and [the pending backend decision](https://github.com/ry-cen/prizecheck/issues/49).

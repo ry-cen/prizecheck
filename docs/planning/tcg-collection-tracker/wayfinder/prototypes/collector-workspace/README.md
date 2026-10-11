@@ -1,6 +1,6 @@
 # Collector workspace prototype
 
-Supports [Prototype collector workspace](https://github.com/ry-cen/tcg-tracker/issues/45). This is development-only design evidence, not production behavior or an accepted backend contract.
+Supports [Prototype collector workspace](https://github.com/ry-cen/prizecheck/issues/45). This is development-only design evidence, not production behavior or an accepted backend contract.
 
 ## Run
 
@@ -101,7 +101,7 @@ Checked at 1280×860 with real mouse drags: a drag starting in the left margin s
 
 ## Manage locations panel — 2026-10-10
 
-Supports [Decide drag and Location ordering](https://github.com/ry-cen/tcg-tracker/issues/46). The owner asked to see this panel before the decision is accepted. **Owner review pending.**
+Supports [Decide drag and Location ordering](https://github.com/ry-cen/prizecheck/issues/46). The owner asked to see this panel before the decision is accepted. **Owner review pending.**
 
 **What it shows**
 
@@ -142,4 +142,4 @@ Variants A, B, and C, including the vertical-fan screenshots and selection check
 
 ## Boundaries
 
-The current artifact does not change the quantity-based Holding model, create copy identities, write inventory, or establish a backend contract. Multi-source atomic operations remain pending in [atomic multi-source inventory operations](https://github.com/ry-cen/tcg-tracker/issues/49).
+The current artifact does not change the quantity-based Holding model, create copy identities, write inventory, or establish a backend contract. Multi-source atomic operations remain pending in [atomic multi-source inventory operations](https://github.com/ry-cen/prizecheck/issues/49).
