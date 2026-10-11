@@ -125,7 +125,10 @@ export function CardDetails({
         </p>
       </div>
       <div className="ws-details-price">
-        <InspectorPrice editionId={holding.edition_id} />
+        <InspectorPrice
+          key={holding.edition_id}
+          editionId={holding.edition_id}
+        />
         <a
           className="ws-details-report"
           href={metadataReportHref(holding.printing_id, holding.edition_id)}
