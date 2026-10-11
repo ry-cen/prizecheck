@@ -206,6 +206,8 @@ function Art({ edition }: { edition: Edition }) {
     </div>
   );
 }
+const plural = (n: number, one: string, many: string) =>
+  `${n} ${n === 1 ? one : many}`;
 export default function MinimalWorkspace() {
   const [locations, setLocations] = useState(initialLocations);
   const children = (id: string | null) =>
@@ -501,7 +503,11 @@ export default function MinimalWorkspace() {
     clear();
     setDialog(null);
     setMessage(
-      `${to ? "Moved" : "Removed"} ${changes.reduce((n, i) => n + i.quantity, 0)} copies${to ? ` to ${path(to)}` : " from your collection"}.`
+      `${to ? "Moved" : "Removed"} ${plural(
+        changes.reduce((n, i) => n + i.quantity, 0),
+        "copy",
+        "copies"
+      )}${to ? ` to ${path(to)}` : " from your collection"}.`
     );
   }
   const latest = activeOperations[0];
@@ -694,7 +700,7 @@ export default function MinimalWorkspace() {
               <span className="mw-tree-chevron" aria-hidden="true">
                 {folder ? (opened ? "⌄" : "›") : ""}
               </span>
-              <span>{location.name}</span>
+              <span title={location.name}>{location.name}</span>
               {!folder && <small>{total(location.id)}</small>}
             </button>
             {!picker && !location.deck && (
@@ -815,9 +821,9 @@ export default function MinimalWorkspace() {
       </button>
     </>
   );
-  const locationHeading = (
+  const locationHeading = (label = true) => (
     <div className="mw-location-heading">
-      <span className="mw-section-label">LOCATIONS</span>
+      {label && <span className="mw-section-label">LOCATIONS</span>}
       <button
         aria-label="Add location"
         title="Add top-level location"
@@ -851,7 +857,12 @@ export default function MinimalWorkspace() {
       <div className="mw-detail-location">
         {path(inspected.source)}
         <small>
-          {inventory[inspected.source][inspected.edition.id] || 0} copies here ·{" "}
+          {plural(
+            inventory[inspected.source][inspected.edition.id] || 0,
+            "copy",
+            "copies"
+          )}{" "}
+          here ·{" "}
           {allTiles.filter((t) => t.edition.id === inspected.edition.id).length}{" "}
           owned
         </small>
@@ -908,7 +919,7 @@ export default function MinimalWorkspace() {
         </header>
         <div className="mw-layout">
           <aside className="mw-navigation">
-            {locationHeading}
+            {locationHeading()}
             {navigation()}
           </aside>
           <main className="mw-main">
@@ -919,7 +930,8 @@ export default function MinimalWorkspace() {
                   : leaves.find((l) => l.id === view)?.name}
               </h1>
               <span>
-                {tiles.length} copies · {visibleEditions.length} editions
+                {plural(tiles.length, "copy", "copies")} ·{" "}
+                {plural(visibleEditions.length, "edition", "editions")}
               </span>
             </div>
             <div className="mw-toolbar">
@@ -1056,7 +1068,7 @@ export default function MinimalWorkspace() {
                         );
                         const badge = document.createElement("div");
                         badge.className = "mw-drag-badge";
-                        badge.textContent = `${counts} copies · ${new Set(dragItems.current.map((i) => i.id)).size} editions`;
+                        badge.textContent = `${plural(counts, "copy", "copies")} · ${plural(new Set(dragItems.current.map((i) => i.id)).size, "edition", "editions")}`;
                         document.body.append(badge);
                         e.dataTransfer.setDragImage(badge, 16, 16);
                         e.dataTransfer.setData(
@@ -1133,8 +1145,17 @@ export default function MinimalWorkspace() {
               <>
                 <strong>{selection.length} selected</strong>
                 <span className="mw-selection-editions">
-                  {new Set(grouped().map((i) => i.id)).size} editions ·{" "}
-                  {new Set(grouped().map((i) => i.source)).size} locations
+                  {plural(
+                    new Set(grouped().map((i) => i.id)).size,
+                    "edition",
+                    "editions"
+                  )}{" "}
+                  ·{" "}
+                  {plural(
+                    new Set(grouped().map((i) => i.source)).size,
+                    "location",
+                    "locations"
+                  )}
                 </span>
               </>
             ) : (
@@ -1261,7 +1282,7 @@ export default function MinimalWorkspace() {
                     <>
                       <strong>{path(destination)}</strong>
                       <p>
-                        {movingCount} copies will move.
+                        {plural(movingCount, "copy", "copies")} will move.
                         {movingCount < selection.length &&
                           ` ${selection.length - movingCount} already here will stay.`}
                       </p>
@@ -1275,15 +1296,16 @@ export default function MinimalWorkspace() {
                   disabled={!destination || !movingCount}
                   onClick={() => mutate(grouped(), destination)}
                 >
-                  Move {movingCount} copies
+                  Move {plural(movingCount, "copy", "copies")}
                 </button>
               </>
             )}
             {dialog === "remove" && (
               <>
                 <p>
-                  Remove {selection.length} selected copies from your
-                  collection?
+                  Remove{" "}
+                  {plural(selection.length, "selected copy", "selected copies")}{" "}
+                  from your collection?
                 </p>
                 <ul className="mw-removal-list">
                   {grouped().map((i) => (
@@ -1300,7 +1322,7 @@ export default function MinimalWorkspace() {
                   className="mw-danger"
                   onClick={() => mutate(grouped(), null)}
                 >
-                  Remove {selection.length} copies
+                  Remove {plural(selection.length, "copy", "copies")}
                 </button>
               </>
             )}
@@ -1309,7 +1331,7 @@ export default function MinimalWorkspace() {
             )}
             {dialog === "nav" && (
               <>
-                {locationHeading}
+                {locationHeading(false)}
                 {navigation()}
               </>
             )}

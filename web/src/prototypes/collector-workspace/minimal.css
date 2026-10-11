@@ -78,7 +78,7 @@
 }
 .mw-layout {
   display: grid;
-  grid-template-columns: 206px minmax(0, 1fr);
+  grid-template-columns: 212px minmax(0, 1fr);
   min-height: calc(100vh - 65px);
 }
 .mw-navigation {
@@ -550,7 +550,7 @@
 }
 @media (max-width: 1100px) {
   .mw-layout {
-    grid-template-columns: 180px minmax(0, 1fr);
+    grid-template-columns: 212px minmax(0, 1fr);
   }
   .mw-main {
     padding-left: 20px;
@@ -724,6 +724,7 @@
   font-size: 20px;
 }
 .mw-location-row {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 2px;
@@ -738,13 +739,18 @@
   text-align: center;
 }
 .mw-tree .mw-add-child {
+  position: absolute;
+  right: 0;
   width: 25px;
   height: 28px;
   padding: 0;
   justify-content: center;
-  flex: 0 0 25px;
   opacity: 0;
   font-size: 18px;
+  background: #101416;
+}
+.mw-tree button.active + .mw-add-child {
+  background: #29332b;
 }
 .mw-location-row:hover .mw-add-child,
 .mw-location-row:focus-within .mw-add-child {
@@ -823,9 +829,9 @@
     height: 64px;
   }
   .mw-header .mw-mobile-nav {
-    flex: 0 0 36px;
+    flex: 0 0 44px;
     justify-content: center;
-    height: 38px;
+    height: 44px;
     padding: 0;
   }
   .mw-header .mw-mobile-search {
@@ -848,8 +854,10 @@
     height: 34px;
   }
   .mw-tree .mw-add-child {
+    position: static;
+    background: transparent;
     opacity: 1;
-    flex-basis: 36px;
+    flex: 0 0 36px;
     width: 36px;
     min-height: 44px;
   }
@@ -874,6 +882,7 @@
     overflow: visible;
   }
   .mw-dialog-nav .mw-location-heading {
+    justify-content: flex-end;
     margin-left: 11px;
   }
 }

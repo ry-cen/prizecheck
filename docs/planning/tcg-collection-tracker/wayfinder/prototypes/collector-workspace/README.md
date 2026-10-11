@@ -69,12 +69,13 @@ The owner confirmed the toolbar, drawer, name-visibility, source-caption, and Lo
 - Inventory Removal was not re-run; that code was not changed, and the baseline checks above stand.
 - Screen-reader output, contrast and full keyboard-only traversal.
 
-**Observations for owner review (not changed)**
+**Observations for owner review — fixed 2026-10-10**
 
-- At 800 px the sidebar truncates long names such as "151 dis…" because the row plus reserves width.
-- The mobile Location drawer repeats its title ("Locations" heading and "LOCATIONS" label).
-- The mobile Locations header control is 36 px wide, below a 44 px target.
-- Copy reads "1 editions" for singular counts.
+- At 800 px the sidebar truncated long names such as "151 dis…". The desktop child plus now overlays the row end on hover or focus instead of reserving width. The sidebar is 212 px at every desktop width (it was 180 px at 1100 px and below), and each name has a hover title. No sample name truncates at 800 px.
+- The mobile Location drawer repeated its title. The drawer now drops the "LOCATIONS" label and keeps the root plus right-aligned under the "Locations" heading.
+- The mobile Locations header control measured 36 px wide. It is now 44×44 px.
+- Counts read "1 editions". Counts now use singular forms in the heading, selection bar, drag badge, inspector, Move and Removal dialogs and result messages, for example "1 selected · 1 edition · 1 location".
+- Checked with `npx tsc`, `npm run build` (no prototype markers in `dist/`) and the browser at 800 px and 375×812 with sample data.
 
 ## Historical evidence
 
