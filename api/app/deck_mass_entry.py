@@ -1,7 +1,11 @@
 """Private Deck TCGplayer Mass Entry export.
 
-Reads one complete, atomically captured Deck composition and the current verified product mappings
-from PostgreSQL. It reads no prices, quotes or Live data and writes nothing.
+Reads one complete, atomically captured Deck List (``capture_deck_list``) and the current verified
+product mappings from PostgreSQL. It reads no prices, quotes or Live data and writes nothing.
+
+The ``scope`` (Deck Lists 08) chooses the copies: ``not_owned`` (the default) sends only each line's
+not-owned copies, the cards the collector would buy; copies elsewhere in the Collection are left
+out because they would be moved in. ``deck_list`` sends every line at its full quantity.
 """
 from typing import Literal
 from uuid import UUID
@@ -12,7 +16,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from .catalog_targets import edition_targets
-from .decks import capture_deck_contents
+from .deck_list_capture import capture_deck_list
 from .location_tree import error
 from .main import connect, verified_user
 from .mass_entry_export import (MAX_LINK_QUANTITY, MAX_URL_BYTES, MassEntryExport, MassEntryInputRow,
@@ -21,6 +25,7 @@ from .mass_entry_export import (MAX_LINK_QUANTITY, MAX_URL_BYTES, MassEntryExpor
 router = APIRouter(prefix='/api/decks', tags=['deck-exports'])
 INLINE_LIMIT_BYTES = 256 * 1024
 NO_STORE = {'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff'}
+MassEntryScope = Literal['not_owned', 'deck_list']
 
 
 class MassEntryLineView(BaseModel):
@@ -40,14 +45,21 @@ class MassEntryView(BaseModel):
     line_count: int
     less_specific_count: int
     total_copies: str
+    # Deck Lists 08. Always filled; the defaults only keep both optional in the generated client, whose panel type
+    # (``MassEntryResult``) is shared with the Published Deck view that has neither.
+    scope: MassEntryScope = 'not_owned'
     owner_revision: int
+    deck_list_revision: int | None = None
     catalog_revision: int
 
 
-def captured_rows(deck_id: UUID, user_id: str):
-    """One consistent Deck capture, then the current mappings; no lock is held across the two."""
-    contents = capture_deck_contents(deck_id, user_id)
-    quantities = {item.edition_id: int(item.quantity) for item in contents.editions}
+def captured_rows(deck_id: UUID, user_id: str, scope: MassEntryScope):
+    """One consistent Deck List capture, then the current mappings; no lock is held across the two."""
+    contents = capture_deck_list(deck_id, user_id)
+    if scope == 'deck_list':
+        quantities = {line.edition_id: line.quantity for line in contents.lines}
+    else:
+        quantities = {line.edition_id: line.not_owned for line in contents.lines if line.not_owned > 0}
     rows = []
     if quantities:
         ids = list(quantities)
@@ -99,19 +111,22 @@ def text_download(export: MassEntryExport, headers=None) -> StreamingResponse:
 
 
 @router.get('/{deck_id}/exports/tcgplayer', response_model=MassEntryView)
-def tcgplayer_export(deck_id: UUID, user_id: str = Depends(verified_user)):
-    contents, rows = captured_rows(deck_id, user_id)
+def tcgplayer_export(deck_id: UUID, scope: MassEntryScope = Query('not_owned'), user_id: str = Depends(verified_user)):
+    contents, rows = captured_rows(deck_id, user_id, scope)
     export = formatted(rows)
-    return MassEntryView(**view_fields(export), owner_revision=contents.owner_revision,
-                         catalog_revision=contents.catalog_revision)
+    return MassEntryView(**view_fields(export), scope=scope, owner_revision=contents.owner_revision,
+                         deck_list_revision=contents.deck_list_revision, catalog_revision=contents.catalog_revision)
 
 
 @router.get('/{deck_id}/exports/tcgplayer.txt')
-def tcgplayer_download(deck_id: UUID, owner_revision: int = Query(ge=0), user_id: str = Depends(verified_user)):
-    contents, rows = captured_rows(deck_id, user_id)
+def tcgplayer_download(deck_id: UUID, owner_revision: int = Query(ge=0), scope: MassEntryScope = Query('not_owned'),
+                       deck_list_revision: int | None = Query(None, ge=1), user_id: str = Depends(verified_user)):
+    contents, rows = captured_rows(deck_id, user_id, scope)
     if contents.owner_revision != owner_revision:
         error(409, 'INVENTORY_CHANGED')
+    if deck_list_revision is not None and contents.deck_list_revision != deck_list_revision:
+        error(409, 'DECK_LIST_CHANGED')
     export = format_mass_entry(rows)
     if export.status == 'empty':
-        error(422, 'DECK_EMPTY')
+        error(422, 'DECK_EMPTY' if scope == 'deck_list' else 'NOTHING_NOT_OWNED')
     return text_download(export)

@@ -69,6 +69,48 @@ def deck_with(quantities, user=USER):
     return str(deck)
 
 
+def deck_list_with(lines, *, held=None, unsorted=None, other_deck=None, user=USER):
+    """A private Deck whose Deck List is exactly ``lines`` ``{edition_id: quantity}``, holding ``held`` in the Deck,
+    ``unsorted`` in the owner's Unsorted leaf and ``other_deck`` in another of the owner's Decks; returns its id.
+
+    Holdings go in first: moving copies into a Deck raises its lines (migration 027), so the lines are written last to
+    leave exactly the list asked for (a held Edition without a line is surplus)."""
+    deck = deck_with(held or {}, user)
+    with connect() as conn:
+        leaf = conn.execute("SELECT id FROM location WHERE owner_id=%s AND kind='storage_leaf' ORDER BY id LIMIT 1",
+                            (user,)).fetchone()["id"]
+        other = uuid4()
+        conn.execute("INSERT INTO location(id,owner_id,name,kind) VALUES (%s,%s,%s,'deck')", (other, user, f"Deck {other}"))
+        for location, copies in ((leaf, unsorted or {}), (other, other_deck or {})):
+            for edition, quantity in copies.items():
+                conn.execute("""INSERT INTO holding(owner_id,location_id,edition_id,quantity,version) VALUES (%s,%s,%s,%s,1)
+                  ON CONFLICT (owner_id,location_id,edition_id) DO UPDATE SET quantity=holding.quantity+EXCLUDED.quantity""",
+                             (user, location, edition, quantity))
+        conn.execute("DELETE FROM deck_list_line WHERE owner_id=%s AND deck_id=%s", (user, deck))
+        for edition, quantity in lines.items():
+            conn.execute("INSERT INTO deck_list_line(owner_id,deck_id,edition_id,quantity) VALUES (%s,%s,%s,%s)",
+                         (user, deck, edition, quantity))
+        conn.execute("UPDATE deck_list SET revision=revision+1 WHERE owner_id=%s AND deck_id=%s", (user, deck))
+        conn.execute("UPDATE inventory_owner SET revision=revision+1 WHERE user_id=%s", (user,))
+    return deck
+
+
+def figures(result):
+    """The fields every cost figure shares, for comparing a nested figure with the top-level one."""
+    return {key: result[key] for key in ("status", "reason", "total_copies", "priced_copies", "stale_copies",
+                                         "unknown_age_copies", "fallback_copies", "amount", "display_amount", "currency")}
+
+
+EMPTY = {"status": "empty", "reason": None, "total_copies": "0", "priced_copies": "0", "stale_copies": "0",
+         "unknown_age_copies": "0", "fallback_copies": "0", "amount": "0", "display_amount": "$0.00", "currency": "USD"}
+
+
+def detail_of(deck, user=USER):
+    response = call("GET", f"/api/decks/{deck}", user)
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
 def revision_of(user=USER):
     with connect() as conn:
         return conn.execute("SELECT revision FROM inventory_owner WHERE user_id=%s", (user,)).fetchone()["revision"]
@@ -96,6 +138,10 @@ def test_three_at_25_cents_two_stale_at_43_and_one_unpriced_is_161_and_five_of_s
     assert (result["stale_copies"], result["unknown_age_copies"]) == ("2", "0")
     assert result["owner_revision"] == revision_of()
     assert result["deck_id"] == deck
+    # Copies moved into a Deck join its Deck List, so the Deck List costs what the Holdings cost; all of it is owned.
+    assert result["deck_list_cost"] == figures(result)
+    assert result["cost_to_complete"] == EMPTY
+    assert result["deck_list_revision"] == detail_of(deck)["deck_list"]["revision"]
 
 
 def test_unknown_provider_age_is_counted_by_copy_and_never_called_fresh_or_stale(store):
@@ -154,6 +200,8 @@ def test_an_empty_deck_is_zero_dollars_with_no_cards_and_reads_no_price(store, m
     assert (result["amount"], result["display_amount"]) == ("0", "$0.00")
     assert (result["priced_copies"], result["total_copies"], result["stale_copies"], result["unknown_age_copies"]) == ("0",) * 4
     assert result["owner_revision"] == revision_of()
+    assert result["deck_list_cost"] == result["cost_to_complete"] == EMPTY
+    assert result["deck_list_revision"] == detail_of(deck)["deck_list"]["revision"]
 
 
 @pytest.mark.slow(reason='wall-clock: waits out the real 2.5 s wait window for an uncached row')
@@ -184,6 +232,9 @@ def test_a_store_outage_reports_no_numeric_coverage_only_the_total(store, monkey
     assert result["total_copies"] == "7"
     for field in ("amount", "display_amount", "priced_copies", "stale_copies", "unknown_age_copies"):
         assert result[field] is None, field
+    assert result["deck_list_cost"] == figures(result)
+    # Every line is in the Deck: nothing needs buying, so no price was needed for the cost to complete.
+    assert result["cost_to_complete"] == EMPTY
 
 
 @pytest.mark.serial(reason='wall-clock: asserts an upper bound on elapsed time')
@@ -197,6 +248,9 @@ def test_an_exhausted_budget_reports_incomplete_without_touching_the_store(store
     assert time.monotonic() - started < 0.5
     assert result["status"] == "incomplete" and result["reason"] == "deadline"
     assert result["priced_copies"] is None and result["amount"] is None
+    assert result["deck_list_revision"] is None
+    for name in ("deck_list_cost", "cost_to_complete"):
+        assert result[name] == figures(result), name
 
 
 @pytest.mark.serial(reason='wall-clock: asserts an upper bound on elapsed time')
@@ -218,6 +272,10 @@ def test_a_held_inventory_lock_answers_inside_the_budget_without_a_count(store):
     # Either the lock wait or the request clock ends first; both are honest and neither reports a count.
     assert result["status"] == "incomplete" and result["reason"] in ("inventory_unavailable", "deadline")
     assert result["total_copies"] is None and result["owner_revision"] is None and result["priced_copies"] is None
+    assert result["deck_list_revision"] is None
+    for name in ("deck_list_cost", "cost_to_complete"):
+        assert (result[name]["status"], result[name]["reason"], result[name]["total_copies"]) == (
+            "incomplete", result["reason"], None), name
 
 
 # ------------------------------------------------------------------ invalidated and superseded quotes
@@ -294,6 +352,7 @@ def test_every_copy_of_a_large_deck_is_evaluated_with_one_admission_and_one_budg
     assert 2.4 < elapsed < 3.5, elapsed
     assert (result["status"], result["priced_copies"], result["total_copies"]) == ("priced", "140", "140")
     assert (result["amount"], result["display_amount"]) == ("22", "$22.00")   # 60 x 0.10 + 80 x 0.20, nothing omitted
+    assert result["deck_list_cost"] == figures(result) and result["cost_to_complete"] == EMPTY
     assert result["fallback_copies"] == "80"  # the day-old copies kept their labelled cached quote
     sched = scheduler(store)
     assert len(sched["jobs"]) == 32 and sched["interactive"] == {}
@@ -373,3 +432,112 @@ def test_no_request_field_forces_a_refresh(store, launches):
     response = client.get(path + "?force=1&refresh=1&max_age=0", headers=headers)
     assert body_of(response)["priced_copies"] == "1"
     assert launches == [] and scheduler(store) is None
+
+
+# ------------------------------------------------------------------ Deck List cost and cost to complete (Deck Lists 08)
+
+
+def test_deck_list_cost_counts_every_line_and_cost_to_complete_only_not_owned_copies(store):
+    editions = world()
+    normal, reverse, plain = editions["normal"], editions["reverse-holofoil"], editions["unspecified"]
+    seed(store, normal, "0.25")
+    seed(store, reverse, "0.43")
+    # normal: 1 in the Deck, 1 in Unsorted, 2 not owned; reverse: 1 held by another Deck, 1 not owned;
+    # plain (never priced): 1 not owned.
+    deck = deck_list_with({normal["id"]: 4, reverse["id"]: 2, plain["id"]: 1}, held={normal["id"]: 1},
+                          unsorted={normal["id"]: 1}, other_deck={reverse["id"]: 1})
+    result = body_of(cost(deck))
+    # The top-level figure stays the cost of the Deck's Holdings.
+    assert (result["status"], result["amount"], result["priced_copies"], result["total_copies"]) == ("priced", "0.25", "1", "1")
+    listed = result["deck_list_cost"]
+    assert (listed["status"], listed["amount"], listed["display_amount"]) == ("priced", "1.86", "$1.86")
+    assert (listed["priced_copies"], listed["total_copies"]) == ("6", "7")
+    complete = result["cost_to_complete"]
+    assert (complete["status"], complete["amount"], complete["display_amount"]) == ("priced", "0.93", "$0.93")
+    assert (complete["priced_copies"], complete["total_copies"]) == ("3", "4")
+    # The cost to complete counts exactly the Deck detail's not-owned copies, from the same Holdings and Deck List.
+    detail = detail_of(deck)
+    assert complete["total_copies"] == str(sum(int(line["not_owned"]) for line in detail["ownership"]))
+    assert result["deck_list_revision"] == detail["deck_list"]["revision"]
+    assert result["owner_revision"] == detail["owner_revision"] == revision_of()
+
+
+def test_copies_elsewhere_are_never_counted_as_needing_purchase(store):
+    editions = world()
+    normal, reverse = editions["normal"], editions["reverse-holofoil"]
+    seed(store, normal, "0.25")
+    seed(store, reverse, "0.43")
+    # Every listed copy is owned, in Unsorted or in another Deck, but none is in this Deck yet.
+    deck = deck_list_with({normal["id"]: 2, reverse["id"]: 3}, unsorted={normal["id"]: 5}, other_deck={reverse["id"]: 3})
+    result = body_of(cost(deck))
+    assert figures(result) == EMPTY                       # the Deck holds no cards
+    assert (result["deck_list_cost"]["amount"], result["deck_list_cost"]["total_copies"]) == ("1.79", "5")
+    assert result["cost_to_complete"] == EMPTY            # a real $0.00: nothing needs buying
+
+
+def test_an_unpriced_not_owned_line_is_never_counted_as_zero(store):
+    editions = world()
+    normal, plain = editions["normal"], editions["unspecified"]
+    seed(store, normal, "0.25")
+    deck = deck_list_with({normal["id"]: 1, plain["id"]: 2}, held={normal["id"]: 1})
+    result = body_of(cost(deck))
+    complete = result["cost_to_complete"]
+    assert (complete["status"], complete["priced_copies"], complete["total_copies"]) == ("no_quotes", "0", "2")
+    assert (complete["amount"], complete["display_amount"]) == (None, None)
+    listed = result["deck_list_cost"]
+    assert (listed["status"], listed["amount"], listed["priced_copies"], listed["total_copies"]) == ("priced", "0.25", "1", "3")
+
+
+def test_a_deck_with_no_cards_yet_prices_its_deck_list_in_the_one_admission(store, monkeypatch):
+    editions = world()
+    normal, reverse = editions["normal"], editions["reverse-holofoil"]
+    seed(store, normal, "0.25")
+    seed(store, reverse, "0.43", updated=ago(timedelta(hours=72)))
+    calls = []
+    real_admit = price_refresh.evaluate_and_admit
+    monkeypatch.setattr(price_refresh, "evaluate_and_admit",
+                        lambda rows, *a, **k: calls.append(len(rows)) or real_admit(rows, *a, **k))
+    deck = deck_list_with({normal["id"]: 2, reverse["id"]: 1})
+    result = body_of(cost(deck))
+    assert calls == [2]                                   # every listed Edition, one admission
+    assert figures(result) == EMPTY
+    listed = result["deck_list_cost"]
+    assert (listed["status"], listed["amount"], listed["priced_copies"], listed["total_copies"]) == ("priced", "0.93", "3", "3")
+    assert listed["stale_copies"] == "1"
+    assert result["cost_to_complete"] == listed           # nothing is owned yet
+
+
+def test_cut_copies_stay_in_the_holdings_figure_but_leave_the_deck_list(store):
+    editions = world()
+    normal, reverse = editions["normal"], editions["reverse-holofoil"]
+    seed(store, normal, "0.25")
+    seed(store, reverse, "0.43")
+    deck = deck_list_with({normal["id"]: 1}, held={normal["id"]: 3, reverse["id"]: 1})
+    result = body_of(cost(deck))
+    assert (result["amount"], result["priced_copies"], result["total_copies"]) == ("1.18", "4", "4")
+    assert (result["deck_list_cost"]["amount"], result["deck_list_cost"]["total_copies"]) == ("0.25", "1")
+    assert result["cost_to_complete"] == EMPTY
+
+
+def test_a_failed_row_makes_only_the_figures_containing_it_incomplete(store, monkeypatch):
+    editions = world()
+    normal, reverse = editions["normal"], editions["reverse-holofoil"]
+    seed(store, normal, "0.25")
+    seed(store, reverse, "0.43")
+    real_quotes = prices.private_edition_quotes
+    calls = []
+
+    def failing_reverse(ids, *args, **kwargs):
+        calls.append(set(ids))
+        views = real_quotes(ids, *args, **kwargs)
+        views[reverse["id"]] = prices._failed([reverse["id"]], "store_unavailable")[reverse["id"]]
+        return views
+    monkeypatch.setattr(prices, "private_edition_quotes", failing_reverse)
+    # reverse is held but cut from the Deck List; normal is listed and not owned.
+    deck = deck_list_with({normal["id"]: 2}, held={reverse["id"]: 1})
+    result = body_of(cost(deck))
+    assert (result["status"], result["reason"], result["total_copies"]) == ("incomplete", "store_unavailable", "1")
+    assert (result["deck_list_cost"]["status"], result["deck_list_cost"]["amount"]) == ("priced", "0.5")
+    assert result["cost_to_complete"] == result["deck_list_cost"]
+    # One quote read covers the held and the listed Editions together.
+    assert calls == [{normal["id"], reverse["id"]}]

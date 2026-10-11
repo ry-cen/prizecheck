@@ -1,10 +1,16 @@
-"""Estimated Deck Cost and Pricing Coverage for one complete private Deck (ticket 09).
+"""Estimated Deck Cost and Pricing Coverage for one complete private Deck (ticket 09), with the Deck List cost and the
+cost to complete it (Deck Lists 08).
 
-One access is one consistent capture of every Holding in the Deck (``decks.capture_deck_contents``, committed and
-unlocked before any store I/O), then one ``prices.private_edition_quotes`` call over every distinct Edition in it. That
-call reads every cache row (in 128-key store batches), calls ``price_refresh.evaluate_and_admit`` exactly once for the
-whole Deck, waits at most once, and validates once, all inside the one gateway budget of this request. The Deck is
-never split into 64-Edition requests and never priced per Edition.
+One access is one consistent capture of the Deck's Holdings and Deck List (``deck_list_capture.capture_deck_list``,
+committed and unlocked before any store I/O), then one ``prices.private_edition_quotes`` call over every distinct
+Edition the Deck holds or lists. That call reads every cache row (in 128-key store batches), calls
+``price_refresh.evaluate_and_admit`` exactly once for the whole Deck, waits at most once, and validates once, all inside
+the one gateway budget of this request. The Deck is never split into 64-Edition requests and never priced per Edition.
+
+Three figures share those views. The top-level fields are the Estimated Deck Cost of the Deck's Holdings, unchanged
+for today's client. ``deck_list_cost`` covers every Deck List line and ``cost_to_complete`` only each line's not-owned
+copies; copies elsewhere in the Collection cost nothing there, since they would be moved in rather than bought. Each
+figure is folded from its own rows only, so a failed row makes incomplete only the figures that contain it.
 
 Arithmetic is exact: quantities are Python integers (base-10 strings on the wire) and quote amounts are integer
 micro-dollars, so neither a bigint quantity nor a long sum can lose a digit. The only rounding is the final display.
@@ -28,7 +34,7 @@ from pydantic import BaseModel
 from starlette.background import BackgroundTask
 
 from . import prices
-from .decks import capture_deck_contents
+from .deck_list_capture import capture_deck_list
 from .main import verified_user
 from .price_budget import Budget, trusted_budget
 
@@ -39,6 +45,20 @@ IncompleteReason = Literal['deadline', 'store_unavailable', 'validation_unavaila
 _INCOMPLETE = ('deadline', 'store_unavailable', 'validation_unavailable')
 _FALLBACK = ('timeout', 'busy', 'backoff', 'failed')
 _MICRO = 10**6
+
+
+class DeckCostFigures(BaseModel):
+    """One cost figure over a set of copies, with the same statuses, counts and labels as the top-level fields."""
+    status: CostStatus
+    reason: IncompleteReason | None = None
+    total_copies: str | None = None
+    priced_copies: str | None = None
+    stale_copies: str | None = None
+    unknown_age_copies: str | None = None
+    fallback_copies: str | None = None
+    amount: str | None = None
+    display_amount: str | None = None
+    currency: Literal['USD'] = 'USD'
 
 
 class DeckCost(BaseModel):
@@ -54,6 +74,11 @@ class DeckCost(BaseModel):
     amount: str | None = None                # Exact decimal subtotal of the priced copies.
     display_amount: str | None = None        # The only rounded form.
     currency: Literal['USD'] = 'USD'
+    # Deck Lists 08. The fields above stay the cost of the Deck's Holdings for today's client; the planned UI overhaul
+    # moves to these and retires them.
+    deck_list_revision: int | None = None    # The Deck List revision the figures belong to; None when nothing was captured.
+    deck_list_cost: DeckCostFigures          # Every Deck List line at its full quantity.
+    cost_to_complete: DeckCostFigures        # Only not-owned copies; ``empty`` ($0.00) when nothing needs buying.
 
 
 def _micros(amount: str) -> int:
@@ -109,27 +134,40 @@ def summarize(quantities: dict, views: dict) -> dict:
     return {'status': 'priced', 'amount': _exact(micros), 'display_amount': _display(micros), **base, **counts}
 
 
-def _summary(deck_id, contents, views) -> DeckCost:
-    quantities = {row.edition_id: int(row.quantity) for row in contents.editions}
-    return DeckCost(deck_id=deck_id, owner_revision=contents.owner_revision, **summarize(quantities, views))
+def _uncaptured(deck_id: UUID, reason: str) -> DeckCost:
+    """Nothing was captured: every figure is incomplete for the same reason, with no total and no coverage."""
+    figures = DeckCostFigures(status='incomplete', reason=reason)
+    return DeckCost(deck_id=deck_id, status='incomplete', reason=reason, deck_list_cost=figures,
+                    cost_to_complete=figures)
 
 
 def private_deck_cost(deck_id: UUID, user_id: str, budget: Budget, releases: list) -> DeckCost:
-    """The cost of every copy in one private Deck, inside ``budget``. Raises the capture's 404 for a foreign Deck."""
+    """The cost of one private Deck's Holdings, its Deck List and its not-owned copies, inside ``budget``.
+    Raises the capture's 404 for a foreign Deck."""
     if budget.wait_remaining() <= 0:
-        return DeckCost(deck_id=deck_id, status='incomplete', reason='deadline')
+        return _uncaptured(deck_id, 'deadline')
     try:
-        contents = prices._bounded(lambda: capture_deck_contents(deck_id, user_id, budget.pg_timeout_ms()),
+        captured = prices._bounded(lambda: capture_deck_list(deck_id, user_id, budget.pg_timeout_ms()),
                                    budget.wait_remaining())
     except prices._Late:
-        return DeckCost(deck_id=deck_id, status='incomplete', reason='deadline')
+        return _uncaptured(deck_id, 'deadline')
     except (psycopg.Error, OSError):
-        return DeckCost(deck_id=deck_id, status='incomplete', reason='inventory_unavailable')
+        return _uncaptured(deck_id, 'inventory_unavailable')
     # The capture committed: no inventory lock or connection is held from here on.
-    if not contents.editions:
-        return DeckCost(deck_id=deck_id, owner_revision=contents.owner_revision, **summarize({}, {}))
-    views = prices.private_edition_quotes([row.edition_id for row in contents.editions], budget, releases)
-    return _summary(deck_id, contents, views)
+    held = captured.holdings
+    listed = {line.edition_id: line.quantity for line in captured.lines}
+    missing = {line.edition_id: line.not_owned for line in captured.lines if line.not_owned > 0}
+    editions = list(dict.fromkeys([*held, *listed]))
+    # One read, one admission and at most one wait for every Edition the Deck holds or lists; none for an empty Deck.
+    views = prices.private_edition_quotes(editions, budget, releases) if editions else {}
+
+    def figures(quantities: dict) -> dict:
+        return summarize(quantities, {key: views[key] for key in quantities})
+
+    return DeckCost(deck_id=deck_id, owner_revision=captured.owner_revision,
+                    deck_list_revision=captured.deck_list_revision, **figures(held),
+                    deck_list_cost=DeckCostFigures(**figures(listed)),
+                    cost_to_complete=DeckCostFigures(**figures(missing)))
 
 
 @router.get('/{deck_id}/cost', response_model=DeckCost)
