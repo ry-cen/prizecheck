@@ -1,0 +1,211 @@
+# Every English set with at least one card in the TCGdex crawl of 2026-10-10 (GET /v2/en/cards, 23,736 records),
+# leaving out the digital-only Pokémon TCG Pocket series (tcgp), which the catalog import skips (api/app/catalog.py
+# EXCLUDED_SERIES). Sets listed by a series but holding no cards (jumbo, rc, sp, wp) are not imported and not listed.
+# It is the same list as card_attributes.CardAttributeRules.ACE_SPEC_SETTLED_SETS.
+#
+# api/tests/test_format_rules.py checks that every format rules file in this directory gives each set here either a
+# legal-from date ([[sets]]) or an explicit exclusion ([[excluded_sets]]). When a catalog import brings in a new set,
+# add it here and to every rules file; until then its cards check as unknown ("set legality date not recorded").
+#
+# Columns, tab-separated: set ID, TCGdex series ID, set name.
+base1	base	Base Set
+base2	base	Jungle
+base3	base	Fossil
+base4	base	Base Set 2
+base5	base	Team Rocket
+basep	base	Wizards Black Star Promos
+bw1	bw	Black & White
+bw2	bw	Emerging Powers
+bw3	bw	Noble Victories
+bw4	bw	Next Destinies
+bw5	bw	Dark Explorers
+bw6	bw	Dragons Exalted
+bw7	bw	Boundaries Crossed
+bw8	bw	Plasma Storm
+bw9	bw	Plasma Freeze
+bw10	bw	Plasma Blast
+bw11	bw	Legendary Treasures
+bwp	bw	BW Black Star Promos
+dv1	bw	Dragon Vault
+col1	col	Call of Legends
+dp1	dp	Diamond & Pearl
+dp2	dp	Mysterious Treasures
+dp3	dp	Secret Wonders
+dp4	dp	Great Encounters
+dp5	dp	Majestic Dawn
+dp6	dp	Legends Awakened
+dp7	dp	Stormfront
+dpp	dp	DP Black Star Promos
+bog	ecard	Best of game
+ecard1	ecard	Expedition Base Set
+ecard2	ecard	Aquapolis
+ecard3	ecard	Skyridge
+ex1	ex	Ruby & Sapphire
+ex2	ex	Sandstorm
+ex3	ex	Dragon
+ex4	ex	Team Magma vs Team Aqua
+ex5	ex	Hidden Legends
+ex5.5	ex	Poké Card Creator Pack
+ex6	ex	FireRed & LeafGreen
+ex7	ex	Team Rocket Returns
+ex8	ex	Deoxys
+ex9	ex	Emerald
+ex10	ex	Unseen Forces
+ex11	ex	Delta Species
+ex12	ex	Legend Maker
+ex13	ex	Holon Phantoms
+ex14	ex	Crystal Guardians
+ex15	ex	Dragon Frontiers
+ex16	ex	Power Keepers
+exu	ex	Unseen Forces Unown Collection
+gym1	gym	Gym Heroes
+gym2	gym	Gym Challenge
+hgss1	hgss	HeartGold SoulSilver
+hgss2	hgss	Unleashed
+hgss3	hgss	Undaunted
+hgss4	hgss	Triumphant
+hgssp	hgss	HGSS Black Star Promos
+lc	lc	Legendary Collection
+2011bw	mc	McDonald's Collection 2011
+2012bw	mc	McDonald's Collection 2012
+2014xy	mc	McDonald's Collection 2014
+2015xy	mc	McDonald's Collection 2015
+2016xy	mc	McDonald's Collection 2016
+2017sm	mc	McDonald's Collection 2017
+2018sm	mc	McDonald's Collection 2018
+2019sm	mc	McDonald's Collection 2019
+2021swsh	mc	McDonald's Collection 2021
+2022swsh	mc	McDonald's Collection 2022
+2023sv	mc	McDonald's Collection 2023
+2024sv	mc	McDonald's Collection 2024
+30th	me	30th Celebration
+30th-c	me	30th Classic Collection
+me01	me	Mega Evolution
+me02	me	Phantasmal Flames
+me02.5	me	Ascended Heroes
+me03	me	Perfect Order
+me04	me	Chaos Rising
+me05	me	Pitch Black
+mee	me	Mega Evolution Energy
+mep	me	MEP Black Star Promos
+miscp	misc	Miscellaneous Promos
+neo1	neo	Neo Genesis
+neo2	neo	Neo Discovery
+neo3	neo	Neo Revelation
+neo4	neo	Neo Destiny
+si1	neo	Southern Islands
+pl1	pl	Platinum
+pl2	pl	Rising Rivals
+pl3	pl	Supreme Victors
+pl4	pl	Arceus
+ru1	pl	Pokémon Rumble
+np	pop	Nintendo Black Star Promos
+pop1	pop	POP Series 1
+pop2	pop	POP Series 2
+pop3	pop	POP Series 3
+pop4	pop	POP Series 4
+pop5	pop	POP Series 5
+pop6	pop	POP Series 6
+pop7	pop	POP Series 7
+pop8	pop	POP Series 8
+pop9	pop	POP Series 9
+det1	sm	Detective Pikachu
+sm1	sm	Sun & Moon
+sm2	sm	Guardians Rising
+sm3	sm	Burning Shadows
+sm3.5	sm	Shining Legends
+sm4	sm	Crimson Invasion
+sm5	sm	Ultra Prism
+sm6	sm	Forbidden Light
+sm7	sm	Celestial Storm
+sm7.5	sm	Dragon Majesty
+sm8	sm	Lost Thunder
+sm9	sm	Team Up
+sm10	sm	Unbroken Bonds
+sm11	sm	Unified Minds
+sm12	sm	Cosmic Eclipse
+sm115	sm	Hidden Fates
+sma	sm	Hidden Fates Shiny Vault
+smp	sm	SM Black Star Promos
+mfb	sv	My First Battle
+sv01	sv	Scarlet & Violet
+sv02	sv	Paldea Evolved
+sv03	sv	Obsidian Flames
+sv03.5	sv	151
+sv04	sv	Paradox Rift
+sv04.5	sv	Paldean Fates
+sv05	sv	Temporal Forces
+sv06	sv	Twilight Masquerade
+sv06.5	sv	Shrouded Fable
+sv07	sv	Stellar Crown
+sv08	sv	Surging Sparks
+sv08.5	sv	Prismatic Evolutions
+sv09	sv	Journey Together
+sv10	sv	Destined Rivals
+sv10.5b	sv	Black Bolt
+sv10.5w	sv	White Flare
+sve	sv	Scarlet & Violet Energy
+svp	sv	SVP Black Star Promos
+cel25	swsh	Celebrations
+cel25cc	swsh	Celebrations Classic Collection
+fut2020	swsh	Pokémon Futsal 2020
+swsh1	swsh	Sword & Shield
+swsh2	swsh	Rebel Clash
+swsh3	swsh	Darkness Ablaze
+swsh3.5	swsh	Champion's Path
+swsh4	swsh	Vivid Voltage
+swsh4.5	swsh	Shining Fates
+swsh4.5sv	swsh	Shining Fates Shiny Vault
+swsh5	swsh	Battle Styles
+swsh6	swsh	Chilling Reign
+swsh7	swsh	Evolving Skies
+swsh8	swsh	Fusion Strike
+swsh9	swsh	Brilliant Stars
+swsh9tg	swsh	Brilliant Stars Trainer Gallery
+swsh10	swsh	Astral Radiance
+swsh10tg	swsh	Astral Radiance Trainer Gallery
+swsh10.5	swsh	Pokémon GO
+swsh11	swsh	Lost Origin
+swsh11tg	swsh	Lost Origin Trainer Gallery
+swsh12	swsh	Silver Tempest
+swsh12tg	swsh	Silver Tempest Trainer Gallery
+swsh12.5	swsh	Crown Zenith
+swsh12.5gg	swsh	Crown Zenith Galarian Gallery
+swshp	swsh	SWSH Black Star Promos
+tk-bw-e	tk	BW trainer Kit (Excadrill)
+tk-bw-z	tk	BW trainer Kit (Zoroark)
+tk-dp-l	tk	DP trainer Kit (Lucario)
+tk-dp-m	tk	DP trainer Kit (Manaphy)
+tk-ex-latia	tk	EX trainer Kit (Latias)
+tk-ex-latio	tk	EX trainer Kit (Latios)
+tk-ex-m	tk	EX trainer Kit 2 (Minun)
+tk-ex-p	tk	EX trainer Kit 2 (Plusle)
+tk-hs-g	tk	HS trainer Kit (Gyarados)
+tk-hs-r	tk	HS trainer Kit (Raichu)
+tk-sm-l	tk	SM trainer Kit (Lycanroc)
+tk-sm-r	tk	SM trainer Kit (Alolan Raichu)
+tk-xy-b	tk	XY trainer Kit (Bisharp)
+tk-xy-latia	tk	XY trainer Kit (Latias)
+tk-xy-latio	tk	XY trainer Kit (Latios)
+tk-xy-n	tk	XY trainer Kit (Noivern)
+tk-xy-p	tk	XY trainer Kit (Pikachu Libre)
+tk-xy-su	tk	XY trainer Kit (Suicune)
+tk-xy-sy	tk	XY trainer Kit (Sylveon)
+tk-xy-w	tk	XY trainer Kit (Wigglytuff)
+dc1	xy	Double Crisis
+g1	xy	Generations
+xy0	xy	Kalos Starter Set
+xy1	xy	XY
+xy2	xy	Flashfire
+xy3	xy	Furious Fists
+xy4	xy	Phantom Forces
+xy5	xy	Primal Clash
+xy6	xy	Roaring Skies
+xy7	xy	Ancient Origins
+xy8	xy	BREAKthrough
+xy9	xy	BREAKpoint
+xy10	xy	Fates Collide
+xy11	xy	Steam Siege
+xy12	xy	Evolutions
+xya	xy	Yellow A Alternate
+xyp	xy	XY Black Star Promos

@@ -1,0 +1,337 @@
+# Pokémon TCG Standard format rules, read by api/app/format_evaluator.py.
+#
+# Maintenance (by commit only):
+#   - Every change bumps `revision` and sets `published` to the day of the change. The rules version a check reports
+#     is "<revision> (<published>)". Then re-pin the file in api/tests/test_format_rules.py (PINNED_RULES).
+#   - Every regulation mark and set entry carries a date. `legal_from` is the first day something is legal;
+#     `rotates_on` is the first day a mark is no longer legal (so G is legal on 2026-04-09 and not on 2026-04-10).
+#   - These rules describe Standard from `covers_from` on. A check for an earlier date is unknown. A mark already
+#     legal at `covers_from` has legal_from = covers_from; a mark already rotated has legal_from = rotates_on =
+#     covers_from.
+#   - Every set in imported_sets.txt is listed exactly once: in [[sets]] with its legal-from date, or in an
+#     [[excluded_sets]] group. A set in neither (a newly imported set) checks as unknown.
+#   - A set's legal-from date is the second Friday after its US release (TCG Tournament Handbook). basis =
+#     "second_friday" means legal_from was computed that way from `released` (the TCGdex releaseDate), and the gate
+#     test recomputes it. basis = "announced" means an announcement set another date; `reference` cites it.
+#   - Sources: research in docs/planning/deck-format-validation/wayfinder/research/standard-and-expanded-rules.md and
+#     tcgdex-legality-data.md. TCGdex `legal` flags are never used.
+
+format = "standard"
+name = "Standard"
+revision = 1
+published = 2026-10-11
+covers_from = 2025-04-11  # The 2025 rotation (F out) took effect at in-person events on 2025-04-11.
+
+# How a printing enters the card pool. "mark_and_set": a legal regulation mark on the date AND a set whose legal-from
+# date has passed. Basic Energy is legal regardless of either.
+pool = "mark_and_set"
+basic_energy_always_legal = true
+
+# Whether a Pokémon printing may be legal through a legal printing in its Reprint Group. Off: no primary source says it
+# may (decide-reprint-groups.md). Trainers and Energy always may (ticket 13).
+pokemon_reprint_inheritance = false
+
+# No card is banned in Standard (Pokémon TCG Banned Card List, read 2026-10-10).
+bans = []
+
+[limits]
+deck_size = 60            # exactly
+copies = 4                # per Card Identity
+basic_energy_exempt = true
+ace_spec_per_deck = 1
+radiant_per_deck = 1
+prism_star_per_name = 1   # per Card Identity
+
+# D, E and F were out of Standard before covers_from (F rotated on 2025-04-11).
+[[regulation_marks]]
+mark = "D"
+legal_from = 2025-04-11
+rotates_on = 2025-04-11
+
+[[regulation_marks]]
+mark = "E"
+legal_from = 2025-04-11
+rotates_on = 2025-04-11
+
+[[regulation_marks]]
+mark = "F"
+legal_from = 2025-04-11
+rotates_on = 2025-04-11
+
+# 2026 rotation, announced 2026-01-09; in-person events from 2026-04-10.
+[[regulation_marks]]
+mark = "G"
+legal_from = 2025-04-11
+rotates_on = 2026-04-10
+
+[[regulation_marks]]
+mark = "H"
+legal_from = 2025-04-11
+
+# I entered Standard with Journey Together on 2025-04-11.
+[[regulation_marks]]
+mark = "I"
+legal_from = 2025-04-11
+
+# J entered Standard with Ascended Heroes on 2026-03-06 (see me02.5 below).
+[[regulation_marks]]
+mark = "J"
+legal_from = 2026-03-06
+
+# Scarlet & Violet series. Promo sets (svp, mep) carry the date of their first products: the monthly per-promo
+# waiting period is not modelled.
+
+[[sets]]
+id = "svp"
+name = "SVP Black Star Promos"
+released = 2023-03-31
+legal_from = 2023-04-14
+basis = "second_friday"
+
+[[sets]]
+id = "sve"
+name = "Scarlet & Violet Energy"
+released = 2023-03-31
+legal_from = 2023-04-14
+basis = "second_friday"
+
+[[sets]]
+id = "sv01"
+name = "Scarlet & Violet"
+released = 2023-03-31
+legal_from = 2023-04-14
+basis = "second_friday"
+
+[[sets]]
+id = "sv02"
+name = "Paldea Evolved"
+released = 2023-06-09
+legal_from = 2023-06-23
+basis = "second_friday"
+
+[[sets]]
+id = "2023sv"
+name = "McDonald's Collection 2023"
+released = 2023-08-01
+legal_from = 2023-08-11
+basis = "second_friday"
+
+[[sets]]
+id = "sv03"
+name = "Obsidian Flames"
+released = 2023-08-11
+legal_from = 2023-08-25
+basis = "second_friday"
+
+[[sets]]
+id = "sv03.5"
+name = "151"
+released = 2023-09-22
+legal_from = 2023-10-06
+basis = "second_friday"
+
+[[sets]]
+id = "mfb"
+name = "My First Battle"
+released = 2023-09-29
+legal_from = 2023-10-13
+basis = "second_friday"
+
+[[sets]]
+id = "sv04"
+name = "Paradox Rift"
+released = 2023-11-03
+legal_from = 2023-11-17
+basis = "second_friday"
+
+[[sets]]
+id = "sv04.5"
+name = "Paldean Fates"
+released = 2024-01-26
+legal_from = 2024-02-09
+basis = "second_friday"
+
+[[sets]]
+id = "sv05"
+name = "Temporal Forces"
+released = 2024-03-22
+legal_from = 2024-04-05
+basis = "second_friday"
+
+[[sets]]
+id = "sv06"
+name = "Twilight Masquerade"
+released = 2024-05-24
+legal_from = 2024-06-07
+basis = "second_friday"
+
+[[sets]]
+id = "sv06.5"
+name = "Shrouded Fable"
+released = 2024-08-02
+legal_from = 2024-08-16
+basis = "second_friday"
+
+[[sets]]
+id = "sv07"
+name = "Stellar Crown"
+released = 2024-09-13
+legal_from = 2024-09-27
+basis = "second_friday"
+
+[[sets]]
+id = "sv08"
+name = "Surging Sparks"
+released = 2024-11-08
+legal_from = 2024-11-22
+basis = "second_friday"
+
+[[sets]]
+id = "2024sv"
+name = "McDonald's Collection 2024"
+released = 2024-12-04
+legal_from = 2024-12-13
+basis = "second_friday"
+
+[[sets]]
+id = "sv08.5"
+name = "Prismatic Evolutions"
+released = 2025-01-17
+legal_from = 2025-01-31
+basis = "second_friday"
+
+[[sets]]
+id = "sv09"
+name = "Journey Together"
+released = 2025-03-28
+legal_from = 2025-04-11
+basis = "second_friday"
+
+[[sets]]
+id = "sv10"
+name = "Destined Rivals"
+released = 2025-05-30
+legal_from = 2025-06-13
+basis = "second_friday"
+
+[[sets]]
+id = "sv10.5b"
+name = "Black Bolt"
+released = 2025-07-17
+legal_from = 2025-07-25
+basis = "second_friday"
+
+[[sets]]
+id = "sv10.5w"
+name = "White Flare"
+released = 2025-07-17
+legal_from = 2025-07-25
+basis = "second_friday"
+
+# Mega Evolution series. me03, me04 and me05 match the effective dates of their announced rule changes
+# (2026-04-10, 2026-06-05, 2026-07-31).
+
+[[sets]]
+id = "mee"
+name = "Mega Evolution Energy"
+released = 2025-09-25
+legal_from = 2025-10-03
+basis = "second_friday"
+
+[[sets]]
+id = "me01"
+name = "Mega Evolution"
+released = 2025-09-26
+legal_from = 2025-10-10
+basis = "second_friday"
+
+[[sets]]
+id = "mep"
+name = "MEP Black Star Promos"
+released = 2025-09-26
+legal_from = 2025-10-10
+basis = "second_friday"
+
+[[sets]]
+id = "me02"
+name = "Phantasmal Flames"
+released = 2025-11-14
+legal_from = 2025-11-28
+basis = "second_friday"
+
+[[sets]]
+id = "me02.5"
+name = "Ascended Heroes"
+released = 2026-01-30
+legal_from = 2026-03-06
+basis = "announced"
+reference = "Play! Pokémon, 2026-01-28: Ascended Heroes legal from 2026-03-06, after the European International Championships (reported by Bulbapedia, VGC and Wargamer)"
+
+[[sets]]
+id = "me03"
+name = "Perfect Order"
+released = 2026-03-27
+legal_from = 2026-04-10
+basis = "second_friday"
+
+[[sets]]
+id = "me04"
+name = "Chaos Rising"
+released = 2026-05-22
+legal_from = 2026-06-05
+basis = "second_friday"
+
+[[sets]]
+id = "me05"
+name = "Pitch Black"
+released = 2026-07-17
+legal_from = 2026-07-31
+basis = "second_friday"
+
+# 30th Celebration: TCGdex records no regulation marks, so its cards check as unknown whatever this date says.
+
+[[sets]]
+id = "30th"
+name = "30th Celebration"
+released = 2026-09-16
+legal_from = 2026-09-25
+basis = "second_friday"
+
+[[sets]]
+id = "30th-c"
+name = "30th Classic Collection"
+released = 2026-09-16
+legal_from = 2026-09-25
+basis = "second_friday"
+
+[[excluded_sets]]
+reason = "printed before Sword & Shield, without a regulation mark"
+noted_on = 2026-10-11
+sets = [
+  "base1", "base2", "base3", "base4", "base5", "basep", "bw1", "bw2", "bw3", "bw4", "bw5", "bw6", "bw7", "bw8",
+  "bw9", "bw10", "bw11", "bwp", "dv1", "col1", "dp1", "dp2", "dp3", "dp4", "dp5", "dp6", "dp7", "dpp", "bog",
+  "ecard1", "ecard2", "ecard3", "ex1", "ex2", "ex3", "ex4", "ex5", "ex5.5", "ex6", "ex7", "ex8", "ex9", "ex10",
+  "ex11", "ex12", "ex13", "ex14", "ex15", "ex16", "exu", "gym1", "gym2", "hgss1", "hgss2", "hgss3", "hgss4", "hgssp",
+  "lc", "2011bw", "2012bw", "2014xy", "2015xy", "2016xy", "2017sm", "2018sm", "2019sm", "miscp", "neo1", "neo2",
+  "neo3", "neo4", "si1", "pl1", "pl2", "pl3", "pl4", "ru1", "np", "pop1", "pop2", "pop3", "pop4", "pop5", "pop6",
+  "pop7", "pop8", "pop9", "det1", "sm1", "sm2", "sm3", "sm3.5", "sm4", "sm5", "sm6", "sm7", "sm7.5", "sm8", "sm9",
+  "sm10", "sm11", "sm12", "sm115", "sma", "smp", "tk-bw-e", "tk-bw-z", "tk-dp-l", "tk-dp-m", "tk-ex-latia",
+  "tk-ex-latio", "tk-ex-m", "tk-ex-p", "tk-hs-g", "tk-hs-r", "tk-sm-l", "tk-sm-r", "tk-xy-b", "tk-xy-latia",
+  "tk-xy-latio", "tk-xy-n", "tk-xy-p", "tk-xy-su", "tk-xy-sy", "tk-xy-w", "dc1", "g1", "xy0", "xy1", "xy2", "xy3",
+  "xy4", "xy5", "xy6", "xy7", "xy8", "xy9", "xy10", "xy11", "xy12", "xya", "xyp",
+]
+
+[[excluded_sets]]
+reason = "Sword & Shield era, regulation marks D to F, all rotated out by 2025-04-11"
+noted_on = 2026-10-11
+sets = [
+  "2021swsh", "2022swsh", "cel25", "cel25cc", "fut2020", "swsh1", "swsh2", "swsh3", "swsh3.5", "swsh4", "swsh4.5",
+  "swsh4.5sv", "swsh5", "swsh6", "swsh7", "swsh8", "swsh9", "swsh9tg", "swsh10", "swsh10tg", "swsh10.5", "swsh11",
+  "swsh11tg", "swsh12", "swsh12tg", "swsh12.5", "swsh12.5gg", "swshp",
+]
+
+# Card Identities whose Standard legality the research has not settled. They check as unknown.
+[[unsettled_cards]]
+identity = "Fairy Energy"
+reason = "whether Basic Fairy Energy is legal in Standard is not settled"
+noted_on = 2026-10-11
