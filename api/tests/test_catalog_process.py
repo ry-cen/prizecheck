@@ -39,14 +39,19 @@ def eventually(predicate, timeout=15):
 def test_detached_child_survives_api_restart_and_exits_after_exact_run(tmp_path):
     owner = owner_fixture()
     entered, release = Event(), Event()
-    child_pids = set()
+    child_pids, paths = set(), set()
     class FixtureSource(BaseHTTPRequestHandler):
         def do_GET(self):
             child_pids.add(int(self.headers['x-process-fixture']))
+            paths.add(self.path)
             if self.path == '/cards':
                 entered.set()
                 release.wait(15)
                 data = [{'id':'process-1'}]
+            elif self.path == '/series/tcgp':
+                data = {'id':'tcgp','sets':[{'id':'P1'}]}
+            elif self.path == '/sets/P1':
+                data = {'id':'P1','serie':{'id':'tcgp'},'cards':[]}
             else:
                 data = {'id':'process-1','name':'Pikachu','localId':'1','set':{'id':'process','name':'Process Set'},'category':'Pokemon','variants':{'normal':True}}
             body = json.dumps(data).encode()
@@ -98,6 +103,7 @@ def test_detached_child_survives_api_restart_and_exits_after_exact_run(tmp_path)
                 return held
         eventually(runner_exited)
         assert len(child_pids) == 1
+        assert {'/series/tcgp', '/sets/P1'} <= paths
         child_pid = next(iter(child_pids))
         def process_exited():
             status = subprocess.run(['ps','-p',str(child_pid),'-o','stat='],capture_output=True,text=True).stdout.strip()
