@@ -1,7 +1,7 @@
 // Generated from FastAPI OpenAPI by scripts/generate_moves_client.py. Do not edit.
 export type MoveItem = { edition_id: string; quantity: string; expected_version: number; source_id?: string | null };
 export type MoveManifest = { id: string; source_id: string | null; expires_at: string; item_count: number };
-export type MoveResult = { edition_count: number; copy_count: string; owner_revision: number; source_count: number; already_at_destination_count: string };
+export type MoveResult = { edition_count: number; copy_count: string; owner_revision: number; source_count: number; already_at_destination_count: string; undo_id?: string | null };
 
 export type MoveErrorDetail = { source_id?: string; edition_id?: string; destination_id?: string };
 export class MoveError extends Error {

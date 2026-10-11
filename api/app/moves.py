@@ -1,7 +1,7 @@
 """Short-lived selections and atomic, owner-scoped Holding Moves across one or more sources."""
 import hashlib
 import json
-from uuid import UUID, uuid4
+from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 import psycopg
 from fastapi import APIRouter, Depends, HTTPException
@@ -47,6 +47,9 @@ class MoveResult(BaseModel):
     owner_revision: int
     source_count: int
     already_at_destination_count: str
+    # The Undo record a Move or Removal created (absent for Undo itself). A replay names the same record,
+    # which may since have been undone, dismissed, superseded or expired.
+    undo_id: UUID | None = None
 
 
 def fail(status: int, code: str, **detail):
@@ -61,6 +64,12 @@ def quantity(raw: str) -> int:
     if value < 1 or value > MAX_QUANTITY:
         fail(422, "INVALID_QUANTITY")
     return value
+
+
+def undo_id_for(user_id: str, key: UUID) -> UUID:
+    """The id of the Undo record a Move or Removal with this idempotency key creates. It is derived, not
+    stored, so a replay reports it without a migration; the owner in the name keeps ids apart across owners."""
+    return uuid5(NAMESPACE_URL, f"prizecheck:inventory-undo:{user_id}:{key}")
 
 
 def lock_owner(conn, user_id: str):
@@ -101,12 +110,12 @@ def view(conn, row, user_id):
     return MoveManifest(id=row["id"], source_id=row["source_id"], expires_at=row["expires_at"].isoformat(), item_count=count)
 
 
-def replayed(previous) -> MoveResult:
+def replayed(previous, undo_id=None) -> MoveResult:
     if previous["edition_count"] is None:
         fail(409, "REPLAY_OUTCOME_UNAVAILABLE")
     return MoveResult(edition_count=previous["edition_count"], copy_count=str(previous["copy_count"]),
                       owner_revision=previous["result_revision"], source_count=previous["source_count"],
-                      already_at_destination_count=str(previous["already_at_destination_count"]))
+                      already_at_destination_count=str(previous["already_at_destination_count"]), undo_id=undo_id)
 
 
 REPLAY = """SELECT mr.command_digest,mr.result_revision,r.edition_count,r.copy_count,
@@ -210,7 +219,7 @@ def apply_selection(manifest_id, command, user_id):
             if previous:
                 if previous["command_digest"] != digest:
                     fail(409, "IDEMPOTENCY_KEY_REUSED")
-                return replayed(previous)
+                return replayed(previous, undo_id_for(user_id, command.idempotency_key))
             manifest(conn, user_id, manifest_id)
             if destination is not None and not leaf(conn, user_id, destination):
                 fail(404, "LOCATION_NOT_FOUND", destination_id=destination)
@@ -290,9 +299,10 @@ def apply_selection(manifest_id, command, user_id):
                   ON CONFLICT (owner_id,location_id,edition_id) DO UPDATE
                     SET quantity=holding.quantity+EXCLUDED.quantity,version=EXCLUDED.version""",
                              (user_id, destination, new_revision))
+            undo_id = undo_id_for(user_id, command.idempotency_key)
             result = MoveResult(edition_count=summary["editions"], copy_count=str(summary["copies"]),
                                 owner_revision=new_revision, source_count=summary["sources"],
-                                already_at_destination_count=str(scope["already"]))
+                                already_at_destination_count=str(scope["already"]), undo_id=undo_id)
             conn.execute("UPDATE inventory_owner SET revision=%s WHERE user_id=%s", (new_revision, user_id))
             conn.execute("""INSERT INTO mutation_request(owner_id,request_key,command_digest,result_revision)
               VALUES (%s,%s,%s,%s)""", (user_id, command.idempotency_key, digest, new_revision))
@@ -306,7 +316,7 @@ def apply_selection(manifest_id, command, user_id):
             conn.execute("""INSERT INTO inventory_undo(id,owner_id,action,source_id,destination_id,source_count,payload)
               SELECT %s,%s,%s,%s,%s,%s,jsonb_agg(jsonb_build_object(
                 'source_id',source_id,'edition_id',edition_id,'quantity',quantity::text))
-              FROM move_work""", (uuid4(), user_id, payload["action"], sources[0] if len(sources) == 1 else None,
+              FROM move_work""", (undo_id, user_id, payload["action"], sources[0] if len(sources) == 1 else None,
                                   destination, len(sources)))
             conn.execute("""DELETE FROM inventory_undo WHERE owner_id=%s AND id NOT IN
               (SELECT id FROM inventory_undo WHERE owner_id=%s ORDER BY created_at DESC,id DESC LIMIT 5)""", (user_id, user_id))

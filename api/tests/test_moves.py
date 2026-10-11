@@ -66,8 +66,10 @@ def test_multi_edition_move_replay_and_cross_owner_privacy():
     key = uuid4()
     result = commit(owner, manifest_id, destination, key)
     assert result.status_code == 200, result.text
-    assert result.json() == {"edition_count": 2, "copy_count": "5", "owner_revision": two["owner_revision"] + 1,
-                             "source_count": 1, "already_at_destination_count": "0"}
+    body = result.json()
+    assert body.pop("undo_id")
+    assert body == {"edition_count": 2, "copy_count": "5", "owner_revision": two["owner_revision"] + 1,
+                    "source_count": 1, "already_at_destination_count": "0"}
     assert commit(owner, manifest_id, destination, key).json() == result.json()
     assert commit(owner, manifest_id, source, key).json()["detail"]["code"] == "IDEMPOTENCY_KEY_REUSED"
     rows = quantities(owner, source, destination)
