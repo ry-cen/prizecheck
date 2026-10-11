@@ -1024,24 +1024,93 @@ export default function MinimalWorkspace() {
     manage.kind === "list"
       ? undefined
       : locations.find((l) => l.id === manage.id);
-  const locationDragProps = (target: string | null) => ({
-    onDragOver: (e: React.DragEvent) => {
-      const id = draggedLocation.current;
-      if (id && parentTargets(id).includes(target)) {
-        e.preventDefault();
-        e.dataTransfer.dropEffect = "move";
-        setManageDropHover(target ?? "top");
+  // Handle drag uses pointer events so it works with touch as well as a mouse.
+  // A press that never moves past the threshold is a tap and opens the Move picker.
+  const handleDrag = useRef<{
+    id: string;
+    x: number;
+    y: number;
+    moved: boolean;
+  } | null>(null);
+  const [dragGhost, setDragGhost] = useState<{
+    x: number;
+    y: number;
+    name: string;
+  } | null>(null);
+  const targetAt = (x: number, y: number): string | null | undefined => {
+    const node = document
+      .elementFromPoint(x, y)
+      ?.closest<HTMLElement>("[data-manage-target]");
+    if (!node) return undefined;
+    return node.dataset.manageTarget === "top"
+      ? null
+      : node.dataset.manageTarget;
+  };
+  const endHandleDrag = () => {
+    handleDrag.current = null;
+    draggedLocation.current = null;
+    setDraggingLocation(false);
+    setManageDropHover(null);
+    setDragGhost(null);
+  };
+  const handleProps = (l: SampleLocation) => ({
+    className: "mw-drag-handle",
+    "aria-label": `Move ${path(l.id)}`,
+    title: "Drag onto another location to nest it, or tap to choose",
+    onPointerDown: (e: React.PointerEvent<HTMLButtonElement>) => {
+      if (e.button !== 0) return;
+      handleDrag.current = {
+        id: l.id,
+        x: e.clientX,
+        y: e.clientY,
+        moved: false,
+      };
+      e.currentTarget.setPointerCapture(e.pointerId);
+    },
+    onPointerMove: (e: React.PointerEvent<HTMLButtonElement>) => {
+      const drag = handleDrag.current;
+      if (!drag) return;
+      if (!drag.moved && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 6)
+        return;
+      if (!drag.moved) {
+        drag.moved = true;
+        draggedLocation.current = drag.id;
+        setDraggingLocation(true);
+      }
+      setDragGhost({ x: e.clientX, y: e.clientY, name: l.name });
+      const target = targetAt(e.clientX, e.clientY);
+      setManageDropHover(
+        target !== undefined && parentTargets(drag.id).includes(target)
+          ? (target ?? "top")
+          : null
+      );
+      // Scroll the panel when dragging near its top or bottom edge.
+      const panel = dialogRef.current;
+      if (panel) {
+        const box = panel.getBoundingClientRect();
+        if (e.clientY < box.top + 48) panel.scrollTop -= 12;
+        else if (e.clientY > box.bottom - 48) panel.scrollTop += 12;
       }
     },
-    onDragLeave: () => setManageDropHover(null),
-    onDrop: (e: React.DragEvent) => {
-      const id = draggedLocation.current;
-      e.preventDefault();
-      setManageDropHover(null);
-      if (id && parentTargets(id).includes(target)) {
-        setManageError("");
-        setManage({ kind: "move", id, target });
+    onPointerUp: (e: React.PointerEvent<HTMLButtonElement>) => {
+      const drag = handleDrag.current;
+      if (!drag) return;
+      if (!drag.moved) {
+        endHandleDrag();
+        startManage({ kind: "move", id: drag.id });
+        return;
       }
+      const target = targetAt(e.clientX, e.clientY);
+      endHandleDrag();
+      if (target !== undefined && parentTargets(drag.id).includes(target)) {
+        setManageError("");
+        setManage({ kind: "move", id: drag.id, target });
+      }
+    },
+    onPointerCancel: endHandleDrag,
+    onClick: (e: React.MouseEvent<HTMLButtonElement>) => {
+      // Keyboard activation (Enter or Space) has no pointer events.
+      if (e.detail === 0) startManage({ kind: "move", id: l.id });
     },
   });
   const dropTargetClass = (target: string | null) =>
@@ -1056,22 +1125,13 @@ export default function MinimalWorkspace() {
     children(parent).map((l) => (
       <li key={l.id}>
         <div
-          className={`mw-manage-row ${dropTargetClass(l.id)}`}
-          draggable
-          onDragStart={(e) => {
-            draggedLocation.current = l.id;
-            setDraggingLocation(true);
-            e.dataTransfer.effectAllowed = "move";
-            e.dataTransfer.setData("application/x-location", l.id);
-          }}
-          onDragEnd={() => {
-            draggedLocation.current = null;
-            setDraggingLocation(false);
-            setManageDropHover(null);
-          }}
-          {...locationDragProps(l.id)}
-          style={{ paddingLeft: 10 + level * 16 }}
+          className={`mw-manage-row ${dropTargetClass(l.id)} ${draggingLocation && draggedLocation.current === l.id ? "mw-manage-lifted" : ""}`}
+          data-manage-target={l.id}
+          style={{ paddingLeft: 4 + level * 16 }}
         >
+          <button {...handleProps(l)}>
+            <span aria-hidden="true">☰</span>
+          </button>
           <span className="mw-manage-name">
             <span title={path(l.id)}>{l.name}</span>
             <small>{kindLabel(l)}</small>
@@ -1082,12 +1142,6 @@ export default function MinimalWorkspace() {
               aria-label={`Rename ${path(l.id)}`}
             >
               Rename
-            </button>
-            <button
-              onClick={() => startManage({ kind: "move", id: l.id })}
-              aria-label={`Move ${path(l.id)}`}
-            >
-              Move
             </button>
             {l.deck ? (
               // Decks can't have children; the spacer keeps action columns aligned.
@@ -1121,20 +1175,25 @@ export default function MinimalWorkspace() {
     ));
   const managePanel = (
     <div className="mw-manage">
+      {dragGhost && (
+        <div
+          className="mw-drag-ghost"
+          style={{ left: dragGhost.x + 14, top: dragGhost.y + 10 }}
+          aria-hidden="true"
+        >
+          {dragGhost.name}
+        </div>
+      )}
       {manage.kind === "list" && (
         <>
           <p className="mw-manage-hint">
-            <span className="mw-desktop">
-              Drag a location onto another to nest it, or onto Top level. Every
-              move asks you to confirm.
-            </span>
-            <span className="mw-mobile">
-              Use Move to nest a location or bring it to the top level.
-            </span>
+            Drag a location by its ☰ handle onto another location to nest it,
+            or onto Top level. Tap the handle to choose from a list instead.
+            Every move asks you to confirm.
           </p>
           <div
-            className={`mw-manage-top mw-desktop ${dropTargetClass(null)}`}
-            {...locationDragProps(null)}
+            className={`mw-manage-top ${dropTargetClass(null)}`}
+            data-manage-target="top"
           >
             Top level
           </div>
