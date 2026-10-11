@@ -4,8 +4,10 @@ export type CollectionEntry = { edition_id: string; quantity: string; printing_i
 export type CollectionPage = { entries: CollectionEntry[]; owner_revision: number; catalog_revision: number; next_cursor?: string | null };
 export type Distribution = { holdings: HoldingView[] };
 export type CollectionTotals = { holdings: number; editions: number; copies: string };
-export type CollectionHoldingView = { edition_id: string; quantity: string; version: number; printing_id: string; printing_name: string; set_id: string; set_name: string; collector_number: string; descriptor: Record<string, unknown>; image_url: string | null; location_id: string; location_name: string; location_path: string };
+export type CollectionHoldingView = { edition_id: string; quantity: string; version: number; printing_id: string; printing_name: string; set_id: string; set_name: string; collector_number: string; descriptor: Record<string, unknown>; image_url: string | null; location_id: string; location_name: string; location_path: string; category: string | null; elemental_types: string[] };
 export type CollectionHoldingPage = { holdings: CollectionHoldingView[]; owner_revision: number; catalog_revision: number; next_cursor?: string | null; totals?: CollectionTotals | null };
+export type CollectionSet = { set_id: string; set_name: string };
+export type CollectionSetList = { sets: CollectionSet[]; owner_revision: number };
 
 export type CollectionFilters = { name?: string; set_id?: string; collector_number?: string; sort?: 'name' | 'quantity'; location_id?: string };
 async function read<T>(path: string): Promise<T> {
@@ -18,9 +20,13 @@ export const getCollection = (filters: CollectionFilters={},cursor?: string) => 
   return read<CollectionPage>(`/api/collection?${query}`);
 };
 export const getEditionDistribution = (editionId: string) => read<Distribution>(`/api/collection/editions/${encodeURIComponent(editionId)}`);
-export type CollectionHoldingQuery = { location_id?: string };
+export type CardCategory = 'Pokemon' | 'Trainer' | 'Energy';
+export type ElementalType = 'Colorless' | 'Darkness' | 'Dragon' | 'Fairy' | 'Fighting' | 'Fire' | 'Grass' | 'Lightning' | 'Metal' | 'Psychic' | 'Water';
+export type HoldingSort = 'name-asc' | 'name-desc' | 'set-asc' | 'set-desc' | 'quantity-asc' | 'quantity-desc';
+export type CollectionHoldingQuery = { location_id?: string; sort?: HoldingSort; name?: string; set_id?: string; category?: CardCategory; elemental_type?: ElementalType };
 export const getCollectionHoldings = (query: CollectionHoldingQuery={},cursor?: string) => {
   const params=new URLSearchParams(Object.entries({...query,...(cursor ? {cursor} : {})}).filter(([,value])=>value !== undefined).map(([key,value])=>[key,value as string]));
   return read<CollectionHoldingPage>(`/api/collection/holdings?${params}`);
 };
+export const getCollectionSets = (locationId?: string) => read<CollectionSetList>(`/api/collection/sets${locationId ? `?location_id=${encodeURIComponent(locationId)}` : ''}`);
 

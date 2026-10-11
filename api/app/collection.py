@@ -124,7 +124,7 @@ def distribution(edition_id: UUID,user_id: str=Depends(verified_user)):
         return Distribution(holdings=views(rows))
 
 
-# Holding-level listing for the collector workspace gallery (ticket #103).
+# Holding-level listing for the collector workspace gallery (tickets #103 and #104).
 # One row per Holding (Storage Leaf + Card Edition), never per copy: the client expands quantities into tiles.
 HOLDING_PAGE_SIZE = 500
 # Full Location paths such as "Shelf / Binder 2". The depth guard only stops a corrupt cycle;
@@ -135,21 +135,61 @@ HOLDING_PATHS = """WITH RECURSIVE paths AS (
   SELECT child.id,parent.path||' / '||child.name,parent.depth+1
   FROM location child JOIN paths parent ON child.parent_id=parent.id
   WHERE child.owner_id=%s AND parent.depth<32)"""
+# Every sort key is NOT NULL: a NULL would drop rows from the keyset comparison.
+# edition_total is the Card Edition's copies within the listed rows (the view after search and filters).
 HOLDING_COLUMNS = """h.edition_id,h.location_id,l.name AS location_name,coalesce(lp.path,l.name) AS location_path,h.quantity,h.version,
   p.id AS printing_id,coalesce(pd.display_name,ci.display_name) AS printing_name,
   coalesce(pd.set_id,'') AS set_id,coalesce(pd.set_name,'') AS set_name,
   coalesce(pd.collector_number,'') AS collector_number,e.descriptor,pd.image_url,
+  pm.category,coalesce(pm.elemental_types,'{}') AS elemental_types,
   coalesce(lower(pd.display_name),lower(ci.display_name)) AS search_name,
-  lower(coalesce(lp.path,l.name)) AS location_key"""
+  lower(coalesce(lp.path,l.name)) AS location_key,
+  lower(coalesce(pd.set_name,'')) AS set_key,
+  substring(coalesce(pd.collector_number,'') from '^[0-9]+') IS NULL AS number_missing,
+  coalesce(substring(pd.collector_number from '^[0-9]+')::numeric,0) AS number_value,
+  lower(coalesce(pd.collector_number,'')) AS number_key,
+  sum(h.quantity) OVER (PARTITION BY h.edition_id) AS edition_total"""
 HOLDING_FROM = """FROM holding h JOIN location l ON l.id=h.location_id AND l.owner_id=h.owner_id
   LEFT JOIN paths lp ON lp.id=h.location_id
   JOIN catalog_edition e ON e.id=h.edition_id
   JOIN catalog_printing p ON p.id=e.printing_id
   JOIN catalog_identity ci ON ci.id=p.identity_id
   LEFT JOIN catalog_printing_display pd ON pd.printing_id=p.id
+  LEFT JOIN catalog_printing_metadata pm ON pm.printing_id=p.id
   WHERE h.owner_id=%s"""
-# Card Edition (by name, then id), then source Location (by full path, then id).
-HOLDING_ORDER = 'search_name,edition_id,location_key,location_id'
+HoldingSort = Literal['name-asc', 'name-desc', 'set-asc', 'set-desc', 'quantity-asc', 'quantity-desc']
+CardCategory = Literal['Pokemon', 'Trainer', 'Energy']
+ElementalType = Literal['Colorless', 'Darkness', 'Dragon', 'Fairy', 'Fighting', 'Fire', 'Grass', 'Lightning',
+                        'Metal', 'Psychic', 'Water']
+# Copies of one Card Edition stay together and in source Location order, whatever the sort and direction.
+LOCATION_KEYS = (('location_key', False), ('location_id', False))
+
+
+def holding_keys(sort):
+    """(column, descending) sort keys. Every key before edition_id is a Card Edition attribute, so an
+    Edition's Holdings stay adjacent; the Location keys always ascend."""
+    key, direction = sort.split('-')
+    down = direction == 'desc'
+    if key == 'set':
+        edition = (('set_key', down), ('set_id', down), ('number_missing', down), ('number_value', down),
+                   ('number_key', down), ('edition_id', down))
+    elif key == 'quantity':
+        # Ties read A–Z in both directions.
+        edition = (('edition_total', down), ('search_name', False), ('edition_id', False))
+    else:
+        edition = (('search_name', down), ('edition_id', down))
+    return edition + LOCATION_KEYS
+
+
+def keyset_after(keys):
+    """The rows after an anchor row under a mixed-direction ORDER BY: an OR of prefix comparisons.
+    Returns the WHERE clause and, in placeholder order, the anchor columns to bind."""
+    terms, columns = [], []
+    for index, (column, descending) in enumerate(keys):
+        equal = [f'{name}=%s' for name, _ in keys[:index]]
+        terms.append('(' + ' AND '.join([*equal, f"{column}{'<' if descending else '>'}%s"]) + ')')
+        columns += [name for name, _ in keys[:index]] + [column]
+    return 'WHERE ' + ' OR '.join(terms), columns
 
 
 class CollectionTotals(BaseModel):
@@ -161,6 +201,9 @@ class CollectionTotals(BaseModel):
 class CollectionHoldingView(HoldingView):
     # Full Location path such as "Shelf / Binder 2"; listing-only, other endpoints keep HoldingView.
     location_path: str
+    # Pokemon, Trainer or Energy; null when the catalog doesn't know it yet.
+    category: str | None
+    elemental_types: list[str]
 
 
 class CollectionHoldingPage(BaseModel):
@@ -173,6 +216,11 @@ class CollectionHoldingPage(BaseModel):
 
 @router.get('/holdings', response_model=CollectionHoldingPage)
 def collection_holdings(location_id: UUID | None = None,
+                        sort: HoldingSort = 'name-asc',
+                        name: str = Query(default='', max_length=120),
+                        set_id: str = Query(default='', max_length=80),
+                        category: CardCategory | None = None,
+                        elemental_type: ElementalType | None = None,
                         cursor: str | None = Query(default=None, max_length=2048),
                         user_id: str = Depends(verified_user)):
     with connect() as conn, conn.transaction():
@@ -187,11 +235,27 @@ def collection_holdings(location_id: UUID | None = None,
                 fail(404, 'LOCATION_NOT_FOUND')
             if leaf['kind'] not in ('storage_leaf', 'deck'):
                 fail(409, 'NOT_STORAGE_LEAF')
-        # Slot 3 is the sort; ticket 104 inserts its filter values before the two revisions.
-        context = ['collection-holdings', user_id, str(location_id) if location_id else None, 'name',
-                   revision, state['revision']]
-        scope = ' AND h.location_id=%s' if location_id else ''
-        base = [user_id, user_id, user_id, *([location_id] if location_id else [])]
+        name, set_id = name.strip().lower(), set_id.strip()
+        # Slot 3 is the sort; the search and filter values sit before the two revisions.
+        context = ['collection-holdings', user_id, str(location_id) if location_id else None, sort,
+                   name, set_id, category, elemental_type, revision, state['revision']]
+        conditions, condition_params = '', []
+        if location_id:
+            conditions += ' AND h.location_id=%s'; condition_params.append(location_id)
+        if name:
+            conditions += " AND coalesce(lower(pd.display_name),lower(ci.display_name)) LIKE %s ESCAPE '!'"
+            condition_params.append('%' + name.replace('!', '!!').replace('%', '!%').replace('_', '!_') + '%')
+        if set_id:
+            conditions += ' AND pd.set_id=%s'; condition_params.append(set_id)
+        if category:
+            conditions += ' AND pm.category=%s'; condition_params.append(category)
+        if elemental_type:
+            conditions += ' AND %s=ANY(pm.elemental_types)'; condition_params.append(elemental_type)
+        base = [user_id, user_id, user_id, *condition_params]
+        # Filters apply inside, so edition_total counts only the listed rows; anchors and pages filter outside.
+        listed = f'SELECT {HOLDING_COLUMNS} {HOLDING_FROM}{conditions}'
+        keys = holding_keys(sort)
+        order = ','.join(f"{column} {'DESC' if descending else 'ASC'}" for column, descending in keys)
         after, after_params = '', []
         if cursor:
             key = decode_cursor(cursor, context)
@@ -201,23 +265,56 @@ def collection_holdings(location_id: UUID | None = None,
                 fail(400, 'INVALID_CURSOR')
             # The cursor names the last Holding sent. Its sort values are re-read in this snapshot;
             # the revision check above guarantees it still exists unchanged.
-            anchor = conn.execute(f"""{HOLDING_PATHS} SELECT {HOLDING_COLUMNS} {HOLDING_FROM}{scope}
-              AND h.edition_id=%s AND h.location_id=%s""", [*base, anchor_edition, anchor_location]).fetchone()
+            anchor = conn.execute(f"""{HOLDING_PATHS} SELECT * FROM ({listed}) listed
+              WHERE edition_id=%s AND location_id=%s""", [*base, anchor_edition, anchor_location]).fetchone()
             if not anchor:
                 fail(409, 'INVENTORY_CHANGED')
-            after = f'WHERE ({HOLDING_ORDER})>(%s,%s,%s,%s)'
-            after_params = [anchor['search_name'], anchor['edition_id'], anchor['location_key'], anchor['location_id']]
-        rows = conn.execute(f"""{HOLDING_PATHS} SELECT * FROM (SELECT {HOLDING_COLUMNS} {HOLDING_FROM}{scope}) listed
-          {after} ORDER BY {HOLDING_ORDER} LIMIT %s""", [*base, *after_params, HOLDING_PAGE_SIZE + 1]).fetchall()
+            after, columns = keyset_after(keys)
+            after_params = [anchor[column] for column in columns]
+        rows = conn.execute(f"""{HOLDING_PATHS} SELECT * FROM ({listed}) listed
+          {after} ORDER BY {order} LIMIT %s""", [*base, *after_params, HOLDING_PAGE_SIZE + 1]).fetchall()
         page = rows[:HOLDING_PAGE_SIZE]
         totals = None
         if not cursor:
             counted = conn.execute(f"""{HOLDING_PATHS} SELECT count(*) AS holdings,
               count(DISTINCT h.edition_id) AS editions,coalesce(sum(h.quantity),0) AS copies
-              {HOLDING_FROM}{scope}""", base).fetchone()
+              {HOLDING_FROM}{conditions}""", base).fetchone()
             totals = CollectionTotals(holdings=counted['holdings'], editions=counted['editions'],
                                       copies=str(counted['copies']))
         next_cursor = (encode_cursor(context, [str(page[-1]['edition_id']), str(page[-1]['location_id'])])
                        if len(rows) > HOLDING_PAGE_SIZE else None)
         return CollectionHoldingPage(holdings=views(page, CollectionHoldingView), owner_revision=revision,
                                      catalog_revision=state['revision'], next_cursor=next_cursor, totals=totals)
+
+
+class CollectionSet(BaseModel):
+    set_id: str
+    set_name: str
+
+
+class CollectionSetList(BaseModel):
+    sets: list[CollectionSet]
+    owner_revision: int
+
+
+@router.get('/sets', response_model=CollectionSetList)
+def collection_sets(location_id: UUID | None = None, user_id: str = Depends(verified_user)):
+    """The sets of the cards in All owned or one Storage Leaf, once each, for the workspace Set filter.
+    Search and filters don't narrow it, so every choice stays offered."""
+    with connect() as conn, conn.transaction():
+        conn.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ')
+        owner = conn.execute('SELECT revision FROM inventory_owner WHERE user_id=%s', (user_id,)).fetchone()
+        if location_id:
+            leaf = conn.execute('SELECT kind FROM location WHERE owner_id=%s AND id=%s', (user_id, location_id)).fetchone()
+            if not leaf:
+                fail(404, 'LOCATION_NOT_FOUND')
+            if leaf['kind'] not in ('storage_leaf', 'deck'):
+                fail(409, 'NOT_STORAGE_LEAF')
+        rows = conn.execute(f"""SELECT pd.set_id,min(pd.set_name) AS set_name FROM holding h
+          JOIN catalog_edition e ON e.id=h.edition_id
+          JOIN catalog_printing_display pd ON pd.printing_id=e.printing_id
+          WHERE h.owner_id=%s{' AND h.location_id=%s' if location_id else ''} AND pd.set_id<>''
+          GROUP BY pd.set_id ORDER BY lower(min(pd.set_name)),pd.set_id""",
+                            [user_id, *([location_id] if location_id else [])]).fetchall()
+        return CollectionSetList(sets=[CollectionSet(**row) for row in rows],
+                                 owner_revision=owner['revision'] if owner else 1)
