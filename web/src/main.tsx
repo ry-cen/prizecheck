@@ -22,12 +22,21 @@ import {
   MissingCardReports,
   OwnerMissingCardReview,
 } from "./MissingCardReports";
+import { Workspace } from "./workspace/Workspace";
 import "./style.css";
+import "./tokens.css";
 
 type View =
-  "locations" | "collection" | "decks" | "catalog" | "reports" | "owner";
+  | "locations"
+  | "workspace"
+  | "collection"
+  | "decks"
+  | "catalog"
+  | "reports"
+  | "owner";
 const protectedViews: View[] = [
   "locations",
+  "workspace",
   "collection",
   "decks",
   "catalog",
@@ -212,6 +221,13 @@ function App() {
         <p role="status">{message}</p>
       </main>
     );
+  if (view === "workspace")
+    return (
+      <Workspace
+        onOpenLocations={() => navigate("locations")}
+        onSignOut={() => void signOut()}
+      />
+    );
   return (
     <main>
       <header>
@@ -231,7 +247,14 @@ function App() {
       </header>
       <nav aria-label="Main views">
         {(
-          ["locations", "collection", "decks", "catalog", "reports"] as const
+          [
+            "locations",
+            "workspace",
+            "collection",
+            "decks",
+            "catalog",
+            "reports",
+          ] as const
         ).map((item) => (
           <button
             key={item}
@@ -241,6 +264,7 @@ function App() {
             {
               {
                 locations: "Locations",
+                workspace: "Workspace",
                 collection: "Collection",
                 decks: "Decks",
                 catalog: "Catalog",

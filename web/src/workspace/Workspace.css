@@ -1,0 +1,343 @@
+/* Collector workspace shell. Every colour, space, radius and duration comes from web/src/tokens.css.
+   No colour literals in this file. Breakpoints: see the list at the top of tokens.css. */
+
+/* The page behind the workspace takes the theme background (overscroll, short content). */
+:root:has(.ws-root) {
+  background: var(--color-bg);
+}
+
+.ws-root {
+  min-height: 100vh;
+  min-height: 100dvh;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-size: var(--font-size-md);
+  line-height: var(--line-height);
+  color-scheme: dark;
+}
+.ws-root *,
+.ws-root *::before,
+.ws-root *::after {
+  box-sizing: border-box;
+}
+
+/* Undo the app-wide element styles in web/src/style.css (main cap, green buttons, header flex, h1 size,
+   input borders, orange focus ring) inside the workspace. */
+.ws-root h1,
+.ws-root h2,
+.ws-root p {
+  margin: 0;
+}
+.ws-root button,
+.ws-root input,
+.ws-root select {
+  font: inherit;
+  color: inherit;
+  margin: 0;
+  border: 1px solid var(--color-control-outline);
+  border-radius: var(--radius-control);
+  background: var(--color-surface-raised);
+}
+.ws-root button {
+  min-height: var(--target-pointer);
+  padding: var(--space-2) var(--space-3);
+  cursor: pointer;
+  transition:
+    background-color var(--motion-duration) var(--motion-ease),
+    border-color var(--motion-duration) var(--motion-ease),
+    color var(--motion-duration) var(--motion-ease);
+}
+.ws-root button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.ws-root input,
+.ws-root select {
+  padding: var(--space-2) var(--space-3);
+  min-width: 0;
+}
+.ws-root input::placeholder {
+  color: var(--color-text-subtle);
+}
+.ws-root :focus-visible {
+  outline: var(--focus-width) solid var(--color-focus);
+  outline-offset: var(--focus-offset);
+}
+
+/* Header */
+.ws-header {
+  height: var(--layout-header-height);
+  padding: 0 var(--space-7);
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: var(--space-6);
+  border-bottom: 1px solid var(--color-border);
+}
+.ws-brand {
+  font-size: var(--font-size-sm);
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.ws-brand-mark {
+  color: var(--color-accent);
+  margin-right: var(--space-2);
+}
+.ws-app-nav {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.ws-root .ws-app-nav button,
+.ws-root .ws-drawer-app-nav button {
+  border-color: transparent;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+}
+.ws-root .ws-app-nav button:hover,
+.ws-root .ws-drawer-app-nav button:hover {
+  color: var(--color-text);
+}
+.ws-root .ws-header-icon {
+  flex: 0 0 var(--target-touch);
+  width: var(--target-touch);
+  height: var(--target-touch);
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--font-size-lg);
+}
+
+/* Layout: the sidebar keeps 212 px; the main area takes the rest. The workspace never uses the
+   app-wide 900 px main cap. */
+.ws-layout {
+  display: grid;
+  grid-template-columns: var(--layout-sidebar-width) minmax(0, 1fr);
+  min-height: calc(100dvh - var(--layout-header-height));
+}
+.ws-sidebar {
+  padding: var(--space-7) var(--space-4);
+  border-right: 1px solid var(--color-border);
+  min-width: 0;
+}
+.ws-location-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin: 0 var(--space-2) var(--space-4) var(--space-3);
+}
+.ws-location-heading h2 {
+  font-size: var(--font-size-2xs);
+  font-weight: 600;
+  letter-spacing: 1.7px;
+  text-transform: uppercase;
+  color: var(--color-text-subtle);
+}
+.ws-root .ws-main {
+  max-width: none;
+  margin: 0;
+  padding: var(--space-7) var(--layout-gutter) var(--space-12);
+  min-width: 0;
+}
+.ws-heading {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-4);
+  margin-bottom: var(--space-5);
+}
+.ws-heading h1 {
+  font-size: var(--font-size-xl);
+  font-weight: 550;
+  letter-spacing: -0.5px;
+  overflow-wrap: anywhere;
+}
+.ws-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.ws-root .ws-toolbar-search {
+  flex: 1 1 180px;
+  max-width: 420px;
+  height: var(--control-height);
+}
+.ws-gallery {
+  margin-top: var(--space-6);
+  min-height: var(--space-12);
+}
+
+/* Location tree (sidebar and drawer) */
+.ws-tree ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.ws-tree > ul {
+  gap: var(--space-1);
+}
+.ws-tree ul ul {
+  margin-top: var(--space-1);
+}
+.ws-root .ws-tree-row {
+  width: 100%;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  padding-left: calc(var(--space-2) + var(--ws-tree-level, 0) * var(--space-3));
+  border-color: transparent;
+  background: transparent;
+  color: var(--color-text);
+  font-size: var(--font-size-sm);
+  text-align: left;
+}
+.ws-root .ws-tree-row:hover {
+  background: var(--color-surface-raised);
+}
+.ws-root .ws-tree-row[aria-current="page"] {
+  background: var(--color-surface-selected);
+  border-color: var(--color-accent-border);
+  color: var(--color-accent-strong);
+  font-weight: 600;
+}
+.ws-root .ws-tree-folder {
+  color: var(--color-text-muted);
+}
+/* Disclosure chevron: aria-hidden, so each row's accessible name is exactly the Location name. */
+.ws-tree-chevron {
+  flex: 0 0 10px;
+  text-align: center;
+  color: var(--color-text-subtle);
+}
+.ws-tree-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ws-tree-status {
+  margin: 0 var(--space-3);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-sm);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+/* Mobile drawer: a modal dialog anchored left, full height. */
+.ws-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: var(--color-scrim);
+}
+.ws-drawer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: var(--layout-drawer-width);
+  overflow: auto;
+  padding: var(--space-4) var(--space-4) var(--space-6);
+  background: var(--color-surface);
+  border-right: 1px solid var(--color-border-strong);
+  box-shadow: 0 0 var(--space-6) var(--color-shadow-strong);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  animation: ws-drawer-in var(--motion-duration) var(--motion-ease);
+}
+@keyframes ws-drawer-in {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: none;
+  }
+}
+.ws-drawer-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+.ws-drawer-heading h2 {
+  font-size: var(--font-size-lg);
+  font-weight: 550;
+}
+.ws-drawer .ws-tree-row {
+  min-height: var(--target-touch);
+}
+.ws-drawer-app-nav {
+  margin-top: auto;
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.ws-root .ws-drawer-app-nav button {
+  min-height: var(--target-touch);
+}
+
+/* Responsive */
+.ws-mobile-only {
+  display: none !important;
+}
+@media (max-width: 1100px) {
+  .ws-header {
+    padding: 0 var(--space-5);
+  }
+}
+@media (max-width: 760px) {
+  .ws-mobile-only {
+    display: inline-flex !important;
+  }
+  .ws-desktop-only {
+    display: none !important;
+  }
+  .ws-header {
+    padding: 0 var(--space-3);
+    gap: var(--space-2);
+  }
+  .ws-brand {
+    display: none;
+  }
+  .ws-root .ws-header-search {
+    flex: 1 1 auto;
+    width: 0;
+    height: var(--target-touch);
+  }
+  .ws-layout {
+    display: block;
+  }
+  .ws-root .ws-main {
+    padding-top: var(--space-5);
+  }
+  .ws-heading h1 {
+    font-size: var(--font-size-xl);
+  }
+}
+
+/* No motion when the device asks for less. --motion-duration is already 0 ms; this also stops
+   any animation a later component forgets to tie to the variable. */
+@media (prefers-reduced-motion: reduce) {
+  .ws-root *,
+  .ws-root *::before,
+  .ws-root *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
