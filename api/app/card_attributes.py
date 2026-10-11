@@ -1,7 +1,7 @@
 """Card attributes of each Card Printing, derived from its catalog source record.
 
-The attributes are the regulation mark, card kind, Basic Energy status, types, and Rule Box, ACE SPEC, Radiant
-and Prism Star status. ``CardAttributeRules`` holds the derivation rules: fixing a misderived class of cards is a
+The attributes are the regulation mark, card kind, Basic Energy status, types, Rule Box, ACE SPEC, Radiant and
+Prism Star status, and Basic Pokémon status. ``CardAttributeRules`` holds the derivation rules: fixing a misderived class of cards is a
 commit here, and the next catalog import (or ``scripts/derive_card_attributes.py``) re-derives every Printing.
 
 ``None`` means unknown. Missing, malformed or contradictory source data leaves an attribute unknown; it is never
@@ -32,6 +32,7 @@ class CardAttributes:
     ace_spec: bool | None = None
     radiant: bool | None = None
     prism_star: bool | None = None
+    basic_pokemon: bool | None = None    # last: migration 034 appends its column to the view
 
 
 UNKNOWN = CardAttributes()
@@ -65,8 +66,21 @@ class CardAttributeRules:
       other set (for example me06). A Basic Energy is never an ACE SPEC. Pokémon are not ACE SPEC.
     - **Radiant**: a Pokémon named "Radiant ...". ``rarity`` "Radiant Rare" without that name is unknown.
     - **Prism Star**: a card whose name contains ◇ (U+25C7). The ☆ and ★ of Pokémon Star are not Prism Star.
+    - **Basic Pokémon**: a Pokémon whose ``stage`` is in ``BASIC_STAGES`` (Basic, including Basic Pokémon V, ex, Mega
+      Evolution ex such as Mega Kangaskhan ex me01-104, Radiant and Prism Star Pokémon; and the e-card era's Baby
+      Pokémon, a kind of Basic Pokémon). Every other known stage is not Basic: Stage 1 and 2, the XY ``MEGA`` stage
+      (Mega Evolution Pokémon-EX evolve from a Pokémon-EX), VMAX, VSTAR, BREAK, LEVEL-UP, V-UNION and RESTORED (the
+      Pokémon TCG Rules, Twilight Masquerade edition: "Pokémon V-UNION are not Basic Pokémon!", p. 27, and
+      "Restored Pokémon are not Basic Pokémon!", p. 39). A Rule Box stage whose mechanic the printed name lacks
+      (Zacian swshp-SWSH135 with ``stage`` BREAK) is a contradiction, so unknown; so is a LEGEND, which the rules
+      do not cover. A missing ``stage`` (716 Black & White to Sun & Moon EX, GX and TAG TEAM printings) or one these
+      rules don't know is unknown. Trainer and Energy cards are not Basic Pokémon, including the 119 Energy cards
+      TCGdex gives ``stage`` Basic and the Fossil Items that are "played as Basic Pokémon" (Unidentified Fossil,
+      Antique Helix Fossil): such an Item is a Trainer in the hand and deck, so it never counts as a Basic Pokémon
+      during setup (Pokémon Rulings Compendium, TPCi Rules Team 2018-02-08, ruling 1189), and the deck-building
+      rule ("your deck must have at least one Basic Pokémon in it", p. 22) exists for setup.
     """
-    VERSION = 1
+    VERSION = 2
     KINDS = {"Pokemon": "pokemon", "Trainer": "trainer", "Energy": "energy"}
     POKEMON_TYPES = ("Grass", "Fire", "Water", "Lightning", "Psychic", "Fighting", "Darkness", "Metal", "Fairy",
                      "Dragon", "Colorless")
@@ -81,6 +95,8 @@ class CardAttributeRules:
     RULE_BOX_STAGES = ("VMAX", "VSTAR", "V-UNION", "MEGA", "BREAK")
     PLAIN_STAGES = ("Basic", "Stage1", "Stage2", "RESTORED", "Baby")
     UNCOVERED_STAGES = ("LEVEL-UP",)
+    BASIC_STAGES = ("Basic", "Baby")
+    NOT_BASIC_STAGES = ("Stage1", "Stage2", "RESTORED", "LEVEL-UP", "VMAX", "VSTAR", "V-UNION", "MEGA", "BREAK")
     STAR_GLYPHS = ("☆", "★")
     PRISM_STAR = "◇"
     RADIANT_PREFIX = "Radiant "
@@ -142,12 +158,14 @@ class CardAttributeRules:
             radiant = cls.radiant(name, record.get("rarity"))
             return CardAttributes(mark, kind, False, cls.types(record.get("types")),
                                   cls.pokemon_rule_box(name, record.get("suffix"), record.get("stage"), radiant, prism_star),
-                                  False, radiant, prism_star)
+                                  False, radiant, prism_star,
+                                  cls.basic_pokemon(name, record.get("suffix"), record.get("stage")))
         set_data = record.get("set")
         set_id = set_data.get("id") if isinstance(set_data, dict) else None
         basic = cls.basic_energy(kind, name, record.get("energyType"))
         return CardAttributes(mark, kind, basic, (), prism_star,
-                              cls.ace_spec(source_id, set_id, name, record.get("rarity"), basic), False, prism_star)
+                              cls.ace_spec(source_id, set_id, name, record.get("rarity"), basic), False, prism_star,
+                              False)
 
     @classmethod
     def regulation_mark(cls, value):
@@ -207,6 +225,17 @@ class CardAttributeRules:
         if suffix in cls.UNCOVERED_SUFFIXES or stage in cls.UNCOVERED_STAGES or any(glyph in name for glyph in cls.STAR_GLYPHS):
             return None
         return False
+
+    @classmethod
+    def basic_pokemon(cls, name, suffix, stage):
+        """A Pokémon's Basic Pokémon status from its ``stage``."""
+        if suffix in cls.UNCOVERED_SUFFIXES:
+            return None  # LEGEND: a mechanic these rules don't cover.
+        if stage in cls.BASIC_STAGES:
+            return True
+        if stage in cls.RULE_BOX_STAGES and cls.name_mechanic(name) is None:
+            return None  # The source claims a Rule Box stage the printed name lacks.
+        return False if stage in cls.NOT_BASIC_STAGES else None
 
     @classmethod
     def ace_spec(cls, source_id, set_id, name, rarity, basic_energy):

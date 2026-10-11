@@ -9,8 +9,8 @@ from uuid import uuid4
 
 from app.format_evaluator import FORMATS
 
-from test_card_attributes import (ACE_SPEC_ENERGY, ACE_SPEC_SV, ENERGY_SEARCH, ENERGY_SV, RARE_CANDY_ME, SWITCH_ME,
-                                  card, edition_of)
+from test_card_attributes import (ACE_SPEC_ENERGY, ACE_SPEC_SV, BULBASAUR_ME, ENERGY_SEARCH, ENERGY_SV, RARE_CANDY_ME,
+                                  SWITCH_ME, card, edition_of)
 from test_catalog import reset_catalog
 from test_catalog_metadata import Records
 from test_catalog_reconciliation import run
@@ -31,8 +31,12 @@ DELTA_POKEMON = card(id="fixture-me06-3", name="Fixture Pokémon", localId="3", 
                      types=["Fire"])
 FUTURE_MARK = card(id="fixture-me05-901", name="Fixture Future Trainer", localId="901", category="Trainer",
                    set={"id": "me05", "name": "Pitch Black"}, regulationMark="K", rarity="Common")
+# A Pokémon whose record has no stage, so its Basic Pokémon status is unknown.
+STAGELESS_POKEMON = card(id="fixture-me01-903", name="Fixture Stageless Pokémon", localId="903", category="Pokemon",
+                         set={"id": "me01", "name": "Mega Evolution"}, regulationMark="I", rarity="Common",
+                         types=["Grass"])
 CARDS = (RARE_CANDY_ME, SWITCH_ME, ENERGY_SV, ENERGY_SEARCH, ACE_SPEC_SV, ACE_SPEC_ENERGY, RESEARCH_JUNIPER,
-         RESEARCH_MAGNOLIA, DELTA_POKEMON, FUTURE_MARK)
+         RESEARCH_MAGNOLIA, DELTA_POKEMON, FUTURE_MARK, BULBASAUR_ME, STAGELESS_POKEMON)
 
 
 def deck_with(cards):
@@ -73,9 +77,9 @@ def lines(*source_ids):
 def test_a_legal_deck_is_standard_legal():
     reset_catalog()
     run(Records(*CARDS))
-    owner, deck = deck_with([("me01-125", 4), ("me01-130", 4), ("sv02-278", 52)])
+    owner, deck = deck_with([("me01-001", 1), ("me01-125", 4), ("me01-130", 4), ("sv02-278", 51)])
     body = format_checks(owner, deck, "?as_of=2026-10-11")
-    assert body["deck_id"] == deck and body["deck_list_revision"] == 4
+    assert body["deck_id"] == deck and body["deck_list_revision"] == 5
     assert isinstance(body["attribute_revision"], int) and body["disclaimer"].startswith("Advisory format checks")
     assert [result["format"] for result in body["results"]] == list(FORMATS)
     assert [{**result, "computed_at": None} for result in body["results"][:2]] == [
@@ -92,8 +96,8 @@ def test_a_legal_deck_is_standard_legal():
 def test_a_deck_over_its_copy_and_ace_spec_limits_is_not_legal():
     reset_catalog()
     run(Records(*CARDS))
-    owner, deck = deck_with([("fixture-sv01-901", 3), ("fixture-sv01-902", 2), ("sv05-157", 1), ("sv05-162", 1),
-                             ("sv02-278", 53)])
+    owner, deck = deck_with([("me01-001", 1), ("fixture-sv01-901", 3), ("fixture-sv01-902", 2), ("sv05-157", 1),
+                             ("sv05-162", 1), ("sv02-278", 52)])
     result = standard(owner, deck, "2026-10-11")
     assert result["status"] == "not_legal"
     assert issues(result) == {
@@ -118,7 +122,7 @@ def test_an_unrecorded_set_and_an_unknown_mark_make_a_deck_unknown():
 def test_standard_legality_flips_on_the_2026_rotation_date():
     reset_catalog()
     run(Records(*CARDS))
-    owner, deck = deck_with([("sv01-172", 4), ("me01-125", 4), ("sv02-278", 52)])
+    owner, deck = deck_with([("me01-001", 1), ("sv01-172", 4), ("me01-125", 4), ("sv02-278", 51)])
     assert standard(owner, deck, "2026-04-09")["status"] == "legal"
     rotated = standard(owner, deck, "2026-04-10")
     assert rotated["status"] == "not_legal"
@@ -131,7 +135,7 @@ def test_standard_legality_flips_on_the_2026_rotation_date():
 def test_checks_default_to_today_and_a_future_date_carries_a_note():
     reset_catalog()
     run(Records(*CARDS))
-    owner, deck = deck_with([("me01-125", 4), ("sv02-278", 56)])
+    owner, deck = deck_with([("me01-001", 1), ("me01-125", 4), ("sv02-278", 55)])
     before = datetime.now(timezone.utc).date()
     [result] = format_checks(owner, deck, "?format=standard")["results"]
     after = datetime.now(timezone.utc).date()
@@ -160,3 +164,26 @@ def test_format_checks_are_private_and_validate_their_query():
     for as_of in ("2026-4-10", "20260410", "2026-02-30", "today", "2026-04-10T00:00", "2026-04-10" + "0" * 50):
         response = call("GET", f"/api/decks/{deck}/format-checks?as_of={as_of}", owner)
         assert response.status_code == 422 and response.json()["detail"]["code"] == "INVALID_AS_OF", as_of
+
+
+def test_a_deck_of_only_trainers_and_energy_is_not_legal_in_any_format():
+    reset_catalog()
+    run(Records(*CARDS))
+    trainers = [("me01-125", 1), ("me01-130", 1)]
+    owner, deck = deck_with([*trainers, ("sv02-278", 58)])
+    every = lines("me01-125", "me01-130", "sv02-278")
+    body = format_checks(owner, deck, "?as_of=2026-10-11")
+    assert {result["format"]: (result["status"], issues(result)) for result in body["results"]} == {
+        name: ("not_legal", {("no_basic_pokemon", f"{deck_name} deck has at least one Basic Pokémon; this one has none",
+                              "deck", "not_legal", every)})
+        for name, deck_name in (("standard", "a Standard"), ("expanded", "an Expanded"),
+                                ("glc", "a Gym Leader Challenge"))}
+    # One Basic Pokémon makes the same deck legal in every format.
+    owner, deck = deck_with([*trainers, ("me01-001", 1), ("sv02-278", 57)])
+    assert [result["status"] for result in format_checks(owner, deck, "?as_of=2026-10-11")["results"]] == [
+        "legal"] * 3
+    # A Pokémon whose Basic Pokémon status is unknown leaves the deck unknown, never legal.
+    owner, deck = deck_with([*trainers, ("fixture-me01-903", 1), ("sv02-278", 57)])
+    unknown = ("attribute_unknown", "Basic Pokémon status unknown", "card", "unknown", lines("fixture-me01-903"))
+    assert [(result["status"], issues(result)) for result in format_checks(owner, deck, "?as_of=2026-10-11")[
+        "results"]] == [("unknown", {unknown})] * 3

@@ -20,7 +20,7 @@ from app.main import app, connect  # noqa: F401  (main first: it includes every 
 from app import format_evaluator, public_catalog, public_deck, published_format_checks
 from app.public_projection import ProjectionUnavailable
 from app.public_records import catalog_format_key, public_record_store
-from test_card_attributes import ENERGY_SV, RARE_CANDY_ME, edition_of
+from test_card_attributes import BULBASAUR_ME, ENERGY_SV, RARE_CANDY_ME, edition_of
 from test_catalog import reset_catalog
 from test_catalog_metadata import Records
 from test_catalog_reconciliation import run
@@ -31,10 +31,12 @@ from test_publications import command, edition_refs, legacy_snapshot, stored_dec
 from test_published_cost import (USER, body_of, generation, launches, publish, rewrite_snapshot,  # noqa: F401
                                  store)  # store and launches are autouse
 
-LEGAL = (("me01-125", 4), ("me01-130", 4), ("sv02-278", 52))
-OVER = (("fixture-sv01-901", 3), ("fixture-sv01-902", 2), ("sv05-157", 1), ("sv05-162", 1), ("sv02-278", 53))
+LEGAL = (("me01-001", 1), ("me01-125", 4), ("me01-130", 4), ("sv02-278", 51))
+OVER = (("me01-001", 1), ("fixture-sv01-901", 3), ("fixture-sv01-902", 2), ("sv05-157", 1), ("sv05-162", 1),
+        ("sv02-278", 52))
 UNKNOWN = (("fixture-me06-3", 4), ("fixture-me05-901", 4), ("sv02-278", 52))
-ROTATING = (("sv01-172", 4), ("me01-125", 4), ("sv02-278", 52))
+ROTATING = (("me01-001", 1), ("sv01-172", 4), ("me01-125", 4), ("sv02-278", 51))
+NO_BASIC = (("me01-125", 1), ("me01-130", 1), ("sv02-278", 58))
 ON = "?format=standard&as_of=2026-10-11"  # Narrowed: the Expanded and GLC results have their own tests.
 
 
@@ -171,8 +173,8 @@ def test_results_follow_a_rotation_without_republishing(store, monkeypatch):
 
 def test_a_reviewed_attribute_correction_changes_published_results_without_republishing(store):
     from test_attribute_corrections import decide, grant, seed
-    ids = seed(RARE_CANDY_ME, ENERGY_SV)
-    _, token = published((("me01-125", 4), ("sv02-278", 56)))
+    ids = seed(RARE_CANDY_ME, ENERGY_SV, BULBASAUR_ME)
+    _, token = published((("me01-001", 1), ("me01-125", 4), ("sv02-278", 55)))
     digest = body_of(public_get(path_of(token, 1, ON)))["digest"]
     assert standard(token)["status"] == "legal"
     printing = ids["me01-125"]
@@ -213,7 +215,7 @@ def test_a_reimport_that_changes_a_derived_attribute_changes_published_results(s
 def test_a_card_identity_change_reaches_published_results(store):
     reset_catalog()
     run(Records(*CARDS))
-    deck, token = published((("fixture-sv01-901", 3), ("me01-130", 2), ("sv02-278", 55)))
+    deck, token = published((("me01-001", 1), ("fixture-sv01-901", 3), ("me01-130", 2), ("sv02-278", 54)))
     assert standard(token)["status"] == "legal"
     # A reviewed identity merge (ticket 14) moves a Printing to another Card Identity; migration 032 re-stamps it.
     with connect() as conn, conn.transaction():
@@ -245,7 +247,7 @@ def test_legacy_and_unproven_rows_are_unknown_and_never_legal(store):
     assert result["status"] == "unknown"
     unavailable = [issue for issue in result["issues"] if issue["code"] == "card_data_unavailable"]
     assert [(i["reason"], i["kind"], i["effect"], i["lines"]) for i in unavailable] == [
-        ("card data not available for this published card", "card", "unknown", ["row:0", "row:1", "row:2"])]
+        ("card data not available for this published card", "card", "unknown", ["row:0", "row:1", "row:2", "row:3"])]
     assert {issue["code"] for issue in result["issues"]} <= {"card_data_unavailable", "attribute_unknown"}
 
     assert command(USER, deck, "PUT").status_code == 200
@@ -254,6 +256,10 @@ def test_legacy_and_unproven_rows_are_unknown_and_never_legal(store):
     good = store.read_records([key], deadline=time.monotonic() + 5).records[key]
     for broken in (None, {**good.value, "reprint_group": "a" * 48}, {**good.value, "extra": 1},
                    {**good.value, "attributes": {**good.value["attributes"], "regulation_mark": "i"}},
+                   {**good.value, "attributes": {**good.value["attributes"], "basic_pokemon": "yes"}},
+                   # A record written before migration 034 has no Basic Pokémon status.
+                   {**good.value, "attributes": {key: value for key, value in good.value["attributes"].items()
+                                                 if key != "basic_pokemon"}},
                    {**good.value, "identity": {"key": "Switch"}}, {**good.value, "printing_ref": "f" * 48}):
         current = store.read_records([key], deadline=time.monotonic() + 5).records[key]
         assert store.compare_and_swap({key: current.version}, {key: broken}, deadline=time.monotonic() + 5)
@@ -365,7 +371,7 @@ def printing_revisions(*source_ids):
 def test_reprint_inherited_legality_matches_the_private_route_and_follows_group_changes(store):
     groups = reprint_catalog()
     # Each is out of Standard on its own on 2026-10-11; me01-125 (mark I) in their group makes all of them legal.
-    deck, token = published((("sv01-191", 2), ("swsh1-180", 1), ("swsh12.5-141", 1), ("sv02-278", 56)))
+    deck, token = published((("sv01-191", 2), ("swsh1-180", 1), ("swsh12.5-141", 1), ("svp-225", 1), ("sv02-278", 55)))
     result = matches_private(token, deck)
     assert (result["status"], result["issues"]) == ("legal", [])
     # The group is published by its public reference and its printings' public references, never its internal ID.
@@ -394,7 +400,7 @@ def test_reprint_inherited_legality_matches_the_private_route_and_follows_group_
 
 def test_a_ban_on_one_printing_reaches_its_identical_reprints_like_the_private_route(store, monkeypatch):
     reprint_catalog()
-    deck, token = published((("sv01-191", 4), ("sv02-278", 56)))
+    deck, token = published((("sv01-191", 4), ("svp-225", 1), ("sv02-278", 55)))
     assert matches_private(token, deck)["status"] == "legal"
     # A deployed rules revision bans me01-125 from 2026-10-01: sv01-191, legal only through it, is banned with it.
     source = (format_evaluator.RULES_DIR / "standard.toml").read_text()
@@ -423,7 +429,7 @@ def test_a_pokemon_with_a_legal_identical_reprint_stays_not_legal_publicly(store
 
 def test_an_unproven_reprint_makes_its_line_unknown_never_legal_or_not_legal(store):
     reprint_catalog()
-    _, token = published((("sv01-191", 4), ("sv02-278", 56)))
+    _, token = published((("sv01-191", 4), ("svp-225", 1), ("sv02-278", 55)))
     assert standard(token)["status"] == "legal"
     unavailable = ("card_data_unavailable", "card data not available for this published card", "card", "unknown",
                    [ref_of("sv01-191")])
@@ -492,3 +498,41 @@ def test_a_reprint_group_change_restamps_every_printing_of_the_groups_it_touches
     deliver()
     assert format_record("sv01-191")[2].value["reprint_group"]["ref"] == public_catalog.reprint_group_ref(
         groups.groups_of("sv01-191")["sv01-191"])
+
+
+def test_a_deck_without_a_basic_pokemon_is_not_legal_publicly_like_the_private_route(store):
+    reset_catalog()
+    run(Records(*CARDS))
+    deck, token = published(NO_BASIC)
+    result = matches_private(token, deck)
+    assert (result["status"], issues(result)) == ("not_legal", [
+        ("no_basic_pokemon", "a Standard deck has at least one Basic Pokémon; this one has none", "deck", "not_legal",
+         sorted(ref_of(source_id) for source_id, _ in NO_BASIC))])
+    # The format record carries the Basic Pokémon status the private route reads.
+    key = catalog_format_key(edition_refs(edition_of("me01-001"))[1])
+    deck, token = published(LEGAL)
+    assert store.read_records([key], deadline=time.monotonic() + 5).records[key].value["attributes"][
+        "basic_pokemon"] is True
+    assert matches_private(token, deck)["status"] == "legal"
+
+
+def test_records_published_before_basic_pokemon_status_are_unproven_until_the_backfill(store):
+    """A store written by a release before migration 034 holds format records without ``basic_pokemon``. The strict
+    reader refuses them (unknown, never legal), and scripts/backfill_public_catalog.py rewrites them at their revision
+    without calling them recovery conflicts."""
+    reset_catalog()
+    run(Records(*CARDS))
+    deck, token = published(LEGAL)
+    keys = [catalog_format_key(edition_refs(edition_of(source_id))[1]) for source_id, _ in LEGAL]
+    for key, record in store.read_records(keys, deadline=time.monotonic() + 5).records.items():
+        old = {**record.value, "attributes": {name: value for name, value in record.value["attributes"].items()
+                                              if name != "basic_pokemon"}}
+        assert store.compare_and_swap({key: record.version}, {key: old}, deadline=time.monotonic() + 5)
+    result = standard(token)
+    assert result["status"] == "unknown"
+    assert ("card_data_unavailable", "card data not available for this published card", "card", "unknown",
+            sorted(ref_of(source_id) for source_id, _ in LEGAL)) in issues(result)
+    with connect() as conn:
+        rebuilt = public_catalog.rebuild(conn, store)
+    assert rebuilt.conflicts == 0 and rebuilt.written >= len(LEGAL)
+    assert matches_private(token, deck)["status"] == "legal"

@@ -333,7 +333,7 @@ def test_old_rare_candy_is_standard_legal_through_its_reprint_group():
     reset_catalog()
     run(Records(*CARDS))
     # Each is out of Standard on its own on 2026-10-11: mark G has rotated, and swsh1 and swsh12.5 are excluded sets.
-    owner, deck = deck_with([("sv01-191", 2), ("swsh1-180", 1), ("swsh12.5-141", 1), ("sv02-278", 56)])
+    owner, deck = deck_with([("sv01-191", 2), ("swsh1-180", 1), ("swsh12.5-141", 1), ("svp-225", 1), ("sv02-278", 55)])
     result = standard(owner, deck, "2026-10-11")
     assert (result["status"], result["issues"]) == ("legal", [])
     # Without a legal printing in the group, each is judged on its own.
@@ -351,7 +351,7 @@ def test_old_rare_candy_is_standard_legal_through_its_reprint_group():
 def test_reworded_rare_candy_sm1_129_is_its_own_group_until_review_merges_it():
     reset_catalog()
     run(Records(*CARDS))
-    owner, deck = deck_with([("sm1-129", 4), ("sv02-278", 56)])
+    owner, deck = deck_with([("sm1-129", 4), ("svp-225", 1), ("sv02-278", 55)])
     result = standard(owner, deck, "2026-10-11")
     assert issues(result) == {("not_in_card_pool", "not in the Standard card pool: printed before Sword & Shield, "
                                                    "without a regulation mark", "card", "not_legal", lines("sm1-129"))}
@@ -382,9 +382,10 @@ def test_a_command_adding_a_card_legal_through_its_reprint_group_returns_legal_a
     created = call("POST", "/api/decks", owner, {"name": "Reprint deck", "idempotency_key": str(uuid4())})
     assert created.status_code == 201, created.text
     deck = created.json()["location"]["id"]
-    assert add_line(owner, deck, edition_of("sv02-278"), "56", 1).status_code == 200
+    assert add_line(owner, deck, edition_of("sv02-278"), "55", 1).status_code == 200
+    assert add_line(owner, deck, edition_of("svp-225"), "1", 2).status_code == 200
     # Crown Zenith's Rare Candy has no regulation mark: legal only through me01-125 (mark I) in its Reprint Group.
-    response = add_line(owner, deck, edition_of("swsh12.5-141"), "4", 2)
+    response = add_line(owner, deck, edition_of("swsh12.5-141"), "4", 3)
     assert response.status_code == 200, response.text
     checks = response.json()["format_checks"]
     assert {result["format"]: (result["status"], result["issues"]) for result in checks["results"]} == {

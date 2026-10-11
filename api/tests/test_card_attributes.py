@@ -21,7 +21,7 @@ from test_deck_lists import add_line, detail
 from test_holdings import add, call
 
 # Changing a derivation rule changes this digest: bump CardAttributeRules.VERSION and pin the new pair here.
-PINNED_RULES = (1, "858926b6998227fa6fdcf791535cb3bb81bd372d481b01d97ce4bc739afd668a")
+PINNED_RULES = (2, "703df5a07970a44c0ce6b8f3f3503842977c17352a59d7550f0d77ba91860f93")
 
 
 def card(**fields):
@@ -109,6 +109,10 @@ COMPUTER_SEARCH_BASE = card(id="base1-71", name="Computer Search", localId="71",
                             set={"id": "base1", "name": "Base Set"}, rarity="Rare")
 RARE_CANDY_ME = card(id="me01-125", name="Rare Candy", localId="125", category="Trainer",
                      set={"id": "me01", "name": "Mega Evolution"}, regulationMark="I", rarity="Common")
+# A Basic Pokémon legal in all three formats: format-check fixtures add one so their decks meet the Basic Pokémon rule.
+BULBASAUR_ME = card(id="me01-001", name="Bulbasaur", localId="001", category="Pokemon",
+                    set={"id": "me01", "name": "Mega Evolution"}, regulationMark="I", stage="Basic", rarity="Common",
+                    types=["Grass"])
 RARE_CANDY_SM = card(id="sm1-129", name="Rare Candy", localId="129", category="Trainer",
                      set={"id": "sm1", "name": "Sun & Moon"}, rarity="Uncommon")
 LOWER_CASE_MARK = card(id="mep-051", name="Oshawott", localId="051", category="Pokemon",
@@ -123,21 +127,53 @@ DUAL_TYPE = card(id="xy11-11", name="Shiftry", localId="11", category="Pokemon",
 NO_CATEGORY = card(id="fixture-no-category", name="Arcanine ex", localId="1", set={"id": "fixture", "name": "Fixture"},
                    regulationMark="G", suffix="ex", stage="Stage1", types=["Fire"])
 
+# Basic Pokémon status across TCGdex stages (Deck Lists 20).
+MEGA_EX_BASIC = card(id="me01-104", name="Mega Kangaskhan ex", localId="104", category="Pokemon",
+                     set={"id": "me01", "name": "Mega Evolution"}, regulationMark="I", suffix="ex", stage="Basic",
+                     rarity="Double rare", types=["Colorless"])
+BABY = card(id="ecard1-22", name="Pichu", localId="22", category="Pokemon",
+            set={"id": "ecard1", "name": "Expedition Base Set"}, stage="Baby", rarity="Holo Rare", types=["Lightning"])
+RESTORED = card(id="bw10-3", name="Lileep", localId="3", category="Pokemon", set={"id": "bw10", "name": "Plasma Blast"},
+                stage="RESTORED", rarity="Uncommon", types=["Grass"])
+VSTAR = card(id="swsh9-123", name="Arceus VSTAR", localId="123", category="Pokemon",
+             set={"id": "swsh9", "name": "Brilliant Stars"}, regulationMark="F", suffix="V", stage="VSTAR",
+             rarity="Holo Rare VSTAR", types=["Colorless"])
+V_UNION = card(id="swshp-SWSH139", name="Pikachu V-UNION", localId="SWSH139", category="Pokemon",
+               set={"id": "swshp", "name": "SWSH Black Star Promos"}, regulationMark="E", suffix="V", stage="V-UNION",
+               rarity="Promo", types=["Lightning"])
+LEVEL_UP = card(id="pl4-99", name="Tangrowth LV.X", localId="99", category="Pokemon", set={"id": "pl4", "name": "Arceus"},
+                stage="LEVEL-UP", rarity="Rare Holo LV.X", types=["Grass"])
+# A Trainer "played as if it were a 60-HP Basic Colorless Pokémon": a Trainer in the hand and deck.
+FOSSIL_ITEM = card(id="sv03.5-153", name="Antique Helix Fossil", localId="153", category="Trainer",
+                   set={"id": "sv03.5", "name": "151"}, regulationMark="G", rarity="Common", trainerType="Item")
+UNKNOWN_STAGE = card(id="fixture-stage-1", name="Fixture Pokémon", localId="1", category="Pokemon",
+                     set={"id": "fixture", "name": "Fixture"}, stage="Stage3", types=["Fire"])
+BASIC_POKEMON = {
+    EX_ME_NO_SUFFIX["id"]: True, MEGA_EX_BASIC["id"]: True, RADIANT["id"]: True, PRISM_POKEMON["id"]: True,
+    UNOWN_V["id"]: True, POKEMON_STAR["id"]: True, LOWER_CASE_MARK["id"]: True, BABY["id"]: True, BULBASAUR_ME["id"]: True,
+    EX_SV["id"]: False, EX_ME_UPPER_SUFFIX["id"]: False, DUAL_TYPE["id"]: False, RESTORED["id"]: False,
+    MEGA_EX["id"]: False, VMAX["id"]: False, VSTAR["id"]: False, V_UNION["id"]: False, LEVEL_UP["id"]: False,
+    ENERGY_BW["id"]: False, FOSSIL_ITEM["id"]: False, RARE_CANDY_ME["id"]: False,
+    EX_BW["id"]: None, GX_PROMO["id"]: None, NO_TYPES["id"]: None, ZACIAN_STAGE_BREAK["id"]: None, LEGEND["id"]: None,
+    UNKNOWN_STAGE["id"]: None, NO_CATEGORY["id"]: None,
+}
 
-def attributes(mark=None, kind=None, basic=None, types=None, rule_box=None, ace=None, radiant=None, prism=None):
-    return CardAttributes(mark, kind, basic, types, rule_box, ace, radiant, prism)
+
+def attributes(mark=None, kind=None, basic=None, types=None, rule_box=None, ace=None, radiant=None, prism=None,
+               basic_pokemon=None):
+    return CardAttributes(mark, kind, basic, types, rule_box, ace, radiant, prism, basic_pokemon)
 
 
-def pokemon(mark, types, rule_box, radiant=False, prism=False):
-    return attributes(mark, "pokemon", False, types, rule_box, False, radiant, prism)
+def pokemon(mark, types, rule_box, basic_pokemon, radiant=False, prism=False):
+    return attributes(mark, "pokemon", False, types, rule_box, False, radiant, prism, basic_pokemon)
 
 
 def trainer(mark, ace=False, rule_box=False, prism=False):
-    return attributes(mark, "trainer", False, (), rule_box, ace, False, prism)
+    return attributes(mark, "trainer", False, (), rule_box, ace, False, prism, False)
 
 
 def energy(mark, basic, ace=False):
-    return attributes(mark, "energy", basic, (), False, ace, False, False)
+    return attributes(mark, "energy", basic, (), False, ace, False, False, False)
 
 
 EXPECTED = {
@@ -147,22 +183,22 @@ EXPECTED = {
     "sv02-192": energy("G", False),
     "tk-hs-g-10": energy(None, None),
     "dp2-119": energy(None, False),
-    "bw6-124": pokemon(None, ("Dragon",), True),
-    "smp-SM232": pokemon(None, ("Lightning",), True),
-    "xy11-109": pokemon(None, ("Metal", "Fighting"), True),
-    "swsh1-116": pokemon("D", ("Fighting",), True),
-    "sv01-032": pokemon("G", ("Fire",), True),
-    "me04-015": pokemon("J", ("Fire",), True),
-    "me02-018": pokemon("I", ("Fire",), True),
-    "ex15-90": pokemon(None, ("Water",), True),
-    "sv02-064": pokemon("G", ("Lightning",), None),
-    "swshp-SWSH135": pokemon(None, ("Metal",), None),
-    "dp6-79": pokemon(None, ("Psychic",), None),
-    "hgss1-111": pokemon(None, ("Fire",), None),
-    "pop5-16": pokemon(None, ("Psychic",), None),
-    "swsh10-046": pokemon("F", ("Water",), True, radiant=True),
+    "bw6-124": pokemon(None, ("Dragon",), True, None),
+    "smp-SM232": pokemon(None, ("Lightning",), True, None),
+    "xy11-109": pokemon(None, ("Metal", "Fighting"), True, False),
+    "swsh1-116": pokemon("D", ("Fighting",), True, False),
+    "sv01-032": pokemon("G", ("Fire",), True, False),
+    "me04-015": pokemon("J", ("Fire",), True, False),
+    "me02-018": pokemon("I", ("Fire",), True, True),
+    "ex15-90": pokemon(None, ("Water",), True, False),
+    "sv02-064": pokemon("G", ("Lightning",), None, False),
+    "swshp-SWSH135": pokemon(None, ("Metal",), None, None),
+    "dp6-79": pokemon(None, ("Psychic",), None, True),
+    "hgss1-111": pokemon(None, ("Fire",), None, None),
+    "pop5-16": pokemon(None, ("Psychic",), None, True),
+    "swsh10-046": pokemon("F", ("Water",), True, True, radiant=True),
     "sm5-120": trainer(None, rule_box=True, prism=True),
-    "sm5-58": pokemon(None, ("Psychic",), True, prism=True),
+    "sm5-58": pokemon(None, ("Psychic",), True, True, prism=True),
     "sv05-157": trainer("H", ace=True),
     "sv05-162": energy("H", False, ace=True),
     "bw7-137": trainer(None, ace=True),
@@ -175,10 +211,10 @@ EXPECTED = {
     "base1-71": trainer(None),
     "me01-125": trainer("I"),
     "sm1-129": trainer(None),
-    "mep-051": pokemon("J", ("Water",), False),
+    "mep-051": pokemon("J", ("Water",), False, True),
     "mfb-33": trainer(None),
-    "swshp-SWSH215": pokemon("E", None, True),
-    "xy11-11": pokemon(None, ("Grass", "Darkness"), False),
+    "swshp-SWSH215": pokemon("E", None, True, None),
+    "xy11-11": pokemon(None, ("Grass", "Darkness"), False, False),
     "fixture-no-category": attributes("G"),
 }
 CARDS = (ENERGY_BW, ENERGY_SV, REVERSAL_MISLABELLED, REVERSAL, TRAINER_KIT_ENERGY, OLD_DARKNESS_ENERGY, EX_BW, GX_PROMO,
@@ -214,6 +250,16 @@ def edition_of(source_id):
 
 def test_derivation_rules_are_pinned():
     assert (RULES.VERSION, rules_digest()) == PINNED_RULES
+
+
+def test_basic_pokemon_status_follows_the_tcgdex_stage():
+    """Basic and Baby are Basic; every other known stage is not; a missing, unknown or contradictory stage and a
+    LEGEND are unknown. Trainer and Energy cards are never Basic Pokémon: not a Fossil Item played as a Basic Pokémon,
+    and not the Energy cards TCGdex gives stage Basic (bw1-105)."""
+    records = {record["id"]: record for record in (*CARDS, MEGA_EX_BASIC, BABY, RESTORED, VSTAR, V_UNION, LEVEL_UP,
+                                                   FOSSIL_ITEM, UNKNOWN_STAGE, BULBASAUR_ME)}
+    assert {source_id: RULES.derive(source_id, records[source_id]).basic_pokemon
+            for source_id in BASIC_POKEMON} == BASIC_POKEMON
 
 
 def test_import_derives_every_attribute_on_cards_across_eras():

@@ -11,8 +11,9 @@ from uuid import UUID, uuid4
 
 from app.card_attributes import RULES, CardAttributeRules, CardAttributes, advance_attribute_revision, \
     attribute_revision, read_card_attributes
+from app.attribute_corrections import consistent
 from app.main import connect
-from test_card_attributes import ENERGY_BW, EX_SV, RARE_CANDY_SM, REVERSAL_MISLABELLED, TRAINER_KIT_ENERGY, \
+from test_card_attributes import ENERGY_BW, EX_BW, EX_SV, RARE_CANDY_SM, REVERSAL_MISLABELLED, TRAINER_KIT_ENERGY, \
     edition_of, printing_ids
 from test_catalog import reset_catalog
 from test_catalog_metadata import Records
@@ -26,7 +27,7 @@ ADMIN = "/api/admin/card-attributes"
 ACTION = "correct_attributes"
 CARDS = (ENERGY_BW, TRAINER_KIT_ENERGY, REVERSAL_MISLABELLED, EX_SV, RARE_CANDY_SM)
 FULL_MANUAL = {"regulation_mark": "H", "card_kind": "pokemon", "basic_energy": False, "types": ["Lightning"],
-               "rule_box": False, "ace_spec": False, "radiant": False, "prism_star": False}
+               "rule_box": False, "ace_spec": False, "radiant": False, "prism_star": False, "basic_pokemon": True}
 
 
 def seed(*records):
@@ -126,7 +127,7 @@ def test_report_proposals_are_allowlisted_and_name_a_real_printing():
     ids = seed()
     printing = ids["tk-hs-g-10"]
     for proposed in ({}, {"price": 1}, {"regulation_mark": "h"}, {"card_kind": "item"}, {"types": ["Fire", "Fire"]},
-                     {"types": ["Fairy Energy"]}, {"basic_energy": "yes"}, {"rule_box": None}):
+                     {"types": ["Fairy Energy"]}, {"basic_energy": "yes"}, {"rule_box": None}, {"basic_pokemon": "yes"}):
         assert report(printing, proposed).status_code == 422, proposed
     missing = report(str(uuid4()), {"basic_energy": True})
     assert (missing.status_code, error(missing)) == (404, "PRINTING_NOT_FOUND")
@@ -268,7 +269,7 @@ def test_manual_printings_get_attributes_only_through_reviewed_corrections():
     response = decide(manual, correction=FULL_MANUAL)
     assert response.status_code == 200, response.text
     assert response.json()["effective"] == FULL_MANUAL and revision() == before + 1
-    expected = CardAttributes("H", "pokemon", False, ("Lightning",), False, False, False, False)
+    expected = CardAttributes("H", "pokemon", False, ("Lightning",), False, False, False, False, True)
     assert effective(manual) == expected
     run(Records(EX_SV))  # an import derives nothing for a manual Printing and leaves its correction alone
     assert effective(manual) == expected
@@ -285,7 +286,8 @@ def test_a_decision_binds_to_the_evidence_shown_and_rejects_impossible_attribute
     stale = decide(printing, correction={"basic_energy": True}, digest=shown)
     assert (stale.status_code, error(stale)) == (409, "ATTRIBUTE_EVIDENCE_CHANGED")
     for correction, code in (({}, "EMPTY_CORRECTION"), ({"types": ["Water"]}, "INCONSISTENT_ATTRIBUTES"),
-                             ({"basic_energy": True, "ace_spec": True}, "INCONSISTENT_ATTRIBUTES")):
+                             ({"basic_energy": True, "ace_spec": True}, "INCONSISTENT_ATTRIBUTES"),
+                             ({"basic_pokemon": True}, "INCONSISTENT_ATTRIBUTES")):
         response = decide(printing, correction=correction)
         assert (response.status_code, error(response)) == (422, code), correction
     removal = decide(printing, decision="remove", correction={"basic_energy": True})
@@ -295,6 +297,30 @@ def test_a_decision_binds_to_the_evidence_shown_and_rejects_impossible_attribute
     assert (response.status_code, error(response)) == (422, "INVALID_REPORT")
     # None of the refusals spent the code.
     assert decide(printing, correction={"basic_energy": True}).status_code == 200
+
+
+def test_a_basic_pokemon_is_never_also_a_basic_energy_ace_spec_or_trainer():
+    # Checked on attributes alone, so a Printing of unknown kind (a manual one) can't hold either combination.
+    assert consistent(CardAttributes(basic_pokemon=True))
+    for other in ({"basic_energy": True}, {"ace_spec": True}, {"card_kind": "trainer"}, {"card_kind": "energy"}):
+        assert not consistent(CardAttributes(basic_pokemon=True, **other)), other
+
+
+def test_basic_pokemon_status_is_reported_and_corrected_like_any_other_attribute():
+    ids = seed(EX_BW)
+    printing = ids["bw6-124"]  # Giratina-EX has no TCGdex stage, so its Basic Pokémon status is unknown.
+    assert effective(printing).basic_pokemon is None
+    sent = report(printing, {"basic_pokemon": True})
+    assert sent.status_code == 201, sent.text
+    assert sent.json()["proposed"] == {"basic_pokemon": True}
+    before = revision()
+    grant(printing)
+    response = decide(printing, correction={"basic_pokemon": True}, report_ids=[sent.json()["id"]])
+    assert response.status_code == 200, response.text
+    assert response.json()["effective"]["basic_pokemon"] is True and revision() == before + 1
+    assert effective(printing).basic_pokemon is True
+    shown = evidence(printing)
+    assert (shown["derived"]["basic_pokemon"], shown["correction"]["basic_pokemon"]) == (None, True)
 
 
 def test_the_attribute_revision_advances_once_per_transaction():

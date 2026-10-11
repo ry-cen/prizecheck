@@ -18,7 +18,7 @@ import app.catalog as catalog_module
 import app.reprint_groups as reprint_groups
 from app.card_attributes import attribute_revision
 from app.catalog import rederive_card_attributes
-from test_card_attributes import ENERGY_SV, card, edition_of, printing_ids
+from test_card_attributes import BULBASAUR_ME, ENERGY_SV, card, edition_of, printing_ids
 from test_catalog import reset_catalog
 from test_catalog_metadata import Records
 from test_catalog_reconciliation import run
@@ -50,7 +50,8 @@ COPYCAT_TRR = card(id="ex7-83", name="Copycat", localId="83", category="Trainer"
                           "cards.")
 # Rare Candy with the Sun & Moon wording, in a set imported after the maintainer merged the wordings.
 CANDY_CES = candy("sm7-142", "sm7", "Celestial Storm", effect=SM_CANDY, rarity="Uncommon")
-CANDIES = (CANDY_ME, CANDY_SV, CANDY_SM, CANDY_SM_GUARDIANS, ENERGY_SV)
+# Bulbasaur is the Basic Pokémon every deck needs (Deck Lists 20).
+CANDIES = (CANDY_ME, CANDY_SV, CANDY_SM, CANDY_SM_GUARDIANS, ENERGY_SV, BULBASAUR_ME)
 # A subtitle the parenthetical rule misses, so it is a Card Identity of its own until the maintainer merges it.
 RESEARCH_SADA = card(id="fixture-sv04-906", name="Professor's Research [Professor Sada]", localId="906",
                      category="Trainer", set={"id": "sv04", "name": "Paradox Rift"}, regulationMark="G", rarity="Rare",
@@ -63,7 +64,7 @@ RESEARCH_TWILIGHT = card(id="fixture-sv06-908", name="Professor's Research", loc
                          trainerType="Supporter", effect=RESEARCH)
 # What a reviewed correction gives a manual Trainer: everything but a regulation mark.
 MANUAL_TRAINER = {"card_kind": "trainer", "basic_energy": False, "types": [], "rule_box": False, "ace_spec": False,
-                  "radiant": False, "prism_star": False}
+                  "radiant": False, "prism_star": False, "basic_pokemon": False}
 
 
 def seed(*records):
@@ -234,7 +235,7 @@ def test_copycat_merge_joins_reworded_printings_and_survives_reimports_and_renam
 
 def test_merging_rare_candy_sm1_129_into_me01_125_makes_it_standard_legal_and_later_reprints_follow():
     ids = seed(*CANDIES)
-    owner, deck = deck_of((edition_of("sm1-129"), 4), (edition_of("sv02-278"), 56))
+    owner, deck = deck_of((edition_of("sm1-129"), 4), (edition_of("me01-001"), 1), (edition_of("sv02-278"), 55))
     assert standard(owner, deck, "2026-10-11")["status"] == "not_legal"
     identity = identity_of(ids["me01-125"])
     found = groups(evidence(identity))
@@ -251,7 +252,7 @@ def test_merging_rare_candy_sm1_129_into_me01_125_makes_it_standard_legal_and_la
     run(Records(*CANDIES, CANDY_CES))
     ces = ids_of("sm7-142")["sm7-142"]
     assert groups(evidence(identity))[ces] == me
-    owner, deck = deck_of((edition_of("sm7-142"), 4), (edition_of("sv02-278"), 56))
+    owner, deck = deck_of((edition_of("sm7-142"), 4), (edition_of("me01-001"), 1), (edition_of("sv02-278"), 55))
     assert standard(owner, deck, "2026-10-11")["status"] == "legal"
     # Undoing the merge restores every linked member; one alone changes nothing while its sibling's link holds.
     grant(identity)
@@ -266,7 +267,7 @@ def test_merging_rare_candy_sm1_129_into_me01_125_makes_it_standard_legal_and_la
 def test_a_reviewed_merge_reaches_published_format_results_without_a_republish():
     from test_published_format_checks import published, standard as published_standard  # needs app.main loaded
     ids = seed(*CANDIES)
-    _, token = published((("sm1-129", 4), ("sv02-278", 56)))
+    _, token = published((("sm1-129", 4), ("me01-001", 1), ("sv02-278", 55)))
     assert published_standard(token)["status"] == "not_legal"
     identity = identity_of(ids["me01-125"])
     found = groups(evidence(identity))
@@ -283,7 +284,7 @@ def test_a_reviewed_merge_reaches_published_format_results_without_a_republish()
 def test_a_split_moves_printings_into_a_new_group_that_survives_reimport_until_restored():
     ids = seed(*CANDIES)
     sv = ids["sv01-191"]
-    owner, deck = deck_of((edition_of("sv01-191"), 4), (edition_of("sv02-278"), 56))
+    owner, deck = deck_of((edition_of("sv01-191"), 4), (edition_of("me01-001"), 1), (edition_of("sv02-278"), 55))
     assert standard(owner, deck, "2026-10-11")["status"] == "legal"  # through me01-125
     identity = identity_of(sv)
     me = groups(evidence(identity))[ids["me01-125"]]
@@ -329,7 +330,7 @@ def test_a_manual_printing_joins_a_group_only_through_review():
         rederive_card_attributes(conn)
     assert groups(evidence(identity))[manual] is None and queue() == [manual]
     correct_attributes(manual, MANUAL_TRAINER)
-    owner, deck = deck_of((edition, 4), (edition_of("sv02-278"), 56))
+    owner, deck = deck_of((edition, 4), (edition_of("me01-001"), 1), (edition_of("sv02-278"), 55))
     result = standard(owner, deck, "2026-10-11")
     # On its own the manual Printing has no regulation mark and a set without a recorded legal date.
     assert (result["status"], {issue["code"] for issue in result["issues"]}) == (

@@ -57,6 +57,7 @@ class AttributeValues(BaseModel):
     ace_spec: bool | None = None
     radiant: bool | None = None
     prism_star: bool | None = None
+    basic_pokemon: bool | None = None
 
     @field_validator("types")
     @classmethod
@@ -113,6 +114,9 @@ def consistent(attributes: CardAttributes) -> bool:
     if attributes.radiant is True and kind not in (None, "pokemon"):
         return False
     if attributes.ace_spec is True and kind == "pokemon":
+        return False
+    if attributes.basic_pokemon is True and (kind not in (None, "pokemon") or attributes.basic_energy is True
+                                             or attributes.ace_spec is True):
         return False
     return True
 

@@ -67,7 +67,7 @@ Export routes are unbudgeted and use `read_for_export`/`revalidate_for_export`, 
 
 Results are recomputed on every read from the frozen rows and quantities and the current public format facts (`catalog:format:<ref>`, below), with the private route's pure evaluator and rules files. They therefore follow rotations, bans and set-legality dates, reviewed attribute corrections, re-derived attributes, Reprint Group changes and Card Identity merges without republishing, after outbox delivery (the same lag as prices). The snapshot's own frozen basic checks (`checks`) never change; a Published Deck keeps its frozen Basic Energy result until it is republished.
 
-A row is proven when its frozen Printing reference has a well-formed format record. A legacy row without references, a row whose record is missing or malformed, and rows of one Edition with different Printing references are checked with unknown facts under their frozen Card Identity name: they count toward size and copy limits, never make a result legal, and report one `card_data_unavailable` gap instead of their set and regulation-mark gaps. A row whose Printing is in a Reprint Group is proven only when every printing the group's record lists has a well-formed format record naming the same group; the evaluator then judges reprint legality and bans through the group exactly as the private route does (`format_evaluator.line_standing`).
+A row is proven when its frozen Printing reference has a well-formed format record. A record must carry exactly the current attribute keys, so a record written before migration 034 (no `basic_pokemon`) is malformed until `scripts/backfill_public_catalog.py` rewrites it (docs/operations/release.md). A legacy row without references, a row whose record is missing or malformed, and rows of one Edition with different Printing references are checked with unknown facts under their frozen Card Identity name: they count toward size and copy limits, never make a result legal, and report one `card_data_unavailable` gap instead of their set and regulation-mark gaps. A row whose Printing is in a Reprint Group is proven only when every printing the group's record lists has a well-formed format record naming the same group; the evaluator then judges reprint legality and bans through the group exactly as the private route does (`format_evaluator.line_standing`).
 
 | status | code                            | when                                                                                             |
 | ------ | ------------------------------- | ------------------------------------------------------------------------------------------------ |
@@ -144,7 +144,7 @@ catalog:printing:<ref>   {printing_ref, name, set_id, set_name, collector_number
 catalog:format:<ref>     {printing_ref, revision, set_id: <text|null>, collector_number: <text|null>,
                           identity: {key, name}, reprint_group: null | {ref, printings: [<printing ref>]},
                           attributes: {regulation_mark, card_kind, basic_energy, types, rule_box, ace_spec, radiant,
-                                       prism_star}}
+                                       prism_star, basic_pokemon}}
 catalog:edition:<ref>    {edition_ref, printing_ref, descriptor, revision,
                           marketplace: {state: unverified|verified|quarantined, reason: <code|null>, mapping_revision,
                                         product_id: <int|null>,
