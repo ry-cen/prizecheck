@@ -1,0 +1,17 @@
+# Price runner liveness is proven by a file lock, not by clocks or PIDs
+
+**Status:** accepted; implemented in ticket 08-B; production validation pending.
+
+Price refresh (tickets 07 and 08) runs at most two detached runner processes, started on demand like the catalog import in [ADR 0003](0003-on-demand-catalog-imports.md). A runner holds a lease in the shared record store (`lease:price:runner:<n>`) and source permits in the scheduler. The question is when it is safe to take those away from a runner that has stopped renewing.
+
+**Decision.** A lease expiring is never proof that its runner is dead. A stopped (SIGSTOP), swapped-out or slow-store runner can resume and write. Termination is confirmed only by taking `flock(LOCK_EX|LOCK_NB)` on `$PRICE_RUNNER_LOCK_DIR/slot-<n>-<owner>.lock`.
+
+- The launcher opens and locks the file, then starts the supervisor with `pass_fds`. The supervisor forks the worker, which inherits the same open file description. The lock is held while either process lives and the kernel drops it when both are gone, including after SIGKILL. There is no PID or start-time comparison, so PID reuse cannot fool it, and no `psutil` or `/proc` dependency (the development host is macOS).
+- A same-host reclaim (`price_launcher.reclaim_slot`) requires an expired lease, a matching `host` (from `<lockdir>/host-id`) and a lock that can be taken. It opens the file without `O_CREAT`: a missing file means "unknown", not "free". It then frees the slot, releases the owner's source permits, requeues unexpired running jobs, drops expired ones and rewrites every `work:` record in one CAS. The version bump fences any writer that somehow still lives.
+- Admission triggers the reclaim itself, after its CAS, with an absolute deadline of at most 0.6 s and one attempt, and the cleanup CAS writes the successor's `reserved` lease in the same write. `PRICE_RUNNER_LOCK_DIR` must be a persistent, host-local volume: a regenerated `host-id` turns every earlier lease into another host's.
+- A lock that is held, a missing lock file, or a lease from another host is `uncertain`. The slot is left alone and rows are served from cache as `busy`. Recovery is the operator command `scripts/price_runners.py release --slot n --confirm-terminated` (decision D10). `flock` on a network filesystem is unreliable, so the lock directory must be host-local.
+- Lease renewal is fenced by owner and record version, never by time: a runner resumed after more than 10 s still renews and finishes if nobody replaced it.
+- A runner that is alive but hung is bounded separately: the supervisor kills the worker with SIGKILL 65 s after the claim, runs the cleanup CAS, and retries it for 60 s more. After that the supervisor exits, the lock frees, and a reclaim recovers.
+- An unclaimed reservation older than 5 s may be overwritten by anyone; a late supervisor's claim then fails and it exits without source I/O.
+
+**Consequences.** Permits are released only after a commit, a `waitpid`, or a lock-confirmed reclaim, never by time alone. A SIGKILLed runner costs exactly one extra fetch, since its running jobs are requeued. A frozen runner holds its slot (and at most four of the eight source permits) until it resumes, reaches its 65 s hard stop, or the operator releases it. The runner has no PostgreSQL access and no `DATABASE_URL`; it validates each job against the store's `catalog:edition` and `quarantine:edition` records (decision D12).

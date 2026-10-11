@@ -5,6 +5,7 @@ from uuid import uuid4
 
 import psycopg
 
+import pytest
 from test_holdings import add, call, fixture
 
 
@@ -128,6 +129,7 @@ def test_rollback_when_destination_write_fails():
     assert commit(owner, manifest_id, destination).status_code == 200
 
 
+@pytest.mark.slow(reason='capacity: 25 000 Editions')
 def test_failed_25000_edition_move_is_wholly_rejected():
     owner, _, source, _, edition, _ = fixture()
     destination = leaf(owner)

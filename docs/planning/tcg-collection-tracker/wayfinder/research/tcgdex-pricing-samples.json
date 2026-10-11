@@ -1,0 +1,120 @@
+{
+  "source": "https://api.tcgdex.net/v2/en/cards/{id}",
+  "retrieved": "2026-10-08",
+  "scope": "Sanitized excerpts from three successful read-only live responses; fields unrelated to pricing/variant mapping omitted.",
+  "records": [
+    {
+      "id": "swsh3-136",
+      "name": "Furret",
+      "set": "Darkness Ablaze",
+      "variants": { "normal": true, "reverse": true, "holo": false },
+      "variants_detailed": [
+        {
+          "type": "normal",
+          "size": "standard",
+          "thirdParty": { "tcgplayer": 219333 },
+          "pricing": {
+            "tcgplayer": {
+              "unit": "USD",
+              "updated": "2026-10-07T22:55:02.647Z",
+              "normal": { "productId": 219333, "marketPrice": 0.25 },
+              "reverse-holofoil": { "productId": 219333, "marketPrice": 0.43 }
+            }
+          }
+        },
+        {
+          "type": "reverse",
+          "size": "standard",
+          "thirdParty": { "tcgplayer": 219333 },
+          "pricing": {
+            "tcgplayer": {
+              "unit": "USD",
+              "updated": "2026-10-07T22:55:02.647Z",
+              "normal": { "productId": 219333, "marketPrice": 0.25 },
+              "reverse-holofoil": { "productId": 219333, "marketPrice": 0.43 }
+            }
+          }
+        }
+      ],
+      "card_pricing": {
+        "tcgplayer": {
+          "unit": "USD",
+          "updated": "2026-10-07T22:55:02.647Z",
+          "normal": { "productId": 219333, "marketPrice": 0.25 },
+          "reverse-holofoil": { "productId": 219333, "marketPrice": 0.43 }
+        }
+      }
+    },
+    {
+      "id": "base1-98",
+      "name": "Fire Energy",
+      "category": "Energy",
+      "set": "Base Set",
+      "variants_detailed": [
+        {
+          "type": "normal",
+          "subtype": "unlimited",
+          "thirdParty": { "tcgplayer": 42442 },
+          "pricing": {
+            "tcgplayer": {
+              "unit": "USD",
+              "updated": "2026-10-07T22:54:34.695Z",
+              "normal": { "productId": 42442, "marketPrice": 0.46 }
+            }
+          }
+        },
+        {
+          "type": "normal",
+          "subtype": "shadowless",
+          "stamp": ["1st-edition"],
+          "thirdParty": { "tcgplayer": 107094 },
+          "pricing": { "tcgplayer": null }
+        },
+        {
+          "type": "normal",
+          "subtype": "shadowless",
+          "thirdParty": { "tcgplayer": 107094 },
+          "pricing": { "tcgplayer": null }
+        },
+        {
+          "type": "normal",
+          "subtype": "1999-2000-copyright"
+        }
+      ],
+      "card_pricing": {
+        "tcgplayer": {
+          "unit": "USD",
+          "updated": "2026-10-07T22:54:34.695Z",
+          "normal": { "productId": 42442, "marketPrice": 0.46 }
+        }
+      }
+    },
+    {
+      "id": "swsh3-20",
+      "name": "Charizard VMAX",
+      "rarity": "Holo Rare VMAX",
+      "set": "Darkness Ablaze",
+      "variants": { "normal": false, "reverse": false, "holo": true },
+      "variants_detailed": [
+        {
+          "type": "holo",
+          "thirdParty": { "tcgplayer": 219233 },
+          "pricing": {
+            "tcgplayer": {
+              "unit": "USD",
+              "updated": "2026-10-07T22:55:02.647Z",
+              "holofoil": { "productId": 219233, "marketPrice": 41.68 }
+            }
+          }
+        }
+      ],
+      "card_pricing": {
+        "tcgplayer": {
+          "unit": "USD",
+          "updated": "2026-10-07T22:55:02.647Z",
+          "holofoil": { "productId": 219233, "marketPrice": 41.68 }
+        }
+      }
+    }
+  ]
+}

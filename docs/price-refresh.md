@@ -1,0 +1,152 @@
+# Price refresh: record contract (tickets 07 and 08)
+
+Skeleton written in Slice 0. Admission (07) and the runners (08) fill in behaviour; the shapes and invariants below are the contract both sides code against. The code for every shape is `api/app/quote_contract.py` (builders and strict validators). The 06 quote/result contract stays in `docs/prices.md`.
+
+Times are integer epoch milliseconds unless noted. `<ref>` is a Edition `public_ref`, `<rev>` its `mapping_revision`, and a job is identified by `<ref>:<rev>`. Every key below passes `key_family` and every coordination record is protected from eviction.
+
+## Records
+
+```
+admission:price:scheduler = {
+  v:1,
+  bucket:{milli:8000, at_ms},
+  interactive:{<request_id>:{caller, until_ms}},      // <=32, <=2 per caller, TTL-pruned
+  jobs:{"<ref>:<rev>":{caller, card, admitted_ms, expires_ms /* admitted+60000, never extended */,
+                       state:"queued"|"running", slot:null|0|1, owner:null|hex32, attempt:null|int}},  // <=256, <=32 per caller
+  fifo:{<caller>:["<ref>:<rev>", ...]},               // exactly the queued jobs, per caller
+  ring:[<caller>, ...], cursor:int,
+  source:{<permit_id>:{caller, slot, owner, jobs:[...], started_ms}},   // <=8, <=2 per caller, <=4 per slot
+  ledger:{interval:int, count:int},                   // <=10000 anonymous callers per interval
+  stats:{admitted, joined, refused:{reason:n}, expired, fenced}
+}
+admission:price:ledger:<00..63> = {v:1, entries:{"anon:<digest>":{expires_ms}}}
+lease:price:runner:<0|1> = null | {v:1, owner, state:"reserved"|"running"|"exiting", host, reserved_ms,
+       launcher_pid, claimed_ms|null, supervisor_pid|null, worker_pid|null, lease_until_ms, hard_stop_ms|null}
+backoff:price:source = {v:1, retry_ms, reason:"retry_after"|"rate_limited", set_ms}
+backoff:price:edition:<ref>:<rev> = {v:1, failures, last_attempt_ms, retry_ms,
+       reason:"timeout"|"transport"|"http_status"|"redirect"|"too_large"|"malformed"|"ambiguous"|"lookup_drift"}
+work:<ref>:<rev>  = {v:1, edition_ref, mapping_revision, card, variant, product_id, caller, admitted_ms, expires_ms,
+                     state:"queued"|"running", attempt:null|int, slot:null|int, owner:null|hex32}
+fence:<ref>:<rev> = {v:1, attempt:int}
+quote:<ref>:<rev>  = docs/prices.md
+result:<ref>:<rev> = docs/prices.md; an `absent` result also carries `attempt`
+```
+
+Backoff schedule: failure k waits `min(60 * 2^(k-1), 900)` s times a jitter in 0.8..1.2, or a valid Retry-After when that is longer. A source-wide backoff is capped at 1 h.
+
+## Invariants
+
+1. Only the fence holder writes `result:`/`quote:`, and only under the job's revision.
+2. `result.attempt == quote.attempt == fence.attempt`, as integers.
+3. `checked_at` changes only on a validated write.
+4. Absence is always `absent` plus `quote` deleted, written in one CAS.
+5. The only result states the runner writes are `quote` and `absent`; it never writes `pending`.
+6. No source I/O happens without a committed claim holding a token, a permit and an owned lease.
+7. Runner and source permits are released only after a commit, a `waitpid`, or a lock-confirmed reclaim. Interactive permits are TTL-bound.
+8. `expires_ms` is set exactly once.
+9. Every cap holds at every committed scheduler version.
+10. The runner has no `DATABASE_URL` and never imports psycopg.
+11. Admission never writes PostgreSQL, and a read under 1 h writes and contacts nothing.
+
+## Read isolation
+
+`quote_states` returns a per-row `invalid` state for a malformed `result:`/`quote:` record. The 06 read maps it to `failed/invalid_quote`, so one bad row never blanks the batch. Store unavailability still raises.
+
+## Test seams (CI only)
+
+`api/tests/catalog_process_fixture/price_fixture.py`, loaded from `sitecustomize`:
+
+- `PRICE_FIXTURE_SOURCE_ORIGIN` redirects `app.price_source.ORIGIN` to a loopback origin.
+- `PRICE_FIXTURE_LAUNCHER=record|fail` (with `PRICE_FIXTURE_LAUNCH_LOG`) replaces `price_launcher.spawn`.
+- A process that asks to import `app.price_runner` while `PRICE_RUNNER_LOCK_DIR` is set refuses non-loopback connects.
+- Launched runners never see `PRICE_FIXTURE_*` (the launcher's allowlist drops them), so a test writes the loopback origin to `$PRICE_RUNNER_LOCK_DIR/fixture-source-origin`. The fixture reads it when `app.price_source` is imported; the environment variable wins, and a non-loopback value fails the import. Runner requests then carry `x-fixture-slot`, `x-fixture-pid` and `x-fixture-pgid`.
+- In a runner process the fixture also logs every connect destination to `connects.log` and registers `runner-pids/<pid>` (`supervisor`, and `worker` for each fork). Tests count, stop and kill only those pids; nothing searches the host's process table.
+- `api/tests/test_price_runner.py` adds a test-only time scale: its sitecustomize reads `scaled_contract` from `$PRICE_RUNNER_LOCK_DIR/fake-source.json` and overrides `HARD_STOP_MS`, `LEASE_TTL_MS` or `LEASE_RENEW_MS` in `app.quote_contract` for the runners that test launches. The hard-stop scenario uses an 8 s stop and the SIGSTOP scenario a 2 s lease renewed every 0.5 s; both assert that the production constants are still 65 s, 10 s and 3 s. `IDLE_S` is a default argument and is not scaled.
+
+Real-process boundary scenarios (ticket 08-C) live in `auth/tests/price-runners.test.ts` (two gateways, two APIs, the HTTP relay, a fake TCGdex server and a fake PostgreSQL port) and `web/tests/price-refresh.spec.ts` (the live stack's runners against a hanging source). Their timing margins are appended to `price-runners-metrics.log` in `TEST_LOG_DIR`. A hanging source shows `failed` when the runner's 2 s source deadline ends inside the 2.5 s wait window, and `timeout` when it ends after it. Both are labelled fallbacks that keep the cached quote.
+
+`PRICE_RUNNER_LOCK_DIR` is the host-local directory for runner lock files (default `.local/price-runners`, gitignored). CI points it at a private temporary directory. In production it must be a **persistent, host-local volume** (not a network filesystem, not a per-container tmpfs): `host-id` and the lock files live there, and a regenerated `host-id` makes every earlier lease look like another host's, so reclaim answers `uncertain` until the operator releases the slot.
+
+## Admission (ticket 07)
+
+`app.price_refresh.evaluate_and_admit(rows, caller, budget, store=None) -> Admission`. `rows` are `Row(key, edition_ref, mapping_revision, lookup, product_id, state)` with `state` from `quote_states`. It is PostgreSQL-free so ticket 12 can reuse it anonymously.
+
+1. Classify each row by `result.checked_at` against `quote_contract.wall_ms()`: `< 1 h` fresh; `1 h .. < 24 h` soft; `>= 24 h`, missing/garbled/future (> 5 min) `checked_at`, unknown, invalid, pending: hard. All fresh: no store call at all.
+2. Otherwise one snapshot read at the generation of the state read: scheduler, both runner leases, source backoff, the anonymous ledger shard, and the `result:` versions of the open rows. Candidates (not already in `scheduler.jobs`) are ordered least recent first; `work:` and `backoff:` are read in chunks of 64 rows (at most 4 chunks) until the room is filled.
+3. Caps: source backoff blocks everything; room = min(32 new per access, 32 - the caller's outstanding jobs, 256 - all jobs); an interactive permit (32 global, 2 per caller, unexpired only) is required when anything is admitted or a hard row is awaited; the anonymous ledger (10000 new callers per hour) refuses only new digests. A refused permit or ledger refuses the whole request as `busy`. Joins (a queued unexpired job or any running job) are free: no write, no re-queue, no lifetime change. An expired queued job is pruned and re-admitted with a new lifetime.
+4. One CAS (at most 2 tries, each with deadline `min(wait_until, now + 0.6 s)`, explicit operation id, `operation_status` after an interrupted commit): expects the scheduler, source backoff, both leases, the ledger shard and each new job's `work:`, `result:`, `backoff:` (at most 101 keys); writes the scheduler, new `work:` records, the ledger entry and a `reserved` lease. The second try re-reads the latest state and reclassifies. Every written scheduler passes `validate_scheduler`; a stored scheduler that fails it is never overwritten (rows are `busy`).
+5. A slot is reserved when queued jobs exist, the source is not in backoff and no slot is usable (running with a live lease and `hard_stop_ms > now + 3 s`, or reserved less than 5 s ago); a second slot when more than 4 jobs are queued. Only a free slot or a reservation older than 5 s is taken; `running` and `exiting` slots are left to the 08 reclaim. After the commit `price_launcher.spawn(slot, owner)` is called; if it fails the slot is freed best effort and the jobs stay queued. If nothing is running or coming, rows answer `busy` (`launch_failed`) at once instead of waiting.
+6. `Admission.wait()` polls every 100 ms until each awaited hard row's `result:` version changes or its job leaves `scheduler.jobs`, and never past `wait_until`. `Admission.release()` removes the interactive permit with its own 1 s deadline (route: `BackgroundTask`); the permit's `until_ms` is `now + budget.remaining() + 500 ms`, so a TTL reclaims it otherwise.
+
+Writes happen only for new jobs, a hard wait (permit), or a needed runner reservation. Refusal reasons are exposed on `Admission.outcomes[key].reason` and `Admission.refused`, and are added to `stats.refused` only inside a CAS that is happening anyway. Pruned expired queued jobs leave their `work:` record behind; the next admission of that Edition overwrites it. Never user-forced: nothing in a request (route, field, header, role) changes the outcome.
+
+### Deck cost (ticket 09)
+
+`GET /api/decks/{id}/cost` is one access over the whole Deck: one capture, one `private_edition_quotes` call, so one `evaluate_and_admit` over every row, one interactive permit at most and one wait. Rows beyond the 32 new jobs answer `busy` (`job_cap`) and keep their cached view; nothing is dropped from the count. Scenarios: `api/tests/test_deck_cost.py` (signed HTTP), `auth/tests/deck-cost.test.ts` (the 08-C stack: gateways, relay, real runners, timing margins in `price-runners-metrics.log`) and `web/tests/deck-cost.spec.ts`.
+
+### Published Deck cost (ticket 12)
+
+One anonymous access is one `evaluate_and_admit` over every price-eligible frozen row, with caller `anon:<digest>` (the anonymous ledger applies) and eligibility read from `catalog:edition` and `quarantine:edition` (`public_catalog.marketplace_states`), never from PostgreSQL. A full ledger refuses a new anonymous caller without waiting: the cached quote is labelled `busy` and no job is created. Scenarios: `api/tests/test_published_cost.py`, `auth/tests/published-cost.test.ts`, `web/tests/published-cost.spec.ts`.
+
+## To be filled in by 08
+
+Runner lifecycle, source client and recovery table. See the ticket plans.
+
+## Runner (ticket 08-B)
+
+Code: `api/app/price_runner.py` (supervisor and worker), `api/app/price_launcher.py` (spawn, reclaim, shared cleanup), `scripts/price_runners.py` (operator). Design rationale: [ADR 0008](adr/0008-price-runner-liveness.md). The runner never imports psycopg, `app.main`, `app.prices` or `app.public_catalog`, and its environment never contains `DATABASE_URL`, `INTERNAL_AUTH_SECRET` or `BETTER_AUTH_SECRET`.
+
+### Launch
+
+`price_launcher.spawn(slot, owner)` opens `$PRICE_RUNNER_LOCK_DIR/slot-<n>-<owner>.lock`, takes `flock(LOCK_EX|LOCK_NB)`, starts `python -m app.price_runner --slot n --owner <owner>` with `pass_fds`, `start_new_session`, null stdio, `cwd=api`, and closes the API's copy of the descriptor. A reaper thread waits on the child. The child environment is `PATH`, `LANG`, `NODE_ENV`, `PYTHONPATH`, `PUBLIC_PROJECTION_*` and the absolute `PRICE_RUNNER_LOCK_DIR`. A failed launch returns `False` and leaves no lock file. The lock directory (default `.local/price-runners`) must be host-local; `host-id` in it is created once, atomically.
+
+### Slot lifecycle
+
+1. The supervisor forks the worker (before any thread), then its first store action is the claim CAS: the lease must be `reserved`, owner-matched and at most 5 s old. It becomes `running` with both pids, `host`, `claimed_ms`, `lease_until_ms = now + 10 s` and `hard_stop_ms = claimed + 65 s`. A failed claim kills the parked worker and exits 0 with no source I/O.
+2. A supervisor thread renews the lease every 3 s with a CAS on the slot key only (owner-fenced, not time-fenced).
+3. The worker claims jobs, fetches, writes, and releases (below). After 2 s with nothing runnable and nothing in flight it sets the lease to `exiting` (a CAS that also expects the scheduler version) and exits.
+4. When the worker exits, or is killed with SIGKILL at `hard_stop_ms`, the supervisor runs the cleanup CAS (release the owner's source permits, requeue unexpired running jobs, drop expired ones, rewrite their `work:` records, free the slot), retrying until `hard_stop + 60 s`. It then removes its lock file and, if runnable jobs remain and no other slot can serve them, reserves a slot and spawns a successor.
+
+### Worker
+
+- **Selection.** Walk `ring` from `cursor`; a caller with fewer than 2 source permits supplies its fifo head. All queued, unexpired jobs for that head's card (at most 16) are claimed together. Requirements: fewer than 8 source permits globally and 4 for this slot, no source backoff, at least 1 token (bucket refills 1/s, capacity 8), `now + 2 s <= expires_ms` and `now + 2.5 s <= hard_stop_ms`. Expired queued jobs and jobs that fail validation are cancelled (scheduler entry and `work:` removed) with no backoff and no check-age change.
+- **Pre-validation.** `work:` must be `queued` and agree with the scheduler job; `catalog:edition` and `quarantine:edition` must pass the marketplace rules (verified, clear, same `mapping_revision`, `product_id` equal to the work copy compared as text, `quote_lookup` equal to the work's card/variant); the Edition must not be in per-Edition backoff.
+- **Claim CAS.** Expects the scheduler, this slot's lease, `backoff:price:source` and, per Edition, `work:`, `fence:`, `result:`, `quote:`, `catalog:edition:`, `quarantine:edition:`. Takes a token, adds the source permit, marks jobs running with `attempt = fence.attempt + 1`, advances the cursor, bumps each fence and rewrites each `work:`. No source I/O happens before this commits.
+- **Per-Edition write.** One CAS per Edition with `operation_id = price:<ref>:<rev>:<attempt>`, expecting `result:`, `quote:`, `fence:`, `work:`, `catalog:edition:`, `quarantine:edition:`, `backoff:price:edition:`. Quote: `result` and `quote` with the new attempt, `work:` and the backoff deleted (an unchanged price is rewritten the same way). Absent: `result` absent and `quote` deleted in the same CAS. Failure: only `backoff:price:edition:` is written and `work:` deleted; `result:` and `quote:` are never touched. A 429, or a valid Retry-After, additionally sets `backoff:price:source` in a separate CAS.
+- **Conflicts.** The writer re-reads. If `work:` or `fence:` no longer shows this claim (owner, slot, attempt), or the Edition is no longer eligible, it abandons silently (counted in `stats.fenced`). If only `quote:` (an eviction) moved it retries, up to three tries. An unknown outcome is resolved with `operation_status`, then by re-reading.
+- **Release.** After the writes, a scheduler CAS removes the permit and the claim's jobs. It is retried until the hard stop and never replaced by time.
+
+- **Robustness.** A record that fails the contract (scheduler, source backoff) makes an iteration a no-op, never a crash. The source backoff written by the runner is validated and clamped to one hour from now. A claim CAS whose answer is false or unknown is checked by re-reading the scheduler: if its permit is there, the claim proceeds. A worker that lost a claim race sleeps 20-100 ms before retrying. A supervisor whose worker exited nonzero (or was killed) cleans up but does not hand off to a successor; the next access reserves one. A supervisor whose claim failed removes its lock file.
+
+### Slot classification and request-path reclaim
+
+One predicate, `quote_contract.slot_status`, serves admission and the runner's `handoff`: `free` (no lease, or a reservation older than 5 s), `usable` (young reservation, or running with a live lease and more than 3 s before `hard_stop_ms`), `reclaimable` (running or exiting with `lease_until_ms <= now`), `winding_down` (live exiting, or about to be killed) and `invalid`. `runner_target(queued)` is 2 when more than four jobs wait, else 1; handoff reserves up to that many free slots.
+
+Admission joins a running job as awaitable only when its slot's lease is valid, owned by the job's owner and unexpired. A job whose lease has run out waits for the reclaim; any other mismatch answers `busy` / `runner_uncertain` at once. A queued hard join waits only when the source is not in backoff and a runner is coming (a slot usable, free so it is reserved in the same CAS, reclaimable, or winding down); otherwise it answers `backoff` / `source_backoff` or `busy` / `no_runner` at once, writing nothing.
+
+After the admission CAS (or instead of it, when there is nothing to write) `Admission._reclaim_dead` runs when a slot is `reclaimable` and either a joined running job sits on it, or jobs are queued with no usable slot and no successful spawn. It calls `reclaim_slot(store, slot, deadline=min(wait_until, now + 0.6 s), attempts=1, replace_with=<new owner>)`; the cleanup CAS then writes a fresh `reserved` lease in the same write and admission spawns into it (freeing the slot if the spawn fails). Rows are settled per slot. `uncertain` relabels only the rows joined to that slot `busy` / `runner_uncertain`, with no wait; a row on a live slot, or on a slot reclaimed in the same access, keeps waiting. A slot that was reclaimed, or turns out to have been freed by someone else (`not_applicable` with the lease now free), turns its joined rows into queued work. Queued work answers `busy` (`launch_failed` or `no_runner`) only when something was attempted and no runner is usable, launched or spawned. A cleanup CAS whose answer was lost is resolved by one bounded lease re-read; if the owner is the replacement owner the runner is spawned. Reclaim spawns respect `runner_target` over queued plus requeued jobs: further reclaimable slots are freed without a reservation. Each post-commit refusal reason is counted once per access. Deviation from the review text: dead running jobs count as pending work, otherwise a SIGKILLed runner with nothing queued would never be reclaimed. Refusals decided after the commit (`runner_uncertain`, `launch_failed`) are added to `stats.refused` by the post-response `release()` CAS, never by a new request-path write. An admission CAS with an unknown outcome that carried a reservation is resolved by one bounded re-read of that lease; if the owner matches the admission landed, so the runner is spawned and the permit released normally.
+
+Every launcher call on the request path takes an absolute `deadline` (read, commit, cleanup, reclaim, and the `operation_status` follow-up); supervisor and operator callers keep their 2 s defaults. The hard wait stops polling 0.25 s before `wait_until` once any row has resolved, and the follow-up reads (failure stamps; the route's re-read of changed rows) use `wait_until` as their deadline, so the 0.5 s PostgreSQL reserve is never spent.
+
+Known risk (review F2, not changed): admission expects both lease versions in every CAS, so a lease renewal landing between its read and its commit makes it conflict and retry once.
+
+Follow-up (re-review note 5, not changed): while a slot stays `uncertain`, every access that joins a row to it records `runner_uncertain` with a post-response scheduler CAS from `release()`, so a long-frozen runner costs one extra scheduler write per such access until it resumes, hits its hard stop or the operator releases the slot.
+
+### Reclaim and operator recovery
+
+`price_launcher.reclaim_slot(store, slot)` returns `reclaimed`, `uncertain` or `not_applicable` as described in ADR 0008. Admission calls it only when no usable slot exists, as its own bounded step, and records `runner_uncertain` itself when it gets `uncertain`. `scripts/price_runners.py status` prints the leases and scheduler counts; `scripts/price_runners.py release --slot n --confirm-terminated` frees a slot without any liveness check, for another-host or lock-less cases.
+
+### Source seam
+
+The worker imports `app.price_source` and `app.tcgdex_record` lazily. It calls `price_source.fetch(card, may_retry)` (`may_retry` spends a bucket token in a small scheduler CAS) and maps `Fetched.status` 429, or 503 with a valid `retry_after`, to a source-wide backoff; every failure also writes the per-Edition backoff. `tcgdex_record.select_quote(record, descriptor, lookup, product_id)` returns `Quote`, `Absent` or `Failure(reason)`, each mapped to the per-Edition write above. The catalog `product_id` is an integer and the `work:` copy is text; they are compared as text.
+
+### Recovery table
+
+| Event                                        | Recovery                                                                    |
+| -------------------------------------------- | --------------------------------------------------------------------------- |
+| API dies after the reservation, before Popen | Reservation expires after 5 s and is replaced.                              |
+| Spawn fails                                  | `spawn` returns `False`; admission frees the slot; jobs stay queued.        |
+| Worker dies or hangs                         | Supervisor cleans up (SIGKILL at 65 s if hung).                             |
+| Both processes die (SIGKILL)                 | Lock is free; same-host reclaim requeues the jobs; one extra fetch.         |
+| Runner stopped (SIGSTOP)                     | Lock is held; reclaim returns `uncertain`; the runner resumes and finishes. |
+| Another host dies                            | `uncertain`; operator release.                                              |

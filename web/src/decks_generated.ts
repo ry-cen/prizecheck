@@ -6,6 +6,8 @@ export type DeckIndex = { decks: TreeNode[]; owner_revision: number; next_cursor
 export type IdentityCheck = { identity_id: string; name: string; quantity: string; status: string };
 export type DeckChecks = { total: string; shortage: string; excess: string; size_status: string; identities: IdentityCheck[]; disclaimer?: string };
 export type DeckDetail = { deck: TreeNode; checks: DeckChecks; owner_revision: number; catalog_revision: number };
+export type DeckEditionQuantity = { edition_id: string; quantity: string };
+export type DeckContents = { editions: DeckEditionQuantity[]; owner_revision: number; catalog_revision: number };
 
 export class DeckError extends Error {
   constructor(public status: number, public code: string) { super(code); }
@@ -22,4 +24,11 @@ async function request<T>(path: string, method: string, body?: object): Promise<
 }
 export const getDecks = (cursor?: string) => request<DeckIndex>('/api/decks' + (cursor ? '?cursor=' + encodeURIComponent(cursor) : ''), 'GET');
 export const createDeck = (body: CreateDeck) => request<LocationCommandResult>('/api/decks', 'POST', body);
+export async function getDeckContents(id: string, currentRevision?: () => number): Promise<DeckContents> {
+  const contents = await request<DeckContents>(`/api/decks/${encodeURIComponent(id)}/contents`, 'GET');
+  if (currentRevision && contents.owner_revision !== currentRevision()) {
+    throw new DeckError(409, 'INVENTORY_CHANGED');
+  }
+  return contents;
+}
 export const getDeck = (id: string) => request<DeckDetail>(`/api/decks/${encodeURIComponent(id)}`, 'GET');

@@ -1,4 +1,5 @@
 from uuid import uuid4
+import pytest
 from test_holdings import add, call, fixture
 from test_moves import start, stage, selected, leaf, commit
 
@@ -87,6 +88,7 @@ def test_newest_only_conflict_dismissal_five_entries_and_concurrent_replay():
     assert responses[0].status_code == 200
 
 
+@pytest.mark.slow(reason='capacity: 25 000 Editions')
 def test_worst_case_25000_edition_removal_payload_is_bounded_and_restored():
     import os
     import psycopg

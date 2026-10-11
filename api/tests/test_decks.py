@@ -81,3 +81,23 @@ def test_deck_index_pages_bind_owner_and_inventory_revision():
     create(owner, 'Later')
     stale = call('GET', '/api/decks?cursor=' + first['next_cursor'], owner)
     assert stale.status_code == 409 and stale.json()['detail']['code'] == 'INVENTORY_CHANGED'
+
+
+def test_complete_contents_preserves_exact_editions_quantities_and_private_scope():
+    owner, other, source, _, edition, _ = fixture()
+    deck = create(owner).json()['location']['id']
+    path = f'/api/decks/{deck}/contents'
+    response = call('GET', path, owner)
+    assert response.status_code == 200, response.text
+    empty = response.json()
+    assert empty['editions'] == []
+    added = add(owner, deck, edition, '9007199254740993').json()
+    complete = call('GET', path, owner).json()
+    assert complete['editions'] == [{'edition_id': edition, 'quantity': '9007199254740993'}]
+    assert complete['owner_revision'] == added['owner_revision']
+    assert complete['catalog_revision'] == empty['catalog_revision']
+    assert call('GET', path, other).status_code == 404
+    assert call('GET', f'/api/decks/{source}/contents', owner).status_code == 404
+    assert call('GET', f'/api/decks/{uuid4()}/contents', owner).status_code == 404
+    from test_holdings import client
+    assert client.get(path).status_code == 401

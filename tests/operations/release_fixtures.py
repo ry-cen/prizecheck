@@ -25,7 +25,10 @@ def runtime_fixtures():
     store = Path(WORK.name)/'store'
     store.mkdir(mode=0o700)
     history = Path(os.environ.get('RELEASE_TEST_HISTORY_ROOT', ROOT))
-    first = subprocess.check_output(['git', 'rev-parse', '47ff191^{commit}'], cwd=history, text=True).strip()
+    # The last application commit before migrations 019/020. The earlier pin,
+    # 47ff191, is no longer reachable after the history was rewritten.
+    first = subprocess.check_output(['git', 'rev-parse', '8d111614c3f396a036b3fd6976ddf421ae243e5b^{commit}'], cwd=history,
+                                    text=True).strip()
     second = hashlib.sha256(b'isolated current working-tree runtime fixture').hexdigest()[:40]
     for commit in (first, second):
         target = store/commit

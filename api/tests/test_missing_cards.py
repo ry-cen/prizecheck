@@ -184,3 +184,23 @@ def test_next_pull_preserves_manual_printing_and_edition(seeded_catalog):
         manual_edition = conn.execute("SELECT active FROM catalog_generation_edition WHERE generation_id=%s AND edition_id=%s", (generation, edition_id)).fetchone()
     assert manual == {"tombstoned": False}
     assert manual_edition == {"active": True}
+
+
+def test_approved_printing_and_edition_are_published_as_public_catalog_records(tmp_path, monkeypatch):
+    from app.public_projection import public_record_store
+    from app.public_records import catalog_edition_key, catalog_printing_key
+    monkeypatch.setenv("PUBLIC_PROJECTION_DIR", str(tmp_path))
+    deadline = time.monotonic() + 5
+    public_record_store().initialize(deadline=deadline)
+    report_id = printing_report()
+    issue_code(report_id)
+    approved = approve(report_id)
+    assert approved.status_code == 200, approved.text
+    with connect() as conn:
+        row = conn.execute("""SELECT p.public_ref AS printing_ref,e.public_ref AS edition_ref FROM catalog_printing p
+          JOIN catalog_edition e ON e.printing_id=p.id WHERE p.id=%s""", (approved.json()["approved_printing_id"],)).fetchone()
+    records = public_record_store().read_records(
+        [catalog_printing_key(row["printing_ref"]), catalog_edition_key(row["edition_ref"])], deadline=deadline).records
+    printing = records[catalog_printing_key(row["printing_ref"])].value
+    assert printing["name"] == "Pikachu" and printing["set_id"] == "jungle"
+    assert records[catalog_edition_key(row["edition_ref"])].value["printing_ref"] == row["printing_ref"]

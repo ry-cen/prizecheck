@@ -32,6 +32,8 @@ class PublicEdition(PublicModel):
     variant: dict
     image_url: str | None
     quantity: str
+    edition_ref: str | None = Field(default=None, pattern=r'^[0-9a-f]{48}$')
+    printing_ref: str | None = Field(default=None, pattern=r'^[0-9a-f]{48}$')
 
 
 class PublicIdentity(PublicModel):
@@ -114,6 +116,7 @@ def snapshot(conn, owner, deck_id, title, version):
     conn.execute('SELECT revision FROM inventory_owner WHERE user_id=%s FOR UPDATE', (owner,))
     state = conn.execute('SELECT active_generation FROM catalog_state WHERE singleton FOR SHARE').fetchone()
     rows = conn.execute("""SELECT ci.id,ci.display_name,h.quantity,e.descriptor,
+      e.public_ref AS edition_ref,p.public_ref AS printing_ref,
       coalesce(pd.set_id,'') AS set_id,coalesce(pd.set_name,'') AS set_name,
       coalesce(pd.collector_number,'') AS collector_number,pd.image_url,
       coalesce(gp.basic_energy,'unresolved') AS basic_energy
@@ -130,7 +133,8 @@ def snapshot(conn, owner, deck_id, title, version):
         group['amount'] += row['quantity']
         group['classes'].append(row['basic_energy'])
         group['editions'].append(PublicEdition(set_id=row['set_id'], set_name=row['set_name'], collector_number=row['collector_number'],
-            variant=row['descriptor'], image_url=f"{row['image_url']}/low.webp" if row['image_url'] else None, quantity=str(row['quantity'])))
+            variant=row['descriptor'], image_url=f"{row['image_url']}/low.webp" if row['image_url'] else None, quantity=str(row['quantity']),
+            edition_ref=row['edition_ref'], printing_ref=row['printing_ref']))
     evaluated = evaluate_checks([IdentityCount(g['amount'],all(value=='supported' for value in g['classes']),
                                              'unresolved' in g['classes']) for g in groups.values()])
     identities, checks = [], []
@@ -200,7 +204,13 @@ def mutate(deck_id, command, owner, action):
                     record = store.read().get(token)
                     if not record:
                         raise ProjectionUnavailable()
-                    projection = {'visibility': command.visibility, 'snapshot': PublicSnapshot.model_validate(record['snapshot']).model_dump(mode='json')}
+                    # Validate only: visibility never reinterprets frozen contents, so legacy
+                    # objects keep their exact stored bytes (no inferred or null references).
+                    try:
+                        PublicSnapshot.model_validate(record['snapshot'])
+                    except (KeyError, TypeError, ValueError, ValidationError):
+                        raise ProjectionUnavailable() from None
+                    projection = {'visibility': command.visibility, 'snapshot': record['snapshot']}
                     conn.execute('UPDATE deck_publication SET visibility=%s WHERE token=%s', (command.visibility, token))
                 elif action == 'revoke':
                     projection = None

@@ -44,7 +44,7 @@ def relay(monkeypatch, tmp_path):
                 state = updated
                 self.send_response(204); self.end_headers()
     server = ThreadingHTTPServer(('127.0.0.1',0),Handler)
-    thread = threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+    thread = threading.Thread(target=server.serve_forever,kwargs={'poll_interval':0.02},daemon=True);thread.start()
     monkeypatch.setenv('PUBLIC_PROJECTION_ADAPTER','http')
     monkeypatch.setenv('PUBLIC_PROJECTION_URL',f'http://127.0.0.1:{server.server_port}/manifest')
     monkeypatch.setenv('PUBLIC_PROJECTION_TOKEN','projection-test-secret')
@@ -111,6 +111,7 @@ def test_failed_http_write_retries_durable_command_without_new_token(relay):
     assert client.get('/api/public/decks/'+token).json()['total'] == '2'
 
 
+@pytest.mark.slow(reason='wall-clock: waits out a hanging manifest relay')
 def test_http_manifest_timeout_is_safe_unavailable(relay):
     relay['hang'] = True
     response = client.get('/api/public/discovery')
