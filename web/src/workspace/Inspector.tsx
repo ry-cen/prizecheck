@@ -1,7 +1,7 @@
 import React, { useEffect, useId, useRef, useState } from "react";
 import { getEditionDistribution } from "../collection_generated";
 import type { HoldingView } from "../holdings_generated";
-import { plural } from "./galleryModel";
+import { CATEGORY_OPTIONS, plural } from "./galleryModel";
 import type { Inspected } from "./useSelection";
 import "./Inspector.css";
 
@@ -22,15 +22,18 @@ type DetailsProps = {
   headingId?: string;
 };
 
-/** Category and elemental type, for example "Pokémon · Fire". Ticket 104 stores both on the Card
- * Printing and returns them on the Holding listing as `category` and `elemental_types`; until then
- * this is null and the line is omitted. If ticket 104 names them differently, change only this function. */
+/** Category and elemental type, for example "Pokémon · Fire" or "Pokémon · Psychic · Water".
+ * The Holding listing returns them as `category` and `elemental_types` (ticket 104); the line is
+ * omitted when the catalog knows neither. */
 export function cardKindLine(holding: HoldingView): string | null {
   const { category, elemental_types } = holding as HoldingView & {
     category?: string | null;
     elemental_types?: readonly string[] | null;
   };
-  const parts = [category, ...(elemental_types ?? [])].filter(
+  const label =
+    CATEGORY_OPTIONS.find((option) => option.value === category)?.label ??
+    category;
+  const parts = [label, ...(elemental_types ?? [])].filter(
     (part): part is string => !!part
   );
   return parts.length ? parts.join(" · ") : null;

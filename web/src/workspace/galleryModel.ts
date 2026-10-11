@@ -1,20 +1,88 @@
-import type { CollectionHoldingView } from "../collection_generated";
+import type {
+  CardCategory,
+  CollectionHoldingQuery,
+  CollectionHoldingView,
+  ElementalType,
+  HoldingSort,
+} from "../collection_generated";
 import type { HoldingView } from "../holdings_generated";
 import type { WorkspaceView } from "./LocationNav";
 
-/** Card size choice. Ticket 104 persists it with the other display preferences. */
+/** Card size choice, remembered with the other preferences (galleryPrefs.ts). */
 export type CardSize = "small" | "medium";
 
 /** Display preferences: presentation only (size, names, and later prices). Sort, search and filters belong in `GalleryQuery`. */
 export type DisplayPrefs = { size: CardSize; names: boolean };
 export const DEFAULT_DISPLAY: DisplayPrefs = { size: "small", names: false };
 
-/** What the gallery lists. Ticket 104 adds search text, filters and sort here; map each new field in `queryToParams` so it refetches. */
-export type GalleryQuery = { view: WorkspaceView };
+/** Sort choice: a key and a direction, sent to the listing as is. Name A–Z is the default. */
+export type GallerySort = HoldingSort;
+export const DEFAULT_SORT: GallerySort = "name-asc";
+export const SORT_OPTIONS: readonly { value: GallerySort; label: string }[] = [
+  { value: "name-asc", label: "Name A–Z" },
+  { value: "name-desc", label: "Name Z–A" },
+  { value: "set-asc", label: "Set / number ↑" },
+  { value: "set-desc", label: "Set / number ↓" },
+  { value: "quantity-desc", label: "Quantity ↓" },
+  { value: "quantity-asc", label: "Quantity ↑" },
+];
 
-/** The listing request parameters for a query. The gallery refetches whenever this changes. */
-export function queryToParams(query: GalleryQuery): { location_id?: string } {
-  return query.view === "all" ? {} : { location_id: query.view };
+export const CATEGORY_OPTIONS: readonly {
+  value: CardCategory;
+  label: string;
+}[] = [
+  { value: "Pokemon", label: "Pokémon" },
+  { value: "Trainer", label: "Trainer" },
+  { value: "Energy", label: "Energy" },
+];
+
+/** The game's elemental types, in the order the game lists them. */
+export const ELEMENTAL_TYPES: readonly ElementalType[] = [
+  "Grass",
+  "Fire",
+  "Water",
+  "Lightning",
+  "Psychic",
+  "Fighting",
+  "Darkness",
+  "Metal",
+  "Fairy",
+  "Dragon",
+  "Colorless",
+];
+
+/** Filter values; "" means any. Each filter narrows independently of the others. */
+export type GalleryFilters = {
+  set: string;
+  category: CardCategory | "";
+  type: ElementalType | "";
+};
+export const NO_FILTERS: GalleryFilters = { set: "", category: "", type: "" };
+
+/** How many filters are narrowing the gallery. */
+export const activeFilterCount = (filters: GalleryFilters) =>
+  [filters.set, filters.category, filters.type].filter(Boolean).length;
+
+/** What the gallery lists. Map every field in `queryToParams`, so a change refetches. */
+export type GalleryQuery = {
+  view: WorkspaceView;
+  /** Card name search text, as typed (already debounced). */
+  search: string;
+  filters: GalleryFilters;
+  sort: GallerySort;
+};
+
+/** The listing request parameters for a query, in a fixed field order. The gallery refetches whenever this changes. */
+export function queryToParams(query: GalleryQuery): CollectionHoldingQuery {
+  const params: CollectionHoldingQuery = {};
+  if (query.view !== "all") params.location_id = query.view;
+  params.sort = query.sort;
+  const search = query.search.trim();
+  if (search) params.name = search;
+  if (query.filters.set) params.set_id = query.filters.set;
+  if (query.filters.category) params.category = query.filters.category;
+  if (query.filters.type) params.elemental_type = query.filters.type;
+  return params;
 }
 
 /** One Holding in display order. A tile is (Holding, ordinal); no per-copy records exist anywhere. */
