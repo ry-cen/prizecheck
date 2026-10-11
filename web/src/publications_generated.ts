@@ -4,6 +4,8 @@ export type PublishCommand = { title: string; idempotency_key: string };
 export type RevokeCommand = { idempotency_key: string };
 export type PublicationStatus = { token: string | null; version: number | null; title: string | null; visibility: string | null; projection_pending?: boolean };
 export type PublicationResult = { token: string; version: number; revoked: boolean };
+export type OwnedPublication = { token: string; version: number; title: string; visibility: string; deck_id: string | null; projection_pending: boolean };
+export type OwnedPublications = { publications: OwnedPublication[] };
 export type PublicEdition = { set_id: string; set_name: string; collector_number: string; variant: Record<string, unknown>; image_url: string | null; quantity: string; edition_ref?: string | null; printing_ref?: string | null; printing_name?: string | null };
 export type PublicIdentity = { name: string; quantity: string; editions: PublicEdition[] };
 export type PublicIdentityCheck = { name: string; quantity: string; status: string };
@@ -29,6 +31,9 @@ export const publishDeck = (id: string, body: PublishCommand) => request<Publica
 export const republishDeck = (id: string, body: PublishCommand) => request<PublicationResult>(`/api/decks/${encodeURIComponent(id)}/publication`, 'PUT', body);
 export const revokeDeck = (id: string, body: RevokeCommand) => request<PublicationResult>(`/api/decks/${encodeURIComponent(id)}/publication`, 'DELETE', body);
 export const setPublicationVisibility = (id: string, body: VisibilityCommand) => request<PublicationResult>(`/api/decks/${encodeURIComponent(id)}/publication/visibility`, 'PATCH', body);
+export const getOwnedPublications = () => request<OwnedPublications>('/api/publications', 'GET');
+export const revokePublication = (token: string, body: RevokeCommand) => request<PublicationResult>(`/api/publications/${encodeURIComponent(token)}`, 'DELETE', body);
+export const setPublishedDeckVisibility = (token: string, body: VisibilityCommand) => request<PublicationResult>(`/api/publications/${encodeURIComponent(token)}/visibility`, 'PATCH', body);
 export async function getPublicDeckPage(token: string) {
   let robots = 'noindex, nofollow';
   const snapshot = await request<PublicSnapshot>(`/api/public/decks/${encodeURIComponent(token)}`, 'GET', undefined, response => { robots = response.headers.get('x-robots-tag') ?? robots; });

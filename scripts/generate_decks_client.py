@@ -23,7 +23,7 @@ names = ("TreeNode", "LocationCommandResult", "CreateDeck", "EditDeck", "DeckInd
          "ElsewhereLocation", "LineOwnership", "SurplusHolding", "CompetingDeck", "CompetitionWarning",
          "AddDeckListPrinting", "DeckListPrintingResult",
          "PickWarning", "PickSource", "PickRow", "PutAwayHolding", "PickList", "PickItem", "ConfirmPicks",
-         "PickConfirmResult")
+         "PickConfirmResult", "DeleteDeck", "DeleteDeckResult")
 lines = ["// Generated from FastAPI OpenAPI by scripts/generate_decks_client.py. Do not edit."]
 for name in names:
     definition = schema[name]
@@ -68,6 +68,8 @@ export const getPickList = (deckId: string) =>
   request<PickList>(`/api/decks/${encodeURIComponent(deckId)}/pick-list`, 'GET');
 export const confirmPicks = (deckId: string, body: ConfirmPicks) =>
   request<PickConfirmResult>(`/api/decks/${encodeURIComponent(deckId)}/pick-list/confirm`, 'POST', body);
+export const deleteDeck = (id: string, body: DeleteDeck) =>
+  request<DeleteDeckResult>(`/api/decks/${encodeURIComponent(id)}`, 'DELETE', body);
 """)
 content = "\n".join(lines)
 target = root / "web/src/decks_generated.ts"
