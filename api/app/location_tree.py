@@ -21,8 +21,14 @@ class TreeNode(BaseModel):
     depth: int
 
 
+class TreeLocation(TreeNode):
+    """A tree row with the copies stored directly in it: the sum of its Holdings' quantities as a
+    decimal string, "0" for Organizational Locations and empty leaves. Only the tree read carries it."""
+    copy_count: str
+
+
 class TreeResponse(BaseModel):
-    locations: list[TreeNode]
+    locations: list[TreeLocation]
     owner_revision: int
 
 
@@ -161,7 +167,11 @@ def store_result(conn, user_id, key, digest, row, rows):
 def tree(user_id: str = Depends(verified_user)):
     with connect() as conn, conn.transaction():
         revision, rows = owner_and_rows(conn, user_id)
-        return TreeResponse(locations=[node_model(row, rows) for row in sorted(rows.values(), key=lambda r: (depth_of(r["id"], rows), r["name"].casefold(), str(r["id"])))], owner_revision=revision)
+        copies = {row["location_id"]: row["copies"] for row in conn.execute(
+            "SELECT location_id,sum(quantity)::text AS copies FROM holding WHERE owner_id=%s GROUP BY location_id", (user_id,)).fetchall()}
+        return TreeResponse(locations=[TreeLocation(**row, depth=depth_of(row["id"], rows), copy_count=copies.get(row["id"], "0"))
+                                       for row in sorted(rows.values(), key=lambda r: (depth_of(r["id"], rows), r["name"].casefold(), str(r["id"])))],
+                            owner_revision=revision)
 
 
 @router.post("", response_model=LocationCommandResult, status_code=201)
