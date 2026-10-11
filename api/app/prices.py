@@ -14,6 +14,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal, localcontext
 import os
 import threading
+import time
 from typing import Literal
 from uuid import UUID
 
@@ -278,6 +279,41 @@ def _admit(lookable, pairs, found, states, budget: Budget, store, releases: list
             for key in changed:
                 admission.outcomes[key].refresh = 'timeout'
     return admission
+
+
+# --- Stored quotes without access -------------------------------------------------------------------------------
+STORED_READ_SECONDS = 1.0  # Whole wait for a stored-quote read on a write path: PostgreSQL targets plus the record store.
+
+
+def stored_edition_quotes(edition_ids, wait_seconds: float = STORED_READ_SECONDS) -> dict[UUID, QuoteView] | None:
+    """What the cache holds now for each Edition, for write paths that choose by price but display none.
+
+    No admission, no refresh, no runner wait and no write of any kind: under ADR 0006 only displayed prices and complete
+    Deck costs are accesses, so this read never wakes the price runner, whatever a row's check age. Rows are labelled and
+    labelled and validated with the same rules as ``private_edition_quotes``, without its final re-read: a mapping
+    change during the read is not detected (a malformed row fails only itself). Returns None when the
+    reviewed state or the record store could not be read inside ``wait_seconds``: the caller cannot tell "unpriced" from
+    "unread" then. Holds no connection or lock while the store is read."""
+    ids = list(dict.fromkeys(edition_ids))
+    if not ids:
+        return {}
+    deadline = time.monotonic() + wait_seconds
+    try:
+        found = _bounded(lambda: _read_targets(ids, max(1, int(wait_seconds * 1000))), wait_seconds)
+    except (_Late, psycopg.Error, OSError, KeyError):
+        return None
+    views = {edition_id: _label(found.get(edition_id)) for edition_id in ids}
+    lookable = [edition_id for edition_id in ids if views[edition_id] is None]
+    if lookable:
+        pairs = [(found[edition_id][0], found[edition_id][2].mapping_revision) for edition_id in lookable]
+        try:
+            states = quote_states(public_record_store(), pairs, deadline=deadline)
+        except (ProjectionUnavailable, ValueError):
+            return None
+        now = _now()
+        for edition_id, pair in zip(lookable, pairs):
+            views[edition_id] = validate_quote(found[edition_id][2].quote_lookup, states[pair], now)
+    return {edition_id: views[edition_id] for edition_id in ids}
 
 
 # --- HTTP ------------------------------------------------------------------------------------------------------
