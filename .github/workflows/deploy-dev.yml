@@ -22,6 +22,10 @@ jobs:
   verify:
     if: github.ref == 'refs/heads/dev' && inputs.operation != 'rollback'
     uses: ./.github/workflows/verify.yml
+    # The fast tier: the slow capacity and timing tests are unreliable on hosted runners and would block deploys at
+    # random. The full gate still runs on the same push through verify.yml's own push trigger, without blocking.
+    with:
+      fast: true
     permissions:
       contents: read
 
