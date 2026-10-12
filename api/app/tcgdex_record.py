@@ -21,6 +21,19 @@ def source_descriptor(variant: dict) -> dict:
     return descriptor
 
 
+def distinct_variants(detailed: list) -> list:
+    """TCGdex lists some variants twice, entry for entry. One entry stands for the pair; entries that share a
+    descriptor but differ in lookup identity remain a collision."""
+    seen, result = set(), []
+    for item in detailed:
+        key = json.dumps(item, sort_keys=True) if isinstance(item, dict) else None
+        if key is None or key not in seen:
+            result.append(item)
+        if key is not None:
+            seen.add(key)
+    return result
+
+
 @dataclass(frozen=True)
 class Quote:
     amount: str
@@ -58,7 +71,7 @@ def select_quote(record, descriptor, lookup, product_id) -> Quote | Absent | Fai
     detailed = record.get('variants_detailed')
     if not isinstance(detailed, list) or not isinstance(descriptor, dict):
         return Failure('malformed')
-    matches = [item for item in detailed if isinstance(item, dict) and source_descriptor(item) == descriptor]
+    matches = [item for item in distinct_variants(detailed) if isinstance(item, dict) and source_descriptor(item) == descriptor]
     if not matches:
         return Failure('lookup_drift')
     if len(matches) > 1:

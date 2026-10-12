@@ -20,7 +20,7 @@ from .card_identity import card_identity_key
 from .catalog_targets import IDENTITY_REVIEW_KINDS, MatchingRulesV1, TargetContext, refresh_editions, refresh_printing
 from .public_catalog import publish_catalog_best_effort
 from .reprint_groups import refresh_reprint_groups
-from .tcgdex_record import source_descriptor
+from .tcgdex_record import distinct_variants, source_descriptor
 
 BASE_URL = "https://api.tcgdex.net/v2/en/cards"
 # Pokémon TCG Pocket is digital-only; its cards are not physical Card Printings.
@@ -120,7 +120,7 @@ def variant_descriptors(record: dict) -> tuple[list[dict], bool]:
             return [{"kind": "unspecified", "label": "Unspecified Variant"}], True
         descriptors = []
         unclassified = False
-        for item in detailed:
+        for item in distinct_variants(detailed):
             if not isinstance(item, dict):
                 return [{"kind": "unspecified", "label": "Unspecified Variant"}], True
             if any(key not in PHYSICAL_VARIANT_KEYS and key not in MUTABLE_SOURCE_KEYS for key in item):
@@ -131,7 +131,7 @@ def variant_descriptors(record: dict) -> tuple[list[dict], bool]:
             descriptors.append(descriptor)
         keys = [json.dumps(value, sort_keys=True) for value in descriptors]
         if len(keys) != len(set(keys)):
-            raise CatalogError("Descriptor collision requires review before promotion")
+            raise CatalogError(f"Descriptor collision on {record.get('id')} requires review before promotion")
         if descriptors:
             return descriptors, unclassified
     variants = record.get("variants")
@@ -248,7 +248,7 @@ def edition_metadata(record, descriptor, physical_conflict):
     printing-level evidence, and unresolved or Unspecified Editions get no quote.
     """
     detailed = record.get("variants_detailed")
-    detailed = detailed if isinstance(detailed, list) else []
+    detailed = distinct_variants(detailed) if isinstance(detailed, list) else []
     exact = [variant for variant in detailed if isinstance(variant, dict) and source_descriptor(variant) == descriptor]
     variant = exact[0] if len(exact) == 1 else {}
     if physical_conflict or descriptor.get("kind") == "unspecified" or detailed and not variant:
