@@ -2,6 +2,9 @@ name: Verify
 on:
   pull_request:
   push:
+    # Pushes to dev run this gate through deploy-dev.yml, which deploys only after it passes.
+    branches-ignore: [dev]
+  workflow_call:
 permissions:
   contents: read
 jobs:
