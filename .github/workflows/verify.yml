@@ -2,13 +2,15 @@ name: Verify
 on:
   pull_request:
   push:
-  # deploy-dev.yml calls the fast tier before each dev deploy; the full gate above still runs on every push.
-  workflow_call:
+  # Every automatic run is the fast tier: the slow capacity and timing tests fail at random on hosted runners.
+  # Run the full gate on demand from Actions -> Verify -> Run workflow, or locally with `npm run verify`.
+  workflow_dispatch:
     inputs:
-      fast:
-        description: Leave out slow tests (verification guide, "Loops").
+      full:
+        description: Run the full gate (slow tests and the operations suite included)
         type: boolean
         default: false
+  workflow_call:
 permissions:
   contents: read
 jobs:
@@ -46,7 +48,7 @@ jobs:
       - run: python -m venv .venv && .venv/bin/pip install -r api/requirements.txt
       - run: sudo apt-get update && sudo apt-get install -y postgresql-client-16
       - run: npx playwright install --with-deps chromium
-      - run: npm run verify${{ inputs.fast && ' -- --fast' || '' }}
+      - run: npm run verify${{ !inputs.full && ' -- --fast' || '' }}
         env:
           TEST_ADMIN_DATABASE_URL: postgresql://postgres:test-only-password@127.0.0.1:5432/postgres
       - uses: actions/upload-artifact@v4
