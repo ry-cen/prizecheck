@@ -2,7 +2,7 @@
 
 **Label:** wayfinder:map
 
-**Status:** charted 2026-10-12; frontier open
+**Status:** charted 2026-10-12; frontier open; app shell decided 2026-10-12
 
 ## Destination
 
@@ -25,11 +25,13 @@ An agreed plan, ready for owner-invoked `/to-spec` and `/to-ticket`, that puts e
 
 <!-- One line per closed ticket: link plus a one-line gist. -->
 
+- [Prototype the app shell and navigation](https://github.com/ry-cen/prizecheck/issues/122): Variant A. Desktop has top tabs (Collection, Decks, Catalog, Missing cards) and an avatar menu with Owner controls and Sign out. Mobile has a bottom tab bar (Collection, Decks, Catalog, More), and ☰ opens the page's side content. Pages keep their state when you leave and come back. Signed-out pages share one slim public header. [Resolution](resolutions/decide-app-shell.md) · [Prototype notes](prototypes/app-shell/README.md)
+
 ## Not yet specified
 
-- **Missing cards and Owner controls** on the shared components. The catalog pull, catalog review, metadata review, operations health and missing-card review pages are dense tables and review cards. How they look on mobile waits on the shell.
-- **Sign-in and loading screens.** Small, but they're the first thing anyone sees. They wait on the public header from the shell.
-- **The shared component kit.** Which pieces to extract from the workspace (buttons, fields, dialogs, tables, empty, loading and error states, toasts), and how the old `web/src/style.css` and the old pages' CSS are retired.
+- **Missing cards and Owner controls** on the shared components. Their place in the shell is decided: Missing cards is a tab and sits in the mobile More sheet, and Owner controls sits in the avatar menu and the More sheet. Still open is how the dense review queues and review cards read, with wide tables scrolling inside their own containers.
+- **Sign-in and loading screens.** These use the slim public header from the shell decision. Still open is the sign-in and code-entry layout, and how loading looks without a flash of the old light screen.
+- **The shared component kit.** Which pieces to extract from the workspace (buttons, fields, dialogs, tables, empty, loading and error states, toasts), and how the old `web/src/style.css` and the old pages' CSS are retired. The shell prototype found that `style.css` restyles every `button`, `input`, `label` and `main`, so it must be retired or scoped.
 - **Rollout and verification.** The order pages move into the shell, and how browser tests and axe checks cover every page.
 - **Reconciling the workspace tickets.** [Workspace: Shell, design variables and Location sidebar](https://github.com/ry-cen/prizecheck/issues/102) through [Workspace: Cutover, accessibility pass and prototype removal](https://github.com/ry-cen/prizecheck/issues/114) are still open, but the cutover appears to have landed on `dev`. The spec needs to know what's actually done.
 
