@@ -12,6 +12,7 @@ from test_deck_lists import add_line, change_line, detail, remove_line
 from test_decks import create
 from test_holdings import add, call, fixture
 from test_moves import commit, edition_like, leaf, selected, stage, start
+from test_multi_source_moves import begin, item
 
 
 def deck_list(owner, deck):
@@ -40,6 +41,28 @@ def move(owner, source, destination, items):
 
 def remove(owner, source, items):
     response = call('POST', f'/api/moves/manifests/{staged(owner, source, items)}/remove', owner,
+                    {'idempotency_key': str(uuid4())})
+    assert response.status_code == 200, response.text
+
+
+def staged_multi(owner, items):
+    """A sourceless Move manifest holding each (source, Edition, copies) triple at its current Holding version."""
+    versions = {(location, row['edition_id']): row['version'] for location in {source for source, _, _ in items}
+                for row in call('GET', f'/api/holdings/{location}', owner).json()['holdings']}
+    manifest = begin(owner)['id']
+    response = stage(owner, manifest, [item(source, edition, amount, versions[(source, edition)])
+                                       for source, edition, amount in items])
+    assert response.status_code == 200, response.text
+    return manifest
+
+
+def move_multi(owner, destination, items):
+    response = commit(owner, staged_multi(owner, items), destination)
+    assert response.status_code == 200, response.text
+
+
+def remove_multi(owner, items):
+    response = call('POST', f'/api/moves/manifests/{staged_multi(owner, items)}/remove', owner,
                     {'idempotency_key': str(uuid4())})
     assert response.status_code == 200, response.text
 
@@ -144,6 +167,66 @@ def test_undoing_moves_and_removals_never_shrinks_the_deck_list():
     undo(owner, newest_undo(owner))
     assert held(owner, deck) == {edition: '3'}
     assert deck_list(owner, deck) == (2, {edition: ('3', '3')})
+
+
+def test_multi_source_move_and_undo_raise_only_the_cut_line_once():
+    owner, _, binder, _, e, generation = fixture()
+    f = edition_like(e, generation)
+    a, b = create(owner, 'Deck A').json()['location']['id'], create(owner, 'Deck B').json()['location']['id']
+    assert add(owner, a, e, '4').status_code == 200 and add(owner, a, f, '2').status_code == 200
+    assert add(owner, b, e, '3').status_code == 200
+    # A and B each list what they hold; one Move takes E from both and F from A, and moves out never shrink a list.
+    assert (deck_list(owner, a), deck_list(owner, b)) == ((3, {e: ('4', '4'), f: ('2', '2')}), (2, {e: ('3', '3')}))
+    move_multi(owner, binder, [(a, e, 3), (b, e, 3), (a, f, 2)])
+    assert held(owner, binder) == {e: '6', f: '2'} and held(owner, a) == {e: '1'} and held(owner, b) == {}
+    # Lines and revisions stay; only the copies in the Decks fall.
+    assert deck_list(owner, a) == (3, {e: ('4', '1'), f: ('2', '0')})
+    assert deck_list(owner, b) == (2, {e: ('3', '0')})
+    # Cut A's E line below the 3 copies the Undo returns; B's line stays covering its copies.
+    assert change_line(owner, a, e, '1', 3).status_code == 200
+    assert deck_list(owner, a) == (4, {e: ('1', '1'), f: ('2', '0')})
+    undo(owner, newest_undo(owner))
+    assert held(owner, a) == {e: '4', f: '2'} and held(owner, b) == {e: '3'} and held(owner, binder) == {}
+    # A's E line is raised once to cover the 4 copies it holds; F's line already covers its 2; B is untouched.
+    assert deck_list(owner, a) == (5, {e: ('4', '4'), f: ('2', '2')})
+    assert deck_list(owner, b) == (2, {e: ('3', '3')})
+
+
+def test_multi_source_move_into_a_deck_covers_arrivals_and_its_undo_never_shrinks_the_list():
+    owner, _, binder, _, e, generation = fixture()
+    f = edition_like(e, generation)
+    a, c = create(owner, 'Deck A').json()['location']['id'], create(owner, 'Deck C').json()['location']['id']
+    assert add(owner, binder, e, '3').status_code == 200
+    assert add(owner, a, e, '2').status_code == 200 and add(owner, a, f, '1').status_code == 200
+    assert deck_list(owner, c) == (1, {})
+    move_multi(owner, c, [(binder, e, 3), (a, e, 2), (a, f, 1)])
+    assert held(owner, c) == {e: '5', f: '1'} and held(owner, binder) == {} and held(owner, a) == {}
+    after_move = deck_list(owner, c)
+    assert after_move[1] == {e: ('5', '5'), f: ('1', '1')}
+    undo(owner, newest_undo(owner))
+    assert held(owner, c) == {} and held(owner, binder) == {e: '3'} and held(owner, a) == {e: '2', f: '1'}
+    # The arrivals' lines stay at their quantities; only the copies in Deck C are gone.
+    assert deck_list(owner, c) == (after_move[0], {e: ('5', '0'), f: ('1', '0')})
+    assert deck_list(owner, a) == (3, {e: ('2', '2'), f: ('1', '1')})
+
+
+def test_multi_source_removal_and_its_undo_leave_every_deck_list_unchanged():
+    owner, _, _, _, e, generation = fixture()
+    f = edition_like(e, generation)
+    a, b = create(owner, 'Deck A').json()['location']['id'], create(owner, 'Deck B').json()['location']['id']
+    assert add(owner, a, e, '3').status_code == 200 and add(owner, a, f, '1').status_code == 200
+    assert add(owner, b, e, '2').status_code == 200
+    a_lines, b_lines = (3, {e: ('3', '3'), f: ('1', '1')}), (2, {e: ('2', '2')})
+    assert (deck_list(owner, a), deck_list(owner, b)) == (a_lines, b_lines)
+    remove_multi(owner, [(a, e, 3), (b, e, 2)])
+    assert held(owner, a) == {f: '1'} and held(owner, b) == {}
+    # Like the single-source Removal above: lines stay, only in_deck falls, and the revision does not advance.
+    assert deck_list(owner, a) == (3, {e: ('3', '0'), f: ('1', '1')})
+    assert deck_list(owner, b) == (2, {e: ('2', '0')})
+    undo(owner, newest_undo(owner))
+    assert held(owner, a) == {e: '3', f: '1'} and held(owner, b) == {e: '2'}
+    # The returned copies are already covered, so (as with the single-source Undo above) no revision advances.
+    assert (deck_list(owner, a), deck_list(owner, b)) == (a_lines, b_lines)
 
 
 def test_reassigning_an_edition_inside_a_deck_covers_the_replacement():

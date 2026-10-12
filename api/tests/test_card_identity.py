@@ -181,7 +181,7 @@ def seed_legacy_extras(conn):
     ("Rotom Dex\u2014Pok\u00e9 Finder Mode", "Rotom Dex\u2014Pok\u00e9 Finder Mode"),
     ("(Rocket\u2019s)", "(Rocket's)"),
 ])
-def test_card_identity_key_strips_one_trailing_parenthetical_like_migration_024(name, expected):
+def test_card_identity_key_strips_one_trailing_parenthetical_like_migration_028(name, expected):
     assert card_identity_key(name) == expected
     with connect() as conn:
         assert conn.execute("SELECT catalog_card_identity_key(%s) AS key", (name,)).fetchone()["key"] == expected
