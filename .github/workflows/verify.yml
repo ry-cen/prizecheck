@@ -10,7 +10,8 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # A passing full gate takes about 19 minutes on a hosted runner.
+    timeout-minutes: 35
     services:
       postgres:
         image: postgres:16
