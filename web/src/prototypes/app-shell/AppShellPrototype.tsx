@@ -33,6 +33,19 @@ import {
   useDeck,
 } from "../deck-experience/DeckExperience";
 const DECK_LOCS = new Set(["d-zard", "d-gard"]);
+// PROTOTYPE (#126): Catalog search variants, ?cat=A|B|C.
+import {
+  CAT_VARIANTS,
+  CatalogPage,
+  CatalogSidebar,
+  CatalogVariantPicker,
+  catalogHasSidebar,
+  CatalogPageActions,
+  CollectionAddOverlay,
+  openAddCards,
+  setCatVariant,
+  useCat,
+} from "../catalog-search/CatalogPrototype";
 
 const VARIANTS = [
   { key: "A", name: "Top tabs + bottom bar" },
@@ -291,7 +304,7 @@ function contextFor(s: Shell): ReactNode {
   if (!s.signedIn) return null;
   if (s.page === "collection") return <LocationTree s={s} />;
   if (s.page === "decks") return <DeckIndex s={s} />;
-  if (s.page === "catalog") return <CatalogFilters />;
+  if (s.page === "catalog") return catalogHasSidebar() ? <CatalogSidebar /> : null;
   return null;
 }
 
@@ -310,7 +323,7 @@ function PageActions({ s }: { s: Shell }) {
   if (s.page === "collection")
     return (
       <>
-        <button type="button" className="ps-btn ps-desktop">
+        <button type="button" className="ps-btn ps-btn-primary" onClick={() => openAddCards(s.loc)}>
           Add cards
         </button>
         <button
@@ -326,6 +339,7 @@ function PageActions({ s }: { s: Shell }) {
         </button>
       </>
     );
+  if (s.page === "catalog") return <CatalogPageActions />;
   if (s.page === "reports")
     return (
       <button type="button" className="ps-btn ps-btn-primary">
@@ -629,7 +643,7 @@ function PageBody({ s }: { s: Shell }) {
     case "decks":
       return <DecksPage s={s} />;
     case "catalog":
-      return <CatalogBody />;
+      return <CatalogPage />;
     case "reports":
       return <ReportsBody />;
     case "owner":
@@ -1156,11 +1170,16 @@ function VariantC({ s }: { s: Shell }) {
 
 function Switcher({ s }: { s: Shell }) {
   const deck = useDeck();
-  const i = DECK_VARIANTS.findIndex((v) => v.key === deck.variant);
-  const cycle = (d: number) =>
-    setDeckVariant(
-      DECK_VARIANTS[(i + d + DECK_VARIANTS.length) % DECK_VARIANTS.length].key
-    );
+  const cat = useCat();
+  const onCatalog = s.page === "catalog";
+  const list = onCatalog ? CAT_VARIANTS : DECK_VARIANTS;
+  const current = onCatalog ? cat.variant : deck.variant;
+  const i = list.findIndex((v) => v.key === current);
+  const cycle = (d: number) => {
+    const next = list[(i + d + list.length) % list.length].key;
+    if (onCatalog) setCatVariant(next as typeof cat.variant);
+    else setDeckVariant(next as typeof deck.variant);
+  };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement;
@@ -1188,7 +1207,7 @@ function Switcher({ s }: { s: Shell }) {
         ‹
       </button>
       <strong>
-        Deck {deck.variant} ({DECK_VARIANTS[i].name})
+        {onCatalog ? "Catalog" : "Deck"} {current} ({list[i].name})
       </strong>
       <button type="button" aria-label="Next variant" onClick={() => cycle(1)}>
         ›
@@ -1196,6 +1215,7 @@ function Switcher({ s }: { s: Shell }) {
       {open && (
         <>
           <DeckVariantPicker />
+          <CatalogVariantPicker />
           <label>
             <input
               type="checkbox"
@@ -1239,11 +1259,13 @@ function Switcher({ s }: { s: Shell }) {
 
 export default function AppShellPrototype() {
   const s = useShell();
+  useCat(); // the Catalog variant decides whether the shell shows a sidebar
   const V =
     s.variant === "A" ? VariantA : s.variant === "B" ? VariantB : VariantC;
   return (
     <>
       {s.signedIn ? <V s={s} /> : <PublicShell s={s} />}
+      <CollectionAddOverlay />
       <Switcher s={s} />
     </>
   );
