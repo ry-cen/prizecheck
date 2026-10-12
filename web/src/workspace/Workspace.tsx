@@ -156,7 +156,7 @@ export function Workspace({
     filters: prefs.filters,
     sort: prefs.sort,
   };
-  const gallery = useGalleryData(galleryQuery);
+  const gallery = useGalleryData(galleryQuery, ownerRevision);
   const galleryKey = JSON.stringify(queryToParams(galleryQuery));
   const sets = useOwnedSets(galleryView, gallery.ownerRevision);
   const narrowed =
