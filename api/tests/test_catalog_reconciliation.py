@@ -25,13 +25,31 @@ def test_descriptor_collision_and_fetched_id_mismatch_keep_searchable_generation
             result=super().fetch(sid)
             result['variants_detailed']=[{'finish':'holo','variantId':'a'},{'finish':'holo','variantId':'b'}]
             return result
-    with pytest.raises(CatalogError,match='Descriptor collision'): run(Collision())
+    with pytest.raises(CatalogError,match='Descriptor collision on test-1'): run(Collision())
     with connect() as conn:
         assert conn.execute('SELECT active_generation FROM catalog_state').fetchone()['active_generation']==first
     class WrongIdentity(Source):
         def fetch(self,sid):
             result=super().fetch(sid);result['id']='different';return result
     with pytest.raises(CatalogError,match='source ID mismatch'):run(WrongIdentity())
+
+
+def test_a_variant_listed_twice_imports_as_one_edition():
+    # TCGdex lists some variants twice, entry for entry (gym2-75): the same physical variant, not a collision.
+    reset_catalog()
+    class Doubled(Source):
+        def fetch(self,sid):
+            result=super().fetch(sid)
+            variant={'type':'holo','size':'standard','variantId':'h','thirdParty':{'tcgplayer':1},
+                     'pricing':{'tcgplayer':{'holofoil':{'productId':1,'marketPrice':'2.50'}}}}
+            result['variants_detailed']=[variant,json.loads(json.dumps(variant))]
+            return result
+    run(Doubled())
+    with connect() as conn:
+        rows=conn.execute("""SELECT e.descriptor,m.mapping_candidate->>'correspondence' AS correspondence
+          FROM catalog_edition e JOIN catalog_printing p ON p.id=e.printing_id
+          JOIN catalog_edition_metadata m ON m.edition_id=e.id WHERE p.source_id='test-2'""").fetchall()
+    assert [(row['descriptor'],row['correspondence']) for row in rows]==[({'type':'holo','size':'standard','thirdParty':{'tcgplayer':1}},'source_candidate')]
 
 
 def test_name_variant_drift_preserves_owned_display_and_safe_editions():

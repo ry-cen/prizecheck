@@ -376,6 +376,11 @@ def test_two_matching_entries_are_ambiguous():
     assert select(record(entry(), entry(variantId='n-2'))) == Failure('ambiguous')
 
 
+def test_an_entry_listed_twice_is_one_entry():
+    # TCGdex lists some variants twice, entry for entry (gym2-75).
+    assert select(record(entry(), entry())).amount == '0.25'
+
+
 def test_non_dict_entries_are_ignored_for_matching():
     assert select(record('junk', entry())).amount == '0.25'
 
