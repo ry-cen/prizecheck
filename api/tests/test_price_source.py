@@ -405,10 +405,13 @@ def test_missing_or_failing_block_is_a_failure_never_absent():
         assert select(record(entry(**changes))) == Failure('lookup_drift'), changes
 
 
-def test_two_products_in_the_block_fail_products_check():
-    pricing = {'tcgplayer': {'normal': {'productId': 219333, 'marketPrice': '1'},
-                             'holofoil': {'productId': 5, 'marketPrice': '1'}}}
-    assert select(record(entry(pricing=pricing))) == Failure('lookup_drift')
+def test_a_repeated_card_block_is_read_at_the_published_variant_only():
+    # TCGdex repeats the card's whole TCGplayer block inside every variant.
+    pricing = {'tcgplayer': {'updated': '2026-10-07T22:55:02Z', 'normal': {'productId': 219333, 'marketPrice': '1'},
+                             'holofoil': {'productId': 5, 'marketPrice': '2'}}}
+    assert select(record(entry(pricing=pricing))).amount == '1'
+    assert select(record(entry(pricing=pricing)), product_id='5') == Failure('lookup_drift')
+    assert select(record(entry(pricing=pricing)), lookup={'card': 'swsh3-136', 'variant': 'reverse-holofoil'}) == Failure('lookup_drift')
 
 
 def test_third_party_conflict_fails():

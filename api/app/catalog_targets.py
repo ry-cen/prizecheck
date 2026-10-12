@@ -13,6 +13,7 @@ the caller's transaction after ``catalog_begin_correction()`` has taken the cloc
 import hashlib
 import inspect
 import json
+import os
 import re
 import unicodedata
 from collections import Counter
@@ -202,8 +203,40 @@ class MatchingRulesV1:
         return product, variant
 
 
+class MatchingRulesV2(MatchingRulesV1):
+    """V1, read through the reviewed finish table when a variant block lists several products.
+
+    TCGdex repeats the card's whole TCGplayer block, one entry per finish key, inside every variant. V1 refuses any
+    block with more than one product. V2 keeps only the entry the finish table names for this Edition's descriptor and
+    then applies every V1 check to it, the thirdParty ID included. A descriptor the table does not cover, or a block
+    without that key, is left as it is, so V1's checks still fail it.
+    """
+
+    @classmethod
+    def finish_key(cls, descriptor):
+        return next((key for key in cls.VARIANT_KEYS.values() if cls.variant(descriptor, key) == key), None)
+
+    @classmethod
+    def narrow(cls, lookup, key):
+        """``lookup`` with its TCGplayer block cut to ``key`` and the block metadata, when the block lists several products."""
+        pricing = lookup.get("pricing") if isinstance(lookup, dict) else None
+        block = pricing.get("tcgplayer") if isinstance(pricing, dict) else None
+        if key is None or not isinstance(block, dict) or not isinstance(block.get(key), dict):
+            return lookup
+        if sum(1 for name, value in block.items()
+               if name not in cls.BLOCK_METADATA and isinstance(value, dict) and "productId" in value) < 2:
+            return lookup
+        kept = {name: value for name, value in block.items() if name == key or name in cls.BLOCK_METADATA}
+        return {**lookup, "pricing": {**pricing, "tcgplayer": kept}}
+
+    @classmethod
+    def evaluate(cls, facts, verified_elsewhere):
+        lookup = cls.narrow(facts["lookup"], cls.finish_key(facts["descriptor"]))
+        return super().evaluate({**facts, "lookup": lookup}, verified_elsewhere)
+
+
 LIVE_RULES = {1: LiveRulesV1}
-MATCHING_RULES = {1: MatchingRulesV1}
+MATCHING_RULES = {1: MatchingRulesV1, 2: MatchingRulesV2}
 REGISTRIES = {LIVE: LIVE_RULES, MATCHING: MATCHING_RULES}
 
 
@@ -592,6 +625,35 @@ def activate_rule(conn, kind, version, reviewer_id, evidence_url, reason):
       WHERE mapping_state='unverified' AND NOT auto_closed ORDER BY edition_id""")]
     changed = sum(refresh_editions(conn, context, ids[start:start + 500]) for start in range(0, len(ids), 500))
     return {"printings": 0, "editions": changed}
+
+
+AUTOMATIC_MATCHING_EVIDENCE = "https://github.com/ry-cen/tcg-tracker/blob/dev/api/app/catalog_targets.py"
+AUTOMATIC_MATCHING_REASON = "Automatic: MARKETPLACE_MATCHING=automatic keeps the newest matching rule active"
+
+
+def automatic_matching() -> bool:
+    return os.environ.get("MARKETPLACE_MATCHING") == "automatic"
+
+
+def ensure_matching_rule(conn):
+    """With MARKETPLACE_MATCHING=automatic, keep the newest matching rule active without an owner approval.
+
+    The activation is recorded for the bound owner like a manual one and re-evaluates the same Editions. It is a no-op
+    when automatic matching is off, the newest version is already active with its current code, or no owner is bound.
+    Runs in the caller's transaction; returns ``activate_rule``'s counts, or None when nothing changed.
+    """
+    if not automatic_matching():
+        return None
+    version = max(MATCHING_RULES)
+    conn.execute("SELECT catalog_begin_correction()")
+    conn.execute("SELECT 1 FROM catalog_rule_state WHERE kind=%s FOR UPDATE", (MATCHING,))
+    active = load_active(conn, MATCHING)
+    if active is not None and active.version == version:
+        return None
+    owner = conn.execute("SELECT user_id FROM owner_binding WHERE singleton").fetchone()
+    if owner is None:
+        return None
+    return activate_rule(conn, MATCHING, version, owner["user_id"], AUTOMATIC_MATCHING_EVIDENCE, AUTOMATIC_MATCHING_REASON)
 
 
 # ---------------------------------------------------------------- readers (PostgreSQL is authoritative)

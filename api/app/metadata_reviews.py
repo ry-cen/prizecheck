@@ -9,8 +9,10 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 import re
 from datetime import datetime
+from threading import Thread
 from typing import Literal
 from uuid import UUID
 
@@ -19,13 +21,15 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, HttpUrl
 
 from . import public_catalog
-from .catalog_targets import (LIVE, MATCHING, REGISTRIES, MatchingRulesV1, TargetContext, activate_rule,
-                              code_digest, fingerprint, is_unspecified, refresh_editions, refresh_printing, verified_elsewhere)
+from .catalog_targets import (LIVE, MATCHING, REGISTRIES, MatchingRulesV1, MatchingRulesV2, TargetContext, activate_rule,
+                              automatic_matching, code_digest, ensure_matching_rule, fingerprint, is_unspecified,
+                              refresh_editions, refresh_printing, verified_elsewhere)
 from .holdings import fail
 from .main import connect, require_owner, verified_user
 from .missing_cards import _code_hash
 
 router = APIRouter()
+log = logging.getLogger(__name__)
 
 LOCK_TIMEOUT = "5s"
 OPEN_REPORT_LIMIT = 25
@@ -470,7 +474,7 @@ def plan_marketplace(conn, command: MetadataDecisionInput, loaded) -> dict:
     else:
         if not loaded["source_candidate"]:
             fail(422, "INVALID_PRODUCT")
-        found = MatchingRulesV1.evaluate(_source_facts(conn, loaded), lambda product, variant: False)
+        found = MatchingRulesV2.evaluate(_source_facts(conn, loaded), lambda product, variant: False)
         if not isinstance(found, tuple):
             fail(422, "INVALID_PRODUCT")
         reviewed = {"product_id": found[0], "quote_variant": found[1]}
@@ -718,3 +722,24 @@ def activate(kind: Literal["live_derivation", "marketplace_matching"], command: 
         public_catalog.spawn_background_drain()
     return MetadataRuleResult(kind=kind, version=command.version, printings=changed["printings"], editions=changed["editions"],
                               public_revision=revision, public_delivery=delivery)
+
+
+def _apply_automatic_matching():
+    try:
+        with connect() as conn, conn.transaction():
+            conn.execute(f"SET LOCAL lock_timeout='{LOCK_TIMEOUT}'")
+            changed = ensure_matching_rule(conn)
+    except Exception as exc:  # A busy catalog or a missing schema waits for the next promotion, which also ensures it.
+        log.warning("Automatic matching rule not applied at startup (%s)", type(exc).__name__)
+        return
+    if changed is not None:
+        log.warning("Automatic matching rule activated; %d Editions changed", changed["editions"])
+        public_catalog.publish_catalog_best_effort()
+        public_catalog.spawn_background_drain()
+
+
+@router.on_event("startup")
+def automatic_matching_on_startup():
+    # Re-evaluating every unverified Edition can take minutes, so it never holds up startup or health checks.
+    if automatic_matching():
+        Thread(target=_apply_automatic_matching, daemon=True, name="automatic-matching").start()
