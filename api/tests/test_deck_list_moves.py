@@ -289,10 +289,11 @@ def test_holdings_written_without_the_current_routes_still_extend_the_deck_list(
 @pytest.mark.serial(reason='wall-clock: bounds the Deck List trigger statements at 25,000 Holdings')
 @pytest.mark.slow(reason='capacity: 25,000 Holdings in one Deck')
 def test_25000_holdings_extend_the_deck_list_after_plans_cached_from_empty_statements():
-    """The trigger's dangerous path (ticket 05 review). PL/pgSQL caches a trigger statement's plan for the session, so
-    the plans below come from empty transition tables; then one statement inserts 25,000 Holdings into a Deck and
-    another raises every one of them. Joining the transition tables took 31 s here, against 0.96 s for pairing rows by
-    aggregation (migration 031); the bound catches a return of the join."""
+    """The trigger's dangerous path (ticket 05 review). PL/pgSQL keeps a static trigger statement's plan from its first
+    call, so the calls below are empty; then one statement inserts 25,000 Holdings into a Deck and another raises every
+    one of them. Joining the transition tables took 31 s here, against 0.96 s for pairing rows by aggregation (migration
+    031); a raise reusing a nested loop over deck_list_line planned for one row took 34 s on CI, against under 1 s with
+    each firing planned for its rows (migration 039). The bound catches a return of either."""
     owner, _, _, _, edition, _ = fixture()
     deck = create(owner).json()['location']['id']
     upsert = """INSERT INTO holding(owner_id,location_id,edition_id,quantity,version)
@@ -305,9 +306,16 @@ def test_25000_holdings_extend_the_deck_list_after_plans_cached_from_empty_state
           SELECT %s,'bulk-' || %s || '-' || n,'{}'::jsonb FROM generate_series(1,25000) AS n
           RETURNING id""", (printing, str(uuid4()))).fetchall()]
         # An empty INSERT ... ON CONFLICT DO UPDATE fires both statement triggers (holding_deck_list_insert and
-        # holding_deck_list_update). Seven calls pass PL/pgSQL's five custom plans, so later calls reuse a cached plan.
-        for _ in range(7):
-            conn.execute(upsert, (owner, deck, []))
+        # holding_deck_list_update). A trigger statement takes no parameters, so PL/pgSQL would keep the plan of its
+        # first call; with hash, merge and index access off, that plan would be a nested loop of sequential scans.
+        # Changing these settings does not replan, so only an autovacuum ANALYZE between here and the timed statements
+        # could replace a kept plan, which would let a regression pass, never fail a sound trigger.
+        planner = ('enable_hashjoin', 'enable_mergejoin', 'enable_indexscan', 'enable_bitmapscan')
+        for setting in planner:
+            conn.execute(f'SET {setting} = off')
+        conn.execute(upsert, (owner, deck, []))
+        for setting in planner:
+            conn.execute(f'RESET {setting}')
         started = time.monotonic()
         conn.execute(upsert, (owner, deck, ids))
         inserted = time.monotonic() - started
