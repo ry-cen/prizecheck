@@ -8,9 +8,9 @@ import psycopg
 import pytest
 
 from app.catalog_targets import (LIVE, LIVE_RULES, MATCHING, MATCHING_RULES, REGISTRIES, EditionState, Failure,
-                                 LiveRulesV1, MatchingRulesV1, PrintingState, TargetContext, activate_rule, code_digest,
-                                 edition_state, edition_targets, evaluate_edition, evaluate_printing, fingerprint,
-                                 load_active, printing_live, refresh_printing)
+                                 LiveRulesV1, MatchingRulesV1, MatchingRulesV2, PrintingState, TargetContext, activate_rule,
+                                 code_digest, edition_state, edition_targets, ensure_matching_rule, evaluate_edition,
+                                 evaluate_printing, fingerprint, load_active, printing_live, refresh_printing)
 from app.main import connect
 from test_catalog import reset_catalog
 from test_catalog_metadata import Records, by_type, editions, furret, owner, printing_rows, reviews
@@ -86,6 +86,70 @@ def test_matching_rule_product_and_variant_are_separate_checks():
     assert MatchingRulesV1.variant({"type": "normal"}, "holofoil") is None
     assert MatchingRulesV1.variant({"type": "normal", "stamp": "x"}, "normal") is None
     assert MatchingRulesV1.variant({"kind": "unspecified", "label": "Unspecified Variant"}, "normal") is None
+
+
+def repeated_block(number=1):
+    """The live TCGdex shape: every variant repeats the card's whole TCGplayer block, one entry per finish."""
+    record = card(number)
+    block = {"unit": "USD", "updated": "2026-10-07T22:55:02Z",
+             "normal": {"productId": 1000 + number, "marketPrice": 0.25},
+             "reverse-holofoil": {"productId": 1000 + number, "marketPrice": 0.43}}
+    for variant in record["variants_detailed"]:
+        variant["pricing"] = {"tcgplayer": copy.deepcopy(block)}
+    return record
+
+
+def test_matching_rule_v2_reads_a_repeated_block_through_the_finish_table():
+    block = lambda **keys: {"pricing": {"tcgplayer": {"unit": "USD", **keys}}}
+    both = block(normal={"productId": 7}, **{"reverse-holofoil": {"productId": 8}})
+    assert MatchingRulesV2.products(MatchingRulesV2.narrow(both, "normal")) == (None, {"normal": 7})
+    assert MatchingRulesV2.products(MatchingRulesV2.narrow(both, "reverse-holofoil")) == (None, {"reverse-holofoil": 8})
+    assert MatchingRulesV2.finish_key({"type": "reverse", "size": "standard"}) == "reverse-holofoil"
+    # Uncovered finishes, extra facets and missing keys leave the block as it is, so V1's one-product check fails it.
+    for descriptor in ({"type": "holo"}, {"type": "normal", "stamp": "x"}, {"kind": "unspecified", "label": "Unspecified Variant"}):
+        assert MatchingRulesV2.narrow(both, MatchingRulesV2.finish_key(descriptor)) is both
+    # The thirdParty ID is still checked against the selected product.
+    assert MatchingRulesV2.products(MatchingRulesV2.narrow({**both, "thirdParty": {"tcgplayer": 8}}, "normal"))[0] == "conflict"
+    single = block(normal={"productId": 7})
+    assert MatchingRulesV2.narrow(single, "reverse-holofoil") is single
+
+
+def test_v1_refuses_a_repeated_block_and_activating_v2_verifies_it():
+    reset_catalog()
+    activate(MATCHING, 1)
+    run(Records(repeated_block(1)))
+    assert {(row["mapping_state"], row["mapping_reason"]) for row in metadata()[1].values()} == {("unverified", "rule_failed")}
+    assert activate(MATCHING, 2) == {"printings": 0, "editions": 2}
+    assert {key: (row["mapping_state"], row["product_id"], row["quote_variant"]) for key, row in metadata()[1].items()} == {
+        "normal": ("verified", 1001, "normal"), "reverse": ("verified", 1001, "reverse-holofoil")}
+
+
+def test_automatic_matching_keeps_the_newest_rule_active_without_an_approval(monkeypatch):
+    reset_catalog()
+    owner()
+    run(Records(repeated_block(1)))
+    with connect() as conn, conn.transaction():
+        assert ensure_matching_rule(conn) is None  # off unless MARKETPLACE_MATCHING=automatic
+    assert {row["mapping_reason"] for row in metadata()[1].values()} == {"no_matching_rule"}
+    monkeypatch.setenv("MARKETPLACE_MATCHING", "automatic")
+    with connect() as conn, conn.transaction():
+        assert ensure_matching_rule(conn) == {"printings": 0, "editions": 2}
+    with connect() as conn, conn.transaction():
+        assert ensure_matching_rule(conn) is None  # already the newest version
+        assert load_active(conn, MATCHING).version == max(MATCHING_RULES)
+        assert conn.execute("""SELECT a.reason FROM catalog_rule_state s JOIN catalog_rule_activation a ON a.id=s.activation_id
+          WHERE s.kind=%s""", (MATCHING,)).fetchone()["reason"].startswith("Automatic")
+    assert {row["mapping_state"] for row in metadata()[1].values()} == {"verified"}
+    # A deactivated rule comes back with the next import, and that import's new cards verify in the same promotion.
+    activate(MATCHING, None)
+    run(Records(repeated_block(1), repeated_block(2)))
+    assert load_active_version() == max(MATCHING_RULES)
+    assert {row["mapping_state"] for row in metadata("meta-2")[1].values()} == {"verified"}
+
+
+def load_active_version():
+    with connect() as conn:
+        return load_active(conn, MATCHING).version
 
 
 def test_rule_activation_fails_closed_when_the_approved_code_is_gone_or_changed(monkeypatch):
@@ -849,6 +913,7 @@ def test_a_deprecated_edition_releases_its_product_and_price_slot_to_its_replace
 PINNED_DIGESTS = {
     (LIVE, 1): "79ed62c768325f3dc0d378e0f8128251c6f8ef4a778b6351c4097c9ec1235084",
     (MATCHING, 1): "5367c25316bea657d01a044af5a175dfe66dab656d36f82bcc16bb060dfb25d6",
+    (MATCHING, 2): "6994b033232a73138f83cda642e97edc8e75e692e9bba29a3704b913eb7a6eef",
 }
 
 

@@ -7,7 +7,7 @@ import json
 from dataclasses import dataclass
 from datetime import datetime
 
-from .catalog_targets import MatchingRulesV1
+from .catalog_targets import MatchingRulesV2
 from .quote_contract import parse_amount
 
 
@@ -76,9 +76,10 @@ def select_quote(record, descriptor, lookup, product_id) -> Quote | Absent | Fai
         return Failure('lookup_drift')
     if len(matches) > 1:
         return Failure('ambiguous')
-    entry = matches[0]
-    problem, products = MatchingRulesV1.products(entry)
     variant = lookup['variant']
+    # The variant block may repeat the card's other finishes; only the published variant's entry is read.
+    entry = MatchingRulesV2.narrow(matches[0], variant)
+    problem, products = MatchingRulesV2.products(entry)
     if problem is not None or set(products) != {variant} or product_id is None or str(products[variant]) != str(product_id):
         return Failure('lookup_drift')
     node = entry['pricing']['tcgplayer'][variant]

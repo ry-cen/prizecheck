@@ -17,7 +17,8 @@ from psycopg.rows import dict_row
 
 from .card_attributes import refresh_card_attributes
 from .card_identity import card_identity_key
-from .catalog_targets import IDENTITY_REVIEW_KINDS, MatchingRulesV1, TargetContext, refresh_editions, refresh_printing
+from .catalog_targets import (IDENTITY_REVIEW_KINDS, MatchingRulesV1, TargetContext, ensure_matching_rule, refresh_editions,
+                              refresh_printing)
 from .public_catalog import publish_catalog_best_effort
 from .reprint_groups import refresh_reprint_groups
 from .tcgdex_record import distinct_variants, source_descriptor
@@ -504,6 +505,7 @@ def execute_run(conn, run_id: UUID, source=None, before_promotion=None):
             state = conn.execute("SELECT active_generation FROM catalog_state WHERE singleton FOR UPDATE").fetchone()
             # Take the commit-ordered public revision before any metadata row is touched.
             conn.execute("SELECT catalog_begin_correction()")
+            ensure_matching_rule(conn)  # before TargetContext loads the active rules
             targets = TargetContext(conn)
             targets.prime_claims(item["metadata"]["export_candidate"] for item in normalized)
             old_id = state["active_generation"]
