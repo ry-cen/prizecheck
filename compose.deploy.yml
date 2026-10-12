@@ -1,0 +1,173 @@
+# Deployed PrizeCheck stack (Unraid dev today; a future production stack reuses this file with its own env file,
+# project name, data directory and port). Local development keeps using docker-compose.yml.
+#
+# Run through deploy/unraid/prizecheck-deploy.sh, which supplies --env-file and PRIZECHECK_IMAGE_TAG.
+# See docs/deployment-unraid.md.
+name: ${PRIZECHECK_PROJECT:-prizecheck-dev}
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-app-hardening: &app-hardening
+  restart: unless-stopped
+  logging: *logging
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+
+x-api-environment: &api-environment
+  DATABASE_URL: postgresql://prizecheck:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@db:5432/prizecheck
+  INTERNAL_AUTH_SECRET: ${INTERNAL_AUTH_SECRET:?INTERNAL_AUTH_SECRET is required}
+  PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:?PUBLIC_ORIGIN is required}
+  PUBLIC_PROJECTION_ADAPTER: filesystem
+  PUBLIC_PROJECTION_DIR: /var/lib/prizecheck/public
+  PRICE_RUNNER_LOCK_DIR: /var/lib/prizecheck/price-runners
+  NODE_ENV: ${PRIZECHECK_NODE_ENV:-development}
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    logging: *logging
+    environment:
+      POSTGRES_USER: prizecheck
+      POSTGRES_DB: prizecheck
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - ${PRIZECHECK_DATA_DIR:?PRIZECHECK_DATA_DIR is required}/postgres:/var/lib/postgresql/data
+    networks: [backend]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U prizecheck -d prizecheck"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    stop_grace_period: 60s
+
+  api:
+    <<: *app-hardening
+    image: ${PRIZECHECK_REGISTRY:-ghcr.io/ry-cen}/prizecheck-api:${PRIZECHECK_IMAGE_TAG:?PRIZECHECK_IMAGE_TAG is required}
+    # Catalog imports and price runners are detached children; an init process reaps them.
+    init: true
+    environment: *api-environment
+    volumes:
+      - ${PRIZECHECK_DATA_DIR}/public:/var/lib/prizecheck/public
+      - ${PRIZECHECK_DATA_DIR}/price-runners:/var/lib/prizecheck/price-runners
+    networks: [backend, egress]
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=4).status == 200 else 1)"
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    stop_grace_period: 30s
+
+  auth:
+    <<: *app-hardening
+    image: ${PRIZECHECK_REGISTRY:-ghcr.io/ry-cen}/prizecheck-auth:${PRIZECHECK_IMAGE_TAG}
+    read_only: true
+    tmpfs: [/tmp]
+    environment:
+      DATABASE_URL: postgresql://prizecheck:${POSTGRES_PASSWORD}@db:5432/prizecheck
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET is required}
+      INTERNAL_AUTH_SECRET: ${INTERNAL_AUTH_SECRET}
+      OWNER_EMAIL: ${OWNER_EMAIL:?OWNER_EMAIL is required}
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN}
+      API_ORIGIN: http://api:8000
+      AUTH_HOST: 0.0.0.0
+      AUTH_PORT: "3001"
+      # Fake (file) mail is refused under NODE_ENV=production; production must use MAIL_MODE=http.
+      NODE_ENV: ${PRIZECHECK_NODE_ENV:-development}
+      MAIL_MODE: ${MAIL_MODE:-file}
+      MAIL_FILE: /var/lib/prizecheck/mail/codes.jsonl
+      MAIL_RELAY_URL: ${MAIL_RELAY_URL:-}
+      MAIL_RELAY_TOKEN: ${MAIL_RELAY_TOKEN:-}
+      MAIL_FROM: ${MAIL_FROM:-}
+      SIGNUP_MODE: owner-only
+      DAILY_SEND_CAP: ${DAILY_SEND_CAP:-100}
+      TRUSTED_PROXY_IPS: ""
+    volumes:
+      - ${PRIZECHECK_DATA_DIR}/mail:/var/lib/prizecheck/mail
+    networks: [backend, edge]
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      # Through the gateway to the API: proves both processes and their link.
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3001/api/health').then(r=>process.exit(r.status===200?0:1),()=>process.exit(1))"
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+
+  web:
+    <<: *app-hardening
+    image: ${PRIZECHECK_REGISTRY:-ghcr.io/ry-cen}/prizecheck-web:${PRIZECHECK_IMAGE_TAG}
+    read_only: true
+    tmpfs: [/tmp]
+    # The only published port. Loopback by default, for Tailscale Serve on the Unraid host.
+    ports:
+      - "${PRIZECHECK_WEB_BIND:-127.0.0.1}:${PRIZECHECK_WEB_PORT:-8088}:8080"
+    networks: [edge]
+    depends_on:
+      auth:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "-q",
+          "-O",
+          "/dev/null",
+          "http://127.0.0.1:8080/api/health",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 5s
+
+  # One-off operator and migration commands, e.g. `run --rm tools /app/scripts/migrate.py`.
+  tools:
+    image: ${PRIZECHECK_REGISTRY:-ghcr.io/ry-cen}/prizecheck-api:${PRIZECHECK_IMAGE_TAG}
+    profiles: [tools]
+    init: true
+    entrypoint: ["python"]
+    command: ["--version"]
+    environment: *api-environment
+    volumes:
+      - ${PRIZECHECK_DATA_DIR}/public:/var/lib/prizecheck/public
+      - ${PRIZECHECK_DATA_DIR}/price-runners:/var/lib/prizecheck/price-runners
+    networks: [backend, egress]
+    depends_on:
+      db:
+        condition: service_healthy
+    logging: *logging
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+networks:
+  # PostgreSQL and the API's private listener: no route outside the host.
+  backend:
+    internal: true
+  # Outbound access for catalog/price imports (TCGdex) and an HTTP mail relay.
+  egress: {}
+  # The gateway and the browser-facing web service.
+  edge: {}
