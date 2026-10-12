@@ -1,5 +1,6 @@
+/// <reference types="vite/client" />
 import { OperationsHealth } from "./OperationsHealth";
-import React, { useEffect, useState } from "react";
+import React, { Suspense, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   getOwnerCatalogStatus,
@@ -356,9 +357,21 @@ if (location.pathname === "/" || location.pathname === "/locations")
     `/workspace${location.search}${location.hash}`
   );
 
+// PROTOTYPE (#122): dev-only app shell variants at /collection?prototype=shell&variant=A|B|C.
+const ShellPrototype = import.meta.env.DEV
+  ? React.lazy(() => import("./prototypes/app-shell/AppShellPrototype"))
+  : null;
+const showShellPrototype =
+  ShellPrototype !== null &&
+  new URLSearchParams(location.search).get("prototype") === "shell";
+
 const publishedRoute = /^\/published\/([^/]+)$/.exec(location.pathname);
 createRoot(document.getElementById("root")!).render(
-  publishedRoute ? (
+  showShellPrototype && ShellPrototype ? (
+    <Suspense fallback={null}>
+      <ShellPrototype />
+    </Suspense>
+  ) : publishedRoute ? (
     <PublishedDeck token={publishedRoute[1]} />
   ) : location.pathname === "/discover" ? (
     <Discovery />
