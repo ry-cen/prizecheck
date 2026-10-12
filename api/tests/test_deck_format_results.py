@@ -106,7 +106,7 @@ def test_a_move_into_the_deck_makes_the_next_read_recompute():
     owner, deck, added = build([("me01-001", 1), ("me01-125", 4), ("sv02-278", 55)])
     saved = added["format_checks"]
     assert format_checks(owner, deck) == saved
-    # Copies the Deck List does not cover extend it (migration 027) without a Deck List command.
+    # Copies the Deck List does not cover extend it (migration 031) without a Deck List command.
     response = add(owner, deck, edition_of("me01-130"), "4")
     assert response.status_code == 200, response.text
     body = format_checks(owner, deck)

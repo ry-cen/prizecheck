@@ -48,7 +48,7 @@ def capture_deck_list(deck_id: UUID, user_id: str, timeout_ms: int | None = None
         header = conn.execute('SELECT revision FROM deck_list WHERE owner_id=%s AND deck_id=%s',
                               (user_id, deck_id)).fetchone()
         if header is None:
-            # Migration 025 and its location trigger give every Deck a Deck List.
+            # Migration 029 and its location trigger give every Deck a Deck List.
             raise RuntimeError('Deck has no Deck List')
         holdings = {row['edition_id']: int(row['quantity']) for row in conn.execute(
             """SELECT edition_id,quantity FROM holding WHERE owner_id=%s AND location_id=%s

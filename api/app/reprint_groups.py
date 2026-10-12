@@ -11,7 +11,7 @@ Only ``refresh_reprint_groups`` writes derived groups. Every catalog import runs
 tombstoned, so withdrawn and digital-only Printings are in no group. Manually approved Printings have no source text;
 they join a group only through maintainer review (``app.reprint_group_reviews``).
 
-Reviewed records override derivation (migration 033): a link puts a Printing's derived group into a reviewed group, and
+Reviewed records override derivation (migration 037): a link puts a Printing's derived group into a reviewed group, and
 an assignment puts one Printing into a group. Both name Printings, so they survive re-imports, re-derivation and
 renamed derived groups. Database triggers keep the effective membership current after every write to the derived or
 reviewed tables. Readers use the ``catalog_reprint_group_member`` view of it, never the derived table. A change to any

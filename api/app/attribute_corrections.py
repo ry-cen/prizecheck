@@ -10,7 +10,7 @@ replaces or removes it; re-derivation on import never touches it. A decision sta
 ``correct`` replaces the stored correction with the given values and ``remove`` deletes it. A correction sets known
 values only; there is no "corrected to unknown". Manually approved Printings have no derived attributes, so a
 correction is their only source. Effective attributes are public format facts (Deck Lists 18): writing or removing a
-correction re-stamps the Printing at the decision's public revision and enqueues it (migration 032's trigger), and the
+correction re-stamps the Printing at the decision's public revision and enqueues it (migration 036's trigger), and the
 decision delivers it after its commit and reports ``public_delivery``, like a metadata decision.
 """
 import hashlib

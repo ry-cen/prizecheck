@@ -144,7 +144,7 @@ def snapshot(conn, owner, deck_id, title, version):
     # writes into the Deck, which may extend its Deck List.
     conn.execute('SELECT revision FROM inventory_owner WHERE user_id=%s FOR UPDATE', (owner,))
     conn.execute('SELECT active_generation FROM catalog_state WHERE singleton FOR SHARE')
-    # The Basic Energy class reads the effective card attributes (migration 026), as Deck detail checks do.
+    # The Basic Energy class reads the effective card attributes (migration 030), as Deck detail checks do.
     rows = conn.execute("""SELECT ci.id,ci.display_name,l.quantity,e.descriptor,
       e.public_ref AS edition_ref,p.public_ref AS printing_ref,
       coalesce(pd.display_name,ci.display_name) AS printing_name,

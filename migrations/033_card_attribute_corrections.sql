@@ -3,7 +3,7 @@
 -- or removes a correction (api/app/attribute_corrections.py). Corrections are per attribute: a corrected attribute
 -- overrides the derived value until the correction is removed, and an attribute the correction leaves NULL follows
 -- derivation. Manually approved Printings have no derived row, so a correction is their only source of attributes.
--- Migration 028 is reserved for another ticket; this one is independent of it.
+-- Migration 032 is reserved for another ticket; this one is independent of it.
 
 -- The attribute revision advances at most once per transaction: a later call in the same transaction returns the
 -- revision the first call took, like catalog_begin_correction() for the public clock. Card attribute derivation,
@@ -90,7 +90,7 @@ ALTER TABLE catalog_approval_code ADD CONSTRAINT catalog_approval_code_action_ch
    'correct_attributes'));
 
 -- Effective attributes: a corrected attribute wins over the derived one. The columns, their order and their types are
--- unchanged from 026, so no reader changes. A Printing appears when it has a derived row, a correction, or both; a
+-- unchanged from 030, so no reader changes. A Printing appears when it has a derived row, a correction, or both; a
 -- manual Printing has only a correction. The view is driven by catalog_printing so that printing_id is the Printing's
 -- primary key: both readers' forms, a join on printing_id (Deck checks, Deck List publication) and a printing_id = ANY
 -- predicate (read_card_attributes), become primary-key lookups into all three tables instead of a full scan of the

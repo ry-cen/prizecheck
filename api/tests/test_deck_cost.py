@@ -73,7 +73,7 @@ def deck_list_with(lines, *, held=None, unsorted=None, other_deck=None, user=USE
     """A private Deck whose Deck List is exactly ``lines`` ``{edition_id: quantity}``, holding ``held`` in the Deck,
     ``unsorted`` in the owner's Unsorted leaf and ``other_deck`` in another of the owner's Decks; returns its id.
 
-    Holdings go in first: moving copies into a Deck raises its lines (migration 027), so the lines are written last to
+    Holdings go in first: moving copies into a Deck raises its lines (migration 031), so the lines are written last to
     leave exactly the list asked for (a held Edition without a line is surplus)."""
     deck = deck_with(held or {}, user)
     with connect() as conn:

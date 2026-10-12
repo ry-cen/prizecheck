@@ -25,9 +25,9 @@ from test_catalog_references import ROOT, migrate
 from test_catalog_search import search
 from test_holdings import add, call
 
-MIGRATION = "024_card_identity_subtitles.sql"
-# The migration after 024 (None while there is none): table checks are scoped to 024 alone, so a later
-# migration that adds columns (for example ticket 03's 025) cannot break them.
+MIGRATION = "028_card_identity_subtitles.sql"
+# The migration after 028 (None while there is none): table checks are scoped to 028 alone, so a later
+# migration that adds columns (for example ticket 03's 029) cannot break them.
 AFTER_MIGRATION = next((path.name for path in sorted((ROOT / "migrations").glob("*.sql")) if path.name > MIGRATION), None)
 
 
@@ -102,7 +102,7 @@ def published_name(conn, printing_id):
 
 
 def seed_legacy_extras(conn):
-    """Create the rows the pre-024 application made besides imports; returns short name -> Printing id."""
+    """Create the rows the pre-028 application made besides imports; returns short name -> Printing id."""
     ids = {}
     for short, record in (("juniper", JUNIPER), ("magnolia", MAGNOLIA), ("magnolia_promo", MAGNOLIA_PROMO),
                           ("plain", PLAIN), ("giovanni", GIOVANNI), ("pikachu", PIKACHU),
@@ -269,21 +269,21 @@ def test_migration_merges_subtitled_identities_and_keeps_every_reference(project
         migrate(url, before=MIGRATION)
         with psycopg.connect(url, row_factory=dict_row) as conn:
             with monkeypatch.context() as legacy:
-                # Before migration 024 the Card Identity key was the exact English name (no folding, no stripping).
+                # Before migration 028 the Card Identity key was the exact English name (no folding, no stripping).
                 legacy.setattr(catalog_module, "card_identity_key", lambda value: value)
-                # Card attributes arrive with migration 026, after the schema this legacy import runs on.
+                # Card attributes arrive with migration 030, after the schema this legacy import runs on.
                 legacy.setattr(catalog_module, "refresh_card_attributes", lambda conn: 0)
-                # So do Reprint Groups, with migration 031.
+                # So do Reprint Groups, with migration 035.
                 legacy.setattr(catalog_module, "refresh_reprint_groups", lambda conn, generation_id=None: 0)
-                # So do Card Identity merges, with migration 033.
+                # So do Card Identity merges, with migration 037.
                 legacy.setattr(catalog_module, "IDENTITY_UPSERT",
                                catalog_module.IDENTITY_UPSERT.replace("coalesce(merged_into,id)", "id"))
                 import_into(conn, *LEGACY_RECORDS)
             ids = seed_legacy_extras(conn)
             conn.commit()
             # Today's rebuild also publishes format facts (Deck Lists 18), which read the effective card attributes of
-            # migration 026 and the Reprint Groups of migration 031. This session gets empty stand-ins, so the legacy
-            # store holds format records whose identity predates 024; the final rebuild must rewrite them without
+            # migration 030 and the Reprint Groups of migration 035. This session gets empty stand-ins, so the legacy
+            # store holds format records whose identity predates 028; the final rebuild must rewrite them without
             # calling them conflicts.
             conn.execute("""CREATE TEMP VIEW catalog_card_attribute AS SELECT NULL::uuid AS printing_id,
               NULL::text AS regulation_mark,NULL::text AS card_kind,NULL::boolean AS basic_energy,NULL::text[] AS types,

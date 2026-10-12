@@ -217,7 +217,7 @@ def test_a_card_identity_change_reaches_published_results(store):
     run(Records(*CARDS))
     deck, token = published((("me01-001", 1), ("fixture-sv01-901", 3), ("me01-130", 2), ("sv02-278", 54)))
     assert standard(token)["status"] == "legal"
-    # A reviewed identity merge (ticket 14) moves a Printing to another Card Identity; migration 032 re-stamps it.
+    # A reviewed identity merge (ticket 14) moves a Printing to another Card Identity; migration 036 re-stamps it.
     with connect() as conn, conn.transaction():
         conn.execute("SELECT catalog_begin_correction()")
         conn.execute("""UPDATE catalog_printing SET identity_id=(SELECT identity_id FROM catalog_printing
@@ -257,7 +257,7 @@ def test_legacy_and_unproven_rows_are_unknown_and_never_legal(store):
     for broken in (None, {**good.value, "reprint_group": "a" * 48}, {**good.value, "extra": 1},
                    {**good.value, "attributes": {**good.value["attributes"], "regulation_mark": "i"}},
                    {**good.value, "attributes": {**good.value["attributes"], "basic_pokemon": "yes"}},
-                   # A record written before migration 034 has no Basic Pokémon status.
+                   # A record written before migration 038 has no Basic Pokémon status.
                    {**good.value, "attributes": {key: value for key, value in good.value["attributes"].items()
                                                  if key != "basic_pokemon"}},
                    {**good.value, "identity": {"key": "Switch"}}, {**good.value, "printing_ref": "f" * 48}):
@@ -517,7 +517,7 @@ def test_a_deck_without_a_basic_pokemon_is_not_legal_publicly_like_the_private_r
 
 
 def test_records_published_before_basic_pokemon_status_are_unproven_until_the_backfill(store):
-    """A store written by a release before migration 034 holds format records without ``basic_pokemon``. The strict
+    """A store written by a release before migration 038 holds format records without ``basic_pokemon``. The strict
     reader refuses them (unknown, never legal), and scripts/backfill_public_catalog.py rewrites them at their revision
     without calling them recovery conflicts."""
     reset_catalog()

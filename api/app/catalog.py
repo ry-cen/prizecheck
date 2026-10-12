@@ -422,7 +422,7 @@ def claim_run(conn, run_id: UUID) -> UUID | None:
 
 
 # The Card Identity of a new Printing. A Card Identity merged by review keeps its key, so a new Printing with that key
-# joins the surviving identity (migration 033).
+# joins the surviving identity (migration 037).
 IDENTITY_UPSERT = """INSERT INTO catalog_identity(identity_key,display_name) VALUES (%s,%s)
   ON CONFLICT(identity_key) DO UPDATE SET identity_key=EXCLUDED.identity_key RETURNING coalesce(merged_into,id) AS id"""
 
@@ -442,7 +442,7 @@ def rederive_card_attributes(conn) -> int:
     try:
         with conn.transaction():
             # Lock order, as in an import and an attribute decision: the public clock first. Changed attributes and
-            # Reprint Groups re-stamp their Printings' public format facts (migration 032), which takes the clock.
+            # Reprint Groups re-stamp their Printings' public format facts (migration 036), which takes the clock.
             conn.execute("SELECT catalog_begin_correction()")
             changed = refresh_card_attributes(conn)
             refresh_reprint_groups(conn)

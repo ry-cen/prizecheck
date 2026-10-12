@@ -209,7 +209,7 @@ def test_25000_holdings_extend_the_deck_list_after_plans_cached_from_empty_state
     """The trigger's dangerous path (ticket 05 review). PL/pgSQL caches a trigger statement's plan for the session, so
     the plans below come from empty transition tables; then one statement inserts 25,000 Holdings into a Deck and
     another raises every one of them. Joining the transition tables took 31 s here, against 0.96 s for pairing rows by
-    aggregation (migration 027); the bound catches a return of the join."""
+    aggregation (migration 031); the bound catches a return of the join."""
     owner, _, _, _, edition, _ = fixture()
     deck = create(owner).json()['location']['id']
     upsert = """INSERT INTO holding(owner_id,location_id,edition_id,quantity,version)

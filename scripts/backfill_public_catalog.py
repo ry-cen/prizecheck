@@ -3,8 +3,8 @@
 The name is kept for existing runbooks and CI. Run it after scripts/init_public_records.py (or
 init_public_projection.py) and whenever the records store was lost, re-initialized empty or
 restored from an older copy, or PostgreSQL was restored to a point older than the store. Run it once
-after activating the first release with Published Deck format results (migration 032) to publish each
-Printing's format facts, again after activating the first release with Basic Pokémon status (migration 034) to rewrite
+after activating the first release with Published Deck format results (migration 036) to publish each
+Printing's format facts, again after activating the first release with Basic Pokémon status (migration 038) to rewrite
 the format records it left without that attribute, and again after rolling forward from a rollback below either release.
 
 Steps: scan the store for the highest stored revision and for records PostgreSQL does not

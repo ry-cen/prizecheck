@@ -188,7 +188,7 @@ def test_confirming_one_row_moves_only_its_copies_and_leaves_the_deck_list_alone
     assert held(owner, binder) == {edition: '1', second: '2'}
     after = pick_list(owner, deck)
     assert set(rows(after)) == {second}
-    # The line already needed these copies (migration 027), so neither it nor the revision changed.
+    # The line already needed these copies (migration 031), so neither it nor the revision changed.
     assert after['deck_list_revision'] == body['deck_list_revision']
     assert [(line['edition_id'], line['quantity']) for line in detail(owner, deck)['deck_list']['lines']] == [
         (line['edition_id'], line['quantity']) for line in lines['lines']]

@@ -2,7 +2,7 @@
 
 Deleting a Deck never deletes cards. In one transaction every Holding in the Deck moves to the collector's root Unsorted
 Storage Leaf, merging into the Holdings Unsorted already has, and then the Deck and its Deck List are deleted. The
-Deck's publications lose their link to it (migration 028) and stay live. Other Locations still delete only when empty,
+Deck's publications lose their link to it (migration 032) and stay live. Other Locations still delete only when empty,
 through the Location tree route, which keeps refusing Decks.
 
 The command is idempotent and confirmed like a Location delete, by the Deck's name and version. It advances the inventory
@@ -91,7 +91,7 @@ def delete_deck(deck_id: UUID, command: DeleteDeck, user_id: str = Depends(verif
                   WHERE d.owner_id=%s AND d.location_id=%s AND u.quantity>%s-d.quantity LIMIT 1""",
                                 (unsorted_id, user_id, deck_id, MAX_QUANTITY)).fetchone():
                     error(409, 'QUANTITY_OVERFLOW')
-                # Unsorted is not a Deck, so migration 027's holding triggers leave every Deck List alone here.
+                # Unsorted is not a Deck, so migration 031's holding triggers leave every Deck List alone here.
                 conn.execute("""INSERT INTO holding AS u (owner_id,location_id,edition_id,quantity,version)
                   SELECT d.owner_id,%s,d.edition_id,d.quantity,%s FROM holding d WHERE d.owner_id=%s AND d.location_id=%s
                   ON CONFLICT (owner_id,location_id,edition_id) DO UPDATE

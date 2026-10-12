@@ -1,7 +1,7 @@
 -- Reviewed Reprint Groups and Card Identity merges (Deck Lists 14). The maintainer merges reworded or errata'd
 -- printings into a Reprint Group, splits a wrong group, lets a manually approved Printing join a group, and merges Card
 -- Identities that the subtitle rule misses (api/app/reprint_group_reviews.py). Each is a reviewed record that only the
--- owner's approval-coded decision writes, as for card attribute corrections (migration 029).
+-- owner's approval-coded decision writes, as for card attribute corrections (migration 033).
 --
 -- Reviewed records name Printings, never derived group IDs: a derived ID embeds the Card Identity and the rules text, so
 -- a rules-text change or an identity merge renames it, while a Printing keeps its ID.
@@ -11,7 +11,7 @@
 --   Splits and manual Printings use assignments. An assignment applies only to a Printing that derives a group (so it
 --   is held, not withdrawn, by the catalog generation refresh_reprint_groups last wrote) or to a manual Printing
 --   (every import carries it forward, never withdrawn). A withdrawn TCGdex Printing therefore leaves its group like
---   any other, through a membership row change that re-stamps its group-mates (migration 032's rule), and rejoins its
+--   any other, through a membership row change that re-stamps its group-mates (migration 036's rule), and rejoins its
 --   assigned group if a later import holds it again. The active generation is not read: refresh_reprint_groups runs
 --   inside the import before the generation switch.
 -- Effective group of a Printing: its applicable assignment, else the reviewed group its derived group is linked to,
@@ -23,12 +23,12 @@
 -- no row skips the recompute; each recompute writes only the rows whose group changed (an anti-join, so an unchanged
 -- catalog costs one read and no row locks or WAL), after locking the attribute revision row, so concurrent writers
 -- recompute one after another from committed inputs.
--- Public format facts (migration 032) carry each Printing's effective Reprint Group and its members. Every change of a
--- Printing's effective group is a row write on catalog_reprint_group_membership, so 032's group re-stamp triggers move
+-- Public format facts (migration 036) carry each Printing's effective Reprint Group and its members. Every change of a
+-- Printing's effective group is a row write on catalog_reprint_group_membership, so 036's group re-stamp triggers move
 -- here from the derived table: a reviewed record changes effective membership without writing a derived row. A Card
--- Identity merge is an UPDATE of catalog_printing.identity_id, which 032 already re-stamps.
+-- Identity merge is an UPDATE of catalog_printing.identity_id, which 036 already re-stamps.
 -- Lock order: every writer of the derived and reviewed tables takes the public clock (catalog_begin_correction()) first,
--- as migration 032 requires, and the recompute takes it too before it writes membership; it then locks the attribute
+-- as migration 036 requires, and the recompute takes it too before it writes membership; it then locks the attribute
 -- revision row, and the re-stamp reuses the clock.
 --
 -- This migration leaves effective membership exactly as before (no reviewed records exist yet), so it does not
@@ -129,7 +129,7 @@ BEGIN
  IF NOT EXISTS (SELECT 1 FROM changed_rows) THEN
   RETURN NULL;
  END IF;
- -- Effective membership is written only after the commit-ordered public clock (migration 032's lock order; a no-op
+ -- Effective membership is written only after the commit-ordered public clock (migration 036's lock order; a no-op
  -- when the writer took it first, as every writer does). Then one recompute at a time, each from committed inputs:
  -- the next waits here until the previous transaction commits.
  PERFORM catalog_begin_correction();
@@ -171,7 +171,7 @@ CREATE TRIGGER catalog_reprint_group_assignment_sync_delete AFTER DELETE ON cata
 INSERT INTO catalog_reprint_group_membership (printing_id, group_id)
  SELECT printing_id, group_id FROM catalog_derived_reprint_group;
 
--- Re-stamp public format facts from effective membership (migration 032's function, same transition-table shape). The
+-- Re-stamp public format facts from effective membership (migration 036's function, same transition-table shape). The
 -- backfill above changed no effective group, so it re-stamps nothing.
 DROP TRIGGER stamp_format_facts_reprint_group_insert ON catalog_derived_reprint_group;
 DROP TRIGGER stamp_format_facts_reprint_group_update ON catalog_derived_reprint_group;
@@ -186,7 +186,7 @@ CREATE TRIGGER stamp_format_facts_reprint_group_delete AFTER DELETE ON catalog_r
  REFERENCING OLD TABLE AS old_rows
  FOR EACH STATEMENT EXECUTE FUNCTION stamp_format_facts_from_reprint_groups();
 
--- Readers keep using this view and its two columns (migration 031); it now reads the stored effective membership.
+-- Readers keep using this view and its two columns (migration 035); it now reads the stored effective membership.
 -- api/tests/test_reprint_groups.py guards that both reader forms look rows up by index.
 CREATE OR REPLACE VIEW catalog_reprint_group_member AS
   SELECT printing_id, group_id FROM catalog_reprint_group_membership;

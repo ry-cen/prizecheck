@@ -9,7 +9,7 @@ Pick List does not optimise trips across cards.
 Confirming moves the chosen copies into the Deck in one transaction under the owner lock: every item is validated
 first and nothing changes unless all of them can move. The writes are those of a committed Move (``moves.py``): one
 owner revision, idempotent replay through ``mutation_request``/``move_response``, and one ordinary single-source
-Inventory Undo record per source Storage Leaf. Migration 027's holding trigger covers arriving copies; copies that a
+Inventory Undo record per source Storage Leaf. Migration 031's holding trigger covers arriving copies; copies that a
 line already needs leave the Deck List unchanged.
 
 Collector workspace compatibility (#106): confirm items have the multi-source Move item shape
@@ -270,7 +270,7 @@ def confirm_picks(deck_id: UUID, command: ConfirmPicks, user_id: str = Depends(v
               FROM jsonb_to_recordset(%s::jsonb) AS w(source_id uuid,edition_id uuid,quantity bigint)
               WHERE h.owner_id=%s AND h.location_id=w.source_id AND h.edition_id=w.edition_id
               AND h.quantity>w.quantity""", (new_revision, work, user_id))
-            # Migration 027's holding trigger extends the Deck List only for copies its lines do not already need.
+            # Migration 031's holding trigger extends the Deck List only for copies its lines do not already need.
             arrivals = json.dumps([{'edition_id': str(edition), 'quantity': amount} for edition, amount in arriving.items()])
             conn.execute("""INSERT INTO holding(owner_id,location_id,edition_id,quantity,version)
               SELECT %s,%s,edition_id,quantity,%s FROM jsonb_to_recordset(%s::jsonb) AS a(edition_id uuid,quantity bigint)

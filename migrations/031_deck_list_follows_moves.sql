@@ -2,7 +2,7 @@
 -- raises that Edition's line so the copies it added are covered. Moves out of a Deck, Inventory Removals and undoing a
 -- Move into a Deck only lower Holdings and never change a line.
 --
--- This is a trigger rather than application code for the same reason as 025's Deck List trigger: an older application
+-- This is a trigger rather than application code for the same reason as 029's Deck List trigger: an older application
 -- still serving during a release, or after a rollback, writes Holdings into Decks without knowing about Deck Lists.
 -- It also covers every current writer (Add, Move commit, undo, Edition reassignment) and any later one in one place.
 --

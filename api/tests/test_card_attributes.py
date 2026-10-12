@@ -343,7 +343,7 @@ def test_rederiving_fills_printings_imported_before_card_attributes_and_waits_fo
     reset_catalog()
     run(Records(*CARDS))
     with connect() as conn:
-        conn.execute("DELETE FROM catalog_derived_attribute")  # The state migration 026 leaves an existing catalog in.
+        conn.execute("DELETE FROM catalog_derived_attribute")  # The state migration 030 leaves an existing catalog in.
     assert set(attributes_of(*EXPECTED).values()) == {UNKNOWN}
     with psycopg.connect(os.environ["DATABASE_URL"]) as importer:
         importer.execute("SELECT pg_advisory_lock(914703)")

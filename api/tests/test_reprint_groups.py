@@ -285,7 +285,7 @@ def test_rederiving_forms_groups_for_a_catalog_imported_before_reprint_groups():
     run(Records(*CARDS))
     before = groups_of(*all_ids())
     with connect() as conn:
-        conn.execute("DELETE FROM catalog_derived_reprint_group")  # The state migration 031 leaves a catalog in.
+        conn.execute("DELETE FROM catalog_derived_reprint_group")  # The state migration 035 leaves a catalog in.
     assert set(groups_of(*all_ids()).values()) == {None}
     imported = revision()
     with connect() as conn:

@@ -294,7 +294,7 @@ def apply_selection(manifest_id, command, user_id):
               FROM move_work w WHERE h.owner_id=%s AND h.location_id=w.source_id AND h.edition_id=w.edition_id
               AND h.quantity>w.quantity""", (new_revision, user_id))
             if destination is not None:
-                # Migration 027's holding trigger extends a destination Deck's Deck List to cover these copies.
+                # Migration 031's holding trigger extends a destination Deck's Deck List to cover these copies.
                 conn.execute("""INSERT INTO holding(owner_id,location_id,edition_id,quantity,version)
                   SELECT %s,%s,edition_id,quantity::bigint,%s FROM arrival_work WHERE true
                   ON CONFLICT (owner_id,location_id,edition_id) DO UPDATE
@@ -412,7 +412,7 @@ def undo_inventory(undo_id: UUID, command: UndoCommand, user_id: str = Depends(v
                 conn.execute('''UPDATE holding h SET quantity=h.quantity-d.quantity::bigint,version=%s FROM departure_work d
                   WHERE h.owner_id=%s AND h.location_id=%s AND h.edition_id=d.edition_id AND h.quantity>d.quantity''',
                              (new_revision, user_id, destination))
-            # Copies returned to a source Deck are covered by migration 027's holding trigger; a Deck that loses
+            # Copies returned to a source Deck are covered by migration 031's holding trigger; a Deck that loses
             # copies here keeps its Deck List lines.
             conn.execute('''INSERT INTO holding(owner_id,location_id,edition_id,quantity,version)
               SELECT %s,source_id,edition_id,quantity,%s FROM undo_work WHERE true

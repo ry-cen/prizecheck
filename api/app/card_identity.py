@@ -2,7 +2,7 @@
 
 "Professor's Research (Professor Juniper)" and "Professor's Research (Professor Magnolia)" are one
 Card Identity, "Professor's Research"; "Professor\u2019s Letter" and "Professor's Letter" are one Card
-Identity, "Professor's Letter". Migration 024's catalog_card_identity_key() is the SQL twin of this
+Identity, "Professor's Letter". Migration 028's catalog_card_identity_key() is the SQL twin of this
 function; api/tests/test_card_identity.py checks that the two agree.
 """
 import re

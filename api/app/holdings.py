@@ -115,7 +115,7 @@ def add_holding(command: AddHolding, user_id: str = Depends(verified_user)):
         if current and current["quantity"] > MAX_QUANTITY - quantity:
             fail(422, "QUANTITY_OVERFLOW")
         revision = owner["revision"] + 1
-        # Migration 027's holding trigger extends a Deck's Deck List to cover copies added to it.
+        # Migration 031's holding trigger extends a Deck's Deck List to cover copies added to it.
         result = conn.execute("""INSERT INTO holding(owner_id,location_id,edition_id,quantity,version)
           VALUES (%s,%s,%s,%s,%s)
           ON CONFLICT (owner_id,location_id,edition_id) DO UPDATE
