@@ -26,6 +26,8 @@ x-api-environment: &api-environment
   PUBLIC_PROJECTION_ADAPTER: filesystem
   PUBLIC_PROJECTION_DIR: /var/lib/prizecheck/public
   PRICE_RUNNER_LOCK_DIR: /var/lib/prizecheck/price-runners
+  # Dev keeps the newest marketplace matching rule active without an owner approval (catalog_targets.ensure_matching_rule).
+  MARKETPLACE_MATCHING: automatic
   NODE_ENV: ${PRIZECHECK_NODE_ENV:-development}
 
 services:
