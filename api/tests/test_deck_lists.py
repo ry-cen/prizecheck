@@ -13,7 +13,7 @@ from test_holdings import add, call, client, fixture
 from test_decks import create
 from test_moves import edition_like, leaf
 
-MIGRATION = '025_deck_lists.sql'
+MIGRATION = '029_deck_lists.sql'
 
 
 def lines_path(deck, edition=None):

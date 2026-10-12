@@ -9,7 +9,7 @@ action, binds to the evidence the maintainer was shown, takes the commit-ordered
 catalog imports), advances the attribute revision once and is recorded append-only. There are no collector reports.
 
 Every decision concerns one Card Identity, since Reprint Groups never span identities. Reviewed records name Printings
-(migration 033), so they survive re-imports, re-derivation and renamed derived groups:
+(migration 037), so they survive re-imports, re-derivation and renamed derived groups:
 
 - ``merge`` puts every Printing of one group into another. Each member's derived group is linked to the target, so a
   reprint with either wording imported later joins the merged group too; members held by an assignment move with it.
@@ -17,7 +17,7 @@ Every decision concerns one Card Identity, since Reprint Groups never span ident
 - ``join`` puts the named Printings into a group by assignment. Manually approved Printings join groups only this way.
   A TCGdex Printing joins only while it derives a group of its own (it is held, not withdrawn, and has rules text).
 
-An assignment applies only to a Printing that derives a group or to a manual Printing (migration 033). A withdrawn
+An assignment applies only to a Printing that derives a group or to a manual Printing (migration 037). A withdrawn
 TCGdex Printing leaves its reviewed group like any other, so private and published format checks never count it, and
 rejoins it if a later import holds it again.
 - ``restore`` removes the named Printings' links and assignments, returning them to derivation. A derived group stays
@@ -36,8 +36,8 @@ until the review resolves and the next import or re-derivation regroups it.
 
 Each decision reports ``affected_printing_ids``, the Printings whose effective group or Card Identity changed. Their
 public format facts (Deck Lists 18) change with them: every such change is a row write on
-``catalog_reprint_group_membership`` or an UPDATE of ``catalog_printing.identity_id``, whose triggers (migrations 032
-and 033) re-stamp and enqueue the Printings concerned and the other members of their old and new groups at the
+``catalog_reprint_group_membership`` or an UPDATE of ``catalog_printing.identity_id``, whose triggers (migrations 036
+and 037) re-stamp and enqueue the Printings concerned and the other members of their old and new groups at the
 decision's public revision. The decision delivers them after its commit and reports ``public_delivery``, like an
 attribute decision.
 """
@@ -337,7 +337,7 @@ def _check_group_decision(command: ReprintGroupDecisionInput, printing_ids: list
     elif command.decision == "join":
         if any(by_id[printing].group_id == command.target_group_id for printing in printing_ids):
             fail(422, "ALREADY_IN_GROUP")
-        # An assignment applies to a TCGdex Printing only while it derives a group (migration 033).
+        # An assignment applies to a TCGdex Printing only while it derives a group (migration 037).
         if any(by_id[printing].source != "manual" and by_id[printing].derived_group_id is None
                for printing in printing_ids):
             fail(422, "PRINTING_NOT_GROUPABLE")
@@ -478,7 +478,7 @@ def merge_identities(command: CardIdentityMergeInput, user_id: str = Depends(ver
                 # Derived group IDs include the identity: re-derive the moved Printings' groups now.
                 if moved:
                     refresh_reprint_groups(conn, printing_ids=moved)
-                # Search cursors and catalog-revision-keyed reads must not span the change (as in migration 024).
+                # Search cursors and catalog-revision-keyed reads must not span the change (as in migration 028).
                 conn.execute("UPDATE catalog_state SET revision=revision+1 WHERE singleton")
                 affected = _changed(before, _membership(conn, [survivor]))
                 conn.execute("""INSERT INTO catalog_card_identity_decision (id, identity_id, decision,

@@ -5,7 +5,7 @@
 -- `catalog:printing:<ref>`, so every change to a fact it carries must re-stamp the Printing in the same transaction.
 -- These triggers do that for every writer, the way migration 023's triggers stamp Live and marketplace changes: derived
 -- attributes, reviewed attribute corrections, a Printing's Card Identity, an identity's key or name, and Reprint Group
--- membership (migration 031).
+-- membership (migration 035).
 --
 -- A Reprint Group change re-stamps the Printings that moved and every Printing of the groups they left and joined,
 -- because each member's record lists the group's printings. The member list is the private format check's
@@ -75,10 +75,10 @@ CREATE TRIGGER stamp_format_facts_identity AFTER UPDATE ON catalog_identity
  FOR EACH ROW WHEN (OLD.identity_key IS DISTINCT FROM NEW.identity_key OR OLD.display_name IS DISTINCT FROM NEW.display_name)
  EXECUTE FUNCTION stamp_format_facts_from_identity();
 
--- Reprint Group membership (migration 031). Statement triggers with transition tables: one import or rederivation can
+-- Reprint Group membership (migration 035). Statement triggers with transition tables: one import or rederivation can
 -- write the groups of the whole catalog in one statement, and the Printings of every touched group are stamped once.
 -- An UPDATE that keeps the group (a text_key or rules_version rewrite) changes no fact. The members are looked up in the
--- effective membership view by group_id, which is indexed (migration 031).
+-- effective membership view by group_id, which is indexed (migration 035).
 CREATE FUNCTION stamp_format_facts_from_reprint_groups() RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE moved uuid[]; groups uuid[];
 BEGIN

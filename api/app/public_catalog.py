@@ -103,7 +103,7 @@ def format_value(row):
     otherwise ``ref`` is the group's public reference and ``printings`` the sorted public references of the group's
     printings that the active catalog generation holds and has not withdrawn (the private check's ``MEMBERS``), whose
     own format records carry their facts. Attributes are the effective ones (``catalog_card_attribute``); null means
-    unknown. Every field changes only together with a Printing stamp (migration 032), so the record shares the
+    unknown. Every field changes only together with a Printing stamp (migration 036), so the record shares the
     Printing's revision.
     """
     attributes = {column: row[column] for column in ATTRIBUTE_COLUMNS}
@@ -152,7 +152,7 @@ def build_values(conn, targets):
         ids[kind].append(target)
     built = {}
     if ids['printing']:
-        # A Printing record carries the Printing's own name; the Card Identity name is folded and drops subtitles (migration 024).
+        # A Printing record carries the Printing's own name; the Card Identity name is folded and drops subtitles (migration 028).
         # Its format record (Deck Lists 18) carries the facts format checks read, at the same revision.
         for row in conn.execute(f"""SELECT p.id,p.public_ref AS printing_ref,coalesce(pd.display_name,ci.display_name) AS display_name,
           coalesce(pd.set_id,'') AS set_id,coalesce(pd.set_name,'') AS set_name,
@@ -202,7 +202,7 @@ def classify(built, records):
 
     A format record that differs at the same revision is written, not a mismatch: format facts have no fail-closed
     state, PostgreSQL is their only source, and such a difference can only be a fact that changed without a Printing
-    stamp (for example on a runtime rolled back below migration 032's triggers). Live and marketplace records keep the
+    stamp (for example on a runtime rolled back below migration 036's triggers). Live and marketplace records keep the
     mismatch rule.
     """
     stored = [stored_revision(records[key].value) for key in built.values]

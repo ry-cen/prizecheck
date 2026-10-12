@@ -279,7 +279,7 @@ def deck_format_checks(deck_id: UUID, format_name: str | None = Query(default=No
         header = conn.execute('SELECT revision FROM deck_list WHERE owner_id=%s AND deck_id=%s',
                               (user_id, deck_id)).fetchone()
         if header is None:
-            raise RuntimeError('Deck has no Deck List')  # Migration 025 gives every Deck a Deck List.
+            raise RuntimeError('Deck has no Deck List')  # Migration 029 gives every Deck a Deck List.
         revisions = read_revisions(conn)
         keys = {name: result_key(header['revision'], rules[name], revisions, on) for name in names}
         answers = {row['format']: (from_saved(row['format'], row['result'], on),

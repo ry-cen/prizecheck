@@ -80,7 +80,7 @@ def listed_deck(quantities, user=USER):
         conn.execute("INSERT INTO inventory_owner(user_id) VALUES (%s) ON CONFLICT DO NOTHING", (user,))
         if not conn.execute("SELECT 1 FROM location WHERE owner_id=%s AND kind='storage_leaf'", (user,)).fetchone():
             conn.execute("INSERT INTO location(id,owner_id,name,kind) VALUES (%s,%s,'Unsorted','storage_leaf')", (uuid4(), user))
-        # Migration 025's trigger gives the new Deck its empty Deck List.
+        # Migration 029's trigger gives the new Deck its empty Deck List.
         conn.execute("INSERT INTO location(id,owner_id,name,kind) VALUES (%s,%s,%s,'deck')", (deck, user, f"Deck {deck}"))
         for edition, quantity in quantities.items():
             conn.execute("INSERT INTO deck_list_line(owner_id,deck_id,edition_id,quantity) VALUES (%s,%s,%s,%s)",

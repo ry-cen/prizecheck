@@ -193,7 +193,7 @@ CHECK_SOURCES = {
 
 
 def basic_checks(conn, generation_id, user_id: str, deck_id: UUID, source: str) -> DeckChecks:
-    # The Basic Energy exemption reads the effective card attributes (migration 026), not the source energy type:
+    # The Basic Energy exemption reads the effective card attributes (migration 030), not the source energy type:
     # an identity is exempt only when every printing is Basic Energy, and unresolved when any printing's Basic
     # Energy status is unknown. ``generation_id`` is no longer read.
     groups = conn.execute(f"""SELECT ci.id,ci.display_name,sum(c.quantity) AS quantity,
@@ -222,7 +222,7 @@ def read_deck_list(conn, user_id: str, deck_id: UUID) -> DeckList:
     header = conn.execute('SELECT revision FROM deck_list WHERE owner_id=%s AND deck_id=%s',
                           (user_id, deck_id)).fetchone()
     if header is None:
-        # Migration 025 and its location trigger give every Deck a Deck List.
+        # Migration 029 and its location trigger give every Deck a Deck List.
         raise RuntimeError('Deck has no Deck List')
     # Two primary-key range reads paired here, never a join (see deck_ownership.read_ownership).
     lines = conn.execute('SELECT edition_id,quantity FROM deck_list_line WHERE owner_id=%s AND deck_id=%s '

@@ -270,7 +270,7 @@ def test_private_and_public_checks_share_rules_without_private_identity_serializ
     owner,_,_,_,edition,generation=fixture()
     deck=create(owner,'Private rules fixture').json()['location']['id']
     list_cards(owner,deck,{edition:5})
-    # Both read the Basic Energy card attribute (migration 026).
+    # Both read the Basic Energy card attribute (migration 030).
     for basic_energy,status in [(False,'over_limit'),(None,'unresolved'),(True,'basic_energy_exempt')]:
         with psycopg.connect(os.environ['DATABASE_URL']) as conn:
             conn.execute('UPDATE catalog_derived_attribute SET basic_energy=%s WHERE printing_id=(SELECT printing_id FROM catalog_edition WHERE id=%s)',(basic_energy,edition))

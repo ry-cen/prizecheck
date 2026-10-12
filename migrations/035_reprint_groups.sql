@@ -6,7 +6,7 @@
 -- scripts/derive_card_attributes.py. A migration cannot run the Python rules, so Printings that exist before this
 -- migration are in no group until that script or the next catalog import runs.
 -- A change to any Printing's group advances catalog_attribute_state.revision through
--- catalog_advance_attribute_revision() (migration 029), once per transaction.
+-- catalog_advance_attribute_revision() (migration 033), once per transaction.
 
 CREATE TABLE catalog_derived_reprint_group (
   printing_id uuid PRIMARY KEY REFERENCES catalog_printing(id) ON DELETE CASCADE,

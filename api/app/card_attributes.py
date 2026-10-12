@@ -32,7 +32,7 @@ class CardAttributes:
     ace_spec: bool | None = None
     radiant: bool | None = None
     prism_star: bool | None = None
-    basic_pokemon: bool | None = None    # last: migration 034 appends its column to the view
+    basic_pokemon: bool | None = None    # last: migration 038 appends its column to the view
 
 
 UNKNOWN = CardAttributes()
@@ -279,7 +279,7 @@ def advance_attribute_revision(conn) -> int:
     """Advance the one revision that covers card attributes and Reprint Groups, at most once per transaction.
 
     Every call in one transaction returns the revision the first call took (``catalog_advance_attribute_revision``,
-    migration 029), so derivation, a reviewed correction and Reprint Group changes in one transaction advance it once.
+    migration 033), so derivation, a reviewed correction and Reprint Group changes in one transaction advance it once.
     Call it in every transaction that changes any Printing's effective attributes or Reprint Group. The revision row
     stays locked until commit, so revisions are commit-ordered.
     """

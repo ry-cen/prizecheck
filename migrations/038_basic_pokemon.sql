@@ -1,23 +1,23 @@
 -- Basic Pokémon status (Deck Lists 20). Every format check requires a deck to hold at least one Basic Pokémon, so each
 -- Card Printing gains a derived ``basic_pokemon`` attribute (api/app/card_attributes.py, rules version 2) that a reviewed
--- correction can override like the others (migration 029). NULL means unknown, as for every attribute.
+-- correction can override like the others (migration 033). NULL means unknown, as for every attribute.
 --
 -- A migration cannot run the Python rules, so every existing Printing's Basic Pokémon status stays unknown until
 -- scripts/derive_card_attributes.py or the next catalog import re-derives it (docs/operations/release.md). Until then a
 -- deck whose Basic Pokémon status is unknown on every line checks as unknown, never legal.
 --
 -- The column is appended to both tables and to the end of catalog_card_attribute, so CREATE OR REPLACE VIEW keeps every
--- existing column, its order and its type: readers written for migration 029's columns keep working.
+-- existing column, its order and its type: readers written for migration 033's columns keep working.
 
 ALTER TABLE catalog_derived_attribute ADD COLUMN basic_pokemon boolean;
 ALTER TABLE catalog_attribute_correction ADD COLUMN basic_pokemon boolean;
 
--- A correction still sets at least one attribute; basic_pokemon now counts. Migration 029 left this CHECK unnamed.
+-- A correction still sets at least one attribute; basic_pokemon now counts. Migration 033 left this CHECK unnamed.
 ALTER TABLE catalog_attribute_correction DROP CONSTRAINT catalog_attribute_correction_check;
 ALTER TABLE catalog_attribute_correction ADD CONSTRAINT catalog_attribute_correction_sets_an_attribute
  CHECK(num_nonnulls(regulation_mark,card_kind,basic_energy,types,rule_box,ace_spec,radiant,prism_star,basic_pokemon)>0);
 
--- Migration 029's view with the new column last.
+-- Migration 033's view with the new column last.
 CREATE OR REPLACE VIEW catalog_card_attribute AS
   SELECT p.id AS printing_id,
     coalesce(c.regulation_mark, d.regulation_mark) AS regulation_mark,
@@ -34,7 +34,7 @@ CREATE OR REPLACE VIEW catalog_card_attribute AS
   LEFT JOIN catalog_attribute_correction c ON c.printing_id = p.id
   WHERE d.printing_id IS NOT NULL OR c.printing_id IS NOT NULL;
 
--- Basic Pokémon status is a public format fact (migration 032): a change to it re-stamps the Printing like a change to
+-- Basic Pokémon status is a public format fact (migration 036): a change to it re-stamps the Printing like a change to
 -- any other attribute. A rules_version-only rewrite still changes no fact.
 CREATE OR REPLACE FUNCTION stamp_format_facts_from_attributes() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
