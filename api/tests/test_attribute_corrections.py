@@ -372,9 +372,13 @@ def test_an_attribute_code_cannot_be_spent_on_a_metadata_decision():
 def scans(query, params):
     """Every scan of the derived and correction tables in the query's plan as (relation, node type, keyed), where keyed
     means the scan looks rows up by an index condition. Seq scans are priced out, as row counts would at catalog scale;
-    a UNION ALL form of the view failed it by reading the whole derived table (6 ms against 0.14 ms at 25k Printings)."""
+    a UNION ALL form of the view failed it by reading the whole derived table (6 ms against 0.14 ms at 25k Printings).
+    Merge and hash joins are priced out too: on a handful of rows the planner may otherwise read a whole primary-key
+    index into one, which depends on table statistics rather than on whether the view can be looked up by key."""
     with connect() as conn, conn.transaction():
         conn.execute("SET LOCAL enable_seqscan=off")
+        conn.execute("SET LOCAL enable_mergejoin=off")
+        conn.execute("SET LOCAL enable_hashjoin=off")
         plan = conn.execute("EXPLAIN (FORMAT JSON) " + query, params).fetchone()["QUERY PLAN"][0]["Plan"]
     found = []
 
