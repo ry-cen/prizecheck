@@ -235,8 +235,26 @@ class MatchingRulesV2(MatchingRulesV1):
         return super().evaluate({**facts, "lookup": lookup}, verified_elsewhere)
 
 
+class MatchingRulesV3(MatchingRulesV2):
+    """V2, with the variant's lookup identity set aside before the finish is read.
+
+    TCGdex lists a variant's ``thirdParty`` IDs inside the variant itself, so they reach the Edition descriptor. V1 and
+    V2 read any key beyond type/finish/size as an extra facet, so those descriptors named no finish and never matched.
+    V3 drops ``thirdParty`` from the descriptor only; the lookup's own ``thirdParty.tcgplayer`` is still checked against
+    the selected product.
+    """
+    LOOKUP_KEYS = frozenset(("thirdParty",))
+
+    @classmethod
+    def evaluate(cls, facts, verified_elsewhere):
+        descriptor = facts["descriptor"]
+        if isinstance(descriptor, dict):
+            descriptor = {key: value for key, value in descriptor.items() if key not in cls.LOOKUP_KEYS}
+        return super().evaluate({**facts, "descriptor": descriptor}, verified_elsewhere)
+
+
 LIVE_RULES = {1: LiveRulesV1}
-MATCHING_RULES = {1: MatchingRulesV1, 2: MatchingRulesV2}
+MATCHING_RULES = {1: MatchingRulesV1, 2: MatchingRulesV2, 3: MatchingRulesV3}
 REGISTRIES = {LIVE: LIVE_RULES, MATCHING: MATCHING_RULES}
 
 

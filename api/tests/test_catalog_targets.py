@@ -8,8 +8,8 @@ import psycopg
 import pytest
 
 from app.catalog_targets import (LIVE, LIVE_RULES, MATCHING, MATCHING_RULES, REGISTRIES, EditionState, Failure,
-                                 LiveRulesV1, MatchingRulesV1, MatchingRulesV2, PrintingState, TargetContext, activate_rule,
-                                 code_digest, edition_state, edition_targets, ensure_matching_rule, evaluate_edition,
+                                 LiveRulesV1, MatchingRulesV1, MatchingRulesV2, MatchingRulesV3, PrintingState, TargetContext, activate_rule,
+                                 code_digest, edition_state, edition_targets, ensure_matching_rule, evaluate_edition, normalized_name,
                                  evaluate_printing, fingerprint, load_active, printing_live, refresh_printing)
 from app.main import connect
 from test_catalog import reset_catalog
@@ -88,14 +88,19 @@ def test_matching_rule_product_and_variant_are_separate_checks():
     assert MatchingRulesV1.variant({"kind": "unspecified", "label": "Unspecified Variant"}, "normal") is None
 
 
-def repeated_block(number=1):
-    """The live TCGdex shape: every variant repeats the card's whole TCGplayer block, one entry per finish."""
+def repeated_block(number=1, third_party=False):
+    """The live TCGdex shape: every variant repeats the card's whole TCGplayer block, one entry per finish.
+
+    Live variants also carry their ``thirdParty`` IDs, which reach the Edition descriptor (``third_party=True``).
+    """
     record = card(number)
     block = {"unit": "USD", "updated": "2026-10-07T22:55:02Z",
              "normal": {"productId": 1000 + number, "marketPrice": 0.25},
              "reverse-holofoil": {"productId": 1000 + number, "marketPrice": 0.43}}
     for variant in record["variants_detailed"]:
         variant["pricing"] = {"tcgplayer": copy.deepcopy(block)}
+        if third_party:
+            variant["thirdParty"] = {"tcgplayer": 1000 + number, "cardmarket": 2000 + number}
     return record
 
 
@@ -122,6 +127,32 @@ def test_v1_refuses_a_repeated_block_and_activating_v2_verifies_it():
     assert activate(MATCHING, 2) == {"printings": 0, "editions": 2}
     assert {key: (row["mapping_state"], row["product_id"], row["quote_variant"]) for key, row in metadata()[1].items()} == {
         "normal": ("verified", 1001, "normal"), "reverse": ("verified", 1001, "reverse-holofoil")}
+
+
+def test_v2_misses_a_descriptor_carrying_third_party_ids_and_activating_v3_verifies_it():
+    reset_catalog()
+    run(Records(repeated_block(1, third_party=True)))
+    assert all("thirdParty" in row["descriptor"] for row in metadata()[1].values())  # the live descriptor shape
+    activate(MATCHING, 2)
+    assert {(row["mapping_state"], row["mapping_reason"]) for row in metadata()[1].values()} == {("unverified", "rule_failed")}
+    assert activate(MATCHING, 3) == {"printings": 0, "editions": 2}
+    assert sorted((row["mapping_state"], row["product_id"], row["quote_variant"]) for row in metadata()[1].values()) == [
+        ("verified", 1001, "normal"), ("verified", 1001, "reverse-holofoil")]
+
+
+def test_v3_sets_aside_only_third_party_and_still_checks_it_against_the_product():
+    lookup = {"pricing": {"tcgplayer": {"normal": {"productId": 7}, "reverse-holofoil": {"productId": 8}}},
+              "thirdParty": {"tcgplayer": 7}}
+    facts = {"correspondence": "source_candidate", "source": "tcgdex", "source_id": "x", "lookup": lookup,
+             "source_record": {"set": {"id": "s"}, "localId": "1", "name": "Furret"},
+             "display": {"set_id": "s", "collector_number": "1", "display_name": normalized_name("Furret")}}
+    descriptor = lambda **extra: {"type": "normal", "size": "standard", "thirdParty": {"tcgplayer": 7}, **extra}
+    evaluate = lambda rule, d: rule.evaluate({**facts, "descriptor": d}, lambda *_: False)
+    assert evaluate(MatchingRulesV2, descriptor()) == Failure("conflict")
+    assert evaluate(MatchingRulesV3, descriptor()) == (7, "normal")
+    # Other facets still name no finish, and the lookup's thirdParty ID must still be the selected product.
+    assert evaluate(MatchingRulesV3, descriptor(stamp="x")) == Failure("conflict")
+    assert evaluate(MatchingRulesV3, {**descriptor(), "type": "reverse"}) == Failure("conflict")
 
 
 def test_automatic_matching_keeps_the_newest_rule_active_without_an_approval(monkeypatch):
@@ -914,6 +945,7 @@ PINNED_DIGESTS = {
     (LIVE, 1): "79ed62c768325f3dc0d378e0f8128251c6f8ef4a778b6351c4097c9ec1235084",
     (MATCHING, 1): "5367c25316bea657d01a044af5a175dfe66dab656d36f82bcc16bb060dfb25d6",
     (MATCHING, 2): "6994b033232a73138f83cda642e97edc8e75e692e9bba29a3704b913eb7a6eef",
+    (MATCHING, 3): "4bd54323c859f05ebd31083fcdaba3c2c4dd84562f82d7e112469086db06a3d9",
 }
 
 
