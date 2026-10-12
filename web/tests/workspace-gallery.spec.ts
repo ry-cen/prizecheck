@@ -349,6 +349,272 @@ test("card-shaped placeholders show until the first page arrives", async ({
   await expect(counts(page, "3 copies · 1 edition")).toBeVisible();
 });
 
+/** The gallery grid's inline height, in px. */
+const gridHeight = (page: Page) =>
+  page.evaluate(() =>
+    parseFloat(
+      document.querySelector<HTMLElement>(".ws-gallery-grid")!.style.height ||
+        "0"
+    )
+  );
+/** The gallery grid's top edge in page coordinates. */
+const gridTop = (page: Page) =>
+  page.evaluate(
+    () =>
+      document.querySelector(".ws-gallery-grid")!.getBoundingClientRect().top +
+      window.scrollY
+  );
+
+type GalleryRecord = { placeholders: number; heights: number[] };
+
+/** From now on, counts every placeholder tile added to the page and records every height the gallery
+ * grid is given. A style change's old value is recorded too, so a height that is replaced before the
+ * observer runs is still seen. The whole page is watched, so a remounted gallery is caught as well. */
+async function recordGallery(page: Page) {
+  await page.evaluate(() => {
+    const probe = document.createElement("div");
+    const heightOf = (style: string | null) => {
+      probe.setAttribute("style", style ?? "");
+      return parseFloat(probe.style.height || "0");
+    };
+    const record = { placeholders: 0, heights: [] as number[] };
+    const observer = new MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        const target = mutation.target as HTMLElement;
+        if (
+          mutation.type === "attributes" &&
+          target.classList.contains("ws-gallery-grid")
+        )
+          record.heights.push(
+            heightOf(mutation.oldValue),
+            parseFloat(target.style.height || "0")
+          );
+        for (const node of Array.from(mutation.addedNodes)) {
+          if (!(node instanceof HTMLElement)) continue;
+          if (
+            node.matches(".ws-tile-placeholder") ||
+            node.querySelector(".ws-tile-placeholder")
+          )
+            record.placeholders++;
+          const grid = node.matches(".ws-gallery-grid")
+            ? node
+            : node.querySelector<HTMLElement>(".ws-gallery-grid");
+          if (grid) record.heights.push(parseFloat(grid.style.height || "0"));
+        }
+      }
+    });
+    observer.observe(document.body, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: ["style"],
+      attributeOldValue: true,
+    });
+    (window as unknown as { galleryRecord: typeof record }).galleryRecord =
+      record;
+  });
+}
+const galleryRecord = (page: Page) =>
+  page.evaluate(
+    () => (window as unknown as { galleryRecord: GalleryRecord }).galleryRecord
+  );
+/** Two animation frames, so every commit after the last event has been painted. */
+const settle = (page: Page) =>
+  page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+      )
+  );
+
+/** Holds the listing requests for one Location until the returned release is called. Other
+ * Locations' requests pass through. */
+async function holdListing(page: Page, locationId: string) {
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await page.route(/\/api\/collection\/holdings/, async (route) => {
+    if (
+      new URL(route.request().url()).searchParams.get("location_id") ===
+      locationId
+    )
+      await held;
+    await route.continue();
+  });
+  return release;
+}
+const listingFor = (page: Page, locationId: string) =>
+  page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === "/api/collection/holdings" &&
+      new URL(response.url()).searchParams.get("location_id") === locationId
+  );
+
+// Ticket 121: switching Locations must not flash placeholders or resize the gallery for a Location
+// already shown. Tall holds more rows than the placeholders' one-viewport fill, so a gallery that
+// reloads it from nothing changes height.
+test("a Location shown before opens from its cached tiles while it is read again, with no placeholders or height change", async ({
+  page,
+}) => {
+  promoteCatalog({ "card-1": "Revisit Abra", "card-2": "Revisit Zubat" });
+  await page.setViewportSize({ width: 1280, height: 860 });
+  await signIn(page);
+  const s = randomUUID().slice(0, 8);
+  const tall = await createLocation(page, `Tall ${s}`, null);
+  const short = await createLocation(page, `Short ${s}`, null);
+  await addCopies(page, tall, await editionOf("card-1"), 120);
+  await addCopies(page, short, await editionOf("card-2"), 3);
+  await page.reload();
+  const nav = page
+    .getByRole("complementary", { name: "Sidebar" })
+    .getByRole("navigation", { name: "Locations" });
+
+  await nav.getByRole("button", { name: `Tall ${s}`, exact: true }).click();
+  await expect(counts(page, "120 copies · 1 edition")).toBeVisible();
+  await expect(tiles(page).first()).toHaveAccessibleName(
+    `Revisit Abra, Fixture Set 1, copy 1, Tall ${s}`
+  );
+  const tallHeight = await gridHeight(page);
+  const tallTop = await gridTop(page);
+  expect(tallHeight).toBeGreaterThan(1.5 * 860);
+  await nav.getByRole("button", { name: `Short ${s}`, exact: true }).click();
+  await expect(counts(page, "3 copies · 1 edition")).toBeVisible();
+  await expect(tiles(page)).toHaveCount(3);
+  const shortHeight = await gridHeight(page);
+  // The heights the grid went through, each once: straight from Short's to Tall's, nothing between.
+  const steps = (heights: number[]) =>
+    heights.filter(
+      (height, index) => index === 0 || height !== heights[index - 1]
+    );
+
+  // Tall's re-read is held: everything shown below comes from what was loaded before.
+  const release = await holdListing(page, tall);
+  const reread = page.waitForRequest(
+    (request) =>
+      new URL(request.url()).pathname === "/api/collection/holdings" &&
+      new URL(request.url()).searchParams.get("location_id") === tall
+  );
+  await recordGallery(page);
+  await nav.getByRole("button", { name: `Tall ${s}`, exact: true }).click();
+  await reread;
+  await settle(page);
+  let record = await galleryRecord(page);
+  expect(record.placeholders).toBe(0);
+  expect(steps(record.heights)).toEqual([shortHeight, tallHeight]);
+  await expect(counts(page, "120 copies · 1 edition")).toBeVisible();
+  await expect(tiles(page).first()).toHaveAccessibleName(
+    `Revisit Abra, Fixture Set 1, copy 1, Tall ${s}`
+  );
+  expect(await gridHeight(page)).toBe(tallHeight);
+  expect(await gridTop(page)).toBe(tallTop);
+
+  // The re-read lands without changing anything on screen.
+  const landed = listingFor(page, tall);
+  release();
+  await landed;
+  await settle(page);
+  record = await galleryRecord(page);
+  expect(record.placeholders).toBe(0);
+  expect(steps(record.heights)).toEqual([shortHeight, tallHeight]);
+  await expect(counts(page, "120 copies · 1 edition")).toBeVisible();
+  expect(await gridHeight(page)).toBe(tallHeight);
+});
+
+test("a Location changed elsewhere since it was shown opens from its cached tiles, then takes the re-read's result", async ({
+  page,
+}) => {
+  promoteCatalog({ "card-1": "Revisit Abra", "card-2": "Revisit Zubat" });
+  await page.setViewportSize({ width: 1280, height: 860 });
+  await signIn(page);
+  const s = randomUUID().slice(0, 8);
+  const tall = await createLocation(page, `Tall ${s}`, null);
+  const short = await createLocation(page, `Short ${s}`, null);
+  const abra = await editionOf("card-1");
+  await addCopies(page, tall, abra, 120);
+  await addCopies(page, short, await editionOf("card-2"), 3);
+  await page.reload();
+  const nav = page
+    .getByRole("complementary", { name: "Sidebar" })
+    .getByRole("navigation", { name: "Locations" });
+
+  await nav.getByRole("button", { name: `Tall ${s}`, exact: true }).click();
+  await expect(counts(page, "120 copies · 1 edition")).toBeVisible();
+  await nav.getByRole("button", { name: `Short ${s}`, exact: true }).click();
+  await expect(counts(page, "3 copies · 1 edition")).toBeVisible();
+
+  // A copy added outside the gallery while Tall is not shown; Tall's re-read is held.
+  await addCopies(page, tall, abra, 1);
+  const release = await holdListing(page, tall);
+  const reread = page.waitForRequest(
+    (request) =>
+      new URL(request.url()).pathname === "/api/collection/holdings" &&
+      new URL(request.url()).searchParams.get("location_id") === tall
+  );
+  await recordGallery(page);
+  await nav.getByRole("button", { name: `Tall ${s}`, exact: true }).click();
+  await reread;
+  await settle(page);
+  // Until the re-read is complete, the cached tiles stay, with no placeholders.
+  expect((await galleryRecord(page)).placeholders).toBe(0);
+  await expect(counts(page, "120 copies · 1 edition")).toBeVisible();
+
+  // The completed re-read replaces them.
+  const landed = listingFor(page, tall);
+  release();
+  await landed;
+  await expect(counts(page, "121 copies · 1 edition")).toBeVisible();
+  expect((await galleryRecord(page)).placeholders).toBe(0);
+});
+
+test("a Location not shown before keeps the gallery's height while its first page loads, then takes its own", async ({
+  page,
+}) => {
+  promoteCatalog({ "card-1": "Revisit Abra", "card-2": "Revisit Zubat" });
+  await page.setViewportSize({ width: 1280, height: 860 });
+  await signIn(page);
+  const s = randomUUID().slice(0, 8);
+  const tall = await createLocation(page, `Tall ${s}`, null);
+  const short = await createLocation(page, `Short ${s}`, null);
+  await addCopies(page, tall, await editionOf("card-1"), 120);
+  await addCopies(page, short, await editionOf("card-2"), 3);
+  await page.reload();
+  const nav = page
+    .getByRole("complementary", { name: "Sidebar" })
+    .getByRole("navigation", { name: "Locations" });
+
+  await nav.getByRole("button", { name: `Tall ${s}`, exact: true }).click();
+  await expect(counts(page, "120 copies · 1 edition")).toBeVisible();
+  const tallHeight = await gridHeight(page);
+  expect(tallHeight).toBeGreaterThan(1.5 * 860);
+
+  const topBefore = await gridTop(page);
+  const release = await holdListing(page, short);
+  await recordGallery(page);
+  await nav.getByRole("button", { name: `Short ${s}`, exact: true }).click();
+  // Short was never listed, so its placeholders show; the grid keeps Tall's height meanwhile.
+  await expect(
+    page.getByRole("status", { name: "Loading cards" })
+  ).toBeVisible();
+  await settle(page);
+  let record = await galleryRecord(page);
+  for (const height of record.heights)
+    expect(height).toBeGreaterThanOrEqual(tallHeight);
+  expect(await gridHeight(page)).toBeGreaterThanOrEqual(tallHeight);
+  expect(await gridTop(page)).toBe(topBefore);
+
+  // Short's first page sizes the grid to Short's three tiles, once.
+  const landed = listingFor(page, short);
+  release();
+  await landed;
+  await expect(counts(page, "3 copies · 1 edition")).toBeVisible();
+  await expect(tiles(page)).toHaveCount(3);
+  const shortHeight = await gridHeight(page);
+  expect(shortHeight).toBeLessThan(tallHeight);
+  expect(shortHeight).toBeGreaterThan(0);
+  record = await galleryRecord(page);
+  for (const height of record.heights)
+    expect([tallHeight, shortHeight]).toContain(height);
+});
+
 // @slow (capacity): seeds 25,000 Holdings and walks all 50 pages of the listing.
 test(
   "a 25,000-Holding Collection mounts only the tiles near the viewport",
