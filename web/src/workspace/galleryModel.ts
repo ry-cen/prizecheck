@@ -137,6 +137,26 @@ export const EMPTY_GALLERY: GalleryData = {
   error: null,
 };
 
+/** Two complete listings show the same thing: equal revisions and totals, and the same Holdings in the same
+ * order with the same fields. Equal revisions alone don't prove it: a metadata review changes a Printing's
+ * category or types without moving the catalog revision. */
+export function sameListing(a: GalleryData, b: GalleryData): boolean {
+  if (
+    a.ownerRevision !== b.ownerRevision ||
+    a.catalogRevision !== b.catalogRevision ||
+    a.totals?.holdings !== b.totals?.holdings ||
+    a.totals?.editions !== b.totals?.editions ||
+    a.totals?.copies !== b.totals?.copies ||
+    a.holdings.length !== b.holdings.length
+  )
+    return false;
+  return a.holdings.every(
+    (entry, index) =>
+      JSON.stringify(entry.holding) ===
+      JSON.stringify(b.holdings[index].holding)
+  );
+}
+
 export const holdingKey = (locationId: string, editionId: string) =>
   `${locationId}:${editionId}`;
 

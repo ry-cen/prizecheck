@@ -105,6 +105,10 @@ export function Gallery({
   }, []);
 
   const loading = data.status === "loading";
+  // Ticket 121: the grid's height when it last showed a listing (0 after an error). While the next one
+  // loads, the grid keeps at least that height, so the page doesn't shrink to one viewport of
+  // placeholders and grow back; it changes once, when the new totals arrive.
+  const settledHeight = useRef(0);
   const layout: GridLayout | null = useMemo(() => {
     if (!metrics || width <= 0) return null;
     const base = computeLayout(width, 0, display, caption, metrics);
@@ -115,6 +119,16 @@ export function Gallery({
       : (data.totals?.copies ?? 0);
     return computeLayout(width, tiles, display, caption, metrics);
   }, [metrics, width, display, caption, loading, data.totals]);
+  useEffect(() => {
+    if (layout && !loading)
+      settledHeight.current = data.status === "error" ? 0 : layout.height;
+  }, [layout, loading, data.status]);
+  const gridHeight =
+    !layout || data.status === "error"
+      ? 0
+      : loading
+        ? Math.max(layout.height, settledHeight.current)
+        : layout.height;
 
   // Mount only the rows within one viewport above and below the visible part of the grid.
   useLayoutEffect(() => {
@@ -415,9 +429,7 @@ export function Gallery({
       <div
         ref={gridRef}
         className="ws-gallery-grid"
-        style={{
-          height: layout && data.status !== "error" ? layout.height : 0,
-        }}
+        style={{ height: gridHeight }}
       >
         {loading && layout && (
           <div
