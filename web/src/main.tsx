@@ -363,7 +363,9 @@ const ShellPrototype = import.meta.env.DEV
   : null;
 const showShellPrototype =
   ShellPrototype !== null &&
-  new URLSearchParams(location.search).get("prototype") === "shell";
+  ["shell", "deck"].includes(
+    new URLSearchParams(location.search).get("prototype") ?? ""
+  );
 
 const publishedRoute = /^\/published\/([^/]+)$/.exec(location.pathname);
 createRoot(document.getElementById("root")!).render(

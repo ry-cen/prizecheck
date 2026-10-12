@@ -21,6 +21,18 @@ import {
   type PageId,
 } from "./sample";
 import "./AppShellPrototype.css";
+// PROTOTYPE (#125): Deck experience variants, ?deck=A|B|C.
+import {
+  CollectionDeck,
+  CollectionDeckActions,
+  DECK_VARIANTS,
+  DeckVariantPicker,
+  DecksActions,
+  DecksPage,
+  setDeckVariant,
+  useDeck,
+} from "../deck-experience/DeckExperience";
+const DECK_LOCS = new Set(["d-zard", "d-gard"]);
 
 const VARIANTS = [
   { key: "A", name: "Top tabs + bottom bar" },
@@ -40,7 +52,7 @@ function setParam(name: string, value: string) {
 
 // ---------- shared shell state ----------
 
-type Shell = ReturnType<typeof useShell>;
+export type Shell = ReturnType<typeof useShell>;
 function useShell() {
   const [variant, setVariantState] = useState<VariantKey>(
     (["A", "B", "C"].includes(param("variant", "A"))
@@ -286,12 +298,15 @@ function contextFor(s: Shell): ReactNode {
 function pageTitle(s: Shell) {
   if (s.page === "collection") return locName(s.loc);
   if (s.page === "decks")
-    return s.deck ? DECKS.find((d) => d.id === s.deck)!.name : "Decks";
+    return s.deck ? (DECKS.find((d) => d.id === s.deck)?.name ?? "Deck") : "Decks";
   return pageLabel(s.page);
 }
 
 /** Page-level actions that belong in the page header, not the app shell. */
 function PageActions({ s }: { s: Shell }) {
+  if (s.page === "decks") return <DecksActions s={s} />;
+  if (s.page === "collection" && DECK_LOCS.has(s.loc))
+    return <CollectionDeckActions />;
   if (s.page === "collection")
     return (
       <>
@@ -310,21 +325,6 @@ function PageActions({ s }: { s: Shell }) {
           Select
         </button>
       </>
-    );
-  if (s.page === "decks")
-    return s.deck ? (
-      <>
-        <button type="button" className="ps-btn">
-          Export
-        </button>
-        <button type="button" className="ps-btn ps-btn-primary">
-          Publish
-        </button>
-      </>
-    ) : (
-      <button type="button" className="ps-btn ps-btn-primary">
-        New Deck
-      </button>
     );
   if (s.page === "reports")
     return (
@@ -621,9 +621,13 @@ function PageBody({ s }: { s: Shell }) {
   if (!s.signedIn) return <PublishedBody />;
   switch (s.page) {
     case "collection":
-      return <CollectionBody s={s} />;
+      return DECK_LOCS.has(s.loc) ? (
+        <CollectionDeck s={s} gallery={<CollectionBody s={s} />} />
+      ) : (
+        <CollectionBody s={s} />
+      );
     case "decks":
-      return <DecksBody s={s} />;
+      return <DecksPage s={s} />;
     case "catalog":
       return <CatalogBody />;
     case "reports":
@@ -1151,9 +1155,12 @@ function VariantC({ s }: { s: Shell }) {
 // ---------- floating prototype switcher (dev only; never part of the design) ----------
 
 function Switcher({ s }: { s: Shell }) {
-  const i = VARIANTS.findIndex((v) => v.key === s.variant);
+  const deck = useDeck();
+  const i = DECK_VARIANTS.findIndex((v) => v.key === deck.variant);
   const cycle = (d: number) =>
-    s.setVariant(VARIANTS[(i + d + VARIANTS.length) % VARIANTS.length].key);
+    setDeckVariant(
+      DECK_VARIANTS[(i + d + DECK_VARIANTS.length) % DECK_VARIANTS.length].key
+    );
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement;
@@ -1181,13 +1188,14 @@ function Switcher({ s }: { s: Shell }) {
         ‹
       </button>
       <strong>
-        {s.variant} ({VARIANTS[i].name})
+        Deck {deck.variant} ({DECK_VARIANTS[i].name})
       </strong>
       <button type="button" aria-label="Next variant" onClick={() => cycle(1)}>
         ›
       </button>
       {open && (
         <>
+          <DeckVariantPicker />
           <label>
             <input
               type="checkbox"
