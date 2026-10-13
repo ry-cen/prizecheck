@@ -1,6 +1,6 @@
 # OAuth sign-in for PrizeCheck
 
-**Status:** published 2026-10-12, `ready-for-agent`. Broken into implementation tickets (see Further Notes).
+**Status:** published 2026-10-12. Implemented on `feature/oauth-sign-in` (tickets #148–#156); #157 is still with the owner. Amended at implementation on 2026-10-13 (see Further Notes).
 
 This spec turns the eight resolutions of the [OAuth sign-in decision map](wayfinder/map.md) into one implementation handoff. Details that no resolution settled are listed under "Details settled at publication" in Further Notes.
 
@@ -188,9 +188,9 @@ Modules are named by role. The sections below give each one's behaviour.
 - **Raise the dependency floor to 1.7.** The manifest range `^1.4.0` allows 1.4, which lacks `validateUserInfo`, per-provider `requireEmailVerification` and the unconditional local-verified link check. The lockfile already resolves 1.7.6. Raise the range so it cannot fall back, and keep the lockfile at 1.7.x.
 - **Providers from environment.** Build the social provider list from environment variables. A provider is configured only when both its `<PROVIDER>_CLIENT_ID` and `<PROVIDER>_CLIENT_SECRET` are set: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`. Each entry carries its provider id, display name and image host (Google `googleusercontent.com`, Discord `cdn.discordapp.com`). A provider with only one of the two variables set is a startup error. Default scopes stay: Google `email profile openid` with PKCE, Discord `identify email`. Google `accessType` stays unset, so no refresh token is requested. Discord keeps Better Auth's default `prompt=none`.
 - **Account linking.** Turn account linking on with `trustedProviders` empty, `allowDifferentEmails: true` and `updateUserInfoOnLink: true`. Leave `requireLocalEmailVerified` at its default (on) and `allowUnlinkingAll` off. Leave `encryptOAuthTokens` unused.
-- **Profile follows latest sign-in.** Set `overrideUserInfoOnSignIn` for every configured provider. If a provider omits a field, the existing value stays.
+- **Profile follows latest sign-in.** Set `overrideUserInfoOnSignIn` for every configured provider. If a provider omits a field, the existing value stays. A `user.update.before` hook that runs only during the OAuth callback leaves the collector's `email` and `emailVerified` unchanged, because Better Auth would otherwise rewrite both from the provider's profile on a returning sign-in. Name and picture still follow the latest sign-in.
 - **Token nulling.** `databaseHooks.account.create.before` and `databaseHooks.account.update.before` set `accessToken`, `refreshToken`, `idToken`, `accessTokenExpiresAt` and `refreshTokenExpiresAt` to null on create, link and every sign-in. `scope` stays.
-- **Error destination.** Set `onAPIError.errorURL` to the web sign-in page, so Better Auth's own `/api/auth/error` is never routed. Each start also sets `errorCallbackURL` and `newUserCallbackURL` to match its `callbackURL`. The existing `onAPIError.throw` setting stays.
+- **Error destination.** Set `onAPIError.errorURL` to the web sign-in page, so Better Auth's own `/api/auth/error` is never routed. A sign-in start sets `callbackURL` and `newUserCallbackURL` to the checked `next`, and `errorCallbackURL` to `/sign-in?provider=<id>`, so the page can name the provider the attempt used. A link start sets `callbackURL` to the Sign-ins page and `errorCallbackURL` to the Sign-ins page with the same `provider` parameter. The existing `onAPIError.throw` setting stays.
 - **Email-code endpoints.** When `EMAIL_SIGN_IN=off`, list the email-code send and sign-in endpoints in `disabledPaths`, so the plugin refuses them even when called internally through the handler. The plugin itself stays registered, so that turning the switch on needs no code change. The resolution names the send and sign-in endpoints. Every other endpoint the plugin registers is listed too, as defence in depth, even though the gateway already makes them unreachable from outside.
 - **Both instances.** The gateway builds two Better Auth instances from one configuration (the shared pool and the budgeted-lookup pool). Every setting above applies to both so that cookies and session rules match.
 - **Session.** Session length, rolling update and cookie rules do not change. `freshAge` stays at Better Auth's default of 24 hours. Better Auth measures freshness from the session's creation time, which a rolling session does not reset, so "a sign-in within 24 hours" holds even for an active session. The gateway's link check must use the same creation time, so link and unlink share one rule.
@@ -201,25 +201,26 @@ One `user.validateUserInfo` function is the only decision point for create, link
 
 | Mode | Create user | Link account | Sign in |
 | --- | --- | --- | --- |
-| `owner-only` | Allowed only when the verified email equals `OWNER_EMAIL` (a fresh deployment with no owner account yet) | Allowed only when the existing user is the `owner_binding` user | Allowed only when the existing user is the `owner_binding` user |
+| `owner-only` | Allowed only when the verified email equals `OWNER_EMAIL` (a fresh deployment with no owner account yet, or one whose binding names no user) | Allowed only when the existing user is the `owner_binding` user | Allowed only when the existing user is the `owner_binding` user |
 | `public`, `local-public` | Allowed, subject to the creation limits | Allowed by the linking rules | Allowed |
 
-- **Verified email, every mode, OAuth only.** Refuse to create a user or link an account unless the provider vouches for the email (Google `email_verified`, Discord `verified`). A missing email is refused the same way. Better Auth's shared callback already rejects a result with no email (`email_not_found`), and the gate refuses an unverified one (`email_not_verified`). Nothing is written in either case, so no user row, Unsorted root or account row exists afterwards.
-- **Owner-only refusal.** Every owner-only refusal returns one code, `sign_in_unavailable`, which says nothing about whether an account exists. The sign-in page also maps Better Auth's own `signup_disabled` to the same "Not open yet" message, so a future configuration that surfaces it lands in the right place.
+- **Verified email, every mode, OAuth only.** Refuse to create a user or link an account unless the provider vouches for the email (Google `email_verified`, Discord `verified`). A missing email is refused the same way. An email the provider does not vouch for is dropped from the profile before Better Auth looks up any local user by it, so every unverified or missing email ends in `email_not_found`, shown as "Needs a verified email", whatever the database holds and in every mode. A deliberate link gets the same code from the gate. The gate's own `email_not_verified` refusal is defence in depth. Nothing is written in any of these cases, so no user row, Unsorted root or account row exists afterwards. The cost is that a returning collector whose provider email has become unverified is refused until the provider verifies it again. With a verified email the requester controls the address, so any difference between an existing and a new collector in the public modes is inherent.
+- **Owner-only refusal.** Every owner-only refusal returns one code, `sign_in_unavailable`, which says nothing about whether an account exists. Under `owner-only`, the gateway's callback also rewrites Better Auth's `account_not_linked` (a sign-in whose local account email is unverified) to exactly that refusal, so neither the address nor the message reveals an unverified account. In the public modes `account_not_linked` is left alone and shows as "Didn't complete". The sign-in page also maps Better Auth's own `signup_disabled` to the same "Not open yet" message, so a future configuration that surfaces it lands in the right place.
+- **Owner binding.** A binding counts only when it names an existing user row. Before that, the stored, verified `OWNER_EMAIL` user counts as the owner.
 - **Email-code method.** The gate also runs for email-code sign-in. The `SIGNUP_MODE` rules apply to it unchanged. The "provider vouches" rule does not apply, because the code itself proves the address.
 - **Gateway checks stay.** The email-code routes keep their current owner-only email check as a second layer.
 - **Linking rules.** Linking by email needs both the provider email and the existing account email verified, matched case-insensitively and exactly (no Gmail dot or plus normalisation). Returning sign-ins look up the provider account id first. The collector's own email and verified flag are never changed by a link or a sign-in.
 
 ### Account creation limits
 
-- **Scope.** Only OAuth account creation is limited. Sign-in and linking are never throttled by these limits. In `owner-only` mode only the owner can be created, so the limits matter once signup is `public` or `local-public`. Email-code creation doesn't count, because it already has its own send limits.
-- **Checks.** In the create-user branch of the gate, in one transaction under a Postgres advisory lock, count rows in the new `auth_rate_event` table:
+- **Scope.** Only OAuth account creation is limited. Sign-in and linking are never throttled by these limits. The creation limits apply only in the `public` and `local-public` modes, following the gate table. In `owner-only` mode only the owner can be created, so they do not apply there. The start limit below applies in every mode. Email-code creation doesn't count, because it already has its own send limits.
+- **Checks.** In the create-user branch of the gate, in one transaction under a Postgres advisory lock, count rows in the new `auth_rate_event` table. The checks use a dedicated small pool with a connect timeout, never the pool that Better Auth's own transaction holds, so a limit check cannot wait on a connection the callback is holding:
   - at most 10 per hashed trusted client IP in the last rolling day;
   - at most `DAILY_SIGNUP_CAP` in total in the last rolling day, default 100.
 
-  A permitted check inserts one row. A creation that fails after the check still counts. Rows older than two days are pruned whenever rows are written. The IP is hashed as in the existing send limiter.
-- **IP source.** The gateway computes the trusted client IP as it does today and runs each callback inside a per-request context (a Node `AsyncLocalStorage` store) holding that IP. The gate reads the IP from the context. No request header can set it. A missing context refuses creation.
-- **Refusal code.** `too_many_sign_ups`, shown with the "Too many attempts" message.
+  A permitted check inserts one row. A creation that fails after the check still counts. Rows older than two days are pruned whenever rows are written. The IP key is a hash of the trusted IP, with an IPv6 address first normalised to its /64 prefix, so one network cannot vary the low bits to get a fresh key.
+- **IP source.** The gateway computes the trusted client IP as it does today and runs each callback inside a per-request context (a Node `AsyncLocalStorage` store) holding that IP. The gate reads the IP from the context. No request header can set it. A missing context makes the gate throw, which Better Auth reports as `validation_failed`, so creation is refused.
+- **Refusal code.** `too_many_sign_ups`, shown with the "Too many attempts" message. Only a limit refusal uses this code. The missing-context refusal is `validation_failed`, shown as "Didn't complete".
 - **Sign-in start limit.** At most 60 starts per trusted IP per hour, shared between the sign-in start and link start routes. The gateway checks it with the same lock-and-hash pattern, not an in-memory limiter, which would reset per replica. Storage: the new table is generalised to `auth_rate_event(kind, ip_key, created_at)`, with `kind` either `signup` or `start`, so both limits use one table and one pruning rule.
 - **How a start refusal reaches the browser.** A start is a plain link, so the gateway answers with a 302 to the sign-in page (or the Sign-ins page for a link start) carrying `error=too_many_sign_ups`.
 - **Counters and owner panel.** Add a `too_many_sign_ups` outcome to the existing bounded auth counters. The owner panel shows new accounts in the last day against `DAILY_SIGNUP_CAP` and warns at 80%. The signup warning deliberately sits at 80%, while existing provider-quota warnings fire at 70%.
@@ -227,26 +228,27 @@ One `user.validateUserInfo` function is the only decision point for create, link
 
 ### Gateway route contract
 
-The browser talks only to gateway routes. The gateway never passes `/api/auth/*` through. All routes use the shared pool and are not budgeted routes.
+The browser talks only to gateway routes. The gateway never passes `/api/auth/*` through. All routes use the shared pool and are not budgeted routes. The rate-limit checks are the exception: they use their own small pool.
 
 | Route | Purpose | Checks | Success | Failure |
 | --- | --- | --- | --- | --- |
 | `GET /auth/methods` | Lists the configured providers and whether email sign-in is on | None. Reveals nothing about any account. | 200 with each provider's id and display name, plus a flag for email sign-in | None expected |
-| `GET /auth/sign-in/:provider?next=<path>` | Starts a sign-in | Provider must be configured. `next` must be a safe path. Start limit applies. | 302 to the provider with Better Auth's `state` cookie. Callback target is the checked `next`. | 404 for an unknown provider. 302 to the sign-in page with `error=too_many_sign_ups` when over the start limit. |
-| `GET /api/auth/callback/:provider` | Completes sign-in or link | Provider must be configured. Runs inside the IP context. | Relays Better Auth's 302 `Location` and `Set-Cookie`, with the query string intact. | 404 for an unknown provider. Provider and gate errors become a 302 to the sign-in page (or Sign-ins page) with an `error` code. |
-| `GET /auth/session` | Session lookup | None | 200 with `signedIn`, `userId`, and for a signed-in collector `name` and `image` (null when absent). The collector's email is added for the Sign-ins page. | None |
+| `GET /auth/sign-in/:provider?next=<path>` | Starts a sign-in | Provider must be configured. `next` must be a safe path. Start limit applies. | 302 to the provider with Better Auth's `state` cookie. Callback target is the checked `next`, or `/collection` when there is none. | 404 for an unknown provider. 302 to the sign-in page with `error=too_many_sign_ups` when over the start limit. |
+| `GET /api/auth/callback/:provider` | Completes sign-in or link | Provider must be configured. Runs inside the IP context. | Relays Better Auth's 302 `Location` and `Set-Cookie`, with the query string intact. | 404 for an unknown provider. Provider and gate errors become a 302 to `/sign-in?provider=<id>&error=<code>` (or, for a link, to `/settings/sign-ins?provider=<id>&error=<code>`). Under `owner-only`, `account_not_linked` is rewritten to `sign_in_unavailable`. |
+| `GET /auth/session` | Session lookup | None | 200 with `signedIn`, `userId`, and for a signed-in collector `name` and `image` (null when absent). `image` is returned only when it is an https URL on a configured provider's image host, and is null otherwise. The collector's email is added for the Sign-ins page. | None |
 | `GET /auth/sign-ins` | Lists the signed-in collector's linked providers | Session required | 200 with the provider id and the date linked for each. No account ids or emails. | 401 without a session |
-| `GET /auth/link/:provider` | Starts linking a provider to the signed-in collector | Session required. Provider must be configured. Session must be fresh. Start limit applies. | 302 to the provider. Returns through the same callback route to the Sign-ins page. | 401 without a session. 404 for an unknown provider. Stale session redirects to the Sign-ins page with `error=recent_sign_in_required`. |
-| `POST /auth/unlink/:provider` | Removes a linked sign-in | Origin must match. Session required. Session must be fresh. | 200 | 403 for a bad origin. 401 without a session. A stale session is refused with the same `recent_sign_in_required` code. Unlinking the last sign-in is refused by Better Auth. |
+| `GET /auth/link/:provider` | Starts linking a provider to the signed-in collector | Session required. Provider must be configured. Fetch Metadata must not mark the request cross-site. Session must be fresh. Start limit applies. | 302 to the provider. Returns through the same callback route to the Sign-ins page. | 302 to `/sign-in?next=%2Fsettings%2Fsign-ins` without a session. 404 for an unknown provider. A cross-site request (a `Sec-Fetch-Site` header that is neither `same-origin` nor `none`) redirects to the Sign-ins page with `error=cross_site_request`. Stale session redirects to the Sign-ins page with `error=recent_sign_in_required`. |
+| `POST /auth/unlink/:provider` | Removes every linked sign-in of that provider | Origin must match. Session required. Session must be fresh. | 200 | 403 for a bad origin. 401 without a session. 404 for a configured provider that is not linked. A stale session is refused with the same `recent_sign_in_required` code. Unlinking the last sign-in is refused. |
 | `POST /auth/request-code`, `POST /auth/verify-code` | Email-code sign-in | Unchanged when `EMAIL_SIGN_IN=on` | Unchanged | 404 when `EMAIL_SIGN_IN=off` |
 | `POST /auth/approval-code`, `POST /auth/sign-out` | Owner approval codes and sign-out | Unchanged | Unchanged | Unchanged |
 | Any other path under `/api/auth/` | None | Matched before the generic `/api/` branch | None | 404, never forwarded to the API |
 
 - **Unknown provider means not configured.** A provider is valid only if its credentials were present at startup. There are no hard-coded provider names in any route.
-- **Safe `next`.** Accept `next` only if it starts with a single `/`, does not start with `//` or `/\`, and does not point into `/api/` or `/auth/`. Otherwise use `/collection`. Better Auth's `trustedOrigins` check on `callbackURL` stays on as a second layer.
+- **Safe `next`.** Accept `next` only if it starts with a single `/` and its resolved path does not start with `//`. Refuse a value with any backslash, any `%2f` or `%5c` (in either case), or a path that points into `/api` or `/auth` after decoding. Otherwise use `/collection`. Better Auth's `trustedOrigins` check on `callbackURL` stays on as a second layer.
 - **Query string and redirects.** The gateway's internal call to Better Auth must forward the query string, and its response relay must pass `Location` for these OAuth routes only. The relay keeps its current content-type, cache and cookie handling.
 - **Freshness.** Better Auth already enforces `freshAge` for unlinking, comparing the session's creation time with 24 hours (it refuses with its `SESSION_NOT_FRESH` error). The gateway enforces the same comparison for the link start, and maps both to one refusal.
-- **Unlinking the last sign-in** is refused by Better Auth. The gateway returns 400 with Better Auth's `FAILED_TO_UNLINK_LAST_ACCOUNT`, and the page shows "Didn't complete".
+- **Unlinking removes every linked account of the provider.** The last-sign-in rule counts configured providers only. A configured provider that is not linked gets 404. The gateway returns 400 with `FAILED_TO_UNLINK_LAST_ACCOUNT`, and the page shows "Didn't complete".
+- **Fetch Metadata needs a secure origin.** The link-start cross-site check relies on `Sec-Fetch-Site`, which browsers send only to secure origins (https, or localhost). `PUBLIC_ORIGIN` must therefore be https for public signup. This is an operator requirement; the readiness proof does not check it.
 - **Better Auth's own link, unlink and list endpoints** stay unreachable from outside. Only the gateway routes call them.
 - **Error codes on the sign-in page.** The codes the page can receive are listed under "Failure messages".
 
@@ -254,6 +256,8 @@ The browser talks only to gateway routes. The gateway never passes `/api/auth/*`
 
 - The profile is stored in the user's name and image fields and the provider account row. Nothing else from the provider profile is stored.
 - `name` and `image` appear only in the signed-in collector's session response. No FastAPI publication route, Published Deck, Discover or other public response reads them or the collector's email.
+- `/auth/session` returns `image` only for an https URL on a configured provider's image host.
+- Until the app-redesign avatar menu exists, the profile badge (picture or initial, and name) sits in the workspace "Main views" navigation.
 - Pictures load directly from the provider's image host and are not copied into PrizeCheck storage. If a content-security policy is added later, its image sources must allow each configured provider's image host.
 - Without a name or picture the app shows the first letter of the collector's email as the avatar and no name.
 - Backups already include the auth tables. Name and picture join the personal data the privacy check covers.
@@ -262,12 +266,12 @@ The browser talks only to gateway routes. The gateway never passes `/api/auth/*`
 
 The visual layout and final copy of the sign-in screen belong to the app-redesign map's "Sign-in and loading screens" work. This spec fixes behaviour only.
 
-- **Sign-in page.** Calls `GET /auth/methods`. Draws one link per configured provider, pointing at the start route with `next` when the collector was sent here from a protected page. Draws the email form only when email sign-in is on. Reads an `error` query parameter, maps it to a message group, announces it as an alert, focuses it once, then removes the parameter from the address bar.
-- **Sign-ins page.** Reached from the avatar menu (desktop) and the More sheet (mobile). Lists every configured provider with the date linked or a Connect link, shows the collector's email once at the top, and shows Remove only when more than one sign-in is linked. Uses the same message mapping for its own errors.
+- **Sign-in page.** Calls `GET /auth/methods`. Validates the shape of the response and fails closed: if it is not a list of providers and a boolean email flag, the page shows its "temporarily unavailable" message with a retry, not the buttons. Draws one link per configured provider, pointing at the start route with `next` when the collector was sent here from a protected page. The bare origin is the workspace, so its provider links carry `next=%2Fworkspace`; the `/sign-in` page itself sends no `next`. A provider sign-in with no `next` lands on `/collection`, while an email-code sign-in lands on `/workspace`. Draws the email form only when email sign-in is on. Reads an `error` query parameter, maps it to a message group, announces it as an alert, focuses it once, then removes the parameter from the address bar.
+- **Sign-ins page.** Reached from the avatar menu (desktop) and the More sheet (mobile). Until the redesign provides those, it sits in the workspace "Main views" navigation beside the profile badge. At 900 px and below, the desktop header shows the badge without its name, so the header does not overflow at 761 px. Lists every configured provider with the date linked or a Connect link, shows the collector's email once at the top, and shows Remove only when more than one sign-in is linked. Uses the same message mapping for its own errors, which arrive as `/settings/sign-ins?provider=<id>&error=<code>`. "Sign in again" signs the collector out and opens `/sign-in?next=%2Fsettings%2Fsign-ins`.
 
 ### Failure messages
 
-Messages come from a fixed allowlist keyed by the `error` code. Anything not listed shows "Didn't complete". Where a provider is named, it is the configured display name for the provider the attempt used. The table fixes what each message must say, not its wording.
+Messages come from a fixed allowlist keyed by the `error` code. Anything not listed shows "Didn't complete". Where a provider is named, it is the configured display name for the provider the attempt used, taken from the `provider` parameter that each start puts in the error destination. The page never shows the raw parameter. The table fixes what each message must say, not its wording.
 
 | Group | Codes | Message (gist) | Next step |
 | --- | --- | --- | --- |
@@ -275,12 +279,12 @@ Messages come from a fixed allowlist keyed by the `error` code. Anything not lis
 | Not open yet | `sign_in_unavailable` (and `signup_disabled`) | PrizeCheck isn't open for new sign-ins yet. | None |
 | Needs a verified email | `email_not_found`, `email_not_verified` | Your {Provider} account needs a verified email address. | Verify it with {Provider}, or use another sign-in |
 | Belongs to another account (Sign-ins page only) | `account_already_linked_to_different_user` | That {Provider} sign-in is already connected to a different PrizeCheck account. | Back to Sign-ins |
-| Sign in again (Sign-ins page only) | `recent_sign_in_required` | For your security, sign in again to change your sign-ins. | Sign in, then return to the Sign-ins page |
+| Sign in again (Sign-ins page only) | `recent_sign_in_required` | For your security, sign in again to change your sign-ins. | Sign in again, which signs out and returns to the Sign-ins page after sign-in |
 | Too many attempts | `too_many_sign_ups` | Too many sign-ins right now. Try again later. | None |
-| Didn't complete | Everything else, including `invalid_code`, `no_code`, every `state_*`, `please_restart_the_process`, `unable_to_get_user_info`, `oauth_provider_not_found`, `unable_to_link_account`, `unable_to_create_user`, `account_not_linked`, `email_does_not_match`, and unknown codes | Sign-in didn't complete. | Try again |
+| Didn't complete | Everything else, including `invalid_code`, `no_code`, every `state_*`, `please_restart_the_process`, `unable_to_get_user_info`, `oauth_provider_not_found`, `unable_to_link_account`, `unable_to_create_user`, `validation_failed`, `cross_site_request`, `email_does_not_match`, `account_not_linked` (public modes), and unknown codes | Sign-in didn't complete. | Try again |
 
 - The provider's `error_description` and any other free text in the address are never shown.
-- `account_not_linked` and `email_does_not_match` should not occur under the linking rules and `allowDifferentEmails`. They are grouped under "Didn't complete" so that no message hints at whether an account exists.
+- `email_does_not_match` does not occur under the linking rules and `allowDifferentEmails`. `account_not_linked` occurs in the public modes when the local account's email is unverified, and under `owner-only` it never reaches the page because the gateway rewrites it to `sign_in_unavailable`. Both are grouped under "Didn't complete" where they appear, so that no message hints at whether an account exists. `cross_site_request` is the refusal of a cross-site link start.
 - The "Not open yet" message is about the app, not the person, and is identical whether or not the email matches a collector.
 
 ### Readiness proof version 2
@@ -293,6 +297,7 @@ Messages come from a fixed allowlist keyed by the `error` code. Anything not lis
 - Unchanged: a non-empty `evidence` string, and `releaseCommit` equal to `RELEASE_COMMIT`.
 - Dropped: the unconditional `MAIL_MODE=http` requirement for public signup. Approval codes and operations mail still need working delivery, and the existing guard that refuses file and console mail in production stays.
 - Google brand verification is not a gate. The `local-public` mode is unchanged.
+- `PUBLIC_ORIGIN` must be https for public signup, because the link-start cross-site check depends on browsers sending Fetch Metadata. This is an operator requirement, not a proof field.
 - The capacity check covers the creation limits at fixture scale.
 
 ### Environment variables
@@ -310,7 +315,7 @@ Existing variables (`SIGNUP_MODE`, `OWNER_EMAIL`, `PUBLIC_ORIGIN`, `MAIL_MODE`, 
 
 The decision is in [Decide how local dev and CI fake provider sign-in](wayfinder/resolutions/decide-oauth-test-fake.md), settled by a prototype.
 
-- **Real provider code, fake HTTP.** The real Google and Discord provider code runs in every test. The fake answers Google's token endpoint and Discord's token and `users/@me` endpoints in-process, using msw or an equivalent fetch interceptor installed as a dev dependency only. Pin its version.
+- **Real provider code, fake HTTP.** The real Google and Discord provider code runs in every test. The fake answers Google's token endpoint and Discord's token and `users/@me` endpoints in-process, using a small hand-written fetch interceptor. It adds no dependency.
 - **Identities.** The `code` names a test identity: the owner at `OWNER_EMAIL`, a new collector, an unverified email, a Discord account with no email, and a second owner provider account for linking. The tests also need an identity with a different but verified email, and a consent cancel that returns `access_denied`. A Discord fake profile needs a numeric snowflake id, because Better Auth builds a default avatar from it. A Google fake ID token needs only plausible claims, because the callback does not verify its signature.
 - **Fail closed.** Any request to a provider host that the fake does not recognise throws. Paths are decoded before matching, because Better Auth sends `/users/%40me`. Unlisted hosts such as the database and the API pass through.
 - **Placeholder credentials.** A provider is configured only when both its id and secret are set, so the CI launcher, each per-stack environment and the local dev script export placeholder credentials for every provider the fake covers (the prototype used `fake-google-client`). Without them `GET /auth/methods` is empty and every start returns 404. The placeholders must never be set in a deployment.
@@ -336,9 +341,9 @@ The decision is in [Decide how local dev and CI fake provider sign-in](wayfinder
     // any other provider-host request: throw, never reach the real provider
     ```
 - **Loading.** The fake lives outside the auth service's source tree and is loaded with `node --import` by the CI launcher and the local dev script. There is no extra port, no container and no change to the Playwright server configuration.
-- **Hook mechanism.** The preload wraps Node's HTTP server, and the gateway source is unchanged. The fake module patches `http.createServer` before the gateway loads, and wraps the request handler it's given. It does two things. It serves its fake consent page at a reserved `/__fake-oauth/consent` path. And when a response is about to send a 302 whose `Location` is a configured provider host, it rewrites that `Location` to its consent page, carrying the original query (`state`, `redirect_uri`). Every other request and response passes through untouched. The shipped gateway has no extension point and never mentions the fake, so the guardrail test holds.
+- **Hook mechanism.** The preload wraps Node's HTTP server, and the gateway source is unchanged. The fake module patches `http.createServer` before the gateway loads, and wraps the request handler it's given. It does two things. It serves its fake consent page at a reserved `/auth/__fake-oauth/consent` path, under `/auth` because the dev server, nginx and the local release proxy forward only `/auth` and `/api` to the gateway. And when a response is about to send a 302 whose `Location` is a configured provider host, it rewrites that `Location` to its consent page, carrying the original query (`state`, `redirect_uri`). Every other request and response passes through untouched. The shipped gateway has no extension point and never mentions the fake, so the guardrail test holds.
 - **Three guards against shipping it.**
-  1. It lives outside the compiled source tree. The auth image compiles only that tree and installs with development dependencies omitted, so the fake and msw are absent from the image.
+  1. It lives outside the compiled source tree. The auth image compiles only that tree and installs with development dependencies omitted, so the fake is absent from the image.
   2. A guardrail test fails if anything in the shipped auth source imports it.
   3. It refuses to load unless `PUBLIC_ORIGIN` is a loopback address (`localhost`, `127.0.0.1` or `[::1]`). The research note also allowed a `.test` host. The resolution says loopback only, and this spec follows the resolution.
 
@@ -453,7 +458,7 @@ Also not in this effort: profile editing, account deletion, copying provider pic
 | Research (providers) | [#129](https://github.com/ry-cen/prizecheck/issues/129) | Better Auth configuration, launch checklist |
 | Research (local and CI) | [#130](https://github.com/ry-cen/prizecheck/issues/130) | Test fake |
 
-Implementation tickets do not exist yet. They come from the owner running `/to-ticket` on this spec.
+Implementation tickets #148–#157 were cut from this spec. #148–#156 are implemented on `feature/oauth-sign-in`; #157 is with the owner.
 
 ### Dependency on the app-redesign map
 
@@ -463,7 +468,7 @@ The sign-in screen layout, the Sign-ins page placement and the exact copy for ev
 
 The owner delegated technical choices. These gaps were left by the resolutions and were settled when the spec was published on 2026-10-12.
 
-1. **Owner bootstrap under `owner-only`.** If no owner binding exists yet, the gate treats the user whose verified email is `OWNER_EMAIL` as the owner for creating, signing in and linking. Once `bind_owner` has run, only the bound user counts. The binding step itself is unchanged.
+1. **Owner bootstrap under `owner-only`.** If no owner binding exists yet, the gate treats the user whose verified email is `OWNER_EMAIL` as the owner for creating, signing in and linking. Once `bind_owner` has run, only the bound user counts, and a binding counts only when it names an existing user. The binding step itself is unchanged.
 2. **Start-limit storage.** One table, `auth_rate_event(kind, ip_key, created_at)`, holds both the `signup` and `start` limits. It's pruned of rows older than two days whenever rows are written.
 3. **Refusal codes.**
    - `sign_in_unavailable` is the owner-only refusal. `signup_disabled` maps to the same "Not open yet" message.
@@ -487,3 +492,32 @@ The owner delegated technical choices. These gaps were left by the resolutions a
 3. Land the test fake, then move CI and the journeys to OAuth sign-in and turn email sign-in off by default.
 4. Add the Sign-ins page and failure messages, then the limits and owner panel.
 5. Do the launch checklist and record the readiness proof only when the owner decides to open signup.
+
+### Amendments at implementation (2026-10-13)
+
+The sections above describe the design as built. These are the changes from the design as first published.
+
+1. The fake's consent page is at `/auth/__fake-oauth/consent`.
+2. The fake uses a hand-written fetch interceptor, not msw, so no dependency is added.
+3. A callback-path `user.update.before` hook keeps `overrideUserInfoOnSignIn` from rewriting `email` and `emailVerified`.
+4. An `owner_binding` that names no user does not count as a binding.
+5. The error destination is the web page `/sign-in`, not a path matching `callbackURL`.
+6. Under `owner-only`, the gateway rewrites `account_not_linked` to `sign_in_unavailable`; in public modes it shows as "Didn't complete".
+7. Starts add `provider=<id>` to the error destination so messages can name the provider.
+8. Until the avatar menu exists, the profile badge sits in the workspace "Main views" navigation.
+9. `next` uses a hardened rule that rejects backslashes, `%2f`, `%5c` and a resolved `//` path.
+10. An email the provider does not vouch for is dropped before any lookup, so every such attempt ends `email_not_found`.
+11. A missing IP context makes the gate throw (`validation_failed`); only limit refusals use `too_many_sign_ups`.
+12. The creation limits apply in `public` and `local-public` only; the start limit applies in every mode.
+13. Link failures land on `/settings/sign-ins?provider=<id>&error=<code>`.
+14. A cross-site link start is refused with `error=cross_site_request`, shown as "Didn't complete".
+15. Unlinking removes every account of the provider; the last-sign-in rule counts configured providers only; a configured but unlinked provider gets 404.
+16. "Sign in again" signs out and opens `/sign-in?next=%2Fsettings%2Fsign-ins`.
+17. Until the redesign, Sign-ins sits in "Main views" beside the profile badge, and at 900 px and below the header badge drops its name.
+18. The bare origin is the workspace: its provider links carry `next=%2Fworkspace`, and `/sign-in` sends no `next`.
+19. A provider sign-in with no `next` lands on `/collection`; an email-code sign-in lands on `/workspace`.
+20. The sign-in page validates the `/auth/methods` shape and fails closed with its "temporarily unavailable" message.
+21. `/auth/session` returns `image` only for an https URL on a configured provider's image host.
+22. The link-start cross-site check uses Fetch Metadata, which browsers send only to secure origins, so `PUBLIC_ORIGIN` must be https for public signup.
+23. A link start without a session redirects to `/sign-in?next=%2Fsettings%2Fsign-ins` instead of answering 401.
+24. Rate-limit checks use a dedicated small pool with a connect timeout, and the IP key hashes the /64-normalised address.
