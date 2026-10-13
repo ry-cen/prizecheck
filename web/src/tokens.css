@@ -121,6 +121,14 @@
   /* Gallery side padding fixed by the spec: 30 px, then 20 px from 1550 px, then 16 px from 2200 px.
      Workspace.css applies it to the workspace main area; ticket 103 tests it. */
   --layout-gutter: 30px;
+
+  /* App shell (app redesign, #162): the phone bottom tab bar's height, and the centred Dialog's width on
+     desktop. Both are read by Tailwind's theme in tailwind.css (pb-tabbar, w-dialog). */
+  --layout-tabbar-height: 56px;
+  --layout-dialog-width: 480px;
+  /* What a sticky element clears at the top of the viewport: the shell's sticky desktop header; nothing on
+     a phone, where the header scrolls away. */
+  --layout-sticky-top: var(--layout-header-height);
 }
 
 @media (min-width: 1550px) {
@@ -142,6 +150,7 @@
     --tile-gap-row: 16px;
     --tile-gap-column: 8px;
     --layout-gutter: 14px;
+    --layout-sticky-top: 0px;
   }
 }
 

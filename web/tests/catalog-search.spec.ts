@@ -34,6 +34,7 @@ promote({**{f'card-{i}': f'Pikachu {i:02d}' for i in range(1, 33)}, 'card-99': '
     await page.goto(
       `${process.env.TEST_ORIGIN || "http://localhost:5173"}/locations`
     );
+    await expect(page).toHaveURL(/\/collection(\?|$)/);
     await page
       .getByLabel("Email")
       .fill(process.env.OWNER_EMAIL || "owner@example.test");

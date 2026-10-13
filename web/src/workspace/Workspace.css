@@ -6,9 +6,11 @@
   background: var(--color-bg);
 }
 
+/* Inside the app shell (#162), whose desktop header takes the top --layout-header-height; on a phone the
+   workspace's own header takes it. */
 .ws-root {
-  min-height: 100vh;
-  min-height: 100dvh;
+  min-height: calc(100vh - var(--layout-header-height));
+  min-height: calc(100dvh - var(--layout-header-height));
   background: var(--color-bg);
   color: var(--color-text);
   font-family: var(--font-sans);
@@ -66,7 +68,7 @@
   outline-offset: var(--focus-offset);
 }
 
-/* Header */
+/* Header: the phone header only; the app shell draws the desktop header and the tabs (#162). */
 .ws-header {
   height: var(--layout-header-height);
   padding: 0 var(--space-7);
@@ -76,33 +78,13 @@
   gap: var(--space-6);
   border-bottom: 1px solid var(--color-border);
 }
-.ws-brand {
-  font-size: var(--font-size-sm);
-  font-weight: 700;
-  letter-spacing: 2px;
-  text-transform: uppercase;
+.ws-phone-header {
+  display: none;
+}
+.ws-phone-title {
+  font-size: var(--font-size-md);
+  font-weight: 600;
   white-space: nowrap;
-}
-.ws-brand-mark {
-  color: var(--color-accent);
-  margin-right: var(--space-2);
-}
-.ws-app-nav {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-.ws-root .ws-app-nav button,
-.ws-root .ws-drawer-app-nav button {
-  border-color: transparent;
-  background: transparent;
-  color: var(--color-text-muted);
-  font-size: var(--font-size-sm);
-}
-.ws-root .ws-app-nav button:hover,
-.ws-root .ws-drawer-app-nav button:hover {
-  color: var(--color-text);
 }
 .ws-root .ws-header-icon {
   flex: 0 0 var(--target-touch);
@@ -240,7 +222,8 @@
   gap: var(--space-2);
 }
 
-/* Mobile drawer: a modal dialog anchored left, full height. */
+/* Mobile drawer frame: a modal dialog anchored left, full height. Only the Filters & display drawer
+   (GalleryControls) still uses it; the Location drawer is the kit Dialog (#162). */
 .ws-drawer-backdrop {
   position: fixed;
   inset: 0;
@@ -281,18 +264,13 @@
   font-size: var(--font-size-lg);
   font-weight: 550;
 }
-.ws-drawer .ws-tree-row {
-  min-height: var(--target-touch);
-}
-.ws-drawer-app-nav {
-  margin-top: auto;
-  padding-top: var(--space-4);
-  border-top: 1px solid var(--color-border);
+/* The Location drawer's content, inside the kit Dialog (web/src/ui/Dialog.tsx), which draws the frame. */
+.ws-location-drawer {
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
+  flex-direction: column;
+  gap: var(--space-4);
 }
-.ws-root .ws-drawer-app-nav button {
+.ws-location-drawer .ws-tree-row {
   min-height: var(--target-touch);
 }
 
@@ -316,8 +294,8 @@
     padding: 0 var(--space-3);
     gap: var(--space-2);
   }
-  .ws-brand {
-    display: none;
+  .ws-phone-header {
+    display: flex;
   }
   .ws-root .ws-header-search {
     flex: 1 1 auto;
@@ -436,7 +414,7 @@
     opacity: 1;
   }
 }
-.ws-root .ws-drawer .ws-add-child {
+.ws-root .ws-location-drawer .ws-add-child {
   position: static;
   flex: 0 0 var(--target-touch);
   width: var(--target-touch);
@@ -465,18 +443,6 @@
 }
 .ws-root .ws-skip-link:focus {
   transform: none;
-}
-/* Ticket 114: Main views in the header never wrap or squeeze at the narrowest desktop width. */
-.ws-root .ws-app-nav button {
-  white-space: nowrap;
-}
-@media (max-width: 1100px) {
-  .ws-app-nav {
-    gap: var(--space-1);
-  }
-  .ws-root .ws-app-nav button {
-    padding: var(--space-2);
-  }
 }
 /* Ticket 114: Add cards in the heading. */
 .ws-root .ws-add-cards-button {

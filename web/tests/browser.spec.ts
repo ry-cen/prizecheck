@@ -12,6 +12,7 @@ test("owner signs in, sees Unsorted, follows safe destination, then signs out", 
   await page.goto(
     `${process.env.TEST_ORIGIN || "http://localhost:5173"}/locations?next=%2Flocations`
   );
+  await expect(page).toHaveURL(/\/collection(\?|$)/);
   await page.getByLabel("Email").fill(email);
   await page.getByRole("button", { name: "Send code" }).click();
   await expect(page.getByRole("status")).toContainText("code has been sent");
@@ -25,7 +26,7 @@ test("owner signs in, sees Unsorted, follows safe destination, then signs out", 
   await page.getByLabel("Six-digit code").fill(code);
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page).toHaveURL(
-    `${process.env.TEST_ORIGIN || "http://localhost:5173"}/workspace`
+    `${process.env.TEST_ORIGIN || "http://localhost:5173"}/collection`
   );
   await expect(page.getByRole("heading", { name: "All owned" })).toBeVisible();
   await expect(
@@ -36,10 +37,11 @@ test("owner signs in, sees Unsorted, follows safe destination, then signs out", 
   ).toBeVisible();
   await page.reload();
   await expect(page.getByRole("heading", { name: "All owned" })).toBeVisible();
-  await page.getByRole("button", { name: "Sign out" }).click();
+  await page.getByRole("button", { name: "Account" }).click();
+  await page.getByRole("menuitem", { name: "Sign out" }).click();
   await expect(page.getByRole("button", { name: "Send code" })).toBeVisible();
   await expect(page).toHaveURL(
-    `${process.env.TEST_ORIGIN || "http://localhost:5173"}/workspace`
+    `${process.env.TEST_ORIGIN || "http://localhost:5173"}/collection`
   );
   await pool.end();
 });
@@ -51,6 +53,7 @@ test("external return destinations are discarded", async ({ page }) => {
   await page.goto(
     `${process.env.TEST_ORIGIN || "http://localhost:5173"}/locations?next=https%3A%2F%2Fexample.com%2Fsteal`
   );
+  await expect(page).toHaveURL(/\/collection(\?|$)/);
   await page.getByLabel("Email").fill(email);
   await page.getByRole("button", { name: "Send code" }).click();
   await expect(page.getByRole("status")).toContainText("code has been sent");
@@ -63,7 +66,7 @@ test("external return destinations are discarded", async ({ page }) => {
   await page.getByLabel("Six-digit code").fill(JSON.parse(lines.at(-1)!).otp);
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page).toHaveURL(
-    `${process.env.TEST_ORIGIN || "http://localhost:5173"}/workspace`
+    `${process.env.TEST_ORIGIN || "http://localhost:5173"}/collection`
   );
   await pool.end();
 });
@@ -93,6 +96,7 @@ test("bound owner starts one catalog run from the private panel", async ({
   await page.goto(
     `${process.env.TEST_ORIGIN || "http://localhost:5173"}/locations`
   );
+  await expect(page).toHaveURL(/\/collection(\?|$)/);
   await page.getByLabel("Email").fill(email);
   await page.getByRole("button", { name: "Send code" }).click();
   await expect(page.getByRole("status")).toContainText("code has been sent");
@@ -105,9 +109,11 @@ test("bound owner starts one catalog run from the private panel", async ({
   await page.getByLabel("Six-digit code").fill(JSON.parse(lines.at(-1)!).otp);
   await page.getByRole("button", { name: "Sign in" }).click();
   await expect(page.getByRole("heading", { name: "All owned" })).toBeVisible();
+  await page.getByRole("button", { name: "Account" }).click();
   await expect(
-    page.getByRole("button", { name: "Owner controls" })
+    page.getByRole("menuitem", { name: "Owner controls" })
   ).toHaveCount(0);
+  await page.keyboard.press("Escape");
   const result = await pool.query('SELECT id FROM "user" WHERE email=$1', [
     email,
   ]);
@@ -116,7 +122,8 @@ test("bound owner starts one catalog run from the private panel", async ({
     [result.rows[0].id]
   );
   await page.reload();
-  await page.getByRole("button", { name: "Owner controls" }).click();
+  await page.getByRole("button", { name: "Account" }).click();
+  await page.getByRole("menuitem", { name: "Owner controls" }).click();
   await expect(
     page.getByRole("heading", { name: "English catalog pull" })
   ).toBeVisible();
@@ -147,7 +154,9 @@ test("bound owner starts one catalog run from the private panel", async ({
   await page.goto(
     `${process.env.TEST_ORIGIN || "http://localhost:5173"}/locations`
   );
-  await page.getByRole("button", { name: "Owner controls" }).click();
+  await expect(page).toHaveURL(/\/collection(\?|$)/);
+  await page.getByRole("button", { name: "Account" }).click();
+  await page.getByRole("menuitem", { name: "Owner controls" }).click();
   await expect(page.getByText("Phase: complete")).toBeVisible();
   await pool.end();
 });

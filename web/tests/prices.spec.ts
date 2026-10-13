@@ -51,12 +51,15 @@ const lastOtp = () =>
 async function signIn(page: Page) {
   await pool.query("DELETE FROM auth_send_event");
   await page.goto(`${ORIGIN}/locations`);
+  await expect(page).toHaveURL(/\/collection(\?|$)/);
   await page.getByLabel("Email", { exact: true }).fill(OWNER_EMAIL);
   await page.getByRole("button", { name: "Send code", exact: true }).click();
   await expect(page.getByRole("status")).toContainText("code has been sent");
   await page.getByLabel("Six-digit code").fill(lastOtp());
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible();
+  await expect(
+    page.getByRole("navigation", { name: "Main views" })
+  ).toBeVisible();
 }
 
 const owner = async () =>
@@ -251,7 +254,7 @@ test("Deck and Collection rows price their exact Edition, including after More c
   expect(new Set(requested.flat()).size).toBe(55);
 
   // Collection rows (aggregate rows count as Holding rows): the same Editions after More owned cards.
-  await page.getByRole("button", { name: "Collection", exact: true }).click();
+  await page.goto(new URL("/old-collection", page.url()).href);
   await expect(page.locator(".holding-grid > li").first()).toBeVisible();
   await page.getByRole("button", { name: "More owned cards" }).click();
   await expect(
@@ -462,7 +465,12 @@ test("following a link does not prefetch prices for unrendered cards", async ({
     "Checking prices"
   );
   expect(seen.flat()).toEqual([ids.normal]);
-  for (const link of await page.locator("a[href]").all()) await link.hover();
+  // The shell's skip link is parked off screen until it has focus; it cannot be hovered. Every other link can.
+  for (const link of await page
+    .locator("a[href]")
+    .filter({ hasNotText: "Skip to main content" })
+    .all())
+    await link.hover();
   // flake-exempt wait-for-timeout (quiet): a hover must not prefetch, and a prefetch would start within this window.
   await page.waitForTimeout(500);
   expect(seen.flat()).toEqual([ids.normal]);

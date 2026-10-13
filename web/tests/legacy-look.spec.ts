@@ -7,6 +7,11 @@ import { Pool } from "pg";
  * loaded, and style.css holds back base.css, so every computed style here matches the baseline that was
  * recorded on the tree before Tailwind (web/tests/support/legacy-look.json).
  *
+ * Since the app shell (#162) the old Decks page and the workspace sit inside it unchanged. The baseline
+ * keeps only their own elements; the old header, Main views and Sign out belong to the shell now, and the
+ * shell's look is not part of this baseline. style.css reaches only inside .legacy, so an unstyled element
+ * outside the old pages gets base.css's focus ring, and one inside them keeps the browser's.
+ *
  * The checks read computed styles through roles and elements, never class names. Sizes that depend on
  * font metrics are left out, and so is the colour of the browser's own focus ring, so the baseline holds
  * on macOS and Linux. Each test writes what it read to its output folder as legacy-look.json. When a
@@ -84,8 +89,8 @@ async function signIn(page: Page) {
   }
   const mail = process.env.MAIL_FILE || "/tmp/tcg-ticket01-mail";
   const before = messages(mail).length;
-  await page.goto(`${origin}/workspace`);
-  await expect(page).toHaveURL(/\/workspace$/);
+  await page.goto(`${origin}/collection`);
+  await expect(page).toHaveURL(/\/collection$/);
   await expect(page.getByLabel("Email")).toBeVisible();
   await page
     .getByLabel("Email")
@@ -96,7 +101,7 @@ async function signIn(page: Page) {
     .getByLabel("Six-digit code")
     .fill(JSON.parse(messages(mail).at(-1)!).otp);
   await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page).toHaveURL(/\/workspace$/);
+  await expect(page).toHaveURL(/\/collection$/);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("All owned");
 }
 
@@ -132,16 +137,38 @@ async function focused(locator: Locator): Promise<Styles> {
   return computed(locator);
 }
 
-/** A link with no focus rule of its own, as the page's first element: it shows which focus ring an
- * unstyled element gets. */
-async function addProbeLink(page: Page): Promise<Locator> {
-  await page.evaluate(() => {
-    const link = document.createElement("a");
-    link.href = "#legacy-look-probe";
-    link.textContent = "Legacy look probe";
-    document.body.prepend(link);
-  });
-  return page.getByRole("link", { name: "Legacy look probe" });
+/** A link with no focus rule of its own, as the first element of the page body (outside every old page)
+ * or of the shown page's main region: it shows which focus ring an unstyled element gets there. */
+async function addProbeLink(
+  page: Page,
+  where: "body" | "main"
+): Promise<Locator> {
+  const name = `Legacy look probe in ${where}`;
+  await page.evaluate(
+    ([where, name]) => {
+      const link = document.createElement("a");
+      link.href = "#legacy-look-probe";
+      link.textContent = name;
+      const parent =
+        where === "body"
+          ? document.body
+          : Array.from(document.querySelectorAll("main")).find(
+              (main) => main.getClientRects().length > 0
+            )!;
+      parent.prepend(link);
+    },
+    [where, name]
+  );
+  return page.getByRole("link", { name });
+}
+
+/** Outside the old pages, base.css's ring: 2 px solid gold, 2 px off. */
+async function expectBaseRing(probe: Locator) {
+  const ring = await focused(probe);
+  expect(ring["outline-style"]).toBe("solid");
+  expect(ring["outline-width"]).toBe("2px");
+  expect(ring["outline-color"]).toBe(GOLD);
+  expect(ring["outline-offset"]).toBe("2px");
 }
 
 function recordAndCompare(
@@ -162,7 +189,8 @@ async function decksLook(page: Page): Promise<Look> {
   await expect(
     page.getByRole("heading", { level: 1, name: "Decks" })
   ).toBeVisible();
-  const probe = await addProbeLink(page);
+  const outside = await addProbeLink(page, "body");
+  const inside = await addProbeLink(page, "main");
   const input = page.getByRole("textbox", { name: "Deck name" });
   const submit = page.getByRole("button", { name: "Create Deck" });
   const look = await read({
@@ -171,11 +199,6 @@ async function decksLook(page: Page): Promise<Look> {
     main: page.getByRole("main"),
     header: page.locator("main > header"),
     "page heading": page.getByRole("heading", { level: 1, name: "Decks" }),
-    "sign out": page.getByRole("button", { name: "Sign out" }),
-    "main views": page.getByRole("navigation", { name: "Main views" }),
-    "main views button": page
-      .getByRole("navigation", { name: "Main views" })
-      .getByRole("button", { name: "Workspace", exact: true }),
     "section heading": page.getByRole("heading", {
       level: 2,
       name: "Physical Decks",
@@ -185,11 +208,11 @@ async function decksLook(page: Page): Promise<Look> {
     label: page.locator("label", { has: input }),
     input,
     submit,
-    "probe link": probe,
   });
-  look["probe link:focus"] = await focused(probe);
   look["input:focus"] = await focused(input);
   look["submit:focus"] = await focused(submit);
+  await expectBaseRing(outside);
+  expect((await focused(inside))["outline-style"]).toBe("auto");
 
   // The checks that fail first if base.css or Preflight reaches an old page.
   expect(look.html["color-scheme"]).toBe("normal");
@@ -198,7 +221,6 @@ async function decksLook(page: Page): Promise<Look> {
   expect(look["page heading"]["font-size"]).toBe("32px");
   expect(look.input["background-color"]).toBe("rgb(255, 255, 255)");
   expect(look.submit["background-color"]).toBe("rgb(18, 92, 69)");
-  expect(look["probe link:focus"]["outline-style"]).toBe("auto");
   expect(look["input:focus"]["outline-style"]).toBe("solid");
   expect(look["input:focus"]["outline-color"]).toBe("rgb(232, 157, 34)");
   return look;
@@ -207,47 +229,35 @@ async function decksLook(page: Page): Promise<Look> {
 async function workspaceLook(page: Page, phone: boolean): Promise<Look> {
   await signIn(page);
   // A fresh document, so nothing has been clicked in it.
-  await page.goto(`${origin}/workspace`);
+  await page.goto(`${origin}/collection`);
   await expect(
     page.getByRole("heading", { level: 1, name: "All owned" })
   ).toBeVisible();
-  const probe = await addProbeLink(page);
-  const banner = page.getByRole("banner");
-  // The search sits in the banner on a phone and in the main region on a desktop.
+  const outside = await addProbeLink(page, "body");
+  // The search sits in the workspace's own header on a phone and in the main region on a desktop.
   const search = page.getByRole("searchbox", { name: "Search cards" });
   const entries: Record<string, Locator> = {
     html: page.locator("html"),
     body: page.locator("body"),
-    root: page.locator("#root > *").first(),
-    banner,
     main: page.getByRole("main"),
     "page heading": page.getByRole("heading", { level: 1, name: "All owned" }),
     search,
-    "probe link": probe,
   };
   if (phone) {
+    const banner = page.getByRole("banner");
+    entries.banner = banner;
     entries["open locations"] = banner.getByRole("button", {
       name: "Open locations",
     });
   } else {
     entries.sidebar = page.getByRole("complementary", { name: "Sidebar" });
-    entries["main views"] = page.getByRole("navigation", {
-      name: "Main views",
-    });
-    entries["main views button"] = page
-      .getByRole("navigation", { name: "Main views" })
-      .getByRole("button", { name: "Decks", exact: true });
   }
   const look = await read(entries);
-  look["probe link:focus"] = await focused(probe);
   look["search:focus"] = await focused(search);
+  await expectBaseRing(outside);
 
   expect(look.html["color-scheme"]).toBe("normal");
   expect(look.html["background-color"]).toBe("rgb(18, 17, 16)");
-  expect(look.root["color-scheme"]).toBe("dark");
-  expect(look.root["background-color"]).toBe("rgb(18, 17, 16)");
-  expect(look.root.color).toBe("rgb(239, 235, 228)");
-  expect(look["probe link:focus"]["outline-style"]).toBe("auto");
   expect(look["search:focus"]["outline-style"]).toBe("solid");
   expect(look["search:focus"]["outline-width"]).toBe("2px");
   expect(look["search:focus"]["outline-color"]).toBe(GOLD);
@@ -280,7 +290,11 @@ test.describe("at 1280×800", () => {
     const background = (locator: Locator) =>
       locator.evaluate((element) => getComputedStyle(element).backgroundColor);
     await expect(html).toHaveAttribute("data-theme", "prize-gold");
+    // #root's first child is the app shell (#162): dark, on the tokens.
     expect(await background(root)).toBe("rgb(18, 17, 16)");
+    expect(
+      await root.evaluate((element) => getComputedStyle(element).colorScheme)
+    ).toBe("dark");
 
     await page.addStyleTag({
       content:

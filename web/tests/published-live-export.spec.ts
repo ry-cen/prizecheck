@@ -42,12 +42,15 @@ const lastOtp = () =>
 async function signIn(page: Page) {
   await pool.query("DELETE FROM auth_send_event");
   await page.goto(`${ORIGIN}/locations`);
+  await expect(page).toHaveURL(/\/collection(\?|$)/);
   await page.getByLabel("Email", { exact: true }).fill(OWNER_EMAIL);
   await page.getByRole("button", { name: "Send code", exact: true }).click();
   await expect(page.getByRole("status")).toContainText("code has been sent");
   await page.getByLabel("Six-digit code").fill(lastOtp());
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible();
+  await expect(
+    page.getByRole("navigation", { name: "Main views" })
+  ).toBeVisible();
 }
 const owner = async () =>
   (await pool.query('SELECT id FROM "user" WHERE email=$1', [OWNER_EMAIL]))

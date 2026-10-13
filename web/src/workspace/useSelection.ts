@@ -37,6 +37,8 @@ type Options = {
   scope: string;
   /** The mobile layout: a tap opens details unless Select mode is on. */
   mobile: boolean;
+  /** False while the app shell shows another page: Escape there leaves this selection alone. */
+  active?: boolean;
 };
 
 export type SelectionState = {
@@ -65,6 +67,7 @@ export function useSelection({
   status,
   scope,
   mobile,
+  active = true,
 }: Options): SelectionState {
   const [selected, setSelected] = useState<Selection>(EMPTY_SELECTION);
   // The last clicked Holding that is still selected.
@@ -75,6 +78,8 @@ export function useSelection({
   // Shift-click ranges start here. A Holding key and ordinal, never a display index, so a sort keeps it valid.
   const anchor = useRef<{ key: string; ordinal: number } | null>(null);
   const marqueeBase = useRef<Selection>(EMPTY_SELECTION);
+  const shown = useRef(active);
+  shown.current = active;
 
   const latest = useRef({
     selected,
@@ -191,6 +196,7 @@ export function useSelection({
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape" || event.defaultPrevented) return;
+      if (!shown.current) return;
       if (document.querySelector("dialog[open], [aria-modal='true']")) return;
       if (latest.current.selected.size) clear();
     };

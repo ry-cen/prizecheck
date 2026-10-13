@@ -60,7 +60,7 @@ async function signIn(page: Page) {
   const mail = process.env.MAIL_FILE || "/tmp/tcg-ticket01-mail";
   const before = messages(mail).length;
   await page.goto(
-    `${process.env.TEST_ORIGIN || "http://localhost:5173"}/workspace`
+    `${process.env.TEST_ORIGIN || "http://localhost:5173"}/collection`
   );
   await page
     .getByLabel("Email")
@@ -71,7 +71,7 @@ async function signIn(page: Page) {
     .getByLabel("Six-digit code")
     .fill(JSON.parse(messages(mail).at(-1)!).otp);
   await page.getByRole("button", { name: "Sign in" }).click();
-  await expect(page).toHaveURL(/\/workspace$/);
+  await expect(page).toHaveURL(/\/collection$/);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("All owned");
 }
 

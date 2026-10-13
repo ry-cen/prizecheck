@@ -92,6 +92,12 @@
   --spacing-quick: var(--size-quick);
   --spacing-quick-phone: var(--size-quick-phone);
   --spacing-tap: var(--target-touch);
+  /* The app shell's layout sizes (tokens.css --layout-*): h-header 64 px, pb-tabbar 56 px (the phone
+     tab bar), w-drawer (a left drawer), w-dialog 480 px (a centred Dialog). */
+  --spacing-header: var(--layout-header-height);
+  --spacing-tabbar: var(--layout-tabbar-height);
+  --spacing-drawer: var(--layout-drawer-width);
+  --spacing-dialog: var(--layout-dialog-width);
 }
 
 /* The breakpoints listed in tokens.css, as variants. Order matters: phone after compact, so phone wins

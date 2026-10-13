@@ -44,6 +44,7 @@ test("mobile collector can search, Add, Move, Undo, check and publish a physical
     await page.goto(
       `${process.env.TEST_ORIGIN || "http://localhost:5173"}/locations`
     );
+    await expect(page).toHaveURL(/\/collection(\?|$)/);
     await page
       .getByLabel("Email")
       .fill(process.env.OWNER_EMAIL || "owner@example.test");
@@ -53,9 +54,7 @@ test("mobile collector can search, Add, Move, Undo, check and publish a physical
       .getByLabel("Six-digit code")
       .fill(JSON.parse(messages(mail).at(-1)!).otp);
     await page.getByRole("button", { name: "Sign in" }).tap();
-    await page.getByRole("button", { name: "Open locations" }).tap();
     await page
-      .getByRole("dialog", { name: "Locations", exact: true })
       .getByRole("navigation", { name: "Main views" })
       .getByRole("button", { name: "Decks", exact: true })
       .tap();

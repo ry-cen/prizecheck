@@ -36,6 +36,7 @@ promote({'card-1': 'Pikachu'})`,
     await page.goto(
       `${process.env.TEST_ORIGIN || "http://localhost:5173"}/locations`
     );
+    await expect(page).toHaveURL(/\/collection(\?|$)/);
     await page
       .getByLabel("Email")
       .fill(process.env.OWNER_EMAIL || "owner@example.test");

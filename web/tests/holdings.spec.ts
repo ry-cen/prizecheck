@@ -21,7 +21,7 @@ promote({'card-1': 'Pikachu'})`,
   await pool.query("DELETE FROM auth_send_event");
   try {
     await page.goto(
-      `${process.env.TEST_ORIGIN || "http://localhost:5173"}/workspace`
+      `${process.env.TEST_ORIGIN || "http://localhost:5173"}/collection`
     );
     await page
       .getByLabel("Email")

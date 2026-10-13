@@ -289,6 +289,8 @@ const server = createServer(async (request, response) => {
       return json(response, 200, {
         signedIn: !!current,
         userId: current?.user.id || null,
+        // The app shell's avatar menu shows it (#162); it is the signed-in user's own address.
+        email: current?.user.email || null,
       });
     }
     if (path === "/auth/approval-code" && request.method === "POST") {

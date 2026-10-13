@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "better-auth": "^1.4.0",
+    "lucide-react": "1.48.0",
     "pg": "^8.13.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"

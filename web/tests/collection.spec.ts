@@ -23,6 +23,7 @@ promote({'collection-1':'Collection Pikachu'})`,
         ? `${process.env.TEST_ORIGIN}/locations`
         : `${process.env.TEST_ORIGIN || "http://localhost:5173"}/locations`
     );
+    await expect(page).toHaveURL(/\/collection(\?|$)/);
     await page
       .getByLabel("Email", { exact: true })
       .fill(process.env.OWNER_EMAIL || "owner@example.test");
@@ -36,7 +37,9 @@ promote({'collection-1':'Collection Pikachu'})`,
       .split("\n");
     await page.getByLabel("Six-digit code").fill(JSON.parse(lines.at(-1)!).otp);
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
-    await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible();
+    await expect(
+      page.getByRole("navigation", { name: "Main views" })
+    ).toBeVisible();
     const owner = (
       await pool.query('SELECT id FROM "user" WHERE email=$1', [
         process.env.OWNER_EMAIL || "owner@example.test",
@@ -57,7 +60,7 @@ promote({'collection-1':'Collection Pikachu'})`,
       "INSERT INTO holding(owner_id,location_id,edition_id,quantity,version) VALUES($1,$2,$3,7,1) ON CONFLICT(owner_id,location_id,edition_id) DO UPDATE SET quantity=7",
       [owner, leaf, edition]
     );
-    await page.getByRole("button", { name: "Collection", exact: true }).click();
+    await page.goto(new URL("/old-collection", page.url()).href);
     await page.getByLabel("Owned card name").fill("Collection Pika");
     await page.getByRole("button", { name: "Filter Collection" }).click();
     const row = page

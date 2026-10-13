@@ -27,7 +27,9 @@ test("owner sees stale backup and allowance warning in operational health", asyn
       .split("\n");
     await page.getByLabel("Six-digit code").fill(JSON.parse(lines.at(-1)!).otp);
     await page.getByRole("button", { name: "Sign in" }).click();
-    await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible();
+    await expect(
+      page.getByRole("navigation", { name: "Main views" })
+    ).toBeVisible();
     const owner = await pool.query('SELECT id FROM "user" WHERE email=$1', [
       email,
     ]);

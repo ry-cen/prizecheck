@@ -24,6 +24,7 @@ promote({'reconciliation-1':'Review Pikachu'})`,
     await page.goto(
       `${process.env.TEST_ORIGIN || "http://localhost:5173"}/locations`
     );
+    await expect(page).toHaveURL(/\/collection(\?|$)/);
     await page
       .getByLabel("Email", { exact: true })
       .fill(process.env.OWNER_EMAIL || "owner@example.test");
@@ -35,7 +36,9 @@ promote({'reconciliation-1':'Review Pikachu'})`,
       ).otp as string;
     await page.getByLabel("Six-digit code").fill(mail());
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
-    await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible();
+    await expect(
+      page.getByRole("navigation", { name: "Main views" })
+    ).toBeVisible();
     const user = (
       await pool.query('SELECT id FROM "user" WHERE email=$1', [
         process.env.OWNER_EMAIL || "owner@example.test",
@@ -61,9 +64,8 @@ promote({'reconciliation-1':'Review Pikachu'})`,
       )
     ).rows[0].id;
     await page.reload();
-    await page
-      .getByRole("button", { name: "Owner controls", exact: true })
-      .click();
+    await page.getByRole("button", { name: "Account" }).click();
+    await page.getByRole("menuitem", { name: "Owner controls" }).click();
     const article = page
       .getByRole("region", { name: "Catalog reconciliation" })
       .getByRole("article")
@@ -123,6 +125,7 @@ promote({'card-1':'Correction Pikachu'})`,
     await page.goto(
       `${process.env.TEST_ORIGIN || "http://localhost:5173"}/locations`
     );
+    await expect(page).toHaveURL(/\/collection(\?|$)/);
     await page
       .getByLabel("Email", { exact: true })
       .fill(process.env.OWNER_EMAIL || "owner@example.test");
