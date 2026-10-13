@@ -181,7 +181,11 @@ def test_stamped_and_contending_variants_borrow_nothing_from_the_cards_block():
                                    for number, variant in enumerate([record["variants_detailed"][0]] * 2)]
     record["variants_detailed"][1]["variantId"] = "n-2"
     run(Records(card_level_block(1), record))
-    assert {row["mapping_state"] for row in metadata("meta-2")[1].values()} == {"unverified"}
+    with connect() as conn:
+        contending = conn.execute("""SELECT m.* FROM catalog_edition e JOIN catalog_edition_metadata m ON m.edition_id=e.id
+          JOIN catalog_printing p ON p.id=e.printing_id WHERE p.source_id='meta-2'""").fetchall()
+    assert [(row["mapping_state"], row["mapping_reason"]) for row in contending] == [("unverified", "rule_failed")] * 2
+    assert all(row["mapping_candidate"]["candidate"].get("pricing") is None for row in contending)
 
 
 def test_a_card_block_entry_without_a_product_is_not_borrowed():
