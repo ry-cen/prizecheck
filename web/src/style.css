@@ -108,3 +108,17 @@ body {
     );
   }
 }
+/* An old light section inside a page that is already on the kit (#167): Owner controls' queue tabs keep
+   today's review components until #168, #170 and #171 move them onto the kit. The old look on a light
+   inset panel, with no page-height fill. */
+.legacy-inset {
+  display: flow-root;
+  padding: 0 1.25rem 1.25rem;
+  border-radius: 10px;
+  font-family: system-ui, sans-serif;
+  font-size: 16px;
+  line-height: normal;
+  color: #172126;
+  background: #f4f5f1;
+  color-scheme: normal;
+}

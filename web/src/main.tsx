@@ -4,7 +4,8 @@ import { getOwnerCatalogStatus, type OwnerCatalogStatus } from "./generated";
 import { Decks } from "./Decks";
 import { CatalogSearch } from "./CatalogSearch";
 import { MissingCardReports } from "./MissingCardReports";
-import { OwnerControls } from "./OwnerControls";
+import { OwnerControlsPage } from "./owner/OwnerControlsPage";
+import { ownerSection, ownerSectionPath } from "./owner/sections";
 import { Workspace } from "./workspace/Workspace";
 import { LegacyPage } from "./shell/LegacyPage";
 import { Shell } from "./shell/Shell";
@@ -14,6 +15,7 @@ import {
   DEFAULT_PATH,
   pageAt,
   pageDef,
+  sectionAt,
   type PageId,
 } from "./shell/routes";
 import { useRoute } from "./shell/useRoute";
@@ -90,18 +92,18 @@ function App() {
     void refresh();
   }, []);
 
-  // Signed in, an address that is no page lands on Collection, except the public pages (Discover, a Published
-  // Deck), which open inside the shell (#163). Owner controls opened by someone else shows its heading and
-  // nothing else, as before.
+  // Signed in, an address that is no page (or section of one) lands on Collection, except the public pages
+  // (Discover, a Published Deck), which open inside the shell (#163). Owner controls opened by someone else
+  // shows its heading and nothing else, as before.
   const signedIn = session?.signedIn === true;
   const publicPage = useMemo(() => publicPageAt(path), [path]);
   const isPublic = publicPage !== null;
   const def = pageAt(path);
   const page: PageId = def ? def.id : "collection";
   useLayoutEffect(() => {
-    if (signedIn && !isPublic && path !== pageDef(page).path)
+    if (signedIn && !isPublic && !def)
       navigate(pageDef(page).path, { replace: true });
-  }, [signedIn, isPublic, page, path, navigate]);
+  }, [signedIn, isPublic, def, page, navigate]);
 
   async function requestCode(event: React.FormEvent) {
     event.preventDefault();
@@ -225,15 +227,14 @@ function App() {
         );
       case "owner":
         return (
-          <LegacyPage title="Owner controls" message={message}>
-            {ownerCatalog && (
-              <OwnerControls
-                status={ownerCatalog}
-                onStatus={setOwnerCatalog}
-                onMessage={setMessage}
-              />
-            )}
-          </LegacyPage>
+          <OwnerControlsPage
+            status={ownerCatalog}
+            section={ownerSection(sectionAt(path))}
+            onSection={(next) => navigate(ownerSectionPath(next))}
+            onStatus={setOwnerCatalog}
+            message={message}
+            onMessage={setMessage}
+          />
         );
       case "sign-ins":
         return <SignInsPage email={accountEmail} />;

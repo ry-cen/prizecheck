@@ -97,7 +97,18 @@ async function openOwnerReview(page: Page) {
   await page.reload();
   await page.getByRole("button", { name: "Account" }).click();
   await page.getByRole("menuitem", { name: "Owner controls" }).click();
+  await page.getByRole("tab", { name: /^Metadata/ }).click();
   return page.getByRole("region", { name: "Catalog metadata review" });
+}
+
+/** Owner controls' Rules tab (#167), where the metadata rules moved from the metadata review. */
+async function openRules(page: Page) {
+  await page.reload();
+  await page.getByRole("button", { name: "Account" }).click();
+  await page.getByRole("menuitem", { name: "Owner controls" }).click();
+  await page.getByRole("tab", { name: "Rules" }).click();
+  await expect(page).toHaveURL(/\/owner\/rules$/);
+  return page.getByRole("tabpanel", { name: "Rules" });
 }
 
 test.beforeEach(async () => {
@@ -233,8 +244,8 @@ test("a stale evidence digest is refused, then succeeds after reloading the evid
   await signIn(page);
   await setMaintainer(true);
   const target = await normal();
-  const review = await openOwnerReview(page);
-  // Open a queue entry through a report, then change the evidence underneath the maintainer.
+  // Open a queue entry through a report, then change the evidence underneath the maintainer. The first report
+  // goes in before the tab opens, so the tab's own read is issued after it.
   const first = await page.request.post(
     `${ORIGIN}/api/catalog/metadata-reports`,
     {
@@ -250,9 +261,17 @@ test("a stale evidence digest is refused, then succeeds after reloading the evid
     }
   );
   expect(first.status()).toBe(201);
-  await review.getByRole("button", { name: "Refresh queue" }).click();
+  const review = await openOwnerReview(page);
   const item = review.getByRole("article").filter({ hasText: "normal" });
   await expect(item).toContainText("1 linked report");
+  // Wait for the refresh to answer, so the second report lands after the evidence the maintainer is shown.
+  const refresh = page.waitForRequest(
+    (request) =>
+      request.url().includes("/api/admin/catalog-metadata/queue") &&
+      request.method() === "GET"
+  );
+  await review.getByRole("button", { name: "Refresh queue" }).click();
+  await (await refresh).response();
   const second = await page.request.post(
     `${ORIGIN}/api/catalog/metadata-reports`,
     {
@@ -363,18 +382,17 @@ test("the maintainer lists rule versions and activates a rule with a fresh code"
   await signIn(page);
   await setMaintainer(true);
   await pool.query("UPDATE catalog_rule_state SET activation_id=NULL");
-  const review = await openOwnerReview(page);
-  const rules = review.getByRole("region", { name: "Metadata rules" });
-  const matching = rules
-    .getByRole("article")
-    .filter({ hasText: "marketplace_matching" });
+  const rules = await openRules(page);
+  const matching = rules.getByRole("article", {
+    name: "Marketplace matching",
+  });
   await expect(matching).toContainText("Version 1");
   await expect(matching).toContainText("No active rule");
   await matching.getByLabel("Rule version").selectOption("1");
   await matching.getByLabel("Rule evidence URL").fill(EVIDENCE);
   await matching.getByLabel("Rule reason").fill("Reviewed the matching rule");
   await sendCode(page, matching);
-  await matching.getByRole("button", { name: "Apply rule change" }).click();
+  await matching.getByRole("button", { name: "Confirm rule change" }).click();
   await expect(matching).toContainText("Active: version 1");
   await expect(matching).toContainText("Public delivery:");
   // Deactivating binds the code to version 0.
@@ -382,7 +400,7 @@ test("the maintainer lists rule versions and activates a rule with a fresh code"
   await matching.getByLabel("Rule evidence URL").fill(EVIDENCE);
   await matching.getByLabel("Rule reason").fill("Pause the matching rule");
   await sendCode(page, matching);
-  await matching.getByRole("button", { name: "Apply rule change" }).click();
+  await matching.getByRole("button", { name: "Confirm rule change" }).click();
   await expect(matching).toContainText("No active rule");
 });
 
@@ -441,21 +459,18 @@ test("quarantining the Edition mapping leaves a reviewed Live identity eligible"
   await setMaintainer(true);
   const printing = await printingRow();
   await reportLive(page, printing.id);
-  let review = await openOwnerReview(page);
-
   // Activate the Live rule v1 with a fresh code.
-  const live = review
-    .getByRole("region", { name: "Metadata rules" })
-    .getByRole("article")
-    .filter({ hasText: "live_derivation" });
+  const live = (await openRules(page)).getByRole("article", {
+    name: "Live derivation",
+  });
   await live.getByLabel("Rule version").selectOption("1");
   await live.getByLabel("Rule evidence URL").fill(EVIDENCE);
   await live.getByLabel("Rule reason").fill("Reviewed the Live rule");
   await sendCode(page, live);
-  await live.getByRole("button", { name: "Apply rule change" }).click();
+  await live.getByRole("button", { name: "Confirm rule change" }).click();
   await expect(live).toContainText("Active: version 1");
   // The activation changed the target's evidence, so reopen the review first.
-  review = await openOwnerReview(page);
+  let review = await openOwnerReview(page);
 
   // A complete Live correction; the set code is normalised to upper case.
   const item = review

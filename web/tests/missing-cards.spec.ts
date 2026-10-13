@@ -77,6 +77,8 @@ promote({'fixture-1': 'Pikachu'})`,
     await expect(report.getByText("pending")).toBeVisible();
     await page.getByRole("button", { name: "Account" }).click();
     await page.getByRole("menuitem", { name: "Owner controls" }).click();
+    await page.getByRole("tab", { name: /^Missing cards/ }).click();
+    await expect(page).toHaveURL(/\/owner\/missing$/);
     const queue = page.getByRole("region", {
       name: "Missing-card review queue",
     });

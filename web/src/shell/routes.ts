@@ -1,3 +1,5 @@
+import { OWNER_SUBPATHS } from "../owner/sections";
+
 /** The signed-in pages inside the app shell, and the addresses that open them. Routing is client-side. */
 export type PageId =
   "collection" | "decks" | "catalog" | "reports" | "sign-ins" | "owner";
@@ -11,6 +13,9 @@ export type PageDef = {
    * Old pages that read their data only on mount remount on every visit until their redesign ticket
    * moves them onto the kit and turns this on. */
   keepMounted: boolean;
+  /** Sub-addresses under `path` that open this page on one of its sections, for example /owner/rules for
+   * Owner controls' Rules tab. The page reads its section with sectionAt. */
+  sections?: readonly string[];
 };
 
 export const PAGES: readonly PageDef[] = [
@@ -49,6 +54,7 @@ export const PAGES: readonly PageDef[] = [
     path: "/owner",
     label: "Owner controls",
     keepMounted: false,
+    sections: OWNER_SUBPATHS,
   },
 ];
 
@@ -81,7 +87,19 @@ export function canonicalPath(path: string): string {
 }
 
 export function pageAt(path: string): PageDef | undefined {
-  return PAGES.find((page) => page.path === path);
+  return PAGES.find(
+    (page) =>
+      page.path === path ||
+      (page.sections ?? []).some(
+        (section) => path === `${page.path}/${section}`
+      )
+  );
+}
+
+/** The section a sub-address names (/owner/rules is "rules"), or null for a page's own address. */
+export function sectionAt(path: string): string | null {
+  const page = pageAt(path);
+  return page && path !== page.path ? path.slice(page.path.length + 1) : null;
 }
 
 export function pageDef(id: PageId): PageDef {

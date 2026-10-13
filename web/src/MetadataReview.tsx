@@ -1,17 +1,15 @@
+import { looksLikeCode } from "./owner/CodeStep";
 import { useEffect, useId, useState } from "react";
 import {
-  activateMetadataRule,
   decideMetadata,
   decideMetadataReport,
   getMetadataHistory,
   getMetadataQueue,
-  getMetadataRules,
   getMetadataTarget,
   requestMetadataCode,
   type MetadataDecisionInput,
   type MetadataDecisionRow,
   type MetadataQueueItem,
-  type MetadataRuleView,
 } from "./metadata_generated";
 
 const messages: Record<string, string> = {
@@ -43,11 +41,11 @@ const messages: Record<string, string> = {
   UNKNOWN_RULE_VERSION: "That rule version does not exist.",
   REPORT_NOT_FOUND: "That report no longer exists.",
 };
-const errorText = (error: unknown) =>
+export const errorText = (error: unknown) =>
   error instanceof Error
     ? (messages[error.message] ?? "The request failed. Please retry.")
     : "The request failed. Please retry.";
-const codeError = (error: unknown) =>
+export const codeError = (error: unknown) =>
   (error as { status?: number })?.status === 429
     ? "Code rate limit reached. Try again in a minute."
     : "Unable to send the code. Please retry.";
@@ -73,8 +71,7 @@ function editionLabel(descriptor: Record<string, unknown> | null) {
     .map(([key, value]) => `${key}: ${String(value)}`)
     .join(" · ");
 }
-const when = (value: string) => new Date(value).toLocaleString();
-const looksLikeCode = (value: string) => /^[0-9]{6}$/.test(value);
+export const when = (value: string) => new Date(value).toLocaleString();
 
 type Decision = MetadataDecisionInput["decision"];
 const decisionOptions: Record<
@@ -517,145 +514,9 @@ function ReviewItem({
   );
 }
 
-function RuleCard({
-  rule,
-  onChanged,
-}: {
-  rule: MetadataRuleView;
-  onChanged: () => Promise<void>;
-}) {
-  const [version, setVersion] = useState("none");
-  const [evidence, setEvidence] = useState("");
-  const [reason, setReason] = useState("");
-  const [code, setCode] = useState("");
-  const [status, setStatus] = useState("");
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  const target = `rule:${rule.kind}:${version === "none" ? 0 : Number(version)}`;
-  const active =
-    rule.active && rule.active.version !== null ? rule.active : null;
-
-  async function sendCode() {
-    setBusy(true);
-    setError("");
-    try {
-      await requestMetadataCode(target, "activate_rule");
-      setStatus("Fresh approval code sent to your email.");
-    } catch (failure) {
-      setStatus("");
-      setError(codeError(failure));
-    } finally {
-      setBusy(false);
-    }
-  }
-  async function apply() {
-    setBusy(true);
-    setError("");
-    try {
-      const result = await activateMetadataRule(rule.kind, {
-        version: version === "none" ? null : Number(version),
-        evidence_url: evidence.trim(),
-        reason: reason.trim(),
-        code,
-      });
-      setCode("");
-      setStatus(
-        `Rule change recorded for ${result.printings} Printings and ${result.editions} Editions. Public delivery: ${result.public_delivery}.` +
-          (result.public_delivery === "pending"
-            ? " A background drain is delivering the remaining changes; until it finishes the public store may still show the old eligibility. If it stays pending, run scripts/backfill_public_catalog.py (exit code 3 means another drain is still running; retry later)."
-            : "")
-      );
-      await onChanged();
-    } catch (failure) {
-      setStatus("");
-      setError(errorText(failure));
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <article aria-label={`Rule ${rule.kind}`}>
-      <h4>{rule.kind}</h4>
-      <p>
-        {active
-          ? `Active: version ${active.version} · activated ${when(active.activated_at)} · ${active.reason}`
-          : "No active rule"}
-      </p>
-      {active && !active.digest_current && (
-        <p role="alert">
-          The rule code changed after approval, so it is inactive until you
-          approve it again.
-        </p>
-      )}
-      <ul>
-        {rule.versions.map((entry) => (
-          <li key={entry.version}>
-            Version {entry.version} · digest {entry.code_digest.slice(0, 12)}
-          </li>
-        ))}
-      </ul>
-      <label>
-        Rule version{" "}
-        <select
-          value={version}
-          onChange={(event) => setVersion(event.target.value)}
-        >
-          <option value="none">No rule (deactivate)</option>
-          {rule.versions.map((entry) => (
-            <option key={entry.version} value={String(entry.version)}>
-              {entry.version}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label>
-        Rule evidence URL{" "}
-        <input
-          type="url"
-          value={evidence}
-          onChange={(event) => setEvidence(event.target.value)}
-        />
-      </label>
-      <label>
-        Rule reason{" "}
-        <textarea
-          value={reason}
-          maxLength={2000}
-          onChange={(event) => setReason(event.target.value)}
-        />
-      </label>
-      <button type="button" disabled={busy} onClick={() => void sendCode()}>
-        Send code
-      </button>
-      <label>
-        Fresh six-digit code{" "}
-        <input
-          inputMode="numeric"
-          pattern="[0-9]{6}"
-          maxLength={6}
-          value={code}
-          onChange={(event) => setCode(event.target.value)}
-        />
-      </label>
-      <button
-        type="button"
-        disabled={
-          busy || !evidence.trim() || !reason.trim() || !looksLikeCode(code)
-        }
-        onClick={() => void apply()}
-      >
-        Apply rule change
-      </button>
-      <p role="status">{status}</p>
-      {error && <p role="alert">{error}</p>}
-    </article>
-  );
-}
-
 export function MetadataReview() {
   const [items, setItems] = useState<MetadataQueueItem[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
-  const [rules, setRules] = useState<MetadataRuleView[]>([]);
   const [message, setMessage] = useState("");
 
   async function load(next?: string) {
@@ -670,16 +531,8 @@ export function MetadataReview() {
       setMessage("Unable to load the metadata review queue.");
     }
   }
-  async function loadRules() {
-    try {
-      setRules(await getMetadataRules());
-    } catch {
-      setMessage("Unable to load the metadata rules.");
-    }
-  }
   useEffect(() => {
     void load();
-    void loadRules();
   }, []);
   const key = (item: MetadataQueueItem) =>
     `${item.kind}:${item.edition_id ?? item.printing_id}`;
@@ -691,13 +544,7 @@ export function MetadataReview() {
         Quarantined Editions, suspended Printings and collector reports. Nothing
         changes until you record a decision with a fresh code.
       </p>
-      <button
-        type="button"
-        onClick={() => {
-          void load();
-          void loadRules();
-        }}
-      >
+      <button type="button" onClick={() => void load()}>
         Refresh queue
       </button>
       <p role="status">{message}</p>
@@ -721,16 +568,6 @@ export function MetadataReview() {
           Load more
         </button>
       )}
-      <section aria-label="Metadata rules">
-        <h3>Metadata rules</h3>
-        <p>
-          Rules live in code. Activating a version records your approval for its
-          exact code digest.
-        </p>
-        {rules.map((rule) => (
-          <RuleCard key={rule.kind} rule={rule} onChanged={loadRules} />
-        ))}
-      </section>
     </section>
   );
 }

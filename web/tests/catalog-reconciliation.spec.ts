@@ -66,6 +66,8 @@ promote({'reconciliation-1':'Review Pikachu'})`,
     await page.reload();
     await page.getByRole("button", { name: "Account" }).click();
     await page.getByRole("menuitem", { name: "Owner controls" }).click();
+    await page.getByRole("tab", { name: /^Catalog/ }).click();
+    await expect(page).toHaveURL(/\/owner\/catalog$/);
     const article = page
       .getByRole("region", { name: "Catalog reconciliation" })
       .getByRole("article")

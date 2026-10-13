@@ -127,10 +127,10 @@ test("bound owner starts one catalog run from the private panel", async ({
   await expect(
     page.getByRole("heading", { name: "English catalog pull" })
   ).toBeVisible();
-  await page.getByRole("button", { name: "Start full English pull" }).click();
+  await page.getByRole("button", { name: "Start full pull" }).click();
   await expect(page.getByText(/Phase: (queued|enumerating)/)).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "Start full English pull" })
+    page.getByRole("button", { name: "Start full pull" })
   ).toBeDisabled();
   expect(
     (

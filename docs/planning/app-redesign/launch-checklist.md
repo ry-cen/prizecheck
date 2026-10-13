@@ -16,6 +16,7 @@ The redesign is a launch gate ([spec](spec.md), "Rollout"): PrizeCheck opens to 
 - [ ] Collection shows every Card Edition's Variant Descriptor (or "Unspecified Variant") on tiles, in tile names and in the inspector, and the inspector lists each Storage Leaf that holds the Edition. The Decks page's link reads "Open in Collection" (#164).
 - [ ] `GET /auth/session` also returns the signed-in `email`, for the avatar menu (#162).
 - [ ] Signing in has its own address, `/sign-in`, which the public header links to. Signed out, an address that is no page shows "Page not found" instead of the sign-in card, and a Published Deck link that no longer works shows "This deck isn't published anymore". Signed in, Discover and Published Decks open inside the app (#163).
+- [ ] Owner controls' sub-tabs have their own addresses: Status at `/owner`, then `/owner/catalog`, `/owner/metadata`, `/owner/attributes`, `/owner/reprints`, `/owner/missing` and `/owner/rules` (#167).
 
 ## Walkthroughs
 
@@ -69,6 +70,23 @@ On a phone (iOS Safari or Android Chrome):
 - [ ] 7. In Filters & display, turn Names on. Each tile shows its Variant line, cut with "…" when long, and nothing on the page scrolls sideways.
 - [ ] 8. Turn on Select and tap a few tiles. Each shows the gold ring and the check badge, and the page still scrolls with a swipe.
 
+### Owner controls (#167)
+
+On a desktop:
+
+- [ ] 1. Open the avatar menu and choose Owner controls. It opens on Status at `/owner`. Above the sub-tabs, a line of pills lists every health check that isn't OK, worst first (a stale backup before a 70% allowance warning, then unverified measurements), or reads "All health checks are OK."
+- [ ] 2. The sub-tabs read Status, Catalog, Metadata, Attributes, Reprints, Missing cards and Rules. Each queue tab shows how many items wait; the Catalog count matches Pending catalog reviews in the health table.
+- [ ] 3. On Status, the English catalog pull panel shows the last successful pull, the run with its phase and a status pill, a progress bar, and the Enumerated, Fetched and Validated counts. Refresh updates them. Start full pull is disabled while a run is in progress; if a run stops reporting progress, the button reads Restart pull and a warning explains why. Don't start a pull just for this check.
+- [ ] 4. Operational health is a table of area, check, value pill and detail. Click into it and use the arrow keys: when it's wider than the window it scrolls sideways inside its own box.
+- [ ] 5. Open Rules. Each rule kind is a card with its active version and every version with its digest, the latest marked. Confirm rule change stays disabled until the evidence URL, the reason and a six-digit code are filled in. Activate a rule only if you mean to.
+- [ ] 6. Press Tab until a sub-tab is focused, then use the arrow keys: focus moves along the tabs, and Enter opens one, changing the address (for example `/owner/rules`). Reload: the same tab is open. Press Back: the previous tab returns.
+- [ ] 7. Open Catalog, Metadata and Missing cards: today's review screens appear on a light panel and still work. Attributes and Reprints show how many items wait and say their review comes in a later update.
+
+On a phone (iOS Safari or Android Chrome):
+
+- [ ] 8. Open More, then Owner controls. The sub-tab row scrolls sideways inside itself, every tab is easy to hit with a thumb, the health table scrolls sideways inside its own box, and nothing else on the page scrolls sideways.
+- [ ] 9. Open Rules: the fields and buttons are thumb-sized, and Send code, the code and Confirm rule change wrap onto new lines instead of running off the screen.
+
 ## Manual checks that automation does not cover
 
 - [ ] Real touch on iOS Safari and Android Chrome for the tab bar, the More sheet and the ☰ drawer (the browser tests only emulate touch), including the home indicator area under the tab bar.
@@ -77,6 +95,7 @@ On a phone (iOS Safari or Android Chrome):
 - [ ] Screen reader on the sign-in card: the heading and subtitle are read first, the Email and Six-digit code fields are named, and "a code has been sent" is announced. On a slow load, "Loading…" is announced once (#163).
 - [ ] Until the dark first paint (rollout stage 7), a slow first load still shows a brief light page before the dark loading screen. That is expected for now (#163).
 - [ ] Screen reader on Collection: with Names off, a tile is read with its Variant (or "Unspecified Variant"), and the inspector's Leaf list is read as a list (#164).
+- [ ] Screen reader on Owner controls: the sub-tabs announce as tabs with their counts and which one is selected, the problems line reads as a list, and the health table reads as a table with its column headers (#167).
 
 ## Sources
 
