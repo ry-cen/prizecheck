@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { Pool } from "pg";
 import { expectTouchTarget } from "./support/touch-target";
+import { startAsNewOwner } from "./support/owner";
 
 // Ticket 111: the inspected Card Edition's price in the inspector, the opt-in Prices toggle that prices each
 // mounted tile, and the inspector's metadata report link. Prices are the existing EditionPrice component and
@@ -85,6 +86,7 @@ async function signIn(page: Page) {
     route.fulfill({ status: 200, contentType: "image/png", body: PIXEL })
   );
   await pool.query("DELETE FROM auth_send_event");
+  await startAsNewOwner(pool);
   await page.goto(`${ORIGIN}/workspace`);
   await page.getByLabel("Email", { exact: true }).fill(OWNER_EMAIL);
   await page.getByRole("button", { name: "Send code", exact: true }).click();
