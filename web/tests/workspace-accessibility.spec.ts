@@ -149,8 +149,6 @@ const sidebar = (page: Page) =>
   page
     .getByRole("complementary", { name: "Sidebar" })
     .getByRole("navigation", { name: "Locations" });
-const headingFocused = (page: Page) =>
-  page.evaluate(() => document.activeElement?.id === "ws-heading");
 const toast = (page: Page) =>
   page.getByRole("status").filter({ hasText: /Moved|Removed|Undo|Dismissed/ });
 
@@ -428,7 +426,7 @@ test.describe("desktop", () => {
     await expect(skip).toBeFocused();
     await expect(skip).toBeInViewport();
     await page.keyboard.press("Enter");
-    expect(await headingFocused(page)).toBe(true);
+    await expect(page.locator("#ws-heading")).toBeFocused();
     await page.keyboard.press("Tab");
     await expect(
       page.getByRole("button", { name: "Add cards", exact: true })
@@ -439,7 +437,12 @@ test.describe("desktop", () => {
     await expect(
       toast(page).filter({ hasText: `Moved 2 copies to 0 Dest ${s}.` })
     ).toBeVisible();
-    expect(await headingFocused(page)).toBe(true);
+    await expect(page.locator("#ws-heading")).toBeFocused();
+    // Undo joins the toast once the Undo list confirms this Move's record, a moment after the message shows
+    // (useInventoryActions.ts); until then the dock's first control, where the skip link lands, is Close notice.
+    await expect(
+      page.getByRole("button", { name: "Undo", exact: true })
+    ).toBeVisible();
     const undoLink = page.getByRole("link", {
       name: "Skip to selection actions and Undo",
     });

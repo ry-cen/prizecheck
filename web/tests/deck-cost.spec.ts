@@ -344,6 +344,8 @@ test("a cost for an older inventory revision is discarded and a concurrent chang
   await expect(checks).toContainText("4 cards");
   await expect(cost).toContainText("$1.00 · 4/4 cards priced");
   release();
+  // flake-exempt wait-for-timeout (quiet): the released answer must never be shown, and nothing on the page marks
+  // that it was dropped, so the check below follows a quiet period.
   await page.waitForTimeout(500);
   await expect(cost).not.toContainText("$99.99");
   await expect(cost).toContainText("$1.00 · 4/4 cards priced");
