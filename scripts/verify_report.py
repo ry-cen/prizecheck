@@ -38,7 +38,7 @@ def network_changes(directory):
                 if any(NETWORK_CHANGED in archive.read(name) for name in archive.namelist()
                        if name.endswith(('.network', '.trace'))):
                     found.append(trace.parent.relative_to(directory).as_posix())
-        except (OSError, zipfile.BadZipFile):
+        except Exception:  # a trace cut short by a killed worker (bad zip, truncated deflate member) is skipped
             continue
     return found
 
