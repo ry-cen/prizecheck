@@ -24,6 +24,14 @@ import { ipContext } from "./ipContext.js";
 import { safeNext } from "./nextPath.js";
 import { PublicReadLimiter } from "./publicReads.js";
 import { sessionBody } from "./sessionView.js";
+import {
+  isFresh,
+  linkedSignIns,
+  sameSiteStart,
+  SIGN_INS_PAGE,
+  unlinkPlan,
+  type AccountRow,
+} from "./signIns.js";
 
 const origin = process.env.PUBLIC_ORIGIN || "http://localhost:5173";
 const ownerEmail = (process.env.OWNER_EMAIL || "").trim().toLowerCase();
@@ -211,6 +219,18 @@ async function session(request: IncomingMessage) {
   });
 }
 
+// Better Auth's account list for the signed-in collector (row id, provider id, link time). Only the Sign-ins routes call
+// it, through the handler; /api/auth/list-accounts itself answers 404 from outside.
+async function listAccounts(request: IncomingMessage): Promise<AccountRow[]> {
+  const result = await auth.handler(
+    betterRequest(origin, request, "/api/auth/list-accounts", undefined, {
+      method: "GET",
+    })
+  );
+  if (!result.ok) throw new Error("Account list unavailable");
+  return (await result.json()) as AccountRow[];
+}
+
 // The session lookup for a budgeted route: the same session rules on a separate, bounded pool (auth/src/auth.ts).
 // Call it outside any auth.handler context: better-auth's adapter context is global, and inside one this lookup would
 // quietly use the shared pool.
@@ -384,6 +404,93 @@ const server = createServer(async (request, response) => {
           providers.map((p) => p.imageHost)
         )
       );
+    }
+    // The Sign-ins page (auth/src/signIns.ts): list, link and unlink, for the signed-in collector only.
+    if (path === "/auth/sign-ins" && request.method === "GET") {
+      if (!(await session(request)))
+        return json(response, 401, { error: "Authentication required" });
+      return json(response, 200, {
+        signIns: linkedSignIns(await listAccounts(request), providers),
+      });
+    }
+    const linkStart = /^\/auth\/link\/([^/]+)$/.exec(path);
+    if (linkStart && request.method === "GET") {
+      const provider = configuredProvider(linkStart[1]);
+      if (!provider) return json(response, 404, { error: "Not found" });
+      const back = `${SIGN_INS_PAGE}?provider=${provider.id}`;
+      // A plain link that carries the session cookie: never started from another site.
+      if (!sameSiteStart(request.headers))
+        return redirect(response, `${back}&error=cross_site_request`);
+      const current = await session(request);
+      if (!current)
+        return redirect(response, "/sign-in?next=%2Fsettings%2Fsign-ins");
+      // Better Auth checks freshness only for unlinking; the gateway applies the same rule to link starts.
+      if (!isFresh(current.session.createdAt))
+        return redirect(response, `${back}&error=recent_sign_in_required`);
+      if (!(await rateLimits.allowStart(trustedClientIp(request))))
+        return redirect(response, `${back}&error=too_many_sign_ups`);
+      const started = await auth.handler(
+        betterRequest(
+          origin,
+          request,
+          "/api/auth/link-social",
+          JSON.stringify({
+            provider: provider.id,
+            callbackURL: SIGN_INS_PAGE,
+            errorCallbackURL: back,
+          }),
+          { method: "POST", originHeader: origin }
+        )
+      );
+      // Like a sign-in start: Better Auth answers 200 with the provider URL, and the gateway redirects.
+      const location = started.ok ? started.headers.get("location") : null;
+      if (!location) throw new Error("Link start failed");
+      return redirect(response, location, started.headers.getSetCookie());
+    }
+    const unlink = /^\/auth\/unlink\/([^/]+)$/.exec(path);
+    if (unlink && request.method === "POST") {
+      if (!sameOrigin(request))
+        return json(response, 403, { error: "Origin required" });
+      const provider = configuredProvider(unlink[1]);
+      if (!provider) return json(response, 404, { error: "Not found" });
+      const current = await session(request);
+      if (!current)
+        return json(response, 401, { error: "Authentication required" });
+      if (!isFresh(current.session.createdAt))
+        return json(response, 403, { code: "recent_sign_in_required" });
+      const plan = unlinkPlan(
+        await listAccounts(request),
+        provider.id,
+        providers
+      );
+      if (plan.kind === "not-linked")
+        return json(response, 404, { error: "Not found" });
+      if (plan.kind === "last")
+        return json(response, 400, { code: "FAILED_TO_UNLINK_LAST_ACCOUNT" });
+      for (const accountId of plan.accountIds) {
+        const result = await auth.handler(
+          betterRequest(
+            origin,
+            request,
+            "/api/auth/unlink-account",
+            JSON.stringify({ accountId }),
+            { originHeader: origin }
+          )
+        );
+        if (result.ok) continue;
+        // Better Auth's own checks are the second layer: the same freshness rule, and the last account.
+        const refusal = (await result.json().catch(() => null)) as {
+          code?: unknown;
+        } | null;
+        if (refusal?.code === "SESSION_NOT_FRESH")
+          return json(response, 403, { code: "recent_sign_in_required" });
+        if (refusal?.code === "FAILED_TO_UNLINK_LAST_ACCOUNT")
+          return json(response, 400, {
+            code: "FAILED_TO_UNLINK_LAST_ACCOUNT",
+          });
+        throw new Error("Unlink failed");
+      }
+      return json(response, 200, { unlinked: provider.id });
     }
     if (path === "/auth/approval-code" && request.method === "POST") {
       if (!sameOrigin(request))
