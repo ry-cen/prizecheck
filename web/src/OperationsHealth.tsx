@@ -48,6 +48,10 @@ export function OperationsHealth() {
             Recorded delivery: {status.sign_in_delivered ?? "Unverified"}.
             Delivery failures: {status.sign_in_failed ?? "Unverified"}.
           </p>
+          <p role={status.signup_warning ? "alert" : "status"}>
+            {`New accounts in the last day: ${status.signups_24h} / ${status.daily_signup_cap}${status.signup_warning ? " — 80% warning" : ""}.`}{" "}
+            Refused for too many sign-ins: {status.signup_refusals}.
+          </p>
           <p>
             Private API in 24 hours: {status.api_requests_24h} requests,{" "}
             {status.api_failures_24h} failures,{" "}

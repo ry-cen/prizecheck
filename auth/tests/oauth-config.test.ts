@@ -146,6 +146,8 @@ describe("signup gate", () => {
       ownerEmail: OWNER,
       ownerBound: async () => options.bound ?? false,
       isOwner: async (id) => (options.owners ?? []).includes(id),
+      clientIp: () => "203.0.113.7",
+      allowSignup: async () => true,
     });
   const input = (
     action: GateInput["source"]["action"],
@@ -277,6 +279,8 @@ describe("signup gate", () => {
       isOwner: async () => {
         throw new Error("database down");
       },
+      clientIp: () => "203.0.113.7",
+      allowSignup: async () => true,
     });
     await expect(
       failing(

@@ -1,4 +1,5 @@
 import { expect, type Page } from "@playwright/test";
+import { Pool } from "pg";
 
 // Browser journeys sign in through the OAuth test fake (auth/testing/oauth-fake), which the gate loads into every stack's
 // gateway: the start route redirects to the fake consent page, which forwards to the real callback with the chosen
@@ -25,6 +26,14 @@ export async function fakeSignIn(
   page: Page,
   { identity = "owner", provider = "google", next }: FakeSignIn = {}
 ): Promise<void> {
+  // Every journey signs in from one loopback address, which would soon pass the sign-in start limit (60 per hour) and,
+  // on a public stack, the creation limits: clear them first, as the email journeys cleared auth_send_event.
+  const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+  try {
+    await pool.query("DELETE FROM auth_rate_event");
+  } finally {
+    await pool.end();
+  }
   await page.context().route(PROVIDER_HOSTS, (route) => route.abort());
   const start = new URL(`/auth/sign-in/${provider}`, origin());
   if (next) start.searchParams.set("next", next);

@@ -28,6 +28,8 @@ x-api-environment: &api-environment
   PRICE_RUNNER_LOCK_DIR: /var/lib/prizecheck/price-runners
   # Dev keeps the newest marketplace matching rule active without an owner approval (catalog_targets.ensure_matching_rule).
   MARKETPLACE_MATCHING: automatic
+  # The owner panel shows the last day's new accounts against this cap; the auth gateway enforces it.
+  DAILY_SIGNUP_CAP: ${DAILY_SIGNUP_CAP:-100}
   NODE_ENV: ${PRIZECHECK_NODE_ENV:-development}
 
 services:
@@ -105,6 +107,8 @@ services:
       DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID:-}
       DISCORD_CLIENT_SECRET: ${DISCORD_CLIENT_SECRET:-}
       DAILY_SEND_CAP: ${DAILY_SEND_CAP:-100}
+      # New OAuth accounts per rolling day, app-wide; the API reads the same variable for the owner panel.
+      DAILY_SIGNUP_CAP: ${DAILY_SIGNUP_CAP:-100}
       TRUSTED_PROXY_IPS: ""
     volumes:
       - ${PRIZECHECK_DATA_DIR}/mail:/var/lib/prizecheck/mail

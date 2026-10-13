@@ -23,6 +23,10 @@ export type GateDependencies = {
    * otherwise the user whose stored, verified email is OWNER_EMAIL.
    */
   isOwner: (userId: string) => Promise<boolean>;
+  /** The trusted client IP of the callback being handled (auth/src/ipContext.ts), or null outside a context. */
+  clientIp: () => string | null;
+  /** Checks one OAuth account creation from `ip` against the creation limits, recording it when permitted. */
+  allowSignup: (ip: string) => Promise<boolean>;
 };
 
 const refuse = (error: string): GateResult => ({
@@ -43,7 +47,17 @@ export function createSignupGate(deps: GateDependencies) {
       if (!email) return refuse("email_not_found");
       if (user.emailVerified !== true) return refuse("email_not_verified");
     }
-    if (deps.publicSignup) return;
+    if (deps.publicSignup) {
+      // Creation limits (#155), on OAuth account creation only: email-code creation has its own send limits, and
+      // returning sign-ins and links are never throttled. Checked last, so a refusal for another reason uses up nothing.
+      if (oauth && source.action === "create-user") {
+        const ip = deps.clientIp();
+        // No IP context: the gateway didn't vouch for this caller. Throwing refuses (Better Auth: validation_failed).
+        if (!ip) throw new Error("No client IP context");
+        if (!(await deps.allowSignup(ip))) return refuse("too_many_sign_ups");
+      }
+      return;
+    }
     // owner-only: every refusal is the same code, whether or not an account exists.
     if (source.action === "create-user") {
       if (email === deps.ownerEmail && !(await deps.ownerBound())) return;
