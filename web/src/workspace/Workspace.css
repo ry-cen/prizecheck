@@ -470,6 +470,13 @@
 .ws-root .ws-app-nav button {
   white-space: nowrap;
 }
+/* #156: Sign-ins joined Main views, so at the narrowest desktop widths the profile badge shows only its picture or
+   initial, and the header still never overflows. The mobile drawer keeps the name. */
+@media (max-width: 900px) {
+  .ws-root .ws-app-nav .profile-badge-name {
+    display: none;
+  }
+}
 @media (max-width: 1100px) {
   .ws-app-nav {
     gap: var(--space-1);

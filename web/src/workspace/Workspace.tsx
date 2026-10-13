@@ -57,7 +57,13 @@ const FOCUSABLE =
   'button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex="-1"])';
 
 /** The other signed-in pages, opened from Main views. */
-export type AppPage = "collection" | "decks" | "catalog" | "reports" | "owner";
+export type AppPage =
+  | "collection"
+  | "decks"
+  | "catalog"
+  | "reports"
+  | "owner"
+  | "settings/sign-ins";
 const PAGES: { view: AppPage; label: string }[] = [
   { view: "collection", label: "Collection" },
   { view: "decks", label: "Decks" },
@@ -372,9 +378,15 @@ export function Workspace({
       />
     );
 
-  const pages = ownerControls
-    ? [...PAGES, { view: "owner" as const, label: "Owner controls" }]
-    : PAGES;
+  const pages: { view: AppPage; label: string }[] = [
+    ...PAGES,
+    ...(ownerControls
+      ? [{ view: "owner" as const, label: "Owner controls" }]
+      : []),
+    // Until the app-redesign avatar menu exists, Sign-ins sits here beside the profile badge and Sign out, on desktop
+    // and in the mobile drawer.
+    { view: "settings/sign-ins", label: "Sign-ins" },
+  ];
   const mainViews = (className: string) => (
     <nav aria-label="Main views" className={className}>
       {pages.map((page) => (

@@ -13,6 +13,7 @@ import { Discovery } from "./Discovery";
 import { CatalogReview } from "./CatalogReview";
 import { CatalogSearch } from "./CatalogSearch";
 import { MetadataReview } from "./MetadataReview";
+import { SignIns } from "./SignIns";
 import {
   MissingCardReports,
   OwnerMissingCardReview,
@@ -26,8 +27,15 @@ import {
 import "./style.css";
 import "./tokens.css";
 
+// A view's path is `/${view}`: the Sign-ins page (#156) is the view "settings/sign-ins" at /settings/sign-ins.
 type View =
-  "workspace" | "collection" | "decks" | "catalog" | "reports" | "owner";
+  | "workspace"
+  | "collection"
+  | "decks"
+  | "catalog"
+  | "reports"
+  | "owner"
+  | "settings/sign-ins";
 const protectedViews: View[] = [
   "workspace",
   "collection",
@@ -35,6 +43,7 @@ const protectedViews: View[] = [
   "catalog",
   "reports",
   "owner",
+  "settings/sign-ins",
 ];
 /** The workspace replaced the old Locations page (ticket 114): old /locations links and the bare origin open it. */
 function canonicalPath(path: string): string {
@@ -336,6 +345,7 @@ function App() {
               catalog: "Catalog",
               reports: "Missing cards",
               owner: "Owner controls",
+              "settings/sign-ins": "Sign-ins",
             }[view]
           }
         </h1>
@@ -369,6 +379,12 @@ function App() {
             Owner controls
           </button>
         )}
+        <button
+          aria-current={view === "settings/sign-ins" ? "page" : undefined}
+          onClick={() => navigate("settings/sign-ins")}
+        >
+          Sign-ins
+        </button>
       </nav>
       {showOwner && ownerCatalog ? (
         <section aria-label="Catalog pull">
@@ -442,6 +458,8 @@ function App() {
         <Collection />
       ) : view === "decks" ? (
         <Decks />
+      ) : view === "settings/sign-ins" ? (
+        <SignIns />
       ) : null}
       <p role="alert">{message}</p>
     </main>
