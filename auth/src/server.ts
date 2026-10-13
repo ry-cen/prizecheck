@@ -7,6 +7,7 @@ import {
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { auth, budgetedAuth, deliverCode, pool } from "./auth.js";
+import { betterRequest, relay } from "./betterRelay.js";
 import { callerFor, trustedClientIp } from "./caller.js";
 import { PublicReadLimiter } from "./publicReads.js";
 import { signupEnabled } from "./signup.js";
@@ -169,29 +170,6 @@ async function authCounter(
   }
 }
 
-function betterRequest(request: IncomingMessage, path: string, body?: string) {
-  const headers = new Headers();
-  if (request.headers.cookie) headers.set("cookie", request.headers.cookie);
-  if (request.headers.origin) headers.set("origin", request.headers.origin);
-  headers.set("content-type", "application/json");
-  return new Request(`${origin}${path}`, {
-    method: request.method,
-    headers,
-    body,
-  });
-}
-
-async function relay(response: ServerResponse, result: Response) {
-  const headers: Record<string, string | string[]> = {
-    "content-type": result.headers.get("content-type") || "application/json",
-    "cache-control": "no-store",
-  };
-  const cookies = result.headers.getSetCookie();
-  if (cookies.length) headers["set-cookie"] = cookies;
-  response.writeHead(result.status, headers);
-  response.end(await result.text());
-}
-
 async function session(request: IncomingMessage) {
   return auth.api.getSession({
     headers: new Headers({ cookie: request.headers.cookie || "" }),
@@ -224,6 +202,7 @@ const server = createServer(async (request, response) => {
           if (await allowedSend(email, ip)) {
             const sent = await auth.handler(
               betterRequest(
+                origin,
                 request,
                 "/api/auth/email-otp/send-verification-otp",
                 JSON.stringify({ email, type: "sign-in" })
@@ -259,6 +238,7 @@ const server = createServer(async (request, response) => {
       }
       const result = await auth.handler(
         betterRequest(
+          origin,
           request,
           "/api/auth/sign-in/email-otp",
           JSON.stringify({ email, otp: body.code })
@@ -416,7 +396,7 @@ const server = createServer(async (request, response) => {
       if (!sameOrigin(request))
         return json(response, 403, { error: "Origin required" });
       const result = await auth.handler(
-        betterRequest(request, "/api/auth/sign-out", "{}")
+        betterRequest(origin, request, "/api/auth/sign-out", "{}")
       );
       return relay(response, result);
     }
