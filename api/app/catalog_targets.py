@@ -374,6 +374,21 @@ def evaluate_edition(current, facts, rejections, active, verified_elsewhere):
                         auto_closed=True, accepted_projection=projection_fp)
 
 
+def complete_quote_variant(current, facts, active, verified_elsewhere):
+    """A matching-rule Edition verified without a quote variant gets the one the active rule now names.
+
+    Only while the accepted candidate is unchanged and the active rule confirms the same product; the state, product and
+    basis stay as they are, and the activation that named the variant is recorded. Anything else returns ``current``.
+    """
+    if (current.state != "verified" or current.quote_variant is not None or current.basis != "matching_rule"
+            or active is None or facts["fingerprint"] != current.accepted_fingerprint):
+        return current
+    result = active.rule.evaluate(facts, verified_elsewhere)
+    if isinstance(result, Failure) or result[0] != current.product_id or result[1] is None:
+        return current
+    return replace(current, quote_variant=result[1], activation_id=active.activation_id)
+
+
 # ---------------------------------------------------------------- Live state
 
 
@@ -520,8 +535,12 @@ def verified_elsewhere(conn, printing_id, edition_id):
     return held
 
 
-def refresh_editions(conn, context, edition_ids):
-    """Re-evaluate marketplace state for Editions whose candidate changed or whose rule changed."""
+def refresh_editions(conn, context, edition_ids, complete=False):
+    """Re-evaluate marketplace state for Editions whose candidate changed or whose rule changed.
+
+    ``complete`` also gives an unchanged verified Edition the quote variant the active rule now names
+    (``complete_quote_variant``).
+    """
     if not edition_ids:
         return 0
     rows = conn.execute("""SELECT e.id,e.printing_id,e.descriptor,p.source,p.source_id,em.mapping_candidate,
@@ -547,7 +566,10 @@ def refresh_editions(conn, context, edition_ids):
             "SELECT source_fingerprint FROM catalog_metadata_rejection WHERE edition_id=%s AND target='marketplace'",
             (edition_id,))])
         current = edition_state(row)
-        new = evaluate_edition(current, facts, rejections, context.matching, verified_elsewhere(conn, row["printing_id"], row["id"]))
+        elsewhere = verified_elsewhere(conn, row["printing_id"], row["id"])
+        new = evaluate_edition(current, facts, rejections, context.matching, elsewhere)
+        if complete and new == current:
+            new = complete_quote_variant(current, facts, context.matching, elsewhere)
         if new == current:
             continue
         bump = 1 if (new.state == "verified") != (current.state == "verified") else 0
@@ -621,7 +643,8 @@ def activate_rule(conn, kind, version, reviewer_id, evidence_url, reason):
     """Record a maintainer's rule activation (version None deactivates) and re-evaluate affected targets.
 
     Re-evaluation covers unsupported and eligible Printings and unverified, not auto-closed
-    Editions only: quarantined, suspended and previously verified targets are never re-qualified.
+    Editions only: quarantined, suspended and previously verified targets are never re-qualified. A matching-rule
+    Edition verified without a quote variant may gain the one the new rule names (``complete_quote_variant``).
     """
     if kind not in REGISTRIES or (version is not None and version not in REGISTRIES[kind]):
         raise ValueError("Unknown rule kind or version")
@@ -642,6 +665,9 @@ def activate_rule(conn, kind, version, reviewer_id, evidence_url, reason):
     ids = [row["edition_id"] for row in conn.execute("""SELECT edition_id FROM catalog_edition_metadata
       WHERE mapping_state='unverified' AND NOT auto_closed ORDER BY edition_id""")]
     changed = sum(refresh_editions(conn, context, ids[start:start + 500]) for start in range(0, len(ids), 500))
+    ids = [row["edition_id"] for row in conn.execute("""SELECT edition_id FROM catalog_edition_metadata
+      WHERE mapping_state='verified' AND quote_variant IS NULL AND mapping_basis='matching_rule' ORDER BY edition_id""")]
+    changed += sum(refresh_editions(conn, context, ids[start:start + 500], complete=True) for start in range(0, len(ids), 500))
     return {"printings": 0, "editions": changed}
 
 
