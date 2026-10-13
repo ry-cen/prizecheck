@@ -195,9 +195,10 @@ class ReleaseTest(unittest.TestCase):
         url = urlunsplit(urlsplit(admin)._replace(path='/'+name))
         with tempfile.TemporaryDirectory() as temp:
             proof = Path(temp)/'deliberately-stale-synthetic-readiness.json'
-            proof.write_text(json.dumps({'schemaVersion':1,'releaseCommit':'0'*40,
+            proof.write_text(json.dumps({'schemaVersion':2,'releaseCommit':'0'*40,
               'authorizedByOwner':True,'senderVerified':True,'recipientDeliveryVerified':True,
               'ownerWalkthroughVerified':True,'recoveryVerified':True,'privacyVerified':True,'capacityVerified':True,
+              'providerSignInVerified':['google','discord'],
               'evidence':'Synthetic rejection probe; no actual production proof'}))
             projection = Path(temp)/'public'
             projection.mkdir()
@@ -235,8 +236,10 @@ class ReleaseTest(unittest.TestCase):
                 self.assertEqual(failure.exception.code,503)
                 failure.exception.close()
                 self.assertEqual(request('/__release/status')['commit'],first)
-                # After schema readiness is satisfied, inherited stale RELEASE_COMMIT must still
-                # be replaced by the actual candidate commit, rejecting the fake readiness file.
+                # The proof is a complete version 2 proof (mail gates included, because the release runtime
+                # defaults EMAIL_SIGN_IN=on; providers cover the placeholder Google and Discord). Only its
+                # releaseCommit is stale: the inherited RELEASE_COMMIT must still be replaced by the actual
+                # candidate commit, so the commit binding is the one gate that rejects it.
                 subprocess.run([str(runtime_root/'.venv/bin/python'),str(store/second/'scripts/migrate.py')],env=env,check=True,capture_output=True)
                 with self.assertRaises(urllib.error.HTTPError) as failure:
                     request('/__release/apply',{'commit':second})
