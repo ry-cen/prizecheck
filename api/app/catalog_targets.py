@@ -242,15 +242,38 @@ class MatchingRulesV3(MatchingRulesV2):
     V2 read any key beyond type/finish/size as an extra facet, so those descriptors named no finish and never matched.
     V3 drops ``thirdParty`` from the descriptor only; the lookup's own ``thirdParty.tcgplayer`` is still checked against
     the selected product.
+
+    TCGdex also often keeps the card's TCGplayer block on the card instead of inside each variant. ``borrowed_block``
+    decides when a variant without a block of its own reads the card's; the import and the price fetch both ask it.
     """
     LOOKUP_KEYS = frozenset(("thirdParty",))
 
     @classmethod
+    def plain(cls, descriptor):
+        if not isinstance(descriptor, dict):
+            return descriptor
+        return {key: value for key, value in descriptor.items() if key not in cls.LOOKUP_KEYS}
+
+    @classmethod
+    def borrowed_block(cls, card_pricing, descriptor, sibling_descriptors):
+        """The card's TCGplayer block for a variant that lists none, or None.
+
+        Only for a plain finish the finish table covers, when the card's block has a product for that finish and no
+        sibling variant reads as the same finish once ``thirdParty`` is set aside: two such siblings would otherwise
+        contend for one entry, and which one won would depend on row order. Every other variant borrows nothing.
+        """
+        block = card_pricing.get("tcgplayer") if isinstance(card_pricing, dict) else None
+        plain = cls.plain(descriptor)
+        key = cls.finish_key(plain) if isinstance(plain, dict) else None
+        if not isinstance(block, dict) or key is None or not isinstance(block.get(key), dict) or "productId" not in block[key]:
+            return None
+        if [cls.plain(sibling) for sibling in sibling_descriptors].count(plain) != 1:
+            return None
+        return block
+
+    @classmethod
     def evaluate(cls, facts, verified_elsewhere):
-        descriptor = facts["descriptor"]
-        if isinstance(descriptor, dict):
-            descriptor = {key: value for key, value in descriptor.items() if key not in cls.LOOKUP_KEYS}
-        return super().evaluate({**facts, "descriptor": descriptor}, verified_elsewhere)
+        return super().evaluate({**facts, "descriptor": cls.plain(facts["descriptor"])}, verified_elsewhere)
 
 
 LIVE_RULES = {1: LiveRulesV1}

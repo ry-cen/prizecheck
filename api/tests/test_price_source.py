@@ -430,6 +430,23 @@ def test_a_variant_without_a_block_reads_the_cards_block_at_its_own_finish_only(
     assert select({**record(stamped), 'pricing': card}, descriptor={**DESCRIPTOR, 'stamp': ['set-logo']}) == Failure('lookup_drift')
 
 
+def test_the_import_and_the_price_fetch_read_the_same_borrowed_entry():
+    from app.catalog import edition_metadata
+    from app.catalog_targets import MatchingRulesV3
+    card = {'tcgplayer': {'updated': '2026-10-07T22:55:02Z', 'normal': {'productId': 219333, 'marketPrice': '1'},
+                          'reverse-holofoil': {'productId': 219333, 'marketPrice': '2'}}}
+    bare = [{key: value for key, value in entry(type=finish, variantId=finish).items() if key != 'pricing'}
+            for finish in ('normal', 'reverse')]
+    rec = {**record(*bare), 'pricing': card}
+    for variant, key in zip(bare, ('normal', 'reverse-holofoil')):
+        descriptor = tcgdex_record.source_descriptor(variant)
+        lookup = edition_metadata(rec, descriptor, False)['mapping_candidate']['candidate']
+        problem, products = MatchingRulesV3.products(MatchingRulesV3.narrow(lookup, MatchingRulesV3.finish_key(descriptor)))
+        assert (problem, products) == (None, {key: 219333})
+        quote = select(rec, descriptor=descriptor, lookup={'card': 'swsh3-136', 'variant': key})
+        assert quote.amount == card['tcgplayer'][key]['marketPrice']
+
+
 def test_third_party_conflict_fails():
     for listed, expected in ((1, Failure('lookup_drift')), (219333, None)):
         third = {'tcgplayer': listed}
