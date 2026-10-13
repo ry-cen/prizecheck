@@ -2,7 +2,7 @@
 
 **Label:** wayfinder:map
 
-**Status:** charted 2026-10-12; frontier open; app shell decided, old Collection page audited, Decks UI inventoried, Deck experience, Catalog search, Published Deck and Discover decided 2026-10-12
+**Status:** charted 2026-10-12; frontier open; app shell decided, old Collection page audited, Decks UI inventoried, Deck experience, Catalog search, Published Deck and Discover decided 2026-10-12; remaining fog ticketed as #136–#141
 
 ## Destination
 
@@ -34,18 +34,9 @@ An agreed plan, ready for owner-invoked `/to-spec` and `/to-ticket`, that puts e
 
 ## Not yet specified
 
-- **Missing cards and Owner controls** on the shared components. Their place in the shell is decided: Missing cards is a tab and sits in the mobile More sheet, and Owner controls sits in the avatar menu and the More sheet. Still open is how the dense review queues and review cards read, with wide tables scrolling inside their own containers.
-- **Sign-in and loading screens.** These use the slim public header from the shell decision. Still open is the sign-in and code-entry layout, and how loading looks without a flash of the old light screen.
-- **The shared component kit.** Which pieces to extract from the workspace (buttons, fields, dialogs, tables, empty, loading and error states, toasts), and where a Card Edition's Variant Descriptor sits on a Collection tile, and how the old `web/src/style.css` and the old pages' CSS are retired. The shell prototype found that `style.css` restyles every `button`, `input`, `label` and `main`, so it must be retired or scoped.
-- **Deck builder, Catalog and public data.** The deck builder and Catalog share one catalog browse that returns Card Editions, filtered by type, format, set and "owned only", with owned counts and copy locations merged in, and with an empty query allowed. The builder also needs display data for Deck List lines and Undo for Deck List edits. Both need per-Edition advisory legality for their format chips. Catalog's Add mode needs to add several Editions to one Location at once. The Target Format decision adds more:
-  - a Target Format on Deck and on published snapshots;
-  - a legal-result gate in the publish and republish commands;
-  - per-Edition prices in the public cost response;
-  - Target Format results, a format filter and a cached-only cost in Discover summaries.
+<!-- Empty: on 2026-10-12 the remaining fog became tickets (#136–#141). Add new fog here as the frontier advances. -->
 
-  See the [Published Deck and Discover](resolutions/decide-published-deck-and-discover.md#what-the-spec-and-backend-need), [Deck experience](resolutions/decide-deck-experience.md#what-the-spec-and-backend-need) and [Catalog search](resolutions/decide-catalog-search.md#what-the-spec-and-backend-need) resolutions. Collection's per-Edition listing (`GET /api/collection`) stays as the owned library's likely source.
-- **Rollout and verification.** The order pages move into the shell, and how browser tests and axe checks cover every page.
-- **Reconciling the workspace tickets.** [Workspace: Shell, design variables and Location sidebar](https://github.com/ry-cen/prizecheck/issues/102) through [Workspace: Cutover, accessibility pass and prototype removal](https://github.com/ry-cen/prizecheck/issues/114) are still open, but the cutover appears to have landed on `dev`. The spec needs to know what's actually done.
+Nothing yet.
 
 ## Out of scope
 
