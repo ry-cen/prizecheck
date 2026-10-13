@@ -164,6 +164,34 @@ def test_a_variant_without_a_block_is_matched_through_the_cards_block_at_its_fin
         "normal": ("verified", None), "reverse": ("unverified", "rule_failed")}
 
 
+def test_stamped_and_contending_variants_borrow_nothing_from_the_cards_block():
+    reset_catalog()
+    activate(MATCHING, 3)
+    record = card_level_block(1)
+    record["variants_detailed"].append({**record["variants_detailed"][0], "stamp": ["set-logo"], "variantId": "s-1"})
+    run(Records(record))
+    with connect() as conn:
+        stamped = conn.execute("""SELECT m.* FROM catalog_edition e JOIN catalog_edition_metadata m ON m.edition_id=e.id
+          JOIN catalog_printing p ON p.id=e.printing_id WHERE p.source_id='meta-1' AND e.descriptor ? 'stamp'""").fetchall()
+    assert [(row["mapping_state"], row["product_id"]) for row in stamped] == [("unverified", None)]
+    assert stamped[0]["mapping_candidate"]["candidate"].get("pricing") is None
+    # Two variants that read as the same plain finish once thirdParty is set aside contend for one entry: neither borrows.
+    record = card_level_block(2)
+    record["variants_detailed"] = [{**variant, "thirdParty": {"cardmarket": 2000 + number}}
+                                   for number, variant in enumerate([record["variants_detailed"][0]] * 2)]
+    record["variants_detailed"][1]["variantId"] = "n-2"
+    run(Records(card_level_block(1), record))
+    assert {row["mapping_state"] for row in metadata("meta-2")[1].values()} == {"unverified"}
+
+
+def test_a_card_block_entry_without_a_product_is_not_borrowed():
+    card = {"tcgplayer": {"normal": {"marketPrice": 1}, "reverse-holofoil": {"productId": 9}}}
+    normal = {"type": "normal", "size": "standard"}
+    assert MatchingRulesV3.borrowed_block(card, normal, [normal]) is None
+    assert MatchingRulesV3.borrowed_block(card, {"type": "reverse", "size": "standard"},
+                                          [normal, {"type": "reverse", "size": "standard"}]) == card["tcgplayer"]
+
+
 def test_activating_v3_names_the_quote_variant_of_an_edition_v1_verified_without_one():
     reset_catalog()
     activate(MATCHING, 1)
@@ -1006,7 +1034,7 @@ PINNED_DIGESTS = {
     (LIVE, 1): "79ed62c768325f3dc0d378e0f8128251c6f8ef4a778b6351c4097c9ec1235084",
     (MATCHING, 1): "5367c25316bea657d01a044af5a175dfe66dab656d36f82bcc16bb060dfb25d6",
     (MATCHING, 2): "6994b033232a73138f83cda642e97edc8e75e692e9bba29a3704b913eb7a6eef",
-    (MATCHING, 3): "4bd54323c859f05ebd31083fcdaba3c2c4dd84562f82d7e112469086db06a3d9",
+    (MATCHING, 3): "60e02ce648ea81e2177124c2f4a5740897e5481dbecfa20a1a1395dddf184c5e",
 }
 
 

@@ -443,7 +443,10 @@ def _source_facts(conn, loaded):
 
 
 def _variant_block_holds(loaded, reviewed) -> bool:
-    """True when this Edition's own source variant block for the quote variant key holds the reviewed product."""
+    """True when this Edition's source variant block for the quote variant key holds the reviewed product.
+
+    The block is the variant's own, or the card's when the variant borrowed it (``tcgdex_record.priced_variant``).
+    """
     candidate = loaded["source_candidate"]
     if not isinstance(candidate, dict) or candidate.get("correspondence") != "source_candidate":
         return False

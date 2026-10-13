@@ -25,22 +25,20 @@ def priced_variant(record: dict, variant: dict) -> dict:
     """``variant`` with a TCGplayer block: its own, or the card's when it lists none.
 
     TCGdex often keeps the card's TCGplayer block (one entry per finish) on the card instead of repeating it inside each
-    variant. A variant borrows it only when the variant is a plain finish the reviewed finish table covers and the block
-    lists that finish, so the matching rule and the price fetch narrow it to that one entry exactly as they narrow a block
-    the variant repeats. Any other variant (a stamp, subtype or special foil, an uncovered finish) keeps the card's
-    block as printing-level evidence and borrows nothing.
+    variant. Whether a variant borrows it is the reviewed rule's decision (``MatchingRulesV3.borrowed_block``); the
+    matching rule and the price fetch then narrow it to the variant's entry exactly as they narrow a block the variant
+    repeats. A variant that borrows nothing keeps the card's block as printing-level evidence.
     """
     pricing = variant.get("pricing")
     if isinstance(pricing, dict) and isinstance(pricing.get("tcgplayer"), dict):
         return variant
-    card = record.get("pricing") if isinstance(record, dict) else None
-    if not isinstance(card, dict) or not isinstance(card.get("tcgplayer"), dict):
+    detailed = record.get("variants_detailed") if isinstance(record, dict) else None
+    siblings = [source_descriptor(item) for item in distinct_variants(detailed) if isinstance(item, dict)] if isinstance(detailed, list) else []
+    block = MatchingRulesV3.borrowed_block(record.get("pricing") if isinstance(record, dict) else None,
+                                           source_descriptor(variant), siblings)
+    if block is None:
         return variant
-    descriptor = {key: value for key, value in source_descriptor(variant).items() if key not in MatchingRulesV3.LOOKUP_KEYS}
-    key = MatchingRulesV3.finish_key(descriptor)
-    if key is None or not isinstance(card["tcgplayer"].get(key), dict):
-        return variant
-    return {**variant, "pricing": {**(pricing if isinstance(pricing, dict) else {}), "tcgplayer": card["tcgplayer"]}}
+    return {**variant, "pricing": {**(pricing if isinstance(pricing, dict) else {}), "tcgplayer": block}}
 
 
 def distinct_variants(detailed: list) -> list:
