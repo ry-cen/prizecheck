@@ -1,12 +1,14 @@
 // PROTOTYPE — throwaway sample data for the app shell prototype (ticket #122). Not production code.
 
-export type PageId = "collection" | "decks" | "catalog" | "reports" | "owner";
+export type PageId = "collection" | "decks" | "catalog" | "reports" | "owner" | "signins";
 export const PAGES: { id: PageId; label: string; icon: string }[] = [
   { id: "collection", label: "Collection", icon: "▦" },
   { id: "decks", label: "Decks", icon: "❒" },
   { id: "catalog", label: "Catalog", icon: "⌕" },
   { id: "reports", label: "Missing cards", icon: "⚑" },
 ];
+// PROTOTYPE (#140): the Sign-ins settings page, reached from the avatar menu and the More sheet.
+export const SIGNINS_PAGE = { id: "signins" as const, label: "Sign-ins", icon: "⚿" };
 export const OWNER_PAGE = {
   id: "owner" as const,
   label: "Owner controls",

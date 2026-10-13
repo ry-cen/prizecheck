@@ -3,10 +3,20 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#121110" />
     <title>PrizeCheck</title>
+    <!-- PROTOTYPE (#140): first paint. These values copy --color-bg, --color-text-muted and --color-accent from
+         tokens.css, because they must apply before any script or stylesheet loads. React replaces #root's contents. -->
+    <style>
+      html { background: #121110; color-scheme: dark; }
+      body { margin: 0; }
+      .boot { position: fixed; inset: 0; display: grid; place-content: center; font: 700 20px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #b9b0a3; }
+      .boot span { color: #e6bd57; }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root"><div class="boot" aria-hidden="true"><span>✦</span> PrizeCheck</div></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

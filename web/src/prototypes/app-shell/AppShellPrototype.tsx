@@ -12,6 +12,7 @@ import {
   DECKS,
   LOCATIONS,
   OWNER_PAGE,
+  SIGNINS_PAGE,
   OWNER_ROWS,
   PAGES,
   REPORTS,
@@ -58,6 +59,16 @@ import {
   setOpsVariant,
   useOps,
 } from "../owner-reports/OwnerReportsPrototype";
+// PROTOTYPE (#140): sign-in, Sign-ins page, messages and loading, ?auth=A|B|C.
+import {
+  AUTH_VARIANTS,
+  AuthPicker,
+  AuthScreens,
+  SignInsPage,
+  setAuthVariant,
+  showAuthScreen,
+  useAuth,
+} from "../sign-in/SignInPrototype";
 
 const VARIANTS = [
   { key: "A", name: "Top tabs + bottom bar" },
@@ -195,7 +206,7 @@ function useShell() {
 }
 
 function pageLabel(id: PageId) {
-  return [...PAGES, OWNER_PAGE].find((p) => p.id === id)!.label;
+  return [...PAGES, OWNER_PAGE, SIGNINS_PAGE].find((p) => p.id === id)!.label;
 }
 
 // ---------- page pieces (identical in every variant; only the shell around them changes) ----------
@@ -650,6 +661,8 @@ function PageBody({ s }: { s: Shell }) {
       return <MissingCardsPage />;
     case "owner":
       return <OwnerControlsPage />;
+    case "signins":
+      return <SignInsPage />;
   }
 }
 
@@ -777,7 +790,7 @@ function PublicShell({ s }: { s: Shell }) {
         <button
           type="button"
           className="ps-btn ps-btn-primary"
-          onClick={() => s.setSignedIn(true)}
+          onClick={() => showAuthScreen("signin")}
         >
           Sign in
         </button>
@@ -845,6 +858,9 @@ function AccountMenu({ s }: { s: Shell }) {
       {s.drawer === "account" && (
         <div className="ps-menu" role="menu">
           <span className="ps-muted">rycen618@…</span>
+          <button type="button" role="menuitem" onClick={() => s.go("signins")}>
+            Sign-ins
+          </button>
           {s.owner && (
             <button type="button" role="menuitem" onClick={() => s.go("owner")}>
               Owner controls
@@ -853,7 +869,10 @@ function AccountMenu({ s }: { s: Shell }) {
           <button
             type="button"
             role="menuitem"
-            onClick={() => s.setSignedIn(false)}
+            onClick={() => {
+              s.setSignedIn(false);
+              showAuthScreen("signin");
+            }}
           >
             Sign out
           </button>
@@ -957,12 +976,21 @@ function VariantA({ s }: { s: Shell }) {
             <button type="button" onClick={() => s.go("reports")}>
               ⚑ Missing cards
             </button>
+            <button type="button" onClick={() => s.go("signins")}>
+              ⚿ Sign-ins
+            </button>
             {s.owner && (
               <button type="button" onClick={() => s.go("owner")}>
                 ⚙ Owner controls
               </button>
             )}
-            <button type="button" onClick={() => s.setSignedIn(false)}>
+            <button
+              type="button"
+              onClick={() => {
+                s.setSignedIn(false);
+                showAuthScreen("signin");
+              }}
+            >
               Sign out
             </button>
           </div>
@@ -1174,14 +1202,17 @@ function Switcher({ s }: { s: Shell }) {
   const deck = useDeck();
   const cat = useCat();
   const ops = useOps();
+  const auth = useAuth();
+  const onAuth = auth.screen !== "off" || s.page === "signins" || !s.signedIn;
   const onCatalog = s.page === "catalog";
   const onOps = s.page === "reports" || s.page === "owner";
-  const list: readonly { key: string; name: string }[] = onOps ? OPS_VARIANTS : onCatalog ? CAT_VARIANTS : DECK_VARIANTS;
-  const current = onOps ? ops.variant : onCatalog ? cat.variant : deck.variant;
+  const list: readonly { key: string; name: string }[] = onAuth ? AUTH_VARIANTS : onOps ? OPS_VARIANTS : onCatalog ? CAT_VARIANTS : DECK_VARIANTS;
+  const current = onAuth ? auth.variant : onOps ? ops.variant : onCatalog ? cat.variant : deck.variant;
   const i = list.findIndex((v) => v.key === current);
   const cycle = (d: number) => {
     const next = list[(i + d + list.length) % list.length].key;
-    if (onOps) setOpsVariant(next as typeof ops.variant);
+    if (onAuth) setAuthVariant(next as typeof auth.variant);
+    else if (onOps) setOpsVariant(next as typeof ops.variant);
     else if (onCatalog) setCatVariant(next as typeof cat.variant);
     else setDeckVariant(next as typeof deck.variant);
   };
@@ -1212,7 +1243,7 @@ function Switcher({ s }: { s: Shell }) {
         ‹
       </button>
       <strong>
-        {onOps ? "Ops" : onCatalog ? "Catalog" : "Deck"} {current} ({list[i].name})
+        {onAuth ? "Auth" : onOps ? "Ops" : onCatalog ? "Catalog" : "Deck"} {current} ({list[i].name})
       </strong>
       <button type="button" aria-label="Next variant" onClick={() => cycle(1)}>
         ›
@@ -1222,6 +1253,7 @@ function Switcher({ s }: { s: Shell }) {
           <DeckVariantPicker />
           <CatalogVariantPicker />
           <OpsVariantPicker />
+          <AuthPicker />
           <label>
             <input
               type="checkbox"
@@ -1273,6 +1305,7 @@ export default function AppShellPrototype() {
     <>
       {s.signedIn ? <V s={s} /> : <PublicShell s={s} />}
       <CollectionAddOverlay />
+      <AuthScreens s={s} />
       <Switcher s={s} />
     </>
   );
