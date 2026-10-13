@@ -119,22 +119,39 @@ function App() {
   }
   useEffect(() => {
     if (session?.signedIn !== false || methods !== null) return;
+    let cancelled = false;
+    let shown = false;
+    // Three attempts after the first, 1 s, 2 s and 4 s apart; the unavailable message stays up while they run.
+    const delays = [1000, 2000, 4000];
     void (async () => {
-      try {
-        const response = await fetch("/auth/methods", {
-          credentials: "same-origin",
-        });
-        const body = response.ok ? await response.json() : null;
-        if (
-          !Array.isArray(body?.providers) ||
-          typeof body.emailSignIn !== "boolean"
-        )
-          throw new Error("Sign-in methods unavailable");
-        setMethods(body as SignInMethods);
-      } catch {
-        setMessage("Sign-in is temporarily unavailable. Please retry.");
+      for (let attempt = 0; ; attempt++) {
+        try {
+          const response = await fetch("/auth/methods", {
+            credentials: "same-origin",
+          });
+          const body = response.ok ? await response.json() : null;
+          if (
+            !Array.isArray(body?.providers) ||
+            typeof body.emailSignIn !== "boolean"
+          )
+            throw new Error("Sign-in methods unavailable");
+          if (cancelled) return;
+          if (shown) setMessage("");
+          setMethods(body as SignInMethods);
+          return;
+        } catch {
+          if (cancelled) return;
+          shown = true;
+          setMessage("Sign-in is temporarily unavailable. Please retry.");
+          if (attempt >= delays.length) return;
+          await new Promise((resolve) => setTimeout(resolve, delays[attempt]));
+          if (cancelled) return;
+        }
       }
     })();
+    return () => {
+      cancelled = true;
+    };
   }, [session?.signedIn, methods]);
   useEffect(() => {
     if (!failure || session === null) return;

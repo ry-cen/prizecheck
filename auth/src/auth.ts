@@ -8,6 +8,7 @@ import { configuredProviders, socialProviders } from "./providers.js";
 import { createRateLimits, dailySignupCap } from "./rateLimits.js";
 import { createSignupGate } from "./signupGate.js";
 import { signupEnabled } from "./signup.js";
+import { FRESH_AGE_SECONDS } from "./signIns.js";
 
 export const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 // Session lookups for budgeted routes (BUDGETED_ROUTES in server.ts) run on their own small pool. The gateway abandons
@@ -23,9 +24,10 @@ const budgetedLookupPool = new Pool({
   statement_timeout: BUDGETED_LOOKUP_TIMEOUT_MS,
   lock_timeout: BUDGETED_LOOKUP_TIMEOUT_MS,
 });
-// The signup gate runs inside Better Auth's transaction, which already holds a shared-pool connection, so the limits use
-// their own small pool: a burst of creations can't wait on connections the transactions themselves are holding.
-const rateLimitPool = new Pool({
+// The signup gate runs inside Better Auth's create-user transaction, which already holds a shared-pool connection, so the
+// gate's own queries (the account-creation limits and the owner checks) use this small pool with a connect timeout: a
+// burst of creations can't wait on connections the transactions themselves are holding.
+const gatePool = new Pool({
   connectionString: process.env.DATABASE_URL,
   max: 4,
   connectionTimeoutMillis: 5_000,
@@ -39,7 +41,7 @@ export const emailSignIn = emailSignInEnabled();
 export const publicSignup = signupEnabled();
 export const providers = configuredProviders();
 // The account-creation and start limits (auth/src/rateLimits.ts); an invalid DAILY_SIGNUP_CAP stops the gateway here.
-export const rateLimits = createRateLimits(rateLimitPool, dailySignupCap());
+export const rateLimits = createRateLimits(gatePool, dailySignupCap());
 const ownerEmail = (process.env.OWNER_EMAIL || "").trim().toLowerCase();
 if (
   process.env.NODE_ENV === "production" &&
@@ -120,10 +122,10 @@ const BOUND = `SELECT 1 FROM owner_binding b JOIN "user" u ON u.id=b.user_id WHE
 const signupGate = createSignupGate({
   publicSignup,
   ownerEmail,
-  ownerBound: async () => (await pool.query(BOUND)).rowCount === 1,
+  ownerBound: async () => (await gatePool.query(BOUND)).rowCount === 1,
   isOwner: async (userId) =>
     (
-      await pool.query<{ owner: boolean }>(
+      await gatePool.query<{ owner: boolean }>(
         `SELECT CASE WHEN EXISTS (${BOUND})
           THEN EXISTS (SELECT 1 FROM owner_binding WHERE singleton AND user_id=$1)
           ELSE EXISTS (SELECT 1 FROM "user" WHERE id=$1 AND lower(email)=$2 AND "emailVerified")
@@ -199,7 +201,12 @@ function authOn(database: Pool) {
         },
       },
     },
-    session: { expiresIn: 60 * 60 * 24 * 30, updateAge: 60 * 60 * 24 },
+    session: {
+      expiresIn: 60 * 60 * 24 * 30,
+      updateAge: 60 * 60 * 24,
+      // Seconds. The Sign-ins page applies the same window to link starts (signIns.ts).
+      freshAge: FRESH_AGE_SECONDS,
+    },
     advanced: {
       useSecureCookies: !new URL(origin).hostname.match(
         /^(localhost|127\.0\.0\.1)$/
