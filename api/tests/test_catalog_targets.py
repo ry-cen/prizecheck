@@ -2,6 +2,7 @@
 import copy
 import json
 import threading
+from dataclasses import replace
 from uuid import uuid4
 
 import psycopg
@@ -9,7 +10,7 @@ import pytest
 
 from app.catalog_targets import (LIVE, LIVE_RULES, MATCHING, MATCHING_RULES, REGISTRIES, EditionState, Failure,
                                  LiveRulesV1, MatchingRulesV1, MatchingRulesV2, MatchingRulesV3, PrintingState, TargetContext, activate_rule,
-                                 code_digest, edition_state, edition_targets, ensure_matching_rule, evaluate_edition, normalized_name,
+                                 code_digest, complete_quote_variant, edition_state, edition_targets, ensure_matching_rule, evaluate_edition, normalized_name,
                                  evaluate_printing, fingerprint, load_active, printing_live, refresh_printing)
 from app.main import connect
 from test_catalog import reset_catalog
@@ -161,6 +162,43 @@ def test_a_variant_without_a_block_is_matched_through_the_cards_block_at_its_fin
     run(Records(card_level_block(1), record))
     assert {key: (row["mapping_state"], row["mapping_reason"]) for key, row in metadata("meta-2")[1].items()} == {
         "normal": ("verified", None), "reverse": ("unverified", "rule_failed")}
+
+
+def test_activating_v3_names_the_quote_variant_of_an_edition_v1_verified_without_one():
+    reset_catalog()
+    activate(MATCHING, 1)
+    record = card(1)
+    for variant in record["variants_detailed"]:
+        variant["thirdParty"] = {"tcgplayer": 1001}
+    run(Records(record))
+    before = metadata()[1]
+    assert {key: (row["mapping_state"], row["product_id"], row["quote_variant"]) for key, row in before.items()} == {
+        "normal": ("verified", 1001, None), "reverse": ("verified", 1001, None)}
+    assert activate(MATCHING, 3) == {"printings": 0, "editions": 2}
+    after = metadata()[1]
+    assert {key: (row["mapping_state"], row["product_id"], row["quote_variant"]) for key, row in after.items()} == {
+        "normal": ("verified", 1001, "normal"), "reverse": ("verified", 1001, "reverse-holofoil")}
+    assert all(after[key]["mapping_revision"] == before[key]["mapping_revision"] for key in after)
+    assert len({row["matching_activation_id"] for row in after.values()} | {before["normal"]["matching_activation_id"]}) == 2
+    assert activate(MATCHING, 3) == {"printings": 0, "editions": 0}
+
+
+def test_completing_a_quote_variant_needs_the_accepted_candidate_and_the_same_product():
+    active = type("Active", (), {"rule": MatchingRulesV3, "activation_id": "a-3"})()
+    current = EditionState(state="verified", product_id=7, basis="matching_rule", accepted_fingerprint="fp", activation_id="a-1")
+    facts = {"fingerprint": "fp", "correspondence": "source_candidate", "source": "tcgdex", "source_id": "x",
+             "lookup": {"pricing": {"tcgplayer": {"normal": {"productId": 7}}}},
+             "descriptor": {"type": "normal", "size": "standard", "thirdParty": {"tcgplayer": 7}},
+             "source_record": {"set": {"id": "s"}, "localId": "1", "name": "Furret"},
+             "display": {"set_id": "s", "collector_number": "1", "display_name": normalized_name("Furret")}}
+    free = lambda *_: False
+    assert complete_quote_variant(current, facts, active, free) == replace(current, quote_variant="normal", activation_id="a-3")
+    for changed in ({"fingerprint": "other"}, {"lookup": {"pricing": {"tcgplayer": {"normal": {"productId": 8}}}}},
+                    {"descriptor": {"type": "normal", "size": "standard", "stamp": ["x"]}}):
+        assert complete_quote_variant(current, {**facts, **changed}, active, free) == current
+    for state in (replace(current, basis="maintainer"), replace(current, state="quarantined"), replace(current, quote_variant="normal")):
+        assert complete_quote_variant(state, facts, active, free) == state
+    assert complete_quote_variant(current, facts, None, free) == current
 
 
 def test_v3_sets_aside_only_third_party_and_still_checks_it_against_the_product():
