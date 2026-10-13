@@ -1,10 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  execFileSync,
-  spawn,
-  spawnSync,
-  type ChildProcess,
-} from "node:child_process";
+import { execFileSync, spawnSync, type ChildProcess } from "node:child_process";
 import {
   existsSync,
   mkdtempSync,
@@ -18,6 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Pool } from "pg";
 import { PublicReadLimiter } from "../src/publicReads.js";
+import { launch, serverReady } from "./support/servers";
 
 describe("public read abuse boundary", () => {
   it("limits one caller, preserves other callers, and expires the window", () => {
@@ -33,10 +29,11 @@ describe("public read abuse boundary", () => {
 });
 
 describe("public catalog records rebuild", () => {
-  // slow (process): rebuilds the records through real API and auth server processes.
+  // slow (process): rebuilds the records through real API and auth server processes. The timeout covers serverReady's
+  // 30 s deadline plus the rebuild on a loaded host.
   it(
     "restores lost records from PostgreSQL without touching discovery or waking a database for anonymous reads",
-    { tags: ["slow"] },
+    { tags: ["slow"], timeout: 60_000 },
     async () => {
       const database = new Pool({ connectionString: process.env.DATABASE_URL });
       // A counting listener stands in for PostgreSQL behind the anonymous read path: every connection is a wakeup.
@@ -192,7 +189,7 @@ print(json.dumps([rows[k].value for k in keys]))`,
           PUBLIC_PROJECTION_ADAPTER: "filesystem",
         };
         children.push(
-          spawn(
+          launch(
             ".venv/bin/uvicorn",
             [
               "app.main:app",
@@ -204,29 +201,21 @@ print(json.dumps([rows[k].value for k in keys]))`,
               String(apiPort),
               "--no-access-log",
             ],
-            { cwd: process.cwd(), env: isolated, stdio: "ignore" }
+            isolated
           ),
-          spawn("node", ["--import", "tsx", "auth/src/server.ts"], {
-            cwd: process.cwd(),
-            env: {
-              ...isolated,
-              AUTH_PORT: String(gatewayPort),
-              API_ORIGIN: `http://127.0.0.1:${apiPort}`,
-            },
-            stdio: "ignore",
+          launch("node", ["--import", "tsx", "auth/src/server.ts"], {
+            ...isolated,
+            AUTH_PORT: String(gatewayPort),
+            API_ORIGIN: `http://127.0.0.1:${apiPort}`,
           })
         );
         const gateway = `http://127.0.0.1:${gatewayPort}`;
-        let ready = false;
-        for (let attempt = 0; attempt < 100 && !ready; attempt++) {
-          try {
-            ready =
-              (await fetch(gateway + "/api/public/discovery")).status === 200;
-          } catch {
-            await new Promise((resolve) => setTimeout(resolve, 100));
-          }
-        }
-        expect(ready).toBe(true);
+        // The gateway usually listens before the API does and answers 503 until it can reach it.
+        await serverReady(
+          children,
+          gateway + "/api/public/discovery",
+          (response) => response.status === 200
+        );
         const read = (path: string) => fetch(gateway + path);
 
         // Create the records store and publish: the values reflect reviewed state, not a bare allowlist copy.
