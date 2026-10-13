@@ -41,6 +41,20 @@ function pathView(): View {
 }
 
 type Session = { signedIn: boolean; userId: string | null };
+/** GET /auth/methods: the configured providers and whether email-code sign-in is on. */
+type SignInMethods = {
+  providers: { id: string; name: string }[];
+  emailSignIn: boolean;
+};
+/** The start link for a provider. `next` is sent only when the collector came here for a page; the gateway checks it. */
+function providerStartHref(provider: string): string {
+  const asked = new URLSearchParams(location.search).get("next");
+  const page = protectedViews.includes(location.pathname.slice(1) as View)
+    ? `${location.pathname}${location.search}${location.hash}`
+    : null;
+  const next = asked ?? page;
+  return `/auth/sign-in/${encodeURIComponent(provider)}${next ? `?next=${encodeURIComponent(next)}` : ""}`;
+}
 function safeDestination(): string {
   const value = new URLSearchParams(location.search).get("next");
   if (!value)
@@ -68,6 +82,7 @@ function App() {
   const [code, setCode] = useState("");
   const [sent, setSent] = useState(false);
   const [message, setMessage] = useState("");
+  const [methods, setMethods] = useState<SignInMethods | null>(null);
 
   async function refresh() {
     try {
@@ -83,6 +98,25 @@ function App() {
       setMessage("Service temporarily unavailable. Please retry.");
     }
   }
+  useEffect(() => {
+    if (session?.signedIn !== false || methods !== null) return;
+    void (async () => {
+      try {
+        const response = await fetch("/auth/methods", {
+          credentials: "same-origin",
+        });
+        const body = response.ok ? await response.json() : null;
+        if (
+          !Array.isArray(body?.providers) ||
+          typeof body.emailSignIn !== "boolean"
+        )
+          throw new Error("Sign-in methods unavailable");
+        setMethods(body as SignInMethods);
+      } catch {
+        setMessage("Sign-in is temporarily unavailable. Please retry.");
+      }
+    })();
+  }, [session?.signedIn, methods]);
   useEffect(() => {
     void refresh();
     const onPop = () => setView(pathView());
@@ -179,40 +213,63 @@ function App() {
         <p role="alert">{message}</p>
       </main>
     );
+  if (!session.signedIn && methods === null)
+    return (
+      <main className="auth">
+        <h1>PrizeCheck</h1>
+        {!message && <p>Loading…</p>}
+        <p role="alert">{message}</p>
+      </main>
+    );
   if (!session.signedIn)
     return (
       <main className="auth">
         <h1>PrizeCheck</h1>
-        <p>Sign in with a code sent to your email.</p>
-        <form onSubmit={requestCode}>
-          <label>
-            Email{" "}
-            <input
-              type="email"
-              autoComplete="email"
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-            />
-          </label>
-          <button>Send code</button>
-        </form>
-        {sent && (
-          <form onSubmit={verifyCode}>
-            <label>
-              Six-digit code{" "}
-              <input
-                inputMode="numeric"
-                autoComplete="one-time-code"
-                pattern="[0-9]{6}"
-                maxLength={6}
-                required
-                value={code}
-                onChange={(e) => setCode(e.target.value)}
-              />
-            </label>
-            <button>Sign in</button>
-          </form>
+        {methods!.providers.length > 0 && (
+          <ul className="auth-providers">
+            {methods!.providers.map((provider) => (
+              <li key={provider.id}>
+                <a href={providerStartHref(provider.id)}>
+                  Sign in with {provider.name}
+                </a>
+              </li>
+            ))}
+          </ul>
+        )}
+        {methods!.emailSignIn && (
+          <>
+            <p>Sign in with a code sent to your email.</p>
+            <form onSubmit={requestCode}>
+              <label>
+                Email{" "}
+                <input
+                  type="email"
+                  autoComplete="email"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                />
+              </label>
+              <button>Send code</button>
+            </form>
+            {sent && (
+              <form onSubmit={verifyCode}>
+                <label>
+                  Six-digit code{" "}
+                  <input
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    pattern="[0-9]{6}"
+                    maxLength={6}
+                    required
+                    value={code}
+                    onChange={(e) => setCode(e.target.value)}
+                  />
+                </label>
+                <button>Sign in</button>
+              </form>
+            )}
+          </>
         )}
         <p role="status">{message}</p>
       </main>

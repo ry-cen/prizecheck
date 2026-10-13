@@ -6,18 +6,25 @@ import {
 } from "node:http";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { auth, budgetedAuth, deliverCode, pool } from "./auth.js";
+import {
+  auth,
+  budgetedAuth,
+  deliverCode,
+  pool,
+  providers,
+  publicSignup,
+  SIGN_IN_PAGE,
+} from "./auth.js";
 import { betterRequest, relay } from "./betterRelay.js";
 import { callerFor, trustedClientIp } from "./caller.js";
+import { safeNext } from "./nextPath.js";
 import { PublicReadLimiter } from "./publicReads.js";
-import { signupEnabled } from "./signup.js";
 
 const origin = process.env.PUBLIC_ORIGIN || "http://localhost:5173";
 const ownerEmail = (process.env.OWNER_EMAIL || "").trim().toLowerCase();
 const apiOrigin = process.env.API_ORIGIN || "http://127.0.0.1:8000";
 const internalSecret = process.env.INTERNAL_AUTH_SECRET || "";
 const publicReadLimiter = new PublicReadLimiter();
-const publicSignup = signupEnabled();
 if (
   !ownerEmail ||
   !internalSecret ||
@@ -170,6 +177,23 @@ async function authCounter(
   }
 }
 
+function configuredProvider(id: string) {
+  return providers.find((provider) => provider.id === id);
+}
+
+function redirect(
+  response: ServerResponse,
+  location: string,
+  cookies: string[] = []
+) {
+  response.writeHead(302, {
+    location,
+    "cache-control": "no-store",
+    ...(cookies.length ? { "set-cookie": cookies } : {}),
+  });
+  response.end();
+}
+
 async function session(request: IncomingMessage) {
   return auth.api.getSession({
     headers: new Headers({ cookie: request.headers.cookie || "" }),
@@ -264,6 +288,66 @@ const server = createServer(async (request, response) => {
       response.end(JSON.stringify({ signedIn: true }));
       return;
     }
+    if (path === "/auth/methods" && request.method === "GET") {
+      // The same answer for everyone: nothing here depends on cookies or accounts.
+      return json(response, 200, {
+        providers: providers.map(({ id, name }) => ({ id, name })),
+        emailSignIn: true,
+      });
+    }
+    const signInStart = /^\/auth\/sign-in\/([^/]+)$/.exec(path);
+    if (signInStart && request.method === "GET") {
+      const provider = configuredProvider(signInStart[1]);
+      if (!provider) return json(response, 404, { error: "Not found" });
+      const next = safeNext(
+        new URL(request.url || "/", origin).searchParams.get("next")
+      );
+      const started = await auth.handler(
+        betterRequest(
+          origin,
+          request,
+          "/api/auth/sign-in/social",
+          JSON.stringify({
+            provider: provider.id,
+            callbackURL: next,
+            newUserCallbackURL: next,
+            errorCallbackURL: SIGN_IN_PAGE,
+          }),
+          { method: "POST", originHeader: origin }
+        )
+      );
+      // Better Auth answers 200 with the provider URL; a sign-in button is a plain link, so the gateway redirects.
+      const location = started.ok ? started.headers.get("location") : null;
+      if (!location) throw new Error("Sign-in start failed");
+      return redirect(response, location, started.headers.getSetCookie());
+    }
+    const callback = /^\/api\/auth\/callback\/([^/]+)$/.exec(path);
+    if (
+      callback &&
+      request.method === "GET" &&
+      configuredProvider(callback[1])
+    ) {
+      try {
+        const result = await auth.handler(
+          betterRequest(origin, request, path, undefined, {
+            forwardQuery: true,
+          })
+        );
+        return relay(response, result, { forwardLocation: true });
+      } catch (error) {
+        console.error(
+          "OAuth callback failed",
+          error instanceof Error ? error.name : "unknown"
+        );
+        return redirect(
+          response,
+          `${SIGN_IN_PAGE}?error=internal_server_error`
+        );
+      }
+    }
+    // Better Auth's own endpoints are never reachable from outside; only the gateway routes above call them.
+    if (path === "/api/auth" || path.startsWith("/api/auth/"))
+      return json(response, 404, { error: "Not found" });
     if (path === "/auth/session" && request.method === "GET") {
       const current = await session(request);
       return json(response, 200, {
