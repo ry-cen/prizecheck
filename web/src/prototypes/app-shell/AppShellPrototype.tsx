@@ -46,6 +46,18 @@ import {
   setCatVariant,
   useCat,
 } from "../catalog-search/CatalogPrototype";
+// PROTOTYPE (#139): Missing cards and Owner controls variants, ?ops=A|B|C.
+import {
+  MissingCardsPage,
+  OPS_VARIANTS,
+  OpsPageActions,
+  OpsVariantPicker,
+  OwnerControlsPage,
+  OwnerSidebarB,
+  ownerHasSidebar,
+  setOpsVariant,
+  useOps,
+} from "../owner-reports/OwnerReportsPrototype";
 
 const VARIANTS = [
   { key: "A", name: "Top tabs + bottom bar" },
@@ -305,6 +317,7 @@ function contextFor(s: Shell): ReactNode {
   if (s.page === "collection") return <LocationTree s={s} />;
   if (s.page === "decks") return <DeckIndex s={s} />;
   if (s.page === "catalog") return catalogHasSidebar() ? <CatalogSidebar /> : null;
+  if (s.page === "owner" && ownerHasSidebar()) return <OwnerSidebarB onPick={() => s.setDrawer(null)} />;
   return null;
 }
 
@@ -340,18 +353,7 @@ function PageActions({ s }: { s: Shell }) {
       </>
     );
   if (s.page === "catalog") return <CatalogPageActions />;
-  if (s.page === "reports")
-    return (
-      <button type="button" className="ps-btn ps-btn-primary">
-        Report a missing card
-      </button>
-    );
-  if (s.page === "owner")
-    return (
-      <button type="button" className="ps-btn ps-btn-primary">
-        Start full English pull
-      </button>
-    );
+  if (s.page === "reports" || s.page === "owner") return <OpsPageActions s={s} />;
   return null;
 }
 
@@ -645,9 +647,9 @@ function PageBody({ s }: { s: Shell }) {
     case "catalog":
       return <CatalogPage />;
     case "reports":
-      return <ReportsBody />;
+      return <MissingCardsPage />;
     case "owner":
-      return <OwnerBody />;
+      return <OwnerControlsPage />;
   }
 }
 
@@ -1171,13 +1173,16 @@ function VariantC({ s }: { s: Shell }) {
 function Switcher({ s }: { s: Shell }) {
   const deck = useDeck();
   const cat = useCat();
+  const ops = useOps();
   const onCatalog = s.page === "catalog";
-  const list = onCatalog ? CAT_VARIANTS : DECK_VARIANTS;
-  const current = onCatalog ? cat.variant : deck.variant;
+  const onOps = s.page === "reports" || s.page === "owner";
+  const list: readonly { key: string; name: string }[] = onOps ? OPS_VARIANTS : onCatalog ? CAT_VARIANTS : DECK_VARIANTS;
+  const current = onOps ? ops.variant : onCatalog ? cat.variant : deck.variant;
   const i = list.findIndex((v) => v.key === current);
   const cycle = (d: number) => {
     const next = list[(i + d + list.length) % list.length].key;
-    if (onCatalog) setCatVariant(next as typeof cat.variant);
+    if (onOps) setOpsVariant(next as typeof ops.variant);
+    else if (onCatalog) setCatVariant(next as typeof cat.variant);
     else setDeckVariant(next as typeof deck.variant);
   };
   useEffect(() => {
@@ -1207,7 +1212,7 @@ function Switcher({ s }: { s: Shell }) {
         ‹
       </button>
       <strong>
-        {onCatalog ? "Catalog" : "Deck"} {current} ({list[i].name})
+        {onOps ? "Ops" : onCatalog ? "Catalog" : "Deck"} {current} ({list[i].name})
       </strong>
       <button type="button" aria-label="Next variant" onClick={() => cycle(1)}>
         ›
@@ -1216,6 +1221,7 @@ function Switcher({ s }: { s: Shell }) {
         <>
           <DeckVariantPicker />
           <CatalogVariantPicker />
+          <OpsVariantPicker />
           <label>
             <input
               type="checkbox"
@@ -1260,6 +1266,7 @@ function Switcher({ s }: { s: Shell }) {
 export default function AppShellPrototype() {
   const s = useShell();
   useCat(); // the Catalog variant decides whether the shell shows a sidebar
+  useOps(); // so does the Owner controls variant
   const V =
     s.variant === "A" ? VariantA : s.variant === "B" ? VariantB : VariantC;
   return (
