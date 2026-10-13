@@ -1,5 +1,7 @@
+import httpx
 import pytest
 
+from app import quote_contract
 from app.catalog import CatalogError, TCGdexSource
 
 
@@ -25,20 +27,38 @@ def test_live_enumeration_id_shapes_round_trip_through_card_urls():
     source = TCGdexSource()
     calls = []
 
-    def get(url):
+    def respond(url):
         calls.append(url)
         if url.endswith('/cards'):
-            return [{'id': 'exu-!'}, {'id': 'exu-%3F'}]
-        if url.endswith('/series/tcgp'):
-            return {'id': 'tcgp', 'sets': [{'id': 'A1'}]}
-        if url.endswith('/sets/A1'):
-            return {'id': 'A1', 'serie': {'id': 'tcgp'}, 'cards': []}
-        return {'id': 'exu-%3F'}
+            body = [{'id': 'exu-!'}, {'id': 'exu-%3F'}]
+        elif url.endswith('/series/tcgp'):
+            body = {'id': 'tcgp', 'sets': [{'id': 'A1'}]}
+        elif url.endswith('/sets/A1'):
+            body = {'id': 'A1', 'serie': {'id': 'tcgp'}, 'cards': []}
+        else:
+            body = {'id': 'exu-%3F'}
+        return httpx.Response(200, json=body, request=httpx.Request('GET', url))
 
-    source._get = get
+    source._response = respond
     assert source.enumerate() == {'exu-!', 'exu-%3F'}
     assert source.fetch('exu-%3F')['id'] == 'exu-%3F'
     assert calls[-1].endswith('/cards/exu-%253F')
+    source.client.close()
+
+
+def test_a_card_fetch_keeps_an_exact_text_price_view_beside_the_unchanged_record(monkeypatch):
+    source = TCGdexSource()
+    body = (b'{"id":"sv01-001","name":"Pikachu","pricing":{"tcgplayer":{"normal":{"productId":7,"marketPrice":0.10}}},'
+            b'"variants_detailed":[{"type":"normal","pricing":{"tcgplayer":{"normal":{"productId":7,"marketPrice":1.50}}}}]}')
+    monkeypatch.setattr(quote_contract, 'wall_ms', lambda: 1_700_000_000_000)
+    source._response = lambda url: httpx.Response(200, content=body, request=httpx.Request('GET', url))
+    record = source.fetch('sv01-001')
+    assert record['pricing']['tcgplayer']['normal']['marketPrice'] == 0.1  # the import's record still parses floats
+    view, fetched_ms = source.price_views['sv01-001']
+    assert view == {'id': 'sv01-001', 'pricing': {'tcgplayer': {'normal': {'productId': 7, 'marketPrice': '0.10'}}},
+                    'variants_detailed': [{'type': 'normal',
+                                           'pricing': {'tcgplayer': {'normal': {'productId': 7, 'marketPrice': '1.50'}}}}]}
+    assert fetched_ms == 1_700_000_000_000
     source.client.close()
 
 

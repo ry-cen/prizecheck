@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   getEditionPrices,
   MAX_PRICE_EDITIONS,
@@ -8,10 +8,15 @@ import {
 import "./EditionPrice.css";
 
 // A price is a cached, server-validated enrichment. The rest of the page never waits for it: each slot asks
-// for its own Edition, the requests of one render are batched (at most 64 ids each), and an answer that
-// takes longer than the gateway budget becomes a labelled fallback instead of a spinner.
+// for its own Edition once it comes near the viewport, the slots that come near together are batched (at most
+// 64 ids each), and an answer that takes longer than the gateway budget becomes a labelled fallback instead of
+// a spinner.
 const CLIENT_TIMEOUT_MS = 3_500;
 const BATCH_DELAY_MS = 15;
+// Near is within two viewport heights of the visible area. The workspace gallery mounts rows one viewport beyond
+// the window, so every tile it mounts still asks; a long catalog page asks only for the rows a collector is about
+// to reach instead of queueing a refresh for every row at once (ADR 0013).
+const NEAR_VIEWPORT = "200% 0px";
 
 type Settled =
   { kind: "row"; row: PriceRow } | { kind: "timeout" } | { kind: "error" };
@@ -85,6 +90,38 @@ function request(editionId: string, waiter: Waiter) {
   if (!scheduled) scheduled = setTimeout(flush, BATCH_DELAY_MS);
   return () => {
     set.delete(waiter);
+  };
+}
+
+// One observer for every slot, so the slots that come near in one frame are asked for in one batch.
+const nearCallbacks = new Map<Element, () => void>();
+let nearObserver: IntersectionObserver | null = null;
+
+/** Calls `onNear` once, when `element` first comes near the viewport, or at once where IntersectionObserver
+ * is missing. Returns a function that stops watching. */
+function whenNear(element: Element | null, onNear: () => void): () => void {
+  if (!element || typeof IntersectionObserver === "undefined") {
+    onNear();
+    return () => {};
+  }
+  nearObserver ??= new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        const callback = nearCallbacks.get(entry.target);
+        nearCallbacks.delete(entry.target);
+        nearObserver?.unobserve(entry.target);
+        callback?.();
+      }
+    },
+    { rootMargin: NEAR_VIEWPORT }
+  );
+  const observer = nearObserver;
+  nearCallbacks.set(element, onNear);
+  observer.observe(element);
+  return () => {
+    nearCallbacks.delete(element);
+    observer.unobserve(element);
   };
 }
 
@@ -188,13 +225,22 @@ export function EditionPrice({
   compact?: boolean;
 }) {
   const [settled, setSettled] = useState<Settled | null>(null);
+  const slot = useRef<HTMLSpanElement>(null);
   useEffect(() => {
     setSettled(null);
-    return request(editionId, setSettled);
+    let cancel = () => {};
+    const stop = whenNear(slot.current, () => {
+      cancel = request(editionId, setSettled);
+    });
+    return () => {
+      stop();
+      cancel();
+    };
   }, [editionId]);
   if (compact)
     return (
       <span
+        ref={slot}
         className="edition-price"
         data-price-status={
           !settled
@@ -224,7 +270,7 @@ export function EditionPrice({
     else content = UNAVAILABLE[row.reason ?? ""] ?? "Price unavailable";
   }
   return (
-    <span className="edition-price" data-price-status={status}>
+    <span ref={slot} className="edition-price" data-price-status={status}>
       {content}
       {settled?.kind === "row" && <Refresh row={settled.row} />}
     </span>
