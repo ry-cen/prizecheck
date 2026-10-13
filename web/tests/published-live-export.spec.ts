@@ -225,8 +225,11 @@ test("an anonymous visitor copies complete Live text of the frozen snapshot, kee
   await live
     .getByRole("button", { name: "Export to Live", exact: true })
     .click();
-  await expect(visitor.getByRole("main")).toContainText(
-    "Published Deck not found."
-  );
+  await expect(
+    visitor.getByRole("heading", {
+      level: 1,
+      name: "This deck isn't published anymore",
+    })
+  ).toBeVisible();
   await anonymous.close();
 });

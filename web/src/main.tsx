@@ -1,10 +1,8 @@
-import React, { useEffect, useLayoutEffect, useState } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { getOwnerCatalogStatus, type OwnerCatalogStatus } from "./generated";
 import { Collection } from "./Collection";
 import { Decks } from "./Decks";
-import { PublishedDeck } from "./PublishedDeck";
-import { Discovery } from "./Discovery";
 import { CatalogSearch } from "./CatalogSearch";
 import { MissingCardReports } from "./MissingCardReports";
 import { OwnerControls } from "./OwnerControls";
@@ -20,6 +18,16 @@ import {
   type PageId,
 } from "./shell/routes";
 import { useRoute } from "./shell/useRoute";
+import { DeadEnd } from "./public/DeadEnd";
+import { LoadingScreen } from "./public/LoadingScreen";
+import { PublicLayout } from "./public/PublicLayout";
+import { PublicPageView } from "./public/PublicPageView";
+import {
+  publicPageAt,
+  publicPageLabel,
+  SIGN_IN_PATH,
+} from "./public/publicRoutes";
+import { EmailCodeForms, SignInCard } from "./public/SignIn";
 import "./style.css";
 import "./tokens.css";
 import "./tailwind.css";
@@ -83,15 +91,18 @@ function App() {
     void refresh();
   }, []);
 
-  // Signed in, an address that is no page lands on Collection. Owner controls opened by someone else shows
-  // its heading and nothing else, as before.
+  // Signed in, an address that is no page lands on Collection, except the public pages (Discover, a Published
+  // Deck), which open inside the shell (#163). Owner controls opened by someone else shows its heading and
+  // nothing else, as before.
   const signedIn = session?.signedIn === true;
+  const publicPage = useMemo(() => publicPageAt(path), [path]);
+  const isPublic = publicPage !== null;
   const def = pageAt(path);
   const page: PageId = def ? def.id : "collection";
   useLayoutEffect(() => {
-    if (signedIn && path !== pageDef(page).path)
+    if (signedIn && !isPublic && path !== pageDef(page).path)
       navigate(pageDef(page).path, { replace: true });
-  }, [signedIn, page, path, navigate]);
+  }, [signedIn, isPublic, page, path, navigate]);
 
   async function requestCode(event: React.FormEvent) {
     event.preventDefault();
@@ -143,70 +154,50 @@ function App() {
     return true;
   }
 
-  if (session === null)
+  // The signed-out screens (#163). A public page whose session read failed is shown signed out: it never
+  // needed the session before #163.
+  const go = (to: string) => navigate(to);
+  if (session === null && !(isPublic && message))
+    return <LoadingScreen message={message} />;
+  if (!signedIn) {
+    if (publicPage)
+      return (
+        <PublicLayout
+          current={publicPage.kind === "discover" ? "discover" : undefined}
+          onNavigate={go}
+        >
+          <PublicPageView page={publicPage} signedIn={false} onNavigate={go} />
+        </PublicLayout>
+      );
+    if (!def && path !== SIGN_IN_PATH)
+      return (
+        <PublicLayout onNavigate={go}>
+          <DeadEnd kind="not-found" signedIn={false} onNavigate={go} />
+        </PublicLayout>
+      );
+    // At /sign-in, or in place of the protected page asked for, which signing in then opens.
     return (
-      <div className="legacy">
-        {!def || def.id === "collection" ? (
-          // Collection's dark page while the session loads, so /collection never flashes the light screen.
-          <div className="ws-root">
-            <main className="ws-main ws-boot">
-              <h1>PrizeCheck</h1>
-              <p role="status">Loading…</p>
-              <p role="alert">{message}</p>
-            </main>
-          </div>
-        ) : (
-          <main>
-            <h1>PrizeCheck</h1>
-            <p>Loading…</p>
-            <p role="alert">{message}</p>
-          </main>
-        )}
-      </div>
+      <PublicLayout current="sign-in" onNavigate={go}>
+        <SignInCard
+          continuing={safeDestination() !== DEFAULT_PATH}
+          status={message}
+        >
+          <EmailCodeForms
+            email={email}
+            code={code}
+            sent={sent}
+            onEmail={setEmail}
+            onCode={setCode}
+            onRequestCode={requestCode}
+            onVerifyCode={verifyCode}
+          />
+        </SignInCard>
+      </PublicLayout>
     );
-  if (!session.signedIn)
-    return (
-      <div className="legacy">
-        <main className="auth">
-          <h1>PrizeCheck</h1>
-          <p>Sign in with a code sent to your email.</p>
-          <form onSubmit={requestCode}>
-            <label>
-              Email{" "}
-              <input
-                type="email"
-                autoComplete="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-              />
-            </label>
-            <button>Send code</button>
-          </form>
-          {sent && (
-            <form onSubmit={verifyCode}>
-              <label>
-                Six-digit code{" "}
-                <input
-                  inputMode="numeric"
-                  autoComplete="one-time-code"
-                  pattern="[0-9]{6}"
-                  maxLength={6}
-                  required
-                  value={code}
-                  onChange={(e) => setCode(e.target.value)}
-                />
-              </label>
-              <button>Sign in</button>
-            </form>
-          )}
-          <p role="status">{message}</p>
-        </main>
-      </div>
-    );
+  }
 
-  const userId = session.userId ?? "";
-  const accountEmail = session.email ?? null;
+  const userId = session?.userId ?? "";
+  const accountEmail = session?.email ?? null;
   function renderPage(id: PageId, active: boolean) {
     switch (id) {
       case "collection":
@@ -264,6 +255,15 @@ function App() {
       onSignOut={signOut}
       scrollFor={scrollFor}
       renderPage={renderPage}
+      other={
+        publicPage && {
+          key: path,
+          label: publicPageLabel(publicPage),
+          content: (
+            <PublicPageView page={publicPage} signedIn onNavigate={go} />
+          ),
+        }
+      }
     />
   );
 }
@@ -277,17 +277,4 @@ if (canonicalPath(location.pathname) !== location.pathname)
     `${canonicalPath(location.pathname)}${location.search}${location.hash}`
   );
 
-const publishedRoute = /^\/published\/([^/]+)$/.exec(location.pathname);
-createRoot(document.getElementById("root")!).render(
-  publishedRoute ? (
-    <div className="legacy">
-      <PublishedDeck token={publishedRoute[1]} />
-    </div>
-  ) : location.pathname === "/discover" ? (
-    <div className="legacy">
-      <Discovery />
-    </div>
-  ) : (
-    <App />
-  )
-);
+createRoot(document.getElementById("root")!).render(<App />);

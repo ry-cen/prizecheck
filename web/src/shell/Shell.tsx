@@ -54,6 +54,10 @@ type Props = {
   scrollFor: (path: string) => number;
   /** Renders a page; `active` is false while a kept-mounted page is hidden. */
   renderPage: (page: PageId, active: boolean) => ReactNode;
+  /** A page that isn't one of the app's pages: Discover or a Published Deck, signed in (#163). While it is set
+   * the shell shows it instead of `page`, with no tab current; kept-mounted pages stay mounted, hidden. `key`
+   * changes when it is another such page. */
+  other?: { key: string; label: string; content: ReactNode } | null;
 };
 
 /**
@@ -78,18 +82,23 @@ function ShellFrame({
   onSignOut,
   scrollFor,
   renderPage,
+  other = null,
 }: Props) {
   const toast = useToast();
   const [moreOpen, setMoreOpen] = useState(false);
   // Pages shown so far; a kept-mounted one stays mounted from its first visit.
   const [visited, setVisited] = useState<ReadonlySet<PageId>>(
-    () => new Set([page])
+    () => new Set(other ? [] : [page])
   );
-  if (!visited.has(page)) setVisited(new Set([...visited, page]));
+  if (!other && !visited.has(page)) setVisited(new Set([...visited, page]));
   const shown = useRef(new Set<PageId>());
   const containers = useRef(new Map<PageId, HTMLDivElement>());
   const moreOpener = useRef<HTMLButtonElement>(null);
+  const otherContainer = useRef<HTMLDivElement>(null);
   const current = pageDef(page);
+  // The page whose tab is current: none while another page is shown.
+  const showing = other ? null : page;
+  const otherKey = other?.key ?? null;
 
   // The shell restores scroll positions itself; the browser's own restoration would fight it.
   useEffect(() => {
@@ -102,23 +111,27 @@ function ShellFrame({
 
   // Before paint: a kept-mounted page shown again returns to where it was; any other page starts at the top.
   useLayoutEffect(() => {
-    const returning = current.keepMounted && shown.current.has(page);
-    shown.current.add(page);
     // Browser Back or Forward can hide a kept-mounted page while one of its dialogs is open. Close them,
-    // so no modal stays open (and no scroll lock stays on) over the page now shown. Their onClose keeps
-    // each owner's state in step.
+    // so no modal stays open (and no scroll lock stays on) over the page now shown, including a public
+    // page shown through `other`. Their onClose keeps each owner's state in step.
     containers.current.forEach((container, id) => {
-      if (id !== page)
+      if (id !== showing)
         container
           .querySelectorAll<HTMLDialogElement>("dialog[open]")
           .forEach((dialog) => dialog.close());
     });
+    if (otherKey !== null) {
+      window.scrollTo(0, 0);
+      return;
+    }
+    const returning = current.keepMounted && shown.current.has(page);
+    shown.current.add(page);
     window.scrollTo(0, returning ? scrollFor(current.path) : 0);
-  }, [page]);
+  }, [page, otherKey]);
 
   function go(next: PageId) {
     setMoreOpen(false);
-    if (next !== page) onNavigate(next);
+    if (next !== showing) onNavigate(next);
   }
   async function signOut() {
     setMoreOpen(false);
@@ -130,7 +143,9 @@ function ShellFrame({
   // The skip link moves focus to the shown page's heading.
   function skipToContent(event: React.MouseEvent) {
     event.preventDefault();
-    const heading = containers.current.get(page)?.querySelector("h1");
+    const heading = (
+      other ? otherContainer.current : containers.current.get(page)
+    )?.querySelector("h1");
     if (!heading) return;
     if (!heading.hasAttribute("tabindex"))
       heading.setAttribute("tabindex", "-1");
@@ -147,7 +162,7 @@ function ShellFrame({
     { label: "Sign out", icon: LogOut, onSelect: () => void signOut() },
   ];
   const mounted = PAGES.filter(
-    (def) => def.id === page || (def.keepMounted && visited.has(def.id))
+    (def) => def.id === showing || (def.keepMounted && visited.has(def.id))
   );
 
   return (
@@ -171,7 +186,7 @@ function ShellFrame({
             <button
               key={id}
               type="button"
-              aria-current={page === id ? "page" : undefined}
+              aria-current={showing === id ? "page" : undefined}
               onClick={() => go(id)}
               className="inline-flex h-control cursor-pointer items-center whitespace-nowrap rounded-control border-0 bg-transparent px-3 text-control font-medium text-text-muted hover:text-text aria-[current=page]:bg-surface-selected aria-[current=page]:text-accent-strong"
             >
@@ -204,11 +219,11 @@ function ShellFrame({
 
       {/* Phone header for pages that don't draw their own (Collection draws its own: ☰, title, Search and
           Filters & display). Pages without side content show the wordmark instead of ☰. */}
-      {page !== "collection" && (
+      {showing !== "collection" && (
         <header className="box-border hidden h-header items-center gap-3 border-b border-border px-3 phone:flex">
           <Wordmark />
           <span className="min-w-0 truncate text-body font-semibold">
-            {current.label}
+            {other ? other.label : current.label}
           </span>
         </header>
       )}
@@ -216,17 +231,27 @@ function ShellFrame({
       {mounted.map((def) => (
         <div
           key={def.id}
-          id={def.id === page ? "main-content" : undefined}
-          hidden={def.id !== page}
+          id={def.id === showing ? "main-content" : undefined}
+          hidden={def.id !== showing}
           className="phone:pb-tabbar"
           ref={(element) => {
             if (element) containers.current.set(def.id, element);
             else containers.current.delete(def.id);
           }}
         >
-          {renderPage(def.id, def.id === page)}
+          {renderPage(def.id, def.id === showing)}
         </div>
       ))}
+      {other && (
+        <div
+          key={other.key}
+          id="main-content"
+          className="phone:pb-tabbar"
+          ref={otherContainer}
+        >
+          {other.content}
+        </div>
+      )}
 
       {/* Phone bottom tab bar. */}
       <nav
@@ -237,7 +262,7 @@ function ShellFrame({
           <button
             key={id}
             type="button"
-            aria-current={page === id ? "page" : undefined}
+            aria-current={showing === id ? "page" : undefined}
             onClick={() => go(id)}
             className={TAB_BAR_BUTTON}
           >
@@ -250,7 +275,9 @@ function ShellFrame({
           type="button"
           aria-haspopup="dialog"
           aria-expanded={moreOpen}
-          aria-current={MORE_PAGES.includes(page) ? "page" : undefined}
+          aria-current={
+            showing && MORE_PAGES.includes(showing) ? "page" : undefined
+          }
           onClick={() => setMoreOpen(true)}
           className={TAB_BAR_BUTTON}
         >
@@ -271,7 +298,7 @@ function ShellFrame({
             <li key={id}>
               <button
                 type="button"
-                aria-current={page === id ? "page" : undefined}
+                aria-current={showing === id ? "page" : undefined}
                 onClick={() => go(id)}
                 className={SHEET_BUTTON}
               >
@@ -301,7 +328,8 @@ const TAB_BAR_BUTTON =
 const SHEET_BUTTON =
   "box-border flex min-h-tap w-full cursor-pointer items-center gap-3 rounded-control border-0 bg-transparent px-3 text-left text-body text-text hover:bg-surface-raised aria-[current=page]:bg-surface-selected aria-[current=page]:text-accent-strong";
 
-function Wordmark() {
+/** The PrizeCheck wordmark, shared with the public header (#163). */
+export function Wordmark() {
   return (
     <span className="whitespace-nowrap text-meta font-bold uppercase tracking-[2px]">
       <span aria-hidden="true" className="mr-2 text-accent">

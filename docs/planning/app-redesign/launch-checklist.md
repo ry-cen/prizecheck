@@ -14,6 +14,7 @@ The redesign is a launch gate ([spec](spec.md), "Rollout"): PrizeCheck opens to 
 - [ ] `/collection` is the default page, the sign-in landing and the sign-out redirect. `/`, `/workspace` and `/locations` redirect to it, keeping any `?location=` link (#162).
 - [ ] The old Collection page moved to `/old-collection`, with no link, until #164 retires it (#162).
 - [ ] `GET /auth/session` also returns the signed-in `email`, for the avatar menu (#162).
+- [ ] Signing in has its own address, `/sign-in`, which the public header links to. Signed out, an address that is no page shows "Page not found" instead of the sign-in card, and a Published Deck link that no longer works shows "This deck isn't published anymore". Signed in, Discover and Published Decks open inside the app (#163).
 
 ## Walkthroughs
 
@@ -34,11 +35,30 @@ On a phone (iOS Safari or Android Chrome):
 - [ ] 8. Tap More: a sheet opens along the bottom with Missing cards, Sign-ins, Owner controls and Sign out. Each opens its page or signs you out.
 - [ ] 9. On Collection, turn on Select and pick a card: the Actions strip and the Undo message sit above the tab bar, never under it. Switch to Decks and back: the selection and scroll position are kept.
 
+### Sign-in, loading, unavailable and not found (#163)
+
+On a desktop (a window at least 1280 px wide):
+
+- [ ] 1. Sign out from the avatar menu. The page is dark, with the public header (✦ PrizeCheck and Discover decks) above a centred card reading "Sign in to PrizeCheck" and "Know every card you own, and where it is." The terms and privacy line at the bottom of the card is plain text, not a link.
+- [ ] 2. Enter your email and press Send code. "If this account can sign in, a code has been sent." appears and a code field shows below. Enter the code and press Sign in: Collection opens.
+- [ ] 3. Sign out, then open a bookmark to `/decks`. The card now reads "Sign in to continue where you left off." Sign in: Decks opens.
+- [ ] 4. Signed out, open `/discover`. Discover sits under the same header, with Discover decks marked. Sign in at the right of the header opens the sign-in card.
+- [ ] 5. Signed out, open `/no-such-page`. It shows "Page not found" and "The link may be mistyped, or the page has moved.", with Discover decks (gold) and Sign in, and each opens what it names. Open `/published/not-a-real-link`: "This deck isn't published anymore" with the same two choices.
+- [ ] 6. Signed in, open `/discover` and `/published/not-a-real-link`. Each opens inside the app, with the tabs above and none of them marked, and the unavailable card offers only Discover decks.
+- [ ] 7. In the browser's developer tools, set the network to Slow 4G and reload Collection. The dark page shows a muted "✦ PrizeCheck", "Loading…" appears under it only after a moment, and no grey tiles or empty header appear before Collection.
+
+On a phone (iOS Safari or Android Chrome):
+
+- [ ] 8. Sign out. The card fills the width, leaving a small margin on each side, and Discover decks, the email field and both buttons are easy to hit with a thumb. Nothing scrolls sideways. Sign in with a code.
+- [ ] 9. Open a mistyped address and `/published/not-a-real-link`. Each card fits the screen, and Discover decks and Sign in are thumb-sized.
+
 ## Manual checks that automation does not cover
 
 - [ ] Real touch on iOS Safari and Android Chrome for the tab bar, the More sheet and the ☰ drawer (the browser tests only emulate touch), including the home indicator area under the tab bar.
 - [ ] Screen reader walkthrough (VoiceOver on macOS and iOS, NVDA on Windows): the tabs announce the current page, the avatar menu announces as a menu, and the drawer and sheet announce their titles and return focus when they close.
 - [ ] Safari and Firefox on desktop: the avatar menu, the sticky header and the dialogs (the browser tests run in Chromium only).
+- [ ] Screen reader on the sign-in card: the heading and subtitle are read first, the Email and Six-digit code fields are named, and "a code has been sent" is announced. On a slow load, "Loading…" is announced once (#163).
+- [ ] Until the dark first paint (rollout stage 7), a slow first load still shows a brief light page before the dark loading screen. That is expected for now (#163).
 
 ## Sources
 

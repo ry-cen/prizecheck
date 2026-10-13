@@ -148,9 +148,12 @@ test("mobile collector can search, Add, Move, Undo, check and publish a physical
       "revoked permanently"
     );
     await publicPage.reload();
-    await expect(publicPage.getByRole("status")).toContainText(
-      "Published Deck not found."
-    );
+    await expect(
+      publicPage.getByRole("heading", {
+        level: 1,
+        name: "This deck isn't published anymore",
+      })
+    ).toBeVisible();
   } finally {
     await anonymous.close();
     await pool.end();
