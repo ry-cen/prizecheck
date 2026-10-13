@@ -4,6 +4,8 @@
 
 **Ticket:** [Prototype the Deck experience](https://github.com/ry-cen/prizecheck/issues/125)
 
+**Amended by:** [Deck builder, Catalog and public data contracts](decide-data-contracts.md). The library uses the new Edition browse route, not `GET /api/collection` (the "Keep it" below is reversed), and Deck List Undo is the inverse batch command.
+
 **Evidence:**
 - [Deck experience prototype notes](../prototypes/deck-experience/README.md). Variant D was chosen out of four, after three revisions with the owner.
 - [Decks UI inventory](../research/decks-ui-inventory.md).

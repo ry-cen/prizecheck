@@ -49,14 +49,15 @@ Filtering by format on the server, with stable pages, needs the standing stored 
 
 - A table holds one row per Card Printing and Format, with its Format Standing (`legal`, `not_legal`, `unknown`). It's computed with the evaluator's own `line_standing` (Reprint Group legality and bans included) over the stored format facts.
 - One key row per Format records what the standings were computed from: the rules file's sha256, the evaluator code's sha256, the attribute revision, the catalog revision, and the next rule date (`next_rule_date`). It's the same key as saved Deck results.
-- When the key no longer matches (a rules commit, an attribute correction, a catalog import, or a rule date passing), the next reader rebuilds that Format's standings in bulk under an advisory lock while other readers wait. Catalog imports and attribute decisions may also rebuild eagerly. A full rebuild is a single pass over the catalog.
+- **Eager rebuilds are the main path:** catalog imports, attribute decisions and a rules deploy rebuild the affected Format's standings, and a scheduled job rebuilds on each rule date.
+- **The reader rebuild is the fallback:** a reader that finds the key stale rebuilds that Format in bulk under an advisory lock while other readers wait. A full rebuild is one pass over the catalog; its cost is unmeasured, so the spec sets a latency budget and a load test for it.
 - A Card Edition's standing is its Card Printing's.
 - Deck List format results are unchanged. They still run the whole-deck check.
 
 ### 3. One source for card type
 
 - `catalog_card_attribute` (the effective attributes, which reviews correct) is the one source. Collection's category and type filters move onto it from `catalog_printing_metadata.category` and `elemental_types`. Those columns stay until a cleanup removes them.
-- Attributes gain **Trainer Type** (`supporter`, `item`, `tool`, `stadium`, or null when unknown), derived from TCGdex `trainerType` and **correctable through the existing attribute review queue**, like card kind.
+- Attributes gain **Trainer Type** (`supporter`, `item`, `tool`, `stadium`, or null when unknown), derived from TCGdex `trainerType` and **correctable through the existing attribute review queue**, like card kind. Any source value the attribute rules don't name maps to null until they do.
 - Attributes gain **evolves from**, the name of the Pokémon this one evolves from, derived from TCGdex `evolveFrom`. It's used only to group Deck List lines by evolution line and is not reviewed: a wrong value only groups a card in the wrong place.
 - A Trainer with no Trainer Type matches the Trainer type chips only through "Any". The tile shows no subtype.
 
@@ -84,7 +85,8 @@ The Pick List confirmation moves to the multi-source Move path (migration 026), 
 
 ### 8. Target Format
 
-- **Field:** `target_format` on the Deck List: `standard`, `expanded` or `glc`, not null, defaulting to `standard`. A migration sets existing Deck Lists to Standard. `PATCH /api/decks/{id}` accepts it, and a change advances the Deck List revision, because the saved result depends on it.
+- **Field:** `target_format` on the Deck List: `standard`, `expanded` or `glc`, not null, defaulting to `standard`. A migration sets existing Deck Lists to Standard.
+- **Changing it is a Deck List command:** `PUT /api/decks/{id}/deck-list/target-format` takes `target_format`, `revision` and `idempotency_key`, is revision-checked like every Deck List command, advances the Deck List revision (the saved result depends on it) and returns the usual Deck List command result with the new Format's result. It is not part of the Location edit (`PATCH /api/decks/{id}`), which returns no Deck List revision and would leave the client's revision stale.
 - **Reads:** `GET /api/decks/{id}` and Deck List command responses carry `target_format` and that Format's result only. `GET /api/decks/{id}/format-checks` defaults to the Target Format.
 - **Publishing gate:** publish and republish recompute the Target Format result for today in the same transaction, and refuse anything but `legal` with `409 TARGET_FORMAT_NOT_LEGAL`, carrying the result so the UI can show the issues.
 - **Snapshots** store their Target Format. Existing snapshots migrate to Standard.

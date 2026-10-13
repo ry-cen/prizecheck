@@ -4,6 +4,8 @@
 
 **Ticket:** [Prototype Catalog search in the shell](https://github.com/ry-cen/prizecheck/issues/126)
 
+**Amended by:** [Deck builder, Catalog and public data contracts](decide-data-contracts.md). Adds use one batch add command with one Undo record, settling the batch-or-sequential question below.
+
 **Evidence:** [Catalog search prototype notes](../prototypes/catalog-search/README.md). Variant D was chosen out of four, after one cleanup pass.
 
 ## Decision
