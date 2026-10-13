@@ -130,8 +130,7 @@ export function AttributesQueue({ onDecided }: { onDecided: () => void }) {
               <th scope="col">Reports</th>
               <th scope="col">Opened</th>
               <th scope="col">Age</th>
-              {/* relative: the visually hidden text is positioned inside the scrolling box, never the page. */}
-              <th scope="col" className="relative">
+              <th scope="col">
                 <span className="sr-only">Review</span>
               </th>
             </tr>
