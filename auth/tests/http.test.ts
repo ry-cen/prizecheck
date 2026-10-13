@@ -18,6 +18,52 @@ function latestCode(): string {
   const lines = readFileSync(mailFile, "utf8").trim().split("\n");
   return JSON.parse(lines.at(-1)!).otp;
 }
+// The last stderr of each server child, so a crash or a lost port race names its cause instead of a bare timeout.
+const stderrTails = new WeakMap<ChildProcess, string>();
+function launch(command: string, args: string[], env: NodeJS.ProcessEnv) {
+  const child = spawn(command, args, {
+    cwd: process.cwd(),
+    env,
+    stdio: ["ignore", "ignore", "pipe"],
+  });
+  stderrTails.set(child, "");
+  child.stderr!.on("data", (chunk: Buffer) =>
+    stderrTails.set(child, (stderrTails.get(child)! + chunk).slice(-2_000))
+  );
+  return child;
+}
+// Probes `url` until `accept` takes an answer and returns it. Every miss (a refused connection, a timed-out probe or
+// an answer `accept` rejects) waits 100 ms before the next probe, up to a 30 s deadline rather than an attempt count,
+// so a cold start on a loaded host still fits. A child that exits first fails at once with its stderr.
+async function waitForServer(
+  children: ChildProcess[],
+  url: string,
+  accept: (response: Response) => boolean,
+  init: RequestInit = {}
+): Promise<Response | undefined> {
+  const deadline = performance.now() + 30_000;
+  for (;;) {
+    const exited = children.find(
+      (child) => child.exitCode !== null || child.signalCode !== null
+    );
+    if (exited)
+      throw new Error(
+        `${exited.spawnargs.join(" ")} exited (${exited.exitCode ?? exited.signalCode}) before ${url} answered:\n${stderrTails.get(exited)}`
+      );
+    try {
+      const response = await fetch(url, {
+        ...init,
+        signal: AbortSignal.timeout(5_000),
+      });
+      if (accept(response)) return response;
+      await response.body?.cancel();
+    } catch {
+      /* not listening yet, or the probe timed out */
+    }
+    if (performance.now() > deadline) return undefined;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+}
 async function post(path: string, body: object, cookie = "") {
   return fetch(base + path, {
     method: "POST",
@@ -106,7 +152,7 @@ describe("live Better Auth boundary", () => {
     ).toBe(401);
   });
 
-  // The timeout covers the readiness deadline below plus sign-in and a cold Python import on a loaded host.
+  // The timeout covers the readiness deadline in waitForServer plus sign-in and a cold Python import on a loaded host.
   it("serves Published Deck reads with no, forged and valid cookies without waking either database", async () => {
     // A counting listener stands in for PostgreSQL: every connection attempt is a wakeup.
     let wakeups = 0;
@@ -182,15 +228,6 @@ describe("live Better Auth boundary", () => {
       })
     );
     const children: ChildProcess[] = [];
-    // The last stderr of each child, so a crash or a lost port race names its cause instead of a bare timeout.
-    const errors = new Map<ChildProcess, string>();
-    const start = (child: ChildProcess) => {
-      errors.set(child, "");
-      child.stderr!.on("data", (chunk: Buffer) =>
-        errors.set(child, (errors.get(child)! + chunk).slice(-2_000))
-      );
-      children.push(child);
-    };
     const environment = {
       ...process.env,
       DATABASE_URL: databaseUrl,
@@ -209,8 +246,8 @@ describe("live Better Auth boundary", () => {
     expect(signedIn.status).toBe(200);
     const valid = signedIn.headers.get("set-cookie")!.split(";")[0];
     try {
-      start(
-        spawn(
+      children.push(
+        launch(
           ".venv/bin/uvicorn",
           [
             "app.main:app",
@@ -222,50 +259,23 @@ describe("live Better Auth boundary", () => {
             String(apiPort),
             "--no-access-log",
           ],
-          {
-            cwd: process.cwd(),
-            env: environment,
-            stdio: ["ignore", "ignore", "pipe"],
-          }
-        )
-      );
-      start(
-        spawn("node", ["--import", "tsx", "auth/src/server.ts"], {
-          cwd: process.cwd(),
-          env: {
-            ...environment,
-            AUTH_PORT: String(gatewayPort),
-            API_ORIGIN: `http://127.0.0.1:${apiPort}`,
-          },
-          stdio: ["ignore", "ignore", "pipe"],
+          environment
+        ),
+        launch("node", ["--import", "tsx", "auth/src/server.ts"], {
+          ...environment,
+          AUTH_PORT: String(gatewayPort),
+          API_ORIGIN: `http://127.0.0.1:${apiPort}`,
         })
       );
       const gateway = `http://127.0.0.1:${gatewayPort}`;
-      // The gateway usually listens before the API does and answers 503 until it can reach it, so every miss
-      // (refused connection or 503) waits before the next probe, up to a deadline rather than an attempt count.
-      const deadline = performance.now() + 30_000;
-      let ready = false;
-      while (!ready) {
-        const exited = children.find(
-          (child) => child.exitCode !== null || child.signalCode !== null
-        );
-        if (exited)
-          throw new Error(
-            `${exited.spawnargs.join(" ")} exited (${exited.exitCode ?? exited.signalCode}) before the gateway was ready:\n${errors.get(exited)}`
-          );
-        try {
-          const probe = await fetch(gateway + "/api/public/discovery", {
-            signal: AbortSignal.timeout(5_000),
-          });
-          ready = probe.status === 200;
-          await probe.body?.cancel();
-        } catch {
-          /* not listening yet, or the probe timed out */
-        }
-        if (ready || performance.now() > deadline) break;
-        await new Promise((resolve) => setTimeout(resolve, 100));
-      }
-      expect(ready).toBe(true);
+      // The gateway usually listens before the API does and answers 503 until it can reach it.
+      const probe = await waitForServer(
+        children,
+        gateway + "/api/public/discovery",
+        (response) => response.status === 200
+      );
+      await probe?.body?.cancel();
+      expect(probe?.status).toBe(200);
       const baseline = wakeups;
       const read = (cookie?: string, path = `/api/public/decks/${token}`) =>
         fetch(gateway + path, cookie ? { headers: { cookie } } : undefined);
@@ -711,34 +721,26 @@ assert store.compare_and_swap({k: rows[k].version for k in keys}, {
     }
   });
 
+  // The timeout covers the readiness deadline in waitForServer plus a cold tsx start on a loaded host.
   it("fails closed when the auth database is unavailable", async () => {
-    const child = spawn("node", ["--import", "tsx", "auth/src/server.ts"], {
-      cwd: process.cwd(),
-      env: {
-        ...process.env,
-        AUTH_PORT: process.env.TEST_UNAVAILABLE_AUTH_PORT || "3002",
-        DATABASE_URL: "postgresql://raian@127.0.0.1:1/unavailable",
-      },
-      stdio: "ignore",
+    const child = launch("node", ["--import", "tsx", "auth/src/server.ts"], {
+      ...process.env,
+      AUTH_PORT: process.env.TEST_UNAVAILABLE_AUTH_PORT || "3002",
+      DATABASE_URL: "postgresql://raian@127.0.0.1:1/unavailable",
     });
     try {
-      let response: Response | undefined;
-      for (let attempt = 0; attempt < 30; attempt++) {
-        try {
-          response = await fetch(
-            `http://127.0.0.1:${process.env.TEST_UNAVAILABLE_AUTH_PORT || "3002"}/api/locations`,
-            {
-              headers: {
-                cookie: "better-auth.session_token=forged",
-                "x-internal-user": "victim",
-              },
-            }
-          );
-          break;
-        } catch {
-          await new Promise((resolve) => setTimeout(resolve, 100));
+      // The first answer the gateway gives, whatever its status, is the one under test.
+      const response = await waitForServer(
+        [child],
+        `http://127.0.0.1:${process.env.TEST_UNAVAILABLE_AUTH_PORT || "3002"}/api/locations`,
+        () => true,
+        {
+          headers: {
+            cookie: "better-auth.session_token=forged",
+            "x-internal-user": "victim",
+          },
         }
-      }
+      );
       expect(response?.status).toBe(503);
       const publicDiscovery = await fetch(
         `http://127.0.0.1:${process.env.TEST_UNAVAILABLE_AUTH_PORT || "3002"}/api/public/discovery`,
@@ -761,5 +763,5 @@ assert store.compare_and_swap({k: rows[k].version for k in keys}, {
         await new Promise((resolve) => child.once("exit", resolve));
       }
     }
-  });
+  }, 60_000);
 });
