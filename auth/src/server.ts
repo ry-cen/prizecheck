@@ -14,11 +14,13 @@ import {
   pool,
   providers,
   publicSignup,
+  rateLimits,
   SIGN_IN_PAGE,
 } from "./auth.js";
 import { betterRequest, relay } from "./betterRelay.js";
 import { neutralCallback } from "./callbackErrors.js";
 import { callerFor, trustedClientIp } from "./caller.js";
+import { ipContext } from "./ipContext.js";
 import { safeNext } from "./nextPath.js";
 import { PublicReadLimiter } from "./publicReads.js";
 import { sessionBody } from "./sessionView.js";
@@ -310,6 +312,12 @@ const server = createServer(async (request, response) => {
     if (signInStart && request.method === "GET") {
       const provider = configuredProvider(signInStart[1]);
       if (!provider) return json(response, 404, { error: "Not found" });
+      // Each start writes a Better Auth verification row: 60 per trusted IP per hour, shared with link starts.
+      if (!(await rateLimits.allowStart(trustedClientIp(request))))
+        return redirect(
+          response,
+          `${SIGN_IN_PAGE}?provider=${provider.id}&error=too_many_sign_ups`
+        );
       const next = safeNext(
         new URL(request.url || "/", origin).searchParams.get("next")
       );
@@ -340,10 +348,15 @@ const server = createServer(async (request, response) => {
       configuredProvider(callback[1])
     ) {
       try {
-        const result = await auth.handler(
-          betterRequest(origin, request, path, undefined, {
-            forwardQuery: true,
-          })
+        // The signup gate reads the trusted client IP from this context (auth/src/ipContext.ts), never from a header.
+        const result = await ipContext.run(
+          { ip: trustedClientIp(request) },
+          () =>
+            auth.handler(
+              betterRequest(origin, request, path, undefined, {
+                forwardQuery: true,
+              })
+            )
         );
         return relay(response, neutralCallback(result, publicSignup), {
           forwardLocation: true,

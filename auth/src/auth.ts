@@ -3,7 +3,9 @@ import { emailOTP } from "better-auth/plugins";
 import { Pool } from "pg";
 import { appendFile } from "node:fs/promises";
 import { EMAIL_OTP_PATHS, emailSignInEnabled } from "./emailSignIn.js";
+import { contextIp } from "./ipContext.js";
 import { configuredProviders, socialProviders } from "./providers.js";
+import { createRateLimits, dailySignupCap } from "./rateLimits.js";
 import { createSignupGate } from "./signupGate.js";
 import { signupEnabled } from "./signup.js";
 
@@ -21,6 +23,13 @@ const budgetedLookupPool = new Pool({
   statement_timeout: BUDGETED_LOOKUP_TIMEOUT_MS,
   lock_timeout: BUDGETED_LOOKUP_TIMEOUT_MS,
 });
+// The signup gate runs inside Better Auth's transaction, which already holds a shared-pool connection, so the limits use
+// their own small pool: a burst of creations can't wait on connections the transactions themselves are holding.
+const rateLimitPool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  max: 4,
+  connectionTimeoutMillis: 5_000,
+});
 const origin = process.env.PUBLIC_ORIGIN || "http://localhost:5173";
 /** The web page that shows sign-in and its error messages (`?error=<code>`). */
 export const SIGN_IN_PAGE = "/sign-in";
@@ -29,6 +38,8 @@ export const SIGN_IN_PAGE = "/sign-in";
 export const emailSignIn = emailSignInEnabled();
 export const publicSignup = signupEnabled();
 export const providers = configuredProviders();
+// The account-creation and start limits (auth/src/rateLimits.ts); an invalid DAILY_SIGNUP_CAP stops the gateway here.
+export const rateLimits = createRateLimits(rateLimitPool, dailySignupCap());
 const ownerEmail = (process.env.OWNER_EMAIL || "").trim().toLowerCase();
 if (
   process.env.NODE_ENV === "production" &&
@@ -120,6 +131,8 @@ const signupGate = createSignupGate({
         [userId, ownerEmail]
       )
     ).rows[0].owner,
+  clientIp: contextIp,
+  allowSignup: rateLimits.allowSignup,
 });
 
 // PrizeCheck never uses provider tokens, so none are stored. `scope` stays.

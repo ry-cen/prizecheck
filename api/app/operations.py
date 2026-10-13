@@ -1,4 +1,6 @@
 """Owner operational summaries contain counts and timestamps, never private payloads."""
+import os
+import re
 from datetime import datetime
 from typing import Literal
 from fastapi import APIRouter, Depends
@@ -39,9 +41,18 @@ class OperationsStatus(BaseModel):
     sign_in_delivered: int | None
     sign_in_failed: int | None
     gateway_authorization_denials: int
+    signups_24h: int
+    daily_signup_cap: int
+    signup_warning: bool
+    signup_refusals: int
     release_failures: int
     provider_quotas: Literal['recorded','unverified']
     quotas: list[QuotaStatus]
+
+def daily_signup_cap() -> int:
+    """DAILY_SIGNUP_CAP as the gateway reads it (auth/src/rateLimits.ts): a whole number, default 100."""
+    value = os.environ.get('DAILY_SIGNUP_CAP', '').strip()
+    return int(value) if re.fullmatch(r'[0-9]{1,9}', value) else 100
 
 @router.get('/api/admin/operations',response_model=OperationsStatus)
 def operations_status(user_id: str = Depends(verified_user)):
@@ -60,7 +71,10 @@ def operations_status(user_id: str = Depends(verified_user)):
          (SELECT count(*) FROM catalog_review WHERE status='pending') AS catalog_pending_reviews,
          (SELECT count(*) FROM catalog_public_outbox WHERE delivered_at IS NULL) AS catalog_outbox_pending,
          (SELECT extract(epoch FROM clock_timestamp()-min(created_at))::float FROM catalog_public_outbox WHERE delivered_at IS NULL) AS catalog_outbox_oldest_seconds,
-         (SELECT count(*) FROM auth_send_event WHERE sent_at>=clock_timestamp()-interval '24 hours') AS sign_in_requests_24h""").fetchone()
+         (SELECT count(*) FROM auth_send_event WHERE sent_at>=clock_timestamp()-interval '24 hours') AS sign_in_requests_24h,
+         (SELECT count(*) FROM auth_rate_event WHERE kind='signup' AND created_at>=clock_timestamp()-interval '24 hours') AS signups_24h""").fetchone()
         counters = {row['name']:row['count'] for row in conn.execute('SELECT name,count FROM operations_counter').fetchall()}
         quotas = conn.execute("SELECT *,used::numeric>=allowance::numeric*0.7 AS warning,measured_at>=clock_timestamp()-interval '25 hours' AS verified FROM operations_quota ORDER BY resource").fetchall()
-        return OperationsStatus(sign_in_delivery='recorded' if 'sign_in_delivered' in counters or 'sign_in_failed' in counters else 'unverified',sign_in_delivered=counters.get('sign_in_delivered'),sign_in_failed=counters.get('sign_in_failed'),gateway_authorization_denials=counters.get('authorization_denials',0),release_failures=counters.get('release_failed',0),provider_quotas='recorded' if quotas else 'unverified',quotas=[QuotaStatus(**item) for item in quotas],**{key:value for key,value in state.items() if key!='singleton'},**totals,**counts)
+        # New accounts in the last day against the cap; the warning deliberately sits at 80%, not the quotas' 70%.
+        cap = daily_signup_cap()
+        return OperationsStatus(sign_in_delivery='recorded' if 'sign_in_delivered' in counters or 'sign_in_failed' in counters else 'unverified',sign_in_delivered=counters.get('sign_in_delivered'),sign_in_failed=counters.get('sign_in_failed'),gateway_authorization_denials=counters.get('authorization_denials',0),daily_signup_cap=cap,signup_warning=counts['signups_24h']*5>=cap*4,signup_refusals=counters.get('too_many_sign_ups',0),release_failures=counters.get('release_failed',0),provider_quotas='recorded' if quotas else 'unverified',quotas=[QuotaStatus(**item) for item in quotas],**{key:value for key,value in state.items() if key!='singleton'},**totals,**counts)
