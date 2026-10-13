@@ -36,6 +36,14 @@ _Avoid_: Mode, ruleset, legality
 The Card Printings within one Card Identity whose rules text is functionally identical. Format legality and bans apply to the whole group; copy limits still count by Card Identity.
 _Avoid_: Gameplay Identity, reprint set, equivalent card
 
+**Format Standing**:
+Whether one Card Printing is in a Format's card pool on a given day: legal, not legal, or unknown when a rule or card fact is missing. It follows the card's Reprint Group and bans, but says nothing about copy limits or deck size; those belong to a Deck List's format result. A Card Edition has its Card Printing's Format Standing.
+_Avoid_: Card legality, deck result
+
+**Trainer Type**:
+The kind of a Trainer card: Supporter, Item, Pokémon Tool or Stadium. Unknown for a Trainer whose source gives none, as for many printed before Black & White.
+_Avoid_: Trainer subtype, card category
+
 **Holding**:
 The current fungible quantity of one Card Edition in one storage leaf.
 _Avoid_: Copy record, individual card instance
