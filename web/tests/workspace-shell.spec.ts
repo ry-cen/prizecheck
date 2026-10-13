@@ -2,6 +2,7 @@ import { test, expect, type Locator, type Page } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { Pool } from "pg";
+import { expectTouchTarget } from "./support/touch-target";
 
 type TreeNode = {
   id: string;
@@ -220,9 +221,7 @@ test.describe("mobile", () => {
     ).toBeHidden();
 
     const opener = header.getByRole("button", { name: "Open locations" });
-    const size = await opener.boundingBox();
-    expect(size!.width).toBeGreaterThanOrEqual(44);
-    expect(size!.height).toBeGreaterThanOrEqual(44);
+    await expectTouchTarget(opener);
 
     await opener.click();
     const drawer = page.getByRole("dialog", { name: "Locations" });

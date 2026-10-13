@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { Pool } from "pg";
+import { expectTouchTarget } from "./support/touch-target";
 
 type TreeNode = { id: string; name: string; version: number };
 
@@ -1097,10 +1098,10 @@ test.describe("mobile", () => {
     const strip = bar(page);
     await expect(strip).toContainText("1 copy selected");
     const actions = strip.getByRole("button", { name: "Actions" });
-    expect((await box(actions)).height).toBeGreaterThanOrEqual(44);
+    await expectTouchTarget(actions, ["height"]);
     await actions.tap();
     const move = strip.getByRole("button", { name: "Move…" });
-    expect((await box(move)).height).toBeGreaterThanOrEqual(44);
+    await expectTouchTarget(move, ["height"]);
     await move.tap();
 
     // A sheet along the bottom edge, full width.
@@ -1123,7 +1124,7 @@ test.describe("mobile", () => {
     await expect(strip).toContainText("1 copy selected");
     const undo = page.getByRole("button", { name: "Undo", exact: true });
     await expect(undo).toBeVisible();
-    expect((await box(undo)).height).toBeGreaterThanOrEqual(44);
+    await expectTouchTarget(undo, ["height"]);
     const toastBox = await box(undo);
     const stripBox = await box(strip);
     expect(toastBox.y + toastBox.height).toBeLessThanOrEqual(stripBox.y);

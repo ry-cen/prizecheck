@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { Pool } from "pg";
+import { expectTouchTarget } from "./support/touch-target";
 
 type TreeNode = { id: string; name: string; version: number };
 
@@ -787,7 +788,7 @@ test.describe("mobile", () => {
     // Select mode: taps toggle, across Locations, and the strip keeps the count in reach.
     const select = page.getByRole("button", { name: "Select", exact: true });
     await expect(select).toHaveAttribute("aria-pressed", "false");
-    expect((await box(select)).height).toBeGreaterThanOrEqual(44);
+    await expectTouchTarget(select, ["height"]);
     await select.tap();
     await expect(select).toHaveAttribute("aria-pressed", "true");
     await tiles(page).nth(0).tap();
@@ -802,9 +803,7 @@ test.describe("mobile", () => {
     expect(stripBox.x).toBeGreaterThanOrEqual(0);
     expect(stripBox.x + stripBox.width).toBeLessThanOrEqual(375);
     for (const name of ["Details", "Actions"])
-      expect(
-        (await box(strip.getByRole("button", { name }))).height
-      ).toBeGreaterThanOrEqual(44);
+      await expectTouchTarget(strip.getByRole("button", { name }), ["height"]);
     expect(
       await page.evaluate(
         () => document.documentElement.scrollWidth <= window.innerWidth
