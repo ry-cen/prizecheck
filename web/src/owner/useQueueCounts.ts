@@ -39,7 +39,13 @@ export function useQueueCounts(section: OwnerSection) {
     void Promise.all([
       read("metadata", () => getMetadataQueue().then(paged)),
       read("attributes", () => getAttributeQueue().then(paged)),
-      read("reprints", () => getCardIdentityQueue().then(paged)),
+      // The Reprints table lists Card Identities, each with one or more queued Printings (#171).
+      read("reprints", () =>
+        getCardIdentityQueue().then(
+          (page) =>
+            `${new Set(page.items.map((item) => item.identity_id)).size}${page.next_cursor ? "+" : ""}`
+        )
+      ),
       read("missing", () =>
         getOwnerMissingCardReports().then((reports) =>
           String(

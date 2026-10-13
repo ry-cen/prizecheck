@@ -21,9 +21,10 @@ import { Pill } from "../ui/Pill";
 import { Segmented, segmentId } from "../ui/Segmented";
 import { AttributesQueue } from "./AttributesQueue";
 import { healthChecks, problems } from "./health";
+import { ReprintsQueue } from "./ReprintsQueue";
 import { RulesPanel } from "./RulesPanel";
 import { OWNER_SECTIONS, type OwnerSection } from "./sections";
-import { PANEL, StatusPanel } from "./StatusPanel";
+import { StatusPanel } from "./StatusPanel";
 import { useQueueCounts } from "./useQueueCounts";
 
 type Props = {
@@ -41,9 +42,9 @@ type Props = {
 /**
  * Owner controls (#167, variant A of the Missing cards and Owner controls decision): the problems line,
  * then sub-tabs with counts. Status and Rules are on the kit. Catalog, Metadata and Missing cards are
- * review queues on ScrollTables, with the review card inline under its row (#168); Attributes (#170) is
- * on the kit too, and only Reprints (#171) is still to come. While a catalog run is in progress the pull
- * status is read again every 5 seconds.
+ * review queues on ScrollTables, with the review card inline under its row (#168), and so is Reprints
+ * (#171); Attributes (#170) is on the kit too, with its own queue table. While a catalog run is in
+ * progress the pull status is read again every 5 seconds.
  */
 export function OwnerControlsPage(props: Props) {
   return (
@@ -156,13 +157,7 @@ function OwnerControls({
       content = <AttributesQueue onDecided={refreshCounts} />;
       break;
     case "reprints":
-      content = (
-        <ComingQueue
-          title="Reprint Groups"
-          count={tabCounts.reprints}
-          what="Reprint Groups"
-        />
-      );
+      content = <ReprintsQueue onChanged={recount} />;
       break;
     case "missing":
       content = <MissingQueue onChanged={recount} />;
@@ -219,29 +214,5 @@ function OwnerControls({
         {content}
       </div>
     </>
-  );
-}
-
-/** A queue whose page arrives with its own ticket (#171); its count is already on its tab. */
-function ComingQueue({
-  title,
-  count,
-  what,
-}: {
-  title: string;
-  count: string | undefined;
-  what: string;
-}) {
-  const headingId = useId();
-  return (
-    <section aria-labelledby={headingId} className={PANEL}>
-      <h2 id={headingId} className="m-0 text-body font-semibold">
-        {title}
-      </h2>
-      <p className="m-0 text-body text-text-muted">
-        {count === undefined ? "" : `Waiting for review: ${count}. `}
-        Reviewing {what} on this page comes in a later update.
-      </p>
-    </section>
   );
 }

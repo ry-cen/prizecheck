@@ -20,6 +20,7 @@ The redesign is a launch gate ([spec](spec.md), "Rollout"): PrizeCheck opens to 
 - [ ] Owner controls' Catalog, Metadata and Missing cards queues are tables, with each review card opening under its row. A confirmed decision takes its row off the list and shows a message, and the Missing cards queue lists only open reports. The owner-only catalog review routes also return the Printing as recorded and each Edition's Holdings count (#168).
 - [ ] Card type has one source, the reviewed card attributes, which gain Trainer Type and evolves from. After migrating to `041_trainer_type_and_evolves_from.sql`, run `scripts/derive_card_attributes.py` once (`docs/operations/release.md`); until then Collection's Trainer Type choices match no card. Collection's Category filter offers "Trainer: any type" and each Trainer Type, and its type filter lists Pokémon only, so a Basic Energy no longer appears under its type (#170).
 - [ ] Owner controls' Attributes tab reviews card attributes on the kit: derived, correction and effective values, Correct or Remove correction with a fresh code, and Reject report or Ask for information with a reason only (#170).
+- [ ] Owner controls' Reprints tab reviews Reprint Groups on the kit: each Card Identity waiting for review lists its Printings with their regulation mark, Reprint Group and that group's legality, and the owner moves Printings between groups, merges one group into another, or merges one Card Identity into another, each with a reason, evidence and a fresh code. The owner-only Card Identity routes also return each Printing's regulation mark, each group's legality (`as_of` picks the day) and when each queued Printing was created (#171).
 - [ ] Collection's Location tree, Manage locations, search, filters and display settings, the stale-collection banner and the Deck heading use the new controls. Filters & display opens as a panel along the right edge of a phone, and Manage locations fills a phone's screen (#166).
 
 ## Walkthroughs
@@ -84,7 +85,7 @@ On a desktop:
 - [ ] 4. Operational health is a table of area, check, value pill and detail. Click into it and use the arrow keys: when it's wider than the window it scrolls sideways inside its own box.
 - [ ] 5. Open Rules. Each rule kind is a card with its active version and every version with its digest, the latest marked. Confirm rule change stays disabled until the evidence URL, the reason and a six-digit code are filled in. Activate a rule only if you mean to.
 - [ ] 6. Press Tab until a sub-tab is focused, then use the arrow keys: focus moves along the tabs, and Enter opens one, changing the address (for example `/owner/rules`). Reload: the same tab is open. Press Back: the previous tab returns.
-- [ ] 7. Reprints shows how many items wait and says its review comes in a later update. Attributes lists its queue as a table (#170). (Catalog, Metadata and Missing cards have their own walkthrough under #168.)
+- [ ] 7. Reprints lists the Card Identities waiting for a Reprint Group review as a table (#171). Attributes lists its queue as a table (#170). (Catalog, Metadata and Missing cards have their own walkthrough under #168.)
 
 On a phone (iOS Safari or Android Chrome):
 
