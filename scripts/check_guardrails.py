@@ -1,4 +1,4 @@
-"""Deterministic release transport, diagnostic, process-scope and test-tier checks; no database required."""
+"""Deterministic release transport, diagnostic, process-scope, test-tier and flake-pattern checks; no database required."""
 import ast
 from pathlib import Path
 import re
@@ -92,6 +92,98 @@ def tier_violations(source, filename):
     return found
 
 
+# Flake-prone test patterns (docs/agents/verification.md). A flagged line may carry an exemption in the block of //
+# comment lines directly above it: `// flake-exempt <rule> (<category>): why`, with a category the rule accepts and a
+# reason of at least three words. touch-target takes no exemption.
+FLAKE_SCOPE = ('web/tests', 'auth/tests')
+FLAKE_EXEMPTIONS = {'wait-for-timeout': ('quiet',), 'one-shot-read': ('invariant',), 'counted-wait': ('retry',)}
+FLAKE_EXEMPTION = re.compile(r'^\s*//\s*flake-exempt\s+(?P<rule>[a-z-]+)\s+\((?P<category>[a-z-]+)\):\s*(?P<why>.*\S)\s*$')
+WAIT_FOR_TIMEOUT = re.compile(r'\.waitForTimeout\(')
+# expect(await <locator chain>.<read>()): one read of state the page can still change, where a retrying assertion waits.
+ONE_SHOT_READ = re.compile(
+    r'\bexpect(?:\.soft)?\(\s*await\s+(?:[^;()]|\((?:[^()]|\([^()]*\))*\))*?'
+    r'\.(?:isVisible|isHidden|isEnabled|isDisabled|isChecked|isEditable|textContent|innerText|innerHTML|inputValue'
+    r'|count|getAttribute|boundingBox|allTextContents|allInnerTexts)\(')
+COUNTED_LOOP = re.compile(r'\bfor\s*\(\s*let\s+(\w+)\s*=\s*0\s*;\s*\1\s*<[^;]*;\s*\1\s*(?:\+\+|\+=\s*1)\s*\)')
+LOOP_SLEEP = re.compile(r'\bsleep\(|\bsetTimeout\(|\.waitForTimeout\(')
+TOUCH_TARGET_SIZE = re.compile(r'\.toBeGreaterThan(?:OrEqual)?\(\s*4[34](?:\.\d+)?\s*\)')
+
+
+def loop_body(source, start):
+    """The statement after a for(...) header at `start`: a balanced {...} block, or a single statement up to its ;."""
+    index = start
+    while index < len(source) and source[index].isspace():
+        index += 1
+    depth = 0
+    for end in range(index, len(source)):
+        character = source[end]
+        if character in '([{':
+            depth += 1
+        elif character in ')]}':
+            depth -= 1
+            if depth == 0 and source[index] == '{':
+                return source[index:end + 1]
+        elif character == ';' and depth == 0 and source[index] != '{':
+            return source[index:end + 1]
+    return source[index:]
+
+
+def flake_exemption(lines, number, rule):
+    """(exempt, problem) for line `number` (1-based): a flake-exempt line for `rule` in the // comment block directly
+    above it, and what is wrong with it if anything."""
+    index = number - 2
+    while index >= 0 and lines[index].lstrip().startswith('//'):
+        match = FLAKE_EXEMPTION.match(lines[index])
+        if match and match['rule'] == rule:
+            categories = FLAKE_EXEMPTIONS[rule]
+            if match['category'] not in categories:
+                return True, f'flake-exempt {rule} takes ({"|".join(categories)}), not ({match["category"]})'
+            if len(match['why'].split()) < 3:
+                return True, f'flake-exempt {rule} needs a reason of at least three words'
+            return True, None
+        index -= 1
+    return False, None
+
+
+def flake_violations(source, filename):
+    """Flake-prone patterns in a TypeScript test file under web/tests or auth/tests: fixed sleeps and one-shot reads
+    of browser state where a retrying assertion waits, 44 px checks outside expectTouchTarget, and counted loops that
+    sleep where a wait should run to a deadline."""
+    lines = source.splitlines()
+    found = []
+
+    def check(offset, rule, reason):
+        line_start = source.rfind('\n', 0, offset) + 1
+        if '//' in source[line_start:offset]:  # a mention in a comment
+            return
+        number = source.count('\n', 0, offset) + 1
+        exempt, problem = flake_exemption(lines, number, rule) if rule in FLAKE_EXEMPTIONS else (False, None)
+        if problem or not exempt:
+            found.append((number, problem or reason))
+
+    if filename.startswith('web/tests/'):
+        for match in WAIT_FOR_TIMEOUT.finditer(source):
+            check(match.start(), 'wait-for-timeout', 'Wait for a state with a retrying assertion, not page.waitForTimeout; a quiet '
+                  'period before a negative check takes // flake-exempt wait-for-timeout (quiet): why')
+        for match in ONE_SHOT_READ.finditer(source):
+            check(match.start(), 'one-shot-read', 'Assert browser state with a retrying assertion (await expect(locator)...), '
+                  'not expect(await locator.<read>()); a sample of an invariant takes // flake-exempt one-shot-read (invariant): why')
+        if filename != 'web/tests/support/touch-target.ts':
+            for match in TOUCH_TARGET_SIZE.finditer(source):
+                check(match.start(), 'touch-target', 'Check 44 px touch targets with expectTouchTarget (web/tests/support/touch-target.ts)')
+    if filename.startswith('auth/tests/'):
+        for match in COUNTED_LOOP.finditer(source):
+            if LOOP_SLEEP.search(loop_body(source, match.end())):
+                check(match.start(), 'counted-wait', 'Wait to a deadline (waitForServer, serverReady or dropDatabase in '
+                      'auth/tests/support/servers.ts, or expect.poll), not a counted loop that sleeps')
+    return found
+
+
+def flake_scope_files():
+    for entry in FLAKE_SCOPE:
+        yield from sorted((ROOT/entry).rglob('*.ts'))
+
+
 def process_scope_files():
     for entry in PROCESS_SCOPE:
         path = ROOT/entry
@@ -115,6 +207,11 @@ def main():
     for path in sorted((ROOT/'api/tests').glob('test_*.py')):
         relative = path.relative_to(ROOT).as_posix()
         for line, reason in tier_violations(path.read_text(), relative):
+            print(f'{relative}:{line}: {reason}')
+            failed = True
+    for path in flake_scope_files():
+        relative = path.relative_to(ROOT).as_posix()
+        for line, reason in flake_violations(path.read_text(), relative):
             print(f'{relative}:{line}: {reason}')
             failed = True
     return int(failed)
