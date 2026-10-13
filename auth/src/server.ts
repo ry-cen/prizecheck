@@ -31,6 +31,7 @@ import {
   SIGN_INS_PAGE,
   unlinkPlan,
   type AccountRow,
+  startFailureUrl,
 } from "./signIns.js";
 
 const origin = process.env.PUBLIC_ORIGIN || "http://localhost:5173";
@@ -333,33 +334,44 @@ const server = createServer(async (request, response) => {
       const provider = configuredProvider(signInStart[1]);
       if (!provider) return json(response, 404, { error: "Not found" });
       // Each start writes a Better Auth verification row: 60 per trusted IP per hour, shared with link starts.
-      if (!(await rateLimits.allowStart(trustedClientIp(request))))
+      try {
+        if (!(await rateLimits.allowStart(trustedClientIp(request))))
+          return redirect(
+            response,
+            `${SIGN_IN_PAGE}?provider=${provider.id}&error=too_many_sign_ups`
+          );
+        const next = safeNext(
+          new URL(request.url || "/", origin).searchParams.get("next")
+        );
+        const started = await auth.handler(
+          betterRequest(
+            origin,
+            request,
+            "/api/auth/sign-in/social",
+            JSON.stringify({
+              provider: provider.id,
+              callbackURL: next,
+              newUserCallbackURL: next,
+              // The provider id lets the page name the provider in its message.
+              errorCallbackURL: `${SIGN_IN_PAGE}?provider=${provider.id}`,
+            }),
+            { method: "POST", originHeader: origin }
+          )
+        );
+        // Better Auth answers 200 with the provider URL; a sign-in button is a plain link, so the gateway redirects.
+        const location = started.ok ? started.headers.get("location") : null;
+        if (!location) throw new Error("Sign-in start failed");
+        return redirect(response, location, started.headers.getSetCookie());
+      } catch (error) {
+        console.error(
+          "Sign-in start failed",
+          error instanceof Error ? error.name : "unknown"
+        );
         return redirect(
           response,
-          `${SIGN_IN_PAGE}?provider=${provider.id}&error=too_many_sign_ups`
+          startFailureUrl(SIGN_IN_PAGE, `provider=${provider.id}`)
         );
-      const next = safeNext(
-        new URL(request.url || "/", origin).searchParams.get("next")
-      );
-      const started = await auth.handler(
-        betterRequest(
-          origin,
-          request,
-          "/api/auth/sign-in/social",
-          JSON.stringify({
-            provider: provider.id,
-            callbackURL: next,
-            newUserCallbackURL: next,
-            // The provider id lets the page name the provider in its message.
-            errorCallbackURL: `${SIGN_IN_PAGE}?provider=${provider.id}`,
-          }),
-          { method: "POST", originHeader: origin }
-        )
-      );
-      // Better Auth answers 200 with the provider URL; a sign-in button is a plain link, so the gateway redirects.
-      const location = started.ok ? started.headers.get("location") : null;
-      if (!location) throw new Error("Sign-in start failed");
-      return redirect(response, location, started.headers.getSetCookie());
+      }
     }
     const callback = /^\/api\/auth\/callback\/([^/]+)$/.exec(path);
     if (
@@ -427,25 +439,36 @@ const server = createServer(async (request, response) => {
       // Better Auth checks freshness only for unlinking; the gateway applies the same rule to link starts.
       if (!isFresh(current.session.createdAt))
         return redirect(response, `${back}&error=recent_sign_in_required`);
-      if (!(await rateLimits.allowStart(trustedClientIp(request))))
-        return redirect(response, `${back}&error=too_many_sign_ups`);
-      const started = await auth.handler(
-        betterRequest(
-          origin,
-          request,
-          "/api/auth/link-social",
-          JSON.stringify({
-            provider: provider.id,
-            callbackURL: SIGN_INS_PAGE,
-            errorCallbackURL: back,
-          }),
-          { method: "POST", originHeader: origin }
-        )
-      );
-      // Like a sign-in start: Better Auth answers 200 with the provider URL, and the gateway redirects.
-      const location = started.ok ? started.headers.get("location") : null;
-      if (!location) throw new Error("Link start failed");
-      return redirect(response, location, started.headers.getSetCookie());
+      try {
+        if (!(await rateLimits.allowStart(trustedClientIp(request))))
+          return redirect(response, `${back}&error=too_many_sign_ups`);
+        const started = await auth.handler(
+          betterRequest(
+            origin,
+            request,
+            "/api/auth/link-social",
+            JSON.stringify({
+              provider: provider.id,
+              callbackURL: SIGN_INS_PAGE,
+              errorCallbackURL: back,
+            }),
+            { method: "POST", originHeader: origin }
+          )
+        );
+        // Like a sign-in start: Better Auth answers 200 with the provider URL, and the gateway redirects.
+        const location = started.ok ? started.headers.get("location") : null;
+        if (!location) throw new Error("Link start failed");
+        return redirect(response, location, started.headers.getSetCookie());
+      } catch (error) {
+        console.error(
+          "Link start failed",
+          error instanceof Error ? error.name : "unknown"
+        );
+        return redirect(
+          response,
+          startFailureUrl(SIGN_INS_PAGE, `provider=${provider.id}`)
+        );
+      }
     }
     const unlink = /^\/auth\/unlink\/([^/]+)$/.exec(path);
     if (unlink && request.method === "POST") {

@@ -6,11 +6,17 @@
 export const SIGN_INS_PAGE = "/settings/sign-ins";
 
 /**
- * A session may change sign-ins for 24 hours after it was created: Better Auth's default session.freshAge (auth.ts
- * doesn't set it), which Better Auth itself applies to unlinking. A rolling session keeps its creation time, so an
+ * A session may change sign-ins for 24 hours after it was created: auth.ts sets Better Auth's session.freshAge from
+ * FRESH_AGE_SECONDS, and Better Auth itself applies it to unlinking. A rolling session keeps its creation time, so an
  * active session still goes stale.
  */
-export const FRESH_AGE_MS = 24 * 60 * 60 * 1000;
+export const FRESH_AGE_SECONDS = 24 * 60 * 60;
+export const FRESH_AGE_MS = FRESH_AGE_SECONDS * 1000;
+
+/** Where a failed sign-in or link start sends the browser: the page that shows the error, never the JSON handler. */
+export function startFailureUrl(page: string, query: string): string {
+  return `${page}?${query}&error=internal_server_error`;
+}
 
 /** Better Auth's freshness rule: stale once `now - createdAt >= freshAge`. */
 export function isFresh(createdAt: Date | string, now = Date.now()): boolean {

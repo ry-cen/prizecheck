@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   FRESH_AGE_MS,
+  FRESH_AGE_SECONDS,
+  startFailureUrl,
   isFresh,
   linkedSignIns,
   sameSiteStart,
@@ -96,5 +98,19 @@ describe("unlinkPlan", () => {
     expect(unlinkPlan([google1], "discord", CONFIGURED)).toEqual({
       kind: "not-linked",
     });
+  });
+});
+
+describe("start failures and the freshness window", () => {
+  it("sends a failed start to the page that shows the error", () => {
+    expect(startFailureUrl("/sign-in", "provider=google")).toBe(
+      "/sign-in?provider=google&error=internal_server_error"
+    );
+    expect(startFailureUrl("/settings/sign-ins", "provider=discord")).toBe(
+      "/settings/sign-ins?provider=discord&error=internal_server_error"
+    );
+  });
+  it("derives the millisecond window from the seconds Better Auth is given", () => {
+    expect(FRESH_AGE_MS).toBe(FRESH_AGE_SECONDS * 1000);
   });
 });
