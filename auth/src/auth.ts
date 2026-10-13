@@ -172,9 +172,16 @@ function authOn(database: Pool) {
         update: {
           // A sign-in or link never changes the collector's own email or verified flag (overrideUserInfoOnSignIn
           // would). Hook data is merged, so the keys are overridden with undefined, which Better Auth drops.
-          before: async (_user, context) =>
+          before: async (user, context) =>
             context?.path === "/callback/:id"
-              ? { data: { email: undefined, emailVerified: undefined } }
+              ? {
+                  data: {
+                    email: undefined,
+                    emailVerified: undefined,
+                    // Better Auth sends "" for a name the provider omitted; the old name stays.
+                    ...(user.name === "" ? { name: undefined } : {}),
+                  },
+                }
               : undefined,
         },
       },

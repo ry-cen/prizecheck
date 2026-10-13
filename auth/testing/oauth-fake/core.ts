@@ -23,6 +23,8 @@ export type Identity = {
   name: string;
   /** Discord avatar hash, or null for Discord's default avatar. */
   discordAvatar: string | null;
+  /** Google sends no `picture` claim (and no `name` claim when `name` is empty). */
+  noGooglePicture?: boolean;
 };
 
 const DEFAULT_OWNER_EMAIL = "owner@example.test";
@@ -88,6 +90,15 @@ export function identities(
       verified: false,
       name: "No Email Collector",
       discordAvatar: null,
+    },
+    "owner-plain": {
+      googleSub: "100000000000000000001",
+      discordId: "100000000000000001",
+      email: owner,
+      verified: true,
+      name: "",
+      discordAvatar: null,
+      noGooglePicture: true,
     },
     "different-email": {
       googleSub: "100000000000000000006",
@@ -199,8 +210,10 @@ export function createFakeFetch(
         aud: env.GOOGLE_CLIENT_ID,
         sub: person.googleSub,
         email_verified: person.verified,
-        name: person.name,
-        picture: `https://lh3.googleusercontent.com/a/fake-${name}`,
+        ...(person.name ? { name: person.name } : {}),
+        ...(person.noGooglePicture
+          ? {}
+          : { picture: `https://lh3.googleusercontent.com/a/fake-${name}` }),
         iat: now,
         exp: now + 3600,
       };
@@ -250,8 +263,9 @@ export function createFakeFetch(
       if (!person) return invalid(401, "unauthorized");
       return Response.json({
         id: person.discordId,
-        username: person.name.toLowerCase().replace(/[^a-z0-9]/g, ""),
-        global_name: person.name,
+        username:
+          person.name.toLowerCase().replace(/[^a-z0-9]/g, "") || "collector",
+        global_name: person.name || null,
         discriminator: "0",
         avatar: person.discordAvatar,
         email: person.email,

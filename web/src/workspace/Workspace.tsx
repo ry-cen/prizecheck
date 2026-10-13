@@ -5,6 +5,7 @@ import React, {
   useRef,
   useState,
 } from "react";
+import { ProfileBadge } from "../ProfileBadge";
 import { getLocationTree, type TreeNode } from "../location_generated";
 import { AddCardsDialog } from "./AddCardsDialog";
 import { CorrectionsNotice } from "./CorrectionsNotice";
@@ -385,6 +386,7 @@ export function Workspace({
           {page.label}
         </button>
       ))}
+      <ProfileBadge />
       <button type="button" onClick={onSignOut}>
         Sign out
       </button>
