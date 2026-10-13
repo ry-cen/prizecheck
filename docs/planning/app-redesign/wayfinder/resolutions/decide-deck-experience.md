@@ -9,6 +9,13 @@
 - [Decks UI inventory](../research/decks-ui-inventory.md).
 - Research on [TCG Live's deck builder](../research/ptcgl-deck-builder.md) and [Limitless's deck builder](../research/limitless-deck-builder.md).
 
+> **Amended 2026-10-12** by [the Published Deck and Discover resolution](decide-published-deck-and-discover.md#target-format-and-the-publishing-gate) and [ADR 0011](../../../../adr/0011-publishing-needs-a-legal-target-format.md):
+> - Every Deck has one **Target Format**.
+> - The three format pills below become one **"Standard ▾ · ✓ Legal"** control.
+> - The library's format chip starts on the Target Format.
+> - **Publish is disabled** until the Target Format result is legal.
+> - The Decks index shows one format pill per Deck.
+
 ## Decision
 
 ### Where Deck work lives

@@ -29,7 +29,7 @@ The application-owned English card-name concept under which Card Printings count
 _Avoid_: Gameplay Identity, identical card, translated printing
 
 **Format**:
-A named set of deck-construction rules, such as Standard, Expanded, or Gym Leader Challenge, that a Deck List can be checked against. A format check is advisory and never blocks the collector.
+A named set of deck-construction rules, such as Standard, Expanded, or Gym Leader Challenge, that a Deck List can be checked against. A format check is advisory: it never blocks editing or moving cards, and its only gate is that publishing needs a legal result in the Deck's Target Format.
 _Avoid_: Mode, ruleset, legality
 
 **Reprint Group**:
@@ -64,6 +64,10 @@ _Avoid_: Virtual deck, linked deck
 The part of a Deck that names its intended Card Editions and quantities, whether the collector owns them, stores them elsewhere, or does not own them. It is not a separate object and never counts toward the Collection.
 _Avoid_: Deck Plan, wishlist, standalone list
 
+**Target Format**:
+The one Format a Deck is being built for; every Deck has one, Standard unless the collector chooses another. The Deck's advisory format check is against its Target Format alone, and changing the Target Format is how a collector checks another Format.
+_Avoid_: Main format, selected format, default format
+
 **Pick List**:
 The cards in a Deck's Deck List that are stored elsewhere in the Collection, each with a suggested source Location. Confirming a pick moves those copies into the Deck.
 _Avoid_: Pull list, retrieval list
@@ -73,7 +77,7 @@ The collector's root Storage Leaf that receives cards without a chosen Location.
 _Avoid_: Inbox, default Location
 
 **Published Deck**:
-A sanitized public snapshot intentionally created from a Deck's Deck List. It is not a live view of the private Deck or its Location, does not depend on the Deck's physical cards, and outlives deletion of the Deck until its owner revokes it.
+A sanitized public snapshot intentionally created from a Deck's Deck List and Target Format. It is not a live view of the private Deck or its Location, does not depend on the Deck's physical cards, and outlives deletion of the Deck until its owner revokes it.
 _Avoid_: Shared Deck, public Location, live deck
 
 **Listed Published Deck**:
