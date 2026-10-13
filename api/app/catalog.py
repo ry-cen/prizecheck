@@ -21,7 +21,7 @@ from .catalog_targets import (IDENTITY_REVIEW_KINDS, MatchingRulesV1, TargetCont
                               refresh_printing)
 from .public_catalog import publish_catalog_best_effort
 from .reprint_groups import refresh_reprint_groups
-from .tcgdex_record import distinct_variants, source_descriptor
+from .tcgdex_record import distinct_variants, priced_variant, source_descriptor
 
 BASE_URL = "https://api.tcgdex.net/v2/en/cards"
 # Pokémon TCG Pocket is digital-only; its cards are not physical Card Printings.
@@ -246,7 +246,8 @@ def edition_metadata(record, descriptor, physical_conflict):
     """Classify source lookup/quote data for one existing Edition without changing identity.
 
     Only one exact variant match is attributed to an Edition. Record-level data is
-    printing-level evidence, and unresolved or Unspecified Editions get no quote.
+    printing-level evidence, and unresolved or Unspecified Editions get no quote. The one exception is the card's
+    TCGplayer block, which a matched variant without its own block reads (``priced_variant``).
     """
     detailed = record.get("variants_detailed")
     detailed = distinct_variants(detailed) if isinstance(detailed, list) else []
@@ -258,7 +259,8 @@ def edition_metadata(record, descriptor, physical_conflict):
         correspondence = "source_candidate"
     else:
         correspondence = "printing_level"
-    lookup = marketplace_candidates(variant if variant else
+    priced = priced_variant(record, variant) if correspondence == "source_candidate" else variant
+    lookup = marketplace_candidates(priced if priced else
                                     {key: value for key, value in record.items() if key != "variants_detailed"})
     evidence = {"physical_evidence": {key: physical_review_evidence(record[key]) for key in ("id", "name", "localId", "variants")
                                       if key in record},
@@ -268,7 +270,7 @@ def edition_metadata(record, descriptor, physical_conflict):
     return {
         "mapping_candidate": {"candidate": lookup, "correspondence": correspondence},
         "mapping_evidence": evidence,
-        "quote_candidate": variant.get("pricing", {}) if correspondence == "source_candidate" else {},
+        "quote_candidate": priced.get("pricing", {}) if correspondence == "source_candidate" else {},
         "source_variant": {key: value for key, value in variant.items() if key not in VARIANT_QUOTE_KEYS},
         "unknown_fields": {key: value for key, value in variant.items()
                            if key not in PHYSICAL_VARIANT_KEYS and key not in MUTABLE_SOURCE_KEYS},
