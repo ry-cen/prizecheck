@@ -2,11 +2,11 @@
 
 **Label:** wayfinder:map
 
-**Status:** charted 2026-10-12; every ticket resolved 2026-10-12. The way is clear. Spec published as [Spec: OAuth sign-in with Google and Discord](https://github.com/ry-cen/prizecheck/issues/147) ([spec.md](../spec.md)). Next: owner-invoked `/to-ticket`.
+**Status:** charted 2026-10-12; every ticket resolved 2026-10-12. The way is clear. Spec published as [Spec: OAuth sign-in with Google and Discord](https://github.com/ry-cen/prizecheck/issues/147) ([spec.md](../spec.md)). Implementation tickets published (listed in the spec).
 
 ## Destination
 
-An agreed plan, spec published as [Spec: OAuth sign-in with Google and Discord](https://github.com/ry-cen/prizecheck/issues/147) ([spec.md](../spec.md)). Next: owner-invoked `/to-ticket`.and `/to-ticket`, that makes Google and Discord the sign-in methods collectors see, able to create accounts. Email-code sign-in stays built but switched off until it's ready. Owner approval codes and operations mail are unchanged. This effort resolves decisions only. The spec at `docs/planning/oauth-sign-in/spec.md`, the implementation tickets and the code come after this map.
+An agreed plan, spec published as [Spec: OAuth sign-in with Google and Discord](https://github.com/ry-cen/prizecheck/issues/147) ([spec.md](../spec.md)). Implementation tickets published (listed in the spec).and `/to-ticket`, that makes Google and Discord the sign-in methods collectors see, able to create accounts. Email-code sign-in stays built but switched off until it's ready. Owner approval codes and operations mail are unchanged. This effort resolves decisions only. The spec at `docs/planning/oauth-sign-in/spec.md`, the implementation tickets and the code come after this map.
 
 ## Notes
 

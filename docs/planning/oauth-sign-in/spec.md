@@ -1,6 +1,6 @@
 # OAuth sign-in for PrizeCheck
 
-**Status:** published 2026-10-12, `ready-for-agent`. Next step: owner-invoked `/to-ticket`.
+**Status:** published 2026-10-12, `ready-for-agent`. Broken into implementation tickets (see Further Notes).
 
 This spec turns the eight resolutions of the [OAuth sign-in decision map](wayfinder/map.md) into one implementation handoff. Details that no resolution settled are listed under "Details settled at publication" in Further Notes.
 
@@ -231,13 +231,13 @@ The browser talks only to gateway routes. The gateway never passes `/api/auth/*`
 
 | Route | Purpose | Checks | Success | Failure |
 | --- | --- | --- | --- | --- |
-| `GET /auth/methods` | Lists the configured providers and whether email sign-in is on | None. Reveals nothing about any account. | 200 with each provider's id and display name, plus a flag for email sign-in (exact body proposed) | None expected |
+| `GET /auth/methods` | Lists the configured providers and whether email sign-in is on | None. Reveals nothing about any account. | 200 with each provider's id and display name, plus a flag for email sign-in | None expected |
 | `GET /auth/sign-in/:provider?next=<path>` | Starts a sign-in | Provider must be configured. `next` must be a safe path. Start limit applies. | 302 to the provider with Better Auth's `state` cookie. Callback target is the checked `next`. | 404 for an unknown provider. 302 to the sign-in page with `error=too_many_sign_ups` when over the start limit. |
 | `GET /api/auth/callback/:provider` | Completes sign-in or link | Provider must be configured. Runs inside the IP context. | Relays Better Auth's 302 `Location` and `Set-Cookie`, with the query string intact. | 404 for an unknown provider. Provider and gate errors become a 302 to the sign-in page (or Sign-ins page) with an `error` code. |
 | `GET /auth/session` | Session lookup | None | 200 with `signedIn`, `userId`, and for a signed-in collector `name` and `image` (null when absent). The collector's email is added for the Sign-ins page. | None |
 | `GET /auth/sign-ins` | Lists the signed-in collector's linked providers | Session required | 200 with the provider id and the date linked for each. No account ids or emails. | 401 without a session |
-| `GET /auth/link/:provider` | Starts linking a provider to the signed-in collector | Session required. Provider must be configured. Session must be fresh. Start limit applies. | 302 to the provider. Returns through the same callback route to the Sign-ins page. | 401 without a session. 404 for an unknown provider. Stale session redirects to the Sign-ins page with `error=recent_sign_in_required` (code name proposed). |
-| `POST /auth/unlink/:provider` | Removes a linked sign-in | Origin must match. Session required. Session must be fresh. | 200 | 403 for a bad origin. 401 without a session. A stale session is refused with the same `recent_sign_in_required` code. Unlinking the last sign-in is refused by Better Auth (reporting proposed, see below). |
+| `GET /auth/link/:provider` | Starts linking a provider to the signed-in collector | Session required. Provider must be configured. Session must be fresh. Start limit applies. | 302 to the provider. Returns through the same callback route to the Sign-ins page. | 401 without a session. 404 for an unknown provider. Stale session redirects to the Sign-ins page with `error=recent_sign_in_required`. |
+| `POST /auth/unlink/:provider` | Removes a linked sign-in | Origin must match. Session required. Session must be fresh. | 200 | 403 for a bad origin. 401 without a session. A stale session is refused with the same `recent_sign_in_required` code. Unlinking the last sign-in is refused by Better Auth. |
 | `POST /auth/request-code`, `POST /auth/verify-code` | Email-code sign-in | Unchanged when `EMAIL_SIGN_IN=on` | Unchanged | 404 when `EMAIL_SIGN_IN=off` |
 | `POST /auth/approval-code`, `POST /auth/sign-out` | Owner approval codes and sign-out | Unchanged | Unchanged | Unchanged |
 | Any other path under `/api/auth/` | None | Matched before the generic `/api/` branch | None | 404, never forwarded to the API |
