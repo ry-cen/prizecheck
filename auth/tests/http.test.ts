@@ -2,11 +2,12 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
-import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { execFileSync, type ChildProcess } from "node:child_process";
 import { createServer, type Server } from "node:net";
 import { mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { launch, waitForServer } from "./support/servers";
 
 const base = process.env.TEST_BASE_URL || "http://localhost:5173";
 const origin = process.env.TEST_ORIGIN || "http://localhost:5173";
@@ -17,52 +18,6 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 function latestCode(): string {
   const lines = readFileSync(mailFile, "utf8").trim().split("\n");
   return JSON.parse(lines.at(-1)!).otp;
-}
-// The last stderr of each server child, so a crash or a lost port race names its cause instead of a bare timeout.
-const stderrTails = new WeakMap<ChildProcess, string>();
-function launch(command: string, args: string[], env: NodeJS.ProcessEnv) {
-  const child = spawn(command, args, {
-    cwd: process.cwd(),
-    env,
-    stdio: ["ignore", "ignore", "pipe"],
-  });
-  stderrTails.set(child, "");
-  child.stderr!.on("data", (chunk: Buffer) =>
-    stderrTails.set(child, (stderrTails.get(child)! + chunk).slice(-2_000))
-  );
-  return child;
-}
-// Probes `url` until `accept` takes an answer and returns it. Every miss (a refused connection, a timed-out probe or
-// an answer `accept` rejects) waits 100 ms before the next probe, up to a 30 s deadline rather than an attempt count,
-// so a cold start on a loaded host still fits. A child that exits first fails at once with its stderr.
-async function waitForServer(
-  children: ChildProcess[],
-  url: string,
-  accept: (response: Response) => boolean,
-  init: RequestInit = {}
-): Promise<Response | undefined> {
-  const deadline = performance.now() + 30_000;
-  for (;;) {
-    const exited = children.find(
-      (child) => child.exitCode !== null || child.signalCode !== null
-    );
-    if (exited)
-      throw new Error(
-        `${exited.spawnargs.join(" ")} exited (${exited.exitCode ?? exited.signalCode}) before ${url} answered:\n${stderrTails.get(exited)}`
-      );
-    try {
-      const response = await fetch(url, {
-        ...init,
-        signal: AbortSignal.timeout(5_000),
-      });
-      if (accept(response)) return response;
-      await response.body?.cancel();
-    } catch {
-      /* not listening yet, or the probe timed out */
-    }
-    if (performance.now() > deadline) return undefined;
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
 }
 async function post(path: string, body: object, cookie = "") {
   return fetch(base + path, {

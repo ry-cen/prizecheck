@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
+import { dropDatabase, serverReady } from "./support/servers";
 
 const admin = new Pool({ connectionString: process.env.DATABASE_URL });
 const database = "tcg_signup_" + randomUUID().replaceAll("-", "");
@@ -26,6 +27,7 @@ function code() {
     readFileSync(join(directory, "mail"), "utf8").trim().split("\n").at(-1)!
   ).otp;
 }
+// The timeout covers serverReady's 30 s deadline plus the migration on a loaded host.
 beforeAll(async () => {
   await admin.query(`CREATE DATABASE "${database}"`);
   const connection = new URL(process.env.DATABASE_URL!);
@@ -57,33 +59,15 @@ beforeAll(async () => {
   });
   child.stdout?.on("data", (chunk) => (gatewayLogs += chunk));
   child.stderr?.on("data", (chunk) => (gatewayLogs += chunk));
-  for (let n = 0; n < 50; n++) {
-    try {
-      if ((await fetch(base + "/auth/session")).ok) return;
-    } catch {
-      /* startup */
-    }
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-  throw new Error("Gateway did not start");
-});
+  await serverReady([child], base + "/auth/session");
+}, 60_000);
 afterAll(async () => {
   if (child && child.exitCode === null) {
     child.kill();
     await new Promise((resolve) => child.once("exit", resolve));
   }
   await pool?.end();
-  // pool.end() resolves before the server sees every socket close; a forced drop
-  // would then terminate a closing client and surface 57P01 as an unhandled error.
-  for (let n = 0; n < 50; n++) {
-    const { rows } = await admin.query(
-      "SELECT count(*)::int AS count FROM pg_stat_activity WHERE datname=$1",
-      [database]
-    );
-    if (rows[0].count === 0) break;
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-  await admin.query(`DROP DATABASE IF EXISTS "${database}" WITH (FORCE)`);
+  await dropDatabase(admin, database);
   await admin.end();
   rmSync(directory, { recursive: true, force: true });
 });
@@ -155,6 +139,7 @@ it("rolls back the account when its initial Storage Leaf cannot be created", asy
     await pool.query("DROP FUNCTION fail_signup_leaf()");
   }
 });
+// The timeout covers two cold tsx starts, one after the other, on a loaded host.
 it("refuses to start public signup without audited readiness or with fake production delivery", async () => {
   for (const settings of [
     { SIGNUP_MODE: "public", SIGNUP_READINESS_FILE: "" },
@@ -173,7 +158,8 @@ it("refuses to start public signup without audited readiness or with fake produc
       1
     );
   }
-});
+}, 60_000);
+// The timeout covers serverReady's 30 s deadline on a loaded host.
 it("keeps code-request responses uniform when configured delivery fails", async () => {
   const connection = new URL(process.env.DATABASE_URL!);
   connection.pathname = "/" + database;
@@ -192,21 +178,10 @@ it("keeps code-request responses uniform when configured delivery fails", async 
     stdio: "ignore",
   });
   try {
-    for (let n = 0; n < 50; n++) {
-      try {
-        if (
-          (
-            await fetch(
-              `http://127.0.0.1:${process.env.TEST_SECONDARY_AUTH_PORT || "3199"}/auth/session`
-            )
-          ).ok
-        )
-          break;
-      } catch {
-        /* startup */
-      }
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
+    await serverReady(
+      [failing],
+      `http://127.0.0.1:${process.env.TEST_SECONDARY_AUTH_PORT || "3199"}/auth/session`
+    );
     const email = "delivery-failure@example.test";
     const response = await fetch(
       `http://127.0.0.1:${process.env.TEST_SECONDARY_AUTH_PORT || "3199"}/auth/request-code`,
@@ -229,7 +204,8 @@ it("keeps code-request responses uniform when configured delivery fails", async 
       await new Promise((resolve) => failing.once("exit", resolve));
     }
   }
-});
+}, 60_000);
+// The timeout covers two cold tsx starts of up to 20 s each.
 it("rejects local-public outside an explicitly local development or test environment", async () => {
   for (const settings of [
     { NODE_ENV: undefined, PUBLIC_ORIGIN: origin },
@@ -250,10 +226,12 @@ it("rejects local-public outside an explicitly local development or test environ
       stdio: "ignore",
     });
     try {
+      // A refused start exits once tsx has loaded the server, which takes seconds on a loaded host; the bound only
+      // catches a server that wrongly keeps running.
       const status = await Promise.race([
         new Promise((resolve) => candidate.once("exit", resolve)),
         new Promise((resolve) =>
-          setTimeout(() => resolve("still-running"), 5000)
+          setTimeout(() => resolve("still-running"), 20_000)
         ),
       ]);
       expect(status).toBe(1);
@@ -264,4 +242,4 @@ it("rejects local-public outside an explicitly local development or test environ
       }
     }
   }
-});
+}, 60_000);
