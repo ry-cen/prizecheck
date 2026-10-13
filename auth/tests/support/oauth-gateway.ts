@@ -20,12 +20,31 @@ export const PLACEHOLDER_CREDENTIALS = {
   DISCORD_CLIENT_SECRET: "fake-discord-secret",
 };
 
+// Ports the verification harness has already handed to other tests and stacks. Their servers may not be listening
+// yet, so an OS-chosen free port could still collide with one of them.
+function reservedPorts(): Set<number> {
+  const reserved = new Set<number>();
+  for (const [key, value] of Object.entries(process.env))
+    if (key.endsWith("_PORT") && value) reserved.add(Number(value));
+  try {
+    for (const stack of JSON.parse(process.env.VERIFY_EXTRA_STACKS || "[]"))
+      for (const key of ["api_port", "auth_port", "web_port"])
+        reserved.add(Number(stack[key]));
+  } catch {
+    // No harness stacks.
+  }
+  return reserved;
+}
+
 export async function freePort(): Promise<number> {
-  const probe = createNetServer();
-  await new Promise<void>((resolve) => probe.listen(0, "127.0.0.1", resolve));
-  const port = (probe.address() as { port: number }).port;
-  await new Promise((resolve) => probe.close(resolve));
-  return port;
+  const reserved = reservedPorts();
+  for (;;) {
+    const probe = createNetServer();
+    await new Promise<void>((resolve) => probe.listen(0, "127.0.0.1", resolve));
+    const port = (probe.address() as { port: number }).port;
+    await new Promise((resolve) => probe.close(resolve));
+    if (!reserved.has(port)) return port;
+  }
 }
 
 export type GatewayOptions = {
