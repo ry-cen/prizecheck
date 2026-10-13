@@ -1,7 +1,6 @@
 import React, { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { getOwnerCatalogStatus, type OwnerCatalogStatus } from "./generated";
-import { Collection } from "./Collection";
 import { Decks } from "./Decks";
 import { CatalogSearch } from "./CatalogSearch";
 import { MissingCardReports } from "./MissingCardReports";
@@ -234,12 +233,6 @@ function App() {
                 onMessage={setMessage}
               />
             )}
-          </LegacyPage>
-        );
-      case "old-collection":
-        return (
-          <LegacyPage title="Old Collection" message={message}>
-            <Collection />
           </LegacyPage>
         );
       case "sign-ins":

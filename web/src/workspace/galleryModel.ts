@@ -6,6 +6,7 @@ import type {
   HoldingSort,
 } from "../collection_generated";
 import type { HoldingView } from "../holdings_generated";
+import { variantLabel } from "../ui/variantLabel";
 import type { WorkspaceView } from "./LocationNav";
 
 /** Card size choice, remembered with the other preferences (galleryPrefs.ts). */
@@ -328,18 +329,19 @@ const counts = new Intl.NumberFormat("en-US");
 export const plural = (n: number, one: string, many: string) =>
   `${counts.format(n)} ${n === 1 ? one : many}`;
 
-/** "Pikachu, Base Set 25, copy 2, Shelf / Binder 2" */
+/** "Pikachu, Base Set 25, Reverse Holo, copy 2, Shelf / Binder 2". The Variant Descriptor (or "Unspecified
+ * Variant") is always in the name, whether or not the Names line is drawn (#164). */
 export const tileLabel = (
   holding: HoldingView,
   ordinal: number,
   path: string
 ) =>
-  `${holding.printing_name}, ${holding.set_name} ${holding.collector_number}, copy ${ordinal + 1}, ${path}`;
+  `${holding.printing_name}, ${holding.set_name} ${holding.collector_number}, ${variantLabel(holding.descriptor)}, copy ${ordinal + 1}, ${path}`;
 
-/** "Pikachu · Base Set 25 · copy 2 · Shelf / Binder 2" */
+/** "Pikachu · Base Set 25 · Reverse Holo · copy 2 · Shelf / Binder 2" */
 export const tileTitle = (
   holding: HoldingView,
   ordinal: number,
   path: string
 ) =>
-  `${holding.printing_name} · ${holding.set_name} ${holding.collector_number} · copy ${ordinal + 1} · ${path}`;
+  `${holding.printing_name} · ${holding.set_name} ${holding.collector_number} · ${variantLabel(holding.descriptor)} · copy ${ordinal + 1} · ${path}`;

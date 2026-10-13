@@ -38,7 +38,6 @@ const ICONS: Record<PageId, LucideIcon> = {
   reports: Flag,
   "sign-ins": KeyRound,
   owner: ShieldCheck,
-  "old-collection": LayoutGrid,
 };
 
 type Props = {

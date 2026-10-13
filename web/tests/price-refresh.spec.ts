@@ -114,12 +114,13 @@ async function hold(editions: string[]) {
   );
 }
 
-/** Opens the Collection page. seed() replaces the catalog, which clears every Holding, so its rows are exactly what
- * hold() added. Unlike the Decks page it reads no Deck cost, so the runner and /api/prices/editions counts stay as before. */
+/** Collection's gallery with Prices on (the old Collection page is retired, #164). seed() replaces the catalog,
+ * which clears every Holding, so its tiles are exactly what hold() added, and their price lines are read in one
+ * batch. Unlike the Decks page it reads no Deck cost, so the runner and /api/prices/editions counts stay as before. */
 async function openCollection(page: Page) {
-  await page.goto(new URL("/old-collection", page.url()).href);
-  const panel = page.getByRole("region", { name: "Collection", exact: true });
-  await expect(panel).toBeVisible();
+  const panel = page.getByRole("region", { name: "Cards" });
+  await expect(panel.getByRole("button")).toHaveCount(2);
+  await page.getByRole("button", { name: "Prices", exact: true }).click();
   return panel;
 }
 
@@ -162,37 +163,47 @@ test(
     await hold([ids.normal, ids["reverse-holofoil"]]);
     await page.reload();
     const answers: number[] = [];
+    const bodies: Promise<{
+      prices: { reason: string | null; refresh: string | null }[];
+    }>[] = [];
     page.on("response", (response) => {
-      if (response.url().endsWith("/api/prices/editions"))
+      if (response.url().endsWith("/api/prices/editions")) {
         answers.push(response.status());
+        bodies.push(response.json());
+      }
     });
     const panel = await openCollection(page);
     // Non-price content is there while every price slot is still pending.
-    await expect(panel.locator(".holding-grid > li")).toHaveCount(2);
+    await expect(panel.getByRole("button")).toHaveCount(2);
     await expect(panel.getByText("Furret").first()).toBeVisible();
     await expect(panel.getByText("Checking prices…")).toHaveCount(2);
     await expect(panel.locator('[data-price-status="checking"]')).toHaveCount(
       2
     );
-    // Then the labelled fallback from the server (not the client's own timeout), inside the gateway deadline.
-    const slots = panel.locator(".edition-price");
+    // Then the labelled fallback from the server (not the client's own timeout), inside the gateway deadline:
+    // the server's "not cached" row is the tile's "Price unavailable"; the client's own timeout would read
+    // "Price check timed out". The full wording and refresh label are asserted on the response rows below, and their rendering in prices.spec.ts (REFRESH_LABELS).
+    const slots = panel.locator("[data-price-status]");
     await expect(panel.getByText("Checking prices…")).toHaveCount(0, {
       timeout: 5_000,
     });
     await expect(slots).toHaveCount(2);
     for (const slot of await slots.all()) {
-      await expect(slot).toContainText("No cached price yet");
-      await expect(slot.locator(".price-refresh")).toHaveAttribute(
-        "data-refresh",
-        /^(timeout|failed)$/
-      );
-      await expect(slot).toContainText(/Refresh timed out|Last refresh failed/);
+      await expect(slot).toHaveAttribute("data-price-status", "unavailable");
+      await expect(slot).toHaveText("Price unavailable");
     }
     await expect(panel).not.toContainText("Price check timed out");
     await expect(panel).not.toContainText("$0.00");
     expect(answers).toEqual([200]);
+    // The server's rows carry the reason and the refresh outcome that the tiles no longer spell out.
+    const rows = (await Promise.all(bodies)).flatMap((body) => body.prices);
+    expect(rows).toHaveLength(2);
+    for (const row of rows) {
+      expect(row.reason).toBe("not_cached");
+      expect(row.refresh).toMatch(/^(timeout|failed)$/);
+    }
     // A real runner fetched the card once for both Editions (one claim per source card).
     expect(fetched).toEqual(["/v2/en/cards/meta-1"]);
-    await expect(panel.locator(".holding-grid > li")).toHaveCount(2);
+    await expect(panel.getByRole("button")).toHaveCount(2);
   }
 );

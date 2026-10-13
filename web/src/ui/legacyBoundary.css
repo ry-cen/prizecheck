@@ -1,0 +1,17 @@
+/*
+ * Temporary: kit components inside an old page's styles (#164).
+ *
+ * Collection still renders inside a .legacy wrapper, under the workspace's .ws-root. Their element rules
+ * (style.css's `:where(.legacy) button`, Workspace.css's `.ws-root button` and `.ws-root :focus-visible`)
+ * are unlayered, so they beat every Tailwind utility (layered) on the same element. A kit component whose
+ * root element carries `data-kit` takes none of them: `all: revert-layer` hands every property of that
+ * element back to the cascade layers, which are its own utilities and then base.css (the focus ring).
+ * Only the marked element is affected, not its children, so a kit root sets its own font and colour.
+ *
+ * The id in :not() raises the rule above those class and element rules (and their :focus-visible forms)
+ * without matching anything. Delete this file, and the data-kit attributes, once style.css and the
+ * workspace CSS are gone (#166 and rollout stage 7).
+ */
+:where(.legacy, .ws-root) [data-kit]:not(#kit-boundary) {
+  all: revert-layer;
+}

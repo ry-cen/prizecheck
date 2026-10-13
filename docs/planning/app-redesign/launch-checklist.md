@@ -12,7 +12,8 @@ The redesign is a launch gate ([spec](spec.md), "Rollout"): PrizeCheck opens to 
 ## Release notes
 
 - [ ] `/collection` is the default page, the sign-in landing and the sign-out redirect. `/`, `/workspace` and `/locations` redirect to it, keeping any `?location=` link (#162).
-- [ ] The old Collection page moved to `/old-collection`, with no link, until #164 retires it (#162).
+- [ ] The old Collection page is retired. `/old-collection` and its view are gone; an old link to it lands on Collection (#162, #164).
+- [ ] Collection shows every Card Edition's Variant Descriptor (or "Unspecified Variant") on tiles, in tile names and in the inspector, and the inspector lists each Storage Leaf that holds the Edition. The Decks page's link reads "Open in Collection" (#164).
 - [ ] `GET /auth/session` also returns the signed-in `email`, for the avatar menu (#162).
 - [ ] Signing in has its own address, `/sign-in`, which the public header links to. Signed out, an address that is no page shows "Page not found" instead of the sign-in card, and a Published Deck link that no longer works shows "This deck isn't published anymore". Signed in, Discover and Published Decks open inside the app (#163).
 
@@ -52,6 +53,22 @@ On a phone (iOS Safari or Android Chrome):
 - [ ] 8. Sign out. The card fills the width, leaving a small margin on each side, and Discover decks, the email field and both buttons are easy to hit with a thumb. Nothing scrolls sideways. Sign in with a code.
 - [ ] 9. Open a mistyped address and `/published/not-a-real-link`. Each card fits the screen, and Discover decks and Sign in are thumb-sized.
 
+### Collection tiles and inspector (#164)
+
+On a desktop (a window at least 1280 px wide):
+
+- [ ] 1. On Collection, turn Names on. Each tile's second line reads set · number · Variant, for example "Paldea Evolved · 185 · Reverse Holo", or "Unspecified Variant". A long Variant ends in "…" and never makes its tile taller than its neighbours. Turn Names off: the line goes.
+- [ ] 2. With Names off, rest the pointer on a tile: its tooltip names the Variant too.
+- [ ] 3. Select a copy of a card you keep in more than one place. The inspector shows a Variant row under set and number, then "N copies owned" with one line per Storage Leaf (or Deck), such as "2 in Shelf / Binder 2". The lines add up to N.
+- [ ] 4. Select or hover a copy and check the selection ring, the check badge, the card art, and the price line with Prices on. They look as they did before this change.
+- [ ] 5. On Decks, use "Open in Collection" on a Deck: Collection opens that Deck. An old `/old-collection` bookmark opens Collection.
+
+On a phone (iOS Safari or Android Chrome):
+
+- [ ] 6. Tap a tile. A sheet opens along the bottom, titled with the card's name, showing the Variant row and the line for each Storage Leaf. Close it with ✕, a tap on the dimmed page, or Android's back gesture: you are back on the tile you tapped. On iOS, swiping back leaves Collection and closes the sheet.
+- [ ] 7. In Filters & display, turn Names on. Each tile shows its Variant line, cut with "…" when long, and nothing on the page scrolls sideways.
+- [ ] 8. Turn on Select and tap a few tiles. Each shows the gold ring and the check badge, and the page still scrolls with a swipe.
+
 ## Manual checks that automation does not cover
 
 - [ ] Real touch on iOS Safari and Android Chrome for the tab bar, the More sheet and the ☰ drawer (the browser tests only emulate touch), including the home indicator area under the tab bar.
@@ -59,6 +76,7 @@ On a phone (iOS Safari or Android Chrome):
 - [ ] Safari and Firefox on desktop: the avatar menu, the sticky header and the dialogs (the browser tests run in Chromium only).
 - [ ] Screen reader on the sign-in card: the heading and subtitle are read first, the Email and Six-digit code fields are named, and "a code has been sent" is announced. On a slow load, "Loading…" is announced once (#163).
 - [ ] Until the dark first paint (rollout stage 7), a slow first load still shows a brief light page before the dark loading screen. That is expected for now (#163).
+- [ ] Screen reader on Collection: with Names off, a tile is read with its Variant (or "Unspecified Variant"), and the inspector's Leaf list is read as a list (#164).
 
 ## Sources
 

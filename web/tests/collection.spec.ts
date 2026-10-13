@@ -60,22 +60,38 @@ promote({'collection-1':'Collection Pikachu'})`,
       "INSERT INTO holding(owner_id,location_id,edition_id,quantity,version) VALUES($1,$2,$3,7,1) ON CONFLICT(owner_id,location_id,edition_id) DO UPDATE SET quantity=7",
       [owner, leaf, edition]
     );
-    await page.goto(new URL("/old-collection", page.url()).href);
-    await page.getByLabel("Owned card name").fill("Collection Pika");
-    await page.getByRole("button", { name: "Filter Collection" }).click();
-    const row = page
-      .getByRole("listitem")
-      .filter({ hasText: "Collection Pikachu" })
-      .first();
-    await expect(row).toContainText("7 copies");
-    await row.getByRole("button", { name: "Find copies" }).click();
+    // The old Collection page is retired (#164): Collection finds the copies, and its inspector lists
+    // the Storage Leaf that holds them.
+    await page.reload();
+    const search = page.getByRole("searchbox", { name: "Search cards" });
+    // The search is debounced and clears the selection when it lands, so wait for its listing before
+    // selecting a tile.
+    const searched = page.waitForResponse(
+      (response) =>
+        new URL(response.url()).pathname === "/api/collection/holdings" &&
+        new URL(response.url()).searchParams.toString().includes("Collection")
+    );
+    await search.fill("Collection Pika");
+    await searched;
     await expect(
-      page.getByRole("dialog", { name: "Physical copies" })
-    ).toContainText("7 copies");
-    await page.getByRole("button", { name: "Close distribution" }).click();
-    await page.getByLabel("Owned card name").fill("Missing owned card");
-    await page.getByRole("button", { name: "Filter Collection" }).click();
-    await expect(page.getByText("No owned Editions match.")).toBeVisible();
+      page.getByRole("main").getByText("7 copies · 1 edition", { exact: true })
+    ).toBeVisible();
+    const tiles = page
+      .getByRole("region", { name: "Cards" })
+      .getByRole("button");
+    await expect(tiles).toHaveCount(7);
+    await tiles.first().click();
+    const details = page.getByRole("complementary", { name: "Card details" });
+    await expect(details).toContainText("7 copies owned");
+    await expect(
+      details
+        .getByRole("list", { name: "Copies by location" })
+        .getByRole("listitem")
+    ).toHaveText([/^7 in /]);
+    await search.fill("Missing owned card");
+    await expect(
+      page.getByText("No cards match your search or filters.")
+    ).toBeVisible();
   } finally {
     await pool.end();
   }

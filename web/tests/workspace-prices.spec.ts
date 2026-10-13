@@ -154,7 +154,7 @@ const pricesToggle = (page: Page) =>
   page.getByRole("button", { name: "Prices", exact: true });
 const counts = (page: Page, text: string) =>
   page.getByRole("main").getByText(text, { exact: true });
-/** The tile whose label starts with `prefix` (labels read "<name>, <set> <number>, copy <n>, <path>"). */
+/** The tile whose label starts with `prefix` (labels read "<name>, <set> <number>, <Variant>, copy <n>, <path>"). */
 const tile = (page: Page, prefix: string) =>
   cards(page).getByRole("button", {
     name: new RegExp(`^${prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`),
@@ -205,7 +205,10 @@ test.describe("desktop", () => {
     await expect(tiles(page)).toHaveCount(3);
 
     // Fresh quote: amount, price time and last check, not stale.
-    await tile(page, "Furret, Darkness Ablaze 1, copy 1, Fresh").click();
+    await tile(
+      page,
+      "Furret, Darkness Ablaze 1, Normal, copy 1, Fresh"
+    ).click();
     await expect(inspector(page)).toContainText(
       "$0.25 cached TCGplayer market price (USD)"
     );
@@ -214,14 +217,20 @@ test.describe("desktop", () => {
     await expect(inspector(page)).not.toContainText("Stale");
 
     // Over 48 hours old: still priced, labelled stale.
-    await tile(page, "Furret, Darkness Ablaze 1, copy 1, Old").click();
+    await tile(
+      page,
+      "Furret, Darkness Ablaze 1, Reverse Holo, copy 1, Old"
+    ).click();
     await expect(inspector(page)).toContainText("$0.43");
     await expect(inspector(page)).toContainText(
       "Stale: the price is over 48 hours old"
     );
 
     // Unspecified Variant: unavailable, never a number.
-    await tile(page, "Furret, Darkness Ablaze 2, copy 1, Unpriced").click();
+    await tile(
+      page,
+      "Furret, Darkness Ablaze 2, Unspecified Variant, copy 1, Unpriced"
+    ).click();
     await expect(inspector(page)).toContainText(
       "Price unavailable: finish not established"
     );
@@ -237,7 +246,10 @@ test.describe("desktop", () => {
       },
     ]);
     await page.reload();
-    await tile(page, "Furret, Darkness Ablaze 1, copy 1, Old").click();
+    await tile(
+      page,
+      "Furret, Darkness Ablaze 1, Reverse Holo, copy 1, Old"
+    ).click();
     await expect(inspector(page)).toContainText("$0.43");
     await expect(inspector(page)).toContainText("Age unknown");
     await expect(inspector(page)).not.toContainText("Stale");

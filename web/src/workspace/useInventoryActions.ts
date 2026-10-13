@@ -157,7 +157,7 @@ export function useInventoryActions({
   /** A tile that holds focus unmounts when the gallery reloads or the selection clears: move focus
    * to a stable control first. */
   const keepFocus = (to: "heading" | "actions") => {
-    if (!document.activeElement?.closest(".ws-tile")) return;
+    if (!document.activeElement?.closest("[data-gallery-tile]")) return;
     if (to === "actions" && actionsButton.current?.isConnected)
       actionsButton.current.focus({ preventScroll: true });
     else focusWorkspaceHeading();

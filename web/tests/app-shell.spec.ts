@@ -251,7 +251,7 @@ test.describe("desktop", () => {
       "aria-current",
       "page"
     );
-    for (const path of ["/", "/workspace", "/locations"]) {
+    for (const path of ["/", "/workspace", "/locations", "/old-collection"]) {
       await page.goto(`${ORIGIN}${path}`);
       await expect(page).toHaveURL(/\/collection$/);
       await expect(heading(page)).toHaveText("All owned");

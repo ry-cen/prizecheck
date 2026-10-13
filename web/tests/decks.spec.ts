@@ -83,12 +83,12 @@ promote({'card-1': 'Pikachu', **{f'card-{i}': f'Pikachu {i:02}' for i in range(2
       .click();
     await expect(checks).toContainText("59 cards · 1 cards short of 60");
     await page
-      .getByRole("link", { name: `Open in workspace: ${name}` })
+      .getByRole("link", { name: `Open in Collection: ${name}` })
       .click();
     await expect(page).toHaveURL(/\/collection$/);
     await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
     await expect(page.getByRole("main")).toContainText("59 copies · 1 edition");
-    // "Open in workspace" is a full navigation to /collection, so go back through the Decks tab rather than goBack().
+    // "Open in Collection" is a full navigation to /collection, so go back through the Decks tab rather than goBack().
     await page.getByRole("button", { name: "Decks", exact: true }).click();
     await page
       .getByRole("navigation", { name: "Deck index" })

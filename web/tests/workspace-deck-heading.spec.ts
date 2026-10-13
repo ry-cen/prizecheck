@@ -629,10 +629,10 @@ test("the Decks page links each Deck to the workspace, and the link opens that D
   const index = page.getByRole("navigation", { name: "Deck index" });
   for (const deck of [first, second])
     await expect(
-      index.getByRole("link", { name: `Open in workspace: ${deck.name}` })
+      index.getByRole("link", { name: `Open in Collection: ${deck.name}` })
     ).toHaveAttribute("href", `/collection?location=${deck.id}`);
   await index
-    .getByRole("link", { name: `Open in workspace: ${second.name}` })
+    .getByRole("link", { name: `Open in Collection: ${second.name}` })
     .click();
   await expect(heading(page)).toHaveText(second.name);
   await expect(page).toHaveURL(/\/collection$/);

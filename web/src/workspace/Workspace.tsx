@@ -100,7 +100,10 @@ export function Workspace({ userId, active }: Props) {
   const [addFor, setAddFor] = useState<string | null>(null);
   const dockRef = useRef<HTMLDivElement>(null);
   const drawerOpener = useRef<HTMLButtonElement>(null);
-  const ownedTotals = useRef(new Map<string, number>()).current;
+  // Each Edition's Storage Leaves as the inspector read them, per owner revision (#164).
+  const ownedTotals: Parameters<typeof Inspector>[0]["ownedTotals"] = useRef(
+    new Map()
+  ).current;
 
   // Reloads can overlap (Reload, an action, Manage locations); only the newest one's answer lands,
   // so an older tree never replaces a newer one.
@@ -344,10 +347,7 @@ export function Workspace({ userId, active }: Props) {
 
   return (
     <div className="ws-root">
-      <div
-        className="ws-surface"
-        inert={filtersDrawerOpen || selection.details !== null}
-      >
+      <div className="ws-surface" inert={filtersDrawerOpen}>
         {/* The phone header (the shell draws the desktop one, and the skip link): ☰ for the Location
             drawer, the page title, then Search and Filters & display. */}
         <header className="ws-header ws-phone-header">

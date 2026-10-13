@@ -1,12 +1,6 @@
 /** The signed-in pages inside the app shell, and the addresses that open them. Routing is client-side. */
 export type PageId =
-  | "collection"
-  | "decks"
-  | "catalog"
-  | "reports"
-  | "sign-ins"
-  | "owner"
-  | "old-collection";
+  "collection" | "decks" | "catalog" | "reports" | "sign-ins" | "owner";
 
 export type PageDef = {
   id: PageId;
@@ -56,13 +50,6 @@ export const PAGES: readonly PageDef[] = [
     label: "Owner controls",
     keepMounted: false,
   },
-  // The old Collection page until its retirement (#164). No tab or menu links here.
-  {
-    id: "old-collection",
-    path: "/old-collection",
-    label: "Old Collection",
-    keepMounted: false,
-  },
 ];
 
 /** Desktop header tabs. */
@@ -82,10 +69,13 @@ export const ACCOUNT_PAGES: readonly PageId[] = ["sign-ins", "owner"];
 /** Where signing in lands by default. */
 export const DEFAULT_PATH = "/collection";
 
-/** Old addresses for Collection: the bare origin, the retired /workspace and /locations. Anything else
+/** Old addresses for Collection: the bare origin, the retired /workspace, /locations and /old-collection. Anything else
  * is returned unchanged. */
 export function canonicalPath(path: string): string {
-  return path === "/" || path === "/workspace" || path === "/locations"
+  return path === "/" ||
+    path === "/workspace" ||
+    path === "/locations" ||
+    path === "/old-collection"
     ? DEFAULT_PATH
     : path;
 }

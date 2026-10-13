@@ -202,7 +202,7 @@ test("card information shows each Edition's own price with age, stale and finish
   await expect(results).not.toContainText("$0.25");
 });
 
-test("Deck and Collection rows price their exact Edition, including after More cards", async ({
+test("Deck rows and Collection tiles price their exact Edition, including after More cards and a scroll", async ({
   page,
 }) => {
   // Tall enough that every row of each page is near the viewport, so every rendered slot asks at once.
@@ -253,21 +253,30 @@ test("Deck and Collection rows price their exact Edition, including after More c
   expect(requested.every((batch) => batch.length <= 64)).toBe(true);
   expect(new Set(requested.flat()).size).toBe(55);
 
-  // Collection rows (aggregate rows count as Holding rows): the same Editions after More owned cards.
-  await page.goto(new URL("/old-collection", page.url()).href);
-  await expect(page.locator(".holding-grid > li").first()).toBeVisible();
-  await page.getByRole("button", { name: "More owned cards" }).click();
+  // Collection's tiles (the old Collection page is retired, #164): with Prices on, each copy's price line
+  // shows its own Edition's price, including the last tiles, which mount only once the gallery reaches them.
+  await page.getByRole("button", { name: "Collection", exact: true }).click();
   await expect(
-    page.locator(".holding-grid > li").filter({ hasText: "$0.25" })
-  ).toHaveCount(1);
+    page.getByRole("main").getByText("55 copies · 55 editions", { exact: true })
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Prices", exact: true }).click();
+  await page.evaluate(() =>
+    window.scrollTo(0, document.documentElement.scrollHeight)
+  );
+  const tile = (prefix: RegExp) =>
+    page.getByRole("region", { name: "Cards" }).getByRole("button", {
+      name: prefix,
+    });
+  await expect(tile(/^Furret, Darkness Ablaze 1, Normal, /)).toContainText(
+    "$0.25"
+  );
   await expect(
-    page.locator(".holding-grid > li").filter({ hasText: "$0.43" })
-  ).toHaveCount(1);
+    tile(/^Furret, Darkness Ablaze 1, Reverse Holo, /)
+  ).toContainText("$0.43");
   await expect(
-    page
-      .locator(".holding-grid > li")
-      .filter({ hasText: "finish not established" })
-  ).toHaveCount(53);
+    tile(/^Furret, Darkness Ablaze 2, Unspecified Variant, /)
+  ).toContainText("Price unavailable");
+  expect(requested.every((batch) => batch.length <= 64)).toBe(true);
 
   // A Deck's Holdings rows.
   const name = `Priced ${randomUUID().slice(0, 8)}`;
