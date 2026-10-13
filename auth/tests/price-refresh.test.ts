@@ -15,6 +15,7 @@ import { createServer as netServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Pool } from "pg";
+import { dropDatabase } from "./support/servers";
 
 // Two gateways, two APIs, one PostgreSQL database and one record store (the transactional HTTP relay), with the runner
 // launcher replaced by the CI recorder: admission is exercised end to end and nothing ever fetches a price. Caps are
@@ -482,15 +483,7 @@ afterAll(async () => {
     }
   }
   await pool?.end();
-  for (let n = 0; n < 50; n++) {
-    const { rows } = await admin.query(
-      "SELECT count(*)::int AS count FROM pg_stat_activity WHERE datname=$1",
-      [database]
-    );
-    if (rows[0].count === 0) break;
-    await sleep(100);
-  }
-  await admin.query(`DROP DATABASE IF EXISTS "${database}" WITH (FORCE)`);
+  await dropDatabase(admin, database);
   await admin.end();
   rmSync(directory, { recursive: true, force: true });
 });

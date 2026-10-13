@@ -20,6 +20,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { Pool } from "pg";
+import { dropDatabase } from "./support/servers";
 
 // Ticket 12: the Published Deck cost through the real gateway. Two stacks share one projection directory. G0/A0 use a
 // disposable database and publish. G1/A1 are the anonymous pair: their DATABASE_URL points at counting listeners, so any
@@ -554,15 +555,7 @@ afterAll(async () => {
   for (const server of listeners)
     await new Promise((resolve) => server.close(resolve));
   await pool?.end();
-  for (let n = 0; n < 50; n++) {
-    const { rows } = await admin.query(
-      "SELECT count(*)::int AS count FROM pg_stat_activity WHERE datname=$1",
-      [database]
-    );
-    if (rows[0].count === 0) break;
-    await sleep(100);
-  }
-  await admin.query(`DROP DATABASE IF EXISTS "${database}" WITH (FORCE)`);
+  await dropDatabase(admin, database);
   await admin.end();
   rmSync(directory, { recursive: true, force: true });
 }, 60_000);

@@ -27,6 +27,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { Pool } from "pg";
+import { dropDatabase } from "./support/servers";
 
 const run = promisify(execFile);
 export const sleep = (ms: number) =>
@@ -829,17 +830,7 @@ serve_relay({'adapter': 'http', 'directory': sys.argv[1]}, Out())`,
       await this.source.close();
       await new Promise((resolve) => this.fakePg?.close(resolve));
       await this.pool?.end();
-      for (let n = 0; n < 50; n++) {
-        const { rows } = await this.admin.query(
-          "SELECT count(*)::int AS count FROM pg_stat_activity WHERE datname=$1",
-          [this.database]
-        );
-        if (rows[0].count === 0) break;
-        await sleep(100);
-      }
-      await this.admin.query(
-        `DROP DATABASE IF EXISTS "${this.database}" WITH (FORCE)`
-      );
+      await dropDatabase(this.admin, this.database);
       await this.admin.end();
       rmSync(this.directory, { recursive: true, force: true });
     }

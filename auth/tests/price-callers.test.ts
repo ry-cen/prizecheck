@@ -7,6 +7,7 @@ import { createServer as netServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Pool } from "pg";
+import { dropDatabase, launch, serverReady } from "./support/servers";
 import {
   anonymousDigest,
   callerFor,
@@ -113,7 +114,6 @@ let base = "";
 let cookie = "";
 let userId = "";
 const seen: IncomingMessage["headers"][] = [];
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const freePort = () =>
   new Promise<number>((resolve) => {
     const probe = netServer();
@@ -130,6 +130,7 @@ const post = (path: string, body: string, extra: Record<string, string> = {}) =>
   });
 
 describe("gateway seam", () => {
+  // The timeout covers serverReady's 30 s deadline plus the migration and sign-in on a loaded host.
   beforeAll(async () => {
     await admin.query(`CREATE DATABASE "${database}"`);
     const connection = new URL(process.env.DATABASE_URL!);
@@ -170,18 +171,8 @@ describe("gateway seam", () => {
     await new Promise<void>((resolve) =>
       api.listen(apiPort, "127.0.0.1", resolve)
     );
-    gateway = spawn("node", ["--import", "tsx", "auth/src/server.ts"], {
-      env,
-      stdio: "ignore",
-    });
-    for (let n = 0; n < 100; n++) {
-      try {
-        if ((await fetch(base + "/auth/session")).ok) break;
-      } catch {
-        /* startup */
-      }
-      await sleep(100);
-    }
+    gateway = launch("node", ["--import", "tsx", "auth/src/server.ts"], env);
+    await serverReady([gateway], base + "/auth/session");
     const email = "caller-reader@example.test";
     expect(
       (await post("/auth/request-code", JSON.stringify({ email }))).status
@@ -197,7 +188,7 @@ describe("gateway seam", () => {
     cookie = signin.headers.get("set-cookie")!.split(";")[0];
     userId = (await pool.query('SELECT id FROM "user" WHERE email=$1', [email]))
       .rows[0].id;
-  }, 30_000);
+  }, 60_000);
 
   afterAll(async () => {
     if (gateway && gateway.exitCode === null) {
@@ -207,15 +198,7 @@ describe("gateway seam", () => {
     api?.closeAllConnections();
     await new Promise((resolve) => api?.close(resolve));
     await pool?.end();
-    for (let n = 0; n < 50; n++) {
-      const { rows } = await admin.query(
-        "SELECT count(*)::int AS count FROM pg_stat_activity WHERE datname=$1",
-        [database]
-      );
-      if (rows[0].count === 0) break;
-      await sleep(100);
-    }
-    await admin.query(`DROP DATABASE IF EXISTS "${database}" WITH (FORCE)`);
+    await dropDatabase(admin, database);
     await admin.end();
     rmSync(directory, { recursive: true, force: true });
   });
