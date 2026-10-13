@@ -96,7 +96,7 @@ describe("public signup through providers (local-public)", () => {
       "/auth/sign-in/google",
       "unverified"
     );
-    expect(unverified.location).toMatch(/[?&]error=email_not_verified(&|$)/);
+    expect(unverified.location).toMatch(/[?&]error=email_not_found(&|$)/);
     const missing = await walkSignIn(
       gateway.base,
       "/auth/sign-in/discord",

@@ -57,6 +57,25 @@ export function configuredProviders(
   return configured;
 }
 
+/** Whether the provider vouches for the email in its profile, by its own verified claim. One entry per provider. */
+const VOUCHES_FOR_EMAIL: Record<ProviderId, (profile: object) => boolean> = {
+  google: (profile) =>
+    (profile as { email_verified?: unknown }).email_verified === true,
+  discord: (profile) => (profile as { verified?: unknown }).verified === true,
+};
+
+/**
+ * Drops an email the provider doesn't vouch for, before Better Auth looks for a local user at that address. Otherwise
+ * Better Auth answers `account_not_linked` when a collector has that address and the gate answers `email_not_verified`
+ * when nobody does, which would reveal who has an account. Without an email every such attempt ends the same way,
+ * `email_not_found`, whatever the database holds: on sign-in from the callback's own check, on a deliberate link from
+ * the gate.
+ */
+export function vouchedEmailOnly(provider: ProviderId) {
+  return (profile: object) =>
+    VOUCHES_FOR_EMAIL[provider](profile) ? {} : { email: null };
+}
+
 /** Better Auth's `socialProviders` option. Default scopes stay; Google's accessType stays unset (no refresh token). */
 export function socialProviders(providers: ConfiguredProvider[]) {
   return Object.fromEntries(
@@ -66,6 +85,7 @@ export function socialProviders(providers: ConfiguredProvider[]) {
         clientId: provider.clientId,
         clientSecret: provider.clientSecret,
         overrideUserInfoOnSignIn: true,
+        mapProfileToUser: vouchedEmailOnly(provider.id),
       },
     ])
   );
