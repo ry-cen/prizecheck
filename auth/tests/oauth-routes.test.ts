@@ -24,7 +24,7 @@ describe("OAuth routes without the fake (the real redirect to the provider)", ()
         { id: "google", name: "Google" },
         { id: "discord", name: "Discord" },
       ],
-      emailSignIn: true,
+      emailSignIn: false,
     });
     const withCookie = await fetch(`${gateway.base}/auth/methods`, {
       headers: { cookie: "better-auth.session_token=forged" },

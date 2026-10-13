@@ -70,7 +70,10 @@ class Runtime:
             dependencies(checkout,self.runtime)
             api_port,auth_port = port(),port()
             env = {**os.environ,'PYTHONPATH':str(checkout/'api'),'API_ORIGIN':f'http://127.0.0.1:{api_port}',
-                   'AUTH_PORT':str(auth_port),'AUTH_HOST':'127.0.0.1','RELEASE_COMMIT':commit,'PUBLIC_ORIGIN':self.origin,'NODE_ENV':'development'}
+                   'AUTH_PORT':str(auth_port),'AUTH_HOST':'127.0.0.1','RELEASE_COMMIT':commit,'PUBLIC_ORIGIN':self.origin,'NODE_ENV':'development',
+                   # No provider is registered for a local release, and the OAuth test fake is never loaded here (bundles
+                   # are git archives that include auth/testing/): email codes are its sign-in method.
+                   'EMAIL_SIGN_IN':os.environ.get('EMAIL_SIGN_IN','on')}
             processes.append(subprocess.Popen([str(self.runtime/'.venv/bin/python'),'-m','uvicorn','app.main:app','--host','127.0.0.1','--port',str(api_port),'--no-access-log'],cwd=checkout,env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL))
             processes.append(subprocess.Popen(['node','--import','tsx','auth/src/server.ts'],cwd=checkout,env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL))
             bundle['auth'] = f'http://127.0.0.1:{auth_port}'

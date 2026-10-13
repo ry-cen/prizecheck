@@ -16,6 +16,13 @@ export BETTER_AUTH_SECRET="test-better-auth-secret-abcdefghijklmnopqrstuvwxyz"
 export SIGNUP_MODE=owner-only
 export PUBLIC_PROJECTION_ADAPTER=filesystem
 export MAIL_MODE=file
+# The OAuth test fake (auth/testing/oauth-fake) covers these providers; their placeholder credentials configure them.
+# Never set these in a deployment. EMAIL_SIGN_IN stays unset here: stacks set it off below, and the tests that cover
+# email codes start their own gateways with EMAIL_SIGN_IN=on.
+export GOOGLE_CLIENT_ID=fake-google-client
+export GOOGLE_CLIENT_SECRET=fake-google-secret
+export DISCORD_CLIENT_ID=fake-discord-client
+export DISCORD_CLIENT_SECRET=fake-discord-secret
 export MAIL_FILE="$(mktemp)"
 export PUBLIC_PROJECTION_DIR="$(mktemp -d)"
 export CATALOG_PROCESS_FIXTURE_DIR="$(mktemp -d)"
@@ -40,7 +47,8 @@ start_stack() {  # $1: stack directory holding env.sh; $2: log directory
   mkdir -p "$2"
   (. "$1/env.sh"; PYTHONPATH="$PWD/api/tests/catalog_process_fixture:$PWD/api" exec .venv/bin/uvicorn app.main:app --app-dir api --host 127.0.0.1 --port "$API_PORT" --no-access-log) > "$2/api.log" 2>&1 &
   pids+=($!)
-  (. "$1/env.sh"; exec node --import tsx auth/src/server.ts) > "$2/auth.log" 2>&1 &
+  # Every stack's gateway signs in through the OAuth test fake, with email codes off.
+  (. "$1/env.sh"; EMAIL_SIGN_IN=off exec node --import tsx --import ./auth/testing/oauth-fake/preload.ts auth/src/server.ts) > "$2/auth.log" 2>&1 &
   pids+=($!)
   (. "$1/env.sh"; exec node node_modules/vite/bin/vite.js --config web/vite.config.ts --strictPort) > "$2/web.log" 2>&1 &
   pids+=($!)

@@ -97,6 +97,13 @@ services:
       MAIL_RELAY_TOKEN: ${MAIL_RELAY_TOKEN:-}
       MAIL_FROM: ${MAIL_FROM:-}
       SIGNUP_MODE: owner-only
+      # Email-code sign-in is off unless EMAIL_SIGN_IN=on. With no provider credentials and email off the gateway refuses
+      # to start, so keep EMAIL_SIGN_IN=on in the env file until Google or Discord is registered (spec launch checklist).
+      EMAIL_SIGN_IN: ${EMAIL_SIGN_IN:-off}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID:-}
+      DISCORD_CLIENT_SECRET: ${DISCORD_CLIENT_SECRET:-}
       DAILY_SEND_CAP: ${DAILY_SEND_CAP:-100}
       TRUSTED_PROXY_IPS: ""
     volumes:

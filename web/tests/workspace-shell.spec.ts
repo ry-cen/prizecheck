@@ -1,6 +1,6 @@
 import { test, expect, type Locator, type Page } from "@playwright/test";
+import { signInAsOwner } from "./support/sign-in";
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
 import { Pool } from "pg";
 import { expectTouchTarget } from "./support/touch-target";
 import { startAsNewOwner } from "./support/owner";
@@ -12,14 +12,6 @@ type TreeNode = {
   version: number;
 };
 
-function messages(path: string): string[] {
-  try {
-    return readFileSync(path, "utf8").trim().split("\n").filter(Boolean);
-  } catch {
-    return [];
-  }
-}
-
 async function signIn(page: Page) {
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });
   try {
@@ -28,22 +20,14 @@ async function signIn(page: Page) {
   } finally {
     await pool.end();
   }
-  const mail = process.env.MAIL_FILE || "/tmp/tcg-ticket01-mail";
-  const before = messages(mail).length;
   await page.goto(
     `${process.env.TEST_ORIGIN || "http://localhost:5173"}/workspace`
   );
   await expect(page).toHaveURL(/\/workspace$/);
-  await expect(page.getByLabel("Email")).toBeVisible();
-  await page
-    .getByLabel("Email")
-    .fill(process.env.OWNER_EMAIL || "owner@example.test");
-  await page.getByRole("button", { name: "Send code" }).click();
-  await expect.poll(() => messages(mail).length).toBeGreaterThan(before);
-  await page
-    .getByLabel("Six-digit code")
-    .fill(JSON.parse(messages(mail).at(-1)!).otp);
-  await page.getByRole("button", { name: "Sign in" }).click();
+  await expect(
+    page.getByRole("link", { name: "Sign in with Google" })
+  ).toBeVisible();
+  await signInAsOwner(page, "/workspace");
   await expect(page).toHaveURL(/\/workspace$/);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("All owned");
 }

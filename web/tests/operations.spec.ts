@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { readFileSync } from "node:fs";
+import { signInAsOwner } from "./support/sign-in";
 import { Pool } from "pg";
 
 test("owner sees stale backup and allowance warning in operational health", async ({
@@ -15,18 +15,8 @@ test("owner sees stale backup and allowance warning in operational health", asyn
     await pool.query(
       "INSERT INTO operations_quota(resource,used,allowance) VALUES('database_bytes',70,100) ON CONFLICT(resource) DO UPDATE SET used=70,allowance=100,measured_at=now()"
     );
-    await page.goto(
-      `${process.env.TEST_ORIGIN || "http://localhost:5173"}/owner`
-    );
     const email = process.env.OWNER_EMAIL || "owner@example.test";
-    await page.getByLabel("Email").fill(email);
-    await page.getByRole("button", { name: "Send code" }).click();
-    await expect(page.getByRole("status")).toContainText("code has been sent");
-    const lines = readFileSync(process.env.MAIL_FILE!, "utf8")
-      .trim()
-      .split("\n");
-    await page.getByLabel("Six-digit code").fill(JSON.parse(lines.at(-1)!).otp);
-    await page.getByRole("button", { name: "Sign in" }).click();
+    await signInAsOwner(page, "/owner");
     await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible();
     const owner = await pool.query('SELECT id FROM "user" WHERE email=$1', [
       email,

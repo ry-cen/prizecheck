@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
@@ -9,7 +9,35 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { launch, waitForServer } from "./support/servers";
 
-const base = process.env.TEST_BASE_URL || "http://localhost:5173";
+// The gate's stacks run with email-code sign-in off. These tests cover email codes, so they get their own gateway with
+// EMAIL_SIGN_IN=on, on the stack's database, API, mail file and public origin.
+let base = "";
+let codeGateway: ChildProcess | undefined;
+beforeAll(async () => {
+  const probe = createServer();
+  await new Promise<void>((resolve) => probe.listen(0, "127.0.0.1", resolve));
+  const port = (probe.address() as { port: number }).port;
+  await new Promise((resolve) => probe.close(resolve));
+  base = `http://127.0.0.1:${port}`;
+  codeGateway = launch("node", ["--import", "tsx", "auth/src/server.ts"], {
+    ...process.env,
+    AUTH_PORT: String(port),
+    EMAIL_SIGN_IN: "on",
+  });
+  const ready = await waitForServer(
+    [codeGateway],
+    base + "/auth/session",
+    (r) => r.ok
+  );
+  if (!ready) throw new Error("Email-code gateway did not start");
+  await ready.body?.cancel();
+}, 30_000);
+afterAll(async () => {
+  if (codeGateway && codeGateway.exitCode === null) {
+    codeGateway.kill();
+    await new Promise((resolve) => codeGateway!.once("exit", resolve));
+  }
+});
 const origin = process.env.TEST_ORIGIN || "http://localhost:5173";
 const email = process.env.OWNER_EMAIL || "owner@example.test";
 const mailFile = process.env.MAIL_FILE || "/tmp/tcg-ticket01-mail";
@@ -680,6 +708,7 @@ assert store.compare_and_swap({k: rows[k].version for k in keys}, {
   it("fails closed when the auth database is unavailable", async () => {
     const child = launch("node", ["--import", "tsx", "auth/src/server.ts"], {
       ...process.env,
+      EMAIL_SIGN_IN: "on",
       AUTH_PORT: process.env.TEST_UNAVAILABLE_AUTH_PORT || "3002",
       DATABASE_URL: "postgresql://raian@127.0.0.1:1/unavailable",
     });

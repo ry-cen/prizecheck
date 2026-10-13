@@ -1,17 +1,9 @@
 import { test, expect } from "@playwright/test";
+import { signInAsOwner } from "./support/sign-in";
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { listHoldings } from "./support/deck-list";
-
-function messages(path: string): string[] {
-  try {
-    return readFileSync(path, "utf8").trim().split("\n").filter(Boolean);
-  } catch {
-    return [];
-  }
-}
 
 test("Unlisted snapshot is anonymous, escaped, intentional, and permanently revocable", async ({
   page,
@@ -31,20 +23,7 @@ promote({'card-1': 'Pikachu'})`,
   const publicPage = await anonymous.newPage();
   try {
     await pool.query("DELETE FROM auth_send_event");
-    const mail = process.env.MAIL_FILE || "/tmp/tcg-ticket01-mail";
-    const before = messages(mail).length;
-    await page.goto(
-      `${process.env.TEST_ORIGIN || "http://localhost:5173"}/locations`
-    );
-    await page
-      .getByLabel("Email")
-      .fill(process.env.OWNER_EMAIL || "owner@example.test");
-    await page.getByRole("button", { name: "Send code" }).click();
-    await expect.poll(() => messages(mail).length).toBeGreaterThan(before);
-    await page
-      .getByLabel("Six-digit code")
-      .fill(JSON.parse(messages(mail).at(-1)!).otp);
-    await page.getByRole("button", { name: "Sign in" }).click();
+    await signInAsOwner(page, "/workspace");
     await page.getByRole("button", { name: "Decks", exact: true }).click();
     const privateName = `Private ${randomUUID().slice(0, 8)}`;
     await page.getByLabel("Deck name").fill(privateName);

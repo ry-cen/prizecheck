@@ -35,6 +35,7 @@ beforeAll(async () => {
   pool = new Pool({ connectionString: connection.toString() });
   const env = {
     ...process.env,
+    EMAIL_SIGN_IN: "on",
     DATABASE_URL: connection.toString(),
     AUTH_PORT: process.env.TEST_SIGNUP_PORT || "3198",
     MAIL_MODE: "file",
@@ -166,6 +167,7 @@ it("keeps code-request responses uniform when configured delivery fails", async 
   const failing = spawn("node", ["--import", "tsx", "auth/src/server.ts"], {
     env: {
       ...process.env,
+      EMAIL_SIGN_IN: "on",
       DATABASE_URL: connection.toString(),
       AUTH_PORT: process.env.TEST_SECONDARY_AUTH_PORT || "3199",
       MAIL_MODE: "file",

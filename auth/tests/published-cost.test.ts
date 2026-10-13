@@ -431,6 +431,7 @@ beforeAll(async () => {
   );
   env = {
     ...inherited,
+    EMAIL_SIGN_IN: "on",
     DATABASE_URL: connection.toString(),
     MAIL_MODE: "file",
     MAIL_FILE: join(directory, "mail"),

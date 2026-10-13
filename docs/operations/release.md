@@ -57,7 +57,7 @@ The bundled adapter binds only loopback, uses local HTTP/development cookies and
   --store /private/release-store --runtime /private/installed-runtime --port 5173
 ```
 
-It restores an existing active release on startup, verifies artifacts/dependencies and its configured database's applied migration names, binds RELEASE_COMMIT to the loaded commit, starts candidate auth/API processes before retiring the old processes, and stops children on termination. This local adapter is an executable test/development implementation, not an internet-facing TLS deployment. A production runtime adapter must preserve the protocol below and configure production origin/cookies/mail/process lifetime through its own provider-specific runtime implementation.
+It restores an existing active release on startup, verifies artifacts/dependencies and its configured database's applied migration names, binds RELEASE_COMMIT to the loaded commit, starts candidate auth/API processes before retiring the old processes, and stops children on termination. The local runtime signs in by email code and defaults `EMAIL_SIGN_IN` to `on`; if `.env` is sourced first, `.env.example` now sets `EMAIL_SIGN_IN=off`, so keep `EMAIL_SIGN_IN=on` (or configure a provider) or the auth process refuses to start. This local adapter is an executable test/development implementation, not an internet-facing TLS deployment. A production runtime adapter must preserve the protocol below and configure production origin/cookies/mail/process lifetime through its own provider-specific runtime implementation.
 
 ```sh
 .venv/bin/python scripts/release.py activate \

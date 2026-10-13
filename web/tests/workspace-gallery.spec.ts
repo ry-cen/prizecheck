@@ -1,7 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
+import { signInAsOwner } from "./support/sign-in";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
 import { Pool } from "pg";
 import { startAsNewOwner } from "./support/owner";
 
@@ -36,14 +36,6 @@ search.promote(json.loads(sys.argv[1]))`,
   );
 }
 
-function messages(path: string): string[] {
-  try {
-    return readFileSync(path, "utf8").trim().split("\n").filter(Boolean);
-  } catch {
-    return [];
-  }
-}
-
 async function signIn(page: Page) {
   await page.route(/^https:\/\/assets\.tcgdex\.net\//, (route) =>
     route.fulfill({ status: 200, contentType: "image/png", body: PIXEL })
@@ -55,20 +47,7 @@ async function signIn(page: Page) {
   } finally {
     await pool.end();
   }
-  const mail = process.env.MAIL_FILE || "/tmp/tcg-ticket01-mail";
-  const before = messages(mail).length;
-  await page.goto(
-    `${process.env.TEST_ORIGIN || "http://localhost:5173"}/workspace`
-  );
-  await page
-    .getByLabel("Email")
-    .fill(process.env.OWNER_EMAIL || "owner@example.test");
-  await page.getByRole("button", { name: "Send code" }).click();
-  await expect.poll(() => messages(mail).length).toBeGreaterThan(before);
-  await page
-    .getByLabel("Six-digit code")
-    .fill(JSON.parse(messages(mail).at(-1)!).otp);
-  await page.getByRole("button", { name: "Sign in" }).click();
+  await signInAsOwner(page, "/workspace");
   await expect(page).toHaveURL(/\/workspace$/);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("All owned");
 }

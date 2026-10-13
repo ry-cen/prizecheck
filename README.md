@@ -109,9 +109,12 @@ set +a
 npm run dev
 ```
 
-Open **http://localhost:5173/**. Request a code for `OWNER_EMAIL`, read it in the
-`npm run dev` terminal, and sign in. Your account starts with an Unsorted storage
-location.
+Open **http://localhost:5173/** and choose **Sign in with Google** (or Discord).
+`npm run dev:auth` loads a local test fake instead of the real providers: its page
+lists test identities, and **owner** signs you in as `OWNER_EMAIL` with no
+credentials. Your account starts with an Unsorted storage location. To use email
+codes instead, set `EMAIL_SIGN_IN=on` in `.env`; codes appear in the `npm run dev`
+terminal.
 
 ### 4. Bind the owner and import the catalog
 

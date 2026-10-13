@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
+import { signInAsOwner } from "./support/sign-in";
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
 import { Pool } from "pg";
 
 test("collector searches a promoted generation and chooses an exact Edition", async ({
@@ -31,22 +31,7 @@ promote({**{f'card-{i}': f'Pikachu {i:02d}' for i in range(1, 33)}, 'card-99': '
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });
   await pool.query("DELETE FROM auth_send_event");
   try {
-    await page.goto(
-      `${process.env.TEST_ORIGIN || "http://localhost:5173"}/locations`
-    );
-    await page
-      .getByLabel("Email")
-      .fill(process.env.OWNER_EMAIL || "owner@example.test");
-    await page.getByRole("button", { name: "Send code" }).click();
-    await expect(page.getByRole("status")).toContainText("code has been sent");
-    const lines = readFileSync(
-      process.env.MAIL_FILE || "/tmp/tcg-ticket01-mail",
-      "utf8"
-    )
-      .trim()
-      .split("\n");
-    await page.getByLabel("Six-digit code").fill(JSON.parse(lines.at(-1)!).otp);
-    await page.getByRole("button", { name: "Sign in" }).click();
+    await signInAsOwner(page, "/workspace");
     await page.getByRole("button", { name: "Catalog", exact: true }).click();
     await page.getByLabel("English name").fill("Pik");
     await page.getByRole("button", { name: "Search", exact: true }).click();

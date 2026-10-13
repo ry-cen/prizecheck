@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { signInAsOwner } from "./support/sign-in";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { Pool } from "pg";
@@ -41,12 +42,7 @@ if ${quarantine ? "True" : "False"}:
 
 async function signIn(page: Page) {
   await pool.query("DELETE FROM auth_send_event");
-  await page.goto(`${ORIGIN}/locations`);
-  await page.getByLabel("Email", { exact: true }).fill(OWNER_EMAIL);
-  await page.getByRole("button", { name: "Send code", exact: true }).click();
-  await expect(page.getByRole("status")).toContainText("code has been sent");
-  await page.getByLabel("Six-digit code").fill(lastOtp());
-  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await signInAsOwner(page, "/workspace");
   await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible();
 }
 

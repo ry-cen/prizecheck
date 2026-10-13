@@ -1,7 +1,8 @@
 import { test, expect, type Page } from "@playwright/test";
+import { signInAsOwner } from "./support/sign-in";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { Pool } from "pg";
 import { expectTouchTarget } from "./support/touch-target";
 import { startAsNewOwner } from "./support/owner";
@@ -15,11 +16,6 @@ const ORIGIN = process.env.TEST_ORIGIN || "http://localhost:5173";
 const OWNER_EMAIL = process.env.OWNER_EMAIL || "owner@example.test";
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const TCGPLAYER = "https://www.tcgplayer.com/massentry?productline=Pokemon&c=";
-
-const lastOtp = () =>
-  JSON.parse(
-    readFileSync(process.env.MAIL_FILE!, "utf8").trim().split("\n").at(-1)!
-  ).otp as string;
 
 /** Runs Python against the live stack's database, passing `argument` as a JSON file. */
 function python(code: string, argument: object = {}): string {
@@ -168,12 +164,7 @@ async function signIn(page: Page) {
   );
   await pool.query("DELETE FROM auth_send_event");
   await startAsNewOwner(pool);
-  await page.goto(`${ORIGIN}/locations`);
-  await page.getByLabel("Email", { exact: true }).fill(OWNER_EMAIL);
-  await page.getByRole("button", { name: "Send code", exact: true }).click();
-  await expect(page.getByRole("status")).toContainText("code has been sent");
-  await page.getByLabel("Six-digit code").fill(lastOtp());
-  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await signInAsOwner(page, "/workspace");
   await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible();
 }
 const owner = async () =>

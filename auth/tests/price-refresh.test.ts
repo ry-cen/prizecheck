@@ -336,6 +336,7 @@ beforeAll(async () => {
   pool = new Pool({ connectionString: connection.toString() });
   const base = {
     ...process.env,
+    EMAIL_SIGN_IN: "on",
     DATABASE_URL: connection.toString(),
     MAIL_MODE: "file",
     MAIL_FILE: join(directory, "mail"),

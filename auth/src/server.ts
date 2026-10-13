@@ -10,6 +10,7 @@ import {
   auth,
   budgetedAuth,
   deliverCode,
+  emailSignIn,
   pool,
   providers,
   publicSignup,
@@ -33,6 +34,12 @@ if (
 ) {
   throw new Error(
     "OWNER_EMAIL, INTERNAL_AUTH_SECRET, BETTER_AUTH_SECRET, DATABASE_URL are required"
+  );
+}
+// Whatever NODE_ENV says: a gateway nobody can sign in to is a misconfiguration, not a deployment.
+if (!emailSignIn && providers.length === 0) {
+  throw new Error(
+    "No sign-in method: configure a provider or set EMAIL_SIGN_IN=on"
   );
 }
 
@@ -215,6 +222,7 @@ const server = createServer(async (request, response) => {
   const path = new URL(request.url || "/", origin).pathname;
   try {
     if (path === "/auth/request-code" && request.method === "POST") {
+      if (!emailSignIn) return json(response, 404, { error: "Not found" });
       if (!sameOrigin(request))
         return json(response, 403, { error: "Origin required" });
       const started = Date.now();
@@ -247,6 +255,7 @@ const server = createServer(async (request, response) => {
       });
     }
     if (path === "/auth/verify-code" && request.method === "POST") {
+      if (!emailSignIn) return json(response, 404, { error: "Not found" });
       if (!sameOrigin(request))
         return json(response, 403, { error: "Origin required" });
       const body = JSON.parse(await readBody(request));
@@ -292,7 +301,7 @@ const server = createServer(async (request, response) => {
       // The same answer for everyone: nothing here depends on cookies or accounts.
       return json(response, 200, {
         providers: providers.map(({ id, name }) => ({ id, name })),
-        emailSignIn: true,
+        emailSignIn,
       });
     }
     const signInStart = /^\/auth\/sign-in\/([^/]+)$/.exec(path);

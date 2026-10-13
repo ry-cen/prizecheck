@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { signInAsOwner } from "./support/sign-in";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { Pool } from "pg";
@@ -26,23 +27,8 @@ promote({'fixture-1': 'Pikachu'})`,
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });
   await pool.query("DELETE FROM auth_send_event");
   try {
-    await page.goto(
-      `${process.env.TEST_ORIGIN || "http://localhost:5173"}/locations`
-    );
+    await signInAsOwner(page, "/workspace");
     const mailFile = process.env.MAIL_FILE || "/tmp/tcg-ticket01-mail";
-    const beforeSignIn = mailLines(mailFile).length;
-    await page
-      .getByLabel("Email")
-      .fill(process.env.OWNER_EMAIL || "owner@example.test");
-    await page.getByRole("button", { name: "Send code" }).click();
-    await expect(page.getByRole("status")).toContainText("code has been sent");
-    await expect
-      .poll(() => mailLines(mailFile).length)
-      .toBeGreaterThan(beforeSignIn);
-    await page
-      .getByLabel("Six-digit code")
-      .fill(JSON.parse(mailLines(mailFile).at(-1)!).otp);
-    await page.getByRole("button", { name: "Sign in" }).click();
     await expect(
       page.getByRole("button", { name: "Catalog", exact: true })
     ).toBeVisible();

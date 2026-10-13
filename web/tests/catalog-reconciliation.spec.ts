@@ -1,5 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import { test, expect } from "@playwright/test";
+import { signInAsOwner } from "./support/sign-in";
 import { execFileSync } from "node:child_process";
 import { chmodSync, readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
@@ -21,20 +22,11 @@ promote({'reconciliation-1':'Review Pikachu'})`,
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });
   await pool.query("DELETE FROM auth_send_event");
   try {
-    await page.goto(
-      `${process.env.TEST_ORIGIN || "http://localhost:5173"}/locations`
-    );
-    await page
-      .getByLabel("Email", { exact: true })
-      .fill(process.env.OWNER_EMAIL || "owner@example.test");
-    await page.getByRole("button", { name: "Send code", exact: true }).click();
-    await expect(page.getByRole("status")).toContainText("code has been sent");
+    await signInAsOwner(page, "/workspace");
     const mail = () =>
       JSON.parse(
         readFileSync(process.env.MAIL_FILE!, "utf8").trim().split("\n").at(-1)!
       ).otp as string;
-    await page.getByLabel("Six-digit code").fill(mail());
-    await page.getByRole("button", { name: "Sign in", exact: true }).click();
     await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible();
     const user = (
       await pool.query('SELECT id FROM "user" WHERE email=$1', [
@@ -74,8 +66,12 @@ promote({'reconciliation-1':'Review Pikachu'})`,
     await article
       .getByLabel("Review evidence URL")
       .fill("https://example.org/card-photo");
-    // Sign-in and catalog approval share the one-email-per-minute limit.
-    await pool.query("UPDATE auth_send_event SET sent_at=now()");
+    // Catalog approval shares the one-email-per-minute limit with any mail sent to the owner. Sign-in through the fake
+    // sends none, so record a send that just happened.
+    await pool.query(
+      "INSERT INTO auth_send_event(email_key, ip_key, sent_at) VALUES (encode(sha256(convert_to($1, 'UTF8')), 'hex'), 'journey', now())",
+      [(process.env.OWNER_EMAIL || "owner@example.test").trim().toLowerCase()]
+    );
     const limited = page.waitForResponse((r) =>
       r.url().endsWith("/auth/approval-code")
     );
@@ -120,20 +116,11 @@ promote({'card-1':'Correction Pikachu'})`,
   await pool.query("DELETE FROM auth_send_event");
   const location = `Correction ${Date.now()}`;
   try {
-    await page.goto(
-      `${process.env.TEST_ORIGIN || "http://localhost:5173"}/locations`
-    );
-    await page
-      .getByLabel("Email", { exact: true })
-      .fill(process.env.OWNER_EMAIL || "owner@example.test");
-    await page.getByRole("button", { name: "Send code", exact: true }).click();
-    await expect(page.getByRole("status")).toContainText("code has been sent");
+    await signInAsOwner(page, "/workspace");
     const mail = () =>
       JSON.parse(
         readFileSync(process.env.MAIL_FILE!, "utf8").trim().split("\n").at(-1)!
       ).otp as string;
-    await page.getByLabel("Six-digit code").fill(mail());
-    await page.getByRole("button", { name: "Sign in", exact: true }).click();
     const cards = page.getByRole("region", { name: "Cards" });
     const openLocation = async () => {
       await page

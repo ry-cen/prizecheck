@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
-import { readFileSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { fakeSignIn, signInAsOwner } from "./support/sign-in";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { Pool } from "pg";
 
@@ -8,22 +9,7 @@ test("owner signs in, sees Unsorted, follows safe destination, then signs out", 
 }) => {
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });
   await pool.query("DELETE FROM auth_send_event");
-  const email = process.env.OWNER_EMAIL || "owner@example.test";
-  await page.goto(
-    `${process.env.TEST_ORIGIN || "http://localhost:5173"}/locations?next=%2Flocations`
-  );
-  await page.getByLabel("Email").fill(email);
-  await page.getByRole("button", { name: "Send code" }).click();
-  await expect(page.getByRole("status")).toContainText("code has been sent");
-  const lines = readFileSync(
-    process.env.MAIL_FILE || "/tmp/tcg-ticket01-mail",
-    "utf8"
-  )
-    .trim()
-    .split("\n");
-  const code = JSON.parse(lines.at(-1)!).otp;
-  await page.getByLabel("Six-digit code").fill(code);
-  await page.getByRole("button", { name: "Sign in" }).click();
+  await fakeSignIn(page, { next: "/locations" });
   await expect(page).toHaveURL(
     `${process.env.TEST_ORIGIN || "http://localhost:5173"}/workspace`
   );
@@ -37,7 +23,9 @@ test("owner signs in, sees Unsorted, follows safe destination, then signs out", 
   await page.reload();
   await expect(page.getByRole("heading", { name: "All owned" })).toBeVisible();
   await page.getByRole("button", { name: "Sign out" }).click();
-  await expect(page.getByRole("button", { name: "Send code" })).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "Sign in with Google" })
+  ).toBeVisible();
   await expect(page).toHaveURL(
     `${process.env.TEST_ORIGIN || "http://localhost:5173"}/workspace`
   );
@@ -47,23 +35,10 @@ test("owner signs in, sees Unsorted, follows safe destination, then signs out", 
 test("external return destinations are discarded", async ({ page }) => {
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });
   await pool.query("DELETE FROM auth_send_event");
-  const email = process.env.OWNER_EMAIL || "owner@example.test";
-  await page.goto(
-    `${process.env.TEST_ORIGIN || "http://localhost:5173"}/locations?next=https%3A%2F%2Fexample.com%2Fsteal`
-  );
-  await page.getByLabel("Email").fill(email);
-  await page.getByRole("button", { name: "Send code" }).click();
-  await expect(page.getByRole("status")).toContainText("code has been sent");
-  const lines = readFileSync(
-    process.env.MAIL_FILE || "/tmp/tcg-ticket01-mail",
-    "utf8"
-  )
-    .trim()
-    .split("\n");
-  await page.getByLabel("Six-digit code").fill(JSON.parse(lines.at(-1)!).otp);
-  await page.getByRole("button", { name: "Sign in" }).click();
+  await fakeSignIn(page, { next: "https://example.com/steal" });
+  // A provider sign-in with no safe destination lands on /collection (spec), not on the email flow's /workspace.
   await expect(page).toHaveURL(
-    `${process.env.TEST_ORIGIN || "http://localhost:5173"}/workspace`
+    `${process.env.TEST_ORIGIN || "http://localhost:5173"}/collection`
   );
   await pool.end();
 });
@@ -90,20 +65,7 @@ test("bound owner starts one catalog run from the private panel", async ({
     "UPDATE catalog_run SET phase='failed',outcome='failed',finished_at=now() WHERE outcome IS NULL"
   );
   const email = process.env.OWNER_EMAIL || "owner@example.test";
-  await page.goto(
-    `${process.env.TEST_ORIGIN || "http://localhost:5173"}/locations`
-  );
-  await page.getByLabel("Email").fill(email);
-  await page.getByRole("button", { name: "Send code" }).click();
-  await expect(page.getByRole("status")).toContainText("code has been sent");
-  const lines = readFileSync(
-    process.env.MAIL_FILE || "/tmp/tcg-ticket01-mail",
-    "utf8"
-  )
-    .trim()
-    .split("\n");
-  await page.getByLabel("Six-digit code").fill(JSON.parse(lines.at(-1)!).otp);
-  await page.getByRole("button", { name: "Sign in" }).click();
+  await signInAsOwner(page, "/workspace");
   await expect(page.getByRole("heading", { name: "All owned" })).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Owner controls" })
