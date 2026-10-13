@@ -171,6 +171,19 @@ async function expectAccessible(page: Page, state: string) {
     violations.map(
       (v) => `${v.id}: ${v.nodes.map((n) => n.target.join(" ")).join(" | ")}`
     );
+  // Dialogs and drawers enter with a fade or a slide that is still running once they are visible; axe measured the
+  // Manage locations panel half faded in and reported its muted text's contrast. Audit the state they come to rest in.
+  await page.evaluate(() =>
+    Promise.all(
+      document
+        .getAnimations()
+        .filter(
+          (animation) =>
+            animation.effect?.getComputedTiming().iterations !== Infinity
+        )
+        .map((animation) => animation.finished.catch(() => undefined))
+    )
+  );
   const aa = await new AxeBuilder({ page }).withTags(WCAG_AA).analyze();
   expect(list(aa.violations), `WCAG 2.2 AA violations in ${state}`).toEqual([]);
   const order = await new AxeBuilder({ page })
