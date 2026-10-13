@@ -1,37 +1,23 @@
 import { expect, type Locator } from "@playwright/test";
+import { animationsFinished } from "./motion";
 
 type Box = { x: number; y: number; width: number; height: number };
 
-// Touch targets on a phone are at least 44 CSS px. A box measured from transformed layout carries floating-point
-// error: a 44 px button inside a drawer that is still sliding in (every drawer and sheet enters with a translate,
-// which never changes a size) measures 43.99998 px. Half a pixel is the allowance the accessibility audit's
-// smallTargets also uses; a target a finger could notice is still a failure.
+// Touch targets on a phone are at least 44 CSS px. A 44 px button inside a drawer that was still sliding in (every
+// drawer and sheet enters with a translate, which never changes a size) measured 43.99998 px, so targets are measured
+// once entry animations finish. A box measured from transformed or fractional layout can still carry floating-point
+// error, so half a pixel is allowed, as the accessibility audit's smallTargets also does; a target a finger could
+// notice is still a failure.
 const TOUCH_TARGET = 44;
 const ALLOWANCE = 0.5;
 
-const same = (a: Box | null, b: Box | null) =>
-  !!a &&
-  !!b &&
-  a.x === b.x &&
-  a.y === b.y &&
-  a.width === b.width &&
-  a.height === b.height;
-
-/** `locator`'s box once two measurements in a row agree, so an entering drawer or sheet has finished moving. */
+/** `locator`'s box once it is visible and every entry animation has finished, so a drawer or sheet has stopped moving. */
 export async function settledBox(locator: Locator): Promise<Box> {
-  let previous = await locator.boundingBox();
-  await expect
-    .poll(
-      async () => {
-        const current = await locator.boundingBox();
-        const settled = same(previous, current);
-        previous = current;
-        return settled;
-      },
-      { message: `${locator} to stop moving` }
-    )
-    .toBe(true);
-  return previous!;
+  await expect(locator).toBeVisible();
+  await animationsFinished(locator.page());
+  const box = await locator.boundingBox();
+  expect(box, `${locator} has a box`).not.toBeNull();
+  return box!;
 }
 
 /** Asserts `locator` is a 44 px touch target in `dimensions` once it has settled, and returns that settled box. */
