@@ -21,6 +21,7 @@ import { neutralCallback } from "./callbackErrors.js";
 import { callerFor, trustedClientIp } from "./caller.js";
 import { safeNext } from "./nextPath.js";
 import { PublicReadLimiter } from "./publicReads.js";
+import { sessionBody } from "./sessionView.js";
 
 const origin = process.env.PUBLIC_ORIGIN || "http://localhost:5173";
 const ownerEmail = (process.env.OWNER_EMAIL || "").trim().toLowerCase();
@@ -362,11 +363,14 @@ const server = createServer(async (request, response) => {
     if (path === "/api/auth" || path.startsWith("/api/auth/"))
       return json(response, 404, { error: "Not found" });
     if (path === "/auth/session" && request.method === "GET") {
-      const current = await session(request);
-      return json(response, 200, {
-        signedIn: !!current,
-        userId: current?.user.id || null,
-      });
+      return json(
+        response,
+        200,
+        sessionBody(
+          await session(request),
+          providers.map((p) => p.imageHost)
+        )
+      );
     }
     if (path === "/auth/approval-code" && request.method === "POST") {
       if (!sameOrigin(request))
