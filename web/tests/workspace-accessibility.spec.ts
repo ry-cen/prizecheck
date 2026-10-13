@@ -377,8 +377,8 @@ test.describe("desktop", () => {
     );
     await expect(tiles(page)).toHaveCount(3);
 
-    // Enough presses for every stop once, however many Locations earlier tests left in this owner's tree: a fixed 150
-    // ran out before the gallery when burn-in repeats of this file shared one stack.
+    // Enough presses for every stop once. The tree holds only this test's Locations (startAsNewOwner), so this sizing is
+    // defence in depth: a fixed 150 ran out before the gallery when burn-in repeats shared one owner's tree.
     const stops = await page.evaluate(
       () =>
         document.querySelectorAll(

@@ -175,7 +175,8 @@ def flake_violations(source, filename):
             for match in TOUCH_TARGET_SIZE.finditer(source):
                 check(match.start(), 'touch-target', 'Check 44 px touch targets with expectTouchTarget (web/tests/support/touch-target.ts)')
         sign_in = WORKSPACE_SIGN_IN.search(source)
-        if WORKSPACE_SPEC.fullmatch(filename) and sign_in and 'startAsNewOwner(' not in source:
+        # A call in a // comment does not count. signIn is matched in its function form, which every spec uses.
+        if WORKSPACE_SPEC.fullmatch(filename) and sign_in and not re.search(r'^(?!\s*//).*startAsNewOwner\(', source, re.M):
             check(sign_in.start(), 'fresh-owner', 'A workspace spec\'s signIn calls startAsNewOwner (web/tests/support/owner.ts), '
                   'so each test starts with an empty Location tree')
     if filename.startswith('auth/tests/'):
