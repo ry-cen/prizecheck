@@ -106,6 +106,9 @@ ONE_SHOT_READ = re.compile(
     r'|count|getAttribute|boundingBox|allTextContents|allInnerTexts)\(')
 COUNTED_LOOP = re.compile(r'\bfor\s*\(\s*let\s+(\w+)\s*=\s*0\s*;\s*\1\s*<[^;]*;\s*\1\s*(?:\+\+|\+=\s*1)\s*\)')
 LOOP_SLEEP = re.compile(r'\bsleep\(|\bsetTimeout\(|\.waitForTimeout\(')
+# Workspace specs sign in as the stack's one owner; each test starts as a new owner (web/tests/support/owner.ts).
+WORKSPACE_SPEC = re.compile(r'web/tests/workspace-[^/]+\.spec\.ts')
+WORKSPACE_SIGN_IN = re.compile(r'\basync function signIn\(')
 TOUCH_TARGET_SIZE = re.compile(r'\.toBeGreaterThan(?:OrEqual)?\(\s*4[34](?:\.\d+)?\s*\)')
 
 
@@ -147,8 +150,8 @@ def flake_exemption(lines, number, rule):
 
 def flake_violations(source, filename):
     """Flake-prone patterns in a TypeScript test file under web/tests or auth/tests: fixed sleeps and one-shot reads
-    of browser state where a retrying assertion waits, 44 px checks outside expectTouchTarget, and counted loops that
-    sleep where a wait should run to a deadline."""
+    of browser state where a retrying assertion waits, 44 px checks outside expectTouchTarget, a workspace spec whose
+    signIn reuses the owner earlier tests filled, and counted loops that sleep where a wait should run to a deadline."""
     lines = source.splitlines()
     found = []
 
@@ -171,6 +174,10 @@ def flake_violations(source, filename):
         if filename != 'web/tests/support/touch-target.ts':
             for match in TOUCH_TARGET_SIZE.finditer(source):
                 check(match.start(), 'touch-target', 'Check 44 px touch targets with expectTouchTarget (web/tests/support/touch-target.ts)')
+        sign_in = WORKSPACE_SIGN_IN.search(source)
+        if WORKSPACE_SPEC.fullmatch(filename) and sign_in and 'startAsNewOwner(' not in source:
+            check(sign_in.start(), 'fresh-owner', 'A workspace spec\'s signIn calls startAsNewOwner (web/tests/support/owner.ts), '
+                  'so each test starts with an empty Location tree')
     if filename.startswith('auth/tests/'):
         for match in COUNTED_LOOP.finditer(source):
             if LOOP_SLEEP.search(loop_body(source, match.end())):

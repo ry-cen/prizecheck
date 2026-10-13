@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { Pool } from "pg";
+import { startAsNewOwner } from "./support/owner";
 
 type TreeNode = { id: string; name: string; version: number };
 
@@ -50,6 +51,7 @@ async function signIn(page: Page) {
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });
   try {
     await pool.query("DELETE FROM auth_send_event");
+    await startAsNewOwner(pool);
   } finally {
     await pool.end();
   }
