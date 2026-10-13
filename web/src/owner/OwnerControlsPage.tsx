@@ -15,7 +15,7 @@ import {
 } from "../generated";
 import { CatalogReview } from "../CatalogReview";
 import { MetadataReview } from "../MetadataReview";
-import { OwnerMissingCardReview } from "../MissingCardReports";
+import { MissingQueue } from "./MissingQueue";
 import { PageHeader } from "../shell/PageHeader";
 import { Pill } from "../ui/Pill";
 import { Segmented, segmentId } from "../ui/Segmented";
@@ -40,10 +40,10 @@ type Props = {
 
 /**
  * Owner controls (#167, variant A of the Missing cards and Owner controls decision): the problems line,
- * then sub-tabs with counts. Status, Rules and Attributes (#170) are on the kit. The other queue tabs
- * show today's review components on an old light panel until #168 (Catalog, Metadata, Missing cards)
- * and #171 (Reprints) move them onto ScrollTables. While a catalog run is in progress the pull status is read
- * again every 5 seconds.
+ * then sub-tabs with counts. Status and Rules are on the kit. Catalog, Metadata and Missing cards are
+ * review queues on ScrollTables, with the review card inline under its row (#168); Attributes (#170) is
+ * on the kit too, and only Reprints (#171) is still to come. While a catalog run is in progress the pull
+ * status is read again every 5 seconds.
  */
 export function OwnerControlsPage(props: Props) {
   return (
@@ -110,6 +110,12 @@ function OwnerControls({
     void readOperations();
     refreshCounts();
   }
+  // A confirmed decision changes its queue's count: Catalog's comes from the operational status, the
+  // others from useQueueCounts.
+  function recount() {
+    void readOperations();
+    refreshCounts();
+  }
   async function start() {
     onMessage("");
     try {
@@ -141,18 +147,10 @@ function OwnerControls({
       );
       break;
     case "catalog":
-      content = (
-        <LegacyQueue>
-          <CatalogReview />
-        </LegacyQueue>
-      );
+      content = <CatalogReview onChanged={recount} />;
       break;
     case "metadata":
-      content = (
-        <LegacyQueue>
-          <MetadataReview />
-        </LegacyQueue>
-      );
+      content = <MetadataReview onChanged={recount} />;
       break;
     case "attributes":
       content = <AttributesQueue onDecided={refreshCounts} />;
@@ -167,11 +165,7 @@ function OwnerControls({
       );
       break;
     case "missing":
-      content = (
-        <LegacyQueue>
-          <OwnerMissingCardReview />
-        </LegacyQueue>
-      );
+      content = <MissingQueue onChanged={recount} />;
       break;
     case "rules":
       content = <RulesPanel />;
@@ -226,12 +220,6 @@ function OwnerControls({
       </div>
     </>
   );
-}
-
-/** Today's review component for a queue, unchanged on the old light look, until its ticket moves it onto
- * the kit. */
-function LegacyQueue({ children }: { children: ReactNode }) {
-  return <div className="legacy legacy-inset">{children}</div>;
 }
 
 /** A queue whose page arrives with its own ticket (#171); its count is already on its tab. */

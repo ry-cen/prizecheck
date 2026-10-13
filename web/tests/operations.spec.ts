@@ -65,11 +65,20 @@ test("owner sees stale backup and allowance warning in operational health", asyn
     await expect(row("database_bytes")).toContainText("70 / 100 · 70% warning");
     // The problems line lists both, the stale backup (bad) before the allowance warning (warn).
     const problems = page.getByRole("list", { name: "Problems" });
-    const listed = await problems.getByRole("listitem").allTextContents();
-    const backup = listed.indexOf("Backup: Stale");
-    const allowance = listed.indexOf("database_bytes: 70 / 100 · 70% warning");
-    expect(backup).toBeGreaterThanOrEqual(0);
-    expect(allowance).toBeGreaterThan(backup);
+    // Read the line again until it settles: the operational status loads after the page.
+    await expect
+      .poll(async () => {
+        const listed = await problems.getByRole("listitem").allTextContents();
+        const backup = listed.indexOf("Backup: Stale");
+        const allowance = listed.indexOf(
+          "database_bytes: 70 / 100 · 70% warning"
+        );
+        return {
+          backup: backup >= 0,
+          allowanceAfterBackup: allowance > backup,
+        };
+      })
+      .toEqual({ backup: true, allowanceAfterBackup: true });
     await expect(health).not.toContainText(email);
     await expect(problems).not.toContainText(email);
   } finally {

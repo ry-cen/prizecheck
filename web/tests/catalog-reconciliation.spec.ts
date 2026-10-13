@@ -68,10 +68,29 @@ promote({'reconciliation-1':'Review Pikachu'})`,
     await page.getByRole("menuitem", { name: "Owner controls" }).click();
     await page.getByRole("tab", { name: /^Catalog/ }).click();
     await expect(page).toHaveURL(/\/owner\/catalog$/);
-    const article = page
-      .getByRole("region", { name: "Catalog reconciliation" })
+    // The queue is a table (#168); Review opens the review's card in a row under it.
+    const queue = page.getByRole("region", { name: "Catalog reconciliation" });
+    await queue
+      .getByRole("button", { name: /^Review .* · reconciliation-1$/ })
+      .click();
+    const article = queue
       .getByRole("article")
       .filter({ hasText: "reconciliation-1" });
+    await expect(article.getByLabel("Review reason")).toBeFocused();
+    // The incoming change beside the Printing as recorded, and every Edition with its Holdings.
+    const incoming = article.getByRole("region", { name: "Incoming change" });
+    const nameRow = incoming
+      .getByRole("row")
+      .filter({ has: page.getByRole("cell", { name: /^Name/ }) });
+    await expect(nameRow).toContainText("Review Pikachu");
+    await expect(nameRow).toContainText("Different Pikachu");
+    await expect(nameRow).toContainText("Differs");
+    const mapping = article.getByRole("region", { name: "Edition mapping" });
+    await expect(mapping.getByRole("columnheader")).toHaveText([
+      "Edition",
+      "Holdings",
+    ]);
+    await expect(mapping.getByRole("row")).toHaveCount(2);
     await article
       .getByLabel("Review reason")
       .fill("Physical card confirms original English name");
@@ -83,7 +102,7 @@ promote({'reconciliation-1':'Review Pikachu'})`,
     const limited = page.waitForResponse((r) =>
       r.url().endsWith("/auth/approval-code")
     );
-    await article.getByRole("button", { name: "Send review code" }).click();
+    await article.getByRole("button", { name: "Send code" }).click();
     expect((await limited).status()).toBe(429);
     await expect(article.getByRole("status")).toContainText(
       "Unable to send review code"
@@ -91,14 +110,16 @@ promote({'reconciliation-1':'Review Pikachu'})`,
     await pool.query(
       "UPDATE auth_send_event SET sent_at=now()-interval '61 seconds'"
     );
-    await article.getByRole("button", { name: "Send review code" }).click();
+    await article.getByRole("button", { name: "Send code" }).click();
     await expect(article.getByRole("status")).toContainText(
       "Fresh review code sent"
     );
-    await article.getByLabel("Fresh review code").fill(mail());
-    await article
-      .getByRole("button", { name: "Confirm catalog decision" })
-      .click();
+    await article.getByLabel("Fresh six-digit code").fill(mail());
+    await article.getByRole("button", { name: "Confirm decision" }).click();
+    // A confirmed decision removes the row and says so in a toast.
+    await expect(
+      page.getByRole("region", { name: "Notifications" })
+    ).toContainText("Catalog decision recorded for Review Pikachu: retained.");
     await expect(article).toHaveCount(0);
     await expect(
       page.getByRole("region", { name: "Catalog reconciliation" })

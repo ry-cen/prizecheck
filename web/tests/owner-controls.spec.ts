@@ -262,7 +262,7 @@ test.describe("desktop", () => {
       await expect(
         page
           .getByRole("region", { name: "Missing-card review queue" })
-          .getByRole("article")
+          .getByRole("row")
           .filter({ hasText: "Counted Card" })
       ).toBeVisible();
       await expectPageChecks(page, "Owner controls, Missing cards (desktop)");

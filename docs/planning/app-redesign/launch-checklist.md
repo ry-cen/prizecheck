@@ -17,6 +17,7 @@ The redesign is a launch gate ([spec](spec.md), "Rollout"): PrizeCheck opens to 
 - [ ] `GET /auth/session` also returns the signed-in `email`, for the avatar menu (#162).
 - [ ] Signing in has its own address, `/sign-in`, which the public header links to. Signed out, an address that is no page shows "Page not found" instead of the sign-in card, and a Published Deck link that no longer works shows "This deck isn't published anymore". Signed in, Discover and Published Decks open inside the app (#163).
 - [ ] Owner controls' sub-tabs have their own addresses: Status at `/owner`, then `/owner/catalog`, `/owner/metadata`, `/owner/attributes`, `/owner/reprints`, `/owner/missing` and `/owner/rules` (#167).
+- [ ] Owner controls' Catalog, Metadata and Missing cards queues are tables, with each review card opening under its row. A confirmed decision takes its row off the list and shows a message, and the Missing cards queue lists only open reports. The owner-only catalog review routes also return the Printing as recorded and each Edition's Holdings count (#168).
 - [ ] Card type has one source, the reviewed card attributes, which gain Trainer Type and evolves from. After migrating to `041_trainer_type_and_evolves_from.sql`, run `scripts/derive_card_attributes.py` once (`docs/operations/release.md`); until then Collection's Trainer Type choices match no card. Collection's Category filter offers "Trainer: any type" and each Trainer Type, and its type filter lists Pokémon only, so a Basic Energy no longer appears under its type (#170).
 - [ ] Owner controls' Attributes tab reviews card attributes on the kit: derived, correction and effective values, Correct or Remove correction with a fresh code, and Reject report or Ask for information with a reason only (#170).
 - [ ] Collection's Location tree, Manage locations, search, filters and display settings, the stale-collection banner and the Deck heading use the new controls. Filters & display opens as a panel along the right edge of a phone, and Manage locations fills a phone's screen (#166).
@@ -83,12 +84,29 @@ On a desktop:
 - [ ] 4. Operational health is a table of area, check, value pill and detail. Click into it and use the arrow keys: when it's wider than the window it scrolls sideways inside its own box.
 - [ ] 5. Open Rules. Each rule kind is a card with its active version and every version with its digest, the latest marked. Confirm rule change stays disabled until the evidence URL, the reason and a six-digit code are filled in. Activate a rule only if you mean to.
 - [ ] 6. Press Tab until a sub-tab is focused, then use the arrow keys: focus moves along the tabs, and Enter opens one, changing the address (for example `/owner/rules`). Reload: the same tab is open. Press Back: the previous tab returns.
-- [ ] 7. Open Catalog, Metadata and Missing cards: today's review screens appear on a light panel and still work. Reprints shows how many items wait and says its review comes in a later update. Attributes lists its queue as a table (#170).
+- [ ] 7. Reprints shows how many items wait and says its review comes in a later update. Attributes lists its queue as a table (#170). (Catalog, Metadata and Missing cards have their own walkthrough under #168.)
 
 On a phone (iOS Safari or Android Chrome):
 
 - [ ] 8. Open More, then Owner controls. The sub-tab row scrolls sideways inside itself, every tab is easy to hit with a thumb, the health table scrolls sideways inside its own box, and nothing else on the page scrolls sideways.
 - [ ] 9. Open Rules: the fields and buttons are thumb-sized, and Send code, the code and Confirm rule change wrap onto new lines instead of running off the screen.
+
+### Owner controls queues (#168)
+
+On a desktop:
+
+- [ ] 1. Open Owner controls, then Catalog. Pending catalog reviews are a table of card, set · number, kind, reports, opened, age and Review. Press Review: the card opens in a row under it with the cursor in Review reason. Press Review on another row: the first card closes, so only one is open. Close folds the card and puts focus back on that row's Review button.
+- [ ] 2. On a catalog card, the Incoming change table shows each field as recorded and as incoming, marked "Differs" where they disagree, and the Edition mapping table shows every Edition with its Holdings (copies across every collection). Choose "Deprecate Printing and map every Edition": a Replacement Edition column appears. Don't confirm unless you mean to.
+- [ ] 3. Confirm decision stays disabled until Review reason, Review evidence URL and a six-digit code are all filled in. Send code emails you a fresh code.
+- [ ] 4. Open Metadata. A card shows source and reviewed values side by side with "Differs" on each changed field, then the linked reports, whose Ask for information and Reject report work once a reason is written. Choosing Correct mapping shows Product ID and Quote variant. Show history unfolds the decision history and Hide history folds it away. With more than 100 targets, Load more adds the next page under the table.
+- [ ] 5. Open Missing cards. Begin a record directly is folded above the table and opens its form. A report's card shows the reporter's note, the evidence link and the verified fields, with no review evidence field. Request information and Reject work as soon as a reason is written; Approve shared record also needs a fresh code.
+- [ ] 6. Make a decision you need anyway, for example rejecting a duplicate missing-card report. Its row leaves the table, a message at the bottom of the screen says what happened, focus moves to the next row's Review button, and the tab's count drops by one.
+- [ ] 7. Request information on a missing-card report: the row stays, marked "needs info", and the message says the reporter was asked.
+
+On a phone (iOS Safari or Android Chrome):
+
+- [ ] 8. Open Owner controls from More, then Catalog, Metadata and Missing cards in turn. Open a card and swipe the table sideways: the card stays at the table's left edge, as wide as the table's box, while the columns move. Nothing else on the page scrolls sideways.
+- [ ] 9. On an open card, every field and button is easy to hit with a thumb, and Send code, the code field and the confirm button wrap onto new lines instead of running off the screen.
 
 ### Missing cards (#169)
 
@@ -133,6 +151,7 @@ On a phone (iOS Safari or Android Chrome):
 - [ ] Until the dark first paint (rollout stage 7), a slow first load still shows a brief light page before the dark loading screen. That is expected for now (#163).
 - [ ] Screen reader on Collection: with Names off, a tile is read with its Variant (or "Unspecified Variant"), and the inspector's Leaf list is read as a list (#164).
 - [ ] Screen reader on Owner controls: the sub-tabs announce as tabs with their counts and which one is selected, the problems line reads as a list, and the health table reads as a table with its column headers (#167).
+- [ ] Screen reader on the Owner controls queues: each Review button is read with its card and whether it is expanded, an open card is read as an article named for its card with the cursor in Review reason, and the message after a decision is announced once (#168).
 - [ ] Screen reader on Missing cards: the sub-tabs announce as tabs and which one is selected, the reports table reads with its column headers, Reply announces whether its row is open, and after a send the message is read where focus lands (#169).
 - [ ] Real touch and Safari on Collection: Manage locations' handle drag with a finger on iOS Safari and Android Chrome, and the sidebar's tile drag and the + on hover in Safari and Firefox on desktop (#166).
 

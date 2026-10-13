@@ -24,6 +24,12 @@ class CatalogReviewView(BaseModel):
     candidate: dict
     created_at: datetime
     evidence_digest: str
+    # The Printing as the catalog records it now (null without a Printing), shown beside the incoming change.
+    # Outside the evidence digest, which binds only to what the source sent.
+    current_name: str | None=None
+    current_set_id: str | None=None
+    current_set_name: str | None=None
+    current_collector_number: str | None=None
 
 class EditionReplacementInput(BaseModel):
     edition_id: UUID
@@ -77,7 +83,10 @@ def consume_review_code(conn,owner_id,review_id,action,code):
 def reviews(user_id: str=Depends(verified_user)):
     with connect() as conn:
         require_owner(conn,user_id)
-        return [view(row) for row in conn.execute("SELECT * FROM catalog_review WHERE status='pending' ORDER BY created_at,id LIMIT 100").fetchall()]
+        return [view(row) for row in conn.execute("""SELECT r.*,d.display_name AS current_name,d.set_id AS current_set_id,
+          d.set_name AS current_set_name,d.collector_number AS current_collector_number
+          FROM catalog_review r LEFT JOIN catalog_printing_display d ON d.printing_id=r.printing_id
+          WHERE r.status='pending' ORDER BY r.created_at,r.id LIMIT 100""").fetchall()]
 
 @router.post('/api/admin/catalog-reviews/{review_id}/decision',response_model=CatalogReviewView)
 def decide(review_id: UUID,command: CatalogDecision,user_id: str=Depends(verified_user)):
@@ -233,6 +242,9 @@ def reassign(command: ReassignHolding,user_id: str=Depends(verified_user)):
 class ReviewEditionView(BaseModel):
     id: UUID
     descriptor: dict
+    # Copies of this Edition across every collection (the sum of its Holdings), so the owner sees what a
+    # deprecation leaves for collectors to reassign. A count only: no collector, Location or user id.
+    holdings: int
 
 @router.get('/api/admin/catalog-reviews/{review_id}/editions',response_model=list[ReviewEditionView])
 def review_editions(review_id: UUID,user_id: str=Depends(verified_user)):
@@ -240,4 +252,6 @@ def review_editions(review_id: UUID,user_id: str=Depends(verified_user)):
         require_owner(conn,user_id)
         review=conn.execute('SELECT printing_id FROM catalog_review WHERE id=%s',(review_id,)).fetchone()
         if not review:fail(404,'REVIEW_NOT_FOUND')
-        return [ReviewEditionView(**row) for row in conn.execute('SELECT id,descriptor FROM catalog_edition WHERE printing_id=%s ORDER BY descriptor_key,id',(review['printing_id'],)).fetchall()]
+        return [ReviewEditionView(**row) for row in conn.execute('''SELECT e.id,e.descriptor,coalesce(sum(h.quantity),0)::bigint AS holdings
+          FROM catalog_edition e LEFT JOIN holding h ON h.edition_id=e.id WHERE e.printing_id=%s
+          GROUP BY e.id ORDER BY e.descriptor_key,e.id''',(review['printing_id'],)).fetchall()]

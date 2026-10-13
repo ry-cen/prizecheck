@@ -274,3 +274,30 @@ def test_decision_requires_the_unchanged_evidence_digest_shown_to_the_owner():
     accepted=call('POST',path,owner,{**body,'evidence_digest':current})
     assert accepted.status_code==200,accepted.text
     assert accepted.json()['candidate']=={'name':'Different evidence'}
+
+
+def test_owner_review_shows_the_current_printing_and_copies_held_per_edition():
+    # Owner controls' Catalog card (#168) shows the incoming change beside the Printing as recorded, and each
+    # Edition's Holdings across every collection: a count only, and only for the owner.
+    reset_catalog();run(Source())
+    owner,first,second=str(uuid4()),str(uuid4()),str(uuid4())
+    with connect() as conn:
+        conn.execute('INSERT INTO inventory_owner(user_id) VALUES (%s),(%s),(%s)',(owner,first,second))
+        conn.execute('INSERT INTO owner_binding(user_id) VALUES (%s)',(owner,))
+        printing=conn.execute("SELECT id FROM catalog_printing WHERE source_id='test-2'").fetchone()['id']
+        normal=conn.execute("SELECT id FROM catalog_edition WHERE printing_id=%s AND descriptor->>'finish'='normal'",(printing,)).fetchone()['id']
+        for collector,quantity in ((first,3),(second,2)):
+            leaf=conn.execute("INSERT INTO location(id,owner_id,name,kind) VALUES (%s,%s,'Binder','storage_leaf') RETURNING id",(uuid4(),collector)).fetchone()['id']
+            conn.execute('INSERT INTO holding VALUES (%s,%s,%s,%s,1)',(collector,leaf,normal,quantity))
+        review=conn.execute("""INSERT INTO catalog_review(printing_id,source_id,kind,source_fingerprint,detail,candidate)
+          VALUES (%s,'test-2','name_change','holdings-test','Name review','{"name":"Raichu"}') RETURNING id""",(printing,)).fetchone()['id']
+    row=next(r for r in call('GET','/api/admin/catalog-reviews',owner).json() if r['id']==str(review))
+    assert (row['current_name'],row['current_set_id'],row['current_collector_number'])==('Pikachu','test','2')
+    assert row['candidate']=={'name':'Raichu'}
+    editions=call('GET',f'/api/admin/catalog-reviews/{review}/editions',owner)
+    assert editions.status_code==200,editions.text
+    held={edition['id']:edition['holdings'] for edition in editions.json()}
+    assert held[str(normal)]==5 and len(held)>1
+    assert all(count==0 for edition,count in held.items() if edition!=str(normal))
+    assert all(set(edition)=={'id','descriptor','holdings'} for edition in editions.json())
+    assert call('GET',f'/api/admin/catalog-reviews/{review}/editions',first).status_code==403
