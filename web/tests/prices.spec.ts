@@ -429,11 +429,14 @@ test(
     await expect(panel.locator(".holding-grid > li")).toHaveCount(96);
     await panel.getByRole("button", { name: "More cards" }).click();
     await expect(panel.locator(".holding-grid > li")).toHaveCount(113);
+    await expect.poll(() => seen.length).toBe(2);
+    // flake-exempt wait-for-timeout (quiet): while two batches are held, a third must not start.
     await page.waitForTimeout(800);
     expect(seen).toHaveLength(2);
     expect(peak).toBe(2);
     release();
     await expect.poll(() => seen.length).toBe(3);
+    // flake-exempt wait-for-timeout (quiet): once the queue has drained, nothing is polled or retried.
     await page.waitForTimeout(1_000);
     expect(peak).toBeLessThanOrEqual(2);
     expect(seen.every((batch) => batch.length <= 64)).toBe(true);
@@ -460,6 +463,7 @@ test("following a link does not prefetch prices for unrendered cards", async ({
   );
   expect(seen.flat()).toEqual([ids.normal]);
   for (const link of await page.locator("a[href]").all()) await link.hover();
+  // flake-exempt wait-for-timeout (quiet): a hover must not prefetch, and a prefetch would start within this window.
   await page.waitForTimeout(500);
   expect(seen.flat()).toEqual([ids.normal]);
 });

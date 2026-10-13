@@ -179,7 +179,7 @@ promote({'card-1': 'Pikachu'})`,
       .getByRole("button", { name: "Publish Unlisted snapshot", exact: true })
       .click();
     await expect(link).toBeVisible();
-    expect(await link.getAttribute("href")).not.toBe(firstUrl);
+    await expect(link).not.toHaveAttribute("href", firstUrl);
     await publicPage.reload();
     await expect(publicPage.getByRole("status")).toContainText(
       "Published Deck not found."

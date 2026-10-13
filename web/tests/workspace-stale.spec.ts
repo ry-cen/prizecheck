@@ -156,9 +156,6 @@ async function openActions(page: Page, item: string) {
   await bar(page).getByRole("button", { name: item }).click();
 }
 
-const focusedId = (page: Page) =>
-  page.evaluate(() => document.activeElement?.id ?? "");
-
 // Ticket 113's copy.
 const STALE = "Your collection changed in another tab or session.";
 const NOTE =
@@ -240,10 +237,10 @@ test.describe("desktop", () => {
     await expect(bar(page)).toHaveCount(0);
     await expect(note(page)).toHaveText(NOTE);
     await expect(banner(page)).toHaveCount(0);
-    expect(await focusedId(page)).toBe("ws-heading");
+    await expect(page.locator("#ws-heading")).toBeFocused();
     await page.getByRole("button", { name: "Dismiss note" }).click();
     await expect(note(page)).toHaveCount(0);
-    expect(await focusedId(page)).toBe("ws-heading");
+    await expect(page.locator("#ws-heading")).toBeFocused();
     await other.close();
   });
 
@@ -357,7 +354,7 @@ test.describe("desktop", () => {
       page.getByRole("button", { name: "Dismiss note" })
     ).toHaveCount(0);
     await expect(note(page)).toHaveCount(0);
-    expect(await focusedId(page)).toBe("ws-heading");
+    await expect(page.locator("#ws-heading")).toBeFocused();
   });
 
   const sidebarButton = (page: Page, name: string) =>
@@ -448,7 +445,7 @@ test.describe("desktop", () => {
       "All owned"
     );
     await expect(tiles(page)).toHaveCount(1);
-    await expect.poll(() => focusedId(page)).toBe("ws-heading");
+    await expect(page.locator("#ws-heading")).toBeFocused();
     await expect(
       page.getByRole("button", { name: "Add cards", exact: true })
     ).toHaveCount(0);
@@ -501,7 +498,8 @@ test.describe("desktop", () => {
     await expect(banner(page)).toHaveCount(0);
     await expect(tiles(page)).toHaveCount(3);
     await expect(amount).toHaveValue("2");
-    // Let any late read land before counting: one read for the new revision, none while the gallery reloaded.
+    // flake-exempt wait-for-timeout (quiet): any late read lands before counting: one read for the new revision, none
+    // while the gallery reloaded.
     await page.waitForTimeout(300);
     expect(reads).toBe(1);
   });
