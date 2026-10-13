@@ -106,6 +106,7 @@ describe("live Better Auth boundary", () => {
     ).toBe(401);
   });
 
+  // The timeout covers the readiness deadline below plus sign-in and a cold Python import on a loaded host.
   it("serves Published Deck reads with no, forged and valid cookies without waking either database", async () => {
     // A counting listener stands in for PostgreSQL: every connection attempt is a wakeup.
     let wakeups = 0;
@@ -181,6 +182,15 @@ describe("live Better Auth boundary", () => {
       })
     );
     const children: ChildProcess[] = [];
+    // The last stderr of each child, so a crash or a lost port race names its cause instead of a bare timeout.
+    const errors = new Map<ChildProcess, string>();
+    const start = (child: ChildProcess) => {
+      errors.set(child, "");
+      child.stderr!.on("data", (chunk: Buffer) =>
+        errors.set(child, (errors.get(child)! + chunk).slice(-2_000))
+      );
+      children.push(child);
+    };
     const environment = {
       ...process.env,
       DATABASE_URL: databaseUrl,
@@ -199,7 +209,7 @@ describe("live Better Auth boundary", () => {
     expect(signedIn.status).toBe(200);
     const valid = signedIn.headers.get("set-cookie")!.split(";")[0];
     try {
-      children.push(
+      start(
         spawn(
           ".venv/bin/uvicorn",
           [
@@ -212,8 +222,14 @@ describe("live Better Auth boundary", () => {
             String(apiPort),
             "--no-access-log",
           ],
-          { cwd: process.cwd(), env: environment, stdio: "ignore" }
-        ),
+          {
+            cwd: process.cwd(),
+            env: environment,
+            stdio: ["ignore", "ignore", "pipe"],
+          }
+        )
+      );
+      start(
         spawn("node", ["--import", "tsx", "auth/src/server.ts"], {
           cwd: process.cwd(),
           env: {
@@ -221,18 +237,33 @@ describe("live Better Auth boundary", () => {
             AUTH_PORT: String(gatewayPort),
             API_ORIGIN: `http://127.0.0.1:${apiPort}`,
           },
-          stdio: "ignore",
+          stdio: ["ignore", "ignore", "pipe"],
         })
       );
       const gateway = `http://127.0.0.1:${gatewayPort}`;
+      // The gateway usually listens before the API does and answers 503 until it can reach it, so every miss
+      // (refused connection or 503) waits before the next probe, up to a deadline rather than an attempt count.
+      const deadline = performance.now() + 30_000;
       let ready = false;
-      for (let attempt = 0; attempt < 100 && !ready; attempt++) {
+      while (!ready) {
+        const exited = children.find(
+          (child) => child.exitCode !== null || child.signalCode !== null
+        );
+        if (exited)
+          throw new Error(
+            `${exited.spawnargs.join(" ")} exited (${exited.exitCode ?? exited.signalCode}) before the gateway was ready:\n${errors.get(exited)}`
+          );
         try {
-          ready =
-            (await fetch(gateway + "/api/public/discovery")).status === 200;
+          const probe = await fetch(gateway + "/api/public/discovery", {
+            signal: AbortSignal.timeout(5_000),
+          });
+          ready = probe.status === 200;
+          await probe.body?.cancel();
         } catch {
-          await new Promise((resolve) => setTimeout(resolve, 100));
+          /* not listening yet, or the probe timed out */
         }
+        if (ready || performance.now() > deadline) break;
+        await new Promise((resolve) => setTimeout(resolve, 100));
       }
       expect(ready).toBe(true);
       const baseline = wakeups;
@@ -354,7 +385,7 @@ assert store.compare_and_swap({k: rows[k].version for k in keys}, {
       rmSync(directory, { recursive: true, force: true });
       await post("/auth/sign-out", {}, valid);
     }
-  });
+  }, 60_000);
 
   it("rejects missing origin and forged identity headers", async () => {
     const csrf = await fetch(base + "/auth/request-code", {
