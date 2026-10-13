@@ -1,6 +1,8 @@
 import { defineConfig } from "vite";
+import tailwindcss from "@tailwindcss/vite";
 export default defineConfig({
   root: "web",
+  plugins: [tailwindcss()],
   // The verification gate gives each concurrent dev server its own dependency cache.
   cacheDir: process.env.VITE_CACHE_DIR || undefined,
   server: {

@@ -8,6 +8,8 @@
   font-family: system-ui, sans-serif;
   color: #172126;
   background: #f4f5f1;
+  /* Holds back the dark color-scheme in base.css (layered) until this file is deleted. */
+  color-scheme: normal;
 }
 body {
   margin: 0;
@@ -73,4 +75,10 @@ button:focus-visible,
 input:focus-visible {
   outline: 3px solid #e89d22;
   outline-offset: 2px;
+}
+/* Holds back base.css's focus ring (layered) until this file is deleted: an element with no focus rule of
+   its own keeps the browser's ring. Zero specificity, so every existing focus rule still wins. */
+:where(:focus-visible) {
+  outline: revert;
+  outline-offset: revert;
 }

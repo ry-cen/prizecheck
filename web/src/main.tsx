@@ -20,6 +20,7 @@ import {
 import { Workspace } from "./workspace/Workspace";
 import "./style.css";
 import "./tokens.css";
+import "./tailwind.css";
 
 type View =
   "workspace" | "collection" | "decks" | "catalog" | "reports" | "owner";

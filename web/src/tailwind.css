@@ -1,0 +1,102 @@
+/*
+ * Tailwind CSS v4 on PrizeCheck's tokens (ADR 0012). The app's only Tailwind entry; main.tsx imports it
+ * after style.css and tokens.css.
+ *
+ * - Preflight is not imported while the old global stylesheet (style.css) exists: only the theme and
+ *   utilities layers load, so no element reset reaches existing pages. Preflight returns when style.css
+ *   is deleted (rollout stage 7).
+ * - Every theme key reads a variable from tokens.css instead of copying its value. `inline` makes each
+ *   utility emit that var() itself (bg-surface -> background-color: var(--color-surface)), so the
+ *   utilities follow data-theme on <html>. Tailwind also emits the keys it uses into @layer theme as
+ *   self-references (--color-bg: var(--color-bg)). tokens.css is unlayered, so its values always win:
+ *   keep it unlayered (never import it into a layer or move its variables into @theme).
+ * - Tailwind's own palette, type scale, radii, fonts, shadows and breakpoints are reset to `initial`:
+ *   bg-red-500, text-sm, rounded-lg and md: generate nothing. Default shadows carry literal colours.
+ * - Utilities are generated only from classes found under web/src.
+ * - scripts/check_guardrails.py rejects arbitrary colour values: a hex code, colour function or colour
+ *   name inside a class's square brackets.
+ */
+@layer theme, base, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities) source(none);
+@import "./base.css";
+
+@source "./**/*.{ts,tsx,css,html}";
+
+@theme inline {
+  /* Tailwind's defaults that are not ours. */
+  --color-*: initial;
+  --text-*: initial;
+  --radius-*: initial;
+  --font-*: initial;
+  --shadow-*: initial;
+  --inset-shadow-*: initial;
+  --drop-shadow-*: initial;
+  --text-shadow-*: initial;
+  --breakpoint-*: initial;
+
+  /* Colour roles, one per tokens.css --color-* role: bg-surface-raised, text-text-muted, border-border. */
+  --color-bg: var(--color-bg);
+  --color-surface: var(--color-surface);
+  --color-surface-raised: var(--color-surface-raised);
+  --color-surface-selected: var(--color-surface-selected);
+  --color-border: var(--color-border);
+  --color-border-strong: var(--color-border-strong);
+  --color-control-outline: var(--color-control-outline);
+  --color-text: var(--color-text);
+  --color-text-muted: var(--color-text-muted);
+  --color-text-subtle: var(--color-text-subtle);
+  --color-accent: var(--color-accent);
+  --color-accent-strong: var(--color-accent-strong);
+  --color-accent-border: var(--color-accent-border);
+  --color-accent-outline: var(--color-accent-outline);
+  --color-accent-fill: var(--color-accent-fill);
+  --color-accent-wash: var(--color-accent-wash);
+  --color-on-accent: var(--color-on-accent);
+  --color-art-start: var(--color-art-start);
+  --color-art-end: var(--color-art-end);
+  --color-warning: var(--color-warning);
+  --color-danger: var(--color-danger);
+  --color-danger-border: var(--color-danger-border);
+  --color-danger-fill: var(--color-danger-fill);
+  --color-scrim: var(--color-scrim);
+  --color-shadow: var(--color-shadow);
+  --color-shadow-strong: var(--color-shadow-strong);
+  --color-focus: var(--color-focus);
+
+  /* Type: 11 px captions, 12 px meta, 13 px controls, 14 px body (the kit's scale), plus the token
+     scale's 10, 18 and 24 px. Sizes only; line height is inherited. */
+  --text-micro: var(--font-size-2xs);
+  --text-caption: var(--font-size-xs);
+  --text-meta: var(--font-size-sm);
+  --text-control: var(--font-size-control);
+  --text-body: var(--font-size-md);
+  --text-heading: var(--font-size-lg);
+  --text-display: var(--font-size-xl);
+  --font-sans: var(--font-sans);
+
+  /* Radii */
+  --radius-control: var(--radius-control);
+  --radius-card: var(--radius-card);
+  --radius-panel: var(--radius-panel);
+  --radius-dialog: var(--radius-dialog);
+  --radius-round: var(--radius-round);
+
+  /* Spacing: the 4 px scale (p-1 = 4 px, gap-3 = 12 px), and the kit's sizes as named steps:
+     h-control 30 px, phone:h-control-phone 44 px, h-chip 24 px, size-quick 26 px,
+     phone:size-quick-phone 36 px, min-h-tap 44 px (the phone tap area). */
+  --spacing: var(--space-1);
+  --spacing-control: var(--size-control);
+  --spacing-control-phone: var(--size-control-phone);
+  --spacing-chip: var(--size-chip);
+  --spacing-quick: var(--size-quick);
+  --spacing-quick-phone: var(--size-quick-phone);
+  --spacing-tap: var(--target-touch);
+}
+
+/* The breakpoints listed in tokens.css, as variants. Order matters: phone after compact, so phone wins
+   below 761 px; extra-wide after wide. */
+@custom-variant compact (@media (max-width: 1100px));
+@custom-variant phone (@media (max-width: 760px));
+@custom-variant wide (@media (min-width: 1550px));
+@custom-variant extra-wide (@media (min-width: 2200px));

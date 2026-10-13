@@ -59,6 +59,35 @@ class GuardrailTest(unittest.TestCase):
         self.assertFalse(guardrails.tier_violations('@pytest.mark.serial(reason="wall-clock: asserts < 0.3 s")\ndef test_x():\n pass', 'test_x.py'))
 
 
+    def test_arbitrary_colour_values_are_rejected(self):
+        for source in ('<div className="bg-[#123]">', 'className="p-2 text-[#a1b2c3]"', '`hover:border-[rgb(1_2_3)]`',
+                       '"shadow-[0_0_0_1px_#000]"', '"shadow-[0_0_0_1px_black]"', '"bg-[#123]/50"', '"!bg-[#fff]"',
+                       '"border-t-[#FFF]"', '"from-[#12345678]"', '"text-[red]"', '"decoration-[Tomato]"',
+                       '"bg-[color:white]"', '"text-[color:rgb(0_0_0)]"', '"fill-[color-mix(in_oklab,var(--a),var(--b))]"',
+                       '  @apply bg-[oklch(0.5_0.1_20)];', 'className="[color:#fff]"', '"md:[background-color:hsl(0_0%_0%)]"',
+                       '"shadow-[0_35px_60px_-15px_rgba(0,0,0,0.3)]"', '"border-[1px_solid_rgb(0_0_0)]"',
+                       '"shadow-[0_0_0_1px_#000_inset]"', '"[border:#000_1px_solid]"',
+                       '"bg-[linear-gradient(to_right,red,blue)]"', '"[color:var(--x,red)]"', '"bg-(--x,#123)"'):
+            self.assertTrue(guardrails.arbitrary_colour_violations(source), source)
+
+    def test_token_colours_and_other_values_are_allowed(self):
+        for source in ('className="bg-surface-raised text-text-muted border-border"', '"bg-transparent text-current"',
+                       '"w-[30px] text-[13px] grid-cols-[1fr_auto] aspect-[245/342]"', '"bg-[url(/img/red-card.png)]"',
+                       '"bg-[var(--color-bg)] text-[color:var(--color-text)]"', '"bg-(--color-bg)"', '"[mask-type:luminance]"',
+                       '"w-[calc(100%-var(--tile-small))]"', '"content-[\'\']"',
+                       '.ws-root .ws-tile[aria-pressed="true"]:focus-visible {', '  outline: 3px solid #e89d22;',
+                       'input[type="email"] { border: 1px solid #82948a; }', 'a[href^="http:"] {}',
+                       'const value = items["#fff"];', 'type Lookup = { [key: string]: string };',
+                       '"bg-[url(/img/a_red_b.png)]"', '"before:content-[\'#123\']"', '"bg-[url(/a.svg#abc)]"',
+                       '"bg-(--color-bg)"', '"bg-(color:--x)"'):
+            self.assertFalse(guardrails.arbitrary_colour_violations(source), source)
+
+    def test_colour_scope_covers_the_web_sources(self):
+        names = {path.relative_to(guardrails.ROOT).as_posix() for path in guardrails.colour_scope_files()}
+        self.assertIn('web/index.html', names)
+        self.assertIn('web/src/main.tsx', names)
+        self.assertIn('web/src/tokens.css', names)
+
 class FlakeGuardrailTest(unittest.TestCase):
     SPEC = 'web/tests/moves.spec.ts'
     AUTH = 'auth/tests/gateway.test.ts'

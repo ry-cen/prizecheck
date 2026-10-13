@@ -51,6 +51,7 @@
   --font-size-2xs: 10px;
   --font-size-xs: 11px;
   --font-size-sm: 12px;
+  --font-size-control: 13px;
   --font-size-md: 14px;
   --font-size-lg: 18px;
   --font-size-xl: 24px;
@@ -81,6 +82,13 @@
   --target-touch: 44px;
   --target-pointer: 24px;
   --control-height: 36px;
+  /* The kit's control sizes (app redesign, ADR 0012), read by Tailwind's theme in tailwind.css.
+     They replace --control-height once the workspace moves onto the kit. */
+  --size-control: 30px;
+  --size-control-phone: 44px;
+  --size-chip: 24px;
+  --size-quick: 26px;
+  --size-quick-phone: 36px;
 
   /* Focus */
   --focus-width: 2px;
