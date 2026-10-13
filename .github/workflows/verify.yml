@@ -1,7 +1,8 @@
 name: Verify
 on:
+  # Pull requests, and each dev deploy through deploy-dev.yml's call. No push trigger: a push to dev already runs this
+  # workflow as the deploy gate, and other branches are checked when their pull request opens.
   pull_request:
-  push:
   # Every automatic run is the fast tier: the slow capacity and timing tests fail at random on hosted runners.
   # Run the full gate on demand from Actions -> Verify -> Run workflow, or locally with `npm run verify`.
   workflow_dispatch:
@@ -61,7 +62,7 @@ jobs:
 
   # Pull requests only: the vitest files and Playwright specs the pull request changes, repeated under parallel load
   # (npm run verify -- --burn-in; docs/agents/verification.md). This job only looks for changed test files, so a pull
-  # request without any skips the burn-in job, and push runs (including deploy-dev.yml's call) skip both.
+  # request without any skips the burn-in job, and deploy-dev.yml's call (a push event) and manual runs skip both.
   changed-tests:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
