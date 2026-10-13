@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { Pool } from "pg";
 import { expectTouchTarget } from "./support/touch-target";
+import { startAsNewOwner } from "./support/owner";
 
 // Ticket 112: the open Deck's Estimated Deck Cost and Export menu in the workspace heading, and the Decks
 // page's Open in workspace link. The cost and export panels are the existing components; these tests prove
@@ -166,6 +167,7 @@ async function signIn(page: Page) {
     route.abort()
   );
   await pool.query("DELETE FROM auth_send_event");
+  await startAsNewOwner(pool);
   await page.goto(`${ORIGIN}/locations`);
   await page.getByLabel("Email", { exact: true }).fill(OWNER_EMAIL);
   await page.getByRole("button", { name: "Send code", exact: true }).click();

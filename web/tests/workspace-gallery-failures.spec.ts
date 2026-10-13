@@ -1,6 +1,7 @@
 import { test, expect, type Page, type Route } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { Pool } from "pg";
+import { startAsNewOwner } from "./support/owner";
 
 // The listing endpoint is faked here: these tests are about how the gallery reacts to failures,
 // so no catalog or Holdings are seeded.
@@ -19,6 +20,7 @@ async function signIn(page: Page) {
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });
   try {
     await pool.query("DELETE FROM auth_send_event");
+    await startAsNewOwner(pool);
   } finally {
     await pool.end();
   }

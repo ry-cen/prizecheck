@@ -143,3 +143,13 @@ class FlakeGuardrailTest(unittest.TestCase):
                        'for (let i = 0; i < 3; i++)\n  expect((await post("/auth/verify-code", body)).status).toBe(401);',
                        '// flake-exempt counted-wait (retry): each attempt re-sends a refused write, not a probe\n' + self.PROBE):
             self.assertEqual(self.flagged(source, self.AUTH), [], source)
+
+    def test_a_workspace_sign_in_starts_as_a_new_owner(self):
+        sign_in = 'async function signIn(page: Page) {\n  await pool.query("DELETE FROM auth_send_event");\n}'
+        self.assertEqual(self.flagged(sign_in, 'web/tests/workspace-moves.spec.ts'), [1])
+        self.assertEqual(self.flagged('// flake-exempt fresh-owner (quiet): this spec keeps the tree\n' + sign_in,
+                                      'web/tests/workspace-moves.spec.ts'), [2])
+        fresh = sign_in.replace('auth_send_event");', 'auth_send_event");\n  await startAsNewOwner(pool);')
+        self.assertEqual(self.flagged(fresh, 'web/tests/workspace-moves.spec.ts'), [])
+        self.assertEqual(self.flagged(sign_in, 'web/tests/holdings.spec.ts'), [])
+        self.assertEqual(self.flagged(sign_in, 'web/tests/support/workspace-sign-in.ts'), [])
