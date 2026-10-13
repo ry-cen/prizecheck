@@ -2,7 +2,7 @@
 
 **Label:** wayfinder:map
 
-**Status:** charted 2026-10-12; frontier open; app shell decided, old Collection page audited, Decks UI inventoried, Deck experience, Catalog search, Published Deck and Discover decided 2026-10-12; remaining fog ticketed as #136–#141; data contracts decided 2026-10-12; Missing cards and Owner controls decided 2026-10-12; sign-in and loading decided 2026-10-12
+**Status:** clear 2026-10-12. Every ticket is resolved and nothing is left in Not yet specified. Ready for the owner's `/to-spec`.
 
 ## Destination
 
@@ -37,6 +37,7 @@ An agreed plan, ready for owner-invoked `/to-spec` and `/to-ticket`, that puts e
 - [Decide the deck builder, Catalog and public data contracts](https://github.com/ry-cen/prizecheck/issues/138): One signed-in browse route returns Card Editions with ownership and each card's stored **Format Standing**, shared by Catalog and the builder's library. Format chips hide only not-legal cards; unknown ones show with a "?". Card type has one source, the reviewed card attributes, which gain **Trainer Type** and evolves-from. Deck List lines carry display data. One batch Deck List change command makes a swap, and its Undo, one step. A batch add writes one Undo record, and Gather writes one. Undo is one step, from the toast. The Target Format lives on the Deck List and gates publishing. Discover lists only decks that are legal today, with a cached-only cost ("$X", "$X+" or "Price on page"). [Resolution](resolutions/decide-data-contracts.md)
 - [Prototype Missing cards and Owner controls](https://github.com/ry-cen/prizecheck/issues/139): Variant A on both pages: sub-tabs over sideways-scrolling tables, with the review card inline under its row and the six-digit code step on the card. Owner controls gains two queues with no UI today: **card attributes** (where Trainer Type is corrected) and **Reprint Groups**. Missing cards keeps My reports and Report a card. Metadata reports stay in Catalog. [Resolution](resolutions/decide-owner-and-missing-cards.md) · [Prototype notes](prototypes/owner-reports/README.md)
 - [Prototype sign-in and loading screens](https://github.com/ry-cen/prizecheck/issues/140): Sign-in is a centred card under the slim public header: "Sign in to PrizeCheck", the tagline "Know every card you own, and where it is.", then branded Google and Discord links drawn from the configured providers, and the email form only when it's switched on. The seven failure messages have final wording, with "Not open yet" shown as calm news. The Sign-ins page sits in the shell. `index.html` paints dark with a static wordmark before any script loads. [Resolution](resolutions/decide-sign-in-and-loading.md) · [Prototype notes](prototypes/sign-in/README.md)
+- [Decide rollout and verification](https://github.com/ry-cen/prizecheck/issues/141): The redesign is a launch gate. Pages move into the shell one at a time on `dev`, in seven stages: foundations, Collection, Owner controls and Missing cards, Catalog, Decks, Published Deck and Discover, then `style.css` removal and the dark first paint. Each page's data steps land first. Every page gets browser and axe checks at 1280 and 375 px, and a short owner walkthrough in the launch checklist. Handoff is one spec. [Resolution](resolutions/decide-rollout-and-verification.md)
 
 ## Not yet specified
 
