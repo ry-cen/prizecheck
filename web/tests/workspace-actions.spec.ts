@@ -550,8 +550,8 @@ test.describe("desktop", () => {
     await expectCounts(page, `Dest ${s}`, "3 copies · 2 editions");
   });
 
-  /** Seeds two Alpha copies of one card and an empty "0 Dest" leaf. Names starting "0 " sort first,
-   * so the sidebar rows are in view whatever earlier specs left in this worker's database. */
+  /** Seeds two Alpha copies of one card and an empty "0 Dest" leaf. The tree holds only this test's Locations
+   * (startAsNewOwner); names starting "0 " also sort first, so the sidebar rows stay in view. */
   async function seedAlphaAndDest(page: Page, card: string) {
     promoteCatalog({ "card-1": card });
     await signIn(page);

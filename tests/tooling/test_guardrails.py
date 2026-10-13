@@ -151,5 +151,7 @@ class FlakeGuardrailTest(unittest.TestCase):
                                       'web/tests/workspace-moves.spec.ts'), [2])
         fresh = sign_in.replace('auth_send_event");', 'auth_send_event");\n  await startAsNewOwner(pool);')
         self.assertEqual(self.flagged(fresh, 'web/tests/workspace-moves.spec.ts'), [])
+        commented = sign_in.replace('auth_send_event");', 'auth_send_event");\n  // await startAsNewOwner(pool);')
+        self.assertEqual(self.flagged(commented, 'web/tests/workspace-moves.spec.ts'), [1])
         self.assertEqual(self.flagged(sign_in, 'web/tests/holdings.spec.ts'), [])
         self.assertEqual(self.flagged(sign_in, 'web/tests/support/workspace-sign-in.ts'), [])

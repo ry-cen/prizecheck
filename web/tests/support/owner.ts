@@ -15,6 +15,12 @@ let started: object | undefined;
  * starts with an empty Location tree; a later call in the same test (signing in another tab) keeps the new account.
  */
 export async function startAsNewOwner(pool: Pool) {
+  // Only against a verification stack's disposable database: run by hand against a developer's database, the delete
+  // would leave their collection under a user id nothing signs in as.
+  if (!process.env.VERIFY_BROWSER_STACKS)
+    throw new Error(
+      "startAsNewOwner deletes the owner's account; run workspace specs through npm run verify"
+    );
   const info = test.info();
   if (started === info) return;
   started = info;
