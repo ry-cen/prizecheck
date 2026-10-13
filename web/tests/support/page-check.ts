@@ -1,23 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, type Page } from "@playwright/test";
-
-/**
- * Waits for every running finite CSS animation and transition to finish, so a measurement taken after a drawer or
- * sheet opens does not see a state no one rests on. Infinite animations (a spinner) are left out.
- */
-async function animationsFinished(page: Page) {
-  await page.evaluate(() =>
-    Promise.all(
-      document
-        .getAnimations()
-        .filter(
-          (animation) =>
-            animation.effect?.getComputedTiming().iterations !== Infinity
-        )
-        .map((animation) => animation.finished.catch(() => undefined))
-    )
-  );
-}
+import { animationsFinished } from "./motion";
 
 /**
  * The app redesign's shared page check (spec "Testing Decisions"). Every page runs it at 1280×800 and
