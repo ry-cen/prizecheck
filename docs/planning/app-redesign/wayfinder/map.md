@@ -2,7 +2,7 @@
 
 **Label:** wayfinder:map
 
-**Status:** clear 2026-10-12. Every ticket is resolved and nothing is left in Not yet specified. Ready for the owner's `/to-spec`.
+**Status:** clear 2026-10-12. Every ticket is resolved and nothing is left in Not yet specified. Specified in [Spec: App redesign onto one shell and design system](https://github.com/ry-cen/prizecheck/issues/159) ([spec.md](../spec.md)).
 
 ## Destination
 
