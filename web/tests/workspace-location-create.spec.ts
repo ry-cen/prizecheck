@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { Pool } from "pg";
+import { expectTouchTarget } from "./support/touch-target";
 
 type TreeNode = {
   id: string;
@@ -495,23 +496,19 @@ test.describe("mobile", () => {
     await expect(
       drawer.getByRole("button", { name: "Close locations" })
     ).toBeFocused();
-    const plus = await drawer
-      .getByRole("button", { name: "Add location", exact: true })
-      .boundingBox();
-    expect(plus!.width).toBeGreaterThanOrEqual(44);
-    expect(plus!.height).toBeGreaterThanOrEqual(44);
+    await expectTouchTarget(
+      drawer.getByRole("button", { name: "Add location", exact: true })
+    );
 
     // Add child is always visible and 44 px tall; Decks have none.
     const addShelf = addChild(nav, shelf);
     await expect(addShelf).toBeVisible();
     await expect(addShelf).toHaveCSS("opacity", "1");
-    const size = await addShelf.boundingBox();
-    expect(size!.height).toBeGreaterThanOrEqual(44);
-    expect(size!.width).toBeGreaterThanOrEqual(44);
+    const size = await expectTouchTarget(addShelf);
     const shelfBox = (await row(nav, shelf).boundingBox())!;
-    expect(size!.x).toBeGreaterThanOrEqual(shelfBox.x + shelfBox.width - 1);
-    expect(Math.abs(size!.y - shelfBox.y)).toBeLessThanOrEqual(1);
-    expect(Math.abs(size!.height - shelfBox.height)).toBeLessThanOrEqual(1);
+    expect(size.x).toBeGreaterThanOrEqual(shelfBox.x + shelfBox.width - 1);
+    expect(Math.abs(size.y - shelfBox.y)).toBeLessThanOrEqual(1);
+    expect(Math.abs(size.height - shelfBox.height)).toBeLessThanOrEqual(1);
     await expect(row(nav, deck)).toBeVisible();
     await expect(addChild(nav, deck)).toHaveCount(0);
 

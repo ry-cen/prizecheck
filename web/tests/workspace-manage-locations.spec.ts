@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { Pool } from "pg";
+import { expectTouchTarget } from "./support/touch-target";
 
 type TreeLocation = {
   id: string;
@@ -806,9 +807,7 @@ test.describe("mobile", () => {
     await opener.click();
     const drawer = page.getByRole("dialog", { name: "Locations", exact: true });
     const gear = button(drawer, "Manage locations");
-    const size = (await gear.boundingBox())!;
-    expect(size.width).toBeGreaterThanOrEqual(44);
-    expect(size.height).toBeGreaterThanOrEqual(44);
+    await expectTouchTarget(gear);
     await gear.click();
     await expect(drawer).toBeHidden();
     const panel = panelOf(page);
@@ -825,17 +824,13 @@ test.describe("mobile", () => {
     await reveal(panel, f.shelf);
 
     const binder1 = `${f.shelf} / Binder 1`;
-    const grip = (await handle(panel, binder1).boundingBox())!;
-    expect(grip.width).toBeGreaterThanOrEqual(44);
-    expect(grip.height).toBeGreaterThanOrEqual(44);
+    await expectTouchTarget(handle(panel, binder1));
     for (const name of [
       `Rename ${binder1}`,
       `Add child location to ${binder1}`,
       `Delete ${binder1}`,
     ])
-      expect(
-        (await button(panel, name).boundingBox())!.height
-      ).toBeGreaterThanOrEqual(44);
+      await expectTouchTarget(button(panel, name), ["height"]);
 
     // A tap on the handle opens the picker.
     await handle(panel, binder1).tap();
