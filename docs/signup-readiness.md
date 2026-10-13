@@ -2,22 +2,25 @@
 
 Signup remains owner-only by default. `SIGNUP_MODE=local-public` enables local rehearsal only with explicit `NODE_ENV=development` or `test` and a loopback `PUBLIC_ORIGIN`; unset environments and nonlocal origins fail closed. No configuration was changed on a running production environment. Sender verification, real recipient delivery, owner walkthrough and production recovery/performance acceptance remain independent proofs.
 
-`SIGNUP_MODE=public` requires `MAIL_MODE=http`, `RELEASE_COMMIT` (full forty-character commit), and `SIGNUP_READINESS_FILE` pointing to operator-maintained JSON:
+`SIGNUP_MODE=public` requires `RELEASE_COMMIT` (full forty-character commit) and `SIGNUP_READINESS_FILE` pointing to operator-maintained JSON, readiness proof version 2:
 
 ```json
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "releaseCommit": "exact forty-character deployed commit",
   "authorizedByOwner": true,
-  "senderVerified": true,
-  "recipientDeliveryVerified": true,
   "ownerWalkthroughVerified": true,
   "recoveryVerified": true,
   "privacyVerified": true,
   "capacityVerified": true,
+  "providerSignInVerified": ["google", "discord"],
   "evidence": "Location of the dated acceptance proofs"
 }
 ```
+
+- `providerSignInVerified` lists the providers whose real sign-in was verified on the production origin. It must contain every configured provider (each provider whose `<PROVIDER>_CLIENT_ID` and `<PROVIDER>_CLIENT_SECRET` are set), so adding a provider means proving it again.
+- When `EMAIL_SIGN_IN=on`, the proof must also have `"senderVerified": true` and `"recipientDeliveryVerified": true`, and `MAIL_MODE` must be `http`. With email sign-in off, mail checks are not part of opening signup. Approval codes and operations mail still need working delivery, and file or console mail is still refused in production.
+- A version 1 proof is rejected. Google brand verification is not a gate.
 
 This is an explicit operator attestation, not automatic verification of a sender domain or proof that measurements passed. Do not fill it with unverified claims. Missing/invalid attestations or a mismatched release commit prevent gateway startup; changing the release requires renewed acceptance. Keep it private and review changes before restarting the gateway. No ready production attestation is supplied by this repository.
 
