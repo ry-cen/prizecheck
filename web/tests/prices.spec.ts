@@ -98,7 +98,7 @@ async function openHeld(page: Page, name: string) {
   return panel;
 }
 
-/** Prices are read when a slot mounts, so each check starts from a fresh page load. */
+/** Prices are read once, when a slot first comes near the viewport, so each check starts from a fresh page load. */
 async function search(page: Page) {
   await page.reload();
   await page.getByRole("button", { name: "Catalog", exact: true }).click();
@@ -202,6 +202,8 @@ test("card information shows each Edition's own price with age, stale and finish
 test("Deck and Collection rows price their exact Edition, including after More cards", async ({
   page,
 }) => {
+  // Tall enough that every row of each page is near the viewport, so every rendered slot asks at once.
+  await page.setViewportSize({ width: 1280, height: 2000 });
   const ids = seed(52);
   apply([
     {
@@ -397,6 +399,8 @@ test(
   "at most two price batches are in flight, later ones queue, and nothing is polled or retried",
   { tag: "@slow" },
   async ({ page }) => {
+    // Tall enough that every row of each page is near the viewport, so every rendered slot asks at once.
+    await page.setViewportSize({ width: 1280, height: 2000 });
     const ids = seed(110);
     await signIn(page);
     const held = await hold(page, [
@@ -458,4 +462,77 @@ test("following a link does not prefetch prices for unrendered cards", async ({
   for (const link of await page.locator("a[href]").all()) await link.hover();
   await page.waitForTimeout(500);
   expect(seen.flat()).toEqual([ids.normal]);
+});
+
+test("price slots ask only once they come near the viewport, and each Edition once", async ({
+  page,
+}) => {
+  const ids = seed(52);
+  await signIn(page);
+  const held = await hold(page, [
+    ...ids.pagers,
+    ids.normal,
+    ids["reverse-holofoil"],
+    ids.unspecified,
+  ]);
+  // A short window: the near area (two viewport heights) ends well above the last of the page's 48 rows.
+  await page.setViewportSize({ width: 1280, height: 300 });
+  await page.reload();
+  const requested: string[][] = [];
+  await page.route("**/api/prices/editions", async (route) => {
+    requested.push(route.request().postDataJSON().edition_ids);
+    await route.continue();
+  });
+  const panel = await openHeld(page, held);
+  const rows = panel.locator(".holding-grid > li");
+  await expect(rows).toHaveCount(48);
+  await rows.first().scrollIntoViewIfNeeded();
+  await expect(rows.first().locator(".edition-price")).not.toContainText(
+    "Checking prices"
+  );
+  // The last row has not asked yet.
+  await expect(rows.last().locator(".edition-price")).toHaveAttribute(
+    "data-price-status",
+    "checking"
+  );
+  const before = new Set(requested.flat()).size;
+  expect(before).toBeGreaterThan(0);
+  expect(before).toBeLessThan(48);
+  // Scrolling to it asks for it, and no Edition is ever asked for twice.
+  await rows.last().scrollIntoViewIfNeeded();
+  await expect(rows.last().locator(".edition-price")).not.toContainText(
+    "Checking prices"
+  );
+  expect(new Set(requested.flat()).size).toBeGreaterThan(before);
+  expect(requested.flat()).toHaveLength(new Set(requested.flat()).size);
+});
+
+test("without IntersectionObserver every rendered slot asks at once", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    delete (window as { IntersectionObserver?: unknown }).IntersectionObserver;
+  });
+  const ids = seed(52);
+  await signIn(page);
+  const held = await hold(page, [
+    ...ids.pagers,
+    ids.normal,
+    ids["reverse-holofoil"],
+    ids.unspecified,
+  ]);
+  await page.setViewportSize({ width: 1280, height: 300 });
+  await page.reload();
+  const requested: string[][] = [];
+  await page.route("**/api/prices/editions", async (route) => {
+    requested.push(route.request().postDataJSON().edition_ids);
+    await route.continue();
+  });
+  const panel = await openHeld(page, held);
+  const rows = panel.locator(".holding-grid > li");
+  await expect(rows).toHaveCount(48);
+  await expect.poll(() => new Set(requested.flat()).size).toBe(48);
+  await expect(rows.last().locator(".edition-price")).not.toContainText(
+    "Checking prices"
+  );
 });

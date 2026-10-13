@@ -19,6 +19,8 @@ from .card_attributes import refresh_card_attributes
 from .card_identity import card_identity_key
 from .catalog_targets import (IDENTITY_REVIEW_KINDS, MatchingRulesV1, TargetContext, ensure_matching_rule, refresh_editions,
                               refresh_printing)
+from . import quote_contract
+from .price_seed import seed_from_import
 from .public_catalog import publish_catalog_best_effort
 from .reprint_groups import refresh_reprint_groups
 from .tcgdex_record import distinct_variants, priced_variant, source_descriptor
@@ -147,23 +149,37 @@ def variant_descriptors(record: dict) -> tuple[list[dict], bool]:
     return descriptors, ambiguous
 
 
+# The only parts of a card the price runner's quote selection reads (tcgdex_record.select_quote, priced_variant).
+PRICE_VIEW_KEYS = ("id", "pricing", "variants_detailed")
+
+
+def price_view(record):
+    """The parts of a card that price selection reads, or None when the response is not a card."""
+    return {key: record[key] for key in PRICE_VIEW_KEYS if key in record} if isinstance(record, dict) else None
+
+
 class TCGdexSource:
     def __init__(self):
         self.client = httpx.Client(timeout=20, follow_redirects=False,
                                    limits=httpx.Limits(max_connections=MAX_WORKERS, max_keepalive_connections=MAX_WORKERS))
         self.excluded_sets, self.excluded_ids = frozenset(), frozenset()
+        # source_id -> (exact-text price view, epoch ms it arrived); an import seeds the price cache from it (ADR 0013).
+        self.price_views = {}
 
-    def _get(self, url: str):
+    def _response(self, url: str):
         for attempt in range(12):
             try:
                 response = self.client.get(url)
                 response.raise_for_status()
-                return response.json()
+                return response
             except (httpx.TimeoutException, httpx.TransportError, httpx.HTTPStatusError) as exc:
                 if attempt == 11 or isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code < 500 and exc.response.status_code != 429:
                     raise CatalogError("TCGdex request failed") from exc
                 time.sleep(min(30, 2 ** attempt) + random.uniform(0, 0.5))
         raise CatalogError("TCGdex request failed")
+
+    def _get(self, url: str):
+        return self._response(url).json()
 
     def enumerate(self) -> set[str]:
         data = self._get(BASE_URL)
@@ -203,9 +219,13 @@ class TCGdexSource:
         return frozenset(set_ids), frozenset(card_ids)
 
     def fetch(self, source_id: str) -> dict:
-        data = self._get(f"{BASE_URL}/{quote(source_id, safe='-._~')}")
+        response = self._response(f"{BASE_URL}/{quote(source_id, safe='-._~')}")
+        data = response.json()
         if not isinstance(data, dict) or data.get("id") != source_id:
             raise CatalogError("Full record source ID mismatch")
+        # The same bytes again with exact decimal text, as the price runner parses a card (price_source.fetch). The
+        # import's own record above is unchanged, so its fingerprints and quote candidates are too (ADR 0007).
+        self.price_views[source_id] = (price_view(response.json(parse_float=str)), quote_contract.wall_ms())
         return data
 
 
@@ -683,6 +703,11 @@ def execute_run(conn, run_id: UUID, source=None, before_promotion=None):
         # The import is committed. Public catalog records are a derived copy: a failure
         # here is reported and recoverable by backfill, never a failed or rolled-back run.
         publish_catalog_best_effort(conn)
+        # Seed the price cache from the cards this run received, after the commit and the catalog records it is
+        # checked against (ADR 0013). seed_from_import never raises, so it never changes the run's outcome.
+        price_views = getattr(source, "price_views", None)
+        if price_views:
+            seed_from_import(conn, run_id, dict(price_views))
     except BaseException as exc:
         conn.rollback()
         safe = str(exc) if isinstance(exc, CatalogError) else "Catalog import failed; start a new pull"

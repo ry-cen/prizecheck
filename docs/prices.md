@@ -2,7 +2,7 @@
 
 Ticket 06 shows cached USD TCGplayer market quotes (supplied through TCGdex) for one exact reviewed Edition, or an honest unavailable state. The route never writes PostgreSQL, never fetches a source in-request, and writes nothing at all for rows checked under one hour ago. Older rows are admitted for background refresh by ticket 07 (coordination records only; see `docs/price-refresh.md`). There is no refresh or force route.
 
-**Launch gate.** Pricing stays closed for production. The launch checklist still requires exact physical Edition and quote-variant evidence and an activated matching rule before any price is enabled, and nothing writes quotes until ticket 08. Until then every production Edition reads as unavailable or "No cached price yet". Tests seed `quote:` and `result:` records through the store.
+**Launch gate.** Pricing stays closed for production. The launch checklist still requires exact physical Edition and quote-variant evidence and an activated matching rule before any price is enabled, and nothing writes quotes until ticket 08. Until then every production Edition reads as unavailable or "No cached price yet". Quotes are written by the price runner and, for Editions verified at import time, by the catalog import itself (ADR 0013). Tests seed `quote:` and `result:` records through the store.
 
 **Matching rule versions.** TCGdex repeats a card's whole TCGplayer block (one entry per finish) inside every variant. Matching rule v1 refuses any block with more than one product. v2 reads only the entry the reviewed finish table names for the Edition's descriptor and then applies every v1 check to it; the price fetch (`tcgdex_record.select_quote`) likewise reads only the published variant's entry. Live TCGdex variants also list their `thirdParty` IDs, which reach the Edition descriptor; v1 and v2 read that key as an extra facet, so those Editions named no finish. v3 sets `thirdParty` aside before reading the finish and otherwise applies v2; the lookup's `thirdParty.tcgplayer` is still checked against the selected product. TCGdex also often keeps the TCGplayer block on the card instead of inside each variant: a variant with no block of its own borrows the card's block (`tcgdex_record.priced_variant`, decided by `MatchingRulesV3.borrowed_block` so v3's digest covers it), for both matching and the price fetch, only when it is a plain finish the reviewed finish table covers, the block has a product for that finish, and no sibling variant reads as the same finish once `thirdParty` is set aside. Stamped, subtype and special-foil variants, finishes the block does not list, and such contending siblings borrow nothing. The import applies this whichever matching rule is active; it changes the candidate a v1 or v2 activation reads as well, which is acceptable because only dev activates matching (automatically, always the newest rule). Activation re-evaluates unverified Editions, and also gives a matching-rule Edition verified without a quote variant the one the new rule names, when its accepted candidate is unchanged and the rule confirms the same product (`catalog_targets.complete_quote_variant`). Its state, product and basis stay as they are; its `matching_activation_id` becomes the activation that named the variant. With `MARKETPLACE_MATCHING=automatic` (set in `compose.deploy.yml` for dev), `ensure_matching_rule` keeps the newest version active without an owner approval: it records the activation for the bound owner at API startup and at every catalog promotion, and re-evaluates unverified Editions the same way a manual activation does. Without that setting, activation stays a reviewed owner action.
 
@@ -15,7 +15,7 @@ A quote is valid for an Edition only when all of these hold:
 - The payload's `card` and `variant` equal `quote_lookup` exactly, otherwise the row fails closed (`lookup_mismatch`).
 - The amount matches `^(0|[1-9]\d{0,11})(\.\d{1,6})?$`, is held as a `Decimal`, and the payload says `USD` from `tcgdex`. A JSON float, exponent, sign, `NaN`, whitespace or a 13th digit fails only that row (`invalid_quote`). A validated zero amount is a real zero price and shows `$0.00`; missing, evicted or unknown data is never shown as zero.
 - PostgreSQL is authoritative for state. The store's `quarantine:` record is never read. A PostgreSQL quarantine hides a price before any outbox delivery.
-- `catalog_edition_metadata.quote_candidate` (an import snapshot) never seeds a price.
+- `catalog_edition_metadata.quote_candidate` (the stored import snapshot) is never read as a price. A catalog import seeds the cache from the response it fetched instead, through the same selection and validation as the runner ([ADR 0013](adr/0013-import-pricing-seeds-the-price-cache.md); "Import seeding" in `docs/price-refresh.md`).
 
 ## Statuses
 
@@ -53,6 +53,7 @@ result:<ref>:<rev> = {state: "quote", attempt, checked_at, last_failure_at?}
 - `attempt` in the marker and payload must match (`quote_states` treats a mismatch or a missing payload as unknown).
 - `amount` is always a string. `checked_at` lives only in `result`.
 - 07/08 obligation: the fetched block's productId must equal the published `product_id`, and `card`/`variant` must be the Edition's `quote_lookup`.
+- A catalog import writes the same records for a successful check (ADR 0013): `checked_at` is when the import received the card, never the seeding time, and it never writes `absent`.
 
 ## HTTP
 
@@ -203,11 +204,11 @@ Every `status: quote` row is a price, whatever its provider or check age; everyt
 
 ## Client
 
-`EditionPrice` is mounted for rendered rows only: card detail Editions and catalog result rows, leaf and Deck Holdings rows (including pages added by "More cards"), and Collection rows. It batches the slots of one render into requests of at most 64 ids, shows "Checking prices…" only in the price slot, and gives up after about 3.5 s with a labelled fallback. It renders `display_amount` as given and never shows an amount for a non-quote status.
+`EditionPrice` is mounted for rendered rows only: card detail Editions and catalog result rows, leaf and Deck Holdings rows (including pages added by "More cards"), and Collection rows. A slot asks for its price once, when it first comes within two viewport heights of the visible area (one shared `IntersectionObserver` with `rootMargin: 200% 0px`; where there is none, at mount). Slots that come near together are batched into requests of at most 64 ids, at most two in flight. It shows "Checking prices…" only in the price slot, and gives up after about 3.5 s with a labelled fallback. It renders `display_amount` as given and never shows an amount for a non-quote status.
 
 ## Known limits
 
 - API thread-pool queueing before the handler is not counted; the gateway abort is the hard gate.
 - Clock skew between hosts is assumed negligible; headers carry remaining milliseconds.
 - A malformed `result:`/`quote:` record fails only its own row (`invalid_quote`); a store outage still fails the read (`store_unavailable`).
-- Prices are read when a slot mounts; an open page does not poll.
+- Prices are read when a slot first comes near the viewport. An open page does not poll, and a slot that never comes near is never asked for.
