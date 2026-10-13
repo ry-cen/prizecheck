@@ -1,7 +1,7 @@
 // Ticket #167: Owner controls (spec "Missing cards and Owner controls"). The problems line, the sub-tabs
 // with counts and their addresses, Status (the pull panel and the operational health table) and Rules, with
 // the shared page check at 1280×800 and 375×812. The queue tabs still hold today's review components, which
-// their own specs cover (catalog-reconciliation, metadata-review, missing-cards).
+// their own specs cover (catalog-reconciliation, metadata-review, missing-cards, owner-attributes).
 import { test, expect, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { Pool } from "pg";
@@ -268,11 +268,12 @@ test.describe("desktop", () => {
       await expectPageChecks(page, "Owner controls, Missing cards (desktop)");
       await sectionTab(page, /^Attributes/).click();
       await expect(page).toHaveURL(/\/owner\/attributes$/);
+      // The Attributes queue is on the kit (#170); owner-attributes.spec.ts covers its review card.
       await expect(
-        page.getByRole("tabpanel", { name: /^Attributes/ })
-      ).toContainText(
-        "Reviewing card attributes on this page comes in a later update."
-      );
+        page
+          .getByRole("tabpanel", { name: /^Attributes/ })
+          .getByRole("heading", { name: "Card attributes" })
+      ).toBeVisible();
       await expectPageChecks(page, "Owner controls, Attributes (desktop)");
     } finally {
       await query("DELETE FROM missing_card_report WHERE id=$1", [reportId]);

@@ -150,7 +150,8 @@ HOLDING_COLUMNS = """h.edition_id,h.location_id,l.name AS location_name,coalesce
   p.id AS printing_id,coalesce(pd.display_name,ci.display_name) AS printing_name,
   coalesce(pd.set_id,'') AS set_id,coalesce(pd.set_name,'') AS set_name,
   coalesce(pd.collector_number,'') AS collector_number,e.descriptor,pd.image_url,
-  pm.category,coalesce(pm.elemental_types,'{}') AS elemental_types,
+  CASE ca.card_kind WHEN 'pokemon' THEN 'Pokemon' WHEN 'trainer' THEN 'Trainer' WHEN 'energy' THEN 'Energy' END AS category,
+  coalesce(ca.types,'{}') AS elemental_types,ca.trainer_type,
   coalesce(lower(pd.display_name),lower(ci.display_name)) AS search_name,
   lower(coalesce(lp.path,l.name)) AS location_key,
   lower(coalesce(pd.set_name,'')) AS set_key,
@@ -164,10 +165,14 @@ HOLDING_FROM = """FROM holding h JOIN location l ON l.id=h.location_id AND l.own
   JOIN catalog_printing p ON p.id=e.printing_id
   JOIN catalog_identity ci ON ci.id=p.identity_id
   LEFT JOIN catalog_printing_display pd ON pd.printing_id=p.id
-  LEFT JOIN catalog_printing_metadata pm ON pm.printing_id=p.id
+  LEFT JOIN catalog_card_attribute ca ON ca.printing_id=p.id
   WHERE h.owner_id=%s"""
 HoldingSort = Literal['name-asc', 'name-desc', 'set-asc', 'set-desc', 'quantity-asc', 'quantity-desc']
 CardCategory = Literal['Pokemon', 'Trainer', 'Energy']
+# Card kind and type come from the effective card attributes, the one source of card type (migration 041), never the
+# metadata columns of migration 027.
+CARD_KINDS = {'Pokemon': 'pokemon', 'Trainer': 'trainer', 'Energy': 'energy'}
+TrainerType = Literal['supporter', 'item', 'tool', 'stadium']
 ElementalType = Literal['Colorless', 'Darkness', 'Dragon', 'Fairy', 'Fighting', 'Fire', 'Grass', 'Lightning',
                         'Metal', 'Psychic', 'Water']
 # Copies of one Card Edition stay together and in source Location order, whatever the sort and direction.
@@ -243,9 +248,12 @@ class CollectionTotals(BaseModel):
 class CollectionHoldingView(HoldingView):
     # Full Location path such as "Shelf / Binder 2"; listing-only, other endpoints keep HoldingView.
     location_path: str
-    # Pokemon, Trainer or Energy; null when the catalog doesn't know it yet.
+    # From the effective card attributes. Pokemon, Trainer or Energy; null when the card kind is unknown.
     category: str | None
+    # A Pokémon's types in printed order; empty for a Trainer or Energy card and when unknown.
     elemental_types: list[str]
+    # supporter, item, tool or stadium for a Trainer whose Trainer Type is known; otherwise null.
+    trainer_type: str | None
 
 
 class CollectionHoldingPage(BaseModel):
@@ -262,6 +270,7 @@ def collection_holdings(location_id: UUID | None = None,
                         name: str = Query(default='', max_length=120),
                         set_id: str = Query(default='', max_length=80),
                         category: CardCategory | None = None,
+                        trainer_type: TrainerType | None = None,
                         elemental_type: ElementalType | None = None,
                         cursor: str | None = Query(default=None, max_length=4096),
                         user_id: str = Depends(verified_user)):
@@ -269,6 +278,7 @@ def collection_holdings(location_id: UUID | None = None,
         # One repeatable snapshot binds rows, totals and both revisions.
         conn.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ')
         state = conn.execute('SELECT revision FROM catalog_state WHERE singleton').fetchone()
+        attributes = conn.execute('SELECT revision FROM catalog_attribute_state WHERE singleton').fetchone()
         owner = conn.execute('SELECT revision FROM inventory_owner WHERE user_id=%s', (user_id,)).fetchone()
         revision = owner['revision'] if owner else 1
         if location_id:
@@ -278,9 +288,12 @@ def collection_holdings(location_id: UUID | None = None,
             if leaf['kind'] not in ('storage_leaf', 'deck'):
                 fail(409, 'NOT_STORAGE_LEAF')
         name, set_id = name.strip().lower(), set_id.strip()
-        # Slot 3 is the sort; the search and filter values sit before the two revisions.
+        # Slot 3 is the sort; the search and filter values sit before the two revisions. The last slot binds the
+        # catalog and the card attribute revisions together: an attribute decision moves cards between filters, so a
+        # cursor from before it answers 409 CATALOG_CHANGED and the gallery starts again.
         context = ['collection-holdings', user_id, str(location_id) if location_id else None, sort,
-                   name, set_id, category, elemental_type, revision, state['revision']]
+                   name, set_id, category, trainer_type, elemental_type, revision,
+                   [state['revision'], attributes['revision']]]
         conditions, condition_params = '', []
         if location_id:
             conditions += ' AND h.location_id=%s'; condition_params.append(location_id)
@@ -290,9 +303,12 @@ def collection_holdings(location_id: UUID | None = None,
         if set_id:
             conditions += ' AND pd.set_id=%s'; condition_params.append(set_id)
         if category:
-            conditions += ' AND pm.category=%s'; condition_params.append(category)
+            conditions += ' AND ca.card_kind=%s'; condition_params.append(CARD_KINDS[category])
+        if trainer_type:
+            # A Trainer whose Trainer Type is unknown matches no Trainer Type, only the Trainer category.
+            conditions += ' AND ca.trainer_type=%s'; condition_params.append(trainer_type)
         if elemental_type:
-            conditions += ' AND %s=ANY(pm.elemental_types)'; condition_params.append(elemental_type)
+            conditions += ' AND %s=ANY(ca.types)'; condition_params.append(elemental_type)
         base = [user_id, user_id, user_id, *condition_params]
         # Filters apply inside, so edition_total counts only the listed rows; anchors and pages filter outside.
         listed = f'SELECT {HOLDING_COLUMNS} {HOLDING_FROM}{conditions}'

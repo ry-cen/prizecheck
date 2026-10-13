@@ -29,9 +29,10 @@ export const getCollection = (filters: CollectionFilters={},cursor?: string) => 
 };
 export const getEditionDistribution = (editionId: string) => read<Distribution>(`/api/collection/editions/${encodeURIComponent(editionId)}`);
 export type CardCategory = 'Pokemon' | 'Trainer' | 'Energy';
+export type TrainerType = 'supporter' | 'item' | 'tool' | 'stadium';
 export type ElementalType = 'Colorless' | 'Darkness' | 'Dragon' | 'Fairy' | 'Fighting' | 'Fire' | 'Grass' | 'Lightning' | 'Metal' | 'Psychic' | 'Water';
 export type HoldingSort = 'name-asc' | 'name-desc' | 'set-asc' | 'set-desc' | 'quantity-asc' | 'quantity-desc';
-export type CollectionHoldingQuery = { location_id?: string; sort?: HoldingSort; name?: string; set_id?: string; category?: CardCategory; elemental_type?: ElementalType };
+export type CollectionHoldingQuery = { location_id?: string; sort?: HoldingSort; name?: string; set_id?: string; category?: CardCategory; trainer_type?: TrainerType; elemental_type?: ElementalType };
 export const getCollectionHoldings = (query: CollectionHoldingQuery={},cursor?: string) => {
   const params=new URLSearchParams(Object.entries({...query,...(cursor ? {cursor} : {})}).filter(([,value])=>value !== undefined).map(([key,value])=>[key,value as string]));
   return read<CollectionHoldingPage>(`/api/collection/holdings?${params}`);

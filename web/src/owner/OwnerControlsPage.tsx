@@ -19,6 +19,7 @@ import { OwnerMissingCardReview } from "../MissingCardReports";
 import { PageHeader } from "../shell/PageHeader";
 import { Pill } from "../ui/Pill";
 import { Segmented, segmentId } from "../ui/Segmented";
+import { AttributesQueue } from "./AttributesQueue";
 import { healthChecks, problems } from "./health";
 import { RulesPanel } from "./RulesPanel";
 import { OWNER_SECTIONS, type OwnerSection } from "./sections";
@@ -39,9 +40,9 @@ type Props = {
 
 /**
  * Owner controls (#167, variant A of the Missing cards and Owner controls decision): the problems line,
- * then sub-tabs with counts. Status and Rules are on the kit. The queue tabs show today's review
- * components on an old light panel until #168 (Catalog, Metadata, Missing cards), #170 (Attributes) and
- * #171 (Reprints) move them onto ScrollTables. While a catalog run is in progress the pull status is read
+ * then sub-tabs with counts. Status, Rules and Attributes (#170) are on the kit. The other queue tabs
+ * show today's review components on an old light panel until #168 (Catalog, Metadata, Missing cards)
+ * and #171 (Reprints) move them onto ScrollTables. While a catalog run is in progress the pull status is read
  * again every 5 seconds.
  */
 export function OwnerControlsPage(props: Props) {
@@ -154,13 +155,7 @@ function OwnerControls({
       );
       break;
     case "attributes":
-      content = (
-        <ComingQueue
-          title="Card attributes"
-          count={tabCounts.attributes}
-          what="card attributes"
-        />
-      );
+      content = <AttributesQueue onDecided={refreshCounts} />;
       break;
     case "reprints":
       content = (
@@ -239,7 +234,7 @@ function LegacyQueue({ children }: { children: ReactNode }) {
   return <div className="legacy legacy-inset">{children}</div>;
 }
 
-/** A queue whose page arrives with its own ticket (#170, #171); its count is already on its tab. */
+/** A queue whose page arrives with its own ticket (#171); its count is already on its tab. */
 function ComingQueue({
   title,
   count,

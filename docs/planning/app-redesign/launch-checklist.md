@@ -17,6 +17,8 @@ The redesign is a launch gate ([spec](spec.md), "Rollout"): PrizeCheck opens to 
 - [ ] `GET /auth/session` also returns the signed-in `email`, for the avatar menu (#162).
 - [ ] Signing in has its own address, `/sign-in`, which the public header links to. Signed out, an address that is no page shows "Page not found" instead of the sign-in card, and a Published Deck link that no longer works shows "This deck isn't published anymore". Signed in, Discover and Published Decks open inside the app (#163).
 - [ ] Owner controls' sub-tabs have their own addresses: Status at `/owner`, then `/owner/catalog`, `/owner/metadata`, `/owner/attributes`, `/owner/reprints`, `/owner/missing` and `/owner/rules` (#167).
+- [ ] Card type has one source, the reviewed card attributes, which gain Trainer Type and evolves from. After migrating to `041_trainer_type_and_evolves_from.sql`, run `scripts/derive_card_attributes.py` once (`docs/operations/release.md`); until then Collection's Trainer Type choices match no card. Collection's Category filter offers "Trainer: any type" and each Trainer Type, and its type filter lists Pokémon only, so a Basic Energy no longer appears under its type (#170).
+- [ ] Owner controls' Attributes tab reviews card attributes on the kit: derived, correction and effective values, Correct or Remove correction with a fresh code, and Reject report or Ask for information with a reason only (#170).
 
 ## Walkthroughs
 
@@ -80,7 +82,7 @@ On a desktop:
 - [ ] 4. Operational health is a table of area, check, value pill and detail. Click into it and use the arrow keys: when it's wider than the window it scrolls sideways inside its own box.
 - [ ] 5. Open Rules. Each rule kind is a card with its active version and every version with its digest, the latest marked. Confirm rule change stays disabled until the evidence URL, the reason and a six-digit code are filled in. Activate a rule only if you mean to.
 - [ ] 6. Press Tab until a sub-tab is focused, then use the arrow keys: focus moves along the tabs, and Enter opens one, changing the address (for example `/owner/rules`). Reload: the same tab is open. Press Back: the previous tab returns.
-- [ ] 7. Open Catalog, Metadata and Missing cards: today's review screens appear on a light panel and still work. Attributes and Reprints show how many items wait and say their review comes in a later update.
+- [ ] 7. Open Catalog, Metadata and Missing cards: today's review screens appear on a light panel and still work. Reprints shows how many items wait and says its review comes in a later update. Attributes lists its queue as a table (#170).
 
 On a phone (iOS Safari or Android Chrome):
 

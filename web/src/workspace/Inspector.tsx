@@ -1,11 +1,15 @@
 import React, { useEffect, useState } from "react";
-import { getEditionDistribution } from "../collection_generated";
+import {
+  getEditionDistribution,
+  type CardCategory,
+  type TrainerType,
+} from "../collection_generated";
 import { EditionPrice } from "../EditionPrice";
 import type { HoldingView } from "../holdings_generated";
 import { metadataReportHref } from "../metadataReportLink";
 import { Dialog } from "../ui/Dialog";
 import { variantLabel } from "../ui/variantLabel";
-import { CATEGORY_OPTIONS, plural } from "./galleryModel";
+import { CATEGORY_LABELS, TRAINER_TYPE_LABELS, plural } from "./galleryModel";
 import type { Inspected } from "./useSelection";
 import "./Inspector.css";
 
@@ -33,18 +37,23 @@ type DetailsProps = {
   sheet?: boolean;
 };
 
-/** Category and elemental type, for example "Pokémon · Fire" or "Pokémon · Psychic · Water".
- * The Holding listing returns them as `category` and `elemental_types` (ticket 104); the line is
- * omitted when the catalog knows neither. */
+/** Card kind, Trainer Type and elemental type from the effective card attributes, for example
+ * "Pokémon · Fire", "Pokémon · Psychic · Water" or "Trainer · Supporter". The Holding listing returns
+ * them as `category`, `trainer_type` and `elemental_types` (tickets 104 and 170); the line is omitted
+ * when the catalog knows none of them. */
 export function cardKindLine(holding: HoldingView): string | null {
-  const { category, elemental_types } = holding as HoldingView & {
+  const { category, trainer_type, elemental_types } = holding as HoldingView & {
     category?: string | null;
+    trainer_type?: string | null;
     elemental_types?: readonly string[] | null;
   };
-  const label =
-    CATEGORY_OPTIONS.find((option) => option.value === category)?.label ??
-    category;
-  const parts = [label, ...(elemental_types ?? [])].filter(
+  const label = category
+    ? (CATEGORY_LABELS[category as CardCategory] ?? category)
+    : null;
+  const trainerType = trainer_type
+    ? (TRAINER_TYPE_LABELS[trainer_type as TrainerType] ?? trainer_type)
+    : null;
+  const parts = [label, trainerType, ...(elemental_types ?? [])].filter(
     (part): part is string => !!part
   );
   return parts.length ? parts.join(" · ") : null;
