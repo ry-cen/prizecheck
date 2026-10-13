@@ -9,6 +9,9 @@ Pokémon status, so a deck with no other known Basic Pokémon checks as unknown 
 before 041 have no Trainer Type or evolves from, so Collection's Trainer Type filters match no card. Every catalog import re-derives all Printings itself, so it
 is never needed again; rerunning it changes nothing.
 
+Changed attributes and Reprint Groups also make every Format's stored Format Standing stale (migration 042); it rebuilds
+them before it exits, best effort.
+
 Changed attributes and Reprint Groups are public format facts (Deck Lists 18): the changed Printings, and every
 Printing of a Reprint Group whose membership changed, are enqueued and then delivered to the shared records store
 before it exits. When delivery reports pending, run scripts/backfill_public_catalog.py.
@@ -23,6 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'api'))
 import psycopg  # noqa: E402
 from app.catalog import RunnerBusy, rederive_card_attributes  # noqa: E402
 from app.main import connect  # noqa: E402
+from app.format_standing import rebuild_stale_best_effort  # noqa: E402
 from app.public_catalog import publish_catalog_best_effort  # noqa: E402
 
 
@@ -31,6 +35,7 @@ def main():
         with connect() as conn:
             changed = rederive_card_attributes(conn)
             delivered = publish_catalog_best_effort(conn)
+        standing = rebuild_stale_best_effort()
     except RunnerBusy:
         print('A catalog import is running; nothing was changed. Retry when it has finished.', file=sys.stderr)
         return 3
@@ -39,6 +44,8 @@ def main():
         return 1
     print(f'Card attributes derived: {changed} Printings changed; Reprint Groups refreshed; public catalog delivery '
           f'{"delivered" if delivered else "pending (run scripts/backfill_public_catalog.py)"}')
+    print('Format Standing: ' + ('not rebuilt (the next reader or scripts/format_standing_job.py rebuilds it)'
+                                 if standing is None else f'rebuilt {", ".join(standing.rebuilt) or "nothing (current)"}'))
     return 0
 
 

@@ -27,11 +27,12 @@ from typing import Literal
 from uuid import UUID
 
 import psycopg
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, BackgroundTasks, Depends
 from pydantic import BaseModel, Field, HttpUrl, field_validator
 
 from .card_attributes import ATTRIBUTE_COLUMNS, SOURCE_FIELDS, CardAttributes, advance_attribute_revision, \
     attribute_revision
+from .format_standing import rebuild_stale_best_effort
 from .holdings import fail
 from .main import connect, require_owner, verified_user
 from .metadata_reviews import consume_metadata_code, delivery_status
@@ -429,7 +430,7 @@ def _closable_reports(conn, command: AttributeDecisionInput):
 
 
 @router.post("/api/admin/card-attributes/decisions", response_model=AttributeDecisionResult)
-def decide(command: AttributeDecisionInput, user_id: str = Depends(verified_user)):
+def decide(command: AttributeDecisionInput, background_tasks: BackgroundTasks, user_id: str = Depends(verified_user)):
     reason = " ".join(command.reason.split())
     if not reason:
         fail(422, "REASON_REQUIRED")
@@ -501,6 +502,8 @@ def decide(command: AttributeDecisionInput, user_id: str = Depends(verified_user
         fail(403, "INVALID_APPROVAL_CODE")
     # Committed. The Printing's public records are a derived copy: delivery is best effort and recoverable.
     publish_catalog_best_effort(printing_ids=[command.printing_id])
+    # The attribute revision moved, so every Format's stored standing is stale: rebuild after the response.
+    background_tasks.add_task(rebuild_stale_best_effort)
     return AttributeDecisionResult(decision_id=decision_id, printing_id=command.printing_id, decision=command.decision,
                                    correction=_values(correction), effective=_values(result),
                                    attribute_revision=revision, closed_report_ids=closing,

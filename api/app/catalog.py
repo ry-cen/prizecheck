@@ -17,6 +17,7 @@ from psycopg.rows import dict_row
 
 from .card_attributes import refresh_card_attributes
 from .card_identity import card_identity_key
+from .format_standing import rebuild_stale_best_effort
 from .catalog_targets import (IDENTITY_REVIEW_KINDS, MatchingRulesV1, TargetContext, ensure_matching_rule, refresh_editions,
                               refresh_printing)
 from . import quote_contract
@@ -700,7 +701,10 @@ def execute_run(conn, run_id: UUID, source=None, before_promotion=None):
                 database_bytes = conn.execute("SELECT pg_database_size(current_database()) AS size").fetchone()["size"]
                 if database_bytes > int(db_limit):
                     raise CatalogError("Catalog exceeds configured database capacity gate")
-        # The import is committed. Public catalog records are a derived copy: a failure
+        # The import is committed. Stored Format Standing is keyed by the catalog and attribute revisions, so every
+        # Format is stale now: rebuild it before the unbounded delivery below. Best effort; the next reader rebuilds.
+        rebuild_stale_best_effort()
+        # Public catalog records are a derived copy: a failure
         # here is reported and recoverable by backfill, never a failed or rolled-back run.
         publish_catalog_best_effort(conn)
         # Seed the price cache from the cards this run received, after the commit and the catalog records it is
