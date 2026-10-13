@@ -774,7 +774,7 @@ Each page and the shell get specs against the per-worker stacks. Prior art: `wor
 
 ### Running
 
-Follow `docs/agents/verification.md`. Iterate with the narrow API and browser loops. Each ticket's acceptance runs the full gate once and quotes the counts from its `verification.log`. Tests that measure elapsed time are marked `serial`, and tests that start real processes or build capacity-sized data are marked `slow`, each with a reason.
+Follow `docs/agents/verification.md`. Iterate with the narrow API and browser loops. Each ticket is accepted on the tests relevant to it, through the narrow loops, and its evidence quotes their counts. The full gate runs once, after the last ticket and before the pull request to `dev`, and the pull request quotes the counts from its `verification.log`. Tests that measure elapsed time are marked `serial`, and tests that start real processes or build capacity-sized data are marked `slow`, each with a reason.
 
 ### Owner walkthroughs
 
