@@ -7,7 +7,7 @@ import json
 from dataclasses import dataclass
 from datetime import datetime
 
-from .catalog_targets import MatchingRulesV2
+from .catalog_targets import MatchingRulesV2, MatchingRulesV3
 from .quote_contract import parse_amount
 
 
@@ -19,6 +19,28 @@ def source_descriptor(variant: dict) -> dict:
     if isinstance(descriptor.get("stamps"), list):
         descriptor["stamps"] = sorted(descriptor["stamps"], key=lambda value: json.dumps(value, sort_keys=True))
     return descriptor
+
+
+def priced_variant(record: dict, variant: dict) -> dict:
+    """``variant`` with a TCGplayer block: its own, or the card's when it lists none.
+
+    TCGdex often keeps the card's TCGplayer block (one entry per finish) on the card instead of repeating it inside each
+    variant. A variant borrows it only when the variant is a plain finish the reviewed finish table covers and the block
+    lists that finish, so the matching rule and the price fetch narrow it to that one entry exactly as they narrow a block
+    the variant repeats. Any other variant (a stamp, subtype or special foil, an uncovered finish) keeps the card's
+    block as printing-level evidence and borrows nothing.
+    """
+    pricing = variant.get("pricing")
+    if isinstance(pricing, dict) and isinstance(pricing.get("tcgplayer"), dict):
+        return variant
+    card = record.get("pricing") if isinstance(record, dict) else None
+    if not isinstance(card, dict) or not isinstance(card.get("tcgplayer"), dict):
+        return variant
+    descriptor = {key: value for key, value in source_descriptor(variant).items() if key not in MatchingRulesV3.LOOKUP_KEYS}
+    key = MatchingRulesV3.finish_key(descriptor)
+    if key is None or not isinstance(card["tcgplayer"].get(key), dict):
+        return variant
+    return {**variant, "pricing": {**(pricing if isinstance(pricing, dict) else {}), "tcgplayer": card["tcgplayer"]}}
 
 
 def distinct_variants(detailed: list) -> list:
@@ -77,8 +99,8 @@ def select_quote(record, descriptor, lookup, product_id) -> Quote | Absent | Fai
     if len(matches) > 1:
         return Failure('ambiguous')
     variant = lookup['variant']
-    # The variant block may repeat the card's other finishes; only the published variant's entry is read.
-    entry = MatchingRulesV2.narrow(matches[0], variant)
+    # The variant block may repeat the card's other finishes, or come from the card; only the published variant's entry is read.
+    entry = MatchingRulesV2.narrow(priced_variant(record, matches[0]), variant)
     problem, products = MatchingRulesV2.products(entry)
     if problem is not None or set(products) != {variant} or product_id is None or str(products[variant]) != str(product_id):
         return Failure('lookup_drift')

@@ -140,6 +140,29 @@ def test_v2_misses_a_descriptor_carrying_third_party_ids_and_activating_v3_verif
         ("verified", 1001, "normal"), ("verified", 1001, "reverse-holofoil")]
 
 
+def card_level_block(number=1):
+    """The other live TCGdex shape: the TCGplayer block sits on the card, and the variants list none."""
+    record = repeated_block(number, third_party=True)
+    record["pricing"] = record["variants_detailed"][0]["pricing"]
+    for variant in record["variants_detailed"]:
+        del variant["pricing"]
+    return record
+
+
+def test_a_variant_without_a_block_is_matched_through_the_cards_block_at_its_finish():
+    reset_catalog()
+    activate(MATCHING, 3)
+    run(Records(card_level_block(1)))
+    assert sorted((row["mapping_state"], row["product_id"], row["quote_variant"]) for row in metadata()[1].values()) == [
+        ("verified", 1001, "normal"), ("verified", 1001, "reverse-holofoil")]
+    # A card block without the variant's finish is printing-level evidence only: the variant borrows nothing.
+    record = card_level_block(2)
+    del record["pricing"]["tcgplayer"]["reverse-holofoil"]
+    run(Records(card_level_block(1), record))
+    assert {key: (row["mapping_state"], row["mapping_reason"]) for key, row in metadata("meta-2")[1].items()} == {
+        "normal": ("verified", None), "reverse": ("unverified", "rule_failed")}
+
+
 def test_v3_sets_aside_only_third_party_and_still_checks_it_against_the_product():
     lookup = {"pricing": {"tcgplayer": {"normal": {"productId": 7}, "reverse-holofoil": {"productId": 8}}},
               "thirdParty": {"tcgplayer": 7}}
