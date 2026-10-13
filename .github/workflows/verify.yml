@@ -58,3 +58,78 @@ jobs:
           path: .scratch/verification/
           retention-days: 7
           include-hidden-files: true
+
+  # Pull requests only: the vitest files and Playwright specs the pull request changes, repeated under parallel load
+  # (npm run verify -- --burn-in; docs/agents/verification.md). This job only looks for changed test files, so a pull
+  # request without any skips the burn-in job, and push runs (including deploy-dev.yml's call) skip both.
+  changed-tests:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      changed: ${{ steps.find.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: find
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          base=$(git merge-base HEAD "origin/$BASE_REF")
+          if git diff --quiet "$base" HEAD -- auth/tests web/tests; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No file under auth/tests or web/tests changed against origin/$BASE_REF; no burn-in."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+  burn-in:
+    needs: changed-tests
+    if: needs.changed-tests.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    # The default budget is about 11 minutes of repeated Playwright runs plus setup; a pull request that changes more
+    # than about 80 tests runs each 3 times and takes longer.
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: test-only-password
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - run: npm ci
+      - run: python -m venv .venv && .venv/bin/pip install -r api/requirements.txt
+      - run: sudo apt-get update && sudo apt-get install -y postgresql-client-16
+      - run: npx playwright install --with-deps chromium
+      - run: npm run verify -- --burn-in --fast --base "origin/$BASE_REF"
+        env:
+          TEST_ADMIN_DATABASE_URL: postgresql://postgres:test-only-password@127.0.0.1:5432/postgres
+          BASE_REF: ${{ github.base_ref }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: burn-in
+          path: .scratch/verification/
+          retention-days: 7
+          include-hidden-files: true
+          if-no-files-found: ignore
