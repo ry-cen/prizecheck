@@ -57,7 +57,7 @@ wait_for_stack() {  # $1: stack directory holding env.sh
   curl -fsS "$origin/api/health" >/dev/null
 }
 case "$VERIFY_SUITE" in
-  all|api|browser|auth|operations) ;;
+  all|api|browser|auth|operations|burn-in) ;;
   *) echo 'Unknown verification suite' >&2; exit 1 ;;
 esac
 phase setup start
@@ -68,10 +68,10 @@ case "$VERIFY_SUITE" in api) ;; *) npm run guardrails; npm run build ;; esac
 case "$VERIFY_SUITE" in
   all) .venv/bin/python scripts/verify_resources.py prepare --pytest --stacks ;;
   api) .venv/bin/python scripts/verify_resources.py prepare --pytest ;;
-  browser|auth) .venv/bin/python scripts/verify_resources.py prepare --stacks ;;
+  browser|auth|burn-in) .venv/bin/python scripts/verify_resources.py prepare --stacks ;;
 esac
 case "$VERIFY_SUITE" in
-  all|browser|auth)
+  all|browser|auth|burn-in)
     stacks=$(cat "$VERIFY_WORK/stacks/count")
     start_stack "$VERIFY_WORK/stacks/s0" "$TEST_LOG_DIR"
     k=1
@@ -95,19 +95,44 @@ case "$VERIFY_SUITE" in
     phase pytest end
     ;;
 esac
+# Burn-in (scripts/verify.py --burn-in) names its changed vitest files and Playwright specs in VERIFY_BURN_IN_VITEST and
+# VERIFY_BURN_IN_SPECS, space-separated; a suite with none of them is left out.
+burn_in_vitest=""
+if [ "$VERIFY_SUITE" = burn-in ]; then
+  burn_in_vitest="${VERIFY_BURN_IN_VITEST:-}"
+  set -- ${VERIFY_BURN_IN_SPECS:-}
+fi
 case "$VERIFY_SUITE" in
-  all|auth)
-    phase vitest start
-    # --fast leaves out vitest files and tests tagged slow (vitest.config.ts); vitest.xml holds per-test times.
-    npm run test:auth -- --reporter=default --reporter=junit --outputFile.junit="$TEST_LOG_DIR/vitest.xml" ${VERIFY_FAST:+--tags-filter=!slow}
-    phase vitest end
+  all|auth|burn-in)
+    if [ "$VERIFY_SUITE" != burn-in ] || [ -n "$burn_in_vitest" ]; then
+      phase vitest start
+      # --fast leaves out vitest files and tests tagged slow (vitest.config.ts); the junit report holds per-test times.
+      # VERIFY_VITEST_REPEAT > 1 (--repeat, --burn-in) runs vitest that many times, one after another (repeats of one
+      # file would share its ports and the gate's database), each with its own vitest-<k>.xml.
+      repeats="${VERIFY_VITEST_REPEAT:-1}"
+      vitest_failed=0
+      k=1
+      while [ "$k" -le "$repeats" ]; do
+        report="$TEST_LOG_DIR/vitest.xml"
+        if [ "$repeats" -gt 1 ]; then
+          report="$TEST_LOG_DIR/vitest-$k.xml"
+          echo "== vitest run $k of $repeats"
+        fi
+        npm run test:auth -- --reporter=default --reporter=junit --outputFile.junit="$report" ${VERIFY_FAST:+--tags-filter=!slow} $burn_in_vitest || vitest_failed=1
+        k=$((k + 1))
+      done
+      phase vitest end
+      if [ "$vitest_failed" != 0 ]; then exit 1; fi
+    fi
     ;;
 esac
 case "$VERIFY_SUITE" in
-  all|browser)
-    phase browser start
-    .venv/bin/python scripts/run_playwright.py --workers "$stacks" ${VERIFY_FAST:+--fast} -- "$@"
-    phase browser end
+  all|browser|burn-in)
+    if [ "$VERIFY_SUITE" != burn-in ] || [ "$#" -gt 0 ]; then
+      phase browser start
+      .venv/bin/python scripts/run_playwright.py --workers "$stacks" ${VERIFY_FAST:+--fast} --repeat-each "${VERIFY_REPEAT:-1}" -- "$@"
+      phase browser end
+    fi
     ;;
 esac
 case "$VERIFY_SUITE" in
