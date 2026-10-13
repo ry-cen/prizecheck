@@ -1123,9 +1123,7 @@ test.describe("mobile", () => {
     await tiles(page).nth(1).tap();
     await expect(strip).toContainText("1 copy selected");
     const undo = page.getByRole("button", { name: "Undo", exact: true });
-    await expect(undo).toBeVisible();
-    await expectTouchTarget(undo, ["height"]);
-    const toastBox = await box(undo);
+    const toastBox = await expectTouchTarget(undo, ["height"]);
     const stripBox = await box(strip);
     expect(toastBox.y + toastBox.height).toBeLessThanOrEqual(stripBox.y);
     expect(stripBox.y + stripBox.height).toBeLessThanOrEqual(812);

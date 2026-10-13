@@ -184,6 +184,8 @@ async function expectAccessible(page: Page, state: string) {
 
 /** Visible controls smaller than `min` px; inline links in text are exempt, and a radio or checkbox counts its label. */
 async function smallTargets(page: Page, min: number): Promise<string[]> {
+  // A drawer still sliding in from the left would have its controls skipped below as off-screen.
+  await animationsFinished(page);
   return page.evaluate((min) => {
     const found: string[] = [];
     const controls = document.querySelectorAll<HTMLElement>(
