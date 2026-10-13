@@ -414,6 +414,22 @@ def test_a_repeated_card_block_is_read_at_the_published_variant_only():
     assert select(record(entry(pricing=pricing)), lookup={'card': 'swsh3-136', 'variant': 'reverse-holofoil'}) == Failure('lookup_drift')
 
 
+def test_a_variant_without_a_block_reads_the_cards_block_at_its_own_finish_only():
+    # TCGdex often keeps the TCGplayer block on the card instead of inside each variant.
+    card = {'tcgplayer': {'updated': '2026-10-07T22:55:02Z', 'normal': {'productId': 219333, 'marketPrice': '1'},
+                          'reverse-holofoil': {'productId': 219333, 'marketPrice': '2'}}}
+    bare = {key: value for key, value in entry().items() if key != 'pricing'}
+    rec = {**record(bare), 'pricing': card}
+    assert select(rec).amount == '1'
+    reverse = {**bare, 'type': 'reverse'}
+    assert select({**record(reverse), 'pricing': card}, descriptor={'type': 'reverse', 'size': 'standard'},
+                  lookup={'card': 'swsh3-136', 'variant': 'reverse-holofoil'}).amount == '2'
+    # A variant's own block wins, and a stamped variant borrows nothing from the card.
+    assert select({**record(), 'pricing': {'tcgplayer': {'normal': {'productId': 219333, 'marketPrice': '9'}}}}).amount == '0.25'
+    stamped = {**bare, 'stamp': ['set-logo']}
+    assert select({**record(stamped), 'pricing': card}, descriptor={**DESCRIPTOR, 'stamp': ['set-logo']}) == Failure('lookup_drift')
+
+
 def test_third_party_conflict_fails():
     for listed, expected in ((1, Failure('lookup_drift')), (219333, None)):
         third = {'tcgplayer': listed}
