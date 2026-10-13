@@ -5,9 +5,10 @@ import {
   LocationError,
   type TreeNode,
 } from "../location_generated";
+import { Button } from "../ui/Button";
+import { CONTROL } from "../ui/control";
 import { Dialog } from "../ui/Dialog";
 import { Icon } from "../ui/Icon";
-import { BUTTON, BUTTON_ROW, FIELD, PRIMARY_BUTTON } from "./controlClasses";
 import { KitLayer } from "./KitLayer";
 import type { LocationIndex } from "./locationTree";
 
@@ -168,7 +169,7 @@ export function CreateLocationDialog({
             Name
             <input
               ref={nameRef}
-              className={FIELD}
+              className={CONTROL}
               data-autofocus
               value={name}
               maxLength={120}
@@ -185,7 +186,7 @@ export function CreateLocationDialog({
           <label className="flex flex-col gap-2 text-meta text-text-muted">
             Parent location
             <select
-              className={FIELD}
+              className={CONTROL}
               value={parentId ?? ""}
               onChange={(event) => {
                 setParentId(event.target.value || null);
@@ -249,22 +250,13 @@ export function CreateLocationDialog({
               <span>{error}</span>
             </p>
           )}
-          <div className={BUTTON_ROW}>
-            <button
-              type="button"
-              className={`inline-flex ${BUTTON}`}
-              onClick={onCancel}
-              disabled={busy}
-            >
+          <div className="flex justify-end gap-2">
+            <Button onClick={onCancel} disabled={busy}>
               Cancel
-            </button>
-            <button
-              type="submit"
-              className={`inline-flex ${PRIMARY_BUTTON}`}
-              disabled={busy}
-            >
+            </Button>
+            <Button type="submit" variant="primary" disabled={busy}>
               {busy ? "Creating…" : "Create location"}
-            </button>
+            </Button>
           </div>
         </form>
       </Dialog>

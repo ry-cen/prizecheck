@@ -19,6 +19,7 @@ The redesign is a launch gate ([spec](spec.md), "Rollout"): PrizeCheck opens to 
 - [ ] Owner controls' sub-tabs have their own addresses: Status at `/owner`, then `/owner/catalog`, `/owner/metadata`, `/owner/attributes`, `/owner/reprints`, `/owner/missing` and `/owner/rules` (#167).
 - [ ] Card type has one source, the reviewed card attributes, which gain Trainer Type and evolves from. After migrating to `041_trainer_type_and_evolves_from.sql`, run `scripts/derive_card_attributes.py` once (`docs/operations/release.md`); until then Collection's Trainer Type choices match no card. Collection's Category filter offers "Trainer: any type" and each Trainer Type, and its type filter lists Pokémon only, so a Basic Energy no longer appears under its type (#170).
 - [ ] Owner controls' Attributes tab reviews card attributes on the kit: derived, correction and effective values, Correct or Remove correction with a fresh code, and Reject report or Ask for information with a reason only (#170).
+- [ ] Collection's Location tree, Manage locations, search, filters and display settings, the stale-collection banner and the Deck heading use the new controls. Filters & display opens as a panel along the right edge of a phone, and Manage locations fills a phone's screen (#166).
 
 ## Walkthroughs
 
@@ -106,6 +107,23 @@ On a phone (iOS Safari or Android Chrome):
 - [ ] 8. On a report that needs information, tap Reply, then swipe the table sideways: the conversation and the reply box stay in place, as wide as the screen, while the columns slide behind them.
 - [ ] 9. Open Report a card: each field and Send private report fills the width and is thumb-sized.
 
+### Collection sidebar, Manage locations and filters (#166)
+
+On a desktop (a window at least 1280 px wide):
+
+- [ ] 1. On Collection, the Locations sidebar lists All owned, then your Locations in natural order. Open a folder with its chevron, then open a Storage Leaf: its row is gold and the heading names it. Rest the pointer on a row: a + appears at its right end; Tab onto a row shows the + too.
+- [ ] 2. The toolbar keeps Search and Filters on the left and Sort, Card size, Names and Prices on the right, all one height. Open Filters, pick a Set and a Category: the Filters button counts them ("Filters, 2 active") and Clear filters resets only the filters. Names and Prices turn gold while on.
+- [ ] 3. Select a card and drag it onto another Storage Leaf in the sidebar: every Leaf it can go to shows a dashed outline, the one under the pointer a solid gold ring, and the drop moves the card with an Undo message.
+- [ ] 4. Open Manage locations with the gear. It opens centred, and the page behind doesn't scroll. Drag a Location by its ☰ handle onto another row: valid rows are outlined, the one under the pointer ringed, the rest dimmed. Confirm with Move here. Rename one, and delete an empty one by typing its name. Escape closes the panel and returns focus to the gear.
+- [ ] 5. Open a Deck: the heading shows Estimated Deck Cost and Export. Export opens a menu (arrow keys move through it); Pokémon TCG Live opens its panel, and Escape returns focus to Export.
+- [ ] 6. Change something in another tab (add or move a card). Back here, a slim banner reads "Your collection changed in another tab or session." with Reload; Reload brings the change in.
+
+On a phone (iOS Safari or Android Chrome):
+
+- [ ] 7. The header shows ☰, Collection, Search and Filters & display, all thumb-sized, and nothing scrolls sideways. Filters & display opens along the right edge; a change applies at once, and a tap on the dimmed page closes it.
+- [ ] 8. Tap ☰: each Location row and its + are thumb-sized. Tap the gear: Manage locations fills the screen. Drag a Location by its ☰ handle onto another row with your finger, or tap the handle to choose from a list. Close it: you are back on ☰.
+- [ ] 9. Open a Deck and tap Export, then TCGplayer Mass Entry: the panel fills the screen and its buttons are thumb-sized. Tap Add cards in a Storage Leaf: the panel opens along the bottom, and its fields and buttons are thumb-sized.
+
 ## Manual checks that automation does not cover
 
 - [ ] Real touch on iOS Safari and Android Chrome for the tab bar, the More sheet and the ☰ drawer (the browser tests only emulate touch), including the home indicator area under the tab bar.
@@ -116,6 +134,7 @@ On a phone (iOS Safari or Android Chrome):
 - [ ] Screen reader on Collection: with Names off, a tile is read with its Variant (or "Unspecified Variant"), and the inspector's Leaf list is read as a list (#164).
 - [ ] Screen reader on Owner controls: the sub-tabs announce as tabs with their counts and which one is selected, the problems line reads as a list, and the health table reads as a table with its column headers (#167).
 - [ ] Screen reader on Missing cards: the sub-tabs announce as tabs and which one is selected, the reports table reads with its column headers, Reply announces whether its row is open, and after a send the message is read where focus lands (#169).
+- [ ] Real touch and Safari on Collection: Manage locations' handle drag with a finger on iOS Safari and Android Chrome, and the sidebar's tile drag and the + on hover in Safari and Firefox on desktop (#166).
 
 ## Sources
 

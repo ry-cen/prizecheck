@@ -1,15 +1,10 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Check, ChevronDown, ChevronRight, TriangleAlert } from "lucide-react";
 import type { TreeNode } from "../location_generated";
+import { Button } from "../ui/Button";
+import { CONTROL } from "../ui/control";
 import { Dialog } from "../ui/Dialog";
 import { Icon } from "../ui/Icon";
-import {
-  BUTTON,
-  BUTTON_ROW,
-  DANGER_BUTTON,
-  FIELD,
-  PRIMARY_BUTTON,
-} from "./controlClasses";
 import { plural } from "./galleryModel";
 import {
   groupRemovalRows,
@@ -189,7 +184,7 @@ export function MoveDialog({
         <div className="flex flex-col gap-3">
           <input
             type="search"
-            className={FIELD}
+            className={CONTROL}
             aria-label="Search locations"
             placeholder="Find a location…"
             autoComplete="off"
@@ -241,22 +236,19 @@ export function MoveDialog({
             )}
           </div>
           <Feedback progress={progress} error={error} />
-          <div className={BUTTON_ROW}>
-            <button
-              type="button"
-              className={`inline-flex ${BUTTON}`}
+          <div className="flex justify-end gap-2">
+            <Button
               aria-disabled={busy || undefined}
               onClick={() => {
                 if (!busy) onCancel();
               }}
             >
               Cancel
-            </button>
-            <button
-              type="button"
-              className={`inline-flex ${PRIMARY_BUTTON}`}
+            </Button>
+            <Button
+              variant="primary"
               disabled={!canConfirm}
-              aria-disabled={busy || undefined}
+              aria-disabled={(busy && canConfirm) || undefined}
               onClick={() => {
                 if (!busy && destination && canConfirm) onConfirm(destination);
               }}
@@ -264,7 +256,7 @@ export function MoveDialog({
               {canConfirm && preview
                 ? `Move ${plural(preview.moving, "copy", "copies")}`
                 : "Move"}
-            </button>
+            </Button>
           </div>
         </div>
       </Dialog>
@@ -333,10 +325,8 @@ export function RemovalDialog({
             ))}
           </div>
           <Feedback progress={progress} error={error} />
-          <div className={BUTTON_ROW}>
-            <button
-              type="button"
-              className={`inline-flex ${BUTTON}`}
+          <div className="flex justify-end gap-2">
+            <Button
               data-autofocus
               aria-disabled={busy || undefined}
               onClick={() => {
@@ -344,17 +334,16 @@ export function RemovalDialog({
               }}
             >
               Cancel
-            </button>
-            <button
-              type="button"
-              className={`inline-flex ${DANGER_BUTTON}`}
+            </Button>
+            <Button
+              variant="danger"
               aria-disabled={busy || undefined}
               onClick={() => {
                 if (!busy) onConfirm();
               }}
             >
               Remove {plural(copies, "copy", "copies")}
-            </button>
+            </Button>
           </div>
         </div>
       </Dialog>

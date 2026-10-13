@@ -202,11 +202,7 @@ function App() {
   function renderPage(id: PageId, active: boolean) {
     switch (id) {
       case "collection":
-        return (
-          <div className="legacy">
-            <Workspace userId={userId} active={active} />
-          </div>
-        );
+        return <Workspace userId={userId} active={active} />;
       case "decks":
         return (
           <LegacyPage title="Decks" message={message}>

@@ -1,8 +1,8 @@
 import React, { useEffect, useId, useLayoutEffect, useState } from "react";
 import { ChevronDown, TriangleAlert } from "lucide-react";
+import { Button } from "../ui/Button";
 import { Icon } from "../ui/Icon";
 import { useToast } from "../ui/Toast";
-import { BUTTON } from "./controlClasses";
 import { plural } from "./galleryModel";
 import { KitLayer } from "./KitLayer";
 import type { SelectionSummary } from "./selectionModel";
@@ -34,8 +34,6 @@ type Props = {
   actionsRef: React.RefObject<HTMLButtonElement | null>;
   /** The bar itself, for the skip link past the cards. */
   barRef: React.RefObject<HTMLDivElement | null>;
-  /** The hand-rolled Filters & display drawer is open over it. */
-  inert: boolean;
 };
 
 const LIST_ITEM =
@@ -56,7 +54,6 @@ export function SelectionBar({
   error,
   actionsRef,
   barRef,
-  inert,
 }: Props) {
   const [open, setOpen] = useState(false);
   const menuId = useId();
@@ -71,10 +68,10 @@ export function SelectionBar({
     document.addEventListener("pointerdown", onPointerDown);
     return () => document.removeEventListener("pointerdown", onPointerDown);
   }, [open, barRef]);
-  // An action running, or a sheet or drawer opening over the bar, closes the list.
+  // An action running closes the list. Sheets and drawers are kit dialogs, which make the bar inert themselves.
   useEffect(() => {
-    if (busy || inert) setOpen(false);
-  }, [busy, inert]);
+    if (busy) setOpen(false);
+  }, [busy]);
 
   // The toast stacks above the bar, with the bar's gap between them.
   useLayoutEffect(() => {
@@ -116,7 +113,6 @@ export function SelectionBar({
         id="ws-dock"
         role="region"
         aria-label="Selection"
-        inert={inert}
         // While the list is open the bar rises to the toast's layer: drawn after the toast host, it
         // paints over a toast, as the list did when both sat in one dock. Closed, it stays below sheets.
         className={`${open ? "z-(--layer-toast)" : "z-(--layer-sticky)"} fixed bottom-6 left-1/2 box-border flex max-w-[calc(100vw-var(--space-8))] -translate-x-1/2 flex-wrap items-center gap-4 rounded-panel border border-border-strong bg-surface-raised py-2 pl-4 pr-2 text-body text-text phone:inset-x-2 phone:bottom-[calc(var(--layout-tabbar-height)+var(--space-2))] phone:max-w-none phone:translate-x-0 phone:justify-between phone:gap-2 phone:py-1 phone:pl-3 phone:pr-1`}
@@ -138,18 +134,13 @@ export function SelectionBar({
           </span>
         </p>
         <span className="flex items-center gap-2">
-          <button
-            type="button"
-            className={`hidden phone:inline-flex ${BUTTON}`}
-            onClick={onDetails}
-          >
-            Details
-          </button>
+          {/* Details is for a phone, where the inspector is a sheet. */}
+          <span className="hidden phone:contents">
+            <Button onClick={onDetails}>Details</Button>
+          </span>
           <span className="relative inline-flex">
-            <button
+            <Button
               ref={actionsRef}
-              type="button"
-              className={`inline-flex ${BUTTON}`}
               aria-expanded={open}
               aria-controls={open ? menuId : undefined}
               aria-disabled={busy || undefined}
@@ -158,7 +149,7 @@ export function SelectionBar({
               }}
             >
               Actions <Icon icon={ChevronDown} size={14} />
-            </button>
+            </Button>
             {open && (
               <span
                 id={menuId}

@@ -215,7 +215,8 @@ async function smallTargets(page: Page, min: number): Promise<string[]> {
   }, min);
 }
 
-/** The longest transition or animation on any workspace element, in seconds. */
+/** The longest transition or animation on any element of Collection's page (its root carries
+ * data-collection-page since #166), in seconds. */
 const longestMotion = (page: Page) =>
   page.evaluate(() => {
     const seconds = (value: string) =>
@@ -230,7 +231,7 @@ const longestMotion = (page: Page) =>
       );
     let longest = 0;
     for (const el of document.querySelectorAll<HTMLElement>(
-      ".ws-root, .ws-root *"
+      "[data-collection-page], [data-collection-page] *"
     )) {
       const style = getComputedStyle(el);
       longest = Math.max(longest, seconds(style.transitionDuration));

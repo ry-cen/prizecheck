@@ -9,6 +9,7 @@ import React, {
   useState,
 } from "react";
 import { EditionPrice } from "../EditionPrice";
+import { Button } from "../ui/Button";
 import { CopyTile } from "../ui/CopyTile";
 import { variantLabel } from "../ui/variantLabel";
 import {
@@ -28,8 +29,11 @@ import {
 } from "./galleryModel";
 import { isTileSelected, marqueeSpans, type Selection } from "./selectionModel";
 import type { MarqueeEvent, TileGesture } from "./useSelection";
-import "./Gallery.css";
-import "./Selection.css";
+
+// The tile's price line: the existing EditionPrice component's compact form, on one line cut with an ellipsis,
+// in the tile's colours. EditionPrice.css reaches only the old pages (#166), so these are the only rules here.
+const TILE_PRICE =
+  "block [&_.edition-price]:block [&_.edition-price]:truncate [&_.edition-price]:text-text-subtle [&_.edition-price_strong]:font-semibold [&_.edition-price_strong]:text-text [&_.edition-price-line]:flex [&_.edition-price-line]:min-w-0 [&_.edition-price-line]:whitespace-nowrap [&_.edition-price-amount]:min-w-0 [&_.edition-price-amount]:truncate [&_.edition-price-label]:shrink-0 [&_.edition-price-label]:whitespace-pre [&_.edition-price-sr]:sr-only";
 
 type Props = {
   data: GalleryData;
@@ -432,14 +436,14 @@ export function Gallery({
           className="flex flex-col items-center gap-3 px-3 py-10 text-center text-text-muted"
           role="alert"
         >
-          <p>{data.error}</p>
-          <button type="button" onClick={onRetry}>
-            Retry
-          </button>
+          <p className="m-0">{data.error}</p>
+          <Button onClick={onRetry}>Retry</Button>
         </div>
       )}
       {empty && (
-        <p className="px-3 py-10 text-center text-text-muted">{emptyMessage}</p>
+        <p className="m-0 px-3 py-10 text-center text-text-muted">
+          {emptyMessage}
+        </p>
       )}
       <div ref={gridRef} className="relative" style={{ height: gridHeight }}>
         {loading && layout && (
@@ -555,8 +559,7 @@ const Tile = memo(function Tile({
       selected={selected}
       price={
         prices ? (
-          // The tile-price rules in Gallery.css restyle EditionPrice's own (unlayered) colours here.
-          <span className="ws-tile-price block">
+          <span className={TILE_PRICE}>
             <EditionPrice compact editionId={holding.edition_id} />
           </span>
         ) : undefined

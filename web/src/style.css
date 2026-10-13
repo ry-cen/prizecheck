@@ -91,6 +91,13 @@ body {
   outline: revert;
   outline-offset: revert;
 }
+/* Collection is on the kit (#166) and dark down to <html>, as it was with the workspace CSS: this unlayered rule
+   outranks the light :root above while Collection is mounted (it stays mounted, hidden, once visited). Only the
+   background: <html> keeps color-scheme: normal until this file is deleted in rollout stage 7, when base.css's
+   dark :root takes over. */
+:root:has([data-collection-page]) {
+  background: var(--color-bg);
+}
 /* An old light page inside the dark app shell: the light page :root gives it outside the shell. Fills the
    page area under the shell's header (and above the phone tab bar). */
 .legacy-light {

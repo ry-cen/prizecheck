@@ -11,7 +11,6 @@ import { Dialog } from "../ui/Dialog";
 import { variantLabel } from "../ui/variantLabel";
 import { CATEGORY_LABELS, TRAINER_TYPE_LABELS, plural } from "./galleryModel";
 import type { Inspected } from "./useSelection";
-import "./Inspector.css";
 
 /** Hover and selection change quickly; wait this long before asking for an Edition's copies or price. */
 const TOTAL_DELAY_MS = 150;
@@ -115,11 +114,15 @@ const byPath = new Intl.Collator(undefined, {
 });
 const counts = new Intl.NumberFormat("en-US");
 
-// Inside the workspace, Workspace.css's `.ws-root h2, .ws-root p { margin: 0 }` is unlayered and beats
-// margin utilities, so the details use padding for their spacing. The price section is inset by
-// px-1 and the panel ends with pb-1 so the report link's focus ring isn't clipped by the panel's scroll box.
+// The details space their lines with padding (m-0 clears the browser's own margins: there is no Preflight).
+// The price section is inset by px-1 and the panel ends with pb-1 so the report link's focus ring isn't
+// clipped by the panel's scroll box.
 const META = "text-meta text-text-muted tabular-nums";
 const SECTION = "mt-4 border-t border-border pt-4";
+// The inspected Edition's price: the existing EditionPrice component in the inspector's colours, the amount
+// in the accent. EditionPrice.css reaches only the old pages (#166), so these are the only rules here.
+const PRICE =
+  "[&_.edition-price]:block [&_.edition-price]:text-text-muted [&_.edition-price[data-price-status=checking]]:italic [&_.edition-price_strong]:text-body [&_.edition-price_strong]:font-semibold [&_.edition-price_strong]:text-accent [&_.price-refresh]:text-text-subtle [&_.price-refresh[data-refresh=failed]]:text-warning";
 
 /** The inspected card's facts: set, number and Variant, category and type, its Location, copies there,
  * copies owned and each Storage Leaf that holds them (#164), then its price. */
@@ -154,11 +157,11 @@ export function CardDetails({
     <div className="text-body">
       <DetailsArt holding={holding} narrow={sheet} />
       {!sheet && (
-        <h2 className="pt-4 text-heading font-[550] wrap-anywhere">
+        <h2 className="m-0 pt-4 text-heading font-[550] wrap-anywhere">
           {holding.printing_name}
         </h2>
       )}
-      <p className={`${sheet ? "pt-4" : "pt-1"} ${META}`}>
+      <p className={`m-0 ${sheet ? "pt-4" : "pt-1"} ${META}`}>
         {holding.set_name} · {holding.collector_number}
       </p>
       <dl className="m-0 flex gap-2 pt-1 text-meta text-text-muted">
@@ -167,13 +170,15 @@ export function CardDetails({
           {variantLabel(holding.descriptor)}
         </dd>
       </dl>
-      {kind && <p className={`pt-1 ${META}`}>{kind}</p>}
+      {kind && <p className={`m-0 pt-1 ${META}`}>{kind}</p>}
       <div className={`${SECTION} text-meta wrap-anywhere`}>
-        <p>{locationPath(holding.location_id) ?? holding.location_name}</p>
-        <p className="pt-1 text-text-subtle tabular-nums">
+        <p className="m-0">
+          {locationPath(holding.location_id) ?? holding.location_name}
+        </p>
+        <p className="m-0 pt-1 text-text-subtle tabular-nums">
           {plural(card.holding.copies, "copy", "copies")} here
         </p>
-        <p className="pt-1 text-text-subtle tabular-nums">
+        <p className="m-0 pt-1 text-text-subtle tabular-nums">
           {owned.state === "ready"
             ? `${plural(copiesOwned, "copy", "copies")} owned`
             : owned.state === "failed"
@@ -197,7 +202,7 @@ export function CardDetails({
         )}
       </div>
       <div
-        className={`ws-details-price ${SECTION} flex flex-col items-start gap-2 px-1 text-meta tabular-nums wrap-anywhere`}
+        className={`${SECTION} ${PRICE} flex flex-col items-start gap-2 px-1 text-meta tabular-nums wrap-anywhere`}
       >
         <InspectorPrice
           key={holding.edition_id}

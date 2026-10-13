@@ -119,7 +119,7 @@
   --layout-sidebar-width: 212px;
   --layout-drawer-width: min(340px, 92vw);
   /* Gallery side padding fixed by the spec: 30 px, then 20 px from 1550 px, then 16 px from 2200 px.
-     Workspace.css applies it to the workspace main area; ticket 103 tests it. */
+     Collection's main area applies it (Workspace.tsx, px-(--layout-gutter)); ticket 103 tests it. */
   --layout-gutter: 30px;
 
   /* App shell (app redesign, #162): the phone bottom tab bar's height, and the centred Dialog's width on

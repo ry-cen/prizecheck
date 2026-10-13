@@ -1,5 +1,5 @@
 /*
- * The signed-out screens (#163) are dark down to <html>, as Collection is (Workspace.css): loading, sign-in,
+ * The signed-out screens (#163) are dark down to <html>, as Collection is (style.css, #166): loading, sign-in,
  * not found, unavailable, and the public pages under the public header. style.css's unlayered :root keeps every
  * other page light; this rule outranks it only while such a screen is mounted. Deleted with style.css in rollout
  * stage 7, when base.css's dark :root takes over.

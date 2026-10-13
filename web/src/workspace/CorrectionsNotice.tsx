@@ -5,7 +5,11 @@ import {
   type ReplacementView,
 } from "../reconciliation_generated";
 import type { GalleryHolding, GalleryStatus } from "./galleryModel";
-import "./CorrectionsNotice.css";
+import { OLD_BUTTONS, OLD_FIELDS, OLD_TEXT } from "./legacyContent";
+
+// The existing Correction component (EditionCorrections.tsx), styled from here so its markup stays unchanged:
+// each correction wraps its controls on one line under a full-width heading and paragraphs.
+const CORRECTIONS = `${OLD_BUTTONS} ${OLD_FIELDS} ${OLD_TEXT} mt-4 box-border flex flex-col gap-3 rounded-panel border border-l-3 border-border-strong border-l-warning bg-surface p-4 [&_article]:flex [&_article]:flex-wrap [&_article]:items-center [&_article]:gap-2 [&_h3]:basis-full [&_h3]:text-meta [&_h3]:font-semibold [&_p]:basis-full [&_p]:text-meta [&_p]:text-text-muted [&_input]:ml-2 [&_input]:w-[6em]`;
 
 type Relevant = { entry: GalleryHolding; correction: ReplacementView }[];
 /** One empty list, so a view without corrections never re-renders or re-walks for them. */
@@ -74,11 +78,8 @@ export function CorrectionsNotice({
       : relevant;
   if (!shown.length) return null;
   return (
-    <section
-      className="ws-corrections"
-      aria-label="Reviewed Edition corrections"
-    >
-      <h2 className="ws-corrections-title">Reviewed Edition corrections</h2>
+    <section className={CORRECTIONS} aria-label="Reviewed Edition corrections">
+      <h2 className="text-body font-semibold">Reviewed Edition corrections</h2>
       {shown.map(({ entry, correction }) => (
         <Correction
           key={entry.key}

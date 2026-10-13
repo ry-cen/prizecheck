@@ -1,7 +1,6 @@
 import React, { useEffect, useState, type ReactNode } from "react";
 import { Check, DollarSign, RefreshCw } from "lucide-react";
 import { Icon } from "./Icon";
-import "./legacyBoundary.css";
 
 /** Where a copy is, from the page's point of view: here (solid; Collection's only state), owned
  * elsewhere (dashed, ↻) or not owned (ghost, $). The deck builder's Spread view uses all three. */
@@ -41,7 +40,8 @@ type Props = Omit<
 
 // The tile's height is fixed by the page's layout model (tokens.css: the art's aspect ratio and
 // --tile-names-height, --tile-price-height and --tile-caption-height), so every line here has a fixed
-// height and cuts its text with an ellipsis instead of wrapping.
+// height and cuts its text with an ellipsis instead of wrapping. Those heights include each line's top padding
+// (box-border): with no Preflight a page's own reset can't be relied on (#166 removed Collection's).
 // A selected tile's focus ring sits outside its selection ring. The ring itself is base.css's.
 const ROOT =
   "group block box-border m-0 min-h-0 cursor-pointer rounded-card border-0 bg-transparent p-0 text-left [font:inherit] text-text aria-pressed:focus-visible:outline-offset-[calc(var(--tile-ring-gap)+var(--tile-ring-width)+var(--focus-offset))]";
@@ -89,7 +89,6 @@ export function CopyTile({
     <button
       {...button}
       type="button"
-      data-kit=""
       className={[ROOT, absolute ? "absolute" : "relative", className]
         .filter(Boolean)
         .join(" ")}
@@ -104,7 +103,7 @@ export function CopyTile({
         <TileArt name={name} imageUrl={imageUrl} />
       </span>
       {names && (
-        <span className="block h-(--tile-names-height) overflow-hidden pt-1">
+        <span className="box-border block h-(--tile-names-height) overflow-hidden pt-1">
           <span className={`${LINE} text-caption leading-4`}>{name}</span>
           <span
             className={`${LINE} text-micro leading-3.5 text-text-subtle tabular-nums`}
@@ -116,14 +115,14 @@ export function CopyTile({
       {price !== undefined && (
         <span
           id={priceId}
-          className="block h-(--tile-price-height) overflow-hidden pt-1 text-caption leading-3.5 tabular-nums"
+          className="box-border block h-(--tile-price-height) overflow-hidden pt-1 text-caption leading-3.5 tabular-nums"
         >
           {price}
         </span>
       )}
       {caption != null && (
         <span
-          className={`${LINE} h-(--tile-caption-height) pt-1 text-micro leading-3.5 text-text-subtle`}
+          className={`${LINE} box-border h-(--tile-caption-height) pt-1 text-micro leading-3.5 text-text-subtle`}
         >
           {caption}
         </span>

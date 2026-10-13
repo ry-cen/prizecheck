@@ -23,16 +23,17 @@ type IconOnlyButton = Shared & {
 };
 
 const BASE =
-  "box-border m-0 inline-flex h-control cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-control border font-sans text-control font-medium leading-none disabled:cursor-default disabled:opacity-45 phone:h-control-phone";
+  "box-border m-0 inline-flex h-control cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-control border font-sans text-control font-medium leading-none disabled:cursor-default disabled:opacity-45 aria-disabled:cursor-progress aria-disabled:opacity-60 phone:h-control-phone";
+// A toggle (aria-pressed) or an open menu or panel (aria-expanded) shows the selected look (#166).
+const SELECTED =
+  "aria-pressed:border-accent-border aria-pressed:bg-surface-selected aria-pressed:text-accent-strong aria-expanded:border-accent-border aria-expanded:bg-surface-selected aria-expanded:text-accent-strong";
 const TEXT = "px-3 phone:px-4";
 const ICON_ONLY = "w-control p-0 phone:w-control-phone";
 const VARIANTS: Record<ButtonVariant, string> = {
   primary:
     "border-accent bg-accent font-semibold text-on-accent enabled:hover:border-accent-strong enabled:hover:bg-accent-strong",
-  secondary:
-    "border-border-strong bg-surface-raised text-text enabled:hover:border-control-outline",
-  quiet:
-    "border-transparent bg-transparent text-text-muted enabled:hover:bg-surface-raised enabled:hover:text-text",
+  secondary: `border-border-strong bg-surface-raised text-text enabled:hover:border-control-outline ${SELECTED}`,
+  quiet: `border-transparent bg-transparent text-text-muted enabled:hover:bg-surface-raised enabled:hover:text-text ${SELECTED}`,
   danger:
     "border-danger-border bg-danger-fill text-text enabled:hover:border-danger",
 };
