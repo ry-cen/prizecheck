@@ -132,10 +132,12 @@ def clock_warnings(suspended, skews):
 
 
 def network_warnings(tests):
-    """Lines that say a failed Playwright test is not evidence: Chromium dropped its requests with
-    net::ERR_NETWORK_CHANGED because the host's network configuration changed (an interface or address came or went)."""
+    """Lines naming failed Playwright tests during which Chromium dropped requests with net::ERR_NETWORK_CHANGED because
+    the host's network configuration changed (an interface or address came or went). The dropped request may be
+    unrelated to the failure, so the line asks for the trace to be checked rather than dismissing the failure."""
     return [f'Chromium dropped requests with net::ERR_NETWORK_CHANGED in {test}: the host network changed during that '
-            'test, so its failure is not evidence. Rerun it.' for test in tests]
+            'test. If its trace shows the dropped requests caused the failure (for example a blank page after module '
+            'loads failed), the failure is not evidence: rerun it.' for test in tests]
 
 
 def changed_files(base, root=ROOT):
@@ -356,7 +358,10 @@ def main(argv=None):
             suspended = round(max(0.0, (time.time() - wall) - (time.monotonic() - steady)), 1)
             skews['end'] = database_skew(args.admin_url)
             warnings = clock_warnings(suspended, skews)
-            network = network_warnings(network_changes(artifacts))
+            try:
+                network = network_warnings(network_changes(artifacts))
+            except Exception as error:  # an unreadable trace must not cost the run its summary and result.json
+                network = [f'could not scan failed tests\' traces for network changes ({type(error).__name__})']
             if warnings or network:
                 with (artifacts/'verification.log').open('a') as log:
                     log.write(''.join(f'== WARNING: {line}; wall-clock and expiry failures in this run are not evidence. '

@@ -498,8 +498,10 @@ test.describe("desktop", () => {
     await expect(banner(page)).toHaveCount(0);
     await expect(tiles(page)).toHaveCount(3);
     await expect(amount).toHaveValue("2");
-    // flake-exempt wait-for-timeout (quiet): any late read lands before counting: one read for the new revision, none
-    // while the gallery reloaded.
+    // The corrections read for the new revision runs in an effect after the holdings render, so wait for it.
+    await expect.poll(() => reads).toBe(1);
+    // flake-exempt wait-for-timeout (quiet): any late extra read lands before counting: one read for the new
+    // revision, none while the gallery reloaded.
     await page.waitForTimeout(300);
     expect(reads).toBe(1);
   });

@@ -375,8 +375,16 @@ test.describe("desktop", () => {
     );
     await expect(tiles(page)).toHaveCount(3);
 
+    // Enough presses for every stop once, however many Locations earlier tests left in this owner's tree: a fixed 150
+    // ran out before the gallery when burn-in repeats of this file shared one stack.
+    const stops = await page.evaluate(
+      () =>
+        document.querySelectorAll(
+          'a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])'
+        ).length
+    );
     const names: string[] = [];
-    for (let press = 0; press < 150; press++) {
+    for (let press = 0; press < stops + 10; press++) {
       await page.keyboard.press("Tab");
       const stop = await page.evaluate(() => {
         const el = document.activeElement;
