@@ -131,7 +131,7 @@ def gateway(tmp_path_factory):
     mail.touch()
     email = f"latency-{uuid4().hex[:12]}@example.test"   # one owner per run: allowedSend limits sends per address
     api_port, gateway_port = free_port(), free_port()
-    env = {**os.environ, "OWNER_EMAIL": email, "MAIL_MODE": "file", "MAIL_FILE": str(mail),
+    env = {**os.environ, "OWNER_EMAIL": email, "MAIL_MODE": "file", "EMAIL_SIGN_IN": "on", "MAIL_FILE": str(mail),
            "SIGNUP_MODE": "owner-only", "NODE_ENV": "test", "PUBLIC_ORIGIN": ORIGIN, "AUTH_PORT": str(gateway_port),
            "API_ORIGIN": f"http://127.0.0.1:{api_port}",
            "PYTHONPATH": str(ROOT / "api/tests/catalog_process_fixture") + os.pathsep + str(ROOT / "api")}

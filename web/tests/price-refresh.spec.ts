@@ -1,13 +1,8 @@
 import { test, expect, type Page } from "@playwright/test";
+import { signInAsOwner } from "./support/sign-in";
 import { execFile, execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import {
-  existsSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -76,15 +71,7 @@ async function liveRunners() {
 
 async function signIn(page: Page) {
   await pool.query("DELETE FROM auth_send_event");
-  await page.goto(`${ORIGIN}/locations`);
-  await page.getByLabel("Email", { exact: true }).fill(OWNER_EMAIL);
-  await page.getByRole("button", { name: "Send code", exact: true }).click();
-  await expect(page.getByRole("status")).toContainText("code has been sent");
-  const otp = JSON.parse(
-    readFileSync(process.env.MAIL_FILE!, "utf8").trim().split("\n").at(-1)!
-  ).otp as string;
-  await page.getByLabel("Six-digit code").fill(otp);
-  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await signInAsOwner(page, "/workspace");
   await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible();
 }
 

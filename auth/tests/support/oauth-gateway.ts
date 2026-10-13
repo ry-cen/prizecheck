@@ -8,6 +8,7 @@ import { createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Pool } from "pg";
+import { dropDatabase, waitForServer } from "./servers.js";
 import type { Jar } from "../../testing/oauth-fake/walk.js";
 import { cookieHeader, keepCookies } from "../../testing/oauth-fake/walk.js";
 
@@ -89,6 +90,7 @@ export async function startGateway(
     MAIL_MODE: "file",
     MAIL_FILE: mailFile,
     NODE_ENV: "test",
+    EMAIL_SIGN_IN: "off",
     ...PLACEHOLDER_CREDENTIALS,
   };
   for (const [key, value] of Object.entries(options.env || {})) {
@@ -104,16 +106,7 @@ export async function startGateway(
     }
     await new Promise((resolve) => api.close(resolve));
     await pool.end();
-    // pool.end() resolves before the server sees every socket close (see signup.test.ts).
-    for (let n = 0; n < 50; n++) {
-      const { rows } = await admin.query(
-        "SELECT count(*)::int AS count FROM pg_stat_activity WHERE datname=$1",
-        [database]
-      );
-      if (rows[0].count === 0) break;
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
-    await admin.query(`DROP DATABASE IF EXISTS "${database}" WITH (FORCE)`);
+    await dropDatabase(admin, database);
     await admin.end();
     rmSync(directory, { recursive: true, force: true });
   };
@@ -130,24 +123,15 @@ export async function startGateway(
     );
     child.stdout?.on("data", (chunk) => (output += chunk));
     child.stderr?.on("data", (chunk) => (output += chunk));
-    for (let n = 0; n < 100; n++) {
-      if (child.exitCode !== null) throw new Error("Gateway exited");
-      try {
-        if ((await fetch(`${base}/auth/session`)).ok)
-          return {
-            base,
-            pool,
-            apiPaths,
-            mailFile,
-            logs: () => output,
-            stop,
-          };
-      } catch {
-        /* startup */
-      }
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
-    throw new Error("Gateway did not start");
+    // waitForServer fails at once if the child exits; the catch below adds the gateway's own output.
+    const ready = await waitForServer(
+      [child],
+      `${base}/auth/session`,
+      (r) => r.ok
+    );
+    if (!ready) throw new Error("Gateway did not start");
+    await ready.body?.cancel();
+    return { base, pool, apiPaths, mailFile, logs: () => output, stop };
   } catch (error) {
     await stop();
     throw new Error(

@@ -1,8 +1,8 @@
 // Add moved from the old Locations page to the workspace in ticket 114.
 import { test, expect } from "@playwright/test";
+import { signInAsOwner } from "./support/sign-in";
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
 import { Pool } from "pg";
 
 test("collector adds an exact Edition to a Storage Leaf using keyboard controls", async ({
@@ -20,22 +20,7 @@ promote({'card-1': 'Pikachu'})`,
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });
   await pool.query("DELETE FROM auth_send_event");
   try {
-    await page.goto(
-      `${process.env.TEST_ORIGIN || "http://localhost:5173"}/workspace`
-    );
-    await page
-      .getByLabel("Email")
-      .fill(process.env.OWNER_EMAIL || "owner@example.test");
-    await page.getByRole("button", { name: "Send code" }).click();
-    await expect(page.getByRole("status")).toContainText("code has been sent");
-    const lines = readFileSync(
-      process.env.MAIL_FILE || "/tmp/tcg-ticket01-mail",
-      "utf8"
-    )
-      .trim()
-      .split("\n");
-    await page.getByLabel("Six-digit code").fill(JSON.parse(lines.at(-1)!).otp);
-    await page.getByRole("button", { name: "Sign in" }).click();
+    await signInAsOwner(page, "/workspace");
     await expect(
       page.getByRole("heading", { name: "All owned" })
     ).toBeVisible();

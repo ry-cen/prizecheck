@@ -1,7 +1,8 @@
 import { test, expect, type Page } from "@playwright/test";
+import { signInAsOwner } from "./support/sign-in";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { Pool } from "pg";
 import { listCards, raiseLine } from "./support/deck-list";
 
@@ -34,19 +35,9 @@ print('WORLD' + json.dumps(ui_live_world()))`,
   );
   return JSON.parse(out.slice(out.lastIndexOf("WORLD") + 5));
 }
-const lastOtp = () =>
-  JSON.parse(
-    readFileSync(process.env.MAIL_FILE!, "utf8").trim().split("\n").at(-1)!
-  ).otp as string;
-
 async function signIn(page: Page) {
   await pool.query("DELETE FROM auth_send_event");
-  await page.goto(`${ORIGIN}/locations`);
-  await page.getByLabel("Email", { exact: true }).fill(OWNER_EMAIL);
-  await page.getByRole("button", { name: "Send code", exact: true }).click();
-  await expect(page.getByRole("status")).toContainText("code has been sent");
-  await page.getByLabel("Six-digit code").fill(lastOtp());
-  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await signInAsOwner(page, "/workspace");
   await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible();
 }
 const owner = async () =>

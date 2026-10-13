@@ -13,7 +13,7 @@ import {
 let gateway: TestGateway;
 let owner = "";
 beforeAll(async () => {
-  gateway = await startGateway();
+  gateway = await startGateway({ env: { EMAIL_SIGN_IN: "on" } });
   const jar = await emailCodeSignIn(gateway, OWNER);
   owner = (await sessionOf(gateway, jar)).userId!;
   await gateway.pool.query("INSERT INTO owner_binding(user_id) VALUES ($1)", [

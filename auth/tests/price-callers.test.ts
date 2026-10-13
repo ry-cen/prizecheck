@@ -141,6 +141,7 @@ describe("gateway seam", () => {
     base = `http://127.0.0.1:${port}`;
     const env = {
       ...process.env,
+      EMAIL_SIGN_IN: "on",
       DATABASE_URL: connection.toString(),
       AUTH_PORT: String(port),
       API_ORIGIN: `http://127.0.0.1:${apiPort}`,

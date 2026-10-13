@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
+import { signInAsOwner } from "./support/sign-in";
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
 import { Pool } from "pg";
 
 test("collector searches Collection totals and opens physical leaf distribution", async ({
@@ -18,24 +18,7 @@ promote({'collection-1':'Collection Pikachu'})`,
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });
   await pool.query("DELETE FROM auth_send_event");
   try {
-    await page.goto(
-      process.env.TEST_ORIGIN
-        ? `${process.env.TEST_ORIGIN}/locations`
-        : `${process.env.TEST_ORIGIN || "http://localhost:5173"}/locations`
-    );
-    await page
-      .getByLabel("Email", { exact: true })
-      .fill(process.env.OWNER_EMAIL || "owner@example.test");
-    await page.getByRole("button", { name: "Send code" }).click();
-    await expect(page.getByRole("status")).toContainText("code has been sent");
-    const lines = readFileSync(
-      process.env.MAIL_FILE || "/tmp/tcg-ticket01-mail",
-      "utf8"
-    )
-      .trim()
-      .split("\n");
-    await page.getByLabel("Six-digit code").fill(JSON.parse(lines.at(-1)!).otp);
-    await page.getByRole("button", { name: "Sign in", exact: true }).click();
+    await signInAsOwner(page, "/workspace");
     await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible();
     const owner = (
       await pool.query('SELECT id FROM "user" WHERE email=$1', [

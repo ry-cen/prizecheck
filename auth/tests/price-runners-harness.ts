@@ -417,6 +417,7 @@ export class Stack {
     );
     this.base = {
       ...inherited,
+      EMAIL_SIGN_IN: "on",
       DATABASE_URL: connection.toString(),
       MAIL_MODE: "file",
       MAIL_FILE: join(this.directory, "mail"),

@@ -2,6 +2,7 @@ import { afterAll, beforeAll, expect, it } from "vitest";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createServer } from "node:net";
 import { CONSENT_PATH } from "../testing/oauth-fake/core.js";
+import { PLACEHOLDER_CREDENTIALS } from "./support/oauth-gateway.js";
 import { waitForServer } from "./support/servers.js";
 
 // The preload must leave the real gateway's own routes alone and add only the consent page (#150 builds on this).
@@ -37,6 +38,7 @@ beforeAll(async () => {
         PUBLIC_ORIGIN: origin,
         OWNER_EMAIL: "owner@example.test",
         SIGNUP_MODE: "owner-only",
+        ...PLACEHOLDER_CREDENTIALS,
       },
       stdio: ["ignore", "pipe", "pipe"],
     }
@@ -65,7 +67,7 @@ it("serves the fake consent page from the real gateway and leaves its routes unc
   expect(await session.json()).toEqual({ signedIn: false, userId: null });
   expect((await fetch(`${base}/no-such-route`)).status).toBe(404);
   expect(
-    (await fetch(`${base}/auth/request-code`, { method: "POST", body: "{}" }))
+    (await fetch(`${base}/auth/sign-out`, { method: "POST", body: "{}" }))
       .status
   ).toBe(403);
   const query = new URLSearchParams({

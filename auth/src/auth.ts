@@ -2,6 +2,7 @@ import { betterAuth } from "better-auth";
 import { emailOTP } from "better-auth/plugins";
 import { Pool } from "pg";
 import { appendFile } from "node:fs/promises";
+import { EMAIL_OTP_PATHS, emailSignInEnabled } from "./emailSignIn.js";
 import { configuredProviders, socialProviders } from "./providers.js";
 import { createSignupGate } from "./signupGate.js";
 import { signupEnabled } from "./signup.js";
@@ -23,7 +24,9 @@ const budgetedLookupPool = new Pool({
 const origin = process.env.PUBLIC_ORIGIN || "http://localhost:5173";
 /** The web page that shows sign-in and its error messages (`?error=<code>`). */
 export const SIGN_IN_PAGE = "/sign-in";
-// Startup checks: an invalid signup configuration or a half-configured provider stops the gateway here.
+// Startup checks: an invalid EMAIL_SIGN_IN, an invalid signup configuration or a half-configured provider stops the
+// gateway here.
+export const emailSignIn = emailSignInEnabled();
 export const publicSignup = signupEnabled();
 export const providers = configuredProviders();
 const ownerEmail = (process.env.OWNER_EMAIL || "").trim().toLowerCase();
@@ -32,6 +35,13 @@ if (
   ["console", "file"].includes(process.env.MAIL_MODE || "")
 ) {
   throw new Error("Fake email delivery is for local development only");
+}
+if (
+  emailSignIn &&
+  process.env.NODE_ENV === "production" &&
+  process.env.MAIL_MODE !== "http"
+) {
+  throw new Error("Email sign-in in production requires MAIL_MODE=http");
 }
 
 export async function deliverCode(
@@ -134,6 +144,9 @@ function authOn(database: Pool) {
     basePath: "/api/auth",
     trustedOrigins: [origin],
     emailAndPassword: { enabled: false },
+    // The plugin stays registered so turning the switch on needs no code change; when off, Better Auth itself refuses
+    // every one of its endpoints, even if a gateway route reached them by mistake.
+    disabledPaths: emailSignIn ? [] : EMAIL_OTP_PATHS,
     socialProviders: socialProviders(providers),
     account: {
       accountLinking: {
