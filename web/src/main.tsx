@@ -1,5 +1,5 @@
 import { OperationsHealth } from "./OperationsHealth";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   getOwnerCatalogStatus,
@@ -18,6 +18,11 @@ import {
   OwnerMissingCardReview,
 } from "./MissingCardReports";
 import { Workspace } from "./workspace/Workspace";
+import {
+  clearFailureFromAddress,
+  failureInAddress,
+  signInMessage,
+} from "./signInMessages";
 import "./style.css";
 import "./tokens.css";
 
@@ -83,6 +88,11 @@ function App() {
   const [sent, setSent] = useState(false);
   const [message, setMessage] = useState("");
   const [methods, setMethods] = useState<SignInMethods | null>(null);
+  // A failed sign-in lands here with ?error=<code>: read once, shown once, then removed from the address bar. Once
+  // signed in it is dropped, so a later sign-out never replays it.
+  const [failure, setFailure] = useState(failureInAddress);
+  const failureRef = useRef<HTMLDivElement>(null);
+  const failureShown = useRef(false);
 
   async function refresh() {
     try {
@@ -117,6 +127,19 @@ function App() {
       }
     })();
   }, [session?.signedIn, methods]);
+  useEffect(() => {
+    if (!failure || session === null) return;
+    // Signed in (another tab finished signing in, or the back button): never show the code; drop it from the address.
+    if (session.signedIn) {
+      setFailure(null);
+      clearFailureFromAddress();
+      return;
+    }
+    if (failureShown.current || methods === null) return;
+    failureShown.current = true;
+    failureRef.current?.focus();
+    clearFailureFromAddress();
+  }, [failure, session, methods]);
   useEffect(() => {
     void refresh();
     const onPop = () => setView(pathView());
@@ -221,10 +244,29 @@ function App() {
         <p role="alert">{message}</p>
       </main>
     );
+  const failureMessage =
+    failure && methods
+      ? signInMessage(
+          failure.code,
+          methods.providers.find((provider) => provider.id === failure.provider)
+            ?.name ?? null
+        )
+      : null;
   if (!session.signedIn)
     return (
       <main className="auth">
         <h1>PrizeCheck</h1>
+        {failureMessage && (
+          <div
+            className="auth-failure"
+            role="alert"
+            tabIndex={-1}
+            ref={failureRef}
+          >
+            <p>{failureMessage.text}</p>
+            {failureMessage.next && <p>{failureMessage.next}</p>}
+          </div>
+        )}
         {methods!.providers.length > 0 && (
           <ul className="auth-providers">
             {methods!.providers.map((provider) => (

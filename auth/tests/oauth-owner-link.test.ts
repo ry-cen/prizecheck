@@ -33,7 +33,10 @@ it("refuses to link a provider while the owner's own email is unverified", async
       "/auth/sign-in/google",
       "owner"
     );
-    expect(walk.location).toBe("/sign-in?error=account_not_linked");
+    // Better Auth's account_not_linked, made identical to the owner-only refusal by the gateway.
+    expect(walk.location).toBe(
+      "/sign-in?provider=google&error=sign_in_unavailable&error_description=sign_in_unavailable"
+    );
     expect(await accountsOf(gateway, owner)).toEqual([]);
   } finally {
     await gateway.pool.query(

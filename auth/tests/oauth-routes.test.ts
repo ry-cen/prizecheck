@@ -167,7 +167,7 @@ describe("OAuth routes through the fake", () => {
       "/auth/sign-in/google",
       "cancel"
     );
-    expect(walk.location).toBe("/sign-in?error=access_denied");
+    expect(walk.location).toBe("/sign-in?provider=google&error=access_denied");
   });
 });
 

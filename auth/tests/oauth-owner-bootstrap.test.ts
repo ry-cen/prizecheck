@@ -15,8 +15,8 @@ beforeAll(async () => {
 }, 60_000);
 afterAll(() => gateway?.stop(), 30_000);
 
-const NOT_OPEN =
-  "/sign-in?error=sign_in_unavailable&error_description=sign_in_unavailable";
+const notOpen = (provider: string) =>
+  `/sign-in?provider=${provider}&error=sign_in_unavailable&error_description=sign_in_unavailable`;
 const rows = async () =>
   (
     await gateway.pool.query(
@@ -40,28 +40,31 @@ it("refuses everyone but the owner, and an unverified or missing email, writing 
     "/auth/sign-in/google",
     "newcomer"
   );
-  expect(newcomer.location).toBe(NOT_OPEN);
+  expect(newcomer.location).toBe(notOpen("google"));
   const viaDiscord = await walkSignIn(
     gateway.base,
     "/auth/sign-in/discord",
     "different-email"
   );
-  expect(viaDiscord.location).toBe(NOT_OPEN);
+  expect(viaDiscord.location).toBe(notOpen("discord"));
   for (const provider of ["google", "discord"]) {
     const unverified = await walkSignIn(
       gateway.base,
       `/auth/sign-in/${provider}`,
       "unverified"
     );
+    // An email the provider doesn't vouch for is dropped before any lookup (auth/src/providers.ts).
     expect(unverified.location).toBe(
-      "/sign-in?error=email_not_verified&error_description=email_not_verified"
+      `/sign-in?provider=${provider}&error=email_not_found`
     );
     const missing = await walkSignIn(
       gateway.base,
       `/auth/sign-in/${provider}`,
       "no-email"
     );
-    expect(missing.location).toBe("/sign-in?error=email_not_found");
+    expect(missing.location).toBe(
+      `/sign-in?provider=${provider}&error=email_not_found`
+    );
     expect(missing.jar.has("better-auth.session_token")).toBe(false);
   }
   expect(await rows()).toEqual({
@@ -177,8 +180,19 @@ it("once bound, lets only the bound owner sign in or link, with the same refusal
     "/auth/sign-in/google",
     "newcomer"
   );
-  expect(before.location).toBe(NOT_OPEN);
+  expect(before.location).toBe(notOpen("google"));
   expect(after.location).toBe(before.location);
+  // A collector whose own email is unverified: Better Auth refuses to link with account_not_linked, which the gateway
+  // turns into the same refusal, so nothing reveals the account.
+  await gateway.pool.query(
+    `INSERT INTO "user"(id, name, email, "emailVerified") VALUES ('unverified-collector', 'Unverified', 'owner.elsewhere@example.test', false)`
+  );
+  const unverifiedLocal = await walkSignIn(
+    gateway.base,
+    "/auth/sign-in/google",
+    "different-email"
+  );
+  expect(unverifiedLocal.location).toBe(notOpen("google"));
   expect(
     (
       await gateway.pool.query(

@@ -17,6 +17,7 @@ import {
   SIGN_IN_PAGE,
 } from "./auth.js";
 import { betterRequest, relay } from "./betterRelay.js";
+import { neutralCallback } from "./callbackErrors.js";
 import { callerFor, trustedClientIp } from "./caller.js";
 import { safeNext } from "./nextPath.js";
 import { PublicReadLimiter } from "./publicReads.js";
@@ -320,7 +321,8 @@ const server = createServer(async (request, response) => {
             provider: provider.id,
             callbackURL: next,
             newUserCallbackURL: next,
-            errorCallbackURL: SIGN_IN_PAGE,
+            // The provider id lets the page name the provider in its message.
+            errorCallbackURL: `${SIGN_IN_PAGE}?provider=${provider.id}`,
           }),
           { method: "POST", originHeader: origin }
         )
@@ -342,7 +344,9 @@ const server = createServer(async (request, response) => {
             forwardQuery: true,
           })
         );
-        return relay(response, result, { forwardLocation: true });
+        return relay(response, neutralCallback(result, publicSignup), {
+          forwardLocation: true,
+        });
       } catch (error) {
         console.error(
           "OAuth callback failed",

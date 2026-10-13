@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_NEXT, safeNext } from "../src/nextPath.js";
-import { configuredProviders, socialProviders } from "../src/providers.js";
+import {
+  configuredProviders,
+  socialProviders,
+  vouchedEmailOnly,
+} from "../src/providers.js";
 import { createSignupGate, type GateInput } from "../src/signupGate.js";
 
 describe("safeNext", () => {
@@ -95,12 +99,37 @@ describe("configuredProviders", () => {
         clientId: "g-id",
         clientSecret: "g-secret",
         overrideUserInfoOnSignIn: true,
+        mapProfileToUser: expect.any(Function),
       },
       discord: {
         clientId: "d-id",
         clientSecret: "d-secret",
         overrideUserInfoOnSignIn: true,
+        mapProfileToUser: expect.any(Function),
       },
+    });
+  });
+  it("keeps a provider's email only when the provider vouches for it", () => {
+    const google = vouchedEmailOnly("google");
+    const discord = vouchedEmailOnly("discord");
+    expect(google({ email: "a@example.test", email_verified: true })).toEqual(
+      {}
+    );
+    expect(discord({ email: "a@example.test", verified: true })).toEqual({});
+    for (const profile of [
+      { email: "a@example.test", email_verified: false, verified: false },
+      { email: "a@example.test", email_verified: "true", verified: "true" },
+      { email: "a@example.test" },
+    ]) {
+      expect(google(profile)).toEqual({ email: null });
+      expect(discord(profile)).toEqual({ email: null });
+    }
+    // Each provider reads only its own claim.
+    expect(google({ email: "a@example.test", verified: true })).toEqual({
+      email: null,
+    });
+    expect(discord({ email: "a@example.test", email_verified: true })).toEqual({
+      email: null,
     });
   });
 });
