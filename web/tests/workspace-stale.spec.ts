@@ -143,9 +143,12 @@ async function editionOf(sourceId: string): Promise<string> {
 const cards = (page: Page) => page.getByRole("region", { name: "Cards" });
 const tiles = (page: Page) => cards(page).getByRole("button");
 const bar = (page: Page) => page.getByRole("region", { name: "Selection" });
-/** The toast's live status line (ticket 107). */
+/** The message of ticket 107's toast, in the app's one toast host (#165). */
 const toast = (page: Page) =>
-  page.getByRole("status").filter({ hasText: /Moved|Removed|Undo|Dismissed/ });
+  page
+    .getByRole("region", { name: "Notifications" })
+    .getByRole("paragraph")
+    .filter({ hasText: /Moved|Removed|Undo|Dismissed/ });
 
 async function box(locator: Locator) {
   const found = await locator.boundingBox();

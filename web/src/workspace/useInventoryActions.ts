@@ -50,6 +50,8 @@ export type ToastState = {
   entry: UndoEntry | null;
   /** The API refused this Undo as incompatible: it shows as unavailable and can be dismissed. */
   unavailable: boolean;
+  /** The collector acted on the toast (Undo, Dismiss Undo): its first usable button takes focus. */
+  focus?: boolean;
 };
 
 type Options = {
@@ -67,7 +69,7 @@ type Options = {
  * reuses both, so a commit whose response was lost applies once. */
 type Pending = { manifestId: string; key: string; signature: string };
 
-type FocusTarget = "heading" | "actions" | "toast";
+type FocusTarget = "heading" | "actions";
 
 /** A failure whose refresh may empty the selection: its toast text and the selection it was about. */
 type Carried = { toastText: string; selection: Selection };
@@ -103,7 +105,6 @@ export function useInventoryActions({
   const byKeyRef = useRef(byKey);
   byKeyRef.current = byKey;
   const actionsButton = useRef<HTMLButtonElement>(null);
-  const toastRef = useRef<HTMLDivElement>(null);
   // Names and paths outlive a gallery reload, which empties the listing while it refetches.
   const labels = useRef(new Map<string, CardLabel>()).current;
   const paths = useRef(new Map<string, string>()).current;
@@ -155,7 +156,8 @@ export function useInventoryActions({
   }, []);
 
   /** A tile that holds focus unmounts when the gallery reloads or the selection clears: move focus
-   * to a stable control first. */
+   * to a stable control first. Tiles carry data-gallery-tile, not a class, since #164 moved them onto
+   * the kit's CopyTile. */
   const keepFocus = (to: "heading" | "actions") => {
     if (!document.activeElement?.closest("[data-gallery-tile]")) return;
     if (to === "actions" && actionsButton.current?.isConnected)
@@ -344,11 +346,11 @@ export function useInventoryActions({
     try {
       const result = await applyUndo(entry.id, key);
       undoKeys.current.delete(entry.id);
-      focusAfter.current = "toast";
       showToast({
         message: `Undo restored ${countText(result.copy_count, "copy", "copies")} to ${plural(result.source_count, "location", "locations")}.`,
         entry: null,
         unavailable: false,
+        focus: true,
       });
       live.current.reloadGallery();
       void live.current.reloadTree();
@@ -364,11 +366,11 @@ export function useInventoryActions({
             : source_id || destination_id
               ? `${place((source_id ?? destination_id)!)} can no longer hold cards`
               : "the cards have changed";
-        focusAfter.current = "toast";
         showToast({
           message: `Undo unavailable: ${reason}, so nothing was restored. Dismiss it to reach an earlier action.`,
           entry,
           unavailable: true,
+          focus: true,
         });
       } else if (
         code === "UNDO_EXPIRED" ||
@@ -377,13 +379,13 @@ export function useInventoryActions({
       ) {
         undoKeys.current.delete(entry.id);
         const entries = await listUndo().catch(() => [] as UndoEntry[]);
-        focusAfter.current = "toast";
         showToast({
           message: entries[0]
             ? "That Undo is no longer available. The newest action can still be undone."
             : "That Undo is no longer available.",
           entry: entries[0] ?? null,
           unavailable: false,
+          focus: true,
         });
       } else if (!(cause instanceof MoveError) || cause.status >= 500) {
         // Unknown outcome (no response or a server error): the same key makes a retry apply once.
@@ -393,12 +395,12 @@ export function useInventoryActions({
         });
       } else if (code === "REPLAY_OUTCOME_UNAVAILABLE") {
         undoKeys.current.delete(entry.id);
-        focusAfter.current = "toast";
         showToast({
           message:
             "Undo may have already finished, and your collection was refreshed. Review it before trying again.",
           entry: null,
           unavailable: false,
+          focus: true,
         });
         live.current.reloadGallery();
         void live.current.reloadTree();
@@ -436,13 +438,13 @@ export function useInventoryActions({
       }
       const entries = await listUndo().catch(() => [] as UndoEntry[]);
       const next = entries[0] ?? null;
-      focusAfter.current = "toast";
       showToast({
         message: next
           ? `Dismissed. The earlier ${next.action === "move" ? "Move" : "Inventory Removal"} can be undone.`
           : "Dismissed. There is no earlier action to undo.",
         entry: next,
         unavailable: false,
+        focus: true,
       });
     } finally {
       busyRef.current = false;
@@ -450,8 +452,10 @@ export function useInventoryActions({
     }
   }, [showToast]);
 
+  // Dismiss is pressed inside the toast, which goes away with this. The heading takes focus now, while
+  // the toast is still there, rather than in an effect that can run before the toast is removed.
   const closeToast = useCallback(() => {
-    focusAfter.current = "heading";
+    focusWorkspaceHeading();
     setToast(null);
   }, []);
 
@@ -478,23 +482,18 @@ export function useInventoryActions({
   }, [entryId, entryExpires]);
 
   // Runs after the commit that closed a dialog or changed the toast, once the dialog has left the
-  // top layer, so the page is no longer inert and focus can move.
+  // top layer, so the page is no longer inert and focus can move. A toast the collector acted on takes
+  // focus itself, in the kit's toast host (ToastState.focus).
   useEffect(() => {
     const target = focusAfter.current;
     if (!target) return;
+    // An earlier render's pending effects can run before the commit that closes the dialog. Focus can't
+    // leave an open modal, so keep the request for the commit that closes it.
+    if (document.activeElement?.closest("dialog[open]")) return;
     focusAfter.current = null;
     if (target === "actions" && actionsButton.current?.isConnected) {
       actionsButton.current.focus();
       return;
-    }
-    if (target === "toast") {
-      const button = toastRef.current?.querySelector<HTMLButtonElement>(
-        "button:not(:disabled)"
-      );
-      if (button) {
-        button.focus();
-        return;
-      }
     }
     const active = document.activeElement;
     if (!active || active === document.body || !active.isConnected)
@@ -563,7 +562,6 @@ export function useInventoryActions({
     removalRows,
     toast,
     actionsButton,
-    toastRef,
     openMove,
     openRemoval,
     closeDialog,

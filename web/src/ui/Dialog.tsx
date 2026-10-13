@@ -32,9 +32,11 @@ const LEFT =
 
 /**
  * The kit's one dialog, on the native <dialog> element (ADR 0012). It opens with showModal(), so the
- * rest of the page is inert and the scrim is the ::backdrop. It moves focus to its first control (or an
- * [autofocus] one), keeps Tab inside, closes on Escape, the close button and a press on the scrim, and
- * returns focus to the element that had it when it opened. It has no entry animation.
+ * rest of the page is inert and the scrim is the ::backdrop. It moves focus to its first control, or to
+ * the element marked data-autofocus (React's autoFocus writes no attribute, and its own focus call runs
+ * before the dialog is shown, so it can't be used here), keeps Tab inside, closes on Escape, the close
+ * button and a press on the scrim, and returns focus to the element that had it when it opened. It has
+ * no entry animation.
  */
 export function Dialog({
   open,
@@ -61,7 +63,7 @@ export function Dialog({
         : null);
     if (!dialog.open) dialog.showModal();
     const first =
-      dialog.querySelector<HTMLElement>("[autofocus]") ??
+      dialog.querySelector<HTMLElement>("[autofocus], [data-autofocus]") ??
       focusableIn(dialog)[0] ??
       dialog;
     first.focus();

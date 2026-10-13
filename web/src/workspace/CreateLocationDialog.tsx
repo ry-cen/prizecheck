@@ -1,11 +1,15 @@
 import React, { useEffect, useRef, useState } from "react";
+import { TriangleAlert } from "lucide-react";
 import {
   createLocation,
   LocationError,
   type TreeNode,
 } from "../location_generated";
+import { Dialog } from "../ui/Dialog";
+import { Icon } from "../ui/Icon";
+import { BUTTON, BUTTON_ROW, FIELD, PRIMARY_BUTTON } from "./controlClasses";
+import { KitLayer } from "./KitLayer";
 import type { LocationIndex } from "./locationTree";
-import "./CreateLocationDialog.css";
 
 type Conversion = "move_holdings_to_child" | "create_unsorted_child";
 
@@ -51,9 +55,12 @@ function parentOptions(index: LocationIndex): TreeNode[] {
   return result;
 }
 
-/** The Name-and-parent create form as a modal dialog. A stocked Storage Leaf parent is only known
- * from the server's STOCKED_LOCATION_REQUIRES_CONVERSION answer; the form then offers the two
- * atomic conversion choices. Cancel at any point creates nothing. */
+/** The Name-and-parent create form in the kit Dialog (#165), a bottom sheet on a phone. The Name field
+ * takes focus, and focus returns to the opener on close (to ☰ when it opened from the phone drawer,
+ * whose own close puts focus there first). A stocked Storage Leaf parent is only known from the server's
+ * STOCKED_LOCATION_REQUIRES_CONVERSION answer; the form then offers the two atomic conversion choices.
+ * Cancel at any point creates nothing; Escape, the close button and the scrim are Cancel, except while
+ * the form is busy. */
 export function CreateLocationDialog({
   index,
   initialParentId,
@@ -61,9 +68,7 @@ export function CreateLocationDialog({
   onCancel,
   onTreeChanged,
 }: Props) {
-  const dialogRef = useRef<HTMLDialogElement>(null);
   const nameRef = useRef<HTMLInputElement>(null);
-  const pressedBackdrop = useRef(false);
   const [name, setName] = useState("");
   const [parentId, setParentId] = useState<string | null>(initialParentId);
   // The parent the server reported as stocked; its choices show while it stays selected.
@@ -72,23 +77,6 @@ export function CreateLocationDialog({
   const [error, setError] = useState("");
   const [nameInvalid, setNameInvalid] = useState(false);
   const [busy, setBusy] = useState(false);
-
-  // A passive effect on purpose: when the form opens from the mobile drawer, the drawer's cleanup
-  // focuses its opener in this same phase, and cleanups run first. Focus returns there on close.
-  useEffect(() => {
-    const dialog = dialogRef.current;
-    if (!dialog) return;
-    const opener =
-      document.activeElement instanceof HTMLElement
-        ? document.activeElement
-        : null;
-    if (!dialog.open) dialog.showModal();
-    nameRef.current?.focus();
-    return () => {
-      if (dialog.open) dialog.close();
-      if (opener?.isConnected && opener.getClientRects().length) opener.focus();
-    };
-  }, []);
 
   // A parent that disappeared after a refresh falls back to Top level.
   useEffect(() => {
@@ -167,115 +155,119 @@ export function CreateLocationDialog({
   }
 
   return (
-    <dialog
-      ref={dialogRef}
-      className="ws-create-dialog"
-      aria-labelledby="ws-create-title"
-      onCancel={(event) => {
-        // Escape: React state decides when the dialog closes.
-        event.preventDefault();
-        if (!busy) onCancel();
-      }}
-      onClose={() => {
-        // The browser can force a close (a repeated Escape while busy); keep React state in step.
-        // The cleanup's own close() finds the dialog unmounted or, under StrictMode, open again.
-        if (!dialogRef.current?.open) onCancel();
-      }}
-      onPointerDown={(event) => {
-        pressedBackdrop.current = event.target === event.currentTarget;
-      }}
-      onClick={(event) => {
-        // Only a press and release both on the backdrop closes; a text drag that ends outside doesn't.
-        const backdrop =
-          pressedBackdrop.current && event.target === event.currentTarget;
-        pressedBackdrop.current = false;
-        if (backdrop && !busy) onCancel();
-      }}
-    >
-      <form className="ws-create-form" onSubmit={submit} noValidate>
-        <h2 id="ws-create-title">Add location</h2>
-        <label className="ws-create-field">
-          Name
-          <input
-            ref={nameRef}
-            value={name}
-            maxLength={120}
-            autoComplete="off"
-            aria-invalid={nameInvalid || undefined}
-            aria-describedby={error ? "ws-create-error" : undefined}
-            onChange={(event) => {
-              setName(event.target.value);
-              setError("");
-              setNameInvalid(false);
-            }}
-          />
-        </label>
-        <label className="ws-create-field">
-          Parent location
-          <select
-            value={parentId ?? ""}
-            onChange={(event) => {
-              setParentId(event.target.value || null);
-              setConversion(null);
-              setError("");
-              setNameInvalid(false);
-            }}
-          >
-            <option value="">Top level</option>
-            {options.map((node) => (
-              <option key={node.id} value={node.id}>
-                {index.path(node.id)}
-              </option>
-            ))}
-          </select>
-        </label>
-        {stocked && parent && (
-          <fieldset className="ws-create-conversion">
-            <legend>{parent.name} contains cards. Where should they go?</legend>
-            <label>
-              <input
-                type="radio"
-                name="conversion"
-                value="move_holdings_to_child"
-                checked={conversion === "move_holdings_to_child"}
-                onChange={() => {
-                  setConversion("move_holdings_to_child");
-                  setError("");
-                  setNameInvalid(false);
-                }}
-              />
-              Move existing cards into {trimmed || "the new Location"}
-            </label>
-            <label>
-              <input
-                type="radio"
-                name="conversion"
-                value="create_unsorted_child"
-                checked={conversion === "create_unsorted_child"}
-                onChange={() => {
-                  setConversion("create_unsorted_child");
-                  setError("");
-                  setNameInvalid(false);
-                }}
-              />
-              Create a separate Unsorted child for existing cards
-            </label>
-          </fieldset>
-        )}
-        {error && (
-          <p id="ws-create-error" role="alert" className="ws-create-error">
-            {error}
-          </p>
-        )}
-        <div className="ws-create-actions">
-          <button type="button" onClick={onCancel} disabled={busy}>
-            Cancel
-          </button>
-          <button type="submit" className="ws-create-submit" disabled={busy}>
-            {busy ? "Creating…" : "Create location"}
-          </button>
-        </div>
-      </form>
-    </dialog>
+    <KitLayer>
+      <Dialog
+        open
+        onClose={() => {
+          if (!busy) onCancel();
+        }}
+        title="Add location"
+      >
+        <form className="flex flex-col gap-4" onSubmit={submit} noValidate>
+          <label className="flex flex-col gap-2 text-meta text-text-muted">
+            Name
+            <input
+              ref={nameRef}
+              className={FIELD}
+              data-autofocus
+              value={name}
+              maxLength={120}
+              autoComplete="off"
+              aria-invalid={nameInvalid || undefined}
+              aria-describedby={error ? "ws-create-error" : undefined}
+              onChange={(event) => {
+                setName(event.target.value);
+                setError("");
+                setNameInvalid(false);
+              }}
+            />
+          </label>
+          <label className="flex flex-col gap-2 text-meta text-text-muted">
+            Parent location
+            <select
+              className={FIELD}
+              value={parentId ?? ""}
+              onChange={(event) => {
+                setParentId(event.target.value || null);
+                setConversion(null);
+                setError("");
+                setNameInvalid(false);
+              }}
+            >
+              <option value="">Top level</option>
+              {options.map((node) => (
+                <option key={node.id} value={node.id}>
+                  {index.path(node.id)}
+                </option>
+              ))}
+            </select>
+          </label>
+          {stocked && parent && (
+            <fieldset className="m-0 flex min-w-0 flex-col gap-3 rounded-panel border border-border p-4">
+              <legend className="px-1 text-meta">
+                {parent.name} contains cards. Where should they go?
+              </legend>
+              <label className="flex items-start gap-2 text-meta phone:min-h-tap phone:items-center">
+                <input
+                  type="radio"
+                  name="conversion"
+                  value="move_holdings_to_child"
+                  className="m-0 mt-0.5 shrink-0 accent-accent phone:mt-0"
+                  checked={conversion === "move_holdings_to_child"}
+                  onChange={() => {
+                    setConversion("move_holdings_to_child");
+                    setError("");
+                    setNameInvalid(false);
+                  }}
+                />
+                Move existing cards into {trimmed || "the new Location"}
+              </label>
+              <label className="flex items-start gap-2 text-meta phone:min-h-tap phone:items-center">
+                <input
+                  type="radio"
+                  name="conversion"
+                  value="create_unsorted_child"
+                  className="m-0 mt-0.5 shrink-0 accent-accent phone:mt-0"
+                  checked={conversion === "create_unsorted_child"}
+                  onChange={() => {
+                    setConversion("create_unsorted_child");
+                    setError("");
+                    setNameInvalid(false);
+                  }}
+                />
+                Create a separate Unsorted child for existing cards
+              </label>
+            </fieldset>
+          )}
+          {error && (
+            <p
+              id="ws-create-error"
+              role="alert"
+              className="m-0 flex items-start gap-1 text-meta text-danger"
+            >
+              <Icon icon={TriangleAlert} size={14} className="mt-px shrink-0" />
+              <span>{error}</span>
+            </p>
+          )}
+          <div className={BUTTON_ROW}>
+            <button
+              type="button"
+              className={`inline-flex ${BUTTON}`}
+              onClick={onCancel}
+              disabled={busy}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className={`inline-flex ${PRIMARY_BUTTON}`}
+              disabled={busy}
+            >
+              {busy ? "Creating…" : "Create location"}
+            </button>
+          </div>
+        </form>
+      </Dialog>
+    </KitLayer>
   );
 }

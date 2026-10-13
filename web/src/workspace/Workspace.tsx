@@ -45,7 +45,7 @@ import { SelectionBar } from "./SelectionBar";
 import { selectedGroups, selectionScope } from "./selectionModel";
 import { StaleBanner } from "./StaleBanner";
 import { DragBadge, useTileDrag } from "./tileDrag";
-import { UndoToast } from "./UndoToast";
+import { useUndoToast } from "./UndoToast";
 import { useDebouncedValue } from "./useDebouncedValue";
 import { useGalleryData } from "./useGalleryData";
 import { useInventoryActions } from "./useInventoryActions";
@@ -334,9 +334,23 @@ export function Workspace({ userId, active }: Props) {
       />
     );
 
-  // The skip link past the cards: focus the dock's first visible control (the toast's Undo, or the
-  // selection bar). #107 sends focus to the heading after a Move, which is otherwise a Tab through every tile away.
+  // Ticket 107's toast on the kit's toast host (#165). It shows only while Collection is the shown page and
+  // the hand-rolled Filters & display drawer is closed (kit dialogs make it inert themselves).
+  const overlayOpen = filtersDrawerOpen;
+  const undoToast = useUndoToast({
+    toast: actions.toast,
+    busy: actions.busy,
+    shown: active && !overlayOpen,
+    onUndo: actions.undo,
+    onDismiss: actions.dismiss,
+    onClose: actions.closeToast,
+  });
+
+  // The skip link past the cards: focus the toast's first usable button (Undo), or else the selection
+  // bar's first visible control. #107 sends focus to the heading after a Move, which is otherwise a Tab
+  // through every tile away.
   function focusDock() {
+    if (undoToast.focus()) return;
     const target = Array.from(
       dockRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? []
     ).find((element) => element.getClientRects().length > 0);
@@ -514,30 +528,24 @@ export function Workspace({ userId, active }: Props) {
             </div>
           </main>
         </div>
-        {/* The bottom dock: the success and Undo toast sits above the selection bar. */}
-        <div className="ws-dock" id="ws-dock" ref={dockRef}>
-          <UndoToast
-            toast={actions.toast}
+        {/* The selection bar (the Actions strip). It and the dialogs below draw outside the page
+            (KitLayer, #165), so they are drawn only while Collection is the shown page; their state
+            stays, and they show again when it does. */}
+        {active && selection.summary.copies > 0 && (
+          <SelectionBar
+            summary={selection.summary}
+            onClear={actions.clearSelection}
+            onDetails={selection.openDetails}
+            onMove={actions.openMove}
+            onRemove={actions.openRemoval}
             busy={actions.busy}
-            onUndo={actions.undo}
-            onDismiss={actions.dismiss}
-            onClose={actions.closeToast}
-            toastRef={actions.toastRef}
+            status={actions.dialog ? "" : actions.progress}
+            error={actions.barError}
+            actionsRef={actions.actionsButton}
+            barRef={dockRef}
+            inert={overlayOpen}
           />
-          {selection.summary.copies > 0 && (
-            <SelectionBar
-              summary={selection.summary}
-              onClear={actions.clearSelection}
-              onDetails={selection.openDetails}
-              onMove={actions.openMove}
-              onRemove={actions.openRemoval}
-              busy={actions.busy}
-              status={actions.dialog ? "" : actions.progress}
-              error={actions.barError}
-              actionsRef={actions.actionsButton}
-            />
-          )}
-        </div>
+        )}
       </div>
       {/* The phone Location drawer: the kit Dialog along the left edge. Its close button is the first
           focus stop; focus returns to ☰ when it closes. */}
@@ -573,7 +581,7 @@ export function Workspace({ userId, active }: Props) {
           onClose={closeFiltersDrawer}
         />
       )}
-      {createFor !== undefined && (
+      {active && createFor !== undefined && (
         <CreateLocationDialog
           index={index}
           initialParentId={createFor}
@@ -613,7 +621,7 @@ export function Workspace({ userId, active }: Props) {
           onClose={selection.closeDetails}
         />
       )}
-      {actions.dialog === "move" && (
+      {active && actions.dialog === "move" && (
         <MoveDialog
           index={index}
           initialExpanded={expanded}
@@ -626,7 +634,7 @@ export function Workspace({ userId, active }: Props) {
           onCancel={actions.closeDialog}
         />
       )}
-      {actions.dialog === "remove" && (
+      {active && actions.dialog === "remove" && (
         <RemovalDialog
           rows={actions.removalRows}
           copies={selection.summary.copies}

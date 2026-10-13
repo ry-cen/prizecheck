@@ -1,92 +1,56 @@
-import React, { useEffect, useId, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
+import { Check, ChevronDown, ChevronRight, TriangleAlert } from "lucide-react";
 import type { TreeNode } from "../location_generated";
+import { Dialog } from "../ui/Dialog";
+import { Icon } from "../ui/Icon";
+import {
+  BUTTON,
+  BUTTON_ROW,
+  DANGER_BUTTON,
+  FIELD,
+  PRIMARY_BUTTON,
+} from "./controlClasses";
 import { plural } from "./galleryModel";
 import {
   groupRemovalRows,
   movePreview,
   type RemovalRow,
 } from "./inventoryActionsModel";
+import { KitLayer } from "./KitLayer";
 import { isFolder, type LocationIndex } from "./locationTree";
 import type { SelectedGroup } from "./selectionModel";
-import "./InventoryActions.css";
 
-type ShellProps = {
-  titleId: string;
-  className: string;
-  busy: boolean;
-  /** `forced` is true when the browser closed the dialog itself. */
-  onCancel: (forced?: boolean) => void;
-  children: React.ReactNode;
-};
-
-/** A native modal dialog: a centred panel on desktop, a bottom sheet on mobile. The page behind is
- * inert. Escape, Cancel and a backdrop press close it, except while an action is running.
- * The element marked data-autofocus takes focus when it opens; the caller restores focus on close. */
-function ActionDialog({
-  titleId,
-  className,
-  busy,
-  onCancel,
-  children,
-}: ShellProps) {
-  const ref = useRef<HTMLDialogElement>(null);
-  const pressedBackdrop = useRef(false);
-  const live = useRef({ busy, onCancel });
-  live.current = { busy, onCancel };
-  useEffect(() => {
-    const dialog = ref.current;
-    if (!dialog) return;
-    if (!dialog.open) dialog.showModal();
-    dialog.querySelector<HTMLElement>("[data-autofocus]")?.focus();
-    return () => {
-      if (dialog.open) dialog.close();
-    };
-  }, []);
-  return (
-    <dialog
-      ref={ref}
-      className={`ws-action-dialog ${className}`}
-      aria-labelledby={titleId}
-      onCancel={(event) => {
-        // Escape: React state decides when the dialog closes.
-        event.preventDefault();
-        if (!live.current.busy) live.current.onCancel();
-      }}
-      onClose={() => {
-        // The browser can force a close (a repeated Escape); keep React state in step.
-        if (!ref.current?.open) live.current.onCancel(true);
-      }}
-      onPointerDown={(event) => {
-        pressedBackdrop.current = event.target === event.currentTarget;
-      }}
-      onClick={(event) => {
-        // Only a press and release both on the backdrop closes.
-        const backdrop =
-          pressedBackdrop.current && event.target === event.currentTarget;
-        pressedBackdrop.current = false;
-        if (backdrop && !live.current.busy) live.current.onCancel();
-      }}
-    >
-      {children}
-    </dialog>
-  );
-}
-
-/** Progress (polite) and the inline error of a running or failed action. */
+/** Progress (polite) and the inline error of a running or failed action. The empty status line stays in
+ * the accessibility tree but takes no space. */
 function Feedback({ progress, error }: { progress: string; error: string }) {
   return (
     <>
-      <p className="ws-action-progress" role="status">
+      <p className="m-0 text-meta text-text-muted empty:sr-only" role="status">
         {progress}
       </p>
       {error && (
-        <p className="ws-action-error" role="alert">
-          {error}
+        <p
+          className="m-0 flex items-start gap-1 text-meta text-danger"
+          role="alert"
+        >
+          <Icon icon={TriangleAlert} size={14} className="mt-px shrink-0" />
+          <span>{error}</span>
         </p>
       )}
     </>
   );
 }
+
+/** The explorer's and the Removal list's scrolling box. */
+const LIST_BOX =
+  "box-border max-h-[40dvh] min-h-30 flex-auto overflow-auto rounded-panel border border-border p-1";
+const LIST = "m-0 flex list-none flex-col gap-1 p-0";
+/** An explorer row; the indent comes from its level (inline style). */
+const ROW =
+  "box-border flex min-h-8 w-full cursor-pointer items-center gap-2 rounded-control border border-transparent bg-transparent py-1 pr-2 text-left font-sans text-meta hover:bg-surface-raised phone:min-h-tap";
+const indent = (level: number): React.CSSProperties => ({
+  paddingLeft: `calc(var(--space-2) + ${level} * var(--space-3))`,
+});
 
 type MoveProps = {
   index: LocationIndex;
@@ -114,9 +78,11 @@ function leavesOf(index: LocationIndex): TreeNode[] {
   return result;
 }
 
-/** Actions → Move: a searchable folder-style explorer. Organizational Locations expand; only Storage
- * Leaves and Decks can be chosen. The full path and the copies that actually move show before
- * confirmation, which is disabled when every selected copy is already at the destination. */
+/** Actions → Move: a searchable folder-style explorer in the kit Dialog (#165), a bottom sheet on a phone.
+ * Organizational Locations expand; only Storage Leaves and Decks can be chosen. The full path and the
+ * copies that actually move show before confirmation, which is disabled when every selected copy is
+ * already at the destination. Escape, the close button, Cancel and the scrim close it, except while the
+ * Move runs. */
 export function MoveDialog({
   index,
   initialExpanded,
@@ -128,7 +94,6 @@ export function MoveDialog({
   onConfirm,
   onCancel,
 }: MoveProps) {
-  const titleId = useId();
   const [query, setQuery] = useState("");
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(
     () => new Set(initialExpanded)
@@ -164,18 +129,20 @@ export function MoveDialog({
   const leafButton = (node: TreeNode, label: string, level: number) => (
     <button
       type="button"
-      className="ws-explorer-row ws-explorer-leaf"
-      style={{ "--ws-tree-level": level } as React.CSSProperties}
+      className={`${ROW} text-text aria-pressed:border-accent-border aria-pressed:bg-surface-selected aria-pressed:font-semibold aria-pressed:text-accent-strong`}
+      style={indent(level)}
       aria-pressed={destination === node.id}
       title={index.path(node.id)}
       onClick={() => setDestination(node.id)}
     >
-      <span className="ws-explorer-name">{label}</span>
-      {node.kind === "deck" && <span className="ws-explorer-kind">Deck</span>}
-      {destination === node.id && (
-        <span className="ws-explorer-check" aria-hidden="true">
-          ✓
+      <span className="min-w-0 wrap-anywhere">{label}</span>
+      {node.kind === "deck" && (
+        <span className="rounded-control border border-border px-1 text-caption font-normal text-text-muted">
+          Deck
         </span>
+      )}
+      {destination === node.id && (
+        <Icon icon={Check} size={14} className="ml-auto shrink-0" />
       )}
     </button>
   );
@@ -188,19 +155,21 @@ export function MoveDialog({
       <li key={node.id}>
         <button
           type="button"
-          className="ws-explorer-row ws-explorer-folder"
-          style={{ "--ws-tree-level": level } as React.CSSProperties}
+          className={`${ROW} text-text-muted`}
+          style={indent(level)}
           aria-expanded={open}
           title={index.path(node.id)}
           onClick={() => toggle(node.id)}
         >
-          <span className="ws-explorer-chevron" aria-hidden="true">
-            {open ? "⌄" : "›"}
-          </span>
-          <span className="ws-explorer-name">{node.name}</span>
+          <Icon
+            icon={open ? ChevronDown : ChevronRight}
+            size={14}
+            className="shrink-0 text-text-subtle"
+          />
+          <span className="min-w-0 wrap-anywhere">{node.name}</span>
         </button>
         {open && (
-          <ul aria-label={node.name}>
+          <ul aria-label={node.name} className={`${LIST} mt-1`}>
             {index.children(node.id).map((child) => branch(child, level + 1))}
           </ul>
         )}
@@ -209,89 +178,97 @@ export function MoveDialog({
   };
 
   return (
-    <ActionDialog
-      titleId={titleId}
-      className="ws-move-dialog"
-      busy={busy}
-      onCancel={onCancel}
-    >
-      <div className="ws-action-body">
-        <h2 id={titleId}>Move {plural(copies, "copy", "copies")}</h2>
-        <input
-          type="search"
-          className="ws-explorer-search"
-          aria-label="Search locations"
-          placeholder="Find a location…"
-          autoComplete="off"
-          data-autofocus
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-        />
-        <div className="ws-explorer">
-          {needle ? (
-            matches.length ? (
-              <ul aria-label="Matching locations">
-                {matches.map((node) => (
-                  <li key={node.id}>
-                    {leafButton(node, index.path(node.id), 0)}
-                  </li>
-                ))}
-              </ul>
+    <KitLayer>
+      <Dialog
+        open
+        onClose={() => {
+          if (!busy) onCancel();
+        }}
+        title={`Move ${plural(copies, "copy", "copies")}`}
+      >
+        <div className="flex flex-col gap-3">
+          <input
+            type="search"
+            className={FIELD}
+            aria-label="Search locations"
+            placeholder="Find a location…"
+            autoComplete="off"
+            data-autofocus
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+          <div className={LIST_BOX}>
+            {needle ? (
+              matches.length ? (
+                <ul aria-label="Matching locations" className={LIST}>
+                  {matches.map((node) => (
+                    <li key={node.id}>
+                      {leafButton(node, index.path(node.id), 0)}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="m-0 p-2 text-meta text-text-muted">
+                  No Storage Leaf or Deck matches “{query.trim()}”.
+                </p>
+              )
             ) : (
-              <p className="ws-explorer-empty">
-                No Storage Leaf or Deck matches “{query.trim()}”.
-              </p>
-            )
-          ) : (
-            <ul aria-label="Locations">
-              {index.children(null).map((node) => branch(node, 0))}
-            </ul>
-          )}
-        </div>
-        <div className="ws-move-summary" aria-live="polite">
-          {destination && preview ? (
-            <>
-              <p className="ws-move-path">{index.path(destination)}</p>
-              <p>
-                {preview.moving > 0
-                  ? `${plural(preview.moving, "copy", "copies")} will move.`
-                  : "Every selected copy is already here."}
-                {preview.moving > 0 && preview.alreadyThere > 0
-                  ? ` ${plural(preview.alreadyThere, "copy", "copies")} already here will stay.`
-                  : ""}
-              </p>
-            </>
-          ) : (
-            <p>Choose a Storage Leaf or Deck.</p>
-          )}
-        </div>
-        <Feedback progress={progress} error={error} />
-        <div className="ws-action-buttons">
-          <button
-            type="button"
-            aria-disabled={busy || undefined}
-            onClick={() => {
-              if (!busy) onCancel();
-            }}
+              <ul aria-label="Locations" className={LIST}>
+                {index.children(null).map((node) => branch(node, 0))}
+              </ul>
+            )}
+          </div>
+          <div
+            className="flex flex-col gap-1 text-meta tabular-nums"
+            aria-live="polite"
           >
-            Cancel
-          </button>
-          <button
-            type="button"
-            className="ws-action-primary"
-            disabled={!canConfirm}
-            aria-disabled={busy || undefined}
-            onClick={() => {
-              if (!busy && destination && canConfirm) onConfirm(destination);
-            }}
-          >
-            {canConfirm && preview
-              ? `Move ${plural(preview.moving, "copy", "copies")}`
-              : "Move"}
-          </button>
+            {destination && preview ? (
+              <>
+                <p className="m-0 font-semibold wrap-anywhere">
+                  {index.path(destination)}
+                </p>
+                <p className="m-0">
+                  {preview.moving > 0
+                    ? `${plural(preview.moving, "copy", "copies")} will move.`
+                    : "Every selected copy is already here."}
+                  {preview.moving > 0 && preview.alreadyThere > 0
+                    ? ` ${plural(preview.alreadyThere, "copy", "copies")} already here will stay.`
+                    : ""}
+                </p>
+              </>
+            ) : (
+              <p className="m-0">Choose a Storage Leaf or Deck.</p>
+            )}
+          </div>
+          <Feedback progress={progress} error={error} />
+          <div className={BUTTON_ROW}>
+            <button
+              type="button"
+              className={`inline-flex ${BUTTON}`}
+              aria-disabled={busy || undefined}
+              onClick={() => {
+                if (!busy) onCancel();
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className={`inline-flex ${PRIMARY_BUTTON}`}
+              disabled={!canConfirm}
+              aria-disabled={busy || undefined}
+              onClick={() => {
+                if (!busy && destination && canConfirm) onConfirm(destination);
+              }}
+            >
+              {canConfirm && preview
+                ? `Move ${plural(preview.moving, "copy", "copies")}`
+                : "Move"}
+            </button>
+          </div>
         </div>
-      </div>
-    </ActionDialog>
+      </Dialog>
+    </KitLayer>
   );
 }
 
@@ -305,7 +282,8 @@ type RemovalProps = {
   onCancel: (forced?: boolean) => void;
 };
 
-/** Actions → Inventory Removal: confirms each Card Edition, quantity and source Location. */
+/** Actions → Inventory Removal: confirms each Card Edition, quantity and source Location, in the kit
+ * Dialog (#165). Cancel takes focus first. */
 export function RemovalDialog({
   rows,
   copies,
@@ -315,69 +293,71 @@ export function RemovalDialog({
   onConfirm,
   onCancel,
 }: RemovalProps) {
-  const titleId = useId();
   const groups = useMemo(() => groupRemovalRows(rows), [rows]);
   return (
-    <ActionDialog
-      titleId={titleId}
-      className="ws-removal-dialog"
-      busy={busy}
-      onCancel={onCancel}
-    >
-      <div className="ws-action-body">
-        <h2 id={titleId}>
-          Remove {plural(copies, "copy", "copies")} from your Collection
-        </h2>
-        <p className="ws-removal-note">
-          These copies leave your tracked Collection. You can undo this for ten
-          minutes.
-        </p>
-        <div
-          className="ws-removal-list"
-          role="group"
-          aria-label="Copies to remove"
-          tabIndex={0}
-        >
-          {groups.map((group) => (
-            <div key={group.locationId} className="ws-removal-group">
-              <h3>{group.path}</h3>
-              <ul>
-                {group.rows.map((row) => (
-                  <li key={row.key}>
-                    <span className="ws-removal-quantity">
-                      {row.quantity.toLocaleString("en-US")} ×
-                    </span>{" "}
-                    {row.card}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
-        </div>
-        <Feedback progress={progress} error={error} />
-        <div className="ws-action-buttons">
-          <button
-            type="button"
-            data-autofocus
-            aria-disabled={busy || undefined}
-            onClick={() => {
-              if (!busy) onCancel();
-            }}
+    <KitLayer>
+      <Dialog
+        open
+        onClose={() => {
+          if (!busy) onCancel();
+        }}
+        title={`Remove ${plural(copies, "copy", "copies")} from your Collection`}
+      >
+        <div className="flex flex-col gap-3">
+          <p className="m-0 text-meta text-text-muted">
+            These copies leave your tracked Collection. You can undo this for
+            ten minutes.
+          </p>
+          <div
+            className={LIST_BOX}
+            role="group"
+            aria-label="Copies to remove"
+            tabIndex={0}
           >
-            Cancel
-          </button>
-          <button
-            type="button"
-            className="ws-action-danger"
-            aria-disabled={busy || undefined}
-            onClick={() => {
-              if (!busy) onConfirm();
-            }}
-          >
-            Remove {plural(copies, "copy", "copies")}
-          </button>
+            {groups.map((group) => (
+              <div key={group.locationId} className="p-2">
+                <h3 className="m-0 mb-1 text-meta font-semibold wrap-anywhere">
+                  {group.path}
+                </h3>
+                <ul className={LIST}>
+                  {group.rows.map((row) => (
+                    <li key={row.key} className="text-meta">
+                      <span className="font-semibold tabular-nums">
+                        {row.quantity.toLocaleString("en-US")} ×
+                      </span>{" "}
+                      {row.card}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </div>
+          <Feedback progress={progress} error={error} />
+          <div className={BUTTON_ROW}>
+            <button
+              type="button"
+              className={`inline-flex ${BUTTON}`}
+              data-autofocus
+              aria-disabled={busy || undefined}
+              onClick={() => {
+                if (!busy) onCancel();
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className={`inline-flex ${DANGER_BUTTON}`}
+              aria-disabled={busy || undefined}
+              onClick={() => {
+                if (!busy) onConfirm();
+              }}
+            >
+              Remove {plural(copies, "copy", "copies")}
+            </button>
+          </div>
         </div>
-      </div>
-    </ActionDialog>
+      </Dialog>
+    </KitLayer>
   );
 }

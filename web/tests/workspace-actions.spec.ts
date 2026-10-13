@@ -5,6 +5,7 @@ import { readFileSync } from "node:fs";
 import { Pool } from "pg";
 import { expectTouchTarget } from "./support/touch-target";
 import { startAsNewOwner } from "./support/owner";
+import { expectPageChecks } from "./support/page-check";
 
 type TreeNode = { id: string; name: string; version: number };
 
@@ -159,9 +160,11 @@ const sidebar = (page: Page) =>
   page
     .getByRole("complementary", { name: "Sidebar" })
     .getByRole("navigation", { name: "Locations" });
-/** The toast's live status line. */
+/** The message of the kit toast, in the app's one toast host (#165). */
+const toastText = (page: Page) =>
+  page.getByRole("region", { name: "Notifications" }).getByRole("paragraph");
 const toast = (page: Page) =>
-  page.getByRole("status").filter({ hasText: /Moved|Removed|Undo|Dismissed/ });
+  toastText(page).filter({ hasText: /Moved|Removed|Undo|Dismissed/ });
 
 async function box(locator: Locator) {
   const found = await locator.boundingBox();
@@ -184,6 +187,32 @@ async function expectCounts(page: Page, name: string, counts: string) {
 async function openActions(page: Page, item: string) {
   await bar(page).getByRole("button", { name: "Actions" }).click();
   await bar(page).getByRole("button", { name: item }).click();
+}
+
+const focusedId = (page: Page) =>
+  page.evaluate(() => document.activeElement?.id ?? "");
+
+/** True when a press at the element's centre lands on it: nothing (the toast) paints over it. */
+const onTop = (locator: Locator) =>
+  locator.evaluate((element) => {
+    const box = element.getBoundingClientRect();
+    const hit = document.elementFromPoint(
+      box.left + box.width / 2,
+      box.top + box.height / 2
+    );
+    return !!hit && (hit === element || element.contains(hit));
+  });
+
+/** Opens Actions with a toast showing: each item paints over the toast. Closes it again. */
+async function expectActionsOverToast(page: Page) {
+  const actions = bar(page).getByRole("button", { name: "Actions" });
+  await actions.click();
+  for (const name of ["Move…", "Inventory Removal…", "Clear selection"])
+    await expect
+      .poll(() => onTop(bar(page).getByRole("button", { name })), name)
+      .toBe(true);
+  await actions.click();
+  await expect(actions).toHaveAttribute("aria-expanded", "false");
 }
 
 test.describe("desktop", () => {
@@ -732,9 +761,7 @@ test.describe("desktop", () => {
     ).toBeVisible();
     await expect(page.getByRole("dialog")).toHaveCount(0);
     await expect(bar(page)).toHaveCount(0);
-    const notice = page
-      .getByRole("status")
-      .filter({ hasText: "Nothing moved." });
+    const notice = toastText(page).filter({ hasText: "Nothing moved." });
     await expect(notice).toHaveText(
       `Zero Abra (Fixture Set 1) in 0 Alpha ${s} changed since you selected it. Nothing moved. The cards have been refreshed.`
     );
@@ -775,9 +802,7 @@ test.describe("desktop", () => {
       page.getByText("Your Collection has no cards yet.")
     ).toBeVisible();
     await expect(bar(page)).toHaveCount(0);
-    const notice = page
-      .getByRole("status")
-      .filter({ hasText: "Nothing moved." });
+    const notice = toastText(page).filter({ hasText: "Nothing moved." });
     await expect(notice).toContainText("Nothing moved.");
     await expect(notice).not.toContainText("selection");
     await expect(page.locator("#ws-heading")).toBeFocused();
@@ -816,7 +841,7 @@ test.describe("desktop", () => {
     await tiles(page).nth(0).click();
     await expect(bar(page)).toContainText("1 copy selected");
     await expect(
-      page.getByRole("status").filter({ hasText: "Nothing moved." })
+      toastText(page).filter({ hasText: "Nothing moved." })
     ).toHaveCount(0);
   });
 
@@ -1073,6 +1098,119 @@ test.describe("desktop", () => {
       page.getByRole("button", { name: "Undo", exact: true })
     ).toHaveCount(0);
   });
+
+  test.describe("at 1280×800", () => {
+    test.use({ viewport: { width: 1280, height: 800 } });
+
+    test("the Actions strip, the Move, Removal and Add location dialogs and the Undo toast pass the page check, and each dialog gives focus back", async ({
+      page,
+    }) => {
+      const { s, dest } = await seedAlphaAndDest(page, "Check Abra");
+      const actions = bar(page).getByRole("button", { name: "Actions" });
+      await tiles(page).nth(0).click();
+      await expect(bar(page)).toContainText("1 copy selected");
+      await expectPageChecks(page, "selection bar");
+      await actions.click();
+      await expectPageChecks(page, "Actions open");
+
+      // Move: Escape closes it, and focus goes back to Actions. So does its close button.
+      await bar(page).getByRole("button", { name: "Move…" }).click();
+      const move = page.getByRole("dialog", { name: "Move 1 copy" });
+      await expect(
+        move.getByRole("searchbox", { name: "Search locations" })
+      ).toBeFocused();
+      await expectPageChecks(page, "Move dialog");
+      await page.keyboard.press("Escape");
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+      await expect(actions).toBeFocused();
+      await openActions(page, "Move…");
+      await move.getByRole("button", { name: "Close", exact: true }).click();
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+      await expect(actions).toBeFocused();
+
+      // Removal: a press on the scrim closes it and keeps the selection.
+      await openActions(page, "Inventory Removal…");
+      const removal = page.getByRole("dialog", {
+        name: "Remove 1 copy from your Collection",
+      });
+      await expect(
+        removal.getByRole("button", { name: "Cancel" })
+      ).toBeFocused();
+      await expectPageChecks(page, "Removal dialog");
+      await page.mouse.click(8, 8);
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+      await expect(actions).toBeFocused();
+      await expect(bar(page)).toContainText("1 copy selected");
+
+      // Add location: Escape closes it, and focus goes back to the sidebar's +.
+      const plus = page
+        .getByRole("complementary", { name: "Sidebar" })
+        .getByRole("button", { name: "Add location", exact: true });
+      await plus.click();
+      const create = page.getByRole("dialog", { name: "Add location" });
+      await expect(create.getByLabel("Name", { exact: true })).toBeFocused();
+      await expectPageChecks(page, "Add location dialog");
+      await page.keyboard.press("Escape");
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+      await expect(plus).toBeFocused();
+      await expect(bar(page)).toContainText("1 copy selected");
+
+      // The Undo toast, then a new selection: the toast sits above the bar.
+      // A click on the only selected tile clears it, so select the other tile first.
+      await tiles(page).nth(1).click();
+      await moveFirstTileToDest(page, s);
+      await expect(toast(page)).toHaveText(`Moved 1 copy to 0 Dest ${s}.`);
+      const undo = page.getByRole("button", { name: "Undo", exact: true });
+      await expect(undo).toBeVisible();
+      await expectPageChecks(page, "Undo toast");
+      await tiles(page).nth(1).click();
+      await expect(bar(page)).toContainText("1 copy selected");
+      await expect
+        .poll(async () => {
+          const toastBox = await box(undo);
+          return toastBox.y + toastBox.height <= (await box(bar(page))).y;
+        })
+        .toBe(true);
+      await expectPageChecks(page, "Undo toast above the selection bar");
+      await expectActionsOverToast(page);
+
+      // The toast is Collection's: it leaves with the page and comes back with it, Undo still offered.
+      const views = page.getByRole("navigation", { name: "Main views" });
+      await views.getByRole("button", { name: "Decks" }).click();
+      await expect(
+        page.getByRole("heading", { level: 1, name: "Decks" })
+      ).toBeVisible();
+      await expect(toastText(page)).toHaveCount(0);
+      await expect(bar(page)).toHaveCount(0);
+      await views.getByRole("button", { name: "Collection" }).click();
+      await expect(toast(page)).toHaveText(`Moved 1 copy to 0 Dest ${s}.`);
+      await expect(undo).toBeVisible();
+      await expect(bar(page)).toContainText("1 copy selected");
+
+      // Another tab empties the destination: Undo is unavailable, and Dismiss Undo takes focus.
+      await sql(
+        `WITH changed AS (
+           UPDATE inventory_owner SET revision=revision+1
+           WHERE user_id=(SELECT owner_id FROM location WHERE id=$1) RETURNING revision
+         ) DELETE FROM holding WHERE location_id=$1`,
+        [dest]
+      );
+      await undo.click();
+      await expect(toast(page)).toContainText("Undo unavailable");
+      await expect(
+        page.getByRole("button", { name: "Undo unavailable" })
+      ).toBeDisabled();
+      await expect(
+        page.getByRole("button", { name: "Dismiss Undo" })
+      ).toBeFocused();
+      await expectPageChecks(page, "unavailable Undo");
+
+      // Dismiss closes the notice and gives focus to the heading.
+      await page.getByRole("button", { name: "Dismiss", exact: true }).click();
+      await expect(toastText(page)).toHaveCount(0);
+      await expect.poll(() => focusedId(page)).toBe("ws-heading");
+    });
+  });
 });
 
 test.describe("mobile", () => {
@@ -1140,5 +1278,106 @@ test.describe("mobile", () => {
     await removal.getByRole("button", { name: "Cancel" }).tap();
     await expect(page.getByRole("dialog")).toHaveCount(0);
     await expect(strip).toContainText("1 copy selected");
+  });
+  test("on a phone the Actions strip, the Move, Removal and Add location sheets and the Undo toast pass the page check above the tab bar", async ({
+    page,
+  }) => {
+    promoteCatalog({ "card-1": "Sheet Abra" });
+    await signIn(page);
+    const s = randomUUID().slice(0, 8);
+    const alpha = await createLocation(page, `0 Alpha ${s}`, null);
+    await createLocation(page, `0 Dest ${s}`, null);
+    await addCopies(page, alpha, await editionOf("card-1"), 2);
+    await page.reload();
+    await expect(tiles(page)).toHaveCount(2);
+    const tabBar = page.getByRole("navigation", { name: "Main views" });
+    await page.getByRole("button", { name: "Select", exact: true }).tap();
+    await tiles(page).nth(0).tap();
+    const strip = bar(page);
+    await expect(strip).toContainText("1 copy selected");
+    const stripBox = await box(strip);
+    expect(stripBox.y + stripBox.height).toBeLessThanOrEqual(
+      (await box(tabBar)).y
+    );
+    await expectPageChecks(page, "phone Actions strip");
+    const actions = strip.getByRole("button", { name: "Actions" });
+    await actions.tap();
+    await expectPageChecks(page, "phone Actions open");
+
+    await strip.getByRole("button", { name: "Move…" }).tap();
+    const move = page.getByRole("dialog", { name: "Move 1 copy" });
+    await expect(move).toBeVisible();
+    await expectPageChecks(page, "phone Move sheet");
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(actions).toBeFocused();
+
+    await actions.tap();
+    await strip.getByRole("button", { name: "Inventory Removal…" }).tap();
+    await expect(
+      page.getByRole("dialog", { name: "Remove 1 copy from your Collection" })
+    ).toBeVisible();
+    await expectPageChecks(page, "phone Removal sheet");
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(actions).toBeFocused();
+
+    // Add location from the Locations drawer opens as a sheet, and so does its conversion choice.
+    // Escape returns focus to ☰.
+    const opener = page
+      .getByRole("banner")
+      .getByRole("button", { name: "Open locations" });
+    await opener.tap();
+    await page
+      .getByRole("dialog", { name: "Locations", exact: true })
+      .getByRole("button", { name: "Add location", exact: true })
+      .tap();
+    const create = page.getByRole("dialog", { name: "Add location" });
+    await expect(create.getByLabel("Name", { exact: true })).toBeFocused();
+    const sheet = await box(create);
+    expect(Math.round(sheet.y + sheet.height)).toBe(812);
+    expect(Math.round(sheet.width)).toBe(375);
+    await expectPageChecks(page, "phone Add location sheet");
+    await create
+      .getByLabel("Parent location")
+      .selectOption({ label: `0 Alpha ${s}` });
+    await create.getByLabel("Name", { exact: true }).fill(`Page ${s}`);
+    await create.getByRole("button", { name: "Create location" }).tap();
+    await expect(
+      create.getByRole("group", {
+        name: `0 Alpha ${s} contains cards. Where should they go?`,
+      })
+    ).toBeVisible();
+    await expectPageChecks(page, "phone Add location conversion");
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(opener).toBeFocused();
+
+    // A Move: the toast sits above the tab bar, and above a new selection's strip.
+    await actions.tap();
+    await strip.getByRole("button", { name: "Move…" }).tap();
+    await move
+      .getByRole("searchbox", { name: "Search locations" })
+      .fill(`0 Dest ${s}`);
+    await move.getByRole("button", { name: `0 Dest ${s}`, exact: true }).tap();
+    await move.getByRole("button", { name: "Move 1 copy" }).tap();
+    await expect(toast(page)).toHaveText(`Moved 1 copy to 0 Dest ${s}.`);
+    const undo = page.getByRole("button", { name: "Undo", exact: true });
+    await expect(undo).toBeVisible();
+    const undoBox = await box(undo);
+    expect(undoBox.y + undoBox.height).toBeLessThanOrEqual(
+      (await box(tabBar)).y
+    );
+    await expectPageChecks(page, "phone Undo toast");
+    await tiles(page).nth(1).tap();
+    await expect(strip).toContainText("1 copy selected");
+    await expect
+      .poll(async () => {
+        const toastBox = await box(undo);
+        return toastBox.y + toastBox.height <= (await box(strip)).y;
+      })
+      .toBe(true);
+    await expectPageChecks(page, "phone Undo toast above the strip");
+    await expectActionsOverToast(page);
   });
 });
