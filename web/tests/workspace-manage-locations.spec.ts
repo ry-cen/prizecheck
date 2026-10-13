@@ -812,12 +812,14 @@ test.describe("mobile", () => {
     await expect(drawer).toBeHidden();
     const panel = panelOf(page);
     await expect(panel).toBeVisible();
-    expect(await panel.boundingBox()).toEqual({
-      x: 0,
-      y: 0,
-      width: 375,
-      height: 812,
-    });
+    await expect
+      .poll(() => panel.boundingBox())
+      .toEqual({
+        x: 0,
+        y: 0,
+        width: 375,
+        height: 812,
+      });
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth)
     ).toBeLessThanOrEqual(375);

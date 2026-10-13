@@ -396,6 +396,7 @@ test.describe("desktop, short window", () => {
 
     // Off by default: no tile shows or requests a price.
     await expect(pricesToggle(page)).toHaveAttribute("aria-pressed", "false");
+    // flake-exempt wait-for-timeout (quiet): with Prices off, no tile may ask for a price in this window.
     await page.waitForTimeout(300);
     expect(seen.batches).toEqual([]);
     // Without a price line the description is the tile's hover title.

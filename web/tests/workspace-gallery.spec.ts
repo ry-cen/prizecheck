@@ -658,7 +658,8 @@ test(
     await expect(counts(page, "25,000 copies · 25,000 editions")).toBeVisible({
       timeout: 30_000,
     });
-    expect(await tiles(page).count()).toBeGreaterThan(0);
+    await expect(tiles(page)).not.toHaveCount(0);
+    // flake-exempt one-shot-read (invariant): at no moment may the gallery mount more than 400 tiles.
     expect(await tiles(page).count()).toBeLessThanOrEqual(400);
 
     // The middle of the gallery mounts real tiles, still a bounded number.
@@ -677,6 +678,7 @@ test(
         { timeout: 90_000 }
       )
       .toBe(true);
+    // flake-exempt one-shot-read (invariant): at no moment may the gallery mount more than 400 tiles.
     expect(await tiles(page).count()).toBeLessThanOrEqual(400);
 
     // The end: once every page has loaded, the last row holds real tiles, flush with the gallery's end.
@@ -695,6 +697,7 @@ test(
         { timeout: 90_000 }
       )
       .toBe(true);
+    // flake-exempt one-shot-read (invariant): at no moment may the gallery mount more than 400 tiles.
     expect(await tiles(page).count()).toBeLessThanOrEqual(400);
   }
 );

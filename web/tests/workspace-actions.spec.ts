@@ -184,9 +184,6 @@ async function openActions(page: Page, item: string) {
   await bar(page).getByRole("button", { name: item }).click();
 }
 
-const focusedId = (page: Page) =>
-  page.evaluate(() => document.activeElement?.id ?? "");
-
 test.describe("desktop", () => {
   test.use({ viewport: { width: 1280, height: 860 } });
 
@@ -279,7 +276,7 @@ test.describe("desktop", () => {
     await expect(toast(page)).toHaveText(
       `Moved 4 copies to Shelf ${s} / Binder ${s}. 1 copy already there stayed.`
     );
-    expect(await focusedId(page)).toBe("ws-heading");
+    await expect(page.locator("#ws-heading")).toBeFocused();
     await expectCounts(page, `Alpha ${s}`, "This Location has no cards.");
     await expectCounts(page, `Beta ${s}`, "This Location has no cards.");
     // Binder is inside the Shelf folder, collapsed in the sidebar.
@@ -347,7 +344,7 @@ test.describe("desktop", () => {
     await expect(toast(page)).toHaveText(`Moved 2 copies to 0 Dest ${s}.`);
     await expect(bar(page)).toHaveCount(0);
     // The dragged tile unmounted with the selection: focus lands on the heading, not the page.
-    expect(await focusedId(page)).toBe("ws-heading");
+    await expect(page.locator("#ws-heading")).toBeFocused();
     await expect(
       page.getByRole("button", { name: "Undo", exact: true })
     ).toBeVisible();
@@ -740,7 +737,7 @@ test.describe("desktop", () => {
       `Zero Abra (Fixture Set 1) in 0 Alpha ${s} changed since you selected it. Nothing moved. The cards have been refreshed.`
     );
     await expect(notice).not.toContainText("selection");
-    expect(await focusedId(page)).toBe("ws-heading");
+    await expect(page.locator("#ws-heading")).toBeFocused();
   });
 
   test("a drag failure whose refresh empties the selection moves to the toast and focuses the heading", async ({
@@ -781,7 +778,7 @@ test.describe("desktop", () => {
       .filter({ hasText: "Nothing moved." });
     await expect(notice).toContainText("Nothing moved.");
     await expect(notice).not.toContainText("selection");
-    expect(await focusedId(page)).toBe("ws-heading");
+    await expect(page.locator("#ws-heading")).toBeFocused();
   });
 
   test("clearing the selection after a failure doesn't move the failure to the toast", async ({
@@ -902,7 +899,7 @@ test.describe("desktop", () => {
     ).toBeFocused();
     await page.keyboard.press("Enter");
     await expect(bar(page)).toHaveCount(0);
-    expect(await focusedId(page)).toBe("ws-heading");
+    await expect(page.locator("#ws-heading")).toBeFocused();
 
     // Select two copies with Space, then Move through Actions.
     await tiles(page).nth(0).focus();
@@ -946,7 +943,7 @@ test.describe("desktop", () => {
       `Moved 2 copies to Shelf ${s} / Binder ${s}.`
     );
     await expect(page.getByRole("dialog")).toHaveCount(0);
-    expect(await focusedId(page)).toBe("ws-heading");
+    await expect(page.locator("#ws-heading")).toBeFocused();
   });
 
   test("a Move to a destination deleted meanwhile keeps the selection and refreshes both views, with no stale banner", async ({
@@ -1067,7 +1064,8 @@ test.describe("desktop", () => {
     await moveFirstTileToDest(page, s);
     await expect(toast(page)).toHaveText(`Moved 1 copy to 0 Dest ${s}.`);
     await listed;
-    // Let the list's answer render before checking that no Undo was attached.
+    // flake-exempt wait-for-timeout (quiet): an answer that attaches no Undo changes nothing on screen, so a short
+    // quiet period lets a wrongly attached Undo render before the check below.
     await page.waitForTimeout(300);
     await expect(
       page.getByRole("button", { name: "Undo", exact: true })
