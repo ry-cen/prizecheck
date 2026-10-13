@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { Pool } from "pg";
+import { expectTouchTarget } from "./support/touch-target";
 
 type TreeNode = { id: string; name: string; version: number };
 
@@ -530,8 +531,7 @@ test.describe("mobile", () => {
       document.dispatchEvent(new Event("visibilitychange"))
     );
     await expect(banner(page)).toHaveText(STALE);
-    const button = await box(reload(page));
-    expect(button.height).toBeGreaterThanOrEqual(44);
+    const button = await expectTouchTarget(reload(page), ["height"]);
     expect(button.y + button.height).toBeLessThanOrEqual(
       (await box(tiles(page).nth(0))).y
     );

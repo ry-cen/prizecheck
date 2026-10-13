@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { Pool } from "pg";
+import { expectTouchTarget } from "./support/touch-target";
 
 type TreeNode = { id: string; name: string; version: number };
 
@@ -534,12 +535,10 @@ test.describe("mobile", () => {
     const header = page.getByRole("banner");
     const opener = header.getByRole("button", { name: /^Filters & display/ });
     await expect(opener).toHaveAccessibleName("Filters & display");
-    const openerBox = (await opener.boundingBox())!;
+    const openerBox = await expectTouchTarget(opener);
     const searchBox = (await header
       .getByRole("searchbox", { name: "Search cards" })
       .boundingBox())!;
-    expect(openerBox.height).toBeGreaterThanOrEqual(44);
-    expect(openerBox.width).toBeGreaterThanOrEqual(44);
     expect(openerBox.x).toBeGreaterThan(searchBox.x + searchBox.width);
     expect(openerBox.x + openerBox.width).toBeLessThanOrEqual(375);
     expect(

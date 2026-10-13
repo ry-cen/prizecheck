@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { Pool } from "pg";
+import { expectTouchTarget } from "./support/touch-target";
 
 // Ticket 111: the inspected Card Edition's price in the inspector, the opt-in Prices toggle that prices each
 // mounted tile, and the inspector's metadata report link. Prices are the existing EditionPrice component and
@@ -497,7 +498,7 @@ test.describe("mobile", () => {
     const drawer = page.getByRole("dialog", { name: "Filters & display" });
     const toggle = drawer.getByRole("button", { name: "Prices", exact: true });
     await expect(toggle).toHaveAttribute("aria-pressed", "false");
-    expect((await toggle.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    await expectTouchTarget(toggle, ["height"]);
     await toggle.click();
     await expect(toggle).toHaveAttribute("aria-pressed", "true");
     await page.keyboard.press("Escape");
@@ -511,6 +512,6 @@ test.describe("mobile", () => {
     );
     const link = sheet.getByRole("link", { name: REPORT });
     await expect(link).toBeVisible();
-    expect((await link.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    await expectTouchTarget(link, ["height"]);
   });
 });

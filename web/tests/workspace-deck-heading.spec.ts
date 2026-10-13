@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { Pool } from "pg";
+import { expectTouchTarget } from "./support/touch-target";
 
 // Ticket 112: the open Deck's Estimated Deck Cost and Export menu in the workspace heading, and the Decks
 // page's Open in workspace link. The cost and export panels are the existing components; these tests prove
@@ -553,8 +554,7 @@ test("a blocked Live export lists every blocker and offers no text, on a phone o
   await page.setViewportSize({ width: 375, height: 812 });
   await page.goto(`${ORIGIN}/workspace?location=${deck.id}`);
   await expect(heading(page)).toHaveText(deck.name);
-  const box = await exportButton(page).boundingBox();
-  expect(box!.height).toBeGreaterThanOrEqual(44);
+  await expectTouchTarget(exportButton(page), ["height"]);
   const dialog = await openExport(page, "Pokémon TCG Live");
   // Full screen on a phone.
   const sheet = await dialog.boundingBox();
