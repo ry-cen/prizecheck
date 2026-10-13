@@ -62,7 +62,11 @@ promote({'fixture-1': 'Pikachu'})`,
     ).toBeVisible();
     await page.keyboard.press("Escape");
     await page.getByRole("button", { name: "Missing cards" }).click();
-    const report = page.getByRole("region", { name: "Missing-card reports" });
+    await page
+      .getByRole("tablist", { name: "Missing cards sections" })
+      .getByRole("tab", { name: "Report a card", exact: true })
+      .click();
+    const report = page.getByRole("tabpanel", { name: "Report a card" });
     await report.getByLabel("Set ID").fill("Jungle");
     await report.getByLabel("Set name").fill("Jungle");
     await report.getByLabel("Collector number").fill("99");
@@ -71,10 +75,17 @@ promote({'fixture-1': 'Pikachu'})`,
       .getByLabel("Evidence link")
       .fill("https://example.org/jungle-card");
     await report.getByRole("button", { name: "Send private report" }).click();
-    await expect(report.getByRole("status")).toContainText(
+    await expect(page.getByRole("main").getByRole("status")).toContainText(
       "Report sent privately"
     );
-    await expect(report.getByText("pending")).toBeVisible();
+    // Sending opens My reports, newest first; earlier runs on this stack may have left their own Jungle #99.
+    await expect(
+      page
+        .getByRole("region", { name: "Reports you sent", exact: true })
+        .getByRole("row")
+        .filter({ hasText: "Pikachu · Jungle #99" })
+        .first()
+    ).toContainText("Pending");
     await page.getByRole("button", { name: "Account" }).click();
     await page.getByRole("menuitem", { name: "Owner controls" }).click();
     await page.getByRole("tab", { name: /^Missing cards/ }).click();

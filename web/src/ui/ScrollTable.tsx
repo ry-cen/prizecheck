@@ -17,6 +17,9 @@ type Props = {
  * as the table's visible area and stay pinned to its left edge with `sticky left-0 w-[100cqw]`. Because of
  * that containment, put a ScrollTable in normal block flow or a flex column, never a flex row, where it
  * would shrink to nothing.
+ *
+ * The box is `relative` so absolutely positioned descendants (sr-only header text, `Select labelHidden`)
+ * stay inside the scroll box and can't widen the page.
  */
 export function ScrollTable({ label, children }: Props) {
   return (
@@ -24,7 +27,7 @@ export function ScrollTable({ label, children }: Props) {
       role="region"
       aria-label={label}
       tabIndex={0}
-      className="@container box-border max-w-full overflow-x-auto rounded-control border border-border"
+      className="@container relative box-border max-w-full overflow-x-auto rounded-control border border-border"
     >
       <table className="w-full border-collapse whitespace-nowrap text-meta text-text [:where(&)>tbody>tr>td]:h-8 [:where(&)>tbody>tr>td]:border-b [:where(&)>tbody>tr>td]:border-border [:where(&)>tbody>tr>td]:px-2.5 [:where(&)>tbody>tr>td]:py-1 [:where(&)>tbody>tr>td]:align-middle [:where(&)>thead>tr>th]:h-8 [:where(&)>thead>tr>th]:border-b [:where(&)>thead>tr>th]:border-border [:where(&)>thead>tr>th]:bg-surface [:where(&)>thead>tr>th]:px-2.5 [:where(&)>thead>tr>th]:py-1 [:where(&)>thead>tr>th]:text-left [:where(&)>thead>tr>th]:font-medium [:where(&)>thead>tr>th]:text-text-muted [:where(&)>tbody>tr:last-child>td]:border-b-0">
         {children}

@@ -3,11 +3,11 @@ import { createRoot } from "react-dom/client";
 import { getOwnerCatalogStatus, type OwnerCatalogStatus } from "./generated";
 import { Decks } from "./Decks";
 import { CatalogSearch } from "./CatalogSearch";
-import { MissingCardReports } from "./MissingCardReports";
 import { OwnerControlsPage } from "./owner/OwnerControlsPage";
 import { ownerSection, ownerSectionPath } from "./owner/sections";
 import { Workspace } from "./workspace/Workspace";
 import { LegacyPage } from "./shell/LegacyPage";
+import { MissingCardsPage } from "./reports/MissingCardsPage";
 import { Shell } from "./shell/Shell";
 import { SignInsPage } from "./shell/SignInsPage";
 import {
@@ -220,11 +220,7 @@ function App() {
           </LegacyPage>
         );
       case "reports":
-        return (
-          <LegacyPage title="Missing cards" message={message}>
-            <MissingCardReports />
-          </LegacyPage>
-        );
+        return <MissingCardsPage active={active} message={message} />;
       case "owner":
         return (
           <OwnerControlsPage

@@ -87,6 +87,23 @@ On a phone (iOS Safari or Android Chrome):
 - [ ] 8. Open More, then Owner controls. The sub-tab row scrolls sideways inside itself, every tab is easy to hit with a thumb, the health table scrolls sideways inside its own box, and nothing else on the page scrolls sideways.
 - [ ] 9. Open Rules: the fields and buttons are thumb-sized, and Send code, the code and Confirm rule change wrap onto new lines instead of running off the screen.
 
+### Missing cards (#169)
+
+On a desktop:
+
+- [ ] 1. Open the Missing cards tab. It opens on My reports at `/reports`: a table of your reports, newest first, with Card, Kind, Status, Sent and Owner response, or "No reports yet." The line above it says that a wrong detail on a card that exists is reported from the card in Catalog.
+- [ ] 2. Open Report a card. With Report type on Missing Printing, the form asks for Set ID, Set name, Collector number and English name, then Evidence link and What is missing?. Switch to Missing Edition: Printing ID and Physical variant details replace the four set fields. Switch back.
+- [ ] 3. Type a Set ID, open Decks, then Missing cards again: Report a card is still open, with the Set ID you typed.
+- [ ] 4. Finish a test report and press Send private report. "Report sent privately to the owner." appears, My reports opens, and the report is at the top with a Pending pill and today's date. Open Report a card again: the card's fields are still filled in, and Evidence link and What is missing? are empty.
+- [ ] 5. In Owner controls, open Missing cards and use Request information, with a reason, on the test report. Back on Missing cards, the report reads Needs information, shows your reason under Owner response, and has a Reply button.
+- [ ] 6. Press Reply. A row opens under the report with your note and the owner's question, and the cursor is in Additional information. Type something and press Close: the row folds away, and Reply brings it back with your text. Press Send information: "Information sent to the owner." appears, the pill reads Pending, and Reply is gone. Then reject the test report in Owner controls.
+
+On a phone (iOS Safari or Android Chrome):
+
+- [ ] 7. Open More, then Missing cards. Both sub-tabs are easy to hit with a thumb, the reports table scrolls sideways inside its own box, and nothing else on the page scrolls sideways.
+- [ ] 8. On a report that needs information, tap Reply, then swipe the table sideways: the conversation and the reply box stay in place, as wide as the screen, while the columns slide behind them.
+- [ ] 9. Open Report a card: each field and Send private report fills the width and is thumb-sized.
+
 ## Manual checks that automation does not cover
 
 - [ ] Real touch on iOS Safari and Android Chrome for the tab bar, the More sheet and the ☰ drawer (the browser tests only emulate touch), including the home indicator area under the tab bar.
@@ -96,6 +113,7 @@ On a phone (iOS Safari or Android Chrome):
 - [ ] Until the dark first paint (rollout stage 7), a slow first load still shows a brief light page before the dark loading screen. That is expected for now (#163).
 - [ ] Screen reader on Collection: with Names off, a tile is read with its Variant (or "Unspecified Variant"), and the inspector's Leaf list is read as a list (#164).
 - [ ] Screen reader on Owner controls: the sub-tabs announce as tabs with their counts and which one is selected, the problems line reads as a list, and the health table reads as a table with its column headers (#167).
+- [ ] Screen reader on Missing cards: the sub-tabs announce as tabs and which one is selected, the reports table reads with its column headers, Reply announces whether its row is open, and after a send the message is read where focus lands (#169).
 
 ## Sources
 

@@ -41,7 +41,7 @@ export const PAGES: readonly PageDef[] = [
     id: "reports",
     path: "/reports",
     label: "Missing cards",
-    keepMounted: false,
+    keepMounted: true,
   },
   {
     id: "sign-ins",
