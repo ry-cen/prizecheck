@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
+import { openDeckTools } from "./support/deck-builder";
 
 const OWNER_EMAIL = process.env.OWNER_EMAIL || "owner@example.test";
 const ORIGIN = process.env.TEST_ORIGIN || "http://localhost:5173";
@@ -113,6 +114,7 @@ async function openDeck(page: Page, name: string) {
   await page.reload();
   await page.getByRole("button", { name: "Decks", exact: true }).click();
   await page.getByRole("button", { name, exact: true }).click();
+  await openDeckTools(page);
   return page.getByRole("region", { name: "TCGplayer export", exact: true });
 }
 

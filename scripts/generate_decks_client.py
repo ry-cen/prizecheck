@@ -12,9 +12,16 @@ def ts_type(value):
         return value["$ref"].split("/")[-1]
     if "anyOf" in value:
         return " | ".join(ts_type(part) for part in value["anyOf"])
+    if "enum" in value:
+        return " | ".join(f"'{item}'" for item in value["enum"])
+    if "const" in value:
+        return f"'{value['const']}'"
     if value.get("type") == "array":
         return f"{ts_type(value['items'])}[]"
-    return {"string": "string", "integer": "number", "number": "number", "null": "null"}[value["type"]]
+    if value.get("type") == "object":
+        return "Record<string, unknown>"
+    return {"string": "string", "integer": "number", "number": "number", "boolean": "boolean",
+            "null": "null"}[value["type"]]
 
 
 schema = app.openapi()["components"]["schemas"]

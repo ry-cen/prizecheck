@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { Pool } from "pg";
+import { openDeckTools } from "./support/deck-builder";
 
 // Ticket 09: Estimated Deck Cost and Pricing Coverage on the real stack (browser -> gateway -> API -> PostgreSQL and
 // the record store). Quotes are written to the live stack's store the way a runner writes them; nothing here sums rows
@@ -87,10 +88,11 @@ async function deckWith(page: Page, quantities: Record<string, number>) {
   );
   return { id, name };
 }
+/** Opens the Deck from a fresh load of the Decks index: a reload on the deck builder would read the cost once more. */
 async function openDeck(page: Page, name: string) {
-  await page.reload();
-  await page.getByRole("button", { name: "Decks", exact: true }).click();
+  await page.goto(`${ORIGIN}/decks`);
   await page.getByRole("button", { name, exact: true }).click();
+  await openDeckTools(page);
   return page.getByRole("region", { name: "Estimated Deck Cost" });
 }
 const sixCopies = (ids: Ids) => {
@@ -368,9 +370,9 @@ test("a cost for an older inventory revision is discarded and a concurrent chang
     }
     await route.continue();
   });
-  await page.reload();
-  await page.getByRole("button", { name: "Decks", exact: true }).click();
+  await page.goto(`${ORIGIN}/decks`);
   await page.getByRole("button", { name: deck.name, exact: true }).click();
+  await openDeckTools(page);
   await expect(checks).toContainText("4 cards");
   await expect.poll(() => seen.length).toBe(1);
   await pool.query(

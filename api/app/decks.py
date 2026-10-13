@@ -13,6 +13,7 @@ from .location_tree import (TreeNode, LocationCommandResult, EditLocation, apply
                             owner_and_rows, replay, check_name, store_result, error, node_model)
 from .deck_ownership import CompetitionWarning, LineOwnership, SurplusHolding, held_in, read_ownership
 from .deck_format_checks import DeckFormatChecks, command_format_checks
+from .deck_list_display import CardKind, TrainerType, read_line_display, with_line_display
 
 router = APIRouter(prefix='/api/decks', tags=['decks'])
 from .construction_checks import DISCLAIMER, IdentityCount, evaluate_checks
@@ -64,6 +65,23 @@ class DeckListLine(BaseModel):
     edition_id: UUID
     quantity: str
     in_deck: str
+    # Display data (app redesign #176, ``deck_list_display``): catalog facts about the line's Card Edition, so a line for
+    # a card the collector doesn't own renders without a second lookup.
+    name: str
+    set_id: str
+    set_name: str
+    collector_number: str
+    descriptor: dict          # The Variant Descriptor, as Collection's Holdings carry it.
+    image_url: str | None     # The small artwork, or None.
+    card_kind: CardKind | None
+    trainer_type: TrainerType | None
+    evolves_from: str | None
+    identity_id: UUID         # The Card Identity.
+    identity_name: str
+    # A Pokémon's evolution root and its steps from it (migration 043); null for other cards and before the roots are
+    # first derived.
+    evolution_root: str | None
+    evolution_stage: int | None
 
 
 class DeckList(BaseModel):
@@ -228,9 +246,10 @@ def read_deck_list(conn, user_id: str, deck_id: UUID) -> DeckList:
     lines = conn.execute('SELECT edition_id,quantity FROM deck_list_line WHERE owner_id=%s AND deck_id=%s '
                          'ORDER BY edition_id', (user_id, deck_id)).fetchall()
     held = held_in(conn, user_id, deck_id)
+    display = read_line_display(conn, [row['edition_id'] for row in lines])
     return DeckList(revision=header['revision'], lines=[
         DeckListLine(edition_id=row['edition_id'], quantity=str(row['quantity']),
-                     in_deck=str(min(row['quantity'], held.get(row['edition_id'], 0))))
+                     in_deck=str(min(row['quantity'], held.get(row['edition_id'], 0))), **display[row['edition_id']])
         for row in lines])
 
 
@@ -295,7 +314,7 @@ def add_deck_list_line(deck_id: UUID, command: AddDeckListLine, user_id: str = D
         _, rows = owner_and_rows(conn, user_id)
         digest, previous = replay(conn, user_id, command.idempotency_key, payload)
         if previous:
-            return previous
+            return with_line_display(conn, previous)
         require_deck(rows, deck_id)
         check_revision(conn, user_id, deck_id, command.revision)
         state = conn.execute('SELECT active_generation FROM catalog_state WHERE singleton FOR SHARE').fetchone()
@@ -322,7 +341,7 @@ def change_deck_list_line(deck_id: UUID, edition_id: UUID, command: ChangeDeckLi
         _, rows = owner_and_rows(conn, user_id)
         digest, previous = replay(conn, user_id, command.idempotency_key, payload)
         if previous:
-            return previous
+            return with_line_display(conn, previous)
         require_deck(rows, deck_id)
         check_revision(conn, user_id, deck_id, command.revision)
         if not line_exists(conn, user_id, deck_id, edition_id):
@@ -341,7 +360,7 @@ def remove_deck_list_line(deck_id: UUID, edition_id: UUID, command: RemoveDeckLi
         _, rows = owner_and_rows(conn, user_id)
         digest, previous = replay(conn, user_id, command.idempotency_key, payload)
         if previous:
-            return previous
+            return with_line_display(conn, previous)
         require_deck(rows, deck_id)
         check_revision(conn, user_id, deck_id, command.revision)
         if not line_exists(conn, user_id, deck_id, edition_id):

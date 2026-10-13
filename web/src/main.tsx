@@ -2,6 +2,7 @@ import React, { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { getOwnerCatalogStatus, type OwnerCatalogStatus } from "./generated";
 import { Decks } from "./Decks";
+import { DeckBuilderPage } from "./decks/DeckBuilderPage";
 import { CatalogSearch } from "./CatalogSearch";
 import { OwnerControlsPage } from "./owner/OwnerControlsPage";
 import { ownerSection, ownerSectionPath } from "./owner/sections";
@@ -203,12 +204,25 @@ function App() {
     switch (id) {
       case "collection":
         return <Workspace userId={userId} active={active} />;
-      case "decks":
-        return (
+      case "decks": {
+        // /decks is the index; /decks/<id> opens that Deck in the deck builder (#176).
+        const deckId = sectionAt(path);
+        return deckId ? (
+          <DeckBuilderPage
+            key={deckId}
+            deckId={deckId}
+            onAllDecks={() => navigate(pageDef("decks").path)}
+          />
+        ) : (
           <LegacyPage title="Decks" message={message}>
-            <Decks />
+            <Decks
+              onOpenDeck={(id) =>
+                navigate(`${pageDef("decks").path}/${encodeURIComponent(id)}`)
+              }
+            />
           </LegacyPage>
         );
+      }
       case "catalog":
         return (
           <LegacyPage title="Catalog" message={message}>
@@ -237,7 +251,9 @@ function App() {
       page={page}
       email={accountEmail}
       owner={ownerCatalog !== null}
-      onNavigate={(next) => navigate(pageDef(next).path)}
+      onNavigate={(next) => {
+        if (pageDef(next).path !== path) navigate(pageDef(next).path);
+      }}
       onSignOut={signOut}
       scrollFor={scrollFor}
       renderPage={renderPage}

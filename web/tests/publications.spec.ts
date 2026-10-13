@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { listHoldings } from "./support/deck-list";
+import { openDeckTools } from "./support/deck-builder";
 
 function messages(path: string): string[] {
   try {
@@ -52,6 +53,7 @@ promote({'card-1': 'Pikachu'})`,
     await page
       .getByRole("button", { name: "Create Deck", exact: true })
       .click();
+    await openDeckTools(page);
     const holdings = page.getByRole("region", {
       name: `Cards in ${privateName}`,
     });

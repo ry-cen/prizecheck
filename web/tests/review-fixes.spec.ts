@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { openDeckTools } from "./support/deck-builder";
 
 const origin =
   process.env.REVIEW_BROWSER_ORIGIN ??
@@ -129,6 +130,18 @@ test("Revoke sends revocation after an uncertain republish rather than replaying
                   identities: [],
                   disclaimer: "",
                 },
+                deck_list_checks: {
+                  total: "0",
+                  shortage: "60",
+                  excess: "0",
+                  size_status: "shortage",
+                  identities: [],
+                  disclaimer: "",
+                },
+                deck_list: { revision: 1, lines: [] },
+                ownership: [],
+                surplus: [],
+                competition: [],
               },
     });
   });
@@ -137,6 +150,7 @@ test("Revoke sends revocation after an uncertain republish rather than replaying
     .getByRole("navigation", { name: "Deck index" })
     .getByRole("button", { name: "Shared Deck" })
     .click();
+  await openDeckTools(page);
   const panel = page.getByRole("region", { name: "Publish Deck", exact: true });
   await panel
     .getByRole("button", { name: "Republish snapshot", exact: true })

@@ -18,6 +18,7 @@ from psycopg.rows import dict_row
 from .card_attributes import refresh_card_attributes
 from .card_identity import card_identity_key
 from .format_standing import rebuild_stale_best_effort
+from .evolution_roots import refresh_evolution_roots
 from .catalog_targets import (IDENTITY_REVIEW_KINDS, MatchingRulesV1, TargetContext, ensure_matching_rule, refresh_editions,
                               refresh_printing)
 from . import quote_contract
@@ -453,8 +454,8 @@ IDENTITY_UPSERT = """INSERT INTO catalog_identity(identity_key,display_name) VAL
 
 def rederive_card_attributes(conn) -> int:
     """Re-derive every Printing's card attributes, and the Reprint Groups of the active catalog generation, from their
-    stored source records, fetching nothing. Both happen in one transaction, so the attribute revision advances at most
-    once.
+    stored source records, fetching nothing, and then every Pokémon's evolution root (migration 043). All of it happens in
+    one transaction, so the attribute revision advances at most once; the roots never advance it.
 
     For ``scripts/derive_card_attributes.py``. It holds the importer's lock, so it never interleaves with an import;
     RunnerBusy means an import is running. Returns the number of Printings whose attributes changed.
@@ -470,6 +471,8 @@ def rederive_card_attributes(conn) -> int:
             conn.execute("SELECT catalog_begin_correction()")
             changed = refresh_card_attributes(conn)
             refresh_reprint_groups(conn)
+            # Evolution roots follow evolves from through the re-derived attributes; they are not attributes (migration 043).
+            refresh_evolution_roots(conn)
             return changed
     finally:
         conn.execute("SELECT pg_advisory_unlock(914703)")
@@ -691,6 +694,8 @@ def execute_run(conn, run_id: UUID, source=None, before_promotion=None):
             # Reprint Groups of this generation's Printings, from the same stored source records. Attribute and group
             # changes in this transaction advance the attribute revision once.
             refresh_reprint_groups(conn, run_id)
+            # Each Pokémon's evolution root, from the evolves from just derived (migration 043). Advances no revision.
+            refresh_evolution_roots(conn)
             conn.execute("UPDATE catalog_state SET active_generation=%s, revision=revision+1, last_success=now() WHERE singleton", (run_id,))
             conn.execute("UPDATE catalog_run SET phase='complete', outcome='succeeded', finished_at=now(), lease_until=NULL WHERE id=%s", (run_id,))
             # Keep current and previous successful compressed raw generations.

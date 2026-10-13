@@ -1,28 +1,17 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useLayoutEffect, useState, type FormEvent } from "react";
 import {
   createDeck,
-  getDeck,
   getDecks,
   DeckError,
-  type DeckDetail,
   type TreeNode,
 } from "./decks_generated";
-import { getLocationTree } from "./location_generated";
-import { indexLocations } from "./workspace/locationTree";
-import type { MoveDestination } from "./MoveHoldings";
-import { Holdings } from "./Holdings";
-import { PublishDeck } from "./PublishDeck";
-import { DeckLiveExport } from "./DeckLiveExport";
-import { DeckMassEntryExport } from "./DeckMassEntryExport";
-import { DeckCostSummary } from "./DeckCost";
 import { workspaceHref } from "./workspace/workspaceLink";
 
-export function Decks() {
+/** The Decks index (/decks), still the old page: create a Deck and list every Deck. Opening one shows the deck
+ * builder at /decks/<id> (#176). #181 moves this onto the kit. */
+export function Decks({ onOpenDeck }: { onOpenDeck: (id: string) => void }) {
   const [cursor, setCursor] = useState<string | null>(null);
   const [decks, setDecks] = useState<TreeNode[]>([]);
-  const [leaves, setLeaves] = useState<MoveDestination[]>([]);
-  const [selected, setSelected] = useState<string | null>(null);
-  const [detail, setDetail] = useState<DeckDetail | null>(null);
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -30,16 +19,16 @@ export function Decks() {
     null
   );
 
+  // Back from a Deck's builder (/decks/<id>), the index starts at the top: the shell keeps one page's scroll position
+  // across its own addresses.
+  useLayoutEffect(() => {
+    window.scrollTo(0, 0);
+  }, []);
+
   async function loadIndex() {
-    const [index, tree] = await Promise.all([getDecks(), getLocationTree()]);
+    const index = await getDecks();
     setDecks(index.decks);
     setCursor(index.next_cursor);
-    const paths = indexLocations(tree.locations);
-    setLeaves(
-      tree.locations
-        .filter((item) => item.kind !== "organization")
-        .map((item) => ({ id: item.id, name: paths.path(item.id) }))
-    );
   }
   async function moreDecks() {
     if (!cursor) return;
@@ -54,24 +43,11 @@ export function Decks() {
       } else setMessage("Decks are temporarily unavailable. Please retry.");
     }
   }
-  async function refreshChecks(id: string) {
-    try {
-      setDetail(await getDeck(id));
-    } catch {
-      setMessage(
-        "Deck checks are temporarily unavailable. Refresh checks to retry."
-      );
-    }
-  }
   useEffect(() => {
     void loadIndex().catch(() =>
       setMessage("Decks are temporarily unavailable. Please retry.")
     );
   }, []);
-  useEffect(() => {
-    setDetail(null);
-    if (selected) void refreshChecks(selected);
-  }, [selected]);
 
   async function create(event: FormEvent) {
     event.preventDefault();
@@ -86,8 +62,7 @@ export function Decks() {
       });
       setPending(null);
       setName("");
-      await loadIndex();
-      setSelected(result.location.id);
+      onOpenDeck(result.location.id);
     } catch (cause) {
       if (cause instanceof DeckError && cause.status < 500) {
         setPending(null);
@@ -101,13 +76,6 @@ export function Decks() {
       setBusy(false);
     }
   }
-  const labels: Record<string, string> = {
-    basic_energy_exempt: "Basic Energy exemption supported",
-    unresolved:
-      "Basic Energy classification unresolved; exemption not established",
-    over_limit: "Over four-copy limit",
-    within_limit: "Within four-copy limit",
-  };
   return (
     <section aria-label="Physical Decks">
       <h2>Physical Decks</h2>
@@ -133,11 +101,7 @@ export function Decks() {
       <nav aria-label="Deck index">
         {decks.map((deck) => (
           <span key={deck.id}>
-            <button
-              type="button"
-              onClick={() => setSelected(deck.id)}
-              aria-current={selected === deck.id ? "page" : undefined}
-            >
+            <button type="button" onClick={() => onOpenDeck(deck.id)}>
               {deck.name}
             </button>{" "}
             {/* The accessible name starts with the visible text and names the Deck. */}
@@ -156,61 +120,6 @@ export function Decks() {
         </button>
       )}
       {!decks.length && <p>No Decks yet.</p>}
-      {detail && (
-        <section aria-label={`Checks for ${detail.deck.name}`}>
-          <h3>{detail.deck.name}</h3>
-          <p>
-            {detail.checks.total} cards ·{" "}
-            {detail.checks.size_status === "complete"
-              ? "Exactly 60 cards"
-              : detail.checks.size_status === "shortage"
-                ? `${detail.checks.shortage} cards short of 60`
-                : `${detail.checks.excess} cards over 60`}
-          </p>
-          <DeckCostSummary
-            key={`cost-${detail.deck.id}`}
-            deckId={detail.deck.id}
-            ownerRevision={detail.owner_revision}
-            totalCopies={detail.checks.total}
-            onNewerRevision={() => void refreshChecks(detail.deck.id)}
-          />
-          <ul>
-            {detail.checks.identities.map((identity) => (
-              <li key={identity.identity_id}>
-                {identity.name} · {identity.quantity} copies ·{" "}
-                {labels[identity.status] ?? "Check unresolved"}
-              </li>
-            ))}
-          </ul>
-          <p>{detail.checks.disclaimer}</p>
-          <button
-            type="button"
-            onClick={() => void refreshChecks(detail.deck.id)}
-          >
-            Refresh checks
-          </button>
-          <Holdings
-            key={detail.deck.id}
-            locationId={detail.deck.id}
-            locationName={detail.deck.name}
-            destinations={leaves}
-            onInventoryChanged={() => refreshChecks(detail.deck.id)}
-          />
-          <PublishDeck key={detail.deck.id} deckId={detail.deck.id} />
-          <DeckLiveExport
-            key={`live-${detail.deck.id}`}
-            deckId={detail.deck.id}
-            ownerRevision={detail.owner_revision}
-            checks={detail.checks}
-          />
-          <DeckMassEntryExport
-            key={`mass-${detail.deck.id}`}
-            deckId={detail.deck.id}
-            ownerRevision={detail.owner_revision}
-            checks={detail.checks}
-          />
-        </section>
-      )}
       {message && <p role="status">{message}</p>}
     </section>
   );

@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { listHoldings } from "./support/deck-list";
+import { openDeckTools } from "./support/deck-builder";
 
 test.use({
   viewport: { width: 390, height: 844 },
@@ -61,6 +62,7 @@ test("mobile collector can search, Add, Move, Undo, check and publish a physical
     const name = "Mobile private " + randomUUID().slice(0, 8);
     await page.getByLabel("Deck name").fill(name);
     await page.getByRole("button", { name: "Create Deck", exact: true }).tap();
+    await openDeckTools(page);
     const holdings = page.getByRole("region", { name: `Cards in ${name}` });
     const checks = page.getByRole("region", { name: `Checks for ${name}` });
     await expect(checks).toContainText("0 cards · 60 cards short of 60");

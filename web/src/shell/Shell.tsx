@@ -130,7 +130,9 @@ function ShellFrame({
 
   function go(next: PageId) {
     setMoreOpen(false);
-    if (next !== showing) onNavigate(next);
+    // A page with item addresses (Decks: /decks/<id>) goes back to its own address when its tab is pressed
+    // again; App ignores a press that would not change the address.
+    if (next !== showing || pageDef(next).param) onNavigate(next);
   }
   async function signOut() {
     setMoreOpen(false);
