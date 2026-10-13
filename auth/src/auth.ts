@@ -2,6 +2,9 @@ import { betterAuth } from "better-auth";
 import { emailOTP } from "better-auth/plugins";
 import { Pool } from "pg";
 import { appendFile } from "node:fs/promises";
+import { configuredProviders, socialProviders } from "./providers.js";
+import { createSignupGate } from "./signupGate.js";
+import { signupEnabled } from "./signup.js";
 
 export const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 // Session lookups for budgeted routes (BUDGETED_ROUTES in server.ts) run on their own small pool. The gateway abandons
@@ -18,6 +21,12 @@ const budgetedLookupPool = new Pool({
   lock_timeout: BUDGETED_LOOKUP_TIMEOUT_MS,
 });
 const origin = process.env.PUBLIC_ORIGIN || "http://localhost:5173";
+/** The web page that shows sign-in and its error messages (`?error=<code>`). */
+export const SIGN_IN_PAGE = "/sign-in";
+// Startup checks: an invalid signup configuration or a half-configured provider stops the gateway here.
+export const publicSignup = signupEnabled();
+export const providers = configuredProviders();
+const ownerEmail = (process.env.OWNER_EMAIL || "").trim().toLowerCase();
 if (
   process.env.NODE_ENV === "production" &&
   ["console", "file"].includes(process.env.MAIL_MODE || "")
@@ -84,18 +93,79 @@ export async function deliverCode(
   throw new Error("Email delivery is not configured");
 }
 
+// A binding counts only when it names an existing account: scripts/bind_owner.py binds a signed-in account, and a
+// binding to an id with no account (test fixtures write these) can identify nobody who could sign in.
+const BOUND = `SELECT 1 FROM owner_binding b JOIN "user" u ON u.id=b.user_id WHERE b.singleton`;
+const signupGate = createSignupGate({
+  publicSignup,
+  ownerEmail,
+  ownerBound: async () => (await pool.query(BOUND)).rowCount === 1,
+  isOwner: async (userId) =>
+    (
+      await pool.query<{ owner: boolean }>(
+        `SELECT CASE WHEN EXISTS (${BOUND})
+          THEN EXISTS (SELECT 1 FROM owner_binding WHERE singleton AND user_id=$1)
+          ELSE EXISTS (SELECT 1 FROM "user" WHERE id=$1 AND lower(email)=$2 AND "emailVerified")
+        END AS owner`,
+        [userId, ownerEmail]
+      )
+    ).rows[0].owner,
+});
+
+// PrizeCheck never uses provider tokens, so none are stored. `scope` stays.
+const NO_TOKENS = {
+  accessToken: null,
+  refreshToken: null,
+  idToken: null,
+  accessTokenExpiresAt: null,
+  refreshTokenExpiresAt: null,
+};
+
 // One configuration for both instances: cookie names and session rules must match, or a budgeted route finds no session.
 function authOn(database: Pool) {
   return betterAuth({
     database,
     // Gateway emits bounded operational outcomes; adapter errors can contain PII.
     logger: { disabled: true },
-    onAPIError: { throw: true },
+    // Better Auth's own /api/auth/error page is never routed: errors land on the web sign-in page.
+    onAPIError: { throw: true, errorURL: `${origin}${SIGN_IN_PAGE}` },
     secret: process.env.BETTER_AUTH_SECRET,
     baseURL: origin,
     basePath: "/api/auth",
     trustedOrigins: [origin],
     emailAndPassword: { enabled: false },
+    socialProviders: socialProviders(providers),
+    account: {
+      accountLinking: {
+        enabled: true,
+        trustedProviders: [],
+        allowDifferentEmails: true,
+        updateUserInfoOnLink: true,
+      },
+    },
+    user: {
+      validateUserInfo: (data) =>
+        signupGate({
+          user: data.user,
+          source: { action: data.source.action, method: data.source.method },
+        }),
+    },
+    databaseHooks: {
+      account: {
+        create: { before: async () => ({ data: NO_TOKENS }) },
+        update: { before: async () => ({ data: NO_TOKENS }) },
+      },
+      user: {
+        update: {
+          // A sign-in or link never changes the collector's own email or verified flag (overrideUserInfoOnSignIn
+          // would). Hook data is merged, so the keys are overridden with undefined, which Better Auth drops.
+          before: async (_user, context) =>
+            context?.path === "/callback/:id"
+              ? { data: { email: undefined, emailVerified: undefined } }
+              : undefined,
+        },
+      },
+    },
     session: { expiresIn: 60 * 60 * 24 * 30, updateAge: 60 * 60 * 24 },
     advanced: {
       useSecureCookies: !new URL(origin).hostname.match(

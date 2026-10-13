@@ -13,7 +13,9 @@ async function sessionFixture(
     await route.fulfill({
       json: route.request().url().includes("/session")
         ? { signedIn: current, userId: current ? "owner" : null }
-        : {},
+        : route.request().url().includes("/methods")
+          ? { providers: [], emailSignIn: true }
+          : {},
     });
   });
   await page.route("**/api/**", async (route) => {

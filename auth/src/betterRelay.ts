@@ -7,6 +7,13 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 export type BetterRequestOptions = {
   /** Append the incoming request's query string to `path`. */
   forwardQuery?: boolean;
+  /** The method for Better Auth when it differs from the browser's (a GET start calls a POST endpoint). */
+  method?: string;
+  /**
+   * Send this Origin instead of the browser's. A GET start carries no Origin, and Better Auth refuses a POST that
+   * carries a cookie without one; the gateway vouches with its own PUBLIC_ORIGIN for the routes that opt in.
+   */
+  originHeader?: string;
 };
 
 export type RelayOptions = {
@@ -23,13 +30,14 @@ export function betterRequest(
 ): Request {
   const headers = new Headers();
   if (request.headers.cookie) headers.set("cookie", request.headers.cookie);
-  if (request.headers.origin) headers.set("origin", request.headers.origin);
+  const sentOrigin = options.originHeader ?? request.headers.origin;
+  if (sentOrigin) headers.set("origin", sentOrigin);
   headers.set("content-type", "application/json");
   const query = options.forwardQuery
     ? new URL(request.url || "/", origin).search
     : "";
   return new Request(`${origin}${path}${query}`, {
-    method: request.method,
+    method: options.method ?? request.method,
     headers,
     body,
   });

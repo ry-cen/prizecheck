@@ -48,6 +48,26 @@ describe("betterRequest", () => {
   });
 });
 
+describe("betterRequest route options", () => {
+  it("lets a route set the method and vouch with the gateway's own origin", async () => {
+    const request = betterRequest(
+      origin,
+      {
+        method: "GET",
+        url: "/auth/sign-in/google",
+        headers: { cookie: "a=1" },
+      },
+      "/api/auth/sign-in/social",
+      "{}",
+      { method: "POST", originHeader: origin }
+    );
+    expect(request.method).toBe("POST");
+    expect(request.headers.get("origin")).toBe(origin);
+    expect(request.headers.get("cookie")).toBe("a=1");
+    expect(await request.text()).toBe("{}");
+  });
+});
+
 describe("relay", () => {
   let base = "";
   let result: () => Response = () => new Response(null);
