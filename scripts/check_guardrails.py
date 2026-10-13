@@ -192,6 +192,28 @@ def flake_scope_files():
         yield from sorted((ROOT/entry).rglob('*.ts'))
 
 
+FAKE_IMPORT = re.compile(r"""(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+|\brequire\s*\(\s*)["']([^"']+)["']""")
+FAKE_SPECIFIER = re.compile(r'(^|/)testing(/|$)|oauth-fake')
+
+
+def oauth_fake_import_violations(source):
+    """Shipped auth source (auth/src) never loads the OAuth test fake (auth/testing/): no import, re-export, dynamic
+    import or require of it, and no mention of its consent path."""
+    found = []
+    for number, line in enumerate(source.splitlines(), 1):
+        if any(FAKE_SPECIFIER.search(specifier) for specifier in FAKE_IMPORT.findall(line)):
+            found.append((number, 'Shipped auth source must not import the OAuth test fake (auth/testing/)'))
+        elif '__fake-oauth' in line:
+            found.append((number, 'Shipped auth source must not mention the OAuth test fake'))
+    return found
+
+
+def dockerignore_violations(text):
+    """The OAuth test fake never enters an image build context."""
+    lines = {line.strip() for line in text.splitlines()}
+    return [] if 'auth/testing/' in lines else [(1, 'List auth/testing/ in .dockerignore so the OAuth test fake never enters an image')]
+
+
 def process_scope_files():
     for entry in PROCESS_SCOPE:
         path = ROOT/entry
@@ -212,6 +234,14 @@ def main():
         for line, reason in process_search_violations(path.read_text()):
             print(f'{relative}:{line}: {reason}')
             failed = True
+    for path in sorted((ROOT/'auth/src').rglob('*.ts')):
+        relative = path.relative_to(ROOT).as_posix()
+        for line, reason in oauth_fake_import_violations(path.read_text()):
+            print(f'{relative}:{line}: {reason}')
+            failed = True
+    for line, reason in dockerignore_violations((ROOT/'.dockerignore').read_text()):
+        print(f'.dockerignore:{line}: {reason}')
+        failed = True
     for path in sorted((ROOT/'api/tests').glob('test_*.py')):
         relative = path.relative_to(ROOT).as_posix()
         for line, reason in tier_violations(path.read_text(), relative):

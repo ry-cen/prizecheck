@@ -155,3 +155,25 @@ class FlakeGuardrailTest(unittest.TestCase):
         self.assertEqual(self.flagged(commented, 'web/tests/workspace-moves.spec.ts'), [1])
         self.assertEqual(self.flagged(sign_in, 'web/tests/holdings.spec.ts'), [])
         self.assertEqual(self.flagged(sign_in, 'web/tests/support/workspace-sign-in.ts'), [])
+
+
+    def test_shipped_auth_importing_the_oauth_fake_is_rejected(self):
+        for source in ('import "../testing/oauth-fake/preload.js";',
+                       'import { identities } from "../testing/oauth-fake/core.js";',
+                       "export * from '../../auth/testing/oauth-fake/core.js';",
+                       'const fake = await import("../testing/oauth-fake/core.js");',
+                       'const fake = require("./oauth-fake");',
+                       'if (url.pathname === "/auth/__fake-oauth/consent") serve();'):
+            self.assertTrue(guardrails.oauth_fake_import_violations(source), source)
+
+    def test_shipped_auth_imports_are_allowed(self):
+        source = ('import { createServer } from "node:http";\n'
+                  'import { auth, pool } from "./auth.js";\n'
+                  'import { betterAuth } from "better-auth";\n'
+                  'const label = "testing mode";\n'
+                  '// the gateway has no fake extension point\n')
+        self.assertFalse(guardrails.oauth_fake_import_violations(source))
+
+    def test_dockerignore_must_exclude_the_oauth_fake(self):
+        self.assertTrue(guardrails.dockerignore_violations('**/.env\n.git/\n'))
+        self.assertFalse(guardrails.dockerignore_violations('**/.env\nauth/testing/\n.git/\n'))
