@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import {
   getEditionPrices,
   MAX_PRICE_EDITIONS,
@@ -213,6 +213,33 @@ function compactContent(settled: Settled | null) {
       )}
     </span>
   );
+}
+
+/** What a price slot settles to: the Edition's price row, a client timeout, or an error. */
+export type PriceSettled = Settled;
+
+/**
+ * The cached price row of one Card Edition for a page that renders it itself (the deck builder's List view
+ * multiplies it by a line's quantity). It is requested once `slot` first comes near the viewport, through
+ * the same batched queue as EditionPrice; null while the check is pending.
+ */
+export function useEditionPriceRow(
+  editionId: string,
+  slot: RefObject<Element | null>
+): PriceSettled | null {
+  const [settled, setSettled] = useState<Settled | null>(null);
+  useEffect(() => {
+    setSettled(null);
+    let cancel = () => {};
+    const stop = whenNear(slot.current, () => {
+      cancel = request(editionId, setSettled);
+    });
+    return () => {
+      stop();
+      cancel();
+    };
+  }, [editionId]);
+  return settled;
 }
 
 /** The cached price of one Card Edition. `compact` renders one short line (workspace tiles); the default

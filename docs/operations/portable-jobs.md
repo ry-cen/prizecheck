@@ -7,8 +7,11 @@ The implementation selects no provider. A scheduler invokes independent commands
 | Daily logical backup | Daily, 03:00 | `.venv/bin/python scripts/operations_job.py backup` |
 | Independent backup watchdog | Hourly, minute15 | `.venv/bin/python scripts/operations_job.py watchdog` |
 | Disposable recovery drill | Monthly, first day04:00 | `.venv/bin/python scripts/operations_job.py restore --target tcg_recovery_monthly_YYYYMM` |
+| Format Standing rule dates | Daily, 00:05 UTC | `.venv/bin/python scripts/format_standing_job.py` |
 
 The monthly target must be new; existing databases are never overwritten. Remove only that disposable target after recording the drill. Source connection is `DATABASE_URL`; restore administration uses `RESTORE_ADMIN_DATABASE_URL`. Scheduler installation, actual daily execution and remote durability need deployment evidence, rather than a code-level assertion.
+
+The Format Standing job rebuilds the stored Format Standing of each Format whose rules changed on that day (a set becoming legal, a rotation, a ban); on other days it reads one row per Format and changes nothing. It exits 0 when every Format is current, 1 when the database is unreachable, and 3 when another rebuild held a Format's lock for longer than the wait (retry). A missed run is safe: the first Catalog read after a rule date rebuilds that Format itself and makes the read wait for the rebuild.
 
 ## Private object storage boundary
 

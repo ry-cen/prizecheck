@@ -4,6 +4,7 @@ Prices are controlled by writing what the price runner writes (``test_prices.see
 catalog search route, the order the collector sees. No real runner is ever started.
 """
 from datetime import timedelta
+import json
 import time
 from uuid import uuid4
 
@@ -100,6 +101,9 @@ def test_the_edition_with_the_cheapest_stored_price_is_chosen_and_stored_as_an_o
     assert body["deck_id"] == deck
     assert body["deck_list"]["revision"] == 2
     assert lines(body) == {second: "3"}
+    # The line carries its display data like every Deck List command response (app redesign #176).
+    assert {"name", "set_name", "collector_number", "descriptor", "card_kind", "identity_id"} <= set(
+        body["deck_list"]["lines"][0])
     # Deck detail shows the same line and nothing about how it was chosen.
     listed = detail(owner, deck)["deck_list"]
     assert listed == body["deck_list"]
@@ -109,6 +113,32 @@ def test_the_edition_with_the_cheapest_stored_price_is_chosen_and_stored_as_an_o
     seed(store, by_id[second], "7.00")
     assert chosen(add_printing(owner, deck_of(owner), printing, "1", 1)) == (second, "cheapest_price")
     assert launches == []
+
+
+def test_a_response_stored_by_an_older_release_replays_with_every_display_field(store):
+    """A retry of a command whose response was stored before #176 (no display data) or before migration 043 (no
+    evolution root) replays the stored answer with today's display data on each line (``deck_list_display``)."""
+    owner = str(uuid4())
+    printing, (first_edition, second), by_id = furret_world(owner)
+    seed(store, by_id[first_edition], "0.50")
+    deck = deck_of(owner)
+    key = uuid4()
+    first = add_printing(owner, deck, printing, "1", 1, key)
+    assert first.status_code == 200, first.text
+    display = ("name", "set_id", "set_name", "collector_number", "descriptor", "image_url", "card_kind", "trainer_type",
+               "evolves_from", "identity_id", "identity_name", "evolution_root", "evolution_stage")
+    for stripped in (("evolution_root", "evolution_stage"), display):
+        with connect() as conn:
+            stored = conn.execute("SELECT response FROM location_command WHERE owner_id=%s AND request_key=%s",
+                                  (owner, key)).fetchone()["response"]
+            for line in stored["deck_list"]["lines"]:
+                for field in stripped:
+                    line.pop(field, None)
+            conn.execute("UPDATE location_command SET response=%s WHERE owner_id=%s AND request_key=%s",
+                         (json.dumps(stored), owner, key))
+        replayed = add_printing(owner, deck, printing, "1", 1, key)
+        assert replayed.status_code == 200, replayed.text
+        assert replayed.json() == first.json()
 
 
 def test_equal_prices_go_to_catalog_order_and_a_zero_price_is_the_cheapest(store):

@@ -7,7 +7,7 @@ from uuid import uuid4
 import psycopg
 
 from test_deck_list_moves import held
-from test_deck_lists import change_line, code, deck_revision, detail, put_line, remove_line, states
+from test_deck_lists import change_line, code, core, deck_revision, detail, put_line, remove_line, states
 from test_decks import create
 from test_holdings import add, call, fixture
 from test_moves import commit, edition_like, leaf, selected, stage, start
@@ -253,8 +253,8 @@ def test_a_source_override_moves_copies_from_the_chosen_locations():
     assert after['rows'] == [] and after['deck_list_revision'] == body['deck_list_revision']
     # Taking more than the line needs is still a Move into the Deck: the line rises to cover the extra copy.
     ok(confirm(owner, deck, [item(box, edition, 1, versions(owner, box)[edition])], after['deck_list_revision']))
-    assert detail(owner, deck)['deck_list'] == {'revision': after['deck_list_revision'] + 1,
-                                                'lines': [{'edition_id': edition, 'quantity': '3', 'in_deck': '3'}]}
+    assert core(detail(owner, deck)['deck_list']) == {'revision': after['deck_list_revision'] + 1,
+                                                      'lines': [{'edition_id': edition, 'quantity': '3', 'in_deck': '3'}]}
 
 
 def test_stale_or_invalid_confirmations_change_nothing():
@@ -353,8 +353,8 @@ def test_each_source_of_a_confirmation_is_undone_like_an_ordinary_move():
     assert held(owner, binder) == restored[binder] and held(owner, unsorted) == restored[unsorted]
     assert held(owner, deck) == {}
     # Taking copies back out of the Deck leaves its line.
-    assert detail(owner, deck)['deck_list'] == {'revision': body['deck_list_revision'],
-                                                'lines': [{'edition_id': edition, 'quantity': '3', 'in_deck': '0'}]}
+    assert core(detail(owner, deck)['deck_list']) == {'revision': body['deck_list_revision'],
+                                                      'lines': [{'edition_id': edition, 'quantity': '3', 'in_deck': '0'}]}
 
 
 def test_concurrent_confirmations_of_the_same_copies_move_them_once():
