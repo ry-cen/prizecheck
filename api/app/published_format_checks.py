@@ -1,8 +1,10 @@
-"""Advisory format results of one Published Deck snapshot version (Deck Lists 18).
+"""Advisory format results of one Published Deck snapshot version (Deck Lists 18), in its Target Format only (app
+redesign #183).
 
 Anonymous, unbudgeted and PostgreSQL-free, like the Published Deck exports. The inputs are the token and the version in
-the path plus the private route's ``?format=`` and ``?as_of=`` (``public_deck``). Rows and quantities come from the active
-frozen snapshot. Each row's Card Printing, Card Identity, set, collector number, Reprint Group and card attributes come
+the path plus the private route's ``?as_of=`` (``public_deck``). The Format is the one the snapshot was published in
+(``PublicSnapshot.target_format``; a snapshot published before #178 reads as Standard), never a request input. Rows and
+quantities come from the active frozen snapshot. Each row's Card Printing, Card Identity, set, collector number, Reprint Group and card attributes come
 from the current public format facts (``public_catalog.format_facts``), and so do the facts of every printing in those
 Reprint Groups, read at the same store generation. Results therefore follow rotations, bans, reviewed corrections,
 re-derived attributes and Reprint Groups, and identity merges without republishing. The pure evaluator and the private
@@ -29,7 +31,7 @@ from .public_projection import ProjectionUnavailable
 from .public_records import public_record_store
 
 router = APIRouter(tags=['published-format-checks'])
-QUERY = frozenset({'format', 'as_of'})
+QUERY = frozenset({'as_of'})
 # A row whose Printing cannot be proven against well-formed public format records is checked with no facts at all. The
 # evaluator then reports its set and mark as not recorded; those two gaps are replaced by this one.
 UNAVAILABLE = 'card_data_unavailable'
@@ -65,18 +67,14 @@ class PublishedDeckFormatChecks(BaseModel):
     disclaimer: str = DISCLAIMER
 
 
-def _query(request: Request) -> tuple[tuple[str, ...], date, date]:
-    """The formats to check, the evaluation date and today; refusals carry the public headers."""
-    params = request.query_params
-    name = params.get('format')
-    if name is not None and name not in evaluator.FORMATS:
-        raise public_deck.error(422, 'UNKNOWN_FORMAT')
+def _query(request: Request) -> tuple[date, date]:
+    """The evaluation date and today; a refusal carries the public headers."""
     current = today()
     try:
-        on = parse_as_of(params.get('as_of'), current)
+        on = parse_as_of(request.query_params.get('as_of'), current)
     except HTTPException:
         raise public_deck.error(422, 'INVALID_AS_OF') from None
-    return (evaluator.FORMATS if name is None else (name,)), on, current
+    return on, current
 
 
 def read_facts(store, printing_refs, deadline, *, generation=None) -> dict:
@@ -208,21 +206,23 @@ def checks_for(active, facts, names, on: date, current: date, computed_at: datet
     return results
 
 
-def published_format_checks(token: str, version: int, names, on: date, current: date) -> PublishedDeckFormatChecks:
+def published_format_checks(token: str, version: int, on: date, current: date) -> PublishedDeckFormatChecks:
+    """The snapshot's result in its Target Format only (app redesign #183): the one Format it was published in."""
     deadline = public_deck.export_deadline()
     active = public_deck.read_for_export(token, version, deadline=deadline)
-    results = checks_for(active, _facts(active, deadline), names, on, current, datetime.now(timezone.utc))
+    results = checks_for(active, _facts(active, deadline), (active.snapshot.target_format,), on, current,
+                         datetime.now(timezone.utc))
     public_deck.revalidate_for_export(active, deadline=deadline)
     return PublishedDeckFormatChecks(version=active.version, digest=active.digest, results=results)
 
 
 @router.get('/api/public/decks/{token}/versions/{version}/format-checks', response_model=PublishedDeckFormatChecks)
 def published_deck_format_checks(request: Request, token: str, version: str,
-                                 format_name: str | None = Query(default=None, alias='format'),
                                  as_of: str | None = Query(default=None)):
     # Synchronous on purpose: the HTTP record-store adapter refuses to run on an event loop. The declared query
-    # parameters document the contract; public_path and _query read and validate the raw query themselves.
+    # parameter documents the contract; public_path and _query read and validate the raw query themselves. There is no
+    # ``format``: the answer is the snapshot's Target Format, and a ``format`` parameter is 422 INVALID_REQUEST.
     number = public_deck.public_path(request, token, version, query=QUERY)
-    names, on, current = _query(request)
-    checks = published_format_checks(token, number, names, on, current)
+    on, current = _query(request)
+    checks = published_format_checks(token, number, on, current)
     return JSONResponse(checks.model_dump(mode='json'), headers=dict(public_deck.PUBLIC_HEADERS))

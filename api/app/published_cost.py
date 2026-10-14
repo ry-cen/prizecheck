@@ -9,6 +9,11 @@ at most one wait, a final validation inside the 0.5 s reserve, and the private r
 Edition's eligibility is re-read; otherwise the answer is 404 (revoked), 409 (republished or rewritten) or a withheld
 ``incomplete``.
 
+Each answer that passed the final validation also lists every frozen Edition's own price (app redesign #183):
+``editions`` holds one ``{edition_ref, amount}`` per distinct public Edition reference, in snapshot order, with the
+exact per-copy amount of a priced row and null otherwise. It comes from the same views as the totals, so it adds no
+store read and no admission, and it carries no price age. Legacy rows have no reference and no entry.
+
 Contract: docs/prices.md ("Published Deck cost").
 """
 import re
@@ -16,7 +21,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 from starlette.background import BackgroundTask
 
 from . import price_refresh, prices, public_deck
@@ -31,19 +36,28 @@ ANON = re.compile(r'anon:[0-9a-f]{32}')
 _FINAL_MARGIN = FINAL_MARGIN_MS / 1000
 
 
+class PublishedEditionPrice(BaseModel):
+    """One frozen Edition's price: the exact per-copy amount of its quote, or null when it has none. No age."""
+    model_config = ConfigDict(extra='forbid')
+    edition_ref: str = Field(pattern=r'^[0-9a-f]{48}$')
+    amount: str | None = None
+
+
 class PublishedDeckCost(BaseModel):
+    model_config = ConfigDict(extra='forbid')
     version: int                              # the snapshot version this answer belongs to
     digest: str | None = None                 # sha256 of the frozen snapshot content; None when it was not confirmed
     status: CostStatus
     reason: IncompleteReason | None = None
     total_copies: str | None = None
     priced_copies: str | None = None
-    stale_copies: str | None = None
-    unknown_age_copies: str | None = None
     fallback_copies: str | None = None
     amount: str | None = None
     display_amount: str | None = None
     currency: Literal['USD'] = 'USD'
+    # App redesign #183: each frozen Edition's per-copy price, for the Published Deck page's tiles and lines. Empty on a
+    # withheld or incomplete answer, like every other figure.
+    editions: list[PublishedEditionPrice] = []
 
 
 def _label(state, printing_ref):
@@ -154,7 +168,13 @@ def published_deck_cost(token: str, version: int, budget: Budget, releases: list
         return _withheld(version, 'validation_unavailable')
     if budget.expired():
         return _withheld(version, 'deadline')
-    return PublishedDeckCost(version=active.version, digest=active.digest, **summarize(quantities, views))
+    figures = summarize(quantities, views)
+    editions = [] if figures['status'] == 'incomplete' else [
+        PublishedEditionPrice(edition_ref=ref, amount=view.amount if view.status == 'quote' else None)
+        for ref, view in ((ref, views[ref]) for ref in frozen)]
+    # No price age is shown or sent (app redesign spec): the two age counts of the shared fold stay private.
+    public = {key: value for key, value in figures.items() if key not in ('stale_copies', 'unknown_age_copies')}
+    return PublishedDeckCost(version=active.version, digest=active.digest, editions=editions, **public)
 
 
 @router.get('/api/public/decks/{token}/versions/{version}/cost', response_model=PublishedDeckCost)

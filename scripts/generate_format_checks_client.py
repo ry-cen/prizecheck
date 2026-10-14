@@ -49,14 +49,13 @@ export async function getDeckFormatChecks(deckId: string, options: { format?: st
   }
   return response.json() as Promise<DeckFormatChecks>;
 }
-// A Published Deck's advisory results, recomputed from current public card facts: only the token, the snapshot version
-// and the same optional ``format``/``asOf`` are sent, and no cookie. An issue's ``lines`` are the frozen rows' public
-// Edition references ("row:<n>" for a legacy row without one).
+// A Published Deck's advisory result in its Target Format (app redesign #183), recomputed from current public card
+// facts: only the token, the snapshot version and an optional ``asOf`` are sent, and no cookie. An issue's ``lines`` are
+// the frozen rows' public Edition references ("row:<n>" for a legacy row without one).
 export async function getPublishedFormatChecks(token: string, version: number,
-                                               options: { format?: string; asOf?: string } = {},
+                                               options: { asOf?: string } = {},
                                                signal?: AbortSignal): Promise<PublishedDeckFormatChecks> {
   const query = new URLSearchParams();
-  if (options.format) query.set('format', options.format);
   if (options.asOf) query.set('as_of', options.asOf);
   const suffix = query.toString() ? '?' + query.toString() : '';
   const response = await fetch(

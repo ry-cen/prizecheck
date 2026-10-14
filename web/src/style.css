@@ -98,23 +98,6 @@ body {
 :root:has([data-collection-page]) {
   background: var(--color-bg);
 }
-/* An old light page inside the dark app shell: the light page :root gives it outside the shell. Fills the
-   page area under the shell's header (and above the phone tab bar). */
-.legacy-light {
-  display: flow-root;
-  min-height: calc(100dvh - var(--layout-header-height));
-  font-family: system-ui, sans-serif;
-  color: #172126;
-  background: #f4f5f1;
-  color-scheme: normal;
-}
-@media (max-width: 760px) {
-  .legacy-light {
-    min-height: calc(
-      100dvh - var(--layout-header-height) - var(--layout-tabbar-height)
-    );
-  }
-}
 /* An old light section inside a page that is already on the kit (#167): Owner controls' queue tabs keep
    today's review components until #168, #170 and #171 move them onto the kit. The old look on a light
    inset panel, with no page-height fill. */

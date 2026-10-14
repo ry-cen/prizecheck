@@ -572,13 +572,12 @@ const KEYS = [
   "currency",
   "digest",
   "display_amount",
+  "editions",
   "fallback_copies",
   "priced_copies",
   "reason",
-  "stale_copies",
   "status",
   "total_copies",
-  "unknown_age_copies",
   "version",
 ];
 
@@ -643,10 +642,30 @@ describe("the Published Deck cost through the real gateway", () => {
         display_amount: "$1.61",
         priced_copies: "5",
         total_copies: "6",
-        stale_copies: "2",
-        unknown_age_copies: "0",
         fallback_copies: "0",
         currency: "USD",
+      });
+      // Each frozen Edition's own price (app redesign #183): its public reference and amount, and nothing else.
+      expect(
+        body.editions.map((entry: object) => Object.keys(entry).sort())
+      ).toEqual([
+        ["amount", "edition_ref"],
+        ["amount", "edition_ref"],
+        ["amount", "edition_ref"],
+      ]);
+      expect(
+        Object.fromEntries(
+          body.editions.map(
+            (entry: { edition_ref: string; amount: string }) => [
+              entry.edition_ref,
+              entry.amount,
+            ]
+          )
+        )
+      ).toEqual({
+        [normal.ref]: "0.25",
+        [reverse.ref]: "0.43",
+        [plain.ref]: null,
       });
       expect(body.digest).toMatch(/^[0-9a-f]{64}$/);
       for (const secret of [owner.id, deck, normal.id, reverse.id, plain.id])
@@ -994,10 +1013,9 @@ describe("the Published Deck cost through the real gateway", () => {
       const body = answer!.json;
       expect(body.version).toBe(1);
       expect(body.digest).toMatch(/^[0-9a-f]{64}$/);
+      // The snapshot's Target Format only (app redesign #183).
       expect(body.results.map((result: any) => result.format)).toEqual([
         "standard",
-        "expanded",
-        "glc",
       ]);
       // Four copies of a card with no set or attributes: not legal on size, never legal.
       for (const result of body.results)

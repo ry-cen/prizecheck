@@ -166,11 +166,14 @@ test("an anonymous visitor opens an all-mapped Published Deck in TCGplayer only 
   const visitor = await anonymous.newPage();
   await stubClipboard(visitor, "reject");
   await visitor.goto(`${ORIGIN}/published/${token}`);
-
-  const region = visitor.getByRole("region", {
-    name: "TCGplayer export",
-    exact: true,
-  });
+  // Buy on TCGplayer opens Mass Entry for the whole list in a dialog that prepares it (#183).
+  await visitor.getByRole("button", { name: "Buy on TCGplayer" }).click();
+  const region = visitor
+    .getByRole("dialog", { name: "Buy on TCGplayer" })
+    .getByRole("region", {
+      name: "TCGplayer export",
+      exact: true,
+    });
   await region
     .getByRole("button", { name: "Prepare TCGplayer export" })
     .click();

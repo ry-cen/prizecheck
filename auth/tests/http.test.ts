@@ -285,8 +285,16 @@ describe("live Better Auth boundary", () => {
         "total",
         "version",
       ]);
+      // A snapshot written before #183 reads the display facts the Published Deck page groups rows by as null.
       expect(Object.keys(shown.identities[0].editions[0]).sort()).toEqual(
-        Object.keys(edition).sort()
+        [
+          ...Object.keys(edition),
+          "card_kind",
+          "trainer_type",
+          "evolves_from",
+          "evolution_root",
+          "evolution_stage",
+        ].sort()
       );
       expect(shown.identities[0].editions[0]).toMatchObject({
         edition_ref: edition.edition_ref,

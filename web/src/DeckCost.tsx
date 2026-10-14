@@ -6,7 +6,7 @@ import { getDeckCost, type DeckCost } from "./prices_generated";
 // discarded, and a newer one asks the page to reload its checks (which re-renders this with the new revision).
 const CLIENT_TIMEOUT_MS = 3_500;
 
-/** The figures both surfaces render: a private Deck (DeckCost) and a Published Deck snapshot (PublishedDeckCost). */
+/** The figures a private Deck's cost summary renders (DeckCost). The Published Deck page has its own cost line (#183). */
 export type CostFigures = Pick<
   DeckCost,
   | "status"

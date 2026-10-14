@@ -110,9 +110,7 @@ promote({'card-1': 'Pikachu'})`,
     await expect(
       publicPage.getByRole("heading", { name: "Friends & rivals", exact: true })
     ).toBeVisible();
-    await expect(publicPage.getByRole("main")).toContainText(
-      "59 cards · 1 cards short of 60"
-    );
+    await expect(publicPage.getByRole("main")).toContainText("59 cards");
     await expect(publicPage.getByRole("main")).not.toContainText(privateName);
     await expect(publicPage.getByLabel("Email")).toHaveCount(0);
     await expect(publicPage.locator('meta[name="robots"]')).toHaveAttribute(
@@ -134,10 +132,21 @@ promote({'card-1': 'Pikachu'})`,
       ownerView.getByRole("navigation", { name: "Public pages" })
     ).toHaveCount(0);
     await ownerView.close();
-    await publicPage.getByText("Pikachu · 59 copies", { exact: true }).click();
+    // The read-only deck panel (#183): the List line, then the card popup with its Edition.
+    const publicList = publicPage.getByRole("region", { name: "Deck List" });
+    await publicPage
+      .getByRole("radiogroup", { name: "Deck List view" })
+      .getByRole("radio", { name: "List" })
+      .click();
+    const pikachu = publicList
+      .getByRole("listitem")
+      .filter({ hasText: "Pikachu" });
+    await expect(pikachu).toContainText("59");
+    await pikachu.getByRole("button").click();
     await expect(
-      publicPage.getByRole("region", { name: "Published cards" })
+      publicPage.getByRole("dialog", { name: "Pikachu" })
     ).toContainText("Fixture Set");
+    await publicPage.keyboard.press("Escape");
     const token = firstUrl.split("/").at(-1)!;
     const snapshotResponse = await anonymous.request.get(
       `${process.env.TEST_ORIGIN || "http://localhost:5173"}/api/public/decks/${token}`
@@ -153,14 +162,19 @@ promote({'card-1': 'Pikachu'})`,
     expect(reference.edition_ref).not.toBe(reference.printing_ref);
     expect(reference.printing_name).toBe("Pikachu");
     expect(Object.keys(reference).sort()).toEqual([
+      "card_kind",
       "collector_number",
       "edition_ref",
+      "evolution_root",
+      "evolution_stage",
+      "evolves_from",
       "image_url",
       "printing_name",
       "printing_ref",
       "quantity",
       "set_id",
       "set_name",
+      "trainer_type",
       "variant",
     ]);
     expect(
@@ -185,9 +199,7 @@ promote({'card-1': 'Pikachu'})`,
       "Friends & rivals · Unlisted · version 2"
     );
     await publicPage.reload();
-    await expect(publicPage.getByRole("main")).toContainText(
-      "61 cards · 1 cards over 60"
-    );
+    await expect(publicPage.getByRole("main")).toContainText("61 cards");
     const republished = await anonymous.request.get(
       `${process.env.TEST_ORIGIN || "http://localhost:5173"}/api/public/decks/${token}`
     );

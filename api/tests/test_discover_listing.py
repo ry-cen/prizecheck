@@ -110,9 +110,11 @@ def tokens(query=""):
 
 
 def public_status(token, target="standard"):
-    response = client.get(f"/api/public/decks/{token}/versions/1/format-checks?format={target}")
+    # The public format checks answer the snapshot's Target Format only (app redesign #183).
+    response = client.get(f"/api/public/decks/{token}/versions/1/format-checks")
     assert response.status_code == 200, response.text
     [result] = response.json()["results"]
+    assert result["format"] == target
     return result["status"]
 
 

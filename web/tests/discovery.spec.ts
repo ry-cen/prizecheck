@@ -144,6 +144,11 @@ promote({'card-1': ${JSON.stringify(hostileName)}})`,
     await expect(
       publicPage.getByRole("heading", { name: title, exact: true })
     ).toBeVisible();
+    // Card names are text, never markup: the List view shows each line's name (#183).
+    await publicPage
+      .getByRole("radiogroup", { name: "Deck List view" })
+      .getByRole("radio", { name: "List" })
+      .click();
     await expect(publicPage.getByRole("main")).toContainText(hostileName);
     await expect(publicPage.locator('img[src="x"]')).toHaveCount(0);
     expect(

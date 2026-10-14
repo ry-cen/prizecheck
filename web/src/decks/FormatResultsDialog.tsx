@@ -1,4 +1,4 @@
-import { useEffect, useId, useState, type RefObject } from "react";
+import { useEffect, useId, useRef, useState, type RefObject } from "react";
 import {
   getDeckFormatChecks,
   type FormatCheck,
@@ -17,11 +17,26 @@ import {
   statusOf,
 } from "./targetFormat";
 
-type Props = {
+type Source =
+  | {
+      /** The private Deck whose format-checks read answers another "as of" date. */
+      deckId: string;
+      resultOn?: never;
+    }
+  | {
+      /** Reads the Target Format's result on another date: the Published Deck page passes the public read for its
+       * snapshot (#183). Null means no result for that date. */
+      resultOn: (
+        asOf: string,
+        signal: AbortSignal
+      ) => Promise<FormatCheck | null>;
+      deckId?: never;
+    };
+
+type Props = Source & {
   open: boolean;
   onClose: () => void;
   returnFocus: RefObject<HTMLElement | null>;
-  deckId: string;
   /** The Deck's Target Format and its result as of today, from the last Deck read or command. */
   targetFormat: string;
   today: FormatCheck;
@@ -48,12 +63,16 @@ export function FormatResultsDialog({
   onClose,
   returnFocus,
   deckId,
+  resultOn,
   targetFormat,
   today,
   disclaimer,
   lines,
 }: Props) {
   const [asOf, setAsOf] = useState(today.evaluated_on);
+  // The page may pass a fresh reader on every render; only the date, the Deck and the Format start a read.
+  const reader = useRef(resultOn);
+  reader.current = resultOn;
   const [other, setOther] = useState<Other | null>(null);
   const headingBase = useId();
 
@@ -72,13 +91,17 @@ export function FormatResultsDialog({
     }
     const controller = new AbortController();
     setOther({ kind: "loading", on: asOf });
-    getDeckFormatChecks(
-      deckId,
-      { format: targetFormat, asOf },
-      controller.signal
-    )
-      .then((checks) => {
-        const result = resultFor(checks, targetFormat);
+    const read =
+      reader.current ??
+      ((on: string, signal: AbortSignal) =>
+        getDeckFormatChecks(
+          deckId ?? "",
+          { format: targetFormat, asOf: on },
+          signal
+        ).then((checks) => resultFor(checks, targetFormat)));
+    read(asOf, controller.signal)
+      .then((result) => {
+        if (controller.signal.aborted) return;
         setOther(
           result
             ? { kind: "ready", on: asOf, result }

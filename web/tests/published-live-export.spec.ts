@@ -147,7 +147,11 @@ test("an anonymous visitor copies complete Live text of the frozen snapshot, kee
   const visitor = await anonymous.newPage();
   await stubClipboard(visitor, "reject");
   await visitor.goto(`${ORIGIN}/published/${token}`);
-  const live = visitor.getByRole("region", { name: "Pokémon TCG Live export" });
+  // Copy for TCG Live opens the export in a dialog that prepares it (#183); Export to Live prepares it again.
+  await visitor.getByRole("button", { name: "Copy for TCG Live" }).click();
+  const live = visitor
+    .getByRole("dialog", { name: "Copy for TCG Live" })
+    .getByRole("region", { name: "Pokémon TCG Live export" });
   await live
     .getByRole("button", { name: "Export to Live", exact: true })
     .click();
@@ -176,7 +180,8 @@ test("an anonymous visitor copies complete Live text of the frozen snapshot, kee
   await live
     .getByRole("button", { name: "Export to Live", exact: true })
     .click();
-  await expect(visitor.getByRole("main")).toContainText("Snapshot version 2");
+  // The page read the snapshot again: version 2 holds eleven copies.
+  await expect(visitor.getByRole("main")).toContainText("11 cards");
   await expect(live).toContainText("Published Deck changed; export again");
   await visitor.unroute("**/versions/1/exports/live");
   await live

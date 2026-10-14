@@ -7,7 +7,8 @@ import { exemptFromPublishGate } from "./support/publish-gate";
 import { listCards, raiseLine } from "./support/deck-list";
 
 // Ticket 12: the Estimated Deck Cost on a Published Deck page, read by an anonymous visitor in a second browser context
-// (no cookie) against the real stack. Quotes are checked under an hour ago, so nothing waits for a runner.
+// (no cookie) against the real stack. Quotes are checked under an hour ago, so nothing waits for a runner. Since #183
+// the page's header shows the total and the priced-copy count, and each List line its own price, with no price age.
 const ORIGIN = process.env.TEST_ORIGIN || "http://localhost:5173";
 const OWNER_EMAIL = process.env.OWNER_EMAIL || "owner@example.test";
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -156,24 +157,28 @@ test("an anonymous visitor sees $1.61 and 5/6 for the frozen snapshot, which sta
     await route.continue();
   });
   await visitor.goto(`${ORIGIN}/published/${token}`);
-  await expect(visitor.getByRole("main")).toContainText(
-    "6 cards · 54 cards short of 60"
-  );
-  const cost = visitor.getByRole("region", { name: "Estimated Deck Cost" });
-  await expect(cost).toContainText("Checking prices…");
+  const cost = visitor.getByRole("main");
+  await expect(cost).toContainText("6 cards · Checking prices…");
+  const list = visitor.getByRole("region", { name: "Deck List" });
+  await visitor
+    .getByRole("radiogroup", { name: "Deck List view" })
+    .getByRole("radio", { name: "List" })
+    .click();
+  await expect(list).toContainText("Checking price");
   release();
-  await expect(cost).toContainText("$1.61 · 5/6 cards priced");
-  await expect(cost).toContainText(
-    "Incomplete subtotal: 1 card without a price"
-  );
-  await expect(cost).toContainText("2 stale cards (price over 48 hours old)");
-  await expect(cost).toContainText("Excludes shipping and taxes");
+  await expect(cost).toContainText("6 cards · $1.61 · 5/6 copies priced");
+  // Each line's price for its copies: 3 × $0.25, 2 × $0.43, and none for the Unspecified Variant.
+  await expect(list).toContainText("$0.75");
+  await expect(list).toContainText("$0.86");
+  await expect(list).toContainText("No price");
+  // The $0.43 quote is three days old by its provider's clock; no price age is shown.
+  await expect(cost).not.toContainText(/stale|48 hours/i);
   // A private edit after publishing changes nothing the visitor sees.
   await raiseLine(pool, deck.id, ids.normal, 4);
   await bump();
   await visitor.unroute(pattern);
   await visitor.reload();
-  await expect(cost).toContainText("$1.61 · 5/6 cards priced");
+  await expect(cost).toContainText("6 cards · $1.61 · 5/6 copies priced");
   await anonymous.close();
 });
 
@@ -211,9 +216,9 @@ test("a cost answer held across a republish is discarded and the page prices the
   );
   await visitor.goto(`${ORIGIN}/published/${token}`);
   expect((await stale).status()).toBe(409);
-  await expect(visitor.getByRole("main")).toContainText("Snapshot version 2");
-  const cost = visitor.getByRole("region", { name: "Estimated Deck Cost" });
-  await expect(cost).toContainText("$0.50 · 2/2 cards priced");
+  // The page read the snapshot again: version 2 holds two copies.
+  const cost = visitor.getByRole("main");
+  await expect(cost).toContainText("2 cards · $0.50 · 2/2 copies priced");
   // An answer for another version is never shown.
   await visitor.route("**/versions/2/cost", (route) =>
     route.fulfill({
@@ -225,19 +230,19 @@ test("a cost answer held across a republish is discarded and the page prices the
         reason: null,
         total_copies: "2",
         priced_copies: "2",
-        stale_copies: "0",
-        unknown_age_copies: "0",
         fallback_copies: "0",
         amount: "9",
         display_amount: "$9.00",
         currency: "USD",
+        editions: [],
       },
     })
   );
   await visitor.reload();
-  await expect(cost).toContainText(
-    "Price unavailable; coverage unavailable; 2 cards total"
-  );
+  await expect(cost).toContainText("2 cards · Price unavailable");
   await expect(cost).not.toContainText("$9.00");
+  await expect(
+    visitor.getByRole("region", { name: "Deck List" })
+  ).not.toContainText("No price");
   await anonymous.close();
 });
