@@ -36,7 +36,14 @@ export function searchHint(search: BrowseSearch | null): string {
   if (!search || search.mode === "all") return SEARCH_EXAMPLE;
   if (search.mode === "set_number")
     return `Set and number: ${search.set_name} (${search.set_code}) number ${search.number}.`;
-  return `Name: cards whose name starts with “${search.text}”.`;
+  if (search.mode === "fuzzy") return closeSpellings(search.text);
+  return `Name: cards whose name contains “${search.text}”.`;
+}
+
+/** A close-spelling search (mode "fuzzy"): no card's name contains the words typed, so names spelled close to them
+ * are shown. Catalog's hint and the deck builder library's status both say it. */
+export function closeSpellings(text: string): string {
+  return `No exact matches. Showing close spellings of “${text}”.`;
 }
 
 /** "N Printings · English catalog from TCGdex, last pulled …" (spec "Catalog": status line). */

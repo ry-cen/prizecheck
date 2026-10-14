@@ -323,6 +323,19 @@ test.describe("on a desktop", () => {
       .getByRole("searchbox", { name: "Search the library" })
       .fill("pika");
     await expect(results.getByRole("button")).toHaveCount(1);
+    // A misspelling no name contains lists close spellings, and the library says so.
+    await shelf
+      .getByRole("searchbox", { name: "Search the library" })
+      .fill("charmandr");
+    await expect(
+      shelf.getByRole("searchbox", { name: "Search the library" })
+    ).toHaveAccessibleDescription(
+      /^No exact matches\. Showing close spellings of “charmandr”\. /
+    );
+    await expect(results.getByRole("button")).toHaveCount(2);
+    await expect(
+      results.getByRole("button", { name: /^Charmander, / })
+    ).toHaveCount(2);
     await shelf.getByRole("searchbox", { name: "Search the library" }).fill("");
     await shelf.getByRole("button", { name: "Supporter", exact: true }).click();
     await expect(results.getByRole("button")).toHaveCount(1);

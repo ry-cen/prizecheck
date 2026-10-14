@@ -2,7 +2,7 @@
 export type FormatStandingView = { status: 'legal' | 'not_legal' | 'unknown'; reasons: string[] };
 export type EditionStandings = { standard: FormatStandingView; expanded: FormatStandingView; glc: FormatStandingView };
 export type BrowseEdition = { edition_id: string; printing_id: string; name: string; set_id: string; set_name: string; set_code: string; collector_number: string; descriptor: Record<string, unknown>; image_url: string | null; card_kind: 'pokemon' | 'trainer' | 'energy' | null; trainer_type: 'supporter' | 'item' | 'tool' | 'stadium' | null; evolves_from: string | null; regulation_mark: string | null; standing: EditionStandings; owned: number; in_deck: number | null; free: number | null };
-export type BrowseSearch = { mode: 'all' | 'name' | 'set_number'; text: string; set_id: string | null; set_name: string | null; set_code: string | null; number: string | null };
+export type BrowseSearch = { mode: 'all' | 'name' | 'fuzzy' | 'set_number'; text: string; set_id: string | null; set_name: string | null; set_code: string | null; number: string | null };
 export type BrowsePage = { available: boolean; catalog_revision: number; owner_revision: number; last_success: string | null; search: BrowseSearch; editions: BrowseEdition[]; next_cursor: string | null; printings: number | null; matches: number | null };
 export type CatalogSet = { set_id: string; set_name: string; set_code: string; printings: number };
 export type CatalogSetList = { available: boolean; catalog_revision: number; sets: CatalogSet[] };

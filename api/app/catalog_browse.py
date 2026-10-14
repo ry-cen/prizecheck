@@ -7,30 +7,40 @@ Standing in all three Formats (migration 042, ``format_standing``) and the calle
 carries the copies in that Deck and the copies free elsewhere (owned and not in that Deck). Only active Editions of
 Printings the active generation holds and has not withdrawn are listed.
 
-Search. ``q`` is the smart search. A first word that is a printed set code (``set_codes``, any case: "PAL 185") or else a
-TCGdex set ID in the active generation ("sv02 185"), followed by a collector number, lists that set and number; zeros
+Search. ``q`` is the smart search. A first word that is a printed set code (``set_codes``, any case: "PAL 185") or else
+a TCGdex set ID in the active generation ("sv02 185"), followed by a collector number, lists that set and number; zeros
 after a number's letters don't count, so "MEG 1" finds "001" and "SHF SV1" finds "SV001". A printed code wins over a
 TCGdex set ID that reads the same ("G1" is Gym Heroes, not Generations, whose code is GEN), and a code that a main set
-shares with its subsets searches all of them. Anything else is a name prefix; an empty ``q`` lists everything. The response says which mode ran (``search``), so the page's hint reports the
-server's reading. Filters: ``kind`` (Pokémon, Supporter, Item, Tool, Stadium, Energy; a Trainer whose Trainer Type is
-unknown matches no Trainer Type), ``format`` (hides ``not_legal`` only, so ``unknown`` stays), ``set_id`` and ``owned``.
-``printing_id`` (#174) lists one Card Printing's active Editions, so the CardPopup reads every Edition's copies, the
-regulation mark and the Format Standing in one call, whether it opened from a tile or from the inspector's report link.
-``identity_id`` (#177) lists every active Edition of one Card Identity, for the deck builder's "Swap this copy for".
+shares with its subsets searches all of them. Anything else is a name search: the Editions whose name contains q,
+comparing letters and digits only (migration 048's ``catalog_search_words`` normalizes both, dropping accents,
+apostrophes, periods and spaces), so "juniper" finds "Professor's Research (Professor Juniper)", "pokemon" "Pokémon",
+"farfetchd" "Farfetch’d", "mr mime" "Mr. Mime" and "porygonz" "Porygon-Z"; a possessive 's may be left out ("boss
+orders"). When no listed Edition of the active catalog has such a name, whatever the other filters (a spelling is right
+or wrong whatever the collector owns or filters), and q has at least five letters and digits, the route lists the names
+spelled close to q instead (``name_search``: "charzard" finds Charizard) as mode ``fuzzy``, but only when one of them
+passes the filters; otherwise it reads as a name search that lists nothing. "char" is part of "Charizard", so it never
+reaches "Chatot". An empty ``q`` lists everything. The response says which mode ran (``search``), so the page's hint
+reports the server's reading. Filters: ``kind`` (Pokémon, Supporter, Item, Tool, Stadium, Energy; a Trainer whose
+Trainer Type is unknown matches no Trainer Type), ``format`` (hides ``not_legal`` only, so ``unknown`` stays),
+``set_id`` and ``owned``. ``printing_id`` (#174) lists one Card Printing's active Editions, so the CardPopup reads every
+Edition's copies, the regulation mark and the Format Standing in one call, whether it opened from a tile or from the
+inspector's report link. ``identity_id`` (#177) lists every active Edition of one Card Identity, for the deck builder's
+"Swap this copy for".
 
 Order (the owner's decision on #173). Newest set first: by the set's release date, latest first, then within a set by
 collector number in natural order (2 before 10, a letter suffix after its number, numbers with a letter prefix such as
-TG01 after the plain ones), then Variant (descriptor key) and Edition id. A name search keeps this order. With a set
-filter or a set and number search, collector number order within the set(s) instead. A set's release date is the one
-the last catalog import stored (``catalog_generation_set``, migration 044, from TCGdex), else its date in the format
-rules files; a set with neither sorts after every dated set, by TCGdex set ID.
+TG01 after the plain ones), then Variant (descriptor key) and Edition id. A name or close-spelling search keeps this
+order. With a set filter or a set and number search, collector number order within the set(s) instead. A set's release
+date is the one the last catalog import stored (``catalog_generation_set``, migration 044, from TCGdex), else its date
+in the format rules files; a set with neither sorts after every dated set, by TCGdex set ID.
 
 Paging is keyset, 60 rows a page, with a signed cursor (``collection.encode_cursor``). The cursor binds the query, the
-owner revision and, together, the catalog revision and the Format Standing token (``format_standing.standing_token``
-over all three Formats). A moved owner revision answers 409 ``INVENTORY_CHANGED``; a moved catalog revision or standing
-key answers 409 ``CATALOG_CHANGED``. The token covers every Format, so a rule date or rules deploy in one Format restarts
-every walk, whatever its ``format`` filter: rows carry all three standings. Any other cursor problem is 400
-``INVALID_CURSOR``.
+owner revision and, together, the catalog revision, the Format Standing token (``format_standing.standing_token`` over
+all three Formats), the set code table and the search mode. A moved owner revision answers 409 ``INVENTORY_CHANGED``; a
+moved catalog revision, standing key or code table, or a search that now reads otherwise (a close-spelling search whose
+words a name now contains, or the reverse), answers 409 ``CATALOG_CHANGED``, so a walk never changes mode midway. The
+token covers every Format, so a rule date or rules deploy in one Format restarts every walk, whatever its ``format``
+filter: rows carry all three standings. Any other cursor problem is 400 ``INVALID_CURSOR``.
 
 Format Standing. ``format_standing.ensure_current`` runs before the read snapshot (it may rebuild, or wait up to
 ``format_standing.LOCK_WAIT`` for another rebuild, so this route is a sync ``def`` on the threadpool). Inside the snapshot
@@ -42,14 +52,14 @@ import re
 import time
 import unicodedata
 from datetime import datetime
-from typing import Literal
+from typing import Literal, NamedTuple
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
 from . import format_evaluator as evaluator
-from . import format_standing, set_codes
+from . import format_standing, name_search, set_codes
 from .collection import anchor_json, anchor_value, cursor_key, encode_cursor
 from .holdings import fail
 from .main import connect, verified_user
@@ -73,6 +83,19 @@ KIND_FILTERS = {"pokemon": ("card_kind", "pokemon"), "energy": ("card_kind", "en
 SET_AND_NUMBER = re.compile(r"^(\S+)\s+#?(\S+)$")
 # A collector number with the zeros after its letters dropped: "001" -> "1", "sv001" -> "sv1", "tg01" -> "tg1".
 NUMBER_KEY = "regexp_replace(lower({}),'^([a-z]*)0*([0-9])','\\1\\2')"
+# A name search: the name's letters and digits contain q's, with or without the name's possessive 's (migration 048).
+NAME_MATCH = "(gp.search_key LIKE %s ESCAPE '\\' OR gp.search_key_bare LIKE %s ESCAPE '\\')"
+# Whether a listed Edition of the active catalog has such a name, whatever the request's other filters: a spelling is
+# right or wrong whatever the collector owns or filters.
+NAME_LISTED = f"""SELECT 1 FROM catalog_generation_edition ge JOIN catalog_generation_printing gp
+  ON gp.generation_id=ge.generation_id AND gp.printing_id=ge.printing_id
+  WHERE ge.generation_id=%s AND ge.active AND NOT gp.tombstoned AND {NAME_MATCH} LIMIT 1"""
+# Every name a listed Edition of the active catalog has, normalized: what a close-spelling search compares q with.
+LISTED_NAMES = """SELECT DISTINCT gp.search_words FROM catalog_generation_printing gp
+  WHERE gp.generation_id=%s AND NOT gp.tombstoned AND gp.search_words<>'' AND EXISTS (
+    SELECT 1 FROM catalog_generation_edition ge
+    WHERE ge.generation_id=gp.generation_id AND ge.printing_id=gp.printing_id AND ge.active)
+  ORDER BY gp.search_words"""
 
 # Sort keys, all ascending and NOT NULL, so a row comparison finds the rows after the cursor's anchor.
 # release_rank is days before 9999-12-31, so ascending is latest first; undated sets have release_missing true and go last.
@@ -134,8 +157,10 @@ class BrowseEdition(BaseModel):
 
 
 class BrowseSearch(BaseModel):
-    # all: q was empty; name: a name prefix; set_number: a known set ID and a collector number.
-    mode: Literal["all", "name", "set_number"]
+    # all: q was empty; name: Editions whose name contains q, letters and digits only (migration 048); fuzzy: no
+    # listed Edition's name contains q, so names spelled close to it (name_search); set_number: a known set ID and a
+    # collector number.
+    mode: Literal["all", "name", "fuzzy", "set_number"]
     # q as searched: trimmed, spaces collapsed, case folded.
     text: str
     set_id: str | None
@@ -171,6 +196,17 @@ class CatalogSetList(BaseModel):
     sets: list[CatalogSet]
 
 
+class Reading(NamedTuple):
+    """What ``q`` asks for (``_search``)."""
+    search: BrowseSearch
+    # set_number: the TCGdex sets to look in, main set first.
+    sets: list[str]
+    # name: q's letters and digits (catalog_search_words without its spaces); empty when q has none ("!!!").
+    key: str
+    # fuzzy: the names (catalog_generation_printing.search_words) spelled close to q.
+    close: list[str]
+
+
 def _text(value: str) -> str:
     return " ".join(unicodedata.normalize("NFC", value).split()).casefold()
 
@@ -179,12 +215,13 @@ def _escape_like(value: str) -> str:
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
-def _search(conn, generation, text: str) -> tuple[BrowseSearch, list[str]]:
-    """What ``q`` asks for, and for a set and number search the TCGdex sets to look in. A first word that is a printed
-    set code with a set in the active generation, or else a TCGdex set ID there, then one more word, is a set and
-    collector number search; anything else is a name prefix."""
+def _search(conn, generation, text: str) -> Reading:
+    """What ``q`` asks for. A first word that is a printed set code with a set in the active generation, or else a
+    TCGdex set ID there, then one more word, is a set and collector number search. Anything else is a name search,
+    or a close-spelling search when no listed Edition's name contains q and some name is spelled close to it."""
     if not text:
-        return BrowseSearch(mode="all", text="", set_id=None, set_name=None, set_code=None, number=None), []
+        return Reading(BrowseSearch(mode="all", text="", set_id=None, set_name=None, set_code=None, number=None),
+                       [], "", [])
     match = SET_AND_NUMBER.fullmatch(text)
     if match and generation:
         word, number = match.groups()
@@ -204,10 +241,22 @@ def _search(conn, generation, text: str) -> tuple[BrowseSearch, list[str]]:
                         (generation, [row["set_id"] for row in found], number)).fetchone():
                     continue
                 main = found[0]
-                return BrowseSearch(mode="set_number", text=text, set_id=main["set_id"], set_name=main["set_name"],
-                                    set_code=set_codes.code_for(main["set_id"]), number=number), \
-                    [row["set_id"] for row in found]
-    return BrowseSearch(mode="name", text=text, set_id=None, set_name=None, set_code=None, number=None), []
+                return Reading(BrowseSearch(mode="set_number", text=text, set_id=main["set_id"],
+                                            set_name=main["set_name"], set_code=set_codes.code_for(main["set_id"]),
+                                            number=number), [row["set_id"] for row in found], "", [])
+    words = conn.execute("SELECT catalog_search_words(%s) AS words", (text,)).fetchone()["words"]
+    key = words.replace(" ", "")
+    search = BrowseSearch(mode="name", text=text, set_id=None, set_name=None, set_code=None, number=None)
+    if not generation or len(key) < name_search.FUZZY_MIN_LENGTH:
+        return Reading(search, [], key, [])
+    pattern = "%" + _escape_like(key) + "%"
+    if conn.execute(NAME_LISTED, (generation, pattern, pattern)).fetchone():
+        return Reading(search, [], key, [])
+    names = [row["search_words"] for row in conn.execute(LISTED_NAMES, (generation,)).fetchall()]
+    close = name_search.close_names(words, names)
+    if not close:
+        return Reading(search, [], key, [])
+    return Reading(search.model_copy(update={"mode": "fuzzy"}), [], key, close)
 
 
 def _standing(found) -> FormatStandingView:
@@ -272,50 +321,28 @@ def browse_editions(q: str = Query(default="", max_length=120),
     fail(503, "FORMAT_STANDING_BUSY")
 
 
-def _page(conn, user_id, keys, text, kind, format_name, set_id, owned, deck_id, printing_id, identity_id,
-          cursor) -> BrowsePage:
-    state = conn.execute("SELECT active_generation,revision,last_success FROM catalog_state WHERE singleton").fetchone()
-    owner = conn.execute("SELECT revision FROM inventory_owner WHERE user_id=%s", (user_id,)).fetchone()
-    revision = owner["revision"] if owner else 1
-    if deck_id:
-        deck = conn.execute("SELECT kind FROM location WHERE owner_id=%s AND id=%s", (user_id, deck_id)).fetchone()
-        if not deck or deck["kind"] != "deck":
-            fail(404, "DECK_NOT_FOUND")
-    generation = state["active_generation"]
-    search, search_sets = _search(conn, generation, text)
-    # The last slot answers 409 CATALOG_CHANGED: the catalog revision, the Format Standing key and the set code table
-    # (a deploy that changes it can change what q means).
-    context = ["catalog-editions", user_id, text, kind, format_name, set_id, owned,
-               str(deck_id) if deck_id else None, str(printing_id) if printing_id else None,
-               str(identity_id) if identity_id else None, revision,
-               [state["revision"], format_standing.standing_token(keys), set_codes.DIGEST]]
-    order = NUMBER_ORDER if set_id or search.mode == "set_number" else NAME_ORDER
-    anchor = None
-    if cursor:
-        carried = cursor_key(cursor, context)
-        try:
-            if not isinstance(carried, list) or len(carried) != len(order):
-                raise ValueError
-            anchor = [_anchor(column, raw) for column, raw in zip(order, carried)]
-        except (ValueError, TypeError, ArithmeticError):
-            fail(400, "INVALID_CURSOR")
-    if not generation:
-        return BrowsePage(available=False, catalog_revision=state["revision"], owner_revision=revision,
-                          last_success=state["last_success"], search=search, editions=[], next_cursor=None,
-                          printings=0, matches=0)
-
+def _listed(reading: Reading, generation, kind, format_name, set_id, owned, printing_id, identity_id,
+            user_id) -> tuple[str, list]:
+    """The listing query for this search and these filters (every matching row, before paging) and its parameters."""
     joins, conditions, params = "", "", [*_rules_release_dates()]
     if format_name:
         joins = " LEFT JOIN catalog_format_standing fs ON fs.printing_id=ge.printing_id AND fs.format=%s"
         params.append(format_name)
         conditions += " AND coalesce(fs.standing,'unknown')<>'not_legal'"
     params.append(generation)
-    if search.mode == "name":
-        conditions += " AND gp.search_name LIKE %s ESCAPE '\\'"
-        params.append(_escape_like(text) + "%")
-    elif search.mode == "set_number":
+    mode = reading.search.mode
+    if mode == "name" and reading.key:
+        conditions += " AND " + NAME_MATCH
+        pattern = "%" + _escape_like(reading.key) + "%"
+        params.extend([pattern, pattern])
+    elif mode == "name":  # q has no letters or digits ("!!!", "♀"): no name contains it.
+        conditions += " AND false"
+    elif mode == "fuzzy":
+        conditions += " AND gp.search_words=ANY(%s)"
+        params.append(reading.close)
+    elif mode == "set_number":
         conditions += f" AND gp.set_id=ANY(%s) AND {NUMBER_KEY.format('gp.collector_number')}={NUMBER_KEY.format('%s')}"
-        params.extend([search_sets, search.number])
+        params.extend([reading.sets, reading.search.number])
     if set_id:
         conditions += " AND gp.set_id=%s"
         params.append(set_id)
@@ -332,7 +359,47 @@ def _page(conn, user_id, keys, text, kind, format_name, set_id, owned, deck_id, 
     if owned:
         conditions += " AND EXISTS (SELECT 1 FROM holding h WHERE h.owner_id=%s AND h.edition_id=ge.edition_id)"
         params.append(user_id)
-    listed = f"{LISTED}{joins} WHERE ge.generation_id=%s AND ge.active AND NOT gp.tombstoned{conditions}"
+    return f"{LISTED}{joins} WHERE ge.generation_id=%s AND ge.active AND NOT gp.tombstoned{conditions}", params
+
+
+def _page(conn, user_id, keys, text, kind, format_name, set_id, owned, deck_id, printing_id, identity_id,
+          cursor) -> BrowsePage:
+    state = conn.execute("SELECT active_generation,revision,last_success FROM catalog_state WHERE singleton").fetchone()
+    owner = conn.execute("SELECT revision FROM inventory_owner WHERE user_id=%s", (user_id,)).fetchone()
+    revision = owner["revision"] if owner else 1
+    if deck_id:
+        deck = conn.execute("SELECT kind FROM location WHERE owner_id=%s AND id=%s", (user_id, deck_id)).fetchone()
+        if not deck or deck["kind"] != "deck":
+            fail(404, "DECK_NOT_FOUND")
+    generation = state["active_generation"]
+    reading = _search(conn, generation, text)
+    listed, params = _listed(reading, generation, kind, format_name, set_id, owned, printing_id, identity_id, user_id)
+    if reading.search.mode == "fuzzy" and not conn.execute(f"SELECT 1 FROM ({listed}) listed LIMIT 1",
+                                                           params).fetchone():
+        # Close spellings, but none passes these filters: the search reads as a name search, which lists nothing too.
+        reading = reading._replace(search=reading.search.model_copy(update={"mode": "name"}))
+    search = reading.search
+    # The last slot answers 409 CATALOG_CHANGED: the catalog revision, the Format Standing key, the set code table
+    # (a deploy that changes it can change what q means) and the search mode, so a walk never changes mode midway.
+    context = ["catalog-editions", user_id, text, kind, format_name, set_id, owned,
+               str(deck_id) if deck_id else None, str(printing_id) if printing_id else None,
+               str(identity_id) if identity_id else None, revision,
+               [state["revision"], format_standing.standing_token(keys), set_codes.DIGEST, search.mode]]
+    order = NUMBER_ORDER if set_id or search.mode == "set_number" else NAME_ORDER
+    anchor = None
+    if cursor:
+        carried = cursor_key(cursor, context)
+        try:
+            if not isinstance(carried, list) or len(carried) != len(order):
+                raise ValueError
+            anchor = [_anchor(column, raw) for column, raw in zip(order, carried)]
+        except (ValueError, TypeError, ArithmeticError):
+            fail(400, "INVALID_CURSOR")
+    if not generation:
+        return BrowsePage(available=False, catalog_revision=state["revision"], owner_revision=revision,
+                          last_success=state["last_success"], search=search, editions=[], next_cursor=None,
+                          printings=0, matches=0)
+
     columns = ",".join(order)
     after = f" WHERE ({columns})>({','.join(['%s'] * len(order))})" if anchor else ""
     rows = conn.execute(f"SELECT * FROM ({listed}) listed{after} ORDER BY {columns} LIMIT %s",

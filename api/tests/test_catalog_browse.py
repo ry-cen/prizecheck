@@ -44,6 +44,19 @@ CARDS = (BULBASAUR_ME, CANDY_ME, CANDY_SV, SWITCH_ME, SUPPORTER, ENERGY_SV, SCOO
 # Sixty-one more Printings in a set the rules don't record, so a walk of the whole catalog has a second page.
 FILLERS = tuple(card(id=f"fixture-zz-{i}", name=f"Zubat {i:02d}", localId=str(i), category="Pokemon",
                      set={"id": "fixturezz", "name": "Fixture Zubats"}) for i in range(1, 62))
+
+
+def named(number, name, category="Pokemon", **fields):
+    """One Printing of the name search fixture, all in one set the rules don't record."""
+    return card(id=f"fixture-names-{number}", name=name, localId=str(number), category=category,
+                set={"id": "fixturenames", "name": "Fixture Names"}, **fields)
+
+
+# Names for the name search: accents, punctuation, a possessive, near misses (Charmander, Chatot) and a subtitle.
+NAMED = (named(1, "Charizard"), named(2, "Charmander"), named(3, "Chatot"), named(4, "Gardevoir"),
+         named(5, "Farfetch’d"), named(6, "Porygon-Z"), named(7, "Mr. Mime"),
+         named(8, "Pokémon Center Lady", "Trainer", trainerType="Supporter"),
+         named(9, "Boss's Orders", "Trainer", trainerType="Supporter"), JUNIPER)
 EDITIONS = "/api/catalog/editions"
 client = TestClient(app)
 
@@ -152,7 +165,7 @@ def test_a_row_carries_display_data_card_type_standing_and_copies():
     assert page["owner_revision"] >= 2 and page["catalog_revision"] >= 1 and page["last_success"]
 
 
-def test_smart_search_reads_a_known_set_and_number_otherwise_a_name_prefix_and_may_be_empty():
+def test_smart_search_reads_a_known_set_and_number_otherwise_a_name_search_and_may_be_empty():
     seed(*CARDS)
     user = collector()
     everything = browse(user)
@@ -167,7 +180,7 @@ def test_smart_search_reads_a_known_set_and_number_otherwise_a_name_prefix_and_m
     assert browse(user, q="ME01%201")["search"]["set_code"] == "MEG"
     assert names(user, q="me01%201") == names(user, q="meg%20001") == [("Bulbasaur", "me01", "001")]
     assert names(user, q="meg%20%23125") == [("Rare Candy", "me01", "125")]
-    # Anything else is a name prefix.
+    # Anything else is a name search.
     candy = browse(user, q="%20rare%20%20")
     assert candy["search"]["mode"] == "name" and candy["search"]["text"] == "rare"
     assert [row[1:] for row in names(user, q="rare")] == [("me01", "125"), ("sv01", "191")]
@@ -507,6 +520,76 @@ def test_a_name_starting_with_a_set_code_is_a_name_search_unless_the_number_matc
     assert browse(user, q="sv03.5%20ex")["search"]["mode"] == "name"
 
 
+def test_a_name_search_finds_the_words_anywhere_in_a_name_ignoring_accents_spaces_and_punctuation():
+    reset_catalog()
+    run(Records(*NAMED))
+    user = collector()
+
+    def found(q):
+        page = browse(user, q=q)
+        assert page["search"]["mode"] == "name", (q, page["search"])
+        return sorted(row["name"] for row in page["editions"])
+
+    assert found("juniper") == ["Professor's Research (Professor Juniper)"]
+    assert found("zard") == ["Charizard"]
+    assert found("char") == ["Charizard", "Charmander"]  # part of no other name: never Chatot
+    assert found("pokemon") == found("POK%C3%89MON") == ["Pokémon Center Lady"]
+    assert found("farfetchd") == found("farfetch%27d") == found("farfetch%E2%80%99d") == ["Farfetch’d"]
+    assert found("porygonz") == found("porygon%20z") == found("porygon-z") == ["Porygon-Z"]
+    assert found("mr%20mime") == found("mr.%20mime") == found("mrmime") == ["Mr. Mime"]
+    assert (found("boss%20orders") == found("boss%27s%20orders") == found("bosss%20orders")
+            == found("boss%E2%80%99s") == ["Boss's Orders"])
+    assert browse(user, q="%20Mr.%20%20Mime")["search"]["text"] == "mr. mime"  # trimmed, collapsed, case folded
+    assert found("%21%21%21") == []  # no letters or digits: no name contains it
+
+
+def test_a_name_no_card_has_lists_close_spellings_and_says_so():
+    reset_catalog()
+    run(Records(*NAMED))
+    user = collector()
+    page = browse(user, q="charzard")
+    assert page["search"] == {"mode": "fuzzy", "text": "charzard", "set_id": None, "set_name": None,
+                              "set_code": None, "number": None}
+    assert [row["name"] for row in page["editions"]] == ["Charizard"] and page["matches"] == 1
+    page = browse(user, q="gardivoir")
+    assert page["search"]["mode"] == "fuzzy" and [row["name"] for row in page["editions"]] == ["Gardevoir"]
+    # Under five letters, or far from every name, a search never reads as a close spelling.
+    for q in ("chaz", "zzzzzzzz"):
+        page = browse(user, q=q)
+        assert (page["search"]["mode"], page["editions"]) == ("name", []), q
+    # The filters narrow close spellings like any rows; with none left the search reads as a name search.
+    assert browse(user, q="charzard", kind="pokemon")["search"]["mode"] == "fuzzy"
+    page = browse(user, q="charzard", kind="supporter")
+    assert (page["search"]["mode"], page["editions"]) == ("name", [])
+    # Whether a name exists asks the whole catalog: a name the collector owns no copy of is no misspelling.
+    page = browse(user, q="charizard", owned="true")
+    assert (page["search"]["mode"], page["editions"]) == ("name", [])
+    page = browse(user, q="charzard", owned="true")
+    assert (page["search"]["mode"], page["editions"]) == ("name", [])
+    assert add(user, leaf(user), edition_of("fixture-names-1"), "1").status_code == 200
+    page = browse(user, q="charzard", owned="true")
+    assert page["search"]["mode"] == "fuzzy" and [row["name"] for row in page["editions"]] == ["Charizard"]
+
+
+def test_close_spelling_pages_keep_their_mode_and_a_name_that_appears_restarts_the_walk():
+    promote({f"card-{i}": f"Charizard {i:02d}" for i in range(1, 71)})  # 70 Printings, 71 Editions (card-1 has two)
+    user = collector()
+    pages = walk(user, q="charzard")
+    assert [len(page["editions"]) for page in pages] == [60, 11]
+    assert {page["search"]["mode"] for page in pages} == {"fuzzy"}
+    assert len({row["edition_id"] for page in pages for row in page["editions"]}) == 71
+    cursor = pages[0]["next_cursor"]
+    # A listed name now contains the words typed, so the search reads as a name search: the walk restarts even
+    # though, as here, the catalog revision did not move.
+    with connect() as conn:
+        conn.execute("""UPDATE catalog_generation_printing SET display_name='Charzard Prime'
+          WHERE generation_id=(SELECT active_generation FROM catalog_state) AND display_name='Charizard 70'""")
+    stale = call("GET", f"{EDITIONS}?q=charzard&cursor={cursor}", user)
+    assert (stale.status_code, error(stale)) == (409, "CATALOG_CHANGED")
+    page = browse(user, q="charzard")
+    assert page["search"]["mode"] == "name" and [row["name"] for row in page["editions"]] == ["Charzard Prime"]
+
+
 def test_a_retired_edition_has_no_tile():
     seed(*CARDS)
     user = collector()
@@ -623,6 +706,51 @@ def test_migration_044_creates_an_empty_table_and_runs_again():
             assert conn.execute("SELECT count(*) FROM catalog_generation_set").fetchone()[0] == 1
             conn.execute("DELETE FROM catalog_generation WHERE id=%s", (generation,))
             assert conn.execute("SELECT count(*) FROM catalog_generation_set").fetchone()[0] == 0
+    finally:
+        with psycopg.connect(admin, autocommit=True) as conn:
+            conn.execute(sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(sql.Identifier(name)))
+
+
+def _fixture_printing(conn, identity, generation, number, display):
+    printing = conn.execute("INSERT INTO catalog_printing(source,identity_id) VALUES ('manual',%s) RETURNING id",
+                            (identity,)).fetchone()[0]
+    conn.execute("""INSERT INTO catalog_generation_printing(generation_id,printing_id,source_id,set_id,set_name,
+      collector_number,display_name,search_name,source_fingerprint,basic_energy)
+      VALUES (%s,%s,%s,'fixture','Fixture Set',%s,%s,%s,'manual','unresolved')""",
+                 (generation, printing, f"manual:{number}", number, display, display.casefold()))
+
+
+def test_migration_048_fills_the_search_columns_for_existing_and_new_printings_and_runs_again():
+    admin = os.environ.get("RECOVERY_TEST_DATABASE_URL")
+    if not admin:
+        pytest.skip("RECOVERY_TEST_DATABASE_URL names the disposable PostgreSQL server")
+    name = "tcg_name_search_" + uuid4().hex
+    with psycopg.connect(admin, autocommit=True) as conn:
+        conn.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
+    url = make_conninfo(admin, dbname=name)
+    columns = ("SELECT search_words,search_key,search_key_bare FROM catalog_generation_printing"
+               " WHERE collector_number=%s")
+    try:
+        migrate(url, before="048_catalog_name_search.sql")
+        with psycopg.connect(url) as conn:
+            identity = conn.execute("""INSERT INTO catalog_identity(identity_key,display_name)
+              VALUES ('fixture','Fixture') RETURNING id""").fetchone()[0]
+            generation = conn.execute("""INSERT INTO catalog_generation(id,source_count,raw_gzip,raw_sha256)
+              VALUES (gen_random_uuid(),0,'',repeat('0',64)) RETURNING id""").fetchone()[0]
+            _fixture_printing(conn, identity, generation, "1", "Boss’s Orders")
+            revision = conn.execute("SELECT revision FROM catalog_state").fetchone()[0]
+        migrate(url)
+        with psycopg.connect(url) as conn:
+            # Existing rows are filled as the migration runs; it moves no revision.
+            assert conn.execute(columns, ("1",)).fetchone() == ("bosss orders", "bosssorders", "bossorders")
+            assert conn.execute("SELECT revision FROM catalog_state").fetchone()[0] == revision
+            # Every later insert is filled by the database, though the writer names no search column.
+            _fixture_printing(conn, identity, generation, "2", "Porygon-Z")
+            assert conn.execute(columns, ("2",)).fetchone() == ("porygon z", "porygonz", "porygonz")
+            assert conn.execute("SELECT catalog_search_words(%s)", ("Flabébé  Mr. Mime ♀",)).fetchone()[0] == \
+                "flabebe mr mime"
+            conn.execute((ROOT_MIGRATIONS / "048_catalog_name_search.sql").read_text())  # runs again
+            assert conn.execute(columns, ("1",)).fetchone() == ("bosss orders", "bosssorders", "bossorders")
     finally:
         with psycopg.connect(admin, autocommit=True) as conn:
             conn.execute(sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(sql.Identifier(name)))

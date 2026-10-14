@@ -12,7 +12,12 @@ import type {
   BrowseFormat,
   BrowseKind,
 } from "../catalog_browse_generated";
-import { FORMAT_NAMES, FORMATS, KINDS } from "../catalog/catalogText";
+import {
+  closeSpellings,
+  FORMAT_NAMES,
+  FORMATS,
+  KINDS,
+} from "../catalog/catalogText";
 import { useCatalogBrowse } from "../catalog/useCatalogBrowse";
 import { EditionPrice } from "../EditionPrice";
 import { Button } from "../ui/Button";
@@ -99,6 +104,7 @@ export function DeckLibrary({
   const scroller = useRef<HTMLElement>(null);
   const sentinel = useRef<HTMLDivElement>(null);
   const countId = useId();
+  const closeId = useId();
   const { loadMore } = browse;
   const canLoad = browse.nextCursor !== null && !browse.errorMore;
   const index = open
@@ -145,6 +151,8 @@ export function DeckLibrary({
   }, [canLoad, ownScroll, rows.length, browse.loadingMore, loadMore]);
 
   const first = browse.first;
+  // A close-spelling search says so above the count, and the search box reads it first.
+  const close = first?.search.mode === "fuzzy" ? first.search.text : null;
   return (
     <aside
       ref={scroller}
@@ -164,7 +172,7 @@ export function DeckLibrary({
         placeholder="Card name, or set code and number"
         value={text}
         maxLength={120}
-        aria-describedby={countId}
+        aria-describedby={close === null ? countId : `${closeId} ${countId}`}
         onChange={(event) => setText(event.target.value)}
       />
       {/* A scroll container (Segmented) has no automatic minimum height, so keep it from shrinking in the Library column. */}
@@ -208,6 +216,11 @@ export function DeckLibrary({
       <div role="status" className="flex flex-col gap-0.5 text-meta">
         {browse.notice && (
           <p className="m-0 font-medium text-text">{browse.notice}</p>
+        )}
+        {close !== null && (
+          <p id={closeId} className="m-0 text-text-muted">
+            {closeSpellings(close)}
+          </p>
         )}
         <p id={countId} className="m-0 text-text-subtle">
           {first && !first.available
