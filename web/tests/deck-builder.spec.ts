@@ -339,7 +339,7 @@ test.describe("on a desktop", () => {
     await page.getByRole("button", { name: "Decks", exact: true }).click();
     await page
       .getByRole("navigation", { name: "Deck index" })
-      .getByRole("button", { name: built.deckName, exact: true })
+      .getByRole("link", { name: built.deckName, exact: true })
       .click();
     await expect(page).toHaveURL(`${ORIGIN}/decks/${built.deckId}`);
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(
@@ -443,23 +443,20 @@ test.describe("on a desktop", () => {
     ).toContainText("No price");
     await expectPageChecks(page, "deck builder, List");
 
-    // The old panels stay below until #181; a Holdings change there redraws the copy states.
-    await page
-      .getByText("Holdings, publishing and exports", { exact: true })
-      .click();
-    const checks = page.getByRole("region", {
-      name: `Checks for ${built.deckName}`,
-    });
-    await expect(checks).toContainText("16 cards");
-    await expectPageChecks(page, "deck builder, old panels open");
+    // The header's Export dialog (#181) replaces the old panels; it passes the page check open.
+    await page.getByRole("button", { name: "Export", exact: true }).click();
+    await expect(page.getByRole("dialog", { name: "Export" })).toBeVisible();
+    await expectPageChecks(page, "deck builder, Export open");
+    await page.keyboard.press("Escape");
+
+    // A Holdings change (Collection's, through the gateway) redraws the copy states on the next read.
     await post(page, "/api/holdings", {
       location_id: built.deckId,
       edition_id: built.editions["Charizard ex"],
       quantity: "1",
       idempotency_key: randomUUID(),
     });
-    await checks.getByRole("button", { name: "Refresh checks" }).click();
-    await expect(checks).toContainText("17 cards");
+    await page.reload();
     await page.getByRole("radio", { name: "Spread" }).click();
     await expect(
       tile(page, "Charizard ex", alpha("6"), "copy 1 of 2: in this Deck")
@@ -531,7 +528,7 @@ test.describe("on a desktop", () => {
     await page.getByRole("link", { name: "All Decks" }).click();
     await expect(page).toHaveURL(`${ORIGIN}/decks`);
     await expect(
-      page.getByRole("heading", { level: 2, name: "Physical Decks" })
+      page.getByRole("heading", { level: 1, name: "Decks" })
     ).toBeVisible();
   });
 });
@@ -551,9 +548,12 @@ test.describe("on a phone", () => {
     const library = page.getByRole("tab", { name: "Library" });
     const deck = page.getByRole("tab", { name: "Deck 23/60" });
     await expect(library).toHaveAttribute("aria-selected", "true");
-    await expect(page.getByRole("tabpanel")).toContainText(
-      "Adding cards from your Collection and the catalog comes in the next update."
-    );
+    // The library (#177) fills the Library tab.
+    await expect(
+      page
+        .getByRole("tabpanel")
+        .getByRole("searchbox", { name: "Search the library" })
+    ).toBeVisible();
     await expectPageChecks(page, "phone deck builder, Library");
 
     await deck.tap();
@@ -582,22 +582,17 @@ test.describe("on a phone", () => {
     ).toContainText("$1.00");
     await expectPageChecks(page, "phone deck builder, List");
 
-    // The old panels keep their own small controls until #181 replaces them, so only page-level sideways scroll is
-    // checked with them open.
-    await page
-      .getByText("Holdings, publishing and exports", { exact: true })
-      .tap();
+    // The old panels are gone (#181): the page header holds Export, Publish and Delete, and the page still passes.
+    for (const name of ["Export", "Delete Deck"])
+      await expect(
+        page.getByRole("button", { name, exact: true })
+      ).toBeVisible();
     await expect(
-      page.getByRole("region", { name: `Checks for ${built.deckName}` })
+      page.getByRole("button", { name: /^Publish/ }).first()
     ).toBeVisible();
-    await expect
-      .poll(() =>
-        page.evaluate(
-          () =>
-            document.documentElement.scrollWidth -
-            document.documentElement.clientWidth
-        )
-      )
-      .toBeLessThanOrEqual(0);
+    await expect(
+      page.getByText("Holdings, publishing and exports", { exact: true })
+    ).toHaveCount(0);
+    await expectPageChecks(page, "phone deck builder header actions");
   });
 });

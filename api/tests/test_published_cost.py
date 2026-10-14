@@ -141,8 +141,9 @@ def test_published_cost_labels_empty_unpriced_and_unreadable_snapshots(store, mo
     assert (body["status"], body["display_amount"], body["total_copies"], body["priced_copies"], body["version"]) == \
         ("empty", "$0.00", "0", "0", 1)
     assert body["digest"] == public_deck.snapshot_digest(stored_decks()["decks"][token]["snapshot"])
-    assert set(body) == {"version", "digest", "status", "reason", "total_copies", "priced_copies", "stale_copies",
-                         "unknown_age_copies", "fallback_copies", "amount", "display_amount", "currency"}
+    assert set(body) == {"version", "digest", "status", "reason", "total_copies", "priced_copies",
+                         "fallback_copies", "amount", "display_amount", "currency", "editions"}
+    assert body["editions"] == []
 
     _, token = publish({plain["id"]: 2})
     body = body_of(public_cost(token, 1))
@@ -249,7 +250,8 @@ def test_legacy_and_unproven_rows_stay_readable_and_unpriced_until_a_republish_c
     assert (body["status"], body["priced_copies"], body["total_copies"]) == ("no_quotes", "0", "6")
     assert command(USER, deck, "PUT").status_code == 200
     body = body_of(public_cost(token, 2))
-    assert (body["display_amount"], body["priced_copies"], body["total_copies"], body["stale_copies"]) == ("$1.61", "5", "6", "2")
+    assert (body["display_amount"], body["priced_copies"], body["total_copies"]) == ("$1.61", "5", "6")
+    assert "stale_copies" not in body and "unknown_age_copies" not in body
 
     def unprove(snapshot):
         for identity in snapshot["identities"]:

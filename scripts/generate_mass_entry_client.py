@@ -33,9 +33,9 @@ export class MassEntryError extends Error {
   constructor(public status: number, public code: string) { super(code); }
 }
 const base = (id: string) => `/api/decks/${encodeURIComponent(id)}/exports/tcgplayer`;
-// The API defaults to the not-owned copies. The current Deck panel exports the whole Deck List, so the scope defaults
-// to 'deck_list' here; a caller offering the choice passes it explicitly.
-export async function getMassEntryExport(id: string, signal?: AbortSignal, scope: MassEntryScope = 'deck_list'): Promise<MassEntryView> {
+// The API and this client both default to the not-owned copies, the cards to buy (app redesign #181: Buy missing); the
+// deck builder's Export offers the whole Deck List as the other choice.
+export async function getMassEntryExport(id: string, signal?: AbortSignal, scope: MassEntryScope = 'not_owned'): Promise<MassEntryView> {
   const response = await fetch(`${base(id)}?scope=${scope}`, { credentials: 'same-origin', signal });
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));
@@ -43,7 +43,7 @@ export async function getMassEntryExport(id: string, signal?: AbortSignal, scope
   }
   return response.json() as Promise<MassEntryView>;
 }
-export const massEntryDownloadHref = (id: string, ownerRevision: number, scope: MassEntryScope = 'deck_list', deckListRevision?: number | null) =>
+export const massEntryDownloadHref = (id: string, ownerRevision: number, scope: MassEntryScope = 'not_owned', deckListRevision?: number | null) =>
   `${base(id)}.txt?owner_revision=${ownerRevision}&scope=${scope}${deckListRevision == null ? '' : `&deck_list_revision=${deckListRevision}`}`;
 export const MASS_ENTRY_DOWNLOAD_NAME = 'tcgplayer-mass-entry.txt';
 // A Published Deck's Mass Entry export: only the token and the snapshot version are sent, and no cookie.

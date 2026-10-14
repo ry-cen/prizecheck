@@ -3,7 +3,7 @@ import { signInAsOwner } from "./support/sign-in";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
-import { openDeckTools } from "./support/deck-builder";
+import { openExport } from "./support/deck-builder";
 
 const OWNER_EMAIL = process.env.OWNER_EMAIL || "owner@example.test";
 const ORIGIN = process.env.TEST_ORIGIN || "http://localhost:5173";
@@ -99,12 +99,16 @@ async function putAll(deck: string, numbers: number[]) {
   );
 }
 
+/** Opens the Deck from the Decks index, then its Mass Entry export of the whole Deck List (the deck builder's Export
+ * dialog, #181). These Decks hold every card they list, so the cards-not-owned choice would be empty. */
 async function openDeck(page: Page, name: string) {
   await page.reload();
   await page.getByRole("button", { name: "Decks", exact: true }).click();
-  await page.getByRole("button", { name, exact: true }).click();
-  await openDeckTools(page);
-  return page.getByRole("region", { name: "TCGplayer export", exact: true });
+  await page
+    .getByRole("navigation", { name: "Deck index" })
+    .getByRole("link", { name, exact: true })
+    .click();
+  return openExport(page, "mass", "deck_list");
 }
 
 test.beforeEach(async ({ context }) => {
@@ -255,9 +259,12 @@ test(
     await expect(text).toContainText("1 Furret");
     expect(((await text.textContent()) ?? "").split("\n")).toHaveLength(51);
 
-    // Another tab-equivalent change: the Deck's revision moves, so the old export must not stay.
+    // Another tab-equivalent change: the Deck's revision moves, so the next export says so and the page reads the
+    // Deck again; the old export never stays.
     await put(page, deck.id, 1, 1);
-    await page.getByRole("button", { name: "Refresh checks" }).click();
+    await region
+      .getByRole("button", { name: "Prepare TCGplayer export" })
+      .click();
     await expect(region).toContainText("Deck changed; export again");
     await expect(region.getByLabel("TCGplayer Mass Entry text")).toHaveCount(0);
     await region

@@ -276,7 +276,7 @@ test.describe("desktop", () => {
       .getByRole("link", { name: "Discover decks" })
       .click();
     await expect(page).toHaveURL(`${ORIGIN}/discover`);
-    await expect(heading(page)).toHaveText("Discover Listed Decks");
+    await expect(heading(page)).toHaveText("Discover decks");
     // Discover under the same public header, its link marked as the current page.
     await expect(
       page.getByRole("banner").getByRole("link", { name: "Discover decks" })
@@ -355,7 +355,7 @@ test.describe("desktop", () => {
     await signIn(page);
     await page.goto(`${ORIGIN}/discover`);
     await expect(page).toHaveURL(`${ORIGIN}/discover`);
-    await expect(heading(page)).toHaveText("Discover Listed Decks");
+    await expect(heading(page)).toHaveText("Discover decks");
     await expect(mainViews(page)).toBeVisible();
     // Discover is not a tab: none is marked.
     await expect(mainViews(page).locator("[aria-current]")).toHaveCount(0);
@@ -376,7 +376,7 @@ test.describe("desktop", () => {
       .getByRole("link", { name: "Discover decks" })
       .click();
     await expect(page).toHaveURL(`${ORIGIN}/discover`);
-    await expect(heading(page)).toHaveText("Discover Listed Decks");
+    await expect(heading(page)).toHaveText("Discover decks");
     await mainViews(page).getByRole("button", { name: "Collection" }).click();
     await expect(page).toHaveURL(`${ORIGIN}/collection`);
     await expect(heading(page)).toHaveText("All owned");

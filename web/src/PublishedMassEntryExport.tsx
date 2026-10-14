@@ -20,6 +20,8 @@ export type PublishedMassEntryExportProps = {
     "total" | "size_status" | "shortage" | "excess" | "disclaimer"
   >;
   onChanged: () => void;
+  /** Prepare the export as soon as the panel mounts: the Published Deck page's export dialogs (#183). */
+  autoPrepare?: boolean;
 };
 
 export function PublishedMassEntryExport({
@@ -27,6 +29,7 @@ export function PublishedMassEntryExport({
   version,
   checks,
   onChanged,
+  autoPrepare = false,
 }: PublishedMassEntryExportProps) {
   const [view, setView] = useState<PublishedMassEntryView | null>(null);
   const [notice, setNotice] = useState("");
@@ -69,6 +72,11 @@ export function PublishedMassEntryExport({
       if (mine === attempt.current) setBusy(false);
     }
   }
+
+  // The dialog that mounts the panel was opened to export: start once, as a press of the prepare button would.
+  useEffect(() => {
+    if (autoPrepare) void prepare();
+  }, []);
 
   return (
     <MassEntryPanel

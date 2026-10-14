@@ -4,7 +4,8 @@ export type TreeNode = { id: string; name: string; kind: string; parent_id: stri
 export type LocationCommandResult = { location: TreeNode; owner_revision: number };
 export type CreateDeck = { name: string; idempotency_key: string };
 export type EditDeck = { name?: string | null; parent_id?: string | null; parent_version?: number | null; conversion?: string | null; version: number; idempotency_key: string };
-export type DeckIndex = { decks: TreeNode[]; owner_revision: number; next_cursor: string | null };
+export type DeckIndexEntry = { id: string; name: string; kind: string; parent_id: string | null; version: number; depth: number; deck_list_total: string; in_deck: string; target_format: 'standard' | 'expanded' | 'glc' };
+export type DeckIndex = { decks: DeckIndexEntry[]; owner_revision: number; next_cursor: string | null };
 export type IdentityCheck = { identity_id: string; name: string; quantity: string; status: string };
 export type DeckChecks = { total: string; shortage: string; excess: string; size_status: string; identities: IdentityCheck[]; disclaimer?: string };
 export type DeckDetail = { deck: TreeNode; checks: DeckChecks; deck_list_checks: DeckChecks; deck_list: DeckList; ownership: LineOwnership[]; surplus: SurplusHolding[]; competition: CompetitionWarning[]; owner_revision: number; catalog_revision: number; target_format: 'standard' | 'expanded' | 'glc'; format_checks: DeckFormatChecks };
@@ -34,6 +35,8 @@ export type ConfirmPicks = { items: PickItem[]; deck_list_revision: number; idem
 export type PickConfirmResult = { edition_count: number; copy_count: string; owner_revision: number; source_count: number; undo_id: string };
 export type DeleteDeck = { name: string; version: number; idempotency_key: string };
 export type DeleteDeckResult = { deleted_id: string; unsorted_id: string | null; edition_count: number; copy_count: string; owner_revision: number };
+export type DeckListChange = { edition_id: string; quantity: string };
+export type ChangeDeckList = { revision: number; idempotency_key: string; changes: DeckListChange[] };
 
 export class DeckError extends Error {
   constructor(public status: number, public code: string) { super(code); }
@@ -69,6 +72,9 @@ export const removeDeckListLine = (deckId: string, editionId: string, body: Remo
 // Changes the Deck List's Target Format (app redesign #178); answers the new Format's result.
 export const setTargetFormat = (deckId: string, body: SetTargetFormat) =>
   request<DeckListCommandResult>(`/api/decks/${encodeURIComponent(deckId)}/deck-list/target-format`, 'PUT', body);
+// Sets several Deck List lines in one batch (app redesign #177): each change is a line's new total, 0 removing it.
+export const changeDeckList = (deckId: string, body: ChangeDeckList) =>
+  request<DeckListCommandResult>(`/api/decks/${encodeURIComponent(deckId)}/deck-list/changes`, 'POST', body);
 export const addDeckListPrinting = (deckId: string, body: AddDeckListPrinting) =>
   request<DeckListPrintingResult>(`/api/decks/${encodeURIComponent(deckId)}/deck-list/printings`, 'POST', body);
 export const getPickList = (deckId: string) =>

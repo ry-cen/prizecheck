@@ -233,7 +233,7 @@ def test_catalog_and_quote_record_writes_leave_snapshots_discovery_revision_and_
     before_bytes = projection.read_bytes()
     published = client.get(f'/api/public/decks/{token}')
     page = client.get('/api/public/discovery').json()
-    cursor = cursor_encode('', page['revision'], [json.loads(before_bytes)['decks'][token]['snapshot']['published_at'], token])
+    cursor = cursor_encode('', None, page['revision'], [json.loads(before_bytes)['decks'][token]['snapshot']['published_at'], token])
     with connect() as conn:
         row = conn.execute("SELECT e.public_ref AS edition_ref FROM catalog_edition e WHERE e.id=%s", (edition,)).fetchone()
     # Catalog records, a quote payload and its current-result marker all go to the shared store.

@@ -1,8 +1,10 @@
-"""Advisory format results of one Published Deck snapshot version (Deck Lists 18).
+"""Advisory format results of one Published Deck snapshot version (Deck Lists 18), in its Target Format only (app
+redesign #183).
 
 Anonymous, unbudgeted and PostgreSQL-free, like the Published Deck exports. The inputs are the token and the version in
-the path plus the private route's ``?format=`` and ``?as_of=`` (``public_deck``). Rows and quantities come from the active
-frozen snapshot. Each row's Card Printing, Card Identity, set, collector number, Reprint Group and card attributes come
+the path plus the private route's ``?as_of=`` (``public_deck``). The Format is the one the snapshot was published in
+(``PublicSnapshot.target_format``; a snapshot published before #178 reads as Standard), never a request input. Rows and
+quantities come from the active frozen snapshot. Each row's Card Printing, Card Identity, set, collector number, Reprint Group and card attributes come
 from the current public format facts (``public_catalog.format_facts``), and so do the facts of every printing in those
 Reprint Groups, read at the same store generation. Results therefore follow rotations, bans, reviewed corrections,
 re-derived attributes and Reprint Groups, and identity merges without republishing. The pure evaluator and the private
@@ -29,7 +31,7 @@ from .public_projection import ProjectionUnavailable
 from .public_records import public_record_store
 
 router = APIRouter(tags=['published-format-checks'])
-QUERY = frozenset({'format', 'as_of'})
+QUERY = frozenset({'as_of'})
 # A row whose Printing cannot be proven against well-formed public format records is checked with no facts at all. The
 # evaluator then reports its set and mark as not recorded; those two gaps are replaced by this one.
 UNAVAILABLE = 'card_data_unavailable'
@@ -65,37 +67,41 @@ class PublishedDeckFormatChecks(BaseModel):
     disclaimer: str = DISCLAIMER
 
 
-def _query(request: Request) -> tuple[tuple[str, ...], date, date]:
-    """The formats to check, the evaluation date and today; refusals carry the public headers."""
-    params = request.query_params
-    name = params.get('format')
-    if name is not None and name not in evaluator.FORMATS:
-        raise public_deck.error(422, 'UNKNOWN_FORMAT')
+def _query(request: Request) -> tuple[date, date]:
+    """The evaluation date and today; a refusal carries the public headers."""
     current = today()
     try:
-        on = parse_as_of(params.get('as_of'), current)
+        on = parse_as_of(request.query_params.get('as_of'), current)
     except HTTPException:
         raise public_deck.error(422, 'INVALID_AS_OF') from None
-    return (evaluator.FORMATS if name is None else (name,)), on, current
+    return on, current
+
+
+def read_facts(store, printing_refs, deadline, *, generation=None) -> dict:
+    """Format facts of ``printing_refs`` and of every printing in their Reprint Groups, by Printing reference, all read at
+    one store generation (``generation`` when given); ``None`` where a record is missing or malformed.
+    ProjectionUnavailable and ValueError propagate. Shared with Discover (``discovery``)."""
+    refs = list(dict.fromkeys(printing_refs))
+    if not refs:
+        return {}
+    facts = format_facts(store, refs, deadline, generation=generation)
+    members = sorted({ref for found in facts.values() if found is not None for ref in found.reprint_printings}
+                     - facts.keys())
+    if members:
+        generation = next(found.generation for found in facts.values() if found is not None)
+        facts.update(format_facts(store, members, deadline, generation=generation))
+    return facts
 
 
 def _facts(active, deadline) -> dict:
-    """Format facts of the rows' Printings and of every printing in their Reprint Groups, by Printing reference, all
-    read at one store generation; ``None`` where a record is missing or malformed."""
+    """Format facts of the rows' Printings and of every printing in their Reprint Groups (``read_facts``)."""
     refs = [row.printing_ref for row in active.rows if row.printing_ref is not None]
     if not refs:
         return {}
-    store = public_record_store()
     try:
-        facts = format_facts(store, refs, deadline)
-        members = sorted({ref for found in facts.values() if found is not None for ref in found.reprint_printings}
-                         - facts.keys())
-        if members:
-            generation = next(found.generation for found in facts.values() if found is not None)
-            facts.update(format_facts(store, members, deadline, generation=generation))
+        return read_facts(public_record_store(), refs, deadline)
     except (ProjectionUnavailable, ValueError):
         raise public_deck.error(503, 'PUBLIC_CATALOG_UNAVAILABLE') from None
-    return facts
 
 
 def _printing_id(printing_ref: str) -> UUID:
@@ -188,27 +194,35 @@ def published_check(result: evaluator.FormatResult, rules: evaluator.FormatRules
                                 evaluated_on=check.evaluated_on, notes=check.notes, computed_at=check.computed_at)
 
 
-def published_format_checks(token: str, version: int, names, on: date, current: date) -> PublishedDeckFormatChecks:
-    deadline = public_deck.export_deadline()
-    active = public_deck.read_for_export(token, version, deadline=deadline)
-    lines, reprint_groups, keys, unproven = resolve(active, _facts(active, deadline))
-    computed_at = datetime.now(timezone.utc)
+def checks_for(active, facts, names, on: date, current: date, computed_at: datetime) -> list[PublishedFormatCheck]:
+    """The published result of ``active`` in each of ``names`` on ``on``, from ``facts`` (``read_facts``). Pure: the one
+    evaluation behind this route and Discover's listing (``discovery``), so the two never disagree."""
+    lines, reprint_groups, keys, unproven = resolve(active, facts)
     results = []
     for name in names:
         rules = evaluator.format_rules(name)
         results.append(published_check(evaluator.evaluate_format(lines, rules, on, reprint_groups), rules, current,
                                        computed_at, keys, unproven))
+    return results
+
+
+def published_format_checks(token: str, version: int, on: date, current: date) -> PublishedDeckFormatChecks:
+    """The snapshot's result in its Target Format only (app redesign #183): the one Format it was published in."""
+    deadline = public_deck.export_deadline()
+    active = public_deck.read_for_export(token, version, deadline=deadline)
+    results = checks_for(active, _facts(active, deadline), (active.snapshot.target_format,), on, current,
+                         datetime.now(timezone.utc))
     public_deck.revalidate_for_export(active, deadline=deadline)
     return PublishedDeckFormatChecks(version=active.version, digest=active.digest, results=results)
 
 
 @router.get('/api/public/decks/{token}/versions/{version}/format-checks', response_model=PublishedDeckFormatChecks)
 def published_deck_format_checks(request: Request, token: str, version: str,
-                                 format_name: str | None = Query(default=None, alias='format'),
                                  as_of: str | None = Query(default=None)):
     # Synchronous on purpose: the HTTP record-store adapter refuses to run on an event loop. The declared query
-    # parameters document the contract; public_path and _query read and validate the raw query themselves.
+    # parameter documents the contract; public_path and _query read and validate the raw query themselves. There is no
+    # ``format``: the answer is the snapshot's Target Format, and a ``format`` parameter is 422 INVALID_REQUEST.
     number = public_deck.public_path(request, token, version, query=QUERY)
-    names, on, current = _query(request)
-    checks = published_format_checks(token, number, names, on, current)
+    on, current = _query(request)
+    checks = published_format_checks(token, number, on, current)
     return JSONResponse(checks.model_dump(mode='json'), headers=dict(public_deck.PUBLIC_HEADERS))

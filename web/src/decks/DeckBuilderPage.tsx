@@ -7,11 +7,13 @@ import {
   useState,
 } from "react";
 import { ChevronLeft } from "lucide-react";
+import type { BrowseEdition } from "../catalog_browse_generated";
 import {
   DeckError,
   getDeck,
   setTargetFormat,
   type DeckDetail,
+  type DeckListCommandResult,
 } from "../decks_generated";
 import { PageHeader } from "../shell/PageHeader";
 import { Button } from "../ui/Button";
@@ -26,11 +28,16 @@ import { DeckListBody, type OpenSheet } from "./DeckListViews";
 import { deckListModel, type DeckView } from "./deckListModel";
 import { GatherDialog } from "./GatherDialog";
 import { FormatResultsDialog } from "./FormatResultsDialog";
-import { LegacyDeckTools } from "./LegacyDeckTools";
+import { useDeckActions } from "./useDeckActions";
 import { flaggedLines, resultFor, type TargetFormat } from "./targetFormat";
 import { TargetFormatControl } from "./TargetFormatControl";
 import { useDeckCost } from "./useDeckCost";
 import { useGatherToast } from "./useGatherToast";
+import { variantLabel } from "../ui/variantLabel";
+import { DeckLibrary } from "./DeckLibrary";
+import { editionText, type DeckLine } from "./deckListModel";
+import { DeckDragBadge, dropLook, useDeckDrag } from "./useDeckDrag";
+import { useDeckListEdits } from "./useDeckListEdits";
 
 type Props = {
   /** The Deck's id, from the address /decks/<id>. */
@@ -55,17 +62,20 @@ const VIEWS = [
 
 /**
  * The deck builder (#176): opening a Deck on the Decks page shows its Deck List as the main area, with every
- * copy's ownership state and the cost, in Spread, Stacked and List, and a column on the right for the card
- * library (#177). On a phone, Deck and Library tabs switch between the two, Library first, with the live
- * count on the Deck tab.
+ * copy's ownership state and the cost, in Spread, Stacked and List, and the card library in a column on the right
+ * that scrolls on its own (#177). On a phone, Deck and Library tabs switch between the two, Library first, with the
+ * live count on the Deck tab; both stay mounted, so the library keeps its search and results.
+ *
+ * Editing (#177): dragging a library tile onto the Deck List adds a copy, and the card popup's ±1 does too; a copy's
+ * sheet has ±1 and Swap this copy for; dragging a copy onto the library, or Delete or Backspace on it, takes it off.
+ * Every edit goes through the batch Deck List command, one at a time (useDeckListEdits), with an Undo toast.
  *
  * Row 1's Gather N opens the Pick List dialog (#179), as does the copy sheet's Gather on that card.
  *
  * Header row 2 holds the Target Format control (#178): ▾ changes the Deck's Target Format through its Deck List
  * command, and the result opens the results dialog. A card-level issue in that result highlights its lines.
  *
- * Seams for later tickets: header row 1 takes Buy missing (#181) after Gather N; the page header takes Export,
- * Publish and Delete (#181), which also retires the old panels at the foot of the page.
+ * The page header holds Export, Publish and Delete, and row 1 Buy missing after Gather N (#181, useDeckActions).
  */
 export function DeckBuilderPage({ deckId, onAllDecks }: Props) {
   const phone = useMediaQuery(MOBILE_QUERY);
@@ -80,7 +90,6 @@ export function DeckBuilderPage({ deckId, onAllDecks }: Props) {
     editionId: string;
     ordinal: number | null;
   } | null>(null);
-  const [toolsOpen, setToolsOpen] = useState(false);
   // The Pick List dialog: open with the copy sheet's card (edition), or with none from Gather N.
   const [gather, setGather] = useState<{ edition: string | null } | null>(null);
   const opener = useRef<HTMLElement | null>(null);
@@ -95,16 +104,32 @@ export function DeckBuilderPage({ deckId, onAllDecks }: Props) {
   } | null>(null);
   const resultButton = useRef<HTMLButtonElement | null>(null);
   const reads = useRef(0);
+  // The newest Deck List revision shown, from a read or an edit's answer (#177): a read that left before an edit
+  // landed is behind it and is dropped (the edit queue reads again once it drains).
+  const shownRevision = useRef(0);
+  // After an edit takes a copy off from its control or its sheet: the Editions whose controls should take focus if
+  // the control that had it left the page (#177).
+  const refocus = useRef<string[] | null>(null);
+  const deckListRef = useRef<HTMLElement>(null);
+  const [sheetSince, setSheetSince] = useState(0);
 
   async function read() {
+    await readDeck();
+  }
+
+  /** Reads the Deck and shows it, unless a newer read or a newer edit's answer came first; gives what it showed. */
+  async function readDeck(): Promise<DeckDetail | null> {
     const ticket = ++reads.current;
     try {
       const detail = await getDeck(deckId);
-      if (ticket !== reads.current) return;
+      if (ticket !== reads.current) return null;
+      if (detail.deck_list.revision < shownRevision.current) return null;
+      shownRevision.current = detail.deck_list.revision;
       setLoad({ kind: "ready", detail });
       setNotice("");
+      return detail;
     } catch (cause) {
-      if (ticket !== reads.current) return;
+      if (ticket !== reads.current) return null;
       if (
         cause instanceof DeckError &&
         (cause.status === 404 || cause.status === 422)
@@ -118,12 +143,38 @@ export function DeckBuilderPage({ deckId, onAllDecks }: Props) {
           "This Deck couldn't be loaded. Check your connection and try again."
         );
       }
+      return null;
     }
+  }
+
+  /** An edit's answer (#177): its Deck List, Target Format and result show at once; the read that follows once the
+   * edits drain brings the ownership, checks and surplus up to date. */
+  function applyResult(result: DeckListCommandResult) {
+    shownRevision.current = Math.max(
+      shownRevision.current,
+      result.deck_list.revision
+    );
+    setLoad((previous) =>
+      previous.kind === "ready" &&
+      result.deck_list.revision >= previous.detail.deck_list.revision
+        ? {
+            kind: "ready",
+            detail: {
+              ...previous.detail,
+              deck_list: result.deck_list,
+              target_format: result.target_format,
+              format_checks:
+                result.format_checks ?? previous.detail.format_checks,
+            },
+          }
+        : previous
+    );
   }
 
   /** Change the Target Format through its Deck List command (revision-checked, idempotent), one at a time. */
   async function changeTarget(target: TargetFormat) {
-    if (load.kind !== "ready" || changing) return;
+    // Not while Deck List edits are on their way: they move the revision this command is checked against.
+    if (load.kind !== "ready" || changing || edits.busy) return;
     const current = load.detail;
     if (target === current.target_format) return;
     const revision = current.deck_list.revision;
@@ -183,6 +234,68 @@ export function DeckBuilderPage({ deckId, onAllDecks }: Props) {
   }, []);
 
   const detail = load.kind === "ready" ? load.detail : null;
+  const edits = useDeckListEdits({
+    deckId,
+    deckList: detail?.deck_list ?? null,
+    onResult: applyResult,
+    onSettled: () => void read(),
+    reread: async () => (await readDeck())?.deck_list ?? null,
+    onMissing: () => setLoad({ kind: "missing" }),
+  });
+  /** One Edition, `delta` copies on or off the Deck List, as one edit. */
+  const step = (editionId: string, name: string, delta: bigint) =>
+    edits.edit({
+      deltas: new Map([[editionId, delta]]),
+      names: new Map([[editionId, name]]),
+      message:
+        delta > 0n ? `Added ${delta} ${name}.` : `Removed ${-delta} ${name}.`,
+    });
+  /** Swap one copy of a line for another Edition of its Card Identity: one batch, so one Undo puts it back. */
+  const swap = (line: DeckLine, row: BrowseEdition) => {
+    const from = line.line.edition_id;
+    refocus.current = [row.edition_id, from];
+    setSheet(null);
+    edits.edit({
+      deltas: new Map([
+        [from, -1n],
+        [row.edition_id, 1n],
+      ]),
+      names: new Map([
+        [from, line.line.name],
+        [row.edition_id, row.name],
+      ]),
+      message: `Swapped a copy of ${line.line.name} (${editionText(line)}) for ${row.name} (${row.set_name} · ${row.collector_number} · ${variantLabel(row.descriptor)}).`,
+    });
+  };
+  const drag = useDeckDrag({
+    enabled: !phone,
+    onDrop: (payload) =>
+      step(
+        payload.editionId,
+        payload.name,
+        payload.from === "library" ? 1n : -1n
+      ),
+  });
+  // A copy taken off from its control (Delete, or −1 in its sheet) can take that control with it: once the edits
+  // have landed, focus moves to the line's last control, or else to the toast's Undo.
+  useEffect(() => {
+    const wanted = refocus.current;
+    if (!wanted || edits.busy || sheet) return;
+    refocus.current = null;
+    const active = document.activeElement;
+    if (active && active !== document.body && active.isConnected) return;
+    for (const id of wanted) {
+      const controls = deckListRef.current?.querySelectorAll<HTMLElement>(
+        `[data-edition-id="${CSS.escape(id)}"]`
+      );
+      const last = controls?.[controls.length - 1];
+      if (last) {
+        last.focus();
+        return;
+      }
+    }
+    edits.focusUndo();
+  });
   const cost = useDeckCost(
     deckId,
     detail?.deck_list.revision ?? null,
@@ -205,6 +318,14 @@ export function DeckBuilderPage({ deckId, onAllDecks }: Props) {
     ? resultFor(detail.format_checks, detail.target_format)
     : null;
   const flagged = useMemo(() => flaggedLines(targetResult), [targetResult]);
+  const deckActions = useDeckActions({
+    deckId,
+    detail,
+    result: changing ? null : targetResult,
+    target: changing ?? detail?.target_format ?? "standard",
+    read: () => void read(),
+    onAllDecks,
+  });
   const open: OpenSheet = (line, ordinal, element) => {
     opener.current = element;
     setSheet({ editionId: line.line.edition_id, ordinal });
@@ -268,14 +389,16 @@ export function DeckBuilderPage({ deckId, onAllDecks }: Props) {
   );
   const deckList = (
     <section
+      ref={deckListRef}
       aria-labelledby={phone ? deckTab : `${idBase}-deck-list`}
-      className="flex min-w-0 flex-col gap-4"
+      data-deck-drop="deck"
+      className={`flex min-w-0 flex-col gap-4 rounded-panel${dropLook(drag.dragging, "deck")}`}
     >
       <CompetitionNotice warnings={detail.competition} lines={model.lines} />
       <h2 id={`${idBase}-deck-list`} className="sr-only">
         Deck List
       </h2>
-      {/* Row 1: the count, the cost and Gather N. Buy missing (#181) joins Gather N on the right. */}
+      {/* Row 1: the count, the cost, Gather N and Buy missing (#181). */}
       <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
         <p className="m-0 tabular-nums">
           <strong className="text-display font-semibold">{model.total}</strong>
@@ -293,6 +416,7 @@ export function DeckBuilderPage({ deckId, onAllDecks }: Props) {
           >
             Gather {toGather.toString()}
           </Button>
+          {deckActions.buyMissing}
         </div>
       </div>
       {/* Row 2: the Target Format control (#178), then the view switch. */}
@@ -300,7 +424,7 @@ export function DeckBuilderPage({ deckId, onAllDecks }: Props) {
         <TargetFormatControl
           value={changing ?? detail.target_format}
           result={changing ? null : targetResult}
-          busy={changing !== null}
+          busy={changing !== null || edits.busy}
           onChange={(target) => void changeTarget(target)}
           onOpenResult={() => setResultsOpen(true)}
           resultRef={resultButton}
@@ -318,8 +442,30 @@ export function DeckBuilderPage({ deckId, onAllDecks }: Props) {
       <DeckListBody
         view={view}
         groups={model.groups}
-        onOpen={open}
+        onOpen={(line, ordinal, element) => {
+          setSheetSince(edits.feedback?.id ?? 0);
+          open(line, ordinal, element);
+        }}
         flagged={flagged}
+        editing={{
+          onRemove: (line) => {
+            refocus.current = [line.line.edition_id];
+            step(line.line.edition_id, line.line.name, -1n);
+          },
+          onStep: (line, delta) => {
+            if (delta < 0n) refocus.current = [line.line.edition_id];
+            step(line.line.edition_id, line.line.name, delta);
+          },
+          onDragStart: (line, event) =>
+            drag.start(
+              {
+                from: "deck",
+                editionId: line.line.edition_id,
+                name: line.line.name,
+              },
+              event
+            ),
+        }}
       />
       {view !== "list" && model.groups.length > 0 && (
         <p className="m-0 border-t border-border pt-2 text-caption text-text-subtle">
@@ -334,30 +480,40 @@ export function DeckBuilderPage({ deckId, onAllDecks }: Props) {
       {putAway.dialog}
     </section>
   );
+  // The library's format chip starts on the Deck's Target Format (#178).
   const library = (
-    <aside
-      aria-labelledby={`${idBase}-library`}
-      className="box-border flex min-w-0 flex-col gap-2 self-start rounded-panel border border-border bg-surface p-4"
-    >
-      <h2 id={`${idBase}-library`} className="m-0 text-heading font-semibold">
-        Library
-      </h2>
-      {/* #177: the library's format chip starts on detail.target_format (#178). */}
-      <p className="m-0 text-body text-text-muted">
-        Adding cards from your Collection and the catalog comes in the next
-        update.
-      </p>
-    </aside>
+    <DeckLibrary
+      deckId={deckId}
+      headingId={`${idBase}-library`}
+      targetFormat={detail.target_format}
+      ownScroll={!phone}
+      quantityOf={edits.quantityOf}
+      onChange={(row, delta) => step(row.edition_id, row.name, delta)}
+      feedback={edits.feedback}
+      onDragStart={drag.start}
+      dropClass={dropLook(drag.dragging, "library")}
+    />
   );
 
   return (
     <main className="mx-auto box-border flex max-w-7xl flex-col gap-4 px-7 py-6 phone:px-4 phone:py-4">
       {back}
-      <PageHeader title={detail.deck.name} />
+      <PageHeader title={detail.deck.name} actions={deckActions.actions} />
       {notice && (
         <p role="status" className="m-0 text-body text-warning">
           {notice}
         </p>
+      )}
+      {edits.notice && (
+        <div
+          role="alert"
+          className="flex flex-wrap items-center gap-3 text-body text-warning"
+        >
+          <p className="m-0">{edits.notice.text}</p>
+          {edits.notice.retry && (
+            <Button onClick={edits.notice.retry}>Try again</Button>
+          )}
+        </div>
       )}
       {phone ? (
         <>
@@ -378,7 +534,8 @@ export function DeckBuilderPage({ deckId, onAllDecks }: Props) {
             aria-labelledby={segmentId(idBase, pane)}
             className="min-w-0"
           >
-            {pane === "deck" ? deckList : library}
+            <div hidden={pane !== "deck"}>{deckList}</div>
+            <div hidden={pane !== "library"}>{library}</div>
           </div>
         </>
       ) : (
@@ -387,28 +544,27 @@ export function DeckBuilderPage({ deckId, onAllDecks }: Props) {
           {library}
         </div>
       )}
-      <details
-        className="mt-4 rounded-panel border border-border"
-        onToggle={(event) => setToolsOpen(event.currentTarget.open)}
-      >
-        <summary className="flex min-h-control cursor-pointer items-center px-4 text-body font-semibold phone:min-h-tap">
-          Holdings, publishing and exports
-        </summary>
-        {toolsOpen && (
-          <div className="legacy legacy-light">
-            <LegacyDeckTools
-              detail={detail}
-              cost={cost}
-              onInventoryChanged={read}
-            />
-          </div>
-        )}
-      </details>
+      {deckActions.dialogs}
       <CopySheet
         line={sheetLine}
         ordinal={sheet?.ordinal ?? null}
         onClose={() => setSheet(null)}
         returnFocus={opener}
+        editing={
+          sheetLine
+            ? {
+                deckId,
+                quantity: edits.quantityOf(sheetLine.line.edition_id),
+                onChange: (delta) => {
+                  if (delta < 0n) refocus.current = [sheetLine.line.edition_id];
+                  step(sheetLine.line.edition_id, sheetLine.line.name, delta);
+                },
+                onSwap: (row) => swap(sheetLine, row),
+                feedback: edits.feedback,
+                since: sheetSince,
+              }
+            : undefined
+        }
         onGather={(edition) => {
           // The sheet closes and the Pick List opens on its card; closing that returns focus to the copy.
           gatherOpener.current = opener.current;
@@ -442,6 +598,7 @@ export function DeckBuilderPage({ deckId, onAllDecks }: Props) {
           lines={model.lines}
         />
       )}
+      <DeckDragBadge dragging={drag.dragging} />
     </main>
   );
 }

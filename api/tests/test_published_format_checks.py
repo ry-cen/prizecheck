@@ -37,7 +37,7 @@ OVER = (("me01-001", 1), ("fixture-sv01-901", 3), ("fixture-sv01-902", 2), ("sv0
 UNKNOWN = (("fixture-me06-3", 4), ("fixture-me05-901", 4), ("sv02-278", 52))
 ROTATING = (("me01-001", 1), ("sv01-172", 4), ("me01-125", 4), ("sv02-278", 51))
 NO_BASIC = (("me01-125", 1), ("me01-130", 1), ("sv02-278", 58))
-ON = "?format=standard&as_of=2026-10-11"  # Narrowed: the Expanded and GLC results have their own tests.
+ON = "?as_of=2026-10-11"  # These snapshots are Standard: the answer is the Target Format only (app redesign #183).
 
 
 def path_of(token, version, query=""):
@@ -72,7 +72,8 @@ def published(cards):
 
 def standard(token, version=1, query=ON, **options):
     body = body_of(public_get(path_of(token, version, query), **options))
-    [result] = [result for result in body["results"] if result["format"] == "standard"]
+    [result] = body["results"]  # The snapshot's Target Format only (app redesign #183).
+    assert result["format"] == "standard"
     return result
 
 
@@ -91,18 +92,14 @@ def public_lines(private_results):
                                            for issue in result["issues"]]} for result in private_results])
 
 
-def matches_private(token, deck, query="?as_of=2026-10-11"):  # Every format, unlike ON.
-    """The public results for ``token`` equal the private route's for ``deck``, line references mapped; returns the
-    public Standard result."""
-    public = body_of(public_get(path_of(token, 1, query)))["results"]
-    # The private read answers the Deck's Target Format unless ``format`` names one (app redesign #178): ask for each.
-    private = []
-    for name in format_evaluator.FORMATS:
-        response = call("GET", f"/api/decks/{deck}/format-checks{query}&format={name}", USER)
-        assert response.status_code == 200, response.text
-        private.extend(response.json()["results"])
-    assert timeless(public) == public_lines(private)
-    [result] = [result for result in public if result["format"] == "standard"]
+def matches_private(token, deck, query="?as_of=2026-10-11", version=1):
+    """The public result for ``token`` equals the private route's for ``deck``, line references mapped: both answer the
+    Target Format only (app redesign #178 for the Deck, #183 for the snapshot). Returns the public result."""
+    public = body_of(public_get(path_of(token, version, query)))["results"]
+    response = call("GET", f"/api/decks/{deck}/format-checks{query}", USER)
+    assert response.status_code == 200, response.text
+    assert timeless(public) == public_lines(response.json()["results"])
+    [result] = public
     return result
 
 
@@ -139,8 +136,6 @@ def test_published_results_load_anonymously_with_the_private_shape_and_match_the
         private = call("GET", f"/api/decks/{deck}/format-checks{ON}", USER)
         assert private.status_code == 200, private.text
         assert timeless(body["results"]) == public_lines(private.json()["results"])
-        assert timeless(body_of(public_get(path + "?format=standard&as_of=2026-10-11"))["results"]) == timeless(
-            body["results"])
         text = json.dumps(body)
         for secret in (USER, deck, *(edition_of(source_id) for source_id, _ in cards)):
             assert secret not in text
@@ -154,11 +149,11 @@ def test_results_follow_a_rotation_without_republishing(store, monkeypatch):
     _, token = published(ROTATING)
     snapshot = stored_decks()["decks"][token]
     monkeypatch.setattr(published_format_checks, "today", lambda: date(2026, 4, 9))
-    before = body_of(public_get(path_of(token, 1, "?format=standard")))
+    before = body_of(public_get(path_of(token, 1)))
     assert [(r["status"], r["evaluated_on"], r["issues"], r["notes"]) for r in before["results"]] == [
         ("legal", "2026-04-09", [], [])]
     monkeypatch.setattr(published_format_checks, "today", lambda: date(2026, 4, 10))
-    after = body_of(public_get(path_of(token, 1, "?format=standard")))
+    after = body_of(public_get(path_of(token, 1)))
     [result] = after["results"]
     assert (result["status"], result["evaluated_on"]) == ("not_legal", "2026-04-10")
     assert issues(result) == [("not_in_card_pool", "regulation mark G rotated out of Standard on 2026-04-10", "card",
@@ -279,17 +274,17 @@ def test_query_body_and_syntax_are_validated_with_public_headers(store):
     reset_catalog()
     run(Records(*CARDS))
     _, token = published(LEGAL)
-    for query in ("?owner=1", "?format=standard&format=standard", "?as_of=2026-10-11&as_of=2026-10-12", "?&",
+    # There is no ``format``: the answer is the snapshot's Target Format (app redesign #183), so naming one is refused.
+    for query in ("?owner=1", "?format=standard", "?format=expanded", "?format=unlimited", "?format=",
+                  "?format=standard&format=standard", "?as_of=2026-10-11&as_of=2026-10-12", "?&",
                   "?printing_ref=" + "a" * 48):
         refused(public_get(path_of(token, 1, query)), 422, "INVALID_REQUEST")
     refused(client.request("GET", path_of(token, 1), content=b"{}"), 422, "INVALID_REQUEST")
-    for query in ("?format=unlimited", "?format=", "?format=" + "x" * 100):
-        refused(public_get(path_of(token, 1, query)), 422, "UNKNOWN_FORMAT")
     for as_of in ("2026-4-10", "20260410", "2026-02-30", "today", "2026-04-10T00:00", "", "2026-04-10" + "0" * 50):
         refused(public_get(path_of(token, 1, f"?as_of={as_of}")), 422, "INVALID_AS_OF")
     refused(public_get(path_of(token, "01")), 404, "PUBLISHED_DECK_NOT_FOUND")
     refused(public_get(path_of("Z" * 32, 1)), 404, "PUBLISHED_DECK_NOT_FOUND")
-    refused(public_get(path_of("short", 1, "?format=unlimited")), 404, "PUBLISHED_DECK_NOT_FOUND")
+    refused(public_get(path_of("short", 1, "?as_of=today")), 404, "PUBLISHED_DECK_NOT_FOUND")
     refused(public_get(path_of(token, 2)), 409, "PUBLISHED_DECK_CHANGED")
     assert client.post(path_of(token, 1)).status_code == 405
 

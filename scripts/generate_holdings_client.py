@@ -20,7 +20,7 @@ def ts_type(value):
 
 
 schema = app.openapi()["components"]["schemas"]
-names = ("HoldingView", "LeafHoldings", "AddResult", "AddHolding")
+names = ("HoldingView", "LeafHoldings", "AddResult", "AddHolding", "BatchAddItem", "BatchAdd", "BatchAddResult")
 lines = ["// Generated from FastAPI OpenAPI by scripts/generate_holdings_client.py. Do not edit."]
 for name in names:
     definition = schema[name]
@@ -29,7 +29,8 @@ for name in names:
     lines.append(f"export type {name} = {{ {'; '.join(fields)} }};")
 lines.append("""
 export class HoldingError extends Error {
-  constructor(public status: number, public code: string) { super(code); }
+  /** The Card Edition a batch add refused (EDITION_UNAVAILABLE, QUANTITY_OVERFLOW), when the API names one. */
+  constructor(public status: number, public code: string, public editionId: string | null = null) { super(code); }
 }
 async function request<T>(path: string, method = 'GET', body?: object): Promise<T> {
   const response = await fetch(path, { method, credentials: 'same-origin',
@@ -37,7 +38,9 @@ async function request<T>(path: string, method = 'GET', body?: object): Promise<
     body: body ? JSON.stringify(body) : undefined });
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));
-    throw new HoldingError(response.status, payload?.detail?.code ?? 'HOLDING_REQUEST_FAILED');
+    const detail = payload?.detail;
+    throw new HoldingError(response.status, detail?.code ?? 'HOLDING_REQUEST_FAILED',
+      typeof detail?.edition_id === 'string' ? detail.edition_id : null);
   }
   return response.json() as Promise<T>;
 }
@@ -47,6 +50,7 @@ export const getLeafHoldings = (locationId: string, cursor?: string, filters: Le
   return request<LeafHoldings>(`/api/holdings/${encodeURIComponent(locationId)}?${query}`);
 };
 export const addHolding = (body: AddHolding) => request<AddResult>('/api/holdings', 'POST', body);
+export const batchAddHoldings = (body: BatchAdd) => request<BatchAddResult>('/api/holdings/batch', 'POST', body);
 """)
 content = "\n".join(lines)
 target = root / "web/src/holdings_generated.ts"

@@ -9,12 +9,13 @@ from uuid import UUID
 from typing import Literal
 
 import psycopg
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator, ValidationError
 
 from .main import connect, verified_user
 from .construction_checks import DISCLAIMER, IdentityCount, evaluate_checks
 from .deck_format_checks import TargetFormat, held_format_checks
+from .deck_list_display import CardKind, TrainerType
 from .public_projection import public_projection_store, ProjectionUnavailable
 
 router = APIRouter(tags=['publication'])
@@ -38,6 +39,15 @@ class PublicEdition(PublicModel):
     # The row's own Card Printing name, subtitle included ("Professor's Research (Professor Juniper)"). Snapshots
     # published before Deck Lists 09 have none; readers then use the Card Identity name of the row's group.
     printing_name: str | None = None
+    # What the Published Deck page groups a row by, as the deck builder groups Deck List lines (app redesign #183):
+    # the effective card kind, Trainer Type and evolves from (catalog_card_attribute) and a Pokémon's stored evolution
+    # root and stage (migration 043), frozen with the snapshot. They are catalog facts about the row's Card Printing,
+    # never ownership. Snapshots published before #183 have none, and every one is null where the catalog has no value.
+    card_kind: CardKind | None = None
+    trainer_type: TrainerType | None = None
+    evolves_from: str | None = None
+    evolution_root: str | None = None
+    evolution_stage: int | None = None
 
 
 class PublicIdentity(PublicModel):
@@ -164,7 +174,8 @@ def require_legal(conn, owner, deck_id) -> str:
 def snapshot(conn, owner, deck_id, title, version, target_format):
     """Freeze the Deck's Deck List lines (ADR 0009), never its Holdings: a line may name a card the owner does not own,
     and nothing about ownership or Locations is read. Rows group by Card Identity, which drives copy counts and checks;
-    each row keeps its own Card Printing name."""
+    each row keeps its own Card Printing name and the display facts the Published Deck page groups it by (#183), read
+    as the deck builder's display query reads them (``deck_list_display.DISPLAY_QUERY``)."""
     # The inventory-owner lock serializes this snapshot with Deck List commands (owner_and_rows) and with Holding
     # writes into the Deck, which may extend its Deck List.
     conn.execute('SELECT revision FROM inventory_owner WHERE user_id=%s FOR UPDATE', (owner,))
@@ -175,11 +186,13 @@ def snapshot(conn, owner, deck_id, title, version, target_format):
       coalesce(pd.display_name,ci.display_name) AS printing_name,
       coalesce(pd.set_id,'') AS set_id,coalesce(pd.set_name,'') AS set_name,
       coalesce(pd.collector_number,'') AS collector_number,pd.image_url,
-      CASE a.basic_energy WHEN true THEN 'supported' WHEN false THEN 'not_basic' ELSE 'unresolved' END AS basic_energy
+      CASE a.basic_energy WHEN true THEN 'supported' WHEN false THEN 'not_basic' ELSE 'unresolved' END AS basic_energy,
+      a.card_kind,a.trainer_type,a.evolves_from,er.root_name AS evolution_root,er.stage AS evolution_stage
       FROM deck_list_line l JOIN catalog_edition e ON e.id=l.edition_id
       JOIN catalog_printing p ON p.id=e.printing_id JOIN catalog_identity ci ON ci.id=p.identity_id
       LEFT JOIN catalog_printing_display pd ON pd.printing_id=p.id
       LEFT JOIN catalog_card_attribute a ON a.printing_id=p.id
+      LEFT JOIN catalog_evolution_root er ON er.identity_key=ci.identity_key AND a.card_kind='pokemon'
       WHERE l.owner_id=%s AND l.deck_id=%s
       ORDER BY ci.display_name,ci.id,pd.set_id,pd.collector_number,e.descriptor_key""",
       (owner, deck_id)).fetchall()
@@ -190,7 +203,9 @@ def snapshot(conn, owner, deck_id, title, version, target_format):
         group['classes'].append(row['basic_energy'])
         group['editions'].append(PublicEdition(set_id=row['set_id'], set_name=row['set_name'], collector_number=row['collector_number'],
             variant=row['descriptor'], image_url=f"{row['image_url']}/low.webp" if row['image_url'] else None, quantity=str(row['quantity']),
-            edition_ref=row['edition_ref'], printing_ref=row['printing_ref'], printing_name=row['printing_name']))
+            edition_ref=row['edition_ref'], printing_ref=row['printing_ref'], printing_name=row['printing_name'],
+            card_kind=row['card_kind'], trainer_type=row['trainer_type'], evolves_from=row['evolves_from'],
+            evolution_root=row['evolution_root'], evolution_stage=row['evolution_stage']))
     evaluated = evaluate_checks([IdentityCount(g['amount'],all(value=='supported' for value in g['classes']),
                                              'unresolved' in g['classes']) for g in groups.values()])
     identities, checks = [], []
@@ -342,14 +357,24 @@ def publication_status(deck_id: UUID, user_id: str = Depends(verified_user)):
             title=row['title'] if row else None, visibility=row['visibility'] if row else None, projection_pending=row['pending'] if row else False)
 
 
+def refresh_after(background: BackgroundTasks, result: dict, user_id: str) -> dict:
+    """After a publish or republish answered (the publish gate passed and the snapshot is committed and projected), start
+    the background price refresh for the snapshot's Editions (app redesign #181). It runs after the response, outside every
+    lock ``mutate`` takes, and never changes the answer (``publish_refresh``, imported here: it imports ``public_deck``,
+    which imports this module)."""
+    from . import publish_refresh
+    background.add_task(publish_refresh.refresh_published_prices, result['token'], result['version'], f'user:{user_id}')
+    return result
+
+
 @router.post('/api/decks/{deck_id}/publication', response_model=PublicationResult)
-def publish(deck_id: UUID, command: PublishCommand, user_id: str = Depends(verified_user)):
-    return mutate(deck_id, command, user_id, 'publish')
+def publish(deck_id: UUID, command: PublishCommand, background: BackgroundTasks, user_id: str = Depends(verified_user)):
+    return refresh_after(background, mutate(deck_id, command, user_id, 'publish'), user_id)
 
 
 @router.put('/api/decks/{deck_id}/publication', response_model=PublicationResult)
-def republish(deck_id: UUID, command: PublishCommand, user_id: str = Depends(verified_user)):
-    return mutate(deck_id, command, user_id, 'republish')
+def republish(deck_id: UUID, command: PublishCommand, background: BackgroundTasks, user_id: str = Depends(verified_user)):
+    return refresh_after(background, mutate(deck_id, command, user_id, 'republish'), user_id)
 
 
 @router.delete('/api/decks/{deck_id}/publication', response_model=PublicationResult)

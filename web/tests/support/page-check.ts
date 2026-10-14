@@ -51,8 +51,10 @@ const TOUCH_TARGET = 44;
  * Visible interactive elements smaller than 44 px in either direction with no 44 px tap area. An inline
  * link inside a paragraph is exempt, a checkbox or radio is measured by its label, and anything inert,
  * aria-hidden, invisible or parked above or left of the page (a skip link before it is focused) is left
- * out. While a modal is open only the controls inside it count. A small element is scrolled into view and hit-tested at nine points spread over a 44 px square
- * around its centre; it has a tap area when every point lands on it. Half a pixel is allowed for
+ * out. While a modal is open only the controls inside it count; with one modal open over another (the card popup
+ * over Collection's Add cards), the innermost one. A small element is hit-tested at nine points spread over a 44 px square
+ * around its centre, first where it is and then, if it is out of view or something covers it there (a sticky bar),
+ * scrolled to the middle of the view; it has a tap area when every point lands on it. Half a pixel is allowed for
  * fractional layout. The window's scroll position is restored afterwards.
  */
 async function smallTargets(page: Page): Promise<string[]> {
@@ -61,9 +63,12 @@ async function smallTargets(page: Page): Promise<string[]> {
     const reach = size / 2 - 0.5;
     const found: string[] = [];
     const start = { x: window.scrollX, y: window.scrollY };
-    // With a modal open, only its own controls can be reached.
+    // With a modal open, only its own controls can be reached. A modal opened over another is drawn inside it, so
+    // the last one in document order is on top.
     const modal =
-      document.querySelector<HTMLElement>("dialog:modal") ??
+      Array.from(
+        document.querySelectorAll<HTMLElement>("dialog:modal")
+      ).pop() ??
       Array.from(
         document.querySelectorAll<HTMLElement>('[aria-modal="true"]')
       ).pop();
@@ -103,7 +108,8 @@ async function smallTargets(page: Page): Promise<string[]> {
         box.left - reach >= 0 &&
         box.bottom + reach <= window.innerHeight &&
         box.right + reach <= window.innerWidth;
-      if (!inView) {
+      // Out of view, or under something at this scroll position (a sticky bar): measure it in the middle of the view.
+      if (!inView || !hitsItself(measured, box)) {
         measured.scrollIntoView({ block: "center", inline: "center" });
         box = measured.getBoundingClientRect();
       }
