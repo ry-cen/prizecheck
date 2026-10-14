@@ -410,16 +410,23 @@ export function useDeckListEdits({
     return total < 0n ? 0n : total;
   };
 
-  return {
-    edit,
-    quantityOf,
-    /** A command or an Undo is on its way, waiting to be sent again, or queued. */
-    busy:
+  function working() {
+    return (
       inFlight.current !== null ||
       failed.current !== null ||
       queued.current.length > 0 ||
       undoJob.current !== null ||
-      undoing.current,
+      undoing.current
+    );
+  }
+
+  return {
+    edit,
+    quantityOf,
+    /** A command or an Undo is on its way, waiting to be sent again, or queued, as of this render. */
+    busy: working(),
+    /** The same, read now: for an effect that may run late, after an event handler queued an edit. */
+    busyNow: working,
     notice,
     feedback,
     /** Focus the toast's Undo, when the control that made the edit has left the page. */

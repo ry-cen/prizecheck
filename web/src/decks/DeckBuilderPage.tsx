@@ -280,7 +280,9 @@ export function DeckBuilderPage({ deckId, onAllDecks }: Props) {
   // have landed, focus moves to the line's last control, or else to the toast's Undo.
   useEffect(() => {
     const wanted = refocus.current;
-    if (!wanted || edits.busy || sheet) return;
+    // busyNow, not busy: React can run the previous commit's effect late, after the keypress that set `wanted` has
+    // queued its edit; that render's own busy is stale and would use up `wanted` while the control is still there.
+    if (!wanted || edits.busyNow() || sheet) return;
     refocus.current = null;
     const active = document.activeElement;
     if (active && active !== document.body && active.isConnected) return;
