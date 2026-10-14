@@ -30,7 +30,7 @@ export type PutAwayHolding = { edition_id: string; quantity: string; version: nu
 export type PickList = { deck_id: string; deck_list_revision: number; owner_revision: number; rows: PickRow[]; put_away: PutAwayHolding[]; competition: CompetitionWarning[] };
 export type PickItem = { source_id: string; edition_id: string; quantity: string; expected_version: number };
 export type ConfirmPicks = { items: PickItem[]; deck_list_revision: number; idempotency_key: string };
-export type PickConfirmResult = { edition_count: number; copy_count: string; owner_revision: number };
+export type PickConfirmResult = { edition_count: number; copy_count: string; owner_revision: number; source_count: number; undo_id: string };
 export type DeleteDeck = { name: string; version: number; idempotency_key: string };
 export type DeleteDeckResult = { deleted_id: string; unsorted_id: string | null; edition_count: number; copy_count: string; owner_revision: number };
 

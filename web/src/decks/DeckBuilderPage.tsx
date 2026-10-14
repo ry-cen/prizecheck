@@ -17,8 +17,10 @@ import { CopySheet } from "./CopySheet";
 import { DeckCostLine } from "./DeckCostLine";
 import { DeckListBody, type OpenSheet } from "./DeckListViews";
 import { deckListModel, type DeckView } from "./deckListModel";
+import { GatherDialog } from "./GatherDialog";
 import { LegacyDeckTools } from "./LegacyDeckTools";
 import { useDeckCost } from "./useDeckCost";
+import { useGatherToast } from "./useGatherToast";
 
 type Props = {
   /** The Deck's id, from the address /decks/<id>. */
@@ -47,7 +49,9 @@ const VIEWS = [
  * library (#177). On a phone, Deck and Library tabs switch between the two, Library first, with the live
  * count on the Deck tab.
  *
- * Seams for later tickets: header row 1 takes Gather N (#179) and Buy missing (#181) after the cost; row 2
+ * Row 1's Gather N opens the Pick List dialog (#179), as does the copy sheet's Gather on that card.
+ *
+ * Seams for later tickets: header row 1 takes Buy missing (#181) after Gather N; row 2
  * takes the Target Format control (#178) before the view switch; the page header takes Export, Publish and
  * Delete (#181), which also retires the old panels at the foot of the page.
  */
@@ -65,7 +69,10 @@ export function DeckBuilderPage({ deckId, onAllDecks }: Props) {
     ordinal: number | null;
   } | null>(null);
   const [toolsOpen, setToolsOpen] = useState(false);
+  // The Pick List dialog: open with the copy sheet's card (edition), or with none from Gather N.
+  const [gather, setGather] = useState<{ edition: string | null } | null>(null);
   const opener = useRef<HTMLElement | null>(null);
+  const gatherOpener = useRef<HTMLElement | null>(null);
   const reads = useRef(0);
 
   async function read() {
@@ -110,6 +117,7 @@ export function DeckBuilderPage({ deckId, onAllDecks }: Props) {
     () => (detail ? deckListModel(detail) : null),
     [detail]
   );
+  const gathered = useGatherToast(detail?.deck.name ?? "", () => void read());
   const open: OpenSheet = (line, ordinal, element) => {
     opener.current = element;
     setSheet({ editionId: line.line.edition_id, ordinal });
@@ -167,6 +175,10 @@ export function DeckBuilderPage({ deckId, onAllDecks }: Props) {
     );
 
   const deckTab = segmentId(idBase, "deck");
+  const toGather = model.lines.reduce(
+    (total, line) => total + line.elsewhere,
+    0n
+  );
   const deckList = (
     <section
       aria-labelledby={phone ? deckTab : `${idBase}-deck-list`}
@@ -175,7 +187,7 @@ export function DeckBuilderPage({ deckId, onAllDecks }: Props) {
       <h2 id={`${idBase}-deck-list`} className="sr-only">
         Deck List
       </h2>
-      {/* Row 1: the count and the cost. Gather N (#179) and Buy missing (#181) join it on the right. */}
+      {/* Row 1: the count, the cost and Gather N. Buy missing (#181) joins Gather N on the right. */}
       <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
         <p className="m-0 tabular-nums">
           <strong className="text-display font-semibold">{model.total}</strong>
@@ -183,6 +195,17 @@ export function DeckBuilderPage({ deckId, onAllDecks }: Props) {
           <span className="sr-only"> cards</span>
         </p>
         <DeckCostLine settled={cost} />
+        <div className="ml-auto flex flex-wrap items-center gap-2 self-center">
+          <Button
+            disabled={toGather === 0n}
+            onClick={(event) => {
+              gatherOpener.current = event.currentTarget;
+              setGather({ edition: null });
+            }}
+          >
+            Gather {toGather.toString()}
+          </Button>
+        </div>
       </div>
       {/* Row 2: the Target Format control (#178) goes before the view switch. */}
       <div className="flex flex-wrap items-center gap-2">
@@ -278,6 +301,26 @@ export function DeckBuilderPage({ deckId, onAllDecks }: Props) {
         ordinal={sheet?.ordinal ?? null}
         onClose={() => setSheet(null)}
         returnFocus={opener}
+        onGather={(edition) => {
+          // The sheet closes and the Pick List opens on its card; closing that returns focus to the copy.
+          gatherOpener.current = opener.current;
+          setSheet(null);
+          setGather({ edition });
+        }}
+      />
+      <GatherDialog
+        open={gather !== null}
+        deckId={deckId}
+        lines={model.lines}
+        focusEdition={gather?.edition ?? null}
+        returnFocus={gatherOpener}
+        onClose={() => setGather(null)}
+        onConfirmed={(result) => {
+          setGather(null);
+          void read();
+          void gathered(result);
+        }}
+        onChanged={() => void read()}
       />
     </main>
   );

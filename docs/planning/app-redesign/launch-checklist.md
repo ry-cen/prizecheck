@@ -24,6 +24,7 @@ The redesign is a launch gate ([spec](spec.md), "Rollout"): PrizeCheck opens to 
 - [ ] Collection's Location tree, Manage locations, search, filters and display settings, the stale-collection banner and the Deck heading use the new controls. Filters & display opens as a panel along the right edge of a phone, and Manage locations fills a phone's screen (#166).
 - [ ] Opening a Deck on Decks shows it in the deck builder at `/decks/<Deck id>`: the count, the Deck List cost and the cost to complete, and every copy's state in Spread, Stacked and List, grouped by evolution line, Trainer Type and Energy. Pressing the Decks tab returns to the index. Until #181, the old Holdings, Publish and export panels sit under "Holdings, publishing and exports" at the foot of the builder. Every Deck List line in `GET /api/decks/{id}` and in the Deck List command responses carries its card's name, set, collector number, Variant Descriptor, image, card kind, Trainer Type, evolves from and Card Identity, and a Pokémon line also its evolution root and stage, so a deck that skips a stage (Charmander and Charizard ex with no Charmeleon) still forms one evolution line. After migrating to `043_evolution_roots.sql`, run `scripts/derive_card_attributes.py` once (`docs/operations/release.md`); until then a deck that skips a stage shows its Pokémon apart (#176).
 - [ ] Catalog is an Edition gallery: one tile per Card Edition, one search box (a printed set code and number such as `PAL 185`, a TCGdex set ID and number such as `sv02 185`, or the start of a name) and one filter row, with no sidebar. Pressing a tile opens the Printing's details and today's report forms until the card popup (#174) replaces them. The gallery loads more cards as you scroll, so My metadata reports moves from the foot of the page to a button beside the page title. A new signed-in route, `GET /api/catalog/editions`, lists Card Editions with their card type, Format Standing in all three Formats and the caller's copies (with `deck_id`, also the copies in that Deck and free elsewhere), 60 to a page; `GET /api/catalog/sets` lists the catalog's sets. Tiles read the printed set code and number ("PAL 185 · Reverse Holo"), from a reviewed table of 136 sets (`api/app/set_codes.tsv`, its sources in its header); a set with no confirmed code shows its TCGdex set ID. Collection's tiles still show the set's name. The gallery lists the newest set first, each set in collector number order; migration `044_catalog_set_release.sql` stores each set's release date at the next catalog import, and until then sets the format rules files don't date come last (`docs/operations/release.md`). `GET /api/catalog/search` stays for its other callers (#173).
+- [ ] **Gather N** in the deck builder's header opens the Pick List as a dialog, one row per card, with a source picker on each row and a warning when a source is another Deck that would be left short. Confirm picked and Confirm all each move the copies as one Move with one Undo toast. `POST /api/decks/{id}/pick-list/confirm` now writes one Inventory Undo record per confirmation, however many sources it names, and returns its `undo_id` and `source_count`; the five-source limit (`TOO_MANY_PICK_SOURCES`) is gone, so a Gather no longer pushes Collection's earlier Undo records out. The copy sheet's Gather opens the dialog on that card (#179).
 
 ## Walkthroughs
 
@@ -177,6 +178,22 @@ On a phone (iOS Safari or Android Chrome):
 
 - [ ] 7. Open Catalog. The search box fills the width and is thumb-sized. Swipe the chip row: it scrolls sideways inside itself and fades at its right edge, every chip is easy to hit, and nothing else on the page scrolls sideways.
 - [ ] 8. Tap Any set: the set list opens along the bottom. Close it, then tap a tile: its details open along the bottom, and ✕ or a tap on the dimmed page closes them.
+
+### Deck builder: Gather (#179)
+
+On a desktop (a window at least 1280 px wide):
+
+- [ ] 1. Open a Deck whose Deck List has copies you own in other Locations. The first header line ends in **Gather N**, where N counts those copies. With every owned copy already in the Deck, it reads Gather 0 and can't be pressed.
+- [ ] 2. Press Gather N. A dialog titled "Gather cards you own" lists one row per card: its name, set, number and Variant, a source picker, how many copies come from where, and a line saying how many copies from how many Locations in all.
+- [ ] 3. On a card spread over several Locations, the picker starts on "Suggested: N Locations". Choose one Location: the row now takes copies from there only (no more than it holds).
+- [ ] 4. A row whose copies come from another Deck that lists them for itself says "Leaves <Deck> (Deck) N short".
+- [ ] 5. Tick one row and press Confirm 1 picked. The dialog closes, a toast says "Moved N copies from N Locations into <Deck>." with Undo, and the copies show solid in the Deck List.
+- [ ] 6. Press Gather again, then Confirm all on a list that draws on more than five Locations. One toast names them all. Press Undo once: every copy goes back to where it came from, and the toast says how many Locations got copies back.
+- [ ] 7. Press a dashed (↻) copy, then Gather in its sheet. The Pick List opens with that card's row already ticked and focused.
+
+On a phone (iOS Safari or Android Chrome):
+
+- [ ] 8. On the Deck tab, tap Gather N. The dialog fills the screen; the checkboxes, pickers and buttons are easy to hit with a thumb, and nothing scrolls sideways. Confirm all, then tap Undo in the toast above the tab bar.
 
 ## Manual checks that automation does not cover
 
