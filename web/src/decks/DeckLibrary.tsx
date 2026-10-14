@@ -167,13 +167,16 @@ export function DeckLibrary({
         aria-describedby={countId}
         onChange={(event) => setText(event.target.value)}
       />
-      <Segmented
-        mode="choice"
-        label="Library cards"
-        options={SHOWN}
-        value={shown}
-        onChange={setShown}
-      />
+      {/* A scroll container (Segmented) has no automatic minimum height, so keep it from shrinking in the Library column. */}
+      <div className="shrink-0">
+        <Segmented
+          mode="choice"
+          label="Library cards"
+          options={SHOWN}
+          value={shown}
+          onChange={setShown}
+        />
+      </div>
       <div
         role="group"
         aria-label="Library filters"

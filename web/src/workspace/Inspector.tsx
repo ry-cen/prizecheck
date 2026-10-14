@@ -120,7 +120,7 @@ const counts = new Intl.NumberFormat("en-US");
 const META = "text-meta text-text-muted tabular-nums";
 const SECTION = "mt-4 border-t border-border pt-4";
 // The inspected Edition's price: the existing EditionPrice component in the inspector's colours, the amount
-// in the accent. EditionPrice.css reaches only the old pages (#166), so these are the only rules here.
+// in the accent. EditionPrice has no stylesheet of its own (#184), so these are its only rules here.
 const PRICE =
   "[&_.edition-price]:block [&_.edition-price]:text-text-muted [&_.edition-price[data-price-status=checking]]:italic [&_.edition-price_strong]:text-body [&_.edition-price_strong]:font-semibold [&_.edition-price_strong]:text-accent [&_.price-refresh]:text-text-subtle [&_.price-refresh[data-refresh=failed]]:text-warning";
 
