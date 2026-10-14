@@ -91,10 +91,17 @@ const header = (page: Page) => ({
   publish: page.getByRole("button", { name: /^(Publish|Published · v\d+)$/ }),
   remove: page.getByRole("button", { name: "Delete Deck", exact: true }),
 });
-const targetSelect = (page: Page) =>
-  page
+/** Chooses the Deck's Target Format ("Gym Leader Challenge") from the deck builder's Target Format menu. */
+async function chooseTarget(page: Page, format: string) {
+  await page
     .getByRole("group", { name: "Target Format and result" })
-    .getByRole("combobox", { name: "Target Format" });
+    .getByRole("button", { name: /^Target Format: / })
+    .click();
+  await page
+    .getByRole("menu", { name: /^Target Format: / })
+    .getByRole("menuitemradio", { name: format, exact: true })
+    .click();
+}
 const deckIndex = (page: Page) =>
   page.getByRole("navigation", { name: "Deck index" });
 const published = (page: Page) =>
@@ -172,7 +179,7 @@ test.describe("on a desktop", () => {
     const { publish } = header(page);
 
     // Gym Leader Challenge allows one copy of a card: not legal, so Publish says why and stays disabled.
-    await targetSelect(page).selectOption("glc");
+    await chooseTarget(page, "Gym Leader Challenge");
     await expect(publish).toBeDisabled();
     // The Publish dialog's own copy of the reason stays in its closed dialog, hidden.
     const reason = page
@@ -184,7 +191,7 @@ test.describe("on a desktop", () => {
     await expect(publish).toHaveAccessibleDescription(
       (await reason.textContent())!
     );
-    await targetSelect(page).selectOption("standard");
+    await chooseTarget(page, "Standard");
     await expect(publish).toBeEnabled();
     await expect(reason).toHaveCount(0);
 
@@ -224,7 +231,7 @@ test.describe("on a desktop", () => {
     ).toBeFocused();
 
     // A published Deck that stops being legal can still be managed: only Republish waits for a legal result.
-    await targetSelect(page).selectOption("glc");
+    await chooseTarget(page, "Gym Leader Challenge");
     const again = page.getByRole("button", { name: "Published · v2" });
     await expect(again).toBeEnabled();
     await again.click();

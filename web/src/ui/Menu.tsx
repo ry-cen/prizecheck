@@ -5,13 +5,16 @@ import React, {
   useState,
   type ReactNode,
 } from "react";
-import type { LucideIcon } from "lucide-react";
+import { Check, type LucideIcon } from "lucide-react";
 import { Icon } from "./Icon";
 
 export type MenuItem = {
   label: string;
   icon?: LucideIcon;
   onSelect: () => void;
+  /** Set on every item of a single-choice menu (the Target Format): the item is a menuitemradio, checked when true,
+   * and a check mark shows the chosen one. */
+  checked?: boolean;
 };
 
 type Props = {
@@ -23,6 +26,9 @@ type Props = {
   /** Non-interactive content above the items, outside the menu role (the signed-in email). */
   header?: ReactNode;
   items: MenuItem[];
+  /** Which edge of the trigger the list lines up with: "end" (its right edge, the default, for menus at the right of
+   * a header) or "start" (its left edge, for a control at the left of a row). */
+  align?: "start" | "end";
 };
 
 /**
@@ -30,7 +36,9 @@ type Props = {
  * it, aligned to its right edge. Enter, Space, ArrowDown and ArrowUp on the trigger open it; ArrowUp
  * starts at the last item. Inside, ArrowDown, ArrowUp, Home and End move between items, Escape closes
  * and returns focus to the trigger, Tab closes, and a press outside closes. Choosing an item closes the
- * menu, returns focus to the trigger and then runs the item.
+ * menu, returns focus to the trigger and then runs the item. In a single-choice menu (items with `checked`) the
+ * items are menuitemradio, and opening it by click, Enter, Space or ArrowDown starts on the checked item.
+ * Items are 30 px tall on desktop and 44 px on a phone.
  */
 export function Menu({
   label,
@@ -38,6 +46,7 @@ export function Menu({
   triggerClassName,
   header,
   items,
+  align = "end",
 }: Props) {
   const [open, setOpen] = useState(false);
   const [start, setStart] = useState<"first" | "last">("first");
@@ -48,13 +57,18 @@ export function Menu({
   const menuId = useId();
   const menuItems = () =>
     Array.from(
-      list.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? []
+      list.current?.querySelectorAll<HTMLElement>(
+        '[role="menuitem"], [role="menuitemradio"]'
+      ) ?? []
     );
 
   useEffect(() => {
     if (!open) return;
     const all = menuItems();
-    (start === "last" ? all[all.length - 1] : all[0])?.focus();
+    const checked = all.find(
+      (item) => item.getAttribute("aria-checked") === "true"
+    );
+    (start === "last" ? all[all.length - 1] : (checked ?? all[0]))?.focus();
     const onPointerDown = (event: PointerEvent) => {
       if (!wrapper.current?.contains(event.target as Node)) setOpen(false);
     };
@@ -111,7 +125,11 @@ export function Menu({
         {trigger}
       </button>
       {open && (
-        <div className="absolute right-0 top-full z-(--layer-panel) mt-1 min-w-56 rounded-panel border border-border-strong bg-surface-raised py-1 text-control text-text">
+        <div
+          className={`absolute top-full z-(--layer-panel) mt-1 min-w-56 rounded-panel border border-border-strong bg-surface-raised py-1 text-control text-text ${
+            align === "start" ? "left-0" : "right-0"
+          }`}
+        >
           {header}
           <ul
             ref={list}
@@ -125,15 +143,23 @@ export function Menu({
               <li key={item.label} role="none">
                 <button
                   type="button"
-                  role="menuitem"
+                  role={
+                    item.checked === undefined ? "menuitem" : "menuitemradio"
+                  }
+                  aria-checked={item.checked}
                   tabIndex={-1}
-                  className="box-border flex h-control w-full cursor-pointer items-center gap-2 border-0 bg-transparent px-3 text-left text-control text-text hover:bg-surface-selected focus-visible:bg-surface-selected"
+                  className="box-border flex h-control w-full cursor-pointer items-center gap-2 border-0 bg-transparent px-3 text-left font-sans text-control text-text hover:bg-surface-selected focus-visible:bg-surface-selected phone:h-control-phone"
                   onClick={() => {
                     setOpen(false);
                     button.current?.focus();
                     item.onSelect();
                   }}
                 >
+                  {item.checked !== undefined && (
+                    <span className="inline-flex w-4 shrink-0 text-accent-strong">
+                      {item.checked && <Icon icon={Check} />}
+                    </span>
+                  )}
                   {item.icon && <Icon icon={item.icon} />}
                   {item.label}
                 </button>

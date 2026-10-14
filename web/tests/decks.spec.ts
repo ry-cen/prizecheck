@@ -66,7 +66,7 @@ promote({'card-1': 'Pikachu', **{f'card-{i}': f'Pikachu {i:02}' for i in range(2
     await expect(
       page
         .getByRole("group", { name: "Target Format and result" })
-        .getByRole("button")
+        .getByRole("button", { name: /result$/ })
     ).toHaveText(/Not legal/);
     // Two copies move out to the top-level Unsorted (Collection's Move, through the gateway).
     const locationTree = await (
