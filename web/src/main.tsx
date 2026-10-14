@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import { getOwnerCatalogStatus, type OwnerCatalogStatus } from "./generated";
 import { Decks } from "./Decks";
 import { DeckBuilderPage } from "./decks/DeckBuilderPage";
-import { CatalogSearch } from "./CatalogSearch";
+import { CatalogPage } from "./catalog/CatalogPage";
 import { OwnerControlsPage } from "./owner/OwnerControlsPage";
 import { ownerSection, ownerSectionPath } from "./owner/sections";
 import { Workspace } from "./workspace/Workspace";
@@ -224,11 +224,7 @@ function App() {
         );
       }
       case "catalog":
-        return (
-          <LegacyPage title="Catalog" message={message}>
-            <CatalogSearch />
-          </LegacyPage>
-        );
+        return <CatalogPage active={active} message={message} />;
       case "reports":
         return <MissingCardsPage active={active} message={message} />;
       case "owner":

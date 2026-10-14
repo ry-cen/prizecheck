@@ -103,13 +103,31 @@ async function openHeld(page: Page, name: string) {
   return panel;
 }
 
-/** Prices are read once, when a slot first comes near the viewport, so each check starts from a fresh page load. */
+/** Prices are read once, when a slot first comes near the viewport, so each check starts from a fresh page load.
+ * Catalog is an Edition gallery (#173): Furret's three Editions are three tiles, each with its compact price. */
 async function search(page: Page) {
   await page.reload();
   await page.getByRole("button", { name: "Catalog", exact: true }).click();
-  await page.getByLabel("English name").fill("Furret");
-  await page.getByRole("button", { name: "Search", exact: true }).click();
-  await expect(page.locator(".catalog-results > li")).toHaveCount(2);
+  await page
+    .getByRole("searchbox", { name: "Search the catalog" })
+    .fill("Furret");
+  await expect(
+    page.getByRole("region", { name: "Catalog results" }).getByRole("listitem")
+  ).toHaveCount(3);
+}
+
+/** A gallery tile by the start of its accessible name ("Furret, DAA 1, Darkness Ablaze, Normal"). */
+const tile = (page: Page, start: string) =>
+  page
+    .getByRole("region", { name: "Catalog results" })
+    .getByRole("button", { name: new RegExp(`^${start}`) });
+
+/** Opens a tile's Printing details, which give every Edition of that Printing its full price sentence. */
+async function details(page: Page, start: string) {
+  await tile(page, start).click();
+  const dialog = page.getByRole("dialog", { name: "Furret" });
+  await expect(dialog.getByRole("article")).toBeVisible();
+  return dialog;
 }
 
 test.afterEach(async () => {
@@ -140,16 +158,25 @@ test("card information shows each Edition's own price with age, stale and finish
   ]);
   await signIn(page);
   await search(page);
-  const results = page.locator(".catalog-results");
-  await expect(results).toContainText("$0.25");
-  await expect(results).toContainText("$0.43");
-  await expect(results).toContainText("Age unknown");
-  await expect(results).toContainText("Last checked");
-  await expect(results).toContainText(
-    "Price unavailable: finish not established"
-  );
-  await expect(results).not.toContainText("Stale");
-  await expect(results).not.toContainText("$0.00");
+  // Each tile prices its own Edition in one short line.
+  await expect(
+    tile(page, "Furret, DAA 1, Darkness Ablaze, Normal")
+  ).toContainText("$0.25");
+  await expect(
+    tile(page, "Furret, DAA 1, Darkness Ablaze, Reverse Holo")
+  ).toContainText("$0.43");
+  // The details give the full sentence for each Edition of the Printing.
+  let card = await details(page, "Furret, DAA 1, Darkness Ablaze, Normal");
+  await expect(card).toContainText("$0.25");
+  await expect(card).toContainText("$0.43");
+  await expect(card).toContainText("Age unknown");
+  await expect(card).toContainText("Last checked");
+  await expect(card).not.toContainText("Stale");
+  await expect(card).not.toContainText("$0.00");
+  await expect(card.locator(".edition-price")).toHaveCount(2);
+  await page.keyboard.press("Escape");
+  card = await details(page, "Furret, DAA 2,");
+  await expect(card).toContainText("Price unavailable: finish not established");
 
   // Stale: strictly over 48 hours of provider age, even though the check is fresh.
   apply([
@@ -162,25 +189,22 @@ test("card information shows each Edition's own price with age, stale and finish
     },
   ]);
   await search(page);
-  await expect(results).toContainText("Stale: the price is over 48 hours old");
-  await expect(results).toContainText("$0.25");
-
-  // Card detail lists the same exact-Edition answers.
-  await page
-    .locator(".catalog-results > li")
-    .filter({ hasText: "$0.25" })
-    .getByRole("button", { name: "View Editions" })
-    .click();
-  await expect(page.locator("article .edition-price")).toHaveCount(2);
-  await expect(page.locator("article")).toContainText("$0.43");
+  await expect(
+    tile(page, "Furret, DAA 1, Darkness Ablaze, Normal")
+  ).toContainText("Stale");
+  card = await details(page, "Furret, DAA 1, Darkness Ablaze, Normal");
+  await expect(card).toContainText("Stale: the price is over 48 hours old");
+  await expect(card).toContainText("$0.25");
+  await expect(card).toContainText("$0.43");
 
   // Invalid cached decimals never render as a number.
   apply([{ op: "quote", edition: ids.normal, amount: "1e3" }]);
   await search(page);
-  await expect(results).toContainText(
+  card = await details(page, "Furret, DAA 1, Darkness Ablaze, Normal");
+  await expect(card).toContainText(
     "Price unavailable: the cached price failed validation"
   );
-  await expect(results).not.toContainText("1000");
+  await expect(card).not.toContainText("1000");
 
   // A PostgreSQL quarantine hides the quote before anything reaches the store.
   apply([
@@ -198,10 +222,11 @@ test("card information shows each Edition's own price with age, stale and finish
     },
   ]);
   await search(page);
-  await expect(results).toContainText(
+  card = await details(page, "Furret, DAA 1, Darkness Ablaze, Normal");
+  await expect(card).toContainText(
     "Price unavailable: market matching is under review"
   );
-  await expect(results).not.toContainText("$0.25");
+  await expect(card).not.toContainText("$0.25");
 });
 
 test("Deck rows and Collection tiles price their exact Edition, including after More cards and a scroll", async ({

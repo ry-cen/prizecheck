@@ -179,6 +179,8 @@ app.include_router(missing_cards_router)
 app.include_router(moves_router)
 from .collection import router as collection_router  # noqa: E402
 app.include_router(collection_router)
+from .catalog_browse import router as catalog_browse_router  # noqa: E402
+app.include_router(catalog_browse_router)
 
 from .decks import router as decks_router  # noqa: E402
 app.include_router(decks_router)

@@ -43,9 +43,10 @@ type Props = Omit<
 // height and cuts its text with an ellipsis instead of wrapping. Those heights include each line's top padding
 // (box-border): with no Preflight a page's own reset can't be relied on (#166 removed Collection's).
 // A selected tile's focus ring sits outside its selection ring. The ring itself is base.css's.
-const ROOT =
+// ROOT, ART and LINE are exported for EditionTile (#173), which shares the button, the art frame and the Names line.
+export const ROOT =
   "group block box-border m-0 min-h-0 cursor-pointer rounded-card border-0 bg-transparent p-0 text-left [font:inherit] text-text aria-pressed:focus-visible:outline-offset-[calc(var(--tile-ring-gap)+var(--tile-ring-width)+var(--focus-offset))]";
-const ART =
+export const ART =
   "block w-full aspect-(--tile-aspect) overflow-hidden rounded-card bg-[linear-gradient(135deg,var(--color-art-start),var(--color-art-end))] shadow-[0_var(--space-1)_var(--space-3)_var(--color-shadow)]";
 const ART_SELECTED =
   "group-aria-pressed:shadow-[0_0_0_var(--tile-ring-gap)_var(--color-bg),0_0_0_calc(var(--tile-ring-gap)+var(--tile-ring-width))_var(--color-accent)]";
@@ -56,7 +57,7 @@ const ART_STATE: Record<CopyState, string> = {
     "outline-2 -outline-offset-2 outline-dashed outline-accent-outline",
   missing: "opacity-40",
 };
-const LINE = "block truncate";
+export const LINE = "block truncate";
 const BADGE =
   "pointer-events-none absolute top-1 flex size-6 items-center justify-center rounded-round border-2 border-solid border-bg shadow-[0_1px_var(--space-1)_var(--color-shadow-strong)]";
 

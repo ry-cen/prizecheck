@@ -11,7 +11,7 @@ test("collector searches a promoted generation and chooses an exact Edition", as
     [
       "-c",
       `from test_catalog_search import promote
-promote({**{f'card-{i}': f'Pikachu {i:02d}' for i in range(1, 33)}, 'card-99': 'Énergie'})`,
+promote({**{f'card-{i}': f'Pikachu {i:02d}' for i in range(1, 66)}, 'card-99': 'Énergie'})`,
     ],
     { env: { ...process.env, PYTHONPATH: "api:api/tests" } }
   );
@@ -49,46 +49,63 @@ promote({**{f'card-{i}': f'Pikachu {i:02d}' for i in range(1, 33)}, 'card-99': '
     await page.getByLabel("Six-digit code").fill(JSON.parse(lines.at(-1)!).otp);
     await page.getByRole("button", { name: "Sign in" }).click();
     await page.getByRole("button", { name: "Catalog", exact: true }).click();
-    await page.getByLabel("English name").fill("Pik");
-    await page.getByRole("button", { name: "Search", exact: true }).click();
-    await expect(page.locator(".catalog-results > li")).toHaveCount(30);
+    // Catalog is an Edition gallery (#173): one smart search box, tiles of Card Editions, more tiles load as you scroll past 60.
+    const search = page.getByRole("searchbox", { name: "Search the catalog" });
+    const results = page.getByRole("region", { name: "Catalog results" });
+    const tiles = results.getByRole("listitem");
+    await search.fill("Pik");
+    await expect(results).toContainText("Showing 60 of 66 cards");
+    await expect(tiles).toHaveCount(60);
     await expect(
-      page.getByRole("img", { name: "Pikachu 01 card art" })
+      results.getByRole("button", {
+        name: /^Pikachu 01, fixture 1, Fixture Set, Normal/,
+      })
     ).toBeVisible();
-    await page.getByRole("button", { name: "Next page" }).click();
-    await expect(page.locator(".catalog-results > li")).toHaveCount(2);
-    await page.getByLabel("English name").fill("Pikachu 01");
-    await page.getByRole("button", { name: "Search", exact: true }).click();
-    await expect(page.locator(".catalog-results > li")).toHaveCount(1);
-    await page.getByRole("button", { name: "View Editions" }).click();
+    // The gallery loads its next page as its end comes near (#173).
+    await tiles.last().scrollIntoViewIfNeeded();
+    await expect(tiles).toHaveCount(66);
+    // Pikachu 01 has two Editions, so two tiles; either opens the Printing's details.
+    await search.fill("Pikachu 01");
+    await expect(tiles).toHaveCount(2);
+    await results
+      .getByRole("button", {
+        name: /^Pikachu 01, fixture 1, Fixture Set, Reverse Holo/,
+      })
+      .click();
+    const details = page.getByRole("dialog", { name: "Pikachu 01" });
     await expect(
-      page.getByRole("img", { name: "Artwork unavailable for Pikachu 01" })
+      details.getByRole("img", { name: "Artwork unavailable for Pikachu 01" })
     ).toBeVisible();
     await expect(
-      page.getByText("Artwork belongs to the Printing")
+      details.getByText("Artwork belongs to the Printing")
     ).toBeVisible();
-    await page.getByRole("button", { name: "finish: normal" }).click();
-    await expect(page.getByRole("status")).toContainText(
-      "Selected Edition: finish: normal"
-    );
-    await page.getByRole("button", { name: "Back to results" }).click();
-    await page.getByLabel("English name").fill("Pikachu 02");
-    await page.getByRole("button", { name: "Search", exact: true }).click();
+    // Each Card Edition is listed by its Variant.
+    await expect(details.getByRole("listitem")).toHaveText([
+      /^Normal · TCGdex Edition/,
+      /^Reverse Holo · TCGdex Edition/,
+    ]);
+    await details.getByRole("button", { name: "Close card details" }).click();
+    await search.fill("Pikachu 02");
+    await expect(tiles).toHaveCount(1);
+    await expect(tiles).toContainText("Artwork unavailable");
+    await tiles.getByRole("button").click();
     await expect(
-      page.getByRole("img", { name: "Artwork unavailable for Pikachu 02" })
+      page
+        .getByRole("dialog", { name: "Pikachu 02" })
+        .getByRole("img", { name: "Artwork unavailable for Pikachu 02" })
     ).toBeVisible();
-    await page.getByLabel("English name").fill("NoSuchCard");
-    await page.getByRole("button", { name: "Search", exact: true }).click();
-    await expect(page.getByText("No matching Printings.")).toBeVisible();
-    await page.getByLabel("English name").fill("Pik");
-    await page.getByRole("button", { name: "Search", exact: true }).click();
-    await expect(page.locator(".catalog-results > li")).toHaveCount(30);
+    await page.keyboard.press("Escape");
+    await search.fill("NoSuchCard");
+    await expect(results).toContainText("No cards match this search.");
+    await search.fill("Pik");
+    await expect(tiles).toHaveCount(60);
     await pool.query("UPDATE catalog_state SET revision=revision+1");
-    await page.getByRole("button", { name: "Next page" }).click();
-    await expect(page.getByRole("status")).toContainText(
+    await tiles.last().scrollIntoViewIfNeeded();
+    await expect(page.getByRole("main").getByRole("status")).toContainText(
       "Results refreshed from page one"
     );
-    await expect(page.locator(".catalog-results > li")).toHaveCount(30);
+    // Page one again, and the next page as the end is still near.
+    await expect(tiles).toHaveCount(66);
   } finally {
     await pool.end();
   }
