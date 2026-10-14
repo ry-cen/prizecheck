@@ -73,7 +73,9 @@ test("protected destination restores the rendered view after sign-in, reload, an
   await page.goto(`${origin}/locations?next=%2Fdecks`);
   await expect(page).toHaveURL(/\/collection(\?|$)/);
   await page.getByLabel("Email", { exact: true }).fill("owner@example.test");
-  await page.getByRole("button", { name: "Send code", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Email me a code", exact: true })
+    .click();
   await page.getByLabel("Six-digit code").fill("123456");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(page).toHaveURL(`${origin}/decks`);
@@ -215,7 +217,9 @@ test("direct Collection deep link is preserved when signing in without an explic
   await sessionFixture(page, false);
   await page.goto(`${origin}/collection`);
   await page.getByLabel("Email", { exact: true }).fill("owner@example.test");
-  await page.getByRole("button", { name: "Send code", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Email me a code", exact: true })
+    .click();
   await page.getByLabel("Six-digit code").fill("123456");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(page).toHaveURL(`${origin}/collection`);
