@@ -4,11 +4,12 @@ import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { expectPageChecks } from "./support/page-check";
+import { expectTouchTarget } from "./support/touch-target";
 import { listCards } from "./support/deck-list";
 import { startAsNewOwner } from "./support/owner";
 
 // The deck builder's Target Format (#178): header row 2's "Standard ▾ · ✓ Legal" control changes the Deck's Target
-// Format through its Deck List command, the result opens the results dialog, and a card-level issue highlights its
+// Format through its Deck List command from a kit menu of radio items (owner decision 2026-10-14), the result opens the results dialog, and a card-level issue highlights its
 // lines. The cards come through the real catalog import with real TCGdex-shaped records, so the real rules files judge
 // them on today's date: Bulbasaur, four Rare Candy, four Switch and 51 Basic Grass Energy are legal in Standard and
 // Expanded until the next rotation, and four-ofs break Gym Leader Challenge's one-copy rule.
@@ -157,9 +158,32 @@ async function deckRead(page: Page, deckId: string) {
 
 const control = (page: Page) =>
   page.getByRole("group", { name: "Target Format and result" });
-const select = (page: Page) =>
-  control(page).getByRole("combobox", { name: "Target Format" });
-const resultButton = (page: Page) => control(page).getByRole("button");
+/** The Target Format menu button, named for the Format it shows ("Target Format: Standard"). */
+const formatButton = (page: Page) =>
+  control(page).getByRole("button", { name: /^Target Format: / });
+const formatMenu = (page: Page) =>
+  page.getByRole("menu", { name: /^Target Format: / });
+const resultButton = (page: Page) =>
+  control(page).getByRole("button", { name: /result$/ });
+
+/** Opens the Target Format menu and chooses `format` ("Gym Leader Challenge"). */
+async function chooseFormat(page: Page, format: string) {
+  await formatButton(page).click();
+  await formatMenu(page)
+    .getByRole("menuitemradio", { name: format, exact: true })
+    .click();
+  await expect(formatMenu(page)).toHaveCount(0);
+}
+
+/** The open menu lies inside the viewport, so no item is off the page's edge. */
+async function expectMenuInView(page: Page) {
+  const box = (await formatMenu(page).boundingBox())!;
+  const viewport = page.viewportSize()!;
+  expect(box.x).toBeGreaterThanOrEqual(0);
+  expect(box.y).toBeGreaterThanOrEqual(0);
+  expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
+  expect(box.y + box.height).toBeLessThanOrEqual(viewport.height);
+}
 
 test.describe("on a desktop", () => {
   test.use({ viewport: { width: 1280, height: 800 } });
@@ -174,7 +198,10 @@ test.describe("on a desktop", () => {
     await page.goto(`${ORIGIN}/decks/${built.deckId}`);
 
     // A new Deck targets Standard, where this list is legal.
-    await expect(select(page)).toHaveValue("standard");
+    await expect(formatButton(page)).toHaveAccessibleName(
+      "Target Format: Standard"
+    );
+    await expect(formatButton(page)).toHaveText(/^Standard\s*▾$/);
     await expect(resultButton(page)).toHaveText(/^✓\s*Legal/);
     await expect(resultButton(page)).toHaveAccessibleName(
       /Legal\. Show the Standard result$/
@@ -204,8 +231,36 @@ test.describe("on a desktop", () => {
     await expect(standard).toBeHidden();
     await expect(resultButton(page)).toBeFocused();
 
-    // ▾ changes the Target Format; the header shows Gym Leader Challenge's result.
-    await select(page).selectOption("glc");
+    // ▾ opens the menu: the three Formats as radio items, Standard checked and focused.
+    await formatButton(page).click();
+    await expect(formatButton(page)).toHaveAttribute("aria-expanded", "true");
+    const items = formatMenu(page).getByRole("menuitemradio");
+    await expect(items).toHaveText([
+      "Standard",
+      "Expanded",
+      "Gym Leader Challenge",
+    ]);
+    await expect(items.nth(0)).toHaveAttribute("aria-checked", "true");
+    await expect(items.nth(0)).toBeFocused();
+    await expectMenuInView(page);
+    await expectPageChecks(page, "deck builder, Target Format menu open");
+    // Escape closes it and returns focus to the button, changing nothing.
+    await page.keyboard.press("Escape");
+    await expect(formatMenu(page)).toHaveCount(0);
+    await expect(formatButton(page)).toBeFocused();
+
+    // From the keyboard: ArrowDown opens on the checked item, ArrowDown and Enter choose Gym Leader Challenge, and
+    // the header shows its result.
+    await page.keyboard.press("ArrowDown");
+    await expect(items.nth(0)).toBeFocused();
+    await page.keyboard.press("End");
+    await expect(items.nth(2)).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(formatMenu(page)).toHaveCount(0);
+    await expect(formatButton(page)).toBeFocused();
+    await expect(formatButton(page)).toHaveAccessibleName(
+      "Target Format: Gym Leader Challenge"
+    );
     await expect(resultButton(page)).toHaveText(/^✕\s*Not legal/);
     await expect(resultButton(page)).toHaveAccessibleName(
       /Not legal, 2 issues\. Show the Gym Leader Challenge result$/
@@ -249,9 +304,16 @@ test.describe("on a desktop", () => {
     await glc.getByRole("button", { name: "Close result" }).click();
     await expect(glc).toBeHidden();
 
-    // The choice is the Deck's: a reload keeps it.
+    // The choice is the Deck's: a reload keeps it, and the menu checks it.
     await page.reload();
-    await expect(select(page)).toHaveValue("glc");
+    await expect(formatButton(page)).toHaveAccessibleName(
+      "Target Format: Gym Leader Challenge"
+    );
+    await formatButton(page).click();
+    await expect(
+      formatMenu(page).getByRole("menuitemradio", { checked: true })
+    ).toHaveText("Gym Leader Challenge");
+    await page.keyboard.press("Escape");
 
     // Nothing blocks editing: the Deck List can go over 60, and the control still answers.
     const revision = (await deckRead(page, built.deckId)).deck_list.revision;
@@ -267,7 +329,7 @@ test.describe("on a desktop", () => {
     await expect(page.getByRole("region", { name: "Deck List" })).toContainText(
       "65/60"
     );
-    await select(page).selectOption("standard");
+    await chooseFormat(page, "Standard");
     await expect(resultButton(page)).toHaveText(/^✕\s*Not legal/);
     await resultButton(page).click();
     await expect(
@@ -285,7 +347,9 @@ test.describe("on a desktop", () => {
     const built = await buildDeck(page);
     await stubPrices(page, built.deckId);
     await page.goto(`${ORIGIN}/decks/${built.deckId}`);
-    await expect(select(page)).toHaveValue("standard");
+    await expect(formatButton(page)).toHaveAccessibleName(
+      "Target Format: Standard"
+    );
 
     // Another tab edits the Deck List, so this page's revision is stale.
     const pool = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -294,18 +358,22 @@ test.describe("on a desktop", () => {
     } finally {
       await pool.end();
     }
-    await select(page).selectOption("expanded");
+    await chooseFormat(page, "Expanded");
     await expect(
       page.getByRole("status").filter({ hasText: "changed" })
     ).toContainText(
       "This Deck changed somewhere else, so its Target Format wasn't changed."
     );
-    await expect(select(page)).toHaveValue("standard");
+    await expect(formatButton(page)).toHaveAccessibleName(
+      "Target Format: Standard"
+    );
     expect((await deckRead(page, built.deckId)).target_format).toBe("standard");
 
     // After the re-read, the same choice goes through.
-    await select(page).selectOption("expanded");
-    await expect(select(page)).toHaveValue("expanded");
+    await chooseFormat(page, "Expanded");
+    await expect(formatButton(page)).toHaveAccessibleName(
+      "Target Format: Expanded"
+    );
     await expect
       .poll(async () => (await deckRead(page, built.deckId)).target_format)
       .toBe("expanded");
@@ -324,7 +392,16 @@ test.describe("on a phone", () => {
     await stubPrices(page, built.deckId);
     await page.goto(`${ORIGIN}/decks/${built.deckId}`);
     await page.getByRole("tab", { name: /^Deck / }).tap();
-    await select(page).selectOption("glc");
+    // The menu opens below the button, inside the screen, with 44 px items.
+    await formatButton(page).tap();
+    await expectMenuInView(page);
+    for (const item of await formatMenu(page).getByRole("menuitemradio").all())
+      await expectTouchTarget(item, ["height"]);
+    await expectPageChecks(page, "phone deck builder, Target Format menu open");
+    await formatMenu(page)
+      .getByRole("menuitemradio", { name: "Gym Leader Challenge" })
+      .tap();
+    await expect(formatMenu(page)).toHaveCount(0);
     await expect(resultButton(page)).toHaveText(/^✕\s*Not legal/);
     await expectPageChecks(page, "phone deck builder, Target Format");
 
