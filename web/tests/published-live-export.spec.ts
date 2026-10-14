@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { Pool } from "pg";
+import { exemptFromPublishGate } from "./support/publish-gate";
 import { listCards, raiseLine } from "./support/deck-list";
 
 // Ticket 13: a Published Deck's Pokémon TCG Live export, read by an anonymous visitor (second browser context, no
@@ -81,6 +82,7 @@ async function publication(
   method: "POST" | "PUT" | "DELETE",
   deckId: string
 ) {
+  if (method !== "DELETE") exemptFromPublishGate(deckId); // a small Deck List, not legal in any Format
   const response = await page.request.fetch(
     `${ORIGIN}/api/decks/${deckId}/publication`,
     {

@@ -142,6 +142,34 @@ test("Revoke sends revocation after an uncertain republish rather than replaying
                 ownership: [],
                 surplus: [],
                 competition: [],
+                target_format: "standard",
+                format_checks: {
+                  deck_id: deck.id,
+                  deck_list_revision: 1,
+                  attribute_revision: 1,
+                  catalog_revision: 1,
+                  results: [
+                    {
+                      format: "standard",
+                      status: "not_legal",
+                      issues: [
+                        {
+                          code: "deck_size",
+                          reason:
+                            "a Standard deck has exactly 60 cards; this one has 0",
+                          kind: "deck",
+                          effect: "not_legal",
+                          lines: [],
+                        },
+                      ],
+                      rules_version: "1 (2026-10-11)",
+                      evaluated_on: "2026-10-11",
+                      notes: [],
+                      computed_at: "2026-10-11T00:00:00Z",
+                    },
+                  ],
+                  disclaimer: "Advisory format checks.",
+                },
               },
     });
   });

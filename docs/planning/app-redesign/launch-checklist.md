@@ -25,6 +25,7 @@ The redesign is a launch gate ([spec](spec.md), "Rollout"): PrizeCheck opens to 
 - [ ] Opening a Deck on Decks shows it in the deck builder at `/decks/<Deck id>`: the count, the Deck List cost and the cost to complete, and every copy's state in Spread, Stacked and List, grouped by evolution line, Trainer Type and Energy. Pressing the Decks tab returns to the index. Until #181, the old Holdings, Publish and export panels sit under "Holdings, publishing and exports" at the foot of the builder. Every Deck List line in `GET /api/decks/{id}` and in the Deck List command responses carries its card's name, set, collector number, Variant Descriptor, image, card kind, Trainer Type, evolves from and Card Identity, and a Pokémon line also its evolution root and stage, so a deck that skips a stage (Charmander and Charizard ex with no Charmeleon) still forms one evolution line. After migrating to `043_evolution_roots.sql`, run `scripts/derive_card_attributes.py` once (`docs/operations/release.md`); until then a deck that skips a stage shows its Pokémon apart (#176).
 - [ ] Catalog is an Edition gallery: one tile per Card Edition, one search box (a printed set code and number such as `PAL 185`, a TCGdex set ID and number such as `sv02 185`, or the start of a name) and one filter row, with no sidebar. Pressing a tile opens the Printing's details and today's report forms until the card popup (#174) replaces them. The gallery loads more cards as you scroll, so My metadata reports moves from the foot of the page to a button beside the page title. A new signed-in route, `GET /api/catalog/editions`, lists Card Editions with their card type, Format Standing in all three Formats and the caller's copies (with `deck_id`, also the copies in that Deck and free elsewhere), 60 to a page; `GET /api/catalog/sets` lists the catalog's sets. Tiles read the printed set code and number ("PAL 185 · Reverse Holo"), from a reviewed table of 136 sets (`api/app/set_codes.tsv`, its sources in its header); a set with no confirmed code shows its TCGdex set ID. Collection's tiles still show the set's name. The gallery lists the newest set first, each set in collector number order; migration `044_catalog_set_release.sql` stores each set's release date at the next catalog import, and until then sets the format rules files don't date come last (`docs/operations/release.md`). `GET /api/catalog/search` stays for its other callers (#173).
 - [ ] **Gather N** in the deck builder's header opens the Pick List as a dialog, one row per card, with a source picker on each row and a warning when a source is another Deck that would be left short. Confirm picked and Confirm all each move the copies as one Move with one Undo toast. `POST /api/decks/{id}/pick-list/confirm` now writes one Inventory Undo record per confirmation, however many sources it names, and returns its `undo_id` and `source_count`; the five-source limit (`TOO_MANY_PICK_SOURCES`) is gone, so a Gather no longer pushes Collection's earlier Undo records out. The copy sheet's Gather opens the dialog on that card (#179).
+- [ ] Every Deck has one Target Format (Standard, Expanded or Gym Leader Challenge), Standard by default; migrating to `045_deck_list_target_format.sql` makes every existing Deck Standard. The deck builder's second header line holds the "Standard ▾ · ✓ Legal" control: ▾ changes the Target Format, and the result opens a dialog with the "as of" date, the deck and card issues, the rules version and the disclaimer. A card-level issue outlines its lines with a "!". The Deck read, every Deck List command and the format-checks read answer the Target Format's result only (`?format=` still names another), and `PUT /api/decks/{id}/deck-list/target-format` changes it. Publishing and republishing now need a legal result in the Target Format and otherwise answer `409 TARGET_FORMAT_NOT_LEGAL` with the result; snapshots store their Target Format, and snapshots published before read as Standard. Every saved format result is recomputed once on its Deck's next read, because the code that evaluates changed (#178).
 
 ## Walkthroughs
 
@@ -195,6 +196,23 @@ On a phone (iOS Safari or Android Chrome):
 
 - [ ] 8. On the Deck tab, tap Gather N. The dialog fills the screen; the checkboxes, pickers and buttons are easy to hit with a thumb, and nothing scrolls sideways. Confirm all, then tap Undo in the toast above the tab bar.
 
+### Deck builder: Target Format (#178)
+
+On a desktop (a window at least 1280 px wide):
+
+- [ ] 1. Open a Deck you built before this update. Under the count and the cost, the second line starts with "Standard ▾ · " and the result: "✓ Legal", "✕ Not legal" or "? Unknown".
+- [ ] 2. Press the result. A dialog titled "Standard result" shows the result as of today, the deck issues and the card issues with plain reasons (each card issue names its cards), the rules version and the advisory disclaimer. Escape closes it and puts focus back on the result.
+- [ ] 3. Open the result again and pick a date a few months ahead in As of: a note says the date is in the future and later rule changes are unknown. Close the dialog: the header still shows today's result.
+- [ ] 4. Choose Gym Leader Challenge with ▾. The result changes (a deck with four copies of a card turns "✕ Not legal"), and those cards' copies get an outline and a "!". Reload: Gym Leader Challenge is still chosen.
+- [ ] 5. Choose Standard again. If the deck is not legal in Standard, open "Holdings, publishing and exports" and try Publish: it says publishing needs a legal result in the Target Format, and nothing is published.
+- [ ] 6. With a legal Deck, Publish works, and the public page's address answers as before.
+- [ ] 7. Add cards until the Deck List passes 60 (from "Holdings, publishing and exports"): nothing stops you, the count reads over 60, and the result says the deck has more than 60 cards.
+
+On a phone (iOS Safari or Android Chrome):
+
+- [ ] 8. Open a Deck and tap the Deck tab. Tap ▾: the phone's own picker lists Standard, Expanded and Gym Leader Challenge. Pick one: the result follows, both parts are easy to hit with a thumb, and nothing scrolls sideways.
+- [ ] 9. Tap the result: it opens as a sheet along the bottom with the same contents; close it with ✕.
+
 ## Manual checks that automation does not cover
 
 - [ ] Real touch on iOS Safari and Android Chrome for the tab bar, the More sheet and the ☰ drawer (the browser tests only emulate touch), including the home indicator area under the tab bar.
@@ -209,6 +227,7 @@ On a phone (iOS Safari or Android Chrome):
 - [ ] Real touch and Safari on Collection: Manage locations' handle drag with a finger on iOS Safari and Android Chrome, and the sidebar's tile drag and the + on hover in Safari and Firefox on desktop (#166).
 - [ ] Screen reader on the deck builder: each copy is read with its card, Edition, copy number and state (and the Location of a copy owned elsewhere), a Stacked pile with its counts, Spread / Stacked / List as a radio group, and on a phone Library and Deck as tabs with the Deck count (#176).
 - [ ] Screen reader on Catalog: the search box is read with its hint, each chip with whether it is pressed, the set chip as opening a dialog, and each tile with its card, set and number, Variant, how many you own and, under a format chip, "legality unknown" for a "?" card (#173).
+- [ ] Screen reader on the Target Format control: the picker is read as "Target Format" with the chosen Format, the result as a button with its status and issue count, a change announces the new result once, and a highlighted copy is described as having a format issue (#178).
 
 ## Sources
 

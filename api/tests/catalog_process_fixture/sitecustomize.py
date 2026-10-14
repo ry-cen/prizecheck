@@ -22,3 +22,6 @@ if os.environ.get('CATALOG_PROCESS_FIXTURE_DIR'):
 
 import price_fixture
 price_fixture.install()
+
+import publish_gate_fixture
+publish_gate_fixture.install_on_import()

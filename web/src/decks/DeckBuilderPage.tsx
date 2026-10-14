@@ -7,7 +7,12 @@ import {
   useState,
 } from "react";
 import { ChevronLeft } from "lucide-react";
-import { DeckError, getDeck, type DeckDetail } from "../decks_generated";
+import {
+  DeckError,
+  getDeck,
+  setTargetFormat,
+  type DeckDetail,
+} from "../decks_generated";
 import { PageHeader } from "../shell/PageHeader";
 import { Button } from "../ui/Button";
 import { Icon } from "../ui/Icon";
@@ -18,7 +23,10 @@ import { DeckCostLine } from "./DeckCostLine";
 import { DeckListBody, type OpenSheet } from "./DeckListViews";
 import { deckListModel, type DeckView } from "./deckListModel";
 import { GatherDialog } from "./GatherDialog";
+import { FormatResultsDialog } from "./FormatResultsDialog";
 import { LegacyDeckTools } from "./LegacyDeckTools";
+import { flaggedLines, resultFor, type TargetFormat } from "./targetFormat";
+import { TargetFormatControl } from "./TargetFormatControl";
 import { useDeckCost } from "./useDeckCost";
 import { useGatherToast } from "./useGatherToast";
 
@@ -51,9 +59,11 @@ const VIEWS = [
  *
  * Row 1's Gather N opens the Pick List dialog (#179), as does the copy sheet's Gather on that card.
  *
- * Seams for later tickets: header row 1 takes Buy missing (#181) after Gather N; row 2
- * takes the Target Format control (#178) before the view switch; the page header takes Export, Publish and
- * Delete (#181), which also retires the old panels at the foot of the page.
+ * Header row 2 holds the Target Format control (#178): ▾ changes the Deck's Target Format through its Deck List
+ * command, and the result opens the results dialog. A card-level issue in that result highlights its lines.
+ *
+ * Seams for later tickets: header row 1 takes Buy missing (#181) after Gather N; the page header takes Export,
+ * Publish and Delete (#181), which also retires the old panels at the foot of the page.
  */
 export function DeckBuilderPage({ deckId, onAllDecks }: Props) {
   const phone = useMediaQuery(MOBILE_QUERY);
@@ -73,6 +83,15 @@ export function DeckBuilderPage({ deckId, onAllDecks }: Props) {
   const [gather, setGather] = useState<{ edition: string | null } | null>(null);
   const opener = useRef<HTMLElement | null>(null);
   const gatherOpener = useRef<HTMLElement | null>(null);
+  const [resultsOpen, setResultsOpen] = useState(false);
+  // The Target Format a change in flight asks for, and the last failed attempt, whose key a retry reuses.
+  const [changing, setChanging] = useState<TargetFormat | null>(null);
+  const failedChange = useRef<{
+    target: TargetFormat;
+    revision: number;
+    key: string;
+  } | null>(null);
+  const resultButton = useRef<HTMLButtonElement | null>(null);
   const reads = useRef(0);
 
   async function read() {
@@ -100,6 +119,61 @@ export function DeckBuilderPage({ deckId, onAllDecks }: Props) {
     }
   }
 
+  /** Change the Target Format through its Deck List command (revision-checked, idempotent), one at a time. */
+  async function changeTarget(target: TargetFormat) {
+    if (load.kind !== "ready" || changing) return;
+    const current = load.detail;
+    if (target === current.target_format) return;
+    const revision = current.deck_list.revision;
+    const retry = failedChange.current;
+    const key =
+      retry && retry.target === target && retry.revision === revision
+        ? retry.key
+        : crypto.randomUUID();
+    failedChange.current = null;
+    setChanging(target);
+    setNotice("");
+    reads.current++; // A Deck read already in flight must not overwrite the command's answer.
+    try {
+      const result = await setTargetFormat(deckId, {
+        target_format: target,
+        revision,
+        idempotency_key: key,
+      });
+      setLoad((previous) =>
+        previous.kind === "ready"
+          ? {
+              kind: "ready",
+              detail: {
+                ...previous.detail,
+                deck_list: result.deck_list,
+                target_format: result.target_format,
+                format_checks:
+                  result.format_checks ?? previous.detail.format_checks,
+              },
+            }
+          : previous
+      );
+    } catch (cause) {
+      if (cause instanceof DeckError && cause.status === 409) {
+        // Re-read first: a successful read clears the notice.
+        await read();
+        setNotice(
+          "This Deck changed somewhere else, so its Target Format wasn't changed. It's up to date now: try again."
+        );
+      } else if (cause instanceof DeckError && cause.status === 404) {
+        setLoad({ kind: "missing" });
+      } else {
+        failedChange.current = { target, revision, key };
+        setNotice(
+          "The Target Format couldn't be changed. Check your connection and try again."
+        );
+      }
+    } finally {
+      setChanging(null);
+    }
+  }
+
   // A Deck opened from the index starts at the top; the shell keeps the scroll position within one page.
   useLayoutEffect(() => {
     window.scrollTo(0, 0);
@@ -118,6 +192,10 @@ export function DeckBuilderPage({ deckId, onAllDecks }: Props) {
     [detail]
   );
   const gathered = useGatherToast(detail?.deck.name ?? "", () => void read());
+  const targetResult = detail
+    ? resultFor(detail.format_checks, detail.target_format)
+    : null;
+  const flagged = useMemo(() => flaggedLines(targetResult), [targetResult]);
   const open: OpenSheet = (line, ordinal, element) => {
     opener.current = element;
     setSheet({ editionId: line.line.edition_id, ordinal });
@@ -207,8 +285,16 @@ export function DeckBuilderPage({ deckId, onAllDecks }: Props) {
           </Button>
         </div>
       </div>
-      {/* Row 2: the Target Format control (#178) goes before the view switch. */}
+      {/* Row 2: the Target Format control (#178), then the view switch. */}
       <div className="flex flex-wrap items-center gap-2">
+        <TargetFormatControl
+          value={changing ?? detail.target_format}
+          result={changing ? null : targetResult}
+          busy={changing !== null}
+          onChange={(target) => void changeTarget(target)}
+          onOpenResult={() => setResultsOpen(true)}
+          resultRef={resultButton}
+        />
         <div className="ml-auto">
           <Segmented
             mode="choice"
@@ -219,7 +305,12 @@ export function DeckBuilderPage({ deckId, onAllDecks }: Props) {
           />
         </div>
       </div>
-      <DeckListBody view={view} groups={model.groups} onOpen={open} />
+      <DeckListBody
+        view={view}
+        groups={model.groups}
+        onOpen={open}
+        flagged={flagged}
+      />
       {view !== "list" && model.groups.length > 0 && (
         <p className="m-0 border-t border-border pt-2 text-caption text-text-subtle">
           Solid: in this Deck · Dashed ↻: owned elsewhere · Faded $: not owned
@@ -235,6 +326,7 @@ export function DeckBuilderPage({ deckId, onAllDecks }: Props) {
       <h2 id={`${idBase}-library`} className="m-0 text-heading font-semibold">
         Library
       </h2>
+      {/* #177: the library's format chip starts on detail.target_format (#178). */}
       <p className="m-0 text-body text-text-muted">
         Adding cards from your Collection and the catalog comes in the next
         update.
@@ -322,6 +414,18 @@ export function DeckBuilderPage({ deckId, onAllDecks }: Props) {
         }}
         onChanged={() => void read()}
       />
+      {targetResult && (
+        <FormatResultsDialog
+          open={resultsOpen}
+          onClose={() => setResultsOpen(false)}
+          returnFocus={resultButton}
+          deckId={deckId}
+          targetFormat={detail.target_format}
+          today={targetResult}
+          disclaimer={detail.format_checks.disclaimer}
+          lines={model.lines}
+        />
+      )}
     </main>
   );
 }

@@ -37,7 +37,7 @@ from test_catalog import reset_catalog
 from test_catalog_metadata import Records
 from test_catalog_reconciliation import run
 from test_catalog_references import migrate
-from test_deck_format_checks import DELTA_POKEMON, deck_with, format_checks
+from test_deck_format_checks import DELTA_POKEMON, deck_with, every_format
 from test_expanded_format_checks import NET_REPRINT, SCOOP_UP_NET
 from test_reprint_groups import CANDY_ME, CANDY_SV
 
@@ -87,7 +87,7 @@ def evaluator_says(source_id, as_of=AS_OF.isoformat()):
     owner, deck = deck_with([(source_id, 1)])
     edition = edition_of(source_id)
     found = {}
-    for result in format_checks(owner, deck, f"?as_of={as_of}")["results"]:
+    for result in every_format(owner, deck, as_of):
         issues = [{"code": issue["code"], "reason": issue["reason"], "effect": issue["effect"]}
                   for issue in result["issues"] if issue["kind"] == "card" and edition in issue["lines"]
                   and issue["reason"] != "Basic Pokémon status unknown"]

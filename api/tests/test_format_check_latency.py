@@ -5,10 +5,11 @@ owner signed in with an emailed code. Every time is measured outside the gateway
 connection, as a browser asks. Each path is sampled ``SAMPLES`` times after ``WARMUP`` unmeasured requests:
 
 - cold: ``GET /api/decks/{id}/format-checks`` with no saved result. The test deletes the Deck's saved results before
-  each request, outside the measured time, so every request reads the Deck List and evaluates all three formats.
+  each request, outside the measured time, so every request reads the Deck List and evaluates its Target Format
+  (Standard; before app redesign #178 the read evaluated all three formats).
 - warm: the same request while the saved results match, so it reuses them.
-- command: ``PATCH /api/decks/{id}/deck-list/lines/{edition}``, which evaluates and saves all three formats inside its
-  transaction and returns them (Deck Lists 17).
+- command: ``PATCH /api/decks/{id}/deck-list/lines/{edition}``, which evaluates and saves the Target Format's result
+  inside its transaction and returns it (Deck Lists 17, app redesign #178).
 
 The cards come through a real catalog import, so their attributes and Reprint Groups come from the real derivation
 rules, and every format reads the real rules file. Each Trainer identity has three printings with equal text, so the
@@ -215,7 +216,8 @@ def measure(client, user, deck, edition, samples, statuses):
     def cold():
         forget()
         response, elapsed = timed(lambda: client.get(path))
-        assert {result["format"]: result["status"] for result in response.json()["results"]} == statuses
+        assert {result["format"]: result["status"] for result in response.json()["results"]} == {
+            "standard": statuses["standard"]}
         return response, elapsed
 
     for _ in range(WARMUP):
@@ -236,7 +238,7 @@ def measure(client, user, deck, edition, samples, statuses):
         response, elapsed = timed(lambda: client.patch(f"/api/decks/{deck}/deck-list/lines/{edition}", json=body))
         checks = response.json()["format_checks"]
         revision = response.json()["deck_list"]["revision"]
-        assert checks["deck_list_revision"] == revision and len(checks["results"]) == 3
+        assert checks["deck_list_revision"] == revision and len(checks["results"]) == 1
         command_ms.append(elapsed)
     command_ms = command_ms[WARMUP:]
     return {"cold": summary(cold_ms), "warm": summary(warm_ms), "command": summary(command_ms)}

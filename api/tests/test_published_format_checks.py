@@ -95,9 +95,13 @@ def matches_private(token, deck, query="?as_of=2026-10-11"):  # Every format, un
     """The public results for ``token`` equal the private route's for ``deck``, line references mapped; returns the
     public Standard result."""
     public = body_of(public_get(path_of(token, 1, query)))["results"]
-    private = call("GET", f"/api/decks/{deck}/format-checks{query}", USER)
-    assert private.status_code == 200, private.text
-    assert timeless(public) == public_lines(private.json()["results"])
+    # The private read answers the Deck's Target Format unless ``format`` names one (app redesign #178): ask for each.
+    private = []
+    for name in format_evaluator.FORMATS:
+        response = call("GET", f"/api/decks/{deck}/format-checks{query}&format={name}", USER)
+        assert response.status_code == 200, response.text
+        private.extend(response.json()["results"])
+    assert timeless(public) == public_lines(private)
     [result] = [result for result in public if result["format"] == "standard"]
     return result
 
