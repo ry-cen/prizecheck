@@ -18,6 +18,8 @@ import { Button } from "../ui/Button";
 import { Icon } from "../ui/Icon";
 import { Segmented, segmentId } from "../ui/Segmented";
 import { MOBILE_QUERY, useMediaQuery } from "../workspace/media";
+import { CompetitionNotice, SurplusGroup } from "./Surplus";
+import { usePutAway } from "./usePutAway";
 import { CopySheet } from "./CopySheet";
 import { DeckCostLine } from "./DeckCostLine";
 import { DeckListBody, type OpenSheet } from "./DeckListViews";
@@ -187,6 +189,13 @@ export function DeckBuilderPage({ deckId, onAllDecks }: Props) {
     detail?.owner_revision ?? null,
     () => void read()
   );
+  // Put away for the surplus group (#180): its dialog and Undo toast outlive the phone's Deck and Library tabs.
+  const putAway = usePutAway({
+    deckId,
+    deckName: detail?.deck.name ?? "",
+    surplus: detail?.surplus,
+    onChanged: () => void read(),
+  });
   const model = useMemo(
     () => (detail ? deckListModel(detail) : null),
     [detail]
@@ -262,6 +271,7 @@ export function DeckBuilderPage({ deckId, onAllDecks }: Props) {
       aria-labelledby={phone ? deckTab : `${idBase}-deck-list`}
       className="flex min-w-0 flex-col gap-4"
     >
+      <CompetitionNotice warnings={detail.competition} lines={model.lines} />
       <h2 id={`${idBase}-deck-list`} className="sr-only">
         Deck List
       </h2>
@@ -316,6 +326,12 @@ export function DeckBuilderPage({ deckId, onAllDecks }: Props) {
           Solid: in this Deck · Dashed ↻: owned elsewhere · Faded $: not owned
         </p>
       )}
+      <SurplusGroup
+        rows={detail.surplus}
+        view={view}
+        onPutAway={putAway.open}
+      />
+      {putAway.dialog}
     </section>
   );
   const library = (

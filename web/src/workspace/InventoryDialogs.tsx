@@ -48,6 +48,9 @@ const indent = (level: number): React.CSSProperties => ({
 });
 
 type MoveProps = {
+  /** The action's name in the heading and on the confirm button: "Move" (the default), or "Put away" for the deck
+   * builder's surplus (#180). */
+  verb?: string;
   index: LocationIndex;
   /** The sidebar's open folders; the explorer starts with the same ones open. */
   initialExpanded: ReadonlySet<string>;
@@ -79,6 +82,7 @@ function leavesOf(index: LocationIndex): TreeNode[] {
  * already at the destination. Escape, the close button, Cancel and the scrim close it, except while the
  * Move runs. */
 export function MoveDialog({
+  verb = "Move",
   index,
   initialExpanded,
   groups,
@@ -179,7 +183,7 @@ export function MoveDialog({
         onClose={() => {
           if (!busy) onCancel();
         }}
-        title={`Move ${plural(copies, "copy", "copies")}`}
+        title={`${verb} ${plural(copies, "copy", "copies")}`}
       >
         <div className="flex flex-col gap-3">
           <input
@@ -254,8 +258,8 @@ export function MoveDialog({
               }}
             >
               {canConfirm && preview
-                ? `Move ${plural(preview.moving, "copy", "copies")}`
-                : "Move"}
+                ? `${verb} ${plural(preview.moving, "copy", "copies")}`
+                : verb}
             </Button>
           </div>
         </div>
