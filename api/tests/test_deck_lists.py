@@ -75,6 +75,7 @@ def test_add_change_and_remove_lines_return_the_deck_list_with_in_deck_counts():
     assert added.status_code == 200, added.text
     body = added.json()
     assert body.pop('format_checks')['deck_list_revision'] == 2  # format results: test_deck_format_results.py
+    assert body.pop('target_format') == 'standard'  # the Target Format: test_target_format.py
     assert {**body, 'deck_list': core(body['deck_list'])} == {'deck_id': deck, 'deck_list': {'revision': 2, 'lines': [
         {'edition_id': edition, 'quantity': '4', 'in_deck': '0'}]}}
     # Copies the line already covers leave the Deck List and its revision alone (moves extending a list are in
@@ -318,6 +319,12 @@ def states(body):
             for line in body['ownership']}
 
 
+def surplus(body):
+    """Surplus rows cut to their Edition and quantity. Each row also carries the Holding version and display data (app
+    redesign #180), which test_deck_surplus.py covers."""
+    return [{'edition_id': row['edition_id'], 'quantity': row['quantity']} for row in body['surplus']]
+
+
 def places(body, edition):
     line = next(line for line in body['ownership'] if line['edition_id'] == edition)
     return [(entry['location_id'], entry['name'], entry['kind'], entry['quantity']) for entry in line['locations']]
@@ -397,20 +404,20 @@ def test_surplus_shows_held_copies_beyond_the_deck_list_after_cuts():
     # Cutting a quantity below the held copies leaves the rest as surplus; the line itself is complete.
     assert change_line(owner, deck, edition, '2', deck_revision(owner, deck)).status_code == 200
     body = detail(owner, deck)
-    assert body['surplus'] == [{'edition_id': edition, 'quantity': '3'}]
+    assert surplus(body) == [{'edition_id': edition, 'quantity': '3'}]
     assert states(body)[edition] == ('2', '2', '0', '0')
     # Removing a line makes every held copy of it surplus.
     assert remove_line(owner, deck, cut, deck_revision(owner, deck)).status_code == 200
     body = detail(owner, deck)
-    assert body['surplus'] == sorted([{'edition_id': edition, 'quantity': '3'}, {'edition_id': cut, 'quantity': '2'}],
-                                     key=lambda row: row['edition_id'])
+    assert surplus(body) == sorted([{'edition_id': edition, 'quantity': '3'}, {'edition_id': cut, 'quantity': '2'}],
+                                   key=lambda row: row['edition_id'])
     assert set(states(body)) == {edition}
     # Cuts never move cards.
     assert call('GET', f'/api/decks/{deck}/contents', owner).json() == contents
     # Raising the line again absorbs its surplus.
     assert change_line(owner, deck, edition, '9', deck_revision(owner, deck)).status_code == 200
     body = detail(owner, deck)
-    assert body['surplus'] == [{'edition_id': cut, 'quantity': '2'}]
+    assert surplus(body) == [{'edition_id': cut, 'quantity': '2'}]
     assert states(body)[edition] == ('9', '5', '0', '4')
 
 
@@ -425,7 +432,7 @@ def test_ownership_matches_the_exact_card_edition():
     body = detail(owner, deck)
     # Unspecified Variant copies of the same Printing do not fill a line naming another variant.
     assert states(body) == {specific: ('2', '0', '0', '2')}
-    assert body['surplus'] == [{'edition_id': unspecified, 'quantity': '2'}]
+    assert surplus(body) == [{'edition_id': unspecified, 'quantity': '2'}]
 
 
 def test_decks_short_of_the_same_spare_copies_are_warned_and_nothing_is_reserved():

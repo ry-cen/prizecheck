@@ -32,6 +32,7 @@ const origin = process.env.TEST_ORIGIN || "http://localhost:5173";
 const admin = new Pool({ connectionString: process.env.DATABASE_URL });
 const database = "tcg_published_cost_" + randomUUID().replaceAll("-", "");
 const directory = mkdtempSync(join(tmpdir(), "tcg-published-cost-"));
+const gateExempt = join(directory, "gate");
 const projection = join(directory, "projection");
 const launchLog = join(directory, "launches.log");
 const currentJson = join(projection, "current.json");
@@ -277,6 +278,11 @@ async function publication(
   method: "POST" | "PUT" | "DELETE",
   deck: string
 ): Promise<{ token: string; version: number; revoked: boolean }> {
+  // These Decks are small and not legal in any Format; the CI-only fixture lets them past the publish gate.
+  if (method !== "DELETE") {
+    mkdirSync(join(gateExempt, "publish-gate-exempt"), { recursive: true });
+    writeFileSync(join(gateExempt, "publish-gate-exempt", deck), "");
+  }
   const response = await fetch(`${G0}/api/decks/${deck}/publication`, {
     method,
     headers: {
@@ -444,6 +450,7 @@ beforeAll(async () => {
     PRICE_RUNNER_LOCK_DIR: join(directory, "locks"),
     PRICE_FIXTURE_LAUNCHER: "record",
     PRICE_FIXTURE_LAUNCH_LOG: launchLog,
+    PUBLISH_GATE_EXEMPT_DIR: gateExempt,
   };
   mkdirSync(projection, { recursive: true });
   mkdirSync(join(directory, "locks"), { recursive: true, mode: 0o700 });

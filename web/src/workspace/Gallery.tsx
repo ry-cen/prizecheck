@@ -32,7 +32,7 @@ import type { MarqueeEvent, TileGesture } from "./useSelection";
 
 // The tile's price line: the existing EditionPrice component's compact form, on one line cut with an ellipsis,
 // in the tile's colours. EditionPrice.css reaches only the old pages (#166), so these are the only rules here.
-const TILE_PRICE =
+export const TILE_PRICE =
   "block [&_.edition-price]:block [&_.edition-price]:truncate [&_.edition-price]:text-text-subtle [&_.edition-price_strong]:font-semibold [&_.edition-price_strong]:text-text [&_.edition-price-line]:flex [&_.edition-price-line]:min-w-0 [&_.edition-price-line]:whitespace-nowrap [&_.edition-price-amount]:min-w-0 [&_.edition-price-amount]:truncate [&_.edition-price-label]:shrink-0 [&_.edition-price-label]:whitespace-pre [&_.edition-price-sr]:sr-only";
 
 type Props = {

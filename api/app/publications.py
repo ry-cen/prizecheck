@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, ValidationEr
 
 from .main import connect, verified_user
 from .construction_checks import DISCLAIMER, IdentityCount, evaluate_checks
+from .deck_format_checks import TargetFormat, held_format_checks
 from .public_projection import public_projection_store, ProjectionUnavailable
 
 router = APIRouter(tags=['publication'])
@@ -63,6 +64,9 @@ class PublicSnapshot(PublicModel):
     title: str
     published_at: datetime
     version: int
+    # The Deck List's Target Format, frozen with the snapshot (app redesign #178, ADR 0011). A snapshot published before
+    # it has none and reads as Standard, the Target Format every Deck had then; its stored object is never rewritten.
+    target_format: TargetFormat = 'standard'
     total: str
     identities: list[PublicIdentity]
     checks: PublicChecks
@@ -136,7 +140,28 @@ def owned_publication(conn, owner, token):
         fail(404, 'PUBLICATION_NOT_FOUND')
 
 
-def snapshot(conn, owner, deck_id, title, version):
+def require_legal(conn, owner, deck_id) -> str:
+    """The publish gate (ADR 0011): recompute the Deck List's result in its Target Format for today and refuse anything
+    but ``legal`` with ``409 TARGET_FORMAT_NOT_LEGAL``, carrying the result. Returns the Target Format.
+
+    The caller holds the inventory-owner row, so no Deck List command can change the list before the snapshot reads it
+    in the same transaction. The catalog row (as the snapshot does) and the attribute-state row are share-locked here, so no catalog
+    activation or attribute change lands between the check and the snapshot. The result is saved with the Deck like a command's; a refusal rolls it back with
+    the rest of the transaction and writes nothing."""
+    conn.execute('SELECT 1 FROM catalog_state WHERE singleton FOR SHARE')
+    conn.execute('SELECT 1 FROM catalog_attribute_state WHERE singleton FOR SHARE')
+    header = conn.execute('SELECT revision,target_format FROM deck_list WHERE owner_id=%s AND deck_id=%s',
+                          (owner, deck_id)).fetchone()
+    if header is None:
+        raise RuntimeError('Deck has no Deck List')  # Migration 029 gives every Deck a Deck List.
+    checks = held_format_checks(conn, owner, deck_id, header['revision'], header['target_format'], reuse=False)
+    if checks.results[0].status != 'legal':
+        raise HTTPException(409, {'code': 'TARGET_FORMAT_NOT_LEGAL', 'target_format': header['target_format'],
+                                  'format_checks': checks.model_dump(mode='json')})
+    return header['target_format']
+
+
+def snapshot(conn, owner, deck_id, title, version, target_format):
     """Freeze the Deck's Deck List lines (ADR 0009), never its Holdings: a line may name a card the owner does not own,
     and nothing about ownership or Locations is read. Rows group by Card Identity, which drives copy counts and checks;
     each row keeps its own Card Printing name."""
@@ -173,7 +198,7 @@ def snapshot(conn, owner, deck_id, title, version):
         amount = group['amount']
         identities.append(PublicIdentity(name=group['name'],quantity=str(amount),editions=group['editions']))
         checks.append(PublicIdentityCheck(name=group['name'],quantity=str(amount),status=status))
-    return PublicSnapshot(title=title,published_at=datetime.now(timezone.utc),version=version,total=str(evaluated.total),identities=identities,
+    return PublicSnapshot(title=title,published_at=datetime.now(timezone.utc),version=version,target_format=target_format,total=str(evaluated.total),identities=identities,
         checks=PublicChecks(size_status=evaluated.size_status,shortage=str(evaluated.shortage),excess=str(evaluated.excess),identities=checks))
 
 
@@ -275,6 +300,9 @@ def mutate(deck_id, command, owner, action, token=None):
                     fail(409, 'DECK_ALREADY_PUBLISHED')
                 if action != 'publish' and not active:
                     fail(409, 'DECK_NOT_PUBLISHED')
+                # Publishing and republishing need a legal result in the Target Format (ADR 0011), checked before any
+                # row is written. A replayed command answered above, so a stored publish replays whatever the Deck is now.
+                target_format = require_legal(conn, owner, deck_id) if action in ('publish', 'republish') else None
                 if action == 'publish':
                     target, version = secrets.token_urlsafe(24), 1
                     conn.execute('INSERT INTO deck_publication(token,owner_id,deck_id,title) VALUES (%s,%s,%s,%s)', (target, owner, deck_id, command.title))
@@ -291,7 +319,7 @@ def mutate(deck_id, command, owner, action, token=None):
                     projection = None
                     conn.execute('UPDATE deck_publication SET revoked=true WHERE token=%s', (target,))
                 else:
-                    public = snapshot(conn, owner, deck_id, command.title, version)
+                    public = snapshot(conn, owner, deck_id, command.title, version, target_format)
                     projection = {'visibility': active['visibility'] if active else 'unlisted', 'snapshot': public.model_dump(mode='json')}
                     conn.execute('UPDATE deck_publication SET version=%s,title=%s WHERE token=%s', (version, command.title, target))
                 result = PublicationResult(token=target, version=version, revoked=action == 'revoke').model_dump(mode='json')

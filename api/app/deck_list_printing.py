@@ -21,8 +21,8 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from . import prices
-from .deck_list_display import with_line_display
-from .decks import DeckListCommandResult, advance_deck_list, check_revision, keep_response, line_exists, require_deck
+from .decks import (DeckListCommandResult, advance_deck_list, check_revision, keep_response, line_exists, replayed,
+                    require_deck)
 from .holdings import parse_quantity
 from .location_tree import error, owner_and_rows, replay
 from .main import connect, verified_user
@@ -89,7 +89,7 @@ def add_deck_list_printing(deck_id: UUID, command: AddDeckListPrinting, user_id:
     with connect() as conn, conn.transaction():
         _, previous = replay(conn, user_id, command.idempotency_key, payload)
         if previous:
-            return with_line_display(conn, previous)
+            return replayed(conn, previous)
         candidates = available_editions(conn, command.printing_id)
     # 2. Stored quotes only, with no connection or lock held. None means the cache could not be read in time.
     views = prices.stored_edition_quotes(candidates) if candidates else {}
@@ -98,7 +98,7 @@ def add_deck_list_printing(deck_id: UUID, command: AddDeckListPrinting, user_id:
         _, rows = owner_and_rows(conn, user_id)
         digest, previous = replay(conn, user_id, command.idempotency_key, payload)
         if previous:
-            return with_line_display(conn, previous)
+            return replayed(conn, previous)
         require_deck(rows, deck_id)
         check_revision(conn, user_id, deck_id, command.revision)
         # Re-read under the lock: an Edition withdrawn since step 1 is never chosen; one added since is unpriced.

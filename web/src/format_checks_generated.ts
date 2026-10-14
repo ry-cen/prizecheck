@@ -9,8 +9,8 @@ export type PublishedDeckFormatChecks = { version: number; digest: string; resul
 export class FormatCheckError extends Error {
   constructor(public status: number, public code: string) { super(code); }
 }
-// Advisory Standard, Expanded and Gym Leader Challenge results for a Deck's Deck List. ``format`` ('standard', 'expanded'
-// or 'glc') narrows the response to one format; ``asOf`` (YYYY-MM-DD) checks as of that date instead of today.
+// The advisory result of a Deck's Deck List in its Target Format (app redesign #178). ``format`` ('standard', 'expanded'
+// or 'glc') asks for another Format instead; ``asOf`` (YYYY-MM-DD) checks as of that date instead of today.
 export async function getDeckFormatChecks(deckId: string, options: { format?: string; asOf?: string } = {},
                                           signal?: AbortSignal): Promise<DeckFormatChecks> {
   const query = new URLSearchParams();

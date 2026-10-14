@@ -65,6 +65,12 @@ def standard(owner, deck, as_of):
     return body["results"][0]
 
 
+def every_format(owner, deck, as_of="2026-10-11"):
+    """One result per Format, in FORMATS order. The read answers the Deck's Target Format (Standard unless the collector
+    chose another, app redesign #178) unless ``format`` names one, so each Format is asked for by name."""
+    return [format_checks(owner, deck, f"?format={name}&as_of={as_of}")["results"][0] for name in FORMATS]
+
+
 def issues(result):
     return {(issue["code"], issue["reason"], issue["kind"], issue["effect"], tuple(issue["lines"]))
             for issue in result["issues"]}
@@ -81,16 +87,18 @@ def test_a_legal_deck_is_standard_legal():
     body = format_checks(owner, deck, "?as_of=2026-10-11")
     assert body["deck_id"] == deck and body["deck_list_revision"] == 5
     assert isinstance(body["attribute_revision"], int) and body["disclaimer"].startswith("Advisory format checks")
-    assert [result["format"] for result in body["results"]] == list(FORMATS)
-    assert [{**result, "computed_at": None} for result in body["results"][:2]] == [
+    # The read answers the Target Format, which is Standard for a new Deck.
+    assert [result["format"] for result in body["results"]] == ["standard"]
+    results = every_format(owner, deck)
+    assert [result["format"] for result in results] == list(FORMATS)
+    assert [{**result, "computed_at": None} for result in results[:2]] == [
         {"format": name, "status": "legal", "issues": [], "rules_version": version, "evaluated_on": "2026-10-11",
          "notes": [], "computed_at": None} for name, version in (("standard", "1 (2026-10-11)"),
                                                                   ("expanded", "2 (2026-10-11)"))]
     # Four Rare Candy and four Switch break Gym Leader Challenge's one-copy rule.
-    assert (body["results"][2]["status"], {issue["code"] for issue in body["results"][2]["issues"]}) == (
-        "not_legal", {"copy_limit"})
-    # One format narrows the response; its saved result is reused.
-    assert format_checks(owner, deck, "?format=standard&as_of=2026-10-11") == {**body, "results": body["results"][:1]}
+    assert (results[2]["status"], {issue["code"] for issue in results[2]["issues"]}) == ("not_legal", {"copy_limit"})
+    # Naming the Target Format answers the same result, reused from the save.
+    assert format_checks(owner, deck, "?format=standard&as_of=2026-10-11") == body
 
 
 def test_a_deck_over_its_copy_and_ace_spec_limits_is_not_legal():
@@ -172,18 +180,15 @@ def test_a_deck_of_only_trainers_and_energy_is_not_legal_in_any_format():
     trainers = [("me01-125", 1), ("me01-130", 1)]
     owner, deck = deck_with([*trainers, ("sv02-278", 58)])
     every = lines("me01-125", "me01-130", "sv02-278")
-    body = format_checks(owner, deck, "?as_of=2026-10-11")
-    assert {result["format"]: (result["status"], issues(result)) for result in body["results"]} == {
+    assert {result["format"]: (result["status"], issues(result)) for result in every_format(owner, deck)} == {
         name: ("not_legal", {("no_basic_pokemon", f"{deck_name} deck has at least one Basic Pokémon; this one has none",
                               "deck", "not_legal", every)})
         for name, deck_name in (("standard", "a Standard"), ("expanded", "an Expanded"),
                                 ("glc", "a Gym Leader Challenge"))}
     # One Basic Pokémon makes the same deck legal in every format.
     owner, deck = deck_with([*trainers, ("me01-001", 1), ("sv02-278", 57)])
-    assert [result["status"] for result in format_checks(owner, deck, "?as_of=2026-10-11")["results"]] == [
-        "legal"] * 3
+    assert [result["status"] for result in every_format(owner, deck)] == ["legal"] * 3
     # A Pokémon whose Basic Pokémon status is unknown leaves the deck unknown, never legal.
     owner, deck = deck_with([*trainers, ("fixture-me01-903", 1), ("sv02-278", 57)])
     unknown = ("attribute_unknown", "Basic Pokémon status unknown", "card", "unknown", lines("fixture-me01-903"))
-    assert [(result["status"], issues(result)) for result in format_checks(owner, deck, "?as_of=2026-10-11")[
-        "results"]] == [("unknown", {unknown})] * 3
+    assert [(result["status"], issues(result)) for result in every_format(owner, deck)] == [("unknown", {unknown})] * 3

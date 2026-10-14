@@ -7,7 +7,7 @@ from test_card_attributes import ACE_SPEC_BW, ENERGY_BW, ENERGY_SV, EX_BW, card
 from test_catalog import reset_catalog
 from test_catalog_metadata import Records
 from test_catalog_reconciliation import run
-from test_deck_format_checks import deck_with, format_checks, issues, lines
+from test_deck_format_checks import deck_with, every_format, format_checks, issues, lines
 
 NET_TEXT = "Put 1 of your Pokémon that isn't a Pokémon V or a Pokémon-GX into your hand. (Discard all attached cards.)"
 # Banned in Expanded (Rebel Clash 165/192).
@@ -47,8 +47,7 @@ def test_black_and_white_cards_are_expanded_legal_without_a_regulation_mark():
     owner, deck = deck_with([("bw7-137", 1), ("bw6-124", 1), ("bw1-1", 1), ("bw1-105", 57)])
     result = checked(owner, deck)
     assert (result["status"], result["issues"], result["rules_version"]) == ("legal", [], "2 (2026-10-11)")
-    body = format_checks(owner, deck, "?as_of=2026-10-11")
-    statuses = {result["format"]: result["status"] for result in body["results"]}
+    statuses = {result["format"]: result["status"] for result in every_format(owner, deck)}
     assert (statuses["standard"], statuses["expanded"]) == ("not_legal", "legal")
     before = checked(owner, deck, "2026-04-09")
     assert (before["status"], [issue["code"] for issue in before["issues"]]) == ("unknown", ["before_rules_coverage"])

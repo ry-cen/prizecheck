@@ -54,6 +54,18 @@ def ok(response):
     return response
 
 
+def undo_records(owner):
+    return call('GET', '/api/moves/undo', owner).json()
+
+
+def confirmed(owner, response):
+    """A confirmation's result without its ``undo_id``, once that id is checked to name the owner's newest Undo
+    record."""
+    body = ok(response).json()
+    assert undo_records(owner)[0]['id'] == body['undo_id']
+    return {key: value for key, value in body.items() if key != 'undo_id'}
+
+
 def test_suggestions_take_loose_storage_from_the_fewest_locations_then_other_decks():
     owner, _, unsorted, _, edition, generation = fixture()
     few, owned, missing = (edition_like(edition, generation) for _ in range(3))
@@ -182,8 +194,9 @@ def test_confirming_one_row_moves_only_its_copies_and_leaves_the_deck_list_alone
     put_line(owner, deck, second, '2')
     body = pick_list(owner, deck)
     lines = detail(owner, deck)['deck_list']
-    response = ok(confirm(owner, deck, suggested(body, {edition}), body['deck_list_revision']))
-    assert response.json() == {'edition_count': 1, 'copy_count': '3', 'owner_revision': body['owner_revision'] + 1}
+    response = confirm(owner, deck, suggested(body, {edition}), body['deck_list_revision'])
+    assert confirmed(owner, response) == {'edition_count': 1, 'copy_count': '3', 'owner_revision': body['owner_revision'] + 1,
+                                          'source_count': 1}
     assert held(owner, deck) == {edition: '3'}
     assert held(owner, binder) == {edition: '1', second: '2'}
     after = pick_list(owner, deck)
@@ -205,8 +218,9 @@ def test_confirming_a_selection_moves_those_rows_from_several_sources_in_one_mov
     for card in (edition, second, third):
         put_line(owner, deck, card, '2' if card == edition else '1')
     body = pick_list(owner, deck)
-    response = ok(confirm(owner, deck, suggested(body, {edition, second}), body['deck_list_revision']))
-    assert response.json() == {'edition_count': 2, 'copy_count': '3', 'owner_revision': body['owner_revision'] + 1}
+    response = confirm(owner, deck, suggested(body, {edition, second}), body['deck_list_revision'])
+    assert confirmed(owner, response) == {'edition_count': 2, 'copy_count': '3', 'owner_revision': body['owner_revision'] + 1,
+                                          'source_count': 2}
     assert held(owner, deck) == {edition: '2', second: '1'}
     assert held(owner, binder) == {} and held(owner, box) == {} and held(owner, unsorted) == {third: '1'}
     assert set(rows(pick_list(owner, deck))) == {third}
@@ -227,8 +241,9 @@ def test_confirming_all_rows_moves_every_suggested_copy_at_once():
     body = pick_list(owner, deck)
     items = suggested(body)
     assert {(entry['source_id'], entry['quantity']) for entry in items} == {(binder, '2'), (other, '1'), (unsorted, '1')}
-    response = ok(confirm(owner, deck, items, body['deck_list_revision']))
-    assert response.json() == {'edition_count': 2, 'copy_count': '4', 'owner_revision': body['owner_revision'] + 1}
+    response = confirm(owner, deck, items, body['deck_list_revision'])
+    assert confirmed(owner, response) == {'edition_count': 2, 'copy_count': '4', 'owner_revision': body['owner_revision'] + 1,
+                                          'source_count': 3}
     after = pick_list(owner, deck)
     assert after['rows'] == [] and after['deck_list_revision'] == body['deck_list_revision']
     assert states(detail(owner, deck)) == {edition: ('3', '3', '0', '0'), second: ('1', '1', '0', '0')}
@@ -286,7 +301,6 @@ def test_stale_or_invalid_confirmations_change_nothing():
         ([item(binder, unlisted, 1, versions(owner, binder)[unlisted])], revision, 422, 'EDITION_NOT_ON_DECK_LIST'),
         ([item(deck, edition, 1, 1)], revision, 409, 'SAME_LOCATION'),
         ([item(other_leaf, edition, 1, versions(other, other_leaf)[edition])], revision, 404, 'LOCATION_NOT_FOUND'),
-        ([item(str(uuid4()), edition, 1, 1) for _ in range(6)], revision, 422, 'TOO_MANY_PICK_SOURCES'),
         ([item(binder, edition, 1, binder_version)] * 2, revision, 422, 'DUPLICATE_MOVE_ITEM'),
         ([item(binder, edition, 0, binder_version)], revision, 422, 'INVALID_QUANTITY'),
     ]
@@ -329,7 +343,7 @@ def test_a_confirmation_replays_by_its_idempotency_key():
     assert reused.status_code == 409 and code(reused) == 'IDEMPOTENCY_KEY_REUSED'
 
 
-def test_each_source_of_a_confirmation_is_undone_like_an_ordinary_move():
+def test_a_confirmation_writes_one_undo_record_that_returns_every_source_in_one_step():
     owner, _, unsorted, _, edition, _ = fixture()
     deck = create(owner).json()['location']['id']
     binder = leaf(owner, 'Binder')
@@ -337,24 +351,25 @@ def test_each_source_of_a_confirmation_is_undone_like_an_ordinary_move():
     ok(add(owner, unsorted, edition, '1'))
     put_line(owner, deck, edition, '3')
     body = pick_list(owner, deck)
-    ok(confirm(owner, deck, suggested(body), body['deck_list_revision']))
-    entries = call('GET', '/api/moves/undo', owner).json()
-    assert len(entries) == 2
-    assert {(entry['action'], entry['source_id'], entry['destination_id']) for entry in entries} == {
-        ('move', binder, deck), ('move', unsorted, deck)}
-    restored = {binder: {edition: '2'}, unsorted: {edition: '1'}}
-    newest = entries[0]
-    ok(call('POST', f"/api/moves/undo/{newest['id']}", owner, {'idempotency_key': str(uuid4())}))
-    remaining = binder if newest['source_id'] == unsorted else unsorted
-    assert held(owner, newest['source_id']) == restored[newest['source_id']] and held(owner, remaining) == {}
-    after = pick_list(owner, deck)
-    assert rows(after)[edition]['elsewhere'] == restored[newest['source_id']][edition]
-    ok(call('POST', f"/api/moves/undo/{entries[1]['id']}", owner, {'idempotency_key': str(uuid4())}))
-    assert held(owner, binder) == restored[binder] and held(owner, unsorted) == restored[unsorted]
-    assert held(owner, deck) == {}
+    result = ok(confirm(owner, deck, suggested(body), body['deck_list_revision'])).json()
+    entries = undo_records(owner)
+    # One multi-source record: it names no single source, counts both, and is the one the result names.
+    assert [(entry['id'], entry['action'], entry['source_id'], entry['destination_id'], entry['source_count'])
+            for entry in entries] == [(result['undo_id'], 'move', None, deck, 2)]
+    undone = ok(call('POST', f"/api/moves/undo/{result['undo_id']}", owner, {'idempotency_key': str(uuid4())})).json()
+    assert (undone['copy_count'], undone['source_count']) == ('3', 2)
+    assert held(owner, binder) == {edition: '2'} and held(owner, unsorted) == {edition: '1'} and held(owner, deck) == {}
+    assert undo_records(owner) == []
     # Taking copies back out of the Deck leaves its line.
     assert core(detail(owner, deck)['deck_list']) == {'revision': body['deck_list_revision'],
                                                       'lines': [{'edition_id': edition, 'quantity': '3', 'in_deck': '0'}]}
+    assert rows(pick_list(owner, deck))[edition]['elsewhere'] == '3'
+    # A confirmation from one source names it on its record, as a single-source Move does.
+    again = pick_list(owner, deck)
+    single = [item(binder, edition, 2, versions(owner, binder)[edition])]
+    result = ok(confirm(owner, deck, single, again['deck_list_revision'])).json()
+    assert [(entry['id'], entry['source_id'], entry['source_count']) for entry in undo_records(owner)] == [
+        (result['undo_id'], binder, 1)]
 
 
 def test_concurrent_confirmations_of_the_same_copies_move_them_once():
@@ -369,6 +384,7 @@ def test_concurrent_confirmations_of_the_same_copies_move_them_once():
     assert sorted(response.status_code for response in responses) == [200, 409]
     assert [code(response) for response in responses if response.status_code == 409] == ['STALE_HOLDING']
     assert held(owner, deck) == {edition: '2'} and held(owner, binder) == {edition: '2'}
+    assert len(undo_records(owner)) == 1
 
 
 def test_confirm_write_path_invariants_overflow_organization_sources_and_versions():
@@ -402,27 +418,40 @@ def test_confirm_write_path_invariants_overflow_organization_sources_and_version
     assert held(owner, unsorted) == {edition: '3'}
 
 
-def test_a_confirmation_names_at_most_five_sources_and_keeps_all_their_undo_records():
-    owner, _, _, _, edition, _ = fixture()
+def test_a_confirmation_from_more_than_five_sources_keeps_collections_earlier_undo_records():
+    owner, _, unsorted, _, edition, generation = fixture()
+    loose = edition_like(edition, generation)
     deck = create(owner).json()['location']['id']
     sources = [leaf(owner, f'Box {number}') for number in range(6)]
     for source in sources:
         ok(add(owner, source, edition, '1'))
     put_line(owner, deck, edition, '6')
-    before = pick_list(owner, deck)
-    revision = before['deck_list_revision']
-    items = [item(source, edition, 1, versions(owner, source)[edition]) for source in sources]
-    # A sixth source is refused and nothing is written.
-    response = confirm(owner, deck, items, revision)
-    assert (response.status_code, code(response)) == (422, 'TOO_MANY_PICK_SOURCES'), response.text
-    assert held(owner, deck) == {} and pick_list(owner, deck)['owner_revision'] == before['owner_revision']
-    assert call('GET', '/api/moves/undo', owner).json() == []
-    # Exactly five sources move, and all five undo records remain listed.
-    ok(confirm(owner, deck, items[:5], revision))
-    entries = call('GET', '/api/moves/undo', owner).json()
-    assert len(entries) == 5
-    assert {entry['source_id'] for entry in entries} == set(sources[:5])
-    assert {entry['destination_id'] for entry in entries} == {deck}
+    # Four earlier Moves in Collection, each with its own Undo record.
+    shelves = [leaf(owner, f'Shelf {number}') for number in range(4)]
+    ok(add(owner, unsorted, loose, '4'))
+    for shelf in shelves:
+        manifest = start(owner, unsorted)
+        assert stage(owner, manifest, [selected(loose, 1, versions(owner, unsorted)[loose])]).status_code == 200
+        ok(commit(owner, manifest, shelf))
+    earlier = undo_records(owner)
+    assert [entry['destination_id'] for entry in earlier] == shelves[::-1]
+    body = pick_list(owner, deck)
+    items = suggested(body)
+    assert sorted(entry['source_id'] for entry in items) == sorted(sources)
+    result = ok(confirm(owner, deck, items, body['deck_list_revision'])).json()
+    assert (result['copy_count'], result['source_count']) == ('6', 6)
+    assert held(owner, deck) == {edition: '6'}
+    # The Gather is one record on top; every earlier record is still listed, unchanged and in order.
+    entries = undo_records(owner)
+    assert [(entry['id'], entry['source_id'], entry['destination_id'], entry['source_count']) for entry in entries[:1]] == [
+        (result['undo_id'], None, deck, 6)]
+    assert entries[1:] == earlier
+    # One Undo returns all six copies, and Collection's newest Move can then still be undone.
+    ok(call('POST', f"/api/moves/undo/{result['undo_id']}", owner, {'idempotency_key': str(uuid4())}))
+    assert all(held(owner, source) == {edition: '1'} for source in sources) and held(owner, deck) == {}
+    assert undo_records(owner) == earlier
+    ok(call('POST', f"/api/moves/undo/{earlier[0]['id']}", owner, {'idempotency_key': str(uuid4())}))
+    assert held(owner, shelves[-1]) == {} and held(owner, unsorted) == {loose: '1'}
 
 
 def test_a_stale_holding_is_reported_for_another_deck_as_a_source():

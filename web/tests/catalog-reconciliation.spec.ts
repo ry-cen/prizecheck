@@ -6,6 +6,7 @@ import { chmodSync, readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { listHoldings } from "./support/deck-list";
+import { exemptFromPublishGate } from "./support/publish-gate";
 
 test("owner resolves source drift with evidence and a fresh action-bound email code", async ({
   page,
@@ -219,6 +220,7 @@ run(MetadataSource({'card-1': 'Correction Pikachu'}))`,
     });
     expect(deck.status()).toBe(201);
     const deckId = (await deck.json()).location.id;
+    exemptFromPublishGate(deckId); // a three-card Deck List, not legal in any Format
     const normalEdition = (
       await pool.query(
         "SELECT e.id,e.public_ref,p.public_ref AS printing_ref FROM catalog_edition e JOIN catalog_printing p ON p.id=e.printing_id WHERE p.source_id='card-1' AND e.descriptor->>'finish'='normal'"

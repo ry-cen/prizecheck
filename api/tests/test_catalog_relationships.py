@@ -16,7 +16,7 @@ from test_decks import create
 from test_holdings import add, call, client
 from test_missing_cards import OWNER, REPORTER, approve, issue_code, report
 from test_moves import commit, leaf, selected, stage, start
-from test_publications import list_cards
+from test_publications import list_cards, publish_gate_fixture
 
 
 @pytest.fixture(autouse=True)
@@ -114,6 +114,7 @@ def test_quote_and_target_metadata_imports_preserve_every_existing_relationship(
     binder_rows = {row["edition_id"]: row for row in call("GET", f"/api/holdings/{binder}", collector).json()["holdings"]}
     pending = start(collector, binder)
     assert stage(collector, pending, [selected(normal, 2, binder_rows[normal]["version"])]).status_code == 200
+    publish_gate_fixture.exempt(deck)  # a three-card Deck List: not legal, and this test is about catalog references
     publication = call("POST", f"/api/decks/{deck}/publication", collector, {"title": "Furret", "idempotency_key": str(uuid4())})
     assert publication.status_code == 200, publication.text
     public_path = f"/api/public/decks/{publication.json()['token']}"
