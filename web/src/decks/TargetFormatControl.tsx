@@ -1,5 +1,6 @@
 import type { RefObject } from "react";
 import type { FormatCheck } from "../format_checks_generated";
+import { Menu } from "../ui/Menu";
 import {
   formatLabel,
   issueCount,
@@ -31,15 +32,18 @@ const STATUS_TEXT: Record<FormatCheck["status"], string> = {
   unknown: "text-text-muted",
 };
 
-// No Preflight while style.css exists, so every box property a browser styles on a select or button is set here.
+// No Preflight while style.css exists, so every box property a browser styles on a button is set here.
 const PART =
   "box-border m-0 h-control cursor-pointer border-0 bg-transparent font-sans text-control font-medium phone:h-control-phone";
 
 /**
  * The deck header's "Standard ▾ · ✓ Legal" control (#178): one rounded group holding the Target Format as a
- * native select (the platform's own picker opens on a phone) and the result as a button that opens the results
- * dialog. Both parts are 30 px tall on desktop and 44 px on a phone. The result's status is said in words; its
- * mark and colour only repeat it.
+ * kit menu button (owner decision 2026-10-14: a styled menu, not the native select) and the result as a button
+ * that opens the results dialog. The menu lists the three Formats as menuitemradio items, the Deck's checked;
+ * it opens on the checked one, and arrow keys, Home, End, Enter and Escape work as in every kit Menu. While a
+ * change is in flight the menu still opens, but a choice is ignored until it settles. Both parts are 30 px tall
+ * on desktop and 44 px on a phone, and so are the menu's items. The result's status is said in words; its mark
+ * and colour only repeat it.
  */
 export function TargetFormatControl({
   value,
@@ -58,20 +62,26 @@ export function TargetFormatControl({
       aria-busy={busy || undefined}
       className="box-border inline-flex max-w-full items-center rounded-round border border-border-strong bg-surface-raised"
     >
-      <select
-        aria-label="Target Format"
-        value={value}
-        onChange={(event) => {
-          if (!busy) onChange(event.target.value as TargetFormat);
-        }}
-        className={`${PART} min-w-0 rounded-l-round pl-3 pr-1 text-text`}
-      >
-        {TARGET_FORMATS.map((format) => (
-          <option key={format.value} value={format.value}>
-            {format.label}
-          </option>
-        ))}
-      </select>
+      <Menu
+        label={`Target Format: ${label}`}
+        align="start"
+        triggerClassName={`${PART} inline-flex min-w-0 items-center gap-1 whitespace-nowrap rounded-l-round pl-3 pr-1 text-text hover:bg-surface-selected aria-expanded:bg-surface-selected`}
+        trigger={
+          <>
+            {label}
+            <span aria-hidden="true" className="text-text-muted">
+              ▾
+            </span>
+          </>
+        }
+        items={TARGET_FORMATS.map((format) => ({
+          label: format.label,
+          checked: format.value === value,
+          onSelect: () => {
+            if (!busy && format.value !== value) onChange(format.value);
+          },
+        }))}
+      />
       <span aria-hidden="true" className="px-0.5 text-text-subtle">
         ·
       </span>
