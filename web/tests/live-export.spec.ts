@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readFileSync, statSync, writeFileSync } from "node:fs";
 import { Pool } from "pg";
-import { openDeckTools } from "./support/deck-builder";
+import { openExport } from "./support/deck-builder";
 
 const ORIGIN = process.env.TEST_ORIGIN || "http://localhost:5173";
 const OWNER_EMAIL = process.env.OWNER_EMAIL || "owner@example.test";
@@ -95,14 +95,15 @@ async function makeDeck(
   return { id, name };
 }
 
+/** Opens the Deck from the Decks index, then its Live export (the deck builder's Export dialog, #181). */
 async function openDeck(page: Page, name: string) {
   await page.getByRole("button", { name: "Decks", exact: true }).click();
-  await page.getByRole("button", { name, exact: true }).click();
-  await openDeckTools(page);
-  await expect(
-    page.getByRole("region", { name: `Checks for ${name}` })
-  ).toBeVisible();
-  return page.getByRole("region", { name: "Pokémon TCG Live export" });
+  await page
+    .getByRole("navigation", { name: "Deck index" })
+    .getByRole("link", { name, exact: true })
+    .click();
+  await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
+  return openExport(page, "live");
 }
 
 /** Replace the clipboard: writeText records its argument and either waits for release() or rejects. */
@@ -323,7 +324,10 @@ test("an inventory change discards the export", async ({ page }) => {
     },
   });
   expect(added.status()).toBe(200);
-  await page.getByRole("button", { name: "Refresh checks" }).click();
+  // The next export names the newer revision: it is discarded, and the page reads the Deck again.
+  await live
+    .getByRole("button", { name: "Export to Live", exact: true })
+    .click();
   await expect(live.getByLabel("Live export text")).toHaveCount(0);
   await expect(live.getByRole("status")).toContainText(
     "Deck changed; export again"
@@ -344,7 +348,9 @@ test("an export that changed before it arrived is discarded", async ({
   const deck = await makeDeck(page, mixedQuantities(world));
   const live = await openDeck(page, deck.name);
   // Let the page finish loading, then the server inventory moves on while the page keeps its old revision.
-  await expect(page.getByText("Ultra Ball · Seed Set #196 · ×4")).toBeVisible();
+  await expect(
+    live.getByRole("button", { name: "Export to Live" })
+  ).toBeEnabled();
   let addedStatus = 0;
   await page.route("**/api/decks/*/exports/live", async (route) => {
     const added = await page.request.post(`${ORIGIN}/api/holdings`, {

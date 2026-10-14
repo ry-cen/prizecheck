@@ -29,8 +29,20 @@ class EditDeck(EditLocation):
     """Rename a Deck, move it to another parent, or both. The fields and rules are the Location edit's."""
 
 
+class DeckIndexEntry(TreeNode):
+    """One Deck on the Decks index (app redesign #181): its place in the Location tree plus what its row shows.
+
+    ``deck_list_total`` is the copies on its Deck List, ``in_deck`` how many of those this Deck holds (per line, the
+    lesser of the line and the Deck's Holding), and ``target_format`` its Deck List's Target Format. The result in that
+    Format and the cost to complete come from the Deck's own format-checks and cost reads, which the page asks for row
+    by row, so this read never evaluates a Deck or prices anything while it holds the owner lock."""
+    deck_list_total: str
+    in_deck: str
+    target_format: TargetFormat
+
+
 class DeckIndex(BaseModel):
-    decks: list[TreeNode]
+    decks: list[DeckIndexEntry]
     owner_revision: int
     next_cursor: str | None
 
@@ -214,8 +226,34 @@ def deck_index(cursor: str | None = None, user_id: str = Depends(verified_user))
           WHERE l.owner_id=%s AND a.depth<12)
           SELECT deck_id AS id,max(depth) AS depth FROM ancestors GROUP BY deck_id""",
           (user_id, [row['id'] for row in page[:30]],user_id)).fetchall()}
-        return DeckIndex(decks=[TreeNode(**row,depth=depths[row['id']]) for row in page[:30]], owner_revision=revision,
+        summaries = index_summaries(conn, user_id, [row['id'] for row in page[:30]])
+        return DeckIndex(decks=[DeckIndexEntry(**row,depth=depths[row['id']],**summaries[row['id']]) for row in page[:30]],
+                         owner_revision=revision,
                          next_cursor=deck_cursor_encode(user_id, revision, page[29]) if len(page)>30 else None)
+
+
+def index_summaries(conn, user_id: str, deck_ids: list[UUID]) -> dict[UUID, dict]:
+    """Each Deck's Deck List total, the copies of it the Deck holds, and its Target Format, for one index page.
+
+    The page's Deck List lines and Holdings are two range reads paired here, never a join (see
+    ``deck_ownership.read_ownership``)."""
+    if not deck_ids:
+        return {}
+    formats = {row['deck_id']: row['target_format'] for row in conn.execute(
+        'SELECT deck_id,target_format FROM deck_list WHERE owner_id=%s AND deck_id=ANY(%s)', (user_id, deck_ids))}
+    held = {(row['location_id'], row['edition_id']): row['quantity'] for row in conn.execute(
+        'SELECT location_id,edition_id,quantity FROM holding WHERE owner_id=%s AND location_id=ANY(%s)',
+        (user_id, deck_ids))}
+    totals = {deck_id: [0, 0] for deck_id in deck_ids}
+    for row in conn.execute('SELECT deck_id,edition_id,quantity FROM deck_list_line WHERE owner_id=%s AND deck_id=ANY(%s)',
+                            (user_id, deck_ids)):
+        total = totals[row['deck_id']]
+        total[0] += row['quantity']
+        total[1] += min(row['quantity'], held.get((row['deck_id'], row['edition_id']), 0))
+    # Migration 029 and its location trigger give every Deck a Deck List; a missing one reads as Standard and empty.
+    return {deck_id: {'deck_list_total': str(total), 'in_deck': str(in_deck),
+                      'target_format': formats.get(deck_id, 'standard')}
+            for deck_id, (total, in_deck) in totals.items()}
 
 
 # Basic checks read one quantity source: the Deck's Holdings (``checks``) or its Deck List (``deck_list_checks``).

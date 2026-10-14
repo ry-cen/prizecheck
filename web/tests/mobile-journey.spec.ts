@@ -4,8 +4,7 @@ import { readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { listHoldings } from "./support/deck-list";
-import { exemptNamedDeck } from "./support/publish-gate";
-import { openDeckTools } from "./support/deck-builder";
+import { exemptNamedDeck, showAsLegal } from "./support/publish-gate";
 
 test.use({
   viewport: { width: 390, height: 844 },
@@ -63,53 +62,63 @@ test("mobile collector can search, Add, Move, Undo, check and publish a physical
     const name = "Mobile private " + randomUUID().slice(0, 8);
     await page.getByLabel("Deck name").fill(name);
     await page.getByRole("button", { name: "Create Deck", exact: true }).tap();
-    await openDeckTools(page);
-    const holdings = page.getByRole("region", { name: `Cards in ${name}` });
-    const checks = page.getByRole("region", { name: `Checks for ${name}` });
-    await expect(checks).toContainText("0 cards · 60 cards short of 60");
+    // The deck builder plans the Deck List; its Holdings, with Move and Undo, live in Collection under the Deck's
+    // banner (#181). Cards reach the Deck through the gateway, as Collection's Add cards does.
+    await expect(page).toHaveURL(/\/decks\/[^/?#]+$/);
+    const deckId = page.url().split("/").at(-1)!;
+    const origin = process.env.TEST_ORIGIN || "http://localhost:5173";
+    const pikachu = (
+      await pool.query(
+        `SELECT e.id FROM catalog_edition e JOIN catalog_printing p ON p.id=e.printing_id
+         WHERE p.source_id='card-1' AND e.descriptor->>'finish'='normal'`
+      )
+    ).rows[0].id as string;
     async function add(quantity: string) {
-      await holdings
-        .getByRole("button", { name: "Add cards", exact: true })
-        .tap();
-      await holdings.getByLabel("Search English card name").fill("Pika");
-      await holdings.getByRole("button", { name: "Search", exact: true }).tap();
-      await holdings
-        .getByLabel("Card Edition")
-        .selectOption({ label: "Pikachu · Fixture Set #1 · finish: normal" });
-      await holdings.getByLabel("Quantity", { exact: true }).fill(quantity);
-      await holdings
-        .getByRole("button", { name: "Add to Location", exact: true })
-        .tap();
+      const added = await page.request.post(`${origin}/api/holdings`, {
+        headers: { origin },
+        data: {
+          location_id: deckId,
+          edition_id: pikachu,
+          quantity,
+          idempotency_key: randomUUID(),
+        },
+      });
+      expect(added.status()).toBe(200);
     }
     await add("3");
-    await expect(checks).toContainText("3 cards · 57 cards short of 60");
-    const move = holdings.getByRole("region", { name: "Move cards" });
-    await move.getByRole("button", { name: "Fan copies", exact: true }).tap();
-    await move
-      .getByRole("button", { name: "Select 2 Pikachu copies", exact: true })
-      .tap();
-    await move
-      .getByRole("button", { name: "Move selected", exact: true })
-      .tap();
+    await page.goto(`${origin}/collection?location=${deckId}`);
+    await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
+    await expect(page.getByRole("main")).toContainText("3 copies · 1 edition");
+    const tiles = page
+      .getByRole("region", { name: "Cards" })
+      .getByRole("button");
+    const strip = page.getByRole("region", { name: "Selection" });
+    await page.getByRole("button", { name: "Select", exact: true }).tap();
+    await tiles.nth(0).tap();
+    await tiles.nth(1).tap();
+    await expect(strip).toContainText("2 copies selected");
+    await strip.getByRole("button", { name: "Actions" }).tap();
+    await strip.getByRole("button", { name: "Move…" }).tap();
+    const move = page.getByRole("dialog", { name: "Move 2 copies" });
     // Destinations are labelled by full path, so exact "Unsorted" is the top-level leaf, never "Box / Unsorted".
-    await page
-      .getByRole("dialog", { name: "Choose Move destination" })
-      .getByRole("button", { name: "Unsorted", exact: true })
-      .tap();
-    await expect(checks).toContainText("1 cards · 59 cards short of 60");
-    // The undo list refreshes after the counts; tapping before it does can
-    // latch onto an earlier test's entry, which then becomes non-newest.
-    await expect(
-      move.getByText("Moved 2 copies across 1 Editions.")
-    ).toBeVisible();
-    await move.getByRole("button", { name: "Undo", exact: true }).first().tap();
-    await expect(checks).toContainText("3 cards · 57 cards short of 60");
+    await move.getByRole("button", { name: "Unsorted", exact: true }).tap();
+    await move.getByRole("button", { name: "Move 2 copies" }).tap();
+    await expect(page.getByRole("main")).toContainText("1 copy · 1 edition");
+    await page.getByRole("button", { name: "Undo", exact: true }).tap();
+    await expect(page.getByRole("main")).toContainText("3 copies · 1 edition");
     // Publishing freezes the Deck List; list the cards the Deck holds.
     await listHoldings(pool, name, 3);
     await exemptNamedDeck(pool, name); // not a legal Deck List in any Format
-    const publishing = page.getByRole("region", {
-      name: "Publish Deck",
-      exact: true,
+    // Publish waits for a legal result; the exempt Deck is shown to the page as legal (support/publish-gate.ts).
+    await showAsLegal(page, deckId);
+    await page
+      .getByRole("region", { name: "Deck banner" })
+      .getByRole("link", { name: "Open in the deck builder" })
+      .tap();
+    await expect(page).toHaveURL(`${origin}/decks/${deckId}`);
+    await page.getByRole("button", { name: "Publish", exact: true }).tap();
+    const publishing = page.getByRole("dialog", {
+      name: /^(Publish|Published Deck)$/,
     });
     await publishing.getByLabel("Public title").fill("Mobile public snapshot");
     await publishing
@@ -133,24 +142,26 @@ test("mobile collector can search, Add, Move, Undo, check and publish a physical
       ).status()
     ).toBe(401);
     await add("1");
-    await expect(checks).toContainText("4 cards · 56 cards short of 60");
     await listHoldings(pool, name, 4);
     await publicPage.reload();
     await expect(publicPage.getByRole("main")).toContainText("3 cards");
     await publishing
       .getByRole("button", { name: "Republish snapshot", exact: true })
       .tap();
-    await expect(publishing).toContainText("Snapshot version 2");
+    await expect(publishing).toContainText(
+      "Mobile public snapshot · Unlisted · version 2"
+    );
     await publicPage.reload();
     await expect(publicPage.getByRole("main")).toContainText(
       "4 cards · 56 cards short of 60"
     );
     await publishing
-      .getByRole("button", { name: "Revoke public link", exact: true })
+      .getByRole("button", { name: "Revoke: Mobile public snapshot" })
       .tap();
-    await expect(publishing.getByRole("status")).toContainText(
-      "revoked permanently"
-    );
+    await publishing
+      .getByRole("button", { name: "Revoke for good", exact: true })
+      .tap();
+    await expect(publishing).toContainText("revoked permanently");
     await publicPage.reload();
     await expect(
       publicPage.getByRole("heading", {

@@ -1,34 +1,29 @@
 import { test, expect, type Locator, type Page } from "@playwright/test";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { Pool } from "pg";
 
 /*
  * Existing pages keep their look while Tailwind is added (ticket #161, ADR 0012). Preflight is not
- * loaded, and style.css holds back base.css, so every computed style here matches the baseline that was
- * recorded on the tree before Tailwind (web/tests/support/legacy-look.json).
+ * loaded, and style.css holds back base.css, so the pages kept the look recorded before Tailwind. The
+ * recorded baseline is gone (see below); what remains are the stage-7 checks.
  *
- * Since the app shell (#162) the old Decks page and the workspace sit inside it unchanged. The baseline
- * keeps only their own elements; the old header, Main views and Sign out belong to the shell now, and the
- * shell's look is not part of this baseline. style.css reaches only inside .legacy, so an unstyled element
- * outside the old pages gets base.css's focus ring, and one inside them keeps the browser's.
- *
- * The checks read computed styles through roles and elements, never class names. Sizes that depend on
- * font metrics are left out, and so is the colour of the browser's own focus ring, so the baseline holds
- * on macOS and Linux. Each test writes what it read to its output folder as legacy-look.json. When a
- * page's own redesign ticket restyles it, that ticket re-records or deletes the page's entries.
+ * The checks read computed styles through roles and elements, never class names, so they hold on macOS and
+ * Linux. style.css reaches only inside .legacy, so an unstyled element outside the old pages gets base.css's
+ * focus ring, and one inside them keeps the browser's.
  *
  * Collection left the workspace CSS for the kit in #166, which deleted its two entries: its look is now the
  * kit's, checked by its own specs and the page check. Its tests keep the checks that hold until rollout stage
  * 7: a dark page down to <html>, <html> still at color-scheme normal, and base.css's focus ring.
+ *
+ * The Decks index left the old page for the kit in #181, which deleted the last two entries ("decks 1280" and
+ * "decks 375") along with the baseline file and its comparison. Its tests keep the same stage-7 checks as
+ * Collection's.
  */
 
 type Styles = Record<string, string>;
 type Look = Record<string, Styles>;
 
 const origin = process.env.TEST_ORIGIN || "http://localhost:5173";
-const baseline = JSON.parse(
-  readFileSync(new URL("./support/legacy-look.json", import.meta.url), "utf8")
-) as Record<string, Look>;
 
 /** --color-accent and --color-focus in tokens.css (#e6bd57). */
 const GOLD = "rgb(230, 189, 87)";
@@ -175,19 +170,9 @@ async function expectBaseRing(probe: Locator) {
   expect(ring["outline-offset"]).toBe("2px");
 }
 
-function recordAndCompare(
-  key: string,
-  look: Look,
-  outputPath: (name: string) => string
-) {
-  writeFileSync(
-    outputPath("legacy-look.json"),
-    `${JSON.stringify({ [key]: look }, null, 2)}\n`
-  );
-  expect(look).toEqual(baseline[key]);
-}
-
-async function decksLook(page: Page): Promise<Look> {
+/** The Decks index on the kit (#181): the dark shell, <html> still at color-scheme normal until stage 7, and
+ * base.css's focus ring everywhere, inside the page too, its Deck name field included. */
+async function decksLook(page: Page) {
   await signIn(page);
   await page.goto(`${origin}/decks`);
   await expect(
@@ -196,38 +181,22 @@ async function decksLook(page: Page): Promise<Look> {
   const outside = await addProbeLink(page, "body");
   const inside = await addProbeLink(page, "main");
   const input = page.getByRole("textbox", { name: "Deck name" });
-  const submit = page.getByRole("button", { name: "Create Deck" });
-  const look = await read({
-    html: page.locator("html"),
-    body: page.locator("body"),
-    main: page.getByRole("main"),
-    header: page.locator("main > header"),
-    "page heading": page.getByRole("heading", { level: 1, name: "Decks" }),
-    "section heading": page.getByRole("heading", {
-      level: 2,
-      name: "Physical Decks",
-    }),
-    intro: page.getByText("Decks contain the cards physically stored in them."),
-    form: page.locator("form", { has: input }),
-    label: page.locator("label", { has: input }),
-    input,
-    submit,
-  });
+  const look = await read({ html: page.locator("html"), input });
   look["input:focus"] = await focused(input);
-  look["submit:focus"] = await focused(submit);
   await expectBaseRing(outside);
-  expect((await focused(inside))["outline-style"]).toBe("auto");
+  await expectBaseRing(inside);
 
-  // The checks that fail first if base.css or Preflight reaches an old page.
+  // <html> keeps style.css's light :root until stage 7 (only a mounted Collection darkens it); the shell over it is dark.
   expect(look.html["color-scheme"]).toBe("normal");
-  expect(look.html["background-color"]).toBe("rgb(244, 245, 241)");
-  expect(look.body["margin-top"]).toBe("0px");
-  expect(look["page heading"]["font-size"]).toBe("32px");
-  expect(look.input["background-color"]).toBe("rgb(255, 255, 255)");
-  expect(look.submit["background-color"]).toBe("rgb(18, 92, 69)");
+  expect(
+    await page
+      .locator("#root > *")
+      .first()
+      .evaluate((element) => getComputedStyle(element).backgroundColor)
+  ).toBe("rgb(18, 17, 16)");
   expect(look["input:focus"]["outline-style"]).toBe("solid");
-  expect(look["input:focus"]["outline-color"]).toBe("rgb(232, 157, 34)");
-  return look;
+  expect(look["input:focus"]["outline-width"]).toBe("2px");
+  expect(look["input:focus"]["outline-color"]).toBe(GOLD);
 }
 
 async function workspaceLook(page: Page, phone: boolean): Promise<Look> {
@@ -271,12 +240,10 @@ async function workspaceLook(page: Page, phone: boolean): Promise<Look> {
 test.describe("at 1280×800", () => {
   test.use({ viewport: { width: 1280, height: 800 } });
 
-  test("the old Decks page keeps its look", async ({ page }, testInfo) => {
-    recordAndCompare(
-      "decks 1280",
-      await decksLook(page),
-      testInfo.outputPath.bind(testInfo)
-    );
+  test("the Decks index is on the dark shell, with base.css's focus ring", async ({
+    page,
+  }) => {
+    await decksLook(page);
   });
 
   test("Collection is dark down to the page, with base.css's focus ring", async ({
@@ -321,12 +288,10 @@ test.describe("at 1280×800", () => {
 test.describe("at 375×812", () => {
   test.use({ viewport: { width: 375, height: 812 } });
 
-  test("the old Decks page keeps its look", async ({ page }, testInfo) => {
-    recordAndCompare(
-      "decks 375",
-      await decksLook(page),
-      testInfo.outputPath.bind(testInfo)
-    );
+  test("the Decks index is on the dark shell, with base.css's focus ring", async ({
+    page,
+  }) => {
+    await decksLook(page);
   });
 
   test("Collection is dark down to the page, with base.css's focus ring", async ({

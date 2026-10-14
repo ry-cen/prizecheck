@@ -6,6 +6,7 @@ import {
   MASS_ENTRY_DOWNLOAD_NAME,
   getMassEntryExport,
   massEntryDownloadHref,
+  type MassEntryScope,
   type MassEntryView,
 } from "./mass_entry_generated";
 
@@ -35,6 +36,7 @@ export function MassEntryPanel({
   view,
   downloadHref,
   notice,
+  emptyMessage = "No cards",
 }: {
   checks: MassEntryChecks;
   busy: boolean;
@@ -42,6 +44,8 @@ export function MassEntryPanel({
   view: MassEntryResult | null;
   downloadHref?: string;
   notice: string;
+  /** What an empty export says ("No cards"; the deck builder's not-owned choice says there's nothing to buy). */
+  emptyMessage?: string;
 }) {
   const [confirming, setConfirming] = useState(false);
   // A new or discarded export never inherits an open confirmation.
@@ -141,7 +145,7 @@ export function MassEntryPanel({
         downloadHref={downloadHref}
         downloadName={MASS_ENTRY_DOWNLOAD_NAME}
         empty={empty}
-        emptyMessage="No cards"
+        emptyMessage={emptyMessage}
         warnings={warnings}
         disclaimer={disclaimer}
         status={notice}
@@ -156,21 +160,34 @@ export function DeckMassEntryExport({
   deckId,
   ownerRevision,
   checks,
-}: DeckExportProps) {
+  deckListRevision,
+  onStale,
+  scope = "not_owned",
+  emptyMessage,
+}: DeckExportProps & {
+  /** Which copies: the ones not owned (the default, Buy missing) or the whole Deck List (#181). */
+  scope?: MassEntryScope;
+  emptyMessage?: string;
+}) {
   const [view, setView] = useState<MassEntryView | null>(null);
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
-  const revision = useRef(ownerRevision);
+  const revision = useRef({ owner: ownerRevision, list: deckListRevision });
   const latest = useRef(0);
-  revision.current = ownerRevision;
+  revision.current = { owner: ownerRevision, list: deckListRevision };
+  const matches = (result: MassEntryView) =>
+    result.owner_revision === revision.current.owner &&
+    (revision.current.list === undefined ||
+      result.deck_list_revision === revision.current.list);
 
-  // An inventory change makes a prepared export untrustworthy; discard it instead of showing old quantities.
+  // An inventory or Deck List change makes a prepared export untrustworthy; discard it instead of showing old
+  // quantities.
   useEffect(() => {
-    if (view && view.owner_revision !== ownerRevision) {
+    if (view && !matches(view)) {
       setView(null);
       setNotice("Deck changed; export again");
     }
-  }, [ownerRevision, view]);
+  }, [ownerRevision, deckListRevision, view]);
 
   async function prepare() {
     const attempt = ++latest.current;
@@ -178,10 +195,11 @@ export function DeckMassEntryExport({
     setNotice("");
     setView(null);
     try {
-      const result = await getMassEntryExport(deckId);
+      const result = await getMassEntryExport(deckId, undefined, scope);
       if (attempt !== latest.current) return;
-      if (result.owner_revision !== revision.current) {
+      if (!matches(result)) {
         setNotice("Deck changed; export again");
+        onStale?.();
       } else {
         setView(result);
       }
@@ -201,10 +219,18 @@ export function DeckMassEntryExport({
       view={view}
       downloadHref={
         view?.status === "text"
-          ? massEntryDownloadHref(deckId, view.owner_revision)
+          ? massEntryDownloadHref(
+              deckId,
+              view.owner_revision,
+              scope,
+              deckListRevision === undefined
+                ? undefined
+                : view.deck_list_revision
+            )
           : undefined
       }
       notice={notice}
+      emptyMessage={emptyMessage}
     />
   );
 }

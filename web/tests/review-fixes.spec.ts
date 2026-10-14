@@ -1,5 +1,4 @@
 import { test, expect } from "@playwright/test";
-import { openDeckTools } from "./support/deck-builder";
 
 const origin =
   process.env.REVIEW_BROWSER_ORIGIN ??
@@ -88,6 +87,9 @@ test("Revoke sends revocation after an uncertain republish rather than replaying
     parent_id: null,
     version: 1,
     depth: 1,
+    deck_list_total: "60",
+    in_deck: "0",
+    target_format: "standard",
   };
   let token: string | null = "a".repeat(32);
   const commands: string[] = [];
@@ -151,17 +153,9 @@ test("Revoke sends revocation after an uncertain republish rather than replaying
                   results: [
                     {
                       format: "standard",
-                      status: "not_legal",
-                      issues: [
-                        {
-                          code: "deck_size",
-                          reason:
-                            "a Standard deck has exactly 60 cards; this one has 0",
-                          kind: "deck",
-                          effect: "not_legal",
-                          lines: [],
-                        },
-                      ],
+                      // Republish needs a legal result (#181); this test is about the retry key, not the gate.
+                      status: "legal",
+                      issues: [],
                       rules_version: "1 (2026-10-11)",
                       evaluated_on: "2026-10-11",
                       notes: [],
@@ -176,21 +170,23 @@ test("Revoke sends revocation after an uncertain republish rather than replaying
   await page.goto(`${origin}/decks`);
   await page
     .getByRole("navigation", { name: "Deck index" })
-    .getByRole("button", { name: "Shared Deck" })
+    .getByRole("link", { name: "Shared Deck" })
     .click();
-  await openDeckTools(page);
-  const panel = page.getByRole("region", { name: "Publish Deck", exact: true });
+  await page.getByRole("button", { name: "Published · v1" }).click();
+  const panel = page.getByRole("dialog", { name: "Published Deck" });
   await panel
     .getByRole("button", { name: "Republish snapshot", exact: true })
     .click();
-  await expect(panel).toContainText("Publication has not been confirmed");
+  await expect(panel).toContainText("The publication hasn't been confirmed");
+  await panel.getByRole("button", { name: "Revoke: Shared title" }).click();
   await panel
-    .getByRole("button", { name: "Revoke public link", exact: true })
+    .getByRole("button", { name: "Revoke for good", exact: true })
     .click();
-  await expect(panel).toContainText("Public link revoked permanently.");
+  const revoked = page.getByRole("dialog", { name: "Publish" });
+  await expect(revoked).toContainText("Public link revoked permanently.");
   expect(commands).toEqual(["PUT", "DELETE"]);
   await expect(
-    panel.getByRole("link", { name: "View public snapshot" })
+    revoked.getByRole("link", { name: "View public snapshot" })
   ).toHaveCount(0);
 });
 

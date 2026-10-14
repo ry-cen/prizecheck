@@ -140,9 +140,11 @@ export function Dialog({
         event.preventDefault();
         onClose();
       }}
-      onClose={() => {
+      onClose={(event) => {
         // The browser can close a modal itself (a repeated Escape); keep the parent's state in step.
-        if (openRef.current) onClose();
+        // A queued `close` from an earlier close can arrive after a quick reopen: the dialog is open
+        // again then, and that stale event must not shut it.
+        if (openRef.current && !event.currentTarget.open) onClose();
       }}
       onPointerDown={(event) => {
         pressedScrim.current = event.target === event.currentTarget;

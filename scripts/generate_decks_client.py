@@ -25,7 +25,7 @@ def ts_type(value):
 
 
 schema = app.openapi()["components"]["schemas"]
-names = ("TreeNode", "LocationCommandResult", "CreateDeck", "EditDeck", "DeckIndex", "IdentityCheck", "DeckChecks", "DeckDetail", "DeckEditionQuantity", "DeckContents",
+names = ("TreeNode", "LocationCommandResult", "CreateDeck", "EditDeck", "DeckIndexEntry", "DeckIndex", "IdentityCheck", "DeckChecks", "DeckDetail", "DeckEditionQuantity", "DeckContents",
          "DeckListLine", "DeckList", "AddDeckListLine", "ChangeDeckListLine", "RemoveDeckListLine", "SetTargetFormat",
          "DeckListCommandResult",
          "ElsewhereLocation", "LineOwnership", "SurplusHolding", "CompetingDeck", "CompetitionWarning",

@@ -9,7 +9,7 @@ from uuid import UUID
 from typing import Literal
 
 import psycopg
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator, ValidationError
 
 from .main import connect, verified_user
@@ -342,14 +342,24 @@ def publication_status(deck_id: UUID, user_id: str = Depends(verified_user)):
             title=row['title'] if row else None, visibility=row['visibility'] if row else None, projection_pending=row['pending'] if row else False)
 
 
+def refresh_after(background: BackgroundTasks, result: dict, user_id: str) -> dict:
+    """After a publish or republish answered (the publish gate passed and the snapshot is committed and projected), start
+    the background price refresh for the snapshot's Editions (app redesign #181). It runs after the response, outside every
+    lock ``mutate`` takes, and never changes the answer (``publish_refresh``, imported here: it imports ``public_deck``,
+    which imports this module)."""
+    from . import publish_refresh
+    background.add_task(publish_refresh.refresh_published_prices, result['token'], result['version'], f'user:{user_id}')
+    return result
+
+
 @router.post('/api/decks/{deck_id}/publication', response_model=PublicationResult)
-def publish(deck_id: UUID, command: PublishCommand, user_id: str = Depends(verified_user)):
-    return mutate(deck_id, command, user_id, 'publish')
+def publish(deck_id: UUID, command: PublishCommand, background: BackgroundTasks, user_id: str = Depends(verified_user)):
+    return refresh_after(background, mutate(deck_id, command, user_id, 'publish'), user_id)
 
 
 @router.put('/api/decks/{deck_id}/publication', response_model=PublicationResult)
-def republish(deck_id: UUID, command: PublishCommand, user_id: str = Depends(verified_user)):
-    return mutate(deck_id, command, user_id, 'republish')
+def republish(deck_id: UUID, command: PublishCommand, background: BackgroundTasks, user_id: str = Depends(verified_user)):
+    return refresh_after(background, mutate(deck_id, command, user_id, 'republish'), user_id)
 
 
 @router.delete('/api/decks/{deck_id}/publication', response_model=PublicationResult)

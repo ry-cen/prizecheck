@@ -1,13 +1,12 @@
 import React, { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { getOwnerCatalogStatus, type OwnerCatalogStatus } from "./generated";
-import { Decks } from "./Decks";
 import { DeckBuilderPage } from "./decks/DeckBuilderPage";
+import { DecksIndexPage } from "./decks/DecksIndexPage";
 import { CatalogPage } from "./catalog/CatalogPage";
 import { OwnerControlsPage } from "./owner/OwnerControlsPage";
 import { ownerSection, ownerSectionPath } from "./owner/sections";
 import { Workspace } from "./workspace/Workspace";
-import { LegacyPage } from "./shell/LegacyPage";
 import { MissingCardsPage } from "./reports/MissingCardsPage";
 import { Shell } from "./shell/Shell";
 import { SignInsPage } from "./shell/SignInsPage";
@@ -203,7 +202,15 @@ function App() {
   function renderPage(id: PageId, active: boolean) {
     switch (id) {
       case "collection":
-        return <Workspace userId={userId} active={active} />;
+        return (
+          <Workspace
+            userId={userId}
+            active={active}
+            onOpenDeck={(id) =>
+              navigate(`${pageDef("decks").path}/${encodeURIComponent(id)}`)
+            }
+          />
+        );
       case "decks": {
         // /decks is the index; /decks/<id> opens that Deck in the deck builder (#176).
         const deckId = sectionAt(path);
@@ -214,13 +221,13 @@ function App() {
             onAllDecks={() => navigate(pageDef("decks").path)}
           />
         ) : (
-          <LegacyPage title="Decks" message={message}>
-            <Decks
-              onOpenDeck={(id) =>
-                navigate(`${pageDef("decks").path}/${encodeURIComponent(id)}`)
-              }
-            />
-          </LegacyPage>
+          <DecksIndexPage
+            onOpenDeck={(id) =>
+              navigate(`${pageDef("decks").path}/${encodeURIComponent(id)}`)
+            }
+            onNavigate={navigate}
+            message={message}
+          />
         );
       }
       case "catalog":

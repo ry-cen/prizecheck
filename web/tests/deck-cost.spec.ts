@@ -3,7 +3,6 @@ import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { Pool } from "pg";
-import { openDeckTools } from "./support/deck-builder";
 
 // Ticket 09: Estimated Deck Cost and Pricing Coverage on the real stack (browser -> gateway -> API -> PostgreSQL and
 // the record store). Quotes are written to the live stack's store the way a runner writes them; nothing here sums rows
@@ -88,13 +87,16 @@ async function deckWith(page: Page, quantities: Record<string, number>) {
   );
   return { id, name };
 }
-/** Opens the Deck from a fresh load of the Decks index: a reload on the deck builder would read the cost once more. */
-async function openDeck(page: Page, name: string) {
-  await page.goto(`${ORIGIN}/decks`);
-  await page.getByRole("button", { name, exact: true }).click();
-  await openDeckTools(page);
+/** Opens the Deck in Collection by its link, on a fresh load: the Deck's banner (#181) shows its Estimated Deck Cost
+ * from one cost read. */
+async function openDeck(page: Page, deck: { id: string; name: string }) {
+  await page.goto(`${ORIGIN}/collection?location=${deck.id}`);
+  await expect(
+    page.getByRole("heading", { level: 1, name: deck.name })
+  ).toBeVisible();
   return page.getByRole("region", { name: "Estimated Deck Cost" });
 }
+
 const sixCopies = (ids: Ids) => {
   apply([
     {
@@ -133,7 +135,7 @@ test("three $0.25 copies, two stale $0.43 copies and one unpriced copy show $1.6
     [ids["reverse-holofoil"]]: 2,
     [ids.unspecified]: 1,
   });
-  const cost = await openDeck(page, deck.name);
+  const cost = await openDeck(page, deck);
   await expect(cost).toContainText("$1.61 · 5/6 cards priced");
   await expect(cost).toContainText(
     "Incomplete subtotal: 1 card without a price"
@@ -142,10 +144,8 @@ test("three $0.25 copies, two stale $0.43 copies and one unpriced copy show $1.6
   await expect(cost).toContainText("0 cards with unknown price age");
   await expect(cost).toContainText("Excludes shipping and taxes");
   await expect(cost).not.toContainText("$0.00");
-  // The checks and the rows are independent of the cost.
-  await expect(
-    page.getByRole("region", { name: `Checks for ${deck.name}` })
-  ).toContainText("6 cards");
+  // The gallery's own count is independent of the cost.
+  await expect(page.getByRole("main")).toContainText("6 copies · 3 editions");
 });
 
 test("a Deck spread over several Holding pages is priced in full before More cards is pressed", async ({
@@ -166,13 +166,9 @@ test("a Deck spread over several Holding pages is priced in full before More car
     requested.push(route.request().url());
     await route.continue();
   });
-  const cost = await openDeck(page, deck.name);
-  const rows = page
-    .getByRole("region", { name: `Cards in ${deck.name}` })
-    .locator(".holding-grid > li");
-  await expect(rows).toHaveCount(48);
-  // "Aaa" pagers sort first, so the priced Furret Editions are not on the rendered page at all.
-  await expect(rows.filter({ hasText: "$0.25" })).toHaveCount(0);
+  const cost = await openDeck(page, deck);
+  // The cost covers every copy in one read, whatever the gallery has loaded so far.
+  await expect(page.getByRole("main")).toContainText("58 copies · 55 editions");
   await expect(cost).toContainText("$1.61 · 5/58 cards priced");
   await expect(cost).toContainText(
     "Incomplete subtotal: 53 cards without a price"
@@ -186,7 +182,7 @@ test("an empty Deck is $0.00 with No cards, and a Deck with no eligible quote is
   const ids = seed();
   await signIn(page);
   const empty = await deckWith(page, {});
-  let cost = await openDeck(page, empty.name);
+  let cost = await openDeck(page, empty);
   await expect(cost).toContainText("$0.00 · No cards");
 
   apply([
@@ -204,7 +200,7 @@ test("an empty Deck is $0.00 with No cards, and a Deck with no eligible quote is
     [ids.normal]: 2,
     [ids.unspecified]: 4,
   });
-  cost = await openDeck(page, unpriced.name);
+  cost = await openDeck(page, unpriced);
   await expect(cost).toContainText("Price unavailable · 0/6 cards priced");
   await expect(cost).not.toContainText("$0.00");
 });
@@ -235,7 +231,7 @@ test("an incomplete 200 answer without a total falls back to the checks total, a
       }),
     })
   );
-  let cost = await openDeck(page, deck.name);
+  let cost = await openDeck(page, deck);
   await expect(cost).toContainText(
     "Price unavailable; coverage unavailable; 6 cards total"
   );
@@ -249,7 +245,7 @@ test("an incomplete 200 answer without a total falls back to the checks total, a
       body: JSON.stringify({ detail: { code: "DECK_NOT_FOUND" } }),
     })
   );
-  cost = await openDeck(page, deck.name);
+  cost = await openDeck(page, deck);
   await expect(cost).toContainText(
     "Price unavailable; coverage unavailable; 6 cards total"
   );
@@ -276,7 +272,7 @@ test(
         body: JSON.stringify({ detail: { code: "PRICE_DEADLINE" } }),
       })
     );
-    let cost = await openDeck(page, deck.name);
+    let cost = await openDeck(page, deck);
     await expect(cost).toContainText(
       "Price unavailable; coverage unavailable; 6 cards total"
     );
@@ -288,17 +284,9 @@ test(
       await new Promise((resolve) => setTimeout(resolve, 6_000));
       await route.continue().catch(() => undefined);
     });
-    cost = await openDeck(page, deck.name);
-    const checks = page.getByRole("region", {
-      name: `Checks for ${deck.name}`,
-    });
-    await expect(checks).toContainText("6 cards");
+    cost = await openDeck(page, deck);
+    await expect(page.getByRole("main")).toContainText("6 copies · 3 editions");
     await expect(cost).toContainText("Checking prices…");
-    await expect(
-      page
-        .getByRole("region", { name: `Cards in ${deck.name}` })
-        .locator(".holding-grid > li")
-    ).toHaveCount(3);
     await expect(cost).toContainText(
       "Price unavailable; coverage unavailable; 6 cards total",
       { timeout: 6_000 }
@@ -334,7 +322,7 @@ test("a cost for an older inventory revision is discarded and a concurrent chang
       })
       .catch(() => undefined);
   });
-  const cost = await openDeck(page, deck.name);
+  const cost = await openDeck(page, deck);
   await expect(cost).toContainText("Checking prices…");
   await pool.query(
     "UPDATE holding SET quantity=quantity+1, version=version+1 WHERE owner_id=$1 AND location_id=$2",
@@ -344,9 +332,13 @@ test("a cost for an older inventory revision is discarded and a concurrent chang
     "UPDATE inventory_owner SET revision=revision+1 WHERE user_id=$1",
     [user]
   );
-  const checks = page.getByRole("region", { name: `Checks for ${deck.name}` });
-  await checks.getByRole("button", { name: "Refresh checks" }).click();
-  await expect(checks).toContainText("4 cards");
+  // Collection notices the other tab's change; Reload reads the gallery at the new revision, and the banner then
+  // reads the Deck again.
+  await page.evaluate(() =>
+    document.dispatchEvent(new Event("visibilitychange"))
+  );
+  await page.getByRole("button", { name: "Reload", exact: true }).click();
+  await expect(page.getByRole("main")).toContainText("4 copies · 1 edition");
   await expect(cost).toContainText("$1.00 · 4/4 cards priced");
   release();
   // flake-exempt wait-for-timeout (quiet): the released answer must never be shown, and nothing on the page marks
@@ -370,10 +362,8 @@ test("a cost for an older inventory revision is discarded and a concurrent chang
     }
     await route.continue();
   });
-  await page.goto(`${ORIGIN}/decks`);
-  await page.getByRole("button", { name: deck.name, exact: true }).click();
-  await openDeckTools(page);
-  await expect(checks).toContainText("4 cards");
+  await openDeck(page, deck);
+  await expect(page.getByRole("main")).toContainText("4 copies · 1 edition");
   await expect.poll(() => seen.length).toBe(1);
   await pool.query(
     "INSERT INTO holding(owner_id,location_id,edition_id,quantity,version) VALUES($1,$2,$3,2,1)",
@@ -384,7 +374,6 @@ test("a cost for an older inventory revision is discarded and a concurrent chang
     [user]
   );
   resume();
-  await expect(checks).toContainText("6 cards");
   await expect(cost).toContainText("$1.86 · 6/6 cards priced");
   await expect(cost).toContainText("2 stale cards");
   expect(seen).toHaveLength(2);

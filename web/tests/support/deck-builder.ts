@@ -1,19 +1,35 @@
 import { expect, type Page } from "@playwright/test";
 
 /**
- * Opening a Deck shows the deck builder at /decks/<id> (#176). Until #181 replaces them, the old Decks page's panels
- * for that Deck (the Holdings checks and cost, the Holdings panel, Publish and the exports) sit in a closed
- * "Holdings, publishing and exports" section at the foot of the builder. This opens it and waits for the panels.
+ * The deck builder's exports (#181): Export in the page header opens one "Export" dialog on Pokémon TCG Live; its
+ * "Export to" choice switches to TCGplayer Mass Entry, whose "Send to TCGplayer" choice picks the cards you don't own
+ * or the whole Deck List. Buy missing (header row 1) opens it on Mass Entry with the cards you don't own.
  *
- * The section starts closed each time the builder opens a Deck, so call this once after every such opening (a
- * second call in the same opening would close it again).
+ * Opens the export of `kind` from the builder at /decks/<id> and returns its panel region: "Pokémon TCG Live export"
+ * or "TCGplayer export". For Mass Entry, `scope` picks the copies (default: the whole Deck List, which the specs written
+ * before #181 export).
  */
-export async function openDeckTools(page: Page) {
+export async function openExport(
+  page: Page,
+  kind: "live" | "mass",
+  scope: "deck_list" | "not_owned" = "deck_list"
+) {
   await expect(page).toHaveURL(/\/decks\/[^/?#]+$/);
-  await page
-    .getByText("Holdings, publishing and exports", { exact: true })
-    .click();
-  await expect(
-    page.getByRole("region", { name: /^Checks for / })
-  ).toBeVisible();
+  await page.getByRole("button", { name: "Export", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "Export" });
+  await expect(dialog).toBeVisible();
+  if (kind === "live")
+    return dialog.getByRole("region", { name: "Pokémon TCG Live export" });
+  await dialog.getByRole("radio", { name: "TCGplayer Mass Entry" }).click();
+  await dialog
+    .getByRole("radio", {
+      name:
+        scope === "deck_list" ? /^The whole Deck List/ : /^Cards you don't own/,
+    })
+    .check();
+  return dialog.getByRole("region", { name: "TCGplayer export", exact: true });
 }
+
+/** The export dialog's own page region, for closing it or checking what surrounds the panel. */
+export const exportDialog = (page: Page) =>
+  page.getByRole("dialog", { name: "Export" });

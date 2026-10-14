@@ -26,7 +26,7 @@ import { DeckListBody, type OpenSheet } from "./DeckListViews";
 import { deckListModel, type DeckView } from "./deckListModel";
 import { GatherDialog } from "./GatherDialog";
 import { FormatResultsDialog } from "./FormatResultsDialog";
-import { LegacyDeckTools } from "./LegacyDeckTools";
+import { useDeckActions } from "./useDeckActions";
 import { flaggedLines, resultFor, type TargetFormat } from "./targetFormat";
 import { TargetFormatControl } from "./TargetFormatControl";
 import { useDeckCost } from "./useDeckCost";
@@ -64,8 +64,7 @@ const VIEWS = [
  * Header row 2 holds the Target Format control (#178): ▾ changes the Deck's Target Format through its Deck List
  * command, and the result opens the results dialog. A card-level issue in that result highlights its lines.
  *
- * Seams for later tickets: header row 1 takes Buy missing (#181) after Gather N; the page header takes Export,
- * Publish and Delete (#181), which also retires the old panels at the foot of the page.
+ * The page header holds Export, Publish and Delete, and row 1 Buy missing after Gather N (#181, useDeckActions).
  */
 export function DeckBuilderPage({ deckId, onAllDecks }: Props) {
   const phone = useMediaQuery(MOBILE_QUERY);
@@ -80,7 +79,6 @@ export function DeckBuilderPage({ deckId, onAllDecks }: Props) {
     editionId: string;
     ordinal: number | null;
   } | null>(null);
-  const [toolsOpen, setToolsOpen] = useState(false);
   // The Pick List dialog: open with the copy sheet's card (edition), or with none from Gather N.
   const [gather, setGather] = useState<{ edition: string | null } | null>(null);
   const opener = useRef<HTMLElement | null>(null);
@@ -205,6 +203,14 @@ export function DeckBuilderPage({ deckId, onAllDecks }: Props) {
     ? resultFor(detail.format_checks, detail.target_format)
     : null;
   const flagged = useMemo(() => flaggedLines(targetResult), [targetResult]);
+  const deckActions = useDeckActions({
+    deckId,
+    detail,
+    result: changing ? null : targetResult,
+    target: changing ?? detail?.target_format ?? "standard",
+    read: () => void read(),
+    onAllDecks,
+  });
   const open: OpenSheet = (line, ordinal, element) => {
     opener.current = element;
     setSheet({ editionId: line.line.edition_id, ordinal });
@@ -275,7 +281,7 @@ export function DeckBuilderPage({ deckId, onAllDecks }: Props) {
       <h2 id={`${idBase}-deck-list`} className="sr-only">
         Deck List
       </h2>
-      {/* Row 1: the count, the cost and Gather N. Buy missing (#181) joins Gather N on the right. */}
+      {/* Row 1: the count, the cost, Gather N and Buy missing (#181). */}
       <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
         <p className="m-0 tabular-nums">
           <strong className="text-display font-semibold">{model.total}</strong>
@@ -293,6 +299,7 @@ export function DeckBuilderPage({ deckId, onAllDecks }: Props) {
           >
             Gather {toGather.toString()}
           </Button>
+          {deckActions.buyMissing}
         </div>
       </div>
       {/* Row 2: the Target Format control (#178), then the view switch. */}
@@ -353,7 +360,7 @@ export function DeckBuilderPage({ deckId, onAllDecks }: Props) {
   return (
     <main className="mx-auto box-border flex max-w-7xl flex-col gap-4 px-7 py-6 phone:px-4 phone:py-4">
       {back}
-      <PageHeader title={detail.deck.name} />
+      <PageHeader title={detail.deck.name} actions={deckActions.actions} />
       {notice && (
         <p role="status" className="m-0 text-body text-warning">
           {notice}
@@ -387,23 +394,7 @@ export function DeckBuilderPage({ deckId, onAllDecks }: Props) {
           {library}
         </div>
       )}
-      <details
-        className="mt-4 rounded-panel border border-border"
-        onToggle={(event) => setToolsOpen(event.currentTarget.open)}
-      >
-        <summary className="flex min-h-control cursor-pointer items-center px-4 text-body font-semibold phone:min-h-tap">
-          Holdings, publishing and exports
-        </summary>
-        {toolsOpen && (
-          <div className="legacy legacy-light">
-            <LegacyDeckTools
-              detail={detail}
-              cost={cost}
-              onInventoryChanged={read}
-            />
-          </div>
-        )}
-      </details>
+      {deckActions.dialogs}
       <CopySheet
         line={sheetLine}
         ordinal={sheet?.ordinal ?? null}

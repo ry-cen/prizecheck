@@ -3,7 +3,6 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
-import { openDeckTools } from "./support/deck-builder";
 
 function messages(path: string): string[] {
   try {
@@ -11,6 +10,29 @@ function messages(path: string): string[] {
   } catch {
     return [];
   }
+}
+
+// The deck builder shows the Deck List and its format result; the Deck's Holdings, with Move, Remove and Undo, stay in
+// Collection under the Deck's banner (#181). Cards reach the Deck through the gateway, as a collector adds them.
+
+const ORIGIN = process.env.TEST_ORIGIN || "http://localhost:5173";
+
+async function addToDeck(
+  page: import("@playwright/test").Page,
+  deckId: string,
+  edition: string,
+  quantity: number
+) {
+  const added = await page.request.post(`${ORIGIN}/api/holdings`, {
+    headers: { origin: ORIGIN },
+    data: {
+      location_id: deckId,
+      edition_id: edition,
+      quantity: String(quantity),
+      idempotency_key: randomUUID(),
+    },
+  });
+  expect(added.status()).toBe(200);
 }
 
 test("physical Deck creation, actual Holdings checks, and Move out", async ({
@@ -49,59 +71,83 @@ promote({'card-1': 'Pikachu', **{f'card-{i}': f'Pikachu {i:02}' for i in range(2
     await page
       .getByRole("button", { name: "Create Deck", exact: true })
       .click();
-    await openDeckTools(page);
-    const checks = page.getByRole("region", { name: `Checks for ${name}` });
-    await expect(checks).toContainText("0 cards · 60 cards short of 60");
-    await expect(checks).toContainText(
-      "Basic deck checks only. Format legality, including rotation and banned cards, is reported by the advisory format checks."
-    );
-    const holdings = page.getByRole("region", { name: `Cards in ${name}` });
-    await holdings
-      .getByRole("button", { name: "Add cards", exact: true })
-      .click();
-    await holdings.getByLabel("Search English card name").fill("Pika");
-    await holdings.getByRole("button", { name: "Search", exact: true }).click();
-    await holdings
-      .getByLabel("Card Edition")
-      .selectOption({ label: "Pikachu · Fixture Set #1 · finish: normal" });
-    await holdings.getByLabel("Quantity", { exact: true }).fill("61");
-    await holdings
-      .getByRole("button", { name: "Add to Location", exact: true })
-      .click();
-    await expect(checks).toContainText("61 cards · 1 cards over 60");
-    await expect(checks).toContainText("Over four-copy limit");
-    const move = holdings.getByRole("region", { name: "Move cards" });
-    await move.getByRole("button", { name: "Fan copies", exact: true }).click();
-    await move
-      .getByRole("button", { name: "Select 2 Pikachu copies", exact: true })
-      .click();
-    await move
-      .getByRole("button", { name: "Move selected", exact: true })
-      .click();
-    // Destinations are labelled by full path, so exact "Unsorted" is the top-level leaf, never "Box / Unsorted".
-    await page
-      .getByRole("dialog", { name: "Choose Move destination" })
-      .getByRole("button", { name: "Unsorted", exact: true })
-      .click();
-    await expect(checks).toContainText("59 cards · 1 cards short of 60");
-    // "Open in Collection" is on the Decks index, one step back from the deck builder.
-    await page.getByRole("link", { name: "All Decks" }).click();
-    await page
-      .getByRole("link", { name: `Open in Collection: ${name}` })
-      .click();
+    await expect(page).toHaveURL(/\/decks\/[^/?#]+$/);
+    const deckId = page.url().split("/").at(-1)!;
+    const count = page.getByText(/^\d+\/60 cards$/);
+    await expect(count).toHaveText("0/60 cards");
+    const pikachu = (
+      await pool.query(
+        `SELECT e.id FROM catalog_edition e JOIN catalog_printing p ON p.id=e.printing_id
+         WHERE p.source_id='card-1' AND e.descriptor->>'finish'='normal'`
+      )
+    ).rows[0].id as string;
+    // Copies stored in a Deck put it on its Deck List (migration 031): 61 copies, more than four of one card.
+    await addToDeck(page, deckId, pikachu, 61);
+    await page.reload();
+    await expect(count).toHaveText("61/60 cards");
+    await expect(
+      page
+        .getByRole("group", { name: "Target Format and result" })
+        .getByRole("button")
+    ).toHaveText(/Not legal/);
+    // Two copies move out to the top-level Unsorted (Collection's Move, through the gateway).
+    const locationTree = await (
+      await page.request.get(`${ORIGIN}/api/location-tree`)
+    ).json();
+    const unsortedId = locationTree.locations.find(
+      (row: { name: string; parent_id: string | null }) =>
+        row.name === "Unsorted" && row.parent_id === null
+    ).id;
+    const started = await page.request.post(`${ORIGIN}/api/moves/manifests`, {
+      headers: { origin: ORIGIN },
+      data: { source_id: deckId },
+    });
+    expect(started.status()).toBe(201);
+    const held = (
+      await (await page.request.get(`${ORIGIN}/api/holdings/${deckId}`)).json()
+    ).holdings[0];
+    const moving = (await started.json()).id as string;
+    expect(
+      (
+        await page.request.put(
+          `${ORIGIN}/api/moves/manifests/${moving}/items`,
+          {
+            headers: { origin: ORIGIN },
+            data: {
+              items: [
+                {
+                  edition_id: held.edition_id,
+                  quantity: "2",
+                  expected_version: held.version,
+                },
+              ],
+            },
+          }
+        )
+      ).status()
+    ).toBe(200);
+    expect(
+      (
+        await page.request.post(
+          `${ORIGIN}/api/moves/manifests/${moving}/commit`,
+          {
+            headers: { origin: ORIGIN },
+            data: { destination_id: unsortedId, idempotency_key: randomUUID() },
+          }
+        )
+      ).status()
+    ).toBe(200);
+    // In Collection the Deck holds 59 under its banner, whose link opens the deck builder again.
+    await page.goto(`${ORIGIN}/collection?location=${deckId}`);
     await expect(page).toHaveURL(/\/collection$/);
     await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
     await expect(page.getByRole("main")).toContainText("59 copies · 1 edition");
-    // "Open in Collection" is a full navigation to /collection, so go back through the Decks tab rather than goBack().
-    await page.getByRole("button", { name: "Decks", exact: true }).click();
     await page
-      .getByRole("navigation", { name: "Deck index" })
-      .getByRole("button", { name, exact: true })
+      .getByRole("region", { name: "Deck banner" })
+      .getByRole("link", { name: "Open in the deck builder" })
       .click();
-    await openDeckTools(page);
-    await expect(
-      page.getByRole("region", { name: `Checks for ${name}` })
-    ).toBeVisible();
+    await expect(page).toHaveURL(`${ORIGIN}/decks/${deckId}`);
+    await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
     // Fixture catalog setup may use SQL; all inventory behavior uses the real gateway.
     const gateway = (path: string) => new URL(path, page.url()).toString();
     const deckResponse = await page.request.get(gateway("/api/decks"));
@@ -279,7 +325,7 @@ promote({'card-1': 'Pikachu', **{f'card-{i}': f'Pikachu {i:02}' for i in range(2
   }
 });
 
-test("Deck Cards panel refreshes a stale selection, then Removes and Undoes", async ({
+test("an open Deck in Collection keeps its Holdings with Move, Remove and Undo under its banner", async ({
   page,
 }) => {
   execFileSync(
@@ -315,85 +361,62 @@ promote({'card-1': 'Pikachu'})`,
     await page
       .getByRole("button", { name: "Create Deck", exact: true })
       .click();
-    await openDeckTools(page);
-    const holdings = page.getByRole("region", { name: `Cards in ${name}` });
-    await holdings
-      .getByRole("button", { name: "Add cards", exact: true })
-      .click();
-    await holdings.getByLabel("Search English card name").fill("Pika");
-    await holdings.getByRole("button", { name: "Search", exact: true }).click();
-    await holdings
-      .getByLabel("Card Edition")
-      .selectOption({ label: "Pikachu · Fixture Set #1 · finish: normal" });
-    await holdings.getByLabel("Quantity", { exact: true }).fill("3");
-    await holdings
-      .getByRole("button", { name: "Add to Location", exact: true })
-      .click();
-    const selection = holdings.getByRole("region", { name: "Move cards" });
-    const stack = holdings.locator(".holding-stack");
-    await expect(stack).toContainText("×3");
+    await expect(page).toHaveURL(/\/decks\/[^/?#]+$/);
+    const deckId = page.url().split("/").at(-1)!;
+    const pikachu = (
+      await pool.query(
+        `SELECT e.id FROM catalog_edition e JOIN catalog_printing p ON p.id=e.printing_id
+         WHERE p.source_id='card-1' AND e.descriptor->>'finish'='normal'`
+      )
+    ).rows[0].id as string;
+    await addToDeck(page, deckId, pikachu, 3);
+    await page.goto(`${ORIGIN}/collection?location=${deckId}`);
+    await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
+    await expect(
+      page.getByRole("region", { name: "Deck banner" })
+    ).toBeVisible();
+    const cards = page.getByRole("region", { name: "Cards" });
+    const tiles = cards.getByRole("button");
+    const bar = page.getByRole("region", { name: "Selection" });
+    const toast = page
+      .getByRole("region", { name: "Notifications" })
+      .getByRole("paragraph")
+      .filter({ hasText: /Moved|Removed|Undo/ });
+    await expect(tiles).toHaveCount(3);
 
-    // Another tab changes the Holding after it is selected, so Move reports it and keeps the selection.
-    await selection
-      .getByRole("button", { name: "Select stack", exact: true })
-      .click();
-    const row = await pool.query(
-      `SELECT l.id AS location_id, h.edition_id FROM location l
-       JOIN holding h ON h.location_id=l.id WHERE l.name=$1 LIMIT 1`,
-      [name]
-    );
-    await pool.query(
-      `WITH changed AS (
-         UPDATE inventory_owner SET revision=revision+1
-         WHERE user_id=(SELECT owner_id FROM location WHERE id=$1) RETURNING revision
-       ) UPDATE holding SET quantity=quantity+1,version=(SELECT revision FROM changed)
-         WHERE location_id=$1 AND edition_id=$2`,
-      [row.rows[0].location_id, row.rows[0].edition_id]
-    );
-    await selection
-      .getByRole("button", { name: "Move selected", exact: true })
-      .click();
-    await page
-      .getByRole("dialog", { name: "Choose Move destination" })
-      .getByRole("button", { name: "Unsorted", exact: true })
-      .click();
-    await expect(selection.getByRole("status")).toContainText(
-      "selection is saved"
-    );
-    await selection
-      .getByRole("button", { name: "Refresh selection", exact: true })
-      .click();
-    await expect(selection.getByRole("status")).toContainText(
-      "Editions refreshed"
-    );
-    await expect(selection).toContainText("3 copies · 1 Editions selected");
-    await expect(stack).toContainText("×4");
+    // Move one copy out to the top-level Unsorted, then Undo puts it back.
+    await tiles.nth(0).click();
+    await bar.getByRole("button", { name: "Actions" }).click();
+    await bar.getByRole("button", { name: "Move…" }).click();
+    const move = page.getByRole("dialog", { name: "Move 1 copy" });
+    await move.getByRole("button", { name: "Unsorted", exact: true }).click();
+    await move.getByRole("button", { name: "Move 1 copy" }).click();
+    await expect(toast).toHaveText("Moved 1 copy to Unsorted.");
+    await expect(tiles).toHaveCount(2);
+    await page.getByRole("button", { name: "Undo", exact: true }).click();
+    await expect(toast).toHaveText("Undo restored 1 copy to 1 location.");
+    await expect(tiles).toHaveCount(3);
 
-    // Removal asks first; Cancel leaves the count alone. The refresh keeps the 3 selected copies of the 4 now held, so Confirm removes 3 and Undo restores them.
-    await selection
-      .getByRole("button", { name: "Remove selected", exact: true })
-      .click();
-    const confirmation = page.getByRole("dialog", {
-      name: "Confirm Inventory Removal",
+    // Removal asks first; Cancel leaves the copies. Confirming removes them, and Undo restores them.
+    await tiles.nth(0).click();
+    await tiles.nth(2).click({ modifiers: ["Shift"] });
+    await expect(bar).toContainText("3 copies selected");
+    await bar.getByRole("button", { name: "Actions" }).click();
+    await bar.getByRole("button", { name: "Inventory Removal…" }).click();
+    const removal = page.getByRole("dialog", {
+      name: "Remove 3 copies from your Collection",
     });
-    await expect(confirmation).toContainText(
-      "Remove 3 copies from your tracked Collection?"
-    );
-    await confirmation.getByRole("button", { name: "Cancel removal" }).click();
-    await expect(stack).toContainText("×4");
-    await selection
-      .getByRole("button", { name: "Remove selected", exact: true })
-      .click();
-    await confirmation.getByRole("button", { name: "Confirm removal" }).click();
-    await expect(selection.getByRole("status")).toContainText(
-      "Removed 3 copies"
-    );
-    await expect(stack).toContainText("×1");
-    await selection
-      .getByRole("button", { name: "Undo", exact: true })
-      .first()
-      .click();
-    await expect(stack).toContainText("×4");
+    await removal.getByRole("button", { name: "Cancel" }).click();
+    await expect(tiles).toHaveCount(3);
+    await bar.getByRole("button", { name: "Actions" }).click();
+    await bar.getByRole("button", { name: "Inventory Removal…" }).click();
+    await removal.getByRole("button", { name: "Remove 3 copies" }).click();
+    await expect(toast).toHaveText("Removed 3 copies from your Collection.");
+    await expect(tiles).toHaveCount(0);
+    await page.getByRole("button", { name: "Undo", exact: true }).click();
+    await expect(toast).toHaveText("Undo restored 3 copies to 1 location.");
+    await expect(tiles).toHaveCount(3);
+    await expect(page.getByRole("main")).toContainText("3 copies · 1 edition");
   } finally {
     await pool.end();
   }

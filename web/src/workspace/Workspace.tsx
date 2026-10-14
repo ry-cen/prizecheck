@@ -65,11 +65,13 @@ type Props = {
    * state; document-level keys are ignored meanwhile, and showing it again checks for changes made on
    * other pages (#162). */
   active: boolean;
+  /** Opens a Deck in the deck builder on Decks, from the open Deck's banner (#181). */
+  onOpenDeck: (deckId: string) => void;
 };
 
 /** The collector workspace (Collection, inside the app shell): the phone header, the Location sidebar
  * (desktop) or drawer (phone), and the gallery area. The shell draws the desktop header and the tabs. */
-export function Workspace({ userId, active }: Props) {
+export function Workspace({ userId, active, onOpenDeck }: Props) {
   const [nodes, setNodes] = useState<TreeNode[]>([]);
   const [ownerRevision, setOwnerRevision] = useState<number | null>(null);
   const [treeState, setTreeState] = useState<"loading" | "ready" | "error">(
@@ -460,9 +462,8 @@ export function Workspace({ userId, active }: Props) {
             <DeckHeading
               key={current.id}
               deckId={current.id}
-              deckName={current.name}
               inventoryRevision={gallery.ownerRevision}
-              active={active}
+              onOpenDeck={onOpenDeck}
             />
           )}
           {/* Desktop toolbar: Search and Filters on the left; Sort, Card size, Names and Prices pushed
