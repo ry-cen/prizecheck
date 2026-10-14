@@ -552,16 +552,19 @@ test.describe("desktop", () => {
     expect(await smallTargets(page, 24)).toEqual([]);
 
     await page.setViewportSize({ width: 761, height: 800 });
-    expect(
-      await page
-        .getByRole("banner")
-        .evaluate((h) => h.scrollWidth <= h.clientWidth)
-    ).toBe(true);
-    expect(
-      await page.evaluate(
-        () => document.documentElement.scrollWidth <= window.innerWidth
+    // Layout settles after the resize, so poll rather than read once.
+    await expect
+      .poll(() =>
+        page.getByRole("banner").evaluate((h) => h.scrollWidth <= h.clientWidth)
       )
-    ).toBe(true);
+      .toBe(true);
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () => document.documentElement.scrollWidth <= window.innerWidth
+        )
+      )
+      .toBe(true);
   });
 
   test("a signed-in reload shows the dark loading screen, not the light one", async ({
