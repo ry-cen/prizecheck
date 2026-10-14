@@ -36,7 +36,8 @@ lines.append("""
 export type BrowseKind = 'pokemon' | 'supporter' | 'item' | 'tool' | 'stadium' | 'energy';
 export type BrowseFormat = 'standard' | 'expanded' | 'glc';
 export type BrowseQuery = { q?: string; kind?: BrowseKind | null; format?: BrowseFormat | null; set_id?: string | null;
-                            owned?: boolean; deck_id?: string | null; printing_id?: string | null };
+                            owned?: boolean; deck_id?: string | null; printing_id?: string | null;
+                            identity_id?: string | null };
 
 /** A failed browse request. ``code`` is the API's error code: CATALOG_CHANGED or INVENTORY_CHANGED (409: start again
  * from page one), FORMAT_STANDING_BUSY (503: retry), DECK_NOT_FOUND (404), INVALID_CURSOR (400), or
@@ -64,6 +65,7 @@ export function browseEditions(query: BrowseQuery, cursor?: string | null, signa
   if (query.owned) params.set('owned', 'true');
   if (query.deck_id) params.set('deck_id', query.deck_id);
   if (query.printing_id) params.set('printing_id', query.printing_id);
+  if (query.identity_id) params.set('identity_id', query.identity_id);
   if (cursor) params.set('cursor', cursor);
   const suffix = params.toString() ? '?' + params.toString() : '';
   return browseRequest<BrowsePage>(`/api/catalog/editions${suffix}`, signal);

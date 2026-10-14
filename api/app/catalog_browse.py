@@ -16,6 +16,7 @@ server's reading. Filters: ``kind`` (Pokémon, Supporter, Item, Tool, Stadium, E
 unknown matches no Trainer Type), ``format`` (hides ``not_legal`` only, so ``unknown`` stays), ``set_id`` and ``owned``.
 ``printing_id`` (#174) lists one Card Printing's active Editions, so the CardPopup reads every Edition's copies, the
 regulation mark and the Format Standing in one call, whether it opened from a tile or from the inspector's report link.
+``identity_id`` (#177) lists every active Edition of one Card Identity, for the deck builder's "Swap this copy for".
 
 Order (the owner's decision on #173). Newest set first: by the set's release date, latest first, then within a set by
 collector number in natural order (2 before 10, a letter suffix after its number, numbers with a letter prefix such as
@@ -253,6 +254,7 @@ def browse_editions(q: str = Query(default="", max_length=120),
                     owned: bool = False,
                     deck_id: UUID | None = None,
                     printing_id: UUID | None = None,
+                    identity_id: UUID | None = None,
                     cursor: str | None = Query(default=None, max_length=4096),
                     user_id: str = Depends(verified_user)):
     started = time.monotonic()
@@ -266,11 +268,12 @@ def browse_editions(q: str = Query(default="", max_length=120),
             keys = format_standing.current_keys(conn)
             if keys is not None:
                 return _page(conn, user_id, keys, _text(q), kind, format_name, set_id.strip(), owned, deck_id,
-                             printing_id, cursor)
+                             printing_id, identity_id, cursor)
     fail(503, "FORMAT_STANDING_BUSY")
 
 
-def _page(conn, user_id, keys, text, kind, format_name, set_id, owned, deck_id, printing_id, cursor) -> BrowsePage:
+def _page(conn, user_id, keys, text, kind, format_name, set_id, owned, deck_id, printing_id, identity_id,
+          cursor) -> BrowsePage:
     state = conn.execute("SELECT active_generation,revision,last_success FROM catalog_state WHERE singleton").fetchone()
     owner = conn.execute("SELECT revision FROM inventory_owner WHERE user_id=%s", (user_id,)).fetchone()
     revision = owner["revision"] if owner else 1
@@ -283,7 +286,8 @@ def _page(conn, user_id, keys, text, kind, format_name, set_id, owned, deck_id, 
     # The last slot answers 409 CATALOG_CHANGED: the catalog revision, the Format Standing key and the set code table
     # (a deploy that changes it can change what q means).
     context = ["catalog-editions", user_id, text, kind, format_name, set_id, owned,
-               str(deck_id) if deck_id else None, str(printing_id) if printing_id else None, revision,
+               str(deck_id) if deck_id else None, str(printing_id) if printing_id else None,
+               str(identity_id) if identity_id else None, revision,
                [state["revision"], format_standing.standing_token(keys), set_codes.DIGEST]]
     order = NUMBER_ORDER if set_id or search.mode == "set_number" else NAME_ORDER
     anchor = None
@@ -318,6 +322,9 @@ def _page(conn, user_id, keys, text, kind, format_name, set_id, owned, deck_id, 
     if printing_id:
         conditions += " AND ge.printing_id=%s"
         params.append(printing_id)
+    if identity_id:
+        conditions += " AND ge.printing_id IN (SELECT id FROM catalog_printing WHERE identity_id=%s)"
+        params.append(identity_id)
     if kind:
         column, value = KIND_FILTERS[kind]
         conditions += f" AND ca.{column}=%s"

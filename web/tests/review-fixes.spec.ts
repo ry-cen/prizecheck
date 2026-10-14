@@ -18,6 +18,23 @@ async function sessionFixture(
   });
   await page.route("**/api/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
+    if (path === "/api/catalog/editions") {
+      // The deck builder's library (#177) reads the browse route: an empty catalog.
+      await route.fulfill({
+        json: {
+          available: false,
+          catalog_revision: 0,
+          owner_revision: 1,
+          last_success: null,
+          search: { mode: "all", text: "", set_id: null, set_name: null },
+          editions: [],
+          next_cursor: null,
+          printings: 0,
+          matches: 0,
+        },
+      });
+      return;
+    }
     const json =
       path === "/api/catalog/status"
         ? { available: false, revision: 0, last_success: null }

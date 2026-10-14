@@ -35,6 +35,8 @@ export type ConfirmPicks = { items: PickItem[]; deck_list_revision: number; idem
 export type PickConfirmResult = { edition_count: number; copy_count: string; owner_revision: number; source_count: number; undo_id: string };
 export type DeleteDeck = { name: string; version: number; idempotency_key: string };
 export type DeleteDeckResult = { deleted_id: string; unsorted_id: string | null; edition_count: number; copy_count: string; owner_revision: number };
+export type DeckListChange = { edition_id: string; quantity: string };
+export type ChangeDeckList = { revision: number; idempotency_key: string; changes: DeckListChange[] };
 
 export class DeckError extends Error {
   constructor(public status: number, public code: string) { super(code); }
@@ -70,6 +72,9 @@ export const removeDeckListLine = (deckId: string, editionId: string, body: Remo
 // Changes the Deck List's Target Format (app redesign #178); answers the new Format's result.
 export const setTargetFormat = (deckId: string, body: SetTargetFormat) =>
   request<DeckListCommandResult>(`/api/decks/${encodeURIComponent(deckId)}/deck-list/target-format`, 'PUT', body);
+// Sets several Deck List lines in one batch (app redesign #177): each change is a line's new total, 0 removing it.
+export const changeDeckList = (deckId: string, body: ChangeDeckList) =>
+  request<DeckListCommandResult>(`/api/decks/${encodeURIComponent(deckId)}/deck-list/changes`, 'POST', body);
 export const addDeckListPrinting = (deckId: string, body: AddDeckListPrinting) =>
   request<DeckListPrintingResult>(`/api/decks/${encodeURIComponent(deckId)}/deck-list/printings`, 'POST', body);
 export const getPickList = (deckId: string) =>

@@ -127,6 +127,23 @@ class SetTargetFormat(BaseModel):
     idempotency_key: UUID
 
 
+# The most lines one batch Deck List change sets (app redesign #177): far more than one add, remove, swap or a burst of
+# taps the builder merges into one batch.
+MAX_DECK_LIST_CHANGES = 200
+
+
+class DeckListChange(BaseModel):
+    edition_id: UUID
+    # The line's new total. "0" removes the line; a 0 for an Edition the Deck List doesn't have changes nothing.
+    quantity: str
+
+
+class ChangeDeckList(BaseModel):
+    revision: int = Field(ge=1)
+    idempotency_key: UUID
+    changes: list[DeckListChange] = Field(max_length=MAX_DECK_LIST_CHANGES)
+
+
 class DeckListCommandResult(BaseModel):
     deck_id: UUID
     deck_list: DeckList
@@ -466,6 +483,63 @@ def set_target_format(deck_id: UUID, command: SetTargetFormat, user_id: str = De
         check_revision(conn, user_id, deck_id, command.revision)
         conn.execute('UPDATE deck_list SET target_format=%s WHERE owner_id=%s AND deck_id=%s',
                      (command.target_format, user_id, deck_id))
+        return store_deck_list_result(conn, user_id, deck_id, command.idempotency_key, digest)
+
+
+def change_quantity(raw: str) -> int:
+    """A batch change's new line total: 0 removes the line; anything else is an ordinary quantity (``parse_quantity``)."""
+    if raw and raw.isascii() and raw.isdecimal() and len(raw) <= 19 and int(raw) == 0:
+        return 0
+    return parse_quantity(raw)
+
+
+@router.post('/{deck_id}/deck-list/changes', response_model=DeckListCommandResult)
+def change_deck_list(deck_id: UUID, command: ChangeDeckList, user_id: str = Depends(verified_user)):
+    """Set several Deck List lines at once (app redesign #177): each change is one line's new total, and 0 removes it.
+    Every change applies in one transaction or none does, and the revision advances once, even when nothing differs. A
+    swap is one batch, and the builder's Undo is the inverse batch at the revision this one answered, so
+    STALE_DECK_LIST means the list changed in between. Only a new line needs an available Edition; a line whose Edition
+    was retired can still be changed or removed. Like every Deck List command it never touches a Holding, the inventory
+    revision or the inventory Undo records. The per-line routes stay."""
+    if not command.changes:
+        error(422, 'NO_CHANGES')
+    totals: dict[UUID, int] = {}
+    for change in command.changes:
+        if change.edition_id in totals:
+            error(422, 'DUPLICATE_EDITION')
+        totals[change.edition_id] = change_quantity(change.quantity)
+    # The order of the changes doesn't matter, so the stored request is sorted: the same batch in another order replays.
+    payload = {'action': 'change_deck_list', 'deck_id': str(deck_id), 'revision': command.revision,
+               'changes': sorted([str(edition), str(quantity)] for edition, quantity in totals.items())}
+    with connect() as conn, conn.transaction():
+        _, rows = owner_and_rows(conn, user_id)
+        digest, previous = replay(conn, user_id, command.idempotency_key, payload)
+        if previous:
+            return replayed(conn, previous)
+        require_deck(rows, deck_id)
+        check_revision(conn, user_id, deck_id, command.revision)
+        listed = {row['edition_id'] for row in conn.execute(
+            'SELECT edition_id FROM deck_list_line WHERE owner_id=%s AND deck_id=%s AND edition_id=ANY(%s)',
+            (user_id, deck_id, list(totals)))}
+        new = [edition for edition, quantity in totals.items() if quantity and edition not in listed]
+        if new:
+            state = conn.execute('SELECT active_generation FROM catalog_state WHERE singleton FOR SHARE').fetchone()
+            available = conn.execute("""SELECT count(*) AS n FROM catalog_generation_edition ge
+              JOIN catalog_generation_printing gp ON gp.generation_id=ge.generation_id AND gp.printing_id=ge.printing_id
+              WHERE ge.generation_id=%s AND ge.edition_id=ANY(%s) AND ge.active AND NOT gp.tombstoned""",
+                                     (state['active_generation'], new)).fetchone()['n']
+            if available != len(new):
+                error(422, 'EDITION_UNAVAILABLE')
+        removed = [edition for edition, quantity in totals.items() if quantity == 0]
+        if removed:
+            conn.execute('DELETE FROM deck_list_line WHERE owner_id=%s AND deck_id=%s AND edition_id=ANY(%s)',
+                         (user_id, deck_id, removed))
+        kept = [(edition, quantity) for edition, quantity in totals.items() if quantity > 0]
+        if kept:
+            conn.execute("""INSERT INTO deck_list_line(owner_id,deck_id,edition_id,quantity)
+              SELECT %s,%s,edition_id,quantity FROM unnest(%s::uuid[],%s::bigint[]) AS change(edition_id,quantity)
+              ON CONFLICT (owner_id,deck_id,edition_id) DO UPDATE SET quantity=EXCLUDED.quantity""",
+                         (user_id, deck_id, [edition for edition, _ in kept], [quantity for _, quantity in kept]))
         return store_deck_list_result(conn, user_id, deck_id, command.idempotency_key, digest)
 
 

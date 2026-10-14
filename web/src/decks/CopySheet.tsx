@@ -1,4 +1,5 @@
 import type { RefObject } from "react";
+import type { BrowseEdition } from "../catalog_browse_generated";
 import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
 import { CopyArt } from "../ui/CopyTile";
@@ -8,6 +9,9 @@ import {
   kindText,
   type DeckLine,
 } from "./deckListModel";
+import { DeckListStepper, EditFeedbackLine } from "./DeckListStepper";
+import { SwapList } from "./SwapList";
+import type { EditFeedback } from "./useDeckListEdits";
 
 type Props = {
   /** The line shown, or null while closed. */
@@ -18,12 +22,26 @@ type Props = {
   returnFocus: RefObject<HTMLElement | null>;
   /** Gather: open the Pick List on this line's Edition (#179). Offered while copies are owned elsewhere. */
   onGather?: (editionId: string) => void;
+  /** Editing (#177). Without it the sheet is read-only. */
+  editing?: {
+    deckId: string;
+    /** Copies of the line's Edition on the Deck List, edits on their way included. */
+    quantity: bigint;
+    /** −1 or +1 on the line. */
+    onChange: (delta: bigint) => void;
+    /** Swap this copy for another Edition of the same Card Identity. */
+    onSwap: (row: BrowseEdition) => void;
+    feedback: EditFeedback | null;
+    /** Feedback with this id or lower came before the sheet opened. */
+    since: number;
+  };
 };
 
 /**
  * What a copy is and where it is (#176): the card, its Edition and kind, and how its line's copies split
- * between this Deck, other Locations and not owned, with Gather (#179) while copies are owned elsewhere. #177
- * adds ±1 and Swap this copy for.
+ * between this Deck, other Locations and not owned, with Gather (#179) while copies are owned elsewhere. Editing
+ * (#177) adds −1 / N on Deck List / +1, the last edit's words with its Undo, and Swap this copy for another Edition
+ * of the same Card Identity.
  */
 export function CopySheet({
   line,
@@ -31,6 +49,7 @@ export function CopySheet({
   onClose,
   returnFocus,
   onGather,
+  editing,
 }: Props) {
   const copy =
     line && ordinal !== null && line.copies
@@ -99,6 +118,18 @@ export function CopySheet({
               <li>{line.missing.toString()} not owned</li>
             </ul>
           </section>
+          {editing && (
+            <div className="flex flex-col gap-1">
+              <DeckListStepper
+                quantity={editing.quantity}
+                onChange={editing.onChange}
+              />
+              <EditFeedbackLine
+                feedback={editing.feedback}
+                since={editing.since}
+              />
+            </div>
+          )}
           {onGather && line.elsewhere > 0n && (
             <Button
               variant="primary"
@@ -107,6 +138,15 @@ export function CopySheet({
             >
               Gather
             </Button>
+          )}
+          {editing && (
+            <SwapList
+              key={line.line.identity_id}
+              deckId={editing.deckId}
+              identityId={line.line.identity_id}
+              editionId={line.line.edition_id}
+              onSwap={editing.onSwap}
+            />
           )}
         </div>
       )}

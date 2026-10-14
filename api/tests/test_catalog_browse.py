@@ -23,7 +23,7 @@ from app.catalog import TCGdexSource
 from app.main import app, connect
 from test_attribute_corrections import decide, grant, seed
 from test_card_attributes import BULBASAUR_ME, ENERGY_SV, EX_BW, SUPPORTER, SWITCH_ME, card, edition_of
-from test_card_identity import JUNIPER
+from test_card_identity import JUNIPER, LETTER, MAGNOLIA, PLAIN
 from test_catalog import reset_catalog
 from test_catalog_metadata import Records
 from test_catalog_reconciliation import run
@@ -300,6 +300,35 @@ def test_a_printing_filter_lists_that_printings_active_editions_with_copies_and_
     assert {row["owned"] for row in browse(collector(), printing_id=printing)["editions"]} == {0}
 
 
+def test_an_identity_filter_lists_every_active_edition_of_one_card_identity():
+    """The deck builder's "Swap this copy for" (#177): every active Edition of one Card Identity across its Printings
+    (Professor's Research and its subtitled reprints), each with the caller's copies, and nothing of another Card
+    Identity (Professor's Letter)."""
+    seed(JUNIPER, MAGNOLIA, PLAIN, LETTER)
+    user = collector()
+    with connect() as conn:
+        identity = str(conn.execute(
+            "SELECT identity_id FROM catalog_printing WHERE source_id='sv01-189'").fetchone()["identity_id"])
+        letter = str(conn.execute(
+            "SELECT identity_id FROM catalog_printing WHERE source_id='fixture-letter-1'").fetchone()["identity_id"])
+    created = call("POST", "/api/decks", user, {"name": "Swap deck", "idempotency_key": str(uuid4())})
+    assert created.status_code == 201, created.text
+    deck = created.json()["location"]["id"]
+    assert add(user, deck, edition_of("swsh1-178"), "1").status_code == 200
+    assert add(user, leaf(user), edition_of("swsh1-178"), "2").status_code == 200
+
+    page = browse(user, identity_id=identity, deck_id=deck)
+    assert page["matches"] == 3 and page["next_cursor"] is None
+    assert {(row["name"], row["set_id"], row["owned"], row["in_deck"], row["free"]) for row in page["editions"]} == {
+        ("Professor's Research", "sv01", 0, 0, 0),
+        ("Professor's Research (Professor Juniper)", "swsh4.5", 0, 0, 0),
+        ("Professor's Research (Professor Magnolia)", "swsh1", 3, 1, 2)}
+    # Another Card Identity's Editions, an unknown identity and a malformed id.
+    assert names(user, identity_id=letter) == [("Professor's Letter", "fixture-letters", "1")]
+    assert browse(user, identity_id=str(uuid4()))["editions"] == []
+    assert browse(user, identity_id="not-an-identity", expect=422)
+
+
 # ------------------------------------------------------------------ paging and stale cursors
 
 
@@ -321,6 +350,7 @@ def test_keyset_pages_of_sixty_and_a_409_when_a_revision_or_the_standing_key_cha
     # Another query's cursor, and a forged one, are refused.
     assert error(call("GET", f"{EDITIONS}?q=pika&cursor={cursor}", user)) == "INVALID_CURSOR"
     assert error(call("GET", f"{EDITIONS}?q=pik&printing_id={uuid4()}&cursor={cursor}", user)) == "INVALID_CURSOR"
+    assert error(call("GET", f"{EDITIONS}?q=pik&identity_id={uuid4()}&cursor={cursor}", user)) == "INVALID_CURSOR"
     assert call("GET", f"{EDITIONS}?q=pik&cursor={cursor[:-2]}xx", user).status_code == 400
     # The owner revision moved: start again.
     binder = leaf(user)

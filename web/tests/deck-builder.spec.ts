@@ -566,9 +566,12 @@ test.describe("on a phone", () => {
     const library = page.getByRole("tab", { name: "Library" });
     const deck = page.getByRole("tab", { name: "Deck 23/60" });
     await expect(library).toHaveAttribute("aria-selected", "true");
-    await expect(page.getByRole("tabpanel")).toContainText(
-      "Adding cards from your Collection and the catalog comes in the next update."
-    );
+    // The library (#177) fills the Library tab.
+    await expect(
+      page
+        .getByRole("tabpanel")
+        .getByRole("searchbox", { name: "Search the library" })
+    ).toBeVisible();
     await expectPageChecks(page, "phone deck builder, Library");
 
     await deck.tap();

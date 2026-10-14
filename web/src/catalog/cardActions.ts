@@ -1,15 +1,10 @@
-import {
-  addDeckListLine,
-  changeDeckListLine,
-  DeckError,
-  getDeck,
-} from "../decks_generated";
+import { changeDeckList, DeckError, getDeck } from "../decks_generated";
 import { addHolding, HoldingError } from "../holdings_generated";
 
 /**
  * The CardPopup's two actions (#174), one function each, so later tickets swap what they send without touching the
- * popup: #175 moves Add N onto batch add (POST /api/holdings/batch, with an Undo), and #177 moves Plan 1 onto the
- * batch Deck List change command.
+ * popup: #175 moves Add N onto batch add (POST /api/holdings/batch, with an Undo), and Plan 1 uses the batch Deck List
+ * change command (#177).
  *
  * Each keeps the command it sent after a failure whose outcome is unknown (a dropped connection, a 5xx), and sends
  * exactly that command again on the next press, with the same idempotency key, so the server replays it instead of
@@ -69,8 +64,7 @@ export type PlanCommand = {
   deckId: string;
   editionId: string;
   key: string;
-  /** "add" a new line of 1, or "change" an existing line to `quantity`. */
-  kind: "add" | "change";
+  /** The line's new total: 1 for a new line, or the existing line plus 1. */
   quantity: string;
   revision: number;
 };
@@ -78,16 +72,9 @@ export type PlanCommand = {
 export type PlanOutcome =
   { ok: true; quantity: string } | { ok: false; code: string; retry: boolean };
 
-// The Deck List moved between the read and the command: read it again once.
-const MOVED = new Set([
-  "STALE_DECK_LIST",
-  "DECK_LIST_LINE_EXISTS",
-  "DECK_LIST_LINE_NOT_FOUND",
-]);
-
-/** Plan 1: one more copy of a Card Edition on a Deck's Deck List, a new line of 1 or the existing line plus 1,
- * through the per-line routes (POST or PATCH /api/decks/{id}/deck-list/lines). It never moves a physical card, and
- * the owner revision doesn't move. A Deck List that changed under it is read again once. */
+/** Plan 1: one more copy of a Card Edition on a Deck's Deck List, a new line of 1 or the existing line plus 1, through
+ * the batch Deck List change command (POST /api/decks/{id}/deck-list/changes, #177). It never moves a physical card,
+ * and the owner revision doesn't move. A Deck List that changed under it (STALE_DECK_LIST) is read again once. */
 export async function planOne(
   deckId: string,
   editionId: string,
@@ -109,7 +96,6 @@ export async function planOne(
           deckId,
           editionId,
           key: crypto.randomUUID(),
-          kind: line ? "change" : "add",
           quantity: line ? String(BigInt(line.quantity) + 1n) : "1",
           revision: detail.deck_list.revision,
         };
@@ -123,15 +109,11 @@ export async function planOne(
     }
     pending.current = command;
     try {
-      const body = {
-        quantity: command.quantity,
+      const result = await changeDeckList(deckId, {
         revision: command.revision,
         idempotency_key: command.key,
-      };
-      const result =
-        command.kind === "add"
-          ? await addDeckListLine(deckId, { ...body, edition_id: editionId })
-          : await changeDeckListLine(deckId, editionId, body);
+        changes: [{ edition_id: editionId, quantity: command.quantity }],
+      });
       pending.current = null;
       const line = result.deck_list.lines.find(
         (item) => item.edition_id === editionId
@@ -141,7 +123,7 @@ export async function planOne(
       const code = cause instanceof DeckError ? cause.code : "";
       const definite = cause instanceof DeckError && cause.status < 500;
       if (definite) pending.current = null;
-      if (definite && MOVED.has(code) && attempt === 0) {
+      if (definite && code === "STALE_DECK_LIST" && attempt === 0) {
         command = null;
         continue;
       }
