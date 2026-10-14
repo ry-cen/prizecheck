@@ -33,7 +33,7 @@ from pathlib import Path
 
 from psycopg.pq import TransactionStatus
 
-from .card_attributes import ATTRIBUTE_COLUMNS, CardAttributeRules, CardAttributes
+from .card_attributes import FORMAT_FACT_COLUMNS, CardAttributeRules, CardAttributes
 from .public_projection import ProjectionUnavailable, public_record_store
 from .public_records import (catalog_edition_key, catalog_format_key, catalog_printing_key, quarantine_key, quote_states)
 
@@ -102,11 +102,11 @@ def format_value(row):
     and groups copy limits; ``name`` is its display name. ``reprint_group`` is null for a Printing in no Reprint Group;
     otherwise ``ref`` is the group's public reference and ``printings`` the sorted public references of the group's
     printings that the active catalog generation holds and has not withdrawn (the private check's ``MEMBERS``), whose
-    own format records carry their facts. Attributes are the effective ones (``catalog_card_attribute``); null means
-    unknown. Every field changes only together with a Printing stamp (migration 036), so the record shares the
-    Printing's revision.
+    own format records carry their facts. Attributes are the effective ones (``catalog_card_attribute``) that format
+    rules read, ``FORMAT_FACT_COLUMNS``: every attribute but Trainer Type (migration 041); null means unknown. Every
+    field changes only together with a Printing stamp (migration 036), so the record shares the Printing's revision.
     """
-    attributes = {column: row[column] for column in ATTRIBUTE_COLUMNS}
+    attributes = {column: row[column] for column in FORMAT_FACT_COLUMNS}
     if attributes['types'] is not None:
         attributes['types'] = list(attributes['types'])
     group = None
@@ -160,7 +160,7 @@ def build_values(conn, targets):
           m.public_revision,m.live_state,m.live_reason,m.live_identity,a.version AS rule_version,
           nullif(pd.set_id,'') AS format_set_id,nullif(pd.collector_number,'') AS format_collector_number,
           ci.identity_key,ci.display_name AS identity_name,
-          {', '.join('ca.' + column for column in ATTRIBUTE_COLUMNS)},
+          {', '.join('ca.' + column for column in FORMAT_FACT_COLUMNS)},
           rg.group_id AS reprint_group_id,
           (SELECT array_agg(mp.public_ref ORDER BY mp.public_ref COLLATE "C") FROM catalog_reprint_group_member mg
            JOIN catalog_state s ON s.singleton
@@ -838,7 +838,7 @@ def _format(ref, value, generation):
         if not isinstance(identity, dict) or set(identity) != {'key', 'name'} \
                 or not all(isinstance(identity[key], str) and identity[key] for key in identity):
             return None
-        if not isinstance(attributes, dict) or set(attributes) != set(ATTRIBUTE_COLUMNS):
+        if not isinstance(attributes, dict) or set(attributes) != set(FORMAT_FACT_COLUMNS):
             return None
         mark, kind, types = attributes['regulation_mark'], attributes['card_kind'], attributes['types']
         if not (mark is None or isinstance(mark, str) and _MARK.fullmatch(mark)) or kind not in _KINDS:
@@ -850,7 +850,7 @@ def _format(ref, value, generation):
             return None
     except (KeyError, TypeError):
         return None
-    values = {column: attributes[column] for column in ATTRIBUTE_COLUMNS}
+    values = {column: attributes[column] for column in FORMAT_FACT_COLUMNS}
     values['types'] = tuple(types) if types is not None else None
     return FormatFacts(set_id, number, identity['key'], identity['name'], CardAttributes(**values),
                        None if group is None else group['ref'], () if group is None else tuple(group['printings']),

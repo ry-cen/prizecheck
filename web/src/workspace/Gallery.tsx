@@ -9,7 +9,9 @@ import React, {
   useState,
 } from "react";
 import { EditionPrice } from "../EditionPrice";
-import type { HoldingView } from "../holdings_generated";
+import { Button } from "../ui/Button";
+import { CopyTile } from "../ui/CopyTile";
+import { variantLabel } from "../ui/variantLabel";
 import {
   computeLayout,
   readTileMetrics,
@@ -27,8 +29,11 @@ import {
 } from "./galleryModel";
 import { isTileSelected, marqueeSpans, type Selection } from "./selectionModel";
 import type { MarqueeEvent, TileGesture } from "./useSelection";
-import "./Gallery.css";
-import "./Selection.css";
+
+// The tile's price line: the existing EditionPrice component's compact form, on one line cut with an ellipsis,
+// in the tile's colours. EditionPrice.css reaches only the old pages (#166), so these are the only rules here.
+const TILE_PRICE =
+  "block [&_.edition-price]:block [&_.edition-price]:truncate [&_.edition-price]:text-text-subtle [&_.edition-price_strong]:font-semibold [&_.edition-price_strong]:text-text [&_.edition-price-line]:flex [&_.edition-price-line]:min-w-0 [&_.edition-price-line]:whitespace-nowrap [&_.edition-price-amount]:min-w-0 [&_.edition-price-amount]:truncate [&_.edition-price-label]:shrink-0 [&_.edition-price-label]:whitespace-pre [&_.edition-price-sr]:sr-only";
 
 type Props = {
   data: GalleryData;
@@ -54,6 +59,10 @@ type Props = {
 
 /** Rows mounted beyond the viewport, as a fraction of the viewport height, above and below. */
 const OVERSCAN_VIEWPORTS = 1;
+
+/** A card-shaped placeholder: before the first page, and for tiles whose page hasn't arrived. */
+const PLACEHOLDER =
+  "absolute rounded-card bg-[linear-gradient(135deg,var(--color-art-start),var(--color-art-end))]";
 
 /** A marquee starts selecting once the pointer has moved this far, so a click on empty space only clears. */
 const MARQUEE_THRESHOLD_PX = 4;
@@ -349,7 +358,7 @@ export function Gallery({
       return (
         <div
           key={`pending-${index}`}
-          className="ws-tile-placeholder"
+          className={PLACEHOLDER}
           aria-hidden="true"
           style={{
             left: rect.x,
@@ -384,6 +393,7 @@ export function Gallery({
             : null
         }
         path={holding.location_path}
+        selectMode={selectMode}
       />
     );
   };
@@ -406,7 +416,7 @@ export function Gallery({
   return (
     <section
       ref={sectionRef}
-      className={`ws-gallery${selectMode ? " ws-select-mode" : ""}`}
+      className="mt-6 min-h-12 select-none"
       aria-label="Cards"
       aria-busy={loading}
       onPointerDown={startMarquee}
@@ -422,22 +432,23 @@ export function Gallery({
       onLostPointerCapture={endMarquee}
     >
       {data.error && (
-        <div className="ws-gallery-error" role="alert">
-          <p>{data.error}</p>
-          <button type="button" onClick={onRetry}>
-            Retry
-          </button>
+        <div
+          className="flex flex-col items-center gap-3 px-3 py-10 text-center text-text-muted"
+          role="alert"
+        >
+          <p className="m-0">{data.error}</p>
+          <Button onClick={onRetry}>Retry</Button>
         </div>
       )}
-      {empty && <p className="ws-gallery-empty">{emptyMessage}</p>}
-      <div
-        ref={gridRef}
-        className="ws-gallery-grid"
-        style={{ height: gridHeight }}
-      >
+      {empty && (
+        <p className="m-0 px-3 py-10 text-center text-text-muted">
+          {emptyMessage}
+        </p>
+      )}
+      <div ref={gridRef} className="relative" style={{ height: gridHeight }}>
         {loading && layout && (
           <div
-            className="ws-gallery-loading"
+            className="absolute inset-0"
             role="status"
             aria-label="Loading cards"
           >
@@ -448,7 +459,7 @@ export function Gallery({
                 return (
                   <div
                     key={index}
-                    className="ws-tile-placeholder"
+                    className={PLACEHOLDER}
                     aria-hidden="true"
                     style={{
                       left: rect.x,
@@ -463,7 +474,13 @@ export function Gallery({
           </div>
         )}
         {cells}
-        {band && <div className="ws-marquee" aria-hidden="true" style={band} />}
+        {band && (
+          <div
+            className="pointer-events-none absolute z-1 box-border border border-solid border-accent bg-accent-wash"
+            aria-hidden="true"
+            style={band}
+          />
+        )}
       </div>
     </section>
   );
@@ -493,9 +510,12 @@ type TileProps = {
   /** The source Location's name in All owned; null inside a Storage Leaf. */
   caption: string | null;
   path: string;
+  /** Ticket 105: mobile Select mode, where a tap toggles; the page still scrolls vertically and zooms. */
+  selectMode: boolean;
 };
 
-/** One copy: a toggle button. Selected tiles show a dark gap, an accent ring and a check badge. */
+/** One copy: the kit's CopyTile as a toggle button (#164). Selected tiles show a dark gap, an accent ring
+ * and a check badge. */
 const Tile = memo(function Tile({
   entry,
   ordinal,
@@ -513,19 +533,40 @@ const Tile = memo(function Tile({
   prices,
   caption,
   path,
+  selectMode,
 }: TileProps) {
   const { holding } = entry;
   const priceId = useId();
   const ref = (): TileRef => ({ holding: entry, ordinal, index });
   return (
-    <button
-      type="button"
-      className="ws-tile"
+    <CopyTile
+      absolute
+      data-gallery-tile=""
+      className={
+        selectMode
+          ? "touch-manipulation [-webkit-touch-callout:none]"
+          : undefined
+      }
       style={{ left, top, width }}
-      aria-label={tileLabel(holding, ordinal, path)}
-      aria-describedby={prices ? priceId : undefined}
+      label={tileLabel(holding, ordinal, path)}
       title={tileTitle(holding, ordinal, path)}
-      aria-pressed={selected}
+      name={holding.printing_name}
+      setName={holding.set_name}
+      collectorNumber={holding.collector_number}
+      variant={variantLabel(holding.descriptor)}
+      imageUrl={holding.image_url}
+      names={names}
+      selected={selected}
+      price={
+        prices ? (
+          <span className={TILE_PRICE}>
+            <EditionPrice compact editionId={holding.edition_id} />
+          </span>
+        ) : undefined
+      }
+      priceId={priceId}
+      caption={caption}
+      aria-describedby={prices ? priceId : undefined}
       onClick={(event) =>
         onTile(ref(), {
           kind: "click",
@@ -557,49 +598,6 @@ const Tile = memo(function Tile({
         onBlurTile(index);
         onHover(null);
       }}
-    >
-      <TileArt holding={holding} />
-      {names && (
-        <span className="ws-tile-names">
-          <span className="ws-tile-name">{holding.printing_name}</span>
-          <span className="ws-tile-set">
-            {holding.set_name} · {holding.collector_number}
-          </span>
-        </span>
-      )}
-      {prices && (
-        <span className="ws-tile-price" id={priceId}>
-          <EditionPrice compact editionId={holding.edition_id} />
-        </span>
-      )}
-      {caption !== null && <span className="ws-tile-caption">{caption}</span>}
-      {selected && (
-        <span className="ws-tile-check" aria-hidden="true">
-          ✓
-        </span>
-      )}
-    </button>
+    />
   );
 });
-
-/** Card artwork, or the card's name on the artwork placeholder when there is no image or it fails. */
-function TileArt({ holding }: { holding: HoldingView }) {
-  const [failed, setFailed] = useState(false);
-  useEffect(() => setFailed(false), [holding.image_url]);
-  return (
-    <span className="ws-tile-art" aria-hidden="true">
-      {holding.image_url && !failed ? (
-        <img
-          src={holding.image_url}
-          alt=""
-          loading="lazy"
-          decoding="async"
-          draggable={false}
-          onError={() => setFailed(true)}
-        />
-      ) : (
-        <span className="ws-tile-fallback">{holding.printing_name}</span>
-      )}
-    </span>
-  );
-}

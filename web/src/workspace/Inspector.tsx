@@ -1,82 +1,100 @@
-import React, { useEffect, useId, useRef, useState } from "react";
-import { getEditionDistribution } from "../collection_generated";
+import React, { useEffect, useState } from "react";
+import {
+  getEditionDistribution,
+  type CardCategory,
+  type TrainerType,
+} from "../collection_generated";
 import { EditionPrice } from "../EditionPrice";
 import type { HoldingView } from "../holdings_generated";
 import { metadataReportHref } from "../metadataReportLink";
-import { CATEGORY_OPTIONS, plural } from "./galleryModel";
+import { Dialog } from "../ui/Dialog";
+import { variantLabel } from "../ui/variantLabel";
+import { CATEGORY_LABELS, TRAINER_TYPE_LABELS, plural } from "./galleryModel";
 import type { Inspected } from "./useSelection";
-import "./Inspector.css";
 
-const FOCUSABLE =
-  'button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex="-1"])';
-
-/** Hover and selection change quickly; wait this long before asking for an Edition's total or price. */
+/** Hover and selection change quickly; wait this long before asking for an Edition's copies or price. */
 const TOTAL_DELAY_MS = 150;
 const PRICE_DELAY_MS = TOTAL_DELAY_MS;
+
+/** One Storage Leaf (or Deck) holding copies of the inspected Edition. */
+export type LeafCopies = {
+  locationId: string;
+  locationName: string;
+  quantity: number;
+};
 
 type DetailsProps = {
   card: Inspected;
   /** Full path such as "Shelf / Binder 2", or undefined when the tree doesn't know the Location. */
   locationPath: (id: string) => string | undefined;
-  /** The gallery listing's owner revision; a new revision re-reads totals. */
+  /** The gallery listing's owner revision; a new revision re-reads the copies owned. */
   ownerRevision: number | null;
-  /** Totals already read, kept by the Workspace so they outlive the details panel's mounts. */
-  ownedTotals: Map<string, number>;
-  headingId?: string;
+  /** Each Edition's Leaves already read ("<revision>:<edition>"), kept by the Workspace so they outlive
+   * the details panel's mounts. */
+  ownedTotals: Map<string, LeafCopies[]>;
+  /** The phone sheet: the Dialog's title already names the card, and the art is narrower. */
+  sheet?: boolean;
 };
 
-/** Category and elemental type, for example "Pokémon · Fire" or "Pokémon · Psychic · Water".
- * The Holding listing returns them as `category` and `elemental_types` (ticket 104); the line is
- * omitted when the catalog knows neither. */
+/** Card kind, Trainer Type and elemental type from the effective card attributes, for example
+ * "Pokémon · Fire", "Pokémon · Psychic · Water" or "Trainer · Supporter". The Holding listing returns
+ * them as `category`, `trainer_type` and `elemental_types` (tickets 104 and 170); the line is omitted
+ * when the catalog knows none of them. */
 export function cardKindLine(holding: HoldingView): string | null {
-  const { category, elemental_types } = holding as HoldingView & {
+  const { category, trainer_type, elemental_types } = holding as HoldingView & {
     category?: string | null;
+    trainer_type?: string | null;
     elemental_types?: readonly string[] | null;
   };
-  const label =
-    CATEGORY_OPTIONS.find((option) => option.value === category)?.label ??
-    category;
-  const parts = [label, ...(elemental_types ?? [])].filter(
+  const label = category
+    ? (CATEGORY_LABELS[category as CardCategory] ?? category)
+    : null;
+  const trainerType = trainer_type
+    ? (TRAINER_TYPE_LABELS[trainer_type as TrainerType] ?? trainer_type)
+    : null;
+  const parts = [label, trainerType, ...(elemental_types ?? [])].filter(
     (part): part is string => !!part
   );
   return parts.length ? parts.join(" · ") : null;
 }
 
-type Total =
+type Owned =
   | { state: "loading" }
-  | { state: "ready"; copies: number }
+  | { state: "ready"; leaves: LeafCopies[] }
   | { state: "failed" };
 
-/** Copies of an Edition owned across every Location. The gallery may show one Location only, so
- * this reads the Edition's distribution. Totals are cached per owner revision in the Workspace's
- * map; with no owner revision yet, nothing is read from or written to the cache. */
-function useOwnedTotal(
+/** Where the Edition's copies are, across every Location: the per-Edition distribution read (one row per
+ * Holding, Decks included). The gallery may show one Location only, so this read is separate. Rows are
+ * cached per owner revision in the Workspace's map; with no owner revision yet, nothing is read from or
+ * written to the cache. */
+function useOwnedCopies(
   editionId: string,
   ownerRevision: number | null,
-  cache: Map<string, number>
-): Total {
+  cache: Map<string, LeafCopies[]>
+): Owned {
   const key = `${ownerRevision ?? ""}:${editionId}`;
   const cached = ownerRevision === null ? undefined : cache.get(key);
-  const [total, setTotal] = useState<{ key: string; value: Total }>({
+  const [owned, setOwned] = useState<{ key: string; value: Owned }>({
     key: "",
     value: { state: "loading" },
   });
   useEffect(() => {
     if (ownerRevision !== null && cache.has(key)) return;
-    setTotal({ key, value: { state: "loading" } });
+    setOwned({ key, value: { state: "loading" } });
     let live = true;
     const timer = window.setTimeout(() => {
       getEditionDistribution(editionId)
         .then((distribution) => {
-          const copies = distribution.holdings.reduce(
-            (sum, holding) => sum + (Number(holding.quantity) || 0),
-            0
-          );
-          if (ownerRevision !== null) cache.set(key, copies);
-          if (live) setTotal({ key, value: { state: "ready", copies } });
+          const leaves = distribution.holdings.map((holding) => ({
+            locationId: holding.location_id,
+            locationName: holding.location_name,
+            quantity: Number(holding.quantity) || 0,
+          }));
+          if (ownerRevision !== null) cache.set(key, leaves);
+          if (live) setOwned({ key, value: { state: "ready", leaves } });
         })
         .catch(() => {
-          if (live) setTotal({ key, value: { state: "failed" } });
+          if (live) setOwned({ key, value: { state: "failed" } });
         });
     }, TOTAL_DELAY_MS);
     return () => {
@@ -84,53 +102,114 @@ function useOwnedTotal(
       window.clearTimeout(timer);
     };
   }, [key, editionId, ownerRevision, cache]);
-  if (cached !== undefined) return { state: "ready", copies: cached };
-  return total.key === key ? total.value : { state: "loading" };
+  if (cached !== undefined) return { state: "ready", leaves: cached };
+  return owned.key === key ? owned.value : { state: "loading" };
 }
 
-/** The inspected card's facts: set, number, category and type, Location path, copies there and total owned. */
+/** Location paths in the order the tree lists them: natural, case-insensitive ("Binder 2" before
+ * "Binder 10"). */
+const byPath = new Intl.Collator(undefined, {
+  numeric: true,
+  sensitivity: "base",
+});
+const counts = new Intl.NumberFormat("en-US");
+
+// The details space their lines with padding (m-0 clears the browser's own margins: there is no Preflight).
+// The price section is inset by px-1 and the panel ends with pb-1 so the report link's focus ring isn't
+// clipped by the panel's scroll box.
+const META = "text-meta text-text-muted tabular-nums";
+const SECTION = "mt-4 border-t border-border pt-4";
+// The inspected Edition's price: the existing EditionPrice component in the inspector's colours, the amount
+// in the accent. EditionPrice.css reaches only the old pages (#166), so these are the only rules here.
+const PRICE =
+  "[&_.edition-price]:block [&_.edition-price]:text-text-muted [&_.edition-price[data-price-status=checking]]:italic [&_.edition-price_strong]:text-body [&_.edition-price_strong]:font-semibold [&_.edition-price_strong]:text-accent [&_.price-refresh]:text-text-subtle [&_.price-refresh[data-refresh=failed]]:text-warning";
+
+/** The inspected card's facts: set, number and Variant, category and type, its Location, copies there,
+ * copies owned and each Storage Leaf that holds them (#164), then its price. */
 export function CardDetails({
   card,
   locationPath,
   ownerRevision,
   ownedTotals,
-  headingId,
+  sheet = false,
 }: DetailsProps) {
   const { holding } = card.holding;
-  const total = useOwnedTotal(holding.edition_id, ownerRevision, ownedTotals);
+  const owned = useOwnedCopies(holding.edition_id, ownerRevision, ownedTotals);
   const kind = cardKindLine(holding);
+  const copiesOwned =
+    owned.state === "ready"
+      ? owned.leaves.reduce((sum, leaf) => sum + leaf.quantity, 0)
+      : 0;
+  const leaves =
+    owned.state === "ready"
+      ? owned.leaves
+          .map((leaf) => ({
+            ...leaf,
+            path: locationPath(leaf.locationId) ?? leaf.locationName,
+          }))
+          .sort(
+            (a, b) =>
+              byPath.compare(a.path, b.path) ||
+              a.locationId.localeCompare(b.locationId)
+          )
+      : [];
   return (
-    <div className="ws-details">
-      <DetailsArt holding={holding} />
-      <h2 id={headingId} className="ws-details-name">
-        {holding.printing_name}
-      </h2>
-      <p className="ws-details-meta">
+    <div className="text-body">
+      <DetailsArt holding={holding} narrow={sheet} />
+      {!sheet && (
+        <h2 className="m-0 pt-4 text-heading font-[550] wrap-anywhere">
+          {holding.printing_name}
+        </h2>
+      )}
+      <p className={`m-0 ${sheet ? "pt-4" : "pt-1"} ${META}`}>
         {holding.set_name} · {holding.collector_number}
       </p>
-      {kind && <p className="ws-details-meta">{kind}</p>}
-      <div className="ws-details-location">
-        <p className="ws-details-path">
+      <dl className="m-0 flex gap-2 pt-1 text-meta text-text-muted">
+        <dt className="text-text-subtle">Variant</dt>
+        <dd className="m-0 min-w-0 wrap-anywhere">
+          {variantLabel(holding.descriptor)}
+        </dd>
+      </dl>
+      {kind && <p className={`m-0 pt-1 ${META}`}>{kind}</p>}
+      <div className={`${SECTION} text-meta wrap-anywhere`}>
+        <p className="m-0">
           {locationPath(holding.location_id) ?? holding.location_name}
         </p>
-        <p className="ws-details-counts">
+        <p className="m-0 pt-1 text-text-subtle tabular-nums">
           {plural(card.holding.copies, "copy", "copies")} here
         </p>
-        <p className="ws-details-counts">
-          {total.state === "ready"
-            ? `${plural(total.copies, "copy", "copies")} owned`
-            : total.state === "failed"
+        <p className="m-0 pt-1 text-text-subtle tabular-nums">
+          {owned.state === "ready"
+            ? `${plural(copiesOwned, "copy", "copies")} owned`
+            : owned.state === "failed"
               ? "Copies owned unavailable"
               : "Counting copies owned…"}
         </p>
+        {leaves.length > 0 && (
+          <ul
+            aria-label="Copies by location"
+            className="m-0 flex list-none flex-col gap-0.5 p-0 pt-1 tabular-nums"
+          >
+            {leaves.map((leaf) => (
+              <li key={leaf.locationId} className="text-text-muted">
+                <span className="font-semibold text-text">
+                  {counts.format(leaf.quantity)}
+                </span>{" "}
+                in {leaf.path}
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
-      <div className="ws-details-price">
+      <div
+        className={`${SECTION} ${PRICE} flex flex-col items-start gap-2 px-1 text-meta tabular-nums wrap-anywhere`}
+      >
         <InspectorPrice
           key={holding.edition_id}
           editionId={holding.edition_id}
         />
         <a
-          className="ws-details-report"
+          className="inline-flex min-h-(--target-pointer) items-center text-accent underline-offset-2 hover:text-accent-strong phone:min-h-tap"
           href={metadataReportHref(holding.printing_id, holding.edition_id)}
         >
           Report a problem with this card's data
@@ -160,11 +239,20 @@ function InspectorPrice({ editionId }: { editionId: string }) {
   );
 }
 
-function DetailsArt({ holding }: { holding: HoldingView }) {
+function DetailsArt({
+  holding,
+  narrow,
+}: {
+  holding: HoldingView;
+  narrow: boolean;
+}) {
   const [failed, setFailed] = useState(false);
   useEffect(() => setFailed(false), [holding.image_url]);
   return (
-    <span className="ws-details-art" aria-hidden="true">
+    <span
+      className={`block aspect-(--tile-aspect) overflow-hidden rounded-card bg-[linear-gradient(135deg,var(--color-art-start),var(--color-art-end))] shadow-[0_var(--space-1)_var(--space-3)_var(--color-shadow)] ${narrow ? "mx-auto w-1/2" : "w-full"}`}
+      aria-hidden="true"
+    >
       {holding.image_url && !failed ? (
         <img
           src={holding.image_url}
@@ -172,100 +260,49 @@ function DetailsArt({ holding }: { holding: HoldingView }) {
           decoding="async"
           draggable={false}
           onError={() => setFailed(true)}
+          className="block size-full object-cover"
         />
       ) : (
-        <span className="ws-details-fallback">{holding.printing_name}</span>
+        <span className="box-border flex h-full items-center justify-center p-3 text-center font-semibold text-text-muted wrap-anywhere">
+          {holding.printing_name}
+        </span>
       )}
     </span>
   );
 }
 
-type InspectorProps = Omit<DetailsProps, "card" | "headingId"> & {
+type InspectorProps = Omit<DetailsProps, "card" | "sheet"> & {
   card: Inspected | null;
 };
 
-/** The desktop inspector column. Its space is reserved; it is empty while nothing is hovered or selected. */
+/** The desktop inspector column. Its space is reserved; it is empty while nothing is hovered or selected.
+ * It stays in view while the gallery scrolls, below the app shell's sticky header; when its content is
+ * taller than the window (an Edition in many Leaves), it scrolls inside itself so nothing is cut off. */
 export function Inspector({ card, ...rest }: InspectorProps) {
   return (
-    <aside className="ws-inspector ws-desktop-only" aria-label="Card details">
+    <aside
+      className="sticky top-[calc(var(--space-4)+var(--layout-sticky-top))] mt-6 box-border max-h-[calc(100dvh-var(--space-4)-var(--layout-sticky-top))] min-w-0 self-start overflow-y-auto overscroll-contain pb-1 phone:hidden"
+      aria-label="Card details"
+    >
       {card && <CardDetails card={card} {...rest} />}
     </aside>
   );
 }
 
-type SheetProps = Omit<DetailsProps, "headingId"> & { onClose: () => void };
+type SheetProps = Omit<DetailsProps, "sheet"> & { onClose: () => void };
 
-/** The mobile details sheet: a modal dialog from the bottom. Escape or Close closes it, Tab stays
- * inside, and focus returns to the tile that opened it. */
+/** The mobile details sheet: the kit Dialog, a bottom sheet on a phone (#164). Escape, Close or a tap on
+ * the dimmed page closes it, Tab stays inside, and focus returns to the tile or button that opened it.
+ * The card's name is the sheet's title. */
 export function DetailsSheet({ onClose, ...rest }: SheetProps) {
-  const sheetRef = useRef<HTMLDivElement>(null);
-  const headingId = useId();
-  const close = useRef(onClose);
-  close.current = onClose;
-  useEffect(() => {
-    const opener =
-      document.activeElement instanceof HTMLElement
-        ? document.activeElement
-        : null;
-    const focusables = () =>
-      Array.from(
-        sheetRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? []
-      );
-    focusables()[0]?.focus();
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        close.current();
-        return;
-      }
-      if (event.key !== "Tab") return;
-      const items = focusables();
-      if (!items.length) return;
-      const first = items[0];
-      const last = items[items.length - 1];
-      const inside = sheetRef.current?.contains(document.activeElement);
-      if (event.shiftKey && (document.activeElement === first || !inside)) {
-        event.preventDefault();
-        last.focus();
-      } else if (
-        !event.shiftKey &&
-        (document.activeElement === last || !inside)
-      ) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    document.addEventListener("keydown", onKeyDown);
-    const overflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.removeEventListener("keydown", onKeyDown);
-      document.body.style.overflow = overflow;
-      if (opener?.isConnected && opener.getClientRects().length) opener.focus();
-    };
-  }, []);
   return (
-    <div className="ws-sheet-backdrop" onClick={onClose}>
-      <div
-        ref={sheetRef}
-        className="ws-sheet"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={headingId}
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="ws-sheet-heading">
-          <button
-            type="button"
-            className="ws-header-icon"
-            aria-label="Close details"
-            onClick={onClose}
-          >
-            <span aria-hidden="true">✕</span>
-          </button>
-        </div>
-        <CardDetails headingId={headingId} {...rest} />
-      </div>
-    </div>
+    <Dialog
+      open
+      onClose={onClose}
+      title={rest.card.holding.holding.printing_name}
+      closeLabel="Close details"
+    >
+      <CardDetails sheet {...rest} />
+    </Dialog>
   );
 }

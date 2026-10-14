@@ -40,11 +40,19 @@ public format facts (Deck Lists 18) change with them: every such change is a row
 and 037) re-stamp and enqueue the Printings concerned and the other members of their old and new groups at the
 decision's public revision. The decision delivers them after its commit and reports ``public_delivery``, like an
 attribute decision.
+
+The evidence also shows what Owner controls' Reprints review card needs (#171): each Printing's effective regulation
+mark, and each group's legality in every Format on one day (``legality_on``, today in UTC unless ``as_of`` names
+another). A group is legal in a Format when the format checks would find one of its Printings legal
+(``format_evaluator.line_standing`` over the members the active catalog generation holds and has not withdrawn, as
+``deck_format_checks`` reads them): a ban on any member makes it not legal, and otherwise it is unknown when no member
+is legal and one is unknown. The regulation mark is part of the evidence digest, so a decision binds to it; the
+legality is not, because it changes with the date and the rules files, never with the reviewed records.
 """
 import hashlib
 import hmac
 import json
-from datetime import datetime
+from datetime import date, datetime, timezone
 from typing import Literal
 from uuid import UUID, uuid4, uuid5
 
@@ -52,7 +60,8 @@ import psycopg
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field, HttpUrl
 
-from .card_attributes import advance_attribute_revision, attribute_revision
+from . import format_evaluator as evaluator
+from .card_attributes import advance_attribute_revision, attribute_revision, read_card_attributes
 from .holdings import fail
 from .main import connect, require_owner, verified_user
 from .metadata_reviews import consume_metadata_code, delivery_status
@@ -73,15 +82,26 @@ PRINTINGS = """SELECT p.id AS printing_id, p.source, p.source_id, d.set_id, d.co
     EXISTS (SELECT 1 FROM catalog_state s JOIN catalog_generation_printing gp
             ON gp.generation_id = s.active_generation AND gp.printing_id = p.id
             WHERE s.singleton AND NOT gp.tombstoned) AS in_catalog,
-    dg.group_id AS derived_group_id, l.group_id AS linked_group_id, a.group_id AS assigned_group_id, m.group_id
+    ca.regulation_mark, dg.group_id AS derived_group_id, l.group_id AS linked_group_id,
+    a.group_id AS assigned_group_id, m.group_id
   FROM catalog_printing p
   LEFT JOIN catalog_printing_display d ON d.printing_id = p.id
+  LEFT JOIN catalog_card_attribute ca ON ca.printing_id = p.id
   LEFT JOIN catalog_derived_reprint_group dg ON dg.printing_id = p.id
   LEFT JOIN catalog_reprint_group_link l ON l.printing_id = p.id
   LEFT JOIN catalog_reprint_group_assignment a ON a.printing_id = p.id
   LEFT JOIN catalog_reprint_group_member m ON m.printing_id = p.id
   WHERE p.identity_id = %s
   ORDER BY d.set_id, d.collector_number, p.id"""
+# The members of these groups that format checks count: held by the active catalog generation and not withdrawn (as
+# ``deck_format_checks.MEMBERS``).
+MEMBERS = """SELECT g.group_id, g.printing_id, gp.set_id, gp.collector_number
+  FROM catalog_reprint_group_member g
+  JOIN catalog_state s ON s.singleton
+  JOIN catalog_generation_printing gp ON gp.generation_id = s.active_generation AND gp.printing_id = g.printing_id
+  WHERE g.group_id = ANY(%s) AND NOT gp.tombstoned"""
+# Best first: a group is as legal as its most legal member.
+STATUS_ORDER = {"legal": 0, "unknown": 1, "not_legal": 2}
 
 
 # ---------------------------------------------------------------- evidence, queue and history
@@ -96,6 +116,8 @@ class ReprintGroupPrinting(BaseModel):
     name: str | None
     # Held by the active catalog generation and not withdrawn.
     in_catalog: bool
+    # The effective regulation mark (catalog_card_attribute); null when unknown.
+    regulation_mark: str | None
     derived_group_id: UUID | None
     # The reviewed group this Printing's derived group is linked to, if any.
     linked_group_id: UUID | None
@@ -105,9 +127,18 @@ class ReprintGroupPrinting(BaseModel):
     group_id: UUID | None
 
 
+class GroupLegality(BaseModel):
+    # A Format with a rules file ("standard", "expanded", "glc") and its name ("Standard").
+    format: str
+    name: str
+    status: Literal["legal", "not_legal", "unknown"]
+
+
 class ReprintGroupView(BaseModel):
     group_id: UUID
     printing_ids: list[UUID]
+    # The group's legality in each Format on ``legality_on``, in format order. Outside the evidence digest.
+    legality: list[GroupLegality]
 
 
 class CardIdentityEvidence(BaseModel):
@@ -117,6 +148,8 @@ class CardIdentityEvidence(BaseModel):
     merged_into: UUID | None
     printings: list[ReprintGroupPrinting]
     groups: list[ReprintGroupView]
+    # The day the groups' legality is for.
+    legality_on: date
     attribute_revision: int
     evidence_digest: str
 
@@ -128,6 +161,8 @@ class CardIdentityQueueItem(BaseModel):
     name: str | None
     set_id: str | None
     collector_number: str | None
+    # When the Printing was created, which is when it began waiting for a group.
+    opened_at: datetime
 
 
 class CardIdentityQueuePage(BaseModel):
@@ -171,14 +206,42 @@ def load_evidence(conn, identity_id: UUID):
     return {"identity": identity, "printings": printings, "groups": groups, "evidence_digest": digest}
 
 
-def evidence_view(conn, loaded) -> CardIdentityEvidence:
+def group_legality(conn, identity_name: str, group_ids, on: date) -> dict:
+    """Each group's legality in every Format on ``on``, by group ID (see the module docstring)."""
+    rows = conn.execute(MEMBERS, (list(group_ids),)).fetchall() if group_ids else []
+    attributes = read_card_attributes(conn, {row["printing_id"] for row in rows})
+    members = {}
+    for row in rows:
+        members.setdefault(row["group_id"], []).append(evaluator.PrintingFacts(
+            row["printing_id"], row["set_id"], attributes[row["printing_id"]], row["collector_number"]))
+    legality = {}
+    for group in group_ids:
+        facts = members.get(group, [])
+        reprint_groups = {group: facts}
+        legality[group] = []
+        for name in evaluator.FORMATS:
+            rules = evaluator.format_rules(name)
+            # line_standing reads only the line's printing, group and Card Identity name.
+            standings = [evaluator.line_standing(
+                evaluator.ResolvedLine(edition_id=fact.printing_id, quantity=1, identity_id=fact.printing_id,
+                                       identity_name=identity_name, printing=fact, reprint_group_id=group),
+                rules, on, reprint_groups).status for fact in facts]
+            status = min(standings, key=STATUS_ORDER.__getitem__) if standings else "unknown"
+            legality[group].append(GroupLegality(format=name, name=rules.name, status=status))
+    return legality
+
+
+def evidence_view(conn, loaded, on: date | None = None) -> CardIdentityEvidence:
     identity = loaded["identity"]
+    on = on or datetime.now(timezone.utc).date()
+    ordered = sorted(loaded["groups"].items(), key=lambda item: str(item[0]))
+    legality = group_legality(conn, identity["display_name"], [group for group, _ in ordered], on)
     return CardIdentityEvidence(
         identity_id=identity["id"], identity_key=identity["identity_key"], display_name=identity["display_name"],
         merged_into=identity["merged_into"], printings=loaded["printings"],
-        groups=[ReprintGroupView(group_id=group, printing_ids=members)
-                for group, members in sorted(loaded["groups"].items(), key=lambda item: str(item[0]))],
-        attribute_revision=attribute_revision(conn), evidence_digest=loaded["evidence_digest"])
+        groups=[ReprintGroupView(group_id=group, printing_ids=members, legality=legality[group])
+                for group, members in ordered],
+        legality_on=on, attribute_revision=attribute_revision(conn), evidence_digest=loaded["evidence_digest"])
 
 
 @router.get(f"{ADMIN}/queue", response_model=CardIdentityQueuePage)
@@ -187,7 +250,7 @@ def review_queue(cursor: UUID | None = None, user_id: str = Depends(verified_use
     with connect() as conn:
         require_owner(conn, user_id)
         rows = conn.execute("""SELECT p.id AS printing_id, p.identity_id, ci.display_name AS identity_name,
-            d.display_name AS name, d.set_id, d.collector_number
+            d.display_name AS name, d.set_id, d.collector_number, p.created_at AS opened_at
           FROM catalog_printing p JOIN catalog_identity ci ON ci.id = p.identity_id
           LEFT JOIN catalog_printing_display d ON d.printing_id = p.id
           WHERE p.source = 'manual' AND p.id > %s
@@ -200,24 +263,25 @@ def review_queue(cursor: UUID | None = None, user_id: str = Depends(verified_use
 
 
 @router.get(ADMIN, response_model=CardIdentityEvidence)
-def printing_identity(printing_id: UUID = Query(), user_id: str = Depends(verified_user)):
+def printing_identity(printing_id: UUID = Query(), as_of: date | None = None, user_id: str = Depends(verified_user)):
     """The evidence of a Printing's Card Identity, for finding the identity of a Printing."""
     with connect() as conn:
         require_owner(conn, user_id)
         row = conn.execute("SELECT identity_id FROM catalog_printing WHERE id=%s", (printing_id,)).fetchone()
         if not row:
             fail(404, "PRINTING_NOT_FOUND")
-        return evidence_view(conn, load_evidence(conn, row["identity_id"]))
+        return evidence_view(conn, load_evidence(conn, row["identity_id"]), as_of)
 
 
 @router.get(f"{ADMIN}/{{identity_id}}", response_model=CardIdentityEvidence)
-def identity_evidence(identity_id: UUID, user_id: str = Depends(verified_user)):
+def identity_evidence(identity_id: UUID, as_of: date | None = None, user_id: str = Depends(verified_user)):
+    """``as_of`` (YYYY-MM-DD) is the day the groups' legality is for; today in UTC by default."""
     with connect() as conn:
         require_owner(conn, user_id)
         loaded = load_evidence(conn, identity_id)
         if not loaded:
             fail(404, "IDENTITY_NOT_FOUND")
-        return evidence_view(conn, loaded)
+        return evidence_view(conn, loaded, as_of)
 
 
 @router.get(f"{ADMIN}/{{identity_id}}/history", response_model=list[CardIdentityDecisionRow])

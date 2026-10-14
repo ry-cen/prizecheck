@@ -1,5 +1,8 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, type ReactNode } from "react";
 import type { CollectionSet } from "../collection_generated";
+import { Button } from "../ui/Button";
+import { Dialog } from "../ui/Dialog";
+import { Select } from "../ui/Select";
 import {
   activeFilterCount,
   CATEGORY_OPTIONS,
@@ -12,17 +15,24 @@ import {
 } from "./galleryModel";
 import type { GalleryPrefs } from "./galleryPrefs";
 import { MOBILE_QUERY } from "./media";
-import "./GalleryControls.css";
 
-const FOCUSABLE =
-  'button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex="-1"])';
+/** A select with its label beside it, for the one-line desktop toolbar: the kit's control box (ui/control.ts)
+ * at its own width. Every select here also carries aria-label: a name taken from a wrapping label would end
+ * with the selected option ("Sort Name A–Z"), and the specs find each select by its exact name. */
+const INLINE_FIELD =
+  "inline-flex items-center gap-2 text-meta font-medium text-text-muted";
+const INLINE_SELECT =
+  "box-border m-0 h-control min-w-0 cursor-pointer rounded-control border border-border-strong bg-bg px-2 font-sans text-control text-text phone:h-control-phone";
 
 /** The visible active-filter count. The control's accessible name carries it too ("Filters, 2 active"),
  * set through aria-label because the badge's box would otherwise add a space ("Filters , 2 active"). */
 function ActiveCount({ count }: { count: number }) {
   if (!count) return null;
   return (
-    <span className="ws-filter-badge" aria-hidden="true">
+    <span
+      className="box-border inline-block h-4.5 min-w-4.5 rounded-round bg-accent px-1 text-center text-micro leading-4.5 font-bold text-on-accent tabular-nums"
+      aria-hidden="true"
+    >
       {count}
     </span>
   );
@@ -45,9 +55,7 @@ export function FiltersToggle({
   onToggle: () => void;
 }) {
   return (
-    <button
-      type="button"
-      className="ws-filters-toggle"
+    <Button
       aria-expanded={open}
       aria-controls="ws-filter-panel"
       aria-label={activeName("Filters", filters)}
@@ -55,20 +63,19 @@ export function FiltersToggle({
     >
       Filters
       <ActiveCount count={activeFilterCount(filters)} />
-    </button>
+    </Button>
   );
 }
 
-/** Mobile header control that opens the Filters & display drawer. */
+/** Phone header control that opens the Filters & display drawer. */
 export const FiltersDrawerButton = React.forwardRef<
   HTMLButtonElement,
   { filters: GalleryFilters; open: boolean; onOpen: () => void }
 >(function FiltersDrawerButton({ filters, open, onOpen }, ref) {
   return (
-    <button
+    <Button
       ref={ref}
-      type="button"
-      className="ws-header-filters ws-mobile-only"
+      className="shrink-0"
       aria-haspopup="dialog"
       aria-expanded={open}
       aria-label={activeName("Filters & display", filters)}
@@ -76,92 +83,111 @@ export const FiltersDrawerButton = React.forwardRef<
     >
       Filters &amp; display
       <ActiveCount count={activeFilterCount(filters)} />
-    </button>
+    </Button>
   );
 });
 
-/** Set, Category and Elemental type, then Clear filters (which resets these three only). */
+/** One filter: the kit Select with its label above it. */
+function FilterSelect({
+  label,
+  value,
+  onChange,
+  children,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  children: ReactNode;
+}) {
+  return (
+    <div className="min-w-40">
+      <Select
+        label={label}
+        aria-label={label}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+      >
+        {children}
+      </Select>
+    </div>
+  );
+}
+
+/** Set, Category and Elemental type, then Clear filters (which resets these three only). The options come
+ * from galleryModel.ts; a new filter adds one FilterSelect here. `stacked` lays them out one under another,
+ * full width (the phone drawer). */
 export function FilterControls({
   filters,
   sets,
   onChange,
+  stacked = false,
 }: {
   filters: GalleryFilters;
   /** The view's sets; a remembered set that isn't among them is still offered, by its id. */
   sets: readonly CollectionSet[];
   onChange: (next: GalleryFilters) => void;
+  stacked?: boolean;
 }) {
   const setOptions =
     filters.set && !sets.some((set) => set.set_id === filters.set)
       ? [...sets, { set_id: filters.set, set_name: filters.set }]
       : sets;
   return (
-    <div className="ws-filter-controls">
-      <label className="ws-filter-field">
-        <span>Set</span>
-        <select
-          aria-label="Set"
-          value={filters.set}
-          onChange={(event) =>
-            onChange({ ...filters, set: event.target.value })
-          }
-        >
-          <option value="">All</option>
-          {setOptions.map((set) => (
-            <option key={set.set_id} value={set.set_id}>
-              {set.set_name}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label className="ws-filter-field">
-        <span>Category</span>
-        <select
-          aria-label="Category"
-          value={filters.category}
-          onChange={(event) =>
-            onChange({
-              ...filters,
-              category: event.target.value as GalleryFilters["category"],
-            })
-          }
-        >
-          <option value="">All</option>
-          {CATEGORY_OPTIONS.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label className="ws-filter-field">
-        <span>Elemental type</span>
-        <select
-          aria-label="Elemental type"
-          value={filters.type}
-          onChange={(event) =>
-            onChange({
-              ...filters,
-              type: event.target.value as GalleryFilters["type"],
-            })
-          }
-        >
-          <option value="">All</option>
-          {ELEMENTAL_TYPES.map((type) => (
-            <option key={type} value={type}>
-              {type}
-            </option>
-          ))}
-        </select>
-      </label>
-      <button
-        type="button"
-        className="ws-clear-filters"
+    <div
+      className={
+        stacked ? "flex flex-col gap-3" : "flex flex-wrap items-end gap-3"
+      }
+    >
+      <FilterSelect
+        label="Set"
+        value={filters.set}
+        onChange={(set) => onChange({ ...filters, set })}
+      >
+        <option value="">All</option>
+        {setOptions.map((set) => (
+          <option key={set.set_id} value={set.set_id}>
+            {set.set_name}
+          </option>
+        ))}
+      </FilterSelect>
+      <FilterSelect
+        label="Category"
+        value={filters.category}
+        onChange={(category) =>
+          onChange({
+            ...filters,
+            category: category as GalleryFilters["category"],
+          })
+        }
+      >
+        <option value="">All</option>
+        {CATEGORY_OPTIONS.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </FilterSelect>
+      <FilterSelect
+        label="Elemental type"
+        value={filters.type}
+        onChange={(type) =>
+          onChange({ ...filters, type: type as GalleryFilters["type"] })
+        }
+      >
+        <option value="">All</option>
+        {ELEMENTAL_TYPES.map((type) => (
+          <option key={type} value={type}>
+            {type}
+          </option>
+        ))}
+      </FilterSelect>
+      <Button
+        className={stacked ? "w-full" : undefined}
         disabled={activeFilterCount(filters) === 0}
         onClick={() => onChange(NO_FILTERS)}
       >
         Clear filters
-      </button>
+      </Button>
     </div>
   );
 }
@@ -169,75 +195,106 @@ export function FilterControls({
 export function SortControl({
   sort,
   onChange,
+  stacked = false,
 }: {
   sort: GallerySort;
   onChange: (next: GallerySort) => void;
+  stacked?: boolean;
 }) {
+  const options = SORT_OPTIONS.map((option) => (
+    <option key={option.value} value={option.value}>
+      {option.label}
+    </option>
+  ));
+  const change = (event: React.ChangeEvent<HTMLSelectElement>) =>
+    onChange(event.target.value as GallerySort);
+  if (stacked)
+    return (
+      <Select label="Sort" aria-label="Sort" value={sort} onChange={change}>
+        {options}
+      </Select>
+    );
   return (
-    <label className="ws-display-field">
+    <label className={INLINE_FIELD}>
       <span>Sort</span>
       <select
+        className={INLINE_SELECT}
         aria-label="Sort"
         value={sort}
-        onChange={(event) => onChange(event.target.value as GallerySort)}
+        onChange={change}
       >
-        {SORT_OPTIONS.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
+        {options}
       </select>
     </label>
   );
 }
 
-/** Card size, Names and Prices (ticket 111). */
+/** Card size, Names and Prices (ticket 111). Names and Prices are toggle buttons (aria-pressed). */
 export function DisplayControls({
   display,
   onChange,
+  stacked = false,
 }: {
   display: DisplayPrefs;
   onChange: (next: DisplayPrefs) => void;
+  stacked?: boolean;
 }) {
+  const sizes = (
+    <>
+      <option value="small">Small</option>
+      <option value="medium">Medium</option>
+    </>
+  );
+  const changeSize = (event: React.ChangeEvent<HTMLSelectElement>) =>
+    onChange({
+      ...display,
+      size: event.target.value === "medium" ? "medium" : "small",
+    });
   return (
     <>
-      <label className="ws-display-field">
-        <span>Card size</span>
-        <select
+      {stacked ? (
+        <Select
+          label="Card size"
           aria-label="Card size"
           value={display.size}
-          onChange={(event) =>
-            onChange({
-              ...display,
-              size: event.target.value === "medium" ? "medium" : "small",
-            })
-          }
+          onChange={changeSize}
         >
-          <option value="small">Small</option>
-          <option value="medium">Medium</option>
-        </select>
-      </label>
-      <button
-        type="button"
+          {sizes}
+        </Select>
+      ) : (
+        <label className={INLINE_FIELD}>
+          <span>Card size</span>
+          <select
+            className={INLINE_SELECT}
+            aria-label="Card size"
+            value={display.size}
+            onChange={changeSize}
+          >
+            {sizes}
+          </select>
+        </label>
+      )}
+      <Button
+        className={stacked ? "w-full" : undefined}
         aria-pressed={display.names}
         onClick={() => onChange({ ...display, names: !display.names })}
       >
         Names
-      </button>
-      <button
-        type="button"
+      </Button>
+      <Button
+        className={stacked ? "w-full" : undefined}
         aria-pressed={display.prices}
         onClick={() => onChange({ ...display, prices: !display.prices })}
       >
         Prices
-      </button>
+      </Button>
     </>
   );
 }
 
-/** The mobile Filters & display drawer: a modal dialog anchored right. Changes apply at once and
- * stay after it closes. Focus moves in, Tab stays inside, Escape and the backdrop close it, focus
- * returns to the opener, and widening the window past mobile closes it. */
+/** The phone Filters & display drawer: the kit Dialog along the right edge. Changes apply at once and stay
+ * after it closes. The kit moves focus in (its close button first), keeps Tab inside, closes on Escape and
+ * the scrim, and returns focus to the opener; widening the window past a phone closes it. */
 export function FiltersDrawer({
   opener,
   prefs,
@@ -251,92 +308,46 @@ export function FiltersDrawer({
   onChange: (update: (previous: GalleryPrefs) => GalleryPrefs) => void;
   onClose: () => void;
 }) {
-  const drawerRef = useRef<HTMLDivElement>(null);
   const close = useRef(onClose);
   close.current = onClose;
-
   useEffect(() => {
-    const returnTo = opener.current;
-    const focusables = () =>
-      Array.from(
-        drawerRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? []
-      );
-    focusables()[0]?.focus();
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        close.current();
-        return;
-      }
-      if (event.key !== "Tab") return;
-      const items = focusables();
-      if (!items.length) return;
-      const first = items[0];
-      const last = items[items.length - 1];
-      const inside = drawerRef.current?.contains(document.activeElement);
-      if (event.shiftKey && (document.activeElement === first || !inside)) {
-        event.preventDefault();
-        last.focus();
-      } else if (
-        !event.shiftKey &&
-        (document.activeElement === last || !inside)
-      ) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
     const media = window.matchMedia(MOBILE_QUERY);
     const onMedia = () => {
       if (!media.matches) close.current();
     };
-    document.addEventListener("keydown", onKeyDown);
     media.addEventListener("change", onMedia);
-    const overflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.removeEventListener("keydown", onKeyDown);
-      media.removeEventListener("change", onMedia);
-      document.body.style.overflow = overflow;
-      if (returnTo?.isConnected && returnTo.getClientRects().length)
-        returnTo.focus();
-    };
-  }, [opener]);
+    return () => media.removeEventListener("change", onMedia);
+  }, []);
 
   return (
-    <div className="ws-drawer-backdrop" onClick={() => close.current()}>
-      <div
-        ref={drawerRef}
-        className="ws-drawer ws-filters-drawer"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="ws-filters-title"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="ws-drawer-heading">
-          <h2 id="ws-filters-title">Filters &amp; display</h2>
-          <button
-            type="button"
-            className="ws-header-icon"
-            aria-label="Close filters & display"
-            onClick={() => close.current()}
-          >
-            <span aria-hidden="true">✕</span>
-          </button>
-        </div>
+    <Dialog
+      open
+      onClose={onClose}
+      returnFocus={opener}
+      title="Filters & display"
+      closeLabel="Close filters & display"
+      side="right"
+    >
+      <div className="flex flex-col gap-4">
         <FilterControls
+          stacked
           filters={prefs.filters}
           sets={sets}
           onChange={(filters) =>
             onChange((previous) => ({ ...previous, filters }))
           }
         />
-        <div className="ws-drawer-display">
-          <h3>Display</h3>
+        <div className="flex flex-col gap-3 border-t border-border pt-4">
+          <h3 className="m-0 text-micro font-semibold tracking-[1.7px] text-text-subtle uppercase">
+            Display
+          </h3>
           <SortControl
+            stacked
             sort={prefs.sort}
             onChange={(sort) => onChange((previous) => ({ ...previous, sort }))}
           />
           <DisplayControls
+            stacked
             display={prefs.display}
             onChange={(display) =>
               onChange((previous) => ({ ...previous, display }))
@@ -344,6 +355,6 @@ export function FiltersDrawer({
           />
         </div>
       </div>
-    </div>
+    </Dialog>
   );
 }

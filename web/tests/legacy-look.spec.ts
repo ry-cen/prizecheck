@@ -17,6 +17,10 @@ import { Pool } from "pg";
  * font metrics are left out, and so is the colour of the browser's own focus ring, so the baseline holds
  * on macOS and Linux. Each test writes what it read to its output folder as legacy-look.json. When a
  * page's own redesign ticket restyles it, that ticket re-records or deletes the page's entries.
+ *
+ * Collection left the workspace CSS for the kit in #166, which deleted its two entries: its look is now the
+ * kit's, checked by its own specs and the page check. Its tests keep the checks that hold until rollout stage
+ * 7: a dark page down to <html>, <html> still at color-scheme normal, and base.css's focus ring.
  */
 
 type Styles = Record<string, string>;
@@ -255,12 +259,10 @@ test.describe("at 1280×800", () => {
     );
   });
 
-  test("the workspace keeps its look", async ({ page }, testInfo) => {
-    recordAndCompare(
-      "workspace 1280",
-      await workspaceLook(page, false),
-      testInfo.outputPath.bind(testInfo)
-    );
+  test("Collection is dark down to the page, with base.css's focus ring", async ({
+    page,
+  }) => {
+    await workspaceLook(page, false);
   });
 
   test("themes still switch with data-theme on <html>", async ({ page }) => {
@@ -307,11 +309,9 @@ test.describe("at 375×812", () => {
     );
   });
 
-  test("the workspace keeps its look", async ({ page }, testInfo) => {
-    recordAndCompare(
-      "workspace 375",
-      await workspaceLook(page, true),
-      testInfo.outputPath.bind(testInfo)
-    );
+  test("Collection is dark down to the page, with base.css's focus ring", async ({
+    page,
+  }) => {
+    await workspaceLook(page, true);
   });
 });

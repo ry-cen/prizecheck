@@ -1,18 +1,30 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import {
-  activateMetadataRule,
   decideMetadata,
   decideMetadataReport,
   getMetadataHistory,
   getMetadataQueue,
-  getMetadataRules,
   getMetadataTarget,
   requestMetadataCode,
   type MetadataDecisionInput,
   type MetadataDecisionRow,
   type MetadataQueueItem,
-  type MetadataRuleView,
 } from "./metadata_generated";
+import { CodeStep } from "./owner/CodeStep";
+import {
+  CARD_HEADING,
+  Differs,
+  FIELDS,
+  ReviewCard,
+  ReviewQueue,
+  type QueueRow,
+} from "./owner/ReviewQueue";
+import { Button } from "./ui/Button";
+import { Pill } from "./ui/Pill";
+import { ScrollTable } from "./ui/ScrollTable";
+import { Select } from "./ui/Select";
+import { TextArea, TextField } from "./ui/TextField";
+import { useToast } from "./ui/Toast";
 
 const messages: Record<string, string> = {
   METADATA_EVIDENCE_CHANGED:
@@ -43,11 +55,11 @@ const messages: Record<string, string> = {
   UNKNOWN_RULE_VERSION: "That rule version does not exist.",
   REPORT_NOT_FOUND: "That report no longer exists.",
 };
-const errorText = (error: unknown) =>
+export const errorText = (error: unknown) =>
   error instanceof Error
     ? (messages[error.message] ?? "The request failed. Please retry.")
     : "The request failed. Please retry.";
-const codeError = (error: unknown) =>
+export const codeError = (error: unknown) =>
   (error as { status?: number })?.status === 429
     ? "Code rate limit reached. Try again in a minute."
     : "Unable to send the code. Please retry.";
@@ -73,8 +85,7 @@ function editionLabel(descriptor: Record<string, unknown> | null) {
     .map(([key, value]) => `${key}: ${String(value)}`)
     .join(" · ");
 }
-const when = (value: string) => new Date(value).toLocaleString();
-const looksLikeCode = (value: string) => /^[0-9]{6}$/.test(value);
+export const when = (value: string) => new Date(value).toLocaleString();
 
 type Decision = MetadataDecisionInput["decision"];
 const decisionOptions: Record<
@@ -112,31 +123,47 @@ function History({
       .catch(() => setMessage("Unable to load the decision history."));
   }, [item.edition_id, item.printing_id, kind, refreshKey]);
   return (
-    <section aria-label="Decision history">
-      <h5>Decision history</h5>
-      {message && <p role="alert">{message}</p>}
+    <section
+      aria-label="Decision history"
+      className="flex flex-col gap-2 border-t border-border pt-3"
+    >
+      <h4 className={CARD_HEADING}>Decision history</h4>
+      {message && (
+        <p role="alert" className="m-0 text-meta text-danger">
+          {message}
+        </p>
+      )}
       {rows &&
         (rows.length ? (
-          <ol>
+          <ol className="m-0 flex flex-col gap-3 pl-5 text-meta">
             {rows.map((row) => (
-              <li key={row.id}>
-                <strong>{row.decision.replace(/_/g, " ")}</strong> ·{" "}
-                {when(row.reviewed_at)} · reviewer {row.reviewer_id} · public
-                revision {row.clock_revision}
-                <p>Reviewed value: {summarize(row.reviewed_value)}</p>
+              <li key={row.id} className="flex flex-col gap-0.5">
+                <span>
+                  <strong>{row.decision.replace(/_/g, " ")}</strong> ·{" "}
+                  {when(row.reviewed_at)} · reviewer {row.reviewer_id} · public
+                  revision {row.clock_revision}
+                </span>
+                <span>Reviewed value: {summarize(row.reviewed_value)}</span>
                 {row.source_value && (
-                  <p>Source value at decision: {summarize(row.source_value)}</p>
+                  <span>
+                    Source value at decision: {summarize(row.source_value)}
+                  </span>
                 )}
-                <p>Checks: {summarize(row.checks)}</p>
-                <p>Reason: {row.reason}</p>
-                <p>
+                <span>Checks: {summarize(row.checks)}</span>
+                <span>Reason: {row.reason}</span>
+                <span>
                   {row.rule_kind
                     ? `Rule: ${row.rule_kind} v${row.rule_version}`
                     : "No rule"}
-                </p>
-                <p>
+                </span>
+                <p className="m-0">
                   Evidence:{" "}
-                  <a href={row.evidence_url} target="_blank" rel="noreferrer">
+                  <a
+                    href={row.evidence_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="break-all text-accent-strong"
+                  >
                     {row.evidence_url}
                   </a>
                 </p>
@@ -144,21 +171,89 @@ function History({
             ))}
           </ol>
         ) : (
-          <p>No maintainer decisions yet.</p>
+          <p className="m-0 text-meta text-text-muted">
+            No maintainer decisions yet.
+          </p>
         ))}
     </section>
   );
 }
 
+/** One value of a compared field, as summarize writes it. */
+function valueText(value: unknown) {
+  if (value === undefined || value === null) return "none";
+  return typeof value === "object" ? JSON.stringify(value) : String(value);
+}
+
+/** Source and reviewed values side by side, a field per row, each difference marked in words. */
+function Compare({ item }: { item: MetadataQueueItem }) {
+  const source = item.source_fingerprint ? item.source_candidate : {};
+  const reviewed = item.reviewed_value ?? {};
+  const fields = [
+    ...new Set([...Object.keys(source), ...Object.keys(reviewed)]),
+  ];
+  if (!fields.length)
+    return (
+      <p className="m-0 text-meta text-text-muted">
+        Source value: none · Reviewed value: none
+      </p>
+    );
+  return (
+    <ScrollTable label="Source and reviewed values">
+      <thead>
+        <tr>
+          <th scope="col">Field</th>
+          <th scope="col">Source value</th>
+          <th scope="col">Reviewed value</th>
+        </tr>
+      </thead>
+      <tbody>
+        {fields.map((field) => {
+          const differs =
+            item.reviewed_value !== null &&
+            valueText(source[field]) !== valueText(reviewed[field]);
+          return (
+            <tr key={field}>
+              <td>
+                {field.replace(/_/g, " ")} {differs && <Differs />}
+              </td>
+              <td className="max-w-96 whitespace-normal break-words">
+                {valueText(source[field])}
+              </td>
+              <td className="max-w-96 whitespace-normal break-words">
+                {valueText(reviewed[field])}
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </ScrollTable>
+  );
+}
+
+function label(item: MetadataQueueItem) {
+  return `${item.name ?? "Unnamed Printing"} · ${item.target === "marketplace" ? editionLabel(item.descriptor) : "Live identity"}`;
+}
+
 function ReviewItem({
   item,
   onItem,
+  onClose,
+  onDecided,
+  onChanged,
 }: {
   item: MetadataQueueItem;
   onItem: (next: MetadataQueueItem) => void;
+  onClose: () => void;
+  /** A confirmed decision: the queue removes the row and shows `message` in a toast. */
+  onDecided: (message: string) => void;
+  /** Something changed that the tab counts show. */
+  onChanged: () => void;
 }) {
+  const toast = useToast();
   const hasReports = item.report_ids.length > 0;
-  const decisionId = useId();
+  const closeId = useId();
+  const reasonField = useRef<HTMLTextAreaElement>(null);
   const [decision, setDecision] = useState<Decision>(
     hasReports ? "correct" : "verify_source"
   );
@@ -180,11 +275,6 @@ function ReviewItem({
   const [historyKey, setHistoryKey] = useState(0);
   const kind = item.kind === "edition" ? "editions" : "printings";
   const targetId = item.edition_id ?? item.printing_id;
-  const heading = `${item.name ?? "Unnamed Printing"} · ${item.target === "marketplace" ? editionLabel(item.descriptor) : "Live identity"}`;
-  const label =
-    item.target === "marketplace"
-      ? `${item.name ?? "Printing"} ${editionLabel(item.descriptor)}`
-      : `${item.name ?? "Printing"} Live identity`;
 
   function reviewedValue(): Record<string, unknown> | null {
     if (decision !== "correct") return null;
@@ -200,10 +290,10 @@ function ReviewItem({
       collector_number: number.trim(),
     };
   }
-  const complete =
+  // Everything the decision needs except the code, which the code step checks.
+  const ready =
     !!reason.trim() &&
     !!evidence.trim() &&
-    looksLikeCode(code) &&
     (decision !== "correct" ||
       (item.target === "marketplace"
         ? /^[0-9]+$/.test(productId)
@@ -248,10 +338,18 @@ function ReviewItem({
         report_ids: closeReports ? item.report_ids : [],
         code,
       });
-      setCode("");
-      await reload(
-        `Decision recorded: ${result.state.replace(/_/g, " ")}${result.reason ? ` (${result.reason})` : ""}. Public delivery: ${result.public_delivery}.`
-      );
+      const text = `Decision recorded: ${result.state.replace(/_/g, " ")}${result.reason ? ` (${result.reason})` : ""}. Public delivery: ${result.public_delivery}.`;
+      // A target stays queued while any report is still open (the box was unticked, or more than 25
+      // were linked), so only a target with none left leaves the list.
+      const next = await getMetadataTarget(kind, targetId).catch(() => null);
+      if (next && next.report_ids.length > 0) {
+        onItem(next);
+        onClose();
+        toast.show({ message: `${label(item)}: ${text}` });
+        onChanged();
+      } else {
+        onDecided(text);
+      }
     } catch (failure) {
       setStatus("");
       setStale(
@@ -259,7 +357,6 @@ function ReviewItem({
           failure.message === "METADATA_EVIDENCE_CHANGED"
       );
       setError(errorText(failure));
-    } finally {
       setBusy(false);
     }
   }
@@ -293,6 +390,7 @@ function ReviewItem({
           ? "Report rejected."
           : "Information requested from the reporter."
       );
+      onChanged();
     } catch (failure) {
       setError(errorText(failure));
     } finally {
@@ -301,362 +399,258 @@ function ReviewItem({
   }
 
   return (
-    <article aria-label={`Metadata review: ${label}`}>
-      <h4>{heading}</h4>
-      <p>
+    <ReviewCard
+      title={label(item)}
+      badge={
+        <Pill tone={item.state === "verified" ? "ok" : "warn"}>
+          {item.state.replace(/_/g, " ")}
+        </Pill>
+      }
+      onClose={onClose}
+      focusRef={reasonField}
+    >
+      <p className="m-0 text-meta text-text-muted">
         State: {item.state.replace(/_/g, " ")}
         {item.reason ? ` · Reason: ${item.reason}` : ""} · Revision{" "}
         {item.basis_revision}
+        {item.set_id ? ` · ${item.set_id} #${item.collector_number}` : ""}
       </p>
-      {item.set_id && (
-        <p>
-          {item.set_id} #{item.collector_number}
-        </p>
-      )}
-      <p>
-        Source value:{" "}
-        {item.source_fingerprint ? summarize(item.source_candidate) : "none"}
-      </p>
-      <p>Reviewed value: {summarize(item.reviewed_value)}</p>
-      <p>
+      <Compare item={item} />
+      <p className="m-0 text-meta">
         {item.report_ids.length} linked report
         {item.report_ids.length === 1 ? "" : "s"}
+        {item.rejected_fingerprints.length > 0 &&
+          ` · ${item.rejected_fingerprints.length} previously rejected source value${item.rejected_fingerprints.length === 1 ? "" : "s"}`}
       </p>
-      {item.rejected_fingerprints.length > 0 && (
-        <p>
-          {item.rejected_fingerprints.length} previously rejected source value
-          {item.rejected_fingerprints.length === 1 ? "" : "s"}
-        </p>
-      )}
       {hasReports && (
-        <ul>
-          {item.reports.map((report) => {
-            const id = report.id;
-            return (
-              <li key={id}>
-                Report {id.slice(0, 8)} ({report.issue},{" "}
-                {report.status.replace(/_/g, " ")})
-                <div>Proposed: {summarize(report.proposed)}</div>
-                {report.note && <div>Note: {report.note}</div>}
-                {safeLink(report.evidence_url) && (
-                  <div>
-                    Evidence:{" "}
-                    <a
-                      href={safeLink(report.evidence_url)}
-                      target="_blank"
-                      rel="noopener noreferrer"
+        <>
+          <p className="m-0 text-meta text-text-muted">
+            Ask for information and Reject report send the review reason below
+            to the reporter.
+          </p>
+          <ul className="m-0 flex list-none flex-col gap-2 p-0">
+            {item.reports.map((report) => {
+              const id = report.id;
+              return (
+                <li
+                  key={id}
+                  className="flex flex-col gap-1 rounded-control border border-border p-3 text-meta"
+                >
+                  <span className="font-semibold">
+                    Report {id.slice(0, 8)} ({report.issue},{" "}
+                    {report.status.replace(/_/g, " ")})
+                  </span>
+                  <span>Proposed: {summarize(report.proposed)}</span>
+                  {report.note && <span>Note: {report.note}</span>}
+                  {safeLink(report.evidence_url) && (
+                    <p className="m-0">
+                      Evidence:{" "}
+                      <a
+                        href={safeLink(report.evidence_url)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="break-all text-accent-strong"
+                      >
+                        {report.evidence_url}
+                      </a>
+                    </p>
+                  )}
+                  <span className="flex flex-wrap gap-2">
+                    <Button
+                      disabled={busy || !reason.trim()}
+                      aria-label={`Ask reporter for information on report ${id.slice(0, 8)}`}
+                      onClick={() => void reportDecision(id, "needs_info")}
                     >
-                      {report.evidence_url}
-                    </a>
-                  </div>
-                )}{" "}
-                <button
-                  type="button"
-                  disabled={busy || !reason.trim()}
-                  aria-label={`Ask reporter for information on report ${id.slice(0, 8)}`}
-                  onClick={() => void reportDecision(id, "needs_info")}
-                >
-                  Ask for information
-                </button>{" "}
-                <button
-                  type="button"
-                  disabled={busy || !reason.trim()}
-                  aria-label={`Reject report ${id.slice(0, 8)}`}
-                  onClick={() => void reportDecision(id, "reject")}
-                >
-                  Reject report
-                </button>
-              </li>
-            );
-          })}
-        </ul>
+                      Ask for information
+                    </Button>
+                    <Button
+                      variant="danger"
+                      disabled={busy || !reason.trim()}
+                      aria-label={`Reject report ${id.slice(0, 8)}`}
+                      onClick={() => void reportDecision(id, "reject")}
+                    >
+                      Reject report
+                    </Button>
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </>
       )}
-      <label htmlFor={decisionId}>Decision</label>
-      <select
-        id={decisionId}
-        value={decision}
-        onChange={(event) => setDecision(event.target.value as Decision)}
-      >
-        {decisionOptions[item.target].map(([value, text]) => (
-          <option key={value} value={value}>
-            {text}
-          </option>
-        ))}
-      </select>
-      {decision === "correct" &&
-        (item.target === "marketplace" ? (
-          <>
-            <label>
-              Product ID{" "}
-              <input
+      <div className={FIELDS}>
+        <TextArea
+          ref={reasonField}
+          label="Review reason"
+          value={reason}
+          maxLength={2000}
+          onChange={(event) => setReason(event.target.value)}
+        />
+        <TextField
+          label="Review evidence URL"
+          type="url"
+          value={evidence}
+          onChange={(event) => setEvidence(event.target.value)}
+        />
+      </div>
+      <h4 className={CARD_HEADING}>Decide</h4>
+      <div className={FIELDS}>
+        <Select
+          label="Decision"
+          value={decision}
+          onChange={(event) => setDecision(event.target.value as Decision)}
+        >
+          {decisionOptions[item.target].map(([value, text]) => (
+            <option key={value} value={value}>
+              {text}
+            </option>
+          ))}
+        </Select>
+        {decision === "correct" &&
+          (item.target === "marketplace" ? (
+            <>
+              <TextField
+                label="Product ID"
                 inputMode="numeric"
                 value={productId}
                 onChange={(event) => setProductId(event.target.value)}
               />
-            </label>
-            <label>
-              Quote variant{" "}
-              <input
+              <TextField
+                label="Quote variant"
                 value={variant}
                 maxLength={40}
                 onChange={(event) => setVariant(event.target.value)}
               />
-            </label>
-          </>
-        ) : (
-          <>
-            <label>
-              Category{" "}
-              <select
+            </>
+          ) : (
+            <>
+              <Select
+                label="Category"
                 value={category}
                 onChange={(event) => setCategory(event.target.value)}
               >
                 <option>Pokemon</option>
                 <option>Trainer</option>
                 <option>Energy</option>
-              </select>
-            </label>
-            <label>
-              Live name{" "}
-              <input
+              </Select>
+              <TextField
+                label="Live name"
                 value={name}
                 maxLength={160}
                 onChange={(event) => setName(event.target.value)}
               />
-            </label>
-            <label>
-              Live set code{" "}
-              <input
+              <TextField
+                label="Live set code"
                 value={liveSetCode}
                 maxLength={10}
                 onChange={(event) => setLiveSetCode(event.target.value)}
               />
-            </label>
-            <label>
-              Live collector number{" "}
-              <input
+              <TextField
+                label="Live collector number"
                 value={number}
                 maxLength={20}
                 onChange={(event) => setNumber(event.target.value)}
               />
-            </label>
-          </>
-        ))}
-      <label>
-        Decision evidence URL{" "}
-        <input
-          type="url"
-          value={evidence}
-          onChange={(event) => setEvidence(event.target.value)}
-        />
-      </label>
-      <label>
-        Decision reason{" "}
-        <textarea
-          value={reason}
-          maxLength={2000}
-          onChange={(event) => setReason(event.target.value)}
-        />
-      </label>
+            </>
+          ))}
+      </div>
       {hasReports && (
-        <label>
-          <span>
-            <input
-              type="checkbox"
-              checked={closeReports}
-              onChange={(event) => setCloseReports(event.target.checked)}
-            />{" "}
-            Close linked reports with this decision
-          </span>
+        <label
+          htmlFor={closeId}
+          className="flex items-center gap-2 text-meta phone:min-h-tap"
+        >
+          <input
+            id={closeId}
+            type="checkbox"
+            className="m-0 size-4 accent-accent"
+            checked={closeReports}
+            onChange={(event) => setCloseReports(event.target.checked)}
+          />
+          Close linked reports with this decision
         </label>
       )}
-      <button type="button" disabled={busy} onClick={() => void sendCode()}>
-        Send code
-      </button>
-      <label>
-        Fresh six-digit code{" "}
-        <input
-          inputMode="numeric"
-          pattern="[0-9]{6}"
-          maxLength={6}
-          value={code}
-          onChange={(event) => setCode(event.target.value)}
-        />
-      </label>
-      <button
-        type="button"
-        disabled={busy || !complete}
-        onClick={() => void submit()}
-      >
-        Record decision
-      </button>{" "}
-      <button
-        type="button"
-        onClick={() => setHistory((value) => !value)}
-        aria-expanded={history}
-      >
-        {history ? "Hide history" : "Show history"}
-      </button>
-      <p role="status">{status}</p>
+      <CodeStep
+        onSend={() => void sendCode()}
+        code={code}
+        onCode={setCode}
+        confirmLabel="Confirm decision"
+        ready={ready}
+        busy={busy}
+        onConfirm={() => void submit()}
+      />
+      <p role="status" className="m-0 text-meta">
+        {status}
+      </p>
       {error && (
-        <div role="alert">
-          <p>{error}</p>
+        <div
+          role="alert"
+          className="flex flex-wrap items-center gap-2 text-meta text-danger"
+        >
+          <p className="m-0">{error}</p>
           {stale && (
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => void reloadEvidence()}
-            >
+            <Button disabled={busy} onClick={() => void reloadEvidence()}>
               Reload evidence
-            </button>
+            </Button>
           )}
         </div>
       )}
-      {history && <History item={item} refreshKey={historyKey} />}
-    </article>
-  );
-}
-
-function RuleCard({
-  rule,
-  onChanged,
-}: {
-  rule: MetadataRuleView;
-  onChanged: () => Promise<void>;
-}) {
-  const [version, setVersion] = useState("none");
-  const [evidence, setEvidence] = useState("");
-  const [reason, setReason] = useState("");
-  const [code, setCode] = useState("");
-  const [status, setStatus] = useState("");
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  const target = `rule:${rule.kind}:${version === "none" ? 0 : Number(version)}`;
-  const active =
-    rule.active && rule.active.version !== null ? rule.active : null;
-
-  async function sendCode() {
-    setBusy(true);
-    setError("");
-    try {
-      await requestMetadataCode(target, "activate_rule");
-      setStatus("Fresh approval code sent to your email.");
-    } catch (failure) {
-      setStatus("");
-      setError(codeError(failure));
-    } finally {
-      setBusy(false);
-    }
-  }
-  async function apply() {
-    setBusy(true);
-    setError("");
-    try {
-      const result = await activateMetadataRule(rule.kind, {
-        version: version === "none" ? null : Number(version),
-        evidence_url: evidence.trim(),
-        reason: reason.trim(),
-        code,
-      });
-      setCode("");
-      setStatus(
-        `Rule change recorded for ${result.printings} Printings and ${result.editions} Editions. Public delivery: ${result.public_delivery}.` +
-          (result.public_delivery === "pending"
-            ? " A background drain is delivering the remaining changes; until it finishes the public store may still show the old eligibility. If it stays pending, run scripts/backfill_public_catalog.py (exit code 3 means another drain is still running; retry later)."
-            : "")
-      );
-      await onChanged();
-    } catch (failure) {
-      setStatus("");
-      setError(errorText(failure));
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <article aria-label={`Rule ${rule.kind}`}>
-      <h4>{rule.kind}</h4>
-      <p>
-        {active
-          ? `Active: version ${active.version} · activated ${when(active.activated_at)} · ${active.reason}`
-          : "No active rule"}
-      </p>
-      {active && !active.digest_current && (
-        <p role="alert">
-          The rule code changed after approval, so it is inactive until you
-          approve it again.
-        </p>
-      )}
-      <ul>
-        {rule.versions.map((entry) => (
-          <li key={entry.version}>
-            Version {entry.version} · digest {entry.code_digest.slice(0, 12)}
-          </li>
-        ))}
-      </ul>
-      <label>
-        Rule version{" "}
-        <select
-          value={version}
-          onChange={(event) => setVersion(event.target.value)}
+      <div>
+        <Button
+          variant="quiet"
+          onClick={() => setHistory((value) => !value)}
+          aria-expanded={history}
         >
-          <option value="none">No rule (deactivate)</option>
-          {rule.versions.map((entry) => (
-            <option key={entry.version} value={String(entry.version)}>
-              {entry.version}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label>
-        Rule evidence URL{" "}
-        <input
-          type="url"
-          value={evidence}
-          onChange={(event) => setEvidence(event.target.value)}
-        />
-      </label>
-      <label>
-        Rule reason{" "}
-        <textarea
-          value={reason}
-          maxLength={2000}
-          onChange={(event) => setReason(event.target.value)}
-        />
-      </label>
-      <button type="button" disabled={busy} onClick={() => void sendCode()}>
-        Send code
-      </button>
-      <label>
-        Fresh six-digit code{" "}
-        <input
-          inputMode="numeric"
-          pattern="[0-9]{6}"
-          maxLength={6}
-          value={code}
-          onChange={(event) => setCode(event.target.value)}
-        />
-      </label>
-      <button
-        type="button"
-        disabled={
-          busy || !evidence.trim() || !reason.trim() || !looksLikeCode(code)
-        }
-        onClick={() => void apply()}
-      >
-        Apply rule change
-      </button>
-      <p role="status">{status}</p>
-      {error && <p role="alert">{error}</p>}
-    </article>
+          {history ? "Hide history" : "Show history"}
+        </Button>
+      </div>
+      {history && <History item={item} refreshKey={historyKey} />}
+    </ReviewCard>
   );
 }
 
-export function MetadataReview() {
+const key = (item: MetadataQueueItem) =>
+  `${item.kind}:${item.edition_id ?? item.printing_id}`;
+
+function row(item: MetadataQueueItem): QueueRow {
+  // The queue doesn't record when a target was quarantined or suspended, so a target opens with its oldest
+  // open report, and one without reports shows no date.
+  const opened =
+    item.reports
+      .map((report) => report.created_at)
+      .sort((a, b) => Date.parse(a) - Date.parse(b))[0] ?? null;
+  return {
+    key: key(item),
+    label: label(item),
+    card: item.name ?? "Unnamed Printing",
+    setNumber: item.set_id ? `${item.set_id} #${item.collector_number}` : "—",
+    kind: (
+      <>
+        {item.target === "marketplace"
+          ? `Marketplace · ${editionLabel(item.descriptor)}`
+          : "Live identity"}{" "}
+        <Pill tone={item.state === "verified" ? "ok" : "warn"}>
+          {item.state.replace(/_/g, " ")}
+        </Pill>
+      </>
+    ),
+    reports: String(item.report_ids.length),
+    opened,
+  };
+}
+
+/**
+ * Owner controls' Metadata queue (#168): quarantined Editions, suspended Printings and collector reports
+ * as a ScrollTable, 100 at a time with Load more. A target's card shows source and reviewed values side by
+ * side with differences marked, its linked reports with Ask for information and Reject report, the
+ * decision with a reason, a review evidence URL and a fresh code, and the decision history folded away. A
+ * confirmed decision removes the row and shows a toast; a report decision reloads the target in place.
+ */
+export function MetadataReview({ onChanged }: { onChanged: () => void }) {
   const [items, setItems] = useState<MetadataQueueItem[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
-  const [rules, setRules] = useState<MetadataRuleView[]>([]);
   const [message, setMessage] = useState("");
+  const [open, setOpen] = useState<string | null>(null);
+  const toast = useToast();
 
   async function load(next?: string) {
     try {
@@ -664,73 +658,68 @@ export function MetadataReview() {
       setItems((previous) =>
         next ? [...previous, ...page.items] : page.items
       );
+      if (!next)
+        setOpen((current) =>
+          current && page.items.some((item) => key(item) === current)
+            ? current
+            : null
+        );
       setCursor(page.next_cursor);
       setMessage("");
     } catch {
       setMessage("Unable to load the metadata review queue.");
     }
   }
-  async function loadRules() {
-    try {
-      setRules(await getMetadataRules());
-    } catch {
-      setMessage("Unable to load the metadata rules.");
-    }
-  }
   useEffect(() => {
     void load();
-    void loadRules();
   }, []);
-  const key = (item: MetadataQueueItem) =>
-    `${item.kind}:${item.edition_id ?? item.printing_id}`;
+
+  function decided(item: MetadataQueueItem, text: string) {
+    setItems((previous) => previous.filter((row) => key(row) !== key(item)));
+    setOpen(null);
+    toast.show({ message: `${label(item)}: ${text}` });
+    onChanged();
+  }
 
   return (
-    <section aria-label="Catalog metadata review">
-      <h2>Catalog metadata review</h2>
-      <p>
-        Quarantined Editions, suspended Printings and collector reports. Nothing
-        changes until you record a decision with a fresh code.
-      </p>
-      <button
-        type="button"
-        onClick={() => {
-          void load();
-          void loadRules();
-        }}
-      >
-        Refresh queue
-      </button>
-      <p role="status">{message}</p>
-      {items.length ? (
-        items.map((item) => (
-          <ReviewItem
-            key={key(item)}
-            item={item}
-            onItem={(next) =>
-              setItems((previous) =>
-                previous.map((row) => (key(row) === key(next) ? next : row))
-              )
-            }
-          />
-        ))
-      ) : (
-        <p>No metadata targets need review.</p>
-      )}
-      {cursor && (
-        <button type="button" onClick={() => void load(cursor)}>
-          Load more
-        </button>
-      )}
-      <section aria-label="Metadata rules">
-        <h3>Metadata rules</h3>
-        <p>
-          Rules live in code. Activating a version records your approval for its
-          exact code digest.
-        </p>
-        {rules.map((rule) => (
-          <RuleCard key={rule.kind} rule={rule} onChanged={loadRules} />
-        ))}
-      </section>
-    </section>
+    <ReviewQueue
+      title="Catalog metadata review"
+      intro="Quarantined Editions, suspended Printings and collector reports. Nothing changes until you record a decision with a fresh code."
+      tableLabel="Metadata targets"
+      rows={items.map(row)}
+      emptyText="No metadata targets need review."
+      open={open}
+      onOpen={setOpen}
+      renderCard={(rowKey, close) => {
+        const item = items.find((entry) => key(entry) === rowKey);
+        return (
+          item && (
+            <ReviewItem
+              key={rowKey}
+              item={item}
+              onClose={close}
+              onItem={(next) =>
+                setItems((previous) =>
+                  previous.map((entry) =>
+                    key(entry) === key(next) ? next : entry
+                  )
+                )
+              }
+              onDecided={(text) => decided(item, text)}
+              onChanged={onChanged}
+            />
+          )
+        );
+      }}
+      onRefresh={() => void load()}
+      status={message}
+      after={
+        cursor && (
+          <div>
+            <Button onClick={() => void load(cursor)}>Load more</Button>
+          </div>
+        )
+      }
+    />
   );
 }

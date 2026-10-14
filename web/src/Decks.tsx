@@ -143,9 +143,9 @@ export function Decks() {
             {/* The accessible name starts with the visible text and names the Deck. */}
             <a
               href={workspaceHref(deck.id)}
-              aria-label={`Open in workspace: ${deck.name}`}
+              aria-label={`Open in Collection: ${deck.name}`}
             >
-              Open in workspace
+              Open in Collection
             </a>{" "}
           </span>
         ))}

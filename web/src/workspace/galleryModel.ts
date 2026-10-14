@@ -4,8 +4,10 @@ import type {
   CollectionHoldingView,
   ElementalType,
   HoldingSort,
+  TrainerType,
 } from "../collection_generated";
 import type { HoldingView } from "../holdings_generated";
+import { variantLabel } from "../ui/variantLabel";
 import type { WorkspaceView } from "./LocationNav";
 
 /** Card size choice, remembered with the other preferences (galleryPrefs.ts). */
@@ -32,16 +34,50 @@ export const SORT_OPTIONS: readonly { value: GallerySort; label: string }[] = [
   { value: "quantity-asc", label: "Quantity ↑" },
 ];
 
+/** Each card kind's name, as the inspector shows it. */
+export const CATEGORY_LABELS: Record<CardCategory, string> = {
+  Pokemon: "Pokémon",
+  Trainer: "Trainer",
+  Energy: "Energy",
+};
+
+/** Each Trainer Type's name (CONTEXT.md, Trainer Type). */
+export const TRAINER_TYPE_LABELS: Record<TrainerType, string> = {
+  supporter: "Supporter",
+  item: "Item",
+  tool: "Pokémon Tool",
+  stadium: "Stadium",
+};
+
+/** The Category filter's values: a card kind, or a Trainer Type, which lists only Trainers of that type. Both read
+ * the effective card attributes (spec "Card type: one source"), so a Trainer whose Trainer Type is unknown is listed
+ * by "Trainer: any type" and by no Trainer Type. */
+export type CategoryFilter =
+  CardCategory | "Supporter" | "Item" | "Tool" | "Stadium";
+
+/** The Trainer Type each Trainer Type choice of the Category filter sends. */
+const TRAINER_TYPE_FILTERS: Partial<Record<CategoryFilter, TrainerType>> = {
+  Supporter: "supporter",
+  Item: "item",
+  Tool: "tool",
+  Stadium: "stadium",
+};
+
 export const CATEGORY_OPTIONS: readonly {
-  value: CardCategory;
+  value: CategoryFilter;
   label: string;
 }[] = [
   { value: "Pokemon", label: "Pokémon" },
-  { value: "Trainer", label: "Trainer" },
+  { value: "Trainer", label: "Trainer: any type" },
+  { value: "Supporter", label: "Trainer: Supporter" },
+  { value: "Item", label: "Trainer: Item" },
+  { value: "Tool", label: "Trainer: Pokémon Tool" },
+  { value: "Stadium", label: "Trainer: Stadium" },
   { value: "Energy", label: "Energy" },
 ];
 
-/** The game's elemental types, in the order the game lists them. */
+/** The game's elemental types, in the order the game lists them. The filter lists Pokémon of the type: in the card
+ * attributes, Trainer and Energy cards have no type. */
 export const ELEMENTAL_TYPES: readonly ElementalType[] = [
   "Grass",
   "Fire",
@@ -59,7 +95,7 @@ export const ELEMENTAL_TYPES: readonly ElementalType[] = [
 /** Filter values; "" means any. Each filter narrows independently of the others. */
 export type GalleryFilters = {
   set: string;
-  category: CardCategory | "";
+  category: CategoryFilter | "";
   type: ElementalType | "";
 };
 export const NO_FILTERS: GalleryFilters = { set: "", category: "", type: "" };
@@ -85,7 +121,12 @@ export function queryToParams(query: GalleryQuery): CollectionHoldingQuery {
   const search = query.search.trim();
   if (search) params.name = search;
   if (query.filters.set) params.set_id = query.filters.set;
-  if (query.filters.category) params.category = query.filters.category;
+  const category = query.filters.category;
+  if (category) {
+    const trainerType = TRAINER_TYPE_FILTERS[category];
+    if (trainerType) params.trainer_type = trainerType;
+    else params.category = category as CardCategory;
+  }
   if (query.filters.type) params.elemental_type = query.filters.type;
   return params;
 }
@@ -328,18 +369,19 @@ const counts = new Intl.NumberFormat("en-US");
 export const plural = (n: number, one: string, many: string) =>
   `${counts.format(n)} ${n === 1 ? one : many}`;
 
-/** "Pikachu, Base Set 25, copy 2, Shelf / Binder 2" */
+/** "Pikachu, Base Set 25, Reverse Holo, copy 2, Shelf / Binder 2". The Variant Descriptor (or "Unspecified
+ * Variant") is always in the name, whether or not the Names line is drawn (#164). */
 export const tileLabel = (
   holding: HoldingView,
   ordinal: number,
   path: string
 ) =>
-  `${holding.printing_name}, ${holding.set_name} ${holding.collector_number}, copy ${ordinal + 1}, ${path}`;
+  `${holding.printing_name}, ${holding.set_name} ${holding.collector_number}, ${variantLabel(holding.descriptor)}, copy ${ordinal + 1}, ${path}`;
 
-/** "Pikachu · Base Set 25 · copy 2 · Shelf / Binder 2" */
+/** "Pikachu · Base Set 25 · Reverse Holo · copy 2 · Shelf / Binder 2" */
 export const tileTitle = (
   holding: HoldingView,
   ordinal: number,
   path: string
 ) =>
-  `${holding.printing_name} · ${holding.set_name} ${holding.collector_number} · copy ${ordinal + 1} · ${path}`;
+  `${holding.printing_name} · ${holding.set_name} ${holding.collector_number} · ${variantLabel(holding.descriptor)} · copy ${ordinal + 1} · ${path}`;

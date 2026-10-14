@@ -1,11 +1,12 @@
 """Derive every catalog Printing's card attributes and Reprint Group from its stored source record, without fetching
 anything.
 
-Run it once after applying migration 030, and again after applying migrations 035 and 038. Until it or the next
+Run it once after applying migration 030, and again after applying migrations 035, 038 and 041. Until it or the next
 catalog import runs, the Printings imported before 030 have unknown card attributes, so Deck checks report their Basic
 Energy exemption as unresolved; the Printings imported before 035 are in no Reprint Group, so format checks judge an old
 Trainer or Energy printing on its own mark and set alone; and the Printings imported before 038 have an unknown Basic
-Pokémon status, so a deck with no other known Basic Pokémon checks as unknown in every format. Every catalog import re-derives all Printings itself, so it
+Pokémon status, so a deck with no other known Basic Pokémon checks as unknown in every format; and the Printings imported
+before 041 have no Trainer Type or evolves from, so Collection's Trainer Type filters match no card. Every catalog import re-derives all Printings itself, so it
 is never needed again; rerunning it changes nothing.
 
 Changed attributes and Reprint Groups are public format facts (Deck Lists 18): the changed Printings, and every

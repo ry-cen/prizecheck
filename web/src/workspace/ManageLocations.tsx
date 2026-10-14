@@ -5,6 +5,7 @@ import React, {
   useRef,
   useState,
 } from "react";
+import { Menu as Handle, Settings } from "lucide-react";
 import { DeckError, editDeck } from "../decks_generated";
 import {
   deleteLocation,
@@ -14,6 +15,11 @@ import {
   type EditLocation,
   type TreeLocation,
 } from "../location_generated";
+import { Button } from "../ui/Button";
+import { Dialog } from "../ui/Dialog";
+import { focusableIn } from "../ui/focusable";
+import { Icon } from "../ui/Icon";
+import { TextField } from "../ui/TextField";
 import { CreateLocationDialog } from "./CreateLocationDialog";
 import {
   buildManageModel,
@@ -27,7 +33,6 @@ import {
   STALE_MESSAGE,
   type ParentTarget,
 } from "./manageLocationsModel";
-import "./ManageLocations.css";
 
 /** Pointer travel, in px, that turns a press on the handle into a drag. Less is a tap. */
 const DRAG_THRESHOLD = 6;
@@ -58,21 +63,50 @@ type Props = {
   onChanged: () => void;
 };
 
-/** The settings gear. It sits after the + in the sidebar's and the drawer's .ws-location-tools
- * (ticket 108), which size it: 28 px on desktop, 44 px in the drawer. */
+/** The settings gear, after the + in the sidebar's and the drawer's Location tools (ticket 108): a quiet
+ * icon button, 30 px on desktop and 44 px on a phone. */
 export function ManageLocationsButton({ onClick }: { onClick: () => void }) {
   return (
-    <button
-      type="button"
-      aria-label="Manage locations"
+    <Button
+      variant="quiet"
+      icon={Settings}
+      label="Manage locations"
       title="Manage locations"
       aria-haspopup="dialog"
       onClick={onClick}
-    >
-      <span aria-hidden="true">{"⚙︎"}</span>
-    </button>
+    />
   );
 }
+
+const LIST = "m-0 flex list-none flex-col gap-1 p-0";
+const STEP = "m-0 flex flex-col gap-3";
+const STEP_ACTIONS = "flex flex-wrap gap-2";
+/** Each step button fills its own line on a phone. */
+const STEP_BUTTON = "phone:flex-[1_1_100%]";
+const TARGET =
+  "box-border m-0 flex min-h-control w-full cursor-pointer items-center rounded-control border border-solid border-border bg-surface px-3 text-left font-sans text-control text-text hover:border-control-outline hover:bg-surface-raised phone:min-h-tap";
+
+type DropState = "lifted" | "hover" | "valid" | "invalid" | undefined;
+
+/** A row's drag feedback, by outline and dimming as well as colour. */
+const rowDrop = (state: DropState) =>
+  state === "hover"
+    ? "outline-2 outline-solid outline-accent -outline-offset-2 bg-accent-wash"
+    : state === "valid"
+      ? "outline-1 outline-dashed outline-accent-outline -outline-offset-1 hover:bg-surface-raised"
+      : state === "invalid" || state === "lifted"
+        ? "opacity-40"
+        : "hover:bg-surface-raised";
+
+/** The Top level zone's drag feedback. */
+const topDrop = (state: DropState) =>
+  state === "hover"
+    ? "border-dashed border-border-strong text-text-muted outline-2 outline-solid outline-accent -outline-offset-2 bg-[linear-gradient(var(--color-accent-wash),var(--color-accent-wash))]"
+    : state === "valid"
+      ? "border-dashed border-border-strong text-text-muted outline-1 outline-dashed outline-accent-outline -outline-offset-1"
+      : state === "invalid"
+        ? "border-dotted border-border text-text-subtle"
+        : "border-dashed border-border-strong text-text-muted";
 
 /** Manage locations: a modal panel (a full-screen sheet on mobile) listing the whole tree, with
  * handle drag and a Move picker for reparenting, and Rename, Add child and Delete per row.
@@ -90,7 +124,9 @@ export function ManageLocations({ onClose, onChanged }: Props) {
   const [addingTo, setAddingTo] = useState<string | null | undefined>(
     undefined
   );
-  const dialogRef = useRef<HTMLDialogElement>(null);
+  /** The panel's own content, inside the kit Dialog. */
+  const rootRef = useRef<HTMLDivElement>(null);
+  /** The Dialog's scrolling content box, which a drag scrolls near its edges. */
   const listRef = useRef<HTMLDivElement>(null);
   /** data-manage-focus key of the control to focus when the list shows again. */
   const restoreFocus = useRef<string | null>(null);
@@ -122,40 +158,18 @@ export function ManageLocations({ onClose, onChanged }: Props) {
     void reload();
   }, [reload]);
 
-  // Native modal dialog: the rest of the page is inert while it is open, and Escape closes it.
-  // The close event is the single source of truth for closing (see onClose on the element).
-  // A passive effect on purpose, as in CreateLocationDialog: when the panel opens from the mobile
-  // drawer, the drawer's cleanup focuses its opener (☰) first, so focus returns there on close.
-  useEffect(() => {
-    const dialog = dialogRef.current;
-    if (!dialog) return;
-    const opener =
-      document.activeElement instanceof HTMLElement
-        ? document.activeElement
-        : null;
-    if (!dialog.open) dialog.showModal();
-    // The page behind the open panel doesn't scroll.
-    const root = document.documentElement;
-    const overflow = root.style.overflow;
-    root.style.overflow = "hidden";
-    return () => {
-      root.style.overflow = overflow;
-      if (dialog.open) dialog.close();
-      if (opener?.isConnected && opener.getClientRects().length) opener.focus();
-    };
-  }, []);
-
   // When the list shows again, focus the control that started the step (or Close).
   useEffect(() => {
     if (step.kind !== "list" || load !== "ready") return;
     const key = restoreFocus.current;
     if (!key) return;
     restoreFocus.current = null;
-    const dialog = dialogRef.current;
+    const root = rootRef.current;
+    const dialog = root?.closest("dialog");
     const target =
-      dialog?.querySelector<HTMLElement>(
+      root?.querySelector<HTMLElement>(
         `[data-manage-focus="${CSS.escape(key)}"]:not(:disabled)`
-      ) ?? dialog?.querySelector<HTMLElement>("[data-manage-focus=close]");
+      ) ?? (dialog ? focusableIn(dialog)[0] : undefined); // the Dialog's close button
     target?.focus();
   }, [step, load, nodes]);
 
@@ -218,7 +232,7 @@ export function ManageLocations({ onClose, onChanged }: Props) {
     const element = document
       .elementFromPoint(x, y)
       ?.closest<HTMLElement>("[data-manage-target]");
-    if (!element || !dialogRef.current?.contains(element)) return undefined;
+    if (!element || !rootRef.current?.contains(element)) return undefined;
     const value = element.dataset.manageTarget!;
     return value === "top" ? null : value;
   };
@@ -271,6 +285,20 @@ export function ManageLocations({ onClose, onChanged }: Props) {
     setDrag(null);
   };
   useEffect(() => stopFrame, []);
+  // Escape during a drag only drops the drag. Taken on window before the Dialog sees it; its preventDefault
+  // keeps the Dialog open.
+  const dragging = drag !== null;
+  useEffect(() => {
+    if (!dragging) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || !pointer.current?.moved) return;
+      event.preventDefault();
+      endDrag();
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+    // endDrag only touches refs and state setters.
+  }, [dragging]);
 
   const handleProps = (node: TreeLocation) => ({
     onPointerDown: (event: React.PointerEvent<HTMLButtonElement>) => {
@@ -342,7 +370,7 @@ export function ManageLocations({ onClose, onChanged }: Props) {
     // The valid set depends only on which Location is lifted and on the tree.
     [drag?.id, model]
   );
-  const dropState = (target: ParentTarget) => {
+  const dropState = (target: ParentTarget): DropState => {
     if (!drag || !dragTargets) return undefined;
     const key = targetKey(target);
     if (target === drag.id) return "lifted";
@@ -361,33 +389,35 @@ export function ManageLocations({ onClose, onChanged }: Props) {
       return (
         <li key={node.id}>
           <div
-            className="ws-manage-row"
+            className={`box-border flex min-h-11 items-center gap-2 rounded-control py-1 pr-2 pl-[calc(var(--space-1)+var(--manage-level)*var(--space-4))] phone:flex-wrap phone:pl-[calc(var(--manage-level)*var(--space-2))] ${rowDrop(dropState(node.id))}`}
             role="group"
             aria-label={path}
             data-manage-target={node.id}
             data-drop={dropState(node.id)}
-            style={{ "--ws-manage-level": level } as React.CSSProperties}
+            style={{ "--manage-level": level } as React.CSSProperties}
           >
             <button
               type="button"
-              className="ws-manage-handle"
+              className="m-0 box-border inline-flex h-10 w-8 shrink-0 cursor-grab touch-none items-center justify-center rounded-control border border-solid border-transparent bg-transparent p-0 font-sans text-text-muted enabled:hover:bg-surface-selected enabled:hover:text-text disabled:cursor-default disabled:opacity-40 phone:size-tap"
               aria-label={`Move ${path}`}
               title="Drag onto another location to nest it, or tap to choose"
               disabled={busy}
               data-manage-focus={`move:${node.id}`}
               {...handleProps(node)}
             >
-              <span aria-hidden="true">☰</span>
+              <Icon icon={Handle} />
             </button>
-            <span className="ws-manage-name">
-              <span className="ws-manage-label" title={path}>
+            <span className="flex min-w-0 flex-auto flex-col">
+              <span className="truncate" title={path}>
                 {node.name}
               </span>
-              <small>{model.kindLabel(node)}</small>
+              <small className="text-caption text-text-subtle tabular-nums">
+                {model.kindLabel(node)}
+              </small>
             </span>
-            <span className="ws-manage-actions">
-              <button
-                type="button"
+            <span className="flex flex-none gap-1 phone:flex-[1_1_100%]">
+              <Button
+                className="phone:flex-1"
                 aria-label={`Rename ${path}`}
                 disabled={busy}
                 data-manage-focus={`rename:${node.id}`}
@@ -396,15 +426,18 @@ export function ManageLocations({ onClose, onChanged }: Props) {
                 }
               >
                 Rename
-              </button>
+              </Button>
               {isDeck(node) ? (
                 // Decks can't have children; the spacer keeps the action columns aligned.
-                <span className="ws-manage-spacer" aria-hidden="true">
+                <span
+                  className="invisible box-border inline-flex h-control items-center border border-solid border-transparent px-3 font-sans text-control font-medium whitespace-nowrap phone:h-control-phone phone:flex-1 phone:px-4"
+                  aria-hidden="true"
+                >
                   Add child
                 </span>
               ) : (
-                <button
-                  type="button"
+                <Button
+                  className="phone:flex-1"
                   aria-label={`Add child location to ${path}`}
                   title={
                     model.canAddChild(node)
@@ -418,10 +451,10 @@ export function ManageLocations({ onClose, onChanged }: Props) {
                   }}
                 >
                   Add child
-                </button>
+                </Button>
               )}
-              <button
-                type="button"
+              <Button
+                className="phone:flex-1"
                 aria-label={`Delete ${path}`}
                 title={
                   deletable
@@ -437,11 +470,13 @@ export function ManageLocations({ onClose, onChanged }: Props) {
                 }
               >
                 Delete
-              </button>
+              </Button>
             </span>
           </div>
           {children.length > 0 && (
-            <ul aria-label={node.name}>{rows(node.id, level + 1)}</ul>
+            <ul aria-label={node.name} className={`${LIST} mt-1`}>
+              {rows(node.id, level + 1)}
+            </ul>
           )}
         </li>
       );
@@ -487,30 +522,29 @@ export function ManageLocations({ onClose, onChanged }: Props) {
       );
     };
     return (
-      <form
-        className="ws-manage-step"
-        aria-label={`Rename ${path}`}
-        onSubmit={submit}
-      >
-        <p>
-          Rename <strong>{path}</strong>
+      <form className={STEP} aria-label={`Rename ${path}`} onSubmit={submit}>
+        <p className="m-0">
+          Rename <strong className="wrap-anywhere">{path}</strong>
         </p>
-        <label className="ws-manage-field">
-          New name
-          <input
-            autoFocus
-            autoComplete="off"
-            value={text}
-            onChange={(event) => setText(event.target.value)}
-          />
-        </label>
-        <div className="ws-manage-step-actions">
-          <button type="submit" className="ws-manage-primary" disabled={busy}>
+        <TextField
+          label="New name"
+          autoFocus
+          autoComplete="off"
+          value={text}
+          onChange={(event) => setText(event.target.value)}
+        />
+        <div className={STEP_ACTIONS}>
+          <Button
+            type="submit"
+            variant="primary"
+            className={STEP_BUTTON}
+            disabled={busy}
+          >
             Save name
-          </button>
-          <button type="button" onClick={backToList}>
+          </Button>
+          <Button className={STEP_BUTTON} onClick={backToList}>
             Cancel
-          </button>
+          </Button>
         </div>
       </form>
     );
@@ -540,20 +574,21 @@ export function ManageLocations({ onClose, onChanged }: Props) {
     };
     const parents = model.validParents(node.id);
     return (
-      <section className="ws-manage-step" aria-label={`Move ${path}`}>
-        <p>
-          Move <strong>{path}</strong>
+      <section className={STEP} aria-label={`Move ${path}`}>
+        <p className="m-0">
+          Move <strong className="wrap-anywhere">{path}</strong>
           {nested > 0 &&
             ` and its ${plural(nested, "nested location", "nested locations")}`}
         </p>
         {target === undefined ? (
           <>
             {parents.length ? (
-              <ul className="ws-manage-targets" aria-label="New parent">
+              <ul className={LIST} aria-label="New parent">
                 {parents.map((option, position) => (
                   <li key={targetKey(option)}>
                     <button
                       type="button"
+                      className={TARGET}
                       autoFocus={position === 0}
                       onClick={() => {
                         setError("");
@@ -566,38 +601,41 @@ export function ManageLocations({ onClose, onChanged }: Props) {
                 ))}
               </ul>
             ) : (
-              <p>There is nowhere else this location can go.</p>
+              <p className="m-0">There is nowhere else this location can go.</p>
             )}
-            <div className="ws-manage-step-actions">
-              <button type="button" onClick={backToList}>
+            <div className={STEP_ACTIONS}>
+              <Button className={STEP_BUTTON} onClick={backToList}>
                 Cancel
-              </button>
+              </Button>
             </div>
           </>
         ) : (
-          <div className="ws-manage-confirm">
-            <p>
-              New path: <strong>{model.newPath(node.id, target)}</strong>
+          <div className="flex flex-col gap-3">
+            <p className="m-0">
+              New path:{" "}
+              <strong className="wrap-anywhere">
+                {model.newPath(node.id, target)}
+              </strong>
             </p>
             {parent && isStockedLeaf(parent) && (
-              <p className="ws-manage-warning">
+              <p className="m-0 rounded-panel border border-accent-border bg-accent-wash p-3 text-warning">
                 {parent.name} holds {copiesLabel(parent.copy_count)}. They move
                 into a new Unsorted child inside it, so every card stays in a
                 storage location.
               </p>
             )}
-            <div className="ws-manage-step-actions">
-              <button
-                type="button"
-                className="ws-manage-primary"
+            <div className={STEP_ACTIONS}>
+              <Button
+                variant="primary"
+                className={STEP_BUTTON}
                 autoFocus
                 disabled={busy}
                 onClick={confirm}
               >
                 Move here
-              </button>
-              <button
-                type="button"
+              </Button>
+              <Button
+                className={STEP_BUTTON}
                 disabled={busy}
                 onClick={() => {
                   setError("");
@@ -605,10 +643,14 @@ export function ManageLocations({ onClose, onChanged }: Props) {
                 }}
               >
                 Choose another
-              </button>
-              <button type="button" disabled={busy} onClick={backToList}>
+              </Button>
+              <Button
+                className={STEP_BUTTON}
+                disabled={busy}
+                onClick={backToList}
+              >
                 Cancel
-              </button>
+              </Button>
             </div>
           </div>
         )}
@@ -634,35 +676,30 @@ export function ManageLocations({ onClose, onChanged }: Props) {
       );
     };
     return (
-      <form
-        className="ws-manage-step"
-        aria-label={`Delete ${path}`}
-        onSubmit={submit}
-      >
-        <p>
-          Delete <strong>{path}</strong>? It is empty and has no child
-          locations.
+      <form className={STEP} aria-label={`Delete ${path}`} onSubmit={submit}>
+        <p className="m-0">
+          Delete <strong className="wrap-anywhere">{path}</strong>? It is empty
+          and has no child locations.
         </p>
-        <label className="ws-manage-field">
-          Type {node.name} to confirm
-          <input
-            autoFocus
-            autoComplete="off"
-            value={text}
-            onChange={(event) => setText(event.target.value)}
-          />
-        </label>
-        <div className="ws-manage-step-actions">
-          <button
+        <TextField
+          label={`Type ${node.name} to confirm`}
+          autoFocus
+          autoComplete="off"
+          value={text}
+          onChange={(event) => setText(event.target.value)}
+        />
+        <div className={STEP_ACTIONS}>
+          <Button
             type="submit"
-            className="ws-manage-danger"
+            variant="danger"
+            className={STEP_BUTTON}
             disabled={busy || text !== node.name}
           >
             Delete location
-          </button>
-          <button type="button" onClick={backToList}>
+          </Button>
+          <Button className={STEP_BUTTON} onClick={backToList}>
             Cancel
-          </button>
+          </Button>
         </div>
       </form>
     );
@@ -671,16 +708,17 @@ export function ManageLocations({ onClose, onChanged }: Props) {
   let body: React.ReactNode;
   if (load === "error" && !nodes.length) {
     body = (
-      <div className="ws-manage-status" role="alert">
-        <p>Locations are temporarily unavailable.</p>
-        <button type="button" onClick={() => void reload()}>
-          Retry
-        </button>
+      <div
+        className="flex flex-col items-start gap-2 text-meta text-text-muted"
+        role="alert"
+      >
+        <p className="m-0">Locations are temporarily unavailable.</p>
+        <Button onClick={() => void reload()}>Retry</Button>
       </div>
     );
   } else if (load === "loading" && !nodes.length) {
     body = (
-      <p className="ws-manage-status" role="status">
+      <p className="m-0 text-meta text-text-muted" role="status">
         Loading locations…
       </p>
     );
@@ -693,24 +731,23 @@ export function ManageLocations({ onClose, onChanged }: Props) {
   } else {
     body = (
       <>
-        <p className="ws-manage-hint">
+        <p className="m-0 text-meta text-text-muted">
           Drag a location by its ☰ handle onto another location to nest it, or
           onto Top level. Tap the handle, or press Enter on it, to choose from a
           list instead. Every move asks you to confirm.
         </p>
         <div
-          className="ws-manage-top"
+          className={`sticky top-0 z-1 box-border rounded-panel border bg-surface p-3 text-center text-meta ${topDrop(dropState(null))}`}
           data-manage-target="top"
           data-drop={dropState(null)}
         >
           Top level
         </div>
-        <ul className="ws-manage-tree" aria-label="All locations">
+        <ul className={LIST} aria-label="All locations">
           {rows(null, 0)}
         </ul>
-        <button
-          type="button"
-          className="ws-manage-add-root"
+        <Button
+          className="self-start"
           disabled={busy}
           onClick={() => {
             setNotice(null);
@@ -718,7 +755,7 @@ export function ManageLocations({ onClose, onChanged }: Props) {
           }}
         >
           Add top-level location
-        </button>
+        </Button>
       </>
     );
   }
@@ -730,61 +767,46 @@ export function ManageLocations({ onClose, onChanged }: Props) {
       : `Added ${name} at the top level.`;
   return (
     <>
-      <dialog
-        ref={dialogRef}
-        className="ws-manage"
-        aria-labelledby="ws-manage-title"
-        data-dragging={drag ? "" : undefined}
-        onCancel={(event) => {
-          // Escape during a drag only drops the drag.
-          if (pointer.current?.moved) {
-            event.preventDefault();
-            endDrag();
-          }
-        }}
-        onClose={() => {
-          // A close queued before a re-open must not close the reopened dialog.
-          if (!dialogRef.current?.open) onClose();
-        }}
+      {/* The kit Dialog: a centred panel on desktop, the whole screen on a phone. Escape, the close button
+          and the scrim close it (Escape during a drag only drops the drag), and focus returns to the gear,
+          or to ☰ when it opened from the phone drawer (the drawer gives focus back to ☰ first). */}
+      <Dialog
+        open
+        onClose={onClose}
+        title="Manage locations"
+        closeLabel="Close manage locations"
+        size="wide"
+        bodyRef={listRef}
+        // Focused rows scroll clear of the pinned Top level zone.
+        bodyClassName="scroll-pt-15"
       >
-        <div className="ws-manage-header">
-          <h2 id="ws-manage-title">Manage locations</h2>
-          <button
-            type="button"
-            className="ws-manage-close"
-            aria-label="Close manage locations"
-            data-manage-focus="close"
-            onClick={() => dialogRef.current?.close()}
-          >
-            <span aria-hidden="true">✕</span>
-          </button>
-        </div>
-        <div className="ws-manage-body" ref={listRef}>
+        <div
+          ref={rootRef}
+          className={`flex flex-col gap-3 ${drag ? "cursor-grabbing select-none" : ""}`}
+        >
           <p
-            className={
-              notice?.tone === "alert" ? "ws-manage-error" : "ws-manage-notice"
-            }
+            className={`m-0 text-meta empty:-mb-3 ${notice?.tone === "alert" ? "text-danger" : "text-text"}`}
             role={notice?.tone ?? "status"}
           >
             {notice?.text ?? ""}
           </p>
           {body}
           {error && (
-            <p className="ws-manage-error" role="alert">
+            <p className="m-0 text-meta text-danger" role="alert">
               {error}
             </p>
           )}
+          {drag && lifted && (
+            <div
+              className="pointer-events-none fixed z-1 box-border max-w-60 truncate rounded-control border border-accent-border bg-surface-raised px-3 py-1 text-meta text-text"
+              style={{ left: drag.x + 14, top: drag.y + 10 }}
+              aria-hidden="true"
+            >
+              {lifted.name}
+            </div>
+          )}
         </div>
-        {drag && lifted && (
-          <div
-            className="ws-manage-drag-label"
-            style={{ left: drag.x + 14, top: drag.y + 10 }}
-            aria-hidden="true"
-          >
-            {lifted.name}
-          </div>
-        )}
-      </dialog>
+      </Dialog>
       {/* Add child reuses ticket 108's create dialog. It is a sibling, not a child, of the panel's
         dialog so its cancel and close events never reach the panel's handlers. */}
       {addingTo !== undefined && (

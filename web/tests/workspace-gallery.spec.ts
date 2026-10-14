@@ -177,11 +177,11 @@ test("All owned shows one tile per copy with source captions; a Storage Leaf dro
   await expect(tiles(page)).toHaveCount(5);
   // Card Edition order, then source Location path; one tile per copy, copies of an Edition together.
   const expected = [
-    `Gallery Abra, Fixture Set 1, copy 1, ${shelf} / Binder 10`,
-    `Gallery Pikachu, Fixture Set 2, copy 1, ${shelf} / Binder 10`,
-    `Gallery Pikachu, Fixture Set 2, copy 1, ${shelf} / Binder 2`,
-    `Gallery Pikachu, Fixture Set 2, copy 2, ${shelf} / Binder 2`,
-    `Gallery Zubat, Fixture Set 3, copy 1, ${shelf} / Box`,
+    `Gallery Abra, Fixture Set 1, Normal, copy 1, ${shelf} / Binder 10`,
+    `Gallery Pikachu, Fixture Set 2, Normal, copy 1, ${shelf} / Binder 10`,
+    `Gallery Pikachu, Fixture Set 2, Normal, copy 1, ${shelf} / Binder 2`,
+    `Gallery Pikachu, Fixture Set 2, Normal, copy 2, ${shelf} / Binder 2`,
+    `Gallery Zubat, Fixture Set 3, Normal, copy 1, ${shelf} / Box`,
   ];
   for (const [index, label] of expected.entries())
     await expect(tiles(page).nth(index)).toHaveAccessibleName(label);
@@ -196,7 +196,7 @@ test("All owned shows one tile per copy with source captions; a Storage Leaf dro
   const copy = tiles(page).nth(3);
   await expect(copy).toHaveAttribute(
     "title",
-    `Gallery Pikachu · Fixture Set 2 · copy 2 · ${shelf} / Binder 2`
+    `Gallery Pikachu · Fixture Set 2 · Normal · copy 2 · ${shelf} / Binder 2`
   );
 
   // All owned: the source caption shows even with Names off (the default).
@@ -225,11 +225,11 @@ test("All owned shows one tile per copy with source captions; a Storage Leaf dro
   await expect(counts(page, "2 copies · 1 edition")).toBeVisible();
   await expect(tiles(page)).toHaveCount(2);
   await expect(tiles(page).nth(1)).toHaveAccessibleName(
-    `Gallery Pikachu, Fixture Set 2, copy 2, ${shelf} / Binder 2`
+    `Gallery Pikachu, Fixture Set 2, Normal, copy 2, ${shelf} / Binder 2`
   );
   await expect(tiles(page).nth(1)).toHaveAttribute(
     "title",
-    `Gallery Pikachu · Fixture Set 2 · copy 2 · ${shelf} / Binder 2`
+    `Gallery Pikachu · Fixture Set 2 · Normal · copy 2 · ${shelf} / Binder 2`
   );
   await expect(tiles(page).nth(1)).not.toContainText("Binder 2");
 
@@ -330,20 +330,24 @@ test("card-shaped placeholders show until the first page arrives", async ({
   await expect(counts(page, "3 copies · 1 edition")).toBeVisible();
 });
 
+/** The gallery grid: the Cards region's child that carries the layout model's inline height. */
+const GRID = 'section[aria-label="Cards"] > div[style]';
 /** The gallery grid's inline height, in px. */
 const gridHeight = (page: Page) =>
-  page.evaluate(() =>
-    parseFloat(
-      document.querySelector<HTMLElement>(".ws-gallery-grid")!.style.height ||
-        "0"
-    )
+  page.evaluate(
+    (grid) =>
+      parseFloat(
+        document.querySelector<HTMLElement>(grid)!.style.height || "0"
+      ),
+    GRID
   );
 /** The gallery grid's top edge in page coordinates. */
 const gridTop = (page: Page) =>
   page.evaluate(
-    () =>
-      document.querySelector(".ws-gallery-grid")!.getBoundingClientRect().top +
-      window.scrollY
+    (grid) =>
+      document.querySelector(grid)!.getBoundingClientRect().top +
+      window.scrollY,
+    GRID
   );
 
 type GalleryRecord = { placeholders: number; heights: number[] };
@@ -352,7 +356,13 @@ type GalleryRecord = { placeholders: number; heights: number[] };
  * grid is given. A style change's old value is recorded too, so a height that is replaced before the
  * observer runs is still seen. The whole page is watched, so a remounted gallery is caught as well. */
 async function recordGallery(page: Page) {
-  await page.evaluate(() => {
+  await page.evaluate((grid) => {
+    // A placeholder: the "Loading cards" status, or a pending tile (an aria-hidden box in the grid). The marquee
+    // band is an aria-hidden box in the grid too, but no recording runs while a marquee is drawn.
+    const placeholder = (node: HTMLElement) =>
+      node.matches(
+        `[aria-label="Loading cards"], [aria-label="Loading cards"] > div, ${grid} > div[aria-hidden="true"]`
+      ) || node.querySelector('[aria-label="Loading cards"]') !== null;
     const probe = document.createElement("div");
     const heightOf = (style: string | null) => {
       probe.setAttribute("style", style ?? "");
@@ -362,25 +372,18 @@ async function recordGallery(page: Page) {
     const observer = new MutationObserver((mutations) => {
       for (const mutation of mutations) {
         const target = mutation.target as HTMLElement;
-        if (
-          mutation.type === "attributes" &&
-          target.classList.contains("ws-gallery-grid")
-        )
+        if (mutation.type === "attributes" && target.matches(grid))
           record.heights.push(
             heightOf(mutation.oldValue),
             parseFloat(target.style.height || "0")
           );
         for (const node of Array.from(mutation.addedNodes)) {
           if (!(node instanceof HTMLElement)) continue;
-          if (
-            node.matches(".ws-tile-placeholder") ||
-            node.querySelector(".ws-tile-placeholder")
-          )
-            record.placeholders++;
-          const grid = node.matches(".ws-gallery-grid")
+          if (placeholder(node)) record.placeholders++;
+          const added = node.matches(grid)
             ? node
-            : node.querySelector<HTMLElement>(".ws-gallery-grid");
-          if (grid) record.heights.push(parseFloat(grid.style.height || "0"));
+            : node.querySelector<HTMLElement>(grid);
+          if (added) record.heights.push(parseFloat(added.style.height || "0"));
         }
       }
     });
@@ -393,7 +396,7 @@ async function recordGallery(page: Page) {
     });
     (window as unknown as { galleryRecord: typeof record }).galleryRecord =
       record;
-  });
+  }, GRID);
 }
 const galleryRecord = (page: Page) =>
   page.evaluate(
@@ -452,7 +455,7 @@ test("a Location shown before opens from its cached tiles while it is read again
   await nav.getByRole("button", { name: `Tall ${s}`, exact: true }).click();
   await expect(counts(page, "120 copies · 1 edition")).toBeVisible();
   await expect(tiles(page).first()).toHaveAccessibleName(
-    `Revisit Abra, Fixture Set 1, copy 1, Tall ${s}`
+    `Revisit Abra, Fixture Set 1, Normal, copy 1, Tall ${s}`
   );
   const tallHeight = await gridHeight(page);
   const tallTop = await gridTop(page);
@@ -483,7 +486,7 @@ test("a Location shown before opens from its cached tiles while it is read again
   expect(steps(record.heights)).toEqual([shortHeight, tallHeight]);
   await expect(counts(page, "120 copies · 1 edition")).toBeVisible();
   await expect(tiles(page).first()).toHaveAccessibleName(
-    `Revisit Abra, Fixture Set 1, copy 1, Tall ${s}`
+    `Revisit Abra, Fixture Set 1, Normal, copy 1, Tall ${s}`
   );
   expect(await gridHeight(page)).toBe(tallHeight);
   expect(await gridTop(page)).toBe(tallTop);
@@ -577,6 +580,8 @@ test("a Location not shown before keeps the gallery's height while its first pag
   ).toBeVisible();
   await settle(page);
   let record = await galleryRecord(page);
+  // A positive control: the placeholder probe does see Short's placeholders.
+  expect(record.placeholders).toBeGreaterThan(0);
   for (const height of record.heights)
     expect(height).toBeGreaterThanOrEqual(tallHeight);
   expect(await gridHeight(page)).toBeGreaterThanOrEqual(tallHeight);
