@@ -30,7 +30,7 @@ export function PublishDeck({ deckId }: { deckId: string }) {
       setMessage(attempt.action === 'revoke' ? 'Public link revoked permanently.' : attempt.action === 'visibility' ? 'Public visibility updated.' : 'Published snapshot updated.');
     } catch (cause) {
       if (cause instanceof PublicationError && cause.status < 500) {
-        pending.current = null; setMessage(cause.status === 422 ? 'Use a plain-text public title of at most 120 characters, without markup or links.' : 'Publication changed. Refresh its status before continuing.');
+        pending.current = null; setMessage(cause.status === 422 ? 'Use a plain-text public title of at most 120 characters, without markup or links.' : cause.code === 'TARGET_FORMAT_NOT_LEGAL' ? 'Publishing needs a legal result in this Deck\'s Target Format. Open the result next to the Target Format to see the issues.' : 'Publication changed. Refresh its status before continuing.');
       } else setMessage('Publication has not been confirmed. Retry the same action to recover safely.');
     } finally { setBusy(false); }
   }

@@ -26,7 +26,8 @@ def ts_type(value):
 
 schema = app.openapi()["components"]["schemas"]
 names = ("TreeNode", "LocationCommandResult", "CreateDeck", "EditDeck", "DeckIndex", "IdentityCheck", "DeckChecks", "DeckDetail", "DeckEditionQuantity", "DeckContents",
-         "DeckListLine", "DeckList", "AddDeckListLine", "ChangeDeckListLine", "RemoveDeckListLine", "DeckListCommandResult",
+         "DeckListLine", "DeckList", "AddDeckListLine", "ChangeDeckListLine", "RemoveDeckListLine", "SetTargetFormat",
+         "DeckListCommandResult",
          "ElsewhereLocation", "LineOwnership", "SurplusHolding", "CompetingDeck", "CompetitionWarning",
          "AddDeckListPrinting", "DeckListPrintingResult",
          "PickWarning", "PickSource", "PickRow", "PutAwayHolding", "PickList", "PickItem", "ConfirmPicks",
@@ -70,6 +71,9 @@ export const changeDeckListLine = (deckId: string, editionId: string, body: Chan
   request<DeckListCommandResult>(`${deckListLines(deckId)}/${encodeURIComponent(editionId)}`, 'PATCH', body);
 export const removeDeckListLine = (deckId: string, editionId: string, body: RemoveDeckListLine) =>
   request<DeckListCommandResult>(`${deckListLines(deckId)}/${encodeURIComponent(editionId)}`, 'DELETE', body);
+// Changes the Deck List's Target Format (app redesign #178); answers the new Format's result.
+export const setTargetFormat = (deckId: string, body: SetTargetFormat) =>
+  request<DeckListCommandResult>(`/api/decks/${encodeURIComponent(deckId)}/deck-list/target-format`, 'PUT', body);
 export const addDeckListPrinting = (deckId: string, body: AddDeckListPrinting) =>
   request<DeckListPrintingResult>(`/api/decks/${encodeURIComponent(deckId)}/deck-list/printings`, 'POST', body);
 export const getPickList = (deckId: string) =>

@@ -14,7 +14,7 @@ from test_card_attributes import ENERGY_SV, SWITCH_ME, card, edition_of, printin
 from test_catalog import reset_catalog
 from test_catalog_metadata import Records
 from test_catalog_reconciliation import run, seed_manual
-from test_deck_format_checks import deck_with, format_checks, issues, lines, standard
+from test_deck_format_checks import deck_with, every_format, format_checks, issues, lines, standard
 from test_deck_lists import add_line
 from test_holdings import call
 
@@ -388,9 +388,13 @@ def test_a_command_adding_a_card_legal_through_its_reprint_group_returns_legal_a
     response = add_line(owner, deck, edition_of("swsh12.5-141"), "4", 3)
     assert response.status_code == 200, response.text
     checks = response.json()["format_checks"]
-    assert {result["format"]: (result["status"], result["issues"]) for result in checks["results"]} == {
+    # The command answers the Target Format, Standard (app redesign #178).
+    assert [(result["format"], result["status"], result["issues"]) for result in checks["results"]] == [
+        ("standard", "legal", [])]
+    # The next read reuses the saved result: the same body, computed at the same time.
+    assert format_checks(owner, deck) == checks
+    assert {result["format"]: (result["status"], result["issues"]) for result in every_format(
+        owner, deck, checks["results"][0]["evaluated_on"])} == {
         "standard": ("legal", []), "expanded": ("legal", []),
         "glc": ("not_legal", [{"code": "copy_limit", "reason": "more than 1 copy of Rare Candy (4)", "kind": "card",
                                "effect": "not_legal", "lines": [edition_of("swsh12.5-141")]}])}
-    # The next read reuses every saved result: the same body, computed at the same times.
-    assert format_checks(owner, deck) == checks

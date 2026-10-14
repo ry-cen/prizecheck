@@ -1,0 +1,164 @@
+# Printed set codes (app redesign #173): the code a collector reads on a card or in a deck list ("PAL 185"), by TCGdex
+# set ID. Catalog shows it in place of the TCGdex set ID and its search accepts it ("PAL 185", any case). A set not listed
+# here shows and searches by its TCGdex set ID. Display and search only: this is not the Live export table
+# (catalog_targets.LiveRulesV1.SET_CODES, which needs Live-import evidence) and no export reads it.
+#
+# Rule for a row (api/tests/test_set_codes.py enforces it): two independent sources give the same code, or the code is
+# printed on a card scan and one other source agrees; no source read gives a different code. A subset whose cards
+# TCGdex lists as its own set, numbered with a prefix the main set doesn't use (TG, GG, SV), inherits its main set's
+# code ("I:<main set ID>"), because its cards print that code.
+#
+# Source keys:
+#   L        Limitless TCG card database set list, https://limitlesstcg.com/cards (read 2026-10-13)
+#   J        JustInBasil, Appendix I: Set Symbols and Abbreviations, https://www.justinbasil.com/guide/appendix1
+#            (read 2026-10-13; it lists sets up to Stellar Crown)
+#   S:<card> the code printed at the bottom left of that card, on its TCGdex scan
+#            https://assets.tcgdex.net/en/<series>/<set>/<number>/high.png (viewed 2026-10-13)
+#   I:<set>  inherits that main set's code (see above)
+# TCGdex's own "abbreviation" and "tcgOnline" fields are never a source, and neither are sites that mirror them.
+#
+# Left out on purpose (each shows its TCGdex set ID):
+#   base4 (Base Set 2: BS2 in L, B2 in J), ecard1 (Expedition: E1 / EX), ecard2 (Aquapolis: E2 / AQ),
+#   ecard3 (Skyridge: E3 / SK): the sources disagree.
+#   sve, mee (energy sets), mfb, pop1-pop9, ru1, smp, xyp, bwp, hgssp, dpp, np: one source only, and no card scan.
+#   swshp: the sources disagree (SP in L; Pokémon TCG Live uses PR-SW).
+#   cel25cc: TCGdex numbers it CC001-CC025, which is not what the cards print.
+#   30th-c, xya, basep, bog, miscp, ex5.5, exu, fut2020, the McDonald's Collections and the trainer kits: no code found.
+#
+# Columns, tab-separated: TCGdex set ID, printed code, set name (as in imported_sets.txt), sources.
+me01	MEG	Mega Evolution	L,S:me01-001
+me02	PFL	Phantasmal Flames	L,S:me02-001
+me02.5	ASC	Ascended Heroes	L,S:me02.5-001
+me03	POR	Perfect Order	L,S:me03-001
+me04	CRI	Chaos Rising	L,S:me04-001
+me05	PBL	Pitch Black	L,S:me05-001
+mep	MEP	MEP Black Star Promos	L,S:mep-001
+30th	30C	30th Celebration	L,S:30th-001
+sv01	SVI	Scarlet & Violet	L,J
+sv02	PAL	Paldea Evolved	L,J
+sv03	OBF	Obsidian Flames	L,J
+sv03.5	MEW	151	L,J
+sv04	PAR	Paradox Rift	L,J
+sv04.5	PAF	Paldean Fates	L,J
+sv05	TEF	Temporal Forces	L,J
+sv06	TWM	Twilight Masquerade	L,J
+sv06.5	SFA	Shrouded Fable	L,J
+sv07	SCR	Stellar Crown	L,J
+sv08	SSP	Surging Sparks	L,S:sv08-001
+sv08.5	PRE	Prismatic Evolutions	L,S:sv08.5-001
+sv09	JTG	Journey Together	L,S:sv09-001
+sv10	DRI	Destined Rivals	L,S:sv10-001
+sv10.5b	BLK	Black Bolt	L,S:sv10.5b-001
+sv10.5w	WHT	White Flare	L,S:sv10.5w-001
+svp	SVP	SVP Black Star Promos	L,S:svp-001
+swsh1	SSH	Sword & Shield	L,J
+swsh2	RCL	Rebel Clash	L,J
+swsh3	DAA	Darkness Ablaze	L,J
+swsh3.5	CPA	Champion's Path	L,J
+swsh4	VIV	Vivid Voltage	L,J
+swsh4.5	SHF	Shining Fates	L,J
+swsh4.5sv	SHF	Shining Fates Shiny Vault	I:swsh4.5
+swsh5	BST	Battle Styles	L,J
+swsh6	CRE	Chilling Reign	L,J
+swsh7	EVS	Evolving Skies	L,J
+cel25	CEL	Celebrations	L,J
+swsh8	FST	Fusion Strike	L,J
+swsh9	BRS	Brilliant Stars	L,J
+swsh9tg	BRS	Brilliant Stars Trainer Gallery	I:swsh9
+swsh10	ASR	Astral Radiance	L,J
+swsh10tg	ASR	Astral Radiance Trainer Gallery	I:swsh10
+swsh10.5	PGO	Pokémon GO	L,J
+swsh11	LOR	Lost Origin	L,J
+swsh11tg	LOR	Lost Origin Trainer Gallery	I:swsh11
+swsh12	SIT	Silver Tempest	L,J
+swsh12tg	SIT	Silver Tempest Trainer Gallery	I:swsh12
+swsh12.5	CRZ	Crown Zenith	L,J
+swsh12.5gg	CRZ	Crown Zenith Galarian Gallery	I:swsh12.5
+sm1	SUM	Sun & Moon	L,J
+sm2	GRI	Guardians Rising	L,J
+sm3	BUS	Burning Shadows	L,J
+sm3.5	SLG	Shining Legends	L,J
+sm4	CIN	Crimson Invasion	L,J
+sm5	UPR	Ultra Prism	L,J
+sm6	FLI	Forbidden Light	L,J
+sm7	CES	Celestial Storm	L,J
+sm7.5	DRM	Dragon Majesty	L,J
+sm8	LOT	Lost Thunder	L,J
+sm9	TEU	Team Up	L,J
+det1	DET	Detective Pikachu	L,J
+sm10	UNB	Unbroken Bonds	L,J
+sm11	UNM	Unified Minds	L,J
+sm115	HIF	Hidden Fates	L,J
+sma	HIF	Hidden Fates Shiny Vault	I:sm115
+sm12	CEC	Cosmic Eclipse	L,J
+xy0	KSS	Kalos Starter Set	L,J
+xy1	XY	XY	L,J
+xy2	FLF	Flashfire	L,J
+xy3	FFI	Furious Fists	L,J
+xy4	PHF	Phantom Forces	L,J
+xy5	PRC	Primal Clash	L,J
+dc1	DCR	Double Crisis	L,J
+xy6	ROS	Roaring Skies	L,J
+xy7	AOR	Ancient Origins	L,J
+xy8	BKT	BREAKthrough	L,J
+xy9	BKP	BREAKpoint	L,J
+g1	GEN	Generations	L,J
+xy10	FCO	Fates Collide	L,J
+xy11	STS	Steam Siege	L,J
+xy12	EVO	Evolutions	L,J
+bw1	BLW	Black & White	L,J
+bw2	EPO	Emerging Powers	L,J
+bw3	NVI	Noble Victories	L,J
+bw4	NXD	Next Destinies	L,J
+bw5	DEX	Dark Explorers	L,J
+bw6	DRX	Dragons Exalted	L,J
+dv1	DRV	Dragon Vault	L,J
+bw7	BCR	Boundaries Crossed	L,J
+bw8	PLS	Plasma Storm	L,J
+bw9	PLF	Plasma Freeze	L,J
+bw10	PLB	Plasma Blast	L,J
+bw11	LTR	Legendary Treasures	L,J
+hgss1	HS	HeartGold SoulSilver	L,J
+hgss2	UL	Unleashed	L,J
+hgss3	UD	Undaunted	L,J
+hgss4	TM	Triumphant	L,J
+col1	CL	Call of Legends	L,J
+dp1	DP	Diamond & Pearl	L,J
+dp2	MT	Mysterious Treasures	L,J
+dp3	SW	Secret Wonders	L,J
+dp4	GE	Great Encounters	L,J
+dp5	MD	Majestic Dawn	L,J
+dp6	LA	Legends Awakened	L,J
+dp7	SF	Stormfront	L,J
+pl1	PL	Platinum	L,J
+pl2	RR	Rising Rivals	L,J
+pl3	SV	Supreme Victors	L,J
+pl4	AR	Arceus	L,J
+ex1	RS	Ruby & Sapphire	L,J
+ex2	SS	Sandstorm	L,J
+ex3	DR	Dragon	L,J
+ex4	MA	Team Magma vs Team Aqua	L,J
+ex5	HL	Hidden Legends	L,J
+ex6	RG	FireRed & LeafGreen	L,J
+ex7	TRR	Team Rocket Returns	L,J
+ex8	DX	Deoxys	L,J
+ex9	EM	Emerald	L,J
+ex10	UF	Unseen Forces	L,J
+ex11	DS	Delta Species	L,J
+ex12	LM	Legend Maker	L,J
+ex13	HP	Holon Phantoms	L,J
+ex14	CG	Crystal Guardians	L,J
+ex15	DF	Dragon Frontiers	L,J
+ex16	PK	Power Keepers	L,J
+base1	BS	Base Set	L,J
+base2	JU	Jungle	L,J
+base3	FO	Fossil	L,J
+base5	TR	Team Rocket	L,J
+gym1	G1	Gym Heroes	L,J
+gym2	G2	Gym Challenge	L,J
+neo1	N1	Neo Genesis	L,J
+neo2	N2	Neo Discovery	L,J
+neo3	N3	Neo Revelation	L,J
+neo4	N4	Neo Destiny	L,J
+lc	LC	Legendary Collection	L,J
+si1	SI	Southern Islands	L,J

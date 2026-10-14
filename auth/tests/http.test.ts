@@ -281,6 +281,7 @@ describe("live Better Auth boundary", () => {
         "checks",
         "identities",
         "published_at",
+        "target_format",
         "title",
         "total",
         "version",

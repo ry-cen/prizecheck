@@ -1,4 +1,5 @@
 import type { RefObject } from "react";
+import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
 import { CopyArt } from "../ui/CopyTile";
 import {
@@ -15,14 +16,22 @@ type Props = {
   ordinal: number | null;
   onClose: () => void;
   returnFocus: RefObject<HTMLElement | null>;
+  /** Gather: open the Pick List on this line's Edition (#179). Offered while copies are owned elsewhere. */
+  onGather?: (editionId: string) => void;
 };
 
 /**
  * What a copy is and where it is (#176): the card, its Edition and kind, and how its line's copies split
- * between this Deck, other Locations and not owned. Read-only here; #177 adds ±1 and Swap this copy for, and
- * #179 adds Gather.
+ * between this Deck, other Locations and not owned, with Gather (#179) while copies are owned elsewhere. #177
+ * adds ±1 and Swap this copy for.
  */
-export function CopySheet({ line, ordinal, onClose, returnFocus }: Props) {
+export function CopySheet({
+  line,
+  ordinal,
+  onClose,
+  returnFocus,
+  onGather,
+}: Props) {
   const copy =
     line && ordinal !== null && line.copies
       ? (line.copies.find((item) => item.ordinal === ordinal) ?? null)
@@ -90,6 +99,15 @@ export function CopySheet({ line, ordinal, onClose, returnFocus }: Props) {
               <li>{line.missing.toString()} not owned</li>
             </ul>
           </section>
+          {onGather && line.elsewhere > 0n && (
+            <Button
+              variant="primary"
+              className="self-start"
+              onClick={() => onGather(line.line.edition_id)}
+            >
+              Gather
+            </Button>
+          )}
         </div>
       )}
     </Dialog>

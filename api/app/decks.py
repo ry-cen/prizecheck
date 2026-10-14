@@ -12,7 +12,8 @@ from .holdings import parse_quantity
 from .location_tree import (TreeNode, LocationCommandResult, EditLocation, apply_edit, cleaned_name,
                             owner_and_rows, replay, check_name, store_result, error, node_model)
 from .deck_ownership import CompetitionWarning, LineOwnership, SurplusHolding, held_in, read_ownership
-from .deck_format_checks import DeckFormatChecks, command_format_checks
+from .deck_format_checks import DeckFormatChecks, TargetFormat, command_format_checks, held_format_checks
+from .format_evaluator import FORMATS
 from .deck_list_display import CardKind, TrainerType, read_line_display, with_line_display
 
 router = APIRouter(prefix='/api/decks', tags=['decks'])
@@ -107,11 +108,22 @@ class RemoveDeckListLine(BaseModel):
     idempotency_key: UUID
 
 
+class SetTargetFormat(BaseModel):
+    # Checked by the route, so an unknown name answers UNKNOWN_FORMAT like the format-checks read.
+    target_format: str
+    revision: int = Field(ge=1)
+    idempotency_key: UUID
+
+
 class DeckListCommandResult(BaseModel):
     deck_id: UUID
     deck_list: DeckList
-    # The Deck's format results as of today (UTC) after the edit. A replay returns them as computed then; a response
-    # stored before format results existed has none, so it replays as null instead of failing validation.
+    # The Deck List's Target Format after the command (app redesign #178). A response stored before migration 045 replays
+    # as Standard, the Target Format every Deck List had then (``replayed``).
+    target_format: TargetFormat
+    # The Deck's result in its Target Format as of today (UTC) after the edit: one entry in ``results``. A replay returns
+    # it as computed then; a response stored before format results existed has none, so it replays as null instead of
+    # failing validation.
     format_checks: DeckFormatChecks | None = None
 
 
@@ -128,6 +140,9 @@ class DeckDetail(BaseModel):
     competition: list[CompetitionWarning]
     owner_revision: int
     catalog_revision: int
+    # The Deck List's Target Format and its result as of today (app redesign #178): one entry in ``format_checks.results``.
+    target_format: TargetFormat
+    format_checks: DeckFormatChecks
 
 
 @router.post('', response_model=LocationCommandResult, status_code=201)
@@ -261,11 +276,21 @@ def deck_detail(deck_id: UUID, user_id: str = Depends(verified_user)):
         state = conn.execute('SELECT active_generation,revision FROM catalog_state WHERE singleton FOR SHARE').fetchone()
         generation = state['active_generation']
         ownership = read_ownership(conn, user_id, deck_id)
+        deck_list = read_deck_list(conn, user_id, deck_id)
+        target_format = read_target_format(conn, user_id, deck_id)
+        # The owner lock (owner_and_rows) keeps Deck List commands out, so a saved result is reused when its key matches,
+        # and otherwise recomputed and saved in this transaction.
+        format_checks = held_format_checks(conn, user_id, deck_id, deck_list.revision, target_format, reuse=True)
         return DeckDetail(deck=node_model(deck, rows), owner_revision=revision, catalog_revision=state['revision'],
                           checks=basic_checks(conn, generation, user_id, deck_id, 'holdings'),
                           deck_list_checks=basic_checks(conn, generation, user_id, deck_id, 'deck_list'),
-                          deck_list=read_deck_list(conn, user_id, deck_id),
+                          deck_list=deck_list, target_format=target_format, format_checks=format_checks,
                           ownership=ownership.lines, surplus=ownership.surplus, competition=ownership.competition)
+
+
+def read_target_format(conn, user_id: str, deck_id: UUID) -> str:
+    return conn.execute('SELECT target_format FROM deck_list WHERE owner_id=%s AND deck_id=%s',
+                        (user_id, deck_id)).fetchone()['target_format']
 
 
 def check_revision(conn, user_id: str, deck_id: UUID, expected: int):
@@ -283,13 +308,28 @@ def line_exists(conn, user_id: str, deck_id: UUID, edition_id: UUID) -> bool:
 
 
 def advance_deck_list(conn, user_id: str, deck_id: UUID) -> dict:
-    """Advance the Deck List revision and return the fields every Deck List command response carries: the Deck List
-    and its format results, which are saved with the Deck. The inventory revision does not move: a Deck List never
-    counts toward the Collection."""
+    """Advance the Deck List revision and return the fields every Deck List command response carries: the Deck List,
+    its Target Format and that Format's result, which is saved with the Deck. The inventory revision does not move: a
+    Deck List never counts toward the Collection."""
     conn.execute('UPDATE deck_list SET revision=revision+1 WHERE owner_id=%s AND deck_id=%s', (user_id, deck_id))
     deck_list = read_deck_list(conn, user_id, deck_id)
-    return {'deck_id': deck_id, 'deck_list': deck_list,
-            'format_checks': command_format_checks(conn, user_id, deck_id, deck_list.revision)}
+    target_format = read_target_format(conn, user_id, deck_id)
+    return {'deck_id': deck_id, 'deck_list': deck_list, 'target_format': target_format,
+            'format_checks': command_format_checks(conn, user_id, deck_id, deck_list.revision, target_format)}
+
+
+def replayed(conn, response: dict) -> dict:
+    """A stored Deck List command response as it replays: display data on every line (``with_line_display``), and, for a
+    response stored before migration 045, the Target Format every Deck List had then (Standard) with only that Format's
+    result, as a response stored now would carry."""
+    response = with_line_display(conn, response)
+    if 'target_format' in response:
+        return response
+    checks = response.get('format_checks')
+    if checks is not None:
+        checks = {**checks, 'results': [result for result in checks.get('results', [])
+                                        if result.get('format') == 'standard']}
+    return {**response, 'target_format': 'standard', 'format_checks': checks}
 
 
 def keep_response(conn, user_id: str, key: UUID, digest: str, result: BaseModel) -> dict:
@@ -314,7 +354,7 @@ def add_deck_list_line(deck_id: UUID, command: AddDeckListLine, user_id: str = D
         _, rows = owner_and_rows(conn, user_id)
         digest, previous = replay(conn, user_id, command.idempotency_key, payload)
         if previous:
-            return with_line_display(conn, previous)
+            return replayed(conn, previous)
         require_deck(rows, deck_id)
         check_revision(conn, user_id, deck_id, command.revision)
         state = conn.execute('SELECT active_generation FROM catalog_state WHERE singleton FOR SHARE').fetchone()
@@ -341,7 +381,7 @@ def change_deck_list_line(deck_id: UUID, edition_id: UUID, command: ChangeDeckLi
         _, rows = owner_and_rows(conn, user_id)
         digest, previous = replay(conn, user_id, command.idempotency_key, payload)
         if previous:
-            return with_line_display(conn, previous)
+            return replayed(conn, previous)
         require_deck(rows, deck_id)
         check_revision(conn, user_id, deck_id, command.revision)
         if not line_exists(conn, user_id, deck_id, edition_id):
@@ -360,13 +400,34 @@ def remove_deck_list_line(deck_id: UUID, edition_id: UUID, command: RemoveDeckLi
         _, rows = owner_and_rows(conn, user_id)
         digest, previous = replay(conn, user_id, command.idempotency_key, payload)
         if previous:
-            return with_line_display(conn, previous)
+            return replayed(conn, previous)
         require_deck(rows, deck_id)
         check_revision(conn, user_id, deck_id, command.revision)
         if not line_exists(conn, user_id, deck_id, edition_id):
             error(404, 'DECK_LIST_LINE_NOT_FOUND')
         conn.execute('DELETE FROM deck_list_line WHERE owner_id=%s AND deck_id=%s AND edition_id=%s',
                      (user_id, deck_id, edition_id))
+        return store_deck_list_result(conn, user_id, deck_id, command.idempotency_key, digest)
+
+
+@router.put('/{deck_id}/deck-list/target-format', response_model=DeckListCommandResult)
+def set_target_format(deck_id: UUID, command: SetTargetFormat, user_id: str = Depends(verified_user)):
+    """Change the Deck List's Target Format (app redesign #178). A Deck List command like the line edits: revision-checked,
+    idempotent, it advances the revision (saved results depend on it) and returns the new Format's result. Choosing the
+    current Target Format is accepted and advances the revision too."""
+    if command.target_format not in FORMATS:
+        error(422, 'UNKNOWN_FORMAT')
+    payload = {'action': 'set_target_format', 'deck_id': str(deck_id), 'target_format': command.target_format,
+               'revision': command.revision}
+    with connect() as conn, conn.transaction():
+        _, rows = owner_and_rows(conn, user_id)
+        digest, previous = replay(conn, user_id, command.idempotency_key, payload)
+        if previous:
+            return replayed(conn, previous)
+        require_deck(rows, deck_id)
+        check_revision(conn, user_id, deck_id, command.revision)
+        conn.execute('UPDATE deck_list SET target_format=%s WHERE owner_id=%s AND deck_id=%s',
+                     (command.target_format, user_id, deck_id))
         return store_deck_list_result(conn, user_id, deck_id, command.idempotency_key, digest)
 
 

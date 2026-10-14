@@ -25,7 +25,24 @@ type Props = {
   view: DeckView;
   groups: readonly LineGroup[];
   onOpen: OpenSheet;
+  /** Lines (Edition ids) a card-level issue of the Target Format's result names (#178): each is outlined and
+   * marked "!", and its controls are described as having a format issue. */
+  flagged?: ReadonlySet<string>;
 };
+
+const NO_LINES: ReadonlySet<string> = new Set();
+
+/** The outline and the "!" mark on a line with a card-level format issue: the mark, not the colour, says it. */
+function IssueMark() {
+  return (
+    <span
+      aria-hidden="true"
+      className="absolute -left-1.5 -top-1.5 z-1 box-border flex h-4 w-4 items-center justify-center rounded-round border border-danger-border bg-surface text-caption font-bold leading-none text-danger"
+    >
+      !
+    </span>
+  );
+}
 
 /**
  * The Deck List in one of its three views (#176), group by group, each under a heading with its copy count:
@@ -36,10 +53,17 @@ type Props = {
  *
  * Every tile, pile and row opens the copy sheet. #177 adds editing (drag, Delete, ±1) on the same controls.
  */
-export function DeckListBody({ view, groups, onOpen }: Props) {
+export function DeckListBody({
+  view,
+  groups,
+  onOpen,
+  flagged = NO_LINES,
+}: Props) {
   // Heading ids come from useId and the group's position: a group key holds a card name (spaces, apostrophes),
   // which is no valid id. The key stays React's key only.
   const base = useId();
+  // One description every flagged control points at, so their accessible names stay as they are.
+  const issueId = `${base}-issue`;
   if (!groups.length)
     return (
       <p className="m-0 py-6 text-body text-text-muted">
@@ -48,6 +72,9 @@ export function DeckListBody({ view, groups, onOpen }: Props) {
     );
   return (
     <div className="flex flex-col gap-5">
+      <span id={issueId} hidden>
+        Has a format issue: see the result next to the Target Format.
+      </span>
       {groups.map((group, index) => (
         <section key={group.key} aria-labelledby={`${base}-group-${index}`}>
           <h3
@@ -70,37 +97,52 @@ export function DeckListBody({ view, groups, onOpen }: Props) {
                   key={line.line.edition_id}
                   line={line}
                   onOpen={onOpen}
+                  issueId={
+                    flagged.has(line.line.edition_id) ? issueId : undefined
+                  }
                 />
               ))}
             </ul>
           ) : (
             <ul className="m-0 flex list-none flex-wrap items-start gap-x-4 gap-y-3 p-0">
-              {group.lines.map((line) => (
-                <li key={line.line.edition_id} className="flex flex-wrap gap-1">
-                  {view === "spread" && line.copies ? (
-                    line.copies.map((copy) => (
-                      <CopyTile
-                        key={copy.ordinal}
-                        className="w-14 phone:w-12"
-                        label={copyLabel(line, copy)}
-                        title={copyLabel(line, copy)}
-                        name={line.line.name}
-                        setName={line.line.set_name}
-                        collectorNumber={line.line.collector_number}
-                        variant={line.variant}
-                        imageUrl={line.line.image_url}
-                        names={false}
-                        state={copy.state}
-                        onClick={(event: MouseEvent<HTMLButtonElement>) =>
-                          onOpen(line, copy.ordinal, event.currentTarget)
-                        }
-                      />
-                    ))
-                  ) : (
-                    <Pile line={line} onOpen={onOpen} />
-                  )}
-                </li>
-              ))}
+              {group.lines.map((line) => {
+                const issue = flagged.has(line.line.edition_id)
+                  ? issueId
+                  : undefined;
+                return (
+                  <li
+                    key={line.line.edition_id}
+                    className={`relative flex flex-wrap gap-1 rounded-card${
+                      issue ? " outline-2 outline-offset-2 outline-danger" : ""
+                    }`}
+                  >
+                    {issue && <IssueMark />}
+                    {view === "spread" && line.copies ? (
+                      line.copies.map((copy) => (
+                        <CopyTile
+                          key={copy.ordinal}
+                          className="w-14 phone:w-12"
+                          label={copyLabel(line, copy)}
+                          title={copyLabel(line, copy)}
+                          name={line.line.name}
+                          setName={line.line.set_name}
+                          collectorNumber={line.line.collector_number}
+                          variant={line.variant}
+                          imageUrl={line.line.image_url}
+                          names={false}
+                          state={copy.state}
+                          aria-describedby={issue}
+                          onClick={(event: MouseEvent<HTMLButtonElement>) =>
+                            onOpen(line, copy.ordinal, event.currentTarget)
+                          }
+                        />
+                      ))
+                    ) : (
+                      <Pile line={line} onOpen={onOpen} issueId={issue} />
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           )}
         </section>
@@ -111,7 +153,15 @@ export function DeckListBody({ view, groups, onOpen }: Props) {
 
 /** One pile per Edition: the top copy's art over the edges of the copies under it, and the summary. One
  * button, so a phone's 44 px tap area is the whole pile. */
-function Pile({ line, onOpen }: { line: DeckLine; onOpen: OpenSheet }) {
+function Pile({
+  line,
+  onOpen,
+  issueId,
+}: {
+  line: DeckLine;
+  onOpen: OpenSheet;
+  issueId?: string;
+}) {
   const label = pileLabel(line);
   const top =
     line.missing > 0n ? "missing" : line.elsewhere > 0n ? "elsewhere" : "here";
@@ -119,6 +169,7 @@ function Pile({ line, onOpen }: { line: DeckLine; onOpen: OpenSheet }) {
     <button
       type="button"
       aria-label={label}
+      aria-describedby={issueId}
       title={label}
       onClick={(event) => onOpen(line, null, event.currentTarget)}
       className="m-0 box-border flex w-16 cursor-pointer flex-col gap-1 rounded-card border-0 bg-transparent p-0 text-left font-sans text-text phone:w-14"
@@ -147,15 +198,33 @@ function Pile({ line, onOpen }: { line: DeckLine; onOpen: OpenSheet }) {
 }
 
 /** One List row: quantity, the Edition (which opens the copy sheet), ownership counts and the line's price. */
-function ListRow({ line, onOpen }: { line: DeckLine; onOpen: OpenSheet }) {
+function ListRow({
+  line,
+  onOpen,
+  issueId,
+}: {
+  line: DeckLine;
+  onOpen: OpenSheet;
+  issueId?: string;
+}) {
   return (
-    <li className="grid grid-cols-[2rem_minmax(0,1fr)_auto_4.5rem] items-center gap-2 border-b border-border py-0.5">
+    <li
+      className={`grid grid-cols-[2rem_minmax(0,1fr)_auto_4.5rem] items-center gap-2 border-b py-0.5 ${
+        issueId ? "border-danger-border" : "border-border"
+      }`}
+    >
       <span className="text-right text-control font-semibold tabular-nums">
+        {issueId && (
+          <span aria-hidden="true" className="mr-1 font-bold text-danger">
+            !
+          </span>
+        )}
         <span className="sr-only">Quantity </span>
         {line.quantity.toString()}
       </span>
       <button
         type="button"
+        aria-describedby={issueId}
         onClick={(event) => onOpen(line, null, event.currentTarget)}
         className="m-0 box-border flex min-h-control min-w-0 cursor-pointer flex-col justify-center rounded-control border-0 bg-transparent px-1 text-left font-sans text-text hover:bg-surface-raised phone:min-h-tap"
       >

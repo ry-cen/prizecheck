@@ -39,7 +39,7 @@ export const PAGES: readonly PageDef[] = [
     id: "catalog",
     path: "/catalog",
     label: "Catalog",
-    keepMounted: false,
+    keepMounted: true,
   },
   {
     id: "reports",
