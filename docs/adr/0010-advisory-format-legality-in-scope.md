@@ -1,6 +1,6 @@
 # Advisory format legality is in scope
 
-**Status:** accepted; planning decision, not yet implemented. Supersedes the MVP exclusion of format legality.
+**Status:** accepted; planning decision, not yet implemented. Supersedes the MVP exclusion of format legality. Superseded in part by [ADR 0011](0011-publishing-needs-a-legal-target-format.md): publishing now needs a legal result in the Deck's Target Format, and a Deck is checked against its Target Format only.
 
 The [MVP spec](../planning/tcg-collection-tracker/spec.md) excluded full Standard and other format legality, user story 72 promised a disclaimer that it isn't evaluated, and the construction checks hard-code that disclaimer. The owner reversed this on 2026-10-10.
 
