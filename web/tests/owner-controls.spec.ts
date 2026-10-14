@@ -1,7 +1,8 @@
 // Ticket #167: Owner controls (spec "Missing cards and Owner controls"). The problems line, the sub-tabs
 // with counts and their addresses, Status (the pull panel and the operational health table) and Rules, with
-// the shared page check at 1280×800 and 375×812. The queue tabs still hold today's review components, which
-// their own specs cover (catalog-reconciliation, metadata-review, missing-cards, owner-attributes).
+// the shared page check at 1280×800 and 375×812. Each queue tab's own review is on the kit too (#168, #170, #171), and
+// its own specs cover it (owner-queues, catalog-reconciliation, metadata-review, missing-cards, owner-attributes,
+// owner-reprints).
 import { test, expect, type Page } from "@playwright/test";
 import { signInAsOwner as fakeSignInAsOwner } from "./support/sign-in";
 import { Pool } from "pg";
@@ -227,7 +228,7 @@ test.describe("desktop", () => {
         page.getByRole("heading", { name: "English catalog pull" })
       ).toBeVisible();
 
-      // The queue tabs show today's review components until their tickets land.
+      // Each queue tab shows its own queue, a table on the kit.
       await sectionTab(page, /^Catalog/).click();
       await expect(page).toHaveURL(/\/owner\/catalog$/);
       await expect(

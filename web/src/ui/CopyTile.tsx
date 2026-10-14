@@ -41,7 +41,7 @@ type Props = Omit<
 // The tile's height is fixed by the page's layout model (tokens.css: the art's aspect ratio and
 // --tile-names-height, --tile-price-height and --tile-caption-height), so every line here has a fixed
 // height and cuts its text with an ellipsis instead of wrapping. Those heights include each line's top padding
-// (box-border): with no Preflight a page's own reset can't be relied on (#166 removed Collection's).
+// (box-border), set here rather than left to Preflight's reset.
 // A selected tile's focus ring sits outside its selection ring. The ring itself is base.css's.
 // ROOT, ART and LINE are exported for EditionTile (#173), which shares the button, the art frame and the Names line.
 export const ROOT =
@@ -58,8 +58,10 @@ const ART_STATE: Record<CopyState, string> = {
   missing: "opacity-40",
 };
 export const LINE = "block truncate";
+// box-content: 24 px inside its 2 px ring, 28 px in all, as the badge has always measured (Preflight sizes
+// border-box since #184).
 const BADGE =
-  "pointer-events-none absolute top-1 flex size-6 items-center justify-center rounded-round border-2 border-solid border-bg shadow-[0_1px_var(--space-1)_var(--color-shadow-strong)]";
+  "pointer-events-none absolute top-1 box-content flex size-6 items-center justify-center rounded-round border-2 border-solid border-bg shadow-[0_1px_var(--space-1)_var(--color-shadow-strong)]";
 
 /**
  * One copy of a Card Edition as a card tile (decide-component-kit: CopyTile). Collection's gallery and

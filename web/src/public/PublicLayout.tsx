@@ -2,7 +2,6 @@ import type { ReactNode } from "react";
 import { Wordmark } from "../shell/Shell";
 import { PRIMARY, QUIET } from "./controls";
 import { DISCOVER_PATH, followLink, SIGN_IN_PATH } from "./publicRoutes";
-import "./public.css";
 
 type Props = {
   /** The page being shown, when it has a link in the header. The sign-in screen leaves Sign in out. */
@@ -19,10 +18,7 @@ type Props = {
 export function PublicLayout({ current, onNavigate, children }: Props) {
   const follow = followLink(onNavigate);
   return (
-    <div
-      data-signed-out-screen=""
-      className="flex min-h-dvh flex-col bg-bg font-sans text-text scheme-dark"
-    >
+    <div className="flex min-h-dvh flex-col bg-bg font-sans text-text scheme-dark">
       <header className="sticky top-0 z-(--layer-sticky) box-border flex h-header shrink-0 items-center gap-4 border-b border-border bg-bg px-7 compact:px-5 phone:gap-2 phone:px-3">
         <Wordmark />
         <nav

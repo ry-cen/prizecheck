@@ -126,7 +126,7 @@ function ReviewItem({
             href={report.evidence_url}
             target="_blank"
             rel="noreferrer"
-            className="text-accent-strong"
+            className="text-accent-strong underline"
           >
             Open link
           </a>
