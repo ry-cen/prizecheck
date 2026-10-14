@@ -353,7 +353,7 @@ From [Prototype the Deck experience](wayfinder/resolutions/decide-deck-experienc
   - Spread (one tile per copy; desktop default), Stacked (piles per Edition with a summary such as "×4 1↻ 1$"; phone default) and List (−/+, Edition, ownership counts, price);
   - each copy's state is in this Deck (solid), owned elsewhere and where (dashed, ↻) or not owned (ghost, $);
   - groups are evolution line (from evolves-from), Trainer Type and Energy;
-  - **surplus**, copies physically in the Deck but cut from the list, has its own group with **Put away**, a Move to a Location the collector picks;
+  - **surplus**, copies physically in the Deck but cut from the list, has its own group with **Put away**, a Move to a Location the collector picks. Undoing a Put away returns the copies to the Deck as surplus and leaves the Deck List as it is: the one exception to copies arriving in a Deck joining its Deck List (owner decision, 2026-10-14);
   - the **competition warning** shows when several Decks count the same spare copies.
 - **The copy sheet** shows what and where the copy is, ±1, Gather, and **Swap this copy for** another Edition of the same Card Identity. Dragging a copy onto the library, or Delete or Backspace, removes it.
 - **Dragging** uses pointer events, as Collection's tile drag does:

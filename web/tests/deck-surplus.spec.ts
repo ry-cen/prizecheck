@@ -306,14 +306,18 @@ test.describe("on a desktop", () => {
       newest.source_count,
     ]).toEqual([built.deckId, built.boxId, 1]);
 
-    // Undo returns every copy to the Deck. Copies arriving in a Deck join its Deck List, so they come back listed.
+    // Undo returns every copy to the Deck as surplus: the Deck List stays as it was (migration 047).
     await toast.getByRole("button", { name: "Undo" }).click();
     await expect(toast).toContainText(
-      `Undo returned 5 copies to ${built.deckName}. They're on its Deck List again.`
+      `Undo returned 5 copies to ${built.deckName}. They're surplus again, not on its Deck List.`
     );
-    await expect(deckList).toContainText("8/60");
-    await expect(surplus).toHaveCount(0);
+    await expect(surplus).toBeVisible();
+    await expect(
+      surplus.getByRole("heading", { level: 3, name: "Surplus, 5 cards" })
+    ).toHaveText("Surplus, 5 cards");
+    await expect(deckList).toContainText("3/60");
     expect(await inBox()).toEqual({ [built.editions.ultraBall]: "1" });
+    await expectPageChecks(page, "after Put away's Undo, surplus again");
     await expectWarning(page, built);
   });
 });
@@ -376,8 +380,9 @@ test.describe("on a phone", () => {
     await deck.tap();
     await toast.getByRole("button", { name: "Undo" }).tap();
     await expect(toast).toContainText(
-      `Undo returned 5 copies to ${built.deckName}.`
+      `Undo returned 5 copies to ${built.deckName}. They're surplus again, not on its Deck List.`
     );
-    await expect(page.getByRole("tab", { name: "Deck 8/60" })).toBeVisible();
+    await expect(page.getByRole("tab", { name: "Deck 3/60" })).toBeVisible();
+    await expect(surplus).toBeVisible();
   });
 });

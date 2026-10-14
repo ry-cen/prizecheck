@@ -46,6 +46,9 @@ class StageItems(BaseModel):
 class CommitMove(BaseModel):
     destination_id: UUID | None = None
     idempotency_key: UUID
+    # The deck builder's Put away (#180): a Move out of one Deck whose Undo returns the copies to that Deck as surplus,
+    # leaving its Deck List alone (migration 047). Not part of the command digest, so earlier keys still replay.
+    put_away: bool = False
 
 
 class MoveResult(BaseModel):
@@ -80,7 +83,7 @@ def undo_id_for(user_id: str, key: UUID) -> UUID:
 
 
 def record_undo(conn, user_id: str, undo_id: UUID, action: str, destination_id: UUID | None, sources: list,
-                payload: str):
+                payload: str, returns_as_surplus: bool = False):
     """Writes one Inventory Undo record in the caller's transaction and keeps this owner's newest UNDO_LIMIT, after
     dropping expired ones.
 
@@ -89,12 +92,13 @@ def record_undo(conn, user_id: str, undo_id: UUID, action: str, destination_id: 
     sources: the record's source_id is set only for a single source, so readers from before migration 026 treat a
     multi-source record as incompatible. An add (migration 046) has no sources: its items are
     ``{edition_id, quantity}``, source_id is NULL, source_count 0, and `destination_id` is the Location the copies
-    went to."""
+    went to. `returns_as_surplus` marks a Put away (migration 047): undoing it returns the copies to their Deck
+    without covering them on its Deck List."""
     conn.execute("DELETE FROM inventory_undo WHERE owner_id=%s AND expires_at<=clock_timestamp()", (user_id,))
-    conn.execute("""INSERT INTO inventory_undo(id,owner_id,action,source_id,destination_id,source_count,payload)
-      VALUES (%s,%s,%s,%s,%s,%s,%s::jsonb)""",
+    conn.execute("""INSERT INTO inventory_undo(id,owner_id,action,source_id,destination_id,source_count,payload,
+        returns_as_surplus) VALUES (%s,%s,%s,%s,%s,%s,%s::jsonb,%s)""",
                  (undo_id, user_id, action, sources[0] if len(sources) == 1 else None, destination_id, len(sources),
-                  payload))
+                  payload, returns_as_surplus))
     conn.execute("""DELETE FROM inventory_undo WHERE owner_id=%s AND id NOT IN
       (SELECT id FROM inventory_undo WHERE owner_id=%s ORDER BY created_at DESC,id DESC LIMIT %s)""",
                  (user_id, user_id, UNDO_LIMIT))
@@ -103,6 +107,11 @@ def record_undo(conn, user_id: str, undo_id: UUID, action: str, destination_id: 
 def lock_owner(conn, user_id: str):
     conn.execute("INSERT INTO inventory_owner(user_id) VALUES (%s) ON CONFLICT DO NOTHING", (user_id,))
     return conn.execute("SELECT revision FROM inventory_owner WHERE user_id=%s FOR UPDATE", (user_id,)).fetchone()["revision"]
+
+
+def is_deck(conn, user_id: str, location_id: UUID) -> bool:
+    return bool(conn.execute("SELECT 1 FROM location WHERE owner_id=%s AND id=%s AND kind='deck'",
+                             (user_id, location_id)).fetchone())
 
 
 def leaf(conn, user_id: str, location_id: UUID) -> bool:
@@ -276,6 +285,9 @@ def apply_selection(manifest_id, command, user_id):
                 edition = conn.execute("SELECT edition_id FROM selected_work WHERE source_id=%s ORDER BY edition_id LIMIT 1",
                                        (gone,)).fetchone()["edition_id"]
                 fail(404, "LOCATION_NOT_FOUND", source_id=gone, edition_id=edition)
+            # A Put away takes copies out of one Deck to another Location; its Undo returns them to that Deck alone.
+            if command.put_away and (destination is None or len(sources) != 1 or not is_deck(conn, user_id, sources[0])):
+                fail(422, "PUT_AWAY_NEEDS_ONE_DECK")
             involved = sources + ([destination] if destination is not None else [])
             conn.execute("""CREATE TEMP TABLE current_work ON COMMIT DROP AS
               SELECT location_id,edition_id,quantity,version FROM holding
@@ -342,7 +354,8 @@ def apply_selection(manifest_id, command, user_id):
             items = conn.execute("""SELECT jsonb_agg(jsonb_build_object(
                 'source_id',source_id,'edition_id',edition_id,'quantity',quantity::text))::text AS items
               FROM move_work""").fetchone()["items"]
-            record_undo(conn, user_id, undo_id, payload["action"], destination, sources, items)
+            record_undo(conn, user_id, undo_id, payload["action"], destination, sources, items,
+                        returns_as_surplus=command.put_away)
             conn.execute("DELETE FROM move_manifest WHERE owner_id=%s", (user_id,))
             return result
     except psycopg.Error:
@@ -380,7 +393,7 @@ def undo_inventory(undo_id: UUID, command: UndoCommand, user_id: str = Depends(v
                 if previous['command_digest'] != digest:
                     fail(409, 'IDEMPOTENCY_KEY_REUSED')
                 return replayed(previous)
-            entry = conn.execute('''SELECT action,destination_id,expires_at<=clock_timestamp() AS expired
+            entry = conn.execute('''SELECT action,destination_id,returns_as_surplus,expires_at<=clock_timestamp() AS expired
               FROM inventory_undo WHERE owner_id=%s AND id=%s''', (user_id, undo_id)).fetchone()
             if not entry:
                 fail(404, 'UNDO_NOT_FOUND')
@@ -436,12 +449,18 @@ def undo_inventory(undo_id: UUID, command: UndoCommand, user_id: str = Depends(v
                 conn.execute('''UPDATE holding h SET quantity=h.quantity-d.quantity::bigint,version=%s FROM departure_work d
                   WHERE h.owner_id=%s AND h.location_id=%s AND h.edition_id=d.edition_id AND h.quantity>d.quantity''',
                              (new_revision, user_id, destination))
-            # Copies returned to a source Deck are covered by migration 031's holding trigger; a Deck that loses
+            # Copies returned to a source Deck are covered by migration 031's holding trigger, except a Put away's
+            # (migration 047): its copies return as surplus, so the trigger is switched off for this one statement (its
+            # insert and its update firings) and on again before anything else writes a Holding. A Deck that loses
             # copies here keeps its Deck List lines.
+            if entry['returns_as_surplus']:
+                conn.execute("SELECT set_config('tcg.undo_returns_surplus','on',true)")
             conn.execute('''INSERT INTO holding(owner_id,location_id,edition_id,quantity,version)
               SELECT %s,source_id,edition_id,quantity,%s FROM undo_work WHERE true
               ON CONFLICT(owner_id,location_id,edition_id) DO UPDATE SET quantity=holding.quantity+excluded.quantity,version=excluded.version''',
                          (user_id, new_revision))
+            if entry['returns_as_surplus']:
+                conn.execute("SELECT set_config('tcg.undo_returns_surplus','off',true)")
             conn.execute('UPDATE inventory_owner SET revision=%s WHERE user_id=%s', (new_revision, user_id))
             conn.execute('DELETE FROM mutation_request WHERE owner_id=%s AND expires_at<=now()', (user_id,))
             conn.execute('INSERT INTO mutation_request(owner_id,request_key,command_digest,result_revision) VALUES (%s,%s,%s,%s)',
