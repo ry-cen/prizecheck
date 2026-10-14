@@ -1,5 +1,13 @@
+/*
+ * The old global light stylesheet, deleted in rollout stage 7 once every page is on the kit.
+ *
+ * Its element rules reach only inside a .legacy element (#162): the old pages inside the app shell, the
+ * sign-in and loading screens, and the public pages. The shell and the kit sit outside it, so these
+ * unlayered rules never beat their Tailwind utilities. :where() adds no specificity, so every rule keeps
+ * the weight it had against the component stylesheets.
+ */
 @media (max-width: 650px) {
-  main {
+  :where(.legacy) main {
     margin: 1rem auto;
     padding: 0 1rem;
   }
@@ -8,45 +16,47 @@
   font-family: system-ui, sans-serif;
   color: #172126;
   background: #f4f5f1;
+  /* Holds back the dark color-scheme in base.css (layered) until this file is deleted. */
+  color-scheme: normal;
 }
 body {
   margin: 0;
 }
-main {
+:where(.legacy) main {
   max-width: 900px;
   margin: 3rem auto;
   padding: 0 1.5rem;
 }
-main.auth {
+:where(.legacy) main.auth {
   max-width: 440px;
 }
-h1 {
+:where(.legacy) h1 {
   font-size: 2rem;
 }
-header {
+:where(.legacy) header {
   display: flex;
   align-items: center;
   justify-content: space-between;
 }
-form {
+:where(.legacy) form {
   background: white;
   border: 1px solid #d6ddd9;
   border-radius: 12px;
   padding: 1.25rem;
   margin: 1rem 0;
 }
-label {
+:where(.legacy) label {
   display: grid;
   gap: 0.4rem;
   font-weight: 600;
 }
-input {
+:where(.legacy) input {
   padding: 0.75rem;
   font: inherit;
   border: 1px solid #82948a;
   border-radius: 6px;
 }
-button {
+:where(.legacy) button {
   margin-top: 1rem;
   padding: 0.7rem 1rem;
   background: #125c45;
@@ -56,21 +66,45 @@ button {
   font: inherit;
   cursor: pointer;
 }
-header button {
+:where(.legacy) header button {
   margin: 0;
 }
-article {
+:where(.legacy) article {
   background: white;
   border: 1px solid #d6ddd9;
   border-radius: 12px;
   padding: 1.5rem;
   margin-top: 1rem;
 }
-article h2 {
+:where(.legacy) article h2 {
   margin-top: 0;
 }
-button:focus-visible,
-input:focus-visible {
+:where(.legacy) button:focus-visible,
+:where(.legacy) input:focus-visible {
   outline: 3px solid #e89d22;
   outline-offset: 2px;
+}
+/* Holds back base.css's focus ring (layered) inside old pages until this file is deleted: an element with
+   no focus rule of its own keeps the browser's ring. Zero specificity, so every existing focus rule still
+   wins. Outside .legacy (the shell, the kit) base.css's ring applies. */
+:where(.legacy :focus-visible) {
+  outline: revert;
+  outline-offset: revert;
+}
+/* An old light page inside the dark app shell: the light page :root gives it outside the shell. Fills the
+   page area under the shell's header (and above the phone tab bar). */
+.legacy-light {
+  display: flow-root;
+  min-height: calc(100dvh - var(--layout-header-height));
+  font-family: system-ui, sans-serif;
+  color: #172126;
+  background: #f4f5f1;
+  color-scheme: normal;
+}
+@media (max-width: 760px) {
+  .legacy-light {
+    min-height: calc(
+      100dvh - var(--layout-header-height) - var(--layout-tabbar-height)
+    );
+  }
 }

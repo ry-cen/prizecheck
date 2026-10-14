@@ -37,8 +37,10 @@ print('WORLD' + json.dumps(ui_live_world()))`,
 }
 async function signIn(page: Page) {
   await pool.query("DELETE FROM auth_send_event");
-  await signInAsOwner(page, "/workspace");
-  await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible();
+  await signInAsOwner(page, "/collection");
+  await expect(
+    page.getByRole("navigation", { name: "Main views" })
+  ).toBeVisible();
 }
 const owner = async () =>
   (await pool.query('SELECT id FROM "user" WHERE email=$1', [OWNER_EMAIL]))
@@ -213,8 +215,11 @@ test("an anonymous visitor copies complete Live text of the frozen snapshot, kee
   await live
     .getByRole("button", { name: "Export to Live", exact: true })
     .click();
-  await expect(visitor.getByRole("main")).toContainText(
-    "Published Deck not found."
-  );
+  await expect(
+    visitor.getByRole("heading", {
+      level: 1,
+      name: "This deck isn't published anymore",
+    })
+  ).toBeVisible();
   await anonymous.close();
 });

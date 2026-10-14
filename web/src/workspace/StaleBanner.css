@@ -3,7 +3,8 @@
    web/src/tokens.css. No colour literals. The message is text, never colour alone. */
 .ws-stale {
   position: sticky;
-  top: 0;
+  /* Below the app shell's sticky desktop header. */
+  top: var(--layout-sticky-top);
   z-index: var(--layer-sticky);
   display: flex;
   align-items: center;

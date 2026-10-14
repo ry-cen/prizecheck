@@ -30,7 +30,14 @@ function EditionImage({ image, name }: { image: string | null; name: string }) {
   );
 }
 
-export function PublishedDeck({ token }: { token: string }) {
+export function PublishedDeck({
+  token,
+  onUnavailable,
+}: {
+  token: string;
+  /** An unknown or revoked token: the caller shows the unavailable card instead of this page (#163). */
+  onUnavailable?: () => void;
+}) {
   const [snapshot, setSnapshot] = useState<PublicSnapshot | null>(null);
   const [message, setMessage] = useState("Loading snapshot…");
   const [reload, setReload] = useState(0);
@@ -56,11 +63,14 @@ export function PublishedDeck({ token }: { token: string }) {
       .catch((cause) => {
         if (active) {
           setSnapshot(null);
+          const missing =
+            cause instanceof PublicationError && cause.status === 404;
           setMessage(
-            cause instanceof PublicationError && cause.status === 404
+            missing
               ? "Published Deck not found."
               : "Published Deck temporarily unavailable. Reload to retry."
           );
+          if (missing) onUnavailable?.();
         }
       });
     return () => {

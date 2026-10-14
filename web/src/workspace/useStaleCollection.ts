@@ -42,6 +42,9 @@ type Options = {
   clearSelection: () => void;
   /** A Move, Removal or Undo is running; Reload waits for it. */
   busy: boolean;
+  /** False while the app shell shows another page. Showing the workspace again reads the revision, as
+   * coming back to the tab does, so a change made on another page raises the banner (#162). */
+  active?: boolean;
 };
 
 type PendingNote = { snapshot: Selection; key: string; revision: number };
@@ -65,6 +68,7 @@ export function useStaleCollection({
   selected,
   clearSelection,
   busy,
+  active = true,
 }: Options) {
   const [latest, setLatest] = useState<number | null>(null);
   const [note, setNote] = useState("");
@@ -140,6 +144,27 @@ export function useStaleCollection({
       document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [observe]);
+
+  // Shown again by the app shell after another page, where Holdings may have changed: the same
+  // revision-only read.
+  const wasActive = useRef(active);
+  useEffect(() => {
+    const returning = active && !wasActive.current;
+    wasActive.current = active;
+    if (!returning) return;
+    let alive = true;
+    getCollectionRevision()
+      .then((result) => {
+        if (alive && Number.isSafeInteger(result.owner_revision))
+          observe(result.owner_revision, true);
+      })
+      .catch(() => {
+        /* The next focus or return tries again. */
+      });
+    return () => {
+      alive = false;
+    };
+  }, [active, observe]);
 
   const stale = isStale(
     latest,

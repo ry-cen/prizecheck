@@ -24,7 +24,7 @@ promote({'card-1': ${JSON.stringify(hostileName)}})`,
   const publicPage = await anonymous.newPage();
   try {
     await pool.query("DELETE FROM auth_send_event");
-    await signInAsOwner(page, "/workspace");
+    await signInAsOwner(page, "/collection");
     await page.getByRole("button", { name: "Decks", exact: true }).click();
     const suffix = randomUUID().slice(0, 8);
     const privateName = `Hidden ${suffix}`;

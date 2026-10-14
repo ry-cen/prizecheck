@@ -1,201 +1,118 @@
-import { OperationsHealth } from "./OperationsHealth";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
-import {
-  getOwnerCatalogStatus,
-  startCatalogRun,
-  type OwnerCatalogStatus,
-} from "./generated";
+import { getOwnerCatalogStatus, type OwnerCatalogStatus } from "./generated";
 import { Collection } from "./Collection";
 import { Decks } from "./Decks";
-import { PublishedDeck } from "./PublishedDeck";
-import { Discovery } from "./Discovery";
-import { CatalogReview } from "./CatalogReview";
 import { CatalogSearch } from "./CatalogSearch";
-import { MetadataReview } from "./MetadataReview";
-import { SignIns } from "./SignIns";
-import {
-  MissingCardReports,
-  OwnerMissingCardReview,
-} from "./MissingCardReports";
+import { MissingCardReports } from "./MissingCardReports";
+import { OwnerControls } from "./OwnerControls";
 import { Workspace } from "./workspace/Workspace";
+import { LegacyPage } from "./shell/LegacyPage";
+import { Shell } from "./shell/Shell";
+import { SignInsPage } from "./shell/SignInsPage";
 import {
-  clearFailureFromAddress,
-  failureInAddress,
-  signInMessage,
-} from "./signInMessages";
+  canonicalPath,
+  DEFAULT_PATH,
+  pageAt,
+  pageDef,
+  type PageId,
+} from "./shell/routes";
+import { useRoute } from "./shell/useRoute";
+import { DeadEnd } from "./public/DeadEnd";
+import { LoadingScreen } from "./public/LoadingScreen";
+import { PublicLayout } from "./public/PublicLayout";
+import { PublicPageView } from "./public/PublicPageView";
+import {
+  publicPageAt,
+  publicPageLabel,
+  SIGN_IN_PATH,
+} from "./public/publicRoutes";
+import { EmailCodeForms, SignInScreen } from "./public/SignIn";
+import { clearFailureFromAddress, failureInAddress } from "./signInMessages";
 import "./style.css";
 import "./tokens.css";
+import "./tailwind.css";
 
-// A view's path is `/${view}`: the Sign-ins page (#156) is the view "settings/sign-ins" at /settings/sign-ins.
-type View =
-  | "workspace"
-  | "collection"
-  | "decks"
-  | "catalog"
-  | "reports"
-  | "owner"
-  | "settings/sign-ins";
-const protectedViews: View[] = [
-  "workspace",
-  "collection",
-  "decks",
-  "catalog",
-  "reports",
-  "owner",
-  "settings/sign-ins",
-];
-/** The workspace replaced the old Locations page (ticket 114): old /locations links and the bare origin open it. */
-function canonicalPath(path: string): string {
-  return path === "/" || path === "/locations" ? "/workspace" : path;
-}
-function pathView(): View {
-  const candidate = location.pathname.slice(1) as View;
-  return protectedViews.includes(candidate) ? candidate : "workspace";
-}
-
-type Session = { signedIn: boolean; userId: string | null };
-/** GET /auth/methods: the configured providers and whether email-code sign-in is on. */
-type SignInMethods = {
-  providers: { id: string; name: string }[];
-  emailSignIn: boolean;
+type Session = {
+  signedIn: boolean;
+  userId: string | null;
+  /** The signed-in email (#162); absent from older or test sessions. */
+  email?: string | null;
+  /** The name and picture from the latest provider sign-in (OAuth spec), for the avatar menu. */
+  name?: string | null;
+  image?: string | null;
 };
-/** The start link for a provider. `next` is sent only when the collector came here for a page; the gateway checks it. */
-function providerStartHref(provider: string): string {
-  const asked = new URLSearchParams(location.search).get("next");
-  const page = protectedViews.includes(location.pathname.slice(1) as View)
-    ? `${location.pathname}${location.search}${location.hash}`
-    : null;
-  const next = asked ?? page;
-  return `/auth/sign-in/${encodeURIComponent(provider)}${next ? `?next=${encodeURIComponent(next)}` : ""}`;
-}
+
+/** Where signing in lands: a same-origin `next`, else the signed-in page being visited, else Collection. */
 function safeDestination(): string {
   const value = new URLSearchParams(location.search).get("next");
   if (!value)
-    return protectedViews.includes(
-      canonicalPath(location.pathname).slice(1) as View
-    )
+    return pageAt(canonicalPath(location.pathname))
       ? `${canonicalPath(location.pathname)}${location.search}${location.hash}`
-      : "/workspace";
+      : DEFAULT_PATH;
   if (!value.startsWith("/") || value.startsWith("//") || value.includes("\\"))
-    return "/workspace";
+    return DEFAULT_PATH;
   const url = new URL(value, location.origin);
   return url.origin === location.origin
     ? `${canonicalPath(url.pathname)}${url.search}${url.hash}`
-    : "/workspace";
+    : DEFAULT_PATH;
 }
 
 function App() {
+  const { path, navigate, scrollFor } = useRoute();
   const [session, setSession] = useState<Session | null>(null);
   const [ownerCatalog, setOwnerCatalog] = useState<OwnerCatalogStatus | null>(
     null
   );
-  const [view, setView] = useState<View>(pathView);
-  const showOwner = view === "owner";
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
   const [sent, setSent] = useState(false);
   const [message, setMessage] = useState("");
-  const [methods, setMethods] = useState<SignInMethods | null>(null);
-  // A failed sign-in lands here with ?error=<code>: read once, shown once, then removed from the address bar. Once
-  // signed in it is dropped, so a later sign-out never replays it.
-  const [failure, setFailure] = useState(failureInAddress);
-  const failureRef = useRef<HTMLDivElement>(null);
-  const failureShown = useRef(false);
 
+  // The session and whether this user is the owner arrive together, so the shell never shows an owner-only
+  // page or menu item before it knows.
   async function refresh() {
     try {
       const response = await fetch("/auth/session", {
         credentials: "same-origin",
       });
       const result = (await response.json()) as Session;
-      setSession(result);
+      let owner: OwnerCatalogStatus | null = null;
       if (result.signedIn) {
-        setOwnerCatalog(await getOwnerCatalogStatus());
+        try {
+          owner = await getOwnerCatalogStatus();
+        } catch {
+          setMessage("Service temporarily unavailable. Please retry.");
+        }
       }
+      setOwnerCatalog(owner);
+      setSession(result);
     } catch {
       setMessage("Service temporarily unavailable. Please retry.");
     }
   }
   useEffect(() => {
-    if (session?.signedIn !== false || methods !== null) return;
-    let cancelled = false;
-    let shown = false;
-    // Three attempts after the first, 1 s, 2 s and 4 s apart; the unavailable message stays up while they run.
-    const delays = [1000, 2000, 4000];
-    void (async () => {
-      for (let attempt = 0; ; attempt++) {
-        try {
-          const response = await fetch("/auth/methods", {
-            credentials: "same-origin",
-          });
-          const body = response.ok ? await response.json() : null;
-          if (
-            !Array.isArray(body?.providers) ||
-            typeof body.emailSignIn !== "boolean"
-          )
-            throw new Error("Sign-in methods unavailable");
-          if (cancelled) return;
-          if (shown) setMessage("");
-          setMethods(body as SignInMethods);
-          return;
-        } catch {
-          if (cancelled) return;
-          shown = true;
-          setMessage("Sign-in is temporarily unavailable. Please retry.");
-          if (attempt >= delays.length) return;
-          await new Promise((resolve) => setTimeout(resolve, delays[attempt]));
-          if (cancelled) return;
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [session?.signedIn, methods]);
-  useEffect(() => {
-    if (!failure || session === null) return;
-    // Signed in (another tab finished signing in, or the back button): never show the code; drop it from the address.
-    if (session.signedIn) {
-      setFailure(null);
-      clearFailureFromAddress();
-      return;
-    }
-    if (failureShown.current || methods === null) return;
-    failureShown.current = true;
-    failureRef.current?.focus();
-    clearFailureFromAddress();
-  }, [failure, session, methods]);
-  useEffect(() => {
     void refresh();
-    const onPop = () => setView(pathView());
-    window.addEventListener("popstate", onPop);
-    return () => window.removeEventListener("popstate", onPop);
   }, []);
-  function navigate(next: View) {
-    history.pushState(null, "", `/${next}`);
-    setView(next);
-  }
-  useEffect(() => {
-    if (!showOwner || !ownerCatalog?.run || ownerCatalog.run.outcome) return;
-    const timer = window.setInterval(() => {
-      void getOwnerCatalogStatus()
-        .then((result) => {
-          setOwnerCatalog(result);
-        })
-        .catch(() => setMessage("Catalog status temporarily unavailable."));
-    }, 5000);
-    return () => window.clearInterval(timer);
-  }, [showOwner, ownerCatalog?.run?.outcome]);
 
-  async function beginCatalogRun() {
-    setMessage("");
-    try {
-      setOwnerCatalog(await startCatalogRun());
-    } catch {
-      setMessage("Unable to start catalog pull. Please retry.");
-    }
-  }
+  // Signed in, an address that is no page lands on Collection, except the public pages (Discover, a Published
+  // Deck), which open inside the shell (#163). Owner controls opened by someone else shows its heading and
+  // nothing else, as before.
+  const signedIn = session?.signedIn === true;
+  const publicPage = useMemo(() => publicPageAt(path), [path]);
+  const isPublic = publicPage !== null;
+  const def = pageAt(path);
+  const page: PageId = def ? def.id : "collection";
+  useLayoutEffect(() => {
+    if (signedIn && !isPublic && path !== pageDef(page).path)
+      navigate(pageDef(page).path, { replace: true });
+  }, [signedIn, isPublic, page, path, navigate]);
+  // A failure code in the address belongs to the sign-in page: signed in, it is never shown, only removed. The
+  // Sign-ins page reads and removes its own.
+  useEffect(() => {
+    if (signedIn && page !== "sign-ins" && failureInAddress())
+      clearFailureFromAddress();
+  }, [signedIn, page]);
 
   async function requestCode(event: React.FormEvent) {
     event.preventDefault();
@@ -227,276 +144,151 @@ function App() {
       setMessage("Invalid or expired code. Request a new code.");
       return;
     }
-    history.replaceState(null, "", safeDestination());
-    setView(pathView());
+    navigate(safeDestination(), { replace: true });
     await refresh();
   }
 
-  async function signOut() {
-    const response = await fetch("/auth/sign-out", {
-      method: "POST",
-      credentials: "same-origin",
-    });
-    if (response.ok) {
-      setSession({ signedIn: false, userId: null });
-      setOwnerCatalog(null);
-      setView("workspace");
-      history.replaceState(null, "", "/workspace");
+  async function signOut(): Promise<boolean> {
+    try {
+      const response = await fetch("/auth/sign-out", {
+        method: "POST",
+        credentials: "same-origin",
+      });
+      if (!response.ok) return false;
+    } catch {
+      return false;
     }
+    setSession({ signedIn: false, userId: null });
+    setOwnerCatalog(null);
+    navigate(DEFAULT_PATH, { replace: true });
+    return true;
   }
 
-  if (session === null)
-    return view === "workspace" ? (
-      // The workspace's dark page while the session loads, so /workspace never flashes the light screen.
-      <div className="ws-root">
-        <main className="ws-main ws-boot">
-          <h1>PrizeCheck</h1>
-          <p role="status">Loading…</p>
-          <p role="alert">{message}</p>
-        </main>
-      </div>
-    ) : (
-      <main>
-        <h1>PrizeCheck</h1>
-        <p>Loading…</p>
-        <p role="alert">{message}</p>
-      </main>
-    );
-  if (!session.signedIn && methods === null)
-    return (
-      <main className="auth">
-        <h1>PrizeCheck</h1>
-        {!message && <p>Loading…</p>}
-        <p role="alert">{message}</p>
-      </main>
-    );
-  const failureMessage =
-    failure && methods
-      ? signInMessage(
-          failure.code,
-          methods.providers.find((provider) => provider.id === failure.provider)
-            ?.name ?? null
-        )
-      : null;
-  if (!session.signedIn)
-    return (
-      <main className="auth">
-        <h1>PrizeCheck</h1>
-        {failureMessage && (
-          <div
-            className="auth-failure"
-            role="alert"
-            tabIndex={-1}
-            ref={failureRef}
-          >
-            <p>{failureMessage.text}</p>
-            {failureMessage.next && <p>{failureMessage.next}</p>}
-          </div>
-        )}
-        {methods!.providers.length > 0 && (
-          <ul className="auth-providers">
-            {methods!.providers.map((provider) => (
-              <li key={provider.id}>
-                <a href={providerStartHref(provider.id)}>
-                  Sign in with {provider.name}
-                </a>
-              </li>
-            ))}
-          </ul>
-        )}
-        {methods!.emailSignIn && (
-          <>
-            <p>Sign in with a code sent to your email.</p>
-            <form onSubmit={requestCode}>
-              <label>
-                Email{" "}
-                <input
-                  type="email"
-                  autoComplete="email"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                />
-              </label>
-              <button>Send code</button>
-            </form>
-            {sent && (
-              <form onSubmit={verifyCode}>
-                <label>
-                  Six-digit code{" "}
-                  <input
-                    inputMode="numeric"
-                    autoComplete="one-time-code"
-                    pattern="[0-9]{6}"
-                    maxLength={6}
-                    required
-                    value={code}
-                    onChange={(e) => setCode(e.target.value)}
-                  />
-                </label>
-                <button>Sign in</button>
-              </form>
-            )}
-          </>
-        )}
-        <p role="status">{message}</p>
-      </main>
-    );
-  if (view === "workspace")
-    return (
-      <Workspace
-        userId={session.userId ?? ""}
-        onNavigate={navigate}
-        ownerControls={ownerCatalog !== null}
-        onSignOut={() => void signOut()}
-      />
-    );
-  return (
-    <main>
-      <header>
-        <h1>
-          {
-            {
-              collection: "Collection",
-              decks: "Decks",
-              catalog: "Catalog",
-              reports: "Missing cards",
-              owner: "Owner controls",
-              "settings/sign-ins": "Sign-ins",
-            }[view]
-          }
-        </h1>
-        <button onClick={signOut}>Sign out</button>
-      </header>
-      <nav aria-label="Main views">
-        {(
-          ["workspace", "collection", "decks", "catalog", "reports"] as const
-        ).map((item) => (
-          <button
-            key={item}
-            aria-current={view === item ? "page" : undefined}
-            onClick={() => navigate(item)}
-          >
-            {
-              {
-                workspace: "Workspace",
-                collection: "Collection",
-                decks: "Decks",
-                catalog: "Catalog",
-                reports: "Missing cards",
-              }[item]
-            }
-          </button>
-        ))}
-        {ownerCatalog && (
-          <button
-            aria-current={showOwner ? "page" : undefined}
-            onClick={() => navigate("owner")}
-          >
-            Owner controls
-          </button>
-        )}
-        <button
-          aria-current={view === "settings/sign-ins" ? "page" : undefined}
-          onClick={() => navigate("settings/sign-ins")}
+  // The signed-out screens (#163). A public page whose session read failed is shown signed out: it never
+  // needed the session before #163.
+  const go = (to: string) => navigate(to);
+  if (session === null && !(isPublic && message))
+    return <LoadingScreen message={message} />;
+  if (!signedIn) {
+    if (publicPage)
+      return (
+        <PublicLayout
+          current={publicPage.kind === "discover" ? "discover" : undefined}
+          onNavigate={go}
         >
-          Sign-ins
-        </button>
-      </nav>
-      {showOwner && ownerCatalog ? (
-        <section aria-label="Catalog pull">
-          <h2>English catalog pull</h2>
-          <p>
-            {ownerCatalog.catalog.available
-              ? `Last successful pull: ${new Date(ownerCatalog.catalog.last_success!).toLocaleString()}`
-              : "Catalog unavailable until the first complete import."}
-          </p>
-          <button
-            disabled={
-              !!ownerCatalog.run &&
-              !ownerCatalog.run.outcome &&
-              !ownerCatalog.run.heartbeat_stale
-            }
-            onClick={() => void beginCatalogRun()}
-          >
-            Start full English pull
-          </button>
-          <button
-            onClick={() =>
-              void getOwnerCatalogStatus()
-                .then((result) => {
-                  setOwnerCatalog(result);
-                })
-                .catch(() =>
-                  setMessage("Catalog status temporarily unavailable.")
-                )
-            }
-          >
-            Refresh status
-          </button>
-          {ownerCatalog.run && (
-            <article>
-              <h3>Run {ownerCatalog.run.id}</h3>
-              <p>Phase: {ownerCatalog.run.phase}</p>
-              <p>
-                Enumerated: {ownerCatalog.run.enumerated_count} · Fetched:{" "}
-                {ownerCatalog.run.fetched_count} · Validated:{" "}
-                {ownerCatalog.run.validated_count}
-              </p>
-              <p>Result: {ownerCatalog.run.outcome ?? "In progress"}</p>
-              {ownerCatalog.run.error && (
-                <p role="alert">{ownerCatalog.run.error}</p>
-              )}
-            </article>
-          )}
-          {ownerCatalog.run?.heartbeat_stale && !ownerCatalog.run.outcome && (
-            <p role="status">
-              Progress is stale. Start a full pull to check the current runner
-              and recover if interrupted.
-            </p>
-          )}
-          <h3>Pending review ({ownerCatalog.pending_reviews.length})</h3>
-          {ownerCatalog.pending_reviews.map((item) => (
-            <article key={item.id}>
-              <strong>{item.kind}</strong> · {item.source_id}
-              <p>{item.detail}</p>
-            </article>
-          ))}
-          <OperationsHealth />
-          <CatalogReview />
-          <MetadataReview />
-          <OwnerMissingCardReview />
-        </section>
-      ) : view === "reports" ? (
-        <MissingCardReports />
-      ) : view === "catalog" ? (
-        <CatalogSearch />
-      ) : view === "collection" ? (
-        <Collection />
-      ) : view === "decks" ? (
-        <Decks />
-      ) : view === "settings/sign-ins" ? (
-        <SignIns />
-      ) : null}
-      <p role="alert">{message}</p>
-    </main>
+          <PublicPageView page={publicPage} signedIn={false} onNavigate={go} />
+        </PublicLayout>
+      );
+    if (!def && path !== SIGN_IN_PATH)
+      return (
+        <PublicLayout onNavigate={go}>
+          <DeadEnd kind="not-found" signedIn={false} onNavigate={go} />
+        </PublicLayout>
+      );
+    // At /sign-in, or in place of the protected page asked for, which signing in then opens.
+    return (
+      <PublicLayout current="sign-in" onNavigate={go}>
+        <SignInScreen
+          continuing={safeDestination() !== DEFAULT_PATH}
+          status={message}
+          onNavigate={go}
+          emailForms={
+            <EmailCodeForms
+              email={email}
+              code={code}
+              sent={sent}
+              onEmail={setEmail}
+              onCode={setCode}
+              onRequestCode={requestCode}
+              onVerifyCode={verifyCode}
+            />
+          }
+        />
+      </PublicLayout>
+    );
+  }
+
+  const userId = session?.userId ?? "";
+  const accountEmail = session?.email ?? null;
+  function renderPage(id: PageId, active: boolean) {
+    switch (id) {
+      case "collection":
+        return (
+          <div className="legacy">
+            <Workspace userId={userId} active={active} />
+          </div>
+        );
+      case "decks":
+        return (
+          <LegacyPage title="Decks" message={message}>
+            <Decks />
+          </LegacyPage>
+        );
+      case "catalog":
+        return (
+          <LegacyPage title="Catalog" message={message}>
+            <CatalogSearch />
+          </LegacyPage>
+        );
+      case "reports":
+        return (
+          <LegacyPage title="Missing cards" message={message}>
+            <MissingCardReports />
+          </LegacyPage>
+        );
+      case "owner":
+        return (
+          <LegacyPage title="Owner controls" message={message}>
+            {ownerCatalog && (
+              <OwnerControls
+                status={ownerCatalog}
+                onStatus={setOwnerCatalog}
+                onMessage={setMessage}
+              />
+            )}
+          </LegacyPage>
+        );
+      case "old-collection":
+        return (
+          <LegacyPage title="Old Collection" message={message}>
+            <Collection />
+          </LegacyPage>
+        );
+      case "sign-ins":
+        return <SignInsPage email={accountEmail} />;
+    }
+  }
+  return (
+    <Shell
+      page={page}
+      email={accountEmail}
+      name={session?.name ?? null}
+      image={session?.image ?? null}
+      owner={ownerCatalog !== null}
+      onNavigate={(next) => navigate(pageDef(next).path)}
+      onSignOut={signOut}
+      scrollFor={scrollFor}
+      renderPage={renderPage}
+      other={
+        publicPage && {
+          key: path,
+          label: publicPageLabel(publicPage),
+          content: (
+            <PublicPageView page={publicPage} signedIn onNavigate={go} />
+          ),
+        }
+      }
+    />
   );
 }
 
-if (location.pathname === "/" || location.pathname === "/locations")
+// Old addresses for Collection (/, /workspace, /locations) are rewritten before anything renders, keeping
+// the query, so /workspace?location=<id> still opens that Location.
+if (canonicalPath(location.pathname) !== location.pathname)
   history.replaceState(
     null,
     "",
-    `/workspace${location.search}${location.hash}`
+    `${canonicalPath(location.pathname)}${location.search}${location.hash}`
   );
 
-const publishedRoute = /^\/published\/([^/]+)$/.exec(location.pathname);
-createRoot(document.getElementById("root")!).render(
-  publishedRoute ? (
-    <PublishedDeck token={publishedRoute[1]} />
-  ) : location.pathname === "/discover" ? (
-    <Discovery />
-  ) : (
-    <App />
-  )
-);
+createRoot(document.getElementById("root")!).render(<App />);

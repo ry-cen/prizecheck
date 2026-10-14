@@ -19,7 +19,7 @@ promote({'card-1': 'Pikachu', **{f'card-{i}': f'Pikachu {i:02}' for i in range(2
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });
   try {
     await pool.query("DELETE FROM auth_send_event");
-    await signInAsOwner(page, "/workspace");
+    await signInAsOwner(page, "/collection");
     await page.getByRole("button", { name: "Decks", exact: true }).click();
     const name = `Deck ${randomUUID().slice(0, 8)}`;
     await page.getByLabel("Deck name").fill(name);
@@ -63,10 +63,10 @@ promote({'card-1': 'Pikachu', **{f'card-{i}': f'Pikachu {i:02}' for i in range(2
     await page
       .getByRole("link", { name: `Open in workspace: ${name}` })
       .click();
-    await expect(page).toHaveURL(/\/workspace$/);
+    await expect(page).toHaveURL(/\/collection$/);
     await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
     await expect(page.getByRole("main")).toContainText("59 copies · 1 edition");
-    // "Open in workspace" is a full navigation, so go back through Main views rather than goBack().
+    // "Open in workspace" is a full navigation to /collection, so go back through the Decks tab rather than goBack().
     await page.getByRole("button", { name: "Decks", exact: true }).click();
     await page
       .getByRole("navigation", { name: "Deck index" })
@@ -267,7 +267,7 @@ promote({'card-1': 'Pikachu'})`,
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });
   try {
     await pool.query("DELETE FROM auth_send_event");
-    await signInAsOwner(page, "/workspace");
+    await signInAsOwner(page, "/collection");
     await page.getByRole("button", { name: "Decks", exact: true }).click();
     const name = `Deck ${randomUUID().slice(0, 8)}`;
     await page.getByLabel("Deck name").fill(name);

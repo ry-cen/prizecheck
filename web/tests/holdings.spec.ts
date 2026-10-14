@@ -20,7 +20,7 @@ promote({'card-1': 'Pikachu'})`,
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });
   await pool.query("DELETE FROM auth_send_event");
   try {
-    await signInAsOwner(page, "/workspace");
+    await signInAsOwner(page, "/collection");
     await expect(
       page.getByRole("heading", { name: "All owned" })
     ).toBeVisible();

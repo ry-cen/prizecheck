@@ -49,8 +49,8 @@ async function signIn(page: Page) {
   } finally {
     await pool.end();
   }
-  await signInAsOwner(page, "/workspace");
-  await expect(page).toHaveURL(/\/workspace$/);
+  await signInAsOwner(page, "/collection");
+  await expect(page).toHaveURL(/\/collection$/);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("All owned");
 }
 

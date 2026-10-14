@@ -50,8 +50,10 @@ with connect() as conn:
 }
 async function signIn(page: Page) {
   await pool.query("DELETE FROM auth_send_event");
-  await signInAsOwner(page, "/workspace");
-  await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible();
+  await signInAsOwner(page, "/collection");
+  await expect(
+    page.getByRole("navigation", { name: "Main views" })
+  ).toBeVisible();
 }
 const owner = async () =>
   (await pool.query('SELECT id FROM "user" WHERE email=$1', [OWNER_EMAIL]))
