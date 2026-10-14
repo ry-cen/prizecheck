@@ -32,6 +32,7 @@ export function SignInsPage({ email }: { email: string | null }) {
   const [arrived] = useState(failureInAddress);
   const arrivalShown = useRef(false);
   const failureRef = useRef<HTMLDivElement>(null);
+  const heading = useRef<HTMLHeadingElement>(null);
 
   async function load() {
     try {
@@ -114,7 +115,7 @@ export function SignInsPage({ email }: { email: string | null }) {
 
   return (
     <main className="mx-auto box-border max-w-3xl px-7 py-7 phone:px-4 phone:py-5">
-      <PageHeader title="Sign-ins" />
+      <PageHeader title="Sign-ins" headingRef={heading} />
       <section
         aria-label="Your sign-ins"
         className="flex flex-col gap-4 text-body"
@@ -136,7 +137,11 @@ export function SignInsPage({ email }: { email: string | null }) {
               ) : failure.group === "other-account" ? (
                 <button
                   type="button"
-                  onClick={() => setFailure(null)}
+                  onClick={() => {
+                    // The message (and this button) goes, so focus moves to the page's heading, not the page body.
+                    heading.current?.focus();
+                    setFailure(null);
+                  }}
                   className={`${SECONDARY} mt-1 self-start`}
                 >
                   Back to Sign-ins

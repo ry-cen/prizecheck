@@ -1,17 +1,25 @@
-import type { ReactNode } from "react";
+import type { ReactNode, Ref } from "react";
 
 type Props = {
   title: string;
+  /** The h1, for a page that moves focus to it (it then takes focus by script only: tabIndex -1). */
+  headingRef?: Ref<HTMLHeadingElement>;
   /** The page's actions, on the right: Add cards, Publish and the like. */
   actions?: ReactNode;
 };
 
 /** A page's own header inside the shell: the title (the page's h1) on the left and its actions on the
  * right. Pages on the kit use it; old pages keep their own heading until their redesign ticket. */
-export function PageHeader({ title, actions }: Props) {
+export function PageHeader({ title, actions, headingRef }: Props) {
   return (
     <div className="mb-5 flex flex-wrap items-center gap-4">
-      <h1 className="m-0 text-display font-semibold">{title}</h1>
+      <h1
+        ref={headingRef}
+        tabIndex={headingRef ? -1 : undefined}
+        className="m-0 text-display font-semibold"
+      >
+        {title}
+      </h1>
       {actions && (
         <div className="ml-auto flex items-center gap-2">{actions}</div>
       )}
