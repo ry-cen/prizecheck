@@ -51,7 +51,6 @@ class PublishedDeckCost(BaseModel):
     reason: IncompleteReason | None = None
     total_copies: str | None = None
     priced_copies: str | None = None
-    fallback_copies: str | None = None
     amount: str | None = None
     display_amount: str | None = None
     currency: Literal['USD'] = 'USD'
@@ -172,8 +171,10 @@ def published_deck_cost(token: str, version: int, budget: Budget, releases: list
     editions = [] if figures['status'] == 'incomplete' else [
         PublishedEditionPrice(edition_ref=ref, amount=view.amount if view.status == 'quote' else None)
         for ref, view in ((ref, views[ref]) for ref in frozen)]
-    # No price age is shown or sent (app redesign spec): the two age counts of the shared fold stay private.
-    public = {key: value for key, value in figures.items() if key not in ('stale_copies', 'unknown_age_copies')}
+    # No price age is shown or sent (app redesign spec): the shared fold's age counts and its count of copies shown
+    # from the labelled cache (which hints at staleness, owner decision 2026-10-14) stay private.
+    public = {key: value for key, value in figures.items()
+              if key not in ('stale_copies', 'unknown_age_copies', 'fallback_copies')}
     return PublishedDeckCost(version=active.version, digest=active.digest, editions=editions, **public)
 
 

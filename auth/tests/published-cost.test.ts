@@ -574,7 +574,6 @@ const KEYS = [
   "digest",
   "display_amount",
   "editions",
-  "fallback_copies",
   "priced_copies",
   "reason",
   "status",
@@ -643,7 +642,6 @@ describe("the Published Deck cost through the real gateway", () => {
         display_amount: "$1.61",
         priced_copies: "5",
         total_copies: "6",
-        fallback_copies: "0",
         currency: "USD",
       });
       // Each frozen Edition's own price (app redesign #183): its public reference and amount, and nothing else.
@@ -794,8 +792,9 @@ describe("the Published Deck cost through the real gateway", () => {
         status: "priced",
         display_amount: "$2.00",
         priced_copies: "2",
-        fallback_copies: "2",
       });
+      // The two copies come from the labelled cache; the public answer doesn't say so (no staleness hints, #183).
+      expect(cost.json).not.toHaveProperty("fallback_copies");
       // The bound is generous because vitest has no serial pass (#68) and a loaded host stretches it; the strict 3.0 s
       // gate is the gateway's abort, which turns an overrun into a 504 and so fails the status check above.
       expect(cost.elapsed).toBeGreaterThan(2_000);
@@ -812,7 +811,6 @@ describe("the Published Deck cost through the real gateway", () => {
       expect(refused.json).toMatchObject({
         status: "priced",
         priced_copies: "2",
-        fallback_copies: "2",
       });
       const full = await scheduler();
       expect(Object.keys(full.jobs)).toEqual([]);
@@ -820,7 +818,7 @@ describe("the Published Deck cost through the real gateway", () => {
 
       await resetScheduler(0);
       const admitted = await anonymous(costPath(token, 1));
-      expect(admitted.json).toMatchObject({ fallback_copies: "0" });
+      expect(admitted.json).toMatchObject({ status: "priced" });
       const jobs = (await scheduler()).jobs;
       const job = `${edition.ref}:${edition.revision}`;
       expect(jobs[job].caller).toMatch(/^anon:[0-9a-f]{32}$/);
@@ -1067,9 +1065,9 @@ describe("the Published Deck cost through the real gateway", () => {
         ]),
       };
       const expected = {
-        A: { total: "60", priced: "60", amount: "15", fallback: "20" },
-        B: { total: "30", priced: "30", amount: "7.5", fallback: "10" },
-        C: { total: "6", priced: "5", amount: "1.25", fallback: "0" },
+        A: { total: "60", priced: "60", amount: "15" },
+        B: { total: "30", priced: "30", amount: "7.5" },
+        C: { total: "6", priced: "5", amount: "1.25" },
       };
       const tokens: Record<string, string> = {};
       for (const [name, deck] of Object.entries(decks))
@@ -1144,7 +1142,6 @@ describe("the Published Deck cost through the real gateway", () => {
             total_copies: want.total,
             priced_copies: want.priced,
             amount: want.amount,
-            fallback_copies: hard ? want.fallback : "0",
           });
           expect(answer.elapsed).toBeLessThanOrEqual(3_500);
         }

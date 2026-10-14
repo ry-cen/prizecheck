@@ -146,12 +146,11 @@ def counted(body, total, priced, amount, *, complete, public=False):
     if complete or body["status"] != "incomplete":
         assert (body["status"], body["total_copies"], body["priced_copies"], body["amount"]) == \
             ("priced", str(total), str(priced), format(amount.normalize(), "f")), body
-        assert body["fallback_copies"] == "0", body
         if public:
-            # No price age is sent publicly (#183): the age counts stay private.
-            assert "stale_copies" not in body and "unknown_age_copies" not in body, body
+            # No price age is sent publicly (#183): the age and cached-fallback counts stay private.
+            assert not {"stale_copies", "unknown_age_copies", "fallback_copies"} & set(body), body
         else:
-            assert (body["stale_copies"], body["unknown_age_copies"]) == ("0", "0"), body
+            assert (body["stale_copies"], body["unknown_age_copies"], body["fallback_copies"]) == ("0", "0", "0"), body
     else:
         assert body["reason"] in ("deadline", "store_unavailable", "validation_unavailable"), body
         assert (body["priced_copies"], body["amount"], body["display_amount"]) == (None, None, None), body
