@@ -3,6 +3,7 @@ import { signInAsOwner } from "./support/sign-in";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
+import { openDeckTools } from "./support/deck-builder";
 
 test("physical Deck creation, actual Holdings checks, and Move out", async ({
   page,
@@ -26,6 +27,7 @@ promote({'card-1': 'Pikachu', **{f'card-{i}': f'Pikachu {i:02}' for i in range(2
     await page
       .getByRole("button", { name: "Create Deck", exact: true })
       .click();
+    await openDeckTools(page);
     const checks = page.getByRole("region", { name: `Checks for ${name}` });
     await expect(checks).toContainText("0 cards · 60 cards short of 60");
     await expect(checks).toContainText(
@@ -60,6 +62,8 @@ promote({'card-1': 'Pikachu', **{f'card-{i}': f'Pikachu {i:02}' for i in range(2
       .getByRole("button", { name: "Unsorted", exact: true })
       .click();
     await expect(checks).toContainText("59 cards · 1 cards short of 60");
+    // "Open in Collection" is on the Decks index, one step back from the deck builder.
+    await page.getByRole("link", { name: "All Decks" }).click();
     await page
       .getByRole("link", { name: `Open in Collection: ${name}` })
       .click();
@@ -72,6 +76,7 @@ promote({'card-1': 'Pikachu', **{f'card-{i}': f'Pikachu {i:02}' for i in range(2
       .getByRole("navigation", { name: "Deck index" })
       .getByRole("button", { name, exact: true })
       .click();
+    await openDeckTools(page);
     await expect(
       page.getByRole("region", { name: `Checks for ${name}` })
     ).toBeVisible();
@@ -274,6 +279,7 @@ promote({'card-1': 'Pikachu'})`,
     await page
       .getByRole("button", { name: "Create Deck", exact: true })
       .click();
+    await openDeckTools(page);
     const holdings = page.getByRole("region", { name: `Cards in ${name}` });
     await holdings
       .getByRole("button", { name: "Add cards", exact: true })

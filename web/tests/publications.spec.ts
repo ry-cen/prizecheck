@@ -4,6 +4,7 @@ import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { listHoldings } from "./support/deck-list";
+import { openDeckTools } from "./support/deck-builder";
 
 test("Unlisted snapshot is anonymous, escaped, intentional, and permanently revocable", async ({
   page,
@@ -30,6 +31,7 @@ promote({'card-1': 'Pikachu'})`,
     await page
       .getByRole("button", { name: "Create Deck", exact: true })
       .click();
+    await openDeckTools(page);
     const holdings = page.getByRole("region", {
       name: `Cards in ${privateName}`,
     });

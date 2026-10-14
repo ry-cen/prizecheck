@@ -1,13 +1,17 @@
 """Derive every catalog Printing's card attributes and Reprint Group from its stored source record, without fetching
 anything.
 
-Run it once after applying migration 030, and again after applying migrations 035, 038 and 041. Until it or the next
+Run it once after applying migration 030, and again after applying migrations 035, 038, 041 and 043. Until it or the next
 catalog import runs, the Printings imported before 030 have unknown card attributes, so Deck checks report their Basic
 Energy exemption as unresolved; the Printings imported before 035 are in no Reprint Group, so format checks judge an old
 Trainer or Energy printing on its own mark and set alone; and the Printings imported before 038 have an unknown Basic
 Pokémon status, so a deck with no other known Basic Pokémon checks as unknown in every format; and the Printings imported
-before 041 have no Trainer Type or evolves from, so Collection's Trainer Type filters match no card. Every catalog import re-derives all Printings itself, so it
+before 041 have no Trainer Type or evolves from, so Collection's Trainer Type filters match no card; and until it runs after
+043 no Pokémon has an evolution root, so the deck builder can't join a line across a skipped stage. Every catalog import re-derives all Printings itself, so it
 is never needed again; rerunning it changes nothing.
+
+Changed attributes and Reprint Groups also make every Format's stored Format Standing stale (migration 042); it rebuilds
+them before it exits, best effort.
 
 Changed attributes and Reprint Groups are public format facts (Deck Lists 18): the changed Printings, and every
 Printing of a Reprint Group whose membership changed, are enqueued and then delivered to the shared records store
@@ -23,6 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'api'))
 import psycopg  # noqa: E402
 from app.catalog import RunnerBusy, rederive_card_attributes  # noqa: E402
 from app.main import connect  # noqa: E402
+from app.format_standing import rebuild_stale_best_effort  # noqa: E402
 from app.public_catalog import publish_catalog_best_effort  # noqa: E402
 
 
@@ -31,6 +36,7 @@ def main():
         with connect() as conn:
             changed = rederive_card_attributes(conn)
             delivered = publish_catalog_best_effort(conn)
+        standing = rebuild_stale_best_effort()
     except RunnerBusy:
         print('A catalog import is running; nothing was changed. Retry when it has finished.', file=sys.stderr)
         return 3
@@ -39,6 +45,8 @@ def main():
         return 1
     print(f'Card attributes derived: {changed} Printings changed; Reprint Groups refreshed; public catalog delivery '
           f'{"delivered" if delivered else "pending (run scripts/backfill_public_catalog.py)"}')
+    print('Format Standing: ' + ('not rebuilt (the next reader or scripts/format_standing_job.py rebuilds it)'
+                                 if standing is None else f'rebuilt {", ".join(standing.rebuilt) or "nothing (current)"}'))
     return 0
 
 

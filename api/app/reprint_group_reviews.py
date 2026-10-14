@@ -57,11 +57,12 @@ from typing import Literal
 from uuid import UUID, uuid4, uuid5
 
 import psycopg
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, Query
 from pydantic import BaseModel, Field, HttpUrl
 
 from . import format_evaluator as evaluator
 from .card_attributes import advance_attribute_revision, attribute_revision, read_card_attributes
+from .format_standing import rebuild_stale_best_effort
 from .holdings import fail
 from .main import connect, require_owner, verified_user
 from .metadata_reviews import consume_metadata_code, delivery_status
@@ -444,7 +445,8 @@ def _apply_group_decision(conn, command: ReprintGroupDecisionInput, printing_ids
 
 
 @router.post("/api/admin/reprint-groups/decisions", response_model=ReprintGroupDecisionResult)
-def decide_groups(command: ReprintGroupDecisionInput, user_id: str = Depends(verified_user)):
+def decide_groups(command: ReprintGroupDecisionInput, background_tasks: BackgroundTasks,
+                  user_id: str = Depends(verified_user)):
     reason = _reason(command.reason)
     printing_ids = list(dict.fromkeys(command.printing_ids))
     need_group, need_target, need_printings = SHAPES[command.decision]
@@ -494,13 +496,16 @@ def decide_groups(command: ReprintGroupDecisionInput, user_id: str = Depends(ver
         fail(403, "INVALID_APPROVAL_CODE")
     # Committed. Public records are a derived copy: delivery is best effort and recoverable.
     publish_catalog_best_effort(printing_ids=affected)
+    # The attribute revision moved, so every Format's stored standing is stale: rebuild after the response.
+    background_tasks.add_task(rebuild_stale_best_effort)
     return ReprintGroupDecisionResult(decision_id=decision_id, identity_id=command.identity_id,
                                       decision=command.decision, group_id=group, affected_printing_ids=affected,
                                       attribute_revision=revision, public_delivery=delivery_status(revision=clock))
 
 
 @router.post(f"{ADMIN}/decisions", response_model=CardIdentityMergeResult)
-def merge_identities(command: CardIdentityMergeInput, user_id: str = Depends(verified_user)):
+def merge_identities(command: CardIdentityMergeInput, background_tasks: BackgroundTasks,
+                     user_id: str = Depends(verified_user)):
     reason = _reason(command.reason)
     merged, survivor = command.identity_id, command.into_identity_id
     if merged == survivor:
@@ -556,6 +561,8 @@ def merge_identities(command: CardIdentityMergeInput, user_id: str = Depends(ver
     if bad_code:
         fail(403, "INVALID_APPROVAL_CODE")
     publish_catalog_best_effort(printing_ids=affected)
+    # The attribute and catalog revisions moved, so every Format's stored standing is stale: rebuild after the response.
+    background_tasks.add_task(rebuild_stale_best_effort)
     return CardIdentityMergeResult(decision_id=decision_id, identity_id=merged, into_identity_id=survivor,
                                    moved_printing_ids=sorted(moved, key=str), affected_printing_ids=affected,
                                    attribute_revision=revision, public_delivery=delivery_status(revision=clock))

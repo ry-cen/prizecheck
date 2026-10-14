@@ -4,6 +4,7 @@ import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { Pool } from "pg";
+import { openDeckTools } from "./support/deck-builder";
 
 const ORIGIN = process.env.TEST_ORIGIN || "http://localhost:5173";
 const OWNER_EMAIL = process.env.OWNER_EMAIL || "owner@example.test";
@@ -86,6 +87,7 @@ async function openHeld(page: Page, name: string) {
     .getByRole("navigation", { name: "Deck index" })
     .getByRole("button", { name, exact: true })
     .click();
+  await openDeckTools(page);
   const panel = page.getByRole("region", { name: `Cards in ${name}` });
   await expect(panel).toBeVisible();
   return panel;
@@ -288,6 +290,7 @@ test("Deck rows and Collection tiles price their exact Edition, including after 
   );
   await page.getByRole("button", { name: "Decks", exact: true }).click();
   await page.getByRole("button", { name, exact: true }).click();
+  await openDeckTools(page);
   const rows = page.locator(".holding-grid > li");
   await expect(rows).toHaveCount(2);
   await expect(rows.filter({ hasText: "$0.25" })).toHaveCount(1);

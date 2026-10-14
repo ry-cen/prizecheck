@@ -4,6 +4,7 @@ import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { listHoldings } from "./support/deck-list";
+import { openDeckTools } from "./support/deck-builder";
 
 test("Listed discovery opt-in and removal preserve snapshot, privacy, and escaped source text", async ({
   page,
@@ -33,6 +34,7 @@ promote({'card-1': ${JSON.stringify(hostileName)}})`,
     await page
       .getByRole("button", { name: "Create Deck", exact: true })
       .click();
+    await openDeckTools(page);
     const holdings = page.getByRole("region", {
       name: `Cards in ${privateName}`,
     });
