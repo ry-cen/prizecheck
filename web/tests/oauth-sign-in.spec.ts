@@ -83,7 +83,9 @@ test("shows only the methods that are available", async ({ page }) => {
     page.getByRole("link", { name: "Continue with Google" })
   ).toHaveCount(0);
   await expect(page.getByLabel("Email")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Send code" })).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Email me a code" })
+  ).toHaveCount(0);
 });
 
 test("keeps the email form alone when no provider is configured", async ({

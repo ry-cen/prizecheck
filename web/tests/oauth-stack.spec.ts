@@ -16,7 +16,9 @@ test("offers only the configured providers and no email form when email sign-in 
     page.getByRole("link", { name: "Continue with Discord" })
   ).toBeVisible();
   await expect(page.getByLabel("Email")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Send code" })).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Email me a code" })
+  ).toHaveCount(0);
 });
 
 test("signs the owner in through the fake consent page and returns to the page asked for", async ({

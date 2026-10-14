@@ -34,7 +34,9 @@ async function mockEmailSignIn(page: Page) {
 
 async function signInByCode(page: Page) {
   await page.getByLabel("Email", { exact: true }).fill("owner@example.test");
-  await page.getByRole("button", { name: "Send code", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Email me a code", exact: true })
+    .click();
   await page.getByLabel("Six-digit code").fill("123456");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
 }

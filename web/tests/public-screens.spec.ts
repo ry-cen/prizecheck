@@ -166,17 +166,69 @@ async function checkCodeForm(page: Page, state: string, tap = false) {
   );
   await page.goto(`${ORIGIN}/sign-in`);
   await card(page).getByLabel("Email").fill("owner@example.test");
-  const send = card(page).getByRole("button", { name: "Send code" });
+  const send = card(page).getByRole("button", { name: "Email me a code" });
   await (tap ? send.tap() : send.click());
   await expect(
-    page.getByText("If this account can sign in, a code has been sent.")
+    card(page).getByText("We sent a six-digit code to owner@example.test.")
   ).toBeVisible();
   await expect(card(page).getByLabel("Six-digit code")).toBeVisible();
+  // Step 2 replaces the email step.
+  await expect(card(page).getByLabel("Email")).toHaveCount(0);
+  await expect(
+    card(page).getByRole("button", { name: "Sign in", exact: true })
+  ).toBeVisible();
+  await expect(
+    card(page).getByRole("button", { name: "Use a different email" })
+  ).toBeVisible();
+  await expect(
+    card(page).getByRole("button", { name: "Send a new code" })
+  ).toBeVisible();
   await expectPageChecks(page, state);
 }
 
 test.describe("desktop", () => {
   test.use({ viewport: { width: 1280, height: 800 } });
+
+  test("the code step offers a different email and a new code", async ({
+    page,
+  }) => {
+    let requests = 0;
+    await page.route("**/auth/methods", (route) =>
+      route.fulfill({
+        json: { providers: [], emailSignIn: true },
+        headers: { "cache-control": "no-store" },
+      })
+    );
+    await page.route("**/auth/request-code", (route) => {
+      requests += 1;
+      return route.fulfill({ json: {} });
+    });
+    await page.goto(`${ORIGIN}/sign-in`);
+    await card(page).getByLabel("Email").fill("owner@example.test");
+    await card(page).getByRole("button", { name: "Email me a code" }).click();
+    await expect(card(page).getByLabel("Six-digit code")).toBeVisible();
+    expect(requests).toBe(1);
+
+    await card(page).getByRole("button", { name: "Send a new code" }).click();
+    await expect(
+      card(page).getByText(
+        "We sent a new six-digit code to owner@example.test."
+      )
+    ).toBeVisible();
+    expect(requests).toBe(2);
+
+    await card(page).getByLabel("Six-digit code").fill("123456");
+    await card(page)
+      .getByRole("button", { name: "Use a different email" })
+      .click();
+    await expect(card(page).getByLabel("Six-digit code")).toHaveCount(0);
+    await expect(card(page).getByLabel("Email")).toBeFocused();
+    await expect(card(page).getByLabel("Email")).toHaveValue(
+      "owner@example.test"
+    );
+    await card(page).getByRole("button", { name: "Email me a code" }).click();
+    await expect(card(page).getByLabel("Six-digit code")).toHaveValue("");
+  });
 
   test("with email sign-in on, the code form passes the page check", async ({
     page,
