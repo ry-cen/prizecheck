@@ -330,16 +330,20 @@ export function SignInScreen({
 type EmailCodeProps = {
   email: string;
   code: string;
-  /** A code was requested, so the code form shows. */
+  /** A code was requested, so the code step shows in place of the email step. */
   sent: boolean;
   onEmail: (email: string) => void;
   onCode: (code: string) => void;
   onRequestCode: (event: FormEvent) => void;
   onVerifyCode: (event: FormEvent) => void;
+  /** Back to the email step with the code cleared. */
+  onUseDifferentEmail: () => void;
+  /** Request a new code to the same email. */
+  onResend: () => void;
 };
 
-/** Email-code sign-in, when it is on: an emailed six-digit code. The email form stays after a code is sent, so a new
- * code can be requested; Sign in then becomes the main action. */
+/** Email-code sign-in, when it is on: two steps. Step 1 asks for the email and sends a code; once a code is sent,
+ * step 2 replaces it with the six-digit code field and Sign in, and two secondary actions under the field. */
 export function EmailCodeForms({
   email,
   code,
@@ -348,45 +352,71 @@ export function EmailCodeForms({
   onCode,
   onRequestCode,
   onVerifyCode,
+  onUseDifferentEmail,
+  onResend,
 }: EmailCodeProps) {
-  return (
-    <>
-      <form onSubmit={onRequestCode} className="m-0 flex flex-col gap-3">
+  const emailRef = useRef<HTMLInputElement>(null);
+  const refocusEmail = useRef(false);
+  useEffect(() => {
+    if (!sent && refocusEmail.current) {
+      refocusEmail.current = false;
+      emailRef.current?.focus();
+    }
+  }, [sent]);
+
+  if (sent)
+    return (
+      <form onSubmit={onVerifyCode} className="m-0 flex flex-col gap-3">
         <label className={FIELD_LABEL}>
-          Email
+          Six-digit code
           <input
-            type="email"
-            autoComplete="email"
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            pattern="[0-9]{6}"
+            maxLength={6}
             required
-            value={email}
-            onChange={(e) => onEmail(e.target.value)}
+            value={code}
+            onChange={(e) => onCode(e.target.value)}
             className={FIELD}
           />
         </label>
-        <button type="submit" className={sent ? SECONDARY : PRIMARY}>
-          Send code
+        <button type="submit" className={PRIMARY}>
+          Sign in
         </button>
-      </form>
-      {sent && (
-        <form onSubmit={onVerifyCode} className="m-0 flex flex-col gap-3">
-          <label className={FIELD_LABEL}>
-            Six-digit code
-            <input
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              pattern="[0-9]{6}"
-              maxLength={6}
-              required
-              value={code}
-              onChange={(e) => onCode(e.target.value)}
-              className={FIELD}
-            />
-          </label>
-          <button type="submit" className={PRIMARY}>
-            Sign in
+        <div className="flex flex-col gap-2">
+          <button
+            type="button"
+            className={SECONDARY}
+            onClick={() => {
+              refocusEmail.current = true;
+              onUseDifferentEmail();
+            }}
+          >
+            Use a different email
           </button>
-        </form>
-      )}
-    </>
+          <button type="button" className={SECONDARY} onClick={onResend}>
+            Send a new code
+          </button>
+        </div>
+      </form>
+    );
+  return (
+    <form onSubmit={onRequestCode} className="m-0 flex flex-col gap-3">
+      <label className={FIELD_LABEL}>
+        Email
+        <input
+          ref={emailRef}
+          type="email"
+          autoComplete="email"
+          required
+          value={email}
+          onChange={(e) => onEmail(e.target.value)}
+          className={FIELD}
+        />
+      </label>
+      <button type="submit" className={PRIMARY}>
+        Email me a code
+      </button>
+    </form>
   );
 }

@@ -122,8 +122,8 @@ function App() {
       clearFailureFromAddress();
   }, [signedIn, page]);
 
-  async function requestCode(event: React.FormEvent) {
-    event.preventDefault();
+  async function requestCode(event?: React.FormEvent, again = false) {
+    event?.preventDefault();
     setMessage("");
     const response = await fetch("/auth/request-code", {
       method: "POST",
@@ -136,7 +136,18 @@ function App() {
       return;
     }
     setSent(true);
-    setMessage("If this account can sign in, a code has been sent.");
+    setMessage(
+      again
+        ? `We sent a new six-digit code to ${email}.`
+        : `We sent a six-digit code to ${email}.`
+    );
+  }
+
+  /** Back to the email step with the code cleared. */
+  function useDifferentEmail() {
+    setSent(false);
+    setCode("");
+    setMessage("");
   }
 
   async function verifyCode(event: React.FormEvent) {
@@ -209,6 +220,8 @@ function App() {
               onCode={setCode}
               onRequestCode={requestCode}
               onVerifyCode={verifyCode}
+              onUseDifferentEmail={useDifferentEmail}
+              onResend={() => void requestCode(undefined, true)}
             />
           }
         />
