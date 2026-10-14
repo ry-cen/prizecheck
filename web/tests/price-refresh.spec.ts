@@ -12,7 +12,6 @@ import { Pool } from "pg";
 // fetch hangs at a fake TCGdex server. The page renders at once, each price slot shows its pending text, and then the
 // server's labelled fallback replaces it; the rest of the page never waits. The fake origin reaches the launched runner
 // through the CI fixture's origin file in the stack's PRICE_RUNNER_LOCK_DIR (the launcher's allowlist drops env hooks).
-const ORIGIN = process.env.TEST_ORIGIN || "http://localhost:5173";
 const OWNER_EMAIL = process.env.OWNER_EMAIL || "owner@example.test";
 const LOCK_DIR = process.env.PRICE_RUNNER_LOCK_DIR || "";
 const ORIGIN_FILE = join(LOCK_DIR, "fixture-source-origin"); // price_fixture.ORIGIN_FILE

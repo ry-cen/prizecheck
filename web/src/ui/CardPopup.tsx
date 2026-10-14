@@ -154,7 +154,7 @@ export function CardPopup({
               disabled={!canPrevious}
               onClick={onPrevious}
             />
-            <span className="min-w-14 px-1 text-center text-meta tabular-nums text-text-muted">
+            <span className="box-content min-w-14 px-1 text-center text-meta tabular-nums text-text-muted">
               {(position.index + 1).toLocaleString()} /{" "}
               {position.total.toLocaleString()}
             </span>

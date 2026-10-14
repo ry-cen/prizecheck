@@ -49,12 +49,10 @@ promote({'reconciliation-1':'Review Pikachu'})`,
         "SELECT id FROM catalog_printing WHERE source_id='reconciliation-1'"
       )
     ).rows[0].id;
-    const review = (
-      await pool.query(
-        "INSERT INTO catalog_review(printing_id,source_id,kind,source_fingerprint,detail,candidate) VALUES($1,'reconciliation-1','name_change','browser-review','Incoming name requires physical identity review','{\"name\":\"Different Pikachu\"}') RETURNING id",
-        [printing]
-      )
-    ).rows[0].id;
+    await pool.query(
+      "INSERT INTO catalog_review(printing_id,source_id,kind,source_fingerprint,detail,candidate) VALUES($1,'reconciliation-1','name_change','browser-review','Incoming name requires physical identity review','{\"name\":\"Different Pikachu\"}')",
+      [printing]
+    );
     await page.reload();
     await page.getByRole("button", { name: "Account" }).click();
     await page.getByRole("menuitem", { name: "Owner controls" }).click();

@@ -345,7 +345,7 @@ export function AttributeReviewCard({ item, onClose, onDone }: Props) {
                             href={link}
                             target="_blank"
                             rel="noreferrer noopener"
-                            className="text-accent underline-offset-2 hover:text-accent-strong"
+                            className="text-accent underline underline-offset-2 hover:text-accent-strong"
                           >
                             {link}
                           </a>

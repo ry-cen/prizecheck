@@ -5,7 +5,6 @@ import {
   PriceError,
   type PriceRow,
 } from "./prices_generated";
-import "./EditionPrice.css";
 
 // A price is a cached, server-validated enrichment. The rest of the page never waits for it: each slot asks
 // for its own Edition once it comes near the viewport, the slots that come near together are batched (at most

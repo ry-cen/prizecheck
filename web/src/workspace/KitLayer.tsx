@@ -6,7 +6,7 @@ import { createPortal } from "react-dom";
  * #165) at the end of <body>, after the shell's toast host, so the Actions list can paint over a toast.
  * The wrapper gives them the kit's font, text colour and dark color-scheme, as the shell's root does.
  * Outside the page they are not hidden with it, so callers draw them only while Collection is the shown
- * page. (Until #166 it also kept them clear of the old .legacy and workspace CSS rules, now gone.)
+ * page.
  */
 export function KitLayer({ children }: { children: ReactNode }) {
   return createPortal(

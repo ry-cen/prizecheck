@@ -1,17 +1,28 @@
 /*
  * The base stylesheet (ADR 0012): the page background, text colour, color-scheme and the one focus
- * ring. Bare elements get no other look; every visible control comes from the kit.
+ * ring, after Tailwind's Preflight in the `base` cascade layer. Bare elements get no other look; every
+ * visible control comes from the kit.
  *
- * These rules sit in the `base` cascade layer, and any unlayered rule beats a layered one. While the old
- * global stylesheet web/src/style.css exists, its unlayered :root rule (background, colour,
- * color-scheme: normal) and its :where(:focus-visible) fallback win on every existing page, so nothing
- * on screen changes. Deleting style.css (rollout stage 7) puts these rules in charge.
+ * Any unlayered rule beats a layered one, so no unlayered stylesheet may set these again. web/index.html's
+ * first-paint style copies the background and color-scheme into this same layer, so these rules (a :root
+ * selector, later in the layer) take over once the app's styles load and themes still switch.
  */
 @layer base {
+  /* line-height: normal keeps the line height every page had before Preflight (#184), whose html rule sets 1.5;
+     pages and components that want the kit's body type set --line-height themselves. */
   :root {
     background-color: var(--color-bg);
     color: var(--color-text);
     color-scheme: dark;
+    line-height: normal;
+  }
+
+  /* Preflight gives form controls the inherited font; their line height stays the browser's normal, as before. */
+  button,
+  input,
+  select,
+  textarea {
+    line-height: normal;
   }
 
   :focus-visible {

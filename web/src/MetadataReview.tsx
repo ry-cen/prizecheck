@@ -162,7 +162,7 @@ function History({
                     href={row.evidence_url}
                     target="_blank"
                     rel="noreferrer"
-                    className="break-all text-accent-strong"
+                    className="break-all text-accent-strong underline"
                   >
                     {row.evidence_url}
                   </a>
@@ -449,7 +449,7 @@ function ReviewItem({
                         href={safeLink(report.evidence_url)}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="break-all text-accent-strong"
+                        className="break-all text-accent-strong underline"
                       >
                         {report.evidence_url}
                       </a>

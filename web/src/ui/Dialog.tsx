@@ -32,8 +32,8 @@ type Props = {
   children: ReactNode;
 };
 
-// Without Preflight the browser's own dialog styles (border, padding, margin, maximum sizes, colours) apply,
-// so every one of them is set here. Each property is set once per width, so no two classes compete.
+// The browser's own dialog styles (border, padding, margin, maximum sizes, colours), which Preflight only partly
+// resets, are all set here. Each property is set once per width, so no two classes compete.
 const FRAME =
   "flex-col overflow-hidden bg-surface p-0 text-text backdrop:bg-scrim open:flex";
 const CENTRED =

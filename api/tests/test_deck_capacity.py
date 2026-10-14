@@ -139,13 +139,19 @@ def anonymous(path):
         return client.get(path, headers=headers)
 
 
-def counted(body, total, priced, amount, *, complete):
+def counted(body, total, priced, amount, *, complete, public=False):
     """Every copy is counted. ``complete`` demands the exact numeric answer; otherwise an answer may instead be the
-    labelled incomplete one, with no coverage and no amount (and the total withheld only by a failed final check)."""
+    labelled incomplete one, with no coverage and no amount (and the total withheld only by a failed final check).
+    ``public`` is a Published Deck's cost, which sends no price age."""
     if complete or body["status"] != "incomplete":
         assert (body["status"], body["total_copies"], body["priced_copies"], body["amount"]) == \
             ("priced", str(total), str(priced), format(amount.normalize(), "f")), body
-        assert (body["stale_copies"], body["unknown_age_copies"], body["fallback_copies"]) == ("0", "0", "0"), body
+        assert body["fallback_copies"] == "0", body
+        if public:
+            # No price age is sent publicly (#183): the age counts stay private.
+            assert "stale_copies" not in body and "unknown_age_copies" not in body, body
+        else:
+            assert (body["stale_copies"], body["unknown_age_copies"]) == ("0", "0"), body
     else:
         assert body["reason"] in ("deadline", "store_unavailable", "validation_unavailable"), body
         assert (body["priced_copies"], body["amount"], body["display_amount"]) == (None, None, None), body
@@ -227,7 +233,7 @@ def exercise(count, store, tmp_path, monkeypatch, *, complete, accesses):
     for _ in range(accesses):
         response, seconds = timed(lambda: anonymous(base + "/cost"))
         assert response.status_code == 200, response.text
-        public.append(counted(response.json(), total, priced, amount, complete=complete) + [seconds])
+        public.append(counted(response.json(), total, priced, amount, complete=complete, public=True) + [seconds])
     public_live, public_live_seconds = timed(lambda: anonymous(base + "/exports/live"))
     assert public_live.status_code == 200, public_live.text
     assert (public_live.json()["status"], public_live.json()["total_copies"]) == ("ok", str(total))

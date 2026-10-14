@@ -4,8 +4,8 @@
  * parallel; once both have landed, the <button>s and fields here move onto those components. The links drawn as
  * buttons stay: the kit Button is a <button>.
  *
- * There is no Preflight while style.css exists, so every box property the browser would style is set here. Never
- * combine two classes that set the same property (font-medium with font-semibold, border-0 with border):
+ * Every box property the browser would style is set here, as in the kit (written before Preflight came on in
+ * #184). Never combine two classes that set the same property (font-medium with font-semibold, border-0 with border):
  * Tailwind doesn't promise their order.
  */
 

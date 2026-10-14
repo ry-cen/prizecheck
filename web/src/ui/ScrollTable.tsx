@@ -29,7 +29,8 @@ export function ScrollTable({ label, children }: Props) {
       tabIndex={0}
       className="@container relative box-border max-w-full overflow-x-auto rounded-control border border-border"
     >
-      <table className="w-full border-collapse whitespace-nowrap text-meta text-text [:where(&)>tbody>tr>td]:h-8 [:where(&)>tbody>tr>td]:border-b [:where(&)>tbody>tr>td]:border-border [:where(&)>tbody>tr>td]:px-2.5 [:where(&)>tbody>tr>td]:py-1 [:where(&)>tbody>tr>td]:align-middle [:where(&)>thead>tr>th]:h-8 [:where(&)>thead>tr>th]:border-b [:where(&)>thead>tr>th]:border-border [:where(&)>thead>tr>th]:bg-surface [:where(&)>thead>tr>th]:px-2.5 [:where(&)>thead>tr>th]:py-1 [:where(&)>thead>tr>th]:text-left [:where(&)>thead>tr>th]:font-medium [:where(&)>thead>tr>th]:text-text-muted [:where(&)>tbody>tr:last-child>td]:border-b-0">
+      {/* Cells are box-content: 32 px plus their padding and rule, the 41 px rows they had before Preflight (#184). */}
+      <table className="w-full border-collapse whitespace-nowrap text-meta text-text [:where(&)>tbody>tr>td]:box-content [:where(&)>tbody>tr>td]:h-8 [:where(&)>tbody>tr>td]:border-b [:where(&)>tbody>tr>td]:border-border [:where(&)>tbody>tr>td]:px-2.5 [:where(&)>tbody>tr>td]:py-1 [:where(&)>tbody>tr>td]:align-middle [:where(&)>thead>tr>th]:box-content [:where(&)>thead>tr>th]:h-8 [:where(&)>thead>tr>th]:border-b [:where(&)>thead>tr>th]:border-border [:where(&)>thead>tr>th]:bg-surface [:where(&)>thead>tr>th]:px-2.5 [:where(&)>thead>tr>th]:py-1 [:where(&)>thead>tr>th]:text-left [:where(&)>thead>tr>th]:font-medium [:where(&)>thead>tr>th]:text-text-muted [:where(&)>tbody>tr:last-child>td]:border-b-0">
         {children}
       </table>
     </div>

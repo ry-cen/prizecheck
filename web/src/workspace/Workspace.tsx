@@ -394,8 +394,7 @@ export function Workspace({ userId, active, onOpenDeck }: Props) {
   return (
     // Collection's own root (#166 retired the workspace CSS root and the old .legacy wrapper): the kit's body type
     // (14 px at the tokens' line height) on the theme background, and border-box sizing for everything inside,
-    // as the workspace CSS gave it (Preflight does the same from rollout stage 7). style.css's
-    // :root:has([data-collection-page]) gives the page behind it the same background until then.
+    // as the workspace CSS gave it (Preflight does the same since #184).
     <div
       data-collection-page=""
       className="box-border min-h-[calc(100dvh-var(--layout-header-height))] bg-bg font-sans text-body leading-(--line-height) text-text scheme-dark [&_*]:box-border"

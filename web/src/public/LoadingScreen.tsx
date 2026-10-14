@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import "./public.css";
 
 /** How long the loading screen shows only the wordmark before it says "Loading…", so a quick load shows no text. */
 const LOADING_TEXT_DELAY_MS = 600;
@@ -15,10 +14,7 @@ export function LoadingScreen({ message }: { message: string }) {
     return () => window.clearTimeout(timer);
   }, []);
   return (
-    <div
-      data-signed-out-screen=""
-      className="flex min-h-dvh items-center justify-center bg-bg font-sans text-text scheme-dark"
-    >
+    <div className="flex min-h-dvh items-center justify-center bg-bg font-sans text-text scheme-dark">
       <main className="flex flex-col items-center gap-2 px-5 text-center">
         <p className="m-0 text-heading font-bold text-text-muted">
           <span aria-hidden="true">✦ </span>PrizeCheck

@@ -7,7 +7,7 @@ export type PageId =
 export type PageDef = {
   id: PageId;
   path: string;
-  /** The tab, menu and phone header label; legacy pages also use it as their h1. */
+  /** The tab, menu and phone header label. */
   label: string;
   /** The page stays mounted, hidden, while another page is shown, so it keeps its state and scroll.
    * Old pages that read their data only on mount remount on every visit until their redesign ticket

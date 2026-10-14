@@ -278,6 +278,8 @@ def test_migration_merges_subtitled_identities_and_keeps_every_reference(project
                 # So do Card Identity merges, with migration 037.
                 legacy.setattr(catalog_module, "IDENTITY_UPSERT",
                                catalog_module.IDENTITY_UPSERT.replace("coalesce(merged_into,id)", "id"))
+                # And evolution roots, with migration 043.
+                legacy.setattr(catalog_module, "refresh_evolution_roots", lambda conn: 0)
                 import_into(conn, *LEGACY_RECORDS)
             ids = seed_legacy_extras(conn)
             conn.commit()

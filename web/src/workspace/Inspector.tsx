@@ -114,7 +114,7 @@ const byPath = new Intl.Collator(undefined, {
 });
 const counts = new Intl.NumberFormat("en-US");
 
-// The details space their lines with padding (m-0 clears the browser's own margins: there is no Preflight).
+// The details space their lines with padding (m-0 clears any margin, written before Preflight came on in #184).
 // The price section is inset by px-1 and the panel ends with pb-1 so the report link's focus ring isn't
 // clipped by the panel's scroll box.
 const META = "text-meta text-text-muted tabular-nums";
@@ -209,7 +209,7 @@ export function CardDetails({
           editionId={holding.edition_id}
         />
         <a
-          className="inline-flex min-h-(--target-pointer) items-center text-accent underline-offset-2 hover:text-accent-strong phone:min-h-tap"
+          className="inline-flex min-h-(--target-pointer) items-center text-accent underline underline-offset-2 hover:text-accent-strong phone:min-h-tap"
           href={metadataReportHref(holding.printing_id, holding.edition_id)}
         >
           Report a problem with this card's data
