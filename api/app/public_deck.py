@@ -97,16 +97,9 @@ def _record(token: str, timeout: float):
     return public_projection_store().read_state(timeout=timeout)[0].get(token)
 
 
-def read_active(token: str, version: int, *, deadline: float) -> ActiveSnapshot:
-    remaining = deadline - time.monotonic()
-    if remaining <= 0:
-        raise SnapshotLate()
-    try:
-        record = prices._bounded(lambda: _record(token, max(0.001, remaining)), remaining)
-    except prices._Late:
-        raise SnapshotLate() from None
-    if record is None:
-        raise SnapshotGone()
+def parse_record(token: str, record) -> ActiveSnapshot:
+    """The snapshot one manifest record holds, with its derived rows and digest. ProjectionUnavailable when the record is
+    malformed. Shared by ``read_active`` and Discover (``discovery``), which reads the whole manifest at once."""
     try:
         visibility, stored = record['visibility'], record['snapshot']
         if visibility not in ('listed', 'unlisted'):
@@ -120,9 +113,23 @@ def read_active(token: str, version: int, *, deadline: float) -> ActiveSnapshot:
                      for identity in snapshot.identities for edition in identity.editions)
     except (KeyError, TypeError, ValueError, ValidationError):
         raise ProjectionUnavailable() from None
-    if snapshot.version != version:
+    return ActiveSnapshot(token, snapshot.version, snapshot_digest(stored), visibility, snapshot, rows)
+
+
+def read_active(token: str, version: int, *, deadline: float) -> ActiveSnapshot:
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise SnapshotLate()
+    try:
+        record = prices._bounded(lambda: _record(token, max(0.001, remaining)), remaining)
+    except prices._Late:
+        raise SnapshotLate() from None
+    if record is None:
+        raise SnapshotGone()
+    active = parse_record(token, record)
+    if active.version != version:
         raise SnapshotChanged()
-    return ActiveSnapshot(token, version, snapshot_digest(stored), visibility, snapshot, rows)
+    return active
 
 
 def revalidate(active: ActiveSnapshot, *, deadline: float) -> None:

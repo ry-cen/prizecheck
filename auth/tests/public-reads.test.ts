@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { execFileSync, spawnSync, type ChildProcess } from "node:child_process";
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   renameSync,
@@ -178,6 +179,13 @@ print(json.dumps([rows[k].value for k in keys]))`,
           })
         );
 
+        // Discover lists only decks legal in their Target Format (#182). These snapshots have no format records, so
+        // the API loads the CI-only fixture that lists them anyway (api/tests/catalog_process_fixture).
+        const exempt = join(directory, "exempt");
+        mkdirSync(join(exempt, "discover-exempt"), { recursive: true });
+        for (const listedToken of Object.keys(listed))
+          writeFileSync(join(exempt, "discover-exempt", listedToken), "");
+
         // The anonymous read path points at the counting listener, never at PostgreSQL.
         const databasePort = await listen(counter);
         const apiPort = await freePort();
@@ -201,7 +209,22 @@ print(json.dumps([rows[k].value for k in keys]))`,
               String(apiPort),
               "--no-access-log",
             ],
-            isolated
+            {
+              // Only the publish gate fixture: none of the price or catalog fixtures the same directory carries.
+              ...Object.fromEntries(
+                Object.entries(isolated).filter(
+                  ([key]) =>
+                    !key.startsWith("PRICE_FIXTURE_") &&
+                    key !== "PRICE_RUNNER_LOCK_DIR" &&
+                    key !== "CATALOG_PROCESS_FIXTURE_DIR"
+                )
+              ),
+              PYTHONPATH:
+                join(process.cwd(), "api/tests/catalog_process_fixture") +
+                ":" +
+                join(process.cwd(), "api"),
+              PUBLISH_GATE_EXEMPT_DIR: exempt,
+            }
           ),
           launch("node", ["--import", "tsx", "auth/src/server.ts"], {
             ...isolated,
@@ -269,7 +292,7 @@ print(json.dumps([rows[k].value for k in keys]))`,
         expect(refused.status).toBe(1);
         expect(refused.stderr).not.toContain("Traceback");
         expect(existsSync(records)).toBe(false);
-        // Deck and discovery reads do not depend on the records store.
+        // Deck reads do not depend on the records store (Discover now reads its format facts and quotes there, #182).
         expect((await read(`/api/public/decks/${token}`)).status).toBe(200);
 
         // Recovery: initialize an empty store, rebuild from PostgreSQL, values return.

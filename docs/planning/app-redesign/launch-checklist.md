@@ -28,6 +28,7 @@ The redesign is a launch gate ([spec](spec.md), "Rollout"): PrizeCheck opens to 
 - [ ] Every Deck has one Target Format (Standard, Expanded or Gym Leader Challenge), Standard by default; migrating to `045_deck_list_target_format.sql` makes every existing Deck Standard. The deck builder's second header line holds the "Standard ▾ · ✓ Legal" control: ▾ changes the Target Format, and the result opens a dialog with the "as of" date, the deck and card issues, the rules version and the disclaimer. A card-level issue outlines its lines with a "!". The Deck read, every Deck List command and the format-checks read answer the Target Format's result only (`?format=` still names another), and `PUT /api/decks/{id}/deck-list/target-format` changes it. Publishing and republishing now need a legal result in the Target Format and otherwise answer `409 TARGET_FORMAT_NOT_LEGAL` with the result; snapshots store their Target Format, and snapshots published before read as Standard. Every saved format result is recomputed once on its Deck's next read, because the code that evaluates changed (#178).
 - [ ] Copies physically in a Deck but cut from its Deck List show in the deck builder as **Surplus**, in their own group under the Deck List in Spread, Stacked and List; they never count toward N/60. **Put away all**, or pressing one surplus card, moves those copies to a Location you pick as one Move, with an Undo toast. Undo returns the copies to the Deck and, as for any copies arriving in a Deck, puts them back on its Deck List. A warning at the top of the Deck List names the other Decks whose Deck Lists count the same spare copies, and whether each also counts them or holds copies for its own list. Each `surplus` row in `GET /api/decks/{id}` also carries the Deck's Holding `version` and the card's display data (#180).
 - [ ] Pressing a Catalog tile opens the card popup: the art, the set with its printed code and number, the regulation mark, the Card Identity when it differs from the name, the source, a legality pill per Format (with the reason for an unknown one), the Editions with copies owned, price and Owner reviewed or Unavailable badges, and where your copies are. "‹ N / M ›" and the ← → keys step through the gallery. **Add N** puts copies of the chosen Edition in a Storage Leaf through the existing single add route (batch add and its Undo come with #175), and **Plan 1** adds one copy to a Deck's Deck List without moving a card. The footer opens today's report forms. My metadata reports stays beside the page title, because the gallery scrolls on. `GET /api/catalog/editions` gains a `printing_id` filter (one Printing's Editions) and a `regulation_mark` on every row (#174).
+- [ ] Discover (`/discover`) is on the new design and lists only Listed Published Decks that are legal in their Target Format today: a deck that stops being legal (a rotation, a ban, a corrected card) leaves Discover and returns once legal again, without republishing. It shows a grid of deck cards, newest first, each with a featured card, the title, a ✓ Target Format pill, the card count, the published date and the cost from cached prices: "$142", "$118+" (some cards not priced yet) or "Price on page". A search box (title or card name) and the Any, Standard, Expanded and GLC chips filter it. `GET /api/public/discovery` gains `format=` and each summary gains `featured_name`, `target_format`, `target_format_status` and `cost: {amount, priced_copies, total_copies}`; its cursors change, so a "More decks" press across the release restarts at page one. Snapshots published before rows carried references (legacy rows) and decks whose public format records predate migration 038 stay out of Discover until they are republished or `scripts/backfill_public_catalog.py` runs. The sitemap is unchanged (#182).
 
 ## Walkthroughs
 
@@ -247,6 +248,23 @@ On a phone (iOS Safari or Android Chrome):
 
 - [ ] 8. Tap a tile: the popup rises from the bottom of the screen as a sheet. Every button, picker and link in it is easy to hit with a thumb, nothing scrolls sideways, and ✕ or a tap on the dimmed page closes it.
 
+### Discover (#182)
+
+On a desktop (a window at least 1280 px wide), signed out:
+
+- [ ] 1. Open `/discover` from the public header's "Discover decks". The page title is "Discover decks", with a search box and the Any, Standard, Expanded and GLC chips under it, and a grid of deck cards, newest first.
+- [ ] 2. Each card shows a featured card (a Pokémon from the deck, not an Energy), the title, "✓ Standard" (or the deck's own format), the card count, "Published <date>" and a cost.
+- [ ] 3. Find a deck whose cost reads "$N+": rest the pointer on the cost and a tooltip says how many cards aren't priced yet. A deck with no cached prices reads "Price on page" in muted text.
+- [ ] 4. Press Expanded: only Expanded decks remain and the chip shows as pressed. Press GLC with no GLC deck listed: "No legal decks match this search." Press Any: every deck returns.
+- [ ] 5. Type part of a card name that's in one of your published decks: the grid narrows to the decks holding it. Clear the box.
+- [ ] 6. Press a deck card: its Published Deck opens without a full page reload.
+- [ ] 7. A Listed deck is a snapshot, so editing its Deck or changing its Target Format changes nothing here until you republish. Instead, in Owner controls → Attributes, correct one card of a Listed deck to regulation mark G (rotated out of Standard) and reload Discover: once the correction is delivered, the deck is gone. Remove the correction and reload: the deck returns, with no republish.
+
+On a phone (iOS Safari or Android Chrome), signed in:
+
+- [ ] 8. Open Discover from the public link or a Published Deck: it shows inside the app, with the bottom tab bar and no tab highlighted. Cards sit two to a row, nothing scrolls sideways, and the chips and cards are easy to hit with a thumb.
+- [ ] 9. Scroll to the end of a long listing and press More decks: more cards load under the first ones.
+
 ## Manual checks that automation does not cover
 
 - [ ] Real touch on iOS Safari and Android Chrome for the tab bar, the More sheet and the ☰ drawer (the browser tests only emulate touch), including the home indicator area under the tab bar.
@@ -263,6 +281,7 @@ On a phone (iOS Safari or Android Chrome):
 - [ ] Screen reader on Catalog: the search box is read with its hint, each chip with whether it is pressed, the set chip as opening a dialog, and each tile with its card, set and number, Variant, how many you own and, under a format chip, "legality unknown" for a "?" card (#173).
 - [ ] Screen reader on the Target Format control: the picker is read as "Target Format" with the chosen Format, the result as a button with its status and issue count, a change announces the new result once, and a highlighted copy is described as having a format issue (#178).
 - [ ] Screen reader on the card popup: it is read by the card's name; ‹ › as Previous card and Next card with "N / M" between them; each step as "Card N of M: name"; each Edition as a toggle button with its Variant, copies owned and price, and whether it is pressed; and the footer links as "Report this Edition", "Report Printing metadata" and "Report a missing Edition" (#174).
+- [ ] Screen reader on Discover: each deck card is read as a link named by its title, then its format ("Standard legal"), card count, published date and cost, including "N cards not priced yet" after a "$N+" cost; the chips are read with whether they're pressed, and the results line is announced when a search or chip changes the grid (#182).
 
 ## Sources
 

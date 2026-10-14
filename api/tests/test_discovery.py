@@ -4,12 +4,18 @@ import os
 import pytest
 from test_holdings import fixture, call, client
 from test_decks import create
-from test_publications import command, list_cards, public_objects
+from test_publications import command, list_cards, public_objects, publish_gate_fixture
 
 
 def visibility(owner, deck, value, key=None):
-    return call('PATCH', f'/api/decks/{deck}/publication/visibility', owner,
-                {'visibility': value, 'idempotency_key': str(key or uuid4())})
+    """Change the Deck's publication visibility. These tests list small Deck Lists that aren't legal in any Format, so a
+    snapshot listed here is exempt from Discover's legality filter (``publish_gate_fixture.exempt_listing``); Discover's
+    own tests (test_discover_listing.py) list through the route and exempt nothing."""
+    response = call('PATCH', f'/api/decks/{deck}/publication/visibility', owner,
+                    {'visibility': value, 'idempotency_key': str(key or uuid4())})
+    if response.status_code == 200 and value == 'listed':
+        publish_gate_fixture.exempt_listing(response.json()['token'])
+    return response
 
 
 def test_listing_changes_next_public_request_without_mutating_snapshot(monkeypatch):
@@ -30,7 +36,8 @@ def test_listing_changes_next_public_request_without_mutating_snapshot(monkeypat
     assert client.get(path).headers['x-robots-tag'] == 'index, follow'
     listed = client.get('/api/public/discovery?q=rivals').json()['decks']
     assert len(listed) == 1
-    assert set(listed[0]) == {'url','title','total','published_at','checks','image_url'}
+    assert set(listed[0]) == {'url','title','total','published_at','checks','image_url','featured_name','target_format',
+                              'target_format_status','cost'}
     assert listed[0]['title'] == 'Friends & rivals' and listed[0]['total'] == '59'
     assert len(client.get('/api/public/discovery?q=Pikachu').json()['decks']) == 1
     assert client.get('/api/public/discovery?q=Secret').json()['decks'] == []

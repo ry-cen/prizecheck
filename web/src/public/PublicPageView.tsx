@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Discovery } from "../Discovery";
+import { DiscoverPage } from "../discover/DiscoverPage";
 import { PublishedDeck } from "../PublishedDeck";
 import { DeadEnd } from "./DeadEnd";
 import type { PublicPage } from "./publicRoutes";
@@ -11,17 +11,12 @@ type Props = {
 };
 
 /**
- * Discover or a Published Deck, the same under the public header and inside the shell. Both are still the old
- * light pages (restyled in rollout stage 6), so they sit in .legacy on a light surface; an unknown or revoked
- * token shows the kit's unavailable card instead, outside .legacy.
+ * Discover or a Published Deck, the same under the public header and inside the shell. Discover is on the kit
+ * (#182). A Published Deck is still the old light page (restyled in #183), so it sits in .legacy on a light
+ * surface; an unknown or revoked token shows the kit's unavailable card instead, outside .legacy.
  */
 export function PublicPageView({ page, signedIn, onNavigate }: Props) {
-  if (page.kind === "discover")
-    return (
-      <div className="legacy legacy-light flex-1">
-        <Discovery />
-      </div>
-    );
+  if (page.kind === "discover") return <DiscoverPage onNavigate={onNavigate} />;
   return (
     <PublishedPage
       key={page.token}

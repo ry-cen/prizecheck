@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { listHoldings } from "./support/deck-list";
-import { exemptNamedDeck } from "./support/publish-gate";
+import { exemptFromDiscover, exemptNamedDeck } from "./support/publish-gate";
 import { openDeckTools } from "./support/deck-builder";
 
 function messages(path: string): string[] {
@@ -94,23 +94,24 @@ promote({'card-1': ${JSON.stringify(hostileName)}})`,
     const link = publishing.getByRole("link", { name: "View public snapshot" });
     await expect(link).toBeVisible();
     const publicUrl = (await link.getAttribute("href"))!;
+    // Discover lists only legal decks (#182); this 59-card list isn't one.
+    exemptFromDiscover(publicUrl.split("/").at(-1)!);
+    const searchDecks = publicPage.getByRole("searchbox", {
+      name: "Search decks",
+    });
     await publicPage.goto(
       `${process.env.TEST_ORIGIN || "http://localhost:5173"}/discover`
     );
-    await publicPage.getByLabel("Public title or card name").fill(title);
-    await publicPage
-      .getByRole("button", { name: "Search Published Decks" })
-      .click();
+    await searchDecks.fill(title);
     await expect(publicPage.getByRole("main")).toContainText(
-      "No matching Listed Decks."
+      "No legal decks match this search."
     );
     await publishing
       .getByRole("button", { name: "List in public discovery", exact: true })
       .click();
     await expect(publishing).toContainText("Snapshot version 1 · listed");
-    await publicPage
-      .getByRole("button", { name: "Search Published Decks" })
-      .click();
+    await publicPage.reload();
+    await searchDecks.fill(title);
     await expect(
       publicPage.getByRole("link", { name: title, exact: true })
     ).toBeVisible();
@@ -153,12 +154,9 @@ promote({'card-1': ${JSON.stringify(hostileName)}})`,
     await publicPage.goto(
       `${process.env.TEST_ORIGIN || "http://localhost:5173"}/discover`
     );
-    await publicPage.getByLabel("Public title or card name").fill(title);
-    await publicPage
-      .getByRole("button", { name: "Search Published Decks" })
-      .click();
+    await searchDecks.fill(title);
     await expect(publicPage.getByRole("main")).toContainText(
-      "No matching Listed Decks."
+      "No legal decks match this search."
     );
     expect(
       await (
@@ -196,18 +194,20 @@ for index in range(32):
       ],
       { env: { ...process.env, PYTHONPATH: "api:api/tests" } }
     );
+    const decks = page
+      .getByRole("list", { name: "Decks" })
+      .getByRole("listitem");
+    const searchDecks = page.getByRole("searchbox", { name: "Search decks" });
     await page.goto(
       `${process.env.TEST_ORIGIN || "http://localhost:5173"}/discover`
     );
-    await page.getByLabel("Public title or card name").fill(prefix);
-    await page.getByRole("button", { name: "Search Published Decks" }).click();
-    await expect(page.locator("article")).toHaveCount(30);
-    await page
-      .getByRole("button", { name: "More Published Decks", exact: true })
-      .click();
-    await expect(page.locator("article")).toHaveCount(32);
-    await page.getByRole("button", { name: "Search Published Decks" }).click();
-    await expect(page.locator("article")).toHaveCount(30);
+    await searchDecks.fill(prefix);
+    await expect(decks).toHaveCount(30);
+    await page.getByRole("button", { name: "More decks", exact: true }).click();
+    await expect(decks).toHaveCount(32);
+    await page.reload();
+    await searchDecks.fill(prefix);
+    await expect(decks).toHaveCount(30);
     execFileSync(
       ".venv/bin/python",
       [
@@ -223,13 +223,11 @@ visibility(owner, deck, 'listed')`,
       ],
       { env: { ...process.env, PYTHONPATH: "api:api/tests" } }
     );
-    await page
-      .getByRole("button", { name: "More Published Decks", exact: true })
-      .click();
+    await page.getByRole("button", { name: "More decks", exact: true }).click();
     await expect(page.getByRole("status")).toContainText(
-      "Published Decks changed. Showing the first page."
+      "Published decks changed. Showing the first page."
     );
-    await expect(page.locator("article")).toHaveCount(30);
+    await expect(decks).toHaveCount(30);
     await expect(
       page.getByRole("link", { name: prefix + " new", exact: true })
     ).toBeVisible();

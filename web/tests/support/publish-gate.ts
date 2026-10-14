@@ -29,3 +29,16 @@ export async function exemptNamedDeck(pool: Pool, deckName: string) {
     throw new Error(`expected one Deck named ${deckName}`);
   exemptFromPublishGate(decks.rows[0].id as string);
 }
+
+/** Let Discover list the snapshot `token` on this worker's stack whatever its Target Format result (#182). For specs
+ * written before legal-only Discover; Discover's own spec (discover-page.spec.ts) exempts nothing. */
+export function exemptFromDiscover(token: string) {
+  const root = process.env.CATALOG_PROCESS_FIXTURE_DIR;
+  if (!root)
+    throw new Error(
+      "CATALOG_PROCESS_FIXTURE_DIR is unset: run this spec through npm run verify"
+    );
+  const directory = join(root, "discover-exempt");
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(join(directory, token), "");
+}

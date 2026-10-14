@@ -79,23 +79,31 @@ def _query(request: Request) -> tuple[tuple[str, ...], date, date]:
     return (evaluator.FORMATS if name is None else (name,)), on, current
 
 
+def read_facts(store, printing_refs, deadline, *, generation=None) -> dict:
+    """Format facts of ``printing_refs`` and of every printing in their Reprint Groups, by Printing reference, all read at
+    one store generation (``generation`` when given); ``None`` where a record is missing or malformed.
+    ProjectionUnavailable and ValueError propagate. Shared with Discover (``discovery``)."""
+    refs = list(dict.fromkeys(printing_refs))
+    if not refs:
+        return {}
+    facts = format_facts(store, refs, deadline, generation=generation)
+    members = sorted({ref for found in facts.values() if found is not None for ref in found.reprint_printings}
+                     - facts.keys())
+    if members:
+        generation = next(found.generation for found in facts.values() if found is not None)
+        facts.update(format_facts(store, members, deadline, generation=generation))
+    return facts
+
+
 def _facts(active, deadline) -> dict:
-    """Format facts of the rows' Printings and of every printing in their Reprint Groups, by Printing reference, all
-    read at one store generation; ``None`` where a record is missing or malformed."""
+    """Format facts of the rows' Printings and of every printing in their Reprint Groups (``read_facts``)."""
     refs = [row.printing_ref for row in active.rows if row.printing_ref is not None]
     if not refs:
         return {}
-    store = public_record_store()
     try:
-        facts = format_facts(store, refs, deadline)
-        members = sorted({ref for found in facts.values() if found is not None for ref in found.reprint_printings}
-                         - facts.keys())
-        if members:
-            generation = next(found.generation for found in facts.values() if found is not None)
-            facts.update(format_facts(store, members, deadline, generation=generation))
+        return read_facts(public_record_store(), refs, deadline)
     except (ProjectionUnavailable, ValueError):
         raise public_deck.error(503, 'PUBLIC_CATALOG_UNAVAILABLE') from None
-    return facts
 
 
 def _printing_id(printing_ref: str) -> UUID:
@@ -188,16 +196,22 @@ def published_check(result: evaluator.FormatResult, rules: evaluator.FormatRules
                                 evaluated_on=check.evaluated_on, notes=check.notes, computed_at=check.computed_at)
 
 
-def published_format_checks(token: str, version: int, names, on: date, current: date) -> PublishedDeckFormatChecks:
-    deadline = public_deck.export_deadline()
-    active = public_deck.read_for_export(token, version, deadline=deadline)
-    lines, reprint_groups, keys, unproven = resolve(active, _facts(active, deadline))
-    computed_at = datetime.now(timezone.utc)
+def checks_for(active, facts, names, on: date, current: date, computed_at: datetime) -> list[PublishedFormatCheck]:
+    """The published result of ``active`` in each of ``names`` on ``on``, from ``facts`` (``read_facts``). Pure: the one
+    evaluation behind this route and Discover's listing (``discovery``), so the two never disagree."""
+    lines, reprint_groups, keys, unproven = resolve(active, facts)
     results = []
     for name in names:
         rules = evaluator.format_rules(name)
         results.append(published_check(evaluator.evaluate_format(lines, rules, on, reprint_groups), rules, current,
                                        computed_at, keys, unproven))
+    return results
+
+
+def published_format_checks(token: str, version: int, names, on: date, current: date) -> PublishedDeckFormatChecks:
+    deadline = public_deck.export_deadline()
+    active = public_deck.read_for_export(token, version, deadline=deadline)
+    results = checks_for(active, _facts(active, deadline), names, on, current, datetime.now(timezone.utc))
     public_deck.revalidate_for_export(active, deadline=deadline)
     return PublishedDeckFormatChecks(version=active.version, digest=active.digest, results=results)
 
