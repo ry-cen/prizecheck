@@ -43,6 +43,14 @@ type Session = {
   image?: string | null;
 };
 
+/** The provider picture, only as an https URL. The gateway checks its host too (auth/src/sessionView.ts); this
+ * second check keeps anything else out of the avatar's <img>, as dev's ProfileBadge did. */
+function avatarImage(image: unknown): string | null {
+  return typeof image === "string" && image.startsWith("https://")
+    ? image
+    : null;
+}
+
 /** Where signing in lands: a same-origin `next`, else the signed-in page being visited, else Collection. */
 function safeDestination(): string {
   const value = new URLSearchParams(location.search).get("next");
@@ -265,7 +273,7 @@ function App() {
       page={page}
       email={accountEmail}
       name={session?.name ?? null}
-      image={session?.image ?? null}
+      image={avatarImage(session?.image)}
       owner={ownerCatalog !== null}
       onNavigate={(next) => {
         if (pageDef(next).path !== path) navigate(pageDef(next).path);

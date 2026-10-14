@@ -32,6 +32,22 @@ test("draws one plain link per configured provider, carrying the protected page 
   await expect(page.getByLabel("Email")).toBeVisible();
 });
 
+test("a next never carries a sign-in failure's parameters", async ({
+  page,
+}) => {
+  await methods(page, { providers: [GOOGLE], emailSignIn: false });
+  // An explicit next that carries a failure (as a provider's return can) keeps its path and other parameters only.
+  await page.goto(
+    `${ORIGIN}/sign-in?next=${encodeURIComponent("/decks?view=list&error=access_denied&error_description=x&provider=google")}`
+  );
+  await expect(
+    page.getByRole("link", { name: "Continue with Google" })
+  ).toHaveAttribute(
+    "href",
+    `/auth/sign-in/google?next=${encodeURIComponent("/decks?view=list")}`
+  );
+});
+
 test("sends no next without a destination and passes an explicit next through", async ({
   page,
 }) => {

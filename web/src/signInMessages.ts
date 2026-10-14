@@ -107,6 +107,19 @@ export function signInMessage(
   }
 }
 
+/**
+ * `path` without a sign-in failure's parameters, so a failure carried into `next` isn't shown again after the next
+ * sign-in. Only a same-origin path is rewritten; anything else is returned as it is, for the gateway's own check
+ * (auth/src/nextPath.ts) to refuse.
+ */
+export function withoutFailure(path: string): string {
+  if (!path.startsWith("/") || path.startsWith("//")) return path;
+  const url = new URL(path, location.origin);
+  if (url.origin !== location.origin) return path;
+  for (const key of FAILURE_PARAMS) url.searchParams.delete(key);
+  return `${url.pathname}${url.search}${url.hash}`;
+}
+
 /** The failure in the current address, if any: the `error` code and the `provider` id the start route added. */
 export function failureInAddress(): {
   code: string;
@@ -117,11 +130,13 @@ export function failureInAddress(): {
   return code ? { code, provider: query.get("provider") } : null;
 }
 
+/** The address parameters a sign-in failure arrives in. */
+const FAILURE_PARAMS = ["error", "error_description", "provider"];
+
 /** Removes the failure from the address bar, keeping the path and every other parameter. */
 export function clearFailureFromAddress(): void {
   const url = new URL(location.href);
-  for (const key of ["error", "error_description", "provider"])
-    url.searchParams.delete(key);
+  for (const key of FAILURE_PARAMS) url.searchParams.delete(key);
   history.replaceState(
     history.state,
     "",

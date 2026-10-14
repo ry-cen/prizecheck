@@ -11,6 +11,7 @@ import {
   clearFailureFromAddress,
   failureInAddress,
   signInMessage,
+  withoutFailure,
   type SignInMessage,
 } from "../signInMessages";
 import {
@@ -120,13 +121,16 @@ export function useSignInMethods(): {
 
 /**
  * The `next` a provider button carries: the `next` asked for, else the signed-in page being visited. None at
- * /sign-in or any other address that is no page. The gateway checks it (auth/src/nextPath.ts).
+ * /sign-in or any other address that is no page. Either way without a sign-in failure's parameters, so a failure
+ * isn't replayed after signing in. The gateway checks it (auth/src/nextPath.ts).
  */
 export function providerNext(): string | null {
   const asked = new URLSearchParams(location.search).get("next");
-  if (asked) return asked;
+  if (asked) return withoutFailure(asked);
   const path = canonicalPath(location.pathname);
-  return pageAt(path) ? `${path}${location.search}${location.hash}` : null;
+  return pageAt(path)
+    ? withoutFailure(`${path}${location.search}${location.hash}`)
+    : null;
 }
 
 /** The start link for a provider, with `next` when there is one. */
