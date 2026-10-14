@@ -31,10 +31,8 @@ test("mobile collector can search, Add, Move, Undo, check and publish a physical
   const publicPage = await anonymous.newPage();
   try {
     await pool.query("DELETE FROM auth_send_event");
-    await signInAsOwner(page, "/workspace");
-    await page.getByRole("button", { name: "Open locations" }).tap();
+    await signInAsOwner(page, "/collection");
     await page
-      .getByRole("dialog", { name: "Locations", exact: true })
       .getByRole("navigation", { name: "Main views" })
       .getByRole("button", { name: "Decks", exact: true })
       .tap();
@@ -128,9 +126,12 @@ test("mobile collector can search, Add, Move, Undo, check and publish a physical
       "revoked permanently"
     );
     await publicPage.reload();
-    await expect(publicPage.getByRole("status")).toContainText(
-      "Published Deck not found."
-    );
+    await expect(
+      publicPage.getByRole("heading", {
+        level: 1,
+        name: "This deck isn't published anymore",
+      })
+    ).toBeVisible();
   } finally {
     await anonymous.close();
     await pool.end();

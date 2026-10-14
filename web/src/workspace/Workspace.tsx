@@ -5,8 +5,10 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { ProfileBadge } from "../ProfileBadge";
+import { Menu as MenuIcon } from "lucide-react";
 import { getLocationTree, type TreeNode } from "../location_generated";
+import { Dialog } from "../ui/Dialog";
+import { Icon } from "../ui/Icon";
 import { AddCardsDialog } from "./AddCardsDialog";
 import { CorrectionsNotice } from "./CorrectionsNotice";
 import { CreateLocationDialog } from "./CreateLocationDialog";
@@ -39,7 +41,7 @@ import {
 import { ManageLocations, ManageLocationsButton } from "./ManageLocations";
 import { indexLocations, isFolder } from "./locationTree";
 import { MOBILE_QUERY, useMediaQuery } from "./media";
-import { focusWorkspaceHeading, SelectionBar } from "./SelectionBar";
+import { SelectionBar } from "./SelectionBar";
 import { selectedGroups, selectionScope } from "./selectionModel";
 import { StaleBanner } from "./StaleBanner";
 import { DragBadge, useTileDrag } from "./tileDrag";
@@ -56,38 +58,18 @@ import "./Workspace.css";
 const FOCUSABLE =
   'button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex="-1"])';
 
-/** The other signed-in pages, opened from Main views. */
-export type AppPage =
-  | "collection"
-  | "decks"
-  | "catalog"
-  | "reports"
-  | "owner"
-  | "settings/sign-ins";
-const PAGES: { view: AppPage; label: string }[] = [
-  { view: "collection", label: "Collection" },
-  { view: "decks", label: "Decks" },
-  { view: "catalog", label: "Catalog" },
-  { view: "reports", label: "Missing cards" },
-];
-
 type Props = {
   /** The signed-in user; their gallery preferences are stored under it in this browser. */
   userId: string;
-  /** Opens another signed-in page. */
-  onNavigate: (page: AppPage) => void;
-  /** The owner sees Owner controls in Main views. */
-  ownerControls: boolean;
-  onSignOut: () => void;
+  /** False while the app shell shows another page. The workspace stays mounted, hidden, and keeps its
+   * state; document-level keys are ignored meanwhile, and showing it again checks for changes made on
+   * other pages (#162). */
+  active: boolean;
 };
 
-/** The collector workspace: header, Location sidebar (desktop) or drawer (mobile), and the gallery area. */
-export function Workspace({
-  userId,
-  onNavigate,
-  ownerControls,
-  onSignOut,
-}: Props) {
+/** The collector workspace (Collection, inside the app shell): the phone header, the Location sidebar
+ * (desktop) or drawer (phone), and the gallery area. The shell draws the desktop header and the tabs. */
+export function Workspace({ userId, active }: Props) {
   const [nodes, setNodes] = useState<TreeNode[]>([]);
   const [ownerRevision, setOwnerRevision] = useState<number | null>(null);
   const [treeState, setTreeState] = useState<"loading" | "ready" | "error">(
@@ -117,9 +99,8 @@ export function Workspace({
   const [manageOpen, setManageOpen] = useState(false);
   const [addFor, setAddFor] = useState<string | null>(null);
   const dockRef = useRef<HTMLDivElement>(null);
-  const ownedTotals = useRef(new Map<string, number>()).current;
   const drawerOpener = useRef<HTMLButtonElement>(null);
-  const drawerRef = useRef<HTMLDivElement>(null);
+  const ownedTotals = useRef(new Map<string, number>()).current;
 
   // Reloads can overlap (Reload, an action, Manage locations); only the newest one's answer lands,
   // so an older tree never replaces a newer one.
@@ -175,7 +156,20 @@ export function Workspace({
     status: gallery.status,
     scope: selectionScope({ ...galleryQuery, search: searchText.trim() }),
     mobile,
+    active,
   });
+  // Browser Back or Forward can hide Collection while an overlay is open (it stays mounted, hidden), which
+  // would leave a modal or a scroll lock over the page now shown. Leaving closes them all.
+  const { closeDetails } = selection;
+  useEffect(() => {
+    if (active) return;
+    setDrawerOpen(false);
+    setFiltersDrawerOpen(false);
+    closeDetails();
+    setCreateFor(undefined);
+    setManageOpen(false);
+    setAddFor(null);
+  }, [active, closeDetails]);
   // Ticket 107: Move, Inventory Removal and Undo, and the desktop tile drag.
   const actions = useInventoryActions({
     selection,
@@ -207,6 +201,7 @@ export function Workspace({
     selected: selection.selected,
     clearSelection: actions.clearSelection,
     busy: actions.busy,
+    active,
   });
   // Inspector totals are cached per owner revision ("<revision>:<edition>"). Older revisions' entries can't be
   // asked for again, so drop them whenever the gallery reads a new revision.
@@ -298,48 +293,6 @@ export function Workspace({
     return () => media.removeEventListener("change", onChange);
   }, [drawerOpen]);
 
-  // Modal drawer: focus moves in, Tab stays inside, Escape closes, focus returns to the opener.
-  useEffect(() => {
-    if (!drawerOpen) return;
-    const opener = drawerOpener.current;
-    const focusables = () =>
-      Array.from(
-        drawerRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? []
-      );
-    focusables()[0]?.focus();
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        setDrawerOpen(false);
-        return;
-      }
-      if (event.key !== "Tab") return;
-      const items = focusables();
-      if (!items.length) return;
-      const first = items[0];
-      const last = items[items.length - 1];
-      const inside = drawerRef.current?.contains(document.activeElement);
-      if (event.shiftKey && (document.activeElement === first || !inside)) {
-        event.preventDefault();
-        last.focus();
-      } else if (
-        !event.shiftKey &&
-        (document.activeElement === last || !inside)
-      ) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    document.addEventListener("keydown", onKeyDown);
-    const overflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.removeEventListener("keydown", onKeyDown);
-      document.body.style.overflow = overflow;
-      if (opener?.isConnected && opener.getClientRects().length) opener.focus();
-    };
-  }, [drawerOpen]);
-
   const search = (className: string) => (
     <input
       type="search"
@@ -378,32 +331,6 @@ export function Workspace({
       />
     );
 
-  const pages: { view: AppPage; label: string }[] = [
-    ...PAGES,
-    ...(ownerControls
-      ? [{ view: "owner" as const, label: "Owner controls" }]
-      : []),
-    // Until the app-redesign avatar menu exists, Sign-ins sits here beside the profile badge and Sign out, on desktop
-    // and in the mobile drawer.
-    { view: "settings/sign-ins", label: "Sign-ins" },
-  ];
-  const mainViews = (className: string) => (
-    <nav aria-label="Main views" className={className}>
-      {pages.map((page) => (
-        <button
-          key={page.view}
-          type="button"
-          onClick={() => onNavigate(page.view)}
-        >
-          {page.label}
-        </button>
-      ))}
-      <ProfileBadge />
-      <button type="button" onClick={onSignOut}>
-        Sign out
-      </button>
-    </nav>
-  );
   // The skip link past the cards: focus the dock's first visible control (the toast's Undo, or the
   // selection bar). #107 sends focus to the heading after a Move, which is otherwise a Tab through every tile away.
   function focusDock() {
@@ -419,36 +346,23 @@ export function Workspace({
     <div className="ws-root">
       <div
         className="ws-surface"
-        inert={drawerOpen || filtersDrawerOpen || selection.details !== null}
+        inert={filtersDrawerOpen || selection.details !== null}
       >
-        <a
-          className="ws-skip-link"
-          href="#ws-heading"
-          onClick={(event) => {
-            event.preventDefault();
-            focusWorkspaceHeading();
-          }}
-        >
-          Skip to main content
-        </a>
-        <header className="ws-header">
+        {/* The phone header (the shell draws the desktop one, and the skip link): ☰ for the Location
+            drawer, the page title, then Search and Filters & display. */}
+        <header className="ws-header ws-phone-header">
           <button
-            ref={drawerOpener}
             type="button"
-            className="ws-header-icon ws-mobile-only"
+            ref={drawerOpener}
+            className="ws-header-icon"
             aria-label="Open locations"
             aria-haspopup="dialog"
             aria-expanded={drawerOpen}
             onClick={() => setDrawerOpen(true)}
           >
-            <span aria-hidden="true">☰</span>
+            <Icon icon={MenuIcon} size={20} />
           </button>
-          <span className="ws-brand">
-            <span className="ws-brand-mark" aria-hidden="true">
-              ✦
-            </span>
-            PrizeCheck
-          </span>
+          <span className="ws-phone-title">Collection</span>
           {search("ws-mobile-only ws-header-search")}
           <FiltersDrawerButton
             ref={filtersOpener}
@@ -456,7 +370,6 @@ export function Workspace({
             open={filtersDrawerOpen}
             onOpen={() => setFiltersDrawerOpen(true)}
           />
-          {mainViews("ws-app-nav ws-desktop-only")}
         </header>
         <div className="ws-layout">
           <aside className="ws-sidebar ws-desktop-only" aria-label="Sidebar">
@@ -626,47 +539,31 @@ export function Workspace({
           )}
         </div>
       </div>
-      {drawerOpen && (
-        <div
-          className="ws-drawer-backdrop"
-          onClick={() => setDrawerOpen(false)}
-        >
-          <div
-            ref={drawerRef}
-            className="ws-drawer"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="ws-drawer-title"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="ws-drawer-heading">
-              <h2 id="ws-drawer-title">Locations</h2>
-              <button
-                type="button"
-                className="ws-header-icon"
-                aria-label="Close locations"
-                onClick={() => setDrawerOpen(false)}
-              >
-                <span aria-hidden="true">✕</span>
-              </button>
-            </div>
-            {/* After the heading so Close locations stays the drawer's first focus stop. */}
-            <div className="ws-location-tools ws-drawer-tools">
-              <button
-                type="button"
-                aria-label="Add location"
-                title="Add top-level location"
-                onClick={() => openCreate(null)}
-              >
-                <span aria-hidden="true">+</span>
-              </button>
-              <ManageLocationsButton onClick={openManage} />
-            </div>
-            {tree("ws-drawer")}
-            {mainViews("ws-drawer-app-nav")}
+      {/* The phone Location drawer: the kit Dialog along the left edge. Its close button is the first
+          focus stop; focus returns to ☰ when it closes. */}
+      <Dialog
+        open={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        returnFocus={drawerOpener}
+        title="Locations"
+        closeLabel="Close locations"
+        side="left"
+      >
+        <div className="ws-location-drawer">
+          <div className="ws-location-tools ws-drawer-tools">
+            <button
+              type="button"
+              aria-label="Add location"
+              title="Add top-level location"
+              onClick={() => openCreate(null)}
+            >
+              <span aria-hidden="true">+</span>
+            </button>
+            <ManageLocationsButton onClick={openManage} />
           </div>
+          {tree("ws-drawer")}
         </div>
-      )}
+      </Dialog>
       {filtersDrawerOpen && (
         <FiltersDrawer
           opener={filtersOpener}

@@ -10,10 +10,10 @@ test("offers only the configured providers and no email form when email sign-in 
 }) => {
   await page.goto(`${ORIGIN}/collection`);
   await expect(
-    page.getByRole("link", { name: "Sign in with Google" })
+    page.getByRole("link", { name: "Continue with Google" })
   ).toBeVisible();
   await expect(
-    page.getByRole("link", { name: "Sign in with Discord" })
+    page.getByRole("link", { name: "Continue with Discord" })
   ).toBeVisible();
   await expect(page.getByLabel("Email")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Send code" })).toHaveCount(0);
@@ -23,7 +23,9 @@ test("signs the owner in through the fake consent page and returns to the page a
   page,
 }) => {
   await signInAsOwner(page, "/decks");
-  await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible();
+  await expect(
+    page.getByRole("navigation", { name: "Main views" })
+  ).toBeVisible();
 });
 
 test("answers 404 on the email-code routes", async ({ request }) => {

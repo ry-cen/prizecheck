@@ -1,7 +1,7 @@
-// What the sign-in page (and later the Sign-ins page) says when sign-in fails: a fixed allowlist keyed by the `error`
-// code (spec "Failure messages"). Anything not listed is "Didn't complete". No message says whether an account exists,
-// and no free text from the address (`error_description`) is ever shown. The layout and final copy belong to the
-// app-redesign map; this fixes what each message must say.
+// What the sign-in page and the Sign-ins page say when sign-in fails: a fixed allowlist keyed by the `error` code
+// (OAuth spec "Failure messages"), in the app redesign's final wording (spec "Sign-in, Sign-ins, loading and first
+// paint"). Anything not listed is "Didn't complete". No message says whether an account exists, and no free text from
+// the address (`error_description`) is ever shown.
 
 export type SignInPage = "sign-in" | "sign-ins";
 
@@ -16,9 +16,10 @@ export type MessageGroup =
 
 export type SignInMessage = {
   group: MessageGroup;
-  text: string;
-  /** The next step, when the message has one. */
-  next: string | null;
+  /** The bold first line. */
+  title: string;
+  /** The muted follow-up line. */
+  detail: string;
 };
 
 const GROUPS: Record<string, MessageGroup> = {
@@ -53,49 +54,56 @@ export function signInMessage(
     case "cancelled":
       return {
         group,
-        text: "Sign-in was cancelled.",
-        next: "Choose a way to sign in below.",
+        title: "Sign-in was cancelled.",
+        detail: "Nothing was changed. Choose a way to sign in below.",
       };
     case "not-open":
       return {
         group,
-        text: "PrizeCheck isn't open for new sign-ins yet.",
-        next: null,
+        title: "PrizeCheck isn't open to new collectors yet.",
+        detail:
+          "Sign-ups open once testing is done. Until then, anyone can browse public decks.",
       };
     case "verify-email":
       return providerName
         ? {
             group,
-            text: `Your ${providerName} account needs a verified email address.`,
-            next: `Verify it with ${providerName}, or use another sign-in.`,
+            title: `Your ${providerName} account needs a verified email address.`,
+            detail: `Verify your email with ${providerName}, then try again, or choose another way to sign in.`,
           }
         : {
             group,
-            text: "Your sign-in account needs a verified email address.",
-            next: "Verify it with your provider, or use another sign-in.",
+            title: "Your sign-in account needs a verified email address.",
+            detail:
+              "Verify your email with your provider, then try again, or choose another way to sign in.",
           };
     case "other-account":
       return {
         group,
-        text: providerName
+        title: providerName
           ? `That ${providerName} sign-in is already connected to a different PrizeCheck account.`
           : "That sign-in is already connected to a different PrizeCheck account.",
-        next: null,
+        detail:
+          "Sign in with that account to manage it, or connect a different one here.",
       };
     case "sign-in-again":
       return {
         group,
-        text: "For your security, sign in again to change your sign-ins.",
-        next: null,
+        title: "For your security, sign in again to change your sign-ins.",
+        detail: "You'll come straight back here afterwards.",
       };
     case "too-many":
       return {
         group,
-        text: "Too many sign-ins right now. Try again later.",
-        next: null,
+        title: "Too many sign-ins right now.",
+        detail: "Try again in a little while.",
       };
     default:
-      return { group, text: "Sign-in didn't complete.", next: "Try again." };
+      return {
+        group,
+        title: "Sign-in didn't complete.",
+        detail: "Try again. If it keeps happening, try another way to sign in.",
+      };
   }
 }
 

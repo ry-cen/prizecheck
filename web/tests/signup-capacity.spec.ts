@@ -12,7 +12,7 @@ test("the owner panel warns when the day's new accounts reach 80% of the cap, an
 }) => {
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });
   try {
-    await signInAsOwner(page, "/workspace");
+    await signInAsOwner(page, "/collection");
     const owner = await pool.query('SELECT id FROM "user" WHERE email=$1', [
       OWNER_EMAIL,
     ]);

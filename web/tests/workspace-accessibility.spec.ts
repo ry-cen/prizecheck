@@ -51,8 +51,8 @@ async function signIn(page: Page) {
   } finally {
     await pool.end();
   }
-  await signInAsOwner(page, "/workspace");
-  await expect(page).toHaveURL(/\/workspace$/);
+  await signInAsOwner(page, "/collection");
+  await expect(page).toHaveURL(/\/collection$/);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("All owned");
 }
 
@@ -349,7 +349,7 @@ test.describe("desktop", () => {
     const keys = await createLocation(page, `0 Keys ${s}`, null);
     await createLocation(page, `0 Dest ${s}`, null);
     await addCopies(page, keys, await editionOf("card-1"), 3);
-    const url = `${ORIGIN}/workspace?location=${keys}`;
+    const url = `${ORIGIN}/collection?location=${keys}`;
     await page.goto(url);
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(
       `0 Keys ${s}`
@@ -391,7 +391,7 @@ test.describe("desktop", () => {
       "Decks",
       "Catalog",
       "Missing cards",
-      "Sign out",
+      "Account",
       "Add location",
       "Manage locations",
       "All owned",
@@ -685,7 +685,7 @@ test.describe("mobile", () => {
 test("theme colours meet AA text contrast and 3:1 for outlines", async ({
   page,
 }) => {
-  await page.goto(`${ORIGIN}/workspace`);
+  await page.goto(`${ORIGIN}/collection`);
   const roles = [
     "bg",
     "surface",

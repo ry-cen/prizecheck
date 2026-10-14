@@ -1,4 +1,4 @@
-"""Deterministic release transport, diagnostic, process-scope, test-tier and flake-pattern checks; no database required."""
+"""Deterministic release transport, diagnostic, process-scope, test-tier, flake-pattern and colour-token checks; no database required."""
 import ast
 from pathlib import Path
 import re
@@ -223,6 +223,67 @@ def process_scope_files():
             yield from sorted(item for item in path.rglob('*') if item.is_file() and item.suffix in ('.py', '.ts', '.sh'))
 
 
+# Tailwind arbitrary values (bg-[...], hover:text-[...]) and arbitrary properties ([color:...], md:[background:...]).
+# Colours come only from the token roles (ADR 0012), so neither may spell a colour itself.
+ARBITRARY_VALUE = re.compile(r'(?<=[a-z0-9])-\[([^\[\]\s]+)\]')
+ARBITRARY_PROPERTY = re.compile(r'(?:^|(?<=[\s"\'`:!{(]))\[([a-z-]+:[^\[\]\s]+)\]')
+HEX_COLOUR = re.compile(r'#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})(?![0-9a-zA-Z-])')
+COLOUR_FUNCTION = re.compile(r'(?<![A-Za-z0-9-])(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color|color-mix|light-dark)\(', re.IGNORECASE)
+NON_COLOUR_TEXT = re.compile(r'url\([^)]*\)|\'[^\']*\'|"[^"]*"')
+ARBITRARY_VARIABLE = re.compile(r'(?<=[a-z0-9])-\((--[^\s()]+(?:\([^()]*\))?[^\s()]*)\)')
+CSS_NAMED_COLOURS = frozenset("""
+aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond blue blueviolet brown burlywood
+cadetblue chartreuse chocolate coral cornflowerblue cornsilk crimson cyan darkblue darkcyan darkgoldenrod darkgray
+darkgreen darkgrey darkkhaki darkmagenta darkolivegreen darkorange darkorchid darkred darksalmon darkseagreen
+darkslateblue darkslategray darkslategrey darkturquoise darkviolet deeppink deepskyblue dimgray dimgrey dodgerblue
+firebrick floralwhite forestgreen fuchsia gainsboro ghostwhite gold goldenrod gray green greenyellow grey honeydew
+hotpink indianred indigo ivory khaki lavender lavenderblush lawngreen lemonchiffon lightblue lightcoral lightcyan
+lightgoldenrodyellow lightgray lightgreen lightgrey lightpink lightsalmon lightseagreen lightskyblue lightslategray
+lightslategrey lightsteelblue lightyellow lime limegreen linen magenta maroon mediumaquamarine mediumblue
+mediumorchid mediumpurple mediumseagreen mediumslateblue mediumspringgreen mediumturquoise mediumvioletred
+midnightblue mintcream mistyrose moccasin navajowhite navy oldlace olive olivedrab orange orangered orchid
+palegoldenrod palegreen paleturquoise palevioletred papayawhip peachpuff peru pink plum powderblue purple
+rebeccapurple red rosybrown royalblue saddlebrown salmon sandybrown seagreen seashell sienna silver skyblue
+slateblue slategray slategrey snow springgreen steelblue tan teal thistle tomato turquoise violet wheat white
+whitesmoke yellow yellowgreen
+""".split())
+COLOUR_SCOPE = ('web/index.html', 'web/src')
+
+
+def literal_colour(value):
+    """True when an arbitrary value spells a colour (hex, colour function or CSS colour name) instead of reading a
+    token variable such as var(--color-bg)."""
+    value = NON_COLOUR_TEXT.sub('', value)
+    if HEX_COLOUR.search(value) or COLOUR_FUNCTION.search(value):
+        return True
+    bare = value.split(':', 1)[1] if value.lower().startswith('color:') else value
+    return any(part.lower() in CSS_NAMED_COLOURS for part in re.split(r'[_,()/\s]+', bare))
+
+
+def arbitrary_colour_violations(source):
+    """Classes and @apply lines take colours from the token roles (bg-surface, text-text-muted), never from an
+    arbitrary value such as bg-[#123], text-[rgb(0_0_0)], shadow-[0_0_0_1px_black], [color:red] or a
+    literal fallback in the variable shorthand, bg-(--x,#123)."""
+    found = []
+    for number, line in enumerate(source.splitlines(), 1):
+        values = [match.group(1) for match in ARBITRARY_VALUE.finditer(line)]
+        values += [match.group(1).split(':', 1)[1] for match in ARBITRARY_PROPERTY.finditer(line)]
+        values += [match.group(1).split(',', 1)[1] for match in ARBITRARY_VARIABLE.finditer(line) if ',' in match.group(1)]
+        if any(literal_colour(value) for value in values):
+            found.append((number, 'Use a token colour role such as bg-surface or text-text-muted; '
+                                  'arbitrary colour values like bg-[#123] are banned'))
+    return found
+
+
+def colour_scope_files():
+    for entry in COLOUR_SCOPE:
+        path = ROOT/entry
+        if path.is_file():
+            yield path
+        elif path.is_dir():
+            yield from sorted(item for item in path.rglob('*') if item.is_file() and item.suffix in ('.ts', '.tsx', '.css', '.html'))
+
+
 def main():
     failed = False
     for relative in ('scripts/release.py', 'scripts/release_runtime.py'):
@@ -250,6 +311,11 @@ def main():
     for path in flake_scope_files():
         relative = path.relative_to(ROOT).as_posix()
         for line, reason in flake_violations(path.read_text(), relative):
+            print(f'{relative}:{line}: {reason}')
+            failed = True
+    for path in colour_scope_files():
+        relative = path.relative_to(ROOT).as_posix()
+        for line, reason in arbitrary_colour_violations(path.read_text()):
             print(f'{relative}:{line}: {reason}')
             failed = True
     return int(failed)

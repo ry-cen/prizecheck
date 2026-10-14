@@ -25,14 +25,14 @@ async function signIn(page: Page) {
     await pool.end();
   }
   await page.goto(
-    `${process.env.TEST_ORIGIN || "http://localhost:5173"}/workspace`
+    `${process.env.TEST_ORIGIN || "http://localhost:5173"}/collection`
   );
-  await expect(page).toHaveURL(/\/workspace$/);
+  await expect(page).toHaveURL(/\/collection$/);
   await expect(
-    page.getByRole("link", { name: "Sign in with Google" })
+    page.getByRole("link", { name: "Continue with Google" })
   ).toBeVisible();
-  await signInAsOwner(page, "/workspace");
-  await expect(page).toHaveURL(/\/workspace$/);
+  await signInAsOwner(page, "/collection");
+  await expect(page).toHaveURL(/\/collection$/);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("All owned");
 }
 

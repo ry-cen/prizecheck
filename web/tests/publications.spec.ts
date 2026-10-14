@@ -23,7 +23,7 @@ promote({'card-1': 'Pikachu'})`,
   const publicPage = await anonymous.newPage();
   try {
     await pool.query("DELETE FROM auth_send_event");
-    await signInAsOwner(page, "/workspace");
+    await signInAsOwner(page, "/collection");
     await page.getByRole("button", { name: "Decks", exact: true }).click();
     const privateName = `Private ${randomUUID().slice(0, 8)}`;
     await page.getByLabel("Deck name").fill(privateName);
@@ -73,6 +73,21 @@ promote({'card-1': 'Pikachu'})`,
       "content",
       "noindex, nofollow"
     );
+    // Signed in, the owner reads the same Published Deck inside the shell (#163).
+    const ownerView = await page.context().newPage();
+    await ownerView.goto(
+      `${process.env.TEST_ORIGIN || "http://localhost:5173"}${firstUrl}`
+    );
+    await expect(
+      ownerView.getByRole("heading", { name: "Friends & rivals", exact: true })
+    ).toBeVisible();
+    await expect(
+      ownerView.getByRole("navigation", { name: "Main views" })
+    ).toBeVisible();
+    await expect(
+      ownerView.getByRole("navigation", { name: "Public pages" })
+    ).toHaveCount(0);
+    await ownerView.close();
     await publicPage.getByText("Pikachu · 59 copies", { exact: true }).click();
     await expect(
       publicPage.getByRole("region", { name: "Published cards" })
@@ -150,9 +165,12 @@ promote({'card-1': 'Pikachu'})`,
       "revoked permanently"
     );
     await publicPage.reload();
-    await expect(publicPage.getByRole("status")).toContainText(
-      "Published Deck not found."
-    );
+    await expect(
+      publicPage.getByRole("heading", {
+        level: 1,
+        name: "This deck isn't published anymore",
+      })
+    ).toBeVisible();
     await publishing.getByLabel("Public title").fill("New friends");
     await publishing
       .getByRole("button", { name: "Publish Unlisted snapshot", exact: true })
@@ -160,9 +178,12 @@ promote({'card-1': 'Pikachu'})`,
     await expect(link).toBeVisible();
     await expect(link).not.toHaveAttribute("href", firstUrl);
     await publicPage.reload();
-    await expect(publicPage.getByRole("status")).toContainText(
-      "Published Deck not found."
-    );
+    await expect(
+      publicPage.getByRole("heading", {
+        level: 1,
+        name: "This deck isn't published anymore",
+      })
+    ).toBeVisible();
   } finally {
     await anonymous.close();
     await pool.end();

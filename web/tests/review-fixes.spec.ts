@@ -54,6 +54,7 @@ test("protected destination restores the rendered view after sign-in, reload, an
 }) => {
   await sessionFixture(page, false);
   await page.goto(`${origin}/locations?next=%2Fdecks`);
+  await expect(page).toHaveURL(/\/collection(\?|$)/);
   await page.getByLabel("Email", { exact: true }).fill("owner@example.test");
   await page.getByRole("button", { name: "Send code", exact: true }).click();
   await page.getByLabel("Six-digit code").fill("123456");

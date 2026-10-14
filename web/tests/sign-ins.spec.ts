@@ -4,7 +4,7 @@ import { signInAsOwner } from "./support/sign-in";
 
 // The Sign-ins page (#156) on an owner-only stack, through the OAuth test fake: the list, connecting and removing a
 // sign-in, Remove hidden for the last one, a sign-in that belongs to another collector, the stale-session path, and
-// the way in from Main views on desktop and from the mobile drawer. Stacks are shared between specs, so every test
+// the way in from the avatar menu on desktop and from the More sheet on a phone. Stacks are shared between specs, so every test
 // starts by leaving the owner with only their Google sign-in.
 const ORIGIN = process.env.TEST_ORIGIN || "http://localhost:5173";
 const OWNER_EMAIL = process.env.OWNER_EMAIL || "owner@example.test";
@@ -43,15 +43,14 @@ const row = (page: Page, provider: string) =>
 test("lists, connects and removes sign-ins, never offering to remove the last", async ({
   page,
 }) => {
-  await signInAsOwner(page, "/workspace");
-  await page
-    .getByRole("navigation", { name: "Main views" })
-    .first()
-    .getByRole("button", { name: "Sign-ins" })
-    .click();
+  await signInAsOwner(page, "/collection");
+  await page.getByRole("button", { name: "Account" }).click();
+  await page.getByRole("menuitem", { name: "Sign-ins" }).click();
   await expect(page).toHaveURL(`${ORIGIN}/settings/sign-ins`);
   await expect(page.getByRole("heading", { name: "Sign-ins" })).toBeVisible();
-  await expect(signIns(page)).toContainText(`Signed in as ${OWNER_EMAIL}`);
+  await expect(signIns(page)).toContainText(
+    `Your account email: ${OWNER_EMAIL}`
+  );
   await expect(row(page, "Google")).toContainText("Connected");
   await expect(
     signIns(page).getByRole("button", { name: /^Remove/ })
@@ -96,7 +95,7 @@ test("refuses a sign-in another collector holds, without naming them", async ({
     const alert = page
       .getByRole("alert")
       .filter({ hasText: "already connected" });
-    await expect(alert).toHaveText(
+    await expect(alert).toContainText(
       "That Discord sign-in is already connected to a different PrizeCheck account.",
       { timeout: 15_000 }
     );
@@ -104,11 +103,17 @@ test("refuses a sign-in another collector holds, without naming them", async ({
     await expect(page).toHaveURL(`${ORIGIN}/settings/sign-ins`);
     await expect(page.locator("body")).not.toContainText("sign-ins-spec-other");
     await expect(page.locator("body")).not.toContainText("newcomer");
-    await expect(row(page, "Discord")).toContainText("Connect Discord");
-    // Signing out afterwards shows the sign-in page without replaying the link failure.
-    await page.getByRole("button", { name: "Sign out" }).click();
     await expect(
-      page.getByRole("link", { name: "Sign in with Google" })
+      row(page, "Discord").getByRole("link", { name: "Connect Discord" })
+    ).toBeVisible();
+    // Back to Sign-ins dismisses the message.
+    await alert.getByRole("button", { name: "Back to Sign-ins" }).click();
+    await expect(alert).toHaveCount(0);
+    // Signing out afterwards shows the sign-in page without replaying the link failure.
+    await page.getByRole("button", { name: "Account" }).click();
+    await page.getByRole("menuitem", { name: "Sign out" }).click();
+    await expect(
+      page.getByRole("link", { name: "Continue with Google" })
     ).toBeVisible();
     await expect(
       page.getByRole("alert").filter({ hasText: /connected|complete/ })
@@ -137,19 +142,19 @@ test("asks a stale session to sign in again, then returns to the Sign-ins page",
   await alert.getByRole("button", { name: "Sign in again" }).click();
   await expect(page).toHaveURL(`${ORIGIN}/sign-in?next=%2Fsettings%2Fsign-ins`);
   await chooseIdentity(page, "owner");
-  await page.getByRole("link", { name: "Sign in with Google" }).click();
+  await page.getByRole("link", { name: "Continue with Google" }).click();
   await expect(page).toHaveURL(`${ORIGIN}/settings/sign-ins`, {
     timeout: 15_000,
   });
   await expect(row(page, "Google")).toContainText("Connected");
 });
 
-test("reaches Sign-ins from the mobile drawer", async ({ page }) => {
+test("reaches Sign-ins from the More sheet on a phone", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await signInAsOwner(page, "/workspace");
-  await page.getByRole("button", { name: "Open locations" }).click();
+  await signInAsOwner(page, "/collection");
+  await page.getByRole("button", { name: "More" }).click();
   await page
-    .getByRole("dialog", { name: "Locations" })
+    .getByRole("dialog", { name: "More" })
     .getByRole("button", { name: "Sign-ins" })
     .click();
   await expect(page).toHaveURL(`${ORIGIN}/settings/sign-ins`);

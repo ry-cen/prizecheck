@@ -164,8 +164,10 @@ async function signIn(page: Page) {
   );
   await pool.query("DELETE FROM auth_send_event");
   await startAsNewOwner(pool);
-  await signInAsOwner(page, "/workspace");
-  await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible();
+  await signInAsOwner(page, "/collection");
+  await expect(
+    page.getByRole("navigation", { name: "Main views" })
+  ).toBeVisible();
 }
 const owner = async () =>
   (await pool.query('SELECT id FROM "user" WHERE email=$1', [OWNER_EMAIL]))
@@ -226,7 +228,7 @@ const exportButton = (page: Page) =>
 
 /** Opens the workspace at All owned, then the named Location from the desktop sidebar. */
 async function openInWorkspace(page: Page, name: string) {
-  await page.goto(`${ORIGIN}/workspace`);
+  await page.goto(`${ORIGIN}/collection`);
   await expect(heading(page)).toHaveText("All owned");
   await page
     .getByRole("navigation", { name: "Locations" })
@@ -545,7 +547,7 @@ test("a blocked Live export lists every blocker and offers no text, on a phone o
     [world.sus.editions[0], 3],
   ]);
   await page.setViewportSize({ width: 375, height: 812 });
-  await page.goto(`${ORIGIN}/workspace?location=${deck.id}`);
+  await page.goto(`${ORIGIN}/collection?location=${deck.id}`);
   await expect(heading(page)).toHaveText(deck.name);
   await expectTouchTarget(exportButton(page), ["height"]);
   const dialog = await openExport(page, "Pokémon TCG Live");
@@ -618,12 +620,12 @@ test("the Decks page links each Deck to the workspace, and the link opens that D
   for (const deck of [first, second])
     await expect(
       index.getByRole("link", { name: `Open in workspace: ${deck.name}` })
-    ).toHaveAttribute("href", `/workspace?location=${deck.id}`);
+    ).toHaveAttribute("href", `/collection?location=${deck.id}`);
   await index
     .getByRole("link", { name: `Open in workspace: ${second.name}` })
     .click();
   await expect(heading(page)).toHaveText(second.name);
-  await expect(page).toHaveURL(/\/workspace$/);
+  await expect(page).toHaveURL(/\/collection$/);
   await expect(
     page
       .getByRole("navigation", { name: "Locations" })
@@ -634,8 +636,8 @@ test("the Decks page links each Deck to the workspace, and the link opens that D
   // The link is used once: a reload opens All owned, and an unknown id falls back to All owned.
   await page.reload();
   await expect(heading(page)).toHaveText("All owned");
-  await page.goto(`${ORIGIN}/workspace?location=${randomUUID()}`);
-  await expect(page).toHaveURL(/\/workspace$/);
+  await page.goto(`${ORIGIN}/collection?location=${randomUUID()}`);
+  await expect(page).toHaveURL(/\/collection$/);
   await expect(heading(page)).toHaveText("All owned");
   await expect(costOf(page)).toHaveCount(0);
 });
@@ -686,11 +688,11 @@ test("a link to a folder opens All owned, and a link to its child Deck opens the
     folderId,
   ]);
 
-  await page.goto(`${ORIGIN}/workspace?location=${folderId}`);
+  await page.goto(`${ORIGIN}/collection?location=${folderId}`);
   await expect(heading(page)).toHaveText("All owned");
-  await expect(page).toHaveURL(/\/workspace$/);
+  await expect(page).toHaveURL(/\/collection$/);
 
-  await page.goto(`${ORIGIN}/workspace?location=${deck.id}`);
+  await page.goto(`${ORIGIN}/collection?location=${deck.id}`);
   await expect(heading(page)).toHaveText(deck.name);
   const nav = page.getByRole("navigation", { name: "Locations" });
   await expect(

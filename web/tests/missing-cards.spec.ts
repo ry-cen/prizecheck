@@ -27,7 +27,7 @@ promote({'fixture-1': 'Pikachu'})`,
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });
   await pool.query("DELETE FROM auth_send_event");
   try {
-    await signInAsOwner(page, "/workspace");
+    await signInAsOwner(page, "/collection");
     const mailFile = process.env.MAIL_FILE || "/tmp/tcg-ticket01-mail";
     await expect(
       page.getByRole("button", { name: "Catalog", exact: true })
@@ -41,9 +41,11 @@ promote({'fixture-1': 'Pikachu'})`,
       [owner.rows[0].id]
     );
     await page.reload();
+    await page.getByRole("button", { name: "Account" }).click();
     await expect(
-      page.getByRole("button", { name: "Owner controls" })
+      page.getByRole("menuitem", { name: "Owner controls" })
     ).toBeVisible();
+    await page.keyboard.press("Escape");
     await page.getByRole("button", { name: "Missing cards" }).click();
     const report = page.getByRole("region", { name: "Missing-card reports" });
     await report.getByLabel("Set ID").fill("Jungle");
@@ -58,7 +60,8 @@ promote({'fixture-1': 'Pikachu'})`,
       "Report sent privately"
     );
     await expect(report.getByText("pending")).toBeVisible();
-    await page.getByRole("button", { name: "Owner controls" }).click();
+    await page.getByRole("button", { name: "Account" }).click();
+    await page.getByRole("menuitem", { name: "Owner controls" }).click();
     const queue = page.getByRole("region", {
       name: "Missing-card review queue",
     });

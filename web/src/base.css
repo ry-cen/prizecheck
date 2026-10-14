@@ -1,0 +1,21 @@
+/*
+ * The base stylesheet (ADR 0012): the page background, text colour, color-scheme and the one focus
+ * ring. Bare elements get no other look; every visible control comes from the kit.
+ *
+ * These rules sit in the `base` cascade layer, and any unlayered rule beats a layered one. While the old
+ * global stylesheet web/src/style.css exists, its unlayered :root rule (background, colour,
+ * color-scheme: normal) and its :where(:focus-visible) fallback win on every existing page, so nothing
+ * on screen changes. Deleting style.css (rollout stage 7) puts these rules in charge.
+ */
+@layer base {
+  :root {
+    background-color: var(--color-bg);
+    color: var(--color-text);
+    color-scheme: dark;
+  }
+
+  :focus-visible {
+    outline: var(--focus-width) solid var(--color-focus);
+    outline-offset: var(--focus-offset);
+  }
+}

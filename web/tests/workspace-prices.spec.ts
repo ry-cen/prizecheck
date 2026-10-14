@@ -83,8 +83,8 @@ async function signIn(page: Page) {
   );
   await pool.query("DELETE FROM auth_send_event");
   await startAsNewOwner(pool);
-  await signInAsOwner(page, "/workspace");
-  await expect(page).toHaveURL(/\/workspace$/);
+  await signInAsOwner(page, "/collection");
+  await expect(page).toHaveURL(/\/collection$/);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("All owned");
 }
 

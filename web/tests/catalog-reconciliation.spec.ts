@@ -22,12 +22,14 @@ promote({'reconciliation-1':'Review Pikachu'})`,
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });
   await pool.query("DELETE FROM auth_send_event");
   try {
-    await signInAsOwner(page, "/workspace");
+    await signInAsOwner(page, "/collection");
     const mail = () =>
       JSON.parse(
         readFileSync(process.env.MAIL_FILE!, "utf8").trim().split("\n").at(-1)!
       ).otp as string;
-    await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible();
+    await expect(
+      page.getByRole("navigation", { name: "Main views" })
+    ).toBeVisible();
     const user = (
       await pool.query('SELECT id FROM "user" WHERE email=$1', [
         process.env.OWNER_EMAIL || "owner@example.test",
@@ -53,9 +55,8 @@ promote({'reconciliation-1':'Review Pikachu'})`,
       )
     ).rows[0].id;
     await page.reload();
-    await page
-      .getByRole("button", { name: "Owner controls", exact: true })
-      .click();
+    await page.getByRole("button", { name: "Account" }).click();
+    await page.getByRole("menuitem", { name: "Owner controls" }).click();
     const article = page
       .getByRole("region", { name: "Catalog reconciliation" })
       .getByRole("article")
@@ -116,7 +117,7 @@ promote({'card-1':'Correction Pikachu'})`,
   await pool.query("DELETE FROM auth_send_event");
   const location = `Correction ${Date.now()}`;
   try {
-    await signInAsOwner(page, "/workspace");
+    await signInAsOwner(page, "/collection");
     const mail = () =>
       JSON.parse(
         readFileSync(process.env.MAIL_FILE!, "utf8").trim().split("\n").at(-1)!

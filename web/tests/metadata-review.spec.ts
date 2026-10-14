@@ -42,8 +42,10 @@ if ${quarantine ? "True" : "False"}:
 
 async function signIn(page: Page) {
   await pool.query("DELETE FROM auth_send_event");
-  await signInAsOwner(page, "/workspace");
-  await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible();
+  await signInAsOwner(page, "/collection");
+  await expect(
+    page.getByRole("navigation", { name: "Main views" })
+  ).toBeVisible();
 }
 
 const userId = async () =>
@@ -88,9 +90,8 @@ async function sendCode(page: Page, scope: ReturnType<Page["locator"]>) {
 
 async function openOwnerReview(page: Page) {
   await page.reload();
-  await page
-    .getByRole("button", { name: "Owner controls", exact: true })
-    .click();
+  await page.getByRole("button", { name: "Account" }).click();
+  await page.getByRole("menuitem", { name: "Owner controls" }).click();
   return page.getByRole("region", { name: "Catalog metadata review" });
 }
 
@@ -148,11 +149,15 @@ test("collector reports an Edition mapping, nothing changes until the maintainer
   ).toBe(outboxBefore);
 
   // A collector can neither see nor call the review surface.
+  await page.getByRole("button", { name: "Account" }).click();
   await expect(
-    page.getByRole("button", { name: "Owner controls" })
+    page.getByRole("menuitem", { name: "Owner controls" })
   ).toHaveCount(0);
+  await page.keyboard.press("Escape");
   await page.goto(`${ORIGIN}/owner`);
-  await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible();
+  await expect(
+    page.getByRole("navigation", { name: "Main views" })
+  ).toBeVisible();
   await expect(
     page.getByRole("region", { name: "Catalog metadata review" })
   ).toHaveCount(0);
