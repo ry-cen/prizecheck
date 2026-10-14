@@ -481,7 +481,10 @@ test.describe("on a desktop", () => {
     await stepper.getByRole("button", { name: "+1" }).click();
     await expect(stepper).toContainText("3 on Deck List");
     await expect.poll(() => listed(built)).toEqual({ "edit-1": 3 });
-    await expect(sheet.getByRole("status")).toHaveText("Added 1 Charmander.");
+    // The sheet has two status lines (this feedback and the swap list's loading line), so pick the feedback by its text.
+    await expect(
+      sheet.getByRole("status").filter({ hasText: "Added 1 Charmander." })
+    ).toBeVisible();
     await stepper.getByRole("button", { name: "−1" }).click();
     await expect.poll(() => listed(built)).toEqual({ "edit-1": 2 });
 
