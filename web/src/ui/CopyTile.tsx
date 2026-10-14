@@ -155,6 +155,42 @@ export function CopyTile({
   );
 }
 
+/**
+ * A copy's artwork with its state (solid, dashed ↻ or ghost $) and no button around it, for a page that
+ * draws several copies inside one control: the deck builder's Stacked pile. Decorative (aria-hidden); the
+ * control around it names the copies.
+ */
+export function CopyArt({
+  name,
+  imageUrl,
+  state = "here",
+  className,
+}: {
+  name: string;
+  imageUrl: string | null;
+  state?: CopyState;
+  /** Layout only (position, stacking). */
+  className?: string;
+}) {
+  return (
+    <span aria-hidden="true" className={`relative block ${className ?? ""}`}>
+      <span className={`${ART} ${ART_STATE[state]}`}>
+        <TileArt name={name} imageUrl={imageUrl} />
+      </span>
+      {state === "elsewhere" && (
+        <span className={`${BADGE} left-1 bg-surface-raised text-text`}>
+          <Icon icon={RefreshCw} size={12} />
+        </span>
+      )}
+      {state === "missing" && (
+        <span className={`${BADGE} left-1 bg-surface-raised text-text`}>
+          <Icon icon={DollarSign} size={12} />
+        </span>
+      )}
+    </span>
+  );
+}
+
 /** Card artwork, or the card's name on the artwork's gradient when there is no image or it fails. */
 function TileArt({
   name,

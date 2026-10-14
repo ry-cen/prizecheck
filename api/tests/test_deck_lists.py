@@ -44,6 +44,18 @@ def code(response):
     return response.json()['detail']['code']
 
 
+LINE_FIELDS = ('edition_id', 'quantity', 'in_deck')
+# The display data every line carries (app redesign #176), evolution root included (migration 043).
+DISPLAY_FIELDS = {'name', 'set_id', 'set_name', 'collector_number', 'descriptor', 'image_url', 'card_kind',
+                  'trainer_type', 'evolves_from', 'identity_id', 'identity_name', 'evolution_root', 'evolution_stage'}
+
+
+def core(deck_list):
+    """A Deck List with each line cut to its Deck List fields. Every line also carries display data (app redesign #176),
+    which test_deck_list_display.py covers."""
+    return {**deck_list, 'lines': [{field: line[field] for field in LINE_FIELDS} for line in deck_list['lines']]}
+
+
 def test_a_new_deck_has_an_empty_deck_list_and_its_detail_is_private():
     owner, other, _, _, _, _ = fixture()
     deck = create(owner).json()['location']['id']
@@ -63,12 +75,12 @@ def test_add_change_and_remove_lines_return_the_deck_list_with_in_deck_counts():
     assert added.status_code == 200, added.text
     body = added.json()
     assert body.pop('format_checks')['deck_list_revision'] == 2  # format results: test_deck_format_results.py
-    assert body == {'deck_id': deck, 'deck_list': {'revision': 2, 'lines': [
+    assert {**body, 'deck_list': core(body['deck_list'])} == {'deck_id': deck, 'deck_list': {'revision': 2, 'lines': [
         {'edition_id': edition, 'quantity': '4', 'in_deck': '0'}]}}
     # Copies the line already covers leave the Deck List and its revision alone (moves extending a list are in
     # test_deck_list_moves.py).
     assert add(owner, deck, edition, '3').status_code == 200
-    assert detail(owner, deck)['deck_list'] == {'revision': 2, 'lines': [
+    assert core(detail(owner, deck)['deck_list']) == {'revision': 2, 'lines': [
         {'edition_id': edition, 'quantity': '4', 'in_deck': '3'}]}
     contents = call('GET', f'/api/decks/{deck}/contents', owner).json()
     second = add_line(owner, deck, not_owned, '2', 2).json()['deck_list']
@@ -80,10 +92,11 @@ def test_add_change_and_remove_lines_return_the_deck_list_with_in_deck_counts():
     changed = change_line(owner, deck, edition, '2', 3)
     assert changed.status_code == 200, changed.text
     assert changed.json()['deck_list']['revision'] == 4
-    assert {'edition_id': edition, 'quantity': '2', 'in_deck': '2'} in changed.json()['deck_list']['lines']
+    assert {'edition_id': edition, 'quantity': '2', 'in_deck': '2'} in core(changed.json()['deck_list'])['lines']
     removed = remove_line(owner, deck, not_owned, 4)
     assert removed.status_code == 200, removed.text
-    assert removed.json()['deck_list'] == {'revision': 5, 'lines': [{'edition_id': edition, 'quantity': '2', 'in_deck': '2'}]}
+    assert core(removed.json()['deck_list']) == {'revision': 5, 'lines': [
+        {'edition_id': edition, 'quantity': '2', 'in_deck': '2'}]}
     assert detail(owner, deck)['deck_list'] == removed.json()['deck_list']
     # Editing the Deck List never changes Holdings or the inventory revision.
     assert call('GET', f'/api/decks/{deck}/contents', owner).json() == contents
@@ -195,7 +208,7 @@ def test_deck_list_checks_count_every_line_including_cards_not_owned():
     unlisted = edition_like(first, generation)
     assert add(owner, deck, unlisted, '7').status_code == 200
     listed = detail(owner, deck)['deck_list']
-    assert {'edition_id': unlisted, 'quantity': '7', 'in_deck': '7'} in listed['lines']
+    assert {'edition_id': unlisted, 'quantity': '7', 'in_deck': '7'} in core(listed)['lines']
     cut = remove_line(owner, deck, unlisted, listed['revision'])
     assert cut.status_code == 200, cut.text
     revision = cut.json()['deck_list']['revision']
@@ -277,7 +290,8 @@ def test_migration_converts_each_existing_deck_from_its_holdings(monkeypatch):
             (str(unspecified), '3', '3'), (str(normal), '9007199254740993', '9007199254740993')])
         assert detail(owner, built)['deck_list_checks']['total'] == detail(owner, built)['checks']['total'] == '9007199254740996'
         assert detail(owner, empty)['deck_list'] == {'revision': 1, 'lines': []}
-        assert detail(other, theirs)['deck_list']['lines'] == [{'edition_id': str(normal), 'quantity': '1', 'in_deck': '1'}]
+        assert core(detail(other, theirs)['deck_list'])['lines'] == [
+            {'edition_id': str(normal), 'quantity': '1', 'in_deck': '1'}]
         assert call('GET', f'/api/decks/{binder}', owner).status_code == 404
         assert call('GET', f'/api/decks/{theirs}', owner).status_code == 404
         # Holdings are unchanged by the conversion.
@@ -327,8 +341,8 @@ def test_each_line_splits_into_in_this_deck_elsewhere_and_not_owned_from_current
     # Only a line that still needs copies names other Locations.
     assert places(body, missing) == places(body, built) == []
     assert body['surplus'] == [] and body['competition'] == []
-    # Ownership is detail-only: Deck List lines keep their shape.
-    assert all(set(line) == {'edition_id', 'quantity', 'in_deck'} for line in body['deck_list']['lines'])
+    # Ownership is detail-only: Deck List lines carry their own fields and display data, never the ownership split.
+    assert all(set(line) == set(LINE_FIELDS) | DISPLAY_FIELDS for line in body['deck_list']['lines'])
     # Every read follows current Holdings; the Deck List itself does not change.
     revision = body['deck_list']['revision']
     assert add(owner, unsorted, edition, '5').status_code == 200

@@ -4,6 +4,7 @@ import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readFileSync, statSync, writeFileSync } from "node:fs";
 import { Pool } from "pg";
+import { openDeckTools } from "./support/deck-builder";
 
 const ORIGIN = process.env.TEST_ORIGIN || "http://localhost:5173";
 const OWNER_EMAIL = process.env.OWNER_EMAIL || "owner@example.test";
@@ -87,6 +88,7 @@ async function makeDeck(
 async function openDeck(page: Page, name: string) {
   await page.getByRole("button", { name: "Decks", exact: true }).click();
   await page.getByRole("button", { name, exact: true }).click();
+  await openDeckTools(page);
   await expect(
     page.getByRole("region", { name: `Checks for ${name}` })
   ).toBeVisible();

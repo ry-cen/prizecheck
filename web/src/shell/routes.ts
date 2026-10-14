@@ -16,6 +16,9 @@ export type PageDef = {
   /** Sub-addresses under `path` that open this page on one of its sections, for example /owner/rules for
    * Owner controls' Rules tab. The page reads its section with sectionAt. */
   sections?: readonly string[];
+  /** Any one further segment opens this page on that item, for example /decks/<Deck id> for a Deck in the deck
+   * builder (#176). The page reads the item with sectionAt. */
+  param?: boolean;
 };
 
 export const PAGES: readonly PageDef[] = [
@@ -30,6 +33,7 @@ export const PAGES: readonly PageDef[] = [
     path: "/decks",
     label: "Decks",
     keepMounted: false,
+    param: true,
   },
   {
     id: "catalog",
@@ -92,11 +96,15 @@ export function pageAt(path: string): PageDef | undefined {
       page.path === path ||
       (page.sections ?? []).some(
         (section) => path === `${page.path}/${section}`
-      )
+      ) ||
+      (page.param === true &&
+        /^[^/]+$/.test(path.slice(page.path.length + 1)) &&
+        path.startsWith(`${page.path}/`))
   );
 }
 
-/** The section a sub-address names (/owner/rules is "rules"), or null for a page's own address. */
+/** The section a sub-address names (/owner/rules is "rules", /decks/<id> is the Deck id), or null for a page's
+ * own address. */
 export function sectionAt(path: string): string | null {
   const page = pageAt(path);
   return page && path !== page.path ? path.slice(page.path.length + 1) : null;

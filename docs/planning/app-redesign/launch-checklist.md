@@ -22,6 +22,7 @@ The redesign is a launch gate ([spec](spec.md), "Rollout"): PrizeCheck opens to 
 - [ ] Owner controls' Attributes tab reviews card attributes on the kit: derived, correction and effective values, Correct or Remove correction with a fresh code, and Reject report or Ask for information with a reason only (#170).
 - [ ] Owner controls' Reprints tab reviews Reprint Groups on the kit: each Card Identity waiting for review lists its Printings with their regulation mark, Reprint Group and that group's legality, and the owner moves Printings between groups, merges one group into another, or merges one Card Identity into another, each with a reason, evidence and a fresh code. The owner-only Card Identity routes also return each Printing's regulation mark, each group's legality (`as_of` picks the day) and when each queued Printing was created (#171).
 - [ ] Collection's Location tree, Manage locations, search, filters and display settings, the stale-collection banner and the Deck heading use the new controls. Filters & display opens as a panel along the right edge of a phone, and Manage locations fills a phone's screen (#166).
+- [ ] Opening a Deck on Decks shows it in the deck builder at `/decks/<Deck id>`: the count, the Deck List cost and the cost to complete, and every copy's state in Spread, Stacked and List, grouped by evolution line, Trainer Type and Energy. Pressing the Decks tab returns to the index. Until #181, the old Holdings, Publish and export panels sit under "Holdings, publishing and exports" at the foot of the builder. Every Deck List line in `GET /api/decks/{id}` and in the Deck List command responses carries its card's name, set, collector number, Variant Descriptor, image, card kind, Trainer Type, evolves from and Card Identity, and a Pokémon line also its evolution root and stage, so a deck that skips a stage (Charmander and Charizard ex with no Charmeleon) still forms one evolution line. After migrating to `043_evolution_roots.sql`, run `scripts/derive_card_attributes.py` once (`docs/operations/release.md`); until then a deck that skips a stage shows its Pokémon apart (#176).
 
 ## Walkthroughs
 
@@ -143,6 +144,23 @@ On a phone (iOS Safari or Android Chrome):
 - [ ] 8. Tap ☰: each Location row and its + are thumb-sized. Tap the gear: Manage locations fills the screen. Drag a Location by its ☰ handle onto another row with your finger, or tap the handle to choose from a list. Close it: you are back on ☰.
 - [ ] 9. Open a Deck and tap Export, then TCGplayer Mass Entry: the panel fills the screen and its buttons are thumb-sized. Tap Add cards in a Storage Leaf: the panel opens along the bottom, and its fields and buttons are thumb-sized.
 
+### Deck builder: the Deck List (#176)
+
+On a desktop (a window at least 1280 px wide):
+
+- [ ] 1. On Decks, press a Deck's name. The address ends in `/decks/` and the Deck's id, the Deck's name is the page title, and All Decks leads back. The Deck List fills the left, and a Library column on the right says adding cards comes in the next update.
+- [ ] 2. The first header line reads N/60, then "$… deck (P/T priced) · $… to complete (P/T priced)". The cost to complete counts only the copies you don't own anywhere.
+- [ ] 3. Spread is selected. Every copy is its own card: solid for a copy in this Deck, a dashed outline with ↻ for a copy you own somewhere else, faded with $ for a copy you don't own. Rest the pointer on a dashed copy: its tooltip names the Location (or "(Deck)" after another Deck's name).
+- [ ] 4. Lines are grouped: each evolution line ("Charizard ex line", even when the deck skips Charmeleon) with its first stage first, then Other Pokémon, Supporters, Items, Tools, Stadiums, Other Trainers (a Trainer whose type isn't known yet) and Energy. Each heading shows its card count, and the counts add up to N.
+- [ ] 5. Press a copy. A dialog names the card, its set, number and Variant and what kind of card it is, says what this copy is, and splits the line's copies between this Deck, each other Location and not owned. Escape closes it and puts focus back on the copy.
+- [ ] 6. Choose Stacked: one pile per Edition with a summary such as "×4 1↻ 1$". Press the right arrow key on the switch: List is chosen, with each line's quantity, Edition, ownership counts and the price of that many copies (a dash when there is no price).
+- [ ] 7. Open "Holdings, publishing and exports" at the foot of the page: the old panels work as before. Move a copy out of the Deck there, then look at the Deck List above: that copy now shows as owned elsewhere.
+
+On a phone (iOS Safari or Android Chrome):
+
+- [ ] 8. Open a Deck. Library and Deck tabs sit at the top, with Library chosen and the Deck tab reading "Deck N/60". Tap Deck: the Deck List opens in Stacked, every pile and button is easy to hit with a thumb, and nothing scrolls sideways.
+- [ ] 9. Tap a pile: its sheet opens along the bottom; close it with ✕ or a tap on the dimmed page. Choose Spread, then List: nothing scrolls sideways, and long card names end in "…".
+
 ## Manual checks that automation does not cover
 
 - [ ] Real touch on iOS Safari and Android Chrome for the tab bar, the More sheet and the ☰ drawer (the browser tests only emulate touch), including the home indicator area under the tab bar.
@@ -155,6 +173,7 @@ On a phone (iOS Safari or Android Chrome):
 - [ ] Screen reader on the Owner controls queues: each Review button is read with its card and whether it is expanded, an open card is read as an article named for its card with the cursor in Review reason, and the message after a decision is announced once (#168).
 - [ ] Screen reader on Missing cards: the sub-tabs announce as tabs and which one is selected, the reports table reads with its column headers, Reply announces whether its row is open, and after a send the message is read where focus lands (#169).
 - [ ] Real touch and Safari on Collection: Manage locations' handle drag with a finger on iOS Safari and Android Chrome, and the sidebar's tile drag and the + on hover in Safari and Firefox on desktop (#166).
+- [ ] Screen reader on the deck builder: each copy is read with its card, Edition, copy number and state (and the Location of a copy owned elsewhere), a Stacked pile with its counts, Spread / Stacked / List as a radio group, and on a phone Library and Deck as tabs with the Deck count (#176).
 
 ## Sources
 
