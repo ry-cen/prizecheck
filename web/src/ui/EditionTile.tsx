@@ -28,7 +28,17 @@ type Props = Omit<
   price?: ReactNode;
   /** Id for the price line, so the tile can point aria-describedby at it. */
   priceId?: string;
+  /** Copies queued to add (Catalog's Add mode, #175): above 0 the art is outlined, as a selected CopyTile's is, and
+   * the label and title say "N to add". */
+  queued?: number;
 };
+
+// A queued tile's outline: a dark gap, then an accent ring around the art (CopyTile's selected ring). Its focus ring
+// sits outside it.
+const QUEUED_ART =
+  "group-data-queued:shadow-[0_0_0_var(--tile-ring-gap)_var(--color-bg),0_0_0_calc(var(--tile-ring-gap)+var(--tile-ring-width))_var(--color-accent)]";
+const QUEUED_FOCUS =
+  "data-queued:focus-visible:outline-offset-[calc(var(--tile-ring-gap)+var(--tile-ring-width)+var(--focus-offset))]";
 
 /**
  * One Card Edition as a card tile (decide-component-kit: EditionTile), for Catalog's gallery and the deck
@@ -53,6 +63,7 @@ export function EditionTile({
   flag,
   price,
   priceId,
+  queued = 0,
   className,
   ...button
 }: Props) {
@@ -64,16 +75,18 @@ export function EditionTile({
     variant,
     ownership,
     ...(flag ? [flag.label] : []),
+    ...(queued > 0 ? [`${queued} to add`] : []),
   ];
   return (
     <button
       {...button}
       type="button"
-      className={`${ROOT} relative w-full${className ? ` ${className}` : ""}`}
+      data-queued={queued > 0 ? "" : undefined}
+      className={`${ROOT} ${QUEUED_FOCUS} relative w-full${className ? ` ${className}` : ""}`}
       aria-label={facts.join(", ")}
       title={facts.join(" · ")}
     >
-      <span aria-hidden="true" className={`${ART} relative`}>
+      <span aria-hidden="true" className={`${ART} ${QUEUED_ART} relative`}>
         <EditionArt imageUrl={imageUrl} dark={owned <= 0} />
         {owned > 0 && (
           <span className="pointer-events-none absolute right-1 top-1 box-border flex h-5 min-w-5 items-center justify-center rounded-round border-2 border-solid border-bg bg-accent px-1 text-caption font-semibold leading-none text-on-accent tabular-nums">

@@ -13,15 +13,27 @@ sitecustomize; ``web/tests/support/publish-gate.ts`` and ``auth/tests/published-
 has its own CATALOG_PROCESS_FIXTURE_DIR (scripts/verify_resources.py), which its Playwright worker sees too.
 PUBLISH_GATE_EXEMPT_DIR exists for suites that must not set CATALOG_PROCESS_FIXTURE_DIR, because that variable also
 swaps the catalog source; it enables nothing but this exemption. No production configuration loads this.
+
+Discover (app redesign #182) lists only snapshots that are legal in their Target Format today, so those tests' Listed
+snapshots would never show. They exempt each snapshot they list by its token (``exempt_listing``, which
+``test_discovery.visibility`` calls): Discover then lists it whatever its result or whether the records store could be
+read, and still reads its cost from the store. A token is exempt once ``exempt_listing(token)`` ran in this process, or
+while a file named after it exists in ``discover-exempt/`` under the same directory (``exempt_listing`` writes it when
+that directory is set, so the Python helpers browser specs run reach the stack's API process;
+``web/tests/support/publish-gate.ts`` and the auth suite write it directly). Discover's own tests
+(``test_discover_listing.py``, ``discover-page.spec.ts``) exempt nothing.
 """
 import os
 from pathlib import Path
 
 _exempt: set[str] = set()
 _installed = False
+_listing_exempt: set[str] = set()
+_discovery_installed = False
 
 
 EXEMPT_DIRECTORY = 'publish-gate-exempt'
+LISTING_DIRECTORY = 'discover-exempt'
 
 
 def _root():
@@ -51,6 +63,28 @@ def _wrap(publications):
     _installed = True
 
 
+def _listing_marked(token) -> bool:
+    root = _root()
+    return bool(root) and (Path(root) / LISTING_DIRECTORY / str(token)).is_file()
+
+
+def _wrap_discovery(discovery):
+    """Replace ``discovery.target_status`` with one that answers ``legal`` for exempt tokens. The route looks the name up
+    when it runs, so the replacement takes effect for every later Discover read."""
+    global _discovery_installed
+    if _discovery_installed:
+        return
+    real = discovery.target_status
+
+    def target_status(token, active, facts, on):
+        if token in _listing_exempt or _listing_marked(token):
+            return 'legal'
+        return real(token, active, facts, on)
+
+    discovery.target_status = target_status
+    _discovery_installed = True
+
+
 def install():
     """Wrap the gate in this process now (pytest and Python helpers, where the app is imported anyway)."""
     from app import publications
@@ -65,10 +99,23 @@ def install_on_import():
         return
     import sys
     from price_fixture import _PatchOnImport
-    sys.meta_path.insert(0, _PatchOnImport({'app.publications': _wrap}, {}))
+    sys.meta_path.insert(0, _PatchOnImport({'app.publications': _wrap, 'app.discovery': _wrap_discovery}, {}))
 
 
 def exempt(deck_id):
     """Let ``deck_id`` publish whatever its result, in this process."""
     install()
     _exempt.add(str(deck_id))
+
+
+def exempt_listing(token):
+    """Let Discover list the snapshot ``token`` whatever its Target Format result: in this process, and in the stack's
+    API process when a fixture directory is set."""
+    from app import discovery
+    _wrap_discovery(discovery)
+    _listing_exempt.add(str(token))
+    root = _root()
+    if root:
+        directory = Path(root) / LISTING_DIRECTORY
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / str(token)).touch()

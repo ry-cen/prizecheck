@@ -1,10 +1,10 @@
 /*
  * Looks for the old shared components that Collection still shows inside its own panels: the Deck cost and
- * export panels (DeckCost, DeckLiveExport, DeckMassEntryExport, ExportOutput), a Reviewed Edition correction
- * (EditionCorrections) and the Add cards form (AddCardsForm). The old light pages render the same components,
- * so their markup stays as it is; Collection styles their plain elements from the panel around them with
- * descendant variants. Until #166 the workspace CSS did this. They go when #175 (Add mode), #181 (the Deck
- * banner) and the corrections' own redesign replace these panels.
+ * export panels (DeckCost, DeckLiveExport, DeckMassEntryExport, ExportOutput) and a Reviewed Edition correction
+ * (EditionCorrections). The old light pages render the same components, so their markup stays as it is;
+ * Collection styles their plain elements from the panel around them with descendant variants. Until #166 the
+ * workspace CSS did this. They go when #181 (the Deck banner) and the corrections' own redesign replace these
+ * panels. (#175 replaced the Add cards form with Catalog's Add mode.)
  *
  * There is no Preflight while style.css exists, so every property the browser would otherwise style is set.
  */

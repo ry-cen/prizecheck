@@ -23,6 +23,7 @@ from app.catalog import TCGdexSource
 from app.main import app, connect
 from test_attribute_corrections import decide, grant, seed
 from test_card_attributes import BULBASAUR_ME, ENERGY_SV, EX_BW, SUPPORTER, SWITCH_ME, card, edition_of
+from test_card_identity import JUNIPER, LETTER, MAGNOLIA, PLAIN
 from test_catalog import reset_catalog
 from test_catalog_metadata import Records
 from test_catalog_reconciliation import run
@@ -55,6 +56,22 @@ def seed_gallery():
     reset_catalog()
     bulbasaur = {**BULBASAUR_ME, "image": "https://assets.tcgdex.net/en/me/me01/001"}
     run(Records(bulbasaur, *(record for record in CARDS if record is not BULBASAUR_ME), *FILLERS))
+
+
+def seed_popup():
+    """Browser fixture (web/tests/catalog-popup.spec.ts, #174): Bulbasaur with artwork and three Editions (Normal,
+    Reverse Holo and Holo), the Holo retired so it has no tile; Rare Candy and Switch; and Professor's Research
+    (Professor Juniper), whose Card Identity is "Professor's Research". Newest set first, the tiles are Bulbasaur
+    Normal, Bulbasaur Reverse Holo, Rare Candy and Switch (me01), then Professor's Research (swsh4.5)."""
+    reset_catalog()
+    bulbasaur = {**BULBASAUR_ME, "image": "https://assets.tcgdex.net/en/me/me01/001",
+                 "variants": {"normal": True, "reverse": True, "holo": True}}
+    run(Records(bulbasaur, CANDY_ME, SWITCH_ME, JUNIPER))
+    with connect() as conn:
+        conn.execute("""UPDATE catalog_generation_edition SET active=false
+          WHERE generation_id=(SELECT active_generation FROM catalog_state WHERE singleton)
+            AND edition_id=(SELECT e.id FROM catalog_edition e JOIN catalog_printing p ON p.id=e.printing_id
+                            WHERE p.source_id='me01-001' AND e.descriptor->>'finish'='holo')""")
 
 
 @pytest.fixture(autouse=True)
@@ -128,7 +145,7 @@ def test_a_row_carries_display_data_card_type_standing_and_copies():
     assert row == {
         "edition_id": edition_of("me01-001"), "printing_id": str(printing), "name": "Bulbasaur", "set_id": "me01",
         "set_name": "Mega Evolution", "set_code": "MEG", "collector_number": "001", "descriptor": row["descriptor"], "image_url": None,
-        "card_kind": "pokemon", "trainer_type": None, "evolves_from": None,
+        "card_kind": "pokemon", "trainer_type": None, "evolves_from": None, "regulation_mark": "I",
         "standing": {name: {"status": "legal", "reasons": []} for name in ("standard", "expanded", "glc")},
         "owned": 3, "in_deck": None, "free": None}
     assert row["descriptor"]  # the Edition's Variant Descriptor, as the other catalog reads return it
@@ -237,6 +254,81 @@ def test_ownership_counts_with_and_without_a_deck():
     assert {row["owned"] for row in browse(other, set_id="me01")["editions"]} == {0}
 
 
+def test_a_printing_filter_lists_that_printings_active_editions_with_copies_and_regulation_mark():
+    """The CardPopup's read (#174): one Card Printing's active Editions, each with the caller's copies (and with
+    deck_id the copies in that Deck), the regulation mark and the Printing's Format Standing. A retired Edition is not
+    listed; the popup takes it from the Printing detail instead."""
+    seed({**BULBASAUR_ME, "variants": {"normal": True, "reverse": True, "holo": True}},
+         *(record for record in CARDS if record is not BULBASAUR_ME))
+    user = collector()
+    binder = leaf(user)
+    with connect() as conn:
+        printing = str(conn.execute("SELECT id FROM catalog_printing WHERE source_id='me01-001'").fetchone()["id"])
+        editions = {row["finish"]: str(row["id"]) for row in conn.execute(
+            "SELECT id,descriptor->>'finish' AS finish FROM catalog_edition WHERE printing_id=%s", (printing,))}
+    created = call("POST", "/api/decks", user, {"name": "Popup deck", "idempotency_key": str(uuid4())})
+    assert created.status_code == 201, created.text
+    deck = created.json()["location"]["id"]
+    assert add(user, binder, editions["reverse"], "2").status_code == 200
+    assert add(user, deck, editions["reverse"], "1").status_code == 200
+
+    page = browse(user, printing_id=printing)
+    rows = {row["descriptor"]["finish"]: row for row in page["editions"]}
+    assert set(rows) == {"normal", "reverse", "holo"} and page["matches"] == 3 and page["next_cursor"] is None
+    assert {finish: row["owned"] for finish, row in rows.items()} == {"normal": 0, "reverse": 3, "holo": 0}
+    assert {row["printing_id"] for row in rows.values()} == {printing}
+    assert {row["regulation_mark"] for row in rows.values()} == {"I"}
+    assert {row["standing"]["standard"]["status"] for row in rows.values()} == {"legal"}
+    # Variant order within the Printing, the order the Printing detail lists its Editions in.
+    with connect() as conn:
+        ordered = [str(row["id"]) for row in conn.execute(
+            "SELECT id FROM catalog_edition WHERE printing_id=%s ORDER BY descriptor_key,id", (printing,))]
+    assert [row["edition_id"] for row in page["editions"]] == ordered
+    in_deck = {row["descriptor"]["finish"]: (row["owned"], row["in_deck"], row["free"])
+               for row in browse(user, printing_id=printing, deck_id=deck)["editions"]}
+    assert in_deck == {"normal": (0, 0, 0), "reverse": (3, 1, 2), "holo": (0, 0, 0)}
+
+    # A retired Edition has no row; an unknown Printing has none; a malformed id is refused.
+    with connect() as conn:
+        conn.execute("""UPDATE catalog_generation_edition SET active=false WHERE edition_id=%s
+          AND generation_id=(SELECT active_generation FROM catalog_state)""", (editions["holo"],))
+    assert {row["descriptor"]["finish"] for row in browse(user, printing_id=printing)["editions"]} == {
+        "normal", "reverse"}
+    assert browse(user, printing_id=str(uuid4()))["editions"] == []
+    assert browse(user, printing_id="not-a-printing", expect=422)
+    # Another collector sees the Printing's Editions with none of these copies.
+    assert {row["owned"] for row in browse(collector(), printing_id=printing)["editions"]} == {0}
+
+
+def test_an_identity_filter_lists_every_active_edition_of_one_card_identity():
+    """The deck builder's "Swap this copy for" (#177): every active Edition of one Card Identity across its Printings
+    (Professor's Research and its subtitled reprints), each with the caller's copies, and nothing of another Card
+    Identity (Professor's Letter)."""
+    seed(JUNIPER, MAGNOLIA, PLAIN, LETTER)
+    user = collector()
+    with connect() as conn:
+        identity = str(conn.execute(
+            "SELECT identity_id FROM catalog_printing WHERE source_id='sv01-189'").fetchone()["identity_id"])
+        letter = str(conn.execute(
+            "SELECT identity_id FROM catalog_printing WHERE source_id='fixture-letter-1'").fetchone()["identity_id"])
+    created = call("POST", "/api/decks", user, {"name": "Swap deck", "idempotency_key": str(uuid4())})
+    assert created.status_code == 201, created.text
+    deck = created.json()["location"]["id"]
+    assert add(user, deck, edition_of("swsh1-178"), "1").status_code == 200
+    assert add(user, leaf(user), edition_of("swsh1-178"), "2").status_code == 200
+
+    page = browse(user, identity_id=identity, deck_id=deck)
+    assert page["matches"] == 3 and page["next_cursor"] is None
+    assert {(row["name"], row["set_id"], row["owned"], row["in_deck"], row["free"]) for row in page["editions"]} == {
+        ("Professor's Research", "sv01", 0, 0, 0),
+        ("Professor's Research (Professor Juniper)", "swsh4.5", 0, 0, 0),
+        ("Professor's Research (Professor Magnolia)", "swsh1", 3, 1, 2)}
+    # Another Card Identity's Editions, an unknown identity and a malformed id.
+    assert names(user, identity_id=letter) == [("Professor's Letter", "fixture-letters", "1")]
+    assert browse(user, identity_id=str(uuid4()))["editions"] == []
+    assert browse(user, identity_id="not-an-identity", expect=422)
+
+
 # ------------------------------------------------------------------ paging and stale cursors
 
 
@@ -257,6 +349,8 @@ def test_keyset_pages_of_sixty_and_a_409_when_a_revision_or_the_standing_key_cha
     cursor = first["next_cursor"]
     # Another query's cursor, and a forged one, are refused.
     assert error(call("GET", f"{EDITIONS}?q=pika&cursor={cursor}", user)) == "INVALID_CURSOR"
+    assert error(call("GET", f"{EDITIONS}?q=pik&printing_id={uuid4()}&cursor={cursor}", user)) == "INVALID_CURSOR"
+    assert error(call("GET", f"{EDITIONS}?q=pik&identity_id={uuid4()}&cursor={cursor}", user)) == "INVALID_CURSOR"
     assert call("GET", f"{EDITIONS}?q=pik&cursor={cursor[:-2]}xx", user).status_code == 400
     # The owner revision moved: start again.
     binder = leaf(user)

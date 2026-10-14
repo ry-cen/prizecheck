@@ -4,7 +4,13 @@ import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { execFileSync, type ChildProcess } from "node:child_process";
 import { createServer, type Server } from "node:net";
-import { mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { launch, waitForServer } from "./support/servers";
@@ -210,6 +216,12 @@ describe("live Better Auth boundary", () => {
         decks: { [token]: { visibility: "unlisted", snapshot }, ...listed },
       })
     );
+    // Discover lists only decks legal in their Target Format (#182). These snapshots have no format records, so the
+    // API loads the CI-only fixture that lists them anyway (api/tests/catalog_process_fixture/publish_gate_fixture.py).
+    const exempt = join(directory, "exempt");
+    mkdirSync(join(exempt, "discover-exempt"), { recursive: true });
+    for (const listedToken of Object.keys(listed))
+      writeFileSync(join(exempt, "discover-exempt", listedToken), "");
     const children: ChildProcess[] = [];
     const environment = {
       ...process.env,
@@ -242,7 +254,22 @@ describe("live Better Auth boundary", () => {
             String(apiPort),
             "--no-access-log",
           ],
-          environment
+          {
+            // Only the publish gate fixture: none of the price or catalog fixtures the same directory carries.
+            ...Object.fromEntries(
+              Object.entries(environment).filter(
+                ([key]) =>
+                  !key.startsWith("PRICE_FIXTURE_") &&
+                  key !== "PRICE_RUNNER_LOCK_DIR" &&
+                  key !== "CATALOG_PROCESS_FIXTURE_DIR"
+              )
+            ),
+            PYTHONPATH:
+              join(process.cwd(), "api/tests/catalog_process_fixture") +
+              ":" +
+              join(process.cwd(), "api"),
+            PUBLISH_GATE_EXEMPT_DIR: exempt,
+          }
         ),
         launch("node", ["--import", "tsx", "auth/src/server.ts"], {
           ...environment,
@@ -286,8 +313,16 @@ describe("live Better Auth boundary", () => {
         "total",
         "version",
       ]);
+      // A snapshot written before #183 reads the display facts the Published Deck page groups rows by as null.
       expect(Object.keys(shown.identities[0].editions[0]).sort()).toEqual(
-        Object.keys(edition).sort()
+        [
+          ...Object.keys(edition),
+          "card_kind",
+          "trainer_type",
+          "evolves_from",
+          "evolution_root",
+          "evolution_stage",
+        ].sort()
       );
       expect(shown.identities[0].editions[0]).toMatchObject({
         edition_ref: edition.edition_ref,
@@ -345,6 +380,8 @@ assert store.compare_and_swap({k: rows[k].version for k in keys}, {
         await read(valid, "/api/public/discovery")
       ).json();
       expect(afterPage.revision).toBe(firstPage.revision);
+      // Equal only because the record written is `unverified`: a verified Edition's cached quote would change a
+      // listed deck's cost, and Discover reads the cost from the store.
       expect(afterPage).toEqual(firstPage);
       const next = await read(
         valid,

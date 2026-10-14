@@ -170,7 +170,7 @@ test("collector reports an Edition mapping, nothing changes until the maintainer
 
   await page.reload();
   await page.getByRole("button", { name: "Catalog", exact: true }).click();
-  // A Catalog tile opens the Printing's details (#173), which list each Edition with its report button.
+  // A Catalog tile opens the card popup (#174): pick the Edition, then the footer's "Report: this Edition".
   await page
     .getByRole("searchbox", { name: "Search the catalog" })
     .fill("Furret");
@@ -179,12 +179,12 @@ test("collector reports an Edition mapping, nothing changes until the maintainer
     .getByRole("button", { name: /^Furret,/ })
     .first()
     .click();
-  await page
-    .getByRole("dialog", { name: "Furret" })
-    .getByRole("listitem")
-    .filter({ hasText: /^Normal/ })
-    .getByRole("button", { name: "Report metadata" })
+  const popup = page.getByRole("dialog", { name: "Furret" });
+  await popup
+    .getByRole("group", { name: "Editions" })
+    .getByRole("button", { name: /^Normal/ })
     .click();
+  await popup.getByRole("button", { name: "Report this Edition" }).click();
   const form = page.getByRole("region", { name: "Report card metadata" });
   await form.getByLabel("Metadata target").selectOption("marketplace");
   await form.getByLabel("Proposed product ID").fill("4321");

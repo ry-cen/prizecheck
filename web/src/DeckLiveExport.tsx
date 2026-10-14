@@ -11,7 +11,13 @@ import {
 export type DeckExportProps = {
   deckId: string;
   ownerRevision: number;
+  /** The Deck List's own basic checks (`deck_list_checks`): both exports read the Deck List, never the Holdings. */
   checks: DeckChecks;
+  /** The Deck List revision the page drew: a result for another revision is discarded too, as a Deck List edit
+   * doesn't move the inventory revision (#181). */
+  deckListRevision?: number;
+  /** A result named a revision the page hasn't read: the page reads the Deck again, so the next export can match. */
+  onStale?: () => void;
 };
 
 const CHANGED = "Deck changed; export again";
@@ -35,23 +41,29 @@ export function DeckLiveExport({
   deckId,
   ownerRevision,
   checks,
+  deckListRevision,
+  onStale,
 }: DeckExportProps) {
   const [result, setResult] = useState<LiveExportView | null>(null);
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
-  const latest = useRef(ownerRevision);
+  const latest = useRef({ owner: ownerRevision, list: deckListRevision });
+  const matches = (view: LiveExportView) =>
+    view.owner_revision === latest.current.owner &&
+    (latest.current.list === undefined ||
+      view.deck_list_revision === latest.current.list);
 
-  // A result belongs to one Deck revision; a newer revision discards it.
+  // A result belongs to one inventory revision and one Deck List revision; a newer one discards it.
   useEffect(() => {
-    latest.current = ownerRevision;
+    latest.current = { owner: ownerRevision, list: deckListRevision };
     setResult((previous) => {
-      if (previous && previous.owner_revision !== ownerRevision) {
+      if (previous && !matches(previous)) {
         setStatus(CHANGED);
         return null;
       }
       return previous;
     });
-  }, [ownerRevision]);
+  }, [ownerRevision, deckListRevision]);
 
   async function prepare() {
     setBusy(true);
@@ -59,8 +71,10 @@ export function DeckLiveExport({
     setStatus("");
     try {
       const view = await getLiveExport(deckId);
-      if (view.owner_revision !== latest.current) setStatus(CHANGED);
-      else setResult(view);
+      if (!matches(view)) {
+        setStatus(CHANGED);
+        onStale?.();
+      } else setResult(view);
     } catch {
       setStatus("Live export is temporarily unavailable. Please retry.");
     } finally {
@@ -77,7 +91,13 @@ export function DeckLiveExport({
       resultKey={result ? `${result.owner_revision}` : ""}
       downloadHref={
         result
-          ? liveExportDownloadHref(deckId, result.owner_revision)
+          ? liveExportDownloadHref(
+              deckId,
+              result.owner_revision,
+              deckListRevision === undefined
+                ? undefined
+                : result.deck_list_revision
+            )
           : undefined
       }
       status={status}
@@ -108,7 +128,7 @@ export function LiveExportPanel({
     checks.size_status === "complete" ? undefined : (
       <p>
         This Deck has {checks.total} cards, not 60. The export lists exactly the
-        cards stored in it.
+        cards on its Deck List.
       </p>
     );
   const disclaimer = <p>{checks.disclaimer}</p>;

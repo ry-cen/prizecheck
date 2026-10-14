@@ -1,4 +1,12 @@
-import { useId, useRef, type MouseEvent } from "react";
+import {
+  useId,
+  useRef,
+  type KeyboardEvent,
+  type MouseEvent,
+  type PointerEvent,
+} from "react";
+import { Minus, Plus } from "lucide-react";
+import { Button } from "../ui/Button";
 import { CopyArt, CopyTile } from "../ui/CopyTile";
 import { useEditionPriceRow } from "../EditionPrice";
 import {
@@ -21,6 +29,32 @@ export type OpenSheet = (
   opener: HTMLElement
 ) => void;
 
+/** Editing a line from its controls (#177): Delete or Backspace takes one copy off, and a press may become a drag
+ * onto the library (desktop, mouse or pen). */
+export type LineEditing = {
+  onRemove: (line: DeckLine, control: HTMLElement) => void;
+  onDragStart: (line: DeckLine, event: PointerEvent<HTMLElement>) => void;
+  /** A List row's −1 or +1: one copy off or on. `control` is the button pressed. */
+  onStep: (line: DeckLine, delta: bigint, control: HTMLElement) => void;
+};
+
+/** The props every copy, pile and row control gets for editing: the keys, the drag and the line's Edition id (the
+ * page finds a line's controls by it to keep focus on the line after a copy leaves). */
+function editProps(line: DeckLine, editing: LineEditing | undefined) {
+  if (!editing) return {};
+  return {
+    "data-edition-id": line.line.edition_id,
+    "aria-keyshortcuts": "Delete Backspace",
+    onKeyDown: (event: KeyboardEvent<HTMLElement>) => {
+      if (event.key !== "Delete" && event.key !== "Backspace") return;
+      event.preventDefault();
+      editing.onRemove(line, event.currentTarget);
+    },
+    onPointerDown: (event: PointerEvent<HTMLElement>) =>
+      editing.onDragStart(line, event),
+  };
+}
+
 type Props = {
   view: DeckView;
   groups: readonly LineGroup[];
@@ -28,6 +62,8 @@ type Props = {
   /** Lines (Edition ids) a card-level issue of the Target Format's result names (#178): each is outlined and
    * marked "!", and its controls are described as having a format issue. */
   flagged?: ReadonlySet<string>;
+  /** Editing (#177): without it the controls only open the copy sheet. */
+  editing?: LineEditing;
 };
 
 const NO_LINES: ReadonlySet<string> = new Set();
@@ -51,13 +87,15 @@ function IssueMark() {
  * - Stacked: one pile per Edition with a summary such as "×4 1↻ 1$";
  * - List: one row per Edition with its quantity, the Edition, its ownership counts and the line's price.
  *
- * Every tile, pile and row opens the copy sheet. #177 adds editing (drag, Delete, ±1) on the same controls.
+ * Every tile, pile and row opens the copy sheet. With `editing` (#177), Delete or Backspace on one takes a copy of its
+ * line off the Deck List, and dragging one onto the library does too.
  */
 export function DeckListBody({
   view,
   groups,
   onOpen,
   flagged = NO_LINES,
+  editing,
 }: Props) {
   // Heading ids come from useId and the group's position: a group key holds a card name (spaces, apostrophes),
   // which is no valid id. The key stays React's key only.
@@ -97,6 +135,7 @@ export function DeckListBody({
                   key={line.line.edition_id}
                   line={line}
                   onOpen={onOpen}
+                  editing={editing}
                   issueId={
                     flagged.has(line.line.edition_id) ? issueId : undefined
                   }
@@ -132,13 +171,19 @@ export function DeckListBody({
                           names={false}
                           state={copy.state}
                           aria-describedby={issue}
+                          {...editProps(line, editing)}
                           onClick={(event: MouseEvent<HTMLButtonElement>) =>
                             onOpen(line, copy.ordinal, event.currentTarget)
                           }
                         />
                       ))
                     ) : (
-                      <Pile line={line} onOpen={onOpen} issueId={issue} />
+                      <Pile
+                        line={line}
+                        onOpen={onOpen}
+                        issueId={issue}
+                        editing={editing}
+                      />
                     )}
                   </li>
                 );
@@ -157,10 +202,12 @@ function Pile({
   line,
   onOpen,
   issueId,
+  editing,
 }: {
   line: DeckLine;
   onOpen: OpenSheet;
   issueId?: string;
+  editing?: LineEditing;
 }) {
   const label = pileLabel(line);
   const top =
@@ -171,6 +218,7 @@ function Pile({
       aria-label={label}
       aria-describedby={issueId}
       title={label}
+      {...editProps(line, editing)}
       onClick={(event) => onOpen(line, null, event.currentTarget)}
       className="m-0 box-border flex w-16 cursor-pointer flex-col gap-1 rounded-card border-0 bg-transparent p-0 text-left font-sans text-text phone:w-14"
     >
@@ -202,14 +250,20 @@ function ListRow({
   line,
   onOpen,
   issueId,
+  editing,
 }: {
   line: DeckLine;
   onOpen: OpenSheet;
   issueId?: string;
+  editing?: LineEditing;
 }) {
   return (
     <li
-      className={`grid grid-cols-[2rem_minmax(0,1fr)_auto_4.5rem] items-center gap-2 border-b py-0.5 ${
+      className={`grid ${
+        editing
+          ? "grid-cols-[2rem_minmax(0,1fr)_auto_4.5rem_auto] phone:grid-cols-[2rem_minmax(0,1fr)_auto_4.5rem]"
+          : "grid-cols-[2rem_minmax(0,1fr)_auto_4.5rem]"
+      } items-center gap-2 border-b py-0.5 ${
         issueId ? "border-danger-border" : "border-border"
       }`}
     >
@@ -225,6 +279,7 @@ function ListRow({
       <button
         type="button"
         aria-describedby={issueId}
+        {...editProps(line, editing)}
         onClick={(event) => onOpen(line, null, event.currentTarget)}
         className="m-0 box-border flex min-h-control min-w-0 cursor-pointer flex-col justify-center rounded-control border-0 bg-transparent px-1 text-left font-sans text-text hover:bg-surface-raised phone:min-h-tap"
       >
@@ -250,6 +305,20 @@ function ListRow({
         <span className="sr-only">{stateWords(line)}</span>
       </span>
       <LinePrice line={line} />
+      {editing && (
+        <span className="flex gap-1 phone:col-span-full phone:justify-end">
+          <Button
+            icon={Minus}
+            label={`Remove one ${line.line.name}`}
+            onClick={(event) => editing.onStep(line, -1n, event.currentTarget)}
+          />
+          <Button
+            icon={Plus}
+            label={`Add one ${line.line.name}`}
+            onClick={(event) => editing.onStep(line, 1n, event.currentTarget)}
+          />
+        </span>
+      )}
     </li>
   );
 }

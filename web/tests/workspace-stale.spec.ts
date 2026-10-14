@@ -378,7 +378,7 @@ test.describe("desktop", () => {
     );
   });
 
-  test("Add cards closes when its Location becomes a folder: the workspace opens All owned and focuses the heading", async ({
+  test("Add cards keeps its queue when its Location becomes a folder, and asks for another Location", async ({
     page,
   }) => {
     promoteCatalog({ "card-1": "Banner Abra" });
@@ -390,49 +390,51 @@ test.describe("desktop", () => {
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(
       `Alpha ${s}`
     );
+    // Add cards (#175) is Catalog's gallery in Add mode, set to the open Location.
     await page.getByRole("button", { name: "Add cards", exact: true }).click();
     const add = page.getByRole("dialog", { name: `Add cards to Alpha ${s}` });
     await expect(add).toBeVisible();
-    // Another session nests a Location under Alpha just as this Add reloads the tree: Alpha becomes a folder.
-    let nested = false;
-    await page.route("**/api/location-tree", async (route) => {
-      if (!nested && route.request().method() === "GET") {
-        nested = true;
-        const api = (path: string) => new URL(path, page.url()).href;
-        const tree = await page.request.get(api("/api/location-tree"));
-        const version = (
-          (await tree.json()) as { locations: TreeNode[] }
-        ).locations.find((node) => node.id === alpha)!.version;
-        const created = await page.request.post(api("/api/location-tree"), {
-          headers: { origin: new URL(page.url()).origin },
-          data: {
-            name: `Inner ${s}`,
-            parent_id: alpha,
-            parent_version: version,
-            conversion: "move_holdings_to_child",
-            idempotency_key: randomUUID(),
-          },
-        });
-        expect(created.status(), await created.text()).toBe(201);
-      }
-      await route.continue();
+    // The bar, whatever the dialog is called: its name changes below.
+    const bar = page
+      .getByRole("dialog")
+      .getByRole("region", { name: "Add to a Location" });
+    await add
+      .getByRole("region", { name: "Catalog results" })
+      .getByRole("button", {
+        name: "One more Banner Abra fixture 1 Normal",
+        exact: true,
+      })
+      .click();
+    await expect(bar.getByRole("listitem")).toHaveText([
+      "1× Banner Abra fixture 1 Normal",
+    ]);
+    // Another session nests a Location under Alpha while the queue waits: Alpha becomes a folder.
+    await createLocation(page, `Inner ${s}`, alpha);
+    await bar.getByRole("button", { name: "Add 1 card" }).click();
+    await expect(bar.getByRole("alert")).toHaveText(
+      "That Location is gone. Choose another."
+    );
+    // Add cards stays open with its queue, now asking where to add; the workspace has gone to All owned behind it.
+    const picking = page.getByRole("dialog", {
+      name: "Add cards",
+      exact: true,
     });
-    await add.getByLabel("Search English card name").fill("Banner");
-    await add.getByRole("button", { name: "Search", exact: true }).click();
-    await add.getByLabel("Card Edition").selectOption({
-      label: "Banner Abra · Fixture Set #1 · finish: normal",
-    });
-    await add.getByLabel("Quantity", { exact: true }).fill("1");
-    await add.getByRole("button", { name: "Add to Location" }).click();
+    await expect(picking).toBeVisible();
+    await expect(bar.getByRole("listitem")).toHaveText([
+      "1× Banner Abra fixture 1 Normal",
+    ]);
+    await bar
+      .getByRole("combobox", { name: "Location to add to" })
+      .selectOption({ label: `Alpha ${s} / Inner ${s}` });
+    await bar.getByRole("button", { name: "Add 1 card" }).click();
     await expect(page.getByRole("dialog")).toHaveCount(0);
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(
-      "All owned"
+      `Inner ${s}`
     );
     await expect(tiles(page)).toHaveCount(1);
-    await expect(page.locator("#ws-heading")).toBeFocused();
     await expect(
       page.getByRole("button", { name: "Add cards", exact: true })
-    ).toHaveCount(0);
+    ).toBeFocused();
   });
 
   test("a Reload keeps a Reviewed Edition correction's typed amount and reads the corrections once for the new revision", async ({

@@ -25,13 +25,13 @@ def ts_type(value):
 
 
 schema = app.openapi()["components"]["schemas"]
-names = ("TreeNode", "LocationCommandResult", "CreateDeck", "EditDeck", "DeckIndex", "IdentityCheck", "DeckChecks", "DeckDetail", "DeckEditionQuantity", "DeckContents",
+names = ("TreeNode", "LocationCommandResult", "CreateDeck", "EditDeck", "DeckIndexEntry", "DeckIndex", "IdentityCheck", "DeckChecks", "DeckDetail", "DeckEditionQuantity", "DeckContents",
          "DeckListLine", "DeckList", "AddDeckListLine", "ChangeDeckListLine", "RemoveDeckListLine", "SetTargetFormat",
          "DeckListCommandResult",
          "ElsewhereLocation", "LineOwnership", "SurplusHolding", "CompetingDeck", "CompetitionWarning",
          "AddDeckListPrinting", "DeckListPrintingResult",
          "PickWarning", "PickSource", "PickRow", "PutAwayHolding", "PickList", "PickItem", "ConfirmPicks",
-         "PickConfirmResult", "DeleteDeck", "DeleteDeckResult")
+         "PickConfirmResult", "DeleteDeck", "DeleteDeckResult", "DeckListChange", "ChangeDeckList")
 lines = ["// Generated from FastAPI OpenAPI by scripts/generate_decks_client.py. Do not edit.",
          "import type { DeckFormatChecks } from './format_checks_generated';"]
 for name in names:
@@ -74,6 +74,9 @@ export const removeDeckListLine = (deckId: string, editionId: string, body: Remo
 // Changes the Deck List's Target Format (app redesign #178); answers the new Format's result.
 export const setTargetFormat = (deckId: string, body: SetTargetFormat) =>
   request<DeckListCommandResult>(`/api/decks/${encodeURIComponent(deckId)}/deck-list/target-format`, 'PUT', body);
+// Sets several Deck List lines in one batch (app redesign #177): each change is a line's new total, 0 removing it.
+export const changeDeckList = (deckId: string, body: ChangeDeckList) =>
+  request<DeckListCommandResult>(`/api/decks/${encodeURIComponent(deckId)}/deck-list/changes`, 'POST', body);
 export const addDeckListPrinting = (deckId: string, body: AddDeckListPrinting) =>
   request<DeckListPrintingResult>(`/api/decks/${encodeURIComponent(deckId)}/deck-list/printings`, 'POST', body);
 export const getPickList = (deckId: string) =>

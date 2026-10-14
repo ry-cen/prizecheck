@@ -48,7 +48,7 @@ promote({**{f'card-{i}': f'Pikachu {i:02d}' for i in range(1, 66)}, 'card-99': '
     // The gallery loads its next page as its end comes near (#173).
     await tiles.last().scrollIntoViewIfNeeded();
     await expect(tiles).toHaveCount(66);
-    // Pikachu 01 has two Editions, so two tiles; either opens the Printing's details.
+    // Pikachu 01 has two Editions, so two tiles; either opens the card popup (#174) on its own Edition.
     await search.fill("Pikachu 01");
     await expect(tiles).toHaveCount(2);
     await results
@@ -63,11 +63,15 @@ promote({**{f'card-{i}': f'Pikachu {i:02d}' for i in range(1, 66)}, 'card-99': '
     await expect(
       details.getByText("Artwork belongs to the Printing")
     ).toBeVisible();
-    // Each Card Edition is listed by its Variant.
-    await expect(details.getByRole("listitem")).toHaveText([
-      /^Normal · TCGdex Edition/,
-      /^Reverse Holo · TCGdex Edition/,
-    ]);
+    // Each Card Edition is in the popup's Edition picker by its Variant, the tapped one picked.
+    const editions = details
+      .getByRole("group", { name: "Editions" })
+      .getByRole("button");
+    await expect(editions).toHaveText([/^Normal/, /^Reverse Holo/]);
+    await expect(editions.nth(1)).toHaveAttribute("aria-pressed", "true");
+    await expect(
+      details.getByRole("group", { name: "Selected Edition" })
+    ).toContainText("Reverse Holo · TCGdex Edition");
     await details.getByRole("button", { name: "Close card details" }).click();
     await search.fill("Pikachu 02");
     await expect(tiles).toHaveCount(1);

@@ -21,6 +21,8 @@ export type PublishedLiveExportProps = {
     "total" | "size_status" | "shortage" | "excess" | "disclaimer"
   >;
   onChanged: () => void;
+  /** Prepare the export as soon as the panel mounts: the Published Deck page's export dialogs (#183). */
+  autoPrepare?: boolean;
 };
 
 export function PublishedLiveExport({
@@ -28,6 +30,7 @@ export function PublishedLiveExport({
   version,
   checks,
   onChanged,
+  autoPrepare = false,
 }: PublishedLiveExportProps) {
   const [result, setResult] = useState<PublishedLiveExportView | null>(null);
   const [status, setStatus] = useState("");
@@ -70,6 +73,11 @@ export function PublishedLiveExport({
       if (mine === attempt.current) setBusy(false);
     }
   }
+
+  // The dialog that mounts the panel was opened to export: start once, as a press of the prepare button would.
+  useEffect(() => {
+    if (autoPrepare) void prepare();
+  }, []);
 
   return (
     <LiveExportPanel
