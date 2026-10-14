@@ -41,8 +41,10 @@ with connect() as conn:
 
 async function signIn(page: Page) {
   await pool.query("DELETE FROM auth_send_event");
-  await signInAsOwner(page, "/workspace");
-  await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible();
+  await signInAsOwner(page, "/collection");
+  await expect(
+    page.getByRole("navigation", { name: "Main views" })
+  ).toBeVisible();
 }
 
 const editionOf = async (number: number) =>

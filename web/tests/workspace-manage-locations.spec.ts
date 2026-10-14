@@ -25,14 +25,14 @@ async function signIn(page: Page) {
     await pool.end();
   }
   await page.goto(
-    `${process.env.TEST_ORIGIN || "http://localhost:5173"}/workspace`
+    `${process.env.TEST_ORIGIN || "http://localhost:5173"}/collection`
   );
-  await expect(page).toHaveURL(/\/workspace$/);
+  await expect(page).toHaveURL(/\/collection$/);
   await expect(
-    page.getByRole("link", { name: "Sign in with Google" })
+    page.getByRole("link", { name: "Continue with Google" })
   ).toBeVisible();
-  await signInAsOwner(page, "/workspace");
-  await expect(page).toHaveURL(/\/workspace$/);
+  await signInAsOwner(page, "/collection");
+  await expect(page).toHaveURL(/\/collection$/);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("All owned");
 }
 
@@ -265,7 +265,8 @@ test.describe("desktop", () => {
     await page.reload();
     const sidebar = page.getByRole("complementary", { name: "Sidebar" });
     const gear = button(sidebar, "Manage locations");
-    // The gear sits after the root +.
+    // The gear sits after the root +. The shell reads the session before the page mounts, so wait for it.
+    await expect(gear).toBeVisible();
     const tools = await sidebar
       .getByRole("button", { name: /^(Add location|Manage locations)$/ })
       .evaluateAll((elements) =>

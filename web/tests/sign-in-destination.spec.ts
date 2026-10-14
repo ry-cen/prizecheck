@@ -39,26 +39,27 @@ async function signInByCode(page: Page) {
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
 }
 
-// The positive control: a safe next is followed, even from a page that would otherwise land on /workspace.
-test("sign-in follows a safe next to /collection", async ({ page }) => {
+// The positive control: a safe next is followed, even from a page that would otherwise reopen itself.
+test("sign-in follows a safe next to /catalog", async ({ page }) => {
   await mockEmailSignIn(page);
-  await page.goto(`${ORIGIN}/locations?next=%2Fcollection`);
+  await page.goto(`${ORIGIN}/decks?next=%2Fcatalog`);
   await signInByCode(page);
-  await expect(page).toHaveURL(`${ORIGIN}/collection`);
+  await expect(page).toHaveURL(`${ORIGIN}/catalog`);
 });
 
-// Each rejection starts on /collection, so landing on /workspace proves next was read and refused, not ignored.
+// Each rejection starts on /decks, which signing in would otherwise reopen, so landing on /collection (the default)
+// proves next was read and refused, not ignored.
 for (const [name, next] of [
   ["an absolute URL on another origin", "https%3A%2F%2Fexample.com%2Fsteal"],
   ["a protocol-relative URL", "%2F%2Fevil.example"],
   ["a path containing a backslash", "%2F%5Cevil.example"],
 ] as const) {
-  test(`sign-in ignores ${name} in next and lands on /workspace`, async ({
+  test(`sign-in ignores ${name} in next and lands on /collection`, async ({
     page,
   }) => {
     await mockEmailSignIn(page);
-    await page.goto(`${ORIGIN}/collection?next=${next}`);
+    await page.goto(`${ORIGIN}/decks?next=${next}`);
     await signInByCode(page);
-    await expect(page).toHaveURL(`${ORIGIN}/workspace`);
+    await expect(page).toHaveURL(`${ORIGIN}/collection`);
   });
 }

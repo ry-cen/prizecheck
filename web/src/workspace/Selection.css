@@ -115,7 +115,8 @@
   .ws-selection-bar {
     left: var(--space-2);
     right: var(--space-2);
-    bottom: var(--space-2);
+    /* Above the app shell's bottom tab bar (#162). */
+    bottom: calc(var(--space-2) + var(--layout-tabbar-height));
     transform: none;
     max-width: none;
     justify-content: space-between;

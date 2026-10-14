@@ -51,6 +51,7 @@
   --font-size-2xs: 10px;
   --font-size-xs: 11px;
   --font-size-sm: 12px;
+  --font-size-control: 13px;
   --font-size-md: 14px;
   --font-size-lg: 18px;
   --font-size-xl: 24px;
@@ -81,6 +82,13 @@
   --target-touch: 44px;
   --target-pointer: 24px;
   --control-height: 36px;
+  /* The kit's control sizes (app redesign, ADR 0012), read by Tailwind's theme in tailwind.css.
+     They replace --control-height once the workspace moves onto the kit. */
+  --size-control: 30px;
+  --size-control-phone: 44px;
+  --size-chip: 24px;
+  --size-quick: 26px;
+  --size-quick-phone: 36px;
 
   /* Focus */
   --focus-width: 2px;
@@ -113,6 +121,24 @@
   /* Gallery side padding fixed by the spec: 30 px, then 20 px from 1550 px, then 16 px from 2200 px.
      Workspace.css applies it to the workspace main area; ticket 103 tests it. */
   --layout-gutter: 30px;
+
+  /* App shell (app redesign, #162): the phone bottom tab bar's height, and the centred Dialog's width on
+     desktop. Both are read by Tailwind's theme in tailwind.css (pb-tabbar, w-dialog). */
+  --layout-tabbar-height: 56px;
+  --layout-dialog-width: 480px;
+  /* What a sticky element clears at the top of the viewport: the shell's sticky desktop header; nothing on
+     a phone, where the header scrolls away. */
+  --layout-sticky-top: var(--layout-header-height);
+
+  /* Sign-in provider buttons (app redesign, sign-in decision): each company's own button colours, the same in
+     every theme, so they are not --color-* roles. Google's dark theme: fill, 1 px stroke and text. Discord:
+     blurple with white. Read by tailwind.css (bg-google, border-google-stroke, text-on-google, bg-discord,
+     text-on-discord) and used only by the provider buttons on the sign-in card. */
+  --brand-google: #131314;
+  --brand-google-stroke: #8e918f;
+  --brand-on-google: #e3e3e3;
+  --brand-discord: #5865f2;
+  --brand-on-discord: #ffffff;
 }
 
 @media (min-width: 1550px) {
@@ -134,6 +160,7 @@
     --tile-gap-row: 16px;
     --tile-gap-column: 8px;
     --layout-gutter: 14px;
+    --layout-sticky-top: 0px;
   }
 }
 

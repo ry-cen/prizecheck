@@ -31,7 +31,7 @@ promote({**{f'card-{i}': f'Pikachu {i:02d}' for i in range(1, 33)}, 'card-99': '
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });
   await pool.query("DELETE FROM auth_send_event");
   try {
-    await signInAsOwner(page, "/workspace");
+    await signInAsOwner(page, "/collection");
     await page.getByRole("button", { name: "Catalog", exact: true }).click();
     await page.getByLabel("English name").fill("Pik");
     await page.getByRole("button", { name: "Search", exact: true }).click();

@@ -14,7 +14,7 @@ async function expectMessage(page: Page, text: string, next?: string) {
   await expect(alert).toBeFocused();
   await expect(page).toHaveURL(`${ORIGIN}/sign-in`);
   await expect(
-    page.getByRole("link", { name: "Sign in with Google" })
+    page.getByRole("link", { name: "Continue with Google" })
   ).toBeVisible();
 }
 
@@ -32,13 +32,13 @@ test("an unverified or missing provider email names the provider used", async ({
   await expectMessage(
     page,
     "Your Google account needs a verified email address.",
-    "Verify it with Google"
+    "Verify your email with Google"
   );
   await fakeSignIn(page, { identity: "no-email", provider: "discord" });
   await expectMessage(
     page,
     "Your Discord account needs a verified email address.",
-    "Verify it with Discord"
+    "Verify your email with Discord"
   );
 });
 
@@ -46,16 +46,24 @@ test("a new collector on an owner-only deployment is told it isn't open yet", as
   page,
 }) => {
   await fakeSignIn(page, { identity: "newcomer" });
-  await expectMessage(page, "PrizeCheck isn't open for new sign-ins yet.");
+  await expectMessage(page, "PrizeCheck isn't open to new collectors yet.");
+  // Its next step is browsing public decks.
+  await expect(
+    page.getByRole("alert").getByRole("link", { name: "Browse public decks" })
+  ).toHaveAttribute("href", "/discover");
   await page.goto(`${ORIGIN}/sign-in?error=signup_disabled`);
-  await expectMessage(page, "PrizeCheck isn't open for new sign-ins yet.");
+  await expectMessage(page, "PrizeCheck isn't open to new collectors yet.");
 });
 
 test("too many attempts, unknown codes and Sign-ins-only codes get their fixed messages", async ({
   page,
 }) => {
   await page.goto(`${ORIGIN}/sign-in?provider=google&error=too_many_sign_ups`);
-  await expectMessage(page, "Too many sign-ins right now. Try again later.");
+  await expectMessage(
+    page,
+    "Too many sign-ins right now.",
+    "Try again in a little while."
+  );
   for (const code of [
     "made_up_code",
     "account_not_linked",
@@ -82,13 +90,14 @@ test("free text from the address is never shown", async ({ page }) => {
 test("a signed-in collector never sees a failure code, and it leaves the address bar", async ({
   page,
 }) => {
-  await signInAsOwner(page, "/workspace");
+  await signInAsOwner(page, "/collection");
+  // The old /workspace address still works: the app rewrites it to /collection, and the code leaves the address.
   await page.goto(
     `${ORIGIN}/workspace?provider=google&error=access_denied&error_description=INJECTED`
   );
-  await expect(page).toHaveURL(`${ORIGIN}/workspace`);
+  await expect(page).toHaveURL(`${ORIGIN}/collection`);
   await expect(
-    page.getByRole("button", { name: "Sign out" }).first()
+    page.getByRole("navigation", { name: "Main views" })
   ).toBeVisible();
   await expect(page.getByText("Sign-in was cancelled.")).toHaveCount(0);
   await expect(page.locator("body")).not.toContainText("INJECTED");
@@ -101,7 +110,7 @@ test("the message takes focus once and the sign-in links are the next stop", asy
   await expect(page.getByRole("alert")).toBeFocused();
   await page.keyboard.press("Tab");
   await expect(
-    page.getByRole("link", { name: "Sign in with Google" })
+    page.getByRole("link", { name: "Continue with Google" })
   ).toBeFocused();
   await page.reload();
   await expect(page.getByRole("alert")).toHaveCount(0);

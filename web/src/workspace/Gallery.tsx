@@ -90,6 +90,9 @@ export function Gallery({
     const grid = gridRef.current;
     if (!grid) return;
     const measure = () => {
+      // A hidden page (the app shell keeps Collection mounted under `hidden` while another page shows)
+      // measures 0 wide. Keep the last layout, so coming back shows the same grid at the same height.
+      if (!grid.getClientRects().length) return;
       setWidth(grid.clientWidth);
       const next = readTileMetrics(grid);
       setMetrics((previous) =>
@@ -137,7 +140,8 @@ export function Gallery({
     const update = () => {
       frame = 0;
       const grid = gridRef.current;
-      if (!grid) return;
+      // Hidden (see measure above): keep the mounted rows for when the page is shown again.
+      if (!grid || !grid.getClientRects().length) return;
       const top = grid.getBoundingClientRect().top;
       const viewport = window.innerHeight;
       const overscan = viewport * OVERSCAN_VIEWPORTS;

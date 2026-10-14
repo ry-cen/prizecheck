@@ -12,7 +12,8 @@
 }
 .ws-inspector {
   position: sticky;
-  top: var(--space-4);
+  /* Below the app shell's sticky desktop header. */
+  top: calc(var(--space-4) + var(--layout-sticky-top));
   align-self: start;
   margin-top: var(--space-6);
   min-width: 0;

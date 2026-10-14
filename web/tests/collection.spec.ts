@@ -18,8 +18,10 @@ promote({'collection-1':'Collection Pikachu'})`,
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });
   await pool.query("DELETE FROM auth_send_event");
   try {
-    await signInAsOwner(page, "/workspace");
-    await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible();
+    await signInAsOwner(page, "/collection");
+    await expect(
+      page.getByRole("navigation", { name: "Main views" })
+    ).toBeVisible();
     const owner = (
       await pool.query('SELECT id FROM "user" WHERE email=$1', [
         process.env.OWNER_EMAIL || "owner@example.test",
@@ -40,7 +42,7 @@ promote({'collection-1':'Collection Pikachu'})`,
       "INSERT INTO holding(owner_id,location_id,edition_id,quantity,version) VALUES($1,$2,$3,7,1) ON CONFLICT(owner_id,location_id,edition_id) DO UPDATE SET quantity=7",
       [owner, leaf, edition]
     );
-    await page.getByRole("button", { name: "Collection", exact: true }).click();
+    await page.goto(new URL("/old-collection", page.url()).href);
     await page.getByLabel("Owned card name").fill("Collection Pika");
     await page.getByRole("button", { name: "Filter Collection" }).click();
     const row = page

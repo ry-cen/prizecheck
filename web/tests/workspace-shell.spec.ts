@@ -21,14 +21,14 @@ async function signIn(page: Page) {
     await pool.end();
   }
   await page.goto(
-    `${process.env.TEST_ORIGIN || "http://localhost:5173"}/workspace`
+    `${process.env.TEST_ORIGIN || "http://localhost:5173"}/collection`
   );
-  await expect(page).toHaveURL(/\/workspace$/);
+  await expect(page).toHaveURL(/\/collection$/);
   await expect(
-    page.getByRole("link", { name: "Sign in with Google" })
+    page.getByRole("link", { name: "Continue with Google" })
   ).toBeVisible();
-  await signInAsOwner(page, "/workspace");
-  await expect(page).toHaveURL(/\/workspace$/);
+  await signInAsOwner(page, "/collection");
+  await expect(page).toHaveURL(/\/collection$/);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("All owned");
 }
 
@@ -95,7 +95,7 @@ test("desktop workspace shows the Location tree in natural order and opens Stora
   await signIn(page);
   const shelf = await seedShelf(page);
   await page.reload();
-  await expect(page).toHaveURL(/\/workspace$/);
+  await expect(page).toHaveURL(/\/collection$/);
   const heading = page.getByRole("heading", { level: 1 });
   await expect(heading).toHaveText("All owned");
   await expect(page.locator("html")).toHaveAttribute(
@@ -166,7 +166,7 @@ test("desktop workspace shows the Location tree in natural order and opens Stora
   await nav.getByRole("button", { name: "All owned", exact: true }).click();
   await expect(heading).toHaveText("All owned");
 
-  // The workspace is the inventory page: Main views opens the other pages and returns here, and /locations opens it.
+  // Collection is the inventory page: the shell's Main views opens the other pages and returns here, and /locations opens it.
   await page
     .getByRole("navigation", { name: "Main views" })
     .getByRole("button", { name: "Decks", exact: true })
@@ -174,12 +174,12 @@ test("desktop workspace shows the Location tree in natural order and opens Stora
   await expect(page).toHaveURL(/\/decks$/);
   await page
     .getByRole("navigation", { name: "Main views" })
-    .getByRole("button", { name: "Workspace", exact: true })
+    .getByRole("button", { name: "Collection", exact: true })
     .click();
-  await expect(page).toHaveURL(/\/workspace$/);
+  await expect(page).toHaveURL(/\/collection$/);
   await expect(heading).toHaveText("All owned");
   await page.goto(new URL("/locations", page.url()).href);
-  await expect(page).toHaveURL(/\/workspace$/);
+  await expect(page).toHaveURL(/\/collection$/);
   await expect(heading).toHaveText("All owned");
 });
 
@@ -196,7 +196,7 @@ test.describe("mobile", () => {
     await signIn(page);
     const shelf = await seedShelf(page);
     await page.reload();
-    await expect(page).toHaveURL(/\/workspace$/);
+    await expect(page).toHaveURL(/\/collection$/);
     const heading = page.getByRole("heading", { level: 1 });
     const header = page.getByRole("banner");
     await expect(

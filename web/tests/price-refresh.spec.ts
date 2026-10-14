@@ -71,8 +71,10 @@ async function liveRunners() {
 
 async function signIn(page: Page) {
   await pool.query("DELETE FROM auth_send_event");
-  await signInAsOwner(page, "/workspace");
-  await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible();
+  await signInAsOwner(page, "/collection");
+  await expect(
+    page.getByRole("navigation", { name: "Main views" })
+  ).toBeVisible();
 }
 
 async function hold(editions: string[]) {
@@ -101,7 +103,7 @@ async function hold(editions: string[]) {
 /** Opens the Collection page. seed() replaces the catalog, which clears every Holding, so its rows are exactly what
  * hold() added. Unlike the Decks page it reads no Deck cost, so the runner and /api/prices/editions counts stay as before. */
 async function openCollection(page: Page) {
-  await page.getByRole("button", { name: "Collection", exact: true }).click();
+  await page.goto(new URL("/old-collection", page.url()).href);
   const panel = page.getByRole("region", { name: "Collection", exact: true });
   await expect(panel).toBeVisible();
   return panel;

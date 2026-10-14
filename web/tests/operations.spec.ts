@@ -17,7 +17,9 @@ test("owner sees stale backup and allowance warning in operational health", asyn
     );
     const email = process.env.OWNER_EMAIL || "owner@example.test";
     await signInAsOwner(page, "/owner");
-    await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible();
+    await expect(
+      page.getByRole("navigation", { name: "Main views" })
+    ).toBeVisible();
     const owner = await pool.query('SELECT id FROM "user" WHERE email=$1', [
       email,
     ]);
