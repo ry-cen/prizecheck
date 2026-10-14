@@ -1,4 +1,11 @@
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { FileText } from "lucide-react";
 import type {
   BrowseEdition,
@@ -21,6 +28,7 @@ import { variantLabel } from "../ui/variantLabel";
 import { TILE_PRICE } from "../workspace/Gallery";
 import { OLD_BUTTONS, OLD_FIELDS, OLD_TEXT } from "../workspace/legacyContent";
 import { useDebouncedValue } from "../workspace/useDebouncedValue";
+import { CatalogCardPopup, type CardRequest } from "./CatalogCardPopup";
 import { CatalogFilters } from "./CatalogFilters";
 import {
   CATALOG_UNAVAILABLE,
@@ -28,10 +36,6 @@ import {
   FORMAT_NAMES,
   searchHint,
 } from "./catalogText";
-import {
-  PrintingDetailDialog,
-  type DetailRequest,
-} from "./PrintingDetailDialog";
 import { useCatalogBrowse } from "./useCatalogBrowse";
 
 const SEARCH_DELAY_MS = 250;
@@ -48,10 +52,11 @@ type Props = {
 /**
  * Catalog (#173, spec "Catalog"): an Edition gallery from the browse route, with one smart search box, one filter
  * row and the catalog's status line, and no sidebar. The gallery scrolls on: the next page loads as its end nears, or
- * when focus reaches its last tile. Tapping a tile opens the Printing's details with today's report flows until the
- * CardPopup (#174) replaces them. My metadata reports opens from the page header, since nothing can sit below an
- * endless gallery. The page stays mounted while the collector is elsewhere, so the search, filters, loaded rows and
- * scroll are kept.
+ * when focus reaches its last tile. Tapping a tile opens the CardPopup (#174), which steps through the loaded tiles
+ * with ‹ › or ← → (asking for the next page as it nears the end), and closing it returns focus to the tile of the
+ * card it shows. My metadata reports opens from the page header, since nothing can sit below an endless gallery (the
+ * spec's "at the foot of the page" predates infinite scroll). The page stays mounted while the collector is
+ * elsewhere, so the search, filters, loaded rows and scroll are kept.
  */
 export function CatalogPage({ active, message }: Props) {
   const [text, setText] = useState("");
@@ -65,8 +70,16 @@ export function CatalogPage({ active, message }: Props) {
     [q, format, kind, set, owned]
   );
   const browse = useCatalogBrowse(query, active);
-  const [detail, setDetail] = useState<DetailRequest | null>(null);
+  const [card, setCard] = useState<CardRequest | null>(null);
   const opener = useRef<HTMLElement | null>(null);
+  // The popup's place among the loaded tiles, found by Edition: the list can be replaced under it (a restart).
+  const index = card?.editionId
+    ? browse.editions.findIndex(
+        (edition) => edition.edition_id === card.editionId
+      )
+    : -1;
+  const [wantsNext, setWantsNext] = useState(false);
+  const closedOn = useRef<string | null>(null);
   const [reportsKey, setReportsKey] = useState(0);
   const [reportsOpen, setReportsOpen] = useState(false);
   const reportsButton = useRef<HTMLButtonElement>(null);
@@ -74,6 +87,58 @@ export function CatalogPage({ active, message }: Props) {
   const sentinel = useRef<HTMLDivElement>(null);
   const { loadMore } = browse;
   const canLoad = browse.nextCursor !== null && !browse.errorMore;
+  const editionsShown = browse.editions;
+
+  const show = useCallback((edition: BrowseEdition) => {
+    setCard({
+      printingId: edition.printing_id,
+      editionId: edition.edition_id,
+      row: edition,
+      report: null,
+    });
+  }, []);
+  const stepTo = useCallback(
+    (target: number) => {
+      const edition = editionsShown[target];
+      if (edition) show(edition);
+    },
+    [editionsShown, show]
+  );
+  const onPrevious = useCallback(() => stepTo(index - 1), [stepTo, index]);
+  const onNext = useCallback(() => {
+    if (index < editionsShown.length - 1) stepTo(index + 1);
+    else if (canLoad) {
+      // At the last loaded tile: step once the next page arrives.
+      setWantsNext(true);
+      loadMore();
+    }
+  }, [stepTo, index, editionsShown.length, canLoad, loadMore]);
+
+  // Stepping near the end of the loaded tiles asks for the next page ahead of time.
+  useEffect(() => {
+    if (card && index >= 0 && index >= editionsShown.length - 5 && canLoad)
+      loadMore();
+  }, [card, index, editionsShown.length, canLoad, loadMore]);
+  // The page asked for by › at the end arrived (or failed): step, or stop waiting.
+  useEffect(() => {
+    if (!wantsNext) return;
+    if (!card || index < 0 || browse.errorMore) setWantsNext(false);
+    else if (index < editionsShown.length - 1) {
+      setWantsNext(false);
+      stepTo(index + 1);
+    }
+  }, [wantsNext, card, index, editionsShown.length, browse.errorMore, stepTo]);
+  // Closing the popup after stepping returns focus to the tile of the card it showed (the Dialog itself returns it
+  // to the tile that opened it); the browser scrolls that tile into view.
+  useEffect(() => {
+    if (card || !closedOn.current) return;
+    const id = closedOn.current;
+    closedOn.current = null;
+    const tile = document.querySelector<HTMLElement>(
+      `[data-edition-id="${CSS.escape(id)}"]`
+    );
+    if (tile && tile !== document.activeElement) tile.focus();
+  }, [card]);
 
   // Infinite scroll: a sentinel after the last tile asks for the next page as it nears the window. Observing again
   // after each page (the length changes) asks once more while the sentinel is still in reach.
@@ -104,10 +169,11 @@ export function CatalogPage({ active, message }: Props) {
     clearMetadataReportLink();
     if (link) {
       opener.current = null;
-      setDetail({
+      setCard({
         printingId: link.printingId,
-        reportEditionId: link.editionId,
-        report: true,
+        editionId: link.editionId,
+        row: null,
+        report: { kind: "metadata", editionId: link.editionId },
       });
     }
   }, [active]);
@@ -207,12 +273,7 @@ export function CatalogPage({ active, message }: Props) {
                     format={format}
                     onOpen={(element) => {
                       opener.current = element;
-                      setDetail({
-                        printingId: edition.printing_id,
-                        reportEditionId: null,
-                        report: false,
-                        setCode: edition.set_code,
-                      });
+                      show(edition);
                     }}
                   />
                 </li>
@@ -254,9 +315,27 @@ export function CatalogPage({ active, message }: Props) {
           <MyMetadataReports key={reportsKey} refreshKey={reportsKey} />
         </div>
       </Dialog>
-      <PrintingDetailDialog
-        request={detail}
-        onClose={() => setDetail(null)}
+      <CatalogCardPopup
+        request={card}
+        onClose={() => {
+          closedOn.current = card?.editionId ?? null;
+          setWantsNext(false);
+          setCard(null);
+        }}
+        position={
+          index >= 0 && first?.matches != null
+            ? { index, total: Math.max(first.matches, editionsShown.length) }
+            : null
+        }
+        canPrevious={index > 0}
+        canNext={
+          index >= 0 &&
+          !wantsNext &&
+          (index < editionsShown.length - 1 || canLoad)
+        }
+        onPrevious={onPrevious}
+        onNext={onNext}
+        onAdded={browse.noteAdded}
         onReported={() => setReportsKey((value) => value + 1)}
         returnFocus={opener}
       />
@@ -300,6 +379,7 @@ function CatalogTile({
       }
       priceId={priceId}
       aria-describedby={priceId}
+      data-edition-id={edition.edition_id}
       onClick={(event) => onOpen(event.currentTarget)}
     />
   );

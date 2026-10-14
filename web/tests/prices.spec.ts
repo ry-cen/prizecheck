@@ -122,11 +122,14 @@ const tile = (page: Page, start: string) =>
     .getByRole("region", { name: "Catalog results" })
     .getByRole("button", { name: new RegExp(`^${start}`) });
 
-/** Opens a tile's Printing details, which give every Edition of that Printing its full price sentence. */
+/** Opens a tile's card popup (#174): its Edition picker prices every Edition of the Printing in one short line, and the
+ * picked Edition (the tile's) gets the full price sentence. */
 async function details(page: Page, start: string) {
   await tile(page, start).click();
   const dialog = page.getByRole("dialog", { name: "Furret" });
-  await expect(dialog.getByRole("article")).toBeVisible();
+  await expect(
+    dialog.getByRole("group", { name: "Selected Edition" })
+  ).toBeVisible();
   return dialog;
 }
 
@@ -165,7 +168,7 @@ test("card information shows each Edition's own price with age, stale and finish
   await expect(
     tile(page, "Furret, DAA 1, Darkness Ablaze, Reverse Holo")
   ).toContainText("$0.43");
-  // The details give the full sentence for each Edition of the Printing.
+  // The popup prices each Edition in its picker and gives the picked one the full sentence.
   let card = await details(page, "Furret, DAA 1, Darkness Ablaze, Normal");
   await expect(card).toContainText("$0.25");
   await expect(card).toContainText("$0.43");
@@ -173,7 +176,20 @@ test("card information shows each Edition's own price with age, stale and finish
   await expect(card).toContainText("Last checked");
   await expect(card).not.toContainText("Stale");
   await expect(card).not.toContainText("$0.00");
-  await expect(card.locator(".edition-price")).toHaveCount(2);
+  await expect(
+    card.getByRole("group", { name: "Editions" }).locator(".edition-price")
+  ).toHaveCount(2);
+  const picked = card.getByRole("group", { name: "Selected Edition" });
+  await expect(picked.locator(".edition-price")).toHaveCount(1);
+  await expect(picked).toContainText("$0.25");
+  await expect(picked).toContainText("Last checked");
+  // Picking the Reverse Holo gives it the full sentence: no provider time, so its age is unknown.
+  await card
+    .getByRole("group", { name: "Editions" })
+    .getByRole("button", { name: /^Reverse Holo/ })
+    .click();
+  await expect(picked).toContainText("$0.43");
+  await expect(picked).toContainText("Age unknown");
   await page.keyboard.press("Escape");
   card = await details(page, "Furret, DAA 2,");
   await expect(card).toContainText("Price unavailable: finish not established");

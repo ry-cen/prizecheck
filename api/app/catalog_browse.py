@@ -14,6 +14,8 @@ TCGdex set ID that reads the same ("G1" is Gym Heroes, not Generations, whose co
 shares with its subsets searches all of them. Anything else is a name prefix; an empty ``q`` lists everything. The response says which mode ran (``search``), so the page's hint reports the
 server's reading. Filters: ``kind`` (Pokémon, Supporter, Item, Tool, Stadium, Energy; a Trainer whose Trainer Type is
 unknown matches no Trainer Type), ``format`` (hides ``not_legal`` only, so ``unknown`` stays), ``set_id`` and ``owned``.
+``printing_id`` (#174) lists one Card Printing's active Editions, so the CardPopup reads every Edition's copies, the
+regulation mark and the Format Standing in one call, whether it opened from a tile or from the inspector's report link.
 
 Order (the owner's decision on #173). Newest set first: by the set's release date, latest first, then within a set by
 collector number in natural order (2 before 10, a letter suffix after its number, numbers with a letter prefix such as
@@ -79,6 +81,7 @@ NUMBER_ORDER = ("set_id", "number_missing", "number_value", "number_key", "searc
 
 LISTED = """SELECT ge.edition_id,gp.printing_id,gp.display_name AS name,gp.set_id,gp.set_name,gp.collector_number,
     e.descriptor,e.descriptor_key,gp.image_url,gp.search_name,ca.card_kind,ca.trainer_type,ca.evolves_from,
+    ca.regulation_mark,
     substring(gp.collector_number from '^[0-9]+') IS NULL AS number_missing,
     coalesce(substring(gp.collector_number from '^[0-9]+')::numeric,0) AS number_value,
     lower(gp.collector_number) AS number_key,
@@ -119,6 +122,8 @@ class BrowseEdition(BaseModel):
     card_kind: Literal["pokemon", "trainer", "energy"] | None
     trainer_type: Literal["supporter", "item", "tool", "stadium"] | None
     evolves_from: str | None
+    # The effective regulation mark (migration 041), or null when the card has none or it is unknown.
+    regulation_mark: str | None
     standing: EditionStandings
     # Copies the caller owns in every Location.
     owned: int
@@ -247,6 +252,7 @@ def browse_editions(q: str = Query(default="", max_length=120),
                     set_id: str = Query(default="", max_length=80),
                     owned: bool = False,
                     deck_id: UUID | None = None,
+                    printing_id: UUID | None = None,
                     cursor: str | None = Query(default=None, max_length=4096),
                     user_id: str = Depends(verified_user)):
     started = time.monotonic()
@@ -259,11 +265,12 @@ def browse_editions(q: str = Query(default="", max_length=120),
             conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
             keys = format_standing.current_keys(conn)
             if keys is not None:
-                return _page(conn, user_id, keys, _text(q), kind, format_name, set_id.strip(), owned, deck_id, cursor)
+                return _page(conn, user_id, keys, _text(q), kind, format_name, set_id.strip(), owned, deck_id,
+                             printing_id, cursor)
     fail(503, "FORMAT_STANDING_BUSY")
 
 
-def _page(conn, user_id, keys, text, kind, format_name, set_id, owned, deck_id, cursor) -> BrowsePage:
+def _page(conn, user_id, keys, text, kind, format_name, set_id, owned, deck_id, printing_id, cursor) -> BrowsePage:
     state = conn.execute("SELECT active_generation,revision,last_success FROM catalog_state WHERE singleton").fetchone()
     owner = conn.execute("SELECT revision FROM inventory_owner WHERE user_id=%s", (user_id,)).fetchone()
     revision = owner["revision"] if owner else 1
@@ -276,7 +283,7 @@ def _page(conn, user_id, keys, text, kind, format_name, set_id, owned, deck_id, 
     # The last slot answers 409 CATALOG_CHANGED: the catalog revision, the Format Standing key and the set code table
     # (a deploy that changes it can change what q means).
     context = ["catalog-editions", user_id, text, kind, format_name, set_id, owned,
-               str(deck_id) if deck_id else None, revision,
+               str(deck_id) if deck_id else None, str(printing_id) if printing_id else None, revision,
                [state["revision"], format_standing.standing_token(keys), set_codes.DIGEST]]
     order = NUMBER_ORDER if set_id or search.mode == "set_number" else NAME_ORDER
     anchor = None
@@ -308,6 +315,9 @@ def _page(conn, user_id, keys, text, kind, format_name, set_id, owned, deck_id, 
     if set_id:
         conditions += " AND gp.set_id=%s"
         params.append(set_id)
+    if printing_id:
+        conditions += " AND ge.printing_id=%s"
+        params.append(printing_id)
     if kind:
         column, value = KIND_FILTERS[kind]
         conditions += f" AND ca.{column}=%s"
@@ -338,7 +348,7 @@ def _page(conn, user_id, keys, text, kind, format_name, set_id, owned, deck_id, 
             set_name=row["set_name"], set_code=set_codes.code_for(row["set_id"]),
             collector_number=row["collector_number"], descriptor=row["descriptor"],
             image_url=f'{row["image_url"]}/low.webp' if row["image_url"] else None, card_kind=row["card_kind"],
-            trainer_type=row["trainer_type"], evolves_from=row["evolves_from"],
+            trainer_type=row["trainer_type"], evolves_from=row["evolves_from"], regulation_mark=row["regulation_mark"],
             standing=EditionStandings(**{name: _standing(found.get(name)) for name in ("standard", "expanded", "glc")}),
             owned=total, in_deck=in_deck if deck_id else None, free=total - in_deck if deck_id else None))
     printings = matches = None

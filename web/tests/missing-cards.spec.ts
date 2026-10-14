@@ -126,7 +126,8 @@ promote({'fixture-1': 'Pikachu'})`,
     ).toContainText("Approved shared record: Pikachu · Jungle #99.");
     await expect(item).toHaveCount(0);
     await page.getByRole("button", { name: "Catalog", exact: true }).click();
-    // The approved card is in Catalog's gallery (#173); its details name the owner-reviewed source.
+    // The approved card is in Catalog's gallery (#173); its card popup (#174) names the owner-reviewed source, and its
+    // Edition carries the Owner reviewed badge.
     await page
       .getByRole("searchbox", { name: "Search the catalog" })
       .fill("Pikachu");
@@ -135,11 +136,11 @@ promote({'fixture-1': 'Pikachu'})`,
       .getByRole("button", { name: /^Pikachu, Jungle 99,/ })
       .first()
       .click();
+    const popup = page.getByRole("dialog", { name: "Pikachu" });
+    await expect(popup.getByText("Owner reviewed manual record")).toBeVisible();
     await expect(
-      page
-        .getByRole("dialog", { name: "Pikachu" })
-        .getByText("Owner reviewed manual record")
-    ).toBeVisible();
+      popup.getByRole("group", { name: "Editions" }).getByRole("button")
+    ).toContainText("Owner reviewed");
   } finally {
     await pool.end();
   }

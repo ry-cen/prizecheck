@@ -2,9 +2,9 @@
 // printed set codes, the one filter row (format and type chips, the set picker chip, Owned only), a "?" for a card
 // whose Format Standing is unknown, EditionTile's printed code, owned badge and darkened artwork, newest set first,
 // infinite scroll (its end, Retry after a failed page, a stale cursor starting again from page one), the status line's
-// three states, the page keeping its state across a tab switch, the Printing details a tile opens, My metadata reports
-// in the header, and the shared page check at 1280×800 and 375×812 with the dialogs open as well as closed. The
-// collector flows that predate the gallery are in catalog-search.spec.ts.
+// three states, the page keeping its state across a tab switch, the CardPopup a tile opens (#174; its own behaviour is
+// in catalog-popup.spec.ts), My metadata reports in the header, and the shared page check at 1280×800 and 375×812 with
+// the dialogs open as well as closed. The collector flows that predate the gallery are in catalog-search.spec.ts.
 import { test, expect, type Locator, type Page } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -254,23 +254,26 @@ test.describe("desktop", () => {
     await expect(tile(page, "Switch, MEG 130")).toContainText("×1");
   });
 
-  test("a tile opens the Printing's details, a stale page starts again from page one, and a failed page offers Retry", async ({
+  test("a tile opens the card popup, a stale page starts again from page one, and a failed page offers Retry", async ({
     page,
   }) => {
     seedGallery();
     await signIn(page);
     const bulbasaur = tile(page, "Bulbasaur, MEG 001");
     await bulbasaur.click();
+    // The CardPopup (#174) replaced the interim details dialog.
     const details = page.getByRole("dialog", { name: "Bulbasaur" });
     await expect(details).toContainText("Mega Evolution (MEG) · #001");
-    await expect(details).toContainText("Card Identity: Bulbasaur");
+    await expect(details).toContainText("Regulation mark I");
+    // The Card Identity shows only when it differs from the name.
+    await expect(details).not.toContainText("Card Identity");
     await expect(details).toContainText(
       "Artwork belongs to the Printing and does not prove an Edition finish."
     );
     await expect(
-      details.getByRole("button", { name: "Report metadata" })
+      details.getByRole("button", { name: "Report this Edition" })
     ).toHaveCount(1);
-    await expectPageChecks(page, "Catalog, card details open");
+    await expectPageChecks(page, "Catalog, card popup open");
     await page.keyboard.press("Escape");
     await expect(details).toBeHidden();
     await expect(bulbasaur).toBeFocused();
@@ -346,7 +349,7 @@ test.describe("desktop", () => {
 test.describe("phone", () => {
   test.use({ viewport: { width: 375, height: 812 }, hasTouch: true });
 
-  test("on a phone the gallery, the filter row, the set picker and the details pass the page check", async ({
+  test("on a phone the gallery, the filter row, the set picker and the card popup pass the page check", async ({
     page,
   }) => {
     seedGallery();
@@ -371,8 +374,8 @@ test.describe("phone", () => {
     await expect(picker).toBeHidden();
     await tile(page, "Bulbasaur, MEG 001").tap();
     const details = page.getByRole("dialog", { name: "Bulbasaur" });
-    await expect(details).toContainText("Card Identity: Bulbasaur");
-    await expectPageChecks(page, "Catalog on a phone, card details open");
+    await expect(details).toContainText("Regulation mark I");
+    await expectPageChecks(page, "Catalog on a phone, card popup open");
     await details.getByRole("button", { name: "Close card details" }).tap();
     await page.getByRole("button", { name: "My metadata reports" }).tap();
     await expect(

@@ -17,8 +17,11 @@ type Props = {
    * the dialog is centred on desktop and a bottom sheet on a phone (760 px or narrower). */
   side?: "left" | "right";
   /** "wide": a centred panel up to 760 px wide on desktop that fills the screen on a phone, for a dialog
-   * that holds a long list (Manage locations). Ignored with `side`. */
-  size?: "wide";
+   * that holds a long list (Manage locations). "card": the same centred panel on desktop, but a bottom sheet
+   * on a phone, as a plain Dialog is (CardPopup, #174). Ignored with `side`. */
+  size?: "wide" | "card";
+  /** Controls drawn in the header just before the close button, such as CardPopup's "‹ N / M ›" (#174). */
+  headerActions?: ReactNode;
   /** The scrolling content box, for a dialog that scrolls it itself (a drag that scrolls near its edges). */
   bodyRef?: React.Ref<HTMLDivElement>;
   /** Layout classes for the content box (scroll padding). Never colours or sizes. */
@@ -41,6 +44,9 @@ const RIGHT =
   "inset-y-0 right-0 left-auto m-0 h-dvh max-h-none w-drawer max-w-none rounded-none border-y-0 border-r-0 border-l border-border-strong";
 const WIDE =
   "inset-0 m-auto h-fit max-h-[min(860px,calc(100dvh-var(--space-8)-var(--space-8)))] w-[min(760px,calc(100vw-var(--space-6)-var(--space-6)))] max-w-none rounded-dialog border border-border-strong phone:h-dvh phone:max-h-none phone:w-full phone:rounded-none phone:border-0";
+// WIDE on desktop, CENTRED's bottom sheet on a phone, a little taller so a card's details fit.
+const CARD =
+  "inset-0 m-auto h-fit max-h-[min(860px,calc(100dvh-var(--space-8)-var(--space-8)))] w-[min(760px,calc(100vw-var(--space-6)-var(--space-6)))] max-w-none rounded-dialog border border-border-strong phone:inset-x-0 phone:top-auto phone:bottom-0 phone:m-0 phone:max-h-[92dvh] phone:w-full phone:rounded-b-none phone:border-x-0 phone:border-b-0";
 
 /**
  * The kit's one dialog, on the native <dialog> element (ADR 0012). It opens with showModal(), so the
@@ -57,6 +63,7 @@ export function Dialog({
   closeLabel = "Close",
   side,
   size,
+  headerActions,
   returnFocus,
   bodyRef,
   bodyClassName,
@@ -127,7 +134,7 @@ export function Dialog({
     <dialog
       ref={ref}
       aria-labelledby={titleId}
-      className={`${FRAME} ${side === "left" ? LEFT : side === "right" ? RIGHT : size === "wide" ? WIDE : CENTRED}`}
+      className={`${FRAME} ${side === "left" ? LEFT : side === "right" ? RIGHT : size === "wide" ? WIDE : size === "card" ? CARD : CENTRED}`}
       onKeyDown={onKeyDown}
       onCancel={(event) => {
         event.preventDefault();
@@ -152,14 +159,19 @@ export function Dialog({
           <h2 id={titleId} className="m-0 text-heading font-semibold">
             {title}
           </h2>
-          <button
-            type="button"
-            aria-label={closeLabel}
-            onClick={onClose}
-            className="inline-flex size-control cursor-pointer items-center justify-center rounded-control border-0 bg-transparent p-0 text-text-muted hover:bg-surface-raised hover:text-text phone:size-tap"
-          >
-            <Icon icon={X} size={18} />
-          </button>
+          <div className="flex shrink-0 items-center gap-1">
+            {headerActions}
+            <button
+              type="button"
+              aria-label={closeLabel}
+              // A card popup opens with focus on ✕, not on its first step button.
+              data-autofocus={size === "card" ? "" : undefined}
+              onClick={onClose}
+              className="inline-flex size-control cursor-pointer items-center justify-center rounded-control border-0 bg-transparent p-0 text-text-muted hover:bg-surface-raised hover:text-text phone:size-tap"
+            >
+              <Icon icon={X} size={18} />
+            </button>
+          </div>
         </div>
         <div
           ref={bodyRef}

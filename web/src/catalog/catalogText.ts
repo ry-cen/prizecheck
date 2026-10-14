@@ -60,3 +60,55 @@ export const STANDING_BUSY =
   "Card legality is being updated. Retry in a moment.";
 export const BROWSE_FAILED =
   "Catalog search is temporarily unavailable. Please retry.";
+
+// ---------------------------------------------------------------- CardPopup (#174)
+
+/** The art note (spec "Catalog": the art, with the note that artwork doesn't prove an Edition's finish). */
+export const ART_NOTE =
+  "Artwork belongs to the Printing and does not prove an Edition finish.";
+
+/** A legality Pill's words: the Format, then its standing. */
+export const STANDING_WORDS = {
+  legal: "Legal",
+  not_legal: "Not legal",
+  unknown: "Unknown",
+} as const;
+
+/** The largest stack the popup's − N + adds in one press. */
+export const MAX_ADD = 999;
+
+export function copies(count: number | string): string {
+  return `${count} ${String(count) === "1" ? "copy" : "copies"}`;
+}
+
+export function addedText(count: number, path: string, stack: string): string {
+  return `Added ${copies(count)} to ${path}. It now holds ${stack} of this Edition.`;
+}
+
+export function plannedText(deck: string, quantity: string): string {
+  return `Planned 1 for ${deck}. Its Deck List now has ${quantity} of this Edition.`;
+}
+
+const ADD_ERRORS: Record<string, string> = {
+  EDITION_UNAVAILABLE: "This Edition is no longer available to add.",
+  LOCATION_NOT_FOUND: "That Location is gone. Choose another.",
+  QUANTITY_OVERFLOW: "That Location can't hold that many more copies.",
+  INVALID_QUANTITY: "Choose between 1 and 999 copies.",
+};
+
+export function addFailed(code: string, retry: boolean): string {
+  if (retry) return "Add may have completed. Press Add again to check safely.";
+  return ADD_ERRORS[code] ?? "Add failed. Please retry.";
+}
+
+const PLAN_ERRORS: Record<string, string> = {
+  DECK_NOT_FOUND: "That Deck is gone. Choose another.",
+  EDITION_UNAVAILABLE: "This Edition is no longer available to plan.",
+  STALE_DECK_LIST: "That Deck List keeps changing. Press Plan 1 again.",
+};
+
+export function planFailed(code: string, retry: boolean): string {
+  if (retry)
+    return "Plan 1 may have completed. Press Plan 1 again to check safely.";
+  return PLAN_ERRORS[code] ?? "Plan 1 failed. Please retry.";
+}
