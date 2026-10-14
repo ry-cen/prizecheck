@@ -22,6 +22,10 @@ from test_publications import list_cards, publish_gate_fixture
 @pytest.fixture(autouse=True)
 def public_objects(tmp_path, monkeypatch):
     monkeypatch.setenv("PUBLIC_PROJECTION_DIR", str(tmp_path))
+    # Start with no active marketplace rule: an activation another test on this worker left behind would verify the
+    # mapping this test expects to stay unverified.
+    with connect() as conn:
+        conn.execute("UPDATE catalog_rule_state SET activation_id=NULL")
     from app.public_projection import FilePublicProjection
     with FilePublicProjection().writer(initialize=True):
         pass

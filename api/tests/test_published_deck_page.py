@@ -37,7 +37,7 @@ PRIVATE_KEYS = {"owner", "owner_id", "user_id", "deck_id", "deck_name", "locatio
                 "holding", "holdings", "in_deck", "elsewhere", "not_owned", "ownership", "owned", "free", "surplus",
                 "owner_revision", "deck_list_revision", "edition_id", "printing_id", "identity_id", "storage", "places",
                 "cost_to_complete", "deck_list_cost", "email", "attribute_revision", "catalog_revision",
-                "mapping_revision", "product_id", "quote_lookup", "stale_copies", "unknown_age_copies",
+                "mapping_revision", "product_id", "quote_lookup", "stale_copies", "unknown_age_copies", "fallback_copies",
                 "provider_updated_at"}
 
 

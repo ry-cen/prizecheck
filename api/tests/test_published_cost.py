@@ -142,7 +142,7 @@ def test_published_cost_labels_empty_unpriced_and_unreadable_snapshots(store, mo
         ("empty", "$0.00", "0", "0", 1)
     assert body["digest"] == public_deck.snapshot_digest(stored_decks()["decks"][token]["snapshot"])
     assert set(body) == {"version", "digest", "status", "reason", "total_copies", "priced_copies",
-                         "fallback_copies", "amount", "display_amount", "currency", "editions"}
+                         "amount", "display_amount", "currency", "editions"}
     assert body["editions"] == []
 
     _, token = publish({plain["id"]: 2})
