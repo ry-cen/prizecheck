@@ -15,6 +15,10 @@ import {
   STANDING_BUSY,
 } from "./catalogText";
 
+/** Copies the collector's own command changed for one Card Edition: added (a batch add) or, below 0, taken out
+ * again (its Undo). */
+export type OwnChange = { editionId: string; added: number };
+
 export type CatalogBrowse = {
   /** The first page of the current query: its search reading, counts and revisions. Null before the first answer. */
   first: BrowsePage | null;
@@ -32,9 +36,10 @@ export type CatalogBrowse = {
   errorMore: boolean;
   loadMore: () => void;
   retry: () => void;
-  /** The collector added `added` copies of one Edition from this page (the CardPopup, #174): its tile shows them at
-   * once, and the next page's 409 for that owner revision starts again quietly, without "Your collection changed". */
-  noteAdded: (editionId: string, added: number, ownerRevision: number) => void;
+  /** One command of the collector's own on this page changed these Editions' copies (a batch add from the CardPopup or
+   * Add mode, or its Undo, #174/#175): their tiles show the new counts at once, and the next page's 409 for that one
+   * owner revision starts again quietly, without "Your collection changed". */
+  noteAdded: (changes: readonly OwnChange[], ownerRevision: number) => void;
 };
 
 // A walk that starts again after a 409 reads as many rows as were shown, up to this many, so the gallery and an open
@@ -168,13 +173,20 @@ export function useCatalogBrowse(
   }
 
   const noteAdded = useCallback(
-    (editionId: string, added: number, ownerRevision: number) => {
+    (changes: readonly OwnChange[], ownerRevision: number) => {
       const page = firstRef.current;
+      // One command moves the owner revision once, however many Editions it changed.
       if (page && ownerRevision > page.owner_revision) ownChanges.current += 1;
+      const added = new Map(
+        changes.map((change) => [change.editionId, change.added])
+      );
       setEditions((rows) =>
         rows.map((row) =>
-          row.edition_id === editionId
-            ? { ...row, owned: row.owned + added }
+          added.has(row.edition_id)
+            ? {
+                ...row,
+                owned: Math.max(0, row.owned + added.get(row.edition_id)!),
+              }
             : row
         )
       );

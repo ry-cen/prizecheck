@@ -7,6 +7,7 @@ import { readFileSync } from "node:fs";
 import { Pool } from "pg";
 import { animationsFinished } from "./support/motion";
 import { startAsNewOwner } from "./support/owner";
+import { expectPageChecks } from "./support/page-check";
 
 type TreeNode = { id: string; name: string; version: number };
 
@@ -320,15 +321,26 @@ test.describe("desktop", () => {
     await expectAccessible(page, "Removal dialog");
     await page.keyboard.press("Escape");
 
+    // Add cards (#175): Catalog's gallery in Add mode, with a card queued.
     await page.getByRole("button", { name: "Add cards", exact: true }).click();
     const add = page.getByRole("dialog", {
       name: `Add cards to 0 Access ${s}`,
     });
-    await add.getByLabel("Search English card name").fill("Access");
-    await add.getByRole("button", { name: "Search", exact: true }).click();
-    await expect(add.getByLabel("Card Edition")).toBeVisible();
+    await add
+      .getByRole("searchbox", { name: "Search the catalog" })
+      .fill("Access");
+    await add
+      .getByRole("region", { name: "Catalog results" })
+      .getByRole("button", {
+        name: "One more Access Abra fixture 1 Normal",
+        exact: true,
+      })
+      .click();
+    await expect(
+      add.getByRole("region", { name: "Add to a Location" })
+    ).toContainText("1× Access Abra");
     await expectAccessible(page, "Add cards");
-    await add.getByRole("button", { name: "Close" }).click();
+    await add.getByRole("button", { name: "Close Add cards" }).click();
 
     await page
       .getByRole("button", { name: "Add location", exact: true })
@@ -354,10 +366,7 @@ test.describe("desktop", () => {
     await expect(
       page.getByRole("region", { name: "Estimated Deck Cost" })
     ).toBeVisible();
-    await page.getByRole("button", { name: "Export", exact: true }).click();
-    await expect(page.getByRole("menuitem").first()).toBeVisible();
-    await expectAccessible(page, "Deck heading and Export menu");
-    await page.keyboard.press("Escape");
+    await expectAccessible(page, "Deck heading");
 
     await addCopies(page, access, bulbasaur, 1);
     await page.evaluate(() => window.dispatchEvent(new Event("focus")));
@@ -507,18 +516,30 @@ test.describe("desktop", () => {
       );
     expect(mounted).toBe(true);
 
+    // Add cards (#175): its bar's alert line is there before any failure, and its result is the toast, drawn in the
+    // same live region as before.
     await page.getByRole("button", { name: "Add cards", exact: true }).click();
     const add = page.getByRole("dialog", { name: `Add cards to 0 Live ${s}` });
-    const status = add.getByRole("status");
-    await expect(status).toHaveText("");
-    await add.getByLabel("Search English card name").fill("Live");
-    await add.getByRole("button", { name: "Search", exact: true }).click();
-    await add.getByLabel("Card Edition").selectOption({
-      label: "Live Abra · Fixture Set #1 · finish: normal",
-    });
-    await add.getByLabel("Quantity", { exact: true }).fill("1");
-    await add.getByRole("button", { name: "Add to Location" }).click();
-    await expect(status).toContainText("This stack now has 2 copies");
+    const addBar = add.getByRole("region", { name: "Add to a Location" });
+    await expect(addBar.getByRole("alert")).toHaveText("");
+    await add
+      .getByRole("region", { name: "Catalog results" })
+      .getByRole("button", {
+        name: "One more Live Abra fixture 1 Normal",
+        exact: true,
+      })
+      .click();
+    await addBar.getByRole("button", { name: "Add 1 card" }).click();
+    await expect(add).toHaveCount(0);
+    const added = await page
+      .getByRole("region", { name: "Notifications" })
+      .getByRole("paragraph")
+      .filter({ hasText: `Added 1 card to 0 Live ${s}.` })
+      .evaluate(
+        (el, list) => (list as Element[]).includes(el.closest("[aria-live]")!),
+        before
+      );
+    expect(added).toBe(true);
   });
 
   test("targets are at least 24 px on desktop", async ({ page }) => {
@@ -549,10 +570,7 @@ test.describe("desktop", () => {
     await expect(
       page.getByRole("region", { name: "Estimated Deck Cost" })
     ).toBeVisible();
-    await page.getByRole("button", { name: "Export", exact: true }).click();
-    await expect(page.getByRole("menuitem").first()).toBeVisible();
     expect(await smallTargets(page, 24)).toEqual([]);
-    await page.keyboard.press("Escape");
 
     await page.setViewportSize({ width: 761, height: 800 });
     expect(
@@ -681,12 +699,23 @@ test.describe("mobile", () => {
     expect(await smallTargets(page, 44), "Filters & display").toEqual([]);
     await page.keyboard.press("Escape");
 
+    // Add cards (#175): a tile's quick buttons are 36 px with a 44 px tap area, which the shared page check measures.
     await page.getByRole("button", { name: "Add cards", exact: true }).tap();
     const add = page.getByRole("dialog", { name: `Add cards to 0 Touch ${s}` });
-    await add.getByLabel("Search English card name").fill("Touch");
-    await add.getByRole("button", { name: "Search", exact: true }).tap();
-    await expect(add.getByLabel("Card Edition")).toBeVisible();
-    expect(await smallTargets(page, 44), "Add cards").toEqual([]);
+    await add
+      .getByRole("searchbox", { name: "Search the catalog" })
+      .fill("Touch");
+    await add
+      .getByRole("region", { name: "Catalog results" })
+      .getByRole("button", {
+        name: "One more Touch Abra fixture 1 Normal",
+        exact: true,
+      })
+      .tap();
+    await expect(
+      add.getByRole("region", { name: "Add to a Location" })
+    ).toContainText("1× Touch Abra");
+    await expectPageChecks(page, "phone Add cards");
   });
 
   test("transitions last 150 ms or less and stop under reduced motion", async ({

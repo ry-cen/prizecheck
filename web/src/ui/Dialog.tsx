@@ -137,10 +137,15 @@ export function Dialog({
       className={`${FRAME} ${side === "left" ? LEFT : side === "right" ? RIGHT : size === "wide" ? WIDE : size === "card" ? CARD : CENTRED}`}
       onKeyDown={onKeyDown}
       onCancel={(event) => {
+        // React passes a nested dialog's cancel and close events up to this one (a card popup over Collection's Add
+        // cards, #175): only this dialog's own events close it.
+        if (event.target !== event.currentTarget) return;
         event.preventDefault();
         onClose();
       }}
       onClose={(event) => {
+        // A nested dialog's close (the card popup's, inside Add cards) is not this one's.
+        if (event.target !== event.currentTarget) return;
         // The browser can close a modal itself (a repeated Escape); keep the parent's state in step.
         // A queued `close` from an earlier close can arrive after a quick reopen: the dialog is open
         // again then, and that stale event must not shut it.

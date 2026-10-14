@@ -36,7 +36,8 @@ import {
   useCopiesWhere,
   type PopupEdition,
 } from "./useCardDetails";
-import { usePlaces, type Places } from "./usePlaces";
+import type { AddedCards } from "./useAddToast";
+import { usePlaces, type Place, type Places } from "./usePlaces";
 
 /** A report flow opened from the footer: a metadata report preset to an Edition (null: the Printing's metadata), or
  * a missing-Edition report. */
@@ -61,8 +62,16 @@ type Props = {
   canNext: boolean;
   onPrevious: () => void;
   onNext: () => void;
-  /** Copies were added: the gallery shows the new count on the tile and knows the owner revision moved by itself. */
-  onAdded: (editionId: string, added: number, ownerRevision: number) => void;
+  /** The Add row's Location (null: Unsorted, else the first), and a new choice in it. The gallery keeps it from card to
+   * card, and sets it to Add mode's target when the popup opens in Add mode (#175). */
+  location: string | null;
+  onLocation: (id: string) => void;
+  /** A Location the Add row offers besides the Storage Leaves: Add mode's target when that is a Deck (Collection's Add
+   * cards on an open Deck). */
+  alsoOffer: Place | null;
+  /** A batch add from the Add row succeeded: the gallery shows the new count on the tile, knows the owner revision
+   * moved by itself, and shows the Undo toast. */
+  onAdded: (added: AddedCards) => void;
   /** A metadata report was sent: My metadata reports reads again. */
   onReported: () => void;
   returnFocus?: RefObject<HTMLElement | null>;
@@ -90,8 +99,6 @@ const byPath = new Intl.Collator(undefined, {
   sensitivity: "base",
 });
 
-type Choice = { location: string | null; deck: string | null };
-
 /** Per card: the Edition picked and the report flow open. A step or a new card starts again from the request. */
 type CardState = {
   key: string;
@@ -115,6 +122,9 @@ export function CatalogCardPopup({
   canNext,
   onPrevious,
   onNext,
+  location,
+  onLocation,
+  alsoOffer,
   onAdded,
   onReported,
   returnFocus,
@@ -141,8 +151,8 @@ export function CatalogCardPopup({
     });
   }
   const [whereVersion, setWhereVersion] = useState(0);
-  // The Location and Deck last chosen stay chosen from card to card while the page is open.
-  const [choice, setChoice] = useState<Choice>({ location: null, deck: null });
+  // The Deck last chosen stays chosen from card to card while the page is open (the gallery keeps the Location).
+  const [deck, setDeck] = useState<string | null>(null);
   const reportRef = useRef<HTMLDivElement>(null);
 
   const ready = details.state === "ready" ? details : null;
@@ -359,10 +369,13 @@ export function CatalogCardPopup({
               key={`${cardKey}:${selected.id}`}
               edition={selected}
               places={places}
-              choice={choice}
-              onChoice={setChoice}
-              onAdded={(added, ownerRevision) => {
-                onAdded(selected.id, added, ownerRevision);
+              alsoOffer={alsoOffer}
+              location={location}
+              onLocation={onLocation}
+              deck={deck}
+              onDeck={setDeck}
+              onAdded={(added) => {
+                onAdded(added);
                 reload();
                 setWhereVersion((value) => value + 1);
               }}
@@ -567,30 +580,40 @@ function Where({
 
 /**
  * The Add rows: Collection | Location | − N + | Add N, and Deck List | Deck | Plan 1. The Location and Deck chosen
- * stay chosen while the page is open (the popup stays mounted). Add N puts physical copies in a Storage Leaf; Plan 1
- * adds one copy to a Deck List and never moves a card.
+ * stay chosen while the page is open (the popup stays mounted). Add N puts physical copies in a Storage Leaf through
+ * a batch add of one item (#175), with an Undo record; Plan 1 adds one copy to a Deck List and never moves a card.
  */
 function AddRows({
   edition,
   places,
-  choice,
-  onChoice,
+  alsoOffer,
+  location: locationId,
+  onLocation,
+  deck: deckId,
+  onDeck,
   onAdded,
 }: {
   edition: PopupEdition;
   places: Places;
-  choice: Choice;
-  onChoice: (choice: Choice) => void;
-  onAdded: (added: number, ownerRevision: number) => void;
+  alsoOffer: Place | null;
+  location: string | null;
+  onLocation: (id: string) => void;
+  deck: string | null;
+  onDeck: (id: string) => void;
+  onAdded: (added: AddedCards) => void;
 }) {
   const headingId = useId();
-  // The last choice while it still exists, else Unsorted (the Location every collector has), else the first.
+  const leaves =
+    alsoOffer && !places.leaves.some((leaf) => leaf.id === alsoOffer.id)
+      ? [alsoOffer, ...places.leaves]
+      : places.leaves;
+  // The chosen Location while it still exists, else Unsorted (the Location every collector has), else the first.
   const location =
-    places.leaves.find((leaf) => leaf.id === choice.location) ??
-    places.leaves.find((leaf) => leaf.label === "Unsorted") ??
-    places.leaves[0];
+    leaves.find((leaf) => leaf.id === locationId) ??
+    leaves.find((leaf) => leaf.label === "Unsorted") ??
+    leaves[0];
   const deck =
-    places.decks.find((item) => item.id === choice.deck) ?? places.decks[0];
+    places.decks.find((item) => item.id === deckId) ?? places.decks[0];
   const [count, setCount] = useState(1);
   const [busy, setBusy] = useState<"add" | "plan" | null>(null);
   const [done, setDone] = useState("");
@@ -612,9 +635,17 @@ function AddRows({
     );
     setBusy(null);
     if (outcome.ok) {
-      setDone(addedText(count, location.label, outcome.quantity));
+      setDone(addedText(count, location.label));
       setCount(1);
-      onAdded(count, outcome.ownerRevision);
+      onAdded({
+        locationId: location.id,
+        path: location.label,
+        items: [{ editionId: edition.id, quantity: count }],
+        copies: outcome.copies,
+        ownerRevision: outcome.ownerRevision,
+        undoId: outcome.undoId,
+        from: "popup",
+      });
     } else {
       setFailure(addFailed(outcome.code, outcome.retry));
       if (outcome.code === "LOCATION_NOT_FOUND") places.reload();
@@ -647,13 +678,11 @@ function AddRows({
             label="Location"
             labelHidden
             value={location?.id ?? ""}
-            disabled={!places.leaves.length}
-            onChange={(event) =>
-              onChoice({ ...choice, location: event.target.value })
-            }
+            disabled={!leaves.length}
+            onChange={(event) => onLocation(event.target.value)}
           >
-            {places.leaves.length ? (
-              places.leaves.map((leaf) => (
+            {leaves.length ? (
+              leaves.map((leaf) => (
                 <option key={leaf.id} value={leaf.id}>
                   {leaf.label}
                 </option>
@@ -692,9 +721,7 @@ function AddRows({
             labelHidden
             value={deck?.id ?? ""}
             disabled={!places.decks.length}
-            onChange={(event) =>
-              onChoice({ ...choice, deck: event.target.value })
-            }
+            onChange={(event) => onDeck(event.target.value)}
           >
             {places.decks.length ? (
               places.decks.map((item) => (

@@ -218,16 +218,27 @@ async function checkDeckHeading(page: Page, width: string) {
   await expectPageChecks(page, `Deck banner (${width})`);
 }
 
-/** Opens Add cards for the open Location, searches, checks it with the Edition picker showing, and closes it. */
+/** Opens Add cards (#175: Catalog's gallery in Add mode) for the open Location, searches, checks it with a card
+ * queued, and closes it. */
 async function checkAddCards(page: Page, path: string, width: string) {
   await page.getByRole("button", { name: "Add cards", exact: true }).click();
   const add = page.getByRole("dialog", { name: `Add cards to ${path}` });
   await expect(add).toBeVisible();
-  await add.getByLabel("Search English card name").fill("Check");
-  await add.getByRole("button", { name: "Search", exact: true }).click();
-  await expect(add.getByLabel("Card Edition")).toBeVisible();
+  await add
+    .getByRole("searchbox", { name: "Search the catalog" })
+    .fill("Check");
+  await add
+    .getByRole("region", { name: "Catalog results" })
+    .getByRole("button", {
+      name: "One more Check Abra fixture 1 Normal",
+      exact: true,
+    })
+    .click();
+  await expect(
+    add.getByRole("region", { name: "Add to a Location" })
+  ).toContainText("1× Check Abra");
   await expectPageChecks(page, `Add cards (${width})`);
-  await add.getByRole("button", { name: "Close" }).click();
+  await add.getByRole("button", { name: "Close Add cards" }).click();
   await expect(add).toHaveCount(0);
 }
 

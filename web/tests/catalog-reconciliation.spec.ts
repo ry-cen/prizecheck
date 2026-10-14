@@ -181,19 +181,24 @@ promote({'card-1':'Correction Pikachu'})`,
     await expect(
       page.getByRole("heading", { level: 1, name: location })
     ).toBeVisible();
+    // Add cards (#175): Catalog's gallery in Add mode, set to the open Location.
     await page.getByRole("button", { name: "Add cards", exact: true }).click();
     const add = page.getByRole("dialog", { name: `Add cards to ${location}` });
-    await add.getByLabel("Search English card name").fill("Correction");
-    await add.getByRole("button", { name: "Search", exact: true }).click();
-    await add.getByLabel("Card Edition").selectOption({
-      label: "Correction Pikachu · Fixture Set #1 · finish: normal",
-    });
-    await add.getByLabel("Quantity", { exact: true }).fill("4");
-    await add.getByRole("button", { name: "Add to Location" }).click();
-    await expect(add.getByRole("status")).toContainText(
-      "This stack now has 4 copies"
-    );
-    await add.getByRole("button", { name: "Close" }).click();
+    await add
+      .getByRole("searchbox", { name: "Search the catalog" })
+      .fill("Correction");
+    const more = add
+      .getByRole("region", { name: "Catalog results" })
+      .getByRole("button", {
+        name: "One more Correction Pikachu fixture 1 Normal",
+        exact: true,
+      });
+    for (const _ of [1, 2, 3, 4]) await more.click();
+    await add
+      .getByRole("region", { name: "Add to a Location" })
+      .getByRole("button", { name: "Add 4 cards" })
+      .click();
+    await expect(add).toHaveCount(0);
     await expect(page.getByRole("main")).toContainText("4 copies · 1 edition");
     // Catalog imports are fixture work; observations go through the real gateway.
     const refresh = (amount: string, onlineCode = "FIXTURE") =>

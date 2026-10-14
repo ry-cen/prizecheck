@@ -6,11 +6,12 @@ import React, {
   useState,
 } from "react";
 import { Menu as MenuIcon, Plus } from "lucide-react";
+import type { AddedCards } from "../catalog/useAddToast";
 import { getLocationTree, type TreeNode } from "../location_generated";
 import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
 import { SearchField } from "../ui/SearchField";
-import { AddCardsDialog } from "./AddCardsDialog";
+import { AddCardsGallery } from "./AddCardsGallery";
 import { CorrectionsNotice } from "./CorrectionsNotice";
 import { CreateLocationDialog } from "./CreateLocationDialog";
 import { DeckHeading } from "./DeckHeading";
@@ -99,7 +100,9 @@ export function Workspace({ userId, active, onOpenDeck }: Props) {
   const filtersOpener = useRef<HTMLButtonElement>(null);
   const closeFiltersDrawer = useCallback(() => setFiltersDrawerOpen(false), []);
   const [manageOpen, setManageOpen] = useState(false);
-  const [addFor, setAddFor] = useState<string | null>(null);
+  // Add cards (#175): open, and the Location it adds to (null: its picker chooses).
+  const [adding, setAdding] = useState<{ fixed: string | null } | null>(null);
+  const addOpener = useRef<HTMLButtonElement>(null);
   const dockRef = useRef<HTMLDivElement>(null);
   const drawerOpener = useRef<HTMLButtonElement>(null);
   // Each Edition's Storage Leaves as the inspector read them, per owner revision (#164).
@@ -173,7 +176,7 @@ export function Workspace({ userId, active, onOpenDeck }: Props) {
     closeDetails();
     setCreateFor(undefined);
     setManageOpen(false);
-    setAddFor(null);
+    setAdding(null);
   }, [active, closeDetails]);
   // Ticket 107: Move, Inventory Removal and Undo, and the desktop tile drag.
   const actions = useInventoryActions({
@@ -217,11 +220,13 @@ export function Workspace({ userId, active, onOpenDeck }: Props) {
     for (const key of ownedTotals.keys())
       if (!key.startsWith(prefix)) ownedTotals.delete(key);
   }, [gallery.ownerRevision, ownedTotals]);
-  // Add cards belongs to the open Storage Leaf or Deck. When that Location is gone, became a folder or is no longer
-  // open, forget it, so the dialog never reopens by itself if the Location becomes a leaf again.
+  // Add cards opened from a Storage Leaf or Deck adds to it. When that Location is gone or became a folder (another
+  // tab), Add cards stays open with its queue and asks for another Location, and never goes back to the old one by
+  // itself if it becomes a leaf again.
   useEffect(() => {
-    if (addFor !== null && current?.id !== addFor) setAddFor(null);
-  }, [addFor, current]);
+    if (adding?.fixed && current?.id !== adding.fixed)
+      setAdding({ fixed: null });
+  }, [adding, current]);
   const locationPath = useCallback(
     (id: string) => (index.byId.has(id) ? index.path(id) : undefined),
     [index]
@@ -230,6 +235,19 @@ export function Workspace({ userId, active, onOpenDeck }: Props) {
     (id: string) => index.byId.get(id)?.name,
     [index]
   );
+  // Add N cards closes Add cards and leaves the collector in the Location the cards went to, with its folders open,
+  // and Collection's toast offers Undo. The popup's Add N inside it leaves it open.
+  const addedCards = (added: AddedCards) => {
+    if (added.from === "bar") {
+      setAdding(null);
+      setExpanded(
+        (previous) =>
+          new Set([...previous, ...index.ancestors(added.locationId)])
+      );
+      setView(added.locationId);
+    }
+    void actions.added(added);
+  };
   // A new view, search, filter or sort starts at the top of its gallery.
   useEffect(() => {
     window.scrollTo(0, 0);
@@ -438,18 +456,16 @@ export function Workspace({ userId, active, onOpenDeck }: Props) {
                 {plural(gallery.totals.editions, "edition", "editions")}
               </p>
             )}
-            {current && (
-              <Button
-                className="ml-auto self-center"
-                onClick={() => current && setAddFor(current.id)}
-              >
-                Add cards
-              </Button>
-            )}
-            {/* Mobile Select mode's toggle, on a phone only. */}
-            <span
-              className={`${current ? "" : "ml-auto "}hidden self-center phone:flex`}
+            <Button
+              ref={addOpener}
+              className="ml-auto self-center"
+              aria-haspopup="dialog"
+              onClick={() => setAdding({ fixed: current?.id ?? null })}
             >
+              Add cards
+            </Button>
+            {/* Mobile Select mode's toggle, on a phone only. */}
+            <span className="hidden self-center phone:flex">
               <Button
                 aria-pressed={selection.selectMode}
                 onClick={() => selection.setSelectMode(!selection.selectMode)}
@@ -612,19 +628,18 @@ export function Workspace({ userId, active, onOpenDeck }: Props) {
           onTreeChanged={loadTree}
         />
       )}
-      {current && addFor === current.id && (
-        <AddCardsDialog
-          key={current.id}
-          locationId={current.id}
-          locationName={current.name}
-          path={index.path(current.id)}
-          onAdded={async () => {
-            gallery.reload();
-            await loadTree();
-          }}
-          onClose={() => setAddFor(null)}
-        />
-      )}
+      <AddCardsGallery
+        open={active && adding !== null}
+        target={
+          adding?.fixed && index.byId.has(adding.fixed)
+            ? { id: adding.fixed, label: index.path(adding.fixed) }
+            : null
+        }
+        onClose={() => setAdding(null)}
+        onAdded={addedCards}
+        onTargetGone={() => void loadTree()}
+        returnFocus={addOpener}
+      />
       {manageOpen && (
         <ManageLocations
           onClose={() => setManageOpen(false)}

@@ -1,4 +1,4 @@
-// Add moved from the old Locations page to the workspace in ticket 114.
+// Add moved from the old Locations page to the workspace in ticket 114, and onto Catalog's Add mode in #175.
 import { test, expect } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
@@ -49,42 +49,63 @@ promote({'card-1': 'Pikachu'})`,
     await expect(
       page.getByRole("heading", { level: 1, name: leaf })
     ).toBeVisible();
-    await page.getByRole("button", { name: "Add cards", exact: true }).focus();
+    // Add cards (#175) is Catalog's gallery in Add mode, set to the open Storage Leaf: queue with the keyboard, then
+    // Add N cards, which closes it and returns focus to Add cards.
+    const opener = page.getByRole("button", { name: "Add cards", exact: true });
+    await opener.focus();
     await page.keyboard.press("Enter");
     const dialog = page.getByRole("dialog", { name: `Add cards to ${leaf}` });
     await expect(dialog).toBeVisible();
-    await expect(dialog.getByLabel("Search English card name")).toBeFocused();
+    await expect(
+      dialog.getByRole("searchbox", { name: "Search the catalog" })
+    ).toBeFocused();
     await page.keyboard.type("Pika");
-    await page.keyboard.press("Enter");
-    const edition = dialog.getByLabel("Card Edition");
-    await edition.selectOption({
-      label: "Pikachu · Fixture Set #1 · finish: normal",
+    const results = dialog.getByRole("region", { name: "Catalog results" });
+    const more = results.getByRole("button", {
+      name: "One more Pikachu fixture 1 Normal",
+      exact: true,
     });
-    await edition.focus();
-    await page.keyboard.press("Tab");
-    await expect(dialog.getByLabel("Quantity")).toBeFocused();
-    await dialog.getByLabel("Quantity").fill("3");
+    await expect(more).toHaveCount(1);
+    await more.focus();
     await page.keyboard.press("Enter");
-    await expect(dialog.getByRole("status")).toHaveText(
-      `Added. This stack now has 3 copies in ${leaf}.`
-    );
-    await edition.selectOption({
-      label: "Pikachu · Fixture Set #1 · finish: normal",
-    });
-    await dialog.getByLabel("Quantity").fill("2");
     await page.keyboard.press("Enter");
-    await expect(dialog.getByRole("status")).toHaveText(
-      `Added. This stack now has 5 copies in ${leaf}.`
-    );
-    await page.keyboard.press("Escape");
+    await page.keyboard.press("Enter");
+    const bar = dialog.getByRole("region", { name: "Add to a Location" });
+    await expect(bar.getByRole("listitem")).toHaveText([
+      "3× Pikachu fixture 1 Normal",
+    ]);
+    await bar.getByRole("button", { name: "Add 3 cards" }).focus();
+    await page.keyboard.press("Enter");
+    await expect(dialog).toHaveCount(0);
+    await expect(opener).toBeFocused();
+    await expect(page.getByRole("main")).toContainText("3 copies · 1 edition");
+
+    await page.keyboard.press("Enter");
+    await expect(dialog).toBeVisible();
+    await page.keyboard.type("Pika");
+    await expect(more).toHaveCount(1);
+    await more.focus();
+    await page.keyboard.press("Enter");
+    await page.keyboard.press("Enter");
+    await bar.getByRole("button", { name: "Add 2 cards" }).focus();
+    await page.keyboard.press("Enter");
     await expect(dialog).toHaveCount(0);
     await expect(
-      page.getByRole("button", { name: "Add cards", exact: true })
-    ).toBeFocused();
+      page.getByRole("region", { name: "Notifications" }).getByRole("paragraph")
+    ).toHaveText(`Added 2 cards to ${leaf}.`);
     await expect(page.getByRole("main")).toContainText("5 copies · 1 edition");
     await expect(
       page.getByRole("region", { name: "Cards" }).getByRole("button")
     ).toHaveCount(5);
+
+    // Escape closes it, adding nothing, and focus returns to Add cards.
+    await opener.focus();
+    await page.keyboard.press("Enter");
+    await expect(dialog).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
+    await expect(opener).toBeFocused();
+    await expect(page.getByRole("main")).toContainText("5 copies · 1 edition");
   } finally {
     await pool.end();
   }

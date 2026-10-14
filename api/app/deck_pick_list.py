@@ -33,7 +33,7 @@ from .deck_ownership import CompetitionWarning, read_ownership
 from .decks import check_revision, read_deck_list, require_deck
 from .location_tree import owner_and_rows
 from .main import connect, verified_user
-from .moves import MAX_BATCH, MAX_QUANTITY, first_non_leaf, quantity, undo_id_for
+from .moves import MAX_BATCH, MAX_QUANTITY, first_non_leaf, quantity, record_undo, undo_id_for
 
 router = APIRouter(prefix='/api/decks', tags=['decks'])
 
@@ -289,20 +289,12 @@ def confirm_picks(deck_id: UUID, command: ConfirmPicks, user_id: str = Depends(v
               VALUES (%s,%s,%s,%s)""", (user_id, command.idempotency_key, digest, new_revision))
             conn.execute("""INSERT INTO move_response(owner_id,request_key,edition_count,copy_count,source_count)
               VALUES (%s,%s,%s,%s,%s)""", (user_id, command.idempotency_key, len(arriving), copies, len(sources)))
-            conn.execute('DELETE FROM inventory_undo WHERE owner_id=%s AND expires_at<=clock_timestamp()', (user_id,))
-            # One multi-source Move record for the whole confirmation, written as moves.apply_selection writes it:
-            # every item names its source, and the record's source_id is set only for a single source, so earlier
-            # readers treat a multi-source record as incompatible (migration 026).
+            # One multi-source Move record for the whole confirmation, written as moves.apply_selection writes it
+            # (migration 026): every item names its source.
             undo_id = undo_id_for(user_id, command.idempotency_key)
             undo = [{'source_id': str(source), 'edition_id': str(edition), 'quantity': str(amount)}
                     for source, edition, amount, _ in items]
-            conn.execute("""INSERT INTO inventory_undo(id,owner_id,action,source_id,destination_id,source_count,payload)
-              VALUES (%s,%s,'move',%s,%s,%s,%s::jsonb)""",
-                         (undo_id, user_id, sources[0] if len(sources) == 1 else None, deck_id, len(sources),
-                          json.dumps(undo)))
-            conn.execute("""DELETE FROM inventory_undo WHERE owner_id=%s AND id NOT IN
-              (SELECT id FROM inventory_undo WHERE owner_id=%s ORDER BY created_at DESC,id DESC LIMIT 5)""",
-                         (user_id, user_id))
+            record_undo(conn, user_id, undo_id, 'move', deck_id, sources, json.dumps(undo))
             return PickConfirmResult(edition_count=len(arriving), copy_count=str(copies), owner_revision=new_revision,
                                      source_count=len(sources), undo_id=undo_id)
     except psycopg.Error:

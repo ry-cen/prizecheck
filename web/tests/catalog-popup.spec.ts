@@ -303,11 +303,7 @@ test.describe("desktop", () => {
     await more.click();
     await more.click();
     await addRow(page).getByRole("button", { name: "Add 3" }).click();
-    await expect(
-      card.getByText(
-        "Added 3 copies to Unsorted. It now holds 3 of this Edition."
-      )
-    ).toBeVisible();
+    await expect(card.getByText("Added 3 copies to Unsorted.")).toBeVisible();
     await expect(card).toContainText("3 copies owned");
     await expect(editions(page).first()).toContainText("3 owned");
     await expect(

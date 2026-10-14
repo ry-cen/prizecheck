@@ -3,9 +3,13 @@ export type HoldingView = { edition_id: string; quantity: string; version: numbe
 export type LeafHoldings = { holdings: HoldingView[]; owner_revision: number; catalog_revision: number; next_cursor: string | null };
 export type AddResult = { location_id: string; edition_id: string; quantity: string; version: number; owner_revision: number };
 export type AddHolding = { location_id: string; edition_id: string; quantity: string; idempotency_key: string };
+export type BatchAddItem = { edition_id: string; quantity: string };
+export type BatchAdd = { location_id: string; idempotency_key: string; items: BatchAddItem[] };
+export type BatchAddResult = { location_id: string; edition_count: number; copy_count: string; owner_revision: number; undo_id: string };
 
 export class HoldingError extends Error {
-  constructor(public status: number, public code: string) { super(code); }
+  /** The Card Edition a batch add refused (EDITION_UNAVAILABLE, QUANTITY_OVERFLOW), when the API names one. */
+  constructor(public status: number, public code: string, public editionId: string | null = null) { super(code); }
 }
 async function request<T>(path: string, method = 'GET', body?: object): Promise<T> {
   const response = await fetch(path, { method, credentials: 'same-origin',
@@ -13,7 +17,9 @@ async function request<T>(path: string, method = 'GET', body?: object): Promise<
     body: body ? JSON.stringify(body) : undefined });
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));
-    throw new HoldingError(response.status, payload?.detail?.code ?? 'HOLDING_REQUEST_FAILED');
+    const detail = payload?.detail;
+    throw new HoldingError(response.status, detail?.code ?? 'HOLDING_REQUEST_FAILED',
+      typeof detail?.edition_id === 'string' ? detail.edition_id : null);
   }
   return response.json() as Promise<T>;
 }
@@ -23,3 +29,4 @@ export const getLeafHoldings = (locationId: string, cursor?: string, filters: Le
   return request<LeafHoldings>(`/api/holdings/${encodeURIComponent(locationId)}?${query}`);
 };
 export const addHolding = (body: AddHolding) => request<AddResult>('/api/holdings', 'POST', body);
+export const batchAddHoldings = (body: BatchAdd) => request<BatchAddResult>('/api/holdings/batch', 'POST', body);
