@@ -5,11 +5,17 @@ counts match the line's exact Card Edition. Copies the Deck holds beyond its Dec
 reserved: *elsewhere* counts every copy outside the Deck, including copies another Deck's list needs and copies other
 short Decks also count. ``competition`` flags every such double count: it warns whenever the copies the short Decks
 count as elsewhere exceed the spare copies.
+
+Each surplus row carries the Deck's Holding version and the card's display data (app redesign #180): the deck builder
+draws the surplus group from the Deck read alone, including cards cut from the list entirely, and puts the copies away
+with an ordinary Move, which needs the version.
 """
 from dataclasses import dataclass
 from uuid import UUID
 
 from pydantic import BaseModel
+
+from .deck_list_display import CardKind, TrainerType, read_line_display
 
 
 class ElsewhereLocation(BaseModel):
@@ -32,7 +38,24 @@ class LineOwnership(BaseModel):
 
 class SurplusHolding(BaseModel):
     edition_id: UUID
+    # Copies held in the Deck beyond its Deck List line (all of them when the Edition has no line).
     quantity: str
+    # The Deck's Holding version: send it as ``expected_version`` in the Move that puts the copies away.
+    version: int
+    # Display data, as on a Deck List line (``deck_list_display``).
+    name: str
+    set_id: str
+    set_name: str
+    collector_number: str
+    descriptor: dict
+    image_url: str | None
+    card_kind: CardKind | None
+    trainer_type: TrainerType | None
+    evolves_from: str | None
+    identity_id: UUID
+    identity_name: str
+    evolution_root: str | None
+    evolution_stage: int | None
 
 
 class CompetingDeck(BaseModel):
@@ -73,13 +96,17 @@ def read_ownership(conn, user_id: str, deck_id: UUID) -> DeckOwnership:
 
     The caller holds the owner row lock (``owner_and_rows``), as every Holding and Deck List writer does, so all
     statements see the same Holdings and Deck Lists. Reads are bounded by this Deck's lines and Holdings, the owner's
-    Holdings of the Editions it is short of, and the owner's Deck List lines naming those Editions.
+    Holdings of the Editions it is short of, the owner's Deck List lines naming those Editions, and the catalog display
+    data of the Deck's surplus Editions.
 
     The Deck's lines and Holdings are two primary-key range reads paired here, never a join: without fresh statistics
     for a large Deck the planner estimated one row per side and joined them by filter, quadratic in the Deck's size
     (96 ms per join at 1,000 lines; Deck Lists 19).
     """
-    holdings = held_in(conn, user_id, deck_id)
+    held = conn.execute('SELECT edition_id,quantity,version FROM holding WHERE owner_id=%s AND location_id=%s',
+                        (user_id, deck_id)).fetchall()
+    holdings = {row['edition_id']: row['quantity'] for row in held}
+    versions = {row['edition_id']: row['version'] for row in held}
     lines = [{**row, 'held': holdings.get(row['edition_id'], 0)} for row in conn.execute(
         'SELECT edition_id,quantity FROM deck_list_line WHERE owner_id=%s AND deck_id=%s ORDER BY edition_id',
         (user_id, deck_id))]
@@ -134,7 +161,10 @@ def read_ownership(conn, user_id: str, deck_id: UUID) -> DeckOwnership:
         if counted > spare:
             competition.append(CompetitionWarning(edition_id=edition, spare=str(spare),
                                                   counted_elsewhere=str(counted), decks=decks))
+    # Display data for surplus Editions is one more read keyed by Edition id, as for Deck List lines.
+    display = read_line_display(conn, [row['edition_id'] for row in surplus])
     return DeckOwnership(
         lines=owned,
-        surplus=[SurplusHolding(edition_id=row['edition_id'], quantity=str(row['quantity'])) for row in surplus],
+        surplus=[SurplusHolding(edition_id=row['edition_id'], quantity=str(row['quantity']),
+                                version=versions[row['edition_id']], **display[row['edition_id']]) for row in surplus],
         competition=competition)

@@ -23,6 +23,10 @@ The redesign is a launch gate ([spec](spec.md), "Rollout"): PrizeCheck opens to 
 - [ ] Owner controls' Reprints tab reviews Reprint Groups on the kit: each Card Identity waiting for review lists its Printings with their regulation mark, Reprint Group and that group's legality, and the owner moves Printings between groups, merges one group into another, or merges one Card Identity into another, each with a reason, evidence and a fresh code. The owner-only Card Identity routes also return each Printing's regulation mark, each group's legality (`as_of` picks the day) and when each queued Printing was created (#171).
 - [ ] Collection's Location tree, Manage locations, search, filters and display settings, the stale-collection banner and the Deck heading use the new controls. Filters & display opens as a panel along the right edge of a phone, and Manage locations fills a phone's screen (#166).
 - [ ] Opening a Deck on Decks shows it in the deck builder at `/decks/<Deck id>`: the count, the Deck List cost and the cost to complete, and every copy's state in Spread, Stacked and List, grouped by evolution line, Trainer Type and Energy. Pressing the Decks tab returns to the index. Until #181, the old Holdings, Publish and export panels sit under "Holdings, publishing and exports" at the foot of the builder. Every Deck List line in `GET /api/decks/{id}` and in the Deck List command responses carries its card's name, set, collector number, Variant Descriptor, image, card kind, Trainer Type, evolves from and Card Identity, and a Pokémon line also its evolution root and stage, so a deck that skips a stage (Charmander and Charizard ex with no Charmeleon) still forms one evolution line. After migrating to `043_evolution_roots.sql`, run `scripts/derive_card_attributes.py` once (`docs/operations/release.md`); until then a deck that skips a stage shows its Pokémon apart (#176).
+- [ ] Catalog is an Edition gallery: one tile per Card Edition, one search box (a printed set code and number such as `PAL 185`, a TCGdex set ID and number such as `sv02 185`, or the start of a name) and one filter row, with no sidebar. Pressing a tile opens the Printing's details and today's report forms until the card popup (#174) replaces them. The gallery loads more cards as you scroll, so My metadata reports moves from the foot of the page to a button beside the page title. A new signed-in route, `GET /api/catalog/editions`, lists Card Editions with their card type, Format Standing in all three Formats and the caller's copies (with `deck_id`, also the copies in that Deck and free elsewhere), 60 to a page; `GET /api/catalog/sets` lists the catalog's sets. Tiles read the printed set code and number ("PAL 185 · Reverse Holo"), from a reviewed table of 136 sets (`api/app/set_codes.tsv`, its sources in its header); a set with no confirmed code shows its TCGdex set ID. Collection's tiles still show the set's name. The gallery lists the newest set first, each set in collector number order; migration `044_catalog_set_release.sql` stores each set's release date at the next catalog import, and until then sets the format rules files don't date come last (`docs/operations/release.md`). `GET /api/catalog/search` stays for its other callers (#173).
+- [ ] **Gather N** in the deck builder's header opens the Pick List as a dialog, one row per card, with a source picker on each row and a warning when a source is another Deck that would be left short. Confirm picked and Confirm all each move the copies as one Move with one Undo toast. `POST /api/decks/{id}/pick-list/confirm` now writes one Inventory Undo record per confirmation, however many sources it names, and returns its `undo_id` and `source_count`; the five-source limit (`TOO_MANY_PICK_SOURCES`) is gone, so a Gather no longer pushes Collection's earlier Undo records out. The copy sheet's Gather opens the dialog on that card (#179).
+- [ ] Every Deck has one Target Format (Standard, Expanded or Gym Leader Challenge), Standard by default; migrating to `045_deck_list_target_format.sql` makes every existing Deck Standard. The deck builder's second header line holds the "Standard ▾ · ✓ Legal" control: ▾ changes the Target Format, and the result opens a dialog with the "as of" date, the deck and card issues, the rules version and the disclaimer. A card-level issue outlines its lines with a "!". The Deck read, every Deck List command and the format-checks read answer the Target Format's result only (`?format=` still names another), and `PUT /api/decks/{id}/deck-list/target-format` changes it. Publishing and republishing now need a legal result in the Target Format and otherwise answer `409 TARGET_FORMAT_NOT_LEGAL` with the result; snapshots store their Target Format, and snapshots published before read as Standard. Every saved format result is recomputed once on its Deck's next read, because the code that evaluates changed (#178).
+- [ ] Copies physically in a Deck but cut from its Deck List show in the deck builder as **Surplus**, in their own group under the Deck List in Spread, Stacked and List; they never count toward N/60. **Put away all**, or pressing one surplus card, moves those copies to a Location you pick as one Move, with an Undo toast. Undo returns the copies to the Deck and, as for any copies arriving in a Deck, puts them back on its Deck List. A warning at the top of the Deck List names the other Decks whose Deck Lists count the same spare copies, and whether each also counts them or holds copies for its own list. Each `surplus` row in `GET /api/decks/{id}` also carries the Deck's Holding `version` and the card's display data (#180).
 
 ## Walkthroughs
 
@@ -161,6 +165,71 @@ On a phone (iOS Safari or Android Chrome):
 - [ ] 8. Open a Deck. Library and Deck tabs sit at the top, with Library chosen and the Deck tab reading "Deck N/60". Tap Deck: the Deck List opens in Stacked, every pile and button is easy to hit with a thumb, and nothing scrolls sideways.
 - [ ] 9. Tap a pile: its sheet opens along the bottom; close it with ✕ or a tap on the dimmed page. Choose Spread, then List: nothing scrolls sideways, and long card names end in "…".
 
+### Catalog: the Edition gallery (#173)
+
+On a desktop (a window at least 1280 px wide):
+
+- [ ] 1. Open the Catalog tab. Under the title sit the search box, a hint under it, one row of chips and a status line reading "N Printings · English catalog from TCGdex, last pulled …". There is no sidebar. The gallery shows one tile per Card Edition with its set · number · Variant, a price line, and "×N" on the cards you own; the cards you don't own are darker. The newest set comes first, its cards in collector number order (2 before 10).
+- [ ] 2. Type `PAL 185` (or the code and number printed at the bottom left of a card you own): the hint reads "Set and number: Paldea Evolved (PAL) number 185." and the gallery shows that card's Editions, each tile reading "PAL 185 · …". `pal 185` and `sv02 185` find the same card. Open `api/app/set_codes.tsv` and check a few codes against your cards. Type the start of a name such as `pika`: the hint reads "Name: cards whose name starts with “pika”." Clear the box.
+- [ ] 3. Press Standard: cards not legal in Standard leave the gallery, and a card whose legality isn't known yet stays with a "?" in its corner. Press Any format, then Supporter: only Supporters remain. Press Supporter again to clear it.
+- [ ] 4. Press Any set: a dialog lists every set A–Z with its printed code (or TCGdex ID) and card count. Type part of a set's name and choose it: the chip reads "Set: …" and the gallery lists that set in collector number order. Press Owned only: only cards you own remain.
+- [ ] 5. Scroll down: more tiles join the gallery before you reach its end, with no button to press, and after the last card it reads "All N cards shown" (try a search with a few hundred results). Open Collection, then Catalog again: the search, the chips, the loaded tiles and the scroll position are as you left them.
+- [ ] 6. Press a tile: a dialog shows the card's art, set and number, Card Identity, source, and each Edition with its price and Report metadata. Escape closes it and puts focus back on the tile. My metadata reports opens from the button at the right of the page title.
+
+On a phone (iOS Safari or Android Chrome):
+
+- [ ] 7. Open Catalog. The search box fills the width and is thumb-sized. Swipe the chip row: it scrolls sideways inside itself and fades at its right edge, every chip is easy to hit, and nothing else on the page scrolls sideways.
+- [ ] 8. Tap Any set: the set list opens along the bottom. Close it, then tap a tile: its details open along the bottom, and ✕ or a tap on the dimmed page closes them.
+
+### Deck builder: Gather (#179)
+
+On a desktop (a window at least 1280 px wide):
+
+- [ ] 1. Open a Deck whose Deck List has copies you own in other Locations. The first header line ends in **Gather N**, where N counts those copies. With every owned copy already in the Deck, it reads Gather 0 and can't be pressed.
+- [ ] 2. Press Gather N. A dialog titled "Gather cards you own" lists one row per card: its name, set, number and Variant, a source picker, how many copies come from where, and a line saying how many copies from how many Locations in all.
+- [ ] 3. On a card spread over several Locations, the picker starts on "Suggested: N Locations". Choose one Location: the row now takes copies from there only (no more than it holds).
+- [ ] 4. A row whose copies come from another Deck that lists them for itself says "Leaves <Deck> (Deck) N short".
+- [ ] 5. Tick one row and press Confirm 1 picked. The dialog closes, a toast says "Moved N copies from N Locations into <Deck>." with Undo, and the copies show solid in the Deck List.
+- [ ] 6. Press Gather again, then Confirm all on a list that draws on more than five Locations. One toast names them all. Press Undo once: every copy goes back to where it came from, and the toast says how many Locations got copies back.
+- [ ] 7. Press a dashed (↻) copy, then Gather in its sheet. The Pick List opens with that card's row already ticked and focused.
+
+On a phone (iOS Safari or Android Chrome):
+
+- [ ] 8. On the Deck tab, tap Gather N. The dialog fills the screen; the checkboxes, pickers and buttons are easy to hit with a thumb, and nothing scrolls sideways. Confirm all, then tap Undo in the toast above the tab bar.
+
+### Deck builder: Target Format (#178)
+
+On a desktop (a window at least 1280 px wide):
+
+- [ ] 1. Open a Deck you built before this update. Under the count and the cost, the second line starts with "Standard ▾ · " and the result: "✓ Legal", "✕ Not legal" or "? Unknown".
+- [ ] 2. Press the result. A dialog titled "Standard result" shows the result as of today, the deck issues and the card issues with plain reasons (each card issue names its cards), the rules version and the advisory disclaimer. Escape closes it and puts focus back on the result.
+- [ ] 3. Open the result again and pick a date a few months ahead in As of: a note says the date is in the future and later rule changes are unknown. Close the dialog: the header still shows today's result.
+- [ ] 4. Choose Gym Leader Challenge with ▾. The result changes (a deck with four copies of a card turns "✕ Not legal"), and those cards' copies get an outline and a "!". Reload: Gym Leader Challenge is still chosen.
+- [ ] 5. Choose Standard again. If the deck is not legal in Standard, open "Holdings, publishing and exports" and try Publish: it says publishing needs a legal result in the Target Format, and nothing is published.
+- [ ] 6. With a legal Deck, Publish works, and the public page's address answers as before.
+- [ ] 7. Add cards until the Deck List passes 60 (from "Holdings, publishing and exports"): nothing stops you, the count reads over 60, and the result says the deck has more than 60 cards.
+
+On a phone (iOS Safari or Android Chrome):
+
+- [ ] 8. Open a Deck and tap the Deck tab. Tap ▾: the phone's own picker lists Standard, Expanded and Gym Leader Challenge. Pick one: the result follows, both parts are easy to hit with a thumb, and nothing scrolls sideways.
+- [ ] 9. Tap the result: it opens as a sheet along the bottom with the same contents; close it with ✕.
+
+### Deck builder: Surplus and the competition warning (#180)
+
+On a desktop (a window at least 1280 px wide):
+
+- [ ] 1. In a Deck that holds cards, remove a card from its Deck List, or lower a line below the copies the Deck holds (the deck builder's editing, #177). Removing never moves cards: a **Surplus** group with its card count appears under the Deck List, and N/60 doesn't count it.
+- [ ] 2. In Spread, every surplus copy is its own card; in Stacked, one pile per card with "×N"; in List, one row per card. Rest the pointer on one: its tooltip says it's in this Deck but not on the Deck List.
+- [ ] 3. Press one surplus card. A dialog "Put away N copies" offers your Locations for that card's copies only. Press Escape: it closes and focus returns to the card.
+- [ ] 4. Press **Put away all**, choose a Storage Leaf and press "Put away N copies". The dialog closes, the Surplus group goes, and a toast says "Put away N copies to <Location>." with Undo. Open that Location in Collection: the copies are there.
+- [ ] 5. Back in the Deck, press Undo (within ten minutes, before any other Collection action). The copies return to the Deck, and the toast says they're on its Deck List again: N/60 rises by that many.
+- [ ] 6. Plan a card in two Decks that neither holds, with fewer spare copies elsewhere than they need together. Open either Deck: a warning at the top of the Deck List names the card, says how many copies are counted as owned elsewhere and how many are spare, and names the other Deck.
+
+On a phone (iOS Safari or Android Chrome):
+
+- [ ] 7. Open the Deck tab of a Deck with surplus. The warning and the Surplus group fit the screen with nothing scrolling sideways, and every surplus pile and Put away all is easy to hit with a thumb.
+- [ ] 8. Put away all from the bottom sheet, switch to Library and back to Deck: the toast is still there, and Undo still works.
+
 ## Manual checks that automation does not cover
 
 - [ ] Real touch on iOS Safari and Android Chrome for the tab bar, the More sheet and the ☰ drawer (the browser tests only emulate touch), including the home indicator area under the tab bar.
@@ -174,6 +243,8 @@ On a phone (iOS Safari or Android Chrome):
 - [ ] Screen reader on Missing cards: the sub-tabs announce as tabs and which one is selected, the reports table reads with its column headers, Reply announces whether its row is open, and after a send the message is read where focus lands (#169).
 - [ ] Real touch and Safari on Collection: Manage locations' handle drag with a finger on iOS Safari and Android Chrome, and the sidebar's tile drag and the + on hover in Safari and Firefox on desktop (#166).
 - [ ] Screen reader on the deck builder: each copy is read with its card, Edition, copy number and state (and the Location of a copy owned elsewhere), a Stacked pile with its counts, Spread / Stacked / List as a radio group, and on a phone Library and Deck as tabs with the Deck count (#176).
+- [ ] Screen reader on Catalog: the search box is read with its hint, each chip with whether it is pressed, the set chip as opening a dialog, and each tile with its card, set and number, Variant, how many you own and, under a format chip, "legality unknown" for a "?" card (#173).
+- [ ] Screen reader on the Target Format control: the picker is read as "Target Format" with the chosen Format, the result as a button with its status and issue count, a change announces the new result once, and a highlighted copy is described as having a format issue (#178).
 
 ## Sources
 

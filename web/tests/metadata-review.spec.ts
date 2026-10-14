@@ -170,12 +170,19 @@ test("collector reports an Edition mapping, nothing changes until the maintainer
 
   await page.reload();
   await page.getByRole("button", { name: "Catalog", exact: true }).click();
-  await page.getByLabel("English name").fill("Furret");
-  await page.getByRole("button", { name: "Search", exact: true }).click();
-  await page.getByRole("button", { name: "View Editions" }).click();
+  // A Catalog tile opens the Printing's details (#173), which list each Edition with its report button.
   await page
+    .getByRole("searchbox", { name: "Search the catalog" })
+    .fill("Furret");
+  await page
+    .getByRole("region", { name: "Catalog results" })
+    .getByRole("button", { name: /^Furret,/ })
+    .first()
+    .click();
+  await page
+    .getByRole("dialog", { name: "Furret" })
     .getByRole("listitem")
-    .filter({ hasText: "normal" })
+    .filter({ hasText: /^Normal/ })
     .getByRole("button", { name: "Report metadata" })
     .click();
   const form = page.getByRole("region", { name: "Report card metadata" });
@@ -188,6 +195,10 @@ test("collector reports an Edition mapping, nothing changes until the maintainer
   await expect(form.getByRole("status")).toContainText(
     "Submitted for maintainer review; nothing changes until approved."
   );
+  // My metadata reports opens from Catalog's header (#173).
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog", { name: "Furret" })).toBeHidden();
+  await page.getByRole("button", { name: "My metadata reports" }).click();
   const mine = page.getByRole("region", { name: "My metadata reports" });
   await expect(mine).toContainText("pending");
   await expect(mine).toContainText("product id 4321");
@@ -199,7 +210,11 @@ test("collector reports an Edition mapping, nothing changes until the maintainer
       .rows[0].n
   ).toBe(outboxBefore);
 
-  // A collector can neither see nor call the review surface.
+  // Escape closes My metadata reports (#173). A collector can neither see nor call the review surface.
+  await page.keyboard.press("Escape");
+  await expect(
+    page.getByRole("dialog", { name: "My metadata reports" })
+  ).toBeHidden();
   await page.getByRole("button", { name: "Account" }).click();
   await expect(
     page.getByRole("menuitem", { name: "Owner controls" })
@@ -272,6 +287,7 @@ test("collector reports an Edition mapping, nothing changes until the maintainer
   await setMaintainer(false);
   await page.reload();
   await page.getByRole("button", { name: "Catalog", exact: true }).click();
+  await page.getByRole("button", { name: "My metadata reports" }).click();
   await expect(
     page.getByRole("region", { name: "My metadata reports" })
   ).toContainText("approved");
@@ -638,6 +654,7 @@ test("a request for information round-trips through the collector back to the ma
   await setMaintainer(false);
   await page.reload();
   await page.getByRole("button", { name: "Catalog", exact: true }).click();
+  await page.getByRole("button", { name: "My metadata reports" }).click();
   const mine = page.getByRole("region", { name: "My metadata reports" });
   await expect(mine).toContainText("needs info");
   await expect(mine).toContainText("Which listing did you mean?");

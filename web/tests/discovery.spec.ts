@@ -4,6 +4,7 @@ import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { listHoldings } from "./support/deck-list";
+import { exemptNamedDeck } from "./support/publish-gate";
 import { openDeckTools } from "./support/deck-builder";
 
 test("Listed discovery opt-in and removal preserve snapshot, privacy, and escaped source text", async ({
@@ -50,6 +51,7 @@ promote({'card-1': ${JSON.stringify(hostileName)}})`,
       .click();
     // Publishing freezes the Deck List; list the cards just added.
     await listHoldings(pool, privateName, 59);
+    await exemptNamedDeck(pool, privateName); // not a legal Deck List in any Format
     const publishing = page.getByRole("region", {
       name: "Publish Deck",
       exact: true,

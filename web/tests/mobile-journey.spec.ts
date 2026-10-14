@@ -4,6 +4,7 @@ import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { listHoldings } from "./support/deck-list";
+import { exemptNamedDeck } from "./support/publish-gate";
 import { openDeckTools } from "./support/deck-builder";
 
 test.use({
@@ -83,6 +84,7 @@ test("mobile collector can search, Add, Move, Undo, check and publish a physical
     await expect(checks).toContainText("3 cards · 57 cards short of 60");
     // Publishing freezes the Deck List; list the cards the Deck holds.
     await listHoldings(pool, name, 3);
+    await exemptNamedDeck(pool, name); // not a legal Deck List in any Format
     const publishing = page.getByRole("region", {
       name: "Publish Deck",
       exact: true,

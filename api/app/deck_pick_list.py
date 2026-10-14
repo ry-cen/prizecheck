@@ -7,21 +7,23 @@ for their own lines, which carries a warning that taking them leaves that Deck s
 Pick List does not optimise trips across cards.
 
 Confirming moves the chosen copies into the Deck in one transaction under the owner lock: every item is validated
-first and nothing changes unless all of them can move. The writes are those of a committed Move (``moves.py``): one
-owner revision, idempotent replay through ``mutation_request``/``move_response``, and one ordinary single-source
-Inventory Undo record per source Storage Leaf. Migration 031's holding trigger covers arriving copies; copies that a
-line already needs leave the Deck List unchanged.
+first and nothing changes unless all of them can move. The writes are those of a committed multi-source Move
+(``moves.py``, migration 026): one owner revision, idempotent replay through ``mutation_request``/``move_response``,
+and one Inventory Undo record for the whole confirmation, however many sources it names. A Gather therefore takes one
+of the owner's five Undo records and never pushes Collection's earlier ones out. The record's id is derived from the
+idempotency key (``moves.undo_id_for``) and returned as ``undo_id``, so the caller can offer Undo for it. Migration
+031's holding trigger covers arriving copies; copies that a line already needs leave the Deck List unchanged.
 
-Collector workspace compatibility (#106): confirm items have the multi-source Move item shape
-``{source_id, edition_id, quantity, expected_version}``. When the atomic multi-source Move lands, this transfer and
-its per-source undo records should be replaced by that path and its single multi-source undo record.
+Confirm items have the multi-source Move item shape ``{source_id, edition_id, quantity, expected_version}``. The
+confirmation does not go through a Move manifest: starting one would discard a selection the collector is staging in
+Collection.
 
 Put-away needs no route of its own: the Pick List lists surplus Holdings with their versions, and putting them away is
 an ordinary Move from the Deck to a Location the collector chooses.
 """
 import hashlib
 import json
-from uuid import UUID, uuid4
+from uuid import UUID
 
 import psycopg
 from fastapi import APIRouter, Depends, HTTPException
@@ -31,12 +33,9 @@ from .deck_ownership import CompetitionWarning, read_ownership
 from .decks import check_revision, read_deck_list, require_deck
 from .location_tree import owner_and_rows
 from .main import connect, verified_user
-from .moves import MAX_BATCH, MAX_QUANTITY, leaf, quantity
+from .moves import MAX_BATCH, MAX_QUANTITY, first_non_leaf, quantity, undo_id_for
 
 router = APIRouter(prefix='/api/decks', tags=['decks'])
-# Inventory Undo keeps each owner's newest five records (moves.py), and a confirmation writes one per source. More
-# sources would evict the confirmation's own undo records, so a confirmation names at most five.
-MAX_PICK_SOURCES = 5
 
 
 class PickWarning(BaseModel):
@@ -110,6 +109,11 @@ class PickConfirmResult(BaseModel):
     edition_count: int
     copy_count: str
     owner_revision: int
+    # The distinct source Locations the copies came from.
+    source_count: int
+    # The confirmation's one Inventory Undo record (POST /api/moves/undo/{undo_id}). A replay names the same record,
+    # which may since have been undone, dismissed, superseded or expired.
+    undo_id: UUID
 
 
 def fail(status: int, code: str, **detail):
@@ -205,8 +209,6 @@ def confirm_picks(deck_id: UUID, command: ConfirmPicks, user_id: str = Depends(v
     items = sorted(((item.source_id, item.edition_id, quantity(item.quantity), item.expected_version)
                     for item in command.items), key=lambda item: (str(item[0]), str(item[1])))
     sources = sorted({item[0] for item in items}, key=str)
-    if len(sources) > MAX_PICK_SOURCES:
-        fail(422, 'TOO_MANY_PICK_SOURCES')
     payload = {'action': 'pick_list_confirm', 'deck_id': str(deck_id), 'deck_list_revision': command.deck_list_revision,
                'items': [[str(source), str(edition), str(amount), version] for source, edition, amount, version in items]}
     digest = hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
@@ -214,7 +216,8 @@ def confirm_picks(deck_id: UUID, command: ConfirmPicks, user_id: str = Depends(v
         with connect() as conn, conn.transaction():
             revision, rows = owner_and_rows(conn, user_id)
             conn.execute('DELETE FROM mutation_request WHERE owner_id=%s AND expires_at<=now()', (user_id,))
-            previous = conn.execute("""SELECT mr.command_digest,mr.result_revision,r.edition_count,r.copy_count
+            previous = conn.execute("""SELECT mr.command_digest,mr.result_revision,r.edition_count,r.copy_count,
+                r.source_count
               FROM mutation_request mr LEFT JOIN move_response r
                 ON r.owner_id=mr.owner_id AND r.request_key=mr.request_key
               WHERE mr.owner_id=%s AND mr.request_key=%s""", (user_id, command.idempotency_key)).fetchone()
@@ -224,14 +227,16 @@ def confirm_picks(deck_id: UUID, command: ConfirmPicks, user_id: str = Depends(v
                 if previous['edition_count'] is None:
                     fail(409, 'REPLAY_OUTCOME_UNAVAILABLE')
                 return PickConfirmResult(edition_count=previous['edition_count'], copy_count=str(previous['copy_count']),
-                                         owner_revision=previous['result_revision'])
+                                         owner_revision=previous['result_revision'],
+                                         source_count=previous['source_count'],
+                                         undo_id=undo_id_for(user_id, command.idempotency_key))
             require_deck(rows, deck_id)
             check_revision(conn, user_id, deck_id, command.deck_list_revision)
-            for source in sources:
-                if source == deck_id:
-                    fail(409, 'SAME_LOCATION', source_id=source)
-                if not leaf(conn, user_id, source):
-                    fail(404, 'LOCATION_NOT_FOUND', source_id=source)
+            if deck_id in sources:
+                fail(409, 'SAME_LOCATION', source_id=deck_id)
+            gone = first_non_leaf(conn, user_id, sources)
+            if gone is not None:
+                fail(404, 'LOCATION_NOT_FOUND', source_id=gone)
             listed = {row['edition_id'] for row in conn.execute(
                 'SELECT edition_id FROM deck_list_line WHERE owner_id=%s AND deck_id=%s AND edition_id=ANY(%s)',
                 (user_id, deck_id, sorted({item[1] for item in items}, key=str)))}
@@ -282,18 +287,23 @@ def confirm_picks(deck_id: UUID, command: ConfirmPicks, user_id: str = Depends(v
             conn.execute('UPDATE inventory_owner SET revision=%s WHERE user_id=%s', (new_revision, user_id))
             conn.execute("""INSERT INTO mutation_request(owner_id,request_key,command_digest,result_revision)
               VALUES (%s,%s,%s,%s)""", (user_id, command.idempotency_key, digest, new_revision))
-            conn.execute("""INSERT INTO move_response(owner_id,request_key,edition_count,copy_count)
-              VALUES (%s,%s,%s,%s)""", (user_id, command.idempotency_key, len(arriving), copies))
+            conn.execute("""INSERT INTO move_response(owner_id,request_key,edition_count,copy_count,source_count)
+              VALUES (%s,%s,%s,%s,%s)""", (user_id, command.idempotency_key, len(arriving), copies, len(sources)))
             conn.execute('DELETE FROM inventory_undo WHERE owner_id=%s AND expires_at<=clock_timestamp()', (user_id,))
-            # One ordinary single-source Move record per source, each undone on its own like any other Move.
-            for source in sources:
-                undo = [{'edition_id': str(edition), 'quantity': str(amount)}
-                        for item_source, edition, amount, _ in items if item_source == source]
-                conn.execute("""INSERT INTO inventory_undo(id,owner_id,action,source_id,destination_id,payload)
-                  VALUES (%s,%s,'move',%s,%s,%s::jsonb)""", (uuid4(), user_id, source, deck_id, json.dumps(undo)))
+            # One multi-source Move record for the whole confirmation, written as moves.apply_selection writes it:
+            # every item names its source, and the record's source_id is set only for a single source, so earlier
+            # readers treat a multi-source record as incompatible (migration 026).
+            undo_id = undo_id_for(user_id, command.idempotency_key)
+            undo = [{'source_id': str(source), 'edition_id': str(edition), 'quantity': str(amount)}
+                    for source, edition, amount, _ in items]
+            conn.execute("""INSERT INTO inventory_undo(id,owner_id,action,source_id,destination_id,source_count,payload)
+              VALUES (%s,%s,'move',%s,%s,%s,%s::jsonb)""",
+                         (undo_id, user_id, sources[0] if len(sources) == 1 else None, deck_id, len(sources),
+                          json.dumps(undo)))
             conn.execute("""DELETE FROM inventory_undo WHERE owner_id=%s AND id NOT IN
               (SELECT id FROM inventory_undo WHERE owner_id=%s ORDER BY created_at DESC,id DESC LIMIT 5)""",
                          (user_id, user_id))
-            return PickConfirmResult(edition_count=len(arriving), copy_count=str(copies), owner_revision=new_revision)
+            return PickConfirmResult(edition_count=len(arriving), copy_count=str(copies), owner_revision=new_revision,
+                                     source_count=len(sources), undo_id=undo_id)
     except psycopg.Error:
         fail(503, 'INVENTORY_TEMPORARILY_UNAVAILABLE')

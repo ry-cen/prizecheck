@@ -1,10 +1,15 @@
 """Private publication commands and anonymous sanitized object reads."""
+from pathlib import Path
 from uuid import uuid4
 import json
 import os
+import sys
 import pytest
 from test_holdings import fixture, call, add, client
 from test_decks import create
+
+sys.path.insert(0, str(Path(__file__).parent / 'catalog_process_fixture'))
+import publish_gate_fixture  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -30,6 +35,9 @@ def list_cards(owner, deck, quantities):
 
 
 def command(owner, deck, method='POST', title='Public deck', key=None):
+    """A publication command on the Deck. These tests publish Deck Lists that aren't legal in any Format, so the Deck is
+    exempt from the publish gate (``publish_gate_fixture``); the gate's own tests are in test_publish_gate.py."""
+    publish_gate_fixture.exempt(deck)
     body = {'idempotency_key': str(key or uuid4())}
     if method != 'DELETE':
         body['title'] = title
@@ -133,7 +141,7 @@ def test_snapshot_allowlist_private_edits_republish_revoke_and_burned_url():
     assert response.headers['cache-control'] == 'no-store'
     assert response.headers['x-robots-tag'] == 'noindex, nofollow'
     snapshot = response.json()
-    assert set(snapshot) == {'title', 'published_at', 'version', 'total', 'identities', 'checks'}
+    assert set(snapshot) == {'title', 'published_at', 'version', 'target_format', 'total', 'identities', 'checks'}
     assert snapshot['title'] == 'Public deck' and snapshot['total'] == '59' and snapshot['version'] == 1
     identity = snapshot['identities'][0]
     assert set(identity) == {'name', 'quantity', 'editions'}

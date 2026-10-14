@@ -10,7 +10,7 @@ export type PublicEdition = { set_id: string; set_name: string; collector_number
 export type PublicIdentity = { name: string; quantity: string; editions: PublicEdition[] };
 export type PublicIdentityCheck = { name: string; quantity: string; status: string };
 export type PublicChecks = { size_status: string; shortage: string; excess: string; identities: PublicIdentityCheck[]; disclaimer?: string };
-export type PublicSnapshot = { title: string; published_at: string; version: number; total: string; identities: PublicIdentity[]; checks: PublicChecks };
+export type PublicSnapshot = { title: string; published_at: string; version: number; target_format?: 'standard' | 'expanded' | 'glc'; total: string; identities: PublicIdentity[]; checks: PublicChecks };
 
 export class PublicationError extends Error {
   constructor(public status: number, public code: string) { super(code); }

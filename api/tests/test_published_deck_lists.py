@@ -31,7 +31,7 @@ from test_published_live_export import live_world
 
 JUNIPER_NAME = "Professor's Research (Professor Juniper)"
 MAGNOLIA_NAME = "Professor's Research (Professor Magnolia)"
-SNAPSHOT_KEYS = {'title', 'published_at', 'version', 'total', 'identities', 'checks'}
+SNAPSHOT_KEYS = {'title', 'published_at', 'version', 'target_format', 'total', 'identities', 'checks'}
 EDITION_KEYS = {'set_id', 'set_name', 'collector_number', 'variant', 'image_url', 'quantity', 'edition_ref', 'printing_ref',
                 'printing_name'}
 

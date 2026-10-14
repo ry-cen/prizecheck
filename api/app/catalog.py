@@ -2,12 +2,14 @@
 import gzip
 import hashlib
 import json
+import logging
 import os
 import random
 import re
 import time
 import unicodedata
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from datetime import date
 from urllib.parse import quote
 from uuid import UUID
 
@@ -219,6 +221,29 @@ class TCGdexSource:
                     card_ids.add(card["id"])
                 set_ids.add(set_id)
         return frozenset(set_ids), frozenset(card_ids)
+
+    def set_release_dates(self, set_ids) -> dict[str, date]:
+        """Each set's TCGdex releaseDate (YYYY-MM-DD), for Catalog's newest-first order (migration 044). Best effort and
+        never fails the run: a set whose record can't be read in two tries, or gives no valid date, is left out."""
+        root = BASE_URL.rsplit("/", 1)[0]
+
+        def released(set_id: str) -> date | None:
+            for _ in range(2):
+                try:
+                    response = self.client.get(f"{root}/sets/{quote(set_id, safe='-._~')}")
+                    if response.status_code != 200:
+                        continue
+                    data = response.json()
+                    value = data.get("releaseDate") if isinstance(data, dict) and data.get("id") == set_id else None
+                    return date.fromisoformat(value) if isinstance(value, str) and re.fullmatch(
+                        r"\d{4}-\d{2}-\d{2}", value) else None
+                except (httpx.HTTPError, ValueError):
+                    continue
+            return None
+
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
+            found = dict(zip(set_ids, pool.map(released, set_ids)))
+        return {set_id: value for set_id, value in found.items() if value is not None}
 
     def fetch(self, source_id: str) -> dict:
         response = self._response(f"{BASE_URL}/{quote(source_id, safe='-._~')}")
@@ -522,6 +547,14 @@ def execute_run(conn, run_id: UUID, source=None, before_promotion=None):
             AND p.source='tcgdex' AND NOT gp.tombstoned""").fetchall()}-getattr(source,"excluded_ids",frozenset())
         if previous_ids and len(previous_ids-first)>len(previous_ids)*0.01:
             raise CatalogError('English source ID count dropped by more than 1%')
+        # Each set's release date (migration 044), read before the promotion transaction. A source without the method
+        # (the test sources) dates nothing.
+        dating = getattr(source, "set_release_dates", None)
+        try:
+            release_dates = dating(sorted({item["set_id"] for item in normalized})) if dating else {}
+        except Exception as error:  # Dates are best effort: an import never fails for them.
+            logging.getLogger(__name__).warning("Set release dates unavailable: %s", type(error).__name__)
+            release_dates = {}
         raw = gzip.compress(json.dumps([records[key] for key in sorted(first)], ensure_ascii=False, separators=(",", ":")).encode(), mtime=0)
         limit = int(os.environ.get("CATALOG_RAW_MAX_BYTES", "100000000"))
         if len(raw) > limit:
@@ -537,6 +570,10 @@ def execute_run(conn, run_id: UUID, source=None, before_promotion=None):
             old_id = state["active_generation"]
             conn.execute("INSERT INTO catalog_generation(id,source_count,raw_gzip,raw_sha256) VALUES (%s,%s,%s,%s)",
                          (run_id, len(first), raw, hashlib.sha256(raw).hexdigest()))
+            if release_dates:
+                conn.execute("""INSERT INTO catalog_generation_set(generation_id,set_id,release_date)
+                  SELECT %s,t.set_id,t.released FROM unnest(%s::text[],%s::date[]) AS t(set_id,released)""",
+                             (run_id, list(release_dates), list(release_dates.values())))
             if before_promotion:
                 before_promotion()
             old = {}

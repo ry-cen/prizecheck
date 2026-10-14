@@ -1,5 +1,10 @@
-"""Advisory format checks of a Deck's Deck List (ADR 0010): ``GET /api/decks/{deck_id}/format-checks`` and the results
-every Deck List command returns (``command_format_checks``).
+"""Advisory format checks of a Deck's Deck List (ADR 0010): ``GET /api/decks/{deck_id}/format-checks``, the result
+every Deck List command returns (``command_format_checks``), the result the Deck read carries and the result the publish
+gate recomputes (``held_format_checks``).
+
+Target Format (app redesign #178, ADR 0011). Every Deck List has one Target Format (``deck_list.target_format``, migration
+045), Standard unless the collector chooses another. Deck List commands, the Deck read and the publish gate evaluate the
+Target Format alone, and the format-checks read answers it unless ``?format=`` names another Format.
 
 A check reads, in one snapshot:
 
@@ -34,7 +39,7 @@ import re
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Literal
+from typing import Literal, get_args
 from uuid import UUID
 
 import psycopg
@@ -52,6 +57,9 @@ router = APIRouter(prefix='/api/decks', tags=['decks'])
 DISCLAIMER = ('Advisory format checks: a result is not a guarantee of tournament legality. Missing rules or card data '
               'makes a result unknown, never legal.')
 ISO_DATE = re.compile(r'\d{4}-\d{2}-\d{2}')
+# A Deck List's Target Format: one of the Formats with a rules file (migration 045 checks the same three names).
+TargetFormat = Literal['standard', 'expanded', 'glc']
+assert get_args(TargetFormat) == evaluator.FORMATS
 # A saved result is reusable only while the code that produced it is unchanged: any edit to the evaluator, the attribute
 # reader or this module makes every saved result stale (one recompute per Deck and format, on its next read).
 CODE_SHA256 = hashlib.sha256(b''.join(Path(path).read_bytes()
@@ -225,22 +233,35 @@ def save(conn, user_id: str, deck_id: UUID, format_name: str, key: ResultKey, re
                         computed_at))
 
 
-def command_format_checks(conn, user_id: str, deck_id: UUID, deck_list_revision: int) -> DeckFormatChecks:
-    """Evaluate a Deck's Deck List in every format as of today, inside a Deck List command's transaction, and save each
-    result. The caller holds the owner lock and has just advanced the Deck List revision to ``deck_list_revision``."""
+def held_format_checks(conn, user_id: str, deck_id: UUID, deck_list_revision: int, format_name: str, *,
+                       reuse: bool) -> DeckFormatChecks:
+    """The Deck List's result in ``format_name`` as of today, inside a transaction that holds the owner lock (so no Deck
+    List command can change the list meanwhile), saved with the Deck.
+
+    With ``reuse`` (the Deck read) a saved result whose key matches is answered as saved; otherwise, and always without
+    ``reuse`` (Deck List commands and the publish gate, which must recompute), the result is evaluated and saved."""
     current = today()
+    rules = evaluator.format_rules(format_name)
     revisions = read_revisions(conn)
-    lines, reprint_groups = read_lines(conn, user_id, deck_id)
-    computed_at = datetime.now(timezone.utc)
-    results = []
-    for name in evaluator.FORMATS:
-        rules = evaluator.format_rules(name)
+    key = result_key(deck_list_revision, rules, revisions, current)
+    saved = conn.execute(SAVED, (user_id, deck_id, [format_name])).fetchone() if reuse else None
+    if saved is not None and saved_key(saved) == key:
+        result = from_saved(format_name, saved['result'], current)
+        computed_at = saved['computed_at'].astimezone(timezone.utc)
+    else:
+        lines, reprint_groups = read_lines(conn, user_id, deck_id)
+        computed_at = datetime.now(timezone.utc)
         result = evaluator.evaluate_format(lines, rules, current, reprint_groups)
-        save(conn, user_id, deck_id, name, result_key(deck_list_revision, rules, revisions, current), result,
-             computed_at)
-        results.append(format_check(result, rules, current, computed_at))
+        save(conn, user_id, deck_id, format_name, key, result, computed_at)
     return DeckFormatChecks(deck_id=deck_id, deck_list_revision=deck_list_revision, attribute_revision=revisions[0],
-                            catalog_revision=revisions[1], results=results)
+                            catalog_revision=revisions[1], results=[format_check(result, rules, current, computed_at)])
+
+
+def command_format_checks(conn, user_id: str, deck_id: UUID, deck_list_revision: int,
+                          target_format: str) -> DeckFormatChecks:
+    """Evaluate a Deck's Deck List in its Target Format as of today, inside a Deck List command's transaction, and save
+    the result. The caller holds the owner lock and has just advanced the Deck List revision to ``deck_list_revision``."""
+    return held_format_checks(conn, user_id, deck_id, deck_list_revision, target_format, reuse=False)
 
 
 def save_read_results(user_id: str, deck_id: UUID, keys: dict, fresh: dict):
@@ -264,22 +285,24 @@ def save_read_results(user_id: str, deck_id: UUID, keys: dict, fresh: dict):
 @router.get('/{deck_id}/format-checks', response_model=DeckFormatChecks)
 def deck_format_checks(deck_id: UUID, format_name: str | None = Query(default=None, alias='format'),
                        as_of: str | None = Query(default=None), user_id: str = Depends(verified_user)):
+    """The Deck List's result in its Target Format, or in the Format ``?format=`` names."""
     if format_name is not None and format_name not in evaluator.FORMATS:
         error(422, 'UNKNOWN_FORMAT')
-    names = evaluator.FORMATS if format_name is None else (format_name,)
     current = today()
     on = parse_as_of(as_of, current)
-    rules = {name: evaluator.format_rules(name) for name in names}
     with connect() as conn, conn.transaction():
         # One snapshot binds the Deck List revision, its lines, the catalog, the attribute revision and saved results.
         conn.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY')
         if not conn.execute("SELECT 1 FROM location WHERE owner_id=%s AND id=%s AND kind='deck'",
                             (user_id, deck_id)).fetchone():
             error(404, 'DECK_NOT_FOUND')
-        header = conn.execute('SELECT revision FROM deck_list WHERE owner_id=%s AND deck_id=%s',
+        header = conn.execute('SELECT revision,target_format FROM deck_list WHERE owner_id=%s AND deck_id=%s',
                               (user_id, deck_id)).fetchone()
         if header is None:
             raise RuntimeError('Deck has no Deck List')  # Migration 029 gives every Deck a Deck List.
+        # The Target Format is read in the same snapshot as the revision it belongs to.
+        names = (header['target_format'] if format_name is None else format_name,)
+        rules = {name: evaluator.format_rules(name) for name in names}
         revisions = read_revisions(conn)
         keys = {name: result_key(header['revision'], rules[name], revisions, on) for name in names}
         answers = {row['format']: (from_saved(row['format'], row['result'], on),
