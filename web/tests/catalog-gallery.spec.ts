@@ -155,7 +155,8 @@ test.describe("desktop", () => {
     await mainTab(page, "Catalog").click();
     await expect(tiles(page)).toHaveCount(70);
 
-    // Smart search: a known set ID and a number, otherwise a name prefix.
+    // Smart search: a known set ID and a number, otherwise the words anywhere in a name (accents and
+    // punctuation don't count), or close spellings when no name has them.
     // The hint under the box names the search that ran; it is the box's description.
     await expect(search(page)).toHaveAccessibleDescription(
       "Type a card name, or a set code and number such as PAL 185."
@@ -168,7 +169,20 @@ test.describe("desktop", () => {
     await expect(tileButton(page, 0)).toHaveAccessibleName(/^Bulbasaur,/);
     await search(page).fill("zub");
     await expect(search(page)).toHaveAccessibleDescription(
-      "Name: cards whose name starts with “zub”."
+      "Name: cards whose name contains “zub”."
+    );
+    await expect(results(page)).toContainText("Showing 60 of 61 cards");
+    await search(page).fill("ubat");
+    await expect(search(page)).toHaveAccessibleDescription(
+      "Name: cards whose name contains “ubat”."
+    );
+    await expect(results(page)).toContainText("Showing 60 of 61 cards");
+    await search(page).fill("fixture pokemon");
+    await expect(tiles(page)).toHaveCount(1);
+    await expect(tileButton(page, 0)).toHaveAccessibleName(/^Fixture Pokémon,/);
+    await search(page).fill("zubta");
+    await expect(search(page)).toHaveAccessibleDescription(
+      "No exact matches. Showing close spellings of “zubta”."
     );
     await expect(results(page)).toContainText("Showing 60 of 61 cards");
     await search(page).fill("nothing like this");
