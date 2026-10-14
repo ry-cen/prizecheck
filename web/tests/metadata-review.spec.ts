@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Locator, type Page } from "@playwright/test";
 import { signInAsOwner } from "./support/sign-in";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -92,7 +92,58 @@ async function openOwnerReview(page: Page) {
   await page.reload();
   await page.getByRole("button", { name: "Account" }).click();
   await page.getByRole("menuitem", { name: "Owner controls" }).click();
+  await page.getByRole("tab", { name: /^Metadata/ }).click();
   return page.getByRole("region", { name: "Catalog metadata review" });
+}
+
+/** Opens the review card of the queue row holding every one of `texts` (#168: the queue is a table, and
+ * Review opens the card in a row under it), and returns the card. */
+async function openItem(review: Locator, ...texts: string[]) {
+  let row = review
+    .getByRole("region", { name: "Metadata targets" })
+    .getByRole("row");
+  for (const text of texts) row = row.filter({ hasText: text });
+  await row.getByRole("button", { name: /^Review / }).click();
+  const card = review.getByRole("article");
+  await expect(card.getByLabel("Review reason")).toBeFocused();
+  return card;
+}
+
+/** Files a marketplace report as the signed-in user. A decided target leaves the queue, and a new report
+ * brings it back, so its folded decision history can be read. */
+async function reportEdition(
+  page: Page,
+  target: { id: string; printing_id: string },
+  note: string
+) {
+  const response = await page.request.post(
+    `${ORIGIN}/api/catalog/metadata-reports`,
+    {
+      headers: { origin: ORIGIN },
+      data: {
+        target: "marketplace",
+        issue: "incorrect",
+        printing_id: target.printing_id,
+        edition_id: target.id,
+        proposed: { product_id: 4321 },
+        note,
+      },
+    }
+  );
+  expect(response.status()).toBe(201);
+}
+
+const notifications = (page: Page) =>
+  page.getByRole("region", { name: "Notifications" });
+
+/** Owner controls' Rules tab (#167), where the metadata rules moved from the metadata review. */
+async function openRules(page: Page) {
+  await page.reload();
+  await page.getByRole("button", { name: "Account" }).click();
+  await page.getByRole("menuitem", { name: "Owner controls" }).click();
+  await page.getByRole("tab", { name: "Rules" }).click();
+  await expect(page).toHaveURL(/\/owner\/rules$/);
+  return page.getByRole("tabpanel", { name: "Rules" });
 }
 
 test.beforeEach(async () => {
@@ -170,26 +221,24 @@ test("collector reports an Edition mapping, nothing changes until the maintainer
   // The maintainer reviews it and approves a mapping with a fresh code.
   await setMaintainer(true);
   const review = await openOwnerReview(page);
-  const item = review
-    .getByRole("article")
-    .filter({ hasText: "Furret" })
-    .filter({ hasText: "normal" });
+  const item = await openItem(review, "Furret", "normal");
   await expect(item).toContainText("unverified");
   await expect(item).toContainText("1 linked report");
-  await item.getByLabel("Decision", { exact: true }).selectOption("correct");
+  await item
+    .getByRole("combobox", { name: /^Decision/ })
+    .selectOption("correct");
   await item.getByLabel("Product ID", { exact: true }).fill("4321");
   await item.getByLabel("Quote variant", { exact: true }).fill("normal");
-  await item.getByLabel("Decision evidence URL").fill(EVIDENCE);
-  await item
-    .getByLabel("Decision reason")
-    .fill("Product page matches the card");
+  await item.getByLabel("Review evidence URL").fill(EVIDENCE);
+  await item.getByLabel("Review reason").fill("Product page matches the card");
   await sendCode(page, item);
-  await item.getByRole("button", { name: "Record decision" }).click();
-  await expect(item.getByRole("status").last()).toContainText(
-    "Decision recorded"
+  await item.getByRole("button", { name: "Confirm decision" }).click();
+  // A confirmed decision removes the row and says what happened in a toast (#168).
+  await expect(notifications(page)).toContainText(
+    "Decision recorded: verified"
   );
-  await expect(item).toContainText("Public delivery: delivered");
-  await expect(item).toContainText("verified");
+  await expect(notifications(page)).toContainText("Public delivery: delivered");
+  await expect(item).toHaveCount(0);
 
   const after = await normal();
   expect(after).toMatchObject({
@@ -201,9 +250,16 @@ test("collector reports an Edition mapping, nothing changes until the maintainer
     (await pool.query("SELECT status FROM catalog_metadata_report")).rows
   ).toEqual([{ status: "approved" }]);
 
-  // The history panel carries the provenance of the decision.
-  await item.getByRole("button", { name: "Show history" }).click();
-  const history = item.getByRole("region", { name: "Decision history" });
+  // The history panel carries the provenance of the decision. The decided Edition left the queue, so a
+  // follow-up report brings it back.
+  await reportEdition(page, after, "Follow-up");
+  const reopened = await openItem(
+    await openOwnerReview(page),
+    "Furret",
+    "normal"
+  );
+  await reopened.getByRole("button", { name: "Show history" }).click();
+  const history = reopened.getByRole("region", { name: "Decision history" });
   await expect(history).toContainText("correct");
   await expect(history).toContainText(await userId());
   await expect(history).toContainText(EVIDENCE);
@@ -228,8 +284,8 @@ test("a stale evidence digest is refused, then succeeds after reloading the evid
   await signIn(page);
   await setMaintainer(true);
   const target = await normal();
-  const review = await openOwnerReview(page);
-  // Open a queue entry through a report, then change the evidence underneath the maintainer.
+  // Open a queue entry through a report, then change the evidence underneath the maintainer. The first report
+  // goes in before the tab opens, so the tab's own read is issued after it.
   const first = await page.request.post(
     `${ORIGIN}/api/catalog/metadata-reports`,
     {
@@ -245,9 +301,17 @@ test("a stale evidence digest is refused, then succeeds after reloading the evid
     }
   );
   expect(first.status()).toBe(201);
-  await review.getByRole("button", { name: "Refresh queue" }).click();
-  const item = review.getByRole("article").filter({ hasText: "normal" });
+  const review = await openOwnerReview(page);
+  const item = await openItem(review, "normal");
   await expect(item).toContainText("1 linked report");
+  // Wait for the refresh to answer, so the second report lands after the evidence the maintainer is shown.
+  const refresh = page.waitForRequest(
+    (request) =>
+      request.url().includes("/api/admin/catalog-metadata/queue") &&
+      request.method() === "GET"
+  );
+  await review.getByRole("button", { name: "Refresh queue" }).click();
+  await (await refresh).response();
   const second = await page.request.post(
     `${ORIGIN}/api/catalog/metadata-reports`,
     {
@@ -264,12 +328,14 @@ test("a stale evidence digest is refused, then succeeds after reloading the evid
   );
   expect(second.status()).toBe(201);
 
-  await item.getByLabel("Decision", { exact: true }).selectOption("correct");
+  await item
+    .getByRole("combobox", { name: /^Decision/ })
+    .selectOption("correct");
   await item.getByLabel("Product ID", { exact: true }).fill("777");
-  await item.getByLabel("Decision evidence URL").fill(EVIDENCE);
-  await item.getByLabel("Decision reason").fill("Reviewed the first report");
+  await item.getByLabel("Review evidence URL").fill(EVIDENCE);
+  await item.getByLabel("Review reason").fill("Reviewed the first report");
   await sendCode(page, item);
-  await item.getByRole("button", { name: "Record decision" }).click();
+  await item.getByRole("button", { name: "Confirm decision" }).click();
   await expect(item.getByRole("alert")).toContainText("Evidence changed");
   await expect((await normal()).mapping_state).toBe("unverified");
 
@@ -277,8 +343,9 @@ test("a stale evidence digest is refused, then succeeds after reloading the evid
   await expect(item).toContainText("2 linked reports");
   await expect(item.getByRole("alert")).toHaveCount(0);
   // The unspent code still works; the form keeps the maintainer's entries.
-  await item.getByRole("button", { name: "Record decision" }).click();
-  await expect(item).toContainText("Decision recorded");
+  await item.getByRole("button", { name: "Confirm decision" }).click();
+  await expect(notifications(page)).toContainText("Decision recorded");
+  await expect(item).toHaveCount(0);
   expect((await normal()).mapping_state).toBe("verified");
   expect(
     (await pool.query("SELECT status FROM catalog_metadata_report")).rows.map(
@@ -299,29 +366,25 @@ test("a maintainer-cleared quarantine is visible in the public record after deli
     mapping_reason: "candidate_changed",
   });
   const review = await openOwnerReview(page);
-  const item = review
-    .getByRole("article")
-    .filter({ hasText: "Furret" })
-    .filter({ hasText: "normal" });
+  const item = await openItem(review, "Furret", "normal");
   await expect(item).toContainText("quarantined");
   await expect(item).toContainText("candidate_changed");
   await expect(item).toContainText("Source value");
   await expect(item).toContainText("999");
-  await item.getByLabel("Decision", { exact: true }).selectOption("correct");
+  await item
+    .getByRole("combobox", { name: /^Decision/ })
+    .selectOption("correct");
   await item.getByLabel("Product ID", { exact: true }).fill("4321");
   await item.getByLabel("Quote variant", { exact: true }).fill("normal");
-  await item.getByLabel("Decision evidence URL").fill(EVIDENCE);
-  await item
-    .getByLabel("Decision reason")
-    .fill("Source change checked by hand");
+  await item.getByLabel("Review evidence URL").fill(EVIDENCE);
+  await item.getByLabel("Review reason").fill("Source change checked by hand");
   await sendCode(page, item);
-  await item.getByRole("button", { name: "Record decision" }).click();
-  await expect(item).toContainText("Public delivery: delivered");
-  await expect(item).toContainText("verified");
-  await item.getByRole("button", { name: "Show history" }).click();
-  await expect(
-    item.getByRole("region", { name: "Decision history" })
-  ).toContainText("Rule: marketplace_matching v1");
+  await item.getByRole("button", { name: "Confirm decision" }).click();
+  await expect(notifications(page)).toContainText(
+    "Decision recorded: verified"
+  );
+  await expect(notifications(page)).toContainText("Public delivery: delivered");
+  await expect(item).toHaveCount(0);
 
   const published = JSON.parse(
     execFileSync(
@@ -349,6 +412,19 @@ print(json.dumps(public_record_store().read_records([key],deadline=time.monotoni
       )
     ).rows[0].n
   ).toBe(0);
+
+  // The decision kept the active matching rule. The decided Edition left the queue; a follow-up report
+  // brings it back with its folded history.
+  await reportEdition(page, quarantined, "Follow-up");
+  const reopened = await openItem(
+    await openOwnerReview(page),
+    "Furret",
+    "normal"
+  );
+  await reopened.getByRole("button", { name: "Show history" }).click();
+  await expect(
+    reopened.getByRole("region", { name: "Decision history" })
+  ).toContainText("Rule: marketplace_matching v1");
 });
 
 test("the maintainer lists rule versions and activates a rule with a fresh code", async ({
@@ -358,18 +434,17 @@ test("the maintainer lists rule versions and activates a rule with a fresh code"
   await signIn(page);
   await setMaintainer(true);
   await pool.query("UPDATE catalog_rule_state SET activation_id=NULL");
-  const review = await openOwnerReview(page);
-  const rules = review.getByRole("region", { name: "Metadata rules" });
-  const matching = rules
-    .getByRole("article")
-    .filter({ hasText: "marketplace_matching" });
+  const rules = await openRules(page);
+  const matching = rules.getByRole("article", {
+    name: "Marketplace matching",
+  });
   await expect(matching).toContainText("Version 1");
   await expect(matching).toContainText("No active rule");
   await matching.getByLabel("Rule version").selectOption("1");
   await matching.getByLabel("Rule evidence URL").fill(EVIDENCE);
   await matching.getByLabel("Rule reason").fill("Reviewed the matching rule");
   await sendCode(page, matching);
-  await matching.getByRole("button", { name: "Apply rule change" }).click();
+  await matching.getByRole("button", { name: "Confirm rule change" }).click();
   await expect(matching).toContainText("Active: version 1");
   await expect(matching).toContainText("Public delivery:");
   // Deactivating binds the code to version 0.
@@ -377,7 +452,7 @@ test("the maintainer lists rule versions and activates a rule with a fresh code"
   await matching.getByLabel("Rule evidence URL").fill(EVIDENCE);
   await matching.getByLabel("Rule reason").fill("Pause the matching rule");
   await sendCode(page, matching);
-  await matching.getByRole("button", { name: "Apply rule change" }).click();
+  await matching.getByRole("button", { name: "Confirm rule change" }).click();
   await expect(matching).toContainText("No active rule");
 });
 
@@ -436,36 +511,35 @@ test("quarantining the Edition mapping leaves a reviewed Live identity eligible"
   await setMaintainer(true);
   const printing = await printingRow();
   await reportLive(page, printing.id);
-  let review = await openOwnerReview(page);
-
   // Activate the Live rule v1 with a fresh code.
-  const live = review
-    .getByRole("region", { name: "Metadata rules" })
-    .getByRole("article")
-    .filter({ hasText: "live_derivation" });
+  const live = (await openRules(page)).getByRole("article", {
+    name: "Live derivation",
+  });
   await live.getByLabel("Rule version").selectOption("1");
   await live.getByLabel("Rule evidence URL").fill(EVIDENCE);
   await live.getByLabel("Rule reason").fill("Reviewed the Live rule");
   await sendCode(page, live);
-  await live.getByRole("button", { name: "Apply rule change" }).click();
+  await live.getByRole("button", { name: "Confirm rule change" }).click();
   await expect(live).toContainText("Active: version 1");
   // The activation changed the target's evidence, so reopen the review first.
-  review = await openOwnerReview(page);
+  let review = await openOwnerReview(page);
 
   // A complete Live correction; the set code is normalised to upper case.
-  const item = review
-    .getByRole("article")
-    .filter({ hasText: "Furret" })
-    .filter({ hasText: "Live identity" });
-  await item.getByLabel("Decision", { exact: true }).selectOption("correct");
+  const item = await openItem(review, "Furret", "Live identity");
+  await item
+    .getByRole("combobox", { name: /^Decision/ })
+    .selectOption("correct");
   await item.getByLabel("Live name").fill("Furret");
   await item.getByLabel("Live set code").fill("dab");
   await item.getByLabel("Live collector number").fill("1");
-  await item.getByLabel("Decision evidence URL").fill(EVIDENCE);
-  await item.getByLabel("Decision reason").fill("Printed identity checked");
+  await item.getByLabel("Review evidence URL").fill(EVIDENCE);
+  await item.getByLabel("Review reason").fill("Printed identity checked");
   await sendCode(page, item);
-  await item.getByRole("button", { name: "Record decision" }).click();
-  await expect(item).toContainText("Decision recorded: eligible");
+  await item.getByRole("button", { name: "Confirm decision" }).click();
+  await expect(notifications(page)).toContainText(
+    "Decision recorded: eligible"
+  );
+  await expect(item).toHaveCount(0);
   expect(await printingRow()).toMatchObject({
     live_state: "eligible",
     live_identity: {
@@ -475,9 +549,16 @@ test("quarantining the Edition mapping leaves a reviewed Live identity eligible"
       number: "1",
     },
   });
-  await item.getByRole("button", { name: "Show history" }).click();
+  // The decided Printing left the queue; another Live report brings it back with its folded history.
+  await reportLive(page, printing.id);
+  const liveAgain = await openItem(
+    await openOwnerReview(page),
+    "Furret",
+    "Live identity"
+  );
+  await liveAgain.getByRole("button", { name: "Show history" }).click();
   await expect(
-    item.getByRole("region", { name: "Decision history" })
+    liveAgain.getByRole("region", { name: "Decision history" })
   ).toContainText("Rule: live_derivation v1");
 
   // Now the same Printing's Edition mapping is quarantined.
@@ -490,7 +571,8 @@ test("quarantining the Edition mapping leaves a reviewed Live identity eligible"
   review = await openOwnerReview(page);
   await expect(
     review
-      .getByRole("article")
+      .getByRole("region", { name: "Metadata targets" })
+      .getByRole("row")
       .filter({ hasText: "Furret" })
       .filter({ hasText: "normal" })
   ).toContainText("quarantined");
@@ -531,17 +613,14 @@ test("a request for information round-trips through the collector back to the ma
   expect(created.status()).toBe(201);
   const reportId = (await created.json()).id as string;
   const review = await openOwnerReview(page);
-  const item = review
-    .getByRole("article")
-    .filter({ hasText: "Furret" })
-    .filter({ hasText: "normal" });
+  const item = await openItem(review, "Furret", "normal");
   // The maintainer can read what was reported, and the link cannot leak the opener.
   await expect(item).toContainText("Note: Original note");
   await expect(item).toContainText("product id 4321");
   const link = item.getByRole("link", { name: "https://example.org/listing" });
   await expect(link).toHaveAttribute("rel", "noopener noreferrer");
   await expect(link).toHaveAttribute("href", "https://example.org/listing");
-  await item.getByLabel("Decision reason").fill("Which listing did you mean?");
+  await item.getByLabel("Review reason").fill("Which listing did you mean?");
   await item
     .getByRole("button", { name: /Ask reporter for information/ })
     .click();
@@ -581,16 +660,49 @@ test("a request for information round-trips through the collector back to the ma
 
   // The answered report is back in the maintainer queue.
   await setMaintainer(true);
-  const again = await openOwnerReview(page);
-  await expect(
-    again
-      .getByRole("article")
-      .filter({ hasText: "Furret" })
-      .filter({ hasText: "normal" })
-  ).toContainText("Note: The TCGplayer listing 4321"); // the reply is readable
+  const again = await openItem(await openOwnerReview(page), "Furret", "normal");
+  await expect(again).toContainText("Note: The TCGplayer listing 4321"); // the reply is readable
   const queue = await page.request.get(
     `${ORIGIN}/api/admin/catalog-metadata/queue`
   );
   const items = (await queue.json()).items as { report_ids: string[] }[];
   expect(items.some((entry) => entry.report_ids.includes(reportId))).toBe(true);
+});
+
+test("a decision that leaves a linked report open keeps the row, with its report count", async ({
+  page,
+}) => {
+  seed(false);
+  await signIn(page);
+  await setMaintainer(true);
+  const target = await normal();
+  await reportEdition(page, target, "Left open on purpose");
+  const review = await openOwnerReview(page);
+  const item = await openItem(review, "Furret", "normal");
+  await item.getByLabel("Close linked reports with this decision").uncheck();
+  await item.getByLabel("Product ID", { exact: true }).fill("4321");
+  await item.getByLabel("Quote variant", { exact: true }).fill("normal");
+  await item.getByLabel("Review evidence URL").fill(EVIDENCE);
+  await item.getByLabel("Review reason").fill("Mapping is right, report stays");
+  await sendCode(page, item);
+  await item.getByRole("button", { name: "Confirm decision" }).click();
+
+  await expect(notifications(page)).toContainText(
+    "Decision recorded: verified"
+  );
+  // The report is still open, so the target stays queued: the card folds and the row keeps its count.
+  await expect(item).toHaveCount(0);
+  const row = review
+    .getByRole("region", { name: "Metadata targets" })
+    .getByRole("row")
+    .filter({ hasText: "Furret" })
+    .filter({ hasText: "normal" });
+  await expect(row).toHaveCount(1);
+  await expect(row.getByRole("cell").nth(3)).toHaveText("1");
+  const reopen = row.getByRole("button", { name: /^Review / });
+  await expect(reopen).toHaveAttribute("aria-expanded", "false");
+  await expect(reopen).toBeFocused();
+  expect(
+    (await pool.query("SELECT status FROM catalog_metadata_report")).rows
+  ).toEqual([{ status: "pending" }]);
 });

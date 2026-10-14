@@ -3,6 +3,7 @@ import { signInAsOwner } from "./support/sign-in";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
+import { expectPageChecks } from "./support/page-check";
 import { expectTouchTarget } from "./support/touch-target";
 import { startAsNewOwner } from "./support/owner";
 
@@ -20,6 +21,7 @@ type Card = {
   number: string;
   category: "Pokemon" | "Trainer" | "Energy";
   types?: string[];
+  trainerType?: string;
 };
 
 /** Five Printings across two sets. Set B's numbers 1, 2 and 10 check numeric order. */
@@ -43,6 +45,7 @@ const CARDS: Record<string, Card> = {
     set: ["set-b", "Beta Set"],
     number: "2",
     category: "Trainer",
+    trainerType: "Item",
   },
   "card-4": {
     name: "Basic Fire Energy",
@@ -60,8 +63,9 @@ const CARDS: Record<string, Card> = {
   },
 };
 
-/** Replaces the catalog with CARDS through the real import, so category and elemental type are
- * stored the way a TCGdex pull stores them. This also clears every Holding. */
+/** Replaces the catalog with CARDS through the real import, so the card attributes the filters read
+ * (card kind, Trainer Type and types) are derived the way a TCGdex pull derives them. This also clears
+ * every Holding. */
 function promoteCatalog() {
   execFileSync(
     ".venv/bin/python",
@@ -79,6 +83,8 @@ class Attributed(search.SearchSource):
                   "variants": {"normal": True, "reverse": False}}
         if card.get("types"):
             record["types"] = card["types"]
+        if card.get("trainerType"):
+            record["trainerType"] = card["trainerType"]
         if card["category"] == "Energy":
             record["energyType"] = "Normal"
         return record
@@ -274,20 +280,32 @@ test.describe("desktop", () => {
     await expect(category.locator("option")).toHaveText([
       "All",
       "Pokémon",
-      "Trainer",
+      "Trainer: any type",
+      "Trainer: Supporter",
+      "Trainer: Item",
+      "Trainer: Pokémon Tool",
+      "Trainer: Stadium",
       "Energy",
     ]);
     await category.selectOption({ label: "Pokémon" });
     await expectEditions(page, ["Charmander", "Squirtle", "Vaporeon"]);
-    await category.selectOption({ label: "Trainer" });
+    await category.selectOption({ label: "Trainer: any type" });
     await expectEditions(page, ["Potion"]);
+    // A Trainer Type lists the Trainers of that type (spec "Card type: one source").
+    await category.selectOption({ label: "Trainer: Item" });
+    await expectEditions(page, ["Potion"]);
+    await expect(filters).toHaveAccessibleName("Filters, 1 active");
+    await expectPageChecks(page, "Collection, Filters open (desktop)");
+    await category.selectOption({ label: "Trainer: Supporter" });
+    await expect(tiles(page)).toHaveCount(0);
     await category.selectOption({ label: "Energy" });
     await expectEditions(page, ["Basic Fire Energy"]);
     await category.selectOption("");
 
     const type = panel(page).getByLabel("Elemental type", { exact: true });
+    // Elemental types are a Pokémon's types: a Basic Energy has none in the card attributes.
     await type.selectOption("Fire");
-    await expectEditions(page, ["Basic Fire Energy", "Charmander"]);
+    await expectEditions(page, ["Charmander"]);
     await type.selectOption("Water");
     await expectEditions(page, ["Squirtle", "Vaporeon"]);
 
@@ -298,7 +316,7 @@ test.describe("desktop", () => {
     await expectEditions(page, ["Vaporeon"]);
     await expect(filters).toHaveAccessibleName("Filters, 3 active");
     await expect(filters).toContainText("3");
-    await category.selectOption({ label: "Trainer" });
+    await category.selectOption({ label: "Trainer: any type" });
     await expect(tiles(page)).toHaveCount(0);
     await expect(
       cards(page).getByText("No cards match your search or filters.")
@@ -469,11 +487,20 @@ test.describe("desktop", () => {
     const details = page.getByRole("complementary", { name: "Card details" });
     await expect(details).toContainText("Pokémon · Water");
     await cards(page)
+      .getByRole("button", { name: /^Potion,/ })
+      .first()
+      .click();
+    await expect(
+      details.getByText("Trainer · Item", { exact: true })
+    ).toBeVisible();
+    await vaporeon.first().click();
+    await expect(details).toContainText("Pokémon · Water");
+    await cards(page)
       .getByRole("button", { name: /^Basic Fire Energy,/ })
       .first()
       .click({ modifiers: ["ControlOrMeta"] });
     await expect(selectionBar(page)).toContainText("2 copies selected");
-    await expect(details).toContainText("Energy · Fire");
+    await expect(details.getByText("Energy", { exact: true })).toBeVisible();
 
     await page
       .getByLabel("Sort", { exact: true })
@@ -561,8 +588,9 @@ test.describe("mobile", () => {
     );
     await drawer
       .getByLabel("Category", { exact: true })
-      .selectOption({ label: "Trainer" });
+      .selectOption({ label: "Trainer: any type" });
     await listed;
+    await expectPageChecks(page, "Collection, Filters & display open (phone)");
     await drawer.getByRole("button", { name: "Names", exact: true }).click();
     await expect(
       drawer.getByRole("button", { name: "Names", exact: true })

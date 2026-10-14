@@ -7,16 +7,20 @@ from uuid import uuid4
 
 import psycopg
 
+from app.card_attributes import ATTRIBUTE_COLUMNS, RULES, derive, derive_evolves_from
 from test_collection_holdings import PAGE, location
 from test_holdings import add, call, fixture
 
 
-def card(conn, generation, name, set_id, set_name, number, category=None, types=None):
-    """One Edition of a new Printing in the active generation, with its retained source record."""
+def card(conn, generation, name, set_id, set_name, number, category=None, types=None, trainer_type=None):
+    """One Edition of a new Printing in the active generation, with its retained source record and the card attributes
+    the derivation rules give that record (Collection's filters read the effective attributes, migration 041). The row
+    is written directly: re-deriving the whole catalog would also rewrite other tests' hand-made attribute rows."""
     identity = conn.execute("INSERT INTO catalog_identity(identity_key,display_name) VALUES (%s,%s) RETURNING id",
                             (str(uuid4()), name)).fetchone()[0]
+    source_id = str(uuid4())
     printing = conn.execute("INSERT INTO catalog_printing(source,source_id,identity_id) VALUES ('tcgdex',%s,%s) RETURNING id",
-                            (str(uuid4()), identity)).fetchone()[0]
+                            (source_id, identity)).fetchone()[0]
     edition = conn.execute("INSERT INTO catalog_edition(printing_id,descriptor_key,descriptor) VALUES (%s,'unspecified','{}') RETURNING id",
                            (printing,)).fetchone()[0]
     conn.execute("""INSERT INTO catalog_generation_printing
@@ -25,8 +29,15 @@ def card(conn, generation, name, set_id, set_name, number, category=None, types=
                  (generation, printing, str(uuid4()), set_id, set_name, number, name, name.lower()))
     conn.execute("INSERT INTO catalog_generation_edition(generation_id,edition_id,printing_id) VALUES (%s,%s,%s)",
                  (generation, edition, printing))
-    record = {"name": name, **({"category": category} if category else {}), **({"types": types} if types else {})}
+    record = {"name": name, **({"category": category} if category else {}), **({"types": types} if types else {}),
+              **({"trainerType": trainer_type} if trainer_type else {})}
     conn.execute("UPDATE catalog_printing_metadata SET source_record=%s WHERE printing_id=%s", (json.dumps(record), printing))
+    attributes = derive(source_id, record)
+    values = [list(value) if column == "types" and value is not None else value
+              for column, value in zip(ATTRIBUTE_COLUMNS, (getattr(attributes, column) for column in ATTRIBUTE_COLUMNS))]
+    conn.execute(f"""INSERT INTO catalog_derived_attribute(printing_id,rules_version,{','.join(ATTRIBUTE_COLUMNS)},evolves_from)
+      VALUES (%s,%s,{','.join(['%s'] * len(ATTRIBUTE_COLUMNS))},%s)""",
+                 (printing, RULES.VERSION, *values, derive_evolves_from(record)))
     return str(edition)
 
 
@@ -59,7 +70,7 @@ def seed():
             'Charmander': card(conn, generation, 'Charmander', 'base', 'Base Set', '4', 'Pokemon', ['Fire']),
             'Fire Energy': card(conn, generation, 'Fire Energy', 'jungle', 'Jungle', '2', 'Energy', ['Fire']),
             'Mew': card(conn, generation, 'Mew', 'jungle', 'Jungle', '1', 'Pokemon', ['Psychic', 'Water']),
-            'Potion': card(conn, generation, 'Potion', 'base', 'Base Set', '1', 'Trainer'),
+            'Potion': card(conn, generation, 'Potion', 'base', 'Base Set', '1', 'Trainer', trainer_type='Item'),
             'Unknown': card(conn, generation, 'Unknown', 'promo', 'Promo', 'SWSH001'),
         }
         alpha = location(conn, owner, 'alpha')
@@ -73,7 +84,7 @@ def seed():
     return owner, other, alpha, beta, e
 
 
-def test_listing_filters_by_name_set_category_and_elemental_type():
+def test_listing_filters_by_name_set_category_trainer_type_and_elemental_type():
     owner, other, alpha, beta, _ = seed()
     everything = listing(owner)
     assert editions(everything) == ['Abra', 'Charmander', 'Fire Energy', 'Mew', 'Potion', 'Unknown']
@@ -81,6 +92,8 @@ def test_listing_filters_by_name_set_category_and_elemental_type():
     assert (rows['Mew']['category'], rows['Mew']['elemental_types']) == ('Pokemon', ['Psychic', 'Water'])
     assert (rows['Potion']['category'], rows['Potion']['elemental_types']) == ('Trainer', [])
     assert (rows['Unknown']['category'], rows['Unknown']['elemental_types']) == (None, [])
+    assert (rows['Potion']['trainer_type'], rows['Mew']['trainer_type'], rows['Unknown']['trainer_type']) == (
+        'item', None, None)
 
     # Name search: case-insensitive substring; % and _ are literal characters.
     assert editions(listing(owner, name='  CHAR ')) == ['Charmander']
@@ -90,7 +103,10 @@ def test_listing_filters_by_name_set_category_and_elemental_type():
     assert editions(listing(owner, category='Pokemon')) == ['Abra', 'Charmander', 'Mew']
     assert editions(listing(owner, category='Trainer')) == ['Potion']
     assert editions(listing(owner, category='Energy')) == ['Fire Energy']
-    assert editions(listing(owner, elemental_type='Fire')) == ['Charmander', 'Fire Energy']
+    assert editions(listing(owner, trainer_type='item')) == ['Potion']
+    assert editions(listing(owner, trainer_type='supporter')) == []
+    # Elemental types are a Pokémon's types (the effective card attributes): a Basic Energy has none.
+    assert editions(listing(owner, elemental_type='Fire')) == ['Charmander']
     # A dual-type card matches either type.
     assert editions(listing(owner, elemental_type='Water')) == ['Mew']
     assert editions(listing(owner, elemental_type='Psychic')) == ['Abra', 'Mew']
@@ -101,11 +117,11 @@ def test_listing_filters_by_name_set_category_and_elemental_type():
     assert editions(listing(owner, name='a', category='Pokemon', location_id=alpha)) == ['Abra', 'Charmander']
     assert names(listing(owner, name='char', location_id=beta)) == [('Charmander', 'beta')]
     # Totals describe the filtered view, so the grid's size matches what is listed.
-    assert listing(owner, elemental_type='Fire').json()['totals'] == {'holdings': 3, 'editions': 2, 'copies': '6'}
+    assert listing(owner, elemental_type='Fire').json()['totals'] == {'holdings': 2, 'editions': 1, 'copies': '4'}
     assert listing(owner, category='Trainer', set_id='jungle').json()['totals'] == {'holdings': 0, 'editions': 0, 'copies': '0'}
     # Another owner's copies never show up.
     assert names(listing(other, elemental_type='Psychic')) == [('Abra', 'Unsorted')]
-    for bad in ({'category': 'Item'}, {'elemental_type': 'Plasma'}, {'sort': 'price-asc'}, {'sort': 'name'},
+    for bad in ({'category': 'Item'}, {'trainer_type': 'Item'}, {'elemental_type': 'Plasma'}, {'sort': 'price-asc'}, {'sort': 'name'},
                 {'name': 'x' * 121}, {'set_id': 'x' * 81}):
         assert listing(owner, **bad).status_code == 422, bad
 
@@ -123,7 +139,7 @@ def test_listing_sorts_by_name_set_number_and_quantity_in_the_view():
     # In beta Charmander has 1 copy, not 4, so it falls behind Fire Energy.
     assert editions(listing(owner, sort='quantity-desc', location_id=beta)) == ['Potion', 'Fire Energy', 'Charmander', 'Unknown']
     # Filters keep or drop whole Editions; the sort applies to what is left.
-    assert editions(listing(owner, sort='quantity-asc', elemental_type='Fire')) == ['Fire Energy', 'Charmander']
+    assert editions(listing(owner, sort='quantity-asc', category='Pokemon')) == ['Abra', 'Charmander', 'Mew']
     # Copies of one Edition keep source Location order whatever the direction.
     for sort in ('name-asc', 'name-desc', 'set-desc', 'quantity-desc'):
         charmander = [leaf for name, leaf in names(listing(owner, sort=sort)) if name == 'Charmander']
@@ -187,6 +203,7 @@ def test_sorted_and_filtered_pages_walk_every_holding_once_and_bind_cursors_to_t
     for wrong in (dict(sort='quantity-asc', category='Pokemon'), dict(sort='quantity-desc'),
                   dict(sort='quantity-desc', category='Pokemon', name='p'),
                   dict(sort='quantity-desc', category='Pokemon', elemental_type='Lightning'),
+                  dict(sort='quantity-desc', category='Pokemon', trainer_type='item'),
                   dict(sort='quantity-desc', category='Pokemon', set_id='base'),
                   dict(sort='quantity-desc', category='Pokemon', location_id=binder)):
         response = listing(owner, cursor=second, **wrong)

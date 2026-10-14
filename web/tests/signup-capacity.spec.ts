@@ -25,21 +25,27 @@ test("the owner panel warns when the day's new accounts reach 80% of the cap, an
       "INSERT INTO auth_rate_event(kind,ip_key) SELECT 'signup','key-'||g FROM generate_series(1,79) g"
     );
     await page.goto(`${ORIGIN}/owner`);
+    // Owner controls' Status tab (#167): operational health is a table, and a warning joins the problems line.
     const health = page.getByRole("region", { name: "Operational health" });
-    await expect(
-      health.getByText("New accounts in the last day: 79 / 100.")
-    ).toBeVisible();
-    await expect(health.getByText(/80% warning/)).toHaveCount(0);
+    const row = health
+      .getByRole("region", { name: "Health checks" })
+      .getByRole("row")
+      .filter({
+        has: page.getByRole("cell", { name: "New accounts", exact: true }),
+      });
+    await expect(row).toContainText("79 / 100");
+    await expect(row).toContainText("Refused for too many sign-ins:");
+    await expect(row).not.toContainText("80% warning");
     await pool.query(
       "INSERT INTO auth_rate_event(kind,ip_key) VALUES('signup','key-80')"
     );
-    await health
-      .getByRole("button", { name: "Refresh operational health" })
-      .click();
+    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    await expect(row).toContainText("80 / 100 · 80% warning");
     await expect(
-      health.getByRole("alert").filter({
-        hasText: "New accounts in the last day: 80 / 100 — 80% warning.",
-      })
+      page
+        .getByRole("list", { name: "Problems" })
+        .getByRole("listitem")
+        .filter({ hasText: "New accounts: 80 / 100 · 80% warning" })
     ).toBeVisible();
     await expect(health).not.toContainText(OWNER_EMAIL);
   } finally {

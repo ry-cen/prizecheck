@@ -12,6 +12,11 @@ values only; there is no "corrected to unknown". Manually approved Printings hav
 correction is their only source. Effective attributes are public format facts (Deck Lists 18): writing or removing a
 correction re-stamps the Printing at the decision's public revision and enqueues it (migration 036's trigger), and the
 decision delivers it after its commit and reports ``public_delivery``, like a metadata decision.
+
+Trainer Type belongs to Trainers only: the effective Trainer Type is null whenever the effective card kind is not
+'trainer' (``effective`` and migration 041's view), so correcting a mis-derived Trainer to another kind also clears its
+derived Trainer Type, and a correction that states a Trainer Type for a card that is not a Trainer is refused. Evolves
+from is shown with the evidence but is never reported or corrected.
 """
 import hashlib
 import hmac
@@ -43,6 +48,7 @@ POKEMON_TYPES = ("Grass", "Fire", "Water", "Lightning", "Psychic", "Fighting", "
                  "Colorless")
 PokemonType = Literal["Grass", "Fire", "Water", "Lightning", "Psychic", "Fighting", "Darkness", "Metal", "Fairy",
                       "Dragon", "Colorless"]
+TrainerType = Literal["supporter", "item", "tool", "stadium"]
 
 
 class AttributeValues(BaseModel):
@@ -58,6 +64,7 @@ class AttributeValues(BaseModel):
     radiant: bool | None = None
     prism_star: bool | None = None
     basic_pokemon: bool | None = None
+    trainer_type: TrainerType | None = None
 
     @field_validator("types")
     @classmethod
@@ -100,8 +107,11 @@ def effective(derived: CardAttributes | None, correction: CardAttributes | None)
     """What ``catalog_card_attribute`` returns: each corrected attribute over the derived one."""
     base = asdict(derived) if derived else {}
     over = asdict(correction) if correction else {}
-    return CardAttributes(**{column: over.get(column) if over.get(column) is not None else base.get(column)
-                             for column in ATTRIBUTE_COLUMNS})
+    values = {column: over.get(column) if over.get(column) is not None else base.get(column)
+              for column in ATTRIBUTE_COLUMNS}
+    if values["card_kind"] != "trainer":
+        values["trainer_type"] = None  # Trainers only, as in the view (migration 041)
+    return CardAttributes(**values)
 
 
 def consistent(attributes: CardAttributes) -> bool:
@@ -247,8 +257,13 @@ class AttributeEvidence(BaseModel):
     correction: AttributeValues | None
     correction_decision_id: UUID | None
     effective: AttributeValues
+    # Evolves from is derived but never corrected: the derived value, and the effective one (a Pokémon's only).
+    derived_evolves_from: str | None
+    evolves_from: str | None
     reports: list[AttributeReportView]
     report_ids: list[UUID]
+    # When the Printing needed review: its oldest open report, or for a manual Printing without one, its creation.
+    opened_at: datetime
     attribute_revision: int
     evidence_digest: str
 
@@ -281,7 +296,7 @@ def load_evidence(conn, printing_id: UUID, lock: bool = False):
     in a decision: public clock, derived row, reports, approval code, attribute revision. Re-derivation writes derived
     rows and then the attribute revision and never waits for a lock a decision takes later, so the orders don't invert.
     """
-    row = conn.execute("""SELECT p.id,p.source,p.source_id,d.set_id,d.collector_number,d.display_name,
+    row = conn.execute("""SELECT p.id,p.source,p.source_id,p.created_at,d.set_id,d.collector_number,d.display_name,
         CASE WHEN p.source = 'tcgdex' AND jsonb_typeof(m.source_record) = 'object' THEN
           (SELECT coalesce(jsonb_object_agg(f.key, f.value), '{}'::jsonb) FROM jsonb_each(m.source_record) f
            WHERE f.key = ANY(%s)) END AS source_fields
@@ -301,9 +316,12 @@ def load_evidence(conn, printing_id: UUID, lock: bool = False):
           ORDER BY created_at,id{' FOR UPDATE' if lock else ''}""", (printing_id, list(OPEN))).fetchall()]
     derived, correction = _from_row(derived_row), _from_row(correction_row)
     source_fields = row["source_fields"]
+    derived_evolves_from = derived_row["evolves_from"] if derived_row else None
+    result = effective(derived, correction)
     shown = {"printing_id": str(printing_id), "source": row["source"], "source_id": row["source_id"],
              "source_fields": source_fields,
              "derived": asdict(derived) if derived else None,
+             "derived_evolves_from": derived_evolves_from,
              "rules_version": derived_row["rules_version"] if derived_row else None,
              "correction": asdict(correction) if correction else None,
              "correction_decision_id": str(correction_row["decision_id"]) if correction_row else None,
@@ -315,8 +333,10 @@ def load_evidence(conn, printing_id: UUID, lock: bool = False):
             "rules_version": derived_row["rules_version"] if derived_row else None,
             "correction": correction, "correction_values": _values(correction),
             "correction_decision_id": correction_row["decision_id"] if correction_row else None,
-            "effective": effective(derived, correction), "reports": reports, "report_ids": [r.id for r in reports],
-            "evidence_digest": digest}
+            "effective": result, "derived_evolves_from": derived_evolves_from,
+            "evolves_from": derived_evolves_from if result.card_kind == "pokemon" else None,
+            "reports": reports, "report_ids": [r.id for r in reports],
+            "opened_at": min((r.created_at for r in reports), default=row["created_at"]), "evidence_digest": digest}
 
 
 def evidence_view(conn, loaded) -> AttributeEvidence:
@@ -325,8 +345,10 @@ def evidence_view(conn, loaded) -> AttributeEvidence:
         set_id=loaded["set_id"], collector_number=loaded["collector_number"], name=loaded["name"],
         source_fields=loaded["source_fields"], derived=loaded["derived_values"], rules_version=loaded["rules_version"],
         correction=loaded["correction_values"], correction_decision_id=loaded["correction_decision_id"],
-        effective=_values(loaded["effective"]), reports=loaded["reports"], report_ids=loaded["report_ids"],
-        attribute_revision=attribute_revision(conn), evidence_digest=loaded["evidence_digest"])
+        effective=_values(loaded["effective"]), derived_evolves_from=loaded["derived_evolves_from"],
+        evolves_from=loaded["evolves_from"], reports=loaded["reports"], report_ids=loaded["report_ids"],
+        opened_at=loaded["opened_at"], attribute_revision=attribute_revision(conn),
+        evidence_digest=loaded["evidence_digest"])
 
 
 @router.get("/api/admin/card-attributes/queue", response_model=AttributeQueuePage)
@@ -442,7 +464,7 @@ def decide(command: AttributeDecisionInput, user_id: str = Depends(verified_user
                 fail(422, "NO_CORRECTION")
             correction = _from_stated(stated) if stated else None
             result = effective(loaded["derived"], correction)
-            if not consistent(result):
+            if not consistent(result) or (stated.get("trainer_type") is not None and result.card_kind != "trainer"):
                 fail(422, "INCONSISTENT_ATTRIBUTES")
             closing = _closable_reports(conn, command)
             if not consume_metadata_code(conn, user_id, target, ACTION, command.code):

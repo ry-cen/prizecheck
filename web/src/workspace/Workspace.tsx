@@ -5,10 +5,11 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { Menu as MenuIcon } from "lucide-react";
+import { Menu as MenuIcon, Plus } from "lucide-react";
 import { getLocationTree, type TreeNode } from "../location_generated";
+import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
-import { Icon } from "../ui/Icon";
+import { SearchField } from "../ui/SearchField";
 import { AddCardsDialog } from "./AddCardsDialog";
 import { CorrectionsNotice } from "./CorrectionsNotice";
 import { CreateLocationDialog } from "./CreateLocationDialog";
@@ -45,7 +46,7 @@ import { SelectionBar } from "./SelectionBar";
 import { selectedGroups, selectionScope } from "./selectionModel";
 import { StaleBanner } from "./StaleBanner";
 import { DragBadge, useTileDrag } from "./tileDrag";
-import { UndoToast } from "./UndoToast";
+import { useUndoToast } from "./UndoToast";
 import { useDebouncedValue } from "./useDebouncedValue";
 import { useGalleryData } from "./useGalleryData";
 import { useInventoryActions } from "./useInventoryActions";
@@ -53,7 +54,6 @@ import { useOwnedSets } from "./useOwnedSets";
 import { useSelection } from "./useSelection";
 import { useStaleCollection } from "./useStaleCollection";
 import { clearLinkedLocation, readLinkedLocation } from "./workspaceLink";
-import "./Workspace.css";
 
 const FOCUSABLE =
   'button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex="-1"])';
@@ -100,7 +100,10 @@ export function Workspace({ userId, active }: Props) {
   const [addFor, setAddFor] = useState<string | null>(null);
   const dockRef = useRef<HTMLDivElement>(null);
   const drawerOpener = useRef<HTMLButtonElement>(null);
-  const ownedTotals = useRef(new Map<string, number>()).current;
+  // Each Edition's Storage Leaves as the inspector read them, per owner revision (#164).
+  const ownedTotals: Parameters<typeof Inspector>[0]["ownedTotals"] = useRef(
+    new Map()
+  ).current;
 
   // Reloads can overlap (Reload, an action, Manage locations); only the newest one's answer lands,
   // so an older tree never replaces a newer one.
@@ -293,11 +296,9 @@ export function Workspace({ userId, active }: Props) {
     return () => media.removeEventListener("change", onChange);
   }, [drawerOpen]);
 
-  const search = (className: string) => (
-    <input
-      type="search"
-      className={`ws-search ${className}`}
-      aria-label="Search cards"
+  const search = (
+    <SearchField
+      label="Search cards"
       placeholder="Search your cards…"
       autoComplete="off"
       maxLength={120}
@@ -305,17 +306,31 @@ export function Workspace({ userId, active }: Props) {
       onChange={(event) => setQuery(event.target.value)}
     />
   );
+  // The + beside the Locations heading (sidebar) or atop the drawer, then the Manage locations gear.
+  const locationTools = (
+    <>
+      <Button
+        variant="quiet"
+        icon={Plus}
+        label="Add location"
+        title="Add top-level location"
+        onClick={() => openCreate(null)}
+      />
+      <ManageLocationsButton onClick={openManage} />
+    </>
+  );
 
   const tree = (idPrefix: string, drop?: DropTargets | null) =>
     treeState === "error" ? (
-      <div className="ws-tree-status" role="alert">
-        <p>Locations are temporarily unavailable.</p>
-        <button type="button" onClick={() => void loadTree()}>
-          Retry
-        </button>
+      <div
+        className="mx-3 flex flex-col items-start gap-2 text-meta text-text-muted"
+        role="alert"
+      >
+        <p className="m-0">Locations are temporarily unavailable.</p>
+        <Button onClick={() => void loadTree()}>Retry</Button>
       </div>
     ) : treeState === "loading" && ownerRevision === null ? (
-      <p className="ws-tree-status" role="status">
+      <p className="mx-3 my-0 text-meta text-text-muted" role="status">
         Loading locations…
       </p>
     ) : (
@@ -328,12 +343,26 @@ export function Workspace({ userId, active }: Props) {
         idPrefix={idPrefix}
         onAddChild={openCreate}
         drop={drop}
+        touch={idPrefix === "drawer"}
       />
     );
 
-  // The skip link past the cards: focus the dock's first visible control (the toast's Undo, or the
-  // selection bar). #107 sends focus to the heading after a Move, which is otherwise a Tab through every tile away.
+  // Ticket 107's toast on the kit's toast host (#165). It shows only while Collection is the shown page;
+  // kit dialogs, the Filters & display drawer among them, make it inert themselves (#166).
+  const undoToast = useUndoToast({
+    toast: actions.toast,
+    busy: actions.busy,
+    shown: active,
+    onUndo: actions.undo,
+    onDismiss: actions.dismiss,
+    onClose: actions.closeToast,
+  });
+
+  // The skip link past the cards: focus the toast's first usable button (Undo), or else the selection
+  // bar's first visible control. #107 sends focus to the heading after a Move, which is otherwise a Tab
+  // through every tile away.
   function focusDock() {
+    if (undoToast.focus()) return;
     const target = Array.from(
       dockRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? []
     ).find((element) => element.getClientRects().length > 0);
@@ -343,202 +372,210 @@ export function Workspace({ userId, active }: Props) {
     actions.toast !== null || selection.summary.copies > 0;
 
   return (
-    <div className="ws-root">
-      <div
-        className="ws-surface"
-        inert={filtersDrawerOpen || selection.details !== null}
-      >
-        {/* The phone header (the shell draws the desktop one, and the skip link): ☰ for the Location
-            drawer, the page title, then Search and Filters & display. */}
-        <header className="ws-header ws-phone-header">
-          <button
-            type="button"
-            ref={drawerOpener}
-            className="ws-header-icon"
-            aria-label="Open locations"
-            aria-haspopup="dialog"
-            aria-expanded={drawerOpen}
-            onClick={() => setDrawerOpen(true)}
-          >
-            <Icon icon={MenuIcon} size={20} />
-          </button>
-          <span className="ws-phone-title">Collection</span>
-          {search("ws-mobile-only ws-header-search")}
-          <FiltersDrawerButton
-            ref={filtersOpener}
-            filters={prefs.filters}
-            open={filtersDrawerOpen}
-            onOpen={() => setFiltersDrawerOpen(true)}
-          />
-        </header>
-        <div className="ws-layout">
-          <aside className="ws-sidebar ws-desktop-only" aria-label="Sidebar">
-            <div className="ws-location-heading">
-              <h2>Locations</h2>
-              <span className="ws-location-tools">
-                <button
-                  type="button"
-                  aria-label="Add location"
-                  title="Add top-level location"
-                  onClick={() => openCreate(null)}
-                >
-                  <span aria-hidden="true">+</span>
-                </button>
-                <ManageLocationsButton onClick={openManage} />
-              </span>
-            </div>
-            {tree("ws-sidebar", drag.drop)}
-          </aside>
-          <main className="ws-main" aria-labelledby="ws-heading">
-            <div className="ws-heading">
-              <h1 id="ws-heading">{heading}</h1>
-              {gallery.totals && (
-                <p className="ws-heading-counts">
-                  {plural(gallery.totals.copies, "copy", "copies")} ·{" "}
-                  {plural(gallery.totals.editions, "edition", "editions")}
-                </p>
-              )}
-              {current && (
-                <button
-                  type="button"
-                  className="ws-add-cards-button"
-                  onClick={() => current && setAddFor(current.id)}
-                >
-                  Add cards
-                </button>
-              )}
-              <button
-                type="button"
-                className="ws-select-toggle ws-mobile-only"
+    // Collection's own root (#166 retired the workspace CSS root and the old .legacy wrapper): the kit's body type
+    // (14 px at the tokens' line height) on the theme background, and border-box sizing for everything inside,
+    // as the workspace CSS gave it (Preflight does the same from rollout stage 7). style.css's
+    // :root:has([data-collection-page]) gives the page behind it the same background until then.
+    <div
+      data-collection-page=""
+      className="box-border min-h-[calc(100dvh-var(--layout-header-height))] bg-bg font-sans text-body leading-(--line-height) text-text scheme-dark [&_*]:box-border"
+    >
+      {/* The phone header (the shell draws the desktop one, and the skip link): ☰ for the Location
+          drawer, the page title, then Search and Filters & display. */}
+      <header className="box-border hidden h-header items-center gap-2 border-b border-border px-3 phone:flex">
+        <Button
+          ref={drawerOpener}
+          variant="quiet"
+          icon={MenuIcon}
+          label="Open locations"
+          className="shrink-0"
+          aria-haspopup="dialog"
+          aria-expanded={drawerOpen}
+          onClick={() => setDrawerOpen(true)}
+        />
+        <span className="text-body font-semibold whitespace-nowrap">
+          Collection
+        </span>
+        <div className="min-w-0 flex-1">{search}</div>
+        <FiltersDrawerButton
+          ref={filtersOpener}
+          filters={prefs.filters}
+          open={filtersDrawerOpen}
+          onOpen={() => setFiltersDrawerOpen(true)}
+        />
+      </header>
+      <div className="grid min-h-[calc(100dvh-var(--layout-header-height))] grid-cols-[var(--layout-sidebar-width)_minmax(0,1fr)] phone:block">
+        <aside
+          className="box-border min-w-0 border-r border-border px-4 py-7 phone:hidden"
+          aria-label="Sidebar"
+        >
+          <div className="mr-2 mb-4 ml-3 flex items-center justify-between gap-2">
+            <h2 className="m-0 text-micro font-semibold tracking-[1.7px] text-text-subtle uppercase">
+              Locations
+            </h2>
+            <span className="flex items-center gap-1">{locationTools}</span>
+          </div>
+          {tree("sidebar", drag.drop)}
+        </aside>
+        {/* The gallery area takes the remaining height (ticket 105: empty space below it starts a
+            marquee). The bottom padding on a phone keeps the selection strip off the last row. */}
+        <main
+          className="box-border flex min-w-0 flex-col px-(--layout-gutter) pt-7 pb-12 phone:pt-5 phone:pb-24"
+          aria-labelledby="ws-heading"
+        >
+          <div className="mb-5 flex items-baseline gap-4 phone:flex-wrap phone:gap-y-2">
+            <h1
+              id="ws-heading"
+              className="m-0 text-display font-[550] tracking-[-0.5px] wrap-anywhere"
+            >
+              {heading}
+            </h1>
+            {gallery.totals && (
+              <p className="m-0 text-meta text-text-subtle tabular-nums">
+                {plural(gallery.totals.copies, "copy", "copies")} ·{" "}
+                {plural(gallery.totals.editions, "edition", "editions")}
+              </p>
+            )}
+            {current && (
+              <Button
+                className="ml-auto self-center"
+                onClick={() => current && setAddFor(current.id)}
+              >
+                Add cards
+              </Button>
+            )}
+            {/* Mobile Select mode's toggle, on a phone only. */}
+            <span
+              className={`${current ? "" : "ml-auto "}hidden self-center phone:flex`}
+            >
+              <Button
                 aria-pressed={selection.selectMode}
                 onClick={() => selection.setSelectMode(!selection.selectMode)}
               >
                 Select
-              </button>
-            </div>
-            {current?.kind === "deck" && (
-              <DeckHeading
-                key={current.id}
-                deckId={current.id}
-                deckName={current.name}
-                inventoryRevision={gallery.ownerRevision}
-              />
-            )}
-            <div className="ws-toolbar ws-desktop-only">
-              {search("ws-toolbar-search")}
-              <FiltersToggle
-                filters={prefs.filters}
-                open={filtersOpen}
-                onToggle={() => setFiltersOpen((open) => !open)}
-              />
-              <div className="ws-display-controls">
-                <SortControl
-                  sort={prefs.sort}
-                  onChange={(sort) =>
-                    setPrefs((previous) => ({ ...previous, sort }))
-                  }
-                />
-                <DisplayControls display={display} onChange={setDisplay} />
-              </div>
-            </div>
-            {filtersOpen && (
-              <section
-                id="ws-filter-panel"
-                className="ws-filter-panel ws-desktop-only"
-                aria-label="Card filters"
-              >
-                <FilterControls
-                  filters={prefs.filters}
-                  sets={sets}
-                  onChange={setFilters}
-                />
-              </section>
-            )}
-            <StaleBanner
-              stale={staleness.stale}
-              note={staleness.note}
-              busy={actions.busy}
-              onReload={staleness.reload}
-              onDismissNote={staleness.dismissNote}
-            />
-            <CorrectionsNotice
-              holdings={gallery.holdings}
-              status={gallery.status}
-              galleryKey={galleryKey}
-              ownerRevision={gallery.ownerRevision}
-              catalogRevision={gallery.catalogRevision}
-              onChanged={async () => {
-                gallery.reload();
-                await loadTree();
-              }}
-            />
-            {dockHasControls && (
-              <a
-                className="ws-skip-link"
-                href="#ws-dock"
-                onClick={(event) => {
-                  event.preventDefault();
-                  focusDock();
-                }}
-              >
-                Skip to selection actions and Undo
-              </a>
-            )}
-            <div className="ws-gallery-layout">
-              <Gallery
-                data={gallery}
-                display={display}
-                caption={galleryView === "all"}
-                locationName={locationName}
-                emptyMessage={
-                  narrowed
-                    ? "No cards match your search or filters."
-                    : galleryView === "all"
-                      ? "Your Collection has no cards yet."
-                      : "This Location has no cards."
-                }
-                onRetry={gallery.reload}
-                selected={selection.selected}
-                selectMode={selection.selectMode}
-                onTile={selection.activate}
-                onHover={selection.hover}
-                onMarquee={selection.marquee}
-                onTilePointerDown={drag.start}
-              />
-              <Inspector
-                card={selection.inspected}
-                locationPath={locationPath}
-                ownerRevision={gallery.ownerRevision}
-                ownedTotals={ownedTotals}
-              />
-            </div>
-          </main>
-        </div>
-        {/* The bottom dock: the success and Undo toast sits above the selection bar. */}
-        <div className="ws-dock" id="ws-dock" ref={dockRef}>
-          <UndoToast
-            toast={actions.toast}
-            busy={actions.busy}
-            onUndo={actions.undo}
-            onDismiss={actions.dismiss}
-            onClose={actions.closeToast}
-            toastRef={actions.toastRef}
-          />
-          {selection.summary.copies > 0 && (
-            <SelectionBar
-              summary={selection.summary}
-              onClear={actions.clearSelection}
-              onDetails={selection.openDetails}
-              onMove={actions.openMove}
-              onRemove={actions.openRemoval}
-              busy={actions.busy}
-              status={actions.dialog ? "" : actions.progress}
-              error={actions.barError}
-              actionsRef={actions.actionsButton}
+              </Button>
+            </span>
+          </div>
+          {current?.kind === "deck" && (
+            <DeckHeading
+              key={current.id}
+              deckId={current.id}
+              deckName={current.name}
+              inventoryRevision={gallery.ownerRevision}
+              active={active}
             />
           )}
-        </div>
+          {/* Desktop toolbar: Search and Filters on the left; Sort, Card size, Names and Prices pushed
+              right, all at the kit's control height. Narrow desktop widths wrap the right group. */}
+          <div className="flex flex-wrap items-center gap-2 phone:hidden">
+            <div className="max-w-105 min-w-0 flex-[1_1_180px]">{search}</div>
+            <FiltersToggle
+              filters={prefs.filters}
+              open={filtersOpen}
+              onToggle={() => setFiltersOpen((open) => !open)}
+            />
+            <div className="ml-auto flex items-center gap-2">
+              <SortControl
+                sort={prefs.sort}
+                onChange={(sort) =>
+                  setPrefs((previous) => ({ ...previous, sort }))
+                }
+              />
+              <DisplayControls display={display} onChange={setDisplay} />
+            </div>
+          </div>
+          {filtersOpen && (
+            <section
+              id="ws-filter-panel"
+              className="mt-3 box-border rounded-panel border border-border bg-surface px-4 py-3 phone:hidden"
+              aria-label="Card filters"
+            >
+              <FilterControls
+                filters={prefs.filters}
+                sets={sets}
+                onChange={setFilters}
+              />
+            </section>
+          )}
+          <StaleBanner
+            stale={staleness.stale}
+            note={staleness.note}
+            busy={actions.busy}
+            onReload={staleness.reload}
+            onDismissNote={staleness.dismissNote}
+          />
+          <CorrectionsNotice
+            holdings={gallery.holdings}
+            status={gallery.status}
+            galleryKey={galleryKey}
+            ownerRevision={gallery.ownerRevision}
+            catalogRevision={gallery.catalogRevision}
+            onChanged={async () => {
+              gallery.reload();
+              await loadTree();
+            }}
+          />
+          {dockHasControls && (
+            // Ticket 114: hidden above the viewport until focused, like the shell's skip link.
+            <a
+              className="fixed top-2 left-2 z-(--layer-modal) box-border inline-flex min-h-tap -translate-y-[calc(100%+var(--space-4))] items-center rounded-control border border-control-outline bg-surface-raised px-3 py-2 text-body font-semibold text-text no-underline focus:translate-y-0"
+              href="#ws-dock"
+              onClick={(event) => {
+                event.preventDefault();
+                focusDock();
+              }}
+            >
+              Skip to selection actions and Undo
+            </a>
+          )}
+          {/* The gallery and the inspector column, which keeps its width while idle. */}
+          <div className="grid flex-[1_0_auto] grid-cols-[minmax(0,1fr)_var(--layout-inspector-width)] gap-7 compact:grid-cols-[minmax(0,1fr)_var(--layout-inspector-width-compact)] compact:gap-5 phone:block">
+            <Gallery
+              data={gallery}
+              display={display}
+              caption={galleryView === "all"}
+              locationName={locationName}
+              emptyMessage={
+                narrowed
+                  ? "No cards match your search or filters."
+                  : galleryView === "all"
+                    ? "Your Collection has no cards yet."
+                    : "This Location has no cards."
+              }
+              onRetry={gallery.reload}
+              selected={selection.selected}
+              selectMode={selection.selectMode}
+              onTile={selection.activate}
+              onHover={selection.hover}
+              onMarquee={selection.marquee}
+              onTilePointerDown={drag.start}
+            />
+            <Inspector
+              card={selection.inspected}
+              locationPath={locationPath}
+              ownerRevision={gallery.ownerRevision}
+              ownedTotals={ownedTotals}
+            />
+          </div>
+        </main>
       </div>
+      {/* The selection bar (the Actions strip). It and the dialogs below draw outside the page
+          (KitLayer, #165), so they are drawn only while Collection is the shown page; their state
+          stays, and they show again when it does. */}
+      {active && selection.summary.copies > 0 && (
+        <SelectionBar
+          summary={selection.summary}
+          onClear={actions.clearSelection}
+          onDetails={selection.openDetails}
+          onMove={actions.openMove}
+          onRemove={actions.openRemoval}
+          busy={actions.busy}
+          status={actions.dialog ? "" : actions.progress}
+          error={actions.barError}
+          actionsRef={actions.actionsButton}
+          barRef={dockRef}
+        />
+      )}
       {/* The phone Location drawer: the kit Dialog along the left edge. Its close button is the first
           focus stop; focus returns to ☰ when it closes. */}
       <Dialog
@@ -549,19 +586,11 @@ export function Workspace({ userId, active }: Props) {
         closeLabel="Close locations"
         side="left"
       >
-        <div className="ws-location-drawer">
-          <div className="ws-location-tools ws-drawer-tools">
-            <button
-              type="button"
-              aria-label="Add location"
-              title="Add top-level location"
-              onClick={() => openCreate(null)}
-            >
-              <span aria-hidden="true">+</span>
-            </button>
-            <ManageLocationsButton onClick={openManage} />
+        <div className="flex flex-col gap-4">
+          <div className="flex items-center justify-end gap-1">
+            {locationTools}
           </div>
-          {tree("ws-drawer")}
+          {tree("drawer")}
         </div>
       </Dialog>
       {filtersDrawerOpen && (
@@ -573,7 +602,7 @@ export function Workspace({ userId, active }: Props) {
           onClose={closeFiltersDrawer}
         />
       )}
-      {createFor !== undefined && (
+      {active && createFor !== undefined && (
         <CreateLocationDialog
           index={index}
           initialParentId={createFor}
@@ -613,7 +642,7 @@ export function Workspace({ userId, active }: Props) {
           onClose={selection.closeDetails}
         />
       )}
-      {actions.dialog === "move" && (
+      {active && actions.dialog === "move" && (
         <MoveDialog
           index={index}
           initialExpanded={expanded}
@@ -626,7 +655,7 @@ export function Workspace({ userId, active }: Props) {
           onCancel={actions.closeDialog}
         />
       )}
-      {actions.dialog === "remove" && (
+      {active && actions.dialog === "remove" && (
         <RemovalDialog
           rows={actions.removalRows}
           copies={selection.summary.copies}

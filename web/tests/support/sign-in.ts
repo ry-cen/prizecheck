@@ -55,7 +55,12 @@ export async function fakeSignIn(
 }
 
 /** The old Collection addresses the app rewrites to /collection (web/src/shell/routes.ts canonicalPath). */
-const OLD_COLLECTION_PATHS = ["/", "/workspace", "/locations"];
+const OLD_COLLECTION_PATHS = [
+  "/",
+  "/workspace",
+  "/locations",
+  "/old-collection",
+];
 
 /** Where the app shows `next`: an old Collection address is rewritten to /collection, keeping the query. */
 function landing(next: string): string {
