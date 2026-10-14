@@ -30,7 +30,7 @@ type Props = {
 };
 
 const LIST = "m-0 flex list-none flex-col gap-1 p-0";
-// Buttons get no font from the page without Preflight, so the row sets its own.
+// The row sets its own font rather than inheriting the page's.
 const ROW =
   "box-border m-0 flex w-full min-w-0 cursor-pointer items-center gap-2 rounded-control border border-solid py-1 pr-2 text-left font-sans text-meta leading-(--line-height)";
 const ADD_CHILD =

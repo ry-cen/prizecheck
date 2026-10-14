@@ -32,7 +32,7 @@ const STATUS_TEXT: Record<FormatCheck["status"], string> = {
   unknown: "text-text-muted",
 };
 
-// No Preflight while style.css exists, so every box property a browser styles on a button is set here.
+// Every box property a browser styles on a button is set here, so both parts match the kit's controls.
 const PART =
   "box-border m-0 h-control cursor-pointer border-0 bg-transparent font-sans text-control font-medium phone:h-control-phone";
 

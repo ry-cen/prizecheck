@@ -159,7 +159,7 @@ export function SignInsPage({ email }: { email: string | null }) {
               return (
                 <li
                   key={provider.id}
-                  className="flex min-h-tap items-center gap-3 border-b border-border px-4 py-3 last:border-b-0"
+                  className="box-content flex min-h-tap items-center gap-3 border-b border-border px-4 py-3 last:border-b-0"
                 >
                   <ProviderMark name={provider.name} />
                   <span className="flex min-w-0 flex-1 flex-col">

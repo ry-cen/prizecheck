@@ -30,7 +30,6 @@ import {
 } from "./public/publicRoutes";
 import { EmailCodeForms, SignInScreen } from "./public/SignIn";
 import { clearFailureFromAddress, failureInAddress } from "./signInMessages";
-import "./style.css";
 import "./tokens.css";
 import "./tailwind.css";
 

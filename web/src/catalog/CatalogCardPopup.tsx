@@ -92,7 +92,7 @@ const EDITION =
 const REPORT_LINK =
   "inline-flex min-h-(--target-pointer) cursor-pointer items-center border-0 bg-transparent p-0 font-sans text-meta text-accent underline underline-offset-2 hover:text-accent-strong aria-expanded:font-semibold phone:min-h-tap";
 // The old report forms (MetadataReport, MissingCardReports) keep their markup inside the kit dialog (#166, #173).
-const LEGACY = `flex flex-col gap-3 pt-3 text-body ${OLD_BUTTONS} ${OLD_FIELDS} ${OLD_TEXT} [&_label]:flex [&_label]:flex-col [&_label]:gap-1 [&_label]:text-meta [&_label]:text-text-muted [&_textarea]:box-border [&_textarea]:rounded-control [&_textarea]:border [&_textarea]:border-solid [&_textarea]:border-border-strong [&_textarea]:bg-bg [&_textarea]:p-2 [&_textarea]:font-sans [&_textarea]:text-control [&_textarea]:text-text [&_form]:flex [&_form]:flex-col [&_form]:gap-3 [&_ul]:m-0 [&_ul]:list-none [&_ul]:p-0`;
+const LEGACY = `flex flex-col gap-3 pt-3 text-body ${OLD_BUTTONS} ${OLD_FIELDS} ${OLD_TEXT} [&_h2]:text-[length:1.5em] [&_h2]:font-bold [&_h3]:text-[length:1.17em] [&_h3]:font-bold [&_h4]:font-bold [&_label]:flex [&_label]:flex-col [&_label]:gap-1 [&_label]:text-meta [&_label]:text-text-muted [&_textarea]:box-border [&_textarea]:rounded-control [&_textarea]:border [&_textarea]:border-solid [&_textarea]:border-border-strong [&_textarea]:bg-bg [&_textarea]:p-2 [&_textarea]:font-sans [&_textarea]:text-control [&_textarea]:text-text [&_form]:flex [&_form]:flex-col [&_form]:gap-3 [&_ul]:m-0 [&_ul]:list-none [&_ul]:p-0`;
 
 const byPath = new Intl.Collator(undefined, {
   numeric: true,

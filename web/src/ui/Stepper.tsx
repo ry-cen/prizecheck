@@ -39,9 +39,10 @@ export function Stepper({
       >
         <Icon icon={Minus} />
       </button>
+      {/* box-content: at least 32 px plus its padding, as before Preflight (#184) made border-box the default. */}
       <output
         aria-live="polite"
-        className="inline-flex min-w-8 items-center justify-center px-1 text-control tabular-nums text-text"
+        className="box-content inline-flex min-w-8 items-center justify-center px-1 text-control tabular-nums text-text"
       >
         {value}
       </output>

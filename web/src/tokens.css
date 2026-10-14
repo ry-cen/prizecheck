@@ -15,9 +15,9 @@
  *     compact       (max-width: 1100px)
  *     wide          (min-width: 1550px)
  *     extra wide    (min-width: 2200px)
- * - Pages other than the collector workspace move onto these variables when they are redesigned.
- *   Until then nothing in this file may change how an existing page looks: never set
- *   color, background or color-scheme on :root here.
+ * - Never set color, background or color-scheme on :root here: base.css owns them (in the base
+ *   layer), and web/index.html's first-paint style copies --color-bg (and the wordmark --color-text-muted);
+ *   keep those copies in step with this file.
  *
  * Colour roles (resolution name -> variable)
  *   background          --color-bg

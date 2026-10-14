@@ -807,8 +807,9 @@ export function ManageLocations({ onClose, onChanged }: Props) {
           )}
         </div>
       </Dialog>
-      {/* Add child reuses ticket 108's create dialog. It is a sibling, not a child, of the panel's
-        dialog so its cancel and close events never reach the panel's handlers. */}
+      {/* Add child reuses the create dialog (ticket 108, on the kit Dialog since #165). It is rendered beside the
+        panel's Dialog, not inside it: React events bubble through the component tree (portals included), so
+        inside it the create dialog's Escape key presses would also reach the panel's handlers. */}
       {addingTo !== undefined && (
         <CreateLocationDialog
           index={model.index}

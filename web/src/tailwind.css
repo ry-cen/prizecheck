@@ -1,10 +1,11 @@
 /*
- * Tailwind CSS v4 on PrizeCheck's tokens (ADR 0012). The app's only Tailwind entry; main.tsx imports it
- * after style.css and tokens.css.
+ * Tailwind CSS v4 on PrizeCheck's tokens (ADR 0012). The app's only Tailwind entry and its only global
+ * stylesheet; main.tsx imports it after tokens.css.
  *
- * - Preflight is not imported while the old global stylesheet (style.css) exists: only the theme and
- *   utilities layers load, so no element reset reaches existing pages. Preflight returns when style.css
- *   is deleted (rollout stage 7).
+ * - Preflight is on (#184, which deleted the old global stylesheet): bare button, input, select and heading
+ *   elements get no look, and every visible control comes from the kit. It sits in the base layer before
+ *   base.css, so base.css's page rules follow it. The layer order below is repeated in web/index.html's
+ *   first-paint style, which must keep it.
  * - Every theme key reads a variable from tokens.css instead of copying its value. `inline` makes each
  *   utility emit that var() itself (bg-surface -> background-color: var(--color-surface)), so the
  *   utilities follow data-theme on <html>. Tailwind also emits the keys it uses into @layer theme as
@@ -18,6 +19,7 @@
  */
 @layer theme, base, components, utilities;
 @import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/preflight.css" layer(base);
 @import "tailwindcss/utilities.css" layer(utilities) source(none);
 @import "./base.css";
 

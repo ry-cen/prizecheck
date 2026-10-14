@@ -3,10 +3,50 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#121110" />
     <title>PrizeCheck</title>
+    <!--
+      The first paint (spec "Sign-in, Sign-ins, loading and first paint"): dark from the first frame, with a static
+      wordmark that React replaces. The colours copy tokens.css (prize-gold --color-bg #121110 and
+      --color-text-muted #b9b0a3, the loading screen's wordmark) and the font copies --font-sans; keep them in step.
+      The page rules sit in Tailwind's base layer, declared in tailwind.css's order, so base.css's :root rules take
+      over once the app's styles load and themes still switch on data-theme.
+    -->
+    <style>
+      @layer theme, base, components, utilities;
+      @layer base {
+        html {
+          background: #121110;
+          color-scheme: dark;
+        }
+        body {
+          margin: 0;
+        }
+      }
+      #first-paint {
+        display: flex;
+        box-sizing: border-box;
+        min-height: 100dvh;
+        margin: 0;
+        align-items: center;
+        justify-content: center;
+        font:
+          700 18px system-ui,
+          -apple-system,
+          "Segoe UI",
+          Roboto,
+          "Helvetica Neue",
+          Arial,
+          sans-serif;
+        color: #b9b0a3;
+      }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <p id="first-paint"><span aria-hidden="true">✦ </span>PrizeCheck</p>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
