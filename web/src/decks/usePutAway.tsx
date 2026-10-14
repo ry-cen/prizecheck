@@ -48,8 +48,8 @@ const NO_SURPLUS: readonly SurplusHolding[] = [];
  * tab switch; the toast goes when the page does. The dialog draws the cards from the page's current read, so after a
  * refresh it offers the current copies and versions, and it closes once they are gone.
  *
- * Undo returns the copies to the Deck. Copies arriving in a Deck join its Deck List (migration 031), so they come back
- * listed, not as surplus; the toast says so.
+ * Undo returns the copies to the Deck as surplus. The Move is marked as a Put away, so its Undo leaves the Deck List
+ * alone (migration 047), unlike other copies arriving in a Deck (migration 031); the toast says so.
  */
 export function usePutAway({ deckId, deckName, surplus, onChanged }: Options) {
   const kit = useToast();
@@ -170,7 +170,7 @@ export function usePutAway({ deckId, deckName, surplus, onChanged }: Options) {
         try {
           const restored = await applyUndo(mine!.id, key);
           show({
-            message: `Undo returned ${copiesText(BigInt(restored.copy_count))} to ${live.current.deckName}. They're on its Deck List again.`,
+            message: `Undo returned ${copiesText(BigInt(restored.copy_count))} to ${live.current.deckName}. They're surplus again, not on its Deck List.`,
             focus: true,
           });
           live.current.onChanged();
@@ -257,7 +257,8 @@ export function usePutAway({ deckId, deckName, surplus, onChanged }: Options) {
         const result = await commitMove(
           attempt.manifestId,
           destinationId,
-          attempt.key
+          attempt.key,
+          true
         );
         pending.current = null;
         setTarget(null);
