@@ -71,3 +71,29 @@ test("shows the provider picture, with no referrer, when it loads", async ({
   await expect(avatar).toHaveAttribute("referrerpolicy", "no-referrer");
   await expect(account.getByTestId("profile-initial")).toHaveCount(0);
 });
+
+test("never shows a picture whose address isn't https, even if the session carries one", async ({
+  page,
+}) => {
+  await signInAsOwner(page, "/collection");
+  // The gateway only sends https pictures from configured hosts; the client checks the scheme again.
+  await page.route("**/auth/session", async (route) => {
+    const response = await route.fetch();
+    await route.fulfill({
+      response,
+      json: {
+        ...(await response.json()),
+        image: "http://lh3.googleusercontent.com/a/fake-owner",
+      },
+    });
+  });
+  await page.route(/^http:\/\/lh3\.googleusercontent\.com\//, (route) =>
+    route.fulfill({ contentType: "image/png", body: PIXEL })
+  );
+  await page.reload();
+  const account = page.getByRole("button", { name: "Account" });
+  await expect(account.getByTestId("profile-initial")).toHaveText(
+    OWNER_EMAIL.charAt(0).toUpperCase()
+  );
+  await expect(account.getByTestId("profile-picture")).toHaveCount(0);
+});

@@ -146,8 +146,43 @@ async function checkLoading(page: Page, state: string) {
   await expect(heading(page)).toHaveText("Sign in to PrizeCheck");
 }
 
+/** Opens the sign-in card with email sign-in on, sends a code and runs the page check on the code form. The stacks
+ * leave email sign-in off, so GET /auth/methods and POST /auth/request-code are answered here. */
+async function checkCodeForm(page: Page, state: string, tap = false) {
+  await page.route("**/auth/methods", (route) =>
+    route.fulfill({
+      json: {
+        providers: [
+          { id: "google", name: "Google" },
+          { id: "discord", name: "Discord" },
+        ],
+        emailSignIn: true,
+      },
+      headers: { "cache-control": "no-store" },
+    })
+  );
+  await page.route("**/auth/request-code", (route) =>
+    route.fulfill({ json: {} })
+  );
+  await page.goto(`${ORIGIN}/sign-in`);
+  await card(page).getByLabel("Email").fill("owner@example.test");
+  const send = card(page).getByRole("button", { name: "Send code" });
+  await (tap ? send.tap() : send.click());
+  await expect(
+    page.getByText("If this account can sign in, a code has been sent.")
+  ).toBeVisible();
+  await expect(card(page).getByLabel("Six-digit code")).toBeVisible();
+  await expectPageChecks(page, state);
+}
+
 test.describe("desktop", () => {
   test.use({ viewport: { width: 1280, height: 800 } });
+
+  test("with email sign-in on, the code form passes the page check", async ({
+    page,
+  }) => {
+    await checkCodeForm(page, "the sign-in card with the code form");
+  });
 
   test("sign-in is a centred 400 px card under the public header, and provider sign-in works in it", async ({
     page,
@@ -407,6 +442,16 @@ test.describe("phone", () => {
     await signInWithButton(page, { tap: true });
     await expect(page).toHaveURL(/\/collection$/);
     await expect(heading(page)).toHaveText("All owned");
+  });
+
+  test("with email sign-in on, the code form passes the page check on a phone", async ({
+    page,
+  }) => {
+    await checkCodeForm(
+      page,
+      "the sign-in card with the code form on a phone",
+      true
+    );
   });
 
   test("loading, not found and unavailable pass the page check on a phone", async ({

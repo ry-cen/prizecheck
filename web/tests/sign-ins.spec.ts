@@ -106,9 +106,12 @@ test("refuses a sign-in another collector holds, without naming them", async ({
     await expect(
       row(page, "Discord").getByRole("link", { name: "Connect Discord" })
     ).toBeVisible();
-    // Back to Sign-ins dismisses the message.
+    // Back to Sign-ins dismisses the message and moves focus to the page's heading, not the page body.
     await alert.getByRole("button", { name: "Back to Sign-ins" }).click();
     await expect(alert).toHaveCount(0);
+    await expect(
+      page.getByRole("heading", { level: 1, name: "Sign-ins" })
+    ).toBeFocused();
     // Signing out afterwards shows the sign-in page without replaying the link failure.
     await page.getByRole("button", { name: "Account" }).click();
     await page.getByRole("menuitem", { name: "Sign out" }).click();
