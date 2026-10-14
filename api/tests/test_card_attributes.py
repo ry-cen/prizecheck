@@ -21,7 +21,7 @@ from test_deck_lists import add_line, detail
 from test_holdings import add, call
 
 # Changing a derivation rule changes this digest: bump CardAttributeRules.VERSION and pin the new pair here.
-PINNED_RULES = (2, "703df5a07970a44c0ce6b8f3f3503842977c17352a59d7550f0d77ba91860f93")
+PINNED_RULES = (3, "37c1e26d8b552e92c306db8dea6728915e301a52d7d7e0facc18bf40af66b47d")
 
 
 def card(**fields):
@@ -148,6 +148,27 @@ FOSSIL_ITEM = card(id="sv03.5-153", name="Antique Helix Fossil", localId="153", 
                    set={"id": "sv03.5", "name": "151"}, regulationMark="G", rarity="Common", trainerType="Item")
 UNKNOWN_STAGE = card(id="fixture-stage-1", name="Fixture Pokémon", localId="1", category="Pokemon",
                      set={"id": "fixture", "name": "Fixture"}, stage="Stage3", types=["Fire"])
+# Trainer Type and evolves from (app redesign #170). Fixture records cut down like the ones above.
+SUPPORTER = card(id="fixture-sv01-910", name="Fixture Supporter", localId="910", category="Trainer",
+                 set={"id": "sv01", "name": "Scarlet & Violet"}, regulationMark="G", rarity="Uncommon",
+                 trainerType="Supporter")
+STADIUM = card(id="fixture-sv01-911", name="Fixture Stadium", localId="911", category="Trainer",
+               set={"id": "sv01", "name": "Scarlet & Violet"}, regulationMark="G", rarity="Uncommon",
+               trainerType="Stadium")
+TOOL = card(id="fixture-sv01-912", name="Fixture Tool", localId="912", category="Trainer",
+            set={"id": "sv01", "name": "Scarlet & Violet"}, regulationMark="G", rarity="Uncommon", trainerType="Tool")
+# A value the rules don't name is unknown, not guessed.
+TECHNICAL_MACHINE = card(id="fixture-swsh8-913", name="Technical Machine: Fixture", localId="913", category="Trainer",
+                         set={"id": "swsh8", "name": "Fusion Strike"}, regulationMark="E", rarity="Uncommon",
+                         trainerType="Technical Machine")
+STAGE_ONE = card(id="fixture-sv01-914", name="Fixture Stage 1", localId="914", category="Pokemon",
+                 set={"id": "sv01", "name": "Scarlet & Violet"}, regulationMark="G", stage="Stage1", rarity="Common",
+                 types=["Fire"], evolveFrom="  Fixture   Basic ")
+TRAINER_TYPES = {SUPPORTER["id"]: "supporter", FOSSIL_ITEM["id"]: "item", TOOL["id"]: "tool", STADIUM["id"]: "stadium",
+                 TECHNICAL_MACHINE["id"]: None, RARE_CANDY_ME["id"]: None, BULBASAUR_ME["id"]: None,
+                 ENERGY_SV["id"]: None, NO_CATEGORY["id"]: None}
+EVOLVES_FROM = {STAGE_ONE["id"]: "Fixture Basic", BULBASAUR_ME["id"]: None, SUPPORTER["id"]: None}
+
 BASIC_POKEMON = {
     EX_ME_NO_SUFFIX["id"]: True, MEGA_EX_BASIC["id"]: True, RADIANT["id"]: True, PRISM_POKEMON["id"]: True,
     UNOWN_V["id"]: True, POKEMON_STAR["id"]: True, LOWER_CASE_MARK["id"]: True, BABY["id"]: True, BULBASAUR_ME["id"]: True,
@@ -260,6 +281,28 @@ def test_basic_pokemon_status_follows_the_tcgdex_stage():
                                                    FOSSIL_ITEM, UNKNOWN_STAGE, BULBASAUR_ME)}
     assert {source_id: RULES.derive(source_id, records[source_id]).basic_pokemon
             for source_id in BASIC_POKEMON} == BASIC_POKEMON
+
+
+def test_trainer_type_follows_the_tcgdex_trainer_type_and_an_unnamed_value_is_unknown():
+    """Supporter, Item, Tool and Stadium map to their Trainer Type; any other value, an absent one, and every card that
+    is not a known Trainer have none."""
+    records = {record["id"]: record for record in (SUPPORTER, FOSSIL_ITEM, TOOL, STADIUM, TECHNICAL_MACHINE,
+                                                   RARE_CANDY_ME, BULBASAUR_ME, ENERGY_SV, NO_CATEGORY)}
+    assert {source_id: RULES.derive(source_id, records[source_id]).trainer_type for source_id in TRAINER_TYPES} == \
+        TRAINER_TYPES
+    for value in ("supporter", "Pokémon Tool", "", None, 7, ["Item"], {"en": "Item"}):
+        assert RULES.derive("fixture", {**SUPPORTER, "trainerType": value}).trainer_type is None, value
+    assert RULES.derive("fixture", {**BULBASAUR_ME, "trainerType": "Item"}).trainer_type is None
+
+
+def test_evolves_from_is_a_pokemons_named_predecessor_only():
+    assert {source_id: RULES.evolves_from(record) for source_id, record in
+            ((STAGE_ONE["id"], STAGE_ONE), (BULBASAUR_ME["id"], BULBASAUR_ME), (SUPPORTER["id"], SUPPORTER))} == \
+        EVOLVES_FROM
+    for value in ("", "   ", None, 7, {"en": "Charmander"}, "x" * 121):
+        assert RULES.evolves_from({**STAGE_ONE, "evolveFrom": value}) is None, value
+    assert RULES.evolves_from({**SUPPORTER, "evolveFrom": "Fixture Basic"}) is None
+    assert RULES.evolves_from({**STAGE_ONE, "evolveFrom": "x" * 120}) == "x" * 120
 
 
 def test_import_derives_every_attribute_on_cards_across_eras():

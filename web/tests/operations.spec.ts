@@ -38,16 +38,39 @@ test("owner sees stale backup and allowance warning in operational health", asyn
       owner.rows[0].id,
     ]);
     await page.reload();
+    // Owner controls opens on Status (#167): operational health is a table of area, check, value and detail.
     const health = page.getByRole("region", { name: "Operational health" });
     await expect(
       health.getByRole("heading", { name: "Operational health" })
     ).toBeVisible();
-    await expect(health.getByText(/Backup: stale/)).toBeVisible();
-    await expect(health.getByText(/Stale backup alerts: 1/)).toBeVisible();
-    await expect(
-      health.getByText(/database_bytes: 70 \/ 100.*70% warning/)
-    ).toBeVisible();
+    const table = health.getByRole("region", { name: "Health checks" });
+    const row = (check: string) =>
+      table
+        .getByRole("row")
+        .filter({ has: page.getByRole("cell", { name: check, exact: true }) });
+    await expect(row("Backup")).toContainText("Stale");
+    await expect(row("Backup watchdog")).toContainText(
+      "Stale backup alerts: 1"
+    );
+    await expect(row("database_bytes")).toContainText("70 / 100 · 70% warning");
+    // The problems line lists both, the stale backup (bad) before the allowance warning (warn).
+    const problems = page.getByRole("list", { name: "Problems" });
+    // Read the line again until it settles: the operational status loads after the page.
+    await expect
+      .poll(async () => {
+        const listed = await problems.getByRole("listitem").allTextContents();
+        const backup = listed.indexOf("Backup: Stale");
+        const allowance = listed.indexOf(
+          "database_bytes: 70 / 100 · 70% warning"
+        );
+        return {
+          backup: backup >= 0,
+          allowanceAfterBackup: allowance > backup,
+        };
+      })
+      .toEqual({ backup: true, allowanceAfterBackup: true });
     await expect(health).not.toContainText(email);
+    await expect(problems).not.toContainText(email);
   } finally {
     await pool.end();
   }

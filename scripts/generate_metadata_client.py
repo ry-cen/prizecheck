@@ -16,7 +16,7 @@ for name in ('MetadataReportInput','MetadataReportView','MetadataReportUpdate','
              'MetadataDecisionRow','MetadataDecisionInput','MetadataDecisionResult','RuleVersionView','ActiveRuleView','MetadataRuleView',
              'MetadataRuleActivation','MetadataRuleResult','AttributeValues','AttributeReportInput','AttributeReportView',
              'AttributeReportUpdate','AttributeReportDecision','AttributeEvidence','AttributeQueuePage','AttributeDecisionRow',
-             'AttributeDecisionInput','AttributeDecisionResult','ReprintGroupPrinting','ReprintGroupView',
+             'AttributeDecisionInput','AttributeDecisionResult','ReprintGroupPrinting','GroupLegality','ReprintGroupView',
              'CardIdentityEvidence','CardIdentityQueueItem','CardIdentityQueuePage','CardIdentityDecisionRow',
              'ReprintGroupDecisionInput','ReprintGroupDecisionResult','CardIdentityMergeInput','CardIdentityMergeResult'):
     d=schema[name];fields=[f"{key}{'' if key in d.get('required',[]) else '?'}: {ts(value)}" for key,value in d['properties'].items()]

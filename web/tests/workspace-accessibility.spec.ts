@@ -130,8 +130,12 @@ const sidebar = (page: Page) =>
   page
     .getByRole("complementary", { name: "Sidebar" })
     .getByRole("navigation", { name: "Locations" });
+/** The message of ticket 107's toast, in the app's one toast host (#165). */
 const toast = (page: Page) =>
-  page.getByRole("status").filter({ hasText: /Moved|Removed|Undo|Dismissed/ });
+  page
+    .getByRole("region", { name: "Notifications" })
+    .getByRole("paragraph")
+    .filter({ hasText: /Moved|Removed|Undo|Dismissed/ });
 
 async function createDeck(page: Page, name: string): Promise<string> {
   const response = await page.request.post(
@@ -161,14 +165,15 @@ async function expectAccessible(page: Page, state: string) {
   expect(list(order.violations), `heading order in ${state}`).toEqual([]);
 }
 
-/** Visible controls smaller than `min` px; inline links in text are exempt, and a radio or checkbox counts its label. */
+/** Visible controls smaller than `min` px, anywhere on the page (Collection's dialogs, Actions strip and toast draw
+ * outside its root since #165); inline links in text are exempt, and a radio or checkbox counts its label. */
 async function smallTargets(page: Page, min: number): Promise<string[]> {
   // A drawer still sliding in from the left would have its controls skipped below as off-screen.
   await animationsFinished(page);
   return page.evaluate((min) => {
     const found: string[] = [];
     const controls = document.querySelectorAll<HTMLElement>(
-      '.ws-root button, .ws-root a[href], .ws-root input, .ws-root select, .ws-root [role="menuitem"]'
+      'button, a[href], input, select, [role="menuitem"]'
     );
     for (const el of controls) {
       if (el.closest("[inert]") || el.closest('[aria-hidden="true"]')) continue;
@@ -189,7 +194,8 @@ async function smallTargets(page: Page, min: number): Promise<string[]> {
   }, min);
 }
 
-/** The longest transition or animation on any workspace element, in seconds. */
+/** The longest transition or animation on any element of Collection's page (its root carries
+ * data-collection-page since #166), in seconds. */
 const longestMotion = (page: Page) =>
   page.evaluate(() => {
     const seconds = (value: string) =>
@@ -204,7 +210,7 @@ const longestMotion = (page: Page) =>
       );
     let longest = 0;
     for (const el of document.querySelectorAll<HTMLElement>(
-      ".ws-root, .ws-root *"
+      "[data-collection-page], [data-collection-page] *"
     )) {
       const style = getComputedStyle(el);
       longest = Math.max(longest, seconds(style.transitionDuration));
@@ -428,7 +434,7 @@ test.describe("desktop", () => {
     ).toBeVisible();
     await expect(page.locator("#ws-heading")).toBeFocused();
     // Undo joins the toast once the Undo list confirms this Move's record, a moment after the message shows
-    // (useInventoryActions.ts); until then the dock's first control, where the skip link lands, is Close notice.
+    // (useInventoryActions.ts); until then the dock's first control, where the skip link lands, is Dismiss.
     await expect(
       page.getByRole("button", { name: "Undo", exact: true })
     ).toBeVisible();
@@ -464,13 +470,20 @@ test.describe("desktop", () => {
     await expect(tiles(page)).toHaveCount(3);
 
     const before = await page.evaluateHandle(() =>
-      Array.from(document.querySelectorAll('[role="status"], [role="alert"]'))
+      Array.from(
+        document.querySelectorAll(
+          '[role="status"], [role="alert"], [aria-live]'
+        )
+      )
     );
     await moveTwo(page, `0 Dest ${s}`);
-    const mounted = await page
-      .getByRole("status")
+    // The toast's message is drawn inside the toast host's live region, which was there before it.
+    const mounted = await toast(page)
       .filter({ hasText: "Moved 2 copies" })
-      .evaluate((el, list) => (list as Element[]).includes(el), before);
+      .evaluate(
+        (el, list) => (list as Element[]).includes(el.closest("[aria-live]")!),
+        before
+      );
     expect(mounted).toBe(true);
 
     await page.getByRole("button", { name: "Add cards", exact: true }).click();

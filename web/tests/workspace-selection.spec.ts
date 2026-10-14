@@ -270,9 +270,10 @@ test.describe("desktop", () => {
 
     // Selected tiles carry a check badge inside the card's top-right corner and a ring, not only a colour.
     const selected = tile(0);
-    const check = selected.getByText("✓");
+    // The badge is an icon (an SVG), hidden from assistive technology like the old glyph.
+    const check = selected.locator("svg");
     await expect(check).toBeVisible();
-    await expect(tile(1).getByText("✓")).toHaveCount(0);
+    await expect(tile(1).locator("svg")).toHaveCount(0);
     const badge = await box(check);
     const card = await box(selected);
     expect(badge.x).toBeGreaterThan(card.x + card.width / 2);

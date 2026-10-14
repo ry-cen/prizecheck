@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { CardCategory, ElementalType } from "../collection_generated";
+import type { ElementalType } from "../collection_generated";
 import {
   CATEGORY_OPTIONS,
   DEFAULT_DISPLAY,
@@ -7,6 +7,7 @@ import {
   ELEMENTAL_TYPES,
   NO_FILTERS,
   SORT_OPTIONS,
+  type CategoryFilter,
   type DisplayPrefs,
   type GalleryFilters,
   type GallerySort,
@@ -61,7 +62,7 @@ export function parsePrefs(raw: string | null): GalleryPrefs {
       category: CATEGORY_OPTIONS.some(
         (option) => option.value === filters.category
       )
-        ? (filters.category as CardCategory)
+        ? (filters.category as CategoryFilter)
         : "",
       type: ELEMENTAL_TYPES.some((type) => type === filters.type)
         ? (filters.type as ElementalType)

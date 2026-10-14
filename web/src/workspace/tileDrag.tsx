@@ -9,7 +9,6 @@ import {
   type SelectedGroup,
 } from "./selectionModel";
 import type { SelectionState } from "./useSelection";
-import "./InventoryActions.css";
 
 /** Pointer travel, in px, that turns a press on a tile into a drag. Less is a click. */
 const DRAG_THRESHOLD = 6;
@@ -33,6 +32,14 @@ type Dragging = {
   y: number;
   text: string;
 };
+
+/** While tiles are dragged the pointer shows a closed hand and nothing on the page selects as text. Set on
+ * <body> inline, since a drag can pass over anything (#166 moved this off a body class). */
+function setDraggingLook(on: boolean) {
+  document.body.style.cursor = on ? "grabbing" : "";
+  document.body.style.userSelect = on ? "none" : "";
+  document.body.style.setProperty("-webkit-user-select", on ? "none" : "");
+}
 
 /** Swallows the click that follows a drag's pointerup, so the drag doesn't also act as a click. */
 function swallowNextClick() {
@@ -83,7 +90,7 @@ export function useTileDrag({ enabled, index, selection, onDrop }: Options) {
       let pointer = { x: startX, y: startY };
       const placeBadge = () => {
         frame = 0;
-        const badge = document.querySelector<HTMLElement>(".ws-drag-badge");
+        const badge = document.querySelector<HTMLElement>("[data-drag-badge]");
         if (!badge) return;
         badge.style.left = `${pointer.x + BADGE_OFFSET_X}px`;
         badge.style.top = `${pointer.y + BADGE_OFFSET_Y}px`;
@@ -125,7 +132,7 @@ export function useTileDrag({ enabled, index, selection, onDrop }: Options) {
             .map((node) => node.id)
         );
         text = carriedText(carried);
-        document.body.classList.add("ws-tile-dragging");
+        setDraggingLook(true);
       };
       const onMove = (move: PointerEvent) => {
         if (move.pointerId !== pointerId || cancelled) return;
@@ -139,8 +146,8 @@ export function useTileDrag({ enabled, index, selection, onDrop }: Options) {
         }
         const row = document
           .elementFromPoint(move.clientX, move.clientY)
-          ?.closest<HTMLElement>("[data-ws-drop]");
-        const id = row?.dataset.wsDrop ?? null;
+          ?.closest<HTMLElement>("[data-drop-target]");
+        const id = row?.dataset.dropTarget ?? null;
         const next = id && valid.has(id) ? id : null;
         pointer = { x: move.clientX, y: move.clientY };
         if (!shown || next !== over) {
@@ -155,7 +162,7 @@ export function useTileDrag({ enabled, index, selection, onDrop }: Options) {
         window.removeEventListener("pointerup", onUp);
         window.removeEventListener("pointercancel", onCancel);
         window.removeEventListener("keydown", onKey, true);
-        document.body.classList.remove("ws-tile-dragging");
+        setDraggingLook(false);
         stopBadge();
         stopActive.current = null;
         setDragging(null);
@@ -177,7 +184,7 @@ export function useTileDrag({ enabled, index, selection, onDrop }: Options) {
         // Escape drops the drag, not the selection.
         key.preventDefault();
         cancelled = true;
-        document.body.classList.remove("ws-tile-dragging");
+        setDraggingLook(false);
         stopBadge();
         setDragging(null);
       };
@@ -205,7 +212,8 @@ export function DragBadge({
   if (!badge) return null;
   return (
     <div
-      className="ws-drag-badge"
+      data-drag-badge=""
+      className="pointer-events-none fixed z-(--layer-toast) box-border rounded-round border border-accent-border bg-surface-raised px-3 py-1 font-sans text-meta font-semibold whitespace-nowrap text-text tabular-nums"
       aria-hidden="true"
       style={{ left: badge.x + BADGE_OFFSET_X, top: badge.y + BADGE_OFFSET_Y }}
     >

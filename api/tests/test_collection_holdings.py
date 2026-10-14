@@ -139,6 +139,12 @@ def test_holding_pages_walk_every_holding_once_and_bind_cursors():
         conn.execute('UPDATE catalog_state SET revision=revision+1 WHERE singleton')
     changed = listing(owner, cursor=fresh)
     assert changed.status_code == 409 and changed.json()['detail']['code'] == 'CATALOG_CHANGED'
+    # An attribute decision moves cards between Collection's filters, so it ends a walk the same way (migration 041).
+    fresh = listing(owner).json()['next_cursor']
+    with psycopg.connect(os.environ['DATABASE_URL']) as conn:
+        conn.execute('SELECT catalog_advance_attribute_revision()')
+    changed = listing(owner, cursor=fresh)
+    assert changed.status_code == 409 and changed.json()['detail']['code'] == 'CATALOG_CHANGED'
 
 
 def test_a_cursor_carries_its_anchor_so_the_next_page_does_not_reread_it():
@@ -158,13 +164,14 @@ def test_a_cursor_carries_its_anchor_so_the_next_page_does_not_reread_it():
         conn.execute('DELETE FROM holding WHERE owner_id=%s AND location_id=%s AND edition_id=%s',
                      (owner, anchor['location_id'], anchor['edition_id']))
         catalog_revision = conn.execute('SELECT revision FROM catalog_state WHERE singleton').fetchone()[0]
+        attribute_revision = conn.execute('SELECT revision FROM catalog_attribute_state WHERE singleton').fetchone()[0]
     second = listing(owner, cursor=first['next_cursor'])
     assert second.status_code == 200, second.text
     assert [row['edition_id'] for row in second.json()['holdings']] == editions[PAGE:]
     # A cursor in the earlier shape (the anchor's Edition and Location only), correctly signed, is refused.
     from app.collection import encode_cursor
-    context = ['collection-holdings', owner, None, 'name-asc', '', '', None, None,
-               first['owner_revision'], catalog_revision]
+    context = ['collection-holdings', owner, None, 'name-asc', '', '', None, None, None,
+               first['owner_revision'], [catalog_revision, attribute_revision]]
     legacy = listing(owner, cursor=encode_cursor(context, [anchor['edition_id'], anchor['location_id']]))
     assert legacy.status_code == 400 and legacy.json()['detail']['code'] == 'INVALID_CURSOR', legacy.text
 

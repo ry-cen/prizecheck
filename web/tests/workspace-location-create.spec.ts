@@ -229,7 +229,8 @@ test.describe("desktop", () => {
     const rowBox = (await shelfRow.boundingBox())!;
     const addBox = (await addShelf.boundingBox())!;
     const entryBox = (await shelfRow
-      .locator("xpath=ancestor::*[contains(@class,'ws-tree-entry')][1]")
+      // The row and its Add child share one entry: the row's parent element.
+      .locator("xpath=..")
       .boundingBox())!;
     expect(Math.abs(addBox.width - 28)).toBeLessThanOrEqual(1);
     expect(Math.abs(addBox.height - rowBox.height)).toBeLessThanOrEqual(1);

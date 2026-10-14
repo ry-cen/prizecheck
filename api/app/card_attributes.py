@@ -1,8 +1,14 @@
 """Card attributes of each Card Printing, derived from its catalog source record.
 
 The attributes are the regulation mark, card kind, Basic Energy status, types, Rule Box, ACE SPEC, Radiant and
-Prism Star status, and Basic Pokémon status. ``CardAttributeRules`` holds the derivation rules: fixing a misderived class of cards is a
+Prism Star status, Basic Pokémon status and Trainer Type. ``CardAttributeRules`` holds the derivation rules: fixing a misderived class of cards is a
 commit here, and the next catalog import (or ``scripts/derive_card_attributes.py``) re-derives every Printing.
+
+The effective attributes are the one source of card type (app redesign spec, "Card type: one source"): format checks
+and Collection's category and type filters read them. Trainer Type is reviewed like the other attributes, but no
+format rule reads it, so it is not a public format fact (``FORMAT_FACT_COLUMNS``). Evolves from, the name of the
+Pokémon a Pokémon evolves from, is derived with the attributes but is not one of them: it is never reviewed or
+corrected, and only groups Deck List lines (``derive_evolves_from``, migration 041).
 
 ``None`` means unknown. Missing, malformed or contradictory source data leaves an attribute unknown; it is never
 guessed. Manually approved Printings have no source record, so every attribute is unknown until a reviewed
@@ -32,11 +38,15 @@ class CardAttributes:
     ace_spec: bool | None = None
     radiant: bool | None = None
     prism_star: bool | None = None
-    basic_pokemon: bool | None = None    # last: migration 038 appends its column to the view
+    basic_pokemon: bool | None = None    # migration 038 appends its column to the view
+    trainer_type: str | None = None      # last: 'supporter', 'item', 'tool' or 'stadium'; Trainers only (migration 041)
 
 
 UNKNOWN = CardAttributes()
 ATTRIBUTE_COLUMNS = tuple(field.name for field in fields(CardAttributes))
+# The attributes Published Deck format checks read from the shared records store (migrations 036 and 038). Trainer Type
+# is left out: no format rule reads it, so a Trainer Type change neither re-stamps a Printing nor changes its record.
+FORMAT_FACT_COLUMNS = tuple(column for column in ATTRIBUTE_COLUMNS if column != "trainer_type")
 
 
 class CardAttributeRules:
@@ -79,8 +89,14 @@ class CardAttributeRules:
       Antique Helix Fossil): such an Item is a Trainer in the hand and deck, so it never counts as a Basic Pokémon
       during setup (Pokémon Rulings Compendium, TPCi Rules Team 2018-02-08, ruling 1189), and the deck-building
       rule ("your deck must have at least one Basic Pokémon in it", p. 22) exists for setup.
+    - **Trainer Type**: a Trainer's ``trainerType`` when it is one of ``TRAINER_TYPES`` (Supporter, Item, Tool,
+      Stadium); any other value, such as "Technical Machine", and an absent one (220 printings before Black & White)
+      are unknown. Pokémon and Energy cards have no Trainer Type.
+    - **Evolves from** (``evolves_from``, not an attribute): a Pokémon's ``evolveFrom``, the name of the Pokémon it
+      evolves from, with its whitespace collapsed, when it is a non-empty string of at most ``EVOLVES_FROM_MAX``
+      characters. Anything else, and every Trainer and Energy card, has none.
     """
-    VERSION = 2
+    VERSION = 3
     KINDS = {"Pokemon": "pokemon", "Trainer": "trainer", "Energy": "energy"}
     POKEMON_TYPES = ("Grass", "Fire", "Water", "Lightning", "Psychic", "Fighting", "Darkness", "Metal", "Fairy",
                      "Dragon", "Colorless")
@@ -98,6 +114,8 @@ class CardAttributeRules:
     BASIC_STAGES = ("Basic", "Baby")
     NOT_BASIC_STAGES = ("Stage1", "Stage2", "RESTORED", "LEVEL-UP", "VMAX", "VSTAR", "V-UNION", "MEGA", "BREAK")
     STAR_GLYPHS = ("☆", "★")
+    TRAINER_TYPES = {"Supporter": "supporter", "Item": "item", "Tool": "tool", "Stadium": "stadium"}
+    EVOLVES_FROM_MAX = 120
     PRISM_STAR = "◇"
     RADIANT_PREFIX = "Radiant "
     RADIANT_RARITY = "Radiant Rare"
@@ -165,7 +183,21 @@ class CardAttributeRules:
         basic = cls.basic_energy(kind, name, record.get("energyType"))
         return CardAttributes(mark, kind, basic, (), prism_star,
                               cls.ace_spec(source_id, set_id, name, record.get("rarity"), basic), False, prism_star,
-                              False)
+                              False, cls.trainer_type(kind, record.get("trainerType")))
+
+    @classmethod
+    def trainer_type(cls, kind, value):
+        return cls.TRAINER_TYPES.get(value) if kind == "trainer" and isinstance(value, str) else None
+
+    @classmethod
+    def evolves_from(cls, record):
+        if not isinstance(record, dict) or cls.KINDS.get(record.get("category")) != "pokemon":
+            return None
+        value = record.get("evolveFrom")
+        if not isinstance(value, str):
+            return None
+        name = " ".join(unicodedata.normalize("NFC", value).split())
+        return name if 0 < len(name) <= cls.EVOLVES_FROM_MAX else None
 
     @classmethod
     def regulation_mark(cls, value):
@@ -249,7 +281,8 @@ class CardAttributeRules:
 
 RULES = CardAttributeRules
 # The source fields the rules read; ``set`` supplies the set ID.
-SOURCE_FIELDS = ("category", "energyType", "name", "rarity", "regulationMark", "set", "stage", "suffix", "types")
+SOURCE_FIELDS = ("category", "energyType", "evolveFrom", "name", "rarity", "regulationMark", "set", "stage", "suffix",
+                 "trainerType", "types")
 
 
 def rules_digest() -> str:
@@ -260,6 +293,10 @@ def rules_digest() -> str:
 
 def derive(source_id, record) -> CardAttributes:
     return RULES.derive(source_id, record)
+
+
+def derive_evolves_from(record) -> str | None:
+    return RULES.evolves_from(record)
 
 
 def _row(attributes: CardAttributes):
@@ -293,10 +330,11 @@ def attribute_revision(conn) -> int:
 def refresh_card_attributes(conn) -> int:
     """Re-derive every TCGdex Printing's attributes from its stored source record, inside the caller's transaction.
 
-    Only rows whose values or rules version differ are written, and the revision advances once when any
-    Printing's values changed. A Printing with a pending name or reference review keeps its current attributes:
-    its source record may no longer describe the established Printing. Manual Printings have no source record and
-    get nothing. Returns the number of Printings whose attributes changed.
+    Only rows whose values, evolves-from or rules version differ are written, and the revision advances once when any
+    Printing's attributes changed. Evolves from is not an attribute: a change to it alone is written but advances
+    nothing, since no format check reads it. A Printing with a pending name or reference review keeps its current
+    attributes: its source record may no longer describe the established Printing. Manual Printings have no source
+    record and get nothing. Returns the number of Printings whose attributes changed.
     """
     sources = conn.execute("""SELECT p.id AS printing_id, p.source_id,
         (SELECT coalesce(jsonb_object_agg(f.key, f.value), '{}'::jsonb) FROM jsonb_each(m.source_record) f
@@ -311,18 +349,21 @@ def refresh_card_attributes(conn) -> int:
     writes, changed = [], 0
     for source in sources:
         attributes = derive(source["source_id"], source["fields"])
+        evolves_from = derive_evolves_from(source["fields"])
         existing = current.get(source["printing_id"])
         previous = _attributes(existing) if existing else UNKNOWN
-        if existing and previous == attributes and existing["rules_version"] == RULES.VERSION:
+        if (existing and previous == attributes and existing["evolves_from"] == evolves_from
+                and existing["rules_version"] == RULES.VERSION):
             continue
         changed += previous != attributes
-        writes.append((source["printing_id"], RULES.VERSION, *_row(attributes)))
+        writes.append((source["printing_id"], RULES.VERSION, *_row(attributes), evolves_from))
     if writes:
-        columns = ", ".join(ATTRIBUTE_COLUMNS)
-        updates = ", ".join(f"{column} = EXCLUDED.{column}" for column in ("rules_version", *ATTRIBUTE_COLUMNS))
+        columns = ", ".join((*ATTRIBUTE_COLUMNS, "evolves_from"))
+        updates = ", ".join(f"{column} = EXCLUDED.{column}"
+                            for column in ("rules_version", *ATTRIBUTE_COLUMNS, "evolves_from"))
         with conn.cursor() as cursor:
             cursor.executemany(f"""INSERT INTO catalog_derived_attribute (printing_id, rules_version, {columns})
-              VALUES (%s, %s, {", ".join(["%s"] * len(ATTRIBUTE_COLUMNS))})
+              VALUES (%s, %s, {", ".join(["%s"] * (len(ATTRIBUTE_COLUMNS) + 1))})
               ON CONFLICT (printing_id) DO UPDATE SET {updates}, updated_at = now()""", writes)
     if changed:
         advance_attribute_revision(conn)

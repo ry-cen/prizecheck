@@ -197,7 +197,7 @@ def test_an_approved_correction_overrides_derived_values_closes_reports_and_adva
     body = response.json()
     assert body["attribute_revision"] == before + 1 == revision()
     assert body["closed_report_ids"] == [sent] and body["effective"]["basic_energy"] is True
-    assert body["correction"] == {**dict.fromkeys(FULL_MANUAL), "basic_energy": True}
+    assert body["correction"] == {**dict.fromkeys(FULL_MANUAL), "trainer_type": None, "basic_energy": True}
     assert call("GET", f"{REPORTS}/{sent}", REPORTER).json()["status"] == "approved"
     # A definite derived value is overridden too: Grass Energy bw1-105 derives as Basic Energy.
     assert evidence(known)["derived"]["basic_energy"] is True
@@ -268,7 +268,7 @@ def test_manual_printings_get_attributes_only_through_reviewed_corrections():
     grant(manual)
     response = decide(manual, correction=FULL_MANUAL)
     assert response.status_code == 200, response.text
-    assert response.json()["effective"] == FULL_MANUAL and revision() == before + 1
+    assert response.json()["effective"] == {**FULL_MANUAL, "trainer_type": None} and revision() == before + 1
     expected = CardAttributes("H", "pokemon", False, ("Lightning",), False, False, False, False, True)
     assert effective(manual) == expected
     run(Records(EX_SV))  # an import derives nothing for a manual Printing and leaves its correction alone

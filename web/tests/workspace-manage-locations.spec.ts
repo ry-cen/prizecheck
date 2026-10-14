@@ -279,10 +279,10 @@ test.describe("desktop", () => {
     await gear.click();
     const panel = panelOf(page);
     await expect(panel).toBeVisible();
-    // The page behind the open panel doesn't scroll.
-    expect(
-      await page.evaluate(() => document.documentElement.style.overflow)
-    ).toBe("hidden");
+    // The page behind the open panel doesn't scroll (the kit Dialog locks <body>, #166).
+    expect(await page.evaluate(() => document.body.style.overflow)).toBe(
+      "hidden"
+    );
     await expect(row(panel, f.shelf)).toBeVisible();
     // The panel's handles use pointer events, not native drag and drop.
     await expect(panel.locator('[draggable="true"]')).toHaveCount(0);
@@ -336,7 +336,7 @@ test.describe("desktop", () => {
     await expect(panel).toBeHidden();
     await expect(gear).toBeFocused();
     await expect
-      .poll(() => page.evaluate(() => document.documentElement.style.overflow))
+      .poll(() => page.evaluate(() => document.body.style.overflow))
       .toBe("");
   });
 
