@@ -3,10 +3,11 @@ import {
   type MoveErrorDetail,
   type MoveResult,
 } from "./moves_generated";
-/** One Undo record from GET /api/moves/undo. `source_id` is set only when exactly one source was involved. */
+/** One Undo record from GET /api/moves/undo. `source_id` is set only when exactly one source was involved. An "add"
+ * (a batch add, #175) has no source: `destination_id` is the Location its copies went to and `source_count` is 0. */
 export type UndoEntry = {
   id: string;
-  action: "move" | "remove";
+  action: "move" | "remove" | "add";
   source_id: string | null;
   destination_id: string | null;
   source_count: number;

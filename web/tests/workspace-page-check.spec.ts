@@ -183,42 +183,42 @@ const corrections = (page: Page) =>
 const manage = (page: Page) =>
   page.getByRole("dialog", { name: "Manage locations", exact: true });
 
-/** Opens the Deck's Export menu, checks it, then opens and checks the Live export panel, and closes both. */
+/** Checks the open Deck's banner (#181): its cost and the link to the deck builder; exports live on Decks now. */
 async function checkDeckHeading(page: Page, width: string) {
+  const banner = page.getByRole("region", { name: "Deck banner" });
   await expect(
-    page.getByRole("region", { name: "Estimated Deck Cost" })
+    banner.getByRole("region", { name: "Estimated Deck Cost" })
   ).toBeVisible();
-  await expectPageChecks(page, `Deck heading (${width})`);
-  const exportButton = page.getByRole("button", {
-    name: "Export",
-    exact: true,
-  });
-  await expect(exportButton).toBeEnabled();
-  await exportButton.click();
-  const menu = page.getByRole("menu", { name: "Export" });
-  await expect(menu).toBeVisible();
-  await expectPageChecks(page, `Export menu (${width})`);
-  await menu.getByRole("menuitem", { name: "Pokémon TCG Live" }).click();
-  const panel = page.getByRole("dialog", {
-    name: "Export to Pokémon TCG Live",
-  });
-  await expect(panel).toBeVisible();
-  await expectPageChecks(page, `Live export panel (${width})`);
-  await page.keyboard.press("Escape");
-  await expect(panel).toHaveCount(0);
-  await expect(exportButton).toBeFocused();
+  await expect(
+    banner.getByRole("link", { name: "Open in the deck builder" })
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Export", exact: true })
+  ).toHaveCount(0);
+  await expectPageChecks(page, `Deck banner (${width})`);
 }
 
-/** Opens Add cards for the open Location, searches, checks it with the Edition picker showing, and closes it. */
+/** Opens Add cards (#175: Catalog's gallery in Add mode) for the open Location, searches, checks it with a card
+ * queued, and closes it. */
 async function checkAddCards(page: Page, path: string, width: string) {
   await page.getByRole("button", { name: "Add cards", exact: true }).click();
   const add = page.getByRole("dialog", { name: `Add cards to ${path}` });
   await expect(add).toBeVisible();
-  await add.getByLabel("Search English card name").fill("Check");
-  await add.getByRole("button", { name: "Search", exact: true }).click();
-  await expect(add.getByLabel("Card Edition")).toBeVisible();
+  await add
+    .getByRole("searchbox", { name: "Search the catalog" })
+    .fill("Check");
+  await add
+    .getByRole("region", { name: "Catalog results" })
+    .getByRole("button", {
+      name: "One more Check Abra fixture 1 Normal",
+      exact: true,
+    })
+    .click();
+  await expect(
+    add.getByRole("region", { name: "Add to a Location" })
+  ).toContainText("1× Check Abra");
   await expectPageChecks(page, `Add cards (${width})`);
-  await add.getByRole("button", { name: "Close" }).click();
+  await add.getByRole("button", { name: "Close Add cards" }).click();
   await expect(add).toHaveCount(0);
 }
 

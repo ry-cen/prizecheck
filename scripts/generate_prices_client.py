@@ -24,7 +24,7 @@ def ts_type(value):
 
 schema = app.openapi()["components"]["schemas"]
 lines = ["// Generated from FastAPI OpenAPI by scripts/generate_prices_client.py. Do not edit."]
-for name in ("PriceRow", "PricesResponse", "DeckCostFigures", "DeckCost", "PublishedDeckCost"):
+for name in ("PriceRow", "PricesResponse", "DeckCostFigures", "DeckCost", "PublishedEditionPrice", "PublishedDeckCost"):
     definition = schema[name]
     # The route always serializes every field, so every field is present even where the model has a default.
     fields = [f"{field}: {ts_type(value)}" for field, value in definition["properties"].items()]

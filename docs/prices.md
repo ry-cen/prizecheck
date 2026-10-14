@@ -176,7 +176,9 @@ The only inputs are the token and the version in the path. The version sits in t
 
 Every error body is `{"detail": {"code": ...}}` with `cache-control: no-store` and `x-robots-tag: noindex, nofollow`. POST is 405.
 
-Answer (`PublishedDeckCost`): `version, digest, status, reason, total_copies, priced_copies, stale_copies, unknown_age_copies, fallback_copies, amount, display_amount, currency`. `status`, the counts and the labels are exactly those of the private Deck cost: `deck_cost.summarize` is the one fold behind both routes (an empty snapshot is `$0.00` with every count `"0"`; `no_quotes` is `0/N`; `incomplete` carries a reason and no coverage).
+Answer (`PublishedDeckCost`): `version, digest, status, reason, total_copies, priced_copies, fallback_copies, amount, display_amount, currency, editions`. `status`, `reason`, `total_copies`, `priced_copies`, `fallback_copies`, `amount`, `display_amount` and the labels are those of the private Deck cost, but the public route leaves out its two price-age counts (`stale_copies`, `unknown_age_copies`): no price age is sent. `deck_cost.summarize` is the one fold behind both routes (an empty snapshot is `$0.00` with every count `"0"`; `no_quotes` is `0/N`; `incomplete` carries a reason and no coverage).
+
+`editions` (app redesign #183) lists each frozen Edition's own price for the Published Deck page: one `{edition_ref, amount}` per distinct public Edition reference, in snapshot order, where `amount` is the exact per-copy amount of a priced row (`status: quote`, stale quotes included) and null otherwise. It comes from the same views as the totals, so it adds no store read and no admission, and it carries no price age. Legacy rows have no reference and no entry. A withheld or `incomplete` answer has `editions: []`.
 
 The pipeline for one access:
 

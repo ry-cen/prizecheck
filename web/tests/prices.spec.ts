@@ -4,7 +4,6 @@ import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { Pool } from "pg";
-import { openDeckTools } from "./support/deck-builder";
 
 const ORIGIN = process.env.TEST_ORIGIN || "http://localhost:5173";
 const OWNER_EMAIL = process.env.OWNER_EMAIL || "owner@example.test";
@@ -57,8 +56,8 @@ const owner = async () =>
   (await pool.query('SELECT id FROM "user" WHERE email=$1', [OWNER_EMAIL]))
     .rows[0].id as string;
 
-/** Stocks a new Deck with one copy of each Edition, through the Decks page's Holdings panel (the old Locations page
- * that showed leaf rows is gone, ticket 114). The "0 " prefix keeps it on the first page of 30 Decks by name. */
+/** Stocks a new Deck with one copy of each Edition by SQL; returns its id. Its Holdings show in Collection (#181 moved
+ * them off the Decks page), one tile per copy. */
 async function hold(page: Page, editions: string[]): Promise<string> {
   const name = `0 Held ${randomUUID().slice(0, 8)}`;
   const created = await page.request.post(`${ORIGIN}/api/decks`, {
@@ -77,21 +76,24 @@ async function hold(page: Page, editions: string[]): Promise<string> {
     "UPDATE inventory_owner SET revision=revision+1 WHERE user_id=$1",
     [user]
   );
-  return name;
+  return deck;
 }
 
-/** Opens the held Deck's Holdings rows on the Decks page. */
-async function openHeld(page: Page, name: string) {
-  await page.getByRole("button", { name: "Decks", exact: true }).click();
-  await page
-    .getByRole("navigation", { name: "Deck index" })
-    .getByRole("button", { name, exact: true })
-    .click();
-  await openDeckTools(page);
-  const panel = page.getByRole("region", { name: `Cards in ${name}` });
-  await expect(panel).toBeVisible();
+/** Opens the held Deck in Collection by its link, with Prices on (remembered once turned on), and returns the
+ * gallery's "Cards" region: one tile per copy, each with its compact price line. */
+async function openHeld(page: Page, deckId: string) {
+  await page.goto(`${ORIGIN}/collection?location=${deckId}`);
+  const panel = page.getByRole("region", { name: "Cards" });
+  await expect(panel.getByRole("button").first()).toBeVisible();
+  const prices = page.getByRole("button", { name: "Prices", exact: true });
+  if ((await prices.getAttribute("aria-pressed")) !== "true")
+    await prices.click();
+  await expect(prices).toHaveAttribute("aria-pressed", "true");
   return panel;
 }
+/** A gallery tile by the start of its accessible name ("Furret, Darkness Ablaze 1, Normal, copy 1, …"). */
+const heldTile = (panel: ReturnType<Page["getByRole"]>, start: RegExp) =>
+  panel.getByRole("button", { name: start });
 
 /** Prices are read once, when a slot first comes near the viewport, so each check starts from a fresh page load.
  * Catalog is an Edition gallery (#173): Furret's three Editions are three tiles, each with its compact price. */
@@ -112,11 +114,14 @@ const tile = (page: Page, start: string) =>
     .getByRole("region", { name: "Catalog results" })
     .getByRole("button", { name: new RegExp(`^${start}`) });
 
-/** Opens a tile's Printing details, which give every Edition of that Printing its full price sentence. */
+/** Opens a tile's card popup (#174): its Edition picker prices every Edition of the Printing in one short line, and the
+ * picked Edition (the tile's) gets the full price sentence. */
 async function details(page: Page, start: string) {
   await tile(page, start).click();
   const dialog = page.getByRole("dialog", { name: "Furret" });
-  await expect(dialog.getByRole("article")).toBeVisible();
+  await expect(
+    dialog.getByRole("group", { name: "Selected Edition" })
+  ).toBeVisible();
   return dialog;
 }
 
@@ -155,7 +160,7 @@ test("card information shows each Edition's own price with age, stale and finish
   await expect(
     tile(page, "Furret, DAA 1, Darkness Ablaze, Reverse Holo")
   ).toContainText("$0.43");
-  // The details give the full sentence for each Edition of the Printing.
+  // The popup prices each Edition in its picker and gives the picked one the full sentence.
   let card = await details(page, "Furret, DAA 1, Darkness Ablaze, Normal");
   await expect(card).toContainText("$0.25");
   await expect(card).toContainText("$0.43");
@@ -163,7 +168,20 @@ test("card information shows each Edition's own price with age, stale and finish
   await expect(card).toContainText("Last checked");
   await expect(card).not.toContainText("Stale");
   await expect(card).not.toContainText("$0.00");
-  await expect(card.locator(".edition-price")).toHaveCount(2);
+  await expect(
+    card.getByRole("group", { name: "Editions" }).locator(".edition-price")
+  ).toHaveCount(2);
+  const picked = card.getByRole("group", { name: "Selected Edition" });
+  await expect(picked.locator(".edition-price")).toHaveCount(1);
+  await expect(picked).toContainText("$0.25");
+  await expect(picked).toContainText("Last checked");
+  // Picking the Reverse Holo gives it the full sentence: no provider time, so its age is unknown.
+  await card
+    .getByRole("group", { name: "Editions" })
+    .getByRole("button", { name: /^Reverse Holo/ })
+    .click();
+  await expect(picked).toContainText("$0.43");
+  await expect(picked).toContainText("Age unknown");
   await page.keyboard.press("Escape");
   card = await details(page, "Furret, DAA 2,");
   await expect(card).toContainText("Price unavailable: finish not established");
@@ -219,7 +237,7 @@ test("card information shows each Edition's own price with age, stale and finish
   await expect(card).not.toContainText("$0.25");
 });
 
-test("Deck rows and Collection tiles price their exact Edition, including after More cards and a scroll", async ({
+test("a Deck's Holdings and All owned price each tile's exact Edition, including after a scroll", async ({
   page,
 }) => {
   // Tall enough that every row of each page is near the viewport, so every rendered slot asks at once.
@@ -255,28 +273,36 @@ test("Deck rows and Collection tiles price their exact Edition, including after 
   const held = await hold(page, everything);
   await page.reload();
 
-  // Deck Holdings: 48 rows on the first page; only rendered rows are requested, 64 at a time at most.
+  // The Deck's Holdings in Collection (#181): only mounted tiles are requested, 64 at a time at most, each Edition
+  // once; the "Aaa" pagers sort first, so the priced Furret tiles mount once the gallery reaches them.
   const panel = await openHeld(page, held);
-  await expect(panel.locator(".holding-grid > li")).toHaveCount(48);
-  await expect(panel.locator(".edition-price").first()).not.toContainText(
-    "Checking prices"
-  );
-  await expect(panel).not.toContainText("$0.25");
-  expect(new Set(requested.flat()).size).toBeLessThanOrEqual(48);
-  await panel.getByRole("button", { name: "More cards" }).click();
-  await expect(panel.locator(".holding-grid > li")).toHaveCount(55);
-  await expect(panel).toContainText("$0.25");
-  await expect(panel).toContainText("$0.43");
-  expect(requested.every((batch) => batch.length <= 64)).toBe(true);
-  expect(new Set(requested.flat()).size).toBe(55);
-
-  // Collection's tiles (the old Collection page is retired, #164): with Prices on, each copy's price line
-  // shows its own Edition's price, including the last tiles, which mount only once the gallery reaches them.
-  await page.getByRole("button", { name: "Collection", exact: true }).click();
   await expect(
     page.getByRole("main").getByText("55 copies · 55 editions", { exact: true })
   ).toBeVisible();
-  await page.getByRole("button", { name: "Prices", exact: true }).click();
+  await expect(panel.locator(".edition-price").first()).not.toContainText(
+    "Checking prices"
+  );
+  await page.evaluate(() =>
+    window.scrollTo(0, document.documentElement.scrollHeight)
+  );
+  await expect(
+    heldTile(panel, /^Furret, Darkness Ablaze 1, Normal, /)
+  ).toContainText("$0.25");
+  await expect(
+    heldTile(panel, /^Furret, Darkness Ablaze 1, Reverse Holo, /)
+  ).toContainText("$0.43");
+  expect(requested.every((batch) => batch.length <= 64)).toBe(true);
+  expect(requested.flat()).toHaveLength(new Set(requested.flat()).size);
+
+  // All owned (the old Collection page is retired, #164): with Prices on, each copy's price line shows its own
+  // Edition's price, including the last tiles, which mount only once the gallery reaches them.
+  await page
+    .getByRole("navigation", { name: "Locations" })
+    .getByRole("button", { name: "All owned", exact: true })
+    .click();
+  await expect(
+    page.getByRole("main").getByText("55 copies · 55 editions", { exact: true })
+  ).toBeVisible();
   await page.evaluate(() =>
     window.scrollTo(0, document.documentElement.scrollHeight)
   );
@@ -313,15 +339,11 @@ test("Deck rows and Collection tiles price their exact Edition, including after 
     "UPDATE inventory_owner SET revision=revision+1 WHERE user_id=$1",
     [user]
   );
-  await page.getByRole("button", { name: "Decks", exact: true }).click();
-  await page.getByRole("button", { name, exact: true }).click();
-  await openDeckTools(page);
-  const rows = page.locator(".holding-grid > li");
-  await expect(rows).toHaveCount(2);
-  await expect(rows.filter({ hasText: "$0.25" })).toHaveCount(1);
-  await expect(rows.filter({ hasText: "finish not established" })).toHaveCount(
-    1
-  );
+  const priced = await openHeld(page, deck);
+  const rows = priced.getByRole("button");
+  await expect(rows).toHaveCount(4);
+  await expect(rows.filter({ hasText: "$0.25" })).toHaveCount(2);
+  await expect(rows.filter({ hasText: "Price unavailable" })).toHaveCount(2);
 });
 
 // @slow (wall-clock): the stalled route waits 6 s of real time before the fallback.
@@ -342,15 +364,14 @@ test(
     });
     const panel = await openHeld(page, held);
     // The cards are there at once; only the price slots wait.
-    await expect(panel.locator(".holding-grid > li")).toHaveCount(2);
-    await expect(panel.getByText("Furret").first()).toBeVisible();
+    await expect(panel.getByRole("button")).toHaveCount(2);
+    await expect(heldTile(panel, /^Furret, /).first()).toBeVisible();
     await expect(panel.getByText("Checking prices…").first()).toBeVisible();
-    await expect(panel.getByRole("button", { name: "Search" })).toHaveCount(0);
     await expect(panel.getByText("Price check timed out").first()).toBeVisible({
       timeout: 8_000,
     });
     await expect(panel.getByText("Checking prices…")).toHaveCount(0);
-    await expect(panel.locator(".holding-grid > li")).toHaveCount(2);
+    await expect(panel.getByRole("button")).toHaveCount(2);
   }
 );
 
@@ -370,7 +391,7 @@ test("a gateway deadline answer becomes the same labelled fallback", async ({
   );
   const panel = await openHeld(page, held);
   await expect(panel.getByText("Price check timed out").first()).toBeVisible();
-  await expect(panel.locator(".holding-grid > li")).toHaveCount(1);
+  await expect(panel.getByRole("button")).toHaveCount(1);
 });
 
 const REFRESH_LABELS: [string | null, string | null, RegExp | null][] = [
@@ -412,9 +433,18 @@ test("each refresh outcome has its own label and never changes the cached price 
       }
       await route.fulfill({ response, json: body });
     });
-    await page.reload();
-    const panel = await openHeld(page, held);
-    const slot = panel.locator(".edition-price").first();
+    // The full price sentence, refresh label included, is in the inspector (a tile shows one short line, and Prices
+    // stays off so only the inspector asks). The inspector sits beside the gallery on a wide desktop window.
+    await page.setViewportSize({ width: 1600, height: 900 });
+    await page.goto(`${ORIGIN}/collection?location=${held}`);
+    await page
+      .getByRole("region", { name: "Cards" })
+      .getByRole("button")
+      .first()
+      .click();
+    const slot = page
+      .getByRole("complementary", { name: "Card details" })
+      .locator(".edition-price");
     await expect(slot).toContainText("$0.25");
     if (label) await expect(slot).toContainText(label);
     else await expect(slot.locator(".price-refresh")).toHaveCount(0);
@@ -453,25 +483,32 @@ test(
       live -= 1;
       await route.continue().catch(() => undefined);
     });
-    const panel = await openHeld(page, held);
-    await expect(panel.locator(".holding-grid > li")).toHaveCount(48);
-    await panel.getByRole("button", { name: "More cards" }).click();
-    await expect(panel.locator(".holding-grid > li")).toHaveCount(96);
-    await panel.getByRole("button", { name: "More cards" }).click();
-    await expect(panel.locator(".holding-grid > li")).toHaveCount(113);
+    await openHeld(page, held);
+    // The first tiles' slots fill two batches, held in flight; scrolling mounts more, which queue behind them.
+    await page.evaluate(() =>
+      window.scrollTo(0, document.documentElement.scrollHeight)
+    );
     await expect.poll(() => seen.length).toBe(2);
     // flake-exempt wait-for-timeout (quiet): while two batches are held, a third must not start.
     await page.waitForTimeout(800);
     expect(seen).toHaveLength(2);
     expect(peak).toBe(2);
     release();
-    await expect.poll(() => seen.length).toBe(3);
+    // The gallery mounts only rows near the viewport (a tile mounted again asks again): walk down the page until
+    // every Edition has been asked for.
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await expect
+      .poll(async () => {
+        await page.evaluate(() => window.scrollBy(0, 600));
+        return new Set(seen.flat()).size;
+      })
+      .toBe(113);
+    const asked = seen.length;
     // flake-exempt wait-for-timeout (quiet): once the queue has drained, nothing is polled or retried.
     await page.waitForTimeout(1_000);
+    expect(seen).toHaveLength(asked);
     expect(peak).toBeLessThanOrEqual(2);
     expect(seen.every((batch) => batch.length <= 64)).toBe(true);
-    expect(seen.flat()).toHaveLength(113);
-    expect(new Set(seen.flat()).size).toBe(113);
   }
 );
 
@@ -514,7 +551,7 @@ test("price slots ask only once they come near the viewport, and each Edition on
     ids["reverse-holofoil"],
     ids.unspecified,
   ]);
-  // A short window: the near area (two viewport heights) ends well above the last of the page's 48 rows.
+  // A short window: the near area ends well above the last of the Deck's 55 tiles.
   await page.setViewportSize({ width: 1280, height: 300 });
   await page.reload();
   const requested: string[][] = [];
@@ -523,23 +560,19 @@ test("price slots ask only once they come near the viewport, and each Edition on
     await route.continue();
   });
   const panel = await openHeld(page, held);
-  const rows = panel.locator(".holding-grid > li");
-  await expect(rows).toHaveCount(48);
-  await rows.first().scrollIntoViewIfNeeded();
+  const rows = panel.getByRole("button");
   await expect(rows.first().locator(".edition-price")).not.toContainText(
     "Checking prices"
   );
-  // The last row has not asked yet.
-  await expect(rows.last().locator(".edition-price")).toHaveAttribute(
-    "data-price-status",
-    "checking"
-  );
   const before = new Set(requested.flat()).size;
   expect(before).toBeGreaterThan(0);
-  expect(before).toBeLessThan(48);
-  // Scrolling to it asks for it, and no Edition is ever asked for twice.
-  await rows.last().scrollIntoViewIfNeeded();
-  await expect(rows.last().locator(".edition-price")).not.toContainText(
+  expect(before).toBeLessThan(55);
+  // Scrolling to the last tile asks for it, and no Edition is ever asked for twice.
+  await page.evaluate(() =>
+    window.scrollTo(0, document.documentElement.scrollHeight)
+  );
+  const last = heldTile(panel, /^Furret, Darkness Ablaze 2, /);
+  await expect(last.locator(".edition-price")).not.toContainText(
     "Checking prices"
   );
   expect(new Set(requested.flat()).size).toBeGreaterThan(before);
@@ -568,10 +601,12 @@ test("without IntersectionObserver every rendered slot asks at once", async ({
     await route.continue();
   });
   const panel = await openHeld(page, held);
-  const rows = panel.locator(".holding-grid > li");
-  await expect(rows).toHaveCount(48);
-  await expect.poll(() => new Set(requested.flat()).size).toBe(48);
+  const rows = panel.getByRole("button");
   await expect(rows.last().locator(".edition-price")).not.toContainText(
     "Checking prices"
   );
+  // Every mounted tile asked at once, the ones far below the short window included.
+  const mounted = await rows.count();
+  expect(mounted).toBeGreaterThan(1);
+  await expect.poll(() => new Set(requested.flat()).size).toBe(mounted);
 });

@@ -1,4 +1,9 @@
-"""Short-lived selections and atomic, owner-scoped Holding Moves across one or more sources."""
+"""Short-lived selections and atomic, owner-scoped Holding Moves across one or more sources, and Inventory Undo.
+
+Every inventory command that can be undone writes its one Inventory Undo record through ``record_undo``: a Move or
+Removal here, a Pick List confirmation (``deck_pick_list.py``) and a batch add (``holdings.py``). An owner keeps their
+newest ``UNDO_LIMIT`` records, and only the newest can be undone.
+"""
 import hashlib
 import json
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
@@ -12,6 +17,8 @@ from .main import connect, verified_user
 router = APIRouter(prefix="/api/moves", tags=["moves"])
 MAX_QUANTITY = 2**63 - 1
 MAX_BATCH = 500
+# Inventory Undo keeps this many records per owner, newest first (the five-record limit).
+UNDO_LIMIT = 5
 
 
 class StartMove(BaseModel):
@@ -70,6 +77,27 @@ def undo_id_for(user_id: str, key: UUID) -> UUID:
     """The id of the Undo record a Move or Removal with this idempotency key creates. It is derived, not
     stored, so a replay reports it without a migration; the owner in the name keeps ids apart across owners."""
     return uuid5(NAMESPACE_URL, f"prizecheck:inventory-undo:{user_id}:{key}")
+
+
+def record_undo(conn, user_id: str, undo_id: UUID, action: str, destination_id: UUID | None, sources: list,
+                payload: str):
+    """Writes one Inventory Undo record in the caller's transaction and keeps this owner's newest UNDO_LIMIT, after
+    dropping expired ones.
+
+    `payload` is the record's items as JSON text, with quantities as text so no JSON reader rounds them. A Move or
+    Removal names each item's source, ``{source_id, edition_id, quantity}``, and `sources` lists the distinct
+    sources: the record's source_id is set only for a single source, so readers from before migration 026 treat a
+    multi-source record as incompatible. An add (migration 046) has no sources: its items are
+    ``{edition_id, quantity}``, source_id is NULL, source_count 0, and `destination_id` is the Location the copies
+    went to."""
+    conn.execute("DELETE FROM inventory_undo WHERE owner_id=%s AND expires_at<=clock_timestamp()", (user_id,))
+    conn.execute("""INSERT INTO inventory_undo(id,owner_id,action,source_id,destination_id,source_count,payload)
+      VALUES (%s,%s,%s,%s,%s,%s,%s::jsonb)""",
+                 (undo_id, user_id, action, sources[0] if len(sources) == 1 else None, destination_id, len(sources),
+                  payload))
+    conn.execute("""DELETE FROM inventory_undo WHERE owner_id=%s AND id NOT IN
+      (SELECT id FROM inventory_undo WHERE owner_id=%s ORDER BY created_at DESC,id DESC LIMIT %s)""",
+                 (user_id, user_id, UNDO_LIMIT))
 
 
 def lock_owner(conn, user_id: str):
@@ -311,16 +339,10 @@ def apply_selection(manifest_id, command, user_id):
                 source_count,already_at_destination_count) VALUES (%s,%s,%s,%s,%s,%s)""",
                          (user_id, command.idempotency_key, summary["editions"], summary["copies"],
                           summary["sources"], scope["already"]))
-            conn.execute("DELETE FROM inventory_undo WHERE owner_id=%s AND expires_at<=clock_timestamp()", (user_id,))
-            # The record's source_id is set only for a single source, so earlier readers
-            # keep working and treat a multi-source record as incompatible.
-            conn.execute("""INSERT INTO inventory_undo(id,owner_id,action,source_id,destination_id,source_count,payload)
-              SELECT %s,%s,%s,%s,%s,%s,jsonb_agg(jsonb_build_object(
-                'source_id',source_id,'edition_id',edition_id,'quantity',quantity::text))
-              FROM move_work""", (undo_id, user_id, payload["action"], sources[0] if len(sources) == 1 else None,
-                                  destination, len(sources)))
-            conn.execute("""DELETE FROM inventory_undo WHERE owner_id=%s AND id NOT IN
-              (SELECT id FROM inventory_undo WHERE owner_id=%s ORDER BY created_at DESC,id DESC LIMIT 5)""", (user_id, user_id))
+            items = conn.execute("""SELECT jsonb_agg(jsonb_build_object(
+                'source_id',source_id,'edition_id',edition_id,'quantity',quantity::text))::text AS items
+              FROM move_work""").fetchone()["items"]
+            record_undo(conn, user_id, undo_id, payload["action"], destination, sources, items)
             conn.execute("DELETE FROM move_manifest WHERE owner_id=%s", (user_id,))
             return result
     except psycopg.Error:
@@ -358,7 +380,7 @@ def undo_inventory(undo_id: UUID, command: UndoCommand, user_id: str = Depends(v
                 if previous['command_digest'] != digest:
                     fail(409, 'IDEMPOTENCY_KEY_REUSED')
                 return replayed(previous)
-            entry = conn.execute('''SELECT destination_id,expires_at<=clock_timestamp() AS expired
+            entry = conn.execute('''SELECT action,destination_id,expires_at<=clock_timestamp() AS expired
               FROM inventory_undo WHERE owner_id=%s AND id=%s''', (user_id, undo_id)).fetchone()
             if not entry:
                 fail(404, 'UNDO_NOT_FOUND')
@@ -368,6 +390,8 @@ def undo_inventory(undo_id: UUID, command: UndoCommand, user_id: str = Depends(v
             if newest['id'] != undo_id:
                 fail(409, 'UNDO_NOT_NEWEST')
             destination = entry['destination_id']
+            if entry['action'] == 'add':
+                return undo_add(conn, user_id, undo_id, destination, revision, command.idempotency_key, digest)
             # Items written before multi-source carry no source_id; their source is the record's.
             conn.execute('''CREATE TEMP TABLE undo_work ON COMMIT DROP AS
               SELECT coalesce(p.source_id,u.source_id) AS source_id,p.edition_id,p.quantity
@@ -430,3 +454,43 @@ def undo_inventory(undo_id: UUID, command: UndoCommand, user_id: str = Depends(v
                               source_count=len(sources), already_at_destination_count='0')
     except psycopg.Error:
         fail(503, 'INVENTORY_TEMPORARILY_UNAVAILABLE')
+
+
+def undo_add(conn, user_id: str, undo_id: UUID, location_id: UUID, revision: int, key: UUID, digest: str) -> MoveResult:
+    """Undoes a batch add (migration 046) in the caller's transaction, after its owner lock, replay, expiry and
+    newest-record checks: takes exactly the copies the add put in its Location out again, and puts them nowhere else.
+    When the Location is no longer a Storage Leaf or Deck, or no longer holds every one of those copies (some were
+    moved, removed or corrected away since), nothing changes and the answer is UNDO_INCOMPATIBLE, naming the Location
+    and, for a short Holding, the lowest such Card Edition."""
+    if not leaf(conn, user_id, location_id):
+        fail(409, 'UNDO_INCOMPATIBLE', destination_id=location_id)
+    conn.execute('''CREATE TEMP TABLE added_work ON COMMIT DROP AS
+      SELECT p.edition_id,sum(p.quantity) AS quantity
+      FROM inventory_undo u
+      CROSS JOIN LATERAL jsonb_to_recordset(u.payload) AS p(edition_id uuid,quantity bigint)
+      WHERE u.owner_id=%s AND u.id=%s GROUP BY p.edition_id''', (user_id, undo_id))
+    summary = conn.execute('SELECT count(*) AS editions,coalesce(sum(quantity),0) AS copies FROM added_work').fetchone()
+    if not summary['editions']:
+        fail(409, 'UNDO_INCOMPATIBLE', destination_id=location_id)
+    short = conn.execute('''SELECT a.edition_id FROM added_work a
+      LEFT JOIN holding h ON h.owner_id=%s AND h.location_id=%s AND h.edition_id=a.edition_id
+      WHERE coalesce(h.quantity,0)<a.quantity ORDER BY a.edition_id LIMIT 1''', (user_id, location_id)).fetchone()
+    if short:
+        fail(409, 'UNDO_INCOMPATIBLE', destination_id=location_id, edition_id=short['edition_id'])
+    new_revision = revision + 1
+    conn.execute('''DELETE FROM holding h USING added_work a WHERE h.owner_id=%s AND h.location_id=%s
+      AND h.edition_id=a.edition_id AND h.quantity=a.quantity''', (user_id, location_id))
+    # A Deck that loses copies here keeps its Deck List lines, as after any Move out of it.
+    conn.execute('''UPDATE holding h SET quantity=h.quantity-a.quantity::bigint,version=%s FROM added_work a
+      WHERE h.owner_id=%s AND h.location_id=%s AND h.edition_id=a.edition_id AND h.quantity>a.quantity''',
+                 (new_revision, user_id, location_id))
+    conn.execute('UPDATE inventory_owner SET revision=%s WHERE user_id=%s', (new_revision, user_id))
+    conn.execute('DELETE FROM mutation_request WHERE owner_id=%s AND expires_at<=now()', (user_id,))
+    conn.execute('INSERT INTO mutation_request(owner_id,request_key,command_digest,result_revision) VALUES (%s,%s,%s,%s)',
+                 (user_id, key, digest, new_revision))
+    conn.execute('''INSERT INTO move_response(owner_id,request_key,edition_count,copy_count,source_count,
+        already_at_destination_count) VALUES (%s,%s,%s,%s,0,0)''', (user_id, key, summary['editions'], summary['copies']))
+    conn.execute('DELETE FROM inventory_undo WHERE owner_id=%s AND (id=%s OR expires_at<=clock_timestamp())',
+                 (user_id, undo_id))
+    return MoveResult(edition_count=summary['editions'], copy_count=str(summary['copies']), owner_revision=new_revision,
+                      source_count=0, already_at_destination_count='0')

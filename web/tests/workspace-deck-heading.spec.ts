@@ -7,9 +7,10 @@ import { Pool } from "pg";
 import { expectTouchTarget } from "./support/touch-target";
 import { startAsNewOwner } from "./support/owner";
 
-// Ticket 112: the open Deck's Estimated Deck Cost and Export menu in the workspace heading, and the Decks
-// page's Open in workspace link. The cost and export panels are the existing components; these tests prove
-// the workspace wires them to the server's complete Deck read. Seeding mirrors mass-entry.spec.ts,
+// Ticket 112, moved by #181: an open Deck in Collection shows a banner with its Estimated Deck Cost, its Deck List cost
+// and cost to complete, and a link to the deck builder, whose page header now holds the exports (one Export dialog
+// for Pokémon TCG Live and TCGplayer Mass Entry). The cost and export panels are the existing components; these tests
+// prove the pages wire them to the server's complete Deck read. Seeding mirrors mass-entry.spec.ts,
 // deck-cost.spec.ts and live-export.spec.ts. The file runs the Mass Entry tests first, then cost, then Live,
 // so each seed sees the state its original spec already tolerates.
 const ORIGIN = process.env.TEST_ORIGIN || "http://localhost:5173";
@@ -237,17 +238,28 @@ async function openInWorkspace(page: Page, name: string) {
   await expect(heading(page)).toHaveText(name);
 }
 
-/** Opens one export from the Export menu and returns its dialog. */
+/** Opens the Deck in the deck builder by its address. */
+async function openBuilder(page: Page, deck: { id: string; name: string }) {
+  await page.goto(`${ORIGIN}/decks/${deck.id}`);
+  await expect(heading(page)).toHaveText(deck.name);
+}
+
+/** Opens one export from the deck builder's Export dialog and returns the dialog. These Decks hold every card they
+ * list, so Mass Entry sends the whole Deck List. */
 async function openExport(
   page: Page,
   item: "Pokémon TCG Live" | "TCGplayer Mass Entry"
 ) {
   await exportButton(page).click();
-  await page.getByRole("menuitem", { name: item }).click();
-  const dialog = page.getByRole("dialog", { name: `Export to ${item}` });
+  const dialog = page.getByRole("dialog", { name: "Export" });
   await expect(dialog).toBeVisible();
+  await dialog.getByRole("radio", { name: item }).click();
+  if (item === "TCGplayer Mass Entry")
+    await dialog.getByRole("radio", { name: /^The whole Deck List/ }).check();
   return dialog;
 }
+const banner = (page: Page) =>
+  page.getByRole("region", { name: "Deck banner" });
 
 test.beforeEach(async ({ context }) => {
   // Real TCGplayer is never contacted.
@@ -262,7 +274,7 @@ test.afterAll(async () => {
 
 // --- TCGplayer Mass Entry ----------------------------------------------------------------------------
 
-test("Mass Entry from the Deck heading falls back to complete labelled text when a mapping is missing", async ({
+test("Mass Entry from the deck builder's Export falls back to complete labelled text when a mapping is missing", async ({
   page,
 }) => {
   massWorld(3, { 1: 5001, 2: 5002 });
@@ -276,7 +288,7 @@ test("Mass Entry from the Deck heading falls back to complete labelled text when
   await put(page, deck.id, await massEdition(1), 3);
   await put(page, deck.id, await massEdition(2), 2);
   await put(page, deck.id, await massEdition(3), 1); // never verified
-  await openInWorkspace(page, deck.name);
+  await openBuilder(page, deck);
   const dialog = await openExport(page, "TCGplayer Mass Entry");
   await expect(dialog).toContainText(deck.name);
   const region = dialog.getByRole("region", {
@@ -310,7 +322,7 @@ test("an all-mapped Deck offers the TCGplayer link only after the explanation, a
   const deck = await deckWith(page, []);
   await put(page, deck.id, await massEdition(1), 4);
   await put(page, deck.id, await massEdition(2), 2);
-  await openInWorkspace(page, deck.name);
+  await openBuilder(page, deck);
   const dialog = await openExport(page, "TCGplayer Mass Entry");
   const region = dialog.getByRole("region", {
     name: "TCGplayer export",
@@ -338,7 +350,7 @@ test("an all-mapped Deck offers the TCGplayer link only after the explanation, a
 
 // --- Estimated Deck Cost -----------------------------------------------------------------------------
 
-test("an open Deck's heading shows its cost and coverage, and other views show no Deck tools", async ({
+test("an open Deck's banner shows its cost and coverage and links to the deck builder, and other views show no Deck banner", async ({
   page,
 }) => {
   const ids = priceWorld();
@@ -367,7 +379,7 @@ test("an open Deck's heading shows its cost and coverage, and other views show n
 
   await openInWorkspace(page, leaf);
   await expect(costOf(page)).toHaveCount(0);
-  await expect(exportButton(page)).toHaveCount(0);
+  await expect(banner(page)).toHaveCount(0);
 
   await page
     .getByRole("navigation", { name: "Locations" })
@@ -383,7 +395,14 @@ test("an open Deck's heading shows its cost and coverage, and other views show n
   await expect(cost).toContainText("0 cards with unknown price age");
   await expect(cost).toContainText("Excludes shipping and taxes");
   await expect(cost).not.toContainText("$0.00");
-  await expect(exportButton(page)).toBeEnabled();
+  await expect(banner(page)).toContainText(
+    "$1.61 deck (5/6 priced) · $0.00 to complete"
+  );
+  await expect(
+    banner(page).getByRole("link", { name: "Open in the deck builder" })
+  ).toHaveAttribute("href", `/decks/${deck.id}`);
+  // Exports live on Decks (#181).
+  await expect(exportButton(page)).toHaveCount(0);
   await expect(page.getByText("6 copies · 3 editions")).toBeVisible();
   expect(requested).toHaveLength(1);
 
@@ -393,7 +412,7 @@ test("an open Deck's heading shows its cost and coverage, and other views show n
     .click();
   await expect(heading(page)).toHaveText("All owned");
   await expect(costOf(page)).toHaveCount(0);
-  await expect(exportButton(page)).toHaveCount(0);
+  await expect(banner(page)).toHaveCount(0);
 });
 
 test("the cost comes from the complete Deck read even when the gallery's tiles fail to load", async ({
@@ -467,7 +486,7 @@ test("a cost for a newer inventory revision re-reads the Deck and prices the new
 
 // --- Pokémon TCG Live --------------------------------------------------------------------------------
 
-test("the Export menu works from the keyboard and the Live export shows the complete text with its warnings", async ({
+test("the Export dialog works from the keyboard and the Live export shows the complete text with its warnings", async ({
   page,
 }) => {
   const world = liveWorld(MIXED);
@@ -479,38 +498,28 @@ test("the Export menu works from the keyboard and the Live export shows the comp
     [world.trainer.editions[0], 4],
     [world.basic.editions[0], 9],
   ]);
-  await openInWorkspace(page, deck.name);
+  await openBuilder(page, deck);
   const button = exportButton(page);
-  await expect(button).toHaveAttribute("aria-haspopup", "menu");
-  // Export is disabled until the Deck read arrives, and a disabled button can't take focus.
-  await expect(button).toBeEnabled();
   await button.focus();
-  await page.keyboard.press("ArrowDown");
-  const menu = page.getByRole("menu", { name: "Export" });
+  await page.keyboard.press("Enter");
+  const dialog = page.getByRole("dialog", { name: "Export" });
+  await expect(dialog).toBeVisible();
   await expect(
-    menu.getByRole("menuitem", { name: "Pokémon TCG Live" })
-  ).toBeFocused();
-  await page.keyboard.press("ArrowDown");
-  await expect(
-    menu.getByRole("menuitem", { name: "TCGplayer Mass Entry" })
-  ).toBeFocused();
+    dialog.getByRole("radio", { name: "Pokémon TCG Live" })
+  ).toBeChecked();
   await page.keyboard.press("Escape");
-  await expect(menu).toHaveCount(0);
+  await expect(dialog).toHaveCount(0);
   await expect(button).toBeFocused();
 
-  await page.keyboard.press("Enter");
-  await expect(
-    menu.getByRole("menuitem", { name: "Pokémon TCG Live" })
-  ).toBeFocused();
-  await page.keyboard.press("Enter");
-  const dialog = page.getByRole("dialog", {
-    name: "Export to Pokémon TCG Live",
-  });
+  // Opened again (a press right after a close can race the closing dialog; see #181's brief), the Live export
+  // runs from the keyboard.
+  await button.click();
   await expect(dialog).toBeVisible();
   const live = dialog.getByRole("region", { name: "Pokémon TCG Live export" });
   await live
     .getByRole("button", { name: "Export to Live", exact: true })
-    .click();
+    .focus();
+  await page.keyboard.press("Enter");
   const output = live.getByRole("region", { name: "Live export", exact: true });
   await expect(output.getByLabel("Live export text")).toHaveText(MIXED_TEXT);
   await expect(output).toContainText("This Deck has 18 cards, not 60.");
@@ -520,7 +529,7 @@ test("the Export menu works from the keyboard and the Live export shows the comp
   await expect(button).toBeFocused();
 });
 
-test("a blocked Live export lists every blocker and offers no text, on a phone opened by link", async ({
+test("a blocked Live export lists every blocker and offers no text, on a phone opened from the deck builder", async ({
   page,
 }) => {
   const world = liveWorld([
@@ -547,8 +556,7 @@ test("a blocked Live export lists every blocker and offers no text, on a phone o
     [world.sus.editions[0], 3],
   ]);
   await page.setViewportSize({ width: 375, height: 812 });
-  await page.goto(`${ORIGIN}/collection?location=${deck.id}`);
-  await expect(heading(page)).toHaveText(deck.name);
+  await openBuilder(page, deck);
   await expectTouchTarget(exportButton(page), ["height"]);
   const dialog = await openExport(page, "Pokémon TCG Live");
   // Full screen on a phone.
@@ -575,7 +583,7 @@ test("a blocked Live export lists every blocker and offers no text, on a phone o
 
 // --- No seed -----------------------------------------------------------------------------------------
 
-test("a failed Deck read offers Retry, and an empty Deck is $0.00 with Export disabled and explained", async ({
+test("a failed Deck read offers Retry, and an empty Deck is $0.00, with an Export that says No cards", async ({
   page,
 }) => {
   await signIn(page);
@@ -591,39 +599,30 @@ test("a failed Deck read offers Retry, and an empty Deck is $0.00 with Export di
   );
   await openInWorkspace(page, deck.name);
   const alert = page.getByRole("alert").filter({
-    hasText: "Deck cost and exports are temporarily unavailable.",
+    hasText: "Deck cost is temporarily unavailable.",
   });
   await expect(alert).toBeVisible();
-  await expect(exportButton(page)).toBeDisabled();
   await page.unroute("**/api/decks/*");
   await alert.getByRole("button", { name: "Retry" }).click();
   await expect(alert).toHaveCount(0);
   await expect(costOf(page)).toContainText("$0.00 · No cards");
-  await expect(exportButton(page)).toBeDisabled();
-  await expect(exportButton(page)).toHaveAccessibleDescription(
-    "Export is unavailable because this Deck has no cards."
-  );
+  await expect(exportButton(page)).toHaveCount(0);
+
+  // The deck builder's Export opens on an empty Deck List and says so.
+  await openBuilder(page, deck);
+  const dialog = await openExport(page, "Pokémon TCG Live");
   await expect(
-    page.getByText("Export is unavailable because this Deck has no cards.")
-  ).toBeVisible();
+    dialog.getByRole("region", { name: "Live export", exact: true })
+  ).toContainText("No cards");
 });
 
-test("the Decks page links each Deck to the workspace, and the link opens that Deck once", async ({
+test("a Collection link opens that Deck once, under a banner that links to the deck builder", async ({
   page,
 }) => {
   await signIn(page);
-  // "0 Link" sorts before every other Deck name, so both are on the Decks page's first page.
   const first = await deckWith(page, [], "0 Link");
   const second = await deckWith(page, [], "0 Link");
-  await page.goto(`${ORIGIN}/decks`);
-  const index = page.getByRole("navigation", { name: "Deck index" });
-  for (const deck of [first, second])
-    await expect(
-      index.getByRole("link", { name: `Open in Collection: ${deck.name}` })
-    ).toHaveAttribute("href", `/collection?location=${deck.id}`);
-  await index
-    .getByRole("link", { name: `Open in Collection: ${second.name}` })
-    .click();
+  await page.goto(`${ORIGIN}/collection?location=${second.id}`);
   await expect(heading(page)).toHaveText(second.name);
   await expect(page).toHaveURL(/\/collection$/);
   await expect(
@@ -632,6 +631,10 @@ test("the Decks page links each Deck to the workspace, and the link opens that D
       .getByRole("button", { name: second.name, exact: true })
   ).toHaveAttribute("aria-current", "page");
   await expect(costOf(page)).toContainText("$0.00 · No cards");
+  const link = banner(page).getByRole("link", {
+    name: "Open in the deck builder",
+  });
+  await expect(link).toHaveAttribute("href", `/decks/${second.id}`);
 
   // The link is used once: a reload opens All owned, and an unknown id falls back to All owned.
   await page.reload();
@@ -640,6 +643,14 @@ test("the Decks page links each Deck to the workspace, and the link opens that D
   await expect(page).toHaveURL(/\/collection$/);
   await expect(heading(page)).toHaveText("All owned");
   await expect(costOf(page)).toHaveCount(0);
+
+  // The banner's link opens the Deck in the deck builder, inside the app.
+  await openInWorkspace(page, first.name);
+  await banner(page)
+    .getByRole("link", { name: "Open in the deck builder" })
+    .click();
+  await expect(page).toHaveURL(`${ORIGIN}/decks/${first.id}`);
+  await expect(heading(page)).toHaveText(first.name);
 });
 
 test("Escape and the backdrop close an export and return focus to Export", async ({
@@ -649,7 +660,7 @@ test("Escape and the backdrop close an export and return focus to Export", async
   await signIn(page);
   const deck = await deckWith(page, []);
   await put(page, deck.id, await massEdition(1), 2);
-  await openInWorkspace(page, deck.name);
+  await openBuilder(page, deck);
   const dialog = await openExport(page, "TCGplayer Mass Entry");
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog")).toHaveCount(0);

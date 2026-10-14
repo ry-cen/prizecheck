@@ -81,7 +81,7 @@ export type LineGroup = {
 export type DeckListModel = {
   lines: DeckLine[];
   groups: LineGroup[];
-  /** Copies on the Deck List (the basic checks' total). */
+  /** Copies on the Deck List (the basic checks' total, summed from the lines). */
   total: string;
 };
 
@@ -148,17 +148,26 @@ export function copiesOf(
   return copies;
 }
 
+/**
+ * One line's copies. The in-this-Deck count is the line's own (every Deck List answer carries it); the ownership
+ * entry comes only with a Deck read, so after an edit (#177) it can be a revision behind until the next read. Its
+ * counts are therefore fitted to the line's quantity: copies owned elsewhere are the line's need beyond this Deck, up
+ * to the copies the listed Locations hold, and the rest are not owned. With a current entry this is exactly the
+ * server's split (deck_ownership).
+ */
 export function deckLine(
   line: DeckListLine,
   ownership: LineOwnership | undefined
 ): DeckLine {
   const quantity = big(line.quantity);
-  const here = big(ownership?.in_deck ?? line.in_deck);
-  const elsewhere = big(ownership?.elsewhere);
-  const missing = ownership
-    ? big(ownership.not_owned)
-    : quantity - here - elsewhere;
+  const here = big(line.in_deck);
   const places = placesOf(ownership?.locations ?? []);
+  const need = quantity > here ? quantity - here : 0n;
+  const outside = places.length
+    ? places.reduce((total, place) => total + place.quantity, 0n)
+    : big(ownership?.elsewhere);
+  const elsewhere = outside < need ? outside : need;
+  const missing = need - elsewhere;
   return {
     line,
     variant: variantLabel(line.descriptor),
@@ -361,7 +370,9 @@ export function deckListModel(detail: DeckDetail): DeckListModel {
   return {
     lines,
     groups: groupLines(lines),
-    total: detail.deck_list_checks.total,
+    // The basic checks' total is the sum of the lines; summing them keeps N/60 current after an edit (#177), whose
+    // answer carries the lines but no checks.
+    total: lines.reduce((sum, line) => sum + line.quantity, 0n).toString(),
   };
 }
 

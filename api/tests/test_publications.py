@@ -45,6 +45,8 @@ def command(owner, deck, method='POST', title='Public deck', key=None):
 
 
 REF = '^[0-9a-f]{48}$'
+# The display facts a snapshot row freezes for the Published Deck page (app redesign #183).
+DISPLAY_KEYS = ('card_kind', 'trainer_type', 'evolves_from', 'evolution_root', 'evolution_stage')
 
 
 def stored_decks():
@@ -74,6 +76,8 @@ def legacy_snapshot(token):
         for edition in identity['editions']:
             del edition['edition_ref'], edition['printing_ref']
             edition.pop('printing_name', None)  # published before Deck Lists 09
+            for key in DISPLAY_KEYS:  # published before app redesign #183
+                edition.pop(key, None)
     # A format pydantic would re-render ('Z'), so a model round trip is detectable.
     snapshot['published_at'] = '2025-01-02T03:04:05.123456+00:00'
     with psycopg.connect(os.environ['DATABASE_URL']) as conn:
@@ -145,7 +149,7 @@ def test_snapshot_allowlist_private_edits_republish_revoke_and_burned_url():
     assert snapshot['title'] == 'Public deck' and snapshot['total'] == '59' and snapshot['version'] == 1
     identity = snapshot['identities'][0]
     assert set(identity) == {'name', 'quantity', 'editions'}
-    assert set(identity['editions'][0]) == {'set_id','set_name','collector_number','variant','image_url','quantity','edition_ref','printing_ref','printing_name'}
+    assert set(identity['editions'][0]) == {'set_id','set_name','collector_number','variant','image_url','quantity','edition_ref','printing_ref','printing_name',*DISPLAY_KEYS}
     assert identity['editions'][0]['printing_name'] == 'Pikachu'
     assert published_refs(snapshot) == [edition_refs(edition)]
     assert all(__import__('re').fullmatch(REF[1:-1], ref) for pair in published_refs(snapshot) for ref in pair)

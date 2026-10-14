@@ -9,7 +9,7 @@ export type DeckCostSettled =
 
 /**
  * The Deck's cost (GET /api/decks/{id}/cost), read once per Deck read: the deck builder's header shows its
- * Deck List cost and cost to complete, and the old Holdings panel below shows its Holdings cost from the same
+ * Deck List cost and cost to complete, and Collection's Deck banner (#181) also shows its Holdings cost from the same
  * answer. null while the request is pending.
  *
  * An answer belongs to one inventory revision and one Deck List revision. An answer for the revisions drawn is

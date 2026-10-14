@@ -27,6 +27,12 @@ The redesign is a launch gate ([spec](spec.md), "Rollout"): PrizeCheck opens to 
 - [ ] **Gather N** in the deck builder's header opens the Pick List as a dialog, one row per card, with a source picker on each row and a warning when a source is another Deck that would be left short. Confirm picked and Confirm all each move the copies as one Move with one Undo toast. `POST /api/decks/{id}/pick-list/confirm` now writes one Inventory Undo record per confirmation, however many sources it names, and returns its `undo_id` and `source_count`; the five-source limit (`TOO_MANY_PICK_SOURCES`) is gone, so a Gather no longer pushes Collection's earlier Undo records out. The copy sheet's Gather opens the dialog on that card (#179).
 - [ ] Every Deck has one Target Format (Standard, Expanded or Gym Leader Challenge), Standard by default; migrating to `045_deck_list_target_format.sql` makes every existing Deck Standard. The deck builder's second header line holds the "Standard ▾ · ✓ Legal" control: ▾ changes the Target Format, and the result opens a dialog with the "as of" date, the deck and card issues, the rules version and the disclaimer. A card-level issue outlines its lines with a "!". The Deck read, every Deck List command and the format-checks read answer the Target Format's result only (`?format=` still names another), and `PUT /api/decks/{id}/deck-list/target-format` changes it. Publishing and republishing now need a legal result in the Target Format and otherwise answer `409 TARGET_FORMAT_NOT_LEGAL` with the result; snapshots store their Target Format, and snapshots published before read as Standard. Every saved format result is recomputed once on its Deck's next read, because the code that evaluates changed (#178).
 - [ ] Copies physically in a Deck but cut from its Deck List show in the deck builder as **Surplus**, in their own group under the Deck List in Spread, Stacked and List; they never count toward N/60. **Put away all**, or pressing one surplus card, moves those copies to a Location you pick as one Move, with an Undo toast. Undo returns the copies to the Deck and, as for any copies arriving in a Deck, puts them back on its Deck List. A warning at the top of the Deck List names the other Decks whose Deck Lists count the same spare copies, and whether each also counts them or holds copies for its own list. Each `surplus` row in `GET /api/decks/{id}` also carries the Deck's Holding `version` and the card's display data (#180).
+- [ ] Pressing a Catalog tile opens the card popup: the art, the set with its printed code and number, the regulation mark, the Card Identity when it differs from the name, the source, a legality pill per Format (with the reason for an unknown one), the Editions with copies owned, price and Owner reviewed or Unavailable badges, and where your copies are. "‹ N / M ›" and the ← → keys step through the gallery. **Add N** puts copies of the chosen Edition in a Storage Leaf (as a batch add with an Undo toast since #175), and **Plan 1** adds one copy to a Deck's Deck List without moving a card. The footer opens today's report forms. My metadata reports stays beside the page title, because the gallery scrolls on. `GET /api/catalog/editions` gains a `printing_id` filter (one Printing's Editions) and a `regulation_mark` on every row (#174).
+- [ ] Discover (`/discover`) is on the new design and lists only Listed Published Decks that are legal in their Target Format today: a deck that stops being legal (a rotation, a ban, a corrected card) leaves Discover and returns once legal again, without republishing. It shows a grid of deck cards, newest first, each with a featured card, the title, a ✓ Target Format pill, the card count, the published date and the cost from cached prices: "$142", "$118+" (some cards not priced yet) or "Price on page". A search box (title or card name) and the Any, Standard, Expanded and GLC chips filter it. `GET /api/public/discovery` gains `format=` and each summary gains `featured_name`, `target_format`, `target_format_status` and `cost: {amount, priced_copies, total_copies}`; its cursors change, so a "More decks" press across the release restarts at page one. Snapshots published before rows carried references (legacy rows) and decks whose public format records predate migration 038 stay out of Discover until they are republished or `scripts/backfill_public_catalog.py` runs. The sitemap is unchanged (#182).
+- [ ] The Decks page is on the new look. It lists every Deck with how many of its Deck List's cards it holds ("41/60 in Deck", or "Empty: plan a list"), its cost to complete and its Target Format result, and has a **Published Decks** section listing every publication (those whose Deck was deleted included) with Make Listed or Unlisted and a two-step Revoke, and a "Discover decks" link. `GET /api/decks` rows also carry `deck_list_total`, `in_deck` and `target_format`. The deck builder's header holds **Export** (one dialog for Pokémon TCG Live and TCGplayer Mass Entry), **Publish** and **Delete**, and its first line **Buy missing**, which opens the Mass Entry export on the cards you don't own with the whole Deck List as the other choice; the old "Holdings, publishing and exports" panels are gone. Publish is disabled while the Target Format result isn't legal and says why ("Publish needs a legal Standard deck: 2 issues"); a published Deck shows "Published · vN" and opens the publication's title, visibility and version with Republish, List in Discover or Make Unlisted, and Revoke. Publishing and republishing start a background price refresh for the snapshot's cards within the existing limits, so a fresh listing is usually priced; it never forces a refresh of prices checked in the last hour. Delete asks for the Deck's name, moves its cards to Unsorted and leaves any Published Deck live. In Collection an open Deck keeps its cards with Move, Remove and Undo under a banner with its cost, its Deck List cost and cost to complete, and "Open in the deck builder"; Collection's Deck export menu and the Decks page's "Open in Collection" links are gone. The web client's Mass Entry export now defaults to the cards not owned, as the API always has. No migration (#181).
+- [ ] The deck builder edits the Deck List. Its right-hand column (on a phone the Library tab, chosen first) is the **library**: one tile per Card Edition, reading copies free (owned, not in this Deck) of copies owned and the price, with Owned / All (starting on Owned, unowned cards darkened), a search box, format chips starting on the Deck's Target Format (a "?" marks a card of unknown standing) and type chips. It scrolls on its own beside the Deck List. Drag a tile onto the Deck List (mouse or pen) to add one copy, or tap it for the card popup with −1 / N on Deck List / +1 and ‹ › stepping. A copy's sheet has ±1 and **Swap this copy for** another Edition of the same Card Identity; dragging a copy onto the library, or Delete or Backspace on it, takes it off. Every add, remove or swap is one batch with an Undo toast, repeated inside an open popup or sheet; an Undo after the Deck List changed says "Can't undo: this deck changed." Fast taps all count: they wait behind the change on its way and go as one batch. Adding never moves a card, and Deck List Undo and Collection's Undo never undo each other. New route `POST /api/decks/{id}/deck-list/changes` takes `revision`, `idempotency_key` and `changes: [{edition_id, quantity}]` (each the line's new total, 0 removing it), applies them atomically with one revision and answers the usual Deck List command result; the per-line routes stay, and Catalog's Plan 1 now uses the batch route. `GET /api/catalog/editions` gains an `identity_id` filter; browse cursors from before the release restart once. No migration (#177).
+- [ ] Catalog's page header has a **Browse / Add to a Location** switch. In Add mode a bar stays at the top while you scroll: "Adding to" a Location you pick, the cards you queued, **Clear** and **Add N cards** (on a phone, Clear and Add appear once something is queued). Every tile gets a **+** that becomes − N +, and queued tiles are outlined; the queue survives new searches and filters. Add N cards adds the whole queue to the Location at once, with one Undo toast that takes exactly those copies out again. The card popup's Add row starts on that Location, and its Add N is a batch add with an Undo too. Collection's **Add cards** now opens the same gallery in Add mode over Collection (filling a phone's screen): from a Location it is set to that Location, from All owned it asks for one, and Add N cards closes it and leaves you in that Location with an Undo toast. The old Add cards dialog and its search are gone from Collection. A new route, `POST /api/holdings/batch`, adds up to 200 Card Editions to one Location in one transaction with one owner revision, replays by its idempotency key, and writes one Inventory Undo record of a new `add` kind; undoing it answers `UNDO_INCOMPATIBLE` once one of those copies has left the Location. The newest-only rule and the five-record limit are unchanged. Migration `046_inventory_undo_add.sql` allows the new kind; during process overlap or after a rollback, the previous release lists `add` records, refuses to undo them (`UNDO_INCOMPATIBLE`) and can dismiss them. Add cards on an open Deck adds physical copies to it and extends its Deck List; Undo takes the copies out but keeps the Deck List lines, as after any Move out of a Deck (#175).
+- [ ] A Published Deck (`/published/<token>`) is on the new design, under the public header or inside the app. Its header shows the title, "The card list is a snapshot from <date>; format results update automatically", the Target Format result as a pill that opens the results dialog, the card count with the total price and how many copies are priced, and **Copy for TCG Live**, **Buy on TCGplayer** (Mass Entry for the whole list) and **Share** (copies the link). The cards show in Spread, Stacked or List like the deck builder's, grouped by evolution line, Trainer Type and Energy, with no ownership marks: tiles show one card's price and List lines the price of that many copies, and a card with a format issue is outlined with a "!". Pressing a card opens a read-only card popup with its Edition, price and legality, stepping through the deck. The old four-copy check list and the price-age notes are gone. Signed in, the deck's owner gets a bar with its visibility and version, Make Listed or Unlisted, Revoke and Open Deck ("Deck deleted" once the Deck is gone), and "Hidden from Discover: not legal in Standard" while a Listed snapshot isn't legal. `GET /api/public/decks/{token}/versions/{version}/format-checks` now answers only the snapshot's Target Format and no longer takes `format=`; the public cost gains `editions: [{edition_ref, amount}]` (each Edition's price, no age) and drops `stale_copies` and `unknown_age_copies` (no price age is sent); and new snapshots freeze each row's card kind, Trainer Type, evolves from and evolution root and stage. A snapshot published before this release shows its cards in one "Cards" group until it is republished. Revoke snapshots published on this release before rolling back past it (`docs/public-projections.md`). No migration (#183).
 
 ## Walkthroughs
 
@@ -174,12 +180,12 @@ On a desktop (a window at least 1280 px wide):
 - [ ] 3. Press Standard: cards not legal in Standard leave the gallery, and a card whose legality isn't known yet stays with a "?" in its corner. Press Any format, then Supporter: only Supporters remain. Press Supporter again to clear it.
 - [ ] 4. Press Any set: a dialog lists every set A–Z with its printed code (or TCGdex ID) and card count. Type part of a set's name and choose it: the chip reads "Set: …" and the gallery lists that set in collector number order. Press Owned only: only cards you own remain.
 - [ ] 5. Scroll down: more tiles join the gallery before you reach its end, with no button to press, and after the last card it reads "All N cards shown" (try a search with a few hundred results). Open Collection, then Catalog again: the search, the chips, the loaded tiles and the scroll position are as you left them.
-- [ ] 6. Press a tile: a dialog shows the card's art, set and number, Card Identity, source, and each Edition with its price and Report metadata. Escape closes it and puts focus back on the tile. My metadata reports opens from the button at the right of the page title.
+- [ ] 6. Press a tile: the card popup opens (its own walkthrough is under #174). Escape closes it and puts focus back on the tile. My metadata reports opens from the button at the right of the page title.
 
 On a phone (iOS Safari or Android Chrome):
 
 - [ ] 7. Open Catalog. The search box fills the width and is thumb-sized. Swipe the chip row: it scrolls sideways inside itself and fades at its right edge, every chip is easy to hit, and nothing else on the page scrolls sideways.
-- [ ] 8. Tap Any set: the set list opens along the bottom. Close it, then tap a tile: its details open along the bottom, and ✕ or a tap on the dimmed page closes them.
+- [ ] 8. Tap Any set: the set list opens along the bottom. Close it, then tap a tile: its card popup opens along the bottom, and ✕ or a tap on the dimmed page closes it.
 
 ### Deck builder: Gather (#179)
 
@@ -205,9 +211,9 @@ On a desktop (a window at least 1280 px wide):
 - [ ] 2. Press the result. A dialog titled "Standard result" shows the result as of today, the deck issues and the card issues with plain reasons (each card issue names its cards), the rules version and the advisory disclaimer. Escape closes it and puts focus back on the result.
 - [ ] 3. Open the result again and pick a date a few months ahead in As of: a note says the date is in the future and later rule changes are unknown. Close the dialog: the header still shows today's result.
 - [ ] 4. Choose Gym Leader Challenge with ▾. The result changes (a deck with four copies of a card turns "✕ Not legal"), and those cards' copies get an outline and a "!". Reload: Gym Leader Challenge is still chosen.
-- [ ] 5. Choose Standard again. If the deck is not legal in Standard, open "Holdings, publishing and exports" and try Publish: it says publishing needs a legal result in the Target Format, and nothing is published.
+- [ ] 5. Choose Standard again. If the deck is not legal in Standard, Publish in the page header is disabled and says publishing needs a legal Standard deck (since #181).
 - [ ] 6. With a legal Deck, Publish works, and the public page's address answers as before.
-- [ ] 7. Add cards until the Deck List passes 60 (from "Holdings, publishing and exports"): nothing stops you, the count reads over 60, and the result says the deck has more than 60 cards.
+- [ ] 7. Add cards until the Deck List passes 60 (in Collection, with the Deck open; since #181): nothing stops you, the count reads over 60, and the result says the deck has more than 60 cards.
 
 On a phone (iOS Safari or Android Chrome):
 
@@ -230,6 +236,110 @@ On a phone (iOS Safari or Android Chrome):
 - [ ] 7. Open the Deck tab of a Deck with surplus. The warning and the Surplus group fit the screen with nothing scrolling sideways, and every surplus pile and Put away all is easy to hit with a thumb.
 - [ ] 8. Put away all from the bottom sheet, switch to Library and back to Deck: the toast is still there, and Undo still works.
 
+### Catalog: the card popup (#174)
+
+On a desktop (a window at least 1280 px wide):
+
+- [ ] 1. Open Catalog and press the tile of a card you own. The card popup opens over the page: the art, with "Artwork belongs to the Printing and does not prove an Edition finish." under it, and beside it the set name with its printed code and number, the regulation mark and the source ("TCGdex", or "Owner reviewed manual record" with its evidence). A card whose name has a subtitle, such as "Professor's Research (Professor Juniper)", also reads "Card Identity: Professor's Research"; other cards don't.
+- [ ] 2. Under Legality, one pill per Format reads Legal, Not legal or Unknown. Under an Unknown one, a line says why. A card from a set released in the last few days shows one.
+- [ ] 3. Under Editions, each Edition shows its Variant, how many you own and its price; a retired Edition comes last and reads "Unavailable". Press another Edition: the line under the list gives its full price, and "Where your copies are" lists each Location that holds it, with how many.
+- [ ] 4. Beside ✕ it reads "N / M". Press › and ‹, then the → and ← keys: the popup steps through the gallery's cards in order, and keeps going past the cards loaded so far. Press Escape: focus lands on the tile of the card the popup showed last.
+- [ ] 5. In the Collection row, choose a Location, press + twice and press Add 3. The popup says where the copies went, and the counts under Editions and "Where your copies are" go up. Close it: the tile shows the new "×N". Scroll on: the gallery doesn't jump back to the top and doesn't say "Your collection changed".
+- [ ] 6. In the Deck List row, choose a Deck and press Plan 1 twice. The popup says the Deck List now has 2 of this Edition. Open that Deck on Decks: the card is on its Deck List, and no card moved into the Deck.
+- [ ] 7. In the footer, press "this Edition", "Printing metadata" and "a missing Edition" in turn: each opens today's report form under the footer, one at a time, with the cursor in its first field. Press the open one again to close it.
+
+On a phone (iOS Safari or Android Chrome):
+
+- [ ] 8. Tap a tile: the popup rises from the bottom of the screen as a sheet. Every button, picker and link in it is easy to hit with a thumb, nothing scrolls sideways, and ✕ or a tap on the dimmed page closes it.
+
+### Discover (#182)
+
+On a desktop (a window at least 1280 px wide), signed out:
+
+- [ ] 1. Open `/discover` from the public header's "Discover decks". The page title is "Discover decks", with a search box and the Any, Standard, Expanded and GLC chips under it, and a grid of deck cards, newest first.
+- [ ] 2. Each card shows a featured card (a Pokémon from the deck, not an Energy), the title, "✓ Standard" (or the deck's own format), the card count, "Published <date>" and a cost.
+- [ ] 3. Find a deck whose cost reads "$N+": rest the pointer on the cost and a tooltip says how many cards aren't priced yet. A deck with no cached prices reads "Price on page" in muted text.
+- [ ] 4. Press Expanded: only Expanded decks remain and the chip shows as pressed. Press GLC with no GLC deck listed: "No legal decks match this search." Press Any: every deck returns.
+- [ ] 5. Type part of a card name that's in one of your published decks: the grid narrows to the decks holding it. Clear the box.
+- [ ] 6. Press a deck card: its Published Deck opens without a full page reload.
+- [ ] 7. A Listed deck is a snapshot, so editing its Deck or changing its Target Format changes nothing here until you republish. Instead, in Owner controls → Attributes, correct one card of a Listed deck to regulation mark G (rotated out of Standard) and reload Discover: once the correction is delivered, the deck is gone. Remove the correction and reload: the deck returns, with no republish.
+
+On a phone (iOS Safari or Android Chrome), signed in:
+
+- [ ] 8. Open Discover from the public link or a Published Deck: it shows inside the app, with the bottom tab bar and no tab highlighted. Cards sit two to a row, nothing scrolls sideways, and the chips and cards are easy to hit with a thumb.
+- [ ] 9. Scroll to the end of a long listing and press More decks: more cards load under the first ones.
+
+### Decks index, Publish, Delete and exports (#181)
+
+On a desktop (a window at least 1280 px wide):
+
+- [ ] 1. Open Decks. Each Deck shows its name, "N/M in Deck" (or "Empty: plan a list"), its cost to complete once prices arrive, and a pill such as "Standard · ✓ Legal". "Discover decks" at the top opens Discover inside the app.
+- [ ] 2. Open a Deck whose result isn't legal. Publish in the header is disabled, with the reason under it, such as "Publish needs a legal Standard deck: 2 issues".
+- [ ] 3. Open a legal Deck and press Publish. The dialog explains what a Published Deck shows. Enter a title and press "Publish Unlisted snapshot": the dialog shows "<title> · Unlisted · version 1" with a link to the public page, and the header button reads "Published · v1".
+- [ ] 4. Press List in Discover, then Republish snapshot: the dialog shows "Listed" and version 2. A few minutes later the Published Deck's page and Discover show its price.
+- [ ] 5. Press **Buy missing**. The export opens on TCGplayer Mass Entry with "Cards you don't own" chosen; prepare it and only the cards you don't own are listed. Choose "The whole Deck List" and prepare again: every card is listed. Press Escape: focus returns to Buy missing.
+- [ ] 6. Press **Export**: it opens on Pokémon TCG Live, which exports the whole Deck List.
+- [ ] 7. Press **Delete**. The dialog says the cards go to Unsorted and a Published Deck stays live. Delete Deck stays disabled until you type the Deck's name; delete it. You're back on Decks with a toast, the cards are in Unsorted in Collection, and the publication is under Published Decks as "Its Deck was deleted. It stays live until you revoke it." Revoke it there (Revoke, then Revoke for good).
+- [ ] 8. In Collection, open a Deck: its cards show under a banner with the cost and "Open in the deck builder", Move, Remove and Undo work as for any Location, and there's no Export menu.
+
+On a phone (iOS Safari or Android Chrome):
+
+- [ ] 9. Open Decks and a Deck: the header's Export, Publish and Delete wrap under the title, are easy to hit with a thumb, and nothing scrolls sideways. The Export, Publish and Delete dialogs open as sheets (Export fills the screen) and close with ✕.
+
+### Deck builder: editing the Deck List (#177)
+
+On a desktop (a window at least 1280 px wide):
+
+- [ ] 1. Open a Deck. The Library column on the right lists your cards (Owned is chosen), each tile reading "free/owned" (copies not in this Deck, of copies you own) with its price, and the format chip of the Deck's Target Format is pressed; a card of unknown standing shows "?". Change another Deck's Target Format to Expanded and open it: its library starts on Expanded.
+- [ ] 2. Choose All: cards you don't own appear, darkened. Type part of a name, then press a type chip and Any format: the list narrows and widens. Scroll the column: it scrolls on its own and keeps loading cards while the Deck List stays put.
+- [ ] 3. Drag a tile onto the Deck List with the mouse: a "+1 name" badge follows the pointer and the Deck List is outlined. Drop it: one copy appears, N/60 goes up by one, and a toast says "Added 1 name." with Undo. Start another drag and press Escape before dropping: nothing changes.
+- [ ] 4. Press Undo: the copy leaves and the toast says "Undone: …". Drag a copy from the Deck List onto the library: it leaves, and the toast says "Removed 1 name.". No card moved in Collection.
+- [ ] 5. Tap a library tile: the card popup shows the card, its copies free of owned, its price and legality, and −1 / N on Deck List / +1. Press +1 ten times quickly: N reaches 10 at once and the Deck List shows 10 copies a moment later. The line under the stepper names the last change and offers Undo. ‹ › and ← → step through the library.
+- [ ] 6. Press a copy on the Deck List: its sheet has −1 / N / +1 and "Swap this copy for", listing the card's other Editions with their copies. Choose one: the sheet closes, one copy changes Edition, and one Undo in the toast puts it back.
+- [ ] 7. Tab to a copy and press Delete, then Backspace: each takes one copy off, and focus stays on the line; when its last copy goes, focus moves to the toast's Undo.
+- [ ] 8. Make a change, then change the same Deck List in another tab, then press Undo on the first tab's toast: it says "Can't undo: this deck changed." and nothing is undone.
+
+On a phone (iOS Safari or Android Chrome):
+
+- [ ] 9. Open a Deck: Library is the first tab and keeps its search when you switch to Deck and back. Tap a tile: the popup rises as a sheet; tap +1 and close it: the Deck tab's count went up. On the Deck tab, tap a pile: its sheet has the stepper and Swap, every control is easy to hit with a thumb, and nothing scrolls sideways.
+
+### Catalog: Add mode and Collection's Add cards (#175)
+
+On a desktop (a window at least 1280 px wide):
+
+- [ ] 1. Open Catalog and press **Add to a Location** at the right of the title. A bar appears above the search box reading "Adding to" with a Location picker on Unsorted, "Tap + on cards, then add them together.", and Clear and Add cards, both greyed out. Every tile has a + on its art.
+- [ ] 2. Pick another Location in the bar. Press + on a card three times: it becomes − 3 +, the tile is outlined, the bar lists "3× …" and the button reads "Add 3 cards". Press − once: it reads 2.
+- [ ] 3. Search for another card and press its +, then clear the search: both cards are still in the bar. Scroll down: the bar stays at the top.
+- [ ] 4. Press a tile: the card popup's Collection row starts on the Location in the bar. Close it.
+- [ ] 5. Press **Add N cards**. A toast reads "Added N cards to <Location>." with Undo, the bar is empty again, and the tiles' owned badges go up by N. Open Collection on that Location: the cards are there. Back in Catalog, press Undo: the toast reads "Undo removed N cards from <Location>.", and the copies are gone again.
+- [ ] 6. In Collection, open a Location and press **Add cards**: the same gallery opens over Collection, titled "Add cards to <Location>", already set to it. Queue a few cards and press Add N cards: the gallery closes, you are in that Location with the new cards, and the toast's Undo takes them all out in one step.
+- [ ] 7. Open All owned and press Add cards: the gallery is titled "Add cards" and asks for a Location. Pick one inside a folder, queue a card and add it: you land in that Location, with its folder open in the sidebar.
+
+On a phone (iOS Safari or Android Chrome):
+
+- [ ] 8. In Catalog, switch to Add to a Location: the bar shows the picker and the hint only. Tap a tile's +: Clear and Add 1 card appear. The + and − are easy to hit with a thumb, and nothing scrolls sideways.
+- [ ] 9. In Collection, tap Add cards: the gallery fills the screen. Queue two cards and tap Add 2 cards: it closes onto the Location with the Undo toast above the tab bar.
+
+### Published Deck (#183)
+
+On a desktop (a window at least 1280 px wide), signed out:
+
+- [ ] 1. Open a Listed deck from Discover. The page shows its title, "The card list is a snapshot from <date>; format results update automatically", a pill such as "Standard · ✓ Legal", "60 cards · $N · N/60 copies priced", and Copy for TCG Live, Buy on TCGplayer and Share.
+- [ ] 2. The cards show in Spread, grouped like the deck builder (evolution lines, then Trainers by type, then Energy), each tile with one card's price under it and no ownership marks. Switch to Stacked (piles with "×4" and one card's price) and List (each line's quantity, name, Edition and the price for that many copies, such as "$40.00" for four $10.00 cards).
+- [ ] 3. Press a card: the popup shows its art, set and number, Variant, "N copies", "$N each" and its Standard standing. ‹ › and the ← → keys step through the deck. Escape closes it and focus returns to the card.
+- [ ] 4. Press the result pill: the results dialog shows the "As of" date, any issues with plain reasons, the rules version and the disclaimer.
+- [ ] 5. Press Copy for TCG Live: the Live export is ready in the dialog (or lists what blocks it); Copy for Live copies it. Press Buy on TCGplayer: Mass Entry for the whole list is ready, with Open in TCGplayer when every card has a product. Press Share: "Link copied." and the link pastes elsewhere.
+
+Signed in as the deck's owner:
+
+- [ ] 6. Open your own Published Deck: it shows inside the app, with "Your Published Deck · Listed · vN" above the header. Press Make Unlisted: it reads Unlisted. Press Make Listed to list it again.
+- [ ] 7. Open a Listed deck that isn't legal in its Target Format: the bar says "Hidden from Discover: not legal in Standard", and each card with a format issue is outlined with a "!".
+- [ ] 8. Press Open Deck: the deck builder opens. Delete a test Deck that has a Published Deck, open its page: the bar says "Deck deleted" and has no Open Deck. Revoke, then Revoke for good: the page says "This deck isn't published anymore".
+
+On a phone (iOS Safari or Android Chrome):
+
+- [ ] 9. Open a Published Deck: the cards start in Stacked, nothing scrolls sideways, the header's buttons wrap under the title, and the card popup, the results dialog and both exports open as sheets that close with ✕.
+
 ## Manual checks that automation does not cover
 
 - [ ] Real touch on iOS Safari and Android Chrome for the tab bar, the More sheet and the ☰ drawer (the browser tests only emulate touch), including the home indicator area under the tab bar.
@@ -244,7 +354,13 @@ On a phone (iOS Safari or Android Chrome):
 - [ ] Real touch and Safari on Collection: Manage locations' handle drag with a finger on iOS Safari and Android Chrome, and the sidebar's tile drag and the + on hover in Safari and Firefox on desktop (#166).
 - [ ] Screen reader on the deck builder: each copy is read with its card, Edition, copy number and state (and the Location of a copy owned elsewhere), a Stacked pile with its counts, Spread / Stacked / List as a radio group, and on a phone Library and Deck as tabs with the Deck count (#176).
 - [ ] Screen reader on Catalog: the search box is read with its hint, each chip with whether it is pressed, the set chip as opening a dialog, and each tile with its card, set and number, Variant, how many you own and, under a format chip, "legality unknown" for a "?" card (#173).
+- [ ] Screen reader on the Decks page and the deck builder's header: each Deck is read as a link with its name, then its counts, cost and result; a disabled Publish is read with its reason; the Delete dialog's field is read as "Type the Deck name to confirm"; and Revoke's second step takes focus (#181).
 - [ ] Screen reader on the Target Format control: the picker is read as "Target Format" with the chosen Format, the result as a button with its status and issue count, a change announces the new result once, and a highlighted copy is described as having a format issue (#178).
+- [ ] Screen reader on Add mode: the switch is read as "Catalog mode" with Browse and Add to a Location as radio buttons, each tile's buttons as "One more <card>" and "One fewer <card>", a queued tile with "N to add", the queued cards as the list "Cards to add", and a refused Add N cards as an alert; after Add N cards, focus lands on the toast's Undo (#175).
+- [ ] Screen reader on the card popup: it is read by the card's name; ‹ › as Previous card and Next card with "N / M" between them; each step as "Card N of M: name"; each Edition as a toggle button with its Variant, copies owned and price, and whether it is pressed; and the footer links as "Report this Edition", "Report Printing metadata" and "Report a missing Edition" (#174).
+- [ ] Screen reader on Discover: each deck card is read as a link named by its title, then its format ("Standard legal"), card count, published date and cost, including "N cards not priced yet" after a "$N+" cost; the chips are read with whether they're pressed, and the results line is announced when a search or chip changes the grid (#182).
+- [ ] Screen reader on the deck builder's editing: each library tile is read with its card, set and number, Variant and "N free of M owned" (or "not owned"); the popup's and the copy sheet's −1 and +1 are read in a "Deck List copies" group with the count; each change's words are announced once; and each "Swap this copy for" Edition is read with its set, number, Variant and copies (#177).
+- [ ] Screen reader on a Published Deck: the result pill is read as a button with the Format, its status and issue count; each tile with its card, Edition, copy number and price; a card with a format issue described as having one; Spread / Stacked / List as a radio group; the card popup by the card's name with "Card N of M: name" on each step; and the owner bar as a region named "Your Published Deck · <visibility> · v<N>" (#183).
 
 ## Sources
 

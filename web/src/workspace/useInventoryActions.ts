@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { addUndoneText, batchAddedText } from "../catalog/catalogText";
+import type { AddedCards } from "../catalog/useAddToast";
 import {
   applyUndo,
   dismissUndo,
@@ -43,6 +45,13 @@ import type { SelectionState } from "./useSelection";
 /** The fewest names and paths kept after trimming; see the labels effect. */
 const LABEL_CACHE_FLOOR = 1_000;
 
+/** An Undo record's action as the toast names it. */
+const ACTION_NAMES: Record<UndoEntry["action"], string> = {
+  move: "Move",
+  remove: "Inventory Removal",
+  add: "Add",
+};
+
 /** The success and Undo toast. `entry` is the newest Undo record, or null when none is offered. */
 export type ToastState = {
   id: number;
@@ -74,7 +83,8 @@ type FocusTarget = "heading" | "actions";
 /** A failure whose refresh may empty the selection: its toast text and the selection it was about. */
 type Carried = { toastText: string; selection: Selection };
 
-/** Move, Inventory Removal and Undo for the workspace (ticket 107), on the multi-source manifest API. */
+/** Move, Inventory Removal and Undo for the workspace (ticket 107), on the multi-source manifest API, and the toast
+ * for Add cards' batch adds (#175). */
 export function useInventoryActions({
   selection,
   holdings,
@@ -329,6 +339,26 @@ export function useInventoryActions({
       void run({ kind: "move", destinationId }, groups, "bar"),
     [run]
   );
+  /** A batch add from Add cards (#175) succeeded: the toast names it, the gallery and the tree read again, and Undo
+   * is offered for the add's one record while it is the newest (Undo applies the newest record alone). */
+  const added = useCallback(
+    async (result: AddedCards) => {
+      showToast({
+        message: batchAddedText(result.copies, result.path),
+        entry: null,
+        unavailable: false,
+      });
+      live.current.reloadGallery();
+      void live.current.reloadTree();
+      const id = toastId.current;
+      const entries = await listUndo().catch(() => [] as UndoEntry[]);
+      const mine = entries[0]?.id === result.undoId ? entries[0] : null;
+      setToast((current) =>
+        current && current.id === id ? { ...current, entry: mine } : current
+      );
+    },
+    [showToast]
+  );
   const clearSelection = useCallback(() => {
     carried.current = null;
     setBarError("");
@@ -347,7 +377,10 @@ export function useInventoryActions({
       const result = await applyUndo(entry.id, key);
       undoKeys.current.delete(entry.id);
       showToast({
-        message: `Undo restored ${countText(result.copy_count, "copy", "copies")} to ${plural(result.source_count, "location", "locations")}.`,
+        message:
+          entry.action === "add"
+            ? addUndoneText(result.copy_count, place(entry.destination_id!))
+            : `Undo restored ${countText(result.copy_count, "copy", "copies")} to ${plural(result.source_count, "location", "locations")}.`,
         entry: null,
         unavailable: false,
         focus: true,
@@ -360,14 +393,17 @@ export function useInventoryActions({
         undoKeys.current.delete(entry.id);
         const { source_id, destination_id, edition_id } = (cause as MoveError)
           .detail;
+        // An add's Undo names its Location, and the Card Edition that has left it.
         const reason =
-          source_id && edition_id
-            ? `copies of ${card(source_id, edition_id)} it would return to ${place(source_id)} have changed`
-            : source_id || destination_id
-              ? `${place((source_id ?? destination_id)!)} can no longer hold cards`
-              : "the cards have changed";
+          entry.action === "add" && destination_id && edition_id
+            ? `copies of ${card(destination_id, edition_id)} have left ${place(destination_id)}`
+            : source_id && edition_id
+              ? `copies of ${card(source_id, edition_id)} it would return to ${place(source_id)} have changed`
+              : source_id || destination_id
+                ? `${place((source_id ?? destination_id)!)} can no longer hold cards`
+                : "the cards have changed";
         showToast({
-          message: `Undo unavailable: ${reason}, so nothing was restored. Dismiss it to reach an earlier action.`,
+          message: `Undo unavailable: ${reason}, so nothing was ${entry.action === "add" ? "removed" : "restored"}. Dismiss it to reach an earlier action.`,
           entry,
           unavailable: true,
           focus: true,
@@ -440,7 +476,7 @@ export function useInventoryActions({
       const next = entries[0] ?? null;
       showToast({
         message: next
-          ? `Dismissed. The earlier ${next.action === "move" ? "Move" : "Inventory Removal"} can be undone.`
+          ? `Dismissed. The earlier ${ACTION_NAMES[next.action]} can be undone.`
           : "Dismissed. There is no earlier action to undo.",
         entry: next,
         unavailable: false,
@@ -569,6 +605,7 @@ export function useInventoryActions({
     confirmRemoval,
     dropMove,
     clearSelection,
+    added,
     undo,
     dismiss,
     closeToast,

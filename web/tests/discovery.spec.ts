@@ -1,11 +1,46 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import { signInAsOwner } from "./support/sign-in";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { listHoldings } from "./support/deck-list";
-import { exemptNamedDeck } from "./support/publish-gate";
-import { openDeckTools } from "./support/deck-builder";
+import {
+  exemptFromDiscover,
+  exemptNamedDeck,
+  showAsLegal,
+} from "./support/publish-gate";
+
+const ORIGIN = process.env.TEST_ORIGIN || "http://localhost:5173";
+
+/** Stores `quantity` copies of the catalog's one Pikachu Edition in the Deck through the gateway. */
+async function addToDeck(page: Page, deckId: string, quantity: number) {
+  const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+  let edition: string;
+  try {
+    edition = (
+      await pool.query(
+        `SELECT e.id FROM catalog_edition e JOIN catalog_printing p ON p.id=e.printing_id
+         WHERE p.source_id='card-1' ORDER BY e.descriptor->>'finish'='normal' DESC LIMIT 1`
+      )
+    ).rows[0].id;
+  } finally {
+    await pool.end();
+  }
+  const added = await page.request.post(`${ORIGIN}/api/holdings`, {
+    headers: { origin: ORIGIN },
+    data: {
+      location_id: deckId,
+      edition_id: edition,
+      quantity: String(quantity),
+      idempotency_key: randomUUID(),
+    },
+  });
+  expect(added.status()).toBe(200);
+}
+
+/** The deck builder's Publish dialog, titled "Publish" before publishing and "Published Deck" after. */
+const publishDialog = (page: Page) =>
+  page.getByRole("dialog", { name: /^(Publish|Published Deck)$/ });
 
 test("Listed discovery opt-in and removal preserve snapshot, privacy, and escaped source text", async ({
   page,
@@ -35,36 +70,25 @@ promote({'card-1': ${JSON.stringify(hostileName)}})`,
     await page
       .getByRole("button", { name: "Create Deck", exact: true })
       .click();
-    await openDeckTools(page);
-    const holdings = page.getByRole("region", {
-      name: `Cards in ${privateName}`,
-    });
-    await holdings
-      .getByRole("button", { name: "Add cards", exact: true })
-      .click();
-    await holdings.getByLabel("Search English card name").fill("Pika");
-    await holdings.getByRole("button", { name: "Search", exact: true }).click();
-    await holdings.getByLabel("Card Edition").selectOption({ index: 1 });
-    await holdings.getByLabel("Quantity", { exact: true }).fill("59");
-    await holdings
-      .getByRole("button", { name: "Add to Location", exact: true })
-      .click();
+    // The deck builder has no Holdings panel (#181): cards reach the Deck through the gateway, as Collection adds them.
+    await expect(page).toHaveURL(/\/decks\/[^/?#]+$/);
+    const deckId = page.url().split("/").at(-1)!;
+    await addToDeck(page, deckId, 59);
     // Publishing freezes the Deck List; list the cards just added.
     await listHoldings(pool, privateName, 59);
     await exemptNamedDeck(pool, privateName); // not a legal Deck List in any Format
-    const publishing = page.getByRole("region", {
-      name: "Publish Deck",
-      exact: true,
-    });
+    // Publish waits for a legal result; the exempt Deck is shown to the page as legal (support/publish-gate.ts).
+    await showAsLegal(page, deckId);
+    await page.reload();
+    await page.getByRole("button", { name: "Publish", exact: true }).click();
+    const publishing = publishDialog(page);
     await publishing
       .getByLabel("Public title")
       .fill("<script>window.publicInjected=1</script>");
     await publishing
       .getByRole("button", { name: "Publish Unlisted snapshot", exact: true })
       .click();
-    await expect(publishing.getByRole("status")).toContainText(
-      "plain-text public title"
-    );
+    await expect(publishing).toContainText("plain-text public title");
     await publishing.getByLabel("Public title").fill(title);
     await publishing
       .getByRole("button", { name: "Publish Unlisted snapshot", exact: true })
@@ -72,23 +96,24 @@ promote({'card-1': ${JSON.stringify(hostileName)}})`,
     const link = publishing.getByRole("link", { name: "View public snapshot" });
     await expect(link).toBeVisible();
     const publicUrl = (await link.getAttribute("href"))!;
+    // Discover lists only legal decks (#182); this 59-card list isn't one.
+    exemptFromDiscover(publicUrl.split("/").at(-1)!);
+    const searchDecks = publicPage.getByRole("searchbox", {
+      name: "Search decks",
+    });
     await publicPage.goto(
       `${process.env.TEST_ORIGIN || "http://localhost:5173"}/discover`
     );
-    await publicPage.getByLabel("Public title or card name").fill(title);
-    await publicPage
-      .getByRole("button", { name: "Search Published Decks" })
-      .click();
+    await searchDecks.fill(title);
     await expect(publicPage.getByRole("main")).toContainText(
-      "No matching Listed Decks."
+      "No legal decks match this search."
     );
     await publishing
-      .getByRole("button", { name: "List in public discovery", exact: true })
+      .getByRole("button", { name: "List in Discover", exact: true })
       .click();
-    await expect(publishing).toContainText("Snapshot version 1 · listed");
-    await publicPage
-      .getByRole("button", { name: "Search Published Decks" })
-      .click();
+    await expect(publishing).toContainText(`${title} · Listed · version 1`);
+    await publicPage.reload();
+    await searchDecks.fill(title);
     await expect(
       publicPage.getByRole("link", { name: title, exact: true })
     ).toBeVisible();
@@ -97,6 +122,11 @@ promote({'card-1': ${JSON.stringify(hostileName)}})`,
     await expect(
       publicPage.getByRole("heading", { name: title, exact: true })
     ).toBeVisible();
+    // Card names are text, never markup: the List view shows each line's name (#183).
+    await publicPage
+      .getByRole("radiogroup", { name: "Deck List view" })
+      .getByRole("radio", { name: "List" })
+      .click();
     await expect(publicPage.getByRole("main")).toContainText(hostileName);
     await expect(publicPage.locator('img[src="x"]')).toHaveCount(0);
     expect(
@@ -119,7 +149,7 @@ promote({'card-1': ${JSON.stringify(hostileName)}})`,
     await publishing
       .getByRole("button", { name: "Make Unlisted", exact: true })
       .click();
-    await expect(publishing).toContainText("Snapshot version 1 · unlisted");
+    await expect(publishing).toContainText(`${title} · Unlisted · version 1`);
     await publicPage.reload();
     await expect(publicPage.locator('meta[name="robots"]')).toHaveAttribute(
       "content",
@@ -131,12 +161,9 @@ promote({'card-1': ${JSON.stringify(hostileName)}})`,
     await publicPage.goto(
       `${process.env.TEST_ORIGIN || "http://localhost:5173"}/discover`
     );
-    await publicPage.getByLabel("Public title or card name").fill(title);
-    await publicPage
-      .getByRole("button", { name: "Search Published Decks" })
-      .click();
+    await searchDecks.fill(title);
     await expect(publicPage.getByRole("main")).toContainText(
-      "No matching Listed Decks."
+      "No legal decks match this search."
     );
     expect(
       await (
@@ -174,18 +201,20 @@ for index in range(32):
       ],
       { env: { ...process.env, PYTHONPATH: "api:api/tests" } }
     );
+    const decks = page
+      .getByRole("list", { name: "Decks" })
+      .getByRole("listitem");
+    const searchDecks = page.getByRole("searchbox", { name: "Search decks" });
     await page.goto(
       `${process.env.TEST_ORIGIN || "http://localhost:5173"}/discover`
     );
-    await page.getByLabel("Public title or card name").fill(prefix);
-    await page.getByRole("button", { name: "Search Published Decks" }).click();
-    await expect(page.locator("article")).toHaveCount(30);
-    await page
-      .getByRole("button", { name: "More Published Decks", exact: true })
-      .click();
-    await expect(page.locator("article")).toHaveCount(32);
-    await page.getByRole("button", { name: "Search Published Decks" }).click();
-    await expect(page.locator("article")).toHaveCount(30);
+    await searchDecks.fill(prefix);
+    await expect(decks).toHaveCount(30);
+    await page.getByRole("button", { name: "More decks", exact: true }).click();
+    await expect(decks).toHaveCount(32);
+    await page.reload();
+    await searchDecks.fill(prefix);
+    await expect(decks).toHaveCount(30);
     execFileSync(
       ".venv/bin/python",
       [
@@ -201,13 +230,11 @@ visibility(owner, deck, 'listed')`,
       ],
       { env: { ...process.env, PYTHONPATH: "api:api/tests" } }
     );
-    await page
-      .getByRole("button", { name: "More Published Decks", exact: true })
-      .click();
+    await page.getByRole("button", { name: "More decks", exact: true }).click();
     await expect(page.getByRole("status")).toContainText(
-      "Published Decks changed. Showing the first page."
+      "Published decks changed. Showing the first page."
     );
-    await expect(page.locator("article")).toHaveCount(30);
+    await expect(decks).toHaveCount(30);
     await expect(
       page.getByRole("link", { name: prefix + " new", exact: true })
     ).toBeVisible();
