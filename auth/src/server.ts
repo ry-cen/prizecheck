@@ -64,6 +64,7 @@ const BUDGETED_ROUTES: { method: string; pattern: RegExp }[] = [
     method: "GET",
     pattern: /^\/api\/public\/decks\/[^/]+\/versions\/[^/]+\/cost$/,
   },
+  { method: "GET", pattern: /^\/api\/want-list\/cost$/ },
 ];
 const BUDGET_MS = 3_000;
 // The answer is gated at 3.0 s, so the abort fires early enough to write the 504 inside it.

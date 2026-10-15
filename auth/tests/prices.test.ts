@@ -202,6 +202,47 @@ describe("budgeted price route", () => {
       expect(seen[0].headers[name]).toBeUndefined();
   });
 
+  it("stamps a budget on the Want List cost, signed over its path and not its query, and on no other Want List route", async () => {
+    behaviour = ok;
+    seen.length = 0;
+    const deck = randomUUID();
+    const response = await fetch(`${base}/api/want-list/cost?deck=${deck}`, {
+      headers: { cookie },
+    });
+    expect(response.status).toBe(200);
+    const [request] = seen;
+    expect(request.url).toBe(`/api/want-list/cost?deck=${deck}`);
+    const { headers } = request;
+    expect(headers["x-internal-caller"]).toBe(`user:${userId}`);
+    const milliseconds = Number(headers["x-internal-budget-ms"]);
+    expect(milliseconds).toBeGreaterThan(2_000);
+    expect(milliseconds).toBeLessThanOrEqual(3_000);
+    expect(headers["x-internal-budget-signature"]).toBe(
+      sign(
+        `budget\nGET\n/api/want-list/cost\n${hex("")}\nuser:${userId}\n${headers["x-internal-budget-ms"]}\n${headers["x-internal-budget-time"]}`
+      )
+    );
+    // The list itself and Buy on TCGplayer read no price: no budget, so a download is never cut at three seconds.
+    seen.length = 0;
+    for (const path of [
+      "/api/want-list",
+      "/api/want-list/exports/tcgplayer",
+      "/api/want-list/exports/tcgplayer.txt?owner_revision=1",
+    ])
+      await fetch(base + path, { headers: { cookie } });
+    expect(seen).toHaveLength(3);
+    for (const { headers: sent } of seen) {
+      expect(sent["x-internal-user"]).toBe(userId);
+      for (const name of [
+        "x-internal-budget-ms",
+        "x-internal-caller",
+        "x-internal-budget-signature",
+        "x-internal-budget-time",
+      ])
+        expect(sent[name]).toBeUndefined();
+    }
+  });
+
   // slow (wall-clock): waits out the gateway's real 3 s budget (BUDGET_MS in auth/src/server.ts has no test seam).
   it(
     "answers 504 PRICE_DEADLINE inside three seconds when the API hangs",

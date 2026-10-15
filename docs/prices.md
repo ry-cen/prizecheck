@@ -79,7 +79,7 @@ The existing `x-internal-*` identity message is unchanged. Client-supplied `x-in
 
 - `Budget(hard, caller, wait_until=hard-0.5)` with `remaining()`, `wait_remaining()`, `expired()` and `pg_timeout_ms(final=False)`. The timeout is never 0, because PostgreSQL reads 0 as "no timeout". The final phase leaves a 50 ms margin to answer.
 - `trusted_budget(request)` is the FastAPI dependency. It verifies the budget signature against the exact method, path, body hash, caller, milliseconds and time. A route that identifies a user also depends on `verified_user` and checks `budget.caller == f"user:{user_id}"`.
-- `BUDGETED_ROUTES` / `is_budgeted(method, path)` list the budgeted routes. Keep them in step with `BUDGETED_ROUTES` in `auth/src/server.ts`. Today they are `POST /api/prices/editions`, `GET /api/decks/{id}/cost` and `GET /api/public/decks/{token}/versions/{version}/cost`.
+- `BUDGETED_ROUTES` / `is_budgeted(method, path)` list the budgeted routes. Keep them in step with `BUDGETED_ROUTES` in `auth/src/server.ts`. Today they are `POST /api/prices/editions`, `GET /api/decks/{id}/cost`, `GET /api/public/decks/{token}/versions/{version}/cost` and `GET /api/want-list/cost`.
 
 Read order in `private_edition_quotes(edition_ids, budget)`:
 
@@ -161,6 +161,22 @@ The answer also carries `deck_list_revision`, `deck_list_cost` and `cost_to_comp
 - `deck_list_revision` is the captured Deck List revision. A Deck List edit does not move `owner_revision`, so a client showing the new figures discards an answer for another Deck List revision too.
 
 The client (`web/src/DeckCost.tsx`) asks once per Deck and inventory revision, gives up after about 3.5 s, and renders: `$1.61 · 5/6 cards priced · Incomplete subtotal: …`, the stale and unknown-age counts, `$0.00 · No cards`, `Price unavailable · 0/N cards priced`, or `Price unavailable; coverage unavailable; N cards total` (also for a client timeout or a 504). It always states that the estimate excludes shipping and taxes.
+
+## Want List cost and Buy on TCGplayer (decklist import #210)
+
+`GET /api/want-list/cost` (`app.want_list_cost`, optional `deck=<id>`) prices what `GET /api/want-list` shows for the same scope. It is a separate request so the page draws before prices arrive, and it is budgeted like Deck cost (same gateway signing, same three seconds from receipt). The budget signs the path, not the query: `deck` is the caller's own scope, and a Deck that isn't one of theirs (or isn't a Deck) is 404 `DECK_NOT_FOUND` once the capture runs.
+
+One access:
+
+1. One Want List capture (`want_list.capture_want_list`) under the budget's statement and lock timeouts, run under `_bounded`. It holds the owner row lock and commits before any store I/O.
+2. One `private_edition_quotes` call over every distinct Edition the scope still needs (need > 0): one read, one `evaluate_and_admit`, at most one wait and one validation. Editions the Collection already covers are not read. Nothing to get means no store read and no admission.
+3. Each figure is `deck_cost.summarize` over its own copies (`DeckCostFigures`, with the statuses, counts and labels of Deck cost): `total` (the combined total, or the scoped Deck's needs), each section's `cost`, each section line's `cost` with `price_each` (the per-copy display price of a priced Edition, else null), and each combined row's `cost`. An unpriced copy is never $0, and a failed row makes only the figures containing it `incomplete`.
+
+The answer names `want_list_counting`, `settings_revision`, `owner_revision` and `deck_lists_digest`, exactly as `GET /api/want-list` does (each section also carries its `deck_list_revision`). `deck_lists_digest` covers every Deck's id and Deck List revision, whatever the scope, because a Deck List edit moves neither other revision and an older Deck's list changes a newer Deck's need under Every Deck built at once. The client shows a cost only for the Want List answer with the same scope and those four values; when nothing was captured (an exhausted budget or a failed capture), all four are null, `total` is `incomplete` with the reason, and `sections` and `combined` are empty.
+
+`GET /api/want-list/exports/tcgplayer` (`app.want_list_mass_entry`, optional `deck=<id>`) is the TCGplayer Mass Entry export of the same copies: the combined total with no `deck`, that Deck's needs with one. It reuses the private Deck export's rows, formatter and view (`deck_mass_entry.input_rows`, `formatted`, `view_fields`), so the link, text, coverage reason and less-specific rows are the Deck export's, and a scoped export equals that Deck's Buy missing. It names the same four values as the cost. `.../tcgplayer.txt` takes the required pins `owner_revision` (409 `INVENTORY_CHANGED`), `deck_lists` (the digest, 409 `DECK_LIST_CHANGED`) and `settings_revision` (409 `SETTINGS_CHANGED`), and answers 422 `NOTHING_NOT_OWNED` when nothing is needed. Neither export route reads a price or carries a budget, so a download is never cut at three seconds.
+
+The Decks index's "Want List: N cards · $X" is each row's existing cost read (`cost_to_complete`, the same allocation): the index reads no Want List price.
 
 ## Published Deck cost (ticket 12)
 
