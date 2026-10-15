@@ -1,4 +1,10 @@
-import { useEffect, useId, useState, type MouseEvent } from "react";
+import {
+  useEffect,
+  useId,
+  useState,
+  type MouseEvent,
+  type ReactNode,
+} from "react";
 import { ChevronRight } from "lucide-react";
 import { COUNTING_OPTIONS } from "../settings/wantListCounting";
 import { Button } from "../ui/Button";
@@ -30,6 +36,8 @@ import {
   useWantListCost,
   WantListCostContext,
 } from "./WantListCost";
+import { SwapHint } from "./SwapHint";
+import { useWantListSwap, type WantListSwap } from "./useWantListSwap";
 
 type Props = {
   /** Opens a Deck in the deck builder (/decks/<id>). */
@@ -62,12 +70,12 @@ function follow(event: MouseEvent, go: () => void) {
  *   counted copies are; a Deck that needs nothing collapses to "Nothing to get". Open Deck goes to the builder.
  * - **Combined total:** each card once with the Decks that need it. A sticky right column on desktop and a collapsed
  *   row under the summary on a phone; hidden when the view is scoped to one Deck.
- *
  * - **Cost (#210):** the estimated cost and cards priced in the summary, and each section's, line's and combined row's
  *   cost, from one price access per answer (WantListCost) read after the page draws; **Buy on TCGplayer** exports what
  *   the page shows (WantListBuy).
- *
- * The Swap hint (#211) comes later; the place it goes is marked below.
+ * - **Swap (#211):** a line that can use copies of another Edition the collector owns says so, and Swap changes that many
+ *   copies of the line to it in one Deck List batch, with Undo in a toast (`useWantListSwap`). The Want List is read
+ *   again after it, and the new answer's `deck_lists_digest` makes the cost re-pair.
  */
 export function WantListView({ onOpenDeck, onNavigate }: Props) {
   const idBase = useId();
@@ -82,6 +90,7 @@ export function WantListView({ onOpenDeck, onNavigate }: Props) {
     load.kind === "ready" ? load.list : null,
     reload
   );
+  const swap = useWantListSwap({ reload, notify: setNotice });
 
   function choose(deckId: string | null) {
     setNotice("");
@@ -237,6 +246,7 @@ export function WantListView({ onOpenDeck, onNavigate }: Props) {
               section={section}
               deckName={deckName}
               onOpenDeck={onOpenDeck}
+              swap={swap}
             />
           ))}
         </div>
@@ -254,10 +264,12 @@ function DeckSection({
   section,
   deckName,
   onOpenDeck,
+  swap,
 }: {
   section: WantListSection;
   deckName: (id: string) => string;
   onOpenDeck: (id: string) => void;
+  swap: WantListSwap;
 }) {
   const idBase = useId();
   return (
@@ -303,7 +315,9 @@ function DeckSection({
               deckId={section.deck_id}
               line={line}
               deckName={deckName}
-            />
+            >
+              <SwapHint section={section} line={line} swap={swap} />
+            </NeededLine>
           ))}
         </ul>
       )}
@@ -315,10 +329,13 @@ function NeededLine({
   deckId,
   line,
   deckName,
+  children,
 }: {
   deckId: string;
   line: WantListLine;
   deckName: (id: string) => string;
+  /** The line's Swap hint (#211), under its card and counts. */
+  children?: ReactNode;
 }) {
   return (
     <li className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-4 gap-y-1 border-b border-border px-4 py-3 last:border-b-0 phone:grid-cols-1">
@@ -340,7 +357,7 @@ function NeededLine({
         </p>
       </div>
       <LineCost deckId={deckId} editionId={line.edition_id} />
-      {/* #211: the Swap hint and Swap go here. */}
+      {children}
     </li>
   );
 }
