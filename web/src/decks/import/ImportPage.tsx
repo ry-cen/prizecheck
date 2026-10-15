@@ -149,6 +149,10 @@ export function ImportPage({
   }
 
   function pick(line: number, choice: Pick) {
+    // Change on a resolved line (Basic Energy) keeps the focus on that line; a fix moves on to the next flagged line.
+    const resolved =
+      review?.lines.some((each) => each.line === line && !needsYou(each)) ??
+      false;
     remember();
     setSaveMessage("");
     setPicks((previous) => new Map(previous).set(line, choice));
@@ -158,7 +162,7 @@ export function ImportPage({
       return next;
     });
     setOpen(null);
-    focusAfter.current = { line, same: false };
+    focusAfter.current = { line, same: resolved };
   }
 
   function drop(line: number) {

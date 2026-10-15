@@ -3,8 +3,9 @@ import { browseEditions } from "../../catalog_browse_generated";
 import type { ReviewLine } from "../../decks_generated";
 import { Button } from "../../ui/Button";
 import { TextField } from "../../ui/TextField";
+import { missingCardHref } from "../../reports/missingCardLink";
 import { useDebouncedValue } from "../../workspace/useDebouncedValue";
-import type { Pick } from "./importModel";
+import { printingText, searchStart, type Pick } from "./importModel";
 
 /** A choice button inside a resolver: 30 px tall on desktop, 44 px on a phone. */
 export const ROW =
@@ -24,9 +25,11 @@ type Found =
 const RESULTS = 8;
 
 /**
- * The inline resolver under a flagged line (#212): the cards that share its code and number (Pick one), a catalog
- * search that starts on the pasted name and follows typing, and Drop line. A pick is any Edition of the card by the
- * add-by-Printing rule; the Edition chooser changes it afterwards.
+ * The inline resolver under a flagged line (#212, #213): the cards the line could mean (Pick one: one per code and
+ * number, or one per Reprint Group of its name), a catalog search that starts on the pasted name and follows typing,
+ * Drop line, and for a Not found line the link that reports it on Missing cards with the form filled in. The link opens
+ * a new tab, so the review stays as it is. A pick is any Edition of the card by the add-by-Printing rule; the Edition
+ * chooser changes it afterwards.
  */
 export function LineResolver({
   line,
@@ -38,7 +41,7 @@ export function LineResolver({
   onDrop: () => void;
 }) {
   const field = useRef<HTMLInputElement>(null);
-  const [query, setQuery] = useState(line.name);
+  const [query, setQuery] = useState(searchStart(line));
   const q = useDebouncedValue(query.trim(), 250);
   const [found, setFound] = useState<Found>({ status: "searching", rows: [] });
 
@@ -79,9 +82,9 @@ export function LineResolver({
     >
       {line.candidates.length > 0 && (
         <>
-          <p className="m-0 text-meta">Cards with this code and number:</p>
+          <p className="m-0 text-meta">Cards this line could mean:</p>
           <ul
-            aria-label="Cards with this code and number"
+            aria-label="Cards this line could mean"
             className="m-0 flex list-none flex-col gap-1 p-0"
           >
             {line.candidates.map((candidate) => (
@@ -91,7 +94,7 @@ export function LineResolver({
                   className={ROW}
                   onClick={() => onPick({ printing_id: candidate.printing_id })}
                 >
-                  {`${candidate.name} ${candidate.set_code} ${candidate.collector_number}`}
+                  {printingText(candidate)}
                 </button>
               </li>
             ))}
@@ -133,6 +136,17 @@ export function LineResolver({
               ? "No matches."
               : ""}
       </p>
+      {line.report && (
+        <a
+          className="inline-flex min-h-(--target-pointer) items-center self-start text-meta text-accent underline underline-offset-2 hover:text-accent-strong phone:min-h-tap"
+          href={missingCardHref(line.report)}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          Report it on Missing cards
+          <span className="sr-only"> (opens in a new tab)</span>
+        </a>
+      )}
       <Button
         variant="danger"
         className="self-start phone:self-stretch"

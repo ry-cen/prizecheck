@@ -6,21 +6,24 @@ import { ROW } from "./LineResolver";
 /**
  * The Edition chooser under a resolved line (#212): every active Edition of its Printing with the stored price, the
  * current one pressed. Choosing one posts a fix that names it (the "your choice" Edition); the pressed button takes the
- * focus when the chooser opens.
+ * focus when the chooser opens, unless it sits inside Change (EnergyChooser), which places the focus itself.
  */
 export function EditionChooser({
   line,
   onEdition,
+  focus = true,
 }: {
   line: ReviewLine;
   onEdition: (editionId: string) => void;
+  focus?: boolean;
 }) {
   const group = useRef<HTMLDivElement>(null);
   useEffect(() => {
+    if (!focus) return;
     group.current
       ?.querySelector<HTMLButtonElement>('button[aria-pressed="true"]')
       ?.focus();
-  }, []);
+  }, [focus]);
   return (
     <div
       ref={group}

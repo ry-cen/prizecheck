@@ -8,6 +8,7 @@ import {
 import { PageHeader } from "../shell/PageHeader";
 import { Segmented, segmentId } from "../ui/Segmented";
 import { MyReports } from "./MyReports";
+import { clearMissingCardLink, readMissingCardLink } from "./missingCardLink";
 import { EMPTY_DRAFT, ReportForm, type ReportDraft } from "./ReportForm";
 
 type Section = "mine" | "report";
@@ -30,7 +31,8 @@ type Props = {
  * Missing cards (#169, variant A of the Missing cards and Owner controls decision): sub-tabs for My reports
  * and Report a card. The page stays mounted when the collector leaves it, so the sub-tab, the form and
  * reply drafts are kept; the reports are read again each time the page is shown, as they were when it
- * remounted on every visit. Only missing-card reports are listed: metadata reports stay in Catalog.
+ * remounted on every visit. Only missing-card reports are listed: metadata reports stay in Catalog. A report link
+ * (missingCardLink.ts, from Decklist Import's Not found lines, #213) opens Report a card with the form filled in.
  */
 export function MissingCardsPage({ active, message }: Props) {
   const idBase = useId();
@@ -81,6 +83,17 @@ export function MissingCardsPage({ active, message }: Props) {
   useEffect(() => {
     if (active) void load();
   }, [active, load]);
+
+  // A report link opens Report a card with a new draft from the link, whenever the page is shown with one; the link
+  // then leaves the address.
+  useEffect(() => {
+    if (!active) return;
+    const link = readMissingCardLink();
+    clearMissingCardLink();
+    if (!link) return;
+    setDraft({ ...EMPTY_DRAFT, kind: "printing", ...link });
+    setSection("report");
+  }, [active]);
 
   async function submit() {
     setStatus("");
