@@ -70,14 +70,35 @@ const BUDGET_MS = 3_000;
 // The answer is gated at 3.0 s, so the abort fires early enough to write the 504 inside it.
 const RESPONSE_MARGIN_MS = 100;
 const BUDGET_BODY_BYTES = 16_384;
-// Decklist Import (#212): the review carries a pasted list of up to 20,000 characters (the API's IMPORT_TOO_LONG) plus
-// the collector's fixes, and creating the Deck carries up to 200 lines; both are more than the 16 KiB other routes
-// accept. Counted in bytes, and no more than nginx's client_max_body_size (deploy/docker/nginx.conf, 64k).
+// POST routes whose bodies may pass the 16 KiB other routes accept, matched on the path alone (never the query). Their
+// bodies are counted in bytes, refused with 413 as soon as the count passes the limit, and forwarded as the bytes that
+// arrived. Each limit is no more than nginx's client_max_body_size for the path (deploy/docker/nginx.conf: 64k for the
+// server, 5m for the Collection Import start route alone).
+// - Decklist Import (#212): the review carries a pasted list of up to 20,000 characters (the API's IMPORT_TOO_LONG)
+//   plus the collector's fixes, and creating the Deck carries up to 200 lines.
+// - Collection Import changes (#230): a change names up to 1,000 rows by number and a request holds up to 100 changes,
+//   so this limit is the real bound. Every row of a 10,000-row file ticked one by one is about 49 KB of row numbers.
+// - Collection Import start (#226): the collector's file, up to the API's 5 MiB (collection_import_reader
+//   MAX_IMPORT_BYTES), as raw bytes: a zip or a Windows-1252 export must reach the API unchanged.
 const IMPORT_BODY_BYTES = 65_536;
-const IMPORT_ROUTES = new Set([
-  "/api/decks/import/review",
-  "/api/decks/import",
-]);
+const COLLECTION_IMPORT_BODY_BYTES = 5 * 1024 * 1024;
+const IMPORT_ROUTES: { pattern: RegExp; limit: number }[] = [
+  { pattern: /^\/api\/decks\/import(?:\/review)?$/, limit: IMPORT_BODY_BYTES },
+  {
+    pattern: /^\/api\/collection-imports\/[^/]+\/changes$/,
+    limit: IMPORT_BODY_BYTES,
+  },
+  {
+    pattern: /^\/api\/collection-imports$/,
+    limit: COLLECTION_IMPORT_BODY_BYTES,
+  },
+];
+
+/** The body limit of a POST to `path` that may pass 16 KiB, or undefined for every other request. */
+function importLimit(method: string | undefined, path: string) {
+  if (method !== "POST") return undefined;
+  return IMPORT_ROUTES.find((route) => route.pattern.test(path))?.limit;
+}
 
 class BudgetExceeded extends Error {}
 class PayloadTooLarge extends Error {}
@@ -99,11 +120,12 @@ async function readBody(request: IncomingMessage): Promise<string> {
   return body;
 }
 
-// Bytes, not characters: a multi-byte body must not slip under the cap.
+// Bytes, not characters: a multi-byte body must not slip under the cap. The bytes are returned as they arrived, never
+// decoded, so they are hashed and forwarded unchanged.
 async function readBytes(
   request: IncomingMessage,
   limit: number
-): Promise<string> {
+): Promise<Buffer<ArrayBuffer>> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of request) {
@@ -112,7 +134,7 @@ async function readBytes(
     if (size > limit) throw new PayloadTooLarge();
     chunks.push(piece);
   }
-  return Buffer.concat(chunks).toString("utf8");
+  return Buffer.concat(chunks);
 }
 
 const readBudgetedBody = (request: IncomingMessage) =>
@@ -151,7 +173,7 @@ function normalizedEmail(value: unknown): string | null {
     : null;
 }
 
-function hash(value: string) {
+function hash(value: string | Buffer) {
   return createHash("sha256").update(value).digest("hex");
 }
 
@@ -699,13 +721,14 @@ const server = createServer(async (request, response) => {
             : await session(request);
       if (!current && !publicPath && path !== "/api/health")
         return json(response, 401, { error: "Authentication required" });
-      const body =
+      const limit = importLimit(request.method, path);
+      const body: string | Buffer<ArrayBuffer> =
         request.method === "GET" || request.method === "HEAD"
           ? ""
           : budgeted
             ? await withinBudget(readBudgetedBody(request), left())
-            : request.method === "POST" && IMPORT_ROUTES.has(path)
-              ? await readBytes(request, IMPORT_BODY_BYTES)
+            : limit !== undefined
+              ? await readBytes(request, limit)
               : await readBody(request);
       const stamp = Math.floor(Date.now() / 1000).toString();
       const bodyHash = hash(body);
@@ -748,14 +771,15 @@ const server = createServer(async (request, response) => {
         controller = new AbortController();
         timer = setTimeout(() => controller!.abort(), milliseconds);
       }
-      if (body)
+      // An empty Buffer is truthy: test the length, not the body.
+      if (body.length > 0)
         headers["content-type"] =
           request.headers["content-type"] || "application/json";
       try {
         const upstream = await fetch(`${apiOrigin}${request.url}`, {
           method: request.method,
           headers,
-          body: body || undefined,
+          body: body.length > 0 ? body : undefined,
           signal: controller?.signal,
         });
         const disposition = upstream.headers.get("content-disposition");
