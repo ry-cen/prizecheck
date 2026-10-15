@@ -24,5 +24,13 @@ export function copyErrorText(code: string): string | null {
   return null;
 }
 
-/** A revoked or unknown Published Deck: there is nothing to retry. */
-export const copyGone = (code: string) => code === "PUBLISHED_DECK_NOT_FOUND";
+/**
+ * What Copy says when the Published Deck has too many card lines. Not in copyErrorText: that one also serves pasted
+ * lists, which keep the paste wording for the same code.
+ */
+export const COPY_TOO_MANY_LINES =
+  "This Published Deck has more than 200 card lines, more than a Deck List can hold.";
+
+/** A revoked Published Deck or one too long to copy: there is nothing to retry. */
+export const copyGone = (code: string) =>
+  code === "PUBLISHED_DECK_NOT_FOUND" || code === "IMPORT_TOO_MANY_LINES";

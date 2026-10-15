@@ -1,5 +1,5 @@
 import { Button } from "../../ui/Button";
-import { copyGone } from "./copyModel";
+import { COPY_TOO_MANY_LINES, copyGone } from "./copyModel";
 import { plural, sectionsOf } from "./importModel";
 import type { ImportReviewState } from "./useImportReview";
 
@@ -17,6 +17,7 @@ type Props = {
 export function CopySource({ state, updated }: Props) {
   const review = state.review;
   const source = review?.publication;
+  const rereading = state.code === "PUBLISHED_DECK_CHANGED" && state.pending;
   return (
     <>
       {updated && (
@@ -25,7 +26,7 @@ export function CopySource({ state, updated }: Props) {
           list.
         </p>
       )}
-      {review && source && (
+      {review && source && !rereading && (
         <>
           <p className="m-0 text-body">
             From <strong className="font-semibold">{source.title}</strong>
@@ -55,10 +56,13 @@ export function CopySource({ state, updated }: Props) {
       >
         {state.error ? (
           <>
-            {state.error}
-            {!copyGone(state.code) && (
-              <Button onClick={state.retry}>Retry</Button>
-            )}
+            {state.code === "IMPORT_TOO_MANY_LINES"
+              ? COPY_TOO_MANY_LINES
+              : state.error}
+            {!copyGone(state.code) &&
+              state.code !== "PUBLISHED_DECK_CHANGED" && (
+                <Button onClick={state.retry}>Retry</Button>
+              )}
           </>
         ) : !review ? (
           "Reading the Published Deck…"
