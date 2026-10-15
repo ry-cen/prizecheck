@@ -20,6 +20,10 @@ caller's (404 DECK_NOT_FOUND) and reads it under the same lock, its own copies c
 Deck List revision, the changes batch saving sends and the Surplus preview (``import_replace``). Replace has no route of
 its own: the web saves through the Deck List changes batch.
 
+Copy to my Decks (#216) posts a Published Deck's token instead of text: its snapshot's rows are the card lines
+(``import_publication``), read from the public projection before the catalog snapshot, and the answer carries the
+Published Deck's title, Target Format and snapshot version.
+
 ``POST /api/decks/import`` creates the Deck, sets its Target Format and writes its Deck List lines in one transaction,
 idempotently, like every Location and Deck List command. It trusts the Editions it is sent and never reads the text
 again. Undo is the existing Deck deletion (``deck_deletion``): an imported Deck holds no cards.
@@ -30,10 +34,11 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
-from . import import_aliases, prices, set_codes
+from . import import_aliases, import_publication, prices, set_codes
 from .copy_allocation import Availability
 from .deck_cost import summarize
 from .decklist_text import MAX_CARD_LINES, CardLine, TooLong, TooManyLines, read
+from .deck_format_checks import TargetFormat
 from .decks import MAX_DECK_LIST_CHANGES, DeckListCommandResult, advance_deck_list, keep_response, replayed
 from .format_evaluator import FORMATS
 from .holdings import parse_quantity
@@ -54,8 +59,13 @@ NEEDS_YOU = ('ambiguous', 'not_found', 'unreadable')
 
 
 class ImportSource(BaseModel):
-    # The pasted text. Ticket #216 adds a publication token as the other source.
-    text: str
+    """Exactly one of ``text`` (a pasted list) and ``publication`` (a Published Deck's token: Copy to my Decks, #216);
+    anything else answers 422 INVALID_SOURCE."""
+    text: str | None = None
+    publication: str | None = None
+    # Copy only: the snapshot version the screen's first answer read. Another active version answers 409
+    # PUBLISHED_DECK_CHANGED, so a fix never lands on another row.
+    version: int | None = None
 
 
 class ImportFix(BaseModel):
@@ -190,6 +200,15 @@ class ImportTotals(BaseModel):
     to_get_display: str | None   # its one rounded form ("$12.34", "<$0.01"); None when none is priced
 
 
+class ImportPublication(BaseModel):
+    """The Published Deck a Copy review read (#216): the new Deck's default name and Target Format, and the snapshot
+    version the screen pins."""
+    token: str
+    version: int
+    title: str
+    target_format: TargetFormat
+
+
 class ImportReview(BaseModel):
     lines: list[ReviewLine]
     ignored: list[IgnoredImportLine]
@@ -202,6 +221,7 @@ class ImportReview(BaseModel):
     catalog_revision: int
     # Replace (#215): the Deck List revision, the batch saving sends and the Surplus preview; None for a new Deck.
     replace: ImportReplace | None = None
+    publication: ImportPublication | None = None   # Copy to my Decks only (#216)
 
 
 class ImportDeckLine(BaseModel):
@@ -321,20 +341,35 @@ def _report(card: CardLine) -> MissingCardPrefill:
 @router.post('/import/review', response_model=ImportReview)
 def review_import(command: ReviewImport, user_id: str = Depends(verified_user)):
     # A synchronous route on purpose: the HTTP record-store adapter refuses to run on an event loop.
-    try:
-        reading = read(command.source.text)
-    except TooLong:
-        error(422, 'IMPORT_TOO_LONG')
-    except TooManyLines:
-        error(422, 'IMPORT_TOO_MANY_LINES')
-    cards = list(reading.cards)
+    source = command.source
+    # Exactly one source; a version only pins a publication.
+    if ((source.text is None) == (source.publication is None)
+            or (source.version is not None and source.publication is None)
+            or (source.publication is not None and command.deck_id is not None)):
+        error(422, 'INVALID_SOURCE')
+    copied = None
+    if source.publication is not None:
+        # Copy to my Decks (#216): the snapshot's rows, read before any connection opens.
+        copied = import_publication.read(source.publication, source.version)
+        cards, ignored = copied.cards, []
+    else:
+        try:
+            reading = read(source.text)
+        except TooLong:
+            error(422, 'IMPORT_TOO_LONG')
+        except TooManyLines:
+            error(422, 'IMPORT_TOO_MANY_LINES')
+        cards, ignored = list(reading.cards), list(reading.ignored)
     fixes = _fixes(command, cards)
     # 1. One read-only snapshot: the matches, the fixes' cards and every resolved Printing's Editions.
     with connect() as conn, conn.transaction():
         conn.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY')
         state = conn.execute('SELECT active_generation,revision FROM catalog_state WHERE singleton').fetchone()
         generation = state['active_generation']
-        matches = match_lines(conn, generation, cards)
+        if copied is None:
+            matches, published = match_lines(conn, generation, cards), {}
+        else:
+            matches, published = import_publication.resolve(conn, generation, copied)
         edition_printing = _edition_printings(conn, generation, [fix.edition_id for fix in fixes.values()
                                                                   if fix.edition_id is not None])
         if any(fix.edition_id is not None and fix.edition_id not in edition_printing for fix in fixes.values()):
@@ -361,7 +396,7 @@ def review_import(command: ReviewImport, user_id: str = Depends(verified_user)):
         error(503, 'PRICES_UNAVAILABLE')
     # 4. The answer.
     catalog_order = {printing: [edition['edition_id'] for edition in found] for printing, found in editions.items()}
-    parts = parts_for([Resolved(card.line, card.quantity, resolved[card.line][1], resolved[card.line][2])
+    parts = parts_for([_resolved(card, resolved[card.line], published.get(card.line), command.owned)
                        for card in cards if resolved[card.line][1] is not None],
                       catalog_order, views, command.owned, others, capture.availability.editions)
     edition_of = {edition['edition_id']: (printing, edition['descriptor'])
@@ -383,7 +418,8 @@ def review_import(command: ReviewImport, user_id: str = Depends(verified_user)):
                    for part in parts.get(card.line, [])],
             kept=_kept(parts.get(card.line, []), [catalog_order[each] for each in (printing, *others.get(printing, ()))]
                        if printing is not None else [], capture.availability),
-            report=_report(card) if status == 'not_found' else None))
+            report=(_report(card) if copied is None else MissingCardPrefill(**copied.report(card.line)))
+            if status == 'not_found' else None))
     every_part = [part for card in cards for part in parts.get(card.line, [])]
     deck_list = merged(every_part)
     to_get: dict[UUID, int] = {}
@@ -393,11 +429,11 @@ def review_import(command: ReviewImport, user_id: str = Depends(verified_user)):
     cost = summarize(to_get, {edition: views[edition] for edition in to_get})
     priced = cost.get('priced_copies')   # None when a stored row couldn't be checked
     return ImportReview(
-        lines=lines, ignored=[IgnoredImportLine(line=line.line, text=line.text) for line in reading.ignored],
+        lines=lines, ignored=[IgnoredImportLine(line=line.line, text=line.text) for line in ignored],
         deck_list=[ImportDeckListEntry(edition_id=edition, quantity=str(quantity)) for edition, quantity in deck_list],
         totals=ImportTotals(card_lines=len(cards),
                             cards=str(sum(card.quantity for card in cards if resolved[card.line][0] != 'dropped')),
-                            ignored=len(reading.ignored),
+                            ignored=len(ignored),
                             to_resolve=sum(1 for card in cards if resolved[card.line][0] in NEEDS_YOU),
                             owned=str(sum(part.quantity for part in every_part if part.source != 'new')),
                             to_get=str(sum(to_get.values())), to_get_priced=priced,
@@ -405,7 +441,20 @@ def review_import(command: ReviewImport, user_id: str = Depends(verified_user)):
                             to_get_display=cost.get('display_amount') if priced not in (None, '0') else None),
         owned=command.owned, want_list_counting=capture.counting, settings_revision=capture.settings_revision,
         owner_revision=capture.owner_revision, catalog_revision=state['revision'],
-        replace=replacement(capture.replaced, deck_list) if capture.replaced is not None else None)
+        replace=replacement(capture.replaced, deck_list) if capture.replaced is not None else None,
+        publication=ImportPublication(token=copied.token, version=copied.version, title=copied.title,
+                                      target_format=copied.target_format) if copied is not None else None)
+
+
+def _resolved(card: CardLine, resolution: tuple[LineStatus, UUID | None, UUID | None],
+              published: tuple[UUID, UUID] | None, owned: OwnedCards) -> Resolved:
+    """One resolved line for the allocation. Copy to my Decks under Exact printings (#216): copies the collector doesn't
+    own keep the Edition the Published Deck's row named (``published``: that Edition and its Printing), unless the
+    collector chose an Edition or another card."""
+    _, printing, edition = resolution
+    if edition is None and owned == 'exact' and published is not None and published[1] == printing:
+        return Resolved(card.line, card.quantity, printing, published[0], 'published')
+    return Resolved(card.line, card.quantity, printing, edition)
 
 
 def _display_price(view) -> str | None:

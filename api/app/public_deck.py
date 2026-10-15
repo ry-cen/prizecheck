@@ -116,7 +116,9 @@ def parse_record(token: str, record) -> ActiveSnapshot:
     return ActiveSnapshot(token, snapshot.version, snapshot_digest(stored), visibility, snapshot, rows)
 
 
-def read_active(token: str, version: int, *, deadline: float) -> ActiveSnapshot:
+def read_current(token: str, *, deadline: float) -> ActiveSnapshot:
+    """The token's active snapshot, whatever its version: Copy to my Decks (decklist import #216) reads it before the
+    review screen knows a version. SnapshotGone, SnapshotLate or ProjectionUnavailable as ``read_active``."""
     remaining = deadline - time.monotonic()
     if remaining <= 0:
         raise SnapshotLate()
@@ -126,7 +128,11 @@ def read_active(token: str, version: int, *, deadline: float) -> ActiveSnapshot:
         raise SnapshotLate() from None
     if record is None:
         raise SnapshotGone()
-    active = parse_record(token, record)
+    return parse_record(token, record)
+
+
+def read_active(token: str, version: int, *, deadline: float) -> ActiveSnapshot:
+    active = read_current(token, deadline=deadline)
     if active.version != version:
         raise SnapshotChanged()
     return active
