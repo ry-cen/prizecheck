@@ -23,7 +23,8 @@ def ts_type(value):
 
 
 schema = app.openapi()["components"]["schemas"]
-names = ("CollectionImportCounts", "CollectionImportSummary", "CollectionImportSource", "CollectionImportCard",
+names = ("CollectionImportCounts", "CollectionImportSummary", "CollectionImportSource", "CollectionImportLeftOut",
+         "CollectionImportCard",
          "CollectionImportEdition", "CollectionImportRow", "CollectionImportRowsPage", "CollectionImportPick",
          "CollectionImportChange",
          "ChangeCollectionImport", "CollectionImportChangeResult", "CollectionImportChanges", "SaveCollectionImport",
@@ -73,6 +74,9 @@ export const saveCollectionImport = (importId: string, body: SaveCollectionImpor
 /** The skipped rows as a CSV file in the file's own columns, for a download link. */
 export const collectionImportSkippedHref = (importId: string) =>
   `/api/collection-imports/${encodeURIComponent(importId)}/skipped.csv`;
+/** The rows left out (watchlist, sealed, other games, not in English) as a CSV file in the file's own columns. */
+export const collectionImportLeftOutHref = (importId: string) =>
+  `/api/collection-imports/${encodeURIComponent(importId)}/left-out.csv`;
 """)
 content = "\n".join(lines)
 target = root / "web/src/collection_import_generated.ts"

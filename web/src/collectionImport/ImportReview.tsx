@@ -18,6 +18,7 @@ import { Chip } from "../ui/Chip";
 import { Icon } from "../ui/Icon";
 import { Menu } from "../ui/Menu";
 import { useToast } from "../ui/Toast";
+import { ImportLeftOut } from "./ImportLeftOut";
 import { ImportRowItem } from "./ImportRowItem";
 import {
   BULK_FINISHES,
@@ -66,14 +67,14 @@ const EMPTY: Record<CollectionImportRowFilter, string> = {
 const BULK_TRIGGER =
   "box-border m-0 inline-flex h-control cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-control border border-border-strong bg-surface-raised px-3 font-sans text-control font-medium leading-none text-text hover:border-control-outline aria-expanded:border-accent-border aria-expanded:bg-surface-selected aria-expanded:text-accent-strong phone:h-control-phone phone:px-4";
 
-/** Collection Import's review (#226, #229, #230): one list of the file's rows under Needs you, Finish unknown, Matched
+/** Collection Import's review (#226, #229 to #231): one list of the file's rows under Needs you, Finish unknown, Matched
  * by name, All and Skipped, opening on Needs you when anything needs the collector. A row's finish is picked from its
  * card's own Editions; a row that needs a card opens its resolver (Fix: candidates, a catalog search, Skip row), and a
  * row matched by name or a Basic Energy can change its card (Change). Selected rows (or every row in the filter) get a
  * finish or are skipped at once, Skip all skips every row in Needs you, and skipped rows can be restored or downloaded
  * in the file's own columns. Every change goes to the server at the draft's revision and answers the new counts.
  * Finish unknown and Matched by name never block saving. Saving adds every ready row's copies in one step, with no
- * Undo. */
+ * Undo. The side column (above the list on a phone) holds the summary and the rows left out (#231). */
 export function ImportReview({ summary, fileName, onBack, onLanded }: Props) {
   const places = usePlaces(true);
   const toast = useToast();
@@ -438,37 +439,45 @@ export function ImportReview({ summary, fileName, onBack, onLanded }: Props) {
           )}
         </section>
         <aside
-          aria-labelledby="import-summary-heading"
-          className="box-border flex flex-col gap-2 rounded-panel border border-border bg-surface p-4 phone:order-first"
+          aria-label="About this import"
+          className="flex min-w-0 flex-col gap-4 phone:order-first"
         >
-          <h2
-            id="import-summary-heading"
-            className="m-0 text-heading font-semibold"
+          <section
+            aria-labelledby="import-summary-heading"
+            className="box-border flex flex-col gap-2 rounded-panel border border-border bg-surface p-4"
           >
-            Import summary
-          </h2>
-          <dl className="m-0 grid grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-1 text-body">
-            <dt className="text-text-muted">Rows in file</dt>
-            <dd className="m-0 text-right tabular-nums">{counts.rows}</dd>
-            <dt className="text-text-muted">Need you</dt>
-            <dd className="m-0 text-right tabular-nums">{counts.needs_you}</dd>
-            <dt className="text-text-muted">Ready</dt>
-            <dd className="m-0 text-right tabular-nums">{counts.ready}</dd>
-            <dt className="text-text-muted">Finish unknown</dt>
-            <dd className="m-0 text-right tabular-nums">
-              {counts.finish_unknown}
-            </dd>
-            <dt className="text-text-muted">Matched by name</dt>
-            <dd className="m-0 text-right tabular-nums">{counts.by_name}</dd>
-            <dt className="text-text-muted">Skipped</dt>
-            <dd className="m-0 text-right tabular-nums">{counts.skipped}</dd>
-            <dt className="text-text-muted">Cards to add</dt>
-            <dd className="m-0 text-right tabular-nums">
-              {current.cards_to_add}
-            </dd>
-            <dt className="text-text-muted">Going to</dt>
-            <dd className="m-0 text-right wrap-anywhere">{where}</dd>
-          </dl>
+            <h2
+              id="import-summary-heading"
+              className="m-0 text-heading font-semibold"
+            >
+              Import summary
+            </h2>
+            <dl className="m-0 grid grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-1 text-body">
+              <dt className="text-text-muted">Rows in file</dt>
+              <dd className="m-0 text-right tabular-nums">{counts.rows}</dd>
+              <dt className="text-text-muted">Need you</dt>
+              <dd className="m-0 text-right tabular-nums">
+                {counts.needs_you}
+              </dd>
+              <dt className="text-text-muted">Ready</dt>
+              <dd className="m-0 text-right tabular-nums">{counts.ready}</dd>
+              <dt className="text-text-muted">Finish unknown</dt>
+              <dd className="m-0 text-right tabular-nums">
+                {counts.finish_unknown}
+              </dd>
+              <dt className="text-text-muted">Matched by name</dt>
+              <dd className="m-0 text-right tabular-nums">{counts.by_name}</dd>
+              <dt className="text-text-muted">Skipped</dt>
+              <dd className="m-0 text-right tabular-nums">{counts.skipped}</dd>
+              <dt className="text-text-muted">Cards to add</dt>
+              <dd className="m-0 text-right tabular-nums">
+                {current.cards_to_add}
+              </dd>
+              <dt className="text-text-muted">Going to</dt>
+              <dd className="m-0 text-right wrap-anywhere">{where}</dd>
+            </dl>
+          </section>
+          <ImportLeftOut importId={current.id} leftOut={current.left_out} />
         </aside>
       </div>
       <div className="sticky bottom-0 z-(--layer-sticky) box-border flex flex-col border-t border-border bg-bg phone:bottom-tabbar">

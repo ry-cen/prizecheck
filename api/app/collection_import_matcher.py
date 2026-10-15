@@ -1,5 +1,21 @@
-"""Collection Import matching (#226, #228, #229, #230; spec "Matching"): each source row to one Card Edition of the
-active catalog.
+"""Collection Import matching (#226, #228 to #231; spec "Matching"): each source row to one Card Edition of the
+active catalog, after the filters leave out the rows PrizeCheck can't hold.
+
+**Filters first (#231).** A row gets the first of these reasons that applies (``left_out_reason``), is never matched,
+and is stored with it (``collection_import_row.left_out_reason``): never listed, counted as ready or needing the
+collector, skipped or saved, but counted under Left out and downloadable.
+
+- ``watchlist``: the watchlist flag (Collectr's ``Watchlist`` is ``true``): a watched card, not a copy.
+- ``other_game``: a game column (Collectr's ``Category``, PriceCharting's console, Sorted's ``Collection``, a loose
+  ``Category`` or ``Game``) that isn't Pokémon (POKEMON_GAMES).
+- ``not_english``: a language column that isn't English (ENGLISH; PriceCharting's Japanese and Chinese consoles fill
+  it), a ``(JP)`` or ``(CN)`` tag in the name, or, from Dragon Shield or Sorted, a set that exists only in Japan
+  (JAPAN_ONLY_SETS), which Dragon Shield labels English.
+- ``sealed``: a row with no number, unless its name is a Basic Energy, whose name is a sealed product's
+  (SEALED_NAME), or whose rarity is blank in a file with a rarity column. A file without one (PriceCharting, Dragon
+  Shield, most loose files) never has a blank rarity that means anything.
+
+Graded rows are not filtered: the grade is read and never kept, so a slab is an ordinary copy.
 
 A Printing counts only when it isn't withdrawn and has an active Card Edition in the active generation. A row whose
 quantity can't be read is unreadable. Otherwise the first step that answers wins:
@@ -38,6 +54,7 @@ A handful of batched queries answer every row of a file. Pure SQL reads: nothing
 catalog pull.
 """
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from uuid import UUID
 
@@ -56,8 +73,8 @@ MAX_CANDIDATES = 20
 READY = ("matched", "finish_unknown", "by_name")
 NEEDS_YOU = ("ambiguous", "not_found", "unreadable")
 STATUSES = READY + NEEDS_YOU
-# Row predicates over collection_import_row, for an alias: READY_ROW.format(r="r"). A skipped or left-out row (later
-# tickets) is neither ready nor needs the collector.
+# Row predicates over collection_import_row, for an alias: READY_ROW.format(r="r"). A skipped or left-out row (#231)
+# is neither ready nor needs the collector.
 READY_ROW = ("{r}.status IN ('matched','finish_unknown','by_name') AND NOT {r}.skipped "
              "AND {r}.left_out_reason IS NULL")
 NEEDS_YOU_ROW = ("{r}.status IN ('ambiguous','not_found','unreadable') AND NOT {r}.skipped "
@@ -66,6 +83,8 @@ FINISH_UNKNOWN_ROW = "{r}.status='finish_unknown' AND NOT {r}.skipped AND {r}.le
 # Every row the review lists under All: ready or needing the collector.
 LISTED_ROW = "NOT {r}.skipped AND {r}.left_out_reason IS NULL"
 SKIPPED_ROW = "{r}.skipped AND {r}.left_out_reason IS NULL"
+# A row the filters left out (#231), whatever else it is.
+LEFT_OUT_ROW = "{r}.left_out_reason IS NOT NULL"
 # The row's card came from step 4 (parsed holds BY_NAME_KEY, whatever its finish says); a collector's pick clears it.
 BY_NAME_KEY = "matched_by_name"
 BY_NAME_ROW = ("{r}.status IN ('matched','finish_unknown','by_name') AND {r}.parsed->>'matched_by_name'='1' "
@@ -74,6 +93,24 @@ BY_NAME_ROW = ("{r}.status IN ('matched','finish_unknown','by_name') AND {r}.par
 FILTER_ROWS = {"needs": NEEDS_YOU_ROW, "finish": FINISH_UNKNOWN_ROW, "name": BY_NAME_ROW, "all": LISTED_ROW,
                "skipped": SKIPPED_ROW}
 PRODUCT_ID = re.compile(r"[1-9][0-9]{0,17}")
+
+# The filters' reasons (#231), in the order they are tried: a row gets the first that applies.
+LEFT_OUT_REASONS = ("watchlist", "other_game", "not_english", "sealed")
+# A game column's words for Pokémon, compared by plain(): Collectr's and PriceCharting's "Pokemon", Sorted's "pok".
+POKEMON_GAMES = frozenset({"pokemon", "pok", "ptcg", "pokemon tcg", "pokemon trading card game"})
+# A language column's words for English, compared by plain(): "English" (the TCGplayer app, TCG Collector, Dragon
+# Shield), "en" (Sorted). A blank language is English.
+ENGLISH = frozenset({"english", "en", "eng", "en us", "en gb"})
+# Collectr's name tags for Japanese and Chinese cards.
+LANGUAGE_TAG = re.compile(r"\((?:JP|CN)\)", re.IGNORECASE)
+# Dragon Shield's sets that exist only in Japan, which its export labels English (research "Dragon Shield and Sorted",
+# fixture D1), by its set code and by its set name, compared by plain(). Sorted, its successor, uses the same codes.
+JAPAN_ONLY_SETS = {"s2": "rebellion crash", "s4a": "shiny star v", "s5i": "single strike master"}
+# A sealed product's name: boxes, packs, bundles, collections, tins, blisters, theme decks and kits. Only a row with no
+# number is tested, so a card such as Tinkaton or Booster Energy Capsule is never caught.
+SEALED_NAME = re.compile(r"\b(?:booster (?:box|pack|bundle|display|case)|sleeved booster|elite trainer box|etb|"
+                         r"collection|tin|blister|(?:theme|battle|starter) deck|trainer kit|build (?:&|and) battle|"
+                         r"gift box)\b", re.IGNORECASE)
 
 # A Printing's active Editions in the generation, in catalog order (as catalog search shows them).
 EDITIONS = """SELECT ge.printing_id,e.id AS edition_id,e.descriptor
@@ -109,6 +146,9 @@ class RowMatch:
     candidates: tuple = field(default_factory=tuple)
     # The card came from step 4, the row's name within its set, whatever the finish then said (#229).
     by_name: bool = False
+    # Why the filters left the row out (#231), or None. A left-out row is never matched: it is stored not_found, with
+    # no card.
+    left_out: str | None = None
 
 
 def _by_name(found: list, sets: set) -> tuple | None:
@@ -145,6 +185,37 @@ def card_name(fields: dict) -> str:
 
 def usable_name(name: str) -> bool:
     return any(char.isalnum() for char in name)
+
+
+def plain(text: str) -> str:
+    """A cell as the filters compare it: without accents, case-folded, words joined by single spaces ("Pokémon" is
+    "pokemon", "en_US" is "en us")."""
+    decomposed = unicodedata.normalize("NFKD", text)
+    letters = "".join(char for char in decomposed if not unicodedata.combining(char))
+    return " ".join(re.sub(r"[_\-]+", " ", letters).casefold().split())
+
+
+def left_out_reason(fields: dict, source: str, columns=frozenset()) -> str | None:
+    """Why the filters leave this row out (the module docstring's first list), or None to match it. `columns` are the
+    FIELDS the file has a column for (collection_import_reader.SourceFile.columns)."""
+    if fields["watchlist"] == "true":
+        return "watchlist"
+    game = plain(fields["category"])
+    if game and game not in POKEMON_GAMES:
+        return "other_game"
+    language = plain(fields["language"])
+    if language and language not in ENGLISH:
+        return "not_english"
+    if LANGUAGE_TAG.search(fields["name"]):
+        return "not_english"
+    if source in (DRAGON_SHIELD, SORTED) and (
+            plain(fields["set_code"]) in JAPAN_ONLY_SETS
+            or plain(fields["set_name"]) in JAPAN_ONLY_SETS.values()):
+        return "not_english"
+    if not fields["number"].strip() and not energy_type(card_name(fields)):
+        if SEALED_NAME.search(fields["name"]) or ("rarity" in columns and not fields["rarity"].strip()):
+            return "sealed"
+    return None
 
 
 def editions_of(conn, generation: UUID | None, printing_ids) -> dict:
@@ -203,9 +274,19 @@ def _attempts(by_code: list[str], by_name: list[str], readings: list[str]) -> li
     return found
 
 
-def match(conn, generation: UUID, rows: list, source: str) -> list:
+def match(conn, generation: UUID, rows: list, source: str, columns=frozenset()) -> list:
     """One RowMatch per source row (reader.SourceRow), in order, against `generation`; `source` is the detected
-    source, whose alias entries and finish table read the row."""
+    source, whose alias entries and finish table read the row, and `columns` the FIELDS its file has a column for. The
+    filters run first: a row they leave out is not matched, so it costs no lookup."""
+    reasons = [left_out_reason(row.fields, source, columns) for row in rows]
+    kept = iter(_match(conn, generation, [row for row, reason in zip(rows, reasons) if reason is None], source))
+    return [next(kept) if reason is None else
+            RowMatch("not_found", quantity_of(row.fields["quantity"]), None, None, left_out=reason)
+            for row, reason in zip(rows, reasons)]
+
+
+def _match(conn, generation: UUID, rows: list, source: str) -> list:
+    """match() for the rows the filters keep."""
     sets = aliases.generation_sets(conn, generation)
     quantities = [quantity_of(row.fields["quantity"]) for row in rows]
     names = [card_name(row.fields) for row in rows]
