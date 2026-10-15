@@ -81,8 +81,12 @@ The cards in a Deck's Deck List that are stored elsewhere in the Collection, eac
 _Avoid_: Pull list, retrieval list
 
 **Want List**:
-The Card Editions a collector's Decks name in their Deck Lists but can't get from the Collection, grouped by Deck with a combined total. It is derived from Deck Lists and is never edited directly.
+The Card Editions a collector's Decks name in their Deck Lists but can't get from the Collection, grouped by Deck with a combined total. It is derived from Deck Lists and is never edited directly. The collector's counting setting decides whether Decks are counted as all built at once (spare copies go to the oldest Deck first) or one at a time.
 _Avoid_: Wishlist, shopping list, standalone list
+
+**Spare Copy**:
+A copy that isn't covering any Deck's own Deck List line: a loose copy outside every Deck, or a copy a Deck holds beyond its own Deck List line.
+_Avoid_: Free copy, unused copy
 
 **Unsorted**:
 The collector's root Storage Leaf that receives cards without a chosen Location. It always exists and cannot be renamed or moved.
