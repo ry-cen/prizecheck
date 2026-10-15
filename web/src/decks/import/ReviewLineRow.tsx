@@ -30,9 +30,8 @@ type Props = {
 
 /**
  * One pasted line in the review (#212, #213, #214): its quantity, the card it resolved to, a status Pill, the line as
- * pasted, the Deck List line(s) it becomes (owned copies first), copies other Decks keep, and why it needs the collector
- * or how it was matched. Fix, Edition, Change (Basic
- * Energy matched by type) or Restore sits on the right.
+ * pasted, the Deck List line(s) it becomes (owned copies first), copies other Decks keep, and why it needs the
+ * collector or how it was matched. Fix, Edition, Change (Basic Energy matched by type) or Restore sits on the right.
  */
 export function ReviewLineRow({
   line,

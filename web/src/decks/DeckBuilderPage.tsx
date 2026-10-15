@@ -38,12 +38,15 @@ import { DeckLibrary } from "./DeckLibrary";
 import { editionText, type DeckLine } from "./deckListModel";
 import { DeckDragBadge, dropLook, useDeckDrag } from "./useDeckDrag";
 import { useDeckListEdits } from "./useDeckListEdits";
+import { useDeckListChanged } from "./deckListChanged";
 
 type Props = {
   /** The Deck's id, from the address /decks/<id>. */
   deckId: string;
   /** Back to the Decks index (/decks). */
   onAllDecks: () => void;
+  /** Replace list… (/decks/<id>/replace, #215). */
+  onReplaceList: () => void;
 };
 
 type Load =
@@ -75,9 +78,11 @@ const VIEWS = [
  * Header row 2 holds the Target Format control (#178): its menu changes the Deck's Target Format through its Deck List
  * command, and the result opens the results dialog. A card-level issue in that result highlights its lines.
  *
- * The page header holds Export, Publish and Delete, and row 1 Buy missing after Gather N (#181, useDeckActions).
+ * The page header holds Replace list… (#215), Export, Publish and Delete, and row 1 Buy missing after Gather N (#181,
+ * useDeckActions). A Replace's Undo runs from a toast outside the builder and announces the change; the builder reads
+ * again (deckListChanged).
  */
-export function DeckBuilderPage({ deckId, onAllDecks }: Props) {
+export function DeckBuilderPage({ deckId, onAllDecks, onReplaceList }: Props) {
   const phone = useMediaQuery(MOBILE_QUERY);
   const idBase = useId();
   const [load, setLoad] = useState<Load>({ kind: "loading" });
@@ -232,6 +237,7 @@ export function DeckBuilderPage({ deckId, onAllDecks }: Props) {
     window.scrollTo(0, 0);
     void read();
   }, []);
+  useDeckListChanged(deckId, () => void read());
 
   const detail = load.kind === "ready" ? load.detail : null;
   const edits = useDeckListEdits({
@@ -328,6 +334,7 @@ export function DeckBuilderPage({ deckId, onAllDecks }: Props) {
     target: changing ?? detail?.target_format ?? "standard",
     read: () => void read(),
     onAllDecks,
+    onReplaceList,
   });
   const open: OpenSheet = (line, ordinal, element) => {
     opener.current = element;
