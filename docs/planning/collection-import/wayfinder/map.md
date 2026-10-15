@@ -2,7 +2,7 @@
 
 **Label:** wayfinder:map
 
-**Status:** charted 2026-10-15.
+**Status:** charted 2026-10-15; every ticket resolved 2026-10-15. The way is clear, ready for owner-invoked `/to-spec` and `/to-ticket`.
 
 ## Destination
 
@@ -27,10 +27,11 @@ An agreed plan, ready for owner-invoked `/to-spec` and `/to-ticket`, that lets a
 - [Decide what the import accepts](https://github.com/ry-cen/prizecheck/issues/220): header presets for the six exporting trackers plus a loose fallback for other CSVs, with no mapping screen and the source never named in the UI. One paste box reads a header as a file and anything else as decklist-style lines, then by name. File groups can be left out in the review but never become Locations. Uploads take CSV, TSV, TXT or a one-file zip. [Resolution](resolutions/decide-what-the-import-accepts.md)
 - [Decide how imported rows match Card Editions](https://github.com/ry-cen/prizecheck/issues/221): Product ID, then set and number, then Basic Energy, then name within the set, through a new set-name alias table and a finish table per tracker. Non-card and non-English rows are left out with counts. Graded cards come in as ordinary copies. An unclear finish goes to the Unspecified Variant as Finish unknown, and name matches need one card in the row's set. Untracked columns are dropped quietly, and an import never starts a catalog pull. [Resolution](resolutions/decide-how-rows-match.md)
 - [Prototype the collection import review](https://github.com/ry-cen/prizecheck/issues/223): decklist import's one-list review, opening on Needs you, with bulk finish and skip, the file's groups to leave out, left-out counts and downloads, and Save waiting only on Needs you. It starts from **Import…** in the Collection header or an empty Collection, and lands on the chosen Location. **No undo:** the review is the safety net. [Resolution](resolutions/prototype-collection-import-review.md)
+- [Decide the collection import contract](https://github.com/ry-cen/prizecheck/issues/224) (with [limits](https://github.com/ry-cen/prizecheck/issues/222) merged in): one import holds at most 10,000 rows and 5 MB (owner). A server-held draft, one per collector for 24 hours, with paged rows, a batched changes call and downloads in the file's own columns. Saving is one idempotent transaction into the landing leaf. The 5 MB route is the only one above the gateway's normal limits, with zip-bomb guards and 20 drafts a day. The review is not a price access. The scope change is recorded in [ADR 0014](../../../adr/0014-collection-import-in-scope.md). [Resolution](resolutions/decide-collection-import-contract.md)
 
 ## Not yet specified
 
-<!-- Trimmed by the owner on 2026-10-15: the per-tracker how-to-export help and the launch evidence (which real exports prove the import before public signup) go straight into the spec. -->
+<!-- Nothing is waiting in the fog. The per-tracker how-to-export help and the launch evidence (which real exports prove the import before public signup) go straight into the spec, as the owner decided on 2026-10-15. -->
 
 ## Out of scope
 
