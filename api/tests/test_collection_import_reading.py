@@ -4,8 +4,9 @@ through the start route against PostgreSQL, with the statuses, groups and stored
 The fixtures in collection_import_fixtures/ are reconstructions, not the research exports (whose licences weren't
 checked): each keeps its research fixture's header and edge cases, with this suite's catalog seed (seed_import_catalog
 in test_collection_import). Matching is #228's product IDs, set aliases, number rules and Basic Energy by type, #229's
-names within a set, and #230's finish table, so some rows here wait for a later ticket: the watchlist, sealed,
-other-game and non-English filters (#231). Each such row's comment names the ticket that changes it.
+names within a set, #230's finish table and #231's filters, which leave out watchlist rows, sealed product, other
+games and non-English cards (test_collection_import_left_out asserts each reason). A left-out row is in counts.rows
+and in the summary's left_out, and no filter lists it.
 
 | Research fixture | Reconstruction | Edge cases |
 | T1 tcgplayer-app.real.csv | tcgplayer-app-14.csv, tcgplayer-app-12-crlf.csv (#226's tests) | both headers, CRLF, quoting |
@@ -92,14 +93,15 @@ def test_both_collectr_headers_read_their_portfolios_grades_and_watchlist():
     seed_import_catalog()
     owner, unsorted = collector()
     summary = started(owner, unsorted, COLLECTR_14)
-    assert summary["counts"] == {"rows": 7, "needs_you": 2, "ready": 5, "finish_unknown": 1, "by_name": 0, "skipped": 0}
-    assert summary["cards_to_add"] == "9"
+    assert summary["counts"] == {"rows": 7, "needs_you": 1, "ready": 4, "finish_unknown": 1, "by_name": 0, "skipped": 0}
+    assert summary["cards_to_add"] == "8"
+    # Row 1, a watchlist row with a blank quantity, and row 7, a sealed booster box, are left out (#231).
+    assert [(entry["reason"], entry["rows"]) for entry in summary["left_out"]] == [("watchlist", 1), ("sealed", 1)]
     assert statuses(owner, summary) == [
-        ("matched", "1"),  # a watchlist row with a blank quantity; #231 leaves it out
-        ("matched", "2"), ("finish_unknown", "1"), ("matched", "1"),
+        ("matched", "2"), ("finish_unknown", "1"),
+        ("matched", "1"),  # graded CGC 8.5: an ordinary copy
         ("matched", "4"),  # "Base Set (Unlimited)": the collection set-name alias table (#228)
-        ("ambiguous", "1"),  # Cosmos Holo: Dark Golduck has no such Edition (#230)
-        ("not_found", "1")]  # a sealed booster box: no number, but a name; #231 leaves it out
+        ("ambiguous", "1")]  # Cosmos Holo: Dark Golduck has no such Edition (#230)
     source, rows = stored(summary["id"])
     assert source == "collectr"
     assert [group for group, _ in rows] == [None, "Main", "Main", "Graded", "Main", "Main", "Main"]
@@ -110,12 +112,12 @@ def test_both_collectr_headers_read_their_portfolios_grades_and_watchlist():
     cp1252 = COLLECTR_16.decode("utf-8").encode("cp1252")
     for data in (COLLECTR_16, b"\xef\xbb\xbf" + COLLECTR_16, cp1252, b"\xef\xbb\xbf" + cp1252):
         summary = started(owner, unsorted, data)
-        assert summary["counts"] == {"rows": 4, "needs_you": 1, "ready": 3, "finish_unknown": 0,
+        assert summary["counts"] == {"rows": 4, "needs_you": 0, "ready": 3, "finish_unknown": 0,
                                      "by_name": 0, "skipped": 0}
         assert summary["cards_to_add"] == "4"
-        assert statuses(owner, summary) == [
-            ("matched", "1"), ("matched", "2"), ("matched", "1"),
-            ("not_found", "1")]  # a One Piece card; #231 leaves other games out
+        # Row 4, a One Piece card, is left out (#231); row 2's PSA 10.0 slab is an ordinary copy.
+        assert [(entry["reason"], entry["rows"]) for entry in summary["left_out"]] == [("other_game", 1)]
+        assert statuses(owner, summary) == [("matched", "1"), ("matched", "2"), ("matched", "1")]
         source, rows = stored(summary["id"])
         assert source == "collectr"
         assert [group for group, _ in rows] == ["Main", "For Trade", "For Trade", "Main"]
@@ -129,17 +131,18 @@ def test_pricecharting_splits_name_variant_and_number_and_reads_its_zip_as_is():
     owner, unsorted = collector()
     for data in (PRICECHARTING, zipped(("collection_20260809.csv", PRICECHARTING))):
         summary = started(owner, unsorted, data)
-        assert summary["counts"] == {"rows": 9, "needs_you": 3, "ready": 6, "finish_unknown": 1,
+        assert summary["counts"] == {"rows": 9, "needs_you": 0, "ready": 6, "finish_unknown": 1,
                                      "by_name": 0, "skipped": 0}
         assert summary["cards_to_add"] == "7"
+        # Left out (#231): row 6's Japanese console, row 8's Elite Trainer Box and row 9's Yu-Gi-Oh! card.
+        assert [(entry["reason"], entry["rows"]) for entry in summary["left_out"]] == [
+            ("other_game", 1), ("not_english", 1), ("sealed", 1)]
         assert statuses(owner, summary) == [
             ("matched", "1"), ("matched", "1"),  # one row per copy, added together at save
-            ("matched", "1"), ("finish_unknown", "2"),
+            ("matched", "1"),  # PSA 10: an ordinary copy
+            ("finish_unknown", "2"),
             ("matched", "1"),  # [Reverse Holo] chooses Dark Golduck's Reverse Holo Edition (#230)
-            ("ambiguous", "1"),  # a Japanese console names no set: Pick one by name (#229); #231 leaves it out
-            ("matched", "1"),  # an Energy with no number: Basic Energy by type, in its own set (#228)
-            ("not_found", "1"),  # sealed: no number, but a name; #231 leaves it out
-            ("not_found", "1")]  # another game; #231
+            ("matched", "1")]  # an Energy with no number: Basic Energy by type, in its own set (#228), never sealed
         source, rows = stored(summary["id"])
         assert source == "pricecharting"
         assert [group for group, _ in rows] == ["Collection", "Hits", "Hits", None, None, None, None, None,
@@ -179,26 +182,28 @@ def test_dragon_shield_skips_its_sep_line_and_sorted_reads_with_or_without_one()
     unquoted = DRAGON_SHIELD.replace(b'"sep=,"', b"sep=,", 1)
     for data in (DRAGON_SHIELD, unquoted, DRAGON_SHIELD.split(b"\n", 1)[1]):
         summary = started(owner, unsorted, data)
-        assert summary["counts"] == {"rows": 4, "needs_you": 1, "ready": 3, "finish_unknown": 0,
+        assert summary["counts"] == {"rows": 4, "needs_you": 0, "ready": 3, "finish_unknown": 0,
                                      "by_name": 0, "skipped": 0}
         assert summary["cards_to_add"] == "4"
+        # Row 4's Rebellion Crash exists only in Japan, though Dragon Shield labels it English: left out (#231).
+        assert [(entry["reason"], entry["rows"]) for entry in summary["left_out"]] == [("not_english", 1)]
         assert statuses(owner, summary) == [
             ("matched", "1"), ("matched", "2"),
-            ("matched", "1"),  # "032VL" is also read as 032 (#228's number rules)
-            ("not_found", "1")]  # a Japan-only set; #231 leaves it out
+            ("matched", "1")]  # "032VL" is also read as 032 (#228's number rules)
         source, rows = stored(summary["id"])
         assert source == "dragon_shield"
         assert [group for group, _ in rows] == ["Binder", "Binder", "Binder", "Trades"]
         assert rows[0][1]["number"] == "042 / 102" and rows[0][1]["set_code"] == "BS"
     for data in (SORTED, b'"sep=,"\r\n' + SORTED):
         summary = started(owner, unsorted, data)
-        assert summary["counts"] == {"rows": 4, "needs_you": 1, "ready": 3, "finish_unknown": 0,
+        assert summary["counts"] == {"rows": 4, "needs_you": 0, "ready": 3, "finish_unknown": 0,
                                      "by_name": 0, "skipped": 0}
         assert summary["cards_to_add"] == "5"
+        # Row 4, a Magic card, is left out (#231).
+        assert [(entry["reason"], entry["rows"]) for entry in summary["left_out"]] == [("other_game", 1)]
         assert statuses(owner, summary) == [
             ("matched", "1"), ("matched", "3"),
-            ("matched", "1"),  # a row from a Deck list
-            ("not_found", "1")]  # a Magic card; #231 leaves other games out
+            ("matched", "1")]  # a row from a Deck list
         source, rows = stored(summary["id"])
         assert source == "sorted"
         assert [group for group, _ in rows] == ["Binder A", "Binder A", "Water Deck", "Binder A"]
@@ -247,7 +252,8 @@ def test_the_loose_fallback_reads_name_like_columns_and_product_ids():
     lines[0] += b",Extra"
     summary = started(owner, unsorted, b"\n".join(lines))
     assert stored(summary["id"])[0] == "loose"
-    assert summary["counts"] == {"rows": 7, "needs_you": 2, "ready": 5, "finish_unknown": 1, "by_name": 0, "skipped": 0}
+    assert summary["counts"] == {"rows": 7, "needs_you": 1, "ready": 4, "finish_unknown": 1, "by_name": 0, "skipped": 0}
+    assert [(entry["reason"], entry["rows"]) for entry in summary["left_out"]] == [("watchlist", 1), ("sealed", 1)]
     assert [group for group, _ in stored(summary["id"])[1]][:4] == [None, "Main", "Main", "Graded"]
     # A set column with a number or a name is enough; a name alone isn't.
     summary = started(owner, unsorted, b"Set,Number\nBase Set,64\n")

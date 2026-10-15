@@ -1,15 +1,18 @@
-"""Collection Import (#226 to #230; spec "Collection import from other trackers", ADR 0014): a collector's file
+"""Collection Import (#226 to #231; spec "Collection import from other trackers", ADR 0014): a collector's file
 becomes an import draft on the server, which they review and then save into one Storage Leaf in one step.
 
 - POST /api/collection-imports?location_id=<Storage Leaf> takes the file's bytes as the request body (no multipart): a
   CSV, TSV or TXT export from any supported tracker or with name-like columns, or a zip holding one such file, told
   apart by its bytes, not its content type. It reads the file (collection_import_reader), matches every row
-  (collection_import_matcher) and stores the draft with the detected source (for matching only), each row's group and
-  each row's candidate Printings (Pick one, or a Basic Energy's other Printings), replacing the collector's open draft:
+  (collection_import_matcher, whose filters first leave out the rows PrizeCheck can't hold: watchlist rows, sealed
+  product, other games and non-English cards, #231) and stores the draft with the detected source (for matching only),
+  each row's group, each left-out row's reason and each row's candidate Printings (Pick one, or a Basic Energy's other
+  Printings), replacing the collector's open draft:
   one open draft per collector. A saved draft stays, without rows, as the receipt that answers a repeated save for 24
   hours; starting an import also deletes this collector's expired ones.
   A draft is not inventory, so starting one doesn't advance the owner revision.
-- GET /api/collection-imports/current is the open draft's summary.
+- GET /api/collection-imports/current is the open draft's summary: its counts, and the left-out rows' count per reason
+  with a few of each, as the file wrote them.
 - GET /api/collection-imports/<id>/rows pages through its rows, 100 at a time, by filter: needs (Needs you), finish
   (Finish unknown), name (Matched by name), all (every row not skipped) or skipped. Each row lists its card's active
   Editions, for the finish picker, and its candidate cards, for Pick one and Change.
@@ -19,8 +22,9 @@ becomes an import draft on the server, which they review and then save into one 
   or one Edition), sets their finish (a Variant Descriptor; only where the row's card has exactly one active Edition
   that fits it, collection_import_finish), skips them or restores them. A skipped row is neither ready nor needs the
   collector, so the save leaves it out.
-- GET /api/collection-imports/<id>/skipped.csv downloads the skipped rows in the file's own columns: its header, then
-  each skipped row's cells as the file held them, as CSV (a tab-separated file comes back comma-separated).
+- GET /api/collection-imports/<id>/skipped.csv and .../left-out.csv download the skipped rows and the left-out rows
+  (#231) in the file's own columns: its header, then each row's cells as the file held them, as CSV (a tab-separated
+  file comes back comma-separated).
 - POST /api/collection-imports/<id>/save adds every ready row's copies to the landing Storage Leaf, one Holding
   increment per Card Edition, in one transaction and one owner revision, then deletes the draft's rows. It records no
   Inventory Undo. A repeated key, or a second save of a saved draft, answers the stored result without writing.
@@ -30,7 +34,7 @@ Every descriptor in a response keeps its physical keys only (collection_import_f
 marketplace lookup IDs stay out. The one response that names trackers is IMPORT_UNREADABLE's message, the list of
 trackers whose files are read. Nothing here reads or refreshes prices or starts a catalog pull. The gateway caps request
 bodies (auth/src/server.ts IMPORT_ROUTES): 5 MiB for the start route, forwarded as raw bytes, 64 KiB for changes and 16
-KiB for the rest; it streams the skipped rows' attachment as it streams Deck exports. This API enforces
+KiB for the rest; it streams the skipped and left-out rows' attachments as it streams Deck exports. This API enforces
 MAX_IMPORT_BYTES and MAX_IMPORT_ROWS itself too.
 """
 import csv
@@ -70,6 +74,7 @@ READY_ROW = matcher.READY_ROW.format(r="r")
 NEEDS_YOU_ROW = matcher.NEEDS_YOU_ROW.format(r="r")
 FINISH_UNKNOWN_ROW = matcher.FINISH_UNKNOWN_ROW.format(r="r")
 SKIPPED_ROW = matcher.SKIPPED_ROW.format(r="r")
+LEFT_OUT_ROW = matcher.LEFT_OUT_ROW.format(r="r")
 BY_NAME_ROW = matcher.BY_NAME_ROW.format(r="r")
 # Each row's candidate cards in the active generation, for one page: (printing id, name, set name, number).
 CANDIDATE_CARDS = """SELECT gp.printing_id,gp.display_name,gp.set_name,gp.collector_number
@@ -78,6 +83,16 @@ CANDIDATE_CARDS = """SELECT gp.printing_id,gp.display_name,gp.set_name,gp.collec
     AND EXISTS (SELECT 1 FROM catalog_generation_edition ge
       WHERE ge.generation_id=gp.generation_id AND ge.printing_id=gp.printing_id AND ge.active)"""
 RowFilter = Literal["needs", "finish", "name", "all", "skipped"]
+# collection_import_matcher.LEFT_OUT_REASONS.
+LeftOutReason = Literal["watchlist", "other_game", "not_english", "sealed"]
+# How many left-out rows of each reason the summary shows, for View.
+LEFT_OUT_EXAMPLES = 3
+# The left-out rows' examples: the first LEFT_OUT_EXAMPLES of each reason in file order, with each reason's count.
+LEFT_OUT = f"""SELECT reason,n,parsed FROM (
+    SELECT r.left_out_reason AS reason,r.parsed,count(*) OVER (PARTITION BY r.left_out_reason) AS n,
+      row_number() OVER (PARTITION BY r.left_out_reason ORDER BY r.row_number) AS k
+    FROM collection_import_row r WHERE r.import_id=%s AND {LEFT_OUT_ROW}) found
+  WHERE k<=%s ORDER BY reason,k"""
 # One changes request holds at most MAX_CHANGES changes, and a change names at most MAX_CHANGE_ROWS rows by number: the
 # gateway's 64 KiB body limit for this route binds first. It fits every row of a 10,000-row file named one by one
 # (about 49 KB). Select all sends its filter instead.
@@ -98,6 +113,23 @@ class CollectionImportCounts(BaseModel):
     skipped: int
 
 
+class CollectionImportSource(BaseModel):
+    """What the collector's file said, from the columns PrizeCheck reads; "" for a blank cell."""
+    quantity: str
+    name: str
+    set_name: str
+    number: str
+    finish: str
+
+
+class CollectionImportLeftOut(BaseModel):
+    """The rows the filters left out for one reason (#231): never listed, counted or saved."""
+    reason: LeftOutReason
+    rows: int
+    # The first LEFT_OUT_EXAMPLES of them, in file order, as the file wrote them.
+    examples: list[CollectionImportSource]
+
+
 class CollectionImportSummary(BaseModel):
     id: UUID
     draft_revision: int
@@ -108,15 +140,9 @@ class CollectionImportSummary(BaseModel):
     # The copies the ready rows add, as text so no JSON reader rounds it.
     cards_to_add: str
     expires_at: str
-
-
-class CollectionImportSource(BaseModel):
-    """What the collector's file said, from the columns PrizeCheck reads; "" for a blank cell."""
-    quantity: str
-    name: str
-    set_name: str
-    number: str
-    finish: str
+    # The left-out rows (#231), one entry per reason that has any, in LEFT_OUT_REASONS order. counts.rows includes
+    # them; no other count does.
+    left_out: list[CollectionImportLeftOut]
 
 
 class CollectionImportCard(BaseModel):
@@ -239,6 +265,20 @@ def storage_leaf(conn, user_id: str, location_id: UUID):
       AND NOT EXISTS (SELECT 1 FROM location child WHERE child.parent_id=l.id)""", (user_id, location_id)).fetchone()
 
 
+def source_of(parsed: dict) -> CollectionImportSource:
+    return CollectionImportSource(**{field: parsed.get(field, "") for field in
+                                     ("quantity", "name", "set_name", "number", "finish")})
+
+
+def left_out(conn, import_id: UUID) -> list[CollectionImportLeftOut]:
+    found: dict[str, CollectionImportLeftOut] = {}
+    for row in conn.execute(LEFT_OUT, (import_id, LEFT_OUT_EXAMPLES)):
+        entry = found.setdefault(row["reason"], CollectionImportLeftOut(reason=row["reason"], rows=row["n"],
+                                                                         examples=[]))
+        entry.examples.append(source_of(row["parsed"]))
+    return [found[reason] for reason in matcher.LEFT_OUT_REASONS if reason in found]
+
+
 def summary(conn, user_id: str, import_id: UUID) -> CollectionImportSummary:
     row = conn.execute(f"""SELECT ci.id,ci.draft_revision,ci.location_id,ci.expires_at,l.name AS location_name,
         count(r.row_number) AS rows,
@@ -261,7 +301,8 @@ def summary(conn, user_id: str, import_id: UUID) -> CollectionImportSummary:
         counts=CollectionImportCounts(rows=row["rows"], needs_you=row["needs_you"], ready=row["ready"],
                                       finish_unknown=row["finish_unknown"], by_name=row["by_name"],
                                       skipped=row["skipped"]),
-        cards_to_add=str(int(row["cards"])), expires_at=row["expires_at"].isoformat())
+        cards_to_add=str(int(row["cards"])), expires_at=row["expires_at"].isoformat(),
+        left_out=left_out(conn, import_id))
 
 
 @router.post("", response_model=CollectionImportSummary, status_code=201)
@@ -280,7 +321,7 @@ def start_import(location_id: UUID = Query(), body: bytes = Depends(import_body)
             catalog = conn.execute("SELECT active_generation,revision FROM catalog_state WHERE singleton").fetchone()
             if catalog is None or catalog["active_generation"] is None:
                 refuse(503, "CATALOG_UNAVAILABLE")
-            matches = matcher.match(conn, catalog["active_generation"], source.rows, source.source)
+            matches = matcher.match(conn, catalog["active_generation"], source.rows, source.source, source.columns)
         import_id = uuid4()
         with connect() as conn, conn.transaction():
             lock_owner(conn, user_id)
@@ -294,13 +335,14 @@ def start_import(location_id: UUID = Query(), body: bytes = Depends(import_body)
                          (import_id, user_id, location_id, source.source, json.dumps(source.header),
                           catalog["revision"]))
             with conn.cursor().copy("""COPY collection_import_row
-                (import_id,row_number,group_name,raw_text,parsed,quantity,status,printing_id,edition_id,candidates)
+                (import_id,row_number,group_name,raw_text,parsed,quantity,status,printing_id,edition_id,candidates,
+                 left_out_reason)
                 FROM STDIN""") as copy:
                 for row, found in zip(source.rows, matches):
                     parsed = {**row.fields, matcher.BY_NAME_KEY: "1"} if found.by_name else row.fields
                     copy.write_row((import_id, row.row_number, row.group, row.raw_text, json.dumps(parsed),
                                     found.quantity, found.status, found.printing_id, found.edition_id,
-                                    json.dumps([str(printing) for printing in found.candidates])))
+                                    json.dumps([str(printing) for printing in found.candidates]), found.left_out))
             return summary(conn, user_id, import_id)
     except psycopg.Error:
         refuse(503, "INVENTORY_TEMPORARILY_UNAVAILABLE")
@@ -365,8 +407,7 @@ def import_rows(import_id: UUID, filter_: RowFilter = Query(default="all", alias
             needs_you=(row["status"] in matcher.NEEDS_YOU and not row["skipped"] and row["left_out_reason"] is None),
             skipped=row["skipped"],
             quantity=None if row["quantity"] is None else str(row["quantity"]),
-            source=CollectionImportSource(**{field: parsed.get(field, "") for field in
-                                             ("quantity", "name", "set_name", "number", "finish")}),
+            source=source_of(parsed),
             card=None if row["printing_id"] is None or row["display_name"] is None else CollectionImportCard(
                 printing_id=row["printing_id"], name=row["display_name"], set_name=row["set_name"],
                 collector_number=row["collector_number"]),
@@ -554,12 +595,11 @@ def change_import(import_id: UUID, command: ChangeCollectionImport, user_id: str
         refuse(503, "INVENTORY_TEMPORARILY_UNAVAILABLE")
 
 
-@router.get("/{import_id}/skipped.csv")
-def skipped_rows(import_id: UUID, user_id: str = Depends(verified_user)):
-    """The draft's skipped rows, in file order, under the file's header, as a CSV attachment (UTF-8 with a BOM, so a
-    spreadsheet reads accents, and CRLF lines): each row's cells as the file held them, columns PrizeCheck doesn't read
-    included. Just the header when nothing is skipped. IMPORT_NOT_FOUND for a draft that isn't this collector's open
-    one."""
+def rows_csv(user_id: str, import_id: UUID, where: str, filename: str) -> Response:
+    """The draft's rows that `where` (a row predicate for alias r) holds, in file order, under the file's header, as a
+    CSV attachment (UTF-8 with a BOM, so a spreadsheet reads accents, and CRLF lines): each row's cells as the file held
+    them, columns PrizeCheck doesn't read included. Just the header when there are none. Owner-only and never cached.
+    IMPORT_NOT_FOUND for a draft that isn't this collector's open one."""
     try:
         with connect() as conn:
             draft = conn.execute("""SELECT source_header FROM collection_import
@@ -567,7 +607,7 @@ def skipped_rows(import_id: UUID, user_id: str = Depends(verified_user)):
             if draft is None:
                 refuse(404, "IMPORT_NOT_FOUND")
             lines = [row["raw_text"] for row in conn.execute(
-                f"""SELECT r.raw_text FROM collection_import_row r WHERE r.import_id=%s AND {SKIPPED_ROW}
+                f"""SELECT r.raw_text FROM collection_import_row r WHERE r.import_id=%s AND {where}
                     ORDER BY r.row_number""", (import_id,))]
     except psycopg.Error:
         refuse(503, "INVENTORY_TEMPORARILY_UNAVAILABLE")
@@ -575,8 +615,20 @@ def skipped_rows(import_id: UUID, user_id: str = Depends(verified_user)):
     csv.writer(header, lineterminator="").writerow(draft["source_header"])
     body = "\ufeff" + "".join(f"{line}\r\n" for line in (header.getvalue(), *lines))
     return Response(content=body.encode("utf-8"), media_type="text/csv; charset=utf-8",
-                    headers={"Content-Disposition": 'attachment; filename="skipped-rows.csv"',
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"',
                              "Cache-Control": "no-store"})
+
+
+@router.get("/{import_id}/skipped.csv")
+def skipped_rows(import_id: UUID, user_id: str = Depends(verified_user)):
+    """The draft's skipped rows in the file's own columns (rows_csv)."""
+    return rows_csv(user_id, import_id, SKIPPED_ROW, "skipped-rows.csv")
+
+
+@router.get("/{import_id}/left-out.csv")
+def left_out_rows(import_id: UUID, user_id: str = Depends(verified_user)):
+    """The rows the filters left out (#231), whatever their reason, in the file's own columns (rows_csv)."""
+    return rows_csv(user_id, import_id, LEFT_OUT_ROW, "left-out-rows.csv")
 
 
 @router.post("/{import_id}/save", response_model=CollectionImportSaveResult)

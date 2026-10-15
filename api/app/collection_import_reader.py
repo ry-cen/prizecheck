@@ -92,6 +92,9 @@ class SourceFile:
     # The header's cells, normalised and stripped.
     header: list
     rows: list
+    # The FIELDS this file has a column for (#231: a blank rarity means something only where the file has a rarity
+    # column).
+    columns: frozenset = frozenset()
 
 
 def normalise_cell(text: str) -> str:
@@ -374,4 +377,4 @@ def read(data: bytes) -> SourceFile:
         raise ImportRefused("IMPORT_UNREADABLE") from None
     if not rows:
         raise ImportRefused("IMPORT_EMPTY")
-    return SourceFile(layout.source, [normalise_cell(cell).strip() for cell in header], rows)
+    return SourceFile(layout.source, [normalise_cell(cell).strip() for cell in header], rows, frozenset(layout.columns))

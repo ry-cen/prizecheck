@@ -1,11 +1,13 @@
 import {
   CollectionImportError,
   type CollectionImportCard,
+  type CollectionImportLeftOut,
   type CollectionImportRow,
+  type CollectionImportSource,
 } from "../collection_import_generated";
 
-/* Collection Import copy (#226, #227, #229, #230). It never names the tracker a file came from, and shows no prices, marketplace
- * IDs, fetch times or internal reasons (AGENTS.md "UI copy"). Tracker names appear only in ExportHelp. */
+/* Collection Import copy (#226, #227, #229 to #231). It never names the tracker a file came from, and shows no prices,
+ * marketplace IDs, fetch times or internal reasons (AGENTS.md "UI copy"). Tracker names appear only in ExportHelp. */
 
 export const SPLIT_LARGE =
   "This file is larger than 5 MB. Split it into two files and import each one.";
@@ -187,4 +189,23 @@ export function changeErrorText(error: unknown): string {
     if (CHANGE[error.code]) return CHANGE[error.code];
   }
   return "Couldn't change the rows. Try again.";
+}
+
+/** Why rows were left out (#231), in plain words: the API's reason codes are never shown. */
+export const LEFT_OUT_LABELS: Record<
+  CollectionImportLeftOut["reason"],
+  string
+> = {
+  watchlist: "On a watchlist",
+  other_game: "From other games",
+  not_english: "Not in English",
+  sealed: "Sealed products",
+};
+
+/** A left-out row as View lists it, from the file's own words: "Wartortle · Base Set 042/102". */
+export function exampleText(source: CollectionImportSource): string {
+  const where = [source.set_name, source.number].filter(Boolean).join(" ");
+  return [source.name || "A row with no name", where]
+    .filter(Boolean)
+    .join(" · ");
 }
