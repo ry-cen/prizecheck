@@ -148,8 +148,6 @@ export function LineCost({
   if (!line) return null;
   const parts = [costText(line.cost)];
   if (line.price_each) parts.push(`${line.price_each} each`);
-  if (line.cost.stale_copies && line.cost.stale_copies !== "0")
-    parts.push("stale (price over 48 hours old)");
   return (
     <p className="col-start-2 m-0 text-right text-meta tabular-nums text-text-muted wrap-anywhere phone:col-start-1 phone:text-left">
       {parts.join(" · ")}
@@ -179,7 +177,7 @@ export function useTotalCostSuffix(): string {
 
 /**
  * The summary's estimated cost and how many cards are priced (spec "The Want List page"). Unpriced cards are reported
- * on their own line and never counted as $0; stale, unknown-age and cached-fallback counts are named when there are any.
+ * on their own line and never counted as $0.
  */
 export function CostSummary() {
   const load = useContext(WantListCostContext);
@@ -187,7 +185,6 @@ export function CostSummary() {
   const notes: string[] = [];
   if (load.kind === "unavailable") {
     value = "Price unavailable";
-    notes.push("Coverage unavailable");
   } else if (load.kind === "ready") {
     const total = load.cost.total;
     const copies = total.total_copies ?? "0";
@@ -203,21 +200,8 @@ export function CostSummary() {
       const unpriced = unpricedOf(total);
       if (unpriced !== "0")
         notes.push(`${plural(unpriced, "card")} without a price, not counted`);
-      if (total.stale_copies && total.stale_copies !== "0")
-        notes.push(
-          `${plural(total.stale_copies, "stale card")} (price over 48 hours old)`
-        );
-      if (total.unknown_age_copies && total.unknown_age_copies !== "0")
-        notes.push(
-          `${plural(total.unknown_age_copies, "card")} with unknown price age`
-        );
-      if (total.fallback_copies && total.fallback_copies !== "0")
-        notes.push(
-          `${plural(total.fallback_copies, "card")} could not be refreshed now and ${total.fallback_copies === "1" ? "shows" : "show"} cached data`
-        );
     } else {
       value = "Price unavailable";
-      notes.push("Coverage unavailable");
     }
   }
   return (
