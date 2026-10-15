@@ -14,6 +14,10 @@ from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
 EXCLUDED = {'catalog_generation', 'catalog_generation_printing', 'catalog_generation_edition', 'catalog_run'}
 EXPIRING = {'inventory_undo', 'move_manifest', 'mutation_request', 'catalog_approval_code'}
+# Collection Import drafts hold another app's export for at most 24 hours, and a saved draft only its receipt (spec
+# "The import draft", "Expiry"): a backup never keeps either, so a restore starts with no draft. A save replayed after a
+# restore answers REPLAY_OUTCOME_UNAVAILABLE.
+TRANSIENT = {'collection_import', 'collection_import_row'}
 
 
 def pg_env(url):
@@ -60,7 +64,7 @@ def backup(url, destination):
             rows = {}
             tables = conn.execute("SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename").fetchall()
             for (table,) in tables:
-                if table in EXCLUDED:
+                if table in EXCLUDED or table in TRANSIENT:
                     continue
                 query = sql.SQL('SELECT * FROM {}').format(sql.Identifier(table))
                 if table in EXPIRING:

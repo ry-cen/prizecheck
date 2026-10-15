@@ -446,6 +446,9 @@ def test_save_refuses_review_changed_when_the_leaf_or_an_edition_is_gone():
           VALUES (%s,%s,%s,'Box','storage_leaf') RETURNING id""", (uuid4(), owner, unsorted)).fetchone()["id"]
     response = save(owner, summary["id"])
     assert response.status_code == 409 and code(response) == "REVIEW_CHANGED"
+    # A Location that changed leaves the rows as they were, at the same draft revision.
+    current = call("GET", "/api/collection-imports/current", owner).json()
+    assert current["draft_revision"] == 1 and current["counts"]["needs_you"] == 0
     with connect() as conn:
         conn.execute("DELETE FROM location WHERE id=%s", (child,))
         conn.execute("UPDATE location SET kind='storage_leaf' WHERE id=%s", (unsorted,))
@@ -455,11 +458,19 @@ def test_save_refuses_review_changed_when_the_leaf_or_an_edition_is_gone():
     response = save(owner, summary["id"])
     assert response.status_code == 409 and code(response) == "REVIEW_CHANGED"
     assert held(owner, unsorted) == {} and stored_rows(summary["id"]) == 6
+    # #233: Wigglytuff's only Edition is gone, so its row is back under Needs you with no card, at a new revision
+    # (test_collection_import_drafts covers a card that keeps another Edition).
+    current = call("GET", "/api/collection-imports/current", owner).json()
+    assert current["draft_revision"] == 2 and current["counts"]["needs_you"] == 1
+    [waiting] = all_rows(owner, summary["id"], "needs")
+    assert (waiting["row_number"], waiting["status"], waiting["card"]) == (5, "not_found", None)
     with connect() as conn:
         conn.execute("""UPDATE catalog_generation_edition SET active=true
           WHERE generation_id=(SELECT active_generation FROM catalog_state WHERE singleton) AND edition_id=%s""",
                      (edition("base2-32", "holo"),))
-    assert save(owner, summary["id"]).status_code == 200
+    assert code(save(owner, summary["id"])) == "STALE_DRAFT"
+    response = save(owner, summary["id"], draft_revision=2)
+    assert response.status_code == 422 and response.json()["detail"] == {"code": "ROWS_NEED_YOU", "count": "1"}
 
 
 def test_no_route_reads_prices_or_starts_a_catalog_pull_or_returns_source_data(monkeypatch):
