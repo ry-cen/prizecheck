@@ -108,6 +108,10 @@ _Avoid_: Public account, owner profile
 A Published Deck excluded from public discovery and reachable only through its unguessable URL. Unlisted does not mean private because anyone with the URL can view it.
 _Avoid_: Private Deck, secret Deck
 
+**Collection Import**:
+Adding copies to the Collection from another tracker's export file or a pasted list, through a review in which every row is matched to a Card Edition or skipped before anything is saved. It only adds Holdings, all into one chosen Storage Leaf, and never changes or removes existing ones.
+_Avoid_: Catalog import, Decklist Import, sync, restore
+
 **Inventory Removal**:
 An explicit decrease that takes selected copies out of the tracked Collection without moving them to another Location.
 _Avoid_: Move, delete card
