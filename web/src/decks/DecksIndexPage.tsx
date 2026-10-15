@@ -6,7 +6,6 @@ import {
   useState,
   type FormEvent,
 } from "react";
-import { ArrowRight } from "lucide-react";
 import {
   createDeck,
   DeckError,
@@ -24,23 +23,23 @@ import {
   setPublishedDeckVisibility,
   type OwnedPublication,
 } from "../publications_generated";
-import { PageHeader } from "../shell/PageHeader";
 import { Button } from "../ui/Button";
-import { Icon } from "../ui/Icon";
 import { Pill } from "../ui/Pill";
 import { TextField } from "../ui/TextField";
+import { getWantList } from "../want_list_generated";
 import { figureText } from "./DeckCostLine";
 import { visibilityText } from "./publication";
 import { RevokeControl } from "./RevokeControl";
 import { formatLabel, statusOf } from "./targetFormat";
+import { cards } from "./wantListModel";
 
 type Props = {
   /** Opens a Deck in the deck builder (/decks/<id>). */
   onOpenDeck: (id: string) => void;
-  /** Goes to another address in the app (Discover). */
+  /** Goes to another address in the app (Import a list). */
   onNavigate: (to: string) => void;
-  /** The app's last service message. */
-  message: string;
+  /** Opens the Want List scoped to one Deck (/decks/want-list?deck=<id>). */
+  onWantList: (id: string) => void;
 };
 
 /** What a row reads on its own: the Target Format result and the cost to complete. */
@@ -59,19 +58,24 @@ const LINK =
   "inline-flex h-control items-center gap-1 rounded-control px-2 text-control font-medium text-accent-strong no-underline hover:bg-surface-raised phone:h-control-phone";
 
 /**
- * The Decks index (/decks) on the kit (#181): create a Deck, and every Deck with how many of its Deck List's copies it
- * holds ("41/60 in Deck"), its cost to complete and one Target Format Pill. Each row reads its result and its cost on
- * its own (the Deck's format-checks and cost routes), two rows at a time. Below, **Published Decks** lists every
- * publication, those whose Deck was deleted included, with Make Listed or Unlisted and Revoke. Import a list, beside
- * Create Deck, opens /decks/import (#212). The header links to Discover. Opening a Deck shows the deck builder at /decks/<id> (#176).
+ * The Decks index, the My Decks view of the Decks page (/decks, DecksPage) on the kit (#181): create a Deck, and every
+ * Deck with how many of its Deck List's copies it holds ("41/60 in Deck"), its cost to complete and one Target Format
+ * Pill. Each row reads its result and its cost on its own (the Deck's format-checks and cost routes), two rows at a
+ * time. Each row also has "Want List: N cards", which opens the Want List scoped to that Deck, or "Nothing to get"; N
+ * comes from one Want List read for the whole page (#209), the same allocation as the cost to complete, and a row
+ * shows neither until that read answers. Below, **Published Decks** lists every publication, those whose Deck was
+ * deleted included, with Make Listed or Unlisted and Revoke. Import a list, beside Create Deck, opens /decks/import
+ * (#212). Opening a Deck shows the deck builder at /decks/<id> (#176).
  */
-export function DecksIndexPage({ onOpenDeck, onNavigate, message }: Props) {
+export function DecksIndexPage({ onOpenDeck, onNavigate, onWantList }: Props) {
   const idBase = useId();
   const [decks, setDecks] = useState<DeckIndexEntry[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [notice, setNotice] = useState("");
   const [facts, setFacts] = useState<Record<string, Facts>>({});
+  // Each Deck's need, by Deck id, from one Want List read; null until it answers, and for good if it fails.
+  const [needs, setNeeds] = useState<Map<string, string> | null>(null);
   const queued = useRef(new Set<string>());
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
@@ -92,6 +96,20 @@ export function DecksIndexPage({ onOpenDeck, onNavigate, message }: Props) {
   }
   useEffect(() => {
     void loadIndex().catch(() => setNotice(UNAVAILABLE));
+  }, []);
+  useEffect(() => {
+    const controller = new AbortController();
+    getWantList(null, controller.signal)
+      .then((list) =>
+        setNeeds(
+          new Map(
+            list.sections.map((section) => [section.deck_id, section.to_get])
+          )
+        )
+      )
+      // Without it the rows still show; only the Want List buttons are missing.
+      .catch(() => {});
+    return () => controller.abort();
   }, []);
 
   async function moreDecks() {
@@ -181,24 +199,7 @@ export function DecksIndexPage({ onOpenDeck, onNavigate, message }: Props) {
 
   const names = new Map(decks.map((deck) => [deck.id, deck.name]));
   return (
-    <main className="mx-auto box-border flex max-w-7xl flex-col gap-6 px-7 py-6 phone:px-4 phone:py-4">
-      <PageHeader
-        title="Decks"
-        actions={
-          <a
-            href="/discover"
-            onClick={(event) => {
-              if (event.metaKey || event.ctrlKey || event.shiftKey) return;
-              event.preventDefault();
-              onNavigate("/discover");
-            }}
-            className={LINK}
-          >
-            Discover decks
-            <Icon icon={ArrowRight} />
-          </a>
-        }
-      />
+    <>
       <form
         onSubmit={create}
         className="flex flex-wrap items-end gap-2"
@@ -251,7 +252,9 @@ export function DecksIndexPage({ onOpenDeck, onNavigate, message }: Props) {
                   key={deck.id}
                   deck={deck}
                   facts={facts[deck.id] ?? {}}
+                  need={needs?.get(deck.id)}
                   onOpen={() => onOpenDeck(deck.id)}
+                  onWantList={() => onWantList(deck.id)}
                 />
               ))}
             </ul>
@@ -269,21 +272,23 @@ export function DecksIndexPage({ onOpenDeck, onNavigate, message }: Props) {
         )}
       </section>
       <PublishedDecks deckNames={names} onOpenDeck={onOpenDeck} />
-      <p role="alert" className="m-0 text-body text-danger">
-        {message}
-      </p>
-    </main>
+    </>
   );
 }
 
 function DeckRow({
   deck,
   facts,
+  need,
   onOpen,
+  onWantList,
 }: {
   deck: DeckIndexEntry;
   facts: Facts;
+  /** The Deck's need on the Want List, or undefined before (or without) the Want List read. */
+  need: string | undefined;
   onOpen: () => void;
+  onWantList: () => void;
 }) {
   const format = formatLabel(deck.target_format);
   const result = facts.result;
@@ -330,6 +335,16 @@ function DeckRow({
           )}
         </Pill>
       </span>
+      {need === "0" ? (
+        <span className="text-meta text-text-muted">
+          <span aria-hidden="true">✓ </span>Nothing to get
+        </span>
+      ) : need !== undefined ? (
+        // Above the row link's full-row tap area. #210 appends " · $X".
+        <Button className="relative" onClick={onWantList}>
+          {`Want List: ${cards(need)}`}
+        </Button>
+      ) : null}
     </li>
   );
 }

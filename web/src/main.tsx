@@ -2,8 +2,9 @@ import React, { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { getOwnerCatalogStatus, type OwnerCatalogStatus } from "./generated";
 import { DeckBuilderPage } from "./decks/DeckBuilderPage";
-import { DecksIndexPage } from "./decks/DecksIndexPage";
+import { DecksPage } from "./decks/DecksPage";
 import { ImportPage } from "./decks/import/ImportPage";
+import { WANT_LIST_SEGMENT } from "./decks/wantListModel";
 import { CatalogPage } from "./catalog/CatalogPage";
 import { OwnerControlsPage } from "./owner/OwnerControlsPage";
 import { ownerSection, ownerSectionPath } from "./owner/sections";
@@ -245,7 +246,8 @@ function App() {
           />
         );
       case "decks": {
-        // /decks is the index; /decks/<id> opens that Deck in the deck builder (#176).
+        // /decks is the index (My Decks) and /decks/want-list the Want List (#209), one page with a switch between
+        // them; /decks/import imports a list (#212); /decks/<id> opens that Deck in the deck builder (#176).
         const deckId = sectionAt(path);
         if (deckId === "import")
           return (
@@ -256,14 +258,15 @@ function App() {
               onAllDecks={() => navigate(pageDef("decks").path)}
             />
           );
-        return deckId ? (
+        return deckId && deckId !== WANT_LIST_SEGMENT ? (
           <DeckBuilderPage
             key={deckId}
             deckId={deckId}
             onAllDecks={() => navigate(pageDef("decks").path)}
           />
         ) : (
-          <DecksIndexPage
+          <DecksPage
+            view={deckId === WANT_LIST_SEGMENT ? "want-list" : "decks"}
             onOpenDeck={(id) =>
               navigate(`${pageDef("decks").path}/${encodeURIComponent(id)}`)
             }
