@@ -82,3 +82,5 @@ The prototype used placeholders for these. [Decide the import contract](https://
 - **Matching order.** The prototype matches code and number first, then Basic Energy by type, then name when a code fails. Names are never used for lines without a code.
 - **Use cards I own:** the allocation order, and which owned Edition wins when several are spare.
 - **Exact printings on a new Deck:** whether it uses owned copies of the named Printing's Editions. The decision above covers a replaced Deck's own copies.
+
+*Amended by [the import contract](decide-import-contract.md):* Exact printings uses owned copies of the named Printing from anywhere the counting setting makes available, not only the replaced Deck's; Use cards I own draws on the copies the Want List counting setting makes available; `PH` is ignored; nothing in a paste sets the Target Format; a failed code whose name names one Reprint Group resolves as **Matched by name**.
