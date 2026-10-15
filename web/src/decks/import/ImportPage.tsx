@@ -18,6 +18,8 @@ import {
   type Filter,
   type Pick,
 } from "./importModel";
+import { CopySource } from "./CopySource";
+import { publicationInAddress } from "./copyModel";
 import { useOwnedCards } from "./ownedCards";
 import { PasteStep } from "./PasteStep";
 import {
@@ -49,6 +51,10 @@ type FocusAfter = { line: number; same: boolean } | null;
  * With `replace` (/decks/<id>/replace, Replace list…, #215) the paste replaces that Deck's Deck List: the review uses
  * the Deck's own copies first and shows Will become Surplus, and Replace Deck List sends the review's changes batch at
  * its Deck List revision (replaceList.ts). A save answered STALE_DECK_LIST reviews again; Undo is the inverse batch.
+ *
+ * Copy to my Decks (#216) opens this page at /decks/import?publication=<token>: the paste screen shows the Published
+ * Deck's cards instead of the text box, and the new Deck starts with its title and Target Format, both editable. If it
+ * is republished during the copy, the choices go and the paste screen shows the new list.
  */
 export function ImportPage({
   onOpenDeck,
@@ -72,6 +78,12 @@ export function ImportPage({
   const [saveMessage, setSaveMessage] = useState("");
   const [nameMessage, setNameMessage] = useState("");
   const [owned, setOwned] = useOwnedCards();
+  // Copy to my Decks (#216): the Published Deck's token from the address, read once; null for a pasted list.
+  const [publication] = useState(() =>
+    replace ? null : publicationInAddress()
+  );
+  const [updated, setUpdated] = useState(false);
+  const defaulted = useRef(false);
 
   const pendingSave = useRef<{ payloadKey: string; key: string } | null>(null);
   const previousChoices = useRef<Choices>({
@@ -91,7 +103,8 @@ export function ImportPage({
     fixesFor(picks, drops),
     owned,
     step === "paste" ? 300 : 0,
-    replace?.deckId ?? null
+    replace?.deckId ?? null,
+    publication
   );
   const toast = useToast();
   const review = state.review;
@@ -105,6 +118,30 @@ export function ImportPage({
     if (target === "textArea") textArea.current?.focus();
     if (target === "nameField") nameField.current?.focus();
   }, [step]);
+
+  // Copy to my Decks (#216): the new Deck starts named after the Published Deck, in its Target Format.
+  useEffect(() => {
+    const source = review?.publication;
+    if (!source || defaulted.current) return;
+    defaulted.current = true;
+    setName((current) => current || source.title);
+    setTargetFormat(source.target_format);
+  }, [review]);
+
+  // Republished during the copy: the choices named the old rows, so they go and the paste screen reads the new list.
+  useEffect(() => {
+    if (state.code !== "PUBLISHED_DECK_CHANGED") return;
+    setPicks(new Map());
+    setDrops(new Set());
+    setOpen(null);
+    setSaveMessage("");
+    pendingSave.current = null;
+    setUpdated(true);
+    focusNext.current = "nameField";
+    setStep("paste");
+    state.retry();
+    // Only a new PUBLISHED_DECK_CHANGED answer starts this again.
+  }, [state.code]);
 
   // A fix the API refused is taken back.
   useEffect(() => {
@@ -388,7 +425,7 @@ export function ImportPage({
         createButtonRef={createButton}
         saving={saving}
         saveMessage={saveMessage}
-        onBack={() => backToPaste()}
+        onBack={() => backToPaste(publication ? "nameField" : "textArea")}
         onCreate={() => void save()}
       />
     );
@@ -422,6 +459,16 @@ export function ImportPage({
             destination: <ReplacePasteDestination name={replace.name} />,
           }
         : {})}
+      copy={
+        publication
+          ? {
+              title: "Copy to my Decks",
+              intro:
+                "Copy a Published Deck into a new Deck of your own. You'll check every card before anything is saved.",
+              source: <CopySource state={state} updated={updated} />,
+            }
+          : undefined
+      }
     />
   );
 }

@@ -30,6 +30,8 @@ type Props = {
   back?: { label: string; href: string; onClick: () => void };
   /** Another destination in place of a new Deck's name and Target Format (Replace this Deck's list, #215). */
   destination?: ReactNode;
+  /** Copy to my Decks (#216): the page's heading and words, and the Published Deck's cards in place of the text box. */
+  copy?: { title: string; intro: string; source: ReactNode };
 };
 
 /**
@@ -54,6 +56,7 @@ export function PasteStep({
   heading = "Import a decklist",
   back = { label: "Decks", href: "/decks", onClick: onAllDecks },
   destination,
+  copy,
 }: Props) {
   const totals = state.review?.totals;
   const noName = !destination && !name.trim();
@@ -71,14 +74,24 @@ export function PasteStep({
         >
           ‹ {back.label}
         </a>
-        <PageHeader title={heading} />
+        <PageHeader title={copy?.title ?? heading} />
         <p className="m-0 text-body text-text-muted">
-          Paste a list from Pokémon TCG Live or Limitless. You'll check every
-          line before anything is saved.
+          {copy?.intro ??
+            "Paste a list from Pokémon TCG Live or Limitless. You'll check every line before anything is saved."}
         </p>
       </div>
       <div className="grid grid-cols-[minmax(0,1fr)_20rem] items-start gap-6 phone:grid-cols-1">
-        <section aria-label="Paste" className="flex flex-col gap-2">
+        {copy && (
+          <section aria-label="Published Deck" className="flex flex-col gap-2">
+            {copy.source}
+          </section>
+        )}
+        {/* A copy has no text box: the paste section stays out of sight and out of the accessibility tree. */}
+        <section
+          aria-label="Paste"
+          hidden={copy !== undefined}
+          className="flex flex-col gap-2"
+        >
           <TextArea
             ref={textAreaRef}
             label="Decklist"

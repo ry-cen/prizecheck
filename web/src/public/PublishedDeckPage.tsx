@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Copy, Link2, ShoppingCart } from "lucide-react";
+import { Copy, CopyPlus, Link2, ShoppingCart } from "lucide-react";
 import { publishedDate } from "../discover/discoverText";
 import type { DeckView } from "../decks/deckListModel";
+import { copyPath } from "../decks/import/copyModel";
 import { FormatResultsDialog } from "../decks/FormatResultsDialog";
 import {
   flaggedLines,
@@ -83,7 +84,8 @@ const PILL =
  *
  * - the header: the title, "The card list is a snapshot from [date]; format results update automatically", the
  *   Target Format result as a pill that opens the results dialog, the total and how many copies are priced, and Copy
- *   for TCG Live, Buy on TCGplayer and Share;
+ *   for TCG Live, Copy to my Decks (decklist import #216: the import page with this snapshot; signed out, the sign-in
+ *   screen first, which continues there), Buy on TCGplayer and Share;
  * - the deck builder's deck panel, read-only, in Spread, Stacked and List (Spread on a desktop, Stacked on a phone),
  *   with one card's price on tiles and that many copies' price on List lines; a card-level issue outlines its tiles;
  * - the read-only card popup, stepping through the deck;
@@ -280,6 +282,12 @@ export function PublishedDeckPage({
                 }}
               >
                 Copy for TCG Live
+              </Button>
+              <Button
+                icon={CopyPlus}
+                onClick={() => onNavigate(copyPath(token))}
+              >
+                Copy to my Decks
               </Button>
               <Button
                 icon={ShoppingCart}
