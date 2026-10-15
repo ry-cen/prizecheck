@@ -137,11 +137,15 @@ One collector's invitation to another to become Friends. The friendship starts o
 _Avoid_: Follow, add
 
 **Handle**:
-The unique name another collector types, exactly, to send a Friend Request. It is not a public profile: it is not searchable by partial match and does not appear on Published Decks.
-_Avoid_: Username, profile, display name
+The unique name another collector types, exactly, to send a Friend Request. Every collector has one: it starts as a random, unguessable Handle and can be changed to a chosen one. It is not a public profile: it is not searchable by partial match and does not appear on Published Decks.
+_Avoid_: Username, profile
+
+**Display Name**:
+The free-text name a collector's Friends, and anyone they send a Friend Request or Invite Link to, see for them. It need not be unique and does not appear on Published Decks.
+_Avoid_: Handle, nickname, profile name
 
 **Invite Link**:
-A collector's personal link, shared outside the app, through which someone can send them a Friend Request without knowing their Handle.
+A collector's one reusable personal link, shared outside the app, through which someone can send them a Friend Request without knowing their Handle. Regenerating it stops the old link working.
 _Avoid_: Referral link, share link
 
 **Block**:
