@@ -459,16 +459,14 @@ export function ImportPage({
             destination: <ReplacePasteDestination name={replace.name} />,
           }
         : {})}
-      copy={
-        publication
-          ? {
-              title: "Copy to my Decks",
-              intro:
-                "Copy a Published Deck into a new Deck of your own. You'll check every card before anything is saved.",
-              source: <CopySource state={state} updated={updated} />,
-            }
-          : undefined
-      }
+      {...(publication
+        ? {
+            heading: "Copy to my Decks",
+            intro:
+              "Copy a Published Deck into a new Deck of your own. You'll check every card before anything is saved.",
+            source: <CopySource state={state} updated={updated} />,
+          }
+        : {})}
     />
   );
 }
