@@ -261,7 +261,9 @@ def test_new_copies_get_the_cheapest_stored_quote_and_no_runner_is_launched(stor
     generation = store.read_records(keys, deadline=time.monotonic() + 5).generation
     body = review(owner, "2 Furret DAA 1\n")
     [line] = body["lines"]
-    assert line["parts"] == [{"edition_id": second, "quantity": "2", "source": "new", "chosen_by": "cheapest_price"}]
+    assert [{key: part[key] for key in ("edition_id", "quantity", "source", "chosen_by", "places")}
+            for part in line["parts"]] == [
+        {"edition_id": second, "quantity": "2", "source": "new", "chosen_by": "cheapest_price", "places": []}]
     assert [e["edition_id"] for e in line["editions"]] == [first, second]
     assert [e["display_price"] for e in line["editions"]] == ["$0.50", "$0.10"]
     assert [e["stale"] for e in line["editions"]] == [False, False]
@@ -328,7 +330,8 @@ def test_fixes_drop_pick_a_card_or_choose_an_edition():
     fixed = review(owner, TEXT, fixes)
     assert [l["status"] for l in fixed["lines"]] == ["matched", "matched", "matched", "picked", "dropped"]
     assert fixed["lines"][4]["printing"] is None and fixed["lines"][4]["parts"] == []
-    assert fixed["totals"] == {"card_lines": 5, "cards": "8", "ignored": 0, "to_resolve": 0}
+    assert {key: fixed["totals"][key] for key in ("card_lines", "cards", "ignored", "to_resolve")} == {
+        "card_lines": 5, "cards": "8", "ignored": 0, "to_resolve": 0}
     assert fixed["deck_list"][1]["quantity"] == "7"
     chosen = review(owner, TEXT, fixes + [{"line": 2, "edition_id": mimikyu_edition}])
     assert chosen["lines"][0]["status"] == "matched"
