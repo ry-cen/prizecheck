@@ -134,12 +134,12 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         {toast && (
           <div
             key={toast.id}
-            className="pointer-events-auto box-border flex min-h-control max-w-140 flex-wrap items-center gap-2 rounded-panel border border-border-strong bg-surface-raised py-1 pl-4 pr-1 text-control text-text phone:w-full phone:max-w-full phone:pl-3"
+            className="pointer-events-auto box-border flex min-h-control max-w-140 items-center gap-2 rounded-panel border border-border-strong bg-surface-raised py-1 pl-4 pr-1 text-control text-text phone:w-full phone:max-w-full phone:flex-wrap phone:pl-3"
           >
-            <p className="m-0 min-w-0 grow basis-40 tabular-nums">
+            <p className="m-0 min-w-0 grow tabular-nums phone:basis-40">
               {toast.message}
             </p>
-            <span className="flex shrink-0 items-center gap-1">
+            <span className="ml-auto flex shrink-0 items-center gap-1">
               {toast.action && (
                 <button
                   type="button"

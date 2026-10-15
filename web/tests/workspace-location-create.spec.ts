@@ -232,10 +232,13 @@ test.describe("desktop", () => {
       // The row and its Add child share one entry: the row's parent element.
       .locator("xpath=..")
       .boundingBox())!;
-    expect(Math.abs(addBox.width - 28)).toBeLessThanOrEqual(1);
-    expect(Math.abs(addBox.height - rowBox.height)).toBeLessThanOrEqual(1);
+    // Inset 2 px from the row's top, bottom and end, so the open row's border and a drop ring stay visible.
+    expect(Math.abs(addBox.width - 26)).toBeLessThanOrEqual(1);
+    expect(Math.abs(addBox.height - (rowBox.height - 4))).toBeLessThanOrEqual(
+      1
+    );
     expect(
-      Math.abs(addBox.x + addBox.width - (rowBox.x + rowBox.width))
+      Math.abs(addBox.x + addBox.width - (rowBox.x + rowBox.width - 2))
     ).toBeLessThanOrEqual(1);
     expect(Math.abs(entryBox.width - rowBox.width)).toBeLessThanOrEqual(1);
     await page.mouse.move(1500, 850);

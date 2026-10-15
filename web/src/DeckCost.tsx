@@ -134,9 +134,8 @@ export function CostSection({
             )}
           </p>
           <p>
-            {plural(cost.stale_copies ?? "0", "stale card")} (price over 48
-            hours old) · {plural(cost.unknown_age_copies ?? "0", "card")} with
-            unknown price age
+            {plural(cost.unknown_age_copies ?? "0", "card")} with unknown price
+            age
           </p>
         </>
       );

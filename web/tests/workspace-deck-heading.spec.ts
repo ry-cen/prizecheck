@@ -391,7 +391,7 @@ test("an open Deck's banner shows its cost and coverage and links to the deck bu
   await expect(cost).toContainText(
     "Incomplete subtotal: 1 card without a price"
   );
-  await expect(cost).toContainText("2 stale cards (price over 48 hours old)");
+  await expect(cost).not.toContainText("stale");
   await expect(cost).toContainText("0 cards with unknown price age");
   await expect(cost).toContainText("Excludes shipping and taxes");
   await expect(cost).not.toContainText("$0.00");
@@ -442,7 +442,6 @@ test("the cost comes from the complete Deck read even when the gallery's tiles f
     })
   ).toHaveCount(0);
   await expect(costOf(page)).toContainText("$1.61 · 5/6 cards priced");
-  await expect(costOf(page)).toContainText("2 stale cards");
 });
 
 test("a cost for a newer inventory revision re-reads the Deck and prices the new contents", async ({
@@ -480,7 +479,6 @@ test("a cost for a newer inventory revision re-reads the Deck and prices the new
   );
   resume();
   await expect(costOf(page)).toContainText("$1.61 · 5/5 cards priced");
-  await expect(costOf(page)).toContainText("2 stale cards");
   expect(seen).toHaveLength(2);
 });
 

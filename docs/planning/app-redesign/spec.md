@@ -153,7 +153,7 @@ The redesign is a **launch gate**: nobody besides the owner uses PrizeCheck unti
 74. As a collector, I want Catalog to show one tile per Card Edition, the same tile as Collection and the library, with set, number, Variant, price and an owned badge, and unowned Editions darkened, so that it looks like the rest of the app.
 75. As a collector, I want one search box where "PAL 185" or "svi 191" searches by set and collector number and anything else by name, with a hint showing which, so that I can type what's on the card.
 76. As a collector, I want format and type chips, a set picker and an Owned only chip in one row under the search box, so that filters stay in one place.
-77. As a collector, I want the status line ("N Printings · English catalog from TCGdex, last pulled …", "changed, refreshed", and "unavailable until the first import"), so that I know how fresh the catalog is.
+77. As a collector, I want the status line ("N Printings · last pulled …", "changed, refreshed", and "unavailable until the first import"), so that I know how fresh the catalog is.
 78. As a collector, I want tapping a tile to open the card popup with ‹ N / M ›, the art, the Printing details, the source, legality pills, the Editions with owned counts and prices, and where my copies are, so that one popup answers everything.
 79. As a collector, I want the popup's Collection row (Location, − N +, Add N) and Deck List row (Deck, Plan 1), so that I can add a card where I need it.
 80. As a collector, I want Report links (this Edition, Printing metadata, a missing Edition) in a quiet footer, and My reports at the foot of the page, so that reporting stays available but out of the way.
@@ -405,7 +405,7 @@ From [Prototype Catalog search in the shell](wayfinder/resolutions/decide-catalo
   - one SearchField. A query that starts with a known set id followed by a number is a set and collector number search; anything else is a name search;
   - a hint names the mode.
 - **Filters** sit in one row under the search box: format and type chips in a scrolling row that fades at its edge, a set picker styled as a chip, and an Owned only chip.
-- **Status line:** "N Printings · English catalog from TCGdex, last pulled …", plus today's "changed, refreshed" and "unavailable until the first import" handling.
+- **Status line:** "N Printings · last pulled …", plus today's "changed, refreshed" and "unavailable until the first import" handling.
 - **CardPopup (Browse):**
   - ‹ N / M › beside ✕, with ← → stepping;
   - the art, with the note that artwork doesn't prove an Edition's finish;

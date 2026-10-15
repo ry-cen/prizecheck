@@ -156,7 +156,9 @@ test.describe("desktop", () => {
     await expect(card).toContainText("Mega Evolution (MEG) · #001");
     await expect(card).toContainText("Regulation mark I");
     await expect(card).not.toContainText("Card Identity");
-    await expect(card).toContainText("Source: TCGdex · me01-001");
+    // The third-party catalog source is not named.
+    await expect(card).not.toContainText("TCGdex");
+    await expect(card).not.toContainText("me01-001");
     await expect(
       card.getByRole("list", { name: "Legality" }).getByRole("listitem")
     ).toHaveText(["Standard: Legal", "Expanded: Legal", "GLC: Legal"]);
