@@ -1,4 +1,5 @@
-"""Trusted request budget for deadline-bound routes (Edition prices, private Deck cost, Published Deck cost).
+"""Trusted request budget for deadline-bound routes (Edition prices, private Deck cost, Published Deck cost, Want List
+cost).
 
 The gateway takes the receipt time, spends part of the three seconds on its own work, and signs what is
 left for the API: milliseconds remaining, the epoch millisecond it signed at, and the caller. A client can
@@ -35,6 +36,7 @@ BUDGETED_ROUTES = (
     ('POST', re.compile(r'^/api/prices/editions$')),
     ('GET', re.compile(r'^/api/decks/[^/]+/cost$')),
     ('GET', re.compile(r'^/api/public/decks/[^/]+/versions/[^/]+/cost$')),
+    ('GET', re.compile(r'^/api/want-list/cost$')),
 )
 
 

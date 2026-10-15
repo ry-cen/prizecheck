@@ -5,7 +5,7 @@ export type WantListLine = { edition_id: string; name: string; set_id: string; s
 export type WantListSection = { deck_id: string; name: string; deck_list_revision: number; to_get: string; lines: WantListLine[] };
 export type CombinedDeckNeed = { deck_id: string; need: string };
 export type CombinedRow = { edition_id: string; name: string; set_id: string; set_name: string; collector_number: string; descriptor: Record<string, unknown>; image_url: string | null; need: string; decks: CombinedDeckNeed[] };
-export type WantList = { want_list_counting: 'all_at_once' | 'one_at_a_time'; settings_revision: number; owner_revision: number; deck_id: string | null; decks: WantListDeck[]; sections: WantListSection[]; combined: CombinedRow[]; to_get: string };
+export type WantList = { want_list_counting: 'all_at_once' | 'one_at_a_time'; settings_revision: number; owner_revision: number; deck_lists_digest: string; deck_id: string | null; decks: WantListDeck[]; sections: WantListSection[]; combined: CombinedRow[]; to_get: string };
 
 export class WantListError extends Error {
   constructor(public status: number, public code: string) { super(code); }
