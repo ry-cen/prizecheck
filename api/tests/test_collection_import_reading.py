@@ -3,9 +3,9 @@ through the start route against PostgreSQL, with the statuses, groups and stored
 
 The fixtures in collection_import_fixtures/ are reconstructions, not the research exports (whose licences weren't
 checked): each keeps its research fixture's header and edge cases, with this suite's catalog seed (seed_import_catalog
-in test_collection_import). Matching is #228's product IDs, set aliases, number rules and Basic Energy by type, with
-#230's finish table, so some rows here wait for later tickets: names (#229), and the watchlist, sealed, other-game and
-non-English filters (#231). Each such row's comment names the ticket that changes it.
+in test_collection_import). Matching is #228's product IDs, set aliases, number rules and Basic Energy by type, #229's
+names within a set, and #230's finish table, so some rows here wait for a later ticket: the watchlist, sealed,
+other-game and non-English filters (#231). Each such row's comment names the ticket that changes it.
 
 | Research fixture | Reconstruction | Edge cases |
 | T1 tcgplayer-app.real.csv | tcgplayer-app-14.csv, tcgplayer-app-12-crlf.csv (#226's tests) | both headers, CRLF, quoting |
@@ -92,7 +92,7 @@ def test_both_collectr_headers_read_their_portfolios_grades_and_watchlist():
     seed_import_catalog()
     owner, unsorted = collector()
     summary = started(owner, unsorted, COLLECTR_14)
-    assert summary["counts"] == {"rows": 7, "needs_you": 2, "ready": 5, "finish_unknown": 1, "skipped": 0}
+    assert summary["counts"] == {"rows": 7, "needs_you": 2, "ready": 5, "finish_unknown": 1, "by_name": 0, "skipped": 0}
     assert summary["cards_to_add"] == "9"
     assert statuses(owner, summary) == [
         ("matched", "1"),  # a watchlist row with a blank quantity; #231 leaves it out
@@ -110,7 +110,8 @@ def test_both_collectr_headers_read_their_portfolios_grades_and_watchlist():
     cp1252 = COLLECTR_16.decode("utf-8").encode("cp1252")
     for data in (COLLECTR_16, b"\xef\xbb\xbf" + COLLECTR_16, cp1252, b"\xef\xbb\xbf" + cp1252):
         summary = started(owner, unsorted, data)
-        assert summary["counts"] == {"rows": 4, "needs_you": 1, "ready": 3, "finish_unknown": 0, "skipped": 0}
+        assert summary["counts"] == {"rows": 4, "needs_you": 1, "ready": 3, "finish_unknown": 0,
+                                     "by_name": 0, "skipped": 0}
         assert summary["cards_to_add"] == "4"
         assert statuses(owner, summary) == [
             ("matched", "1"), ("matched", "2"), ("matched", "1"),
@@ -128,13 +129,14 @@ def test_pricecharting_splits_name_variant_and_number_and_reads_its_zip_as_is():
     owner, unsorted = collector()
     for data in (PRICECHARTING, zipped(("collection_20260809.csv", PRICECHARTING))):
         summary = started(owner, unsorted, data)
-        assert summary["counts"] == {"rows": 9, "needs_you": 3, "ready": 6, "finish_unknown": 1, "skipped": 0}
+        assert summary["counts"] == {"rows": 9, "needs_you": 3, "ready": 6, "finish_unknown": 1,
+                                     "by_name": 0, "skipped": 0}
         assert summary["cards_to_add"] == "7"
         assert statuses(owner, summary) == [
             ("matched", "1"), ("matched", "1"),  # one row per copy, added together at save
             ("matched", "1"), ("finish_unknown", "2"),
             ("matched", "1"),  # [Reverse Holo] chooses Dark Golduck's Reverse Holo Edition (#230)
-            ("not_found", "1"),  # a Japanese console; #231 leaves it out
+            ("ambiguous", "1"),  # a Japanese console names no set: Pick one by name (#229); #231 leaves it out
             ("matched", "1"),  # an Energy with no number: Basic Energy by type, in its own set (#228)
             ("not_found", "1"),  # sealed: no number, but a name; #231 leaves it out
             ("not_found", "1")]  # another game; #231
@@ -158,7 +160,7 @@ def test_tcg_collector_reads_crlf_and_repeated_rows():
     seed_import_catalog()
     owner, unsorted = collector()
     summary = started(owner, unsorted, TCG_COLLECTOR)
-    assert summary["counts"] == {"rows": 6, "needs_you": 0, "ready": 6, "finish_unknown": 0, "skipped": 0}
+    assert summary["counts"] == {"rows": 6, "needs_you": 0, "ready": 6, "finish_unknown": 0, "by_name": 0, "skipped": 0}
     assert summary["cards_to_add"] == "33"
     assert statuses(owner, summary) == [
         ("matched", "2"), ("matched", "1"), ("matched", "1"),
@@ -177,7 +179,8 @@ def test_dragon_shield_skips_its_sep_line_and_sorted_reads_with_or_without_one()
     unquoted = DRAGON_SHIELD.replace(b'"sep=,"', b"sep=,", 1)
     for data in (DRAGON_SHIELD, unquoted, DRAGON_SHIELD.split(b"\n", 1)[1]):
         summary = started(owner, unsorted, data)
-        assert summary["counts"] == {"rows": 4, "needs_you": 1, "ready": 3, "finish_unknown": 0, "skipped": 0}
+        assert summary["counts"] == {"rows": 4, "needs_you": 1, "ready": 3, "finish_unknown": 0,
+                                     "by_name": 0, "skipped": 0}
         assert summary["cards_to_add"] == "4"
         assert statuses(owner, summary) == [
             ("matched", "1"), ("matched", "2"),
@@ -189,7 +192,8 @@ def test_dragon_shield_skips_its_sep_line_and_sorted_reads_with_or_without_one()
         assert rows[0][1]["number"] == "042 / 102" and rows[0][1]["set_code"] == "BS"
     for data in (SORTED, b'"sep=,"\r\n' + SORTED):
         summary = started(owner, unsorted, data)
-        assert summary["counts"] == {"rows": 4, "needs_you": 1, "ready": 3, "finish_unknown": 0, "skipped": 0}
+        assert summary["counts"] == {"rows": 4, "needs_you": 1, "ready": 3, "finish_unknown": 0,
+                                     "by_name": 0, "skipped": 0}
         assert summary["cards_to_add"] == "5"
         assert statuses(owner, summary) == [
             ("matched", "1"), ("matched", "3"),
@@ -208,7 +212,8 @@ def test_a_tab_separated_export_reads_like_its_csv():
     owner, unsorted = collector()
     for data in (TSV, zipped(("cards.TSV", TSV))):
         summary = started(owner, unsorted, data)
-        assert summary["counts"] == {"rows": 4, "needs_you": 1, "ready": 3, "finish_unknown": 0, "skipped": 0}
+        assert summary["counts"] == {"rows": 4, "needs_you": 1, "ready": 3, "finish_unknown": 0,
+                                     "by_name": 0, "skipped": 0}
         assert summary["cards_to_add"] == "7"
         assert statuses(owner, summary) == [
             ("matched", "5"), ("matched", "1"), ("matched", "1"),
@@ -223,7 +228,7 @@ def test_the_loose_fallback_reads_name_like_columns_and_product_ids():
     seed_import_catalog()
     owner, unsorted = collector()
     summary = started(owner, unsorted, OTHER_APP)
-    assert summary["counts"] == {"rows": 3, "needs_you": 1, "ready": 2, "finish_unknown": 0, "skipped": 0}
+    assert summary["counts"] == {"rows": 3, "needs_you": 1, "ready": 2, "finish_unknown": 0, "by_name": 0, "skipped": 0}
     assert summary["cards_to_add"] == "3"
     assert statuses(owner, summary) == [("matched", "2"), ("matched", "1"), ("not_found", "1")]
     source, rows = stored(summary["id"])
@@ -242,13 +247,13 @@ def test_the_loose_fallback_reads_name_like_columns_and_product_ids():
     lines[0] += b",Extra"
     summary = started(owner, unsorted, b"\n".join(lines))
     assert stored(summary["id"])[0] == "loose"
-    assert summary["counts"] == {"rows": 7, "needs_you": 2, "ready": 5, "finish_unknown": 1, "skipped": 0}
+    assert summary["counts"] == {"rows": 7, "needs_you": 2, "ready": 5, "finish_unknown": 1, "by_name": 0, "skipped": 0}
     assert [group for group, _ in stored(summary["id"])[1]][:4] == [None, "Main", "Main", "Graded"]
     # A set column with a number or a name is enough; a name alone isn't.
     summary = started(owner, unsorted, b"Set,Number\nBase Set,64\n")
     assert statuses(owner, summary) == [("matched", "1")]
     summary = started(owner, unsorted, b"Name,Set\nStarmie,Base Set\n")
-    assert statuses(owner, summary) == [("not_found", "1")]  # #229 matches it by name within its set
+    assert statuses(owner, summary) == [("by_name", "1")]  # by name within its set (#229)
     for data in (b"Name,Quantity\nStarmie,1\n", b"Item,Cost\nStarmie,1\n", PASTE_LINES):
         # A paste-style list isn't a file; pasting it is #234.
         assert refused(owner, unsorted, data, "IMPORT_UNREADABLE") == {
@@ -332,7 +337,7 @@ def test_cells_read_as_decklist_import_reads_them():
         "900003,800005",
     ]
     summary = started(owner, unsorted, ("\n".join(lines) + "\n").encode("utf-8"))
-    assert summary["counts"] == {"rows": 4, "needs_you": 0, "ready": 4, "finish_unknown": 0, "skipped": 0}
+    assert summary["counts"] == {"rows": 4, "needs_you": 0, "ready": 4, "finish_unknown": 0, "by_name": 0, "skipped": 0}
     assert summary["cards_to_add"] == "5"
     found = all_rows(owner, summary["id"])
     assert [row["status"] for row in found] == ["matched"] * 4
@@ -376,7 +381,7 @@ def test_no_response_names_the_detected_source():
             bodies.append(call("GET", f"/api/collection-imports/{import_id}/rows?filter={filter_}", owner).text)
     ready = b"\n".join(COLLECTR_16.split(b"\n")[:4]) + b"\n"
     summary = started(owner, unsorted, ready)
-    assert summary["counts"] == {"rows": 3, "needs_you": 0, "ready": 3, "finish_unknown": 0, "skipped": 0}
+    assert summary["counts"] == {"rows": 3, "needs_you": 0, "ready": 3, "finish_unknown": 0, "by_name": 0, "skipped": 0}
     response = save(owner, summary["id"], key=uuid4())
     assert response.status_code == 200, response.text
     bodies.append(response.text)
@@ -396,6 +401,6 @@ def test_a_row_or_header_cell_of_only_zero_width_characters_counts_as_blank():
     card = "1,Starmie,Starmie,Base Set,064/102,BS,Normal,Near Mint,English,Common,900003,800003"
     lines = [header, "​,⁠,﻿" + "," * 10, card, "​"]
     summary = started(owner, unsorted, ("\n".join(lines) + "\n").encode("utf-8"))
-    assert summary["counts"] == {"rows": 1, "needs_you": 0, "ready": 1, "finish_unknown": 0, "skipped": 0}
+    assert summary["counts"] == {"rows": 1, "needs_you": 0, "ready": 1, "finish_unknown": 0, "by_name": 0, "skipped": 0}
     assert [row["status"] for row in all_rows(owner, summary["id"])] == ["matched"]
     assert stored(summary["id"])[0] == "tcgplayer_app"

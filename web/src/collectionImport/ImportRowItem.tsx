@@ -1,10 +1,16 @@
+import type { Ref } from "react";
 import { ChevronDown } from "lucide-react";
-import type { CollectionImportRow } from "../collection_import_generated";
+import type {
+  CollectionImportPick,
+  CollectionImportRow,
+} from "../collection_import_generated";
 import { Button } from "../ui/Button";
 import { Icon } from "../ui/Icon";
 import { Menu } from "../ui/Menu";
 import { Pill, type PillTone } from "../ui/Pill";
 import { variantLabel } from "../ui/variantLabel";
+import { ImportRowResolver } from "./ImportRowResolver";
+import { otherCandidates } from "./importText";
 
 type Props = {
   row: CollectionImportRow;
@@ -14,10 +20,20 @@ type Props = {
   onFinish: (descriptor: Record<string, unknown>, label: string) => void;
   onSkip: () => void;
   onRestore: () => void;
+  /** Whether this row's resolver is open. */
+  open: boolean;
+  /** Fix or Change: open or close the resolver. */
+  onToggle: () => void;
+  /** Escape in the resolver. */
+  onClose: () => void;
+  /** A card picked in the resolver, and how the notice names it. */
+  onPick: (pick: CollectionImportPick, card: string) => void;
+  /** The Fix or Change button, so focus can go back to it. */
+  toggleRef: Ref<HTMLButtonElement>;
 };
 
 /** How a row that isn't simply matched is marked. A row whose card is known but whose finish isn't, on a card with no
- * Unspecified Variant, needs its finish picked; one with several matching cards waits for #229's picker. */
+ * Unspecified Variant, needs its finish picked; one with several cards it could be is Pick one (#229). */
 function pillOf(
   row: CollectionImportRow
 ): { text: string; tone: PillTone } | null {
@@ -26,13 +42,15 @@ function pillOf(
     case "ambiguous":
       return row.card
         ? { text: "Pick a finish", tone: "warn" }
-        : { text: "More than one match", tone: "warn" };
+        : { text: "Pick one", tone: "warn" };
     case "not_found":
       return { text: "Not found", tone: "bad" };
     case "unreadable":
       return { text: "Can't read", tone: "bad" };
     case "finish_unknown":
       return { text: "Finish unknown", tone: "neutral" };
+    case "by_name":
+      return { text: "Matched by name", tone: "neutral" };
     default:
       return null;
   }
@@ -42,8 +60,10 @@ function pillOf(
 const FINISH_TRIGGER =
   "box-border m-0 inline-flex h-control max-w-full min-w-0 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-control border border-border-strong bg-surface-raised px-3 font-sans text-control font-medium leading-none text-text hover:border-control-outline aria-expanded:border-accent-border aria-expanded:bg-surface-selected aria-expanded:text-accent-strong phone:h-control-phone phone:px-4";
 
-/** One row of Collection Import's review (#226, #230): what the file said and what it matched, a checkbox for bulk
- * changes, the finish picker (the card's own Editions, when it has more than one) and Skip or Restore. */
+/** One row of Collection Import's review (#226, #229, #230): what the file said and what it matched, a checkbox for
+ * bulk changes, the finish picker (the card's own Editions, when it has more than one), Skip or Restore, and the
+ * resolver: Fix on a row that needs a card (Pick one, Not found, Can't read), Change on a row with a card the collector picked,
+ * one matched by name, or a Basic Energy with other Printings. */
 export function ImportRowItem({
   row,
   selected,
@@ -51,6 +71,11 @@ export function ImportRowItem({
   onFinish,
   onSkip,
   onRestore,
+  open,
+  onToggle,
+  onClose,
+  onPick,
+  toggleRef,
 }: Props) {
   const pill = pillOf(row);
   const { source } = row;
@@ -77,6 +102,16 @@ export function ImportRowItem({
         .join(" · ")
     : null;
   const shown = finish ?? "Pick a finish";
+  const fix = !row.skipped && row.needs_you && !row.card;
+  // Any row with a card the collector may still change: one they picked, one matched by name, one with other
+  // Printings to choose (a Basic Energy), including a card still waiting for its finish.
+  const change =
+    !row.skipped &&
+    row.card !== null &&
+    (row.picked || row.by_name || otherCandidates(row).length > 0);
+  const resolverLabel = fix
+    ? `Fix row ${row.row_number}`
+    : `Change card of row ${row.row_number}`;
   return (
     <li
       data-row={row.row_number}
@@ -133,6 +168,16 @@ export function ImportRowItem({
               })}
             />
           )}
+          {(fix || change) && (
+            <Button
+              ref={toggleRef}
+              aria-label={resolverLabel}
+              aria-expanded={open}
+              onClick={onToggle}
+            >
+              {fix ? "Fix" : "Change"}
+            </Button>
+          )}
           {row.skipped ? (
             <Button
               variant="quiet"
@@ -154,6 +199,15 @@ export function ImportRowItem({
             Row {row.row_number}
           </span>
         </div>
+        {open && (fix || change) && (
+          <ImportRowResolver
+            row={row}
+            label={resolverLabel}
+            onPick={onPick}
+            onSkip={onSkip}
+            onClose={onClose}
+          />
+        )}
       </div>
     </li>
   );

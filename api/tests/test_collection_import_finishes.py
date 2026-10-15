@@ -118,7 +118,7 @@ def changed(owner, import_id, draft_revision, *changes):
 
 
 def counts(**values):
-    return {"rows": 0, "needs_you": 0, "ready": 0, "finish_unknown": 0, "skipped": 0, **values}
+    return {"rows": 0, "needs_you": 0, "ready": 0, "finish_unknown": 0, "by_name": 0, "skipped": 0, **values}
 
 
 def test_each_trackers_finish_words_and_name_tags_choose_the_card_edition():
@@ -358,9 +358,9 @@ def test_changes_are_all_or_nothing_and_refused_for_a_stale_revision_or_a_bad_ch
     response = change(owner, import_id, 1, {"rows": [1], "finish": {"thirdParty": {"tcgplayer": 1}}})
     assert response.status_code == 422 and code(response) == "INVALID_FINISH", response.text
     # Fields a later ticket adds are refused, not ignored; so are more rows than one change takes.
-    for bad in ({"rows": [1], "pick": str(uuid4())}, {"rows": [], "skip": True},
+    for bad in ({"location_id": str(uuid4())}, {"rows": [1], "group": "Main", "skip": True}, {"rows": [], "skip": True},
                 {"rows": [0], "skip": True}, {"rows": [2**31], "skip": True},
-                {"rows": list(range(1, 1002)), "skip": True}, {"filter": "name", "skip": True}):
+                {"rows": list(range(1, 1002)), "skip": True}, {"filter": "graded", "skip": True}):
         assert change(owner, import_id, 1, bad).status_code == 422, bad
     response = change(owner, import_id, 2, {"rows": [1], "skip": True})
     assert response.status_code == 409 and code(response) == "STALE_DRAFT"

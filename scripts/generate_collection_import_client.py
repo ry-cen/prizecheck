@@ -24,7 +24,8 @@ def ts_type(value):
 
 schema = app.openapi()["components"]["schemas"]
 names = ("CollectionImportCounts", "CollectionImportSummary", "CollectionImportSource", "CollectionImportCard",
-         "CollectionImportEdition", "CollectionImportRow", "CollectionImportRowsPage", "CollectionImportChange",
+         "CollectionImportEdition", "CollectionImportRow", "CollectionImportRowsPage", "CollectionImportPick",
+         "CollectionImportChange",
          "ChangeCollectionImport", "CollectionImportChangeResult", "CollectionImportChanges", "SaveCollectionImport",
          "CollectionImportSaveResult")
 # The rows route's filters, which a change's `filter` selects by too (collection_import.RowFilter).
@@ -69,6 +70,9 @@ export const changeCollectionImport = (importId: string, body: ChangeCollectionI
 export const saveCollectionImport = (importId: string, body: SaveCollectionImport) =>
   send<CollectionImportSaveResult>(`/api/collection-imports/${encodeURIComponent(importId)}/save`,
     { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+/** The skipped rows as a CSV file in the file's own columns, for a download link. */
+export const collectionImportSkippedHref = (importId: string) =>
+  `/api/collection-imports/${encodeURIComponent(importId)}/skipped.csv`;
 """)
 content = "\n".join(lines)
 target = root / "web/src/collection_import_generated.ts"

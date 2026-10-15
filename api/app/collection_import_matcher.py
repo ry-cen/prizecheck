@@ -1,5 +1,5 @@
-"""Collection Import matching (#226, #228, #230; spec "Matching"): each source row to one Card Edition of the active
-catalog.
+"""Collection Import matching (#226, #228, #229, #230; spec "Matching"): each source row to one Card Edition of the
+active catalog.
 
 A Printing counts only when it isn't withdrawn and has an active Card Edition in the active generation. A row whose
 quantity can't be read is unreadable. Otherwise the first step that answers wins:
@@ -18,16 +18,24 @@ quantity can't be read is unreadable. Otherwise the first step that answers wins
    name is a Basic Energy in any spelling ("Basic Water Energy", "Water Energy") gets that type's Printing in the row's
    own sets if one has it, else the newest. Every Basic Energy Printing of the type is kept as candidates (up to
    MAX_CANDIDATES, the chosen one first), for the review's Change.
-4. Otherwise the row is ``not_found``, or ``unreadable`` when it has no number and no name to match by.
+4. **Name within the row's set** (``import_name_matching.named_printings``, decklist import's name comparison with
+   optional parenthetical subtitles): the row's card name (``card_name``, without the tracker's tags) among the
+   Printings of its sets (step 2's code and name sets). One Printing is the row's card, ``by_name``; several are
+   ``ambiguous``, with them as candidates; none goes on to step 5, so a Printing is never guessed from another set. A
+   row whose set names no set this catalog holds (blank, a catch-all such as "Miscellaneous Cards & Products", or a
+   set the catalog lacks) is ``ambiguous`` with every Printing of that name as candidates, newest first, even one.
+5. Otherwise the row is ``not_found``, or ``unreadable`` when it has no number and no name to match by.
 
 Once a step names the Printing, its Edition: a Printing with one Edition gets it whatever the row's finish says (the
 single-Edition shortcut). Otherwise the Edition the row's finish names (collection_import_finish, by the detected
 source's finish table) is matched; when it names none, or several fit, the Unspecified Variant is finish_unknown, and a
 card with no Unspecified Variant is ambiguous, with the Printing and no Edition, until the collector picks its finish
 (or skips the row). The catalog gives most modern cards no Unspecified Variant: TCGdex lists their finishes exactly.
+A row matched by name whose finish chooses an Edition stays ``by_name``; Finish unknown and a finish to pick win over
+it.
 
-Names within the row's set come with #229. A handful of batched queries answer every row of a file. Pure SQL reads:
-nothing here writes, reads prices or starts a catalog pull.
+A handful of batched queries answer every row of a file. Pure SQL reads: nothing here writes, reads prices or starts a
+catalog pull.
 """
 import re
 from dataclasses import dataclass, field
@@ -40,6 +48,7 @@ from .catalog_targets import is_unspecified
 from .collection_import_reader import DRAGON_SHIELD, SORTED
 from .import_energy_matching import basic_energy_printings, energy_type
 from .import_match_core import at_code_and_number
+from .import_name_matching import named_printings
 
 MAX_QUANTITY = 2**63 - 1
 # The most candidates a row keeps (Pick one, or a Basic Energy's Change).
@@ -57,8 +66,13 @@ FINISH_UNKNOWN_ROW = "{r}.status='finish_unknown' AND NOT {r}.skipped AND {r}.le
 # Every row the review lists under All: ready or needing the collector.
 LISTED_ROW = "NOT {r}.skipped AND {r}.left_out_reason IS NULL"
 SKIPPED_ROW = "{r}.skipped AND {r}.left_out_reason IS NULL"
-# The rows route's filters, which a change's `filter` selects by too. "name" (Matched by name) comes with #229.
-FILTER_ROWS = {"needs": NEEDS_YOU_ROW, "finish": FINISH_UNKNOWN_ROW, "all": LISTED_ROW, "skipped": SKIPPED_ROW}
+# The row's card came from step 4 (parsed holds BY_NAME_KEY, whatever its finish says); a collector's pick clears it.
+BY_NAME_KEY = "matched_by_name"
+BY_NAME_ROW = ("{r}.status IN ('matched','finish_unknown','by_name') AND {r}.parsed->>'matched_by_name'='1' "
+               "AND NOT {r}.skipped AND {r}.left_out_reason IS NULL")
+# The rows route's filters, which a change's `filter` selects by too.
+FILTER_ROWS = {"needs": NEEDS_YOU_ROW, "finish": FINISH_UNKNOWN_ROW, "name": BY_NAME_ROW, "all": LISTED_ROW,
+               "skipped": SKIPPED_ROW}
 PRODUCT_ID = re.compile(r"[1-9][0-9]{0,17}")
 
 # A Printing's active Editions in the generation, in catalog order (as catalog search shows them).
@@ -93,6 +107,19 @@ class RowMatch:
     edition_id: UUID | None
     # Pick one: the Printings to choose from. A Basic Energy matched by type: its type's Printings, the chosen first.
     candidates: tuple = field(default_factory=tuple)
+    # The card came from step 4, the row's name within its set, whatever the finish then said (#229).
+    by_name: bool = False
+
+
+def _by_name(found: list, sets: set) -> tuple | None:
+    """Step 4's answer, (Printing or None, candidates), from the Printings of the row's name (newest first) and the
+    row's sets; None when its sets hold none of them."""
+    printings = list(dict.fromkeys(row["printing_id"] for row in found if not sets or row["set_id"] in sets))
+    if not printings:
+        return None
+    if sets and len(printings) == 1:
+        return printings[0], ()
+    return None, tuple(printings[:MAX_CANDIDATES])
 
 
 def quantity_of(text: str) -> int | None:
@@ -109,6 +136,7 @@ def quantity_of(text: str) -> int | None:
 def card_name(fields: dict) -> str:
     """The row's card name without a tracker's tags: the TCGplayer app's Simple Name, else the name with its (…) and
     […] tags and a trailing " - <number>" removed ("Raichu GX - 20/68 (#60 Pikachu Stamped)" is "Raichu GX")."""
+    # web/src/collectionImport/importText.ts searchStart repeats this clean-up; change both together.
     text = fields.get("simple_name") or fields.get("name") or ""
     text = re.sub(r"\([^()]*\)|\[[^\]]*\]", " ", text)
     text = re.sub(r"\s+-\s+\S*[0-9]\S*\s*$", " ", text)
@@ -223,6 +251,20 @@ def match(conn, generation: UUID, rows: list, source: str) -> list:
                 answer = (chosen, (chosen, *[printing for printing, _ in found if printing != chosen])[:MAX_CANDIDATES])
         answers.append(answer)
 
+    # Step 4: each distinct name of the rows still unanswered, once.
+    unanswered = [index for index, answer in enumerate(answers)
+                  if answer is None and quantities[index] is not None and usable_name(names[index])]
+    name_keys: dict[str, int] = {}
+    for index in unanswered:
+        name_keys.setdefault(names[index], len(name_keys))
+    named = named_printings(conn, generation, [(key, name) for name, key in name_keys.items()])
+    by_name: set[int] = set()
+    for index in unanswered:
+        answers[index] = _by_name(named.get(name_keys[names[index]], []),
+                                  set(row_sets[index][0]) | set(row_sets[index][1]))
+        if answers[index] and answers[index][0] is not None:
+            by_name.add(index)
+
     editions = editions_of(conn, generation, (answer[0] for answer in answers if answer))
     matches = []
     for index, (row, answer) in enumerate(zip(rows, answers)):
@@ -235,5 +277,7 @@ def match(conn, generation: UUID, rows: list, source: str) -> list:
             matches.append(RowMatch("ambiguous", quantity, None, None, answer[1]))
         else:
             status, edition = edition_for(source, row.fields, editions[answer[0]])
-            matches.append(RowMatch(status, quantity, answer[0], edition, answer[1]))
+            if status == "matched" and index in by_name:
+                status = "by_name"
+            matches.append(RowMatch(status, quantity, answer[0], edition, answer[1], index in by_name))
     return matches
