@@ -107,6 +107,7 @@ Each card line is matched in this order. The first step that answers wins.
   - **Use cards I own:** those two steps, then:
     3. this Deck's copies of other Printings in the Reprint Group;
     4. available copies of those Printings elsewhere.
+- **Basic Energy stands in for a Reprint Group.** Basic Energy is in no Reprint Group: `reprint_groups.ReprintTextRules` leaves out every card without effect text. For the import's allocation, all Basic Energy Printings of one Energy type count as one group: those whose effective `basic_energy` attribute is true and whose types match (migration 030). Under Use cards I own, owned SVE 5 Psychic Energy therefore covers an SVE 13 Psychic line. Under Exact printings, only the named Printing counts. This rule is the import's alone. It doesn't change Reprint Groups or the Want List's Swap hint.
 - **Several owned Editions at one step.** The Edition with the most available copies goes first, then catalog order (`descriptor_key, id`). This keeps the Deck List to as few lines as it can.
 - **The rest of the line** gets add-by-Printing's rule (`deck_list_printing.choose_edition`):
   - the cheapest stored quote among the named Printing's active Editions;
@@ -185,7 +186,7 @@ Read-only, with no idempotency key. It is a POST only because the text is too lo
 
 ### Missing cards and the setting
 
-- **Missing cards.** "Report … on Missing cards" opens the existing report form with the kind set to Printing, the English name, the pasted set code as the set, and the number filled in. The line stays unresolved until it is picked or dropped.
+- **Missing cards.** "Report … on Missing cards" opens the existing report form with the kind set to Printing, the English name and the number filled in. The pasted set code goes into `set_id` only when `set_codes.tsv` or the alias table maps it to a TCGdex set ID. Otherwise it goes into `set_name` and the note, never raw into `set_id`, because a manual Printing keyed by an unmapped code is one no code table can reach (set-code research, section 5). The line stays unresolved until it is picked or dropped.
 - **The owned-cards setting** is remembered per device, like other display preferences. It starts on **Use cards I own** ([the import review step](prototype-import-review.md)).
 
 ## Changes to earlier decisions
