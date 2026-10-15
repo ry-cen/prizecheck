@@ -16,6 +16,7 @@ An agreed plan, ready for owner-invoked `/to-spec` and `/to-ticket`, that lets a
 - **One landing leaf** (owner, charting): the collector picks one Storage Leaf for the whole import, Unsorted by default.
 - **Build on decklist import** ([map](../../decklist-import/wayfinder/map.md) on `feature/decklist-import`): its parser, code-number-name matching, import-alias table and review step are the starting point. Don't redo [the set-code research](https://github.com/ry-cen/prizecheck/issues/200).
 - Use grilling and domain-modeling for decision tickets, prototype for prototype tickets and research for research tickets. Use `CONTEXT.md` vocabulary (Collection Import, Holding, Card Edition, Variant Descriptor, Unspecified Variant, Storage Leaf, Unsorted) and record new terms there as they're resolved. Consult Laya before delegation. Commit and push only with owner approval; stage explicit paths.
+- **Trimmed** (owner, 2026-10-15): the review prototype shows one layout, built on decklist import's approved review. [Decide collection import limits](https://github.com/ry-cen/prizecheck/issues/222) is merged into [the contract](https://github.com/ry-cen/prizecheck/issues/224), which Claude settles, bringing the owner only collector-facing choices.
 - Tickets are GitHub Issues labelled `wayfinder` and `feature: collection import`, blocked with GitHub's native dependencies and a "Blocked by" body line. Research, prototypes and resolutions live beside this map. Work goes on `feature/collection-import`, cut from `dev`.
 
 ## Decisions so far
@@ -25,11 +26,11 @@ An agreed plan, ready for owner-invoked `/to-spec` and `/to-ticket`, that lets a
 - [Research collection export formats from other trackers](https://github.com/ry-cen/prizecheck/issues/219): TCGplayer, Collectr (Pro), PriceCharting, TCG Collector (Premium), Dragon Shield and Sorted export CSVs. Dex+ columns are unconfirmed, and Pokellector has none. The shared key is set name plus number, with TCGplayer's Product ID as the strongest key for its own files. Naive set-name matching reaches 80–94% of rows. Files hold watchlist, sealed, other-game, Japanese and graded rows, and repeat copies. Real files run 92–3,178 rows, so decklist import's limits don't fit. [Findings](research/tracker-export-formats.md)
 - [Decide what the import accepts](https://github.com/ry-cen/prizecheck/issues/220): header presets for the six exporting trackers plus a loose fallback for other CSVs, with no mapping screen and the source never named in the UI. One paste box reads a header as a file and anything else as decklist-style lines, then by name. File groups can be left out in the review but never become Locations. Uploads take CSV, TSV, TXT or a one-file zip. [Resolution](resolutions/decide-what-the-import-accepts.md)
 - [Decide how imported rows match Card Editions](https://github.com/ry-cen/prizecheck/issues/221): Product ID, then set and number, then Basic Energy, then name within the set, through a new set-name alias table and a finish table per tracker. Non-card and non-English rows are left out with counts. Graded cards come in as ordinary copies. An unclear finish goes to the Unspecified Variant as Finish unknown, and name matches need one card in the row's set. Untracked columns are dropped quietly, and an import never starts a catalog pull. [Resolution](resolutions/decide-how-rows-match.md)
+- [Prototype the collection import review](https://github.com/ry-cen/prizecheck/issues/223): decklist import's one-list review, opening on Needs you, with bulk finish and skip, the file's groups to leave out, left-out counts and downloads, and Save waiting only on Needs you. It starts from **Import…** in the Collection header or an empty Collection, and lands on the chosen Location. **No undo:** the review is the safety net. [Resolution](resolutions/prototype-collection-import-review.md)
 
 ## Not yet specified
 
-- Collector-facing help: how-to-export instructions per tracker, and where they live.
-- Launch evidence: which real exports prove the import before public signup.
+<!-- Trimmed by the owner on 2026-10-15: the per-tracker how-to-export help and the launch evidence (which real exports prove the import before public signup) go straight into the spec. -->
 
 ## Out of scope
 
