@@ -31,7 +31,10 @@ names = ("TreeNode", "LocationCommandResult", "CreateDeck", "EditDeck", "DeckInd
          "ElsewhereLocation", "LineOwnership", "SurplusHolding", "CompetingDeck", "CompetitionWarning",
          "AddDeckListPrinting", "DeckListPrintingResult",
          "PickWarning", "PickSource", "PickRow", "PutAwayHolding", "PickList", "PickItem", "ConfirmPicks",
-         "PickConfirmResult", "DeleteDeck", "DeleteDeckResult", "DeckListChange", "ChangeDeckList")
+         "PickConfirmResult", "DeleteDeck", "DeleteDeckResult", "DeckListChange", "ChangeDeckList",
+         "ImportSource", "ImportFix", "ReviewImport", "ImportPrinting", "ImportEdition", "ImportPart", "ReviewLine",
+         "IgnoredImportLine", "ImportDeckListEntry", "ImportTotals", "ImportReview", "ImportDeckLine", "ImportDeck",
+         "ImportDeckResult")
 lines = ["// Generated from FastAPI OpenAPI by scripts/generate_decks_client.py. Do not edit.",
          "import type { DeckFormatChecks } from './format_checks_generated';"]
 for name in names:
@@ -85,6 +88,10 @@ export const confirmPicks = (deckId: string, body: ConfirmPicks) =>
   request<PickConfirmResult>(`/api/decks/${encodeURIComponent(deckId)}/pick-list/confirm`, 'POST', body);
 export const deleteDeck = (id: string, body: DeleteDeck) =>
   request<DeleteDeckResult>(`/api/decks/${encodeURIComponent(id)}`, 'DELETE', body);
+// Decklist Import (#212): read a pasted list against the catalog (read-only; post again after every fix), then create
+// a Deck with the Editions the review resolved.
+export const reviewImport = (body: ReviewImport) => request<ImportReview>('/api/decks/import/review', 'POST', body);
+export const importDeck = (body: ImportDeck) => request<ImportDeckResult>('/api/decks/import', 'POST', body);
 """)
 content = "\n".join(lines)
 target = root / "web/src/decks_generated.ts"
