@@ -64,8 +64,9 @@ def test_the_alias_table_feeds_no_export_format_standing_or_public_record():
     assert LiveRulesV1.SET_CODES == {}
     importers = sorted(path.name for path in APP.glob("*.py") if re.search(
         r"^from \. import .*\bimport_aliases\b|^from \.import_aliases import", path.read_text(), re.M))
-    # The import review alone: import_matching runs its step, deck_import fills the Missing cards report.
-    assert importers == ["deck_import.py", "import_matching.py"]
+    # The import reviews alone: import_matching runs its step, deck_import fills the Missing cards report, and
+    # Collection Import's matcher reads a pasted line's set code through it (#234).
+    assert importers == ["collection_import_matcher.py", "deck_import.py", "import_matching.py"]
     readers = sorted(str(path.relative_to(ROOT)) for folder in ("api/app", "scripts")
                      for path in (ROOT / folder).rglob("*.py")
                      if re.search(r"""['"]import_aliases\.tsv['"]""", path.read_text()))

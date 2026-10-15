@@ -4,9 +4,11 @@
 keyed by the detected tracker and the set name) and, when the table has no entry, through naive normalisation
 (``set_key``), compared with the TCGdex set names of the active catalog generation. The table holds only what naive
 normalisation misses: promo, Energy and renamed sets. A loose file (another app's CSV) may use any tracker's names, so
-it reads every tracker's entries. Dragon Shield and Sorted rows carry a set code close to the printed one; the matcher
-tries it in the printed set code table (``set_codes``) before the name. Other trackers' codes are their own (the
-TCGplayer app writes ``RR`` for two sets), so they are never read as printed codes.
+it reads every tracker's entries, and so does a pasted list (#234). Dragon Shield and Sorted rows carry a set code
+close to the printed one; the matcher tries it in the printed set code table (``set_codes``) before the name. Other
+trackers' codes are their own (the TCGplayer app writes ``RR`` for two sets), so they are never read as printed codes.
+A pasted line's code is decklist import's, so the matcher tries the printed set code table and decklist import's alias
+table for it (``collection_import_matcher``).
 
 ``set_key`` folds accents and case, reads ``&`` as "and", drops apostrophes and turns every other run of punctuation
 into one space. On the tracker's side it first drops an era prefix ending in a colon or a spaced dash (the TCGplayer
@@ -35,10 +37,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from uuid import UUID
 
-from .collection_import_reader import LOOSE, SOURCES
+from .collection_import_reader import LOOSE, PASTE, SOURCES
 
 PATH = Path(__file__).with_name("collection_import_aliases.tsv")
-TRACKERS = frozenset(SOURCES) - {LOOSE}
+# A pasted list (#234) is read with the loose file's names: it has no tracker of its own.
+TRACKERS = frozenset(SOURCES) - {LOOSE, PASTE}
 EVIDENCE = re.compile(r"(?:T1|C1|C2|P1|TC1|D1|S1):[1-9][0-9]*|R:(?:collectr|new-work)")
 SET_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9.\-]*")
 _ERA_PREFIX = re.compile(r"[a-z]{1,4}[0-9]{0,3}\s*(?::|\s-)\s+")

@@ -7,7 +7,7 @@ import {
   type CollectionImportSummary,
 } from "../collection_import_generated";
 
-/* Collection Import copy (#226, #227, #229 to #233). It never names the tracker a file came from, and shows no prices,
+/* Collection Import copy (#226, #227, #229 to #234). It never names the tracker a file came from, and shows no prices,
  * marketplace IDs, fetch times or internal reasons (AGENTS.md "UI copy"). Tracker names appear only in ExportHelp. */
 
 export const SPLIT_LARGE =
@@ -45,12 +45,31 @@ const SAVE: Record<string, string> = {
   QUANTITY_OVERFLOW: "That's more copies of one card than a Location can hold.",
 };
 
-/** What a failed upload tells the collector. The gateway's own body limit answers 413 without a code. */
-export function startErrorText(error: unknown): string {
-  if (!(error instanceof CollectionImportError))
-    return "Couldn't read your file. Try again.";
-  if (error.status === 413) return SPLIT_LARGE;
-  return START[error.code] ?? "Couldn't read your file. Try again.";
+/** A paste's refusals (#234) say "list", not "file". */
+export const PASTE_LARGE =
+  "This list is larger than 5 MB. Split it into two lists and import each one.";
+const PASTE_START: Record<string, string> = {
+  ...START,
+  IMPORT_TOO_LARGE: PASTE_LARGE,
+  IMPORT_TOO_MANY_ROWS:
+    "This list has more than 10,000 rows. Split it into two lists and import each one.",
+  IMPORT_UNREADABLE: "PrizeCheck can't read this list. Paste it as plain text.",
+  IMPORT_EMPTY: "This list has no cards in it.",
+};
+
+/** What a failed upload (or paste, #234) tells the collector. The gateway's own body limit answers 413 without a
+ * code. */
+export function startErrorText(
+  error: unknown,
+  kind: "file" | "paste" = "file"
+): string {
+  const fallback =
+    kind === "paste"
+      ? "Couldn't read your list. Try again."
+      : "Couldn't read your file. Try again.";
+  if (!(error instanceof CollectionImportError)) return fallback;
+  if (error.status === 413) return kind === "paste" ? PASTE_LARGE : SPLIT_LARGE;
+  return (kind === "paste" ? PASTE_START : START)[error.code] ?? fallback;
 }
 
 /** What a failed save tells the collector. */

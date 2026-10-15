@@ -1,4 +1,5 @@
-"""Collection Import reading (#226, #227; spec "Reading the input"): an uploaded file's bytes to source rows.
+"""Collection Import reading (#226, #227, #234; spec "Reading the input"): an uploaded file's bytes, or pasted text, to
+source rows.
 
 Pure: no database and no network. The collector never says which app a file came from; its header decides:
 
@@ -20,6 +21,24 @@ normalise_cell. Each row keeps its cells written back as one CSV line (raw_text,
 folder or list) and the fields matching and later tickets read; other columns (condition, SKU, prices, dates, notes)
 are dropped quietly. The detected source is stored with the draft for matching only, and nothing here is shown to the
 collector.
+
+**A paste (#234, read_paste)** is text, not bytes. When its first non-blank line is a header a preset or the loose
+fallback reads (comma- or tab-separated, as a spreadsheet copies rows), the paste is read exactly like a file. Otherwise
+it is lines (source PASTE), split as decklist import splits a paste, one source row per line that isn't blank or a
+decklist section header:
+
+- a line decklist import's grammar reads (decklist_text.read_line: ``3 Pikachu SVI 25``, its PH dropped) gives its
+  quantity, name, set code and number. A leading ``2x`` reads as ``2``, and a line with no quantity is read as one copy
+  (``Klara CRE 145``);
+- any other line is free text for the name fallback: an optional leading quantity (``1000 Water Energy``), and either
+  ``Name #Number Set`` (PriceCharting's text importer: ``Charizard #4 Base Set``) or a name, whose trailing
+  `` - <number>`` (``Pikachu - SWSH039 (General Mills)``) is also read as its number.
+
+A trailing grade (``PSA 8``) is set aside before either is tried, and a price (``$1.65``) is never read into a field,
+so the review never shows one.
+
+Each line's raw_text is the line as it was typed, so the downloads give the lines back. A paste has a file's limits:
+MAX_IMPORT_BYTES of UTF-8 and MAX_IMPORT_ROWS rows.
 """
 import csv
 import io
@@ -42,7 +61,9 @@ TCG_COLLECTOR = "tcg_collector"
 DRAGON_SHIELD = "dragon_shield"
 SORTED = "sorted"
 LOOSE = "loose"
-SOURCES = (TCGPLAYER_APP, COLLECTR, PRICECHARTING, TCG_COLLECTOR, DRAGON_SHIELD, SORTED, LOOSE)
+# Pasted lines (#234): decklist-style or free text, not a file's columns.
+PASTE = "paste"
+SOURCES = (TCGPLAYER_APP, COLLECTR, PRICECHARTING, TCG_COLLECTOR, DRAGON_SHIELD, SORTED, LOOSE, PASTE)
 
 # Every source row has each of these fields, "" when its file has no such column or the cell is blank:
 # - quantity: as written; the matcher reads it (a blank is one copy);
@@ -356,6 +377,11 @@ def read(data: bytes) -> SourceFile:
     # PostgreSQL text and jsonb can't hold NUL, and no tracker writes one.
     if "\x00" in text:
         raise ImportRefused("IMPORT_UNREADABLE")
+    return _read_text(text)
+
+
+def _read_text(text: str) -> SourceFile:
+    """read() for decoded text."""
     delimiter, text = _delimiter(text)
     records = csv.reader(io.StringIO(text, newline=""), delimiter=delimiter)
     rows = []
@@ -378,3 +404,120 @@ def read(data: bytes) -> SourceFile:
     if not rows:
         raise ImportRefused("IMPORT_EMPTY")
     return SourceFile(layout.source, [normalise_cell(cell).strip() for cell in header], rows, frozenset(layout.columns))
+
+
+# A paste's lines (#234): a leading "2x" quantity, which decklist import's grammar doesn't read.
+_TIMES = re.compile(r"^([0-9]+)[xX\u00d7](?=\s)")
+# Free text: a leading quantity ("1000 Water Energy", "3x Pikachu"), a trailing grade, "Name #Number Set", a trailing
+# " - <number>" (outside any tag), and a price anywhere.
+_FREE_QUANTITY = re.compile(r"([0-9]{1,19})\s*[xX\u00d7]?\s+(?=\S)")
+_GRADE = re.compile(r"\s+((?:PSA|BGS|CGC|SGC|TAG|ACE)\s*[0-9]{1,2}(?:\.[0-9])?)$", re.IGNORECASE)
+_HASH_NUMBER = re.compile(r"(.*\S)\s+#\s?([A-Za-z]{0,6}[0-9]+[A-Za-z]?)(?:\s+(\S.*))?")
+_TAGS = re.compile(r"\([^()]*\)|\[[^\]]*\]")
+_DASH_NUMBER = re.compile(r".*\S\s+-\s+(\S*[0-9]\S*)")
+_PRICE = re.compile(r"[$\u20ac\u00a3]\s?[0-9][0-9,]*(?:\.[0-9]+)?")
+# A price with the whitespace and optional dash before it, which goes before anything else is read.
+_PRICE_TAIL = re.compile(r"\s*(?:[-\u2013]\s*)?" + _PRICE.pattern)
+# A leading quantity digits, which decklist import's grammar reads only from 1 to 999.
+_LEADING_DIGITS = re.compile(r"([0-9]+)\s+(?=\S)")
+# The fields a pasted line can fill.
+PASTE_COLUMNS = frozenset({"quantity", "name", "set_name", "set_code", "number"})
+
+
+def _header_first(text: str) -> bool:
+    """Whether the paste's first non-blank line (after a "sep=" line) is a comma- or tab-separated header that a preset
+    or the loose fallback reads."""
+    delimiter, rest = _delimiter(text)
+    first = next((line for line in decklist_text.lines(rest) if line.strip()), "")
+    if delimiter not in first:
+        return False
+    try:
+        header = next(csv.reader([first], delimiter=delimiter))
+    except csv.Error:
+        return False
+    while header and not normalise_cell(header[-1]).strip():
+        header.pop()
+    try:
+        _layout(header)
+    except ImportRefused:
+        return False
+    return True
+
+
+def _free_text(text: str) -> dict:
+    """The fields of a line decklist import's grammar can't read (module docstring), its grade set aside."""
+    fields = {}
+    text = " ".join(_PRICE.sub(" ", text).split())
+    quantity = _FREE_QUANTITY.match(text)
+    if quantity:
+        fields["quantity"], text = quantity.group(1), text[quantity.end():]
+    found = _HASH_NUMBER.fullmatch(text)
+    if found:
+        fields["name"], fields["number"], fields["set_name"] = found.group(1), found.group(2), found.group(3) or ""
+        return fields
+    fields["name"] = text
+    dashed = _DASH_NUMBER.fullmatch(" ".join(_TAGS.sub(" ", text).split()))
+    if dashed:
+        fields["number"] = dashed.group(1)
+    return fields
+
+
+def _pasted_line(number: int, raw: str) -> dict | None:
+    """One pasted line's fields, or None for a blank or decklist section header line."""
+    work = normalise_cell(raw).strip()
+    if work.startswith("* "):
+        work = work[2:].lstrip()
+    work = _TIMES.sub(r"\1", work, count=1)
+    if decklist_text.read_line(number, work) is None:
+        return None
+    work = _PRICE_TAIL.sub("", work).strip()
+    grade = _GRADE.search(work)
+    if grade:
+        work = work[:grade.start()]
+    fields = {"grade": grade.group(1)} if grade else {}
+    line = decklist_text.read_line(number, work)
+    if isinstance(line, decklist_text.CardLine) and line.readable:
+        return {**fields, "quantity": str(line.quantity), "name": line.name, "set_code": line.set_code,
+                "number": line.number}
+    digits = _LEADING_DIGITS.match(work)
+    if digits:
+        # A quantity outside 1 to 999 (or a line that doesn't read with it): read the rest as one copy, keeping the
+        # digits as the quantity for the matcher to judge.
+        retried = decklist_text.read_line(number, "1 " + work[digits.end():])
+        if isinstance(retried, decklist_text.CardLine) and retried.readable:
+            return {**fields, "quantity": digits.group(1), "name": retried.name, "set_code": retried.set_code,
+                    "number": retried.number}
+    elif isinstance(line, decklist_text.IgnoredLine):
+        # No quantity: one copy, when the rest reads as a card line.
+        retried = decklist_text.read_line(number, "1 " + work)
+        if isinstance(retried, decklist_text.CardLine) and retried.readable:
+            return {**fields, "name": retried.name, "set_code": retried.set_code, "number": retried.number}
+    return {**fields, **_free_text(work)}
+
+
+def read_paste(text: str) -> SourceFile:
+    """The pasted text's source rows (module docstring). Refuses IMPORT_TOO_LARGE (over MAX_IMPORT_BYTES of UTF-8),
+    IMPORT_UNREADABLE (a NUL character or text UTF-8 can't hold), IMPORT_EMPTY (no rows) and IMPORT_TOO_MANY_ROWS
+    (stopping at row MAX_IMPORT_ROWS + 1); a header read like a file refuses as read() does."""
+    try:
+        size = len(text.encode("utf-8"))
+    except UnicodeEncodeError:
+        raise ImportRefused("IMPORT_UNREADABLE") from None
+    if size > MAX_IMPORT_BYTES:
+        raise ImportRefused("IMPORT_TOO_LARGE")
+    if "\x00" in text:
+        raise ImportRefused("IMPORT_UNREADABLE")
+    text = text.removeprefix("\ufeff")
+    if _header_first(text):
+        return _read_text(text)
+    rows = []
+    for number, raw in enumerate(decklist_text.lines(text), 1):
+        found = _pasted_line(number, raw)
+        if found is None:
+            continue
+        if len(rows) == MAX_IMPORT_ROWS:
+            raise ImportRefused("IMPORT_TOO_MANY_ROWS")
+        rows.append(SourceRow(len(rows) + 1, raw, {name: found.get(name, "") for name in FIELDS}, None))
+    if not rows:
+        raise ImportRefused("IMPORT_EMPTY")
+    return SourceFile(PASTE, [], rows, PASTE_COLUMNS)

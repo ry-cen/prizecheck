@@ -27,8 +27,10 @@ quantity can't be read is unreadable. Otherwise the first step that answers wins
    Edition's ``mapping_candidate``, which the catalog import keeps for the card or the variant). It answers only when
    it names exactly one Printing; a product ID nothing names goes on to the next step.
 2. **Set and number** (``collection_import_aliases``): each of the row's number readings in its sets, the printed set
-   code table's sets first for Dragon Shield and Sorted, then its set name's (the alias table, else naive
-   normalisation), then the era's promo set for a promo-prefixed number. The first reading that finds a Printing
+   code table's sets first for Dragon Shield, Sorted and a pasted list, then, for a pasted list (#234), decklist
+   import's alias table and rules (``import_aliases.readings``: ``SVE``, ``PR-SV``, ``BRS-TG 5``), then its set name's
+   (the alias table, else naive normalisation, every tracker's entries for a pasted list), then the era's promo set
+   for a promo-prefixed number. The first reading that finds a Printing
    answers: one Printing is the row's card; several (two sets of one name) are ``ambiguous``, with them as candidates.
    A row whose name is a Basic Energy takes this answer only when it is a Basic Energy of that type: the TCGplayer app
    writes Scarlet & Violet Basic Energy as "SV01: Scarlet & Violet Base Set" 008, which is Scatterbug there.
@@ -62,9 +64,9 @@ from uuid import UUID
 
 from . import collection_import_aliases as aliases
 from . import collection_import_finish as finishes
-from . import set_codes
+from . import import_aliases, set_codes
 from .catalog_targets import is_unspecified
-from .collection_import_reader import DRAGON_SHIELD, SORTED
+from .collection_import_reader import DRAGON_SHIELD, LOOSE, PASTE, SORTED
 from .import_energy_matching import basic_energy_printings, energy_type
 from .import_match_core import at_code_and_number
 from .import_name_matching import named_printings
@@ -273,13 +275,29 @@ def _row_sets(row, source: str, sets: aliases.GenerationSets) -> tuple[list[str]
     """(the printed set code table's sets, the set name's sets) of a row, each only sets this generation holds."""
     code = row.fields["set_code"].strip()
     by_code = [set_id for set_id in set_codes.sets_for_code(code) if set_id in sets.ids] \
-        if code and source in (DRAGON_SHIELD, SORTED) else []
-    return by_code, aliases.sets_for_name(source, row.fields["set_name"], sets)
+        if code and source in (DRAGON_SHIELD, SORTED, PASTE) else []
+    return by_code, aliases.sets_for_name(LOOSE if source == PASTE else source, row.fields["set_name"], sets)
 
 
-def _attempts(by_code: list[str], by_name: list[str], readings: list[str]) -> list[tuple[tuple[str, ...], str]]:
+def _pasted(row, source: str, sets: aliases.GenerationSets) -> list[tuple[tuple[str, ...], str]]:
+    """A pasted line's set code and number through decklist import's alias table and rules (#234), as step 2's
+    (sets, number) attempts, each with only sets this generation holds; [] for a file's row."""
+    code, number = row.fields["set_code"].strip(), row.fields["number"].strip()
+    if source != PASTE or not code or not number:
+        return []
+    found = []
+    for reading in import_aliases.readings(code, number):
+        held = tuple(set_id for set_id in reading.sets if set_id in sets.ids)
+        if held:
+            found.append((held, reading.number))
+    return found
+
+
+def _attempts(by_code: list[str], by_name: list[str], readings: list[str],
+              pasted: list[tuple[tuple[str, ...], str]]) -> list[tuple[tuple[str, ...], str]]:
     """Where step 2 looks for a row, in order: (sets, number)."""
     found = [(tuple(by_code), number) for number in readings if by_code]
+    found += pasted
     found += [(tuple(by_name), number) for number in readings if by_name]
     found += [((aliases.promo_set(number),), number) for number in readings if aliases.promo_set(number)]
     return found
@@ -303,10 +321,15 @@ def _match(conn, generation: UUID, rows: list, source: str) -> list:
     names = [card_name(row.fields) for row in rows]
     readings = [aliases.number_readings(row.fields["number"]) for row in rows]
     row_sets = [_row_sets(row, source, sets) for row in rows]
+    pasted = [_pasted(row, source, sets) for row in rows]
+    # Every set a row names, by code, alias or name: steps 3 and 4 look in them.
+    own_sets = [{*by_code, *by_name, *(set_id for set_ids, _ in found for set_id in set_ids)}
+                for (by_code, by_name), found in zip(row_sets, pasted)]
     products = _products(conn, generation, rows)
 
     # Step 2: every attempt of every row in one lookup, each distinct (sets, number) once.
-    attempts = [_attempts(by_code, by_name, numbers) for (by_code, by_name), numbers in zip(row_sets, readings)]
+    attempts = [_attempts(by_code, by_name, numbers, found)
+                for (by_code, by_name), numbers, found in zip(row_sets, readings, pasted)]
     keys: dict[tuple, int] = {}
     for row_attempts in attempts:
         for attempt in row_attempts:
@@ -338,8 +361,7 @@ def _match(conn, generation: UUID, rows: list, source: str) -> list:
                     break
             if answer is None and types[index] in energies:
                 found = energies[types[index]]
-                own = set(row_sets[index][0]) | set(row_sets[index][1])
-                chosen = next((printing for printing, set_id in found if set_id in own), found[0][0])
+                chosen = next((printing for printing, set_id in found if set_id in own_sets[index]), found[0][0])
                 answer = (chosen, (chosen, *[printing for printing, _ in found if printing != chosen])[:MAX_CANDIDATES])
         answers.append(answer)
 
@@ -352,8 +374,7 @@ def _match(conn, generation: UUID, rows: list, source: str) -> list:
     named = named_printings(conn, generation, [(key, name) for name, key in name_keys.items()])
     by_name: set[int] = set()
     for index in unanswered:
-        answers[index] = _by_name(named.get(name_keys[names[index]], []),
-                                  set(row_sets[index][0]) | set(row_sets[index][1]))
+        answers[index] = _by_name(named.get(name_keys[names[index]], []), own_sets[index])
         if answers[index] and answers[index][0] is not None:
             by_name.add(index)
 

@@ -9,6 +9,8 @@ import { exampleText, LEFT_OUT_LABELS, rowsText } from "./importText";
 
 type Props = {
   importId: string;
+  /** The import is a pasted list (#234): Download gives its lines as text. */
+  lines: boolean;
   /** The summary's left-out rows, one entry per reason that has any. */
   leftOut: CollectionImportLeftOut[];
 };
@@ -22,7 +24,7 @@ const LINK =
 /** Collection Import's Left out panel (#231): how many rows were left out for each reason, in plain words, with View
  * (a dialog listing the first few of each, as the file wrote them) and Download (every left-out row in the file's own
  * columns). Nothing shows when nothing was left out. */
-export function ImportLeftOut({ importId, leftOut }: Props) {
+export function ImportLeftOut({ importId, lines, leftOut }: Props) {
   const [open, setOpen] = useState(false);
   const view = useRef<HTMLButtonElement>(null);
   if (leftOut.length === 0) return null;
@@ -58,7 +60,7 @@ export function ImportLeftOut({ importId, leftOut }: Props) {
         <a
           className={LINK}
           href={href}
-          download="left-out-rows.csv"
+          download={lines ? "left-out-rows.txt" : "left-out-rows.csv"}
           aria-label="Download left-out rows"
         >
           Download
@@ -99,7 +101,7 @@ export function ImportLeftOut({ importId, leftOut }: Props) {
           <a
             className={`${LINK} self-start`}
             href={href}
-            download="left-out-rows.csv"
+            download={lines ? "left-out-rows.txt" : "left-out-rows.csv"}
           >
             Download these rows
           </a>

@@ -1,9 +1,11 @@
-"""Collection Import (#226 to #232; spec "Collection import from other trackers", ADR 0014): a collector's file
+"""Collection Import (#226 to #234; spec "Collection import from other trackers", ADR 0014): a collector's file
 becomes an import draft on the server, which they review and then save into one Storage Leaf in one step.
 
 - POST /api/collection-imports?location_id=<Storage Leaf> takes the file's bytes as the request body (no multipart): a
   CSV, TSV or TXT export from any supported tracker or with name-like columns, or a zip holding one such file, told
-  apart by its bytes, not its content type. It reads the file (collection_import_reader), matches every row
+  apart by its bytes, not its content type. A paste (#234) is the JSON body ``{"text": …}`` with the content type
+  application/json, read by collection_import_reader.read_paste (a malformed body is 422 INVALID_PASTE); it then
+  goes the file's way. It reads the file (collection_import_reader), matches every row
   (collection_import_matcher, whose filters first leave out the rows PrizeCheck can't hold: watchlist rows, sealed
   product, other games and non-English cards, #231) and stores the draft with the detected source (for matching only),
   each row's group, each left-out row's reason and each row's candidate Printings (Pick one, or a Basic Energy's other
@@ -34,7 +36,8 @@ becomes an import draft on the server, which they review and then save into one 
   Groups are never Locations: every included row lands in the one Storage Leaf.
 - GET /api/collection-imports/<id>/skipped.csv and .../left-out.csv download the skipped rows and the left-out rows
   (#231) in the file's own columns: its header, then each row's cells as the file held them, as CSV (a tab-separated
-  file comes back comma-separated).
+  file comes back comma-separated). A pasted list's rows (source PASTE, #234) come back as the lines as they were
+  pasted, as plain text.
 - POST /api/collection-imports/<id>/save adds every ready row's copies to the landing Storage Leaf, one Holding
   increment per Card Edition, in one transaction and one owner revision, then deletes the draft's rows. It records no
   Inventory Undo. A repeated key, or a second save of a saved draft, answers the stored result without writing. When
@@ -75,6 +78,12 @@ PAGE_SIZE = 100
 SPLIT_MESSAGES = {
     "IMPORT_TOO_LARGE": "This file is larger than 5 MB. Split it into two files and import each one.",
     "IMPORT_TOO_MANY_ROWS": "This file has more than 10,000 rows. Split it into two files and import each one.",
+}
+# A paste's refusals (#234) say "list", not "file".
+PASTE_MESSAGES = {
+    "IMPORT_TOO_LARGE": "This list is larger than 5 MB. Split it into two lists and import each one.",
+    "IMPORT_TOO_MANY_ROWS": "This list has more than 10,000 rows. Split it into two lists and import each one.",
+    "IMPORT_UNREADABLE": "PrizeCheck can't read this list. Paste it as plain text.",
 }
 # A start refusal's message, by code. IMPORT_UNREADABLE lists the trackers whose exports are read (the web shows its own
 # copy and opens its export steps instead).
@@ -194,6 +203,8 @@ class CollectionImportSummary(BaseModel):
     groups: list[CollectionImportGroup]
     # Of cards_to_add, the copies whose Card Edition the Collection already holds (#232): importing adds to them.
     already_held: str
+    # The draft is a pasted list read line by line (#234): its rows are lines, and its downloads are text.
+    lines: bool
 
 
 class CollectionImportCard(BaseModel):
@@ -303,6 +314,12 @@ class CollectionImportChanges(BaseModel):
     results: list[CollectionImportChangeResult]
 
 
+class PasteCollectionImport(BaseModel):
+    """A paste's start body (#234)."""
+    model_config = ConfigDict(extra="forbid", strict=True)
+    text: str
+
+
 class CollectionImportSaveResult(BaseModel):
     import_id: UUID
     location_id: UUID
@@ -311,15 +328,38 @@ class CollectionImportSaveResult(BaseModel):
     owner_revision: int
 
 
+def is_paste(request: Request) -> bool:
+    """The start body is a paste's JSON (#234), by its content type; anything else is a file's bytes."""
+    return request.headers.get("content-type", "").split(";")[0].strip().lower() == "application/json"
+
+
 async def import_body(request: Request) -> bytes:
     """The upload's bytes; IMPORT_TOO_LARGE by length before anything else reads them."""
+    messages = PASTE_MESSAGES if is_paste(request) else SPLIT_MESSAGES
     declared = request.headers.get("content-length")
     if declared and declared.isdigit() and int(declared) > reader.MAX_IMPORT_BYTES:
-        refuse(422, "IMPORT_TOO_LARGE", message=SPLIT_MESSAGES["IMPORT_TOO_LARGE"])
+        refuse(422, "IMPORT_TOO_LARGE", message=messages["IMPORT_TOO_LARGE"])
     body = await request.body()
     if len(body) > reader.MAX_IMPORT_BYTES:
-        refuse(422, "IMPORT_TOO_LARGE", message=SPLIT_MESSAGES["IMPORT_TOO_LARGE"])
+        refuse(422, "IMPORT_TOO_LARGE", message=messages["IMPORT_TOO_LARGE"])
     return body
+
+
+def read_source(request: Request, body: bytes) -> reader.SourceFile:
+    """The start body's source rows: a paste's text (#234) or a file's bytes. Refuses 422 with the reader's code and,
+    for a paste, INVALID_PASTE when the body isn't {"text": <string>}."""
+    paste = is_paste(request)
+    try:
+        if not paste:
+            return reader.read(body)
+        try:
+            text = PasteCollectionImport.model_validate_json(body).text
+        except ValueError:
+            refuse(422, "INVALID_PASTE")
+        return reader.read_paste(text)
+    except reader.ImportRefused as refused:
+        messages = {**REFUSAL_MESSAGES, **PASTE_MESSAGES} if paste else REFUSAL_MESSAGES
+        refuse(422, refused.code, message=messages.get(refused.code))
 
 
 def sweep_expired(conn) -> int:
@@ -344,8 +384,9 @@ def storage_leaf(conn, user_id: str, location_id: UUID):
 
 
 def source_of(parsed: dict) -> CollectionImportSource:
-    return CollectionImportSource(**{field: parsed.get(field, "") for field in
-                                     ("quantity", "name", "set_name", "number", "finish")})
+    """What the row said; its set is the set name, else the set code (a pasted line's "PAL", #234)."""
+    fields = {field: parsed.get(field, "") for field in ("quantity", "name", "number", "finish")}
+    return CollectionImportSource(**fields, set_name=parsed.get("set_name") or parsed.get("set_code", ""))
 
 
 def left_out(conn, import_id: UUID) -> list[CollectionImportLeftOut]:
@@ -359,7 +400,7 @@ def left_out(conn, import_id: UUID) -> list[CollectionImportLeftOut]:
 
 def summary(conn, user_id: str, import_id: UUID) -> CollectionImportSummary:
     row = conn.execute(f"""WITH held AS (SELECT DISTINCT h.edition_id FROM holding h WHERE h.owner_id=%s)
-      SELECT ci.id,ci.draft_revision,ci.location_id,ci.expires_at,l.name AS location_name,
+      SELECT ci.id,ci.draft_revision,ci.location_id,ci.expires_at,ci.source,l.name AS location_name,
         count(r.row_number) AS rows,
         count(r.row_number) FILTER (WHERE {NEEDS_YOU_ROW}) AS needs_you,
         count(r.row_number) FILTER (WHERE {READY_ROW}) AS ready,
@@ -386,16 +427,16 @@ def summary(conn, user_id: str, import_id: UUID) -> CollectionImportSummary:
         left_out=left_out(conn, import_id),
         groups=[CollectionImportGroup(name=group["name"], rows=group["n"], included=group["included"])
                 for group in conn.execute(GROUPS, (import_id,))],
-        already_held=str(int(row["already_held"])))
+        already_held=str(int(row["already_held"])), lines=row["source"] == reader.PASTE)
 
 
 @router.post("", response_model=CollectionImportSummary, status_code=201)
-def start_import(location_id: UUID = Query(), body: bytes = Depends(import_body),
+def start_import(request: Request, location_id: UUID = Query(), body: bytes = Depends(import_body),
                  user_id: str = Depends(verified_user)):
-    """Reads and matches the file and stores it as the collector's open import draft, replacing any other. Refuses
-    IMPORT_RATE_LIMITED (429) before reading when this collector has started MAX_STARTS_PER_DAY drafts in the last 24
-    hours, and again when it stores the draft, so two starts at once can't both pass the limit. A refused start isn't
-    counted."""
+    """Reads and matches the file (or the paste, #234) and stores it as the collector's open import draft, replacing any
+    other. Refuses IMPORT_RATE_LIMITED (429) before reading when this collector has started MAX_STARTS_PER_DAY drafts
+    in the last 24 hours, and again when it stores the draft, so two starts at once can't both pass the limit. A
+    refused start isn't counted."""
     try:
         with connect() as conn:
             sweep_expired(conn)
@@ -403,10 +444,7 @@ def start_import(location_id: UUID = Query(), body: bytes = Depends(import_body)
             if not storage_leaf(conn, user_id, location_id):
                 refuse(422, "NOT_STORAGE_LEAF")
             rate_limited(conn, user_id)
-        try:
-            source = reader.read(body)
-        except reader.ImportRefused as refused:
-            refuse(422, refused.code, message=REFUSAL_MESSAGES.get(refused.code))
+        source = read_source(request, body)
         with connect() as conn:
             catalog = conn.execute("SELECT active_generation,revision FROM catalog_state WHERE singleton").fetchone()
             if catalog is None or catalog["active_generation"] is None:
@@ -741,11 +779,12 @@ def change_import(import_id: UUID, command: ChangeCollectionImport, user_id: str
 def rows_csv(user_id: str, import_id: UUID, where: str, filename: str) -> Response:
     """The draft's rows that `where` (a row predicate for alias r) holds, in file order, under the file's header, as a
     CSV attachment (UTF-8 with a BOM, so a spreadsheet reads accents, and CRLF lines): each row's cells as the file held
-    them, columns PrizeCheck doesn't read included. Just the header when there are none. Owner-only and never cached.
-    IMPORT_NOT_FOUND for a draft that isn't this collector's open one."""
+    them, columns PrizeCheck doesn't read included. Just the header when there are none. A pasted list's (#234) are its
+    lines as pasted, one per line, as a .txt attachment (UTF-8, no BOM, LF lines), with no header. Owner-only and never
+    cached. IMPORT_NOT_FOUND for a draft that isn't this collector's open one."""
     try:
         with connect() as conn:
-            draft = conn.execute(f"""SELECT ci.source_header FROM collection_import ci
+            draft = conn.execute(f"""SELECT ci.source,ci.source_header FROM collection_import ci
               WHERE ci.owner_id=%s AND ci.id=%s AND {OPEN_DRAFT}""", (user_id, import_id)).fetchone()
             if draft is None:
                 refuse(404, "IMPORT_NOT_FOUND")
@@ -754,12 +793,15 @@ def rows_csv(user_id: str, import_id: UUID, where: str, filename: str) -> Respon
                     ORDER BY r.row_number""", (import_id,))]
     except psycopg.Error:
         refuse(503, "INVENTORY_TEMPORARILY_UNAVAILABLE")
+    headers = {"Content-Disposition": f'attachment; filename="{filename}"', "Cache-Control": "no-store"}
+    if draft["source"] == reader.PASTE:
+        headers["Content-Disposition"] = f'attachment; filename="{filename.removesuffix(".csv")}.txt"'
+        return Response(content="".join(f"{line}\n" for line in lines).encode("utf-8"),
+                        media_type="text/plain; charset=utf-8", headers=headers)
     header = io.StringIO()
     csv.writer(header, lineterminator="").writerow(draft["source_header"])
     body = "\ufeff" + "".join(f"{line}\r\n" for line in (header.getvalue(), *lines))
-    return Response(content=body.encode("utf-8"), media_type="text/csv; charset=utf-8",
-                    headers={"Content-Disposition": f'attachment; filename="{filename}"',
-                             "Cache-Control": "no-store"})
+    return Response(content=body.encode("utf-8"), media_type="text/csv; charset=utf-8", headers=headers)
 
 
 @router.get("/{import_id}/skipped.csv")
