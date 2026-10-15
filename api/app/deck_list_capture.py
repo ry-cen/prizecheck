@@ -5,22 +5,27 @@ lock (``owner_and_rows``) that every Holding and Deck List writer takes, so the 
 revision, the Deck's Holdings, its lines and each line's ownership states belong to one committed state. It commits
 before the caller reads prices or catalog data, so no inventory lock or connection is held while they are read.
 
-``not_owned`` is the Deck detail's figure (``deck_ownership.read_ownership``): copies elsewhere in the Collection,
-including copies another Deck holds, are never counted as needing purchase.
+Each line's ``need`` follows the account's Want List counting setting (decklist import #208): the setting is read
+in the same transaction, under the same lock, and ``copy_allocation.deck_lines`` counts the line's owned copies with
+it. Under One Deck at a time the need is the Deck detail's ``not_owned`` (``deck_ownership.read_ownership``); under
+Every Deck built at once (the default) copies another Deck holds for its own line, and Spare Copies an older Deck
+counts, are needed too. The capture names the setting and the settings revision it used, because changing the setting
+moves neither the inventory revision nor the Deck List revision.
 """
 from dataclasses import dataclass
 from uuid import UUID
 
-from .deck_ownership import read_ownership
+from .copy_allocation import deck_lines
 from .location_tree import error, owner_and_rows
 from .main import connect
+from .settings import WantListCounting, read_settings
 
 
 @dataclass(frozen=True)
 class CapturedLine:
     edition_id: UUID
     quantity: int     # The line's intended copies.
-    not_owned: int    # Copies neither in this Deck nor elsewhere in the Collection.
+    need: int         # Copies still needed from outside the Collection, under the counting setting (copy_allocation).
 
 
 @dataclass(frozen=True)
@@ -30,6 +35,8 @@ class DeckListCapture:
     owner_revision: int
     deck_list_revision: int
     catalog_revision: int
+    want_list_counting: WantListCounting  # The counting setting ``need`` follows.
+    settings_revision: int                # The settings revision it was read at.
 
 
 def capture_deck_list(deck_id: UUID, user_id: str, timeout_ms: int | None = None) -> DeckListCapture:
@@ -53,11 +60,12 @@ def capture_deck_list(deck_id: UUID, user_id: str, timeout_ms: int | None = None
         holdings = {row['edition_id']: int(row['quantity']) for row in conn.execute(
             """SELECT edition_id,quantity FROM holding WHERE owner_id=%s AND location_id=%s
                ORDER BY edition_id""", (user_id, deck_id))}
-        ownership = read_ownership(conn, user_id, deck_id)
+        settings = read_settings(conn, user_id)
+        counted = deck_lines(conn, user_id, deck_id, settings.want_list_counting)
         capture = DeckListCapture(
             holdings=holdings,
-            lines=tuple(CapturedLine(line.edition_id, int(line.quantity), int(line.not_owned))
-                        for line in ownership.lines),
-            owner_revision=revision, deck_list_revision=header['revision'], catalog_revision=catalog_revision)
+            lines=tuple(CapturedLine(line.edition_id, line.quantity, line.need) for line in counted.values()),
+            owner_revision=revision, deck_list_revision=header['revision'], catalog_revision=catalog_revision,
+            want_list_counting=settings.want_list_counting, settings_revision=settings.revision)
     # Both transaction locks and the connection are released before callers can wait.
     return capture

@@ -5,8 +5,11 @@ The setting lives on the owner row (migration 049) with its own revision, ``sett
 owner command like a Deck List command: authenticated, idempotent through ``location_command`` and revision-checked
 (STALE_SETTINGS). It never moves the inventory revision (``inventory_owner.revision``): a setting is not an inventory
 change, so it must not invalidate Decks index cursors, Deck contents captures or Collection's stale check, nor fire the
-inventory Undo cleanup trigger (migration 012), which runs only on UPDATE OF revision. Nothing reads the setting yet; the
-Want List and the Deck routes follow it from #208.
+inventory Undo cleanup trigger (migration 012), which runs only on UPDATE OF revision.
+
+The Deck routes follow the setting from #208 (``copy_allocation``): the Deck detail's ``to_get``, the cost to complete
+and Buy missing read it under the owner row lock in the same transaction as the figures, and name it with this
+revision, because the inventory and Deck List revisions don't move when it changes.
 """
 import json
 from typing import Literal

@@ -15,6 +15,8 @@ from .deck_ownership import CompetitionWarning, LineOwnership, SurplusHolding, h
 from .deck_format_checks import DeckFormatChecks, TargetFormat, command_format_checks, held_format_checks
 from .format_evaluator import FORMATS
 from .deck_list_display import CardKind, TrainerType, read_line_display, with_line_display
+from .copy_allocation import deck_lines
+from .settings import WantListCounting, read_settings
 
 router = APIRouter(prefix='/api/decks', tags=['decks'])
 from .construction_checks import DISCLAIMER, IdentityCount, evaluate_checks
@@ -172,6 +174,13 @@ class DeckDetail(BaseModel):
     # The Deck List's Target Format and its result as of today (app redesign #178): one entry in ``format_checks.results``.
     target_format: TargetFormat
     format_checks: DeckFormatChecks
+    # Decklist import #208: the copies the Deck List still needs from outside the Collection under the account's Want
+    # List counting setting (``copy_allocation``), which Buy missing sends and the cost to complete prices; the setting
+    # and the settings revision it was read at. ``ownership`` stays the split Gather uses; its ``not_owned`` is the One
+    # Deck at a time reading.
+    to_get: str
+    want_list_counting: WantListCounting
+    settings_revision: int
 
 
 @router.post('', response_model=LocationCommandResult, status_code=201)
@@ -336,11 +345,15 @@ def deck_detail(deck_id: UUID, user_id: str = Depends(verified_user)):
         # The owner lock (owner_and_rows) keeps Deck List commands out, so a saved result is reused when its key matches,
         # and otherwise recomputed and saved in this transaction.
         format_checks = held_format_checks(conn, user_id, deck_id, deck_list.revision, target_format, reuse=True)
+        settings = read_settings(conn, user_id)
+        counted = deck_lines(conn, user_id, deck_id, settings.want_list_counting)
         return DeckDetail(deck=node_model(deck, rows), owner_revision=revision, catalog_revision=state['revision'],
                           checks=basic_checks(conn, generation, user_id, deck_id, 'holdings'),
                           deck_list_checks=basic_checks(conn, generation, user_id, deck_id, 'deck_list'),
                           deck_list=deck_list, target_format=target_format, format_checks=format_checks,
-                          ownership=ownership.lines, surplus=ownership.surplus, competition=ownership.competition)
+                          ownership=ownership.lines, surplus=ownership.surplus, competition=ownership.competition,
+                          to_get=str(sum(line.need for line in counted.values())),
+                          want_list_counting=settings.want_list_counting, settings_revision=settings.revision)
 
 
 def read_target_format(conn, user_id: str, deck_id: UUID) -> str:

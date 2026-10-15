@@ -3,7 +3,7 @@
 The Want List counting setting is stored on the account and defaults to Every Deck built at once (``all_at_once``) for
 every account, existing ones included (migration 049). ``GET /api/settings`` reads it with the settings revision;
 ``PUT /api/settings/want-list-counting`` changes it as an owner command: authenticated, idempotent and revision-checked
-(STALE_SETTINGS). It never moves the inventory revision. Nothing reads the setting yet (#208 makes the figures follow it).
+(STALE_SETTINGS). It never moves the inventory revision. The Deck figures that follow it are tested in test_deck_counting.py.
 """
 import os
 from concurrent.futures import ThreadPoolExecutor
