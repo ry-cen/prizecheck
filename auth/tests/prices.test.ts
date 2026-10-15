@@ -320,6 +320,41 @@ describe("budgeted price route", () => {
     expect(seen).toHaveLength(1);
   });
 
+  it("lets the decklist import routes carry a 20,000-character paste and refuses their bodies over 64 KiB with 413", async () => {
+    behaviour = ok;
+    seen.length = 0;
+    // A paste of the API's 20,000-character limit is over the 16 KiB other routes accept.
+    const paste = JSON.stringify({
+      source: { text: "x".repeat(20_000) },
+      fixes: [],
+    });
+    const reviewed = await gatewayPost("/api/decks/import/review", paste);
+    expect(reviewed.status).toBe(200);
+    expect(seen).toHaveLength(1);
+    expect(seen[0].url).toBe("/api/decks/import/review");
+    expect(seen[0].body).toBe(paste);
+    expect(seen[0].headers["x-internal-signature"]).toBe(
+      sign(
+        `POST\n/api/decks/import/review\n${hex(paste)}\n${userId}\n${seen[0].headers["x-internal-time"]}`
+      )
+    );
+    const exact = " ".repeat(65_536 - 2) + "{}";
+    for (const path of ["/api/decks/import/review", "/api/decks/import"]) {
+      expect((await gatewayPost(path, exact)).status).toBe(200);
+      expect((await gatewayPost(path, exact + " ")).status).toBe(413);
+    }
+    // 33,000 two-byte characters are under 65,536 characters and over 65,536 bytes.
+    const wide = JSON.stringify({ pad: "é".repeat(33_000) });
+    expect(wide.length).toBeLessThan(65_536);
+    expect((await gatewayPost("/api/decks/import/review", wide)).status).toBe(
+      413
+    );
+    expect(seen).toHaveLength(3);
+    // Other routes keep their 16 KiB limit: the paste never reaches the API through them.
+    expect((await gatewayPost("/api/decks", paste)).status).not.toBe(200);
+    expect(seen).toHaveLength(3);
+  });
+
   it("requires a session", async () => {
     behaviour = ok;
     seen.length = 0;
