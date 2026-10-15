@@ -8,12 +8,14 @@ collector, skipped or saved, but counted under Left out and downloadable.
 - ``watchlist``: the watchlist flag (Collectr's ``Watchlist`` is ``true``): a watched card, not a copy.
 - ``other_game``: a game column (Collectr's ``Category``, PriceCharting's console, Sorted's ``Collection``, a loose
   ``Category`` or ``Game``) that isn't Pokémon (POKEMON_GAMES).
-- ``not_english``: a language column that isn't English (ENGLISH; PriceCharting's Japanese and Chinese consoles fill
-  it), a ``(JP)`` or ``(CN)`` tag in the name, or, from Dragon Shield or Sorted, a set that exists only in Japan
-  (JAPAN_ONLY_SETS), which Dragon Shield labels English.
+- ``not_english``: a language column that isn't English (ENGLISH, by its first word, so "English (US)", "en-GB",
+  "ENG." and "English/Japanese" stay; PriceCharting's Japanese and Chinese consoles fill it), a ``(JP)`` or ``(CN)``
+  tag in the name, or, from Dragon Shield or Sorted, a set that exists only in Japan (JAPAN_ONLY_SETS), which Dragon
+  Shield labels English.
 - ``sealed``: a row with no number, unless its name is a Basic Energy, whose name is a sealed product's
-  (SEALED_NAME), or whose rarity is blank in a file with a rarity column. A file without one (PriceCharting, Dragon
-  Shield, most loose files) never has a blank rarity that means anything.
+  (SEALED_NAME), or whose rarity is blank in a file with both a number and a rarity column, unless its name ends in
+  Energy. A file without both (PriceCharting, Dragon Shield, most loose files) never has a blank rarity that means
+  anything.
 
 Graded rows are not filtered: the grade is read and never kept, so a slab is an ordinary copy.
 
@@ -103,8 +105,11 @@ LEFT_OUT_REASONS = ("watchlist", "other_game", "not_english", "sealed")
 # A game column's words for Pokémon, compared by plain(): Collectr's and PriceCharting's "Pokemon", Sorted's "pok".
 POKEMON_GAMES = frozenset({"pokemon", "pok", "ptcg", "pokemon tcg", "pokemon trading card game"})
 # A language column's words for English, compared by plain(): "English" (the TCGplayer app, TCG Collector, Dragon
-# Shield), "en" (Sorted). A blank language is English.
-ENGLISH = frozenset({"english", "en", "eng", "en us", "en gb"})
+# Shield), "en" (Sorted). A blank language is English, and so is any whose first word is one of these: "English (US)",
+# "en-GB".
+ENGLISH = frozenset({"english", "en", "eng"})
+# A card name ending in Energy (Double Turbo Energy, Basic or special): a blank rarity doesn't make it sealed.
+ENERGY_NAME = re.compile(r"\benergy$")
 # Collectr's name tags for Japanese and Chinese cards.
 LANGUAGE_TAG = re.compile(r"\((?:JP|CN)\)", re.IGNORECASE)
 # Dragon Shield's sets that exist only in Japan, which its export labels English (research "Dragon Shield and Sorted",
@@ -208,7 +213,7 @@ def left_out_reason(fields: dict, source: str, columns=frozenset()) -> str | Non
     if game and game not in POKEMON_GAMES:
         return "other_game"
     language = plain(fields["language"])
-    if language and language not in ENGLISH:
+    if language and next(filter(None, re.split(r"[^a-z]+", language)), "") not in ENGLISH:
         return "not_english"
     if LANGUAGE_TAG.search(fields["name"]):
         return "not_english"
@@ -217,7 +222,9 @@ def left_out_reason(fields: dict, source: str, columns=frozenset()) -> str | Non
             or plain(fields["set_name"]) in JAPAN_ONLY_SETS.values()):
         return "not_english"
     if not fields["number"].strip() and not energy_type(card_name(fields)):
-        if SEALED_NAME.search(fields["name"]) or ("rarity" in columns and not fields["rarity"].strip()):
+        blank_rarity = ("number" in columns and "rarity" in columns and not fields["rarity"].strip()
+                        and not ENERGY_NAME.search(plain(card_name(fields))))
+        if SEALED_NAME.search(fields["name"]) or blank_rarity:
             return "sealed"
     return None
 

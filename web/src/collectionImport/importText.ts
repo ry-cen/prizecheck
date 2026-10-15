@@ -213,7 +213,9 @@ export function exampleText(source: CollectionImportSource): string {
 
 /** The side column's note on copies already held (#232): "3 of these cards are already in your Collection. …". */
 export function heldText(count: string): string {
-  return `${count} of these cards ${count === "1" ? "is" : "are"} already in your Collection. Importing adds to them.`;
+  return count === "1"
+    ? "1 of these cards is already in your Collection. Importing adds to it."
+    : `${count} of these cards are already in your Collection. Importing adds to them.`;
 }
 
 /** What leaving a group out, or bringing it back, did (#232). */

@@ -203,8 +203,7 @@ test.describe("desktop", () => {
     await expect(save(page).getByRole("status")).toHaveText(
       "Ready: 6 cards from 3 rows."
     );
-    // Ticking it brings its rows back, then it is left out again. (The notice comes once the rows are read again,
-    // and a click before then is not taken, as for any change.)
+    // Ticking it brings its rows back, then it is left out again. (The notice comes once the rows are read again.)
     await group(page, "Sold 2 rows").click();
     await expect(group(page, "Sold 2 rows")).toBeChecked();
     await expect(notice(page)).toHaveText(
@@ -276,6 +275,61 @@ test.describe("desktop", () => {
     await page.getByRole("button", { name: "Skip row 1" }).click();
     await expect(note).toHaveCount(0);
     await expect(notice(page)).toHaveText("Skipped 1 row.");
+  });
+
+  test("group and Location changes made while one is saving are queued, sent together in click order, and all reach the server", async ({
+    page,
+  }) => {
+    seedImportCatalog();
+    await signIn(page);
+    const binder = await makeLeaf(page, "Binder");
+    await review(page, GROUPS);
+    // Sold goes first, so nothing needs the collector and Save is open.
+    await group(page, "Sold 2 rows").click();
+    await expect(notice(page)).toHaveText(
+      "The rows in Sold are left out of this import."
+    );
+    const add = save(page).getByRole("button", { name: /^Add / });
+    await expect(add).toBeEnabled();
+    // The next change is held at the gate until it is released, and later ones go through.
+    const sent: { changes: Record<string, unknown>[] }[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    await page.route("**/api/collection-imports/*/changes", async (route) => {
+      sent.push(route.request().postDataJSON());
+      if (sent.length === 1) await gate;
+      await route.continue();
+    });
+    // The first click is sent; the next two come while it is saving. Each control shows its pending state at once.
+    await group(page, "Main 2 rows").click();
+    await group(page, "For Trade 1 row").click();
+    await putCardsIn(page).selectOption({ label: "Binder" });
+    await expect(group(page, "Main 2 rows")).not.toBeChecked();
+    await expect(group(page, "For Trade 1 row")).not.toBeChecked();
+    await expect(putCardsIn(page)).toHaveValue(binder);
+    // Saving now would leave the changes behind.
+    await expect(add).toBeDisabled();
+    expect(sent).toHaveLength(1);
+    release();
+    await expect(notice(page)).toHaveText("Cards will go to Binder.");
+    expect(sent.map((request) => request.changes)).toEqual([
+      [{ group: "Main", include: false }],
+      [{ group: "For Trade", include: false }, { location_id: binder }],
+    ]);
+    // The server holds all three, not just the controls.
+    const response = await page.request.get(
+      `${ORIGIN}/api/collection-imports/current`
+    );
+    const current = (await response.json()) as {
+      location_id: string;
+      groups: { name: string; included: boolean }[];
+    };
+    expect(current.location_id).toBe(binder);
+    expect(current.groups.map((g) => [g.name, g.included])).toEqual([
+      ["Main", false],
+      ["For Trade", false],
+      ["Sold", false],
+    ]);
   });
 });
 

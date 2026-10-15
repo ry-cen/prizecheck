@@ -99,12 +99,14 @@ LEFT_OUT = f"""SELECT reason,n,parsed FROM (
       row_number() OVER (PARTITION BY r.left_out_reason ORDER BY r.row_number) AS k
     FROM collection_import_row r WHERE r.import_id=%s AND {LEFT_OUT_ROW}) found
   WHERE k<=%s ORDER BY reason,k"""
-# The file's groups in file order (#232): the rows of each that weren't left out, and whether it is included.
+# The file's groups in file order (#232): the rows of each that weren't left out, and whether it is included. A group
+# whose rows were all left out is not listed.
 GROUPS = """SELECT r.group_name AS name,count(*) FILTER (WHERE r.left_out_reason IS NULL) AS n,
     NOT (ci.excluded_groups @> jsonb_build_array(r.group_name)) AS included
   FROM collection_import_row r JOIN collection_import ci ON ci.id=r.import_id
   WHERE r.import_id=%s AND r.group_name IS NOT NULL
-  GROUP BY r.group_name,ci.excluded_groups ORDER BY min(r.row_number)"""
+  GROUP BY r.group_name,ci.excluded_groups HAVING count(*) FILTER (WHERE r.left_out_reason IS NULL)>0
+  ORDER BY min(r.row_number)"""
 # The copies of each of these Card Editions in the collector's Collection, every Location and Deck (as catalog search
 # counts a card's owned copies, catalog_browse).
 HELD = """SELECT edition_id,sum(quantity) AS held FROM holding WHERE owner_id=%s AND edition_id=ANY(%s::uuid[])
