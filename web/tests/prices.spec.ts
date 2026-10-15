@@ -186,7 +186,7 @@ test("card information shows each Edition's own price with age, stale and finish
   card = await details(page, "Furret, DAA 2,");
   await expect(card).toContainText("Price unavailable: finish not established");
 
-  // Stale: strictly over 48 hours of provider age, even though the check is fresh.
+  // A quote over 48 hours old still shows its price, with no Stale label.
   apply([
     {
       op: "quote",
@@ -199,9 +199,12 @@ test("card information shows each Edition's own price with age, stale and finish
   await search(page);
   await expect(
     tile(page, "Furret, DAA 1, Darkness Ablaze, Normal")
-  ).toContainText("Stale");
+  ).toContainText("$0.25");
+  await expect(
+    tile(page, "Furret, DAA 1, Darkness Ablaze, Normal")
+  ).not.toContainText("Stale");
   card = await details(page, "Furret, DAA 1, Darkness Ablaze, Normal");
-  await expect(card).toContainText("Stale: the price is over 48 hours old");
+  await expect(card).not.toContainText("Stale");
   await expect(card).toContainText("$0.25");
   await expect(card).toContainText("$0.43");
 

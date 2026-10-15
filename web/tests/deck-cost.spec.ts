@@ -130,7 +130,7 @@ test("three $0.25 copies, two stale $0.43 copies and one unpriced copy show $1.6
   await expect(cost).toContainText(
     "Incomplete subtotal: 1 card without a price"
   );
-  await expect(cost).toContainText("2 stale cards (price over 48 hours old)");
+  await expect(cost).not.toContainText("stale");
   await expect(cost).toContainText("0 cards with unknown price age");
   await expect(cost).toContainText("Excludes shipping and taxes");
   await expect(cost).not.toContainText("$0.00");
@@ -365,6 +365,5 @@ test("a cost for an older inventory revision is discarded and a concurrent chang
   );
   resume();
   await expect(cost).toContainText("$1.86 · 6/6 cards priced");
-  await expect(cost).toContainText("2 stale cards");
   expect(seen).toHaveLength(2);
 });

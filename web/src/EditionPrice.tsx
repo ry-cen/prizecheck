@@ -153,7 +153,6 @@ function Quote({ row }: { row: PriceRow }) {
       ) : (
         <> · Age unknown</>
       )}
-      {row.stale && <> · Stale: the price is over 48 hours old</>}
       {row.checked_at && <> · Last checked {moment(row.checked_at)}</>}
     </>
   );
@@ -180,7 +179,7 @@ function Refresh({ row }: { row: PriceRow }) {
   );
 }
 
-/** One line for a gallery tile: the amount with its Stale or Age unknown label, or a short state. It never
+/** One line for a gallery tile: the amount with its Age unknown label, or a short state. It never
  * shows $0 for a missing quote. The full sentence (price time, last check, refresh) is in card information. */
 function compactContent(settled: Settled | null) {
   if (!settled) return "Checking prices…";
@@ -198,18 +197,12 @@ function compactContent(settled: Settled | null) {
       <span className="edition-price-amount">
         <strong>{row.display_amount}</strong>
       </span>
-      {(unknownAge || row.stale) && (
+      {unknownAge && (
         <span className="edition-price-label" aria-hidden="true">
-          {unknownAge && <> · No age</>}
-          {row.stale && <> · Stale</>}
+          {" · No age"}
         </span>
       )}
-      {(unknownAge || row.stale) && (
-        <span className="edition-price-sr">
-          {unknownAge && <> · Age unknown</>}
-          {row.stale && <> · Stale</>}
-        </span>
-      )}
+      {unknownAge && <span className="edition-price-sr"> · Age unknown</span>}
     </span>
   );
 }

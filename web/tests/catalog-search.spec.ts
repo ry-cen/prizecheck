@@ -69,9 +69,9 @@ promote({**{f'card-{i}': f'Pikachu {i:02d}' for i in range(1, 66)}, 'card-99': '
       .getByRole("button");
     await expect(editions).toHaveText([/^Normal/, /^Reverse Holo/]);
     await expect(editions.nth(1)).toHaveAttribute("aria-pressed", "true");
-    await expect(
-      details.getByRole("group", { name: "Selected Edition" })
-    ).toContainText("Reverse Holo · TCGdex Edition");
+    const selected = details.getByRole("group", { name: "Selected Edition" });
+    await expect(selected).toContainText("Reverse Holo");
+    await expect(selected).not.toContainText("TCGdex");
     await details.getByRole("button", { name: "Close card details" }).click();
     await search.fill("Pikachu 02");
     await expect(tiles).toHaveCount(1);
