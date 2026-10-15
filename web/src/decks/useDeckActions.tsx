@@ -61,11 +61,8 @@ export function useDeckActions({
       ? publication.status
       : null;
   const reasonId = `${idBase}-publish-reason`;
-  const notOwned =
-    detail?.ownership.reduce(
-      (total, line) => total + BigInt(line.not_owned),
-      0n
-    ) ?? 0n;
+  // The copies Buy missing sends: the Deck's need under the Want List counting setting (#208), not `not_owned`.
+  const toGet = detail ? BigInt(detail.to_get) : 0n;
 
   const actions: ReactNode = detail && (
     <div className="flex flex-col items-end gap-1 phone:items-start">
@@ -109,7 +106,7 @@ export function useDeckActions({
 
   const buyMissing: ReactNode = (
     <Button
-      disabled={notOwned === 0n}
+      disabled={toGet === 0n}
       onClick={(event) => {
         exportOpener.current = event.currentTarget;
         setExporting({ kind: "mass", scope: "not_owned" });
