@@ -6,9 +6,11 @@ catalog seed and MATCHING_CARDS: real TCGdex set IDs, set names (imported_sets.t
 https://api.tcgdex.net/v2/en on 2026-10-15.
 
 The three match-rate fixtures (collection_import_fixtures/match-rate-*.csv) are reconstructions, not the research
-exports: each holds the card rows of its research slice (T1 tcgplayer-app.real.csv, C1 and C2 collectr-*.real.csv,
-TC1 tcg-collector.real.csv; TCGplayer product and SKU IDs replaced by 9100xx and 8100xx, and Koraidon's by a lookup ID
-this seed lists), padded with plain rows of this seed's cards. The padding is the fewest rows that reach the ticket's
+exports, and share no data line with them (only each file format's header line): they keep the research slice's
+rows' edge cases (T1 tcgplayer-app, C1 and C2 collectr, TC1 tcg-collector: set-name spellings, number shapes, finish
+words, blank cells, quoting, quantities) with other values (TCGplayer product and SKU IDs replaced by 9100xx and 8100xx,
+and Koraidon's by a lookup ID this seed lists; Collectr's portfolio, prices and dates, TCG Collector's conditions and
+notes made up), padded with plain rows of this seed's cards. The padding is the fewest rows that reach the ticket's
 floor while every rule works, so losing any one hard row drops the fixture below it. The rows still not found are the
 ones the ticket leaves to later work: catch-all sets (Miscellaneous, League, Prize Pack, Deck Exclusives, Battle
 Academy), and cards this seed doesn't hold.
