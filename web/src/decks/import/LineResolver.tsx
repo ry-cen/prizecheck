@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { browseEditions } from "../../catalog_browse_generated";
 import type { ReviewLine } from "../../decks_generated";
+import { ExternalLink as ExternalLinkIcon } from "lucide-react";
 import { Button } from "../../ui/Button";
+import { Icon } from "../../ui/Icon";
 import { TextField } from "../../ui/TextField";
 import { missingCardHref } from "../../reports/missingCardLink";
 import { useDebouncedValue } from "../../workspace/useDebouncedValue";
@@ -144,6 +146,7 @@ export function LineResolver({
           rel="noopener noreferrer"
         >
           Report it on Missing cards
+          <Icon icon={ExternalLinkIcon} size={14} className="ml-1" />
           <span className="sr-only"> (opens in a new tab)</span>
         </a>
       )}
