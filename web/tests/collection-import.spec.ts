@@ -203,7 +203,7 @@ test.describe("desktop", () => {
     );
     const save = page.getByRole("region", { name: "Save" });
     await expect(save.getByRole("status")).toHaveText(
-      "1 row needs you. Fix it in your file, then import the file again."
+      "1 row needs you. Fix or skip it to continue."
     );
     await expect(
       save.getByRole("button", { name: "Add 2 cards to Unsorted" })
@@ -234,7 +234,7 @@ test.describe("desktop", () => {
     );
     await chip(page, /^Needs you 0$/).click();
     await expect(
-      page.getByText("Nothing needs you. Every row is ready.")
+      page.getByText("Nothing needs you. Every row is ready or skipped.")
     ).toBeVisible();
     await save.getByRole("button", { name: "Add 9 cards to Unsorted" }).click();
 

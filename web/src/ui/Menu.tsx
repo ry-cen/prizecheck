@@ -29,6 +29,9 @@ type Props = {
   /** Which edge of the trigger the list lines up with: "end" (its right edge, the default, for menus at the right of
    * a header) or "start" (its left edge, for a control at the left of a row). */
   align?: "start" | "end";
+  /** Whether the list opens below the trigger (the default) or above it, for a trigger in a bar fixed to the bottom of
+   * the screen (Collection Import's selection bar). */
+  side?: "below" | "above";
 };
 
 /**
@@ -47,6 +50,7 @@ export function Menu({
   header,
   items,
   align = "end",
+  side = "below",
 }: Props) {
   const [open, setOpen] = useState(false);
   const [start, setStart] = useState<"first" | "last">("first");
@@ -126,9 +130,9 @@ export function Menu({
       </button>
       {open && (
         <div
-          className={`absolute top-full z-(--layer-panel) mt-1 min-w-56 rounded-panel border border-border-strong bg-surface-raised py-1 text-control text-text ${
-            align === "start" ? "left-0" : "right-0"
-          }`}
+          className={`absolute z-(--layer-panel) min-w-56 rounded-panel border border-border-strong bg-surface-raised py-1 text-control text-text ${
+            side === "above" ? "bottom-full mb-1" : "top-full mt-1"
+          } ${align === "start" ? "left-0" : "right-0"}`}
         >
           {header}
           <ul

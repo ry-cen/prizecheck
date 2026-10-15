@@ -43,17 +43,30 @@ def _card(source_id, name, number, set_id, set_name, variants=None, **extra):
     return {**record, "variants": variants} if variants else record
 
 
+def _detailed(*variants):
+    """TCGdex variants_detailed entries, standard size unless a variant says otherwise."""
+    return [{"size": "standard", **variant} for variant in variants]
+
+
+# A TCGdex marketplace lookup ID kept in one Edition's descriptor: no response may carry it (#230).
+LOOKUP_ID = 7770001
+
+
 def seed_import_catalog():
-    """Browser fixture too (web/tests/collection-import.spec.ts). Ten Printings through the importer:
+    """Browser fixture too (web/tests/collection-import*.spec.ts). Fifteen Printings through the importer:
 
     - Base Set: Wartortle 42, Starmie 64, Psychic Energy 101 and Water Energy 102, one Normal Edition each;
     - Jungle: Wigglytuff 32 (Holo only), Weepinbell 48 (Normal and the Unspecified Variant: first edition) and
       Poké Ball 64 (Normal);
     - Team Rocket Returns: Dark Golduck 35 (Normal and Reverse Holo, no Unspecified Variant);
-    - two sets both named Fixture Promos, each with a Pikachu 1.
+    - two sets both named Fixture Promos, each with a Pikachu 1;
+    - Fixture Finishes (#230), described as TCGdex describes them today, so none has an Unspecified Variant:
+      Exeggcute 1 (normal, reverse, Poké Ball and Master Ball reverse; its normal one carries LOOKUP_ID), Suicune 2
+      (holo, and holo with the 1st Edition stamp), Pineco 3 (normal, reverse, a set-logo stamp and Cosmos reverse),
+      Clefairy 4 (unlimited, shadowless, shadowless 1st Edition, and jumbo) and Celebi V 5 (holo only).
     No Rising Rivals set and no Base Set 999."""
     reset_catalog()
-    base, jungle = ("base1", "Base Set"), ("base2", "Jungle")
+    base, jungle, finishes = ("base1", "Base Set"), ("base2", "Jungle"), ("fixturefin", "Fixture Finishes")
     run(Records(
         _card("base1-42", "Wartortle", "42", *base, category="Pokemon", types=["Water"]),
         _card("base1-64", "Starmie", "64", *base, category="Pokemon", types=["Water"]),
@@ -70,6 +83,23 @@ def seed_import_catalog():
               types=["Lightning"]),
         _card("fixtureimportb-1", "Pikachu", "1", "fixtureimportb", "Fixture Promos", category="Pokemon",
               types=["Lightning"]),
+        _card("fixturefin-1", "Exeggcute", "1", *finishes, category="Pokemon", types=["Grass"],
+              variants_detailed=_detailed({"type": "normal", "thirdParty": {"tcgplayer": LOOKUP_ID}},
+                                          {"type": "reverse"}, {"type": "reverse", "foil": "pokeball"},
+                                          {"type": "reverse", "foil": "masterball"})),
+        _card("fixturefin-2", "Suicune", "2", *finishes, category="Pokemon", types=["Water"],
+              variants_detailed=_detailed({"type": "holo"}, {"type": "holo", "stamp": ["1st-edition"]})),
+        _card("fixturefin-3", "Pineco", "3", *finishes, category="Pokemon", types=["Grass"],
+              variants_detailed=_detailed({"type": "normal"}, {"type": "reverse"},
+                                          {"type": "normal", "stamp": ["set-logo"]},
+                                          {"type": "reverse", "foil": "cosmos"})),
+        _card("fixturefin-4", "Clefairy", "4", *finishes, category="Pokemon", types=["Colorless"],
+              variants_detailed=_detailed({"type": "normal", "subtype": "unlimited"},
+                                          {"type": "normal", "subtype": "shadowless"},
+                                          {"type": "normal", "subtype": "shadowless", "stamp": ["1st-edition"]},
+                                          {"type": "normal", "size": "jumbo"})),
+        _card("fixturefin-5", "Celebi V", "5", *finishes, category="Pokemon", types=["Grass"],
+              variants_detailed=_detailed({"type": "holo"})),
     ))
 
 
@@ -165,14 +195,15 @@ def test_the_fourteen_column_export_matches_by_set_name_and_number():
     summary = started(owner, unsorted, FOURTEEN)
     assert summary["draft_revision"] == 1 and summary["location_id"] == unsorted
     assert summary["location_name"] == "Unsorted"
-    assert summary["counts"] == {"rows": 13, "needs_you": 5, "ready": 8}
-    assert summary["cards_to_add"] == "15"
+    # #230: Dark Golduck's Reverse Holofoil (row 9) now chooses its Reverse Holo Edition.
+    assert summary["counts"] == {"rows": 13, "needs_you": 4, "ready": 9, "finish_unknown": 1, "skipped": 0}
+    assert summary["cards_to_add"] == "16"
     found = all_rows(owner, summary["id"])
     assert [row["row_number"] for row in found] == list(range(1, 14))
     status = {row["row_number"]: (row["status"], row["quantity"]) for row in found}
     assert status == {
         1: ("matched", "5"), 2: ("matched", "1"), 3: ("matched", "1"), 4: ("matched", "2"), 5: ("matched", "1"),
-        6: ("matched", "1"), 7: ("finish_unknown", "1"), 8: ("matched", "3"), 9: ("ambiguous", "1"),
+        6: ("matched", "1"), 7: ("finish_unknown", "1"), 8: ("matched", "3"), 9: ("matched", "1"),
         10: ("not_found", "1"), 11: ("not_found", "1"), 12: ("ambiguous", "1"), 13: ("unreadable", None)}
     by_number = {row["row_number"]: row for row in found}
     assert by_number[1]["edition"]["edition_id"] == edition("base1-102", "normal")
@@ -185,12 +216,13 @@ def test_the_fourteen_column_export_matches_by_set_name_and_number():
     assert by_number[7]["edition"]["descriptor"]["label"] == "Unspecified Variant"
     assert by_number[8]["source"] == {"quantity": "3", "name": "Poké Ball", "set_name": "Jungle", "number": "64/64",
                                       "finish": "Unlimited"}
-    assert by_number[9]["card"]["name"] == "Dark Golduck" and by_number[9]["edition"] is None
+    assert by_number[9]["card"]["name"] == "Dark Golduck"
+    assert by_number[9]["edition"]["edition_id"] == edition("ex7-35", "reverse")
     assert by_number[12]["card"] is None and by_number[12]["edition"] is None
     assert by_number[13]["source"]["quantity"] == "two"
-    assert [row["needs_you"] for row in found] == [False] * 8 + [True] * 5
+    assert [row["needs_you"] for row in found] == [False] * 9 + [True] * 4
     needs = all_rows(owner, summary["id"], "needs")
-    assert [row["row_number"] for row in needs] == [9, 10, 11, 12, 13]
+    assert [row["row_number"] for row in needs] == [10, 11, 12, 13]
 
 
 def test_the_twelve_column_export_reads_crlf_quoting_a_blank_quantity_a_bom_and_windows_1252():
@@ -198,7 +230,7 @@ def test_the_twelve_column_export_reads_crlf_quoting_a_blank_quantity_a_bom_and_
     owner, unsorted = collector()
     for data in (TWELVE, b"\xef\xbb\xbf" + TWELVE, TWELVE.decode("utf-8").encode("cp1252")):
         summary = started(owner, unsorted, data)
-        assert summary["counts"] == {"rows": 6, "needs_you": 0, "ready": 6}
+        assert summary["counts"] == {"rows": 6, "needs_you": 0, "ready": 6, "finish_unknown": 1, "skipped": 0}
         assert summary["cards_to_add"] == "10"
         found = all_rows(owner, summary["id"])
         assert found[2]["source"]["name"] == "Wartortle, Shadowless" and found[2]["quantity"] == "4"
@@ -211,7 +243,7 @@ def test_rows_page_by_one_hundred_and_refuse_a_bad_cursor():
     seed_import_catalog()
     owner, unsorted = collector()
     summary = started(owner, unsorted, file_of(250))
-    assert summary["counts"] == {"rows": 250, "needs_you": 0, "ready": 250}
+    assert summary["counts"] == {"rows": 250, "needs_you": 0, "ready": 250, "finish_unknown": 0, "skipped": 0}
     first = rows(owner, summary["id"]).json()
     assert len(first["rows"]) == 100 and first["next_cursor"] == "100" and first["draft_revision"] == 1
     second = rows(owner, summary["id"], cursor="100").json()
@@ -285,7 +317,7 @@ def test_ten_thousand_rows_are_one_import():
     seed_import_catalog()
     owner, unsorted = collector()
     summary = started(owner, unsorted, file_of(10_000))
-    assert summary["counts"] == {"rows": 10_000, "needs_you": 0, "ready": 10_000}
+    assert summary["counts"] == {"rows": 10_000, "needs_you": 0, "ready": 10_000, "finish_unknown": 0, "skipped": 0}
     assert summary["cards_to_add"] == "10000"
 
 
@@ -389,7 +421,7 @@ def test_save_refuses_while_rows_need_the_collector_or_for_another_draft_revisio
     summary = started(owner, unsorted, FOURTEEN)
     before = revision(owner)
     response = save(owner, summary["id"])
-    assert response.status_code == 422 and response.json()["detail"] == {"code": "ROWS_NEED_YOU", "count": "5"}
+    assert response.status_code == 422 and response.json()["detail"] == {"code": "ROWS_NEED_YOU", "count": "4"}
     clean = started(owner, unsorted, TWELVE)
     response = save(owner, clean["id"], draft_revision=2)
     assert response.status_code == 409 and code(response) == "STALE_DRAFT"
@@ -451,7 +483,8 @@ def test_no_route_reads_prices_or_starts_a_catalog_pull_or_returns_source_data(m
         assert conn.execute("SELECT count(*) AS n FROM catalog_run").fetchone()["n"] == runs
     # And the modules don't import them.
     banned = {"prices", "price_refresh", "price_launcher", "public_records", "catalog_dispatch", "catalog"}
-    for module in ("collection_import", "collection_import_reader", "collection_import_matcher"):
+    for module in ("collection_import", "collection_import_reader", "collection_import_matcher",
+                   "collection_import_finish"):
         tree = ast.parse((Path(__file__).parents[1] / "app" / f"{module}.py").read_text())
         imported = {alias.name for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)
                     for alias in node.names} | {node.module.split(".")[-1] for node in ast.walk(tree)

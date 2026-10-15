@@ -1,6 +1,6 @@
 import { CollectionImportError } from "../collection_import_generated";
 
-/* Collection Import copy (#226, #227). It never names the tracker a file came from, and shows no prices, marketplace
+/* Collection Import copy (#226, #227, #230). It never names the tracker a file came from, and shows no prices, marketplace
  * IDs, fetch times or internal reasons (AGENTS.md "UI copy"). Tracker names appear only in ExportHelp. */
 
 export const SPLIT_LARGE =
@@ -57,13 +57,81 @@ export function rowsText(count: number): string {
   return `${count} ${count === 1 ? "row" : "rows"}`;
 }
 
-/** The save bar's line: what still needs the collector, or what the save adds. */
+/** The save bar's line: what still needs the collector, or what the save adds, and the Finish unknown rows that
+ * don't hold it up. */
 export function saveStatusText(
   needsYou: number,
   ready: number,
-  cards: string
+  cards: string,
+  finishUnknown: number
 ): string {
+  const later =
+    finishUnknown > 0
+      ? ` ${rowsText(finishUnknown)} with finish unknown can be fixed later.`
+      : "";
   if (needsYou > 0)
-    return `${rowsText(needsYou)} ${needsYou === 1 ? "needs" : "need"} you. Fix ${needsYou === 1 ? "it" : "them"} in your file, then import the file again.`;
-  return `Ready: ${cardsText(cards)} from ${rowsText(ready)}.`;
+    return `${rowsText(needsYou)} ${needsYou === 1 ? "needs" : "need"} you. Fix or skip ${needsYou === 1 ? "it" : "them"} to continue.${later}`;
+  return `Ready: ${cardsText(cards)} from ${rowsText(ready)}.${later}`;
+}
+
+/** The finishes Set finish… offers for any selection, as partial Variant Descriptors: each row takes the one of its
+ * card's Editions that fits, and a row whose card has none (or several) keeps its own. */
+export const BULK_FINISHES: {
+  label: string;
+  descriptor: Record<string, unknown>;
+}[] = [
+  { label: "Normal", descriptor: { type: "normal" } },
+  { label: "Holo", descriptor: { type: "holo" } },
+  { label: "Reverse Holo", descriptor: { type: "reverse" } },
+  { label: "1st Edition", descriptor: { stamp: ["1st-edition"] } },
+  { label: "Cosmos Holo", descriptor: { foil: "cosmos" } },
+  { label: "Poké Ball Pattern", descriptor: { foil: "pokeball" } },
+  { label: "Master Ball Pattern", descriptor: { foil: "masterball" } },
+];
+
+/** "Row 3", "Rows 3 and 6", "Rows 3, 6 and 9", or the first five and "N more". */
+export function rowNumbersText(numbers: number[]): string {
+  if (numbers.length === 1) return `Row ${numbers[0]}`;
+  const shown = numbers.length > 5 ? numbers.slice(0, 5) : numbers.slice(0, -1);
+  const last =
+    numbers.length > 5
+      ? `${numbers.length - 5} more`
+      : `${numbers[numbers.length - 1]}`;
+  return `Rows ${shown.join(", ")} and ${last}`;
+}
+
+/** What a finish change did: the rows it set, and the rows that can't take that finish. */
+export function finishText(
+  label: string,
+  applied: number,
+  notApplied: number[]
+): string {
+  const set = applied > 0 ? `Set ${label} on ${rowsText(applied)}.` : "";
+  const kept =
+    notApplied.length > 0
+      ? `${rowNumbersText(notApplied)} can't be ${label}, so ${notApplied.length === 1 ? "it wasn't" : "they weren't"} changed.`
+      : "";
+  return [set, kept].filter(Boolean).join(" ");
+}
+
+export function skipText(applied: number, skip: boolean): string {
+  return `${skip ? "Skipped" : "Restored"} ${rowsText(applied)}.`;
+}
+
+const CHANGE: Record<string, string> = {
+  STALE_DRAFT:
+    "This import changed in another window, so nothing was changed. Check the rows and try again.",
+  IMPORT_NOT_FOUND: "This import is no longer open. Choose your file again.",
+  CATALOG_UNAVAILABLE:
+    "Finishes can't be set right now. Try again in a few minutes.",
+};
+
+/** What a failed change tells the collector. The gateway's own body limit answers 413 without a code. */
+export function changeErrorText(error: unknown): string {
+  if (error instanceof CollectionImportError) {
+    if (error.status === 413)
+      return "Too many rows are selected. Select fewer, or use Select all.";
+    if (CHANGE[error.code]) return CHANGE[error.code];
+  }
+  return "Couldn't change the rows. Try again.";
 }
