@@ -23,6 +23,8 @@ A handoff-ready spec at `docs/planning/social-network/spec.md` for Friends, Loan
 
 <!-- One line per closed ticket: link plus a one-line gist. -->
 
+- [Research how copy allocation, Spare Copies and the Want List work today](https://github.com/ry-cen/prizecheck/issues/242): a Holding has exactly one owner and SQL enforces it, nothing is reserved today, and Spare Copies are worked out fresh on every read from five copies of the same rule. Holding rows have no stable identity, locks and revisions are per owner, and there's no row-level security. Collection value isn't computed anywhere. Candidates: lender side L1 to L3, borrower side B1 or B2. [Findings](research/copy-allocation-and-loans.md)
+
 ## Not yet specified
 
 - Email (or push) notifications for Loan steps, beyond the in-app inbox.
