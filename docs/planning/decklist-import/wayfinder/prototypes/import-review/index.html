@@ -1,0 +1,869 @@
+<!doctype html>
+<!--
+  PROTOTYPE, throw me away. Import review step for "Prototype the import review step" (ry-cen/prizecheck#202).
+  Three review layouts (?variant=A|B|C) across three flows (&flow=new|replace|copy), switchable from the purple bar.
+  Mock catalog and Collection in memory only; nothing is saved. Colours and spacing come from web/src/tokens.css.
+-->
+<html lang="en" data-theme="prize-gold">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Import review prototype</title>
+<link rel="stylesheet" href="../../../../../../web/src/tokens.css">
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body { background: var(--color-bg); color: var(--color-text); font: var(--font-size-md)/var(--line-height) var(--font-sans); }
+  button, input, textarea, select { font: inherit; color: inherit; }
+  .num { font-variant-numeric: var(--numeric); }
+  .muted { color: var(--color-text-muted); }
+  .subtle { color: var(--color-text-subtle); }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--font-size-sm); }
+  .warn { color: var(--color-warning); }
+  .danger { color: var(--color-danger); }
+  .gold { color: var(--color-accent-strong); }
+
+  #stage { min-height: 100vh; }
+  #stage.framed { display: flex; justify-content: center; padding: 24px 0 96px; background: #0a0909; }
+  #stage.framed .app { width: 375px; height: 812px; overflow: auto; border: 1px solid var(--color-border-strong); border-radius: 24px; transform: translateZ(0); }
+  .app { container: app / inline-size; background: var(--color-bg); min-height: 100%; }
+
+  /* Kit controls: 30 px on desktop, 44 px on phones; 24 px chips. */
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: var(--size-control); padding: 0 12px; border-radius: var(--radius-control); border: 1px solid var(--color-control-outline); background: var(--color-surface-raised); font-size: var(--font-size-control); cursor: pointer; white-space: nowrap; }
+  .btn:hover { border-color: var(--color-accent-border); }
+  .btn.primary { background: var(--color-accent); border-color: var(--color-accent); color: var(--color-on-accent); font-weight: 600; }
+  .btn.primary[aria-disabled="true"] { opacity: .45; cursor: not-allowed; }
+  .btn.quiet { background: transparent; border-color: transparent; color: var(--color-text-muted); }
+  .btn.small { height: var(--size-quick); padding: 0 10px; font-size: var(--font-size-sm); }
+  .btn.dangerous { color: var(--color-danger); }
+  .pill { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 8px; border-radius: var(--radius-round); border: 1px solid var(--color-border-strong); font-size: var(--font-size-xs); color: var(--color-text-muted); white-space: nowrap; }
+  .pill.gold { border-color: var(--color-accent-border); color: var(--color-accent-strong); background: var(--color-accent-fill); }
+  .pill.warn { border-color: var(--color-warning); color: var(--color-warning); }
+  .pill.danger { border-color: var(--color-danger-border); color: var(--color-danger); background: var(--color-danger-fill); }
+  .seg { display: inline-flex; border: 1px solid var(--color-control-outline); border-radius: var(--radius-control); overflow: hidden; }
+  .seg button { height: calc(var(--size-control) - 2px); padding: 0 12px; border: 0; background: transparent; font-size: var(--font-size-control); cursor: pointer; color: var(--color-text-muted); white-space: nowrap; }
+  .seg button[aria-pressed="true"] { background: var(--color-surface-selected); color: var(--color-accent-strong); font-weight: 600; }
+  .field { display: grid; gap: 4px; font-size: var(--font-size-sm); color: var(--color-text-muted); }
+  .input { height: var(--size-control); padding: 0 10px; border-radius: var(--radius-control); border: 1px solid var(--color-control-outline); background: var(--color-surface); font-size: var(--font-size-control); color: var(--color-text); min-width: 0; }
+  textarea.input { height: 260px; padding: 10px; resize: vertical; line-height: 1.45; }
+  :focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: var(--focus-offset); }
+  .chip { height: var(--size-chip); padding: 0 10px; border-radius: var(--radius-round); border: 1px solid var(--color-border-strong); background: transparent; font-size: var(--font-size-sm); color: var(--color-text-muted); cursor: pointer; white-space: nowrap; }
+  .chip[aria-pressed="true"] { border-color: var(--color-accent-border); background: var(--color-accent-fill); color: var(--color-accent-strong); }
+  .proto-note { display: inline-block; margin-left: 6px; padding: 0 6px; border: 1px dashed var(--color-control-outline); border-radius: 4px; font-size: var(--font-size-2xs); color: var(--color-text-subtle); white-space: nowrap; vertical-align: middle; }
+  a.link, .link { color: var(--color-accent); text-decoration: none; cursor: pointer; background: none; border: 0; padding: 0; font-size: inherit; }
+
+  /* Shell */
+  .hdr { position: sticky; top: 0; z-index: 10; height: var(--layout-header-height); display: flex; align-items: center; gap: 24px; padding: 0 24px; border-bottom: 1px solid var(--color-border); background: var(--color-bg); }
+  .word { font-size: var(--font-size-sm); font-weight: 700; letter-spacing: 2px; text-transform: uppercase; white-space: nowrap; }
+  .word b { color: var(--color-accent); margin-right: 8px; }
+  .tabs { display: flex; gap: 4px; }
+  .tab { height: 32px; padding: 0 12px; border-radius: var(--radius-control); border: 0; background: transparent; color: var(--color-text-muted); font-size: var(--font-size-control); cursor: pointer; }
+  .tab[aria-current="page"] { background: var(--color-surface-selected); color: var(--color-accent-strong); font-weight: 600; }
+  .avatar { margin-left: auto; width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--color-accent-border); background: var(--color-accent-fill); color: var(--color-accent-strong); display: grid; place-items: center; font-weight: 600; font-size: var(--font-size-control); }
+  .phonehdr, .tabbar { display: none; }
+  .page { max-width: 1240px; margin: 0 auto; padding: 24px var(--layout-gutter) 140px; }
+  h1 { font-size: var(--font-size-xl); margin: 0; }
+  h2 { font-size: var(--font-size-lg); margin: 0; }
+  h3 { font-size: var(--font-size-md); margin: 0; }
+  .lede { margin: 4px 0 0; color: var(--color-text-muted); font-size: var(--font-size-control); }
+  .crumbs { display: flex; align-items: center; gap: 8px; font-size: var(--font-size-control); margin-bottom: 12px; }
+  .pagehead { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+  .pagehead .grow { flex: 1; min-width: 200px; }
+  .panel { border: 1px solid var(--color-border); border-radius: var(--radius-panel); background: var(--color-surface); }
+  .panel-h { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px 16px; border-bottom: 1px solid var(--color-border); }
+  .panel-h .grow { flex: 1; min-width: 0; }
+  .pad { padding: 14px 16px; }
+  .stack { display: grid; gap: 12px; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .ellip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .placeholder { margin-top: 20px; padding: 32px; text-align: center; border: 1px dashed var(--color-border-strong); border-radius: var(--radius-panel); color: var(--color-text-subtle); }
+  .art { width: 34px; aspect-ratio: var(--tile-aspect); border-radius: 4px; background: linear-gradient(160deg, var(--color-art-start), var(--color-art-end)); border: 1px solid var(--color-border); flex: none; }
+
+  /* Paste step */
+  .paste-grid { margin-top: 20px; display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 20px; align-items: start; }
+  .opt { display: grid; gap: 6px; }
+  .opt .lbl { font-size: var(--font-size-xs); color: var(--color-text-subtle); text-transform: uppercase; letter-spacing: 1px; }
+  .explain { margin: 0; font-size: var(--font-size-sm); color: var(--color-text-muted); }
+  .radio { display: flex; gap: 8px; align-items: flex-start; font-size: var(--font-size-control); cursor: pointer; }
+  .radio input { margin-top: 3px; accent-color: var(--color-accent); }
+
+  /* Review: shared pieces */
+  .rv-head { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; margin-top: 16px; padding: 12px 16px; border: 1px solid var(--color-border); border-radius: var(--radius-panel); background: var(--color-surface); }
+  .stat .lbl { font-size: var(--font-size-xs); color: var(--color-text-subtle); text-transform: uppercase; letter-spacing: 1px; }
+  .stat .v { font-size: var(--font-size-lg); font-weight: 700; }
+  .rv-head .grow { flex: 1; }
+  .sec-h { padding: 8px 16px; font-size: var(--font-size-xs); letter-spacing: 1px; text-transform: uppercase; color: var(--color-text-subtle); border-bottom: 1px solid var(--color-border); background: var(--color-surface-raised); }
+  .ln { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--color-border); align-items: start; }
+  .ln:last-child { border-bottom: 0; }
+  .ln.problem { background: color-mix(in srgb, var(--color-warning) 6%, transparent); }
+  .ln.dropped { opacity: .55; }
+  .ln.dropped .nm { text-decoration: line-through; }
+  .ln.sel { outline: 1px solid var(--color-accent-border); outline-offset: -1px; background: var(--color-accent-wash); }
+  .nm { font-weight: 600; }
+  .q { font-weight: 700; color: var(--color-accent-strong); margin-right: 6px; }
+  .pasted { color: var(--color-text-subtle); }
+  .parts { display: grid; gap: 2px; margin-top: 4px; font-size: var(--font-size-sm); }
+  .part { display: flex; gap: 6px; align-items: baseline; }
+  .part .pq { min-width: 18px; font-weight: 700; }
+  .owned { color: var(--color-accent-strong); }
+  .note { font-size: var(--font-size-xs); color: var(--color-text-subtle); margin-top: 2px; }
+  .resolver { grid-column: 2 / -1; margin-top: 6px; padding: 10px; border-radius: var(--radius-control); border: 1px solid var(--color-accent-outline); background: var(--color-surface-raised); display: grid; gap: 8px; }
+  .cands { display: grid; gap: 4px; }
+  .cand { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 6px 8px; border: 1px solid var(--color-border); border-radius: var(--radius-control); background: var(--color-surface); cursor: pointer; text-align: left; font-size: var(--font-size-control); }
+  .cand:hover { border-color: var(--color-accent-border); }
+  .cand .art { width: 26px; }
+  .right { text-align: right; }
+  .savebar { position: sticky; bottom: 0; z-index: 5; display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; padding: 12px 16px; margin-top: 16px; border: 1px solid var(--color-border-strong); border-radius: var(--radius-panel); background: var(--color-surface-raised); box-shadow: 0 -6px 24px var(--color-shadow-strong); }
+  .savebar .grow { flex: 1; min-width: 160px; font-size: var(--font-size-control); }
+  .surplus-row { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 8px; padding: 6px 16px; font-size: var(--font-size-control); border-bottom: 1px solid var(--color-border); }
+  .surplus-row:last-child { border-bottom: 0; }
+  .filter { display: flex; gap: 6px; flex-wrap: wrap; }
+
+  /* Variant A: one list with a side summary */
+  .a-grid { margin-top: 16px; display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 20px; align-items: start; }
+  .a-side { position: sticky; top: calc(var(--layout-header-height) + 16px); display: grid; gap: 12px; }
+
+  /* Variant B: paste beside the resulting Deck List */
+  .b-grid { margin-top: 16px; display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: 16px; align-items: start; }
+  .b-src { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--font-size-sm); }
+  .b-src .srow { display: grid; grid-template-columns: 22px 18px minmax(0, 1fr); gap: 6px; align-items: center; padding: 5px 12px; border-bottom: 1px solid var(--color-border); cursor: pointer; background: transparent; border-left: 0; border-right: 0; border-top: 0; width: 100%; text-align: left; color: var(--color-text); }
+  .b-src .srow.hdrline, .b-src .srow.noise { cursor: default; color: var(--color-text-subtle); }
+  .b-src .srow:hover:not(.hdrline):not(.noise) { background: var(--color-surface-raised); }
+  .b-src .srow.sel { background: var(--color-accent-wash); box-shadow: inset 3px 0 0 var(--color-accent); }
+  .b-src .lno { color: var(--color-text-subtle); text-align: right; font-size: var(--font-size-2xs); }
+  .b-src .mk { text-align: center; }
+  .b-out .orow { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; gap: 8px; padding: 6px 14px; border-bottom: 1px solid var(--color-border); font-size: var(--font-size-control); align-items: baseline; }
+  .b-out .orow.hl { background: var(--color-accent-wash); }
+  .b-tabs { display: none; }
+  .b-sticky { position: sticky; top: calc(var(--layout-header-height) + 16px); display: grid; gap: 12px; }
+
+  /* Variant C: problems first */
+  .c-wrap { margin: 16px auto 0; max-width: 760px; display: grid; gap: 16px; }
+  .c-step { border: 1px solid var(--color-accent-border); border-radius: var(--radius-panel); background: var(--color-surface); overflow: hidden; }
+  .c-step .big { font-size: var(--font-size-lg); font-weight: 700; }
+  .c-progress { display: flex; gap: 4px; }
+  .c-progress span { flex: 1; height: 4px; border-radius: 2px; background: var(--color-border-strong); }
+  .c-progress span.done { background: var(--color-accent); }
+  details.grp > summary { list-style: none; cursor: pointer; display: flex; gap: 10px; align-items: center; padding: 12px 16px; }
+  details.grp > summary::-webkit-details-marker { display: none; }
+  details.grp > summary .chev::after { content: "▸"; color: var(--color-text-subtle); }
+  details.grp[open] > summary .chev::after { content: "▾"; }
+  details.grp[open] > summary { border-bottom: 1px solid var(--color-border); }
+
+  /* Decks, builder, Published Deck stubs */
+  .deckcards { margin-top: 20px; display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+  .deckcard { padding: 14px 16px; border: 1px solid var(--color-border); border-radius: var(--radius-panel); background: var(--color-surface); display: grid; gap: 6px; }
+  .newdeck { margin-top: 16px; display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; }
+  .listgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 0 20px; padding: 8px 16px; font-size: var(--font-size-control); }
+  .listgrid div { padding: 3px 0; }
+
+  /* Dialog and toast */
+  .toast { position: fixed; left: 50%; bottom: 84px; transform: translateX(-50%); z-index: 400; display: flex; gap: 12px; align-items: center; padding: 10px 14px; border-radius: var(--radius-panel); background: var(--color-surface-raised); border: 1px solid var(--color-border-strong); box-shadow: 0 6px 24px var(--color-shadow-strong); font-size: var(--font-size-control); max-width: calc(100% - 32px); }
+
+  /* Phone layout */
+  @container app (max-width: 760px) {
+    .hdr { display: none; }
+    .phonehdr { display: flex; align-items: center; gap: 12px; height: var(--layout-header-height); padding: 0 12px; border-bottom: 1px solid var(--color-border); }
+    .phonehdr .t { font-weight: 600; }
+    .tabbar { display: flex; position: fixed; inset: auto 0 0 0; height: var(--layout-tabbar-height); border-top: 1px solid var(--color-border); background: var(--color-surface); z-index: 10; }
+    .tabbar button { flex: 1; border: 0; background: transparent; color: var(--color-text-muted); font-size: var(--font-size-xs); display: grid; place-items: center; padding: 6px 0; cursor: pointer; }
+    .tabbar button .ico { font-size: 18px; line-height: 1; }
+    .tabbar button[aria-current="page"] { color: var(--color-accent-strong); font-weight: 600; }
+    .page { padding: 16px var(--layout-gutter) 150px; }
+    .btn, .seg button, .input { height: var(--size-control-phone); }
+    textarea.input { height: 220px; }
+    .btn.small { height: var(--size-quick-phone); }
+    .seg { display: flex; width: 100%; }
+    .seg button { flex: 1; padding: 0 6px; white-space: normal; line-height: 1.2; }
+    .paste-grid, .a-grid, .b-grid { grid-template-columns: minmax(0, 1fr); }
+    .a-side, .b-sticky { position: static; }
+    .ln { grid-template-columns: 28px minmax(0, 1fr) auto; padding: 10px 12px; gap: 8px; }
+    .ln .art { width: 28px; }
+    .resolver { grid-column: 1 / -1; }
+    .resolver .btn { width: 100%; }
+    .savebar { position: fixed; left: 0; right: 0; bottom: var(--layout-tabbar-height); margin: 0; border-radius: 0; border-left: 0; border-right: 0; padding: 10px 12px; }
+    .savebar .btn.primary { flex: 1; }
+    .b-tabs { display: flex; margin-top: 12px; }
+    .b-grid[data-tab="paste"] .b-outcol { display: none; }
+    .b-grid[data-tab="list"] .b-srccol { display: none; }
+    .panel-h { padding: 12px; }
+    .newdeck .btn { flex: 1; }
+    .pagehead .btn { flex: 1; }
+  }
+
+  /* Prototype switcher: not part of the design. */
+  .proto-bar { position: fixed; right: 16px; top: 72px; z-index: 1000; display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 999px; background: #f4f1ff; color: #1b1440; font: 600 12px/1 system-ui, sans-serif; box-shadow: 0 6px 24px #0009; white-space: nowrap; }
+  .proto-bar button { border: 0; background: #ddd6ff; color: #1b1440; border-radius: 999px; height: 26px; padding: 0 10px; font: inherit; cursor: pointer; }
+  .proto-bar button[aria-pressed="true"] { background: #1b1440; color: #f4f1ff; }
+  .proto-bar .lbl { padding: 0 8px; }
+  .proto-bar .sep { width: 1px; height: 18px; background: #c9c0f5; }
+  @media (max-width: 760px) { .proto-bar { top: 8px; right: 50%; transform: translateX(50%) scale(.82); } .proto-bar .lbl { max-width: 90px; overflow: hidden; text-overflow: ellipsis; } }
+</style>
+</head>
+<body>
+<div id="stage"><div class="app" id="app"></div></div>
+<div class="proto-bar" role="toolbar" aria-label="Prototype switcher">
+  <button id="prev" aria-label="Previous variant">‹</button>
+  <span class="lbl" id="vlabel"></span>
+  <button id="next" aria-label="Next variant">›</button>
+  <span class="sep"></span>
+  <button data-flow="new" title="Decks → Import a list → new Deck">New</button>
+  <button data-flow="replace" title="Deck builder → Replace list…">Replace</button>
+  <button data-flow="copy" title="Published Deck → Copy to my Decks">Copy</button>
+  <span class="sep"></span>
+  <button id="frame" aria-pressed="false" title="Show the phone layout in a 375 × 812 frame">Phone frame</button>
+</div>
+<div id="layer"></div>
+<script>
+// ---------- Fixtures from research/decklist-text-formats.md (copied, not edited) ----------
+const F1 = `Pokémon: 12
+1 Mimikyu PAL 97 PH
+1 Cresselia LOR 74
+1 Drifloon SVI 89
+1 Scream Tail PAR 86
+2 Munkidori TWM 95
+1 Lumineon V BRS 40
+4 Kirlia SIT 68
+1 Mew ex MEW 151
+4 Ralts SIT 67
+1 Radiant Greninja ASR 46
+1 Klefki SVI 96
+2 Gardevoir ex SVI 86
+
+Trainer: 18
+1 Buddy-Buddy Poffin PRE 101 PH
+1 Unfair Stamp TWM 165
+2 Counter Catcher CIN 91
+1 Nest Ball SVI 181
+2 Artazon PAL 171
+4 Bravery Charm PAL 173
+2 Buddy-Buddy Poffin TEF 144 PH
+2 Boss's Orders PAL 172
+3 Iono PAL 185
+2 Arven SVI 166
+1 Professor Turo's Scenario PAR 171
+1 Technical Machine: Evolution PAR 178
+1 Super Rod PAL 188
+1 Crispin SCR 133
+1 Professor's Research CEL 24
+2 Ultra Ball SVI 196
+2 Rare Candy SVI 191
+2 Earthen Vessel PAR 163
+
+Energy: 4
+1 Basic {D} Energy SVALT 137
+1 Basic {P} Energy SVALT 135
+1 Basic {D} Energy SVE 15
+6 Basic {P} Energy SVE 13
+
+Total Cards: 60`;
+const F3 = `Pokémon: 19
+4 Dreepy TWM 128
+4 Drakloak TWM 129
+3 Dragapult ex TWM 130
+2 Munkidori TWM 95
+2 Budew ASC 16
+1 Dunsparce TEF 128
+1 Dudunsparce TEF 129
+1 Meowth ex POR 62
+1 Fezandipiti ex ASC 142
+
+Trainer: 32
+4 Lillie's Determination MEG 119
+3 Boss's Orders MEG 114
+2 Crispin SCR 133
+1 Rosa's Encouragement POR 84
+1 Judge POR 76
+4 Buddy-Buddy Poffin TEF 144
+4 Poké Pad POR 81
+4 Crushing Hammer POR 71
+3 Ultra Ball MEG 131
+3 Night Stretcher ASC 196
+1 Unfair Stamp TWM 165
+2 Risky Ruins MEG 127
+
+Energy: 9
+3 Fire Energy MEE 10
+3 Psychic Energy MEE 13
+3 Darkness Energy MEE 15`;
+
+// ---------- Mock catalog ----------
+// Any code and number resolves to a synthesized Printing, except the cases below, which are mocked to fail.
+const NOT_IN_CATALOG = new Set(["POR 62", "MEE 10", "MEE 13", "MEE 15"]); // newer than the last TCGdex import
+const NAME_ONLY = { "ASC 16": ["PRE 4", "SSP 5"] }; // the number finds nothing; the name finds several Reprint Groups
+const NAMES = { "PRE 4": "Budew", "SSP 5": "Budew", "MEW 52": "Meowth", "PAL 254": "Iono", "PAL 269": "Iono", "PAR 160": "Counter Catcher",
+  "SVE 5": "Basic Psychic Energy", "SVE 7": "Basic Darkness Energy", "SVE 2": "Basic Fire Energy", "SVE 10": "Basic Fire Energy", "SVE 13": "Basic Psychic Energy", "SVE 15": "Basic Darkness Energy",
+  "LOR 162": "Lost Vacuum", "PAR 123": "Brute Bonnet", "SVI 255": "Nest Ball", "SVI 86": "Gardevoir ex", "SIT 68": "Kirlia", "SIT 67": "Ralts",
+  "SVI 166": "Arven", "SVI 191": "Rare Candy", "TWM 95": "Munkidori", "PRE 101": "Buddy-Buddy Poffin", "PAL 172": "Boss's Orders", "SVI 196": "Ultra Ball", "PAL 185": "Iono" };
+const GROUP = { "PAL 185": "iono", "PAL 254": "iono", "PAL 269": "iono", "PAL 172": "boss", "MEG 114": "boss", "SVI 196": "ultra", "MEG 131": "ultra",
+  "TEF 144": "poffin", "PRE 101": "poffin", "CIN 91": "catcher", "PAR 160": "catcher", "SVI 181": "nest", "SVI 255": "nest" };
+const PRICE = { "PAL 185/Normal": .35, "PAL 185/Reverse Holo": .6, "PAL 254/Holo": 6.5, "PAL 172/Normal": .5, "PAL 172/Reverse Holo": .9, "MEG 114/Normal": .45,
+  "SVI 86/Holo": 3, "TWM 130/Holo": 4.8, "MEW 151/Holo": 1.9, "BRS 40/Holo": 1.1, "PAR 171/Normal": null, "SVI 196/Normal": .3, "MEG 131/Normal": .25 };
+const ENERGY_TYPES = { G: "Grass", R: "Fire", W: "Water", L: "Lightning", P: "Psychic", F: "Fighting", D: "Darkness", M: "Metal" };
+const ENERGY_DEFAULT = { G: "SVE 9", R: "SVE 10", W: "SVE 11", L: "SVE 12", P: "SVE 13", F: "SVE 14", D: "SVE 15", M: "SVE 16" };
+const ENERGY_ALT = { P: ["SVE 13", "SVE 5"], D: ["SVE 15", "SVE 7"], R: ["SVE 10", "SVE 2"] };
+const hash = s => [...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
+const bigCard = n => / (ex|V|VSTAR|VMAX)$/.test(n) || /^Radiant /.test(n);
+
+const PRINTINGS = {};
+function printing(key, name) {
+  if (PRINTINGS[key]) return PRINTINGS[key];
+  const [set, num] = key.split(" ");
+  name = NAMES[key] || name;
+  const energy = energyType(name);
+  const eds = energy ? ["Normal", "Reverse Holo"] : bigCard(name) ? ["Holo"] : ["Normal", "Reverse Holo"];
+  const editions = eds.map(v => {
+    const k = key + "/" + v;
+    const base = energy ? .1 : bigCard(name) ? 1 + (hash(key) % 400) / 100 : .1 + (hash(key) % 60) / 100;
+    const normal = PRICE[key + "/Normal"] ?? base;
+    return { variant: v, price: k in PRICE ? PRICE[k] : +(v === "Reverse Holo" ? normal + .25 : base).toFixed(2) };
+  });
+  return PRINTINGS[key] = { key, set, num, name, energy, group: energy ? "energy-" + energy : GROUP[key] || key, editions };
+}
+function energyType(name) {
+  let m = name.match(/^Basic \{([GRWLPFDM])\} Energy$/); if (m) return m[1];
+  m = name.match(/^(?:Basic )?(Grass|Fire|Water|Lightning|Psychic|Fighting|Darkness|Metal) Energy$/);
+  return m ? Object.keys(ENERGY_TYPES).find(k => ENERGY_TYPES[k] === m[1]) : null;
+}
+const cheapest = p => p.editions.filter(e => e.price != null).sort((a, b) => a.price - b.price)[0] || p.editions[0];
+const priceOf = (key, variant) => printing(key).editions.find(e => e.variant === variant)?.price ?? null;
+// A tiny search index for the picker.
+const SEARCH = () => [...new Set(Object.keys(PRINTINGS).concat(Object.keys(NAMES)))].map(k => printing(k)).filter(p => !NOT_IN_CATALOG.has(p.key));
+
+// ---------- Mock Collection ----------
+// Decks: Charizard ex (oldest), Miraidon ex, Gardevoir ex (the Replace target). `own: false` marks a Spare Copy.
+const DECKS = [
+  { id: "zard", name: "Charizard ex", created: "2026-03-02" },
+  { id: "mirai", name: "Miraidon ex", created: "2026-05-18" },
+  { id: "gard", name: "Gardevoir ex", created: "2026-08-30", list: [["SVI 86", "Holo", 2], ["SIT 68", "Normal", 4], ["SIT 67", "Normal", 4], ["SVI 166", "Normal", 4], ["PAR 160", "Normal", 2], ["LOR 162", "Normal", 1], ["PAR 123", "Holo", 1], ["SVE 5", "Normal", 8], ["PAL 185", "Normal", 3]] },
+];
+const HOLDINGS = [
+  // Spare copies: loose, or another Deck's Surplus.
+  { key: "PAL 185", variant: "Reverse Holo", where: "Binder", qty: 1, spare: true },
+  { key: "PAL 254", variant: "Holo", where: "Binder", qty: 1, spare: true },
+  { key: "PAL 172", variant: "Normal", where: "Unsorted", qty: 2, spare: true },
+  { key: "SVI 196", variant: "Normal", where: "Unsorted", qty: 3, spare: true },
+  { key: "PRE 101", variant: "Normal", where: "Miraidon ex (Surplus)", qty: 1, spare: true },
+  { key: "TWM 95", variant: "Normal", where: "Binder", qty: 2, spare: true },
+  // Copies covering another Deck's own line: never used.
+  { key: "PAL 185", variant: "Normal", where: "Charizard ex", qty: 4, spare: false },
+  { key: "SVI 191", variant: "Normal", where: "Charizard ex", qty: 4, spare: false },
+  // Gardevoir ex holds these (its old list).
+  { key: "SVI 86", variant: "Holo", where: "gard", qty: 2, inDeck: true },
+  { key: "SIT 68", variant: "Normal", where: "gard", qty: 4, inDeck: true },
+  { key: "SIT 67", variant: "Normal", where: "gard", qty: 3, inDeck: true },
+  { key: "SVI 166", variant: "Reverse Holo", where: "gard", qty: 2, inDeck: true },
+  { key: "PAR 160", variant: "Normal", where: "gard", qty: 2, inDeck: true },
+  { key: "LOR 162", variant: "Normal", where: "gard", qty: 1, inDeck: true },
+  { key: "PAR 123", variant: "Holo", where: "gard", qty: 1, inDeck: true },
+  { key: "SVE 5", variant: "Normal", where: "gard", qty: 8, inDeck: true },
+];
+// Published Deck snapshot: Card Editions, not text.
+const PUBLISHED = { title: "Dragapult ex — Regionals top 8", by: "kaito", format: "Standard",
+  text: F3, editions: { "MEE 10": ["SVE 10", "Normal"], "MEE 13": ["SVE 13", "Normal"], "MEE 15": ["SVE 15", "Normal"], "POR 62": ["POR 62", "Holo"], "ASC 16": ["PRE 4", "Normal"] } };
+
+// ---------- Prototype state ----------
+const params = new URLSearchParams(location.search);
+const VARIANTS = { A: "One list", B: "Paste beside Deck List", C: "Problems first" };
+const state = {
+  variant: VARIANTS[params.get("variant")] ? params.get("variant") : "A",
+  flow: ["new", "replace", "copy"].includes(params.get("flow")) ? params.get("flow") : "new",
+  frame: params.get("frame") === "phone",
+  screen: null, text: "", owned: "exact", dest: "new", deckName: "", format: "Standard",
+  fixes: {},          // line id -> { drop } | { pick: key } | { energyKey }
+  open: null,         // line id with its resolver open (A, B) or edition editor
+  query: {},          // picker queries per line
+  filter: "all",      // A
+  sel: null, btab: "paste",   // B
+  step: 0,            // C
+  toast: null, saved: null, surplusSaved: [],
+};
+function startFlow() {
+  Object.assign(state, { fixes: {}, open: null, query: {}, filter: "all", sel: null, btab: "paste", step: 0, saved: null, surplusSaved: [], toast: null });
+  if (state.flow === "new") { state.screen = "decks"; state.text = ""; state.dest = "new"; state.deckName = ""; }
+  if (state.flow === "replace") { state.screen = "builder"; state.text = ""; state.dest = "replace"; }
+  if (state.flow === "copy") { state.screen = "published"; state.text = PUBLISHED.text; state.dest = "new"; state.deckName = PUBLISHED.title; }
+}
+function syncUrl() {
+  const p = new URLSearchParams({ variant: state.variant, flow: state.flow });
+  if (state.frame) p.set("frame", "phone");
+  history.replaceState(null, "", "?" + p);
+}
+
+// ---------- Parsing (headers are section breaks only; totals come from the lines) ----------
+function parse(text) {
+  text = text.replace(/^﻿/, "").replace(/\r\n?/g, "\n").replace(/​/g, "").replace(/ /g, " ").normalize("NFC").replace(/’/g, "'");
+  const rows = []; let section = null;
+  text.split("\n").forEach((raw, i) => {
+    let s = raw.trim();
+    const base = { id: "L" + (i + 1), no: i + 1, raw: s, section };
+    if (!s) return;
+    let m = s.match(/^#*\s*(Pok[eé]mon|Trainer Cards|Trainer|Energy|Energie)\s*[:\-]\s*\d+\s*$/i);
+    if (m) { section = /^pok/i.test(m[1]) ? "Pokémon" : /^tr/i.test(m[1]) ? "Trainer" : "Energy"; rows.push({ ...base, kind: "header", section }); return; }
+    if (/^(Total Cards|Karten insgesamt)\b/i.test(s) || /^\*{3,}/.test(s)) { rows.push({ ...base, kind: "noise" }); return; }
+    s = s.replace(/^\*\s+/, "").replace(/\s{2,}/g, " ");
+    if (!/^\d+\s/.test(s)) { rows.push({ ...base, kind: "noise" }); return; }
+    m = s.match(/^(\d+)\s+(.+?)\s+([A-Z0-9]{2,8}(?:-[A-Z0-9]{2,4})?|Energy)\s+([A-Z]{0,4}\d+[a-z]?)(\s+PH)?$/);
+    if (!m) { rows.push({ ...base, kind: "card", qty: +s.match(/^\d+/)[0], name: s.replace(/^\d+\s+/, ""), unreadable: true }); return; }
+    rows.push({ ...base, kind: "card", qty: +m[1], name: m[2], set: m[3], num: m[4].replace(/^0+(?=\d)/, ""), ph: !!m[5] });
+  });
+  return rows;
+}
+
+// ---------- Matching and allocation ----------
+function match(row) {
+  if (row.unreadable) return { status: "unreadable" };
+  const key = `${row.set} ${row.num}`;
+  if (state.flow === "copy") {
+    const [k, v] = PUBLISHED.editions[key] || [key];
+    const p = printing(k, row.name);
+    return { status: "ok", p, variant: v || cheapest(p).variant, how: "snapshot" };
+  }
+  const et = energyType(row.name);
+  if (et && (row.set === "SVALT" || row.set === "Energy" || NOT_IN_CATALOG.has(key)))
+    return { status: "energy", p: printing(ENERGY_DEFAULT[et], `Basic ${ENERGY_TYPES[et]} Energy`), why: row.set === "SVALT" ? "SVALT is a TCG Live-only code" : `${key} isn't in the catalog yet` };
+  if (NAME_ONLY[key]) return { status: "ambiguous", cands: NAME_ONLY[key].map(k => printing(k)) };
+  if (NOT_IN_CATALOG.has(key)) return { status: "missing" };
+  return { status: "ok", p: printing(key, row.name), how: "code" };
+}
+
+// Resolve every card row into Deck List parts, consuming owned copies in paste order.
+function review() {
+  const rows = parse(state.text);
+  const pool = HOLDINGS.map(h => ({ ...h, left: h.qty }));
+  const replace = state.dest === "replace";
+  const usable = h => (h.spare || (replace && h.inDeck)) && h.left > 0;
+  const cards = rows.filter(r => r.kind === "card").map(r => {
+    const fix = state.fixes[r.id] || {};
+    let m = match(r);
+    if (fix.drop) return { ...r, m, status: "dropped", parts: [] };
+    if (fix.pick) m = { status: "ok", p: printing(fix.pick), how: "picked", was: m.status };
+    if (fix.energyKey && m.p) m = { ...m, p: printing(fix.energyKey), energyChanged: true };
+    if (fix.variant && m.p) m = { ...m, variant: fix.variant };
+    if (!m.p) return { ...r, m, status: m.status, parts: [] };
+    const p = m.p; let need = r.qty; const parts = [];
+    const take = (h, how) => { const n = Math.min(need, h.left); if (n) { h.left -= n; need -= n; parts.push({ key: h.key, variant: h.variant, qty: n, src: h.inDeck ? "deck" : "spare", where: h.where, how }); } };
+    const chosen = m.variant || (r.ph && !fix.variant ? (p.editions.find(e => e.variant === "Reverse Holo") || cheapest(p)).variant : cheapest(p).variant);
+    if (state.owned === "exact" || state.flow === "copy" && state.owned === "exact") {
+      // Exact printings: the named Printing at its cheapest priced Edition (or the snapshot's Edition). Copies of that exact Edition
+      // already in the Deck being replaced cover it; nothing else is substituted.
+      if (replace) pool.filter(h => h.inDeck && h.key === p.key && h.variant === chosen && h.left).forEach(h => take(h, "same"));
+    } else {
+      // Use cards I own: this Deck's copies, then Spare Copies; the exact Printing before other Printings in the Reprint Group.
+      const order = [h => h.inDeck && h.key === p.key, h => h.inDeck && h.key !== p.key && printing(h.key).group === p.group,
+                     h => h.spare && h.key === p.key, h => h.spare && h.key !== p.key && printing(h.key).group === p.group];
+      order.forEach(f => pool.filter(h => usable(h) && f(h)).forEach(h => take(h, h.key === p.key && h.variant === chosen ? "same" : "sub")));
+    }
+    if (need) parts.push({ key: p.key, variant: chosen, qty: need, src: "new", how: m.how === "snapshot" ? "snapshot" : chosen === cheapest(p).variant ? "cheapest" : r.ph ? "ph" : "chosen" });
+    const stuck = HOLDINGS.filter(h => !h.spare && !h.inDeck && printing(h.key).group === p.group);
+    return { ...r, m, status: m.how === "picked" ? "picked" : m.status, parts, stuck };
+  });
+  const problems = cards.filter(c => ["ambiguous", "missing", "unreadable"].includes(c.status));
+  // Resulting Deck List: one line per Card Edition.
+  const list = {};
+  cards.forEach(c => c.parts.forEach(pt => { const k = pt.key + "/" + pt.variant; (list[k] ||= { key: pt.key, variant: pt.variant, qty: 0, owned: 0, from: [] }); list[k].qty += pt.qty; if (pt.src !== "new") list[k].owned += pt.qty; list[k].from.push(c.id); }));
+  // Replace: what the Deck holds that the new list doesn't cover becomes Surplus.
+  const surplus = replace ? pool.filter(h => h.inDeck && h.left > 0).map(h => ({ key: h.key, variant: h.variant, qty: h.left })) : [];
+  const subs = cards.filter(c => c.parts.some(pt => pt.how === "sub" || (pt.src !== "new" && pt.how === "same" && state.owned === "owned"))).length;
+  const energy = cards.filter(c => c.status === "energy").length;
+  const total = cards.filter(c => c.status !== "dropped").reduce((s, c) => s + c.qty, 0);
+  const ownedCards = cards.reduce((s, c) => s + c.parts.filter(p => p.src !== "new").reduce((a, p) => a + p.qty, 0), 0);
+  const toBuy = cards.flatMap(c => c.parts.filter(p => p.src === "new"));
+  const buyCost = toBuy.reduce((s, p) => s + (priceOf(p.key, p.variant) ?? 0) * p.qty, 0);
+  const unpriced = toBuy.filter(p => priceOf(p.key, p.variant) == null).reduce((s, p) => s + p.qty, 0);
+  const noise = rows.filter(r => r.kind === "noise");
+  return { rows, cards, problems, list: Object.values(list), surplus, subs, energy, total, ownedCards, buyCost, unpriced, noise };
+}
+
+// ---------- Text helpers ----------
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const money = n => "$" + n.toFixed(2);
+const edText = (key, variant) => `${key}${variant && variant !== "Normal" ? " · " + variant : ""}`;
+const cardName = key => printing(key).name;
+const plural = (n, a, b = a + "s") => `${n} ${n === 1 ? a : b}`;
+
+function partText(pt, c) {
+  const p = printing(pt.key);
+  if (pt.src === "deck") return `<span class="owned">${pt.qty} ${esc(edText(pt.key, pt.variant))}</span> <span class="subtle">already in this Deck${pt.how === "sub" ? " · swapped in" : ""}</span>`;
+  if (pt.src === "spare") return `<span class="owned">Used ${pt.qty} ${esc(p.name)} ${esc(edText(pt.key, pt.variant))} you own</span> <span class="subtle">· ${esc(pt.where)}</span>`;
+  const label = { cheapest: "cheapest priced", ph: "Reverse Holo, from PH", snapshot: "as published", chosen: "your choice" }[pt.how] || "";
+  const pr = priceOf(pt.key, pt.variant);
+  return `${pt.qty} ${esc(edText(pt.key, pt.variant))} <span class="subtle">· ${label}${pt.how === "ph" ? '<span class="proto-note">placeholder: PH picks Reverse Holo</span>' : ""} · ${pr == null ? "no price" : money(pr) + " each"}</span>`;
+}
+function statusPill(c) {
+  return {
+    ok: c.parts.some(p => p.src !== "new") ? `<span class="pill gold">Uses cards you own</span>` : "",
+    picked: `<span class="pill gold">Picked</span>`,
+    energy: `<span class="pill">Basic Energy</span>`,
+    ambiguous: `<span class="pill warn">Pick one</span>`,
+    missing: `<span class="pill warn">Not found</span>`,
+    unreadable: `<span class="pill warn">Can't read</span>`,
+    dropped: `<span class="pill">Dropped</span>`,
+  }[c.status] || "";
+}
+function problemText(c) {
+  if (c.status === "ambiguous") return `No card ${esc(c.set)} ${esc(c.num)}. ${c.m.cands.length} different cards are called ${esc(c.name)}: pick the one on your list.`;
+  if (c.status === "missing") return `${esc(c.name)} ${esc(c.set)} ${esc(c.num)} isn't in the catalog yet.`;
+  if (c.status === "unreadable") return `This line doesn't end with a set code and number.`;
+  return "";
+}
+
+// The resolver: candidates, a search picker, Drop line, and the Missing cards link.
+function resolver(c) {
+  const q = state.query[c.id] ?? (c.status === "unreadable" ? c.name : c.name || "");
+  const hits = q.length < 2 ? [] : SEARCH().filter(p => p.name.toLowerCase().includes(q.toLowerCase().split(" ")[0])).slice(0, 5);
+  const cands = c.status === "ambiguous" ? c.m.cands : hits;
+  return `<div class="resolver" data-stop>
+    ${c.status === "ambiguous" ? `<div class="note" style="margin:0">Cards called ${esc(c.name)}:</div>` : ""}
+    <label class="field">Search the catalog<input class="input" data-q="${c.id}" value="${esc(q)}" placeholder="Name, or set code and number"></label>
+    ${c.status === "ambiguous" && hits.length ? "" : ""}
+    <div class="cands">${cands.map(p => `<button class="cand" data-act="pick" data-line="${c.id}" data-key="${p.key}"><span class="art"></span><span class="ellip"><b>${esc(p.name)}</b> <span class="subtle">${p.key}</span></span><span class="subtle num">${money(cheapest(p).price ?? 0)}</span></button>`).join("") || `<span class="note">No matches.</span>`}</div>
+    <div class="row">
+      <button class="btn small dangerous" data-act="drop" data-line="${c.id}">Drop line</button>
+      ${c.status !== "unreadable" ? `<span class="note">Not in the catalog? <a class="link" data-act="missing" data-line="${c.id}">Report ${esc(c.name)} ${esc(c.set || "")} ${esc(c.num || "")} on Missing cards ›</a></span>` : ""}
+    </div>
+  </div>`;
+}
+// Edition editor for resolved lines (Basic Energy default, or any line's Edition).
+function editionEditor(c) {
+  const p = c.m.p;
+  const opts = c.status === "energy" || p.energy ? (ENERGY_ALT[p.energy] || [p.key]).flatMap(k => printing(k).editions.map(e => [k, e.variant, e.price])) : p.editions.map(e => [p.key, e.variant, e.price]);
+  return `<div class="resolver" data-stop><div class="note" style="margin:0">Choose the Edition for the cards you don't own:</div>
+    <div class="cands">${opts.map(([k, v, pr]) => `<button class="cand" data-act="edition" data-line="${c.id}" data-key="${k}" data-variant="${v}"><span class="art"></span><span>${esc(edText(k, v))}</span><span class="subtle num">${pr == null ? "no price" : money(pr)}</span></button>`).join("")}</div></div>`;
+}
+
+function lineBody(c, { showPasted = true } = {}) {
+  const head = c.m?.p && c.status !== "dropped" ? esc(c.m.p.name) : esc(c.name);
+  let detail = "";
+  if (c.status === "energy") detail = `<div class="note">Matched by type: ${esc(c.m.why)}. Default Edition ${c.m.p.key}.</div>`;
+  if (c.status === "picked") detail = `<div class="note">You picked ${c.m.p.key}.</div>`;
+  if (["ambiguous", "missing", "unreadable"].includes(c.status)) detail = `<div class="note warn">${problemText(c)}</div>`;
+  const stuck = c.stuck?.length && state.owned === "owned" && c.parts.some(p => p.src === "new") ? `<div class="note">${c.stuck.map(h => `${h.qty} in ${esc(h.where)} stay there: they're that Deck's own.`).join(" ")}</div>` : "";
+  return `<div style="min-width:0">
+    <div class="ellip"><span class="q num">${c.qty}</span><span class="nm">${head}</span> ${statusPill(c)}</div>
+    ${showPasted ? `<div class="mono pasted ellip">${esc(c.raw)}</div>` : ""}
+    ${c.parts.length ? `<div class="parts">${c.parts.map(pt => `<div class="part">${partText(pt, c)}</div>`).join("")}</div>` : ""}
+    ${detail}${stuck}
+  </div>`;
+}
+function lineActions(c) {
+  if (c.status === "dropped") return `<button class="btn small quiet" data-act="undrop" data-line="${c.id}">Restore</button>`;
+  if (["ambiguous", "missing", "unreadable"].includes(c.status)) return state.variant === "C" ? "" : `<button class="btn small" data-act="toggle" data-line="${c.id}">${state.open === c.id ? "Close" : "Fix"}</button>`;
+  return `<button class="btn small quiet" data-act="toggle" data-line="${c.id}">${state.open === c.id ? "Close" : c.status === "energy" ? "Change" : "Edition"}</button>`;
+}
+function lineRow(c, opts = {}) {
+  const problem = ["ambiguous", "missing", "unreadable"].includes(c.status);
+  const open = state.open === c.id || (opts.forceOpen && problem);
+  return `<div class="ln ${problem ? "problem" : ""} ${c.status === "dropped" ? "dropped" : ""} ${opts.sel ? "sel" : ""}" id="row-${c.id}">
+    <div class="art" aria-hidden="true"></div>${lineBody(c, opts)}<div class="right">${opts.noActions ? "" : lineActions(c)}</div>
+    ${open ? (problem ? resolver(c) : c.status !== "dropped" ? editionEditor(c) : "") : ""}
+  </div>`;
+}
+
+// ---------- Shared review pieces ----------
+function settingSeg() {
+  return `<div class="seg" role="group" aria-label="Owned cards">
+    <button data-owned="exact" aria-pressed="${state.owned === "exact"}">Exact printings</button>
+    <button data-owned="owned" aria-pressed="${state.owned === "owned"}">Use cards I own</button></div>`;
+}
+const settingExplain = () => state.owned === "exact"
+  ? (state.flow === "copy" ? "Each card becomes the Edition the Published Deck lists." : "Each line becomes the printing it names, at its cheapest priced Edition.")
+  : "Copies you own are used first: the exact printing, then other printings of the same card. Only the rest gets a new Edition. Copies another Deck needs for its own list are never used.";
+function destText() {
+  if (state.dest === "replace") return `Replacing <b>Gardevoir ex</b>'s Deck List`;
+  return `New Deck <b>${esc(state.deckName || "Untitled")}</b> · Target Format <b>${state.format}</b><span class="proto-note">placeholder for the import contract</span>`;
+}
+function saveLabel() { return state.dest === "replace" ? "Replace Deck List" : "Create Deck"; }
+function saveBar(R, extra = "") {
+  const n = R.problems.length;
+  return `<div class="savebar">
+    <div class="grow">${n ? `<b class="warn">${plural(n, "line")} to resolve</b> <span class="subtle">before you can save</span>` : `<b>Ready</b> <span class="subtle num">· ${R.total} cards · ${plural(R.list.length, "Deck List line")}</span>`}${extra}</div>
+    <button class="btn" data-act="back">Back to paste</button>
+    <button class="btn primary" data-act="save" aria-disabled="${n > 0}" ${n ? `title="${plural(n, "line")} to resolve"` : ""}>${saveLabel()}</button>
+  </div>`;
+}
+function summaryStats(R) {
+  return `<div class="stat"><div class="lbl">Cards</div><div class="v num">${R.total}${R.total !== 60 ? ` <span class="subtle" style="font-size:var(--font-size-sm);font-weight:400">(not 60)</span>` : ""}</div></div>
+    <div class="stat"><div class="lbl">You own</div><div class="v num gold">${R.ownedCards}</div></div>
+    <div class="stat"><div class="lbl">To get</div><div class="v num">${R.total - R.ownedCards} <span class="subtle" style="font-size:var(--font-size-sm);font-weight:400">${money(R.buyCost)}${R.unpriced ? ` + ${R.unpriced} unpriced` : ""}</span></div></div>`;
+}
+function surplusPanel(R) {
+  if (state.dest !== "replace") return "";
+  const n = R.surplus.reduce((s, h) => s + h.qty, 0);
+  return `<section class="panel"><div class="panel-h"><span class="grow"><b>Will become Surplus</b> <span class="muted num">· ${plural(n, "card")}</span></span></div>
+    ${n ? R.surplus.map(h => `<div class="surplus-row num"><b>${h.qty}</b><span class="ellip">${esc(cardName(h.key))} <span class="subtle">${esc(edText(h.key, h.variant))}</span></span><span></span></div>`).join("") : `<div class="pad muted">Every card in this Deck is on the new list.</div>`}
+    <div class="pad note" style="margin:0;border-top:1px solid var(--color-border)">These stay in Gardevoir ex until you Put them away. Nothing moves when you save.</div></section>`;
+}
+function noisePanel(R) {
+  if (!R.noise.length) return "";
+  return `<details class="panel grp"><summary><span class="chev"></span><span class="muted">${plural(R.noise.length, "line")} ignored: not cards</span></summary>
+    <div class="pad mono subtle">${R.noise.map(n => esc(n.raw)).join("<br>")}</div></details>`;
+}
+function headerBar(R) {
+  return `<div class="rv-head">${summaryStats(R)}<div class="grow"></div><div class="opt">${settingSeg()}</div>
+    <p class="explain" style="flex-basis:100%">${destText()} · ${settingExplain()}</p></div>`;
+}
+const SECTIONS = ["Pokémon", "Trainer", "Energy", null];
+const secName = s => s || "No section";
+
+// ---------- Variant A: one list, needs-attention filter, side summary ----------
+function variantA(R) {
+  const counts = { all: R.cards.length, attention: R.problems.length, changed: R.cards.filter(c => c.status === "energy" || c.parts.some(p => p.src !== "new") || c.status === "picked").length, dropped: R.cards.filter(c => c.status === "dropped").length };
+  const keep = c => state.filter === "all" || (state.filter === "attention" && ["ambiguous", "missing", "unreadable"].includes(c.status)) || (state.filter === "changed" && (c.status === "energy" || c.status === "picked" || c.parts.some(p => p.src !== "new"))) || (state.filter === "dropped" && c.status === "dropped");
+  const list = SECTIONS.map(s => {
+    const cs = R.cards.filter(c => c.section === s && keep(c));
+    if (!cs.length) return "";
+    const n = R.cards.filter(c => c.section === s && c.status !== "dropped").reduce((a, c) => a + c.qty, 0);
+    return `<div class="sec-h num">${secName(s)} · ${n}</div>${cs.map(c => lineRow(c)).join("")}`;
+  }).join("");
+  return `
+    <div class="a-grid">
+      <div class="stack">
+        <div class="filter" role="group" aria-label="Show lines">
+          ${[["all", "All"], ["attention", "Needs you"], ["changed", "Changed"], ["dropped", "Dropped"]].map(([k, l]) => `<button class="chip num" data-filter="${k}" aria-pressed="${state.filter === k}">${l} ${counts[k]}</button>`).join("")}
+        </div>
+        <section class="panel">${list || `<div class="pad muted">Nothing here.</div>`}</section>
+        ${noisePanel(R)}
+      </div>
+      <aside class="a-side">
+        <section class="panel pad stack">
+          <div class="row">${summaryStats(R)}</div>
+          <div class="opt"><span class="lbl" style="font-size:var(--font-size-xs);color:var(--color-text-subtle);text-transform:uppercase;letter-spacing:1px">Owned cards</span>${settingSeg()}<p class="explain">${settingExplain()}</p></div>
+          <p class="explain">${destText()}</p>
+        </section>
+        ${surplusPanel(R)}
+      </aside>
+    </div>
+    ${saveBar(R)}`;
+}
+
+// ---------- Variant B: the paste on the left, the resulting Deck List on the right ----------
+function variantB(R) {
+  const byId = Object.fromEntries(R.cards.map(c => [c.id, c]));
+  const sel = state.sel && byId[state.sel] ? byId[state.sel] : null;
+  const mark = c => ({ ok: c.parts.some(p => p.src !== "new") ? '<span class="gold">◆</span>' : '<span class="subtle">✓</span>', picked: '<span class="gold">✓</span>', energy: '<span class="subtle">⚡</span>', dropped: '<span class="subtle">–</span>' }[c.status] || '<span class="warn">!</span>');
+  const src = R.rows.map(r => {
+    if (r.kind === "header") return `<div class="srow hdrline"><span class="lno">${r.no}</span><span></span><span>${esc(r.raw)}</span></div>`;
+    if (r.kind === "noise") return `<div class="srow noise"><span class="lno">${r.no}</span><span></span><span class="ellip" title="Ignored">${esc(r.raw)} <span class="subtle">· ignored</span></span></div>`;
+    const c = byId[r.id];
+    const row = `<button class="srow ${state.sel === r.id ? "sel" : ""}" data-act="sel" data-line="${r.id}"><span class="lno">${r.no}</span><span class="mk">${mark(c)}</span><span class="ellip" style="${c.status === "dropped" ? "text-decoration:line-through" : ""}">${esc(r.raw)}</span></button>`;
+    return row + (state.sel === r.id && isPhone() ? `<div style="font-family:var(--font-sans);font-size:var(--font-size-md)">${lineRow(c, { forceOpen: true, sel: true })}</div>` : "");
+  }).join("");
+  const hl = sel ? new Set(sel.parts.map(p => p.key + "/" + p.variant)) : new Set();
+  const out = SECTIONS.map(s => {
+    const items = R.list.filter(l => { const c = byId[l.from[0]]; return c.section === s; });
+    if (!items.length) return "";
+    return `<div class="sec-h num">${secName(s)} · ${items.reduce((a, l) => a + l.qty, 0)}</div>${items.map(l => `<div class="orow num ${hl.has(l.key + "/" + l.variant) ? "hl" : ""}">
+      <b>${l.qty}</b><span class="ellip">${esc(cardName(l.key))} <span class="subtle">${esc(edText(l.key, l.variant))}</span>${l.owned ? ` <span class="owned" style="font-size:var(--font-size-xs)">· own ${l.owned}</span>` : ""}</span>
+      <span class="subtle" style="font-size:var(--font-size-xs)">${l.from.map(id => "line " + id.slice(1)).join(", ")}</span></div>`).join("")}`;
+  }).join("");
+  const firstProblem = R.problems[0];
+  const selCard = sel ? lineRow(sel, { forceOpen: true }) : `<div class="pad muted">Select a line on the left to see how it was matched${firstProblem ? `, or <a class="link" data-act="sel" data-line="${firstProblem.id}">fix the first problem</a>` : ""}.</div>`;
+  return `
+    ${headerBar(R)}
+    <div class="b-tabs seg" role="tablist"><button data-btab="paste" aria-pressed="${state.btab === "paste"}">Your paste${R.problems.length ? ` · ${R.problems.length} to fix` : ""}</button><button data-btab="list" aria-pressed="${state.btab === "list"}">Deck List · ${R.total}</button></div>
+    <div class="b-grid" data-tab="${state.btab}">
+      <div class="b-srccol stack">
+        <section class="panel"><div class="panel-h"><span class="grow"><b>Your paste</b> <span class="muted num">· ${plural(R.cards.length, "card line")}</span></span>
+          ${R.problems.length ? `<span class="pill warn num">${R.problems.length} to fix</span>` : `<span class="pill gold">All matched</span>`}</div>
+          <div class="b-src">${src}</div></section>
+      </div>
+      <div class="b-outcol b-sticky">
+        ${isPhone() ? "" : `<section class="panel">${selCard}</section>`}
+        <section class="panel b-out"><div class="panel-h"><span class="grow"><b>Deck List after saving</b> <span class="muted num">· ${plural(R.list.length, "line")}</span></span></div>${out}</section>
+        ${surplusPanel(R)}
+      </div>
+    </div>
+    ${saveBar(R)}`;
+}
+
+// ---------- Variant C: problems one at a time, then a grouped summary ----------
+function variantC(R) {
+  const all = R.cards.filter(c => ["ambiguous", "missing", "unreadable"].includes(c.status) || state.fixes[c.id]?.touched);
+  const queue = R.cards.filter(c => state.fixes[c.id]?.queued || ["ambiguous", "missing", "unreadable"].includes(c.status));
+  const left = R.problems.length;
+  const step = left ? R.problems[0] : null;
+  const done = queue.length - left;
+  const grp = (title, cs, open = false) => cs.length ? `<details class="panel grp" ${open ? "open" : ""}><summary><span class="chev"></span><b>${title}</b> <span class="muted num">· ${plural(cs.length, "line")}</span></summary>${cs.map(c => lineRow(c, { showPasted: false })).join("")}</details>` : "";
+  const owned = R.cards.filter(c => c.parts.some(p => p.src !== "new") && c.status !== "dropped");
+  const energy = R.cards.filter(c => c.status === "energy");
+  const fixed = R.cards.filter(c => c.status === "picked" || c.status === "dropped");
+  const plain = R.cards.filter(c => !owned.includes(c) && !energy.includes(c) && !fixed.includes(c) && !["ambiguous", "missing", "unreadable"].includes(c.status));
+  return `
+    ${headerBar(R)}
+    <div class="c-wrap">
+      ${step ? `<section class="c-step">
+        <div class="panel-h"><span class="grow"><span class="big">${plural(left, "line needs", "lines need")} you</span></span><span class="muted num">${done + 1} of ${queue.length}</span></div>
+        <div class="pad" style="padding-bottom:0"><div class="c-progress">${queue.map((c, i) => `<span class="${i < done ? "done" : ""}"></span>`).join("")}</div></div>
+        ${lineRow(step, { forceOpen: true, noActions: true })}
+      </section>` : `<section class="panel pad row"><span class="pill gold">✓</span><b>Every line is resolved.</b> <span class="muted">Check the groups below, then save.</span></section>`}
+      ${surplusPanel(R)}
+      ${grp("Uses cards you own", owned, !step)}
+      ${grp("Basic Energy, default Edition", energy, !step)}
+      ${grp("Fixed by you", fixed)}
+      ${grp("Matched as listed", plain)}
+      ${noisePanel(R)}
+    </div>
+    ${saveBar(R)}`;
+}
+
+// ---------- Paste step ----------
+function pastePage() {
+  const rows = parse(state.text);
+  const cards = rows.filter(r => r.kind === "card");
+  const n = cards.reduce((s, c) => s + c.qty, 0);
+  const copy = state.flow === "copy";
+  return `
+    <div class="crumbs"><a class="link" data-act="cancel">‹ ${state.flow === "new" ? "Decks" : copy ? PUBLISHED.title : "Gardevoir ex"}</a></div>
+    <h1>${copy ? "Copy to my Decks" : state.dest === "replace" ? "Replace Gardevoir ex's list" : "Import a decklist"}</h1>
+    <p class="lede">${copy ? `${esc(PUBLISHED.title)} by ${PUBLISHED.by} · ${PUBLISHED.format}. You'll check every card before anything is saved.` : "Paste a list from Pokémon TCG Live or Limitless. You'll check every line before anything is saved."}</p>
+    <div class="paste-grid">
+      <section class="panel pad stack">
+        ${copy ? `<div class="listgrid mono" style="padding:0">${cards.map(c => `<div class="ellip">${c.qty} ${esc(c.name)} <span class="subtle">${c.set} ${c.num}</span></div>`).join("")}</div>` : `
+        <div class="row"><span class="muted" style="font-size:var(--font-size-sm)">Try:</span>
+          <button class="chip" data-preset="F1">TCG Live list</button><button class="chip" data-preset="F3">Limitless list</button><button class="chip" data-preset="">Clear</button></div>
+        <label class="field">Decklist<textarea class="input mono" id="paste" spellcheck="false" placeholder="Pokémon: 12&#10;1 Mimikyu PAL 97&#10;…">${esc(state.text)}</textarea></label>
+        <p class="explain num">${cards.length ? `${plural(cards.length, "card line")} · ${plural(n, "card")}${rows.some(r => r.kind === "noise") ? ` · ${plural(rows.filter(r => r.kind === "noise").length, "other line")} will be ignored` : ""}` : "Section headers and Total Cards lines are fine; their numbers aren't used."}</p>`}
+      </section>
+      <aside class="panel pad stack">
+        <div class="opt"><span class="lbl">Put it in</span>
+          ${state.flow === "replace" ? `
+          <label class="radio"><input type="radio" name="dest" data-dest="replace" ${state.dest === "replace" ? "checked" : ""}><span><b>Replace this Deck's list</b><br><span class="subtle">Cards the new list doesn't name become Surplus in Gardevoir ex.</span></span></label>
+          <label class="radio"><input type="radio" name="dest" data-dest="new" ${state.dest === "new" ? "checked" : ""}><span><b>A new Deck</b></span></label>` : `
+          <span style="font-size:var(--font-size-control)"><b>A new Deck</b></span>`}
+          ${state.dest === "new" ? `<label class="field">Deck name<input class="input" id="dname" value="${esc(state.deckName)}" placeholder="Required"></label>
+          <label class="field">Target Format<select class="input" id="fmt">${["Standard", "Expanded"].map(f => `<option ${state.format === f ? "selected" : ""}>${f}</option>`).join("")}</select></label>
+          <span class="proto-note" style="margin:0;justify-self:start">placeholder: does a header set this? (contract ticket)</span>` : ""}
+        </div>
+        <div class="opt"><span class="lbl">Owned cards</span>${settingSeg()}<p class="explain">${settingExplain()}</p></div>
+        <button class="btn primary" data-act="review" aria-disabled="${!cards.length || (state.dest === "new" && !state.deckName.trim())}">${cards.length ? `Review ${plural(cards.length, "line")}` : "Review"}</button>
+        ${state.dest === "new" && !state.deckName.trim() && cards.length ? `<span class="note warn">Name the Deck first.</span>` : ""}
+      </aside>
+    </div>`;
+}
+function reviewPage() {
+  const R = review();
+  const v = { A: variantA, B: variantB, C: variantC }[state.variant];
+  return `<div class="crumbs"><a class="link" data-act="back">‹ Back to paste</a></div>
+    <div class="pagehead"><div class="grow"><h1>Check the list</h1><p class="lede">${state.flow === "copy" ? `From ${esc(PUBLISHED.title)}.` : "Every line has to be matched or dropped before you can save."}</p></div></div>
+    ${v(R)}`;
+}
+
+// ---------- Stub pages ----------
+function decksPage() {
+  return `<div class="pagehead"><div class="grow"><h1>Decks</h1></div><a class="link" data-act="published">Discover decks ›</a></div>
+    <form class="newdeck" onsubmit="return false"><label class="field" style="width:320px;max-width:100%">Deck name<input class="input" placeholder=""></label>
+      <button class="btn primary" type="button">Create Deck</button><button class="btn" type="button" data-act="import">Import a list</button></form>
+    <div class="deckcards">${DECKS.map(d => `<div class="deckcard"><b>${esc(d.name)}</b><span class="subtle" style="font-size:var(--font-size-sm)">Created ${d.created}</span></div>`).concat(state.saved?.dest === "new" ? [`<div class="deckcard" style="border-color:var(--color-accent-border)"><b>${esc(state.saved.name)}</b><span class="subtle num" style="font-size:var(--font-size-sm)">Just imported · ${state.saved.total} cards · ${state.saved.owned} owned</span></div>`] : []).join("")}</div>`;
+}
+function builderPage() {
+  const replaced = state.saved?.dest === "replace";
+  const list = replaced ? state.saved.list : DECKS[2].list.map(([key, variant, qty]) => ({ key, variant, qty }));
+  const n = list.reduce((s, l) => s + l.qty, 0);
+  const sur = state.surplusSaved.reduce((s, h) => s + h.qty, 0);
+  return `<div class="crumbs"><a class="link">‹ Decks</a></div>
+    <div class="pagehead"><div class="grow"><h1>Gardevoir ex</h1><p class="lede num">Standard · ${n}/60 · deck builder (D variant, simplified)</p></div>
+      <button class="btn" data-act="replace">Replace list…</button><button class="btn">Export</button><button class="btn">Publish</button><button class="btn quiet dangerous">Delete</button></div>
+    <section class="panel" style="margin-top:16px"><div class="panel-h"><b>Deck List</b></div>
+      <div class="listgrid num">${list.map(l => `<div class="ellip"><b>${l.qty}</b> ${esc(cardName(l.key))} <span class="subtle">${esc(edText(l.key, l.variant))}</span></div>`).join("")}</div></section>
+    ${sur ? `<section class="panel" style="margin-top:16px"><div class="panel-h"><span class="grow"><b>Surplus</b> <span class="muted num">· ${sur}</span></span><button class="btn">Put away all</button></div>
+      <div class="listgrid num">${state.surplusSaved.map(h => `<div class="ellip"><b>${h.qty}</b> ${esc(cardName(h.key))} <span class="subtle">${esc(edText(h.key, h.variant))}</span></div>`).join("")}</div></section>` : ""}`;
+}
+function publishedPage() {
+  const rows = parse(PUBLISHED.text).filter(r => r.kind === "card");
+  return `<div class="crumbs"><a class="link">‹ Discover</a></div>
+    <div class="pagehead"><div class="grow"><h1>${esc(PUBLISHED.title)}</h1><p class="lede">by ${PUBLISHED.by} · <span class="pill gold">✓ ${PUBLISHED.format}</span> · Published Deck</p></div>
+      <button class="btn primary" data-act="copy">Copy to my Decks</button><button class="btn">Export</button></div>
+    <section class="panel" style="margin-top:16px"><div class="listgrid num">${rows.map(c => `<div class="ellip"><b>${c.qty}</b> ${esc((PUBLISHED.editions[c.set + " " + c.num] ? printing(PUBLISHED.editions[c.set + " " + c.num][0], c.name).name : c.name))} <span class="subtle">${esc(PUBLISHED.editions[c.set + " " + c.num]?.[0] || c.set + " " + c.num)}</span></div>`).join("")}</div></section>`;
+}
+
+// ---------- Shell ----------
+let phoneNow = false;
+const isPhone = () => phoneNow;
+function currentTab() { return state.screen === "published" ? "decks" : "decks"; }
+function pageTitle() { return { decks: "Decks", builder: "Gardevoir ex", published: "Published Deck", paste: state.flow === "copy" ? "Copy to my Decks" : "Import", review: "Check the list" }[state.screen]; }
+function body() { return { decks: decksPage, builder: builderPage, published: publishedPage, paste: pastePage, review: reviewPage }[state.screen](); }
+function render() {
+  const app = document.getElementById("app");
+  phoneNow = state.frame || window.innerWidth <= 760;
+  const focusId = document.activeElement?.id || (document.activeElement?.dataset?.q ? "q:" + document.activeElement.dataset.q : null);
+  const caret = document.activeElement?.selectionStart;
+  const scroller = state.frame ? app : document.scrollingElement; const scroll = scroller.scrollTop;
+  app.innerHTML = `
+    <header class="hdr"><span class="word"><b>✦</b>PrizeCheck</span>
+      <nav class="tabs" aria-label="Main views">${["Collection", "Decks", "Catalog", "Missing cards"].map(t => `<button class="tab" ${t === "Decks" ? 'aria-current="page"' : ""}>${t}</button>`).join("")}</nav>
+      <span class="avatar">R</span></header>
+    <header class="phonehdr"><span class="word"><b>✦</b></span><span class="t">${esc(pageTitle())}</span></header>
+    <main class="page">${body()}</main>
+    <nav class="tabbar" aria-label="Main views">${[["Collection", "▦"], ["Decks", "❏"], ["Catalog", "⌕"], ["More", "⋯"]].map(([l, i]) => `<button ${l === "Decks" ? 'aria-current="page"' : ""}><span class="ico" aria-hidden="true">${i}</span>${l}</button>`).join("")}</nav>`;
+  scroller.scrollTop = scroll;
+  if (focusId) { const el = focusId.startsWith("q:") ? app.querySelector(`[data-q="${focusId.slice(2)}"]`) : document.getElementById(focusId); if (el) { el.focus(); if (caret != null && el.setSelectionRange) el.setSelectionRange(caret, caret); } }
+  document.getElementById("stage").classList.toggle("framed", state.frame);
+  document.getElementById("vlabel").textContent = `${state.variant} (${VARIANTS[state.variant]})`;
+  document.getElementById("frame").setAttribute("aria-pressed", state.frame);
+  document.querySelectorAll("[data-flow]").forEach(b => b.setAttribute("aria-pressed", b.dataset.flow === state.flow));
+  const layer = document.getElementById("layer");
+  layer.innerHTML = state.toast ? `<div class="toast" role="status"><span>${state.toast.text}</span>${state.toast.undo ? `<button class="btn small" data-act="undo-save">Undo</button>` : ""}</div>` : "";
+  syncUrl();
+}
+let toastTimer;
+function toast(text, undo = false) { state.toast = { text, undo }; clearTimeout(toastTimer); toastTimer = setTimeout(() => { state.toast = null; render(); }, 7000); }
+
+// ---------- Events ----------
+document.addEventListener("click", e => {
+  const el = e.target.closest("[data-act],[data-owned],[data-filter],[data-preset],[data-btab],[data-dest],[data-flow]");
+  if (!el) return;
+  if (el.dataset.flow) { state.flow = el.dataset.flow; startFlow(); return render(); }
+  if (el.dataset.owned) { state.owned = el.dataset.owned; return render(); }
+  if (el.dataset.filter) { state.filter = el.dataset.filter; return render(); }
+  if (el.dataset.preset !== undefined) { state.text = { F1, F3, "": "" }[el.dataset.preset]; state.fixes = {}; return render(); }
+  if (el.dataset.btab) { state.btab = el.dataset.btab; return render(); }
+  if (el.dataset.dest) { state.dest = el.dataset.dest; return render(); }
+  const a = el.dataset.act, id = el.dataset.line;
+  if (a === "import" || a === "replace" || a === "copy") { state.screen = "paste"; state.saved = null; state.surplusSaved = []; }
+  if (a === "published") { state.flow = "copy"; startFlow(); }
+  if (a === "cancel") state.screen = { new: "decks", replace: "builder", copy: "published" }[state.flow];
+  if (a === "review") { if (el.getAttribute("aria-disabled") === "true") return; state.screen = "review"; state.open = null; state.sel = null; window.scrollTo(0, 0); }
+  if (a === "back") state.screen = "paste";
+  if (a === "toggle") state.open = state.open === id ? null : id;
+  if (a === "sel") { state.sel = state.sel === id && isPhone() ? null : id; state.btab = "paste"; }
+  if (a === "pick") { state.fixes[id] = { pick: el.dataset.key, queued: true }; state.open = null; toast(`Matched to ${esc(cardName(el.dataset.key))} ${el.dataset.key}.`); }
+  if (a === "drop") { state.fixes[id] = { drop: true, queued: true }; state.open = null; toast("Line dropped. It won't be in the Deck List."); }
+  if (a === "undrop") { delete state.fixes[id]; }
+  if (a === "edition") { const f = state.fixes[id] ||= {}; if (printing(el.dataset.key).energy) f.energyKey = el.dataset.key; f.variant = el.dataset.variant; state.open = null; }
+  if (a === "missing") toast(`Stub: opens Missing cards with ${esc(review().cards.find(c => c.id === id)?.raw || "this card")} filled in. The line stays unresolved until you drop it or pick a card.`);
+  if (a === "save") {
+    if (el.getAttribute("aria-disabled") === "true") { toast("Resolve or drop every flagged line first."); return render(); }
+    const R = review();
+    state.saved = { dest: state.dest, name: state.deckName, total: R.total, owned: R.ownedCards, list: R.list };
+    if (state.dest === "replace") { state.surplusSaved = R.surplus; state.screen = "builder"; toast(`Replaced Gardevoir ex's Deck List.${R.surplus.length ? ` ${plural(R.surplus.reduce((s, h) => s + h.qty, 0), "card")} became Surplus.` : ""}`, true); }
+    else { state.screen = "decks"; toast(`Created ${esc(state.deckName)} with ${plural(R.list.length, "Deck List line")}.`, true); }
+    window.scrollTo(0, 0);
+  }
+  if (a === "undo-save") { const was = state.saved?.dest; state.saved = null; state.surplusSaved = []; toast(was === "replace" ? "Deck List restored." : "Deck removed."); }
+  render();
+});
+document.addEventListener("input", e => {
+  if (e.target.id === "paste") { state.text = e.target.value; state.fixes = {}; render(); }
+  if (e.target.id === "dname") { state.deckName = e.target.value; render(); }
+  if (e.target.dataset.q) { state.query[e.target.dataset.q] = e.target.value; render(); }
+});
+document.addEventListener("change", e => { if (e.target.id === "fmt") { state.format = e.target.value; render(); } });
+const keys = Object.keys(VARIANTS);
+function cycle(step) { state.variant = keys[(keys.indexOf(state.variant) + step + keys.length) % keys.length]; state.open = null; render(); }
+document.getElementById("prev").onclick = () => cycle(-1);
+document.getElementById("next").onclick = () => cycle(1);
+document.getElementById("frame").onclick = () => { state.frame = !state.frame; render(); };
+document.addEventListener("keydown", e => {
+  if (e.target.closest("input, textarea, select, [contenteditable]")) return;
+  if (e.key === "ArrowLeft") cycle(-1);
+  if (e.key === "ArrowRight") cycle(1);
+});
+addEventListener("resize", () => { const p = state.frame || innerWidth <= 760; if (p !== phoneNow) render(); });
+startFlow();
+// Deep links straight to the review: &screen=review with a preset (F1 for new/replace).
+if (params.get("screen") === "review") { if (!state.text) state.text = state.flow === "new" ? F3 : F1; if (state.flow === "new" && !state.deckName) state.deckName = "Dragapult ex"; state.screen = "review"; }
+render();
+</script>
+</body>
+</html>
