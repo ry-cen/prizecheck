@@ -312,6 +312,54 @@ def test_a_zip_ignores_macos_finder_metadata_entries():
     assert call("GET", "/api/collection-imports/current", owner).json()["counts"]["rows"] == 9
 
 
+def test_cells_read_as_decklist_import_reads_them():
+    """Every cell, header cells included, goes through decklist import's normalisation (decklist_text.normalise):
+    zero-width characters removed, no-break spaces as spaces, NFC, curly apostrophes as "'". The row's raw text keeps
+    the cells as the file had them."""
+    seed_import_catalog()
+    owner, unsorted = collector()
+    # A zero-width space before Quantity still reads as the TCGplayer app's header; a no-break space inside a set
+    # name and a zero-width space inside a number still match; decomposed accents and curly apostrophes read as
+    # decklist import reads them.
+    lines = [
+        "\u200bQuantity,Name,Simple Name,Set,Card\u00a0Number,Set Code,Printing,Condition,Language,Rarity,"
+        "Product ID,SKU",
+        "1,Starmie,Starmie,Base\u00a0Set,064/102,BS,Normal,Near Mint,English,Common,900003,800003",
+        "2,Starmie,Starmie,Base\u202fSet,06\u200b4/102,BS,Normal,Near Mint,English,Common,900003,800004",
+        "1,Poke\u0301 Ball,Poke\u0301 Ball,Jungle,64/64,JU,Normal,Near Mint,English,Common,900007,800007",
+        "1,Misty\u2019s Starmie \u2018Promo\u2019,Starmie,Base Set,064/102,BS,Normal,Near Mint,English,Common,"
+        "900003,800005",
+    ]
+    summary = started(owner, unsorted, ("\n".join(lines) + "\n").encode("utf-8"))
+    assert summary["counts"] == {"rows": 4, "needs_you": 0, "ready": 4, "finish_unknown": 0, "skipped": 0}
+    assert summary["cards_to_add"] == "5"
+    found = all_rows(owner, summary["id"])
+    assert [row["status"] for row in found] == ["matched"] * 4
+    assert [row["source"] for row in found] == [
+        {"quantity": "1", "name": "Starmie", "set_name": "Base Set", "number": "064/102", "finish": "Normal"},
+        {"quantity": "2", "name": "Starmie", "set_name": "Base Set", "number": "064/102", "finish": "Normal"},
+        {"quantity": "1", "name": "Pok\u00e9 Ball", "set_name": "Jungle", "number": "64/64", "finish": "Normal"},
+        {"quantity": "1", "name": "Misty's Starmie 'Promo'", "set_name": "Base Set", "number": "064/102",
+         "finish": "Normal"}]
+    assert found[0]["edition"]["edition_id"] == edition("base1-64", "normal")
+    assert found[2]["edition"]["edition_id"] == edition("base2-64", "normal")
+    source, rows = stored(summary["id"])
+    assert source == "tcgplayer_app"
+    assert rows[1][1]["set_name"] == "Base Set" and rows[1][1]["number"] == "064/102"
+    assert rows[3][1]["name"] == "Misty's Starmie 'Promo'" and rows[3][1]["simple_name"] == "Starmie"
+    with connect() as conn:
+        raw = [row["raw_text"] for row in conn.execute(
+            "SELECT raw_text FROM collection_import_row WHERE import_id=%s ORDER BY row_number",
+            (summary["id"],)).fetchall()]
+    assert "Base\u202fSet" in raw[1] and "06\u200b4/102" in raw[1] and "Misty\u2019s" in raw[3]
+    # A Windows-1252 file's no-break space (0xA0) and curly apostrophe (0x92) read the same way.
+    summary = started(owner, unsorted, b"Set,Number,Name\r\nBase\xa0Set,64,Misty\x92s Starmie\r\n")
+    found = all_rows(owner, summary["id"])
+    assert [row["status"] for row in found] == ["matched"]
+    assert found[0]["source"] == {"quantity": "", "name": "Misty's Starmie", "set_name": "Base Set", "number": "64",
+                                  "finish": ""}
+
+
 def test_no_response_names_the_detected_source():
     seed_import_catalog()
     owner, unsorted = collector()
@@ -335,3 +383,18 @@ def test_no_response_names_the_detected_source():
     for body in bodies:
         assert not TRACKER.search(body), body
         assert "Portfolio" not in body and "console" not in body and "1,055.48" not in body and "PSA" not in body
+
+
+def test_a_row_or_header_cell_of_only_zero_width_characters_counts_as_blank():
+    """Blank rows and the header's trailing blank cells are judged after normalisation, so a cell of only zero-width
+    characters is blank too."""
+    seed_import_catalog()
+    owner, unsorted = collector()
+    header = ("Quantity,Name,Simple Name,Set,Card Number,Set Code,Printing,Condition,Language,Rarity,Product ID,SKU"
+              ",​")
+    card = "1,Starmie,Starmie,Base Set,064/102,BS,Normal,Near Mint,English,Common,900003,800003"
+    lines = [header, "​,⁠,﻿" + "," * 10, card, "​"]
+    summary = started(owner, unsorted, ("\n".join(lines) + "\n").encode("utf-8"))
+    assert summary["counts"] == {"rows": 1, "needs_you": 0, "ready": 1, "finish_unknown": 0, "skipped": 0}
+    assert [row["status"] for row in all_rows(owner, summary["id"])] == ["matched"]
+    assert stored(summary["id"])[0] == "tcgplayer_app"
