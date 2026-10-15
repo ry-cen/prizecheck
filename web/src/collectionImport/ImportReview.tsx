@@ -1,22 +1,32 @@
 import { useEffect, useRef, useState } from "react";
+import { ChevronDown } from "lucide-react";
 import { usePlaces } from "../catalog/usePlaces";
 import {
+  changeCollectionImport,
+  CollectionImportError,
+  getCurrentCollectionImport,
   saveCollectionImport,
-  type CollectionImportRow,
+  type CollectionImportChange,
+  type CollectionImportChangeResult,
   type CollectionImportRowFilter,
   type CollectionImportSummary,
 } from "../collection_import_generated";
 import { PageHeader } from "../shell/PageHeader";
 import { Button } from "../ui/Button";
 import { Chip } from "../ui/Chip";
-import { Pill, type PillTone } from "../ui/Pill";
+import { Icon } from "../ui/Icon";
+import { Menu } from "../ui/Menu";
 import { useToast } from "../ui/Toast";
-import { variantLabel } from "../ui/variantLabel";
+import { ImportRowItem } from "./ImportRowItem";
 import {
+  BULK_FINISHES,
   cardsText,
+  changeErrorText,
+  finishText,
   rowsText,
   saveErrorText,
   saveStatusText,
+  skipText,
 } from "./importText";
 import { useImportRows } from "./useImportRows";
 
@@ -28,47 +38,202 @@ type Props = {
   onLanded: (locationId: string) => void;
 };
 
-/** How a row that isn't simply matched is marked. */
-const PILLS: Partial<
-  Record<CollectionImportRow["status"], { text: string; tone: PillTone }>
-> = {
-  ambiguous: { text: "More than one match", tone: "warn" },
-  not_found: { text: "Not found", tone: "bad" },
-  unreadable: { text: "Can't read", tone: "bad" },
-  finish_unknown: { text: "Finish unknown", tone: "neutral" },
+/** The rows a bulk change applies to: every row in the current filter (Select all), or these row numbers. */
+type Selection = { all: boolean; rows: ReadonlySet<number> };
+const NOTHING: Selection = { all: false, rows: new Set() };
+// A change names at most this many rows by number (collection_import.MAX_CHANGE_ROWS); more go in several changes.
+const MAX_CHANGE_ROWS = 1000;
+
+const FILTERS: { value: CollectionImportRowFilter; label: string }[] = [
+  { value: "needs", label: "Needs you" },
+  { value: "finish", label: "Finish unknown" },
+  { value: "all", label: "All" },
+  { value: "skipped", label: "Skipped" },
+];
+
+const EMPTY: Record<CollectionImportRowFilter, string> = {
+  needs: "Nothing needs you. Every row is ready or skipped.",
+  finish: "No rows have an unknown finish.",
+  all: "Every row is skipped.",
+  skipped: "No rows are skipped.",
 };
 
-/** Collection Import's review (#226): one list of the file's rows with Needs you and All, opening on Needs you when
- * anything needs the collector, and the save bar. Rows that need the collector can't be fixed here yet (#229); the
- * collector fixes the file and imports it again. Saving adds every ready row's copies in one step, with no Undo. */
+// The Set finish… trigger, drawn as the kit's secondary Button (30 px, 44 px on a phone).
+const BULK_TRIGGER =
+  "box-border m-0 inline-flex h-control cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-control border border-border-strong bg-surface-raised px-3 font-sans text-control font-medium leading-none text-text hover:border-control-outline aria-expanded:border-accent-border aria-expanded:bg-surface-selected aria-expanded:text-accent-strong phone:h-control-phone phone:px-4";
+
+/** Collection Import's review (#226, #230): one list of the file's rows under Needs you, Finish unknown, All and
+ * Skipped, opening on Needs you when anything needs the collector. A row's finish is picked from its card's own
+ * Editions; selected rows (or every row in the filter) get a finish or are skipped at once; skipped rows can be
+ * restored. Every change goes to the server at the draft's revision and answers the new counts. Finish unknown never
+ * blocks saving. Saving adds every ready row's copies in one step, with no Undo. */
 export function ImportReview({ summary, fileName, onBack, onLanded }: Props) {
   const places = usePlaces(true);
   const toast = useToast();
   const heading = useRef<HTMLHeadingElement>(null);
-  const { rows, needs_you: needsYou, ready } = summary.counts;
+  const rowsHeading = useRef<HTMLHeadingElement>(null);
+  const listRef = useRef<HTMLUListElement>(null);
+  const [current, setCurrent] = useState(summary);
+  const counts = current.counts;
   const [filter, setFilter] = useState<CollectionImportRowFilter>(
-    needsYou > 0 ? "needs" : "all"
+    summary.counts.needs_you > 0 ? "needs" : "all"
   );
-  const list = useImportRows(summary.id, filter);
+  const list = useImportRows(current.id, filter);
+  const [selection, setSelection] = useState<Selection>(NOTHING);
+  const changing = useRef(false);
+  const [notice, setNotice] = useState("");
+  // Where focus goes once the rows are read again, if the focused control left with its row or with the bulk bar.
+  const [refocus, setRefocus] = useState<
+    { to: "row"; index: number } | { to: "rows" } | null
+  >(null);
   // One key per review, so a retried save after a lost response is the same save.
   const key = useRef(crypto.randomUUID());
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const where =
-    places.path(summary.location_id) ??
-    summary.location_name ??
+    places.path(current.location_id) ??
+    current.location_name ??
     "your Location";
+  const shown: Record<CollectionImportRowFilter, number> = {
+    needs: counts.needs_you,
+    finish: counts.finish_unknown,
+    all: counts.needs_you + counts.ready,
+    skipped: counts.skipped,
+  };
+  const selectedCount = selection.all ? shown[filter] : selection.rows.size;
 
   useEffect(() => {
     heading.current?.focus();
   }, []);
 
+  useEffect(() => {
+    if (!refocus) return;
+    setRefocus(null);
+    const active = document.activeElement;
+    if (active && active !== document.body && active.isConnected) return;
+    if (refocus.to === "row") {
+      const items =
+        listRef.current?.querySelectorAll<HTMLElement>("li[data-row]");
+      const item = items?.[Math.min(refocus.index, items.length - 1)];
+      const box = item?.querySelector<HTMLInputElement>(
+        'input[type="checkbox"]'
+      );
+      if (box) return box.focus();
+    }
+    rowsHeading.current?.focus();
+  }, [refocus, list.rows]);
+
+  function choose(next: CollectionImportRowFilter) {
+    setFilter(next);
+    setSelection(NOTHING);
+    setNotice("");
+  }
+
+  function select(rowNumber: number, on: boolean) {
+    setSelection((previous) => {
+      const rows = new Set(
+        previous.all ? list.rows.map((row) => row.row_number) : previous.rows
+      );
+      if (on) rows.add(rowNumber);
+      else rows.delete(rowNumber);
+      return { all: false, rows };
+    });
+  }
+
+  /** The changes for this action on the selection: the filter for Select all, else the row numbers. */
+  function selected(
+    action: Omit<CollectionImportChange, "rows" | "filter">
+  ): CollectionImportChange[] {
+    if (selection.all) return [{ filter, ...action }];
+    const rows = [...selection.rows].sort((a, b) => a - b);
+    const changes: CollectionImportChange[] = [];
+    for (let start = 0; start < rows.length; start += MAX_CHANGE_ROWS)
+      changes.push({
+        rows: rows.slice(start, start + MAX_CHANGE_ROWS),
+        ...action,
+      });
+    return changes;
+  }
+
+  /** Sends the changes at the draft's revision, then shows the new counts and reads the shown rows again. */
+  async function apply(
+    changes: CollectionImportChange[],
+    describe: (results: CollectionImportChangeResult[]) => string,
+    after: { to: "row"; index: number } | { to: "rows" }
+  ) {
+    if (changing.current || !changes.length) return;
+    changing.current = true;
+    setNotice("");
+    setError(null);
+    try {
+      const result = await changeCollectionImport(current.id, {
+        draft_revision: current.draft_revision,
+        changes,
+      });
+      setCurrent(result.summary);
+      setSelection(NOTHING);
+      await list.refresh();
+      setNotice(describe(result.results));
+      setRefocus(after);
+    } catch (failure) {
+      if (
+        failure instanceof CollectionImportError &&
+        failure.code === "STALE_DRAFT"
+      ) {
+        const latest = await getCurrentCollectionImport().catch(() => null);
+        if (latest?.id === current.id) {
+          setCurrent(latest);
+          setSelection(NOTHING);
+          await list.refresh();
+          setRefocus(after);
+        }
+      }
+      setNotice(changeErrorText(failure));
+    } finally {
+      changing.current = false;
+    }
+  }
+
+  function total(results: CollectionImportChangeResult[]) {
+    return {
+      applied: results.reduce((sum, item) => sum + item.applied, 0),
+      notApplied: results.flatMap((item) => item.not_applied),
+    };
+  }
+
+  function setFinish(
+    changes: CollectionImportChange[],
+    label: string,
+    after: { to: "row"; index: number } | { to: "rows" }
+  ) {
+    void apply(
+      changes,
+      (results) => {
+        const { applied, notApplied } = total(results);
+        return finishText(label, applied, notApplied);
+      },
+      after
+    );
+  }
+
+  function setSkipped(
+    changes: CollectionImportChange[],
+    skip: boolean,
+    after: { to: "row"; index: number } | { to: "rows" }
+  ) {
+    void apply(
+      changes,
+      (results) => skipText(total(results).applied, skip),
+      after
+    );
+  }
+
   async function save() {
     setSaving(true);
     setError(null);
     try {
-      const result = await saveCollectionImport(summary.id, {
-        draft_revision: summary.draft_revision,
+      const result = await saveCollectionImport(current.id, {
+        draft_revision: current.draft_revision,
         idempotency_key: key.current,
       });
       toast.show({
@@ -94,7 +259,7 @@ export function ImportReview({ summary, fileName, onBack, onLanded }: Props) {
           }
         />
         <p className="m-0 text-body text-text-muted wrap-anywhere">
-          {fileName} · {rowsText(rows)}
+          {fileName} · {rowsText(counts.rows)}
         </p>
       </div>
       <div className="grid grid-cols-[minmax(0,1fr)_16rem] items-start gap-6 phone:grid-cols-1">
@@ -104,25 +269,45 @@ export function ImportReview({ summary, fileName, onBack, onLanded }: Props) {
         >
           <h2
             id="import-rows-heading"
+            ref={rowsHeading}
+            tabIndex={-1}
             className="m-0 text-heading font-semibold"
           >
             Rows
           </h2>
-          <div
-            role="group"
-            aria-label="Show rows"
-            className="flex flex-wrap gap-2"
-          >
-            <Chip
-              selected={filter === "needs"}
-              onChange={() => setFilter("needs")}
+          <div className="flex flex-wrap items-center gap-2">
+            <div
+              role="group"
+              aria-label="Show rows"
+              className="flex flex-wrap gap-2"
             >
-              Needs you {needsYou}
-            </Chip>
-            <Chip selected={filter === "all"} onChange={() => setFilter("all")}>
-              All {rows}
-            </Chip>
+              {FILTERS.map((option) => (
+                <Chip
+                  key={option.value}
+                  selected={filter === option.value}
+                  onChange={() => choose(option.value)}
+                >
+                  {option.label} {shown[option.value]}
+                </Chip>
+              ))}
+            </div>
+            {shown[filter] > 0 && (
+              <Button
+                variant="quiet"
+                aria-pressed={selection.all}
+                onClick={() =>
+                  setSelection(
+                    selection.all ? NOTHING : { all: true, rows: new Set() }
+                  )
+                }
+              >
+                Select all {shown[filter]}
+              </Button>
+            )}
           </div>
+          <p role="status" className="m-0 text-body text-text-muted">
+            {notice}
+          </p>
           {list.status === "loading" && (
             <p className="m-0 text-body text-text-muted">Loading rows…</p>
           )}
@@ -135,19 +320,41 @@ export function ImportReview({ summary, fileName, onBack, onLanded }: Props) {
             </div>
           )}
           {list.status === "ready" && list.rows.length === 0 && (
-            <p className="m-0 text-body text-text-muted">
-              {filter === "needs"
-                ? "Nothing needs you. Every row is ready."
-                : "This import has no rows."}
-            </p>
+            <p className="m-0 text-body text-text-muted">{EMPTY[filter]}</p>
           )}
           {list.rows.length > 0 && (
             <ul
+              ref={listRef}
               aria-labelledby="import-rows-heading"
               className="m-0 flex list-none flex-col p-0"
             >
-              {list.rows.map((row) => (
-                <ImportRowItem key={row.row_number} row={row} />
+              {list.rows.map((row, index) => (
+                <ImportRowItem
+                  key={row.row_number}
+                  row={row}
+                  selected={selection.all || selection.rows.has(row.row_number)}
+                  onSelect={(on) => select(row.row_number, on)}
+                  onFinish={(descriptor, label) =>
+                    setFinish(
+                      [{ rows: [row.row_number], finish: descriptor }],
+                      label,
+                      { to: "row", index }
+                    )
+                  }
+                  onSkip={() =>
+                    setSkipped([{ rows: [row.row_number], skip: true }], true, {
+                      to: "row",
+                      index,
+                    })
+                  }
+                  onRestore={() =>
+                    setSkipped(
+                      [{ rows: [row.row_number], restore: true }],
+                      false,
+                      { to: "row", index }
+                    )
+                  }
+                />
               ))}
             </ul>
           )}
@@ -173,85 +380,121 @@ export function ImportReview({ summary, fileName, onBack, onLanded }: Props) {
           </h2>
           <dl className="m-0 grid grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-1 text-body">
             <dt className="text-text-muted">Rows in file</dt>
-            <dd className="m-0 text-right tabular-nums">{rows}</dd>
+            <dd className="m-0 text-right tabular-nums">{counts.rows}</dd>
             <dt className="text-text-muted">Need you</dt>
-            <dd className="m-0 text-right tabular-nums">{needsYou}</dd>
+            <dd className="m-0 text-right tabular-nums">{counts.needs_you}</dd>
             <dt className="text-text-muted">Ready</dt>
-            <dd className="m-0 text-right tabular-nums">{ready}</dd>
+            <dd className="m-0 text-right tabular-nums">{counts.ready}</dd>
+            <dt className="text-text-muted">Finish unknown</dt>
+            <dd className="m-0 text-right tabular-nums">
+              {counts.finish_unknown}
+            </dd>
+            <dt className="text-text-muted">Skipped</dt>
+            <dd className="m-0 text-right tabular-nums">{counts.skipped}</dd>
             <dt className="text-text-muted">Cards to add</dt>
             <dd className="m-0 text-right tabular-nums">
-              {summary.cards_to_add}
+              {current.cards_to_add}
             </dd>
             <dt className="text-text-muted">Going to</dt>
             <dd className="m-0 text-right wrap-anywhere">{where}</dd>
           </dl>
         </aside>
       </div>
-      <section
-        aria-label="Save"
-        className="sticky bottom-0 z-(--layer-sticky) box-border flex flex-wrap items-center gap-3 border-t border-border bg-bg py-3 phone:bottom-tabbar"
-      >
-        <p
-          role="status"
-          className={`m-0 min-w-0 flex-[1_1_14rem] text-body ${error ? "text-warning" : "text-text"}`}
-        >
-          {error ?? saveStatusText(needsYou, ready, summary.cards_to_add)}
-        </p>
-        <Button
-          variant="primary"
-          className="min-w-0 max-w-full"
-          disabled={needsYou > 0 || saving}
-          onClick={() => void save()}
-        >
-          <span className="min-w-0 truncate">
-            Add {cardsText(summary.cards_to_add)} to {where}
-          </span>
-        </Button>
-      </section>
-    </main>
-  );
-}
-
-function ImportRowItem({ row }: { row: CollectionImportRow }) {
-  const pill = PILLS[row.status];
-  const { source } = row;
-  const fromFile = [
-    source.quantity,
-    source.name,
-    source.set_name,
-    source.number,
-    source.finish,
-  ]
-    .filter(Boolean)
-    .join(" · ");
-  const title = row.card
-    ? `${row.quantity ?? "?"} × ${row.card.name}`
-    : source.name || `Row ${row.row_number}`;
-  const detail = row.card
-    ? [
-        `${row.card.set_name} ${row.card.collector_number}`,
-        row.edition ? variantLabel(row.edition.descriptor) : null,
-      ]
-        .filter(Boolean)
-        .join(" · ")
-    : null;
-  return (
-    <li className="flex flex-wrap items-start gap-x-3 gap-y-1 border-b border-border py-3 last:border-b-0">
-      <div className="flex min-w-0 flex-[1_1_16rem] flex-col gap-0.5">
-        <p className="m-0 text-body font-semibold wrap-anywhere">{title}</p>
-        {detail && (
-          <p className="m-0 text-meta text-text-muted wrap-anywhere">
-            {detail}
-          </p>
+      <div className="sticky bottom-0 z-(--layer-sticky) box-border flex flex-col border-t border-border bg-bg phone:bottom-tabbar">
+        {selectedCount > 0 && (
+          <div
+            role="group"
+            aria-label="Selected rows"
+            className="flex flex-wrap items-center gap-2 border-b border-border py-2"
+          >
+            <p className="m-0 text-body font-medium tabular-nums">
+              {selectedCount} selected
+            </p>
+            {filter !== "skipped" && (
+              <Menu
+                label="Set finish…"
+                align="start"
+                side="above"
+                triggerClassName={BULK_TRIGGER}
+                trigger={
+                  <>
+                    Set finish…
+                    <Icon
+                      icon={ChevronDown}
+                      size={14}
+                      className="text-text-muted"
+                    />
+                  </>
+                }
+                items={BULK_FINISHES.map((option) => ({
+                  label: option.label,
+                  onSelect: () =>
+                    setFinish(
+                      selected({ finish: option.descriptor }),
+                      option.label,
+                      { to: "rows" }
+                    ),
+                }))}
+              />
+            )}
+            {filter === "skipped" ? (
+              <Button
+                onClick={() =>
+                  setSkipped(selected({ restore: true }), false, {
+                    to: "rows",
+                  })
+                }
+              >
+                Restore
+              </Button>
+            ) : (
+              <Button
+                onClick={() =>
+                  setSkipped(selected({ skip: true }), true, { to: "rows" })
+                }
+              >
+                Skip
+              </Button>
+            )}
+            <Button
+              variant="quiet"
+              onClick={() => {
+                setSelection(NOTHING);
+                setRefocus({ to: "rows" });
+              }}
+            >
+              Clear
+            </Button>
+          </div>
         )}
-        <p className="m-0 text-meta text-text-muted wrap-anywhere">
-          From your file: {fromFile || "an empty row"}
-        </p>
+        <section
+          aria-label="Save"
+          className="flex flex-wrap items-center gap-3 py-3"
+        >
+          <p
+            role="status"
+            className={`m-0 min-w-0 flex-[1_1_14rem] text-body ${error ? "text-warning" : "text-text"}`}
+          >
+            {error ??
+              saveStatusText(
+                counts.needs_you,
+                counts.ready,
+                current.cards_to_add,
+                counts.finish_unknown
+              )}
+          </p>
+          <Button
+            variant="primary"
+            className="min-w-0 max-w-full"
+            disabled={counts.needs_you > 0 || saving}
+            onClick={() => void save()}
+          >
+            <span className="min-w-0 truncate">
+              Add {cardsText(current.cards_to_add)} to {where}
+            </span>
+          </Button>
+        </section>
       </div>
-      <span className="text-meta text-text-muted tabular-nums">
-        Row {row.row_number}
-      </span>
-      {pill && <Pill tone={pill.tone}>{pill.text}</Pill>}
-    </li>
+    </main>
   );
 }
