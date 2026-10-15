@@ -130,16 +130,23 @@ function EditionArt({
   imageUrl: string | null;
   dark: boolean;
 }) {
-  const [failed, setFailed] = useState(false);
-  useEffect(() => setFailed(false), [imageUrl]);
-  return imageUrl && !failed ? (
+  // A gallery asks the artwork host for dozens of images at once and one can fail for a moment: the first
+  // failure retries once with the large artwork (another address, so not a cached failure) before giving up.
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => setAttempt(0), [imageUrl]);
+  const src =
+    attempt === 1 && imageUrl
+      ? imageUrl.replace(/\/low\.webp$/, "/high.webp")
+      : imageUrl;
+  return src && attempt < 2 ? (
     <img
-      src={imageUrl}
+      key={attempt}
+      src={src}
       alt=""
       loading="lazy"
       decoding="async"
       draggable={false}
-      onError={() => setFailed(true)}
+      onError={() => setAttempt((n) => n + 1)}
       className={`block size-full object-cover${dark ? " brightness-50" : ""}`}
     />
   ) : (

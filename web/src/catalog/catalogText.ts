@@ -46,7 +46,7 @@ export function closeSpellings(text: string): string {
   return `No exact matches. Showing close spellings of “${text}”.`;
 }
 
-/** "N Printings · English catalog from TCGdex, last pulled …" (spec "Catalog": status line). */
+/** "N Printings · last pulled …" (spec "Catalog": status line). */
 export function catalogLine(
   printings: number,
   lastSuccess: string | null
@@ -54,7 +54,7 @@ export function catalogLine(
   const pulled = lastSuccess
     ? new Date(lastSuccess).toLocaleString()
     : "at an unknown time";
-  return `${printings.toLocaleString()} ${printings === 1 ? "Printing" : "Printings"} · English catalog from TCGdex, last pulled ${pulled}`;
+  return `${printings.toLocaleString()} ${printings === 1 ? "Printing" : "Printings"} · last pulled ${pulled}`;
 }
 
 export const CATALOG_UNAVAILABLE =

@@ -111,9 +111,8 @@ test.describe("desktop", () => {
   }) => {
     seedGallery();
     await signIn(page);
-    await expect(status(page)).toContainText(
-      "70 Printings · English catalog from TCGdex, last pulled"
-    );
+    await expect(status(page)).toContainText("70 Printings · last pulled");
+    await expect(status(page)).not.toContainText("TCGdex");
     await expect(results(page)).toContainText("Showing 60 of 70 cards");
     await expect(tiles(page)).toHaveCount(60);
     await expect(page.getByRole("complementary")).toHaveCount(0); // no sidebar

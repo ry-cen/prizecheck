@@ -109,7 +109,7 @@ type CardState = {
 /**
  * Catalog's card popup (#174, spec "Catalog": CardPopup (Browse)). It answers everything about one Card Printing: the
  * art and its note; set name, code and number; regulation mark; the Card Identity when it differs from the name; the
- * source; a legality Pill per Format with the reason for an unknown one; the Editions as a picker, each with its
+ * owner-reviewed note on a manual record; a legality Pill per Format with the reason for an unknown one; the Editions as a picker, each with its
  * Variant, copies owned and price, and Owner reviewed and Unavailable badges; where the picked Edition's copies are;
  * the Add rows (Collection | Location | − N + | Add N, and Deck List | Deck | Plan 1); and a quiet footer that opens
  * today's report flows.
@@ -322,25 +322,23 @@ export function CatalogCardPopup({
                 Card Identity: {ready.printing.identity_name}
               </p>
             )}
-            <p className={META}>
-              Source:{" "}
-              {ready.printing.source === "tcgdex"
-                ? "TCGdex"
-                : "Owner reviewed manual record"}
-              {ready.printing.source_id ? ` · ${ready.printing.source_id}` : ""}
-              {ready.printing.evidence_url && (
-                <>
-                  {" · "}
-                  <a
-                    href={ready.printing.evidence_url}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Open reviewed evidence
-                  </a>
-                </>
-              )}
-            </p>
+            {ready.printing.source !== "tcgdex" && (
+              <p className={META}>
+                Owner reviewed manual record
+                {ready.printing.evidence_url && (
+                  <>
+                    {" · "}
+                    <a
+                      href={ready.printing.evidence_url}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Open reviewed evidence
+                    </a>
+                  </>
+                )}
+              </p>
+            )}
           </div>
           <Legality
             standing={row?.standing ?? null}
@@ -500,8 +498,7 @@ function SelectedEdition({ edition }: { edition: PopupEdition }) {
     >
       <p className="m-0">
         <strong>{variantLabel(edition.descriptor)}</strong>
-        {" · "}
-        {edition.reviewed ? "Owner reviewed manual Edition" : "TCGdex Edition"}
+        {edition.reviewed && " · Owner reviewed manual Edition"}
         {edition.evidenceUrl && (
           <>
             {" · "}

@@ -35,9 +35,9 @@ const ROW =
   "box-border m-0 flex w-full min-w-0 cursor-pointer items-center gap-2 rounded-control border border-solid py-1 pr-2 text-left font-sans text-meta leading-(--line-height)";
 const ADD_CHILD =
   "box-border m-0 inline-flex cursor-pointer items-center justify-center rounded-control border border-solid border-transparent p-0 font-sans text-text-muted hover:text-accent-strong";
-// Desktop: over the row's end, hidden until the row is hovered or holds keyboard focus on a device that
-// can hover; a touch screen always shows it.
-const ADD_CHILD_SIDEBAR = `${ADD_CHILD} absolute inset-y-0 right-0 w-7 opacity-100 [@media(hover:hover)]:opacity-0 group-hover/entry:opacity-100 group-has-[:focus-visible]/entry:opacity-100`;
+// Desktop: over the row's end, inset 2 px so the open row's border and a drop ring stay visible; hidden until
+// the row is hovered or holds keyboard focus on a device that can hover; a touch screen always shows it.
+const ADD_CHILD_SIDEBAR = `${ADD_CHILD} absolute inset-y-0.5 right-0.5 w-6.5 opacity-100 [@media(hover:hover)]:opacity-0 group-hover/entry:opacity-100 group-has-[:focus-visible]/entry:opacity-100`;
 const ADD_CHILD_DRAWER = `${ADD_CHILD} size-tap shrink-0 bg-transparent`;
 
 /** A tree row's look: the open Location, a drop target under a tile drag, or a plain row. */

@@ -207,15 +207,13 @@ test.describe("desktop", () => {
     await expect(inspector(page)).toContainText("Last checked");
     await expect(inspector(page)).not.toContainText("Stale");
 
-    // Over 48 hours old: still priced, labelled stale.
+    // Over 48 hours old: still priced, with no Stale label.
     await tile(
       page,
       "Furret, Darkness Ablaze 1, Reverse Holo, copy 1, Old"
     ).click();
     await expect(inspector(page)).toContainText("$0.43");
-    await expect(inspector(page)).toContainText(
-      "Stale: the price is over 48 hours old"
-    );
+    await expect(inspector(page)).not.toContainText("Stale");
 
     // Unspecified Variant: unavailable, never a number.
     await tile(
@@ -442,7 +440,7 @@ test.describe("desktop, short window", () => {
     ).toHaveAccessibleDescription("$0.25");
     await expect(
       tiles(page).filter({ hasText: "$0.43" })
-    ).toHaveAccessibleDescription("$0.43 · Stale");
+    ).toHaveAccessibleDescription("$0.43");
     await expect(
       tile(page, "Furret, Darkness Ablaze 2, ")
     ).toHaveAccessibleDescription("Price unavailable");
