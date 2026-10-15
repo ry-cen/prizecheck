@@ -7,6 +7,7 @@ import {
 } from "../../decks_generated";
 import type { useToast } from "../../ui/Toast";
 import { announceDeckListChanged } from "../deckListChanged";
+import { WANT_LIST_SEGMENT } from "../wantListModel";
 import { plural } from "./importModel";
 
 /**
@@ -30,7 +31,10 @@ export const replacePath = (deckId: string) =>
 /** The Deck id in "<id>/replace" (the decks page's sectionAt), else null. */
 export function replacedDeckAt(section: string | null): string | null {
   const match = /^([^/]+)\/replace$/.exec(section ?? "");
-  return match ? match[1] : null;
+  // "import" and the Want List are pages of their own, not Decks.
+  return match && match[1] !== "import" && match[1] !== WANT_LIST_SEGMENT
+    ? match[1]
+    : null;
 }
 
 /** True when saving would send more changes than one batch takes. */
