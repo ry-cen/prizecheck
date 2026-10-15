@@ -37,6 +37,7 @@ export function MassEntryPanel({
   downloadHref,
   notice,
   emptyMessage = "No cards",
+  subject = "this Deck",
 }: {
   checks: MassEntryChecks;
   busy: boolean;
@@ -46,6 +47,8 @@ export function MassEntryPanel({
   notice: string;
   /** What an empty export says ("No cards"; the deck builder's not-owned choice says there's nothing to buy). */
   emptyMessage?: string;
+  /** What the export covers, in "shows no price for this Deck" (the Want List's Buy on TCGplayer: "these cards"). */
+  subject?: string;
 }) {
   const [confirming, setConfirming] = useState(false);
   // A new or discarded export never inherits an open confirmation.
@@ -83,10 +86,7 @@ export function MassEntryPanel({
   const disclaimer = (
     <>
       <p>{checks.disclaimer}</p>
-      <p>
-        Opening TCGplayer does not buy anything and shows no price for this
-        Deck.
-      </p>
+      <p>{`Opening TCGplayer does not buy anything and shows no price for ${subject}.`}</p>
     </>
   );
 
