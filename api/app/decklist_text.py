@@ -34,6 +34,10 @@ Line kinds:
   collector can check them.
 
 Totals are worked out from the lines by the caller, never from headers.
+
+Collection Import's paste (``collection_import_reader.read_paste``) reads each pasted line through ``read_line``, the
+same grammar outside any section and without this module's limits, which a collection paste has its own of; ``lines``
+splits a paste as ``read`` does.
 """
 import re
 import unicodedata
@@ -116,6 +120,20 @@ def _display(raw: str) -> str:
     return _clean(raw).rstrip()
 
 
+def _work(raw: str) -> str:
+    """A line as the grammar reads it: normalised, stripped, without an optional ``* `` bullet; '' for a blank line."""
+    work = normalise(raw).strip()
+    if work.startswith('* '):
+        work = work[2:].lstrip()
+    return work
+
+
+def _section(work: str) -> Section | None:
+    """The section a header line starts, or None for any other line."""
+    header = _HEADER.fullmatch(' '.join(work.split()))
+    return _SECTIONS[header.group(1).casefold()] if header else None
+
+
 def _card(number: int, display: str, work: str, section: Section | None) -> CardLine | None:
     """A card or Can't read line, or None when the line doesn't start with a quantity."""
     empty_set = _EMPTY_SET_ENERGY.fullmatch(work)
@@ -136,6 +154,20 @@ def _card(number: int, display: str, work: str, section: Section | None) -> Card
     return CardLine(number, display, section, quantity, rest, None, None, False)
 
 
+def lines(text: str) -> list[str]:
+    """The text's lines, split as ``read`` splits them (LF, CRLF and CR), without their line breaks."""
+    return _LINE_BREAK.split(text)
+
+
+def read_line(number: int, raw: str) -> CardLine | IgnoredLine | None:
+    """One line as ``read`` reads it, outside any section and without ``read``'s limits: None for a blank or header
+    line, a CardLine for a card or Can't read line, or an IgnoredLine. ``number`` is the line's number in its text."""
+    work = _work(raw)
+    if not work or _section(work):
+        return None
+    return _card(number, _display(raw), work, None) or IgnoredLine(number, _display(raw))
+
+
 def read(text: str) -> Reading:
     """Every card, Can't read and ignored line of ``text``, in paste order. Raises TooLong or TooManyLines."""
     if len(text) > MAX_TEXT_CHARACTERS:
@@ -145,16 +177,14 @@ def read(text: str) -> Reading:
     cards: list[CardLine] = []
     ignored: list[IgnoredLine] = []
     section: Section | None = None
-    for number, raw in enumerate(_LINE_BREAK.split(text), 1):
+    for number, raw in enumerate(lines(text), 1):
         display = _display(raw)
-        work = normalise(raw).strip()
+        work = _work(raw)
         if not work:
             continue
-        if work.startswith('* '):
-            work = work[2:].lstrip()
-        header = _HEADER.fullmatch(' '.join(work.split()))
+        header = _section(work)
         if header:
-            section = _SECTIONS[header.group(1).casefold()]
+            section = header
             continue
         card = _card(number, display, work, section)
         if card is None:

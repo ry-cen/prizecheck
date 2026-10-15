@@ -14,6 +14,8 @@ import { otherCandidates } from "./importText";
 
 type Props = {
   row: CollectionImportRow;
+  /** The import is a pasted list read line by line (#234): the row is a line the collector pasted. */
+  lines: boolean;
   selected: boolean;
   onSelect: (selected: boolean) => void;
   /** Set this row's finish to one of its card's Editions (its descriptor, and the label the collector saw). */
@@ -67,6 +69,7 @@ const FINISH_TRIGGER =
  * one matched by name, or a Basic Energy with other Printings. */
 export function ImportRowItem({
   row,
+  lines,
   selected,
   onSelect,
   onFinish,
@@ -148,7 +151,8 @@ export function ImportRowItem({
           <p className="m-0 text-meta text-text-muted wrap-anywhere">{about}</p>
         )}
         <p className="m-0 text-meta text-text-muted wrap-anywhere">
-          From your file: {fromFile || "an empty row"}
+          {lines ? "You pasted" : "From your file"}:{" "}
+          {fromFile || "an empty row"}
         </p>
         <div className="flex flex-wrap items-center gap-2">
           {picker && (

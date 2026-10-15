@@ -12,9 +12,10 @@ Each row cites its own evidence. Two rules are code, not rows:
   ``<code>`` with the number ``TG5``;
 - ``SHF`` and ``HIF`` flat numbers above 73 and 69 (``SHF 74``) are Shining Vault numbers (``SV1``).
 
-``readings`` lists where a pasted code and number may be after the table and the rules. ``by_alias`` is the matching
-step that runs after the printed code table (``import_matching.MATCHERS``). ``report_set`` names the TCGdex set and
-number that a Missing cards report fills in.
+``readings`` lists where a pasted code and number may be after the table and the rules; Collection Import's matcher
+reads a pasted line's code and number through it too (``collection_import_matcher``, #234). ``by_alias`` is the
+matching step that runs after the printed code table (``import_matching.MATCHERS``). ``report_set`` names the TCGdex
+set and number that a Missing cards report fills in.
 
 Like ``set_codes``, nothing here feeds an export, a Format Standing or a public record, and the table never feeds the
 Live export table (``catalog_targets.LiveRulesV1.SET_CODES``). ``api/tests/test_import_aliases.py`` guards this.

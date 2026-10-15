@@ -30,6 +30,9 @@ facet for (Cracked Ice Holo, Promo, Prize Pack and other named stamps): those ro
   which makes the finish unknown rather than let a stamped card land on its plain Edition.
 - A foil pattern (Cosmos Holo, Poke Ball, Master Ball) names the Edition on its own, so it clears the type: TCGdex
   files Cosmos Holo as type reverse on some cards and holo on others, while trackers write "Holofoil" beside it.
+- A pasted list (#234) has no finish column: a line's plain finish words are tags (``Dark Golduck (Reverse
+  Holofoil)``, as the TCGplayer app's unconfirmed plain-text export is described), read as the loose vocabulary reads
+  a finish column.
 - Only the TCGplayer app, Collectr and PriceCharting write a 1st Edition word, so only their plain words mean "no
   stamp". The other vocabularies' words leave stamps open (stamps None).
 - A subtype (Unlimited's "unlimited", PriceCharting's [1999-2000]) is a preference, not a requirement: among several
@@ -41,7 +44,7 @@ import unicodedata
 from dataclasses import dataclass, replace
 
 from .catalog_targets import is_unspecified
-from .collection_import_reader import (COLLECTR, DRAGON_SHIELD, LOOSE, PRICECHARTING, SORTED, TCG_COLLECTOR,
+from .collection_import_reader import (COLLECTR, DRAGON_SHIELD, LOOSE, PASTE, PRICECHARTING, SORTED, TCG_COLLECTOR,
                                        TCGPLAYER_APP)
 
 # The descriptor keys that describe the physical card (as catalog.PHYSICAL_VARIANT_KEYS, which this module may not
@@ -225,6 +228,8 @@ FINISH_TABLE = {
     SORTED: Vocabulary(words=_open_stamps({"normal": NORMAL}), tags={}),
     # Any other app's finish column, and tags in its name column.
     LOOSE: Vocabulary(words=_open_stamps(_PLAIN_WORDS), tags=_NAME_TAGS),
+    # A pasted list's lines (#234): no finish column, and the loose words as tags.
+    PASTE: Vocabulary(words={}, tags={**_open_stamps(_PLAIN_WORDS), **_NAME_TAGS}),
 }
 
 

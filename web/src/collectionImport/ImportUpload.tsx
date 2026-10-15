@@ -2,31 +2,51 @@ import { useEffect, useRef, useState } from "react";
 import { usePlaces } from "../catalog/usePlaces";
 import {
   CollectionImportError,
+  collectionImportPasteBody,
   getCurrentCollectionImport,
   startCollectionImport,
+  startCollectionImportPaste,
   type CollectionImportSummary,
 } from "../collection_import_generated";
 import { PageHeader } from "../shell/PageHeader";
 import { Button } from "../ui/Button";
+import { Segmented, segmentId } from "../ui/Segmented";
 import { Select } from "../ui/Select";
+import { TextArea } from "../ui/TextField";
 import { ExportHelp } from "./ExportHelp";
 import {
   MAX_UPLOAD_BYTES,
+  PASTE_LARGE,
   SPLIT_LARGE,
   startErrorText,
   UNFINISHED_GONE,
 } from "./importText";
 import { ReplaceImportDialog, UnfinishedImport } from "./ImportUnfinished";
 
+/** Upload a file, or Paste a list (#234). */
+export type ImportMode = "file" | "paste";
+
+const MODES = [
+  { value: "file", label: "Upload a file" },
+  { value: "paste", label: "Paste" },
+] as const;
+
 type Props = {
-  /** The chosen file, kept by the page so Back from the review keeps it. */
+  /** Upload a file or Paste, kept by the page with the file and the text, so Back from the review keeps them. */
+  mode: ImportMode;
+  onMode: (mode: ImportMode) => void;
+  /** The chosen file. */
   file: File | null;
   onFile: (file: File) => void;
+  /** The pasted text. */
+  text: string;
+  onText: (text: string) => void;
   /** The chosen Storage Leaf, or null for the default: Unsorted, else the first Storage Leaf. */
   locationId: string | null;
   onLocation: (id: string) => void;
   onCancel: () => void;
-  onReviewed: (summary: CollectionImportSummary, fileName: string) => void;
+  /** The review opens on `summary`; `label` is the file's name, or "Pasted list". */
+  onReviewed: (summary: CollectionImportSummary, label: string) => void;
   /** The collector's open import draft (#233), or null; `checking` while the page still asks. */
   unfinished: CollectionImportSummary | null;
   checking: boolean;
@@ -36,12 +56,17 @@ type Props = {
   onGone: () => void;
 };
 
-/** Collection Import's first step (#226, #227): choose a file and where its cards go, then Review import uploads it.
- * A file PrizeCheck can't read opens How do I export from my tracker?, the one place the UI names trackers. While an
- * import is open (#233), Unfinished import offers to continue it, and Review import asks before replacing it. */
+/** Collection Import's first step (#226, #227): choose a file, or paste a list (#234), and where its cards go, then
+ * Review import uploads it. A file PrizeCheck can't read opens How do I export from my tracker?, the one place the UI
+ * names trackers. While an import is open (#233), Unfinished import offers to continue it, and Review import asks
+ * before replacing it. */
 export function ImportUpload({
+  mode,
+  onMode,
   file,
   onFile,
+  text,
+  onText,
   locationId,
   onLocation,
   onCancel,
@@ -64,6 +89,8 @@ export function ImportUpload({
   const chosen = places.leaves.some((leaf) => leaf.id === locationId)
     ? locationId
     : (fallback?.id ?? null);
+  const pasting = mode === "paste";
+  const ready = pasting ? text.trim() !== "" : file !== null;
 
   useEffect(() => {
     heading.current?.focus();
@@ -84,13 +111,17 @@ export function ImportUpload({
     }
   }
 
-  /** Review import: uploads the file, after asking first when it would replace an open import (`replace` once the
-   * collector chose Replace import). */
+  /** Review import: uploads the file or the pasted text, after asking first when it would replace an open import
+   * (`replace` once the collector chose Replace import). */
   async function review(replace = false) {
-    if (!file || !chosen) return;
-    // Refused here rather than by the gateway: a browser may report a refused upload as a lost connection.
-    if (file.size > MAX_UPLOAD_BYTES) {
-      setError(SPLIT_LARGE);
+    if (!ready || !chosen) return;
+    // Refused here rather than by the gateway: a browser may report a refused upload as a lost connection. A paste is
+    // measured as the JSON body it goes as, escapes included.
+    const size = pasting
+      ? new Blob([collectionImportPasteBody(text)]).size
+      : file!.size;
+    if (size > MAX_UPLOAD_BYTES) {
+      setError(pasting ? PASTE_LARGE : SPLIT_LARGE);
       return;
     }
     if (unfinished && !replace) {
@@ -100,10 +131,16 @@ export function ImportUpload({
     setBusy("reading");
     setError(null);
     try {
-      onReviewed(await startCollectionImport(chosen, file), file.name);
+      if (pasting)
+        onReviewed(
+          await startCollectionImportPaste(chosen, text),
+          "Pasted list"
+        );
+      else onReviewed(await startCollectionImport(chosen, file!), file!.name);
     } catch (failure) {
-      setError(startErrorText(failure));
+      setError(startErrorText(failure, mode));
       if (
+        !pasting &&
         failure instanceof CollectionImportError &&
         failure.code === "IMPORT_UNREADABLE"
       )
@@ -140,41 +177,87 @@ export function ImportUpload({
         />
       )}
       <section
-        aria-labelledby="import-upload-heading"
+        aria-labelledby="import-source-heading"
         className="flex flex-col gap-3"
       >
         <h2
-          id="import-upload-heading"
+          id="import-source-heading"
           className="m-0 text-heading font-semibold"
         >
-          Upload a file
+          Your cards
         </h2>
         <p className="m-0 text-body text-text-muted">
           PrizeCheck keeps each card, its finish and how many you have.
           Condition, prices paid and notes aren&apos;t imported.
         </p>
-        <p className="m-0 text-body text-text-muted">
-          Choose a CSV, TSV or TXT file, or a zip file holding one.
-        </p>
-        <input
-          ref={input}
-          type="file"
-          accept=".csv,.tsv,.txt,.zip,text/csv,text/tab-separated-values,text/plain,application/zip"
-          hidden
-          onChange={(event) => {
-            const next = event.target.files?.[0];
-            event.target.value = "";
-            if (!next) return;
-            onFile(next);
+        <Segmented
+          label="Upload a file or paste a list"
+          idBase="import-source"
+          panelId="import-source-panel"
+          options={MODES}
+          value={mode}
+          onChange={(next) => {
+            onMode(next);
             setError(null);
           }}
         />
-        <div className="flex flex-wrap items-center gap-3">
-          <Button onClick={() => input.current?.click()}>
-            {file ? "Choose another file" : "Choose file"}
-          </Button>
-          {file && (
-            <span className="min-w-0 text-body wrap-anywhere">{file.name}</span>
+        <div
+          id="import-source-panel"
+          role="tabpanel"
+          aria-labelledby={segmentId("import-source", mode)}
+          className="flex min-w-0 flex-col gap-3"
+        >
+          {pasting ? (
+            <>
+              <TextArea
+                label="Your list"
+                rows={10}
+                spellCheck={false}
+                value={text}
+                aria-describedby="import-paste-help"
+                onChange={(event) => {
+                  onText(event.target.value);
+                  setError(null);
+                }}
+              />
+              <p
+                id="import-paste-help"
+                className="m-0 text-meta text-text-muted"
+              >
+                One card per line, like 3 Pikachu SVI 25 or Charizard #4 Base
+                Set. Rows copied from a spreadsheet work too, with their header
+                row.
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="m-0 text-body text-text-muted">
+                Choose a CSV, TSV or TXT file, or a zip file holding one.
+              </p>
+              <input
+                ref={input}
+                type="file"
+                accept=".csv,.tsv,.txt,.zip,text/csv,text/tab-separated-values,text/plain,application/zip"
+                hidden
+                onChange={(event) => {
+                  const next = event.target.files?.[0];
+                  event.target.value = "";
+                  if (!next) return;
+                  onFile(next);
+                  setError(null);
+                }}
+              />
+              <div className="flex flex-wrap items-center gap-3">
+                <Button onClick={() => input.current?.click()}>
+                  {file ? "Choose another file" : "Choose file"}
+                </Button>
+                {file && (
+                  <span className="min-w-0 text-body wrap-anywhere">
+                    {file.name}
+                  </span>
+                )}
+              </div>
+            </>
           )}
         </div>
       </section>
@@ -211,7 +294,7 @@ export function ImportUpload({
         <Button
           ref={reviewButton}
           variant="primary"
-          disabled={!file || !chosen || busy !== null || checking}
+          disabled={!ready || !chosen || busy !== null || checking}
           onClick={() => void review()}
         >
           Review import
@@ -221,7 +304,9 @@ export function ImportUpload({
           className={`m-0 min-w-0 text-body ${error ? "text-warning" : "text-text-muted"}`}
         >
           {busy === "reading"
-            ? "Reading your file…"
+            ? pasting
+              ? "Reading your list…"
+              : "Reading your file…"
             : busy === "opening"
               ? "Opening your import…"
               : (error ?? "")}
