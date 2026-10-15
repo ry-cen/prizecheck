@@ -103,6 +103,10 @@ class RecoveryTest(unittest.TestCase):
                 # Expired staging is left out, including multi-source manifest entries.
                 conn.execute("INSERT INTO move_manifest(owner_id,id,source_id,expires_at) VALUES ('owner',%s,NULL,now()-interval '1 minute')", (uuid.uuid4(),))
                 conn.execute("INSERT INTO move_manifest_entry(owner_id,source_id,edition_id,quantity,expected_version) VALUES ('owner',%s,%s,1,3)", (location, edition))
+                # A Collection Import draft holds another app's export: never backed up, open or saved (#233).
+                draft = uuid.uuid4()
+                conn.execute("INSERT INTO collection_import(id,owner_id,location_id,source,source_header,catalog_revision) VALUES (%s,'owner',%s,'tcgplayer_app','[]',1)", (draft, location))
+                conn.execute("INSERT INTO collection_import_row(import_id,row_number,raw_text,parsed,status) VALUES (%s,1,'1,Private export row','{}','not_found')", (draft,))
             with psycopg.connect(source_url) as conn:
                 references = conn.execute("SELECT p.public_ref,e.public_ref FROM catalog_printing p JOIN catalog_edition e ON e.printing_id=p.id").fetchall()
             run = subprocess.run([str(ROOT / '.venv/bin/python'), str(ROOT / 'scripts/recovery.py'), 'backup', str(backup)], env=env, capture_output=True)
@@ -111,12 +115,16 @@ class RecoveryTest(unittest.TestCase):
             manifest = json.loads((backup/'manifest.json').read_text())
             self.assertEqual(manifest['rows']['inventory_undo'], 1)
             self.assertEqual((manifest['rows']['move_manifest'], manifest['rows']['move_manifest_entry']), (0, 0))
+            self.assertNotIn('collection_import', manifest['rows'])
+            self.assertNotIn('collection_import_row', manifest['rows'])
+            self.assertFalse((backup/'collection_import_row.copy').exists())
             restored_env = dict(os.environ, DATABASE_URL=admin)
             cmd = [str(ROOT / '.venv/bin/python'), str(ROOT / 'scripts/recovery.py'), 'restore', str(backup), target]
             restored = subprocess.run(cmd, env=restored_env, capture_output=True)
             self.assertEqual(restored.returncode, 0, restored.stderr.decode())
             with psycopg.connect(make_conninfo(admin, dbname=target)) as conn:
                 self.assertEqual(conn.execute('SELECT edition_id,quantity,version FROM holding').fetchall(), [(edition,42,3)])
+                self.assertEqual(conn.execute('SELECT (SELECT count(*) FROM collection_import),(SELECT count(*) FROM collection_import_row)').fetchone(), (0, 0))
                 self.assertEqual(conn.execute('SELECT id FROM catalog_printing').fetchall(), [(printing,)])
                 # Opaque public references are restored, not reassigned; new rows still receive one.
                 self.assertEqual(conn.execute("SELECT p.public_ref,e.public_ref FROM catalog_printing p JOIN catalog_edition e ON e.printing_id=p.id").fetchall(), references)

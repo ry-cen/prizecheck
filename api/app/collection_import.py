@@ -7,10 +7,15 @@ becomes an import draft on the server, which they review and then save into one 
   (collection_import_matcher, whose filters first leave out the rows PrizeCheck can't hold: watchlist rows, sealed
   product, other games and non-English cards, #231) and stores the draft with the detected source (for matching only),
   each row's group, each left-out row's reason and each row's candidate Printings (Pick one, or a Basic Energy's other
-  Printings), replacing the collector's open draft:
-  one open draft per collector. A saved draft stays, without rows, as the receipt that answers a repeated save for 24
-  hours; starting an import also deletes this collector's expired ones.
-  A draft is not inventory, so starting one doesn't advance the owner revision.
+  Printings), replacing the collector's open draft without asking (the web asks first, #233): one open draft per
+  collector. A collector starts at most MAX_STARTS_PER_DAY drafts in any 24 hours (429 IMPORT_RATE_LIMITED, counted in
+  collection_import_start, migration 051). A draft is not inventory, so starting one doesn't advance the owner revision.
+- **Expiry (#233).** An open draft expires 24 hours after its last change (start, a change); a saved draft keeps no
+  rows, only its save result, as the receipt that answers a repeated save, for 24 hours after the save. Every route
+  reads a draft only before its expires_at (OPEN_DRAFT, and save's receipt), so an expired draft answers 404 at once.
+  Its rows are deleted by the sweep (sweep_expired) that the start and current routes run, a few drafts of any
+  collector at a time, and by the collector's own next start. Private backups never hold a draft (scripts/recovery.py
+  TRANSIENT).
 - GET /api/collection-imports/current is the open draft's summary: its counts; the left-out rows' count per reason
   with a few of each, as the file wrote them; the file's groups (portfolios, folders, lists) with their rows and
   whether each is included (#232); and how many of the cards to add are of Card Editions the Collection already holds.
@@ -32,7 +37,12 @@ becomes an import draft on the server, which they review and then save into one 
   file comes back comma-separated).
 - POST /api/collection-imports/<id>/save adds every ready row's copies to the landing Storage Leaf, one Holding
   increment per Card Edition, in one transaction and one owner revision, then deletes the draft's rows. It records no
-  Inventory Undo. A repeated key, or a second save of a saved draft, answers the stored result without writing.
+  Inventory Undo. A repeated key, or a second save of a saved draft, answers the stored result without writing. When
+  the landing Location is no longer the collector's Storage Leaf, or a ready row's Card Edition is no longer active,
+  it refuses 409 REVIEW_CHANGED; for the Editions, it first returns those rows to Needs you (#233,
+  return_to_needs_you) and advances the draft revision, so the review reloads onto them.
+
+Another collector's draft id answers 404 IMPORT_NOT_FOUND on every route, as an unknown one does.
 
 JSON responses carry no raw source text, prices, marketplace IDs or the detected source: the UI must not show them.
 Every descriptor in a response keeps its physical keys only (collection_import_finish.public_descriptor), so TCGdex's
@@ -75,6 +85,16 @@ REFUSAL_MESSAGES = {
                          "card's set and its number or name.",
     "IMPORT_BAD_ZIP": "PrizeCheck can't read this zip file. It must hold one CSV, TSV or TXT file, with no password.",
 }
+# A collector starts at most this many import drafts in any 24 hours (#233); the 21st start is refused 429.
+MAX_STARTS_PER_DAY = 20
+RATE_LIMITED_MESSAGE = "You can start 20 imports a day. Try again tomorrow."
+# This collector's import starts in the last 24 hours (collection_import_start, migration 051).
+STARTS_TODAY = """SELECT count(*) AS n FROM collection_import_start
+  WHERE owner_id=%s AND started_at>now()-interval '24 hours'"""
+# A draft the collector can still review: open and not expired (#233). For alias ci.
+OPEN_DRAFT = "ci.status='open' AND ci.expires_at>now()"
+# Each sweep deletes at most this many expired drafts (with their rows), any collector's, oldest first.
+SWEEP_LIMIT = 20
 READY_ROW = matcher.READY_ROW.format(r="r")
 NEEDS_YOU_ROW = matcher.NEEDS_YOU_ROW.format(r="r")
 FINISH_UNKNOWN_ROW = matcher.FINISH_UNKNOWN_ROW.format(r="r")
@@ -302,6 +322,21 @@ async def import_body(request: Request) -> bytes:
     return body
 
 
+def sweep_expired(conn) -> int:
+    """Deletes up to SWEEP_LIMIT expired drafts, any collector's, oldest first, with their rows (the foreign key
+    cascades); how many it deleted. Drafts another request holds are skipped, never waited for. There is no scheduler,
+    so the start and current routes run it (#233)."""
+    return len(conn.execute("""DELETE FROM collection_import WHERE id IN (
+        SELECT id FROM collection_import WHERE expires_at<=now() ORDER BY expires_at,id LIMIT %s FOR UPDATE SKIP LOCKED)
+      RETURNING id""", (SWEEP_LIMIT,)).fetchall())
+
+
+def rate_limited(conn, user_id: str) -> None:
+    """IMPORT_RATE_LIMITED (429) once this collector has started MAX_STARTS_PER_DAY drafts in the last 24 hours."""
+    if conn.execute(STARTS_TODAY, (user_id,)).fetchone()["n"] >= MAX_STARTS_PER_DAY:
+        refuse(429, "IMPORT_RATE_LIMITED", message=RATE_LIMITED_MESSAGE)
+
+
 def storage_leaf(conn, user_id: str, location_id: UUID):
     """This collector's Storage Leaf (not a Deck, no children), or None."""
     return conn.execute("""SELECT l.id,l.name FROM location l WHERE l.owner_id=%s AND l.id=%s AND l.kind='storage_leaf'
@@ -337,7 +372,7 @@ def summary(conn, user_id: str, import_id: UUID) -> CollectionImportSummary:
       LEFT JOIN location l ON l.owner_id=ci.owner_id AND l.id=ci.location_id
       LEFT JOIN collection_import_row r ON r.import_id=ci.id
       LEFT JOIN held ON held.edition_id=r.edition_id
-      WHERE ci.owner_id=%s AND ci.id=%s AND ci.status='open'
+      WHERE ci.owner_id=%s AND ci.id=%s AND {OPEN_DRAFT}
       GROUP BY ci.id,l.name""", (user_id, user_id, import_id)).fetchone()
     if row is None:
         refuse(404, "IMPORT_NOT_FOUND")
@@ -357,11 +392,17 @@ def summary(conn, user_id: str, import_id: UUID) -> CollectionImportSummary:
 @router.post("", response_model=CollectionImportSummary, status_code=201)
 def start_import(location_id: UUID = Query(), body: bytes = Depends(import_body),
                  user_id: str = Depends(verified_user)):
-    """Reads and matches the file and stores it as the collector's open import draft, replacing any other."""
+    """Reads and matches the file and stores it as the collector's open import draft, replacing any other. Refuses
+    IMPORT_RATE_LIMITED (429) before reading when this collector has started MAX_STARTS_PER_DAY drafts in the last 24
+    hours, and again when it stores the draft, so two starts at once can't both pass the limit. A refused start isn't
+    counted."""
     try:
+        with connect() as conn:
+            sweep_expired(conn)
         with connect() as conn:
             if not storage_leaf(conn, user_id, location_id):
                 refuse(422, "NOT_STORAGE_LEAF")
+            rate_limited(conn, user_id)
         try:
             source = reader.read(body)
         except reader.ImportRefused as refused:
@@ -376,6 +417,10 @@ def start_import(location_id: UUID = Query(), body: bytes = Depends(import_body)
             lock_owner(conn, user_id)
             if not storage_leaf(conn, user_id, location_id):
                 refuse(422, "NOT_STORAGE_LEAF")
+            rate_limited(conn, user_id)
+            conn.execute("""DELETE FROM collection_import_start
+              WHERE owner_id=%s AND started_at<=now()-interval '24 hours'""", (user_id,))
+            conn.execute("INSERT INTO collection_import_start(id,owner_id) VALUES (%s,%s)", (uuid4(), user_id))
             # A saved draft keeps no rows, only its save result, for 24 hours of replays.
             conn.execute("DELETE FROM collection_import WHERE owner_id=%s AND (status='open' OR expires_at<=now())",
                          (user_id,))
@@ -399,9 +444,12 @@ def start_import(location_id: UUID = Query(), body: bytes = Depends(import_body)
 
 @router.get("/current", response_model=CollectionImportSummary)
 def current_import(user_id: str = Depends(verified_user)):
+    """The collector's open draft's summary; IMPORT_NOT_FOUND when there is none, or it expired."""
     try:
         with connect() as conn:
-            row = conn.execute("SELECT id FROM collection_import WHERE owner_id=%s AND status='open'",
+            sweep_expired(conn)
+        with connect() as conn:
+            row = conn.execute(f"SELECT ci.id FROM collection_import ci WHERE ci.owner_id=%s AND {OPEN_DRAFT}",
                                (user_id,)).fetchone()
             if row is None:
                 refuse(404, "IMPORT_NOT_FOUND")
@@ -421,8 +469,8 @@ def import_rows(import_id: UUID, filter_: RowFilter = Query(default="all", alias
     where = matcher.FILTER_ROWS[filter_].format(r="r")
     try:
         with connect() as conn:
-            draft = conn.execute("SELECT draft_revision FROM collection_import WHERE owner_id=%s AND id=%s "
-                                 "AND status='open'", (user_id, import_id)).fetchone()
+            draft = conn.execute(f"SELECT ci.draft_revision FROM collection_import ci WHERE ci.owner_id=%s "
+                                 f"AND ci.id=%s AND {OPEN_DRAFT}", (user_id, import_id)).fetchone()
             if draft is None:
                 refuse(404, "IMPORT_NOT_FOUND")
             generation = conn.execute("SELECT active_generation FROM catalog_state WHERE singleton").fetchone()
@@ -656,8 +704,8 @@ def change_import(import_id: UUID, command: ChangeCollectionImport, user_id: str
         with connect() as conn, conn.transaction():
             # As save: the owner, then the draft.
             lock_owner(conn, user_id)
-            draft = conn.execute("""SELECT draft_revision,source FROM collection_import
-              WHERE owner_id=%s AND id=%s AND status='open' FOR UPDATE""", (user_id, import_id)).fetchone()
+            draft = conn.execute(f"""SELECT ci.draft_revision,ci.source FROM collection_import ci
+              WHERE ci.owner_id=%s AND ci.id=%s AND {OPEN_DRAFT} FOR UPDATE""", (user_id, import_id)).fetchone()
             if draft is None:
                 refuse(404, "IMPORT_NOT_FOUND")
             if command.draft_revision != draft["draft_revision"]:
@@ -697,8 +745,8 @@ def rows_csv(user_id: str, import_id: UUID, where: str, filename: str) -> Respon
     IMPORT_NOT_FOUND for a draft that isn't this collector's open one."""
     try:
         with connect() as conn:
-            draft = conn.execute("""SELECT source_header FROM collection_import
-              WHERE owner_id=%s AND id=%s AND status='open'""", (user_id, import_id)).fetchone()
+            draft = conn.execute(f"""SELECT ci.source_header FROM collection_import ci
+              WHERE ci.owner_id=%s AND ci.id=%s AND {OPEN_DRAFT}""", (user_id, import_id)).fetchone()
             if draft is None:
                 refuse(404, "IMPORT_NOT_FOUND")
             lines = [row["raw_text"] for row in conn.execute(
@@ -726,81 +774,119 @@ def left_out_rows(import_id: UUID, user_id: str = Depends(verified_user)):
     return rows_csv(user_id, import_id, LEFT_OUT_ROW, "left-out-rows.csv")
 
 
+# The Card Editions of the save's work (edition_id, quantity) that are no longer active in the generation, or whose
+# Printing was withdrawn.
+UNAVAILABLE = """SELECT w.edition_id FROM jsonb_to_recordset(%s::jsonb) AS w(edition_id uuid,quantity bigint)
+  WHERE NOT EXISTS (SELECT 1 FROM catalog_generation_edition ge
+    JOIN catalog_generation_printing gp ON gp.generation_id=ge.generation_id AND gp.printing_id=ge.printing_id
+    WHERE ge.generation_id=%s AND ge.edition_id=w.edition_id AND ge.active AND NOT gp.tombstoned)
+  ORDER BY w.edition_id"""
+
+
+def return_to_needs_you(conn, import_id: UUID, generation, editions: list) -> int:
+    """The ready rows on these Card Editions, which are no longer active, return to Needs you (#233): a row whose
+    Printing still has active Editions keeps its card and waits for its finish to be picked (ambiguous, as matching
+    leaves a card whose finish it can't tell); any other row is Not found, with no card, and is no longer Matched by
+    name. The finish the collector chose for it is cleared. How many rows changed."""
+    rows = conn.execute(f"""SELECT r.row_number,r.printing_id FROM collection_import_row r
+      WHERE r.import_id=%s AND {READY_ROW} AND r.edition_id=ANY(%s::uuid[])""", (import_id, editions)).fetchall()
+    still = matcher.editions_of(conn, generation, (row["printing_id"] for row in rows))
+    keep = [row["row_number"] for row in rows if still.get(row["printing_id"])]
+    lost = [row["row_number"] for row in rows if not still.get(row["printing_id"])]
+    if keep:
+        conn.execute("""UPDATE collection_import_row SET status='ambiguous',edition_id=NULL,fix=fix-'finish'
+          WHERE import_id=%s AND row_number=ANY(%s::int[])""", (import_id, keep))
+    if lost:
+        conn.execute("""UPDATE collection_import_row SET status='not_found',printing_id=NULL,edition_id=NULL,fix=NULL,
+            parsed=parsed-%s::text
+          WHERE import_id=%s AND row_number=ANY(%s::int[])""", (matcher.BY_NAME_KEY, import_id, lost))
+    return len(rows)
+
+
 @router.post("/{import_id}/save", response_model=CollectionImportSaveResult)
 def save_import(import_id: UUID, command: SaveCollectionImport, user_id: str = Depends(verified_user)):
     """Adds the draft's ready rows to its Storage Leaf in one transaction, all or nothing. Refuses ROWS_NEED_YOU while
-    any row needs the collector, STALE_DRAFT for another draft revision, and REVIEW_CHANGED when the Storage Leaf or a
-    matched Card Edition is no longer there. A repeated key or a second save answers the stored result."""
+    any row needs the collector, STALE_DRAFT for another draft revision, and REVIEW_CHANGED (409) when the Storage Leaf
+    is no longer this collector's, or a ready row's Card Edition is no longer active: those rows first return to Needs
+    you and the draft revision advances, in a transaction of their own, so the review reloads onto them. A repeated key
+    or a second save answers the stored result while the receipt lasts (24 hours after the save); an expired draft or
+    receipt is IMPORT_NOT_FOUND, or REPLAY_OUTCOME_UNAVAILABLE for a key already recorded."""
     fingerprint = {"action": "collection_import_save", "import_id": str(import_id)}
     request_digest = hashlib.sha256(json.dumps(fingerprint, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
     try:
-        with connect() as conn, conn.transaction():
-            revision = lock_owner(conn, user_id)
-            conn.execute("DELETE FROM mutation_request WHERE owner_id=%s AND expires_at<=now()", (user_id,))
-            previous = conn.execute("SELECT command_digest FROM mutation_request WHERE owner_id=%s AND request_key=%s",
-                                    (user_id, command.idempotency_key)).fetchone()
-            if previous and previous["command_digest"] != request_digest:
-                refuse(409, "IDEMPOTENCY_KEY_REUSED")
-            draft = conn.execute("""SELECT id,status,location_id,draft_revision,save_result FROM collection_import
-              WHERE owner_id=%s AND id=%s FOR UPDATE""", (user_id, import_id)).fetchone()
-            if draft is None:
-                refuse(409 if previous else 404, "REPLAY_OUTCOME_UNAVAILABLE" if previous else "IMPORT_NOT_FOUND")
-            if draft["status"] == "saved":
-                return CollectionImportSaveResult(**draft["save_result"])
-            if command.draft_revision != draft["draft_revision"]:
-                refuse(409, "STALE_DRAFT")
-            waiting = conn.execute(f"SELECT count(*) AS n FROM collection_import_row r WHERE r.import_id=%s "
-                                   f"AND {NEEDS_YOU_ROW}", (import_id,)).fetchone()["n"]
-            if waiting:
-                refuse(422, "ROWS_NEED_YOU", count=waiting)
-            location_id = draft["location_id"]
-            if not storage_leaf(conn, user_id, location_id):
-                refuse(409, "REVIEW_CHANGED")
-            items = conn.execute(f"""SELECT r.edition_id,sum(r.quantity) AS quantity FROM collection_import_row r
-              WHERE r.import_id=%s AND {READY_ROW} GROUP BY r.edition_id ORDER BY r.edition_id""",
-                                 (import_id,)).fetchall()
-            if not items:
-                refuse(422, "NOTHING_TO_ADD")
-            for item in items:
-                if item["quantity"] > matcher.MAX_QUANTITY:
-                    refuse(422, "QUANTITY_OVERFLOW", edition_id=item["edition_id"])
-            work = json.dumps([{"edition_id": str(item["edition_id"]), "quantity": int(item["quantity"])}
-                               for item in items])
-            copies = sum(int(item["quantity"]) for item in items)
-            # Hold the promoted generation stable until this save commits (as holdings.add_holdings).
-            catalog = conn.execute("SELECT active_generation FROM catalog_state WHERE singleton FOR SHARE").fetchone()
-            unavailable = conn.execute("""SELECT w.edition_id FROM jsonb_to_recordset(%s::jsonb)
-                AS w(edition_id uuid,quantity bigint)
-              WHERE NOT EXISTS (SELECT 1 FROM catalog_generation_edition ge
-                JOIN catalog_generation_printing gp ON gp.generation_id=ge.generation_id AND gp.printing_id=ge.printing_id
-                WHERE ge.generation_id=%s AND ge.edition_id=w.edition_id AND ge.active AND NOT gp.tombstoned)
-              ORDER BY w.edition_id LIMIT 1""", (work, catalog["active_generation"])).fetchone()
-            if unavailable:
-                refuse(409, "REVIEW_CHANGED")
-            over = conn.execute("""SELECT w.edition_id FROM jsonb_to_recordset(%s::jsonb)
-                AS w(edition_id uuid,quantity bigint)
-              JOIN holding h ON h.owner_id=%s AND h.location_id=%s AND h.edition_id=w.edition_id
-              WHERE h.quantity>%s-w.quantity ORDER BY w.edition_id LIMIT 1""",
-                                (work, user_id, location_id, matcher.MAX_QUANTITY)).fetchone()
-            if over:
-                refuse(422, "QUANTITY_OVERFLOW", edition_id=over["edition_id"])
-            new_revision = revision + 1
-            conn.execute("""INSERT INTO holding(owner_id,location_id,edition_id,quantity,version)
-              SELECT %s,%s,edition_id,quantity,%s FROM jsonb_to_recordset(%s::jsonb) AS w(edition_id uuid,quantity bigint)
-              WHERE true
-              ON CONFLICT (owner_id,location_id,edition_id) DO UPDATE
-                SET quantity=holding.quantity+EXCLUDED.quantity,version=EXCLUDED.version""",
-                         (user_id, location_id, new_revision, work))
-            conn.execute("UPDATE inventory_owner SET revision=%s WHERE user_id=%s", (new_revision, user_id))
-            conn.execute("""INSERT INTO mutation_request(owner_id,request_key,command_digest,result_revision)
-              VALUES (%s,%s,%s,%s)""", (user_id, command.idempotency_key, request_digest, new_revision))
-            result = CollectionImportSaveResult(import_id=import_id, location_id=location_id, edition_count=len(items),
-                                                copy_count=str(copies), owner_revision=new_revision)
-            conn.execute("""UPDATE collection_import SET status='saved',saved_at=now(),changed_at=now(),
-                expires_at=now()+interval '24 hours',save_key=%s,save_result=%s::jsonb WHERE id=%s""",
-                         (command.idempotency_key, result.model_dump_json(), import_id))
-            # The raw rows hold the collector's whole file; a saved draft keeps only its result.
-            conn.execute("DELETE FROM collection_import_row WHERE import_id=%s", (import_id,))
-            return result
+        with connect() as conn:
+            with conn.transaction():
+                revision = lock_owner(conn, user_id)
+                conn.execute("DELETE FROM mutation_request WHERE owner_id=%s AND expires_at<=now()", (user_id,))
+                previous = conn.execute("""SELECT command_digest FROM mutation_request
+                  WHERE owner_id=%s AND request_key=%s""", (user_id, command.idempotency_key)).fetchone()
+                if previous and previous["command_digest"] != request_digest:
+                    refuse(409, "IDEMPOTENCY_KEY_REUSED")
+                draft = conn.execute("""SELECT id,status,location_id,draft_revision,save_result FROM collection_import
+                  WHERE owner_id=%s AND id=%s AND expires_at>now() FOR UPDATE""", (user_id, import_id)).fetchone()
+                if draft is None:
+                    refuse(409 if previous else 404, "REPLAY_OUTCOME_UNAVAILABLE" if previous else "IMPORT_NOT_FOUND")
+                if draft["status"] == "saved":
+                    return CollectionImportSaveResult(**draft["save_result"])
+                if command.draft_revision != draft["draft_revision"]:
+                    refuse(409, "STALE_DRAFT")
+                waiting = conn.execute(f"SELECT count(*) AS n FROM collection_import_row r WHERE r.import_id=%s "
+                                       f"AND {NEEDS_YOU_ROW}", (import_id,)).fetchone()["n"]
+                if waiting:
+                    refuse(422, "ROWS_NEED_YOU", count=waiting)
+                location_id = draft["location_id"]
+                if not storage_leaf(conn, user_id, location_id):
+                    refuse(409, "REVIEW_CHANGED")
+                items = conn.execute(f"""SELECT r.edition_id,sum(r.quantity) AS quantity FROM collection_import_row r
+                  WHERE r.import_id=%s AND {READY_ROW} GROUP BY r.edition_id ORDER BY r.edition_id""",
+                                     (import_id,)).fetchall()
+                if not items:
+                    refuse(422, "NOTHING_TO_ADD")
+                for item in items:
+                    if item["quantity"] > matcher.MAX_QUANTITY:
+                        refuse(422, "QUANTITY_OVERFLOW", edition_id=item["edition_id"])
+                work = json.dumps([{"edition_id": str(item["edition_id"]), "quantity": int(item["quantity"])}
+                                   for item in items])
+                copies = sum(int(item["quantity"]) for item in items)
+                # Hold the promoted generation stable until this save commits (as holdings.add_holdings).
+                catalog = conn.execute("""SELECT active_generation,revision FROM catalog_state WHERE singleton
+                  FOR SHARE""").fetchone()
+                unavailable = [row["edition_id"] for row in conn.execute(
+                    UNAVAILABLE, (work, catalog["active_generation"])).fetchall()]
+                if unavailable:
+                    return_to_needs_you(conn, import_id, catalog["active_generation"], unavailable)
+                    conn.execute("""UPDATE collection_import SET draft_revision=draft_revision+1,catalog_revision=%s,
+                        changed_at=now(),expires_at=now()+interval '24 hours' WHERE id=%s""",
+                                 (catalog["revision"], import_id))
+                else:
+                    over = conn.execute("""SELECT w.edition_id FROM jsonb_to_recordset(%s::jsonb)
+                        AS w(edition_id uuid,quantity bigint)
+                      JOIN holding h ON h.owner_id=%s AND h.location_id=%s AND h.edition_id=w.edition_id
+                      WHERE h.quantity>%s-w.quantity ORDER BY w.edition_id LIMIT 1""",
+                                        (work, user_id, location_id, matcher.MAX_QUANTITY)).fetchone()
+                    if over:
+                        refuse(422, "QUANTITY_OVERFLOW", edition_id=over["edition_id"])
+                    new_revision = revision + 1
+                    conn.execute("""INSERT INTO holding(owner_id,location_id,edition_id,quantity,version)
+                      SELECT %s,%s,edition_id,quantity,%s FROM jsonb_to_recordset(%s::jsonb)
+                        AS w(edition_id uuid,quantity bigint)
+                      WHERE true
+                      ON CONFLICT (owner_id,location_id,edition_id) DO UPDATE
+                        SET quantity=holding.quantity+EXCLUDED.quantity,version=EXCLUDED.version""",
+                                 (user_id, location_id, new_revision, work))
+                    conn.execute("UPDATE inventory_owner SET revision=%s WHERE user_id=%s", (new_revision, user_id))
+                    conn.execute("""INSERT INTO mutation_request(owner_id,request_key,command_digest,result_revision)
+                      VALUES (%s,%s,%s,%s)""", (user_id, command.idempotency_key, request_digest, new_revision))
+                    result = CollectionImportSaveResult(import_id=import_id, location_id=location_id,
+                                                        edition_count=len(items), copy_count=str(copies),
+                                                        owner_revision=new_revision)
+                    conn.execute("""UPDATE collection_import SET status='saved',saved_at=now(),changed_at=now(),
+                        expires_at=now()+interval '24 hours',save_key=%s,save_result=%s::jsonb WHERE id=%s""",
+                                 (command.idempotency_key, result.model_dump_json(), import_id))
+                    # The raw rows hold the collector's whole file; a saved draft keeps only its result.
+                    conn.execute("DELETE FROM collection_import_row WHERE import_id=%s", (import_id,))
+                    return result
+            # Outside the transaction, which committed the rows' return to Needs you: nothing was added.
+            refuse(409, "REVIEW_CHANGED")
     except psycopg.Error:
         refuse(503, "INVENTORY_TEMPORARILY_UNAVAILABLE")

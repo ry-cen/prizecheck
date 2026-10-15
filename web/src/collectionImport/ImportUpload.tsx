@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { usePlaces } from "../catalog/usePlaces";
 import {
   CollectionImportError,
+  getCurrentCollectionImport,
   startCollectionImport,
   type CollectionImportSummary,
 } from "../collection_import_generated";
@@ -9,7 +10,13 @@ import { PageHeader } from "../shell/PageHeader";
 import { Button } from "../ui/Button";
 import { Select } from "../ui/Select";
 import { ExportHelp } from "./ExportHelp";
-import { MAX_UPLOAD_BYTES, SPLIT_LARGE, startErrorText } from "./importText";
+import {
+  MAX_UPLOAD_BYTES,
+  SPLIT_LARGE,
+  startErrorText,
+  UNFINISHED_GONE,
+} from "./importText";
+import { ReplaceImportDialog, UnfinishedImport } from "./ImportUnfinished";
 
 type Props = {
   /** The chosen file, kept by the page so Back from the review keeps it. */
@@ -20,10 +27,18 @@ type Props = {
   onLocation: (id: string) => void;
   onCancel: () => void;
   onReviewed: (summary: CollectionImportSummary, fileName: string) => void;
+  /** The collector's open import draft (#233), or null; `checking` while the page still asks. */
+  unfinished: CollectionImportSummary | null;
+  checking: boolean;
+  /** Continue import: the open draft as the server has it now. */
+  onContinue: (summary: CollectionImportSummary) => void;
+  /** Continue import found no open draft any more. */
+  onGone: () => void;
 };
 
 /** Collection Import's first step (#226, #227): choose a file and where its cards go, then Review import uploads it.
- * A file PrizeCheck can't read opens How do I export from my tracker?, the one place the UI names trackers. */
+ * A file PrizeCheck can't read opens How do I export from my tracker?, the one place the UI names trackers. While an
+ * import is open (#233), Unfinished import offers to continue it, and Review import asks before replacing it. */
 export function ImportUpload({
   file,
   onFile,
@@ -31,11 +46,17 @@ export function ImportUpload({
   onLocation,
   onCancel,
   onReviewed,
+  unfinished,
+  checking,
+  onContinue,
+  onGone,
 }: Props) {
   const places = usePlaces(true);
   const input = useRef<HTMLInputElement>(null);
   const heading = useRef<HTMLHeadingElement>(null);
-  const [busy, setBusy] = useState(false);
+  const reviewButton = useRef<HTMLButtonElement>(null);
+  const [busy, setBusy] = useState<"reading" | "opening" | null>(null);
+  const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
   const fallback =
@@ -48,14 +69,35 @@ export function ImportUpload({
     heading.current?.focus();
   }, []);
 
-  async function review() {
+  /** Continue import: reads the open draft again, so the review opens on it as it is now. */
+  async function resume() {
+    setBusy("opening");
+    setError(null);
+    try {
+      onContinue(await getCurrentCollectionImport());
+    } catch (failure) {
+      if (failure instanceof CollectionImportError && failure.status === 404) {
+        onGone();
+        setError(UNFINISHED_GONE);
+      } else setError("Couldn't open your import. Try again.");
+      setBusy(null);
+    }
+  }
+
+  /** Review import: uploads the file, after asking first when it would replace an open import (`replace` once the
+   * collector chose Replace import). */
+  async function review(replace = false) {
     if (!file || !chosen) return;
     // Refused here rather than by the gateway: a browser may report a refused upload as a lost connection.
     if (file.size > MAX_UPLOAD_BYTES) {
       setError(SPLIT_LARGE);
       return;
     }
-    setBusy(true);
+    if (unfinished && !replace) {
+      setConfirming(true);
+      return;
+    }
+    setBusy("reading");
     setError(null);
     try {
       onReviewed(await startCollectionImport(chosen, file), file.name);
@@ -71,7 +113,7 @@ export function ImportUpload({
         failure.code === "NOT_STORAGE_LEAF"
       )
         places.reload();
-      setBusy(false);
+      setBusy(null);
     }
   }
 
@@ -90,6 +132,13 @@ export function ImportUpload({
         Bring cards over from another tracker. Nothing is added until
         you&apos;ve reviewed it.
       </p>
+      {unfinished && (
+        <UnfinishedImport
+          summary={unfinished}
+          busy={busy !== null}
+          onContinue={() => void resume()}
+        />
+      )}
       <section
         aria-labelledby="import-upload-heading"
         className="flex flex-col gap-3"
@@ -160,8 +209,9 @@ export function ImportUpload({
       </section>
       <div className="flex flex-wrap items-center gap-3">
         <Button
+          ref={reviewButton}
           variant="primary"
-          disabled={!file || !chosen || busy}
+          disabled={!file || !chosen || busy !== null || checking}
           onClick={() => void review()}
         >
           Review import
@@ -170,9 +220,22 @@ export function ImportUpload({
           role="status"
           className={`m-0 min-w-0 text-body ${error ? "text-warning" : "text-text-muted"}`}
         >
-          {busy ? "Reading your file…" : (error ?? "")}
+          {busy === "reading"
+            ? "Reading your file…"
+            : busy === "opening"
+              ? "Opening your import…"
+              : (error ?? "")}
         </p>
       </div>
+      <ReplaceImportDialog
+        open={confirming}
+        onKeep={() => setConfirming(false)}
+        onReplace={() => {
+          setConfirming(false);
+          void review(true);
+        }}
+        returnFocus={reviewButton}
+      />
       <ExportHelp
         open={helpOpen}
         onToggle={() => setHelpOpen((value) => !value)}

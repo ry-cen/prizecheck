@@ -259,6 +259,8 @@ test.describe("desktop", () => {
     // A restored row needs you again, and holds up the save until it is skipped.
     await chip(page, /^Skipped 2$/).click();
     await page.getByRole("button", { name: "Restore row 5" }).click();
+    // The notice comes once the restore's rows are read again; a click before that would arrive while it is saving.
+    await expect(notice(page)).toHaveText("Restored 1 row.");
     await expect(chip(page, /^Needs you 1$/)).toBeVisible();
     await expect(saveButton(page, 5)).toBeDisabled();
     await chip(page, /^Needs you 1$/).click();

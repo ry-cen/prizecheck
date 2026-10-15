@@ -163,6 +163,11 @@ const exportHelp = (page: Page) =>
   page.getByRole("button", { name: "How do I export from my tracker?" });
 const exportSteps = (page: Page) =>
   page.getByRole("list", { name: "Export steps" });
+/** #233: Replace import in the question a new upload asks while another import is open. */
+const replaceImport = (page: Page) =>
+  page
+    .getByRole("dialog", { name: "Replace your unfinished import?" })
+    .getByRole("button", { name: "Replace import" });
 
 /** Chooses `content` as the file `name` through the file picker that Choose file opens. */
 async function choose(
@@ -256,11 +261,12 @@ test.describe("desktop", () => {
     for (const hidden of ["TCGplayer", "$", "900002", "Near Mint"])
       await expect(page.locator("#main-content")).not.toContainText(hidden);
 
-    // Back keeps the Location; a clean file is ready to add.
+    // Back keeps the Location; a clean file is ready to add, once it replaces the open import (#233).
     await page.getByRole("button", { name: "Back" }).click();
     await expect(heading(page)).toHaveText("Import your collection");
     await choose(page, "clean.csv", CLEAN);
     await review.click();
+    await replaceImport(page).click();
     await expect(heading(page)).toHaveText("Review import");
     await expect(chip(page, /^All 4$/)).toHaveAttribute("aria-pressed", "true");
     await expect(rowsList(page).getByRole("listitem")).toHaveCount(4);
@@ -401,9 +407,11 @@ test.describe("large files", () => {
     await page.getByRole("button", { name: "Back" }).click();
     await expect(heading(page)).toHaveText("Import your collection");
 
-    // Exactly 5 MB goes through to the API, which reads it and finds too many rows.
+    // Exactly 5 MB goes through to the API, which reads it and finds too many rows (after the collector agrees to
+    // replace the open import, #233), so the open import stays.
     await choose(page, "five.csv", sizedFile(FIVE_MIB));
     await review.click();
+    await replaceImport(page).click();
     await expect(main.getByRole("status")).toHaveText(
       "This file has more than 10,000 rows. Split it into two files and import each one."
     );
