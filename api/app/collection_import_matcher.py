@@ -1,30 +1,49 @@
-"""Collection Import matching (#226, #230; spec "Matching"): each source row to one Card Edition of the active catalog.
+"""Collection Import matching (#226, #228, #230; spec "Matching"): each source row to one Card Edition of the active
+catalog.
 
-#226 matches by set name and collector number only. The set name is compared trimmed, case-folded and with runs of
-whitespace as one space; the number drops anything after a "/" (the set's card count) and is compared under the
-catalog's number key (catalog_browse.NUMBER_KEY, "001" is "1"). Two batched queries answer every row of a file. A
-Printing counts only when it has an active Card Edition in the active generation:
+A Printing counts only when it isn't withdrawn and has an active Card Edition in the active generation. A row whose
+quantity can't be read is unreadable. Otherwise the first step that answers wins:
 
-- no such Printing: not_found;
-- more than one: ambiguous, with no Printing;
-- one Printing with one Edition: matched, whatever the row's finish says (the single-Edition shortcut);
-- one Printing with several Editions: the Edition the row's finish names (collection_import_finish, by the detected
-  source's finish table) is matched; when it names none, or several fit, the Unspecified Variant is finish_unknown,
-  and a card with no Unspecified Variant is ambiguous, with the Printing and no Edition, until the collector picks
-  its finish (or skips the row). The catalog gives most modern cards no Unspecified Variant: TCGdex lists their
-  finishes exactly.
+1. **TCGplayer product ID** (``product_id``, digits): the Printing of a verified Marketplace Mapping with that product
+   (``catalog_edition_metadata``), else the Printing whose TCGdex lookup IDs list it (``thirdParty.tcgplayer`` in an
+   Edition's ``mapping_candidate``, which the catalog import keeps for the card or the variant). It answers only when
+   it names exactly one Printing; a product ID nothing names goes on to the next step.
+2. **Set and number** (``collection_import_aliases``): each of the row's number readings in its sets, the printed set
+   code table's sets first for Dragon Shield and Sorted, then its set name's (the alias table, else naive
+   normalisation), then the era's promo set for a promo-prefixed number. The first reading that finds a Printing
+   answers: one Printing is the row's card; several (two sets of one name) are ``ambiguous``, with them as candidates.
+   A row whose name is a Basic Energy takes this answer only when it is a Basic Energy of that type: the TCGplayer app
+   writes Scarlet & Violet Basic Energy as "SV01: Scarlet & Violet Base Set" 008, which is Scatterbug there.
+3. **Basic Energy by type** (``import_energy_matching.basic_energy_printings``, as decklist import): a row whose card
+   name is a Basic Energy in any spelling ("Basic Water Energy", "Water Energy") gets that type's Printing in the row's
+   own sets if one has it, else the newest. Every Basic Energy Printing of the type is kept as candidates (up to
+   MAX_CANDIDATES, the chosen one first), for the review's Change.
+4. Otherwise the row is ``not_found``, or ``unreadable`` when it has no number and no name to match by.
 
-Product IDs, names and aliases are not read yet (#228, #229). A row without a readable quantity, set name or number
-is unreadable. Pure SQL reads: nothing here writes, reads prices or starts a catalog pull.
+Once a step names the Printing, its Edition: a Printing with one Edition gets it whatever the row's finish says (the
+single-Edition shortcut). Otherwise the Edition the row's finish names (collection_import_finish, by the detected
+source's finish table) is matched; when it names none, or several fit, the Unspecified Variant is finish_unknown, and a
+card with no Unspecified Variant is ambiguous, with the Printing and no Edition, until the collector picks its finish
+(or skips the row). The catalog gives most modern cards no Unspecified Variant: TCGdex lists their finishes exactly.
+
+Names within the row's set come with #229. A handful of batched queries answer every row of a file. Pure SQL reads:
+nothing here writes, reads prices or starts a catalog pull.
 """
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, field
 from uuid import UUID
 
+from . import collection_import_aliases as aliases
 from . import collection_import_finish as finishes
-from .catalog_browse import NUMBER_KEY
+from . import set_codes
 from .catalog_targets import is_unspecified
+from .collection_import_reader import DRAGON_SHIELD, SORTED
+from .import_energy_matching import basic_energy_printings, energy_type
+from .import_match_core import at_code_and_number
 
 MAX_QUANTITY = 2**63 - 1
+# The most candidates a row keeps (Pick one, or a Basic Energy's Change).
+MAX_CANDIDATES = 20
 READY = ("matched", "finish_unknown", "by_name")
 NEEDS_YOU = ("ambiguous", "not_found", "unreadable")
 STATUSES = READY + NEEDS_YOU
@@ -40,14 +59,8 @@ LISTED_ROW = "NOT {r}.skipped AND {r}.left_out_reason IS NULL"
 SKIPPED_ROW = "{r}.skipped AND {r}.left_out_reason IS NULL"
 # The rows route's filters, which a change's `filter` selects by too. "name" (Matched by name) comes with #229.
 FILTER_ROWS = {"needs": NEEDS_YOU_ROW, "finish": FINISH_UNKNOWN_ROW, "all": LISTED_ROW, "skipped": SKIPPED_ROW}
-# A set name trimmed, case-folded and with runs of whitespace as one space.
-SET_KEY = "lower(regexp_replace(btrim({}),'\\s+',' ','g'))"
+PRODUCT_ID = re.compile(r"[1-9][0-9]{0,17}")
 
-PRINTINGS = f"""SELECT w.set_name,w.number,gp.printing_id
-  FROM (SELECT DISTINCT set_name,number FROM unnest(%s::text[],%s::text[]) AS u(set_name,number)) w
-  JOIN catalog_generation_printing gp ON gp.generation_id=%s AND NOT gp.tombstoned
-    AND {SET_KEY.format('gp.set_name')}={SET_KEY.format('w.set_name')}
-    AND {NUMBER_KEY.format('gp.collector_number')}={NUMBER_KEY.format('w.number')}"""
 # A Printing's active Editions in the generation, in catalog order (as catalog search shows them).
 EDITIONS = """SELECT ge.printing_id,e.id AS edition_id,e.descriptor
   FROM catalog_generation_edition ge JOIN catalog_edition e ON e.id=ge.edition_id
@@ -55,6 +68,20 @@ EDITIONS = """SELECT ge.printing_id,e.id AS edition_id,e.descriptor
     AND NOT gp.tombstoned
   WHERE ge.generation_id=%s AND ge.active AND ge.printing_id=ANY(%s::uuid[])
   ORDER BY ge.printing_id,e.descriptor_key,e.id"""
+# The Printings a product ID names in the generation, with how: a verified Marketplace Mapping, or TCGdex's lookup ID.
+PRODUCTS = """SELECT DISTINCT m.product_id::text AS product,ge.printing_id,true AS verified
+  FROM catalog_edition_metadata m
+  JOIN catalog_generation_edition ge ON ge.edition_id=m.edition_id AND ge.generation_id=%s AND ge.active
+  JOIN catalog_generation_printing gp ON gp.generation_id=ge.generation_id AND gp.printing_id=ge.printing_id
+    AND NOT gp.tombstoned
+  WHERE m.mapping_state='verified' AND m.product_id=ANY(%s::bigint[])
+  UNION
+  SELECT DISTINCT m.mapping_candidate->'candidate'->'thirdParty'->>'tcgplayer',ge.printing_id,false
+  FROM catalog_edition_metadata m
+  JOIN catalog_generation_edition ge ON ge.edition_id=m.edition_id AND ge.generation_id=%s AND ge.active
+  JOIN catalog_generation_printing gp ON gp.generation_id=ge.generation_id AND gp.printing_id=ge.printing_id
+    AND NOT gp.tombstoned
+  WHERE m.mapping_candidate->'candidate'->'thirdParty'->>'tcgplayer'=ANY(%s::text[])"""
 
 
 @dataclass(frozen=True)
@@ -64,6 +91,8 @@ class RowMatch:
     quantity: int | None
     printing_id: UUID | None
     edition_id: UUID | None
+    # Pick one: the Printings to choose from. A Basic Energy matched by type: its type's Printings, the chosen first.
+    candidates: tuple = field(default_factory=tuple)
 
 
 def quantity_of(text: str) -> int | None:
@@ -77,9 +106,17 @@ def quantity_of(text: str) -> int | None:
     return value if 1 <= value <= MAX_QUANTITY else None
 
 
-def number_of(text: str) -> str:
-    """The collector number without the set's card count: "042/102" is "042"."""
-    return text.split("/", 1)[0].strip()
+def card_name(fields: dict) -> str:
+    """The row's card name without a tracker's tags: the TCGplayer app's Simple Name, else the name with its (…) and
+    […] tags and a trailing " - <number>" removed ("Raichu GX - 20/68 (#60 Pikachu Stamped)" is "Raichu GX")."""
+    text = fields.get("simple_name") or fields.get("name") or ""
+    text = re.sub(r"\([^()]*\)|\[[^\]]*\]", " ", text)
+    text = re.sub(r"\s+-\s+\S*[0-9]\S*\s*$", " ", text)
+    return " ".join(text.split())
+
+
+def usable_name(name: str) -> bool:
+    return any(char.isalnum() for char in name)
 
 
 def editions_of(conn, generation: UUID | None, printing_ids) -> dict:
@@ -92,39 +129,111 @@ def editions_of(conn, generation: UUID | None, printing_ids) -> dict:
     return editions
 
 
+def edition_for(source: str, fields: dict, choices: list) -> tuple[str, UUID | None]:
+    """(status, Edition) for a row whose Printing has these active Editions (module docstring, last paragraph)."""
+    chosen = choices[0] if len(choices) == 1 else finishes.choose(finishes.wanted_from_row(source, fields), choices)
+    if chosen is not None:
+        return "matched", chosen["edition_id"]
+    unspecified = [choice for choice in choices if is_unspecified(choice["descriptor"])]
+    if unspecified:
+        return "finish_unknown", unspecified[0]["edition_id"]
+    return "ambiguous", None
+
+
+def _products(conn, generation: UUID, rows: list) -> dict[int, UUID]:
+    """Row index -> the one Printing its product ID names (step 1)."""
+    wanted = {index: row.fields["product_id"].strip() for index, row in enumerate(rows)
+              if PRODUCT_ID.fullmatch(row.fields["product_id"].strip())}
+    if not wanted:
+        return {}
+    products = sorted(set(wanted.values()))
+    verified: dict[str, set] = {}
+    listed: dict[str, set] = {}
+    for hit in conn.execute(PRODUCTS, (generation, [int(product) for product in products], generation, products)):
+        (verified if hit["verified"] else listed).setdefault(hit["product"], set()).add(hit["printing_id"])
+    found = {}
+    for index, product in wanted.items():
+        printings = verified.get(product) or listed.get(product) or set()
+        if len(printings) == 1:
+            found[index] = next(iter(printings))
+    return found
+
+
+def _row_sets(row, source: str, sets: aliases.GenerationSets) -> tuple[list[str], list[str]]:
+    """(the printed set code table's sets, the set name's sets) of a row, each only sets this generation holds."""
+    code = row.fields["set_code"].strip()
+    by_code = [set_id for set_id in set_codes.sets_for_code(code) if set_id in sets.ids] \
+        if code and source in (DRAGON_SHIELD, SORTED) else []
+    return by_code, aliases.sets_for_name(source, row.fields["set_name"], sets)
+
+
+def _attempts(by_code: list[str], by_name: list[str], readings: list[str]) -> list[tuple[tuple[str, ...], str]]:
+    """Where step 2 looks for a row, in order: (sets, number)."""
+    found = [(tuple(by_code), number) for number in readings if by_code]
+    found += [(tuple(by_name), number) for number in readings if by_name]
+    found += [((aliases.promo_set(number),), number) for number in readings if aliases.promo_set(number)]
+    return found
+
+
 def match(conn, generation: UUID, rows: list, source: str) -> list:
     """One RowMatch per source row (reader.SourceRow), in order, against `generation`; `source` is the detected
-    source, whose finish table reads the row's finish."""
-    keys = []
-    for row in rows:
-        keys.append((row.fields["set_name"], number_of(row.fields["number"])))
-    wanted = sorted({key for key in keys if key[0].strip() and key[1]})
-    found: dict = {}
-    if wanted:
-        for hit in conn.execute(PRINTINGS, ([key[0] for key in wanted], [key[1] for key in wanted], generation)):
-            found.setdefault((hit["set_name"], hit["number"]), set()).add(hit["printing_id"])
-    editions = editions_of(conn, generation, (printing for printings in found.values() for printing in printings))
+    source, whose alias entries and finish table read the row."""
+    sets = aliases.generation_sets(conn, generation)
+    quantities = [quantity_of(row.fields["quantity"]) for row in rows]
+    names = [card_name(row.fields) for row in rows]
+    readings = [aliases.number_readings(row.fields["number"]) for row in rows]
+    row_sets = [_row_sets(row, source, sets) for row in rows]
+    products = _products(conn, generation, rows)
+
+    # Step 2: every attempt of every row in one lookup, each distinct (sets, number) once.
+    attempts = [_attempts(by_code, by_name, numbers) for (by_code, by_name), numbers in zip(row_sets, readings)]
+    keys: dict[tuple, int] = {}
+    for row_attempts in attempts:
+        for attempt in row_attempts:
+            keys.setdefault(attempt, len(keys))
+    looked = at_code_and_number(conn, generation, [(key, set_id, number) for (set_ids, number), key in keys.items()
+                                                   for set_id in set_ids])
+    # Step 3's lookups: each Basic Energy row's type, and the Printings of those types.
+    types = [energy_type(name) for name in names]
+    energies = basic_energy_printings(conn, generation, types)
+    energy_ids = {energy: {printing for printing, _ in found} for energy, found in energies.items()}
+
+    answers: list = []
+    for index, row in enumerate(rows):
+        answer = None   # (Printing or None, candidates)
+        if quantities[index] is not None:
+            if index in products:
+                answer = (products[index], ())
+            if answer is None:
+                for attempt in attempts[index]:
+                    hit = looked.get(keys[attempt])
+                    if hit is None:
+                        continue
+                    printings = (hit.printing_id,) if hit.printing_id else hit.candidates
+                    if types[index]:
+                        printings = tuple(p for p in printings if p in energy_ids.get(types[index], ()))
+                        if not printings:
+                            continue
+                    answer = (printings[0], ()) if len(printings) == 1 else (None, printings[:MAX_CANDIDATES])
+                    break
+            if answer is None and types[index] in energies:
+                found = energies[types[index]]
+                own = set(row_sets[index][0]) | set(row_sets[index][1])
+                chosen = next((printing for printing, set_id in found if set_id in own), found[0][0])
+                answer = (chosen, (chosen, *[printing for printing, _ in found if printing != chosen])[:MAX_CANDIDATES])
+        answers.append(answer)
+
+    editions = editions_of(conn, generation, (answer[0] for answer in answers if answer))
     matches = []
-    for row, key in zip(rows, keys):
-        quantity = quantity_of(row.fields["quantity"])
-        if quantity is None or not key[0].strip() or not key[1]:
+    for index, (row, answer) in enumerate(zip(rows, answers)):
+        quantity = quantities[index]
+        if quantity is None or (answer is None and not readings[index] and not usable_name(names[index])):
             matches.append(RowMatch("unreadable", quantity, None, None))
-            continue
-        printings = sorted((printing for printing in found.get(key, ()) if editions.get(printing)), key=str)
-        if not printings:
+        elif answer is None:
             matches.append(RowMatch("not_found", quantity, None, None))
-        elif len(printings) > 1:
-            matches.append(RowMatch("ambiguous", quantity, None, None))
+        elif answer[0] is None:
+            matches.append(RowMatch("ambiguous", quantity, None, None, answer[1]))
         else:
-            printing = printings[0]
-            choices = editions[printing]
-            unspecified = [choice for choice in choices if is_unspecified(choice["descriptor"])]
-            chosen = choices[0] if len(choices) == 1 else finishes.choose(
-                finishes.wanted_from_row(source, row.fields), choices)
-            if chosen is not None:
-                matches.append(RowMatch("matched", quantity, printing, chosen["edition_id"]))
-            elif unspecified:
-                matches.append(RowMatch("finish_unknown", quantity, printing, unspecified[0]["edition_id"]))
-            else:
-                matches.append(RowMatch("ambiguous", quantity, printing, None))
+            status, edition = edition_for(source, row.fields, editions[answer[0]])
+            matches.append(RowMatch(status, quantity, answer[0], edition, answer[1]))
     return matches
