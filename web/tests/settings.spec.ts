@@ -173,9 +173,12 @@ test("a change that couldn't be sent shows the saved setting again and can be re
 }) => {
   await signIn(page, "/settings");
   await expect(option(page, EVERY_DECK)).toBeChecked();
-  await page.route("**/api/settings/want-list-counting", (route) =>
-    route.abort()
-  );
+  // The server commits the change but its answer is lost, so only a retry
+  // that reuses the idempotency key is answered; a fresh key would be stale.
+  await page.route("**/api/settings/want-list-counting", async (route) => {
+    await route.fetch();
+    await route.abort();
+  });
   await option(page, ONE_DECK).click();
   await expect(
     page.getByRole("alert").filter({ hasText: "couldn't be saved" })
