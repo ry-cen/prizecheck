@@ -76,6 +76,10 @@ _Avoid_: Deck Plan, wishlist, standalone list
 The one Format a Deck is being built for; every Deck has one, Standard unless the collector chooses another. The Deck's advisory format check is against its Target Format alone, and changing the Target Format is how a collector checks another Format.
 _Avoid_: Main format, selected format, default format
 
+**Decklist Import**:
+Creating a Deck, or replacing a Deck's Deck List, from a pasted decklist or a Published Deck, through a review in which every line is matched to Card Editions or dropped before anything is saved. Owned copies are used first as the collector's counting setting allows: of the named Card Printing only, or of any Card Printing in its Reprint Group.
+_Avoid_: Deck upload, list merge, sync
+
 **Pick List**:
 The cards in a Deck's Deck List that are stored elsewhere in the Collection, each with a suggested source Location. Confirming a pick moves those copies into the Deck.
 _Avoid_: Pull list, retrieval list

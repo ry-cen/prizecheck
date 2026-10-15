@@ -33,3 +33,5 @@ How each part works under the hood (parsing, matching order, allocation, pricing
 *Amended by [the Want List contract](decide-want-list-contract.md):* the Want List counting setting lives on the Settings page and is stored on the account.
 
 *Amended by [the import review step](prototype-import-review.md):* under **Exact printings**, copies of the named Printing that a replaced Deck already holds cover the line in their own Edition; only the rest gets the cheapest priced Edition. **Use cards I own** is the default the first time.
+
+*Amended by [the import contract](decide-import-contract.md):* both settings use owned copies first, from the copies the Want List counting setting makes available: **Exact printings** copies of the named Printing in any Edition, **Use cards I own** copies of any Printing in its Reprint Group.
