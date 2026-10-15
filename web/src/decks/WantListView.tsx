@@ -69,6 +69,12 @@ export function WantListView({ onOpenDeck, onNavigate }: Props) {
     onNavigate(wantListPath(deckId), { replace: true });
   }
 
+  // An address whose Deck isn't an id reads as All Decks; the address says so too.
+  useEffect(() => {
+    if (scope === null && window.location.search.includes("deck="))
+      onNavigate(wantListPath(null), { replace: true });
+  }, []);
+
   useEffect(() => {
     const controller = new AbortController();
     setLoad((previous) =>
@@ -81,7 +87,7 @@ export function WantListView({ onOpenDeck, onNavigate }: Props) {
         if (
           scope &&
           cause instanceof WantListError &&
-          cause.code === "DECK_NOT_FOUND"
+          (cause.code === "DECK_NOT_FOUND" || cause.status === 422)
         ) {
           choose(null);
           setNotice("That Deck wasn't found. Showing All Decks.");
@@ -114,11 +120,13 @@ export function WantListView({ onOpenDeck, onNavigate }: Props) {
     );
 
   const { list } = load;
-  // The answer on screen can belong to the previous scope for a moment after a chip is pressed.
-  const current = list.deck_id === scope;
+  // The answer on screen can belong to the previous scope for a moment after a chip is pressed, so what it is
+  // labelled and laid out as follows the scope it answers (`shownScope`), never the pressed chip.
+  const shownScope = list.deck_id;
+  const current = shownScope === scope;
   const names = new Map(list.decks.map((deck) => [deck.id, deck.name]));
   const deckName = (id: string) => names.get(id) ?? "another Deck";
-  const scoped = scope ? (names.get(scope) ?? null) : null;
+  const scoped = shownScope ? (names.get(shownScope) ?? null) : null;
   const counting = COUNTING_OPTIONS.find(
     (option) => option.value === list.want_list_counting
   )!;
@@ -183,19 +191,17 @@ export function WantListView({ onOpenDeck, onNavigate }: Props) {
           </Chip>
         ))}
       </div>
-      {notice && (
-        <p role="status" className="m-0 text-body text-warning">
-          {notice}
-        </p>
-      )}
+      <p role="status" className="m-0 text-body text-warning empty:sr-only">
+        {notice}
+      </p>
       <div
         className={
-          scope
+          shownScope
             ? "flex min-w-0 flex-col gap-4"
             : "grid grid-cols-[minmax(0,1fr)_18rem] items-start gap-6 phone:grid-cols-1 phone:gap-4"
         }
       >
-        {!scope && (
+        {!shownScope && (
           <CombinedTotal
             rows={list.combined}
             toGet={list.to_get}

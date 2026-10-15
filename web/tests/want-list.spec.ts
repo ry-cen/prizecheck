@@ -375,6 +375,16 @@ test.describe("on a desktop", () => {
       "aria-pressed",
       "true"
     );
+
+    // So does an address whose Deck isn't an id at all.
+    await page.goto(`${ORIGIN}/decks/want-list?deck=not-a-uuid`);
+    await expect(chip(page, "All Decks")).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    );
+    await expect(
+      page.getByText("The Want List couldn't be loaded.")
+    ).toHaveCount(0);
     await expect(page).toHaveURL(`${ORIGIN}/decks/want-list`);
     await expect(total(page)).toBeVisible();
   });

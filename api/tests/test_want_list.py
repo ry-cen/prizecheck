@@ -324,3 +324,12 @@ def test_the_read_is_not_a_price_access(store, launches):
     want_list(owner, gardevoir)
     # It reads no quote and admits no refresh: the cost of the same scope is #210's price access (ADR 0006).
     assert launches == []
+
+
+def test_lines_of_one_card_read_collector_numbers_the_way_catalog_search_compares_them():
+    from app.want_list import number_order
+    numbers = ["10", "9", "TG05", "9a", "TG1", "097", "SV001", "100", "2", "sv10", "SV9"]
+    assert sorted(numbers, key=number_order) == ["2", "9", "9a", "10", "097", "100", "SV001", "SV9", "sv10", "TG1", "TG05"]
+    # Zeros after a number's letters don't count: 097 and 97 are one number, and the raw text then breaks the tie.
+    assert number_order("TG05")[:3] == number_order("tg5")[:3]
+    assert sorted(["97", "097"], key=number_order) == ["097", "97"]
