@@ -1,17 +1,19 @@
 """Decklist Import (spec "Import interfaces"; ticket #212): review a pasted list, then create a Deck with it.
 
 ``POST /api/decks/import/review`` reads a pasted decklist (``decklist_text``), matches its card lines
-(``import_matching``) and says which Card Edition each line becomes (``import_allocation``). A Not found line carries
-the prefill of its Missing cards report (``MissingCardPrefill``, ticket #213). It is read-only and
-stateless: the review screen posts again, with the collector's fixes so far, whenever a fix changes. It is a POST only
-because the text is long, and it needs no idempotency key.
+(``import_matching``) and says which Card Editions each line becomes (``import_allocation``): owned copies first, under
+the owned-cards setting (``owned``: **Exact printings** or **Use cards I own**, ticket #214) and the Want List counting
+setting, then new copies. A Not found line carries the prefill of its Missing cards report (``MissingCardPrefill``,
+ticket #213). It is read-only and stateless: the review screen posts again, with the setting and the collector's fixes
+so far, whenever either changes. It is a POST only because the text is long, and it needs no idempotency key.
 
 Like adding a card by its Printing (``deck_list_printing``), the review chooses new copies' Editions from stored quotes
 only and is not a price access (ADR 0006): it admits no refresh, waits for no runner and writes nothing to the record
-store. Its steps are add-by-Printing's: one read-only snapshot of the catalog, then the stored quotes with no connection
-or lock held, then the answer. It writes nothing to PostgreSQL either: it never creates the caller's inventory owner,
-and it reads the owner revision as the catalog browse does. Ticket #214 adds the owned-copies capture under the owner
-row lock.
+store. Its steps: one read-only snapshot of the catalog (the matches, every Printing the lines reach and their
+Editions); one capture of the owned copies under the owner row lock (``import_owned.capture_owned``), which never
+creates the caller's inventory owner; the stored quotes with no connection or lock held; then the answer. It writes
+nothing to PostgreSQL. A catalog change between the snapshot and the capture can leave an Edition the review offers
+unavailable; saving then answers 422 EDITION_UNAVAILABLE and the screen reviews again.
 
 ``POST /api/decks/import`` creates the Deck, sets its Target Format and writes its Deck List lines in one transaction,
 idempotently, like every Location and Deck List command. It trusts the Editions it is sent and never reads the text
@@ -24,14 +26,18 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from . import import_aliases, prices, set_codes
+from .copy_allocation import Availability
+from .deck_cost import summarize
 from .decklist_text import MAX_CARD_LINES, CardLine, TooLong, TooManyLines, read
 from .decks import MAX_DECK_LIST_CHANGES, DeckListCommandResult, advance_deck_list, keep_response, replayed
 from .format_evaluator import FORMATS
 from .holdings import parse_quantity
-from .import_allocation import ChosenBy, Part, Resolved, Source, merged, parts_for
+from .import_allocation import ChosenBy, OwnedCards, Part, Resolved, Source, merged, parts_for
 from .import_matching import Match, match_lines
+from .import_owned import capture_owned, groups
 from .location_tree import TreeNode, check_name, cleaned_name, error, node_model, owner_and_rows, replay
 from .main import connect, verified_user
+from .settings import WantListCounting
 
 router = APIRouter(prefix='/api/decks', tags=['decks'])
 
@@ -56,6 +62,9 @@ class ImportFix(BaseModel):
 
 class ReviewImport(BaseModel):
     source: ImportSource
+    # The owned-cards setting: ``exact`` (Exact printings) uses owned copies of the named Printing only; ``owned`` (Use
+    # cards I own, the web's default) also uses the other Printings the line reaches.
+    owned: OwnedCards = 'owned'
     fixes: list[ImportFix] = Field(default_factory=list, max_length=MAX_CARD_LINES)
 
 
@@ -78,12 +87,37 @@ class ImportEdition(BaseModel):
     stale: bool | None = None  # the quote is more than 48 hours old (ADR 0006); None when unpriced
 
 
+class ImportPlace(BaseModel):
+    """Where owned copies are: a Location, or a Deck (its copies beyond its own list, or under One Deck at a time the
+    copies it holds for its own list)."""
+    location_id: UUID
+    name: str
+    deck: bool
+    quantity: str
+
+
 class ImportPart(BaseModel):
     """Copies of one Card Edition that one pasted line becomes."""
     edition_id: UUID
     quantity: str
-    source: Source               # always 'new' in ticket #212; #214 adds owned copies
-    chosen_by: ChosenBy | None   # how a new copy's Edition was chosen
+    source: Source               # in_deck: this Deck's copies (Replace); elsewhere: owned copies elsewhere; new: to get
+    chosen_by: ChosenBy | None   # how a new copy's Edition was chosen; None for owned copies
+    # The part's own card and Edition: under Use cards I own an owned copy can be another Printing than the line's.
+    printing_id: UUID
+    name: str
+    set_code: str
+    collector_number: str
+    descriptor: dict
+    places: list[ImportPlace]    # elsewhere: where the copies are, in the order they are used; empty otherwise
+
+
+class ImportKept(BaseModel):
+    """Copies of the line's card another Deck keeps, so the import leaves them alone (Every Deck built at once)."""
+    deck_id: UUID
+    name: str                    # the Deck's name
+    quantity: str
+    # own_line: the Deck holds them for its own list. counted: Spare Copies that older Deck counts for its list.
+    reason: Literal['own_line', 'counted']
 
 
 class MissingCardPrefill(BaseModel):
@@ -117,6 +151,9 @@ class ReviewLine(BaseModel):
     candidates: list[ImportPrinting]
     editions: list[ImportEdition]            # the printing's active Editions; empty without a printing
     parts: list[ImportPart]                  # what the line becomes; empty unless resolved
+    # Copies of the card (under the setting: its Printing, or every Printing the line reaches) that other Decks keep,
+    # oldest Deck first; only on a line that still gets new copies, and only under Every Deck built at once.
+    kept: list[ImportKept]
     report: MissingCardPrefill | None        # not_found: the Missing cards report form's prefill; None otherwise
 
 
@@ -135,6 +172,13 @@ class ImportTotals(BaseModel):
     cards: str         # copies on every line not dropped, resolved or not; never a header's number
     ignored: int       # ignored lines
     to_resolve: int    # lines that need the collector (Pick one, Not found, Can't read)
+    owned: str         # copies the resolved lines use from the collector's own cards
+    to_get: str        # new copies on the resolved lines
+    # Stored quotes only (ADR 0006). Copies of ``to_get`` with a stored quote; None when a stored row couldn't be
+    # checked, so the cost is incomplete. An unpriced copy is never counted as $0.
+    to_get_priced: str | None
+    to_get_amount: str | None    # the exact sum over the priced copies; None when none is priced
+    to_get_display: str | None   # its one rounded form ("$12.34", "<$0.01"); None when none is priced
 
 
 class ImportReview(BaseModel):
@@ -142,6 +186,9 @@ class ImportReview(BaseModel):
     ignored: list[IgnoredImportLine]
     deck_list: list[ImportDeckListEntry]   # what saving would write: resolved lines merged by Edition
     totals: ImportTotals
+    owned: OwnedCards                      # the owned-cards setting used
+    want_list_counting: WantListCounting   # the counting setting the owned copies follow
+    settings_revision: int
     owner_revision: int
     catalog_revision: int
 
@@ -275,7 +322,6 @@ def review_import(command: ReviewImport, user_id: str = Depends(verified_user)):
     with connect() as conn, conn.transaction():
         conn.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY')
         state = conn.execute('SELECT active_generation,revision FROM catalog_state WHERE singleton').fetchone()
-        owner = conn.execute('SELECT revision FROM inventory_owner WHERE user_id=%s', (user_id,)).fetchone()
         generation = state['active_generation']
         matches = match_lines(conn, generation, cards)
         edition_printing = _edition_printings(conn, generation, [fix.edition_id for fix in fixes.values()
@@ -287,20 +333,27 @@ def review_import(command: ReviewImport, user_id: str = Depends(verified_user)):
         # Dropped lines and lines that need the collector have no Printing (``_resolve``).
         chosen = {printing for _, printing, _ in resolved.values() if printing is not None}
         candidates = {candidate for match in matches.values() for candidate in match.candidates}
-        editions = _editions(conn, generation, chosen) if generation is not None else {}
+        # Use cards I own reaches the other Printings of each resolved card (import_owned.groups).
+        others = groups(conn, generation, chosen) if command.owned == 'owned' and generation is not None else {}
+        reached = {printing for found in others.values() for printing in found}
+        editions = _editions(conn, generation, chosen | reached) if generation is not None else {}
         if any(fix.printing_id is not None and fix.printing_id not in editions for fix in fixes.values()):
             error(422, 'PRINTING_UNAVAILABLE')
-        printings = _printings(conn, generation, chosen | candidates) if generation is not None else {}
-    # 2. Stored quotes only, with no connection or lock held. None means the cache could not be read in time.
+        printings = _printings(conn, generation, chosen | candidates | reached) if generation is not None else {}
+    # 2. The owned copies of every Edition the lines reach, under the owner row lock.
+    capture = capture_owned(user_id, [edition['edition_id'] for found in editions.values() for edition in found])
+    # 3. Stored quotes only, with no connection or lock held. None means the cache could not be read in time.
     wanted = [edition['edition_id'] for printing in chosen for edition in editions[printing]]
     views = prices.stored_edition_quotes(wanted) if wanted else {}
     if views is None:
         error(503, 'PRICES_UNAVAILABLE')
-    # 3. The answer.
+    # 4. The answer.
+    catalog_order = {printing: [edition['edition_id'] for edition in found] for printing, found in editions.items()}
     parts = parts_for([Resolved(card.line, card.quantity, resolved[card.line][1], resolved[card.line][2])
                        for card in cards if resolved[card.line][1] is not None],
-                      {printing: [edition['edition_id'] for edition in found] for printing, found in editions.items()},
-                      views)
+                      catalog_order, views, command.owned, others, capture.availability.editions)
+    edition_of = {edition['edition_id']: (printing, edition['descriptor'])
+                  for printing, found in editions.items() for edition in found}
     lines = []
     for card in cards:
         status, printing, _ = resolved[card.line]
@@ -314,17 +367,32 @@ def review_import(command: ReviewImport, user_id: str = Depends(verified_user)):
                                     display_price=_display_price(views.get(edition['edition_id'])),
                                     stale=_stale(views.get(edition['edition_id'])))
                       for edition in editions[printing]] if printing is not None else [],
-            parts=[_part(part) for part in parts.get(card.line, [])],
+            parts=[_part(part, *edition_of[part.edition_id], printings, capture.availability)
+                   for part in parts.get(card.line, [])],
+            kept=_kept(parts.get(card.line, []), [catalog_order[each] for each in (printing, *others.get(printing, ()))]
+                       if printing is not None else [], capture.availability),
             report=_report(card) if status == 'not_found' else None))
-    deck_list = merged([part for card in cards for part in parts.get(card.line, [])])
+    every_part = [part for card in cards for part in parts.get(card.line, [])]
+    deck_list = merged(every_part)
+    to_get: dict[UUID, int] = {}
+    for part in every_part:
+        if part.source == 'new':
+            to_get[part.edition_id] = to_get.get(part.edition_id, 0) + part.quantity
+    cost = summarize(to_get, {edition: views[edition] for edition in to_get})
+    priced = cost.get('priced_copies')   # None when a stored row couldn't be checked
     return ImportReview(
         lines=lines, ignored=[IgnoredImportLine(line=line.line, text=line.text) for line in reading.ignored],
         deck_list=[ImportDeckListEntry(edition_id=edition, quantity=str(quantity)) for edition, quantity in deck_list],
         totals=ImportTotals(card_lines=len(cards),
                             cards=str(sum(card.quantity for card in cards if resolved[card.line][0] != 'dropped')),
                             ignored=len(reading.ignored),
-                            to_resolve=sum(1 for card in cards if resolved[card.line][0] in NEEDS_YOU)),
-        owner_revision=owner['revision'] if owner else 1, catalog_revision=state['revision'])
+                            to_resolve=sum(1 for card in cards if resolved[card.line][0] in NEEDS_YOU),
+                            owned=str(sum(part.quantity for part in every_part if part.source != 'new')),
+                            to_get=str(sum(to_get.values())), to_get_priced=priced,
+                            to_get_amount=cost.get('amount') if priced not in (None, '0') else None,
+                            to_get_display=cost.get('display_amount') if priced not in (None, '0') else None),
+        owned=command.owned, want_list_counting=capture.counting, settings_revision=capture.settings_revision,
+        owner_revision=capture.owner_revision, catalog_revision=state['revision'])
 
 
 def _display_price(view) -> str | None:
@@ -335,9 +403,32 @@ def _stale(view) -> bool | None:
     return bool(view.stale) if view is not None and view.status == 'quote' else None
 
 
-def _part(part: Part) -> ImportPart:
+def _part(part: Part, printing: UUID, descriptor: dict, printings: dict[UUID, ImportPrinting],
+          availability: Availability) -> ImportPart:
+    card = printings[printing]
     return ImportPart(edition_id=part.edition_id, quantity=str(part.quantity), source=part.source,
-                      chosen_by=part.chosen_by)
+                      chosen_by=part.chosen_by, printing_id=printing, name=card.name, set_code=card.set_code,
+                      collector_number=card.collector_number, descriptor=descriptor,
+                      places=[ImportPlace(location_id=location, name=availability.places[location].name,
+                                          deck=availability.places[location].deck, quantity=str(copies))
+                              for location, copies in part.places])
+
+
+def _kept(parts: list[Part], reached: list[list[UUID]], availability: Availability) -> list[ImportKept]:
+    """Copies of the Editions a line could use (``reached``: its Printing's, and under Use cards I own the other
+    Printings') that other Decks keep, by Deck and reason, oldest Deck first. Only a line that still gets new copies
+    says so: a line its owned copies cover needs nothing from anywhere."""
+    if not any(part.source == 'new' for part in parts):
+        return []
+    totals: dict[tuple[UUID, bool], int] = {}
+    for edition in (edition for found in reached for edition in found):
+        available = availability.editions.get(edition)
+        for kept in available.kept if available else ():
+            totals[(kept.deck_id, kept.counted)] = totals.get((kept.deck_id, kept.counted), 0) + kept.copies
+    rank = {deck: index for index, deck in enumerate(availability.order)}
+    return [ImportKept(deck_id=deck, name=availability.places[deck].name, quantity=str(copies),
+                       reason='counted' if counted else 'own_line')
+            for (deck, counted), copies in sorted(totals.items(), key=lambda item: (rank[item[0][0]], item[0][1]))]
 
 
 # --- creating the Deck -------------------------------------------------------------------------------------------
