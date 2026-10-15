@@ -298,11 +298,13 @@ test("a cost for an older inventory revision is discarded and a concurrent chang
   let release: () => void = () => undefined;
   const gate = new Promise<void>((resolve) => (release = resolve));
   let calls = 0;
+  let captured = false;
   await page.route("**/api/decks/*/cost", async (route) => {
     calls += 1;
     if (calls > 1) return route.continue();
     const response = await route.fetch();
     const body = await response.json();
+    captured = true;
     await gate;
     // By now the page has moved on (and aborted this request); whatever arrives must not be shown.
     await route
@@ -314,6 +316,9 @@ test("a cost for an older inventory revision is discarded and a concurrent chang
   });
   const cost = await openDeck(page, deck);
   await expect(cost).toContainText("Checking prices…");
+  // "Checking prices…" shows before the Deck is even read. Change the Deck only once the server has answered the held
+  // request, so the Deck read and that answer both belong to the old revision and Reload has a newer one to read.
+  await expect.poll(() => captured).toBe(true);
   await pool.query(
     "UPDATE holding SET quantity=quantity+1, version=version+1 WHERE owner_id=$1 AND location_id=$2",
     [user, deck.id]
