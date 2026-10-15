@@ -138,7 +138,9 @@ const notifications = (page: Page) =>
   page.getByRole("region", { name: "Notifications" });
 const hintText = "↻ You own a playable version (PAL 254) × 1";
 const swapButton = (page: Page) =>
-  page.getByRole("button", { name: "Swap 1 Iono for PAL 254" });
+  page.getByRole("button", {
+    name: "Swap 1 Iono Paldea Evolved 185 for PAL 254",
+  });
 
 test.afterAll(async () => {
   await pool.end();
@@ -222,12 +224,45 @@ test.describe("on a desktop", () => {
     await page.reload();
     await expect(page.getByText("Counting: One Deck at a time.")).toBeVisible();
     await expect(needs(page, wanting)).toContainText(hintText);
-    await page.getByRole("button", { name: "Swap 1 Iono for PAL 254" }).click();
+    await page
+      .getByRole("button", {
+        name: "Swap 1 Iono Paldea Evolved 185 for PAL 254",
+      })
+      .click();
     await expect(needs(page, wanting)).toContainText("1 of 1");
     expect(await deckList(page, wantingId)).toEqual({
       [ids["PAL 185"]]: "1",
       [ids["PAL 254"]]: "1",
     });
+  });
+
+  test("the Swap buttons stay disabled until the Want List is read again", async ({
+    page,
+  }) => {
+    const ids = seedCatalog();
+    await signIn(page);
+    const { name } = await example(page, ids);
+    await page.goto(`${ORIGIN}/decks/want-list`);
+    await expect(needs(page, name)).toContainText(hintText);
+
+    // Hold the re-read after the Swap: the old list stays drawn meanwhile.
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    await page.route(
+      (url) => url.pathname === "/api/want-list",
+      async (route) => {
+        await gate;
+        await route.continue();
+      }
+    );
+    await swapButton(page).click();
+    await expect(notifications(page)).toContainText(
+      `Swapped 1 Iono for PAL 254 in ${name}.`
+    );
+    await expect(swapButton(page)).toHaveAttribute("aria-disabled", "true");
+    release();
+    await expect(needs(page, name)).toContainText("3 of 3");
+    await expect(swapButton(page)).toHaveCount(0);
   });
 
   test("a Swap or an Undo after the Deck List changed elsewhere is refused and the page reads it again", async ({
@@ -240,6 +275,7 @@ test.describe("on a desktop", () => {
     await expect(needs(page, name)).toContainText(hintText);
 
     // Another tab lowers the line after the page read it: the Swap is refused and nothing moves.
+    await expect(page.getByText("0/4 cards priced")).toBeVisible();
     await setLine(page, deck, ids["PAL 185"], 2);
     await swapButton(page).click();
     await expect(page.getByRole("status").filter({ hasText: name })).toHaveText(

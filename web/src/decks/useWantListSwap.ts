@@ -8,6 +8,7 @@ import { useToast } from "../ui/Toast";
 import { variantLabel } from "../ui/variantLabel";
 import type {
   SwapHint,
+  WantList,
   WantListLine,
   WantListSection,
 } from "../want_list_generated";
@@ -19,16 +20,17 @@ export function swapVersion(hint: SwapHint): string {
   return `${hint.set_code} ${hint.collector_number}${variant === "Normal" ? "" : ` ${variant}`}`;
 }
 
-/** "↻ You own a playable version (PAL 254) × 1" (spec user story 80). */
+/** "You own a playable version (PAL 254) × 1" (spec user story 80); the hint draws "↻" before it, hidden from readers. */
 export function swapHintText(hint: SwapHint): string {
-  return `↻ You own a playable version (${swapVersion(hint)}) × ${hint.count}`;
+  return `You own a playable version (${swapVersion(hint)}) × ${hint.count}`;
 }
 
-/** The Swap button's accessible name: it starts with the button's text and names the card and the owned Edition, for
- * example "Swap 1 Iono for PAL 254". Two Decks' lines can read the same under One Deck at a time; each button sits in
- * its Deck's own list ("What <Deck> needs"). */
+/** The Swap button's accessible name: it starts with the button's text and names the line's own version and the owned
+ * Edition, for example "Swap 1 Iono Paldea Evolved 185 for PAL 254", so two Swap buttons in one Deck never share a name. */
 export function swapLabel(line: WantListLine, hint: SwapHint): string {
-  return `Swap ${hint.count} ${line.name} for ${swapVersion(hint)}`;
+  const variant = variantLabel(line.descriptor);
+  const own = `${line.set_name} ${line.collector_number}${variant === "Normal" ? "" : ` ${variant}`}`;
+  return `Swap ${hint.count} ${line.name} ${own} for ${swapVersion(hint)}`;
 }
 
 /** Swap's batch: the line lowered by the hint's count (0 removes it) and the owned Edition's line raised by as many
@@ -68,6 +70,10 @@ export type WantListSwap = {
 };
 
 type Options = {
+  /** The Want List the page shows now (null while it has none): a new answer ends the wait that follows a command. */
+  list: WantList | null;
+  /** Whether the page's last read failed: that also ends the wait. */
+  failed: boolean;
   /** Read the Want List again: every count follows a Swap, its Undo or a refusal. */
   reload: () => void;
   /** Say something on the page's status line (a Swap that wasn't made). */
@@ -89,12 +95,19 @@ type Options = {
  * The toast takes the focus: the line's Swap button leaves the page once the Want List is read again. Leaving the
  * Want List takes the toast down.
  */
-export function useWantListSwap({ reload, notify }: Options): WantListSwap {
+export function useWantListSwap({
+  list,
+  failed,
+  reload,
+  notify,
+}: Options): WantListSwap {
   const kit = useToast();
   const live = useRef({ reload, notify });
   live.current = { reload, notify };
   const [busy, setBusy] = useState(false);
   const working = useRef(false);
+  // A command landed and the page is reading the Want List again: the buttons stay off until the new answer draws.
+  const pending = useRef(false);
   const toastId = useRef<number | null>(null);
   const mounted = useRef(true);
 
@@ -106,6 +119,14 @@ export function useWantListSwap({ reload, notify }: Options): WantListSwap {
     };
   }, [kit]);
 
+  // The new answer (or a failed read) ends the wait.
+  useEffect(() => {
+    if (!pending.current) return;
+    pending.current = false;
+    working.current = false;
+    setBusy(false);
+  }, [list, failed]);
+
   function start(): boolean {
     if (working.current) return false;
     working.current = true;
@@ -114,9 +135,8 @@ export function useWantListSwap({ reload, notify }: Options): WantListSwap {
   }
 
   function finish() {
-    working.current = false;
     if (!mounted.current) return;
-    setBusy(false);
+    pending.current = true;
     live.current.reload();
   }
 
