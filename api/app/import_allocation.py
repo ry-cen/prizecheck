@@ -17,7 +17,8 @@ lines as it can.
 The rest of the line gets add-by-Printing's rule (``deck_list_printing.choose_edition``): the cheapest stored quote among
 the named Printing's active Editions, else the first in catalog order, which is how a Printing with only the Unspecified
 Variant gets that Edition. ``PH`` changes nothing. An Edition the collector chose (an ``edition_id`` fix) is the rest's
-Edition; owned copies still come first.
+Edition; owned copies still come first. So is, under Exact printings, the Edition a Published Deck's row names when
+Copy to my Decks resolved the row by it (#216, ``chosen_by`` ``published``).
 
 Pure: no database and no price read.
 """
@@ -29,7 +30,8 @@ from .copy_allocation import Available
 from .deck_list_printing import choose_edition
 
 Source = Literal['in_deck', 'elsewhere', 'new']
-ChosenBy = Literal['cheapest_price', 'catalog_order', 'collector']
+# published: Copy to my Decks under Exact printings kept the snapshot's Edition (#216).
+ChosenBy = Literal['cheapest_price', 'catalog_order', 'collector', 'published']
 OwnedCards = Literal['exact', 'owned']
 
 
@@ -39,7 +41,8 @@ class Resolved:
     line: int
     quantity: int
     printing_id: UUID
-    edition_id: UUID | None   # the collector's Edition for the rest, from an edition_id fix; None lets the rule choose
+    edition_id: UUID | None   # the Edition for the rest (an edition_id fix, or a Published Deck's); None: the rule's
+    chosen_by: ChosenBy = 'collector'   # how ``edition_id`` was chosen: collector, or published (#216)
 
 
 @dataclass(frozen=True)
@@ -82,10 +85,12 @@ class Pool:
         return tuple(taken.items())
 
 
-def new_copies(quantity: int, editions: list[UUID], views: dict, chosen: UUID | None = None) -> Part:
-    """``quantity`` new copies: the collector's Edition, else add-by-Printing's rule over ``editions`` (catalog order)."""
+def new_copies(quantity: int, editions: list[UUID], views: dict, chosen: UUID | None = None,
+               chosen_by: ChosenBy = 'collector') -> Part:
+    """``quantity`` new copies: the given Edition (the collector's, or a Published Deck's under Exact printings), else
+    add-by-Printing's rule over ``editions`` (catalog order)."""
     if chosen is not None:
-        return Part(chosen, quantity, 'new', 'collector')
+        return Part(chosen, quantity, 'new', chosen_by)
     edition_id, rule = choose_edition(editions, views)
     return Part(edition_id, quantity, 'new', rule)
 
@@ -121,7 +126,7 @@ def parts_for(lines: list[Resolved], editions: dict[UUID, list[UUID]], views: di
                 parts.append(Part(edition, copies, source, None, pool.take(edition, source, copies)))
                 wanted -= copies
         if wanted:
-            parts.append(new_copies(wanted, named, views, line.edition_id))
+            parts.append(new_copies(wanted, named, views, line.edition_id, line.chosen_by))
         found[line.line] = parts
     return found
 

@@ -169,6 +169,7 @@ const HOW: Record<NonNullable<ImportPart["chosen_by"]>, string> = {
   cheapest_price: "cheapest priced",
   catalog_order: "no Edition priced",
   collector: "your choice",
+  published: "as published",
 };
 
 /** One Deck List line a pasted line becomes: "4 MEG 119 · Reverse Holo · your choice · no price". A Normal Edition's
