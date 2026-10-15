@@ -43,8 +43,10 @@ export async function getMassEntryExport(id: string, signal?: AbortSignal, scope
   }
   return response.json() as Promise<MassEntryView>;
 }
-export const massEntryDownloadHref = (id: string, ownerRevision: number, scope: MassEntryScope = 'not_owned', deckListRevision?: number | null) =>
-  `${base(id)}.txt?owner_revision=${ownerRevision}&scope=${scope}${deckListRevision == null ? '' : `&deck_list_revision=${deckListRevision}`}`;
+// The not-owned copies follow the Want List counting setting (#208): a download pinned to a settings revision is refused
+// (409 SETTINGS_CHANGED) once the setting has changed.
+export const massEntryDownloadHref = (id: string, ownerRevision: number, scope: MassEntryScope = 'not_owned', deckListRevision?: number | null, settingsRevision?: number | null) =>
+  `${base(id)}.txt?owner_revision=${ownerRevision}&scope=${scope}${deckListRevision == null ? '' : `&deck_list_revision=${deckListRevision}`}${settingsRevision == null ? '' : `&settings_revision=${settingsRevision}`}`;
 export const MASS_ENTRY_DOWNLOAD_NAME = 'tcgplayer-mass-entry.txt';
 // A Published Deck's Mass Entry export: only the token and the snapshot version are sent, and no cookie.
 const publishedBase = (token: string, version: number) => `/api/public/decks/${encodeURIComponent(token)}/versions/${version}/exports/tcgplayer`;

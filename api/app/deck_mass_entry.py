@@ -3,8 +3,9 @@
 Reads one complete, atomically captured Deck List (``capture_deck_list``) and the current verified
 product mappings from PostgreSQL. It reads no prices, quotes or Live data and writes nothing.
 
-The ``scope`` (Deck Lists 08) chooses the copies: ``not_owned`` (the default) sends only each line's
-not-owned copies, the cards the collector would buy; copies elsewhere in the Collection are left
+The ``scope`` (Deck Lists 08) chooses the copies: ``not_owned`` (the default, Buy missing) sends only
+the copies each line still needs under the account's Want List counting setting (``copy_allocation``,
+decklist import #208), the cards the collector would buy; copies the setting counts as owned are left
 out because they would be moved in. ``deck_list`` sends every line at its full quantity.
 """
 from typing import Literal
@@ -21,6 +22,7 @@ from .location_tree import error
 from .main import connect, verified_user
 from .mass_entry_export import (MAX_LINK_QUANTITY, MAX_URL_BYTES, MassEntryExport, MassEntryInputRow,
                                 format_mass_entry, iter_mass_entry_text, mass_entry_text)
+from .settings import WantListCounting
 
 router = APIRouter(prefix='/api/decks', tags=['deck-exports'])
 INLINE_LIMIT_BYTES = 256 * 1024
@@ -51,6 +53,10 @@ class MassEntryView(BaseModel):
     owner_revision: int
     deck_list_revision: int | None = None
     catalog_revision: int
+    # Decklist import #208: the Want List counting setting the ``not_owned`` scope follows and the settings revision it
+    # was read at. Always filled; optional for the same reason as ``scope``.
+    want_list_counting: WantListCounting | None = None
+    settings_revision: int | None = None
 
 
 def captured_rows(deck_id: UUID, user_id: str, scope: MassEntryScope):
@@ -59,7 +65,7 @@ def captured_rows(deck_id: UUID, user_id: str, scope: MassEntryScope):
     if scope == 'deck_list':
         quantities = {line.edition_id: line.quantity for line in contents.lines}
     else:
-        quantities = {line.edition_id: line.not_owned for line in contents.lines if line.not_owned > 0}
+        quantities = {line.edition_id: line.need for line in contents.lines if line.need > 0}
     rows = []
     if quantities:
         ids = list(quantities)
@@ -115,17 +121,22 @@ def tcgplayer_export(deck_id: UUID, scope: MassEntryScope = Query('not_owned'), 
     contents, rows = captured_rows(deck_id, user_id, scope)
     export = formatted(rows)
     return MassEntryView(**view_fields(export), scope=scope, owner_revision=contents.owner_revision,
-                         deck_list_revision=contents.deck_list_revision, catalog_revision=contents.catalog_revision)
+                         deck_list_revision=contents.deck_list_revision, catalog_revision=contents.catalog_revision,
+                         want_list_counting=contents.want_list_counting, settings_revision=contents.settings_revision)
 
 
 @router.get('/{deck_id}/exports/tcgplayer.txt')
 def tcgplayer_download(deck_id: UUID, owner_revision: int = Query(ge=0), scope: MassEntryScope = Query('not_owned'),
-                       deck_list_revision: int | None = Query(None, ge=1), user_id: str = Depends(verified_user)):
+                       deck_list_revision: int | None = Query(None, ge=1),
+                       settings_revision: int | None = Query(None, ge=1), user_id: str = Depends(verified_user)):
     contents, rows = captured_rows(deck_id, user_id, scope)
     if contents.owner_revision != owner_revision:
         error(409, 'INVENTORY_CHANGED')
     if deck_list_revision is not None and contents.deck_list_revision != deck_list_revision:
         error(409, 'DECK_LIST_CHANGED')
+    # The not-owned copies follow the counting setting, which moves neither revision above (decklist import #208).
+    if scope == 'not_owned' and settings_revision is not None and contents.settings_revision != settings_revision:
+        error(409, 'SETTINGS_CHANGED')
     export = format_mass_entry(rows)
     if export.status == 'empty':
         error(422, 'DECK_EMPTY' if scope == 'deck_list' else 'NOTHING_NOT_OWNED')

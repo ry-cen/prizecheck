@@ -1,6 +1,6 @@
 // Generated from FastAPI OpenAPI by scripts/generate_mass_entry_client.py. Do not edit.
 export type MassEntryLineView = { quantity: string; text: string; less_specific: boolean };
-export type MassEntryView = { status: "link" | "text" | "empty"; url: string | null; fallback_reason: "missing_mapping" | "encoded_length" | "quantity_unsupported" | null; text: string | null; inline: boolean; byte_length: number; lines: (MassEntryLineView)[]; line_count: number; less_specific_count: number; total_copies: string; scope?: "not_owned" | "deck_list"; owner_revision: number; deck_list_revision?: number | null; catalog_revision: number };
+export type MassEntryView = { status: "link" | "text" | "empty"; url: string | null; fallback_reason: "missing_mapping" | "encoded_length" | "quantity_unsupported" | null; text: string | null; inline: boolean; byte_length: number; lines: (MassEntryLineView)[]; line_count: number; less_specific_count: number; total_copies: string; scope?: "not_owned" | "deck_list"; owner_revision: number; deck_list_revision?: number | null; catalog_revision: number; want_list_counting?: "all_at_once" | "one_at_a_time" | null; settings_revision?: number | null };
 export type PublishedMassEntryView = { version: number; digest: string; status: "link" | "text" | "empty"; url: string | null; fallback_reason: "missing_mapping" | "encoded_length" | "quantity_unsupported" | null; text: string | null; inline: boolean; byte_length: number; lines: (MassEntryLineView)[]; line_count: number; less_specific_count: number; total_copies: string };
 export type MassEntryScope = NonNullable<MassEntryView["scope"]>;
 
@@ -18,8 +18,10 @@ export async function getMassEntryExport(id: string, signal?: AbortSignal, scope
   }
   return response.json() as Promise<MassEntryView>;
 }
-export const massEntryDownloadHref = (id: string, ownerRevision: number, scope: MassEntryScope = 'not_owned', deckListRevision?: number | null) =>
-  `${base(id)}.txt?owner_revision=${ownerRevision}&scope=${scope}${deckListRevision == null ? '' : `&deck_list_revision=${deckListRevision}`}`;
+// The not-owned copies follow the Want List counting setting (#208): a download pinned to a settings revision is refused
+// (409 SETTINGS_CHANGED) once the setting has changed.
+export const massEntryDownloadHref = (id: string, ownerRevision: number, scope: MassEntryScope = 'not_owned', deckListRevision?: number | null, settingsRevision?: number | null) =>
+  `${base(id)}.txt?owner_revision=${ownerRevision}&scope=${scope}${deckListRevision == null ? '' : `&deck_list_revision=${deckListRevision}`}${settingsRevision == null ? '' : `&settings_revision=${settingsRevision}`}`;
 export const MASS_ENTRY_DOWNLOAD_NAME = 'tcgplayer-mass-entry.txt';
 // A Published Deck's Mass Entry export: only the token and the snapshot version are sent, and no cookie.
 const publishedBase = (token: string, version: number) => `/api/public/decks/${encodeURIComponent(token)}/versions/${version}/exports/tcgplayer`;

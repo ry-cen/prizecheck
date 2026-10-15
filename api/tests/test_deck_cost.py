@@ -19,6 +19,7 @@ from app.public_records import public_record_store
 from test_catalog_targets import isolated_rules, owner  # noqa: F401  (isolated_rules is autouse)
 from test_holdings import add, call
 from test_prices import ago, client, headers_for, seed, world
+from test_settings import change, read
 
 USER = "deck-cost-owner"
 
@@ -437,42 +438,64 @@ def test_no_request_field_forces_a_refresh(store, launches):
 # ------------------------------------------------------------------ Deck List cost and cost to complete (Deck Lists 08)
 
 
-def test_deck_list_cost_counts_every_line_and_cost_to_complete_only_not_owned_copies(store):
+def test_deck_list_cost_counts_every_line_and_cost_to_complete_only_the_copies_still_needed(store):
     editions = world()
     normal, reverse, plain = editions["normal"], editions["reverse-holofoil"], editions["unspecified"]
     seed(store, normal, "0.25")
     seed(store, reverse, "0.43")
-    # normal: 1 in the Deck, 1 in Unsorted, 2 not owned; reverse: 1 held by another Deck, 1 not owned;
+    # A new owner: the counting setting is the account's, so a change must not reach the file's other tests.
+    user = f"deck-cost-{uuid4()}"
+    # normal: 1 in the Deck, 1 in Unsorted, 2 not owned; reverse: 1 held by another Deck for its own line, 1 not owned;
     # plain (never priced): 1 not owned.
     deck = deck_list_with({normal["id"]: 4, reverse["id"]: 2, plain["id"]: 1}, held={normal["id"]: 1},
-                          unsorted={normal["id"]: 1}, other_deck={reverse["id"]: 1})
-    result = body_of(cost(deck))
+                          unsorted={normal["id"]: 1}, other_deck={reverse["id"]: 1}, user=user)
+    result = body_of(cost(deck, user=user))
     # The top-level figure stays the cost of the Deck's Holdings.
     assert (result["status"], result["amount"], result["priced_copies"], result["total_copies"]) == ("priced", "0.25", "1", "1")
     listed = result["deck_list_cost"]
     assert (listed["status"], listed["amount"], listed["display_amount"]) == ("priced", "1.86", "$1.86")
     assert (listed["priced_copies"], listed["total_copies"]) == ("6", "7")
+    # Every Deck built at once (the default): the other Deck's copy covers its own line, so this Deck needs both reverse.
+    complete = result["cost_to_complete"]
+    assert (complete["status"], complete["amount"], complete["display_amount"]) == ("priced", "1.36", "$1.36")
+    assert (complete["priced_copies"], complete["total_copies"]) == ("4", "5")
+    detail = detail_of(deck, user)
+    assert complete["total_copies"] == detail["to_get"]
+    assert result["want_list_counting"] == detail["want_list_counting"] == "all_at_once"
+    assert result["settings_revision"] == detail["settings_revision"] == 1
+    assert result["deck_list_revision"] == detail["deck_list"]["revision"]
+    assert result["owner_revision"] == detail["owner_revision"] == revision_of(user)
+    # One Deck at a time: the figure before the setting, exactly the Deck detail's not-owned copies.
+    assert change(user, "one_at_a_time", read(user)["revision"]).status_code == 200
+    result = body_of(cost(deck, user=user))
     complete = result["cost_to_complete"]
     assert (complete["status"], complete["amount"], complete["display_amount"]) == ("priced", "0.93", "$0.93")
     assert (complete["priced_copies"], complete["total_copies"]) == ("3", "4")
-    # The cost to complete counts exactly the Deck detail's not-owned copies, from the same Holdings and Deck List.
-    detail = detail_of(deck)
-    assert complete["total_copies"] == str(sum(int(line["not_owned"]) for line in detail["ownership"]))
-    assert result["deck_list_revision"] == detail["deck_list"]["revision"]
-    assert result["owner_revision"] == detail["owner_revision"] == revision_of()
+    detail = detail_of(deck, user)
+    assert complete["total_copies"] == detail["to_get"] == str(sum(int(line["not_owned"]) for line in detail["ownership"]))
+    assert (result["want_list_counting"], result["settings_revision"]) == ("one_at_a_time", 2)
+    assert result["owner_revision"] == detail["owner_revision"] == revision_of(user)
 
 
-def test_copies_elsewhere_are_never_counted_as_needing_purchase(store):
+def test_spare_copies_are_never_counted_as_needing_purchase_and_another_decks_own_copies_follow_the_setting(store):
     editions = world()
     normal, reverse = editions["normal"], editions["reverse-holofoil"]
     seed(store, normal, "0.25")
     seed(store, reverse, "0.43")
-    # Every listed copy is owned, in Unsorted or in another Deck, but none is in this Deck yet.
-    deck = deck_list_with({normal["id"]: 2, reverse["id"]: 3}, unsorted={normal["id"]: 5}, other_deck={reverse["id"]: 3})
-    result = body_of(cost(deck))
+    user = f"deck-cost-{uuid4()}"
+    # Every listed copy is owned, in Unsorted or held by another Deck for its own line, but none is in this Deck yet.
+    deck = deck_list_with({normal["id"]: 2, reverse["id"]: 3}, unsorted={normal["id"]: 5}, other_deck={reverse["id"]: 3},
+                          user=user)
+    result = body_of(cost(deck, user=user))
     assert figures(result) == EMPTY                       # the Deck holds no cards
     assert (result["deck_list_cost"]["amount"], result["deck_list_cost"]["total_copies"]) == ("1.79", "5")
-    assert result["cost_to_complete"] == EMPTY            # a real $0.00: nothing needs buying
+    # Every Deck built at once (the default): the loose normal copies are spare; the other Deck's reverse are its own.
+    complete = result["cost_to_complete"]
+    assert (complete["status"], complete["amount"], complete["priced_copies"], complete["total_copies"]) == (
+        "priced", "1.29", "3", "3")
+    # One Deck at a time: every copy outside the Deck counts.
+    assert change(user, "one_at_a_time", read(user)["revision"]).status_code == 200
+    assert body_of(cost(deck, user=user))["cost_to_complete"] == EMPTY   # a real $0.00: nothing needs buying
 
 
 def test_an_unpriced_not_owned_line_is_never_counted_as_zero(store):

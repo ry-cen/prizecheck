@@ -8,9 +8,10 @@ Edition the Deck holds or lists. That call reads every cache row (in 128-key sto
 the one gateway budget of this request. The Deck is never split into 64-Edition requests and never priced per Edition.
 
 Three figures share those views. The top-level fields are the Estimated Deck Cost of the Deck's Holdings, unchanged
-for today's client. ``deck_list_cost`` covers every Deck List line and ``cost_to_complete`` only each line's not-owned
-copies; copies elsewhere in the Collection cost nothing there, since they would be moved in rather than bought. Each
-figure is folded from its own rows only, so a failed row makes incomplete only the figures that contain it.
+for today's client. ``deck_list_cost`` covers every Deck List line and ``cost_to_complete`` only the copies each line
+still needs under the account's Want List counting setting (``copy_allocation``, decklist import #208): copies the
+setting counts as owned cost nothing there, since they would be moved in rather than bought. Each figure is folded from
+its own rows only, so a failed row makes incomplete only the figures that contain it.
 
 Arithmetic is exact: quantities are Python integers (base-10 strings on the wire) and quote amounts are integer
 micro-dollars, so neither a bigint quantity nor a long sum can lose a digit. The only rounding is the final display.
@@ -37,6 +38,7 @@ from . import prices
 from .deck_list_capture import capture_deck_list
 from .main import verified_user
 from .price_budget import Budget, trusted_budget
+from .settings import WantListCounting
 
 router = APIRouter(prefix='/api/decks', tags=['decks'])
 
@@ -78,7 +80,11 @@ class DeckCost(BaseModel):
     # moves to these and retires them.
     deck_list_revision: int | None = None    # The Deck List revision the figures belong to; None when nothing was captured.
     deck_list_cost: DeckCostFigures          # Every Deck List line at its full quantity.
-    cost_to_complete: DeckCostFigures        # Only not-owned copies; ``empty`` ($0.00) when nothing needs buying.
+    cost_to_complete: DeckCostFigures        # Only the copies still needed; ``empty`` ($0.00) when nothing needs buying.
+    # Decklist import #208: the Want List counting setting ``cost_to_complete`` follows and the settings revision it was
+    # read at (the setting moves neither revision above); None when nothing was captured.
+    want_list_counting: WantListCounting | None = None
+    settings_revision: int | None = None
 
 
 def _micros(amount: str) -> int:
@@ -156,7 +162,7 @@ def private_deck_cost(deck_id: UUID, user_id: str, budget: Budget, releases: lis
     # The capture committed: no inventory lock or connection is held from here on.
     held = captured.holdings
     listed = {line.edition_id: line.quantity for line in captured.lines}
-    missing = {line.edition_id: line.not_owned for line in captured.lines if line.not_owned > 0}
+    missing = {line.edition_id: line.need for line in captured.lines if line.need > 0}
     editions = list(dict.fromkeys([*held, *listed]))
     # One read, one admission and at most one wait for every Edition the Deck holds or lists; none for an empty Deck.
     views = prices.private_edition_quotes(editions, budget, releases) if editions else {}
@@ -165,7 +171,8 @@ def private_deck_cost(deck_id: UUID, user_id: str, budget: Budget, releases: lis
         return summarize(quantities, {key: views[key] for key in quantities})
 
     return DeckCost(deck_id=deck_id, owner_revision=captured.owner_revision,
-                    deck_list_revision=captured.deck_list_revision, **figures(held),
+                    deck_list_revision=captured.deck_list_revision, want_list_counting=captured.want_list_counting,
+                    settings_revision=captured.settings_revision, **figures(held),
                     deck_list_cost=DeckCostFigures(**figures(listed)),
                     cost_to_complete=DeckCostFigures(**figures(missing)))
 
