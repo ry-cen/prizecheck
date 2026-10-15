@@ -5,12 +5,18 @@
  * same property (h-control with h-auto, border-0 with border): Tailwind doesn't promise their order.
  */
 
+/** The box every control shares, without its horizontal padding. */
+const BOX =
+  "box-border m-0 w-full min-w-0 rounded-control border border-border-strong bg-bg font-sans text-control font-normal text-text placeholder:text-text-subtle disabled:opacity-45";
+
 /** Everything but the height: inputs, selects and text areas. */
-export const CONTROL_BOX =
-  "box-border m-0 w-full min-w-0 rounded-control border border-border-strong bg-bg px-2 font-sans text-control font-normal text-text placeholder:text-text-subtle disabled:opacity-45";
+export const CONTROL_BOX = `${BOX} px-2`;
 
 /** A one-line control: a text input, a search field or a select. */
 export const CONTROL = `${CONTROL_BOX} h-control phone:h-control-phone`;
+
+/** A select: the one-line box with the platform's arrow hidden and room on the right for SelectBox's chevron. */
+export const SELECT = `${BOX} h-control phone:h-control-phone cursor-pointer appearance-none pl-2 pr-7`;
 
 /** The visible label above a control. The label element wraps the control, so the control takes its name. */
 export const FIELD_LABEL =

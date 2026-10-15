@@ -195,16 +195,15 @@ test.describe("desktop", () => {
     await page.reload();
     await expect(tiles(page)).toHaveCount(3);
 
-    // Fresh quote: amount, price time and last check, not stale.
+    // Fresh quote: the amount alone, with no source, price time or last check.
     await tile(
       page,
       "Furret, Darkness Ablaze 1, Normal, copy 1, Fresh"
     ).click();
-    await expect(inspector(page)).toContainText(
-      "$0.25 cached TCGplayer market price (USD)"
-    );
-    await expect(inspector(page)).toContainText("Price time");
-    await expect(inspector(page)).toContainText("Last checked");
+    await expect(inspector(page)).toContainText("$0.25");
+    await expect(inspector(page)).not.toContainText("cached TCGplayer");
+    await expect(inspector(page)).not.toContainText("Price time");
+    await expect(inspector(page)).not.toContainText("Last checked");
     await expect(inspector(page)).not.toContainText("Stale");
 
     // Over 48 hours old: still priced, with no Stale label.
@@ -220,12 +219,10 @@ test.describe("desktop", () => {
       page,
       "Furret, Darkness Ablaze 2, Unspecified Variant, copy 1, Unpriced"
     ).click();
-    await expect(inspector(page)).toContainText(
-      "Price unavailable: finish not established"
-    );
+    await expect(inspector(page)).toContainText("Price unavailable");
     await expect(inspector(page)).not.toContainText("$");
 
-    // No provider time: Age unknown.
+    // No provider time: still the amount alone, with no Age unknown label.
     quote([
       {
         op: "quote",
@@ -240,11 +237,11 @@ test.describe("desktop", () => {
       "Furret, Darkness Ablaze 1, Reverse Holo, copy 1, Old"
     ).click();
     await expect(inspector(page)).toContainText("$0.43");
-    await expect(inspector(page)).toContainText("Age unknown");
+    await expect(inspector(page)).not.toContainText("Age unknown");
     await expect(inspector(page)).not.toContainText("Stale");
   });
 
-  test("tiles keep the freshness label whole on a small tile, say No age while the description says Age unknown, and word a timed-out row like the inspector", async ({
+  test("a tile shows only the amount for a quote of unknown age, and words a timed-out row like the inspector", async ({
     page,
   }) => {
     const ids = priceWorld();
@@ -278,32 +275,14 @@ test.describe("desktop", () => {
     await pricesToggle(page).click();
 
     const unknown = tiles(page).filter({ hasText: "$0.43" });
-    // The visible label is the short one; "Age unknown" is only in the (visually hidden) description text.
-    await expect(unknown.locator(".edition-price-label")).toHaveText(
-      "· No age"
-    );
-    await expect(unknown).toHaveAccessibleDescription(/^\$0\.43 · Age unknown/);
+    await expect(unknown).toHaveAccessibleDescription("$0.43");
+    await expect(unknown).not.toContainText("No age");
     await expect(
       tile(page, "Furret, Darkness Ablaze 2, ")
     ).toHaveAccessibleDescription("Price check timed out");
     await expect(tile(page, "Furret, Darkness Ablaze 2, ")).toContainText(
       "Price check timed out"
     );
-
-    // At the smallest tile width the label span stays inside the tile.
-    await unknown.evaluate((element) => {
-      (element as HTMLElement).style.width = "110px";
-    });
-    const label = unknown.locator(".edition-price-label");
-    await expect(label).toHaveText(/No age/);
-    const box = (await unknown.boundingBox())!;
-    const labelBox = (await label.boundingBox())!;
-    expect(box.width).toBeCloseTo(110, 0);
-    expect(labelBox.width).toBeGreaterThan(0);
-    expect(labelBox.x + labelBox.width).toBeLessThanOrEqual(
-      box.x + box.width + 0.5
-    );
-    expect(labelBox.x).toBeGreaterThanOrEqual(box.x);
   });
 
   test("a price check that runs out of time is labelled in the inspector and the card details still show", async ({
@@ -323,9 +302,7 @@ test.describe("desktop", () => {
     );
     await page.reload();
     await tile(page, "Furret, Darkness Ablaze 1").click();
-    await expect(inspector(page)).toContainText(
-      "Price check timed out. The rest of this page is unaffected."
-    );
+    await expect(inspector(page)).toContainText("Price check timed out");
     await expect(inspector(page)).toContainText("1 copy here");
     await expect(inspector(page)).not.toContainText("$0.00");
   });
@@ -360,7 +337,7 @@ test.describe("desktop", () => {
       report.getByRole("heading", { name: "Report card metadata for Furret" })
     ).toBeVisible();
     const target = report
-      .locator("label", { hasText: "Metadata target" })
+      .locator("label", { hasText: "What needs fixing" })
       .locator("select");
     await expect(target).toHaveValue("marketplace");
     await expect(target).toBeFocused();
@@ -511,9 +488,8 @@ test.describe("mobile", () => {
 
     await tiles(page).first().tap();
     const sheet = page.getByRole("dialog", { name: "Furret" });
-    await expect(sheet).toContainText(
-      "$0.25 cached TCGplayer market price (USD)"
-    );
+    await expect(sheet).toContainText("$0.25");
+    await expect(sheet).not.toContainText("cached TCGplayer");
     const link = sheet.getByRole("link", { name: REPORT });
     await expect(link).toBeVisible();
     await expectTouchTarget(link, ["height"]);

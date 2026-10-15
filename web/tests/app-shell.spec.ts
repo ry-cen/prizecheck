@@ -584,7 +584,9 @@ test.describe("phone", () => {
 
       await tab(page, "Decks").tap();
       await expect(page).toHaveURL(/\/decks$/);
-      await expect(page.getByRole("banner")).toContainText("Decks");
+      await expect(heading(page)).toHaveText("Decks");
+      // The phone header doesn't repeat the page's title.
+      await expect(page.getByRole("banner")).not.toContainText("Decks");
       await expect(tab(page, "Decks")).toHaveAttribute("aria-current", "page");
 
       const more = tab(page, "More");

@@ -185,33 +185,38 @@ export function DeckLibrary({
           onChange={setShown}
         />
       </div>
+      {/* Formats, then card types, each on its own row: the panel is too narrow for one row, and a divider would
+          land at the end or the start of a wrapped line. */}
       <div
         role="group"
         aria-label="Library filters"
-        className="flex min-w-0 flex-wrap items-center gap-1.5"
+        className="flex min-w-0 flex-col gap-1.5"
       >
-        <Chip selected={format === null} onChange={() => setFormat(null)}>
-          Any format
-        </Chip>
-        {FORMATS.map((option) => (
-          <Chip
-            key={option.value}
-            selected={format === option.value}
-            onChange={(on) => setFormat(on ? option.value : null)}
-          >
-            {option.label}
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+          <Chip selected={format === null} onChange={() => setFormat(null)}>
+            Any format
           </Chip>
-        ))}
-        <span aria-hidden="true" className="mx-1 h-4 w-px shrink-0 bg-border" />
-        {KINDS.map((option) => (
-          <Chip
-            key={option.value}
-            selected={kind === option.value}
-            onChange={(on) => setKind(on ? option.value : null)}
-          >
-            {option.label}
-          </Chip>
-        ))}
+          {FORMATS.map((option) => (
+            <Chip
+              key={option.value}
+              selected={format === option.value}
+              onChange={(on) => setFormat(on ? option.value : null)}
+            >
+              {option.label}
+            </Chip>
+          ))}
+        </div>
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+          {KINDS.map((option) => (
+            <Chip
+              key={option.value}
+              selected={kind === option.value}
+              onChange={(on) => setKind(on ? option.value : null)}
+            >
+              {option.label}
+            </Chip>
+          ))}
+        </div>
       </div>
       <div role="status" className="flex flex-col gap-0.5 text-meta">
         {browse.notice && (
@@ -302,7 +307,7 @@ export function DeckLibrary({
   );
 }
 
-/** One library tile: an EditionTile with copies free of owned, its compact price and, under a format chip, a "?" for
+/** One library tile: an EditionTile with copies free of owned, its price and, under a format chip, a "?" for
  * an unknown standing. */
 function LibraryTile({
   edition,
@@ -340,7 +345,7 @@ function LibraryTile({
       }
       price={
         <span className={TILE_PRICE}>
-          <EditionPrice compact editionId={edition.edition_id} />
+          <EditionPrice editionId={edition.edition_id} />
         </span>
       }
       priceId={priceId}

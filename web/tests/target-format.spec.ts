@@ -8,7 +8,7 @@ import { expectTouchTarget } from "./support/touch-target";
 import { listCards } from "./support/deck-list";
 import { startAsNewOwner } from "./support/owner";
 
-// The deck builder's Target Format (#178): header row 2's "Standard ▾ · ✓ Legal" control changes the Deck's Target
+// The deck builder's Target Format (#178): header row 2's "Standard ⌄ · ✓ Legal" control (the chevron is an icon) changes the Deck's Target
 // Format through its Deck List command from a kit menu of radio items (owner decision 2026-10-14), the result opens the results dialog, and a card-level issue highlights its
 // lines. The cards come through the real catalog import with real TCGdex-shaped records, so the real rules files judge
 // them on today's date: Bulbasaur, four Rare Candy, four Switch and 51 Basic Grass Energy are legal in Standard and
@@ -201,7 +201,8 @@ test.describe("on a desktop", () => {
     await expect(formatButton(page)).toHaveAccessibleName(
       "Target Format: Standard"
     );
-    await expect(formatButton(page)).toHaveText(/^Standard\s*▾$/);
+    await expect(formatButton(page)).toHaveText(/^Standard$/);
+    await expect(formatButton(page).locator("svg")).toHaveCount(1);
     await expect(resultButton(page)).toHaveText(/^✓\s*Legal/);
     await expect(resultButton(page)).toHaveAccessibleName(
       /Legal\. Show the Standard result$/
@@ -231,7 +232,7 @@ test.describe("on a desktop", () => {
     await expect(standard).toBeHidden();
     await expect(resultButton(page)).toBeFocused();
 
-    // ▾ opens the menu: the three Formats as radio items, Standard checked and focused.
+    // The Format button opens the menu: the three Formats as radio items, Standard checked and focused.
     await formatButton(page).click();
     await expect(formatButton(page)).toHaveAttribute("aria-expanded", "true");
     const items = formatMenu(page).getByRole("menuitemradio");

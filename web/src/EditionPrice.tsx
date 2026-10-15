@@ -124,64 +124,9 @@ function whenNear(element: Element | null, onNear: () => void): () => void {
   };
 }
 
-const UNAVAILABLE: Record<string, string> = {
-  unspecified_variant: "Price unavailable: finish not established",
-  not_found: "Price unavailable",
-  unverified: "Price unavailable: not matched to a reviewed market listing",
-  quarantined: "Price unavailable: market matching is under review",
-  no_quote_variant:
-    "Price unavailable: no market price variant for this Edition",
-  not_cached: "No cached price yet",
-  confirmed_absent: "No market price is listed for this Edition",
-  lookup_mismatch: "Price unavailable: the cached price failed validation",
-  invalid_quote: "Price unavailable: the cached price failed validation",
-  store_unavailable: "Price temporarily unavailable",
-  deadline: "Price check timed out",
-  validation_unavailable: "Price check timed out",
-};
-
-function moment(iso: string) {
-  return `${iso.slice(0, 16).replace("T", " ")} UTC`;
-}
-
-function Quote({ row }: { row: PriceRow }) {
-  return (
-    <>
-      <strong>{row.display_amount}</strong> cached TCGplayer market price (USD)
-      {row.age === "known" && row.provider_updated_at ? (
-        <> · Price time {moment(row.provider_updated_at)}</>
-      ) : (
-        <> · Age unknown</>
-      )}
-      {row.checked_at && <> · Last checked {moment(row.checked_at)}</>}
-    </>
-  );
-}
-
-function Refresh({ row }: { row: PriceRow }) {
-  const cached = row.status === "quote" ? " — showing cached" : "";
-  let text: string | null = null;
-  if (row.refresh === "background") text = "Refreshing in background";
-  else if (row.refresh === "refreshed") text = "Refreshed just now";
-  else if (row.refresh === "timeout") text = `Refresh timed out${cached}`;
-  else if (row.refresh === "busy") text = `Refresh busy${cached}`;
-  else if (row.refresh === "backoff") text = `Source backing off${cached}`;
-  else if (row.refresh === "failed" || row.refresh_failed_at)
-    text = `Last refresh failed${
-      row.refresh_failed_at ? ` at ${moment(row.refresh_failed_at)}` : ""
-    }${cached}`;
-  if (!text) return null;
-  return (
-    <span className="price-refresh" data-refresh={row.refresh ?? "failed"}>
-      {" "}
-      · {text}
-    </span>
-  );
-}
-
-/** One line for a gallery tile: the amount with its Age unknown label, or a short state. It never
- * shows $0 for a missing quote. The full sentence (price time, last check, refresh) is in card information. */
-function compactContent(settled: Settled | null) {
+/** A price slot's words: the amount alone, or a short state. It never shows $0 for a missing quote, and leaves out
+ * the quote's source, age, last check and refresh state: the collector only needs the price. */
+function priceContent(settled: Settled | null) {
   if (!settled) return "Checking prices…";
   if (settled.kind === "timeout") return "Price check timed out";
   if (settled.kind === "error") return "Price unavailable";
@@ -190,21 +135,7 @@ function compactContent(settled: Settled | null) {
   if (row.reason === "deadline" || row.reason === "validation_unavailable")
     return "Price check timed out";
   if (row.status !== "quote" || !row.display_amount) return "Price unavailable";
-  const unknownAge = !(row.age === "known" && row.provider_updated_at);
-  // The visible label is short so it is never cut off on a small tile; the description keeps the full wording.
-  return (
-    <span className="edition-price-line">
-      <span className="edition-price-amount">
-        <strong>{row.display_amount}</strong>
-      </span>
-      {unknownAge && (
-        <span className="edition-price-label" aria-hidden="true">
-          {" · No age"}
-        </span>
-      )}
-      {unknownAge && <span className="edition-price-sr"> · Age unknown</span>}
-    </span>
-  );
+  return <strong>{row.display_amount}</strong>;
 }
 
 /** What a price slot settles to: the Edition's price row, a client timeout, or an error. */
@@ -234,15 +165,8 @@ export function useEditionPriceRow(
   return settled;
 }
 
-/** The cached price of one Card Edition. `compact` renders one short line (workspace tiles); the default
- * renders the full sentence. Both share the same batched request queue. */
-export function EditionPrice({
-  editionId,
-  compact = false,
-}: {
-  editionId: string;
-  compact?: boolean;
-}) {
+/** The cached price of one Card Edition, requested through the shared batched queue. */
+export function EditionPrice({ editionId }: { editionId: string }) {
   const [settled, setSettled] = useState<Settled | null>(null);
   const slot = useRef<HTMLSpanElement>(null);
   useEffect(() => {
@@ -256,42 +180,19 @@ export function EditionPrice({
       cancel();
     };
   }, [editionId]);
-  if (compact)
-    return (
-      <span
-        ref={slot}
-        className="edition-price"
-        data-price-status={
-          !settled
-            ? "checking"
-            : settled.kind === "row"
-              ? settled.row.status
-              : settled.kind
-        }
-      >
-        {compactContent(settled)}
-      </span>
-    );
-  let content;
-  let status = "checking";
-  if (!settled) content = "Checking prices…";
-  else if (settled.kind === "timeout") {
-    status = "timeout";
-    content = "Price check timed out. The rest of this page is unaffected.";
-  } else if (settled.kind === "error") {
-    status = "error";
-    content = "Prices are temporarily unavailable.";
-  } else {
-    const { row } = settled;
-    status = row.status;
-    if (row.status === "quote") content = <Quote row={row} />;
-    else if (row.status === "pending") content = "Price check in progress";
-    else content = UNAVAILABLE[row.reason ?? ""] ?? "Price unavailable";
-  }
   return (
-    <span ref={slot} className="edition-price" data-price-status={status}>
-      {content}
-      {settled?.kind === "row" && <Refresh row={settled.row} />}
+    <span
+      ref={slot}
+      className="edition-price"
+      data-price-status={
+        !settled
+          ? "checking"
+          : settled.kind === "row"
+            ? settled.row.status
+            : settled.kind
+      }
+    >
+      {priceContent(settled)}
     </span>
   );
 }

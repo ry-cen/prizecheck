@@ -222,13 +222,11 @@ function ShellFrame({
       </header>
 
       {/* Phone header for pages that don't draw their own (Collection draws its own: ☰, title, Search and
-          Filters & display). Pages without side content show the wordmark instead of ☰. */}
+          Filters & display): the wordmark alone. The page's own heading sits right under it and the tab bar marks
+          the section, so a title here would only repeat them. */}
       {showing !== "collection" && (
         <header className="box-border hidden h-header items-center gap-3 border-b border-border px-3 phone:flex">
           <Wordmark />
-          <span className="min-w-0 truncate text-body font-semibold">
-            {other ? other.label : current.label}
-          </span>
         </header>
       )}
 

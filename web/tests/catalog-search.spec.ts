@@ -60,9 +60,6 @@ promote({**{f'card-{i}': f'Pikachu {i:02d}' for i in range(1, 66)}, 'card-99': '
     await expect(
       details.getByRole("img", { name: "Artwork unavailable for Pikachu 01" })
     ).toBeVisible();
-    await expect(
-      details.getByText("Artwork belongs to the Printing")
-    ).toBeVisible();
     // Each Card Edition is in the popup's Edition picker by its Variant, the tapped one picked.
     const editions = details
       .getByRole("group", { name: "Editions" })

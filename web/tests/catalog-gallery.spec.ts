@@ -111,9 +111,9 @@ test.describe("desktop", () => {
   }) => {
     seedGallery();
     await signIn(page);
-    await expect(status(page)).toContainText("70 Printings · last pulled");
-    await expect(status(page)).not.toContainText("TCGdex");
     await expect(results(page)).toContainText("Showing 60 of 70 cards");
+    // One count only: the results line, not a Printing count in the status line.
+    await expect(status(page)).toHaveText("");
     await expect(tiles(page)).toHaveCount(60);
     await expect(page.getByRole("complementary")).toHaveCount(0); // no sidebar
     // Newest set first, in collector number order: Mega Evolution leads (dated by the rules files here).
@@ -262,9 +262,7 @@ test.describe("desktop", () => {
     await expect(details).toContainText("Regulation mark I");
     // The Card Identity shows only when it differs from the name.
     await expect(details).not.toContainText("Card Identity");
-    await expect(details).toContainText(
-      "Artwork belongs to the Printing and does not prove an Edition finish."
-    );
+    await expect(details).not.toContainText("Artwork belongs to the Printing");
     await expect(
       details.getByRole("button", { name: "Report this Edition" })
     ).toHaveCount(1);

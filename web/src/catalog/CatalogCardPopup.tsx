@@ -14,21 +14,13 @@ import { Stepper } from "../ui/Stepper";
 import { variantLabel } from "../ui/variantLabel";
 import { TILE_PRICE } from "../workspace/Gallery";
 import { OLD_BUTTONS, OLD_FIELDS, OLD_TEXT } from "../workspace/legacyContent";
-import {
-  addToCollection,
-  planOne,
-  type AddCommand,
-  type PlanCommand,
-} from "./cardActions";
+import { addToCollection, type AddCommand } from "./cardActions";
 import {
   addedText,
   addFailed,
-  ART_NOTE,
   copies,
   FORMATS,
   MAX_ADD,
-  plannedText,
-  planFailed,
   STANDING_WORDS,
 } from "./catalogText";
 import {
@@ -111,7 +103,7 @@ type CardState = {
  * art and its note; set name, code and number; regulation mark; the Card Identity when it differs from the name; the
  * owner-reviewed note on a manual record; a legality Pill per Format with the reason for an unknown one; the Editions as a picker, each with its
  * Variant, copies owned and price, and Owner reviewed and Unavailable badges; where the picked Edition's copies are;
- * the Add rows (Collection | Location | − N + | Add N, and Deck List | Deck | Plan 1); and a quiet footer that opens
+ * the Add row (Collection | Location | − N + | Add N); and a quiet footer that opens
  * today's report flows.
  */
 export function CatalogCardPopup({
@@ -151,8 +143,6 @@ export function CatalogCardPopup({
     });
   }
   const [whereVersion, setWhereVersion] = useState(0);
-  // The Deck last chosen stays chosen from card to card while the page is open (the gallery keeps the Location).
-  const [deck, setDeck] = useState<string | null>(null);
   const reportRef = useRef<HTMLDivElement>(null);
 
   const ready = details.state === "ready" ? details : null;
@@ -220,7 +210,6 @@ export function CatalogCardPopup({
       announcement={announcement}
       returnFocus={returnFocus}
       art={<CardArt url={artUrl} name={name} />}
-      artNote={ART_NOTE}
       footer={
         ready && (
           <>
@@ -360,7 +349,10 @@ export function CatalogCardPopup({
               })
             }
           />
-          {selected && <SelectedEdition edition={selected} />}
+          {/* With one Edition the picker already says everything this block would repeat. */}
+          {selected && editions.length > 1 && (
+            <SelectedEdition edition={selected} />
+          )}
           <Where where={where} places={places} />
           {selected && (
             <AddRows
@@ -370,8 +362,6 @@ export function CatalogCardPopup({
               alsoOffer={alsoOffer}
               location={location}
               onLocation={onLocation}
-              deck={deck}
-              onDeck={setDeck}
               onAdded={(added) => {
                 onAdded(added);
                 reload();
@@ -476,7 +466,7 @@ function EditionPicker({
             </span>
             {edition.active && (
               <span className={`${TILE_PRICE} min-w-0 tabular-nums`}>
-                <EditionPrice compact editionId={edition.id} />
+                <EditionPrice editionId={edition.id} />
               </span>
             )}
             {edition.reviewed && <Pill>Owner reviewed</Pill>}
@@ -514,8 +504,7 @@ function SelectedEdition({ edition }: { edition: PopupEdition }) {
         </p>
       ) : (
         <p className="m-0 text-text-muted">
-          This Edition is unavailable: it has no price and can't be added or
-          planned.
+          This Edition is unavailable: it has no price and can't be added.
         </p>
       )}
     </div>
@@ -576,9 +565,9 @@ function Where({
 }
 
 /**
- * The Add rows: Collection | Location | − N + | Add N, and Deck List | Deck | Plan 1. The Location and Deck chosen
- * stay chosen while the page is open (the popup stays mounted). Add N puts physical copies in a Storage Leaf through
- * a batch add of one item (#175), with an Undo record; Plan 1 adds one copy to a Deck List and never moves a card.
+ * The Add row: Collection | Location | − N + | Add N. The Location chosen stays chosen while the page is open (the
+ * popup stays mounted). Add N puts physical copies in a Storage Leaf through a batch add of one item (#175), with an
+ * Undo record.
  */
 function AddRows({
   edition,
@@ -586,8 +575,6 @@ function AddRows({
   alsoOffer,
   location: locationId,
   onLocation,
-  deck: deckId,
-  onDeck,
   onAdded,
 }: {
   edition: PopupEdition;
@@ -595,8 +582,6 @@ function AddRows({
   alsoOffer: Place | null;
   location: string | null;
   onLocation: (id: string) => void;
-  deck: string | null;
-  onDeck: (id: string) => void;
   onAdded: (added: AddedCards) => void;
 }) {
   const headingId = useId();
@@ -609,19 +594,16 @@ function AddRows({
     leaves.find((leaf) => leaf.id === locationId) ??
     leaves.find((leaf) => leaf.label === "Unsorted") ??
     leaves[0];
-  const deck =
-    places.decks.find((item) => item.id === deckId) ?? places.decks[0];
   const [count, setCount] = useState(1);
-  const [busy, setBusy] = useState<"add" | "plan" | null>(null);
+  const [busy, setBusy] = useState(false);
   const [done, setDone] = useState("");
   const [failure, setFailure] = useState("");
   const pendingAdd = useRef<AddCommand | null>(null);
-  const pendingPlan = useRef<PlanCommand | null>(null);
   const usable = edition.active;
 
   async function add() {
     if (!location || busy) return;
-    setBusy("add");
+    setBusy(true);
     setDone("");
     setFailure("");
     const outcome = await addToCollection(
@@ -630,7 +612,7 @@ function AddRows({
       count,
       pendingAdd
     );
-    setBusy(null);
+    setBusy(false);
     if (outcome.ok) {
       setDone(addedText(count, location.label));
       setCount(1);
@@ -646,20 +628,6 @@ function AddRows({
     } else {
       setFailure(addFailed(outcome.code, outcome.retry));
       if (outcome.code === "LOCATION_NOT_FOUND") places.reload();
-    }
-  }
-
-  async function plan() {
-    if (!deck || busy) return;
-    setBusy("plan");
-    setDone("");
-    setFailure("");
-    const outcome = await planOne(deck.id, edition.id, pendingPlan);
-    setBusy(null);
-    if (outcome.ok) setDone(plannedText(deck.label, outcome.quantity));
-    else {
-      setFailure(planFailed(outcome.code, outcome.retry));
-      if (outcome.code === "DECK_NOT_FOUND") places.reload();
     }
   }
 
@@ -704,46 +672,15 @@ function AddRows({
         <Button
           variant="primary"
           disabled={!usable || !location}
-          aria-disabled={busy === "add" || undefined}
+          aria-disabled={busy || undefined}
           onClick={() => void add()}
         >
           Add {count}
         </Button>
       </div>
-      <div role="group" aria-label="Plan in a Deck List" className={ROW}>
-        <span className={ROW_LABEL}>Deck List</span>
-        <div className="min-w-0 flex-1 basis-40">
-          <Select
-            label="Deck"
-            labelHidden
-            value={deck?.id ?? ""}
-            disabled={!places.decks.length}
-            onChange={(event) => onDeck(event.target.value)}
-          >
-            {places.decks.length ? (
-              places.decks.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.label}
-                </option>
-              ))
-            ) : (
-              <option value="">
-                {places.state === "ready" ? "No Decks yet" : "Loading Decks…"}
-              </option>
-            )}
-          </Select>
-        </div>
-        <Button
-          disabled={!usable || !deck}
-          aria-disabled={busy === "plan" || undefined}
-          onClick={() => void plan()}
-        >
-          Plan 1
-        </Button>
-      </div>
       {!usable && (
         <p className={META}>
-          This Edition is unavailable, so it can't be added or planned.
+          This Edition is unavailable, so it can't be added.
         </p>
       )}
       <p role="status" className="m-0 text-meta text-text">

@@ -3,7 +3,8 @@ import type { DeckCostSettled } from "./useDeckCost";
 
 /**
  * One figure as the header reads it: "$123.45 deck (52/58 priced)". An empty figure has no copies to price
- * ("$0.00 to complete"); a figure with no cached price says so; an incomplete or missing one is unavailable.
+ * ("$0.00 to complete"); a figure with no cached price reads "no prices yet"; an incomplete or missing one is
+ * unavailable.
  */
 export function figureText(
   figure: DeckCostFigures | undefined,
@@ -16,9 +17,10 @@ export function figureText(
     case "empty":
       return `${figure.display_amount ?? "$0.00"} ${noun}`;
     case "no_quotes":
+      // Nothing priced: the coverage would only say 0 of N.
       return noun === "deck"
-        ? `Deck unpriced ${coverage}`
-        : `To complete unpriced ${coverage}`;
+        ? "Deck: no prices yet"
+        : "To complete: no prices yet";
     default:
       return noun === "deck"
         ? "Deck price unavailable"

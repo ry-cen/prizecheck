@@ -2,7 +2,7 @@
 // number, regulation mark, the Card Identity only when it differs from the name, the source, a legality Pill per
 // Format), the Edition picker with copies owned and the Unavailable badge, where your copies are, "‹ N / M ›" with
 // ‹ › and ← → stepping (into the next page, and through a quiet restart after the collector's own Add), the Add rows
-// (Add N puts copies in a Location; Plan 1 adds a Deck List copy and never moves a card), the report footer, and the
+// (Add N puts copies in a Location; there is no Deck List row), the report footer, and the
 // shared page check at 1280×800 and 375×812 with the popup open, including the phone's bottom sheet. The gallery
 // itself is in catalog-gallery.spec.ts.
 import { test, expect, type Locator, type Page } from "@playwright/test";
@@ -92,11 +92,6 @@ async function own(page: Page, editionId: string, quantity: number) {
   expect(added.status(), await added.text()).toBe(200);
 }
 
-async function ownerRevision(page: Page): Promise<number> {
-  const response = await page.request.get(`${ORIGIN}/api/collection/revision`);
-  return ((await response.json()) as { owner_revision: number }).owner_revision;
-}
-
 const results = (page: Page) =>
   page.getByRole("region", { name: "Catalog results" });
 const tiles = (page: Page) => results(page).getByRole("listitem");
@@ -124,8 +119,6 @@ const editions = (page: Page) =>
   popup(page).getByRole("group", { name: "Editions" }).getByRole("button");
 const addRow = (page: Page) =>
   popup(page).getByRole("group", { name: "Add to Collection" });
-const planRow = (page: Page) =>
-  popup(page).getByRole("group", { name: "Plan in a Deck List" });
 
 test.describe("desktop", () => {
   test.use({ viewport: { width: 1280, height: 800 } });
@@ -150,9 +143,7 @@ test.describe("desktop", () => {
     await expect(
       card.getByRole("img", { name: "Bulbasaur card art" })
     ).toBeVisible();
-    await expect(card).toContainText(
-      "Artwork belongs to the Printing and does not prove an Edition finish."
-    );
+    await expect(card).not.toContainText("Artwork belongs to the Printing");
     await expect(card).toContainText("Mega Evolution (MEG) · #001");
     await expect(card).toContainText("Regulation mark I");
     await expect(card).not.toContainText("Card Identity");
@@ -183,13 +174,10 @@ test.describe("desktop", () => {
     ).toHaveText(["2 in Unsorted"]);
     await editions(page).nth(2).click();
     await expect(card).toContainText(
-      "This Edition is unavailable, so it can't be added or planned."
+      "This Edition is unavailable, so it can't be added."
     );
     await expect(
       addRow(page).getByRole("button", { name: "Add 1" })
-    ).toBeDisabled();
-    await expect(
-      planRow(page).getByRole("button", { name: "Plan 1" })
     ).toBeDisabled();
     await expectPageChecks(page, "Catalog, card popup open");
 
@@ -232,7 +220,9 @@ test.describe("desktop", () => {
     });
     await expect(report).toBeVisible();
     await expect(
-      report.locator("label", { hasText: "Metadata target" }).locator("select")
+      report
+        .locator("label", { hasText: "What needs fixing" })
+        .locator("select")
     ).toBeFocused();
     await expectPageChecks(page, "Catalog, card popup with a report open");
     await research
@@ -262,7 +252,7 @@ test.describe("desktop", () => {
     ).toBeFocused();
   });
 
-  test("Add N puts copies in a Location, and Plan 1 adds a Deck List copy without moving a card", async ({
+  test("Add N puts copies in a Location, and the popup offers no Deck List row even when a Deck exists", async ({
     page,
   }) => {
     seedPopup();
@@ -272,8 +262,6 @@ test.describe("desktop", () => {
       data: { name: "Popup deck", idempotency_key: randomUUID() },
     });
     expect(created.status()).toBe(201);
-    const deck = (await created.json()).location.id as string;
-    const switchEdition = await edition("me01-130");
     await page.reload();
 
     await tile(page, "Switch, MEG 130").click();
@@ -294,36 +282,11 @@ test.describe("desktop", () => {
       addRow(page).getByRole("button", { name: "Add 1" })
     ).toBeVisible();
 
-    // Plan 1 adds one copy to the Deck List each time, and moves no card: no Holding in the Deck, the same owner
-    // revision, the same 3 copies in Unsorted.
-    const revision = await ownerRevision(page);
+    // Planning a Deck List copy happens in the deck builder, not here.
     await expect(
-      planRow(page).getByRole("combobox", { name: "Deck" })
-    ).toHaveValue(deck);
-    const plan = planRow(page).getByRole("button", { name: "Plan 1" });
-    await plan.click();
-    await expect(
-      card.getByText(
-        "Planned 1 for Popup deck. Its Deck List now has 1 of this Edition."
-      )
-    ).toBeVisible();
-    await plan.click();
-    await expect(
-      card.getByText(
-        "Planned 1 for Popup deck. Its Deck List now has 2 of this Edition."
-      )
-    ).toBeVisible();
-    expect(
-      await sql(
-        "SELECT quantity::int AS quantity FROM deck_list_line WHERE deck_id=$1 AND edition_id=$2",
-        [deck, switchEdition]
-      )
-    ).toEqual([{ quantity: 2 }]);
-    expect(
-      await sql("SELECT 1 FROM holding WHERE location_id=$1", [deck])
-    ).toEqual([]);
-    expect(await ownerRevision(page)).toBe(revision);
-    await expect(card).toContainText("3 copies owned");
+      popup(page).getByRole("group", { name: "Plan in a Deck List" })
+    ).toHaveCount(0);
+    await expect(card.getByRole("button", { name: "Plan 1" })).toHaveCount(0);
 
     // The tile behind shows the new count at once.
     await page.keyboard.press("Escape");
@@ -366,7 +329,6 @@ test.describe("desktop", () => {
     await page.keyboard.press("Escape");
     await expect(tileButton(page, 60)).toBeFocused();
     // The restart was the collector's own doing, so the status line says nothing about it.
-    await expect(status(page)).toContainText("70 Printings");
     await expect(status(page)).not.toContainText("collection changed");
   });
 
@@ -408,7 +370,7 @@ test.describe("desktop", () => {
     ).toHaveAttribute("aria-expanded", "true");
     await expect(
       popup(page)
-        .locator("label", { hasText: "Metadata target" })
+        .locator("label", { hasText: "What needs fixing" })
         .locator("select")
     ).toBeFocused();
   });

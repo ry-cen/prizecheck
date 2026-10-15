@@ -114,7 +114,8 @@ export function SignInsPage({ email }: { email: string | null }) {
   }
 
   return (
-    <main className="mx-auto box-border max-w-3xl px-7 py-7 phone:px-4 phone:py-5">
+    // The app's page container, so the title lines up with every other page; the content keeps a reading width.
+    <main className="mx-auto box-border max-w-7xl px-7 py-7 phone:px-4 phone:py-5 [&>*]:max-w-3xl">
       <PageHeader title="Sign-ins" headingRef={heading} />
       <section
         aria-label="Your sign-ins"

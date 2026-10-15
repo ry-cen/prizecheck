@@ -72,7 +72,7 @@ const VIEWS = [
  *
  * Row 1's Gather N opens the Pick List dialog (#179), as does the copy sheet's Gather on that card.
  *
- * Header row 2 holds the Target Format control (#178): ▾ changes the Deck's Target Format through its Deck List
+ * Header row 2 holds the Target Format control (#178): its menu changes the Deck's Target Format through its Deck List
  * command, and the result opens the results dialog. A card-level issue in that result highlights its lines.
  *
  * The page header holds Export, Publish and Delete, and row 1 Buy missing after Gather N (#181, useDeckActions).

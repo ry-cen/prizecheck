@@ -33,7 +33,7 @@ import type { MarqueeEvent, TileGesture } from "./useSelection";
 // The tile's price line: the existing EditionPrice component's compact form, on one line cut with an ellipsis,
 // in the tile's colours. EditionPrice has no stylesheet of its own (#184), so these are its only rules here.
 export const TILE_PRICE =
-  "block [&_.edition-price]:block [&_.edition-price]:truncate [&_.edition-price]:text-text-subtle [&_.edition-price_strong]:font-semibold [&_.edition-price_strong]:text-text [&_.edition-price-line]:flex [&_.edition-price-line]:min-w-0 [&_.edition-price-line]:whitespace-nowrap [&_.edition-price-amount]:min-w-0 [&_.edition-price-amount]:truncate [&_.edition-price-label]:shrink-0 [&_.edition-price-label]:whitespace-pre [&_.edition-price-sr]:sr-only";
+  "block [&_.edition-price]:block [&_.edition-price]:truncate [&_.edition-price]:text-text-subtle [&_.edition-price_strong]:font-semibold [&_.edition-price_strong]:text-text";
 
 type Props = {
   data: GalleryData;
@@ -560,7 +560,7 @@ const Tile = memo(function Tile({
       price={
         prices ? (
           <span className={TILE_PRICE}>
-            <EditionPrice compact editionId={holding.edition_id} />
+            <EditionPrice editionId={holding.edition_id} />
           </span>
         ) : undefined
       }
