@@ -2,7 +2,7 @@
 
 **Label:** wayfinder:map
 
-**Status:** charted 2026-10-15; every ticket resolved 2026-10-15. The way is clear, ready for owner-invoked `/to-spec` and `/to-ticket`.
+**Status:** charted 2026-10-15; every ticket resolved 2026-10-15. The way is clear. Spec published as [Spec: Collection import from other trackers](https://github.com/ry-cen/prizecheck/issues/225) ([spec.md](../spec.md)); implementation tickets come from owner-invoked `/to-ticket`.
 
 ## Destination
 
