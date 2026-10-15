@@ -69,6 +69,7 @@ def test_the_display_table_is_not_the_live_export_table():
                        if re.search(r"^from \. import .*\bset_codes\b|^from \.set_codes import", path.read_text(), re.M))
     # The decklist import (#212, #213) reads the printed code table too, to match and show a pasted line and to read
     # its alias rules (import_aliases); display and matching, not export. The Want List's Swap hint (#211) shows
-    # the owned Edition's code ("PAL 254").
+    # the owned Edition's code ("PAL 254"). Copy to my Decks (#216) shows a Published Deck row's printed code on its
+    # review line (import_publication).
     assert importers == ["catalog_browse.py", "deck_import.py", "import_aliases.py", "import_matching.py",
-                         "swap_hints.py"]
+                         "import_publication.py", "swap_hints.py"]

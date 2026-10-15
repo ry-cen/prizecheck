@@ -34,7 +34,7 @@ names = ("TreeNode", "LocationCommandResult", "CreateDeck", "EditDeck", "DeckInd
          "PickConfirmResult", "DeleteDeck", "DeleteDeckResult", "DeckListChange", "ChangeDeckList",
          "ImportSource", "ImportFix", "ReviewImport", "ImportPrinting", "ImportEdition", "ImportPlace", "ImportPart",
          "ImportKept", "MissingCardPrefill", "ReviewLine",
-         "IgnoredImportLine", "ImportDeckListEntry", "ImportTotals", "ImportReview", "ImportDeckLine", "ImportDeck",
+         "IgnoredImportLine", "ImportDeckListEntry", "ImportTotals", "ImportPublication", "ImportReview", "ImportDeckLine", "ImportDeck",
          "ImportDeckResult",
          "ReplaceLine", "ImportReplace")
 lines = ["// Generated from FastAPI OpenAPI by scripts/generate_decks_client.py. Do not edit.",
