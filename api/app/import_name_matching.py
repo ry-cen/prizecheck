@@ -49,11 +49,14 @@ def by_name(conn, generation: UUID, lines: list[CardLine]) -> dict[int, Match]:
         SELECT q.line,replace(catalog_search_words(q.name),' ','') AS key FROM unnest(%s::int[],%s::text[]) AS q(line,name)),
       names AS (
         SELECT gp.printing_id,gp.search_key AS key FROM catalog_generation_printing gp
-          WHERE gp.generation_id=%s AND NOT gp.tombstoned
+          WHERE gp.generation_id=%s AND NOT gp.tombstoned AND gp.search_key IN (SELECT key FROM q WHERE key<>'')
         UNION
         SELECT gp.printing_id,replace(catalog_search_words(catalog_card_identity_key(gp.display_name)),' ','')
           FROM catalog_generation_printing gp
-          WHERE gp.generation_id=%s AND NOT gp.tombstoned AND gp.display_name LIKE '%%(%%')
+          WHERE gp.generation_id=%s AND NOT gp.tombstoned AND gp.display_name LIKE '%%(%%'
+            -- The base name's key is a prefix of the whole name's key, so this cheap test keeps every candidate and
+            -- spares the identity-key and normalisation work on the rest.
+            AND EXISTS (SELECT 1 FROM q WHERE key<>'' AND starts_with(gp.search_key,q.key)))
       SELECT DISTINCT q.line,gp.printing_id,g.group_id,{NEWEST_COLUMNS}
       FROM q JOIN names n ON n.key=q.key AND q.key<>''
       JOIN catalog_generation_printing gp ON gp.generation_id=%s AND gp.printing_id=n.printing_id

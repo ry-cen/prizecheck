@@ -250,7 +250,7 @@ def _report(card: CardLine) -> MissingCardPrefill:
     """The Missing cards prefill for a Not found line (``MissingCardPrefill``)."""
     mapped = import_aliases.report_set(card.set_code, card.number) if card.set_code else None
     note = f'Pasted decklist line: "{card.text}".'
-    if mapped is None and card.set_code:
+    if mapped is None and card.set_code and card.set_code != 'Energy':
         note += f" PrizeCheck's code tables don't map the set code {card.set_code}."
     return MissingCardPrefill(
         kind='printing', english_name=card.name[:160],

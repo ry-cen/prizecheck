@@ -101,7 +101,9 @@ def readings(code: str, number: str) -> list[Reading]:
     if subset:
         base, prefix = subset.groups()
         sets = tuple(set_codes.sets_for_code(base))
-        if sets and (DIGITS.fullmatch(number) or number.upper().startswith(prefix)):
+        # TG and GG need the code's subset (SVI-TG has none; BRS-GG's is a Trainer Gallery). RC numbers sit in the main set.
+        has_subset = prefix == 'RC' or (len(sets) > 1 and sets[-1].endswith(prefix.lower()))
+        if sets and has_subset and (DIGITS.fullmatch(number) or number.upper().startswith(prefix)):
             # The subset is listed after its main set (set_codes.tsv's I: rows), so the report names the last set.
             found.append(Reading(sets, prefix + number if DIGITS.fullmatch(number) else number, sets[-1]))
     last = FLAT_NUMBERS.get(code.upper())
@@ -128,4 +130,8 @@ def report_set(code: str, number: str) -> tuple[str, str] | None:
     if found:
         return found[0].report_set, found[0].number
     sets = set_codes.sets_for_code(code)
-    return (sets[0], number) if sets else None
+    if not sets:
+        return None
+    # A Shining Vault number (SHF SV5) belongs to the code's subset, which is listed after its main set.
+    vault = len(sets) > 1 and number.upper().startswith('SV') and sets[-1].endswith('sv')
+    return (sets[-1] if vault else sets[0], number)

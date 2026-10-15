@@ -217,7 +217,7 @@ Each card line is matched in this order. The first step that answers wins.
    - **one:** **Matched by name**, on the group's newest Printing by set release date;
    - **several:** **Pick one**, with one candidate per group (its newest Printing);
    - **none:** **Not found**.
-4. **No code:** **Can't read**. Name matching never runs for these lines.
+4. **No code:** **Can't read**. Name matching never runs for these lines. A capitalised name suffix (EX, GX, V, VMAX, VSTAR and the like) read as the set token also counts as no code, so the line is Can't read rather than matched by a shortened name.
 
 **The import alias table** is a new checked-in table, separate from the printed set code table. That display table keeps its two-source evidence rule; each alias row cites its own evidence.
 
