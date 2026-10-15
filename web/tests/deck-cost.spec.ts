@@ -131,7 +131,7 @@ test("three $0.25 copies, two stale $0.43 copies and one unpriced copy show $1.6
     "Incomplete subtotal: 1 card without a price"
   );
   await expect(cost).not.toContainText("stale");
-  await expect(cost).toContainText("0 cards with unknown price age");
+  await expect(cost).not.toContainText("price age");
   await expect(cost).toContainText("Excludes shipping and taxes");
   await expect(cost).not.toContainText("$0.00");
   // The gallery's own count is independent of the cost.
@@ -191,7 +191,7 @@ test("an empty Deck is $0.00 with No cards, and a Deck with no eligible quote is
     [ids.unspecified]: 4,
   });
   cost = await openDeck(page, unpriced);
-  await expect(cost).toContainText("Price unavailable · 0/6 cards priced");
+  await expect(cost).toContainText("No prices yet");
   await expect(cost).not.toContainText("$0.00");
 });
 
@@ -222,9 +222,7 @@ test("an incomplete 200 answer without a total falls back to the checks total, a
     })
   );
   let cost = await openDeck(page, deck);
-  await expect(cost).toContainText(
-    "Price unavailable; coverage unavailable; 6 cards total"
-  );
+  await expect(cost).toContainText("Price unavailable");
   await expect(cost).not.toContainText("cards priced");
   await page.unroute("**/api/decks/*/cost");
 
@@ -236,9 +234,7 @@ test("an incomplete 200 answer without a total falls back to the checks total, a
     })
   );
   cost = await openDeck(page, deck);
-  await expect(cost).toContainText(
-    "Price unavailable; coverage unavailable; 6 cards total"
-  );
+  await expect(cost).toContainText("Price unavailable");
   await expect(cost).not.toContainText("Checking prices…");
 });
 
@@ -263,9 +259,7 @@ test(
       })
     );
     let cost = await openDeck(page, deck);
-    await expect(cost).toContainText(
-      "Price unavailable; coverage unavailable; 6 cards total"
-    );
+    await expect(cost).toContainText("Price unavailable");
     await expect(cost).not.toContainText("cards priced");
     await page.unroute("**/api/decks/*/cost");
 
@@ -277,10 +271,7 @@ test(
     cost = await openDeck(page, deck);
     await expect(page.getByRole("main")).toContainText("6 copies · 3 editions");
     await expect(cost).toContainText("Checking prices…");
-    await expect(cost).toContainText(
-      "Price unavailable; coverage unavailable; 6 cards total",
-      { timeout: 6_000 }
-    );
+    await expect(cost).toContainText("Price unavailable", { timeout: 6_000 });
   }
 );
 

@@ -148,7 +148,7 @@ export function MissingCardsPage({ active, message }: Props) {
 
   const panelId = `${idBase}-panel-${section}`;
   return (
-    <main className="mx-auto box-border flex max-w-6xl flex-col gap-4 px-7 py-7 phone:px-4 phone:py-5">
+    <main className="mx-auto box-border flex max-w-7xl flex-col gap-4 px-7 py-7 phone:px-4 phone:py-5">
       <PageHeader title="Missing cards" />
       <Segmented
         label="Missing cards sections"

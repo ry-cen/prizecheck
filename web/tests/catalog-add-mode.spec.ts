@@ -354,7 +354,7 @@ test.describe("desktop", () => {
       /, not owned$/
     );
     const status = page.getByRole("main").getByRole("status");
-    await expect(status).toContainText("70 Printings");
+    await expect(page.getByRole("main")).toContainText("of 70 cards");
     await expect(status).not.toContainText("collection changed");
 
     // Inside Collection's Add cards the gallery scrolls in the dialog, and the next page loads as its end nears.

@@ -30,9 +30,8 @@ type Props = {
   cardKey: string;
   /** Announced politely after each step, for example "Card 3 of 70: Bulbasaur". */
   announcement?: string;
-  /** The artwork column: the art, and under it `artNote`. */
+  /** The artwork column. */
   art: ReactNode;
-  artNote?: ReactNode;
   /** The details column. */
   children: ReactNode;
   /** A quiet footer under both columns (Catalog's report links). */
@@ -66,7 +65,6 @@ export function CardPopup({
   cardKey,
   announcement = "",
   art,
-  artNote,
   children,
   footer,
   returnFocus,
@@ -174,9 +172,6 @@ export function CardPopup({
         <div className="flex gap-4 phone:gap-3">
           <div className="flex w-44 shrink-0 flex-col gap-2 phone:w-28">
             {art}
-            {artNote && (
-              <p className="m-0 text-caption text-text-muted">{artNote}</p>
-            )}
           </div>
           <div className="flex min-w-0 flex-1 flex-col gap-4">{children}</div>
         </div>

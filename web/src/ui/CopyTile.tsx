@@ -215,8 +215,15 @@ function TileArt({
       className="block size-full object-cover"
     />
   ) : (
-    <span className="box-border flex h-full items-center justify-center p-2 text-center text-caption font-semibold text-text-muted wrap-anywhere">
-      {name}
+    // The name breaks between words or at a hyphen ("Giratina-|EX"), hyphenated only when one word can't fit, and
+    // a narrow tile (the deck builder's Spread) uses smaller text so short names stay whole, starting below the
+    // corner badges.
+    <span className="@container block size-full">
+      <span className="box-border flex h-full items-center justify-center p-2 @max-[5rem]:px-1 @max-[5rem]:pt-6 @max-[5rem]:pb-1">
+        <span className="max-w-full min-w-0 text-center text-caption font-semibold break-words hyphens-auto text-text-muted @max-[5rem]:text-micro">
+          {name}
+        </span>
+      </span>
     </span>
   );
 }

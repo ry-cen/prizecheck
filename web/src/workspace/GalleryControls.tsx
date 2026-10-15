@@ -1,8 +1,10 @@
 import React, { useEffect, useRef, type ReactNode } from "react";
+import { SlidersHorizontal } from "lucide-react";
 import type { CollectionSet } from "../collection_generated";
 import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
-import { Select } from "../ui/Select";
+import { Icon } from "../ui/Icon";
+import { Select, SelectBox } from "../ui/Select";
 import {
   activeFilterCount,
   CATEGORY_OPTIONS,
@@ -22,7 +24,7 @@ import { MOBILE_QUERY } from "./media";
 const INLINE_FIELD =
   "inline-flex items-center gap-2 text-meta font-medium text-text-muted";
 const INLINE_SELECT =
-  "box-border m-0 h-control min-w-0 cursor-pointer rounded-control border border-border-strong bg-bg px-2 font-sans text-control text-text phone:h-control-phone";
+  "box-border m-0 h-control min-w-0 cursor-pointer appearance-none rounded-control border border-border-strong bg-bg pl-2 pr-7 font-sans text-control text-text phone:h-control-phone";
 
 /** The visible active-filter count. The control's accessible name carries it too ("Filters, 2 active"),
  * set through aria-label because the badge's box would otherwise add a space ("Filters , 2 active"). */
@@ -67,7 +69,8 @@ export function FiltersToggle({
   );
 }
 
-/** Phone header control that opens the Filters & display drawer. */
+/** Phone header control that opens the Filters & display drawer: an icon with the active-filter count, so the
+ * header's search keeps its room on a 375 px screen. Its name says it in words. */
 export const FiltersDrawerButton = React.forwardRef<
   HTMLButtonElement,
   { filters: GalleryFilters; open: boolean; onOpen: () => void }
@@ -78,10 +81,12 @@ export const FiltersDrawerButton = React.forwardRef<
       className="shrink-0"
       aria-haspopup="dialog"
       aria-expanded={open}
-      aria-label={activeName("Filters & display", filters)}
+      aria-label={
+        activeName("Filters & display", filters) ?? "Filters & display"
+      }
       onClick={onOpen}
     >
-      Filters &amp; display
+      <Icon icon={SlidersHorizontal} />
       <ActiveCount count={activeFilterCount(filters)} />
     </Button>
   );
@@ -217,14 +222,14 @@ export function SortControl({
   return (
     <label className={INLINE_FIELD}>
       <span>Sort</span>
-      <select
+      <SelectBox
         className={INLINE_SELECT}
         aria-label="Sort"
         value={sort}
         onChange={change}
       >
         {options}
-      </select>
+      </SelectBox>
     </label>
   );
 }
@@ -264,14 +269,14 @@ export function DisplayControls({
       ) : (
         <label className={INLINE_FIELD}>
           <span>Card size</span>
-          <select
+          <SelectBox
             className={INLINE_SELECT}
             aria-label="Card size"
             value={display.size}
             onChange={changeSize}
           >
             {sizes}
-          </select>
+          </SelectBox>
         </label>
       )}
       <Button

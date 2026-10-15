@@ -2,6 +2,10 @@
 
 Use `dev` as the integration branch. Update `main` from `dev` when the user authorizes a release.
 
+## UI copy
+
+Show collectors only what helps them decide or act. Leave data-source and provenance names (TCGdex, TCGplayer, marketplace IDs), fetch and check times, cache or refresh state, internal reasons and record IDs out of the UI, even when the API returns them. Owner and admin review screens are exempt, and so are legally required credits such as the Published Deck page's not-endorsed notice. If you aren't sure something belongs, leave it out and ask.
+
 ## Agent skills
 
 ### Issue tracker

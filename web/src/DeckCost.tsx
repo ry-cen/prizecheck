@@ -92,12 +92,11 @@ export function CostSection({
   const Heading = headingLevel === 2 ? "h2" : "h4";
   let content;
   let status = "checking";
-  const unavailable = (total: string) =>
-    `Price unavailable; coverage unavailable; ${plural(total, "card")} total`;
+  const unavailable = () => "Price unavailable";
   if (!settled) content = <p>Checking prices…</p>;
   else if (settled.kind === "unavailable") {
     status = "incomplete";
-    content = <p>{unavailable(totalCopies)}</p>;
+    content = <p>{unavailable()}</p>;
   } else {
     const { cost } = settled;
     status = cost.status;
@@ -108,52 +107,25 @@ export function CostSection({
           <strong>{cost.display_amount}</strong> · No cards
         </p>
       );
-    else if (cost.status === "incomplete")
-      content = <p>{unavailable(total)}</p>;
-    else if (cost.status === "no_quotes")
-      content = (
-        <p>
-          Price unavailable · {cost.priced_copies}/{total} cards priced
-        </p>
-      );
+    else if (cost.status === "incomplete") content = <p>{unavailable()}</p>;
+    else if (cost.status === "no_quotes") content = <p>No prices yet</p>;
     else {
       const unpriced = (
         BigInt(total) - BigInt(cost.priced_copies ?? "0")
       ).toString();
       content = (
-        <>
-          <p>
-            <strong>{cost.display_amount}</strong> · {cost.priced_copies}/
-            {total} cards priced
-            {unpriced !== "0" && (
-              <>
-                {" "}
-                · Incomplete subtotal: {plural(unpriced, "card")} without a
-                price
-              </>
-            )}
-          </p>
-          <p>
-            {plural(cost.unknown_age_copies ?? "0", "card")} with unknown price
-            age
-          </p>
-        </>
+        <p>
+          <strong>{cost.display_amount}</strong> · {cost.priced_copies}/{total}{" "}
+          cards priced
+          {unpriced !== "0" && (
+            <>
+              {" "}
+              · Incomplete subtotal: {plural(unpriced, "card")} without a price
+            </>
+          )}
+        </p>
       );
     }
-    if (
-      cost.fallback_copies &&
-      cost.fallback_copies !== "0" &&
-      cost.status !== "incomplete"
-    )
-      content = (
-        <>
-          {content}
-          <p>
-            {plural(cost.fallback_copies, "card")} could not be refreshed now
-            and {cost.fallback_copies === "1" ? "shows" : "show"} cached data.
-          </p>
-        </>
-      );
   }
   return (
     <section
@@ -163,10 +135,7 @@ export function CostSection({
     >
       <Heading>Estimated Deck Cost</Heading>
       {content}
-      <p>
-        Cached TCGplayer market prices (USD) for the exact Editions in this
-        Deck. Excludes shipping and taxes.
-      </p>
+      <p>Excludes shipping and taxes.</p>
     </section>
   );
 }

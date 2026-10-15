@@ -392,7 +392,7 @@ test("an open Deck's banner shows its cost and coverage and links to the deck bu
     "Incomplete subtotal: 1 card without a price"
   );
   await expect(cost).not.toContainText("stale");
-  await expect(cost).toContainText("0 cards with unknown price age");
+  await expect(cost).not.toContainText("price age");
   await expect(cost).toContainText("Excludes shipping and taxes");
   await expect(cost).not.toContainText("$0.00");
   await expect(banner(page)).toContainText(

@@ -21,6 +21,19 @@ const KEY_ORDER = [
   "size",
 ];
 
+/** Marketplace and source lookup IDs that TCGdex variants carry in the descriptor (api/app/catalog.py
+ * MUTABLE_SOURCE_KEYS). They don't name a physical variant, so the label leaves them out. */
+const SOURCE_KEYS = new Set([
+  "variantId",
+  "productId",
+  "pricing",
+  "card_pricing",
+  "cardmarket",
+  "tcgplayer",
+  "thirdParty",
+  "tcgOnline",
+]);
+
 /** "first-edition", "pokeball" or "foilPattern" as "First Edition", "Pokeball", "Foil Pattern". */
 function words(value: string): string {
   return value
@@ -43,7 +56,7 @@ function text(value: unknown): string {
  * (spec "Styling and the kit": Variant Descriptor placement). A reviewed `label` is used as written; the
  * unspecified Edition, an empty descriptor or no descriptor reads "Unspecified Variant". Otherwise each
  * physical key is read out in a fixed order: the finish by its collector name (reverse is "Reverse Holo"),
- * other values in words, a standard size left out, and an unknown key as "Key: value".
+ * other values in words, a standard size and marketplace IDs left out, and an unknown key as "Key: value".
  *
  * Examples: {finish: "reverse"} -> "Reverse Holo"; {type: "holo", size: "standard"} -> "Holo";
  * {type: "normal", stamps: ["first-edition"]} -> "Normal, First Edition".
@@ -66,6 +79,7 @@ export function variantLabel(
   const parts: string[] = [];
   for (const key of keys) {
     const value = descriptor[key];
+    if (SOURCE_KEYS.has(key)) continue;
     if (value === null || value === undefined || value === "") continue;
     if (Array.isArray(value) && !value.length) continue;
     if (key === "size" && value === "standard") continue;

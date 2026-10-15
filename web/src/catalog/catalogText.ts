@@ -46,17 +46,6 @@ export function closeSpellings(text: string): string {
   return `No exact matches. Showing close spellings of “${text}”.`;
 }
 
-/** "N Printings · last pulled …" (spec "Catalog": status line). */
-export function catalogLine(
-  printings: number,
-  lastSuccess: string | null
-): string {
-  const pulled = lastSuccess
-    ? new Date(lastSuccess).toLocaleString()
-    : "at an unknown time";
-  return `${printings.toLocaleString()} ${printings === 1 ? "Printing" : "Printings"} · last pulled ${pulled}`;
-}
-
 export const CATALOG_UNAVAILABLE =
   "Catalog unavailable until the first complete import.";
 export const CATALOG_REFRESHED =
@@ -69,10 +58,6 @@ export const BROWSE_FAILED =
   "Catalog search is temporarily unavailable. Please retry.";
 
 // ---------------------------------------------------------------- CardPopup (#174)
-
-/** The art note (spec "Catalog": the art, with the note that artwork doesn't prove an Edition's finish). */
-export const ART_NOTE =
-  "Artwork belongs to the Printing and does not prove an Edition finish.";
 
 /** A legality Pill's words: the Format, then its standing. */
 export const STANDING_WORDS = {
@@ -94,10 +79,6 @@ export function addedText(count: number, path: string): string {
   return `Added ${copies(count)} to ${path}.`;
 }
 
-export function plannedText(deck: string, quantity: string): string {
-  return `Planned 1 for ${deck}. Its Deck List now has ${quantity} of this Edition.`;
-}
-
 const ADD_ERRORS: Record<string, string> = {
   EDITION_UNAVAILABLE: "This Edition is no longer available to add.",
   LOCATION_NOT_FOUND: "That Location is gone. Choose another.",
@@ -108,18 +89,6 @@ const ADD_ERRORS: Record<string, string> = {
 export function addFailed(code: string, retry: boolean): string {
   if (retry) return "Add may have completed. Press Add again to check safely.";
   return ADD_ERRORS[code] ?? "Add failed. Please retry.";
-}
-
-const PLAN_ERRORS: Record<string, string> = {
-  DECK_NOT_FOUND: "That Deck is gone. Choose another.",
-  EDITION_UNAVAILABLE: "This Edition is no longer available to plan.",
-  STALE_DECK_LIST: "That Deck List keeps changing. Press Plan 1 again.",
-};
-
-export function planFailed(code: string, retry: boolean): string {
-  if (retry)
-    return "Plan 1 may have completed. Press Plan 1 again to check safely.";
-  return PLAN_ERRORS[code] ?? "Plan 1 failed. Please retry.";
 }
 
 // ---------------------------------------------------------------- Batch add and Add mode (#175)

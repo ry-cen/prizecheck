@@ -590,10 +590,10 @@ test.describe("desktop", () => {
         pikachuReads.push(request.url());
     });
 
-    // Idle: the column is there, at the reserved width, and empty.
+    // Idle: the column is there, at the reserved width, with only its placeholder.
     await expect(panel).toBeAttached();
     expect((await box(panel)).width).toBeCloseTo(310, 0);
-    await expect(panel).toBeEmpty();
+    await expect(panel).toHaveText("Select a card to see its details.");
 
     // Hover previews while nothing is selected.
     await tiles(page).nth(3).hover();
@@ -612,7 +612,7 @@ test.describe("desktop", () => {
     await expect(panel).toContainText("2 copies here");
     await expect(panel).toContainText("3 copies owned");
     await page.mouse.move(5, 5);
-    await expect(panel).toBeEmpty();
+    await expect(panel).toHaveText("Select a card to see its details.");
 
     // Totals already read are kept while the inspector empties between tiles: coming back to a
     // card shows its total at once and asks the server nothing more.
@@ -653,7 +653,7 @@ test.describe("desktop", () => {
     ).toBe(false);
     expect(pikachuReads).toHaveLength(1);
     await page.mouse.move(5, 5);
-    await expect(panel).toBeEmpty();
+    await expect(panel).toHaveText("Select a card to see its details.");
 
     // A selection takes precedence over hover and shows the last clicked selected card.
     await tiles(page).nth(2).click();
@@ -689,7 +689,7 @@ test.describe("desktop", () => {
     await nav.getByRole("button", { name: shelf, exact: true }).click();
     await nav.getByRole("button", { name: "Binder 2", exact: true }).click();
     await expect(tiles(page)).toHaveCount(2);
-    await expect(panel).toBeEmpty();
+    await expect(panel).toHaveText("Select a card to see its details.");
     await tiles(page).nth(1).hover();
     await expect(panel).toContainText("2 copies here");
     await expect(panel).toContainText("3 copies owned");
