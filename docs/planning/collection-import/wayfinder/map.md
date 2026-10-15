@@ -24,10 +24,10 @@ An agreed plan, ready for owner-invoked `/to-spec` and `/to-ticket`, that lets a
 
 - [Research collection export formats from other trackers](https://github.com/ry-cen/prizecheck/issues/219): TCGplayer, Collectr (Pro), PriceCharting, TCG Collector (Premium), Dragon Shield and Sorted export CSVs. Dex+ columns are unconfirmed, and Pokellector has none. The shared key is set name plus number, with TCGplayer's Product ID as the strongest key for its own files. Naive set-name matching reaches 80–94% of rows. Files hold watchlist, sealed, other-game, Japanese and graded rows, and repeat copies. Real files run 92–3,178 rows, so decklist import's limits don't fit. [Findings](research/tracker-export-formats.md)
 - [Decide what the import accepts](https://github.com/ry-cen/prizecheck/issues/220): header presets for the six exporting trackers plus a loose fallback for other CSVs, with no mapping screen and the source never named in the UI. One paste box reads a header as a file and anything else as decklist-style lines, then by name. File groups can be left out in the review but never become Locations. Uploads take CSV, TSV, TXT or a one-file zip. [Resolution](resolutions/decide-what-the-import-accepts.md)
+- [Decide how imported rows match Card Editions](https://github.com/ry-cen/prizecheck/issues/221): Product ID, then set and number, then Basic Energy, then name within the set, through a new set-name alias table and a finish table per tracker. Non-card and non-English rows are left out with counts. Graded cards come in as ordinary copies. An unclear finish goes to the Unspecified Variant as Finish unknown, and name matches need one card in the row's set. Untracked columns are dropped quietly, and an import never starts a catalog pull. [Resolution](resolutions/decide-how-rows-match.md)
 
 ## Not yet specified
 
-- Condition, grade and price-paid columns: whether any of them ever becomes something we track, beyond being dropped. This waits on [what the import accepts](https://github.com/ry-cen/prizecheck/issues/220) and [how rows match](https://github.com/ry-cen/prizecheck/issues/221).
 - Collector-facing help: how-to-export instructions per tracker, and where they live.
 - Launch evidence: which real exports prove the import before public signup.
 
