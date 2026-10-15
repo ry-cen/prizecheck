@@ -23,6 +23,7 @@ This is not a price access (ADR 0006): it reads no quote, admits no refresh and 
 same scope (#210) and its Mass Entry export reuse ``capture_want_list`` and ``combined``; the Swap hint (#211) adds an
 optional field to ``WantListLine``.
 """
+import re
 from dataclasses import dataclass
 from uuid import UUID
 
@@ -159,16 +160,29 @@ def capture_want_list(user_id: str, deck_id: UUID | None = None, timeout_ms: int
     return capture
 
 
-def combined(capture: WantListCapture, order: dict[UUID, list[LineCount]]) -> list[tuple[UUID, int, list[LineCount]]]:
+def combined(capture: WantListCapture, needs: dict[UUID, list[LineCount]]) -> list[tuple[UUID, int, list[LineCount]]]:
     """The combined total of the shown sections: each card once, in the order it first appears in them, with its need
-    and the lines that need it. Under Every Deck built at once a card's need is the sum of those lines' needs; under
-    One Deck at a time it is the largest one."""
+    and the lines that need it. ``needs`` holds each shown Deck's lines; the caller sorts them the way the route does,
+    and the total keeps that order. Under Every Deck built at once a card's need is the sum of those lines' needs;
+    under One Deck at a time it is the largest one."""
     rows: dict[UUID, list[LineCount]] = {}
     for deck in capture.shown():
-        for line in order[deck.id]:
+        for line in needs[deck.id]:
             rows.setdefault(line.edition_id, []).append(line)
     pick = sum if capture.counting == 'all_at_once' else max
     return [(edition, pick(line.need for line in lines), lines) for edition, lines in rows.items()]
+
+
+NUMBER_PARTS = re.compile(r'^([a-z]*)(\d*)(.*)$', re.DOTALL)
+
+
+def number_order(number: str) -> tuple:
+    """A collector number in natural order, compared the way catalog search compares it (``catalog_browse.NUMBER_KEY``:
+    zeros after a number's letters don't count, so 097 reads as 97): plain numbers by value (2 before 10), a letter
+    suffix after its number, numbers with a letter prefix after the plain ones. The raw text breaks a tie."""
+    key = re.sub(r'^([a-z]*)0*([0-9])', r'\1\2', number.lower())
+    prefix, digits, rest = NUMBER_PARTS.match(key).groups()
+    return prefix != '', prefix, int(digits) if digits else -1, rest, number
 
 
 DISPLAY_FIELDS = ('name', 'set_id', 'set_name', 'collector_number', 'descriptor', 'image_url')
@@ -187,7 +201,7 @@ def want_list(deck: UUID | None = None, user_id: str = Depends(verified_user)):
     # Lines read by card, then by Edition: name, set, collector number, then the Edition id for a stable order.
     def card_order(line: LineCount):
         fields = display[line.edition_id]
-        return fields['name'].casefold(), fields['set_name'], fields['collector_number'], line.edition_id
+        return fields['name'].casefold(), fields['set_name'], number_order(fields['collector_number']), line.edition_id
 
     for lines in needs.values():
         lines.sort(key=card_order)
