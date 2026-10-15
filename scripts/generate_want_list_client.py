@@ -26,7 +26,7 @@ def ts_type(value):
 
 schema = app.openapi()["components"]["schemas"]
 lines = ["// Generated from FastAPI OpenAPI by scripts/generate_want_list_client.py. Do not edit."]
-for name in ("WantListDeck", "CountedFromDeck", "WantListLine", "WantListSection", "CombinedDeckNeed", "CombinedRow",
+for name in ("WantListDeck", "CountedFromDeck", "SwapHint", "WantListLine", "WantListSection", "CombinedDeckNeed", "CombinedRow",
              "WantList"):
     definition = schema[name]
     fields = [f"{field}{'' if field in definition.get('required', []) else '?'}: {ts_type(value)}"

@@ -1,7 +1,8 @@
 // Generated from FastAPI OpenAPI by scripts/generate_want_list_client.py. Do not edit.
 export type WantListDeck = { id: string; name: string };
 export type CountedFromDeck = { deck_id: string; quantity: string };
-export type WantListLine = { edition_id: string; name: string; set_id: string; set_name: string; collector_number: string; descriptor: Record<string, unknown>; image_url: string | null; quantity: string; held: string; spare: string; other_decks: string; counted_from: CountedFromDeck[]; owned: string; need: string };
+export type SwapHint = { edition_id: string; set_code: string; collector_number: string; descriptor: Record<string, unknown>; count: string; listed: string };
+export type WantListLine = { edition_id: string; name: string; set_id: string; set_name: string; collector_number: string; descriptor: Record<string, unknown>; image_url: string | null; quantity: string; held: string; spare: string; other_decks: string; counted_from: CountedFromDeck[]; owned: string; need: string; swap?: SwapHint | null };
 export type WantListSection = { deck_id: string; name: string; deck_list_revision: number; to_get: string; lines: WantListLine[] };
 export type CombinedDeckNeed = { deck_id: string; need: string };
 export type CombinedRow = { edition_id: string; name: string; set_id: string; set_name: string; collector_number: string; descriptor: Record<string, unknown>; image_url: string | null; need: string; decks: CombinedDeckNeed[] };
