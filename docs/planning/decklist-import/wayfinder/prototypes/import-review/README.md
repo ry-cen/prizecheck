@@ -79,6 +79,17 @@ These are prototype choices, marked in the UI with dashed notes, not decisions:
 - Under Use cards I own, the order is this Deck's copies of the exact Printing, this Deck's other Printings, Spare Copies of the exact Printing, then Spare Copies of other Printings. Among several spare Editions, holding order wins.
 - Matching order: code and number, then Basic Energy by type, then name.
 
+## Owner verdict — 2026-10-14
+
+1. **Variant A.** One list, opening on **Needs you** when there are lines to resolve.
+2. **Exact printings** keeps the replaced Deck's held copies of the named Printing in their own Edition; only the rest gets the cheapest priced Edition.
+3. **Use cards I own** is the default the first time; each device remembers the choice after that.
+4. **The setting** lives in the review's side column only; the paste screen holds the text and destination.
+5. **After saving,** every flow lands in the Deck's builder with an Undo toast. The review shows only the card count; format checks stay in the builder.
+6. **Copy to my Decks** only creates a new Deck, named after the Published Deck.
+7. **A line without a set code** stays **Can't read** until the collector picks a card or drops it.
+8. **Not taken forward:** variants B and C. The full decision is in [the import review resolution](../../resolutions/prototype-import-review.md).
+
 ## Checks — 2026-10-14
 
 - **Desktop (pane width):**
