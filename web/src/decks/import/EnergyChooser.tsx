@@ -36,7 +36,7 @@ export function EnergyChooser({
       </p>
       <ul
         ref={list}
-        aria-label="Basic Energy cards"
+        aria-label="Basic Energy of this type, newest first"
         className="m-0 flex list-none flex-col gap-1 p-0"
       >
         {line.candidates.map((candidate) => (

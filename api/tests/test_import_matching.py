@@ -277,6 +277,18 @@ def test_an_unmapped_code_goes_into_the_set_name_and_note_never_the_set_id():
     assert dropped[0]["report"] is None
 
 
+def test_a_subset_form_with_the_wrong_base_or_prefix_is_not_mapped_and_a_vault_number_names_the_vault_set():
+    seed()
+    got = lines(str(uuid4()), "1 Lillie SVI-TG 5\n1 Lillie BRS-GG 5\n1 Snorlax SHF SV5\n3 Mystery Energy Energy 7\n")
+    svi, brs, vault, energy = (line["report"] for line in got)
+    for report, code in ((svi, "SVI-TG"), (brs, "BRS-GG")):
+        assert report["set_id"] is None and report["set_name"] == code
+        assert report["note"].endswith(f"PrizeCheck's code tables don't map the set code {code}.")
+    assert (vault["set_id"], vault["collector_number"]) == ("swsh4.5sv", "SV5")
+    assert energy["set_name"] == "Energy" and energy["set_id"] is None
+    assert "code tables" not in energy["note"]
+
+
 def test_the_prefill_is_a_report_the_missing_cards_queue_accepts():
     seed()
     owner = str(uuid4())
