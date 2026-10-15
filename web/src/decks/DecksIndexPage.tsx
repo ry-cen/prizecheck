@@ -32,6 +32,7 @@ import { visibilityText } from "./publication";
 import { RevokeControl } from "./RevokeControl";
 import { formatLabel, statusOf } from "./targetFormat";
 import { cards } from "./wantListModel";
+import { costText } from "./WantListCost";
 
 type Props = {
   /** Opens a Deck in the deck builder (/decks/<id>). */
@@ -340,13 +341,24 @@ function DeckRow({
           <span aria-hidden="true">✓ </span>Nothing to get
         </span>
       ) : need !== undefined ? (
-        // Above the row link's full-row tap area. #210 appends " · $X".
+        // Above the row link's full-row tap area.
         <Button className="relative" onClick={onWantList}>
-          {`Want List: ${cards(need)}`}
+          {`Want List: ${cards(need)}${wantListCost(facts.toComplete, need)}`}
         </Button>
       ) : null}
     </li>
   );
+}
+
+/**
+ * " · $X" for a Deck card's Want List button (#210): the row's own cost to complete, which is the Deck's Want List section
+ * under the same counting (one allocation), so the index reads no other price. Shown only when it counts the same copies
+ * as the button and has a price; an unpriced copy reads " + N unpriced", never $0.
+ */
+function wantListCost(figure: Facts["toComplete"], need: string): string {
+  if (!figure || figure === "unavailable" || figure.status !== "priced")
+    return "";
+  return figure.total_copies === need ? ` · ${costText(figure)}` : "";
 }
 
 type PublishedLoad =
