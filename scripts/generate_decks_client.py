@@ -35,7 +35,8 @@ names = ("TreeNode", "LocationCommandResult", "CreateDeck", "EditDeck", "DeckInd
          "ImportSource", "ImportFix", "ReviewImport", "ImportPrinting", "ImportEdition", "ImportPlace", "ImportPart",
          "ImportKept", "MissingCardPrefill", "ReviewLine",
          "IgnoredImportLine", "ImportDeckListEntry", "ImportTotals", "ImportReview", "ImportDeckLine", "ImportDeck",
-         "ImportDeckResult")
+         "ImportDeckResult",
+         "ReplaceLine", "ImportReplace")
 lines = ["// Generated from FastAPI OpenAPI by scripts/generate_decks_client.py. Do not edit.",
          "import type { DeckFormatChecks } from './format_checks_generated';"]
 for name in names:

@@ -11,8 +11,9 @@ Two reads, each in its own transaction:
   group reaches nothing else. Reprint Groups and the Want List's Swap hint don't change. Active means not tombstoned
   and with at least one active Edition, so an owned copy of a withdrawn Printing is never offered for a Deck List.
 - ``capture_owned``: one consistent capture under the owner row lock, as the Want List read takes it. It locks the
-  ``inventory_owner`` row (``FOR UPDATE``, the lock every Holding, Deck List and settings writer takes), reads the
-  counting setting (``settings.read_settings``) and asks ``copy_allocation.available_to`` for the given Editions. It
+  ``inventory_owner`` row (``FOR UPDATE``, the lock every Holding, Deck List and settings writer takes), reads the Deck
+  being replaced for Replace (``import_replace.read_replaced``, #215), reads the counting setting
+  (``settings.read_settings``) and asks ``copy_allocation.available_to`` for the given Editions. It
   never creates the owner: a caller with no ``inventory_owner`` row owns nothing, so it reads nothing and takes no lock,
   and the review stays free of writes. Its work grows with the Holdings of the given Editions and the Deck List lines
   naming them, never with the rest of the Collection.
@@ -25,6 +26,8 @@ from uuid import UUID
 from .copy_allocation import Availability, available_to
 from .import_energy_matching import CATALOG_NAME
 from .import_match_core import ACTIVE, NEWEST_COLUMNS, RELEASE_JOINS, newest_first, release_params
+from .import_replace import ReplacedDeck, read_replaced
+from .location_tree import error
 from .main import connect
 from .settings import WantListCounting, read_settings
 
@@ -69,17 +72,23 @@ class OwnedCapture:
     counting: WantListCounting
     settings_revision: int
     availability: Availability
+    replaced: ReplacedDeck | None = None   # the Deck being replaced (#215); None for a new Deck
 
 
 def capture_owned(user_id: str, editions, deck_id: UUID | None = None) -> OwnedCapture:
-    """The copies of ``editions`` available to the Deck ``deck_id`` (Replace, #215; the caller checks it is the
-    owner's Deck), or to a new Deck when it is None, read under the owner row lock in one transaction."""
+    """The copies of ``editions`` available to the Deck ``deck_id`` (Replace, #215), or to a new Deck when it is None,
+    read under the owner row lock in one transaction. With a ``deck_id`` it first reads that Deck
+    (``import_replace.read_replaced``), which answers 404 DECK_NOT_FOUND unless it is one of the caller's Decks: a
+    caller with no owner row has none. The check comes before ``available_to``, which assumes an owned Deck."""
     with connect() as conn, conn.transaction():
         owner = conn.execute('SELECT revision FROM inventory_owner WHERE user_id=%s FOR UPDATE', (user_id,)).fetchone()
         if owner is None:
+            if deck_id is not None:
+                error(404, 'DECK_NOT_FOUND')
             return OwnedCapture(owner_revision=1, counting=DEFAULT_COUNTING, settings_revision=DEFAULT_SETTINGS_REVISION,
                                 availability=Availability(counting=DEFAULT_COUNTING, editions={}, places={}, order=()))
+        replaced = read_replaced(conn, user_id, deck_id) if deck_id is not None else None
         settings = read_settings(conn, user_id)
         availability = available_to(conn, user_id, editions, settings.want_list_counting, deck_id)
         return OwnedCapture(owner_revision=owner['revision'], counting=settings.want_list_counting,
-                            settings_revision=settings.revision, availability=availability)
+                            settings_revision=settings.revision, availability=availability, replaced=replaced)
