@@ -342,7 +342,10 @@ function DeckRow({
         </span>
       ) : need !== undefined ? (
         // Above the row link's full-row tap area.
-        <Button className="relative" onClick={onWantList}>
+        <Button
+          className="relative h-auto min-h-control whitespace-normal text-left phone:min-h-tap"
+          onClick={onWantList}
+        >
           {`Want List: ${cards(need)}${wantListCost(facts.toComplete, need)}`}
         </Button>
       ) : null}

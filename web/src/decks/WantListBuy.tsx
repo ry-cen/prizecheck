@@ -89,7 +89,11 @@ export function WantListBuy({
                 event.preventDefault();
             }}
           >
-            <WantListMassEntry list={list} onChanged={onChanged} />
+            <WantListMassEntry
+              list={list}
+              scoped={scoped}
+              onChanged={onChanged}
+            />
           </div>
         </Dialog>
       )}
@@ -99,9 +103,11 @@ export function WantListBuy({
 
 function WantListMassEntry({
   list,
+  scoped,
   onChanged,
 }: {
   list: WantList;
+  scoped: string | null;
   onChanged: () => void;
 }) {
   const [view, setView] = useState<WantListMassEntryView | null>(null);
@@ -156,6 +162,7 @@ function WantListMassEntry({
           "Estimated costs on the Want List use cached TCGplayer market prices (USD) and exclude shipping and taxes.",
       }}
       subject="these cards"
+      deckWording={scoped ? "Deck" : "Decks"}
       busy={busy}
       onPrepare={() => void prepare()}
       view={view}
@@ -165,7 +172,11 @@ function WantListMassEntry({
           : undefined
       }
       notice={notice}
-      emptyMessage="Every Deck can be built from your Collection."
+      emptyMessage={
+        scoped
+          ? `${scoped} can be built from your Collection.`
+          : "Every Deck can be built from your Collection."
+      }
     />
   );
 }
