@@ -31,3 +31,5 @@
 How each part works under the hood (parsing, matching order, allocation, pricing) belongs to [Decide the import contract](https://github.com/ry-cen/prizecheck/issues/203) and [Decide the Want List contract](https://github.com/ry-cen/prizecheck/issues/204). The two settings are remembered per device, like the other display preferences, unless a later ticket finds a reason to tie them to the account.
 
 *Amended by [the Want List contract](decide-want-list-contract.md):* the Want List counting setting lives on the Settings page and is stored on the account.
+
+*Amended by [the import review step](prototype-import-review.md):* under **Exact printings**, copies of the named Printing that a replaced Deck already holds cover the line in their own Edition; only the rest gets the cheapest priced Edition. **Use cards I own** is the default the first time.
