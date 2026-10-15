@@ -62,8 +62,8 @@ const LINK =
  * The Decks index (/decks) on the kit (#181): create a Deck, and every Deck with how many of its Deck List's copies it
  * holds ("41/60 in Deck"), its cost to complete and one Target Format Pill. Each row reads its result and its cost on
  * its own (the Deck's format-checks and cost routes), two rows at a time. Below, **Published Decks** lists every
- * publication, those whose Deck was deleted included, with Make Listed or Unlisted and Revoke. The header links to
- * Discover. Opening a Deck shows the deck builder at /decks/<id> (#176).
+ * publication, those whose Deck was deleted included, with Make Listed or Unlisted and Revoke. Import a list, beside
+ * Create Deck, opens /decks/import (#212). The header links to Discover. Opening a Deck shows the deck builder at /decks/<id> (#176).
  */
 export function DecksIndexPage({ onOpenDeck, onNavigate, message }: Props) {
   const idBase = useId();
@@ -222,6 +222,9 @@ export function DecksIndexPage({ onOpenDeck, onNavigate, message }: Props) {
           aria-disabled={busy || undefined}
         >
           Create Deck
+        </Button>
+        <Button onClick={() => onNavigate("/decks/import")}>
+          Import a list
         </Button>
         {formMessage && (
           <p role="status" className="m-0 basis-full text-body text-warning">

@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { getOwnerCatalogStatus, type OwnerCatalogStatus } from "./generated";
 import { DeckBuilderPage } from "./decks/DeckBuilderPage";
 import { DecksIndexPage } from "./decks/DecksIndexPage";
+import { ImportPage } from "./decks/import/ImportPage";
 import { CatalogPage } from "./catalog/CatalogPage";
 import { OwnerControlsPage } from "./owner/OwnerControlsPage";
 import { ownerSection, ownerSectionPath } from "./owner/sections";
@@ -246,6 +247,15 @@ function App() {
       case "decks": {
         // /decks is the index; /decks/<id> opens that Deck in the deck builder (#176).
         const deckId = sectionAt(path);
+        if (deckId === "import")
+          return (
+            <ImportPage
+              onOpenDeck={(id) =>
+                navigate(`${pageDef("decks").path}/${encodeURIComponent(id)}`)
+              }
+              onAllDecks={() => navigate(pageDef("decks").path)}
+            />
+          );
         return deckId ? (
           <DeckBuilderPage
             key={deckId}
