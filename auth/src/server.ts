@@ -69,6 +69,14 @@ const BUDGET_MS = 3_000;
 // The answer is gated at 3.0 s, so the abort fires early enough to write the 504 inside it.
 const RESPONSE_MARGIN_MS = 100;
 const BUDGET_BODY_BYTES = 16_384;
+// Decklist Import (#212): the review carries a pasted list of up to 20,000 characters (the API's IMPORT_TOO_LONG) plus
+// the collector's fixes, and creating the Deck carries up to 200 lines; both are more than the 16 KiB other routes
+// accept. Counted in bytes, and no more than nginx's client_max_body_size (deploy/docker/nginx.conf, 64k).
+const IMPORT_BODY_BYTES = 65_536;
+const IMPORT_ROUTES = new Set([
+  "/api/decks/import/review",
+  "/api/decks/import",
+]);
 
 class BudgetExceeded extends Error {}
 class PayloadTooLarge extends Error {}
@@ -91,17 +99,23 @@ async function readBody(request: IncomingMessage): Promise<string> {
 }
 
 // Bytes, not characters: a multi-byte body must not slip under the cap.
-async function readBudgetedBody(request: IncomingMessage): Promise<string> {
+async function readBytes(
+  request: IncomingMessage,
+  limit: number
+): Promise<string> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of request) {
     const piece = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     size += piece.length;
-    if (size > BUDGET_BODY_BYTES) throw new PayloadTooLarge();
+    if (size > limit) throw new PayloadTooLarge();
     chunks.push(piece);
   }
   return Buffer.concat(chunks).toString("utf8");
 }
+
+const readBudgetedBody = (request: IncomingMessage) =>
+  readBytes(request, BUDGET_BODY_BYTES);
 
 // Rejects when the budget is spent. The wrapped work cannot always be cancelled (the session lookup takes no
 // signal), so it is abandoned rather than awaited. An abandoned session lookup runs on budgetedAuth's own pool, whose
@@ -689,7 +703,9 @@ const server = createServer(async (request, response) => {
           ? ""
           : budgeted
             ? await withinBudget(readBudgetedBody(request), left())
-            : await readBody(request);
+            : request.method === "POST" && IMPORT_ROUTES.has(path)
+              ? await readBytes(request, IMPORT_BODY_BYTES)
+              : await readBody(request);
       const stamp = Math.floor(Date.now() / 1000).toString();
       const bodyHash = hash(body);
       const signature = current
