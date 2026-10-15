@@ -43,6 +43,8 @@ type Props = {
   /** The Location's own name, or undefined when the tree doesn't know it. */
   locationName: (id: string) => string | undefined;
   emptyMessage: string;
+  /** A control under the empty message (Collection's Import from another tracker, #226), or nothing. */
+  emptyAction?: React.ReactNode;
   onRetry: () => void;
   /** Ticket 105: the selection, mobile Select mode and the gestures that change them (see useSelection). */
   selected: Selection;
@@ -80,6 +82,7 @@ export function Gallery({
   caption,
   locationName,
   emptyMessage,
+  emptyAction,
   onRetry,
   selected,
   selectMode,
@@ -444,6 +447,9 @@ export function Gallery({
         <p className="m-0 px-3 py-10 text-center text-text-muted">
           {emptyMessage}
         </p>
+      )}
+      {empty && emptyAction && (
+        <div className="-mt-6 mb-10 flex justify-center">{emptyAction}</div>
       )}
       <div ref={gridRef} className="relative" style={{ height: gridHeight }}>
         {loading && layout && (

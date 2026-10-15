@@ -68,11 +68,13 @@ type Props = {
   active: boolean;
   /** Opens a Deck in the deck builder on Decks, from the open Deck's banner (#181). */
   onOpenDeck: (deckId: string) => void;
+  /** Opens Collection Import (#226): Import… in the header, and Import from another tracker on an empty Collection. */
+  onImport: () => void;
 };
 
 /** The collector workspace (Collection, inside the app shell): the phone header, the Location sidebar
  * (desktop) or drawer (phone), and the gallery area. The shell draws the desktop header and the tabs. */
-export function Workspace({ userId, active, onOpenDeck }: Props) {
+export function Workspace({ userId, active, onOpenDeck, onImport }: Props) {
   const [nodes, setNodes] = useState<TreeNode[]>([]);
   const [ownerRevision, setOwnerRevision] = useState<number | null>(null);
   const [treeState, setTreeState] = useState<"loading" | "ready" | "error">(
@@ -463,6 +465,9 @@ export function Workspace({ userId, active, onOpenDeck }: Props) {
             >
               Add cards
             </Button>
+            <Button className="self-center" onClick={onImport}>
+              Import…
+            </Button>
             {/* Mobile Select mode's toggle, on a phone only. */}
             <span className="hidden self-center phone:flex">
               <Button
@@ -557,6 +562,13 @@ export function Workspace({ userId, active, onOpenDeck }: Props) {
                   : galleryView === "all"
                     ? "Your Collection has no cards yet."
                     : "This Location has no cards."
+              }
+              emptyAction={
+                galleryView === "all" && !narrowed ? (
+                  <Button onClick={onImport}>
+                    Import from another tracker
+                  </Button>
+                ) : undefined
               }
               onRetry={gallery.reload}
               selected={selection.selected}

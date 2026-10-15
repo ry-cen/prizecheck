@@ -30,6 +30,8 @@ export const PAGES: readonly PageDef[] = [
     path: "/collection",
     label: "Collection",
     keepMounted: true,
+    // /collection/import: Collection Import (#226).
+    sections: ["import"],
   },
   {
     id: "decks",
