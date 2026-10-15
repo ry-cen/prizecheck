@@ -1,0 +1,34 @@
+# The collection set-name alias table (Collection Import, spec "Matching"; ticket #228): set names that tracker exports
+# write and that naive set-name normalisation (collection_import_aliases.set_key) can't match to the TCGdex set's own
+# name, each with the TCGdex set it names. Only api/app/collection_import_aliases.py reads it, to match an imported row.
+# It is separate from decklist import's import_aliases.tsv, which holds pasted set codes, not set names. Nothing reads
+# it for exports, Format Standing or public records. api/tests/test_collection_import_matching.py enforces the rules
+# below and matches a row through every entry.
+#
+# Rule for a row: the tracker writes this exact set name (after set_key), naive normalisation doesn't already reach the
+# set, and the row cites where the name is seen. Catch-all sets that hold cards from many TCGdex sets (the TCGplayer
+# app's "Miscellaneous Cards & Products", "League & Championship Cards", "Prize Pack Series Cards" and "Deck
+# Exclusives", Collectr's "Battle Academy") get no row: no one set ID is right for them, so their rows fall through to
+# Basic Energy by type or to the name. The TCGdex set IDs and names were read from https://api.tcgdex.net/v2/en/sets
+# on 2026-10-15 and are in api/app/format_rules/imported_sets.txt.
+#
+# Evidence keys (docs/planning/collection-import/wayfinder/research/tracker-export-formats.md and its fixtures/):
+#   T1:<line>   fixtures/tcgplayer-app.real.csv, that line (1 is the header)
+#   C2:<line>   fixtures/collectr-16col.real.csv, that line
+#   TC1:<line>  fixtures/tcg-collector.real.csv, that line
+#   R:collectr  the research's "Collectr" section, "How a row names a card", which lists the set name
+#   R:new-work  the research's "New work" list, item 4, which names the set as one naive matching misses
+#
+# Columns, tab-separated: tracker (the detected source, collection_import_reader.SOURCES, never loose), set name as the
+# tracker writes it, TCGdex set ID, evidence (comma-separated keys).
+tcgplayer_app	SV01: Scarlet & Violet Base Set	sv01	T1:16,T1:17,T1:18
+tcgplayer_app	SWSH01: Sword & Shield Base Set	swsh1	T1:25
+tcgplayer_app	Nintendo Promos	np	T1:12
+tcgplayer_app	Expedition	ecard1	R:new-work
+collectr	Base Set (Unlimited)	base1	R:collectr,R:new-work
+collectr	Scarlet & Violet Promo	svp	R:collectr,R:new-work
+collectr	Sword & Shield Promo	swshp	R:new-work
+collectr	Mega Evolution Promos	mep	C2:11
+tcg_collector	Scarlet & Violet 151	sv03.5	TC1:7
+tcg_collector	Scarlet & Violet Energies	sve	TC1:8,TC1:9,TC1:10,TC1:11,TC1:12
+tcg_collector	SV Black Star Promos	svp	TC1:13,TC1:14,TC1:15

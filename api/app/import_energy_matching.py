@@ -43,11 +43,11 @@ def energy_type(name: str) -> str | None:
     return SYMBOLS[symbol.upper()] if symbol else word.capitalize()
 
 
-def by_basic_energy(conn, generation: UUID, lines: list[CardLine]) -> dict[int, Match]:
-    """Each Basic Energy line's default Printing, with every Basic Energy Printing of its type as candidates. A type the
-    catalog holds no active Basic Energy for answers nothing, so the line goes on to the name step."""
-    types = {line.line: energy_type(line.name) for line in lines}
-    wanted = sorted({energy for energy in types.values() if energy})
+def basic_energy_printings(conn, generation: UUID, types) -> dict[str, list[tuple[UUID, str]]]:
+    """Every active Basic Energy Printing of each of ``types`` ("Psychic"), newest first, as (Printing, TCGdex set ID).
+    A type the catalog holds no active Basic Energy for is left out. Collection Import's Basic Energy step reads it too
+    (``collection_import_matcher``)."""
+    wanted = sorted({energy for energy in types if energy})
     if not wanted:
         return {}
     rows = conn.execute(f"""SELECT gp.printing_id,substring(gp.display_name from %s) AS energy_type,{NEWEST_COLUMNS}
@@ -56,8 +56,17 @@ def by_basic_energy(conn, generation: UUID, lines: list[CardLine]) -> dict[int, 
       {RELEASE_JOINS}
       WHERE gp.generation_id=%s AND NOT gp.tombstoned AND substring(gp.display_name from %s)=ANY(%s) AND {ACTIVE}""",
                         (CATALOG_NAME, *release_params(), generation, CATALOG_NAME, wanted)).fetchall()
-    by_type: dict[str, list[UUID]] = {}
+    by_type: dict[str, list[tuple[UUID, str]]] = {}
     for row in sorted(rows, key=newest_first):
-        by_type.setdefault(row['energy_type'], []).append(row['printing_id'])
+        by_type.setdefault(row['energy_type'], []).append((row['printing_id'], row['set_id']))
+    return by_type
+
+
+def by_basic_energy(conn, generation: UUID, lines: list[CardLine]) -> dict[int, Match]:
+    """Each Basic Energy line's default Printing, with every Basic Energy Printing of its type as candidates. A type the
+    catalog holds no active Basic Energy for answers nothing, so the line goes on to the name step."""
+    types = {line.line: energy_type(line.name) for line in lines}
+    by_type = {energy: [printing for printing, _ in found]
+               for energy, found in basic_energy_printings(conn, generation, types.values()).items()}
     return {line: Match('energy', printing_id=by_type[energy][0], candidates=tuple(by_type[energy]))
             for line, energy in types.items() if energy in by_type}

@@ -52,8 +52,9 @@ def _detailed(*variants):
 LOOKUP_ID = 7770001
 
 
-def seed_import_catalog():
-    """Browser fixture too (web/tests/collection-import*.spec.ts). Fifteen Printings through the importer:
+def seed_import_catalog(*extra):
+    """Browser fixture too (web/tests/collection-import*.spec.ts). Fifteen Printings through the importer, and any
+    `extra` TCGdex-shaped records in the same import (test_collection_import_matching's sets):
 
     - Base Set: Wartortle 42, Starmie 64, Psychic Energy 101 and Water Energy 102, one Normal Edition each;
     - Jungle: Wigglytuff 32 (Holo only), Weepinbell 48 (Normal and the Unspecified Variant: first edition) and
@@ -100,6 +101,7 @@ def seed_import_catalog():
                                           {"type": "normal", "size": "jumbo"})),
         _card("fixturefin-5", "Celebi V", "5", *finishes, category="Pokemon", types=["Grass"],
               variants_detailed=_detailed({"type": "holo"})),
+        *extra,
     ))
 
 
@@ -484,7 +486,7 @@ def test_no_route_reads_prices_or_starts_a_catalog_pull_or_returns_source_data(m
     # And the modules don't import them.
     banned = {"prices", "price_refresh", "price_launcher", "public_records", "catalog_dispatch", "catalog"}
     for module in ("collection_import", "collection_import_reader", "collection_import_matcher",
-                   "collection_import_finish"):
+                   "collection_import_finish", "collection_import_aliases"):
         tree = ast.parse((Path(__file__).parents[1] / "app" / f"{module}.py").read_text())
         imported = {alias.name for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)
                     for alias in node.names} | {node.module.split(".")[-1] for node in ast.walk(tree)
