@@ -198,7 +198,8 @@ def test_the_fourteen_column_export_matches_by_set_name_and_number():
     assert summary["draft_revision"] == 1 and summary["location_id"] == unsorted
     assert summary["location_name"] == "Unsorted"
     # #230: Dark Golduck's Reverse Holofoil (row 9) now chooses its Reverse Holo Edition.
-    assert summary["counts"] == {"rows": 13, "needs_you": 4, "ready": 9, "finish_unknown": 1, "skipped": 0}
+    assert summary["counts"] == {"rows": 13, "needs_you": 4, "ready": 9, "finish_unknown": 1,
+                                 "by_name": 0, "skipped": 0}
     assert summary["cards_to_add"] == "16"
     found = all_rows(owner, summary["id"])
     assert [row["row_number"] for row in found] == list(range(1, 14))
@@ -232,7 +233,8 @@ def test_the_twelve_column_export_reads_crlf_quoting_a_blank_quantity_a_bom_and_
     owner, unsorted = collector()
     for data in (TWELVE, b"\xef\xbb\xbf" + TWELVE, TWELVE.decode("utf-8").encode("cp1252")):
         summary = started(owner, unsorted, data)
-        assert summary["counts"] == {"rows": 6, "needs_you": 0, "ready": 6, "finish_unknown": 1, "skipped": 0}
+        assert summary["counts"] == {"rows": 6, "needs_you": 0, "ready": 6, "finish_unknown": 1,
+                                     "by_name": 0, "skipped": 0}
         assert summary["cards_to_add"] == "10"
         found = all_rows(owner, summary["id"])
         assert found[2]["source"]["name"] == "Wartortle, Shadowless" and found[2]["quantity"] == "4"
@@ -245,7 +247,8 @@ def test_rows_page_by_one_hundred_and_refuse_a_bad_cursor():
     seed_import_catalog()
     owner, unsorted = collector()
     summary = started(owner, unsorted, file_of(250))
-    assert summary["counts"] == {"rows": 250, "needs_you": 0, "ready": 250, "finish_unknown": 0, "skipped": 0}
+    assert summary["counts"] == {"rows": 250, "needs_you": 0, "ready": 250, "finish_unknown": 0,
+                                 "by_name": 0, "skipped": 0}
     first = rows(owner, summary["id"]).json()
     assert len(first["rows"]) == 100 and first["next_cursor"] == "100" and first["draft_revision"] == 1
     second = rows(owner, summary["id"], cursor="100").json()
@@ -319,7 +322,8 @@ def test_ten_thousand_rows_are_one_import():
     seed_import_catalog()
     owner, unsorted = collector()
     summary = started(owner, unsorted, file_of(10_000))
-    assert summary["counts"] == {"rows": 10_000, "needs_you": 0, "ready": 10_000, "finish_unknown": 0, "skipped": 0}
+    assert summary["counts"] == {"rows": 10_000, "needs_you": 0, "ready": 10_000, "finish_unknown": 0,
+                                 "by_name": 0, "skipped": 0}
     assert summary["cards_to_add"] == "10000"
 
 

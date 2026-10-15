@@ -1,5 +1,5 @@
-"""Collection Import (#226, #227, #228, #230; spec "Collection import from other trackers", ADR 0014): a collector's
-file becomes an import draft on the server, which they review and then save into one Storage Leaf in one step.
+"""Collection Import (#226 to #230; spec "Collection import from other trackers", ADR 0014): a collector's file
+becomes an import draft on the server, which they review and then save into one Storage Leaf in one step.
 
 - POST /api/collection-imports?location_id=<Storage Leaf> takes the file's bytes as the request body (no multipart): a
   CSV, TSV or TXT export from any supported tracker or with name-like columns, or a zip holding one such file, told
@@ -11,32 +11,37 @@ file becomes an import draft on the server, which they review and then save into
   A draft is not inventory, so starting one doesn't advance the owner revision.
 - GET /api/collection-imports/current is the open draft's summary.
 - GET /api/collection-imports/<id>/rows pages through its rows, 100 at a time, by filter: needs (Needs you), finish
-  (Finish unknown), all (every row not skipped) or skipped. Each row lists its card's active Editions, for the finish
-  picker.
+  (Finish unknown), name (Matched by name), all (every row not skipped) or skipped. Each row lists its card's active
+  Editions, for the finish picker, and its candidate cards, for Pick one and Change.
 - POST /api/collection-imports/<id>/changes applies the collector's changes at the draft's revision, in order and in one
   transaction, and answers the new summary (and revision) with what each change couldn't apply to. A change picks
-  rows by number or by filter, and either sets their finish (a Variant Descriptor; only where the row's card has
-  exactly one active Edition that fits it, collection_import_finish), skips them or restores them. A skipped row is
-  neither ready nor needs the collector, so the save leaves it out.
+  rows by number or by filter, and either picks their card (a Printing, whose Edition the row's finish then chooses,
+  or one Edition), sets their finish (a Variant Descriptor; only where the row's card has exactly one active Edition
+  that fits it, collection_import_finish), skips them or restores them. A skipped row is neither ready nor needs the
+  collector, so the save leaves it out.
+- GET /api/collection-imports/<id>/skipped.csv downloads the skipped rows in the file's own columns: its header, then
+  each skipped row's cells as the file held them, as CSV (a tab-separated file comes back comma-separated).
 - POST /api/collection-imports/<id>/save adds every ready row's copies to the landing Storage Leaf, one Holding
   increment per Card Edition, in one transaction and one owner revision, then deletes the draft's rows. It records no
   Inventory Undo. A repeated key, or a second save of a saved draft, answers the stored result without writing.
 
-Responses carry no raw source text, prices, marketplace IDs or the detected source: the UI must not show them. Every
-descriptor in a response keeps its physical keys only (collection_import_finish.public_descriptor), so TCGdex's
-marketplace lookup IDs stay out. The one
-response that names trackers is IMPORT_UNREADABLE's message, the list of trackers whose files are read. Nothing here
-reads or refreshes prices or starts a catalog pull. The gateway caps request bodies (auth/src/server.ts
-IMPORT_ROUTES): 5 MiB for the start route, forwarded as raw bytes, 64 KiB for changes and 16 KiB for the rest. This API
-enforces MAX_IMPORT_BYTES and MAX_IMPORT_ROWS itself too.
+JSON responses carry no raw source text, prices, marketplace IDs or the detected source: the UI must not show them.
+Every descriptor in a response keeps its physical keys only (collection_import_finish.public_descriptor), so TCGdex's
+marketplace lookup IDs stay out. The one response that names trackers is IMPORT_UNREADABLE's message, the list of
+trackers whose files are read. Nothing here reads or refreshes prices or starts a catalog pull. The gateway caps request
+bodies (auth/src/server.ts IMPORT_ROUTES): 5 MiB for the start route, forwarded as raw bytes, 64 KiB for changes and 16
+KiB for the rest; it streams the skipped rows' attachment as it streams Deck exports. This API enforces
+MAX_IMPORT_BYTES and MAX_IMPORT_ROWS itself too.
 """
+import csv
 import hashlib
+import io
 import json
 from typing import Annotated, Literal
 from uuid import UUID, uuid4
 
 import psycopg
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from . import collection_import_finish as finishes
@@ -65,7 +70,14 @@ READY_ROW = matcher.READY_ROW.format(r="r")
 NEEDS_YOU_ROW = matcher.NEEDS_YOU_ROW.format(r="r")
 FINISH_UNKNOWN_ROW = matcher.FINISH_UNKNOWN_ROW.format(r="r")
 SKIPPED_ROW = matcher.SKIPPED_ROW.format(r="r")
-RowFilter = Literal["needs", "finish", "all", "skipped"]
+BY_NAME_ROW = matcher.BY_NAME_ROW.format(r="r")
+# Each row's candidate cards in the active generation, for one page: (printing id, name, set name, number).
+CANDIDATE_CARDS = """SELECT gp.printing_id,gp.display_name,gp.set_name,gp.collector_number
+  FROM catalog_generation_printing gp
+  WHERE gp.generation_id=%s AND gp.printing_id=ANY(%s::uuid[]) AND NOT gp.tombstoned
+    AND EXISTS (SELECT 1 FROM catalog_generation_edition ge
+      WHERE ge.generation_id=gp.generation_id AND ge.printing_id=gp.printing_id AND ge.active)"""
+RowFilter = Literal["needs", "finish", "name", "all", "skipped"]
 # One changes request holds at most MAX_CHANGES changes, and a change names at most MAX_CHANGE_ROWS rows by number: the
 # gateway's 64 KiB body limit for this route binds first. It fits every row of a 10,000-row file named one by one
 # (about 49 KB). Select all sends its filter instead.
@@ -80,6 +92,8 @@ class CollectionImportCounts(BaseModel):
     ready: int
     # Ready rows on the card's Unspecified Variant (part of `ready`).
     finish_unknown: int
+    # Ready rows whose card came from their name within their set, whatever their finish (part of `ready`).
+    by_name: int
     # Neither ready nor needing the collector. needs_you + ready is the All filter's count.
     skipped: int
 
@@ -132,6 +146,13 @@ class CollectionImportRow(BaseModel):
     edition: CollectionImportEdition | None
     # The card's active Editions in catalog order, for the finish picker; [] without a card.
     editions: list[CollectionImportEdition]
+    # The cards the row could be, for Pick one (an ambiguous row without a card) and Change (a Basic Energy's other
+    # Printings, the matched one first); [] for most rows. Only cards still in the catalog are listed.
+    candidates: list[CollectionImportCard]
+    # The collector chose this row's card (a pick), so Change can choose another.
+    picked: bool
+    # The row's card came from its name within its set, whatever its finish; a pick clears it.
+    by_name: bool
 
 
 class CollectionImportRowsPage(BaseModel):
@@ -146,15 +167,24 @@ class SaveCollectionImport(BaseModel):
     idempotency_key: UUID
 
 
+class CollectionImportPick(BaseModel):
+    """The card a row is: exactly one of a Printing (the row's finish then chooses its Edition, as matching does) or one
+    of its active Editions."""
+    model_config = ConfigDict(extra="forbid")
+    printing_id: UUID | None = None
+    edition_id: UUID | None = None
+
+
 class CollectionImportChange(BaseModel):
     """One change: the rows it applies to, by `rows` (row numbers) or `filter` (the rows route's filter, as it stands
-    when this change applies), exactly one of them; and exactly one action, `finish`, `skip` or `restore`. Later
-    tickets add actions as new fields: `pick` (#229) with rows, `group` with `include` and `location_id` (#232) without.
-    Unknown fields are refused, so an older API never ignores a newer change."""
+    when this change applies), exactly one of them; and exactly one action, `pick`, `finish`, `skip` or `restore`.
+    Later tickets add actions as new fields: `group` with `include` and `location_id` (#232) without rows. Unknown
+    fields are refused, so an older API never ignores a newer change."""
     model_config = ConfigDict(extra="forbid")
     rows: list[Annotated[int, Field(ge=1, le=reader.MAX_IMPORT_ROWS)]] | None = Field(
         default=None, min_length=1, max_length=MAX_CHANGE_ROWS)
     filter: RowFilter | None = None
+    pick: CollectionImportPick | None = None
     # A Variant Descriptor: one of the row's `editions[].descriptor`, or a finish such as {"type": "reverse"}. It
     # applies to a row whose card has exactly one active Edition that fits it.
     finish: dict | None = None
@@ -171,8 +201,9 @@ class ChangeCollectionImport(BaseModel):
 class CollectionImportChangeResult(BaseModel):
     # How many of the change's rows it applied to.
     applied: int
-    # The row numbers it couldn't apply to, in file order: for a finish, rows without a card, skipped rows and rows
-    # whose card has no Edition that fits; for skip and restore, none yet (left-out rows, #231).
+    # The row numbers it couldn't apply to, in file order: for a pick, skipped rows and rows whose quantity can't be
+    # read; for a finish, rows without a card, skipped rows and rows whose card has no Edition that fits; for skip and
+    # restore, rows already so (and left-out rows, #231).
     not_applied: list[int]
 
 
@@ -214,6 +245,7 @@ def summary(conn, user_id: str, import_id: UUID) -> CollectionImportSummary:
         count(r.row_number) FILTER (WHERE {NEEDS_YOU_ROW}) AS needs_you,
         count(r.row_number) FILTER (WHERE {READY_ROW}) AS ready,
         count(r.row_number) FILTER (WHERE {FINISH_UNKNOWN_ROW}) AS finish_unknown,
+        count(r.row_number) FILTER (WHERE {BY_NAME_ROW}) AS by_name,
         count(r.row_number) FILTER (WHERE {SKIPPED_ROW}) AS skipped,
         coalesce(sum(r.quantity) FILTER (WHERE {READY_ROW}),0) AS cards
       FROM collection_import ci
@@ -227,7 +259,8 @@ def summary(conn, user_id: str, import_id: UUID) -> CollectionImportSummary:
         id=row["id"], draft_revision=row["draft_revision"], location_id=row["location_id"],
         location_name=row["location_name"],
         counts=CollectionImportCounts(rows=row["rows"], needs_you=row["needs_you"], ready=row["ready"],
-                                      finish_unknown=row["finish_unknown"], skipped=row["skipped"]),
+                                      finish_unknown=row["finish_unknown"], by_name=row["by_name"],
+                                      skipped=row["skipped"]),
         cards_to_add=str(int(row["cards"])), expires_at=row["expires_at"].isoformat())
 
 
@@ -264,7 +297,8 @@ def start_import(location_id: UUID = Query(), body: bytes = Depends(import_body)
                 (import_id,row_number,group_name,raw_text,parsed,quantity,status,printing_id,edition_id,candidates)
                 FROM STDIN""") as copy:
                 for row, found in zip(source.rows, matches):
-                    copy.write_row((import_id, row.row_number, row.group, row.raw_text, json.dumps(row.fields),
+                    parsed = {**row.fields, matcher.BY_NAME_KEY: "1"} if found.by_name else row.fields
+                    copy.write_row((import_id, row.row_number, row.group, row.raw_text, json.dumps(parsed),
                                     found.quantity, found.status, found.printing_id, found.edition_id,
                                     json.dumps([str(printing) for printing in found.candidates])))
             return summary(conn, user_id, import_id)
@@ -302,7 +336,8 @@ def import_rows(import_id: UUID, filter_: RowFilter = Query(default="all", alias
                 refuse(404, "IMPORT_NOT_FOUND")
             generation = conn.execute("SELECT active_generation FROM catalog_state WHERE singleton").fetchone()
             found = conn.execute(f"""SELECT r.row_number,r.status,r.quantity,r.parsed,r.printing_id,r.edition_id,
-                r.skipped,r.left_out_reason,gp.display_name,gp.set_name,gp.collector_number,e.descriptor
+                r.skipped,r.left_out_reason,r.candidates,r.fix,gp.display_name,gp.set_name,gp.collector_number,
+                e.descriptor
               FROM (SELECT * FROM collection_import_row r WHERE r.import_id=%s AND r.row_number>%s AND {where}
                     ORDER BY r.row_number LIMIT %s) r
               LEFT JOIN catalog_generation_printing gp ON gp.generation_id=%s AND gp.printing_id=r.printing_id
@@ -311,8 +346,15 @@ def import_rows(import_id: UUID, filter_: RowFilter = Query(default="all", alias
                                  (import_id, after, PAGE_SIZE + 1,
                                   generation["active_generation"] if generation else None)).fetchall()
             page = found[:PAGE_SIZE]
-            editions = matcher.editions_of(conn, generation["active_generation"] if generation else None,
+            active = generation["active_generation"] if generation else None
+            editions = matcher.editions_of(conn, active,
                                            (row["printing_id"] for row in page if row["display_name"] is not None))
+            wanted = sorted({printing for row in page for printing in row["candidates"]})
+            cards = {} if not wanted or active is None else {
+                str(card["printing_id"]): CollectionImportCard(
+                    printing_id=card["printing_id"], name=card["display_name"], set_name=card["set_name"],
+                    collector_number=card["collector_number"])
+                for card in conn.execute(CANDIDATE_CARDS, (active, wanted))}
     except psycopg.Error:
         refuse(503, "INVENTORY_TEMPORARILY_UNAVAILABLE")
     rows = []
@@ -333,23 +375,28 @@ def import_rows(import_id: UUID, filter_: RowFilter = Query(default="all", alias
             editions=[] if row["display_name"] is None else [
                 CollectionImportEdition(edition_id=choice["edition_id"],
                                         descriptor=finishes.public_descriptor(choice["descriptor"]))
-                for choice in editions.get(row["printing_id"], [])]))
+                for choice in editions.get(row["printing_id"], [])],
+            candidates=[cards[printing] for printing in row["candidates"] if printing in cards],
+            picked=bool(row["fix"] and "pick" in row["fix"]),
+            by_name=parsed.get(matcher.BY_NAME_KEY) == "1"))
     next_cursor = str(page[-1]["row_number"]) if len(found) > PAGE_SIZE else None
     return CollectionImportRowsPage(rows=rows, next_cursor=next_cursor, draft_revision=draft["draft_revision"])
 
 
 def _action(change: CollectionImportChange) -> str:
     """The change's one action; INVALID_CHANGE without exactly one action and exactly one of rows and filter."""
-    actions = [name for name, given in (("finish", change.finish is not None), ("skip", change.skip),
-                                        ("restore", change.restore)) if given]
+    actions = [name for name, given in (("pick", change.pick is not None), ("finish", change.finish is not None),
+                                        ("skip", change.skip), ("restore", change.restore)) if given]
     if len(actions) != 1 or (change.rows is None) == (change.filter is None):
+        refuse(422, "INVALID_CHANGE")
+    if change.pick is not None and (change.pick.printing_id is None) == (change.pick.edition_id is None):
         refuse(422, "INVALID_CHANGE")
     return actions[0]
 
 
 def _targets(conn, import_id: UUID, change: CollectionImportChange) -> list:
     """The change's rows as they stand now, in file order; ROW_NOT_FOUND for a row number the draft doesn't have."""
-    columns = "r.row_number,r.status,r.printing_id,r.skipped,r.left_out_reason"
+    columns = "r.row_number,r.status,r.quantity,r.parsed,r.printing_id,r.skipped,r.left_out_reason"
     if change.filter is not None:
         return conn.execute(f"""SELECT {columns} FROM collection_import_row r WHERE r.import_id=%s
           AND {matcher.FILTER_ROWS[change.filter].format(r="r")} ORDER BY r.row_number""", (import_id,)).fetchall()
@@ -364,7 +411,8 @@ def _targets(conn, import_id: UUID, change: CollectionImportChange) -> list:
 def _set_finish(conn, import_id: UUID, generation, targets: list, descriptor: dict,
                 wanted: finishes.Finish) -> CollectionImportChangeResult:
     """Each target's Edition, where its card has exactly one active Edition that fits `wanted`. The Unspecified Variant
-    makes the row finish_unknown, a Matched by name row stays by_name, and anything else is matched."""
+    makes the row finish_unknown, a row matched by name (parsed's BY_NAME_KEY) is by_name, and anything else is
+    matched."""
     eligible = [row for row in targets if row["printing_id"] is not None and not row["skipped"]
                 and row["left_out_reason"] is None]
     editions = matcher.editions_of(conn, generation, (row["printing_id"] for row in eligible))
@@ -376,13 +424,65 @@ def _set_finish(conn, import_id: UUID, generation, targets: list, descriptor: di
         numbers.append(row["row_number"])
         chosen_ids.append(chosen["edition_id"])
         statuses.append("finish_unknown" if finishes.facets(chosen["descriptor"]).special == "unspecified"
-                        else "by_name" if row["status"] == "by_name" else "matched")
+                        else "by_name" if row["parsed"].get(matcher.BY_NAME_KEY) == "1" else "matched")
     if numbers:
         conn.execute("""UPDATE collection_import_row r SET edition_id=u.edition_id,status=u.status,
             fix=coalesce(r.fix,'{}'::jsonb)||jsonb_build_object('finish',%s::jsonb)
           FROM unnest(%s::int[],%s::uuid[],%s::text[]) AS u(row_number,edition_id,status)
           WHERE r.import_id=%s AND r.row_number=u.row_number""",
                      (json.dumps(finishes.public_descriptor(descriptor)), numbers, chosen_ids, statuses, import_id))
+    done = set(numbers)
+    return CollectionImportChangeResult(applied=len(numbers),
+                                        not_applied=[row["row_number"] for row in targets
+                                                     if row["row_number"] not in done])
+
+
+# An active Edition of the generation and its Printing, for a pick by Edition.
+PICKED_EDITION = """SELECT ge.printing_id,e.id AS edition_id,e.descriptor
+  FROM catalog_generation_edition ge JOIN catalog_edition e ON e.id=ge.edition_id
+  JOIN catalog_generation_printing gp ON gp.generation_id=ge.generation_id AND gp.printing_id=ge.printing_id
+    AND NOT gp.tombstoned
+  WHERE ge.generation_id=%s AND ge.active AND ge.edition_id=%s"""
+
+
+def _pick(conn, import_id: UUID, generation, source: str, targets: list,
+          pick: CollectionImportPick) -> CollectionImportChangeResult:
+    """Each target's card: the picked Edition, or the picked Printing with the Edition its row's finish chooses
+    (collection_import_matcher.edition_for), so a card whose finish the row doesn't tell leaves the row ambiguous with
+    its card, for its finish to be picked. A picked Unspecified Variant is finish_unknown; anything else is matched. The
+    pick ends Matched by name (BY_NAME_KEY is cleared from parsed), even for the row's own card. INVALID_PICK for a
+    card the catalog no longer has."""
+    if pick.edition_id is not None:
+        picked = conn.execute(PICKED_EDITION, (generation, pick.edition_id)).fetchone()
+        if picked is None:
+            refuse(422, "INVALID_PICK")
+        printing, choices = picked["printing_id"], [picked]
+    else:
+        printing = pick.printing_id
+        choices = matcher.editions_of(conn, generation, [printing]).get(printing, [])
+        if not choices:
+            refuse(422, "INVALID_PICK")
+    eligible = [row for row in targets if row["quantity"] is not None and not row["skipped"]
+                and row["left_out_reason"] is None]
+    numbers, edition_ids, statuses = [], [], []
+    for row in eligible:
+        if pick.edition_id is not None:
+            edition = choices[0]["edition_id"]
+            status = "finish_unknown" if matcher.is_unspecified(choices[0]["descriptor"]) else "matched"
+        else:
+            status, edition = matcher.edition_for(source, row["parsed"], choices)
+        numbers.append(row["row_number"])
+        edition_ids.append(edition)
+        statuses.append(status)
+    if numbers:
+        fix = json.dumps({"printing_id": str(printing), **({"edition_id": str(pick.edition_id)}
+                                                           if pick.edition_id is not None else {})})
+        conn.execute("""UPDATE collection_import_row r SET printing_id=%s,edition_id=u.edition_id,status=u.status,
+            fix=(coalesce(r.fix,'{}'::jsonb)-'finish')||jsonb_build_object('pick',%s::jsonb),
+            parsed=r.parsed-%s::text
+          FROM unnest(%s::int[],%s::uuid[],%s::text[]) AS u(row_number,edition_id,status)
+          WHERE r.import_id=%s AND r.row_number=u.row_number""",
+                     (printing, fix, matcher.BY_NAME_KEY, numbers, edition_ids, statuses, import_id))
     done = set(numbers)
     return CollectionImportChangeResult(applied=len(numbers),
                                         not_applied=[row["row_number"] for row in targets
@@ -407,9 +507,10 @@ def _set_skipped(conn, import_id: UUID, targets: list, skipped: bool) -> Collect
 def change_import(import_id: UUID, command: ChangeCollectionImport, user_id: str = Depends(verified_user)):
     """Applies the changes in order, each to its rows as the earlier ones left them, in one transaction: all or none.
     The draft revision advances once, even when nothing differs, and the draft's expiry moves to 24 hours from now.
-    Refuses NO_CHANGES, INVALID_CHANGE, INVALID_FINISH (a descriptor with no physical facet), ROW_NOT_FOUND,
-    IMPORT_NOT_FOUND and STALE_DRAFT. A change touches no Holding and not the owner revision; a repeated request after a
-    lost response gets STALE_DRAFT, and the review reloads."""
+    Refuses NO_CHANGES, INVALID_CHANGE, INVALID_FINISH (a descriptor with no physical facet), INVALID_PICK (a card the
+    catalog doesn't have, or no longer has), ROW_NOT_FOUND, IMPORT_NOT_FOUND and STALE_DRAFT. A change touches no
+    Holding and not the owner revision; a repeated request after a lost response gets STALE_DRAFT, and the review
+    reloads."""
     if not command.changes:
         refuse(422, "NO_CHANGES")
     plans = []
@@ -425,14 +526,14 @@ def change_import(import_id: UUID, command: ChangeCollectionImport, user_id: str
         with connect() as conn, conn.transaction():
             # As save: the owner, then the draft.
             lock_owner(conn, user_id)
-            draft = conn.execute("""SELECT draft_revision FROM collection_import
+            draft = conn.execute("""SELECT draft_revision,source FROM collection_import
               WHERE owner_id=%s AND id=%s AND status='open' FOR UPDATE""", (user_id, import_id)).fetchone()
             if draft is None:
                 refuse(404, "IMPORT_NOT_FOUND")
             if command.draft_revision != draft["draft_revision"]:
                 refuse(409, "STALE_DRAFT")
             generation = None
-            if any(action == "finish" for _, action, _ in plans):
+            if any(action in ("pick", "finish") for _, action, _ in plans):
                 catalog = conn.execute("SELECT active_generation FROM catalog_state WHERE singleton").fetchone()
                 if catalog is None or catalog["active_generation"] is None:
                     refuse(503, "CATALOG_UNAVAILABLE")
@@ -440,7 +541,9 @@ def change_import(import_id: UUID, command: ChangeCollectionImport, user_id: str
             results = []
             for change, action, wanted in plans:
                 targets = _targets(conn, import_id, change)
-                if action == "finish":
+                if action == "pick":
+                    results.append(_pick(conn, import_id, generation, draft["source"], targets, change.pick))
+                elif action == "finish":
                     results.append(_set_finish(conn, import_id, generation, targets, change.finish, wanted))
                 else:
                     results.append(_set_skipped(conn, import_id, targets, action == "skip"))
@@ -449,6 +552,31 @@ def change_import(import_id: UUID, command: ChangeCollectionImport, user_id: str
             return CollectionImportChanges(summary=summary(conn, user_id, import_id), results=results)
     except psycopg.Error:
         refuse(503, "INVENTORY_TEMPORARILY_UNAVAILABLE")
+
+
+@router.get("/{import_id}/skipped.csv")
+def skipped_rows(import_id: UUID, user_id: str = Depends(verified_user)):
+    """The draft's skipped rows, in file order, under the file's header, as a CSV attachment (UTF-8 with a BOM, so a
+    spreadsheet reads accents, and CRLF lines): each row's cells as the file held them, columns PrizeCheck doesn't read
+    included. Just the header when nothing is skipped. IMPORT_NOT_FOUND for a draft that isn't this collector's open
+    one."""
+    try:
+        with connect() as conn:
+            draft = conn.execute("""SELECT source_header FROM collection_import
+              WHERE owner_id=%s AND id=%s AND status='open'""", (user_id, import_id)).fetchone()
+            if draft is None:
+                refuse(404, "IMPORT_NOT_FOUND")
+            lines = [row["raw_text"] for row in conn.execute(
+                f"""SELECT r.raw_text FROM collection_import_row r WHERE r.import_id=%s AND {SKIPPED_ROW}
+                    ORDER BY r.row_number""", (import_id,))]
+    except psycopg.Error:
+        refuse(503, "INVENTORY_TEMPORARILY_UNAVAILABLE")
+    header = io.StringIO()
+    csv.writer(header, lineterminator="").writerow(draft["source_header"])
+    body = "\ufeff" + "".join(f"{line}\r\n" for line in (header.getvalue(), *lines))
+    return Response(content=body.encode("utf-8"), media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": 'attachment; filename="skipped-rows.csv"',
+                             "Cache-Control": "no-store"})
 
 
 @router.post("/{import_id}/save", response_model=CollectionImportSaveResult)

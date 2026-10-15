@@ -4,6 +4,7 @@ import { usePlaces } from "../catalog/usePlaces";
 import {
   changeCollectionImport,
   CollectionImportError,
+  collectionImportSkippedHref,
   getCurrentCollectionImport,
   saveCollectionImport,
   type CollectionImportChange,
@@ -23,6 +24,7 @@ import {
   cardsText,
   changeErrorText,
   finishText,
+  pickText,
   rowsText,
   saveErrorText,
   saveStatusText,
@@ -47,6 +49,7 @@ const MAX_CHANGE_ROWS = 1000;
 const FILTERS: { value: CollectionImportRowFilter; label: string }[] = [
   { value: "needs", label: "Needs you" },
   { value: "finish", label: "Finish unknown" },
+  { value: "name", label: "Matched by name" },
   { value: "all", label: "All" },
   { value: "skipped", label: "Skipped" },
 ];
@@ -54,6 +57,7 @@ const FILTERS: { value: CollectionImportRowFilter; label: string }[] = [
 const EMPTY: Record<CollectionImportRowFilter, string> = {
   needs: "Nothing needs you. Every row is ready or skipped.",
   finish: "No rows have an unknown finish.",
+  name: "No rows were matched by name.",
   all: "Every row is skipped.",
   skipped: "No rows are skipped.",
 };
@@ -62,11 +66,14 @@ const EMPTY: Record<CollectionImportRowFilter, string> = {
 const BULK_TRIGGER =
   "box-border m-0 inline-flex h-control cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-control border border-border-strong bg-surface-raised px-3 font-sans text-control font-medium leading-none text-text hover:border-control-outline aria-expanded:border-accent-border aria-expanded:bg-surface-selected aria-expanded:text-accent-strong phone:h-control-phone phone:px-4";
 
-/** Collection Import's review (#226, #230): one list of the file's rows under Needs you, Finish unknown, All and
- * Skipped, opening on Needs you when anything needs the collector. A row's finish is picked from its card's own
- * Editions; selected rows (or every row in the filter) get a finish or are skipped at once; skipped rows can be
- * restored. Every change goes to the server at the draft's revision and answers the new counts. Finish unknown never
- * blocks saving. Saving adds every ready row's copies in one step, with no Undo. */
+/** Collection Import's review (#226, #229, #230): one list of the file's rows under Needs you, Finish unknown, Matched
+ * by name, All and Skipped, opening on Needs you when anything needs the collector. A row's finish is picked from its
+ * card's own Editions; a row that needs a card opens its resolver (Fix: candidates, a catalog search, Skip row), and a
+ * row matched by name or a Basic Energy can change its card (Change). Selected rows (or every row in the filter) get a
+ * finish or are skipped at once, Skip all skips every row in Needs you, and skipped rows can be restored or downloaded
+ * in the file's own columns. Every change goes to the server at the draft's revision and answers the new counts.
+ * Finish unknown and Matched by name never block saving. Saving adds every ready row's copies in one step, with no
+ * Undo. */
 export function ImportReview({ summary, fileName, onBack, onLanded }: Props) {
   const places = usePlaces(true);
   const toast = useToast();
@@ -82,6 +89,10 @@ export function ImportReview({ summary, fileName, onBack, onLanded }: Props) {
   const [selection, setSelection] = useState<Selection>(NOTHING);
   const changing = useRef(false);
   const [notice, setNotice] = useState("");
+  // The row whose resolver is open, and the Fix or Change buttons, so Escape can return focus to the one that opened it.
+  const [open, setOpen] = useState<number | null>(null);
+  const toggles = useRef(new Map<number, HTMLButtonElement>());
+  const [focusToggle, setFocusToggle] = useState<number | null>(null);
   // Where focus goes once the rows are read again, if the focused control left with its row or with the bulk bar.
   const [refocus, setRefocus] = useState<
     { to: "row"; index: number } | { to: "rows" } | null
@@ -97,6 +108,7 @@ export function ImportReview({ summary, fileName, onBack, onLanded }: Props) {
   const shown: Record<CollectionImportRowFilter, number> = {
     needs: counts.needs_you,
     finish: counts.finish_unknown,
+    name: counts.by_name,
     all: counts.needs_you + counts.ready,
     skipped: counts.skipped,
   };
@@ -105,6 +117,12 @@ export function ImportReview({ summary, fileName, onBack, onLanded }: Props) {
   useEffect(() => {
     heading.current?.focus();
   }, []);
+
+  useEffect(() => {
+    if (focusToggle === null) return;
+    setFocusToggle(null);
+    toggles.current.get(focusToggle)?.focus();
+  }, [focusToggle]);
 
   useEffect(() => {
     if (!refocus) return;
@@ -127,6 +145,7 @@ export function ImportReview({ summary, fileName, onBack, onLanded }: Props) {
     setFilter(next);
     setSelection(NOTHING);
     setNotice("");
+    setOpen(null);
   }
 
   function select(rowNumber: number, on: boolean) {
@@ -228,6 +247,21 @@ export function ImportReview({ summary, fileName, onBack, onLanded }: Props) {
     );
   }
 
+  /** A card picked in a row's resolver: the resolver closes, and focus goes to the row now in its place. */
+  function pick(
+    rowNumber: number,
+    index: number,
+    change: CollectionImportChange,
+    card: string
+  ) {
+    setOpen(null);
+    void apply(
+      [change],
+      (results) => pickText(rowNumber, card, total(results).applied),
+      { to: "row", index }
+    );
+  }
+
   async function save() {
     setSaving(true);
     setError(null);
@@ -304,6 +338,18 @@ export function ImportReview({ summary, fileName, onBack, onLanded }: Props) {
                 Select all {shown[filter]}
               </Button>
             )}
+            {filter === "needs" && counts.needs_you > 0 && (
+              <Button
+                onClick={() => {
+                  setOpen(null);
+                  setSkipped([{ filter: "needs", skip: true }], true, {
+                    to: "rows",
+                  });
+                }}
+              >
+                Skip all {counts.needs_you}
+              </Button>
+            )}
           </div>
           <p role="status" className="m-0 text-body text-text-muted">
             {notice}
@@ -341,12 +387,13 @@ export function ImportReview({ summary, fileName, onBack, onLanded }: Props) {
                       { to: "row", index }
                     )
                   }
-                  onSkip={() =>
+                  onSkip={() => {
+                    setOpen(null);
                     setSkipped([{ rows: [row.row_number], skip: true }], true, {
                       to: "row",
                       index,
-                    })
-                  }
+                    });
+                  }}
                   onRestore={() =>
                     setSkipped(
                       [{ rows: [row.row_number], restore: true }],
@@ -354,6 +401,28 @@ export function ImportReview({ summary, fileName, onBack, onLanded }: Props) {
                       { to: "row", index }
                     )
                   }
+                  open={open === row.row_number}
+                  onToggle={() =>
+                    setOpen((previous) =>
+                      previous === row.row_number ? null : row.row_number
+                    )
+                  }
+                  onClose={() => {
+                    setOpen(null);
+                    setFocusToggle(row.row_number);
+                  }}
+                  onPick={(choice, card) =>
+                    pick(
+                      row.row_number,
+                      index,
+                      { rows: [row.row_number], pick: choice },
+                      card
+                    )
+                  }
+                  toggleRef={(element) => {
+                    if (element) toggles.current.set(row.row_number, element);
+                    else toggles.current.delete(row.row_number);
+                  }}
                 />
               ))}
             </ul>
@@ -389,6 +458,8 @@ export function ImportReview({ summary, fileName, onBack, onLanded }: Props) {
             <dd className="m-0 text-right tabular-nums">
               {counts.finish_unknown}
             </dd>
+            <dt className="text-text-muted">Matched by name</dt>
+            <dd className="m-0 text-right tabular-nums">{counts.by_name}</dd>
             <dt className="text-text-muted">Skipped</dt>
             <dd className="m-0 text-right tabular-nums">{counts.skipped}</dd>
             <dt className="text-text-muted">Cards to add</dt>
@@ -472,6 +543,7 @@ export function ImportReview({ summary, fileName, onBack, onLanded }: Props) {
           className="flex flex-wrap items-center gap-3 py-3"
         >
           <p
+            id="import-save-status"
             role="status"
             className={`m-0 min-w-0 flex-[1_1_14rem] text-body ${error ? "text-warning" : "text-text"}`}
           >
@@ -483,10 +555,20 @@ export function ImportReview({ summary, fileName, onBack, onLanded }: Props) {
                 counts.finish_unknown
               )}
           </p>
+          {counts.skipped > 0 && (
+            <a
+              className="inline-flex min-h-(--target-pointer) items-center text-meta text-accent underline underline-offset-2 hover:text-accent-strong phone:min-h-tap"
+              href={collectionImportSkippedHref(current.id)}
+              download="skipped-rows.csv"
+            >
+              Download skipped rows
+            </a>
+          )}
           <Button
             variant="primary"
             className="min-w-0 max-w-full"
             disabled={counts.needs_you > 0 || saving}
+            aria-describedby="import-save-status"
             onClick={() => void save()}
           >
             <span className="min-w-0 truncate">

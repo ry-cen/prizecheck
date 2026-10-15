@@ -1,6 +1,10 @@
-import { CollectionImportError } from "../collection_import_generated";
+import {
+  CollectionImportError,
+  type CollectionImportCard,
+  type CollectionImportRow,
+} from "../collection_import_generated";
 
-/* Collection Import copy (#226, #227, #230). It never names the tracker a file came from, and shows no prices, marketplace
+/* Collection Import copy (#226, #227, #229, #230). It never names the tracker a file came from, and shows no prices, marketplace
  * IDs, fetch times or internal reasons (AGENTS.md "UI copy"). Tracker names appear only in ExportHelp. */
 
 export const SPLIT_LARGE =
@@ -121,12 +125,58 @@ export function skipText(applied: number, skip: boolean): string {
   return `${skip ? "Skipped" : "Restored"} ${rowsText(applied)}.`;
 }
 
+/** A card as the resolver lists it: "Pikachu · Fixture Promos 1". */
+export function cardText(card: {
+  name: string;
+  set_name: string;
+  collector_number: string;
+}): string {
+  return `${card.name} · ${card.set_name} ${card.collector_number}`;
+}
+
+/** What a pick did: the card the row is now, or why it couldn't take it. */
+export function pickText(
+  rowNumber: number,
+  card: string,
+  applied: number
+): string {
+  return applied > 0
+    ? `Row ${rowNumber} is now ${card}.`
+    : `Row ${rowNumber} can't take a card. Skip it instead.`;
+}
+
+/** Where the resolver's catalog search starts: the row's card name without its tags in brackets or a trailing
+ * " - number", as matching reads it (api/app/collection_import_matcher.py card_name repeats this clean-up; change both
+ * together; "Raichu GX - 20/68 (#60 Pikachu Stamped)" is "Raichu GX"). */
+export function searchStart(row: CollectionImportRow): string {
+  return row.source.name
+    .replace(/\([^()]*\)|\[[^\]]*\]/g, " ")
+    .replace(/\s+-\s+\S*[0-9]\S*\s*$/, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** The resolver's line for a row whose quantity can't be read: no card can fix it, so it is skipped or fixed in the
+ * file. */
+export const UNREADABLE_QUANTITY =
+  "PrizeCheck can't read how many copies this row has. Fix the quantity in your file and import it again, or skip this row.";
+
+/** The candidates a resolver lists: every card the row could be except the one it already is. */
+export function otherCandidates(
+  row: CollectionImportRow
+): CollectionImportCard[] {
+  return row.candidates.filter(
+    (card) => card.printing_id !== row.card?.printing_id
+  );
+}
+
 const CHANGE: Record<string, string> = {
   STALE_DRAFT:
     "This import changed in another window, so nothing was changed. Check the rows and try again.",
   IMPORT_NOT_FOUND: "This import is no longer open. Choose your file again.",
   CATALOG_UNAVAILABLE:
-    "Finishes can't be set right now. Try again in a few minutes.",
+    "Cards and finishes can't be changed right now. Try again in a few minutes.",
+  INVALID_PICK: "That card isn't in the catalog any more. Search for it again.",
 };
 
 /** What a failed change tells the collector. The gateway's own body limit answers 413 without a code. */
