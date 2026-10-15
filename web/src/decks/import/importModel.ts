@@ -2,6 +2,7 @@ import type {
   ImportEdition,
   ImportFix,
   ImportPart,
+  ImportPrinting,
   ImportReview,
   ReviewLine,
 } from "../../decks_generated";
@@ -110,16 +111,25 @@ export function statusText(line: ReviewLine): string | null {
   }
 }
 
-/** Why a line needs the collector, or what they did to it. */
+/** Why a line needs the collector, how the import matched it, or what the collector did to it. */
 export function noteText(line: ReviewLine): string | null {
   const pasted = [line.set_code, line.number].filter(Boolean).join(" ");
   switch (line.status) {
     case "not_found":
       return `${[line.name, pasted].filter(Boolean).join(" ")} isn't in the catalog yet.`;
     case "unreadable":
-      return "This line doesn't end with a set code and number.";
+      // A name suffix the server read as the set token ("Giratina VSTAR 131") has no code either.
+      return line.set_code
+        ? `${line.set_code} is part of the card's name, not a set code.`
+        : "This line doesn't end with a set code and number.";
     case "ambiguous":
-      return `${pasted} matches ${plural(line.candidates.length, "card")}: pick the one on your list.`;
+      return `${[line.name, pasted].filter(Boolean).join(" ")} could be ${plural(line.candidates.length, "card")}: pick the one on your list.`;
+    case "by_name":
+      return `Matched by name, because no card has ${pasted}.`;
+    case "energy":
+      return pasted && line.set_code
+        ? `Matched by type, because no card has ${pasted}.`
+        : "Matched by type, because the line has no set code.";
     case "picked":
       return line.printing
         ? `You picked ${line.printing.set_code} ${line.printing.collector_number}.`
@@ -128,6 +138,17 @@ export function noteText(line: ReviewLine): string | null {
       return null;
   }
 }
+
+/** A card as a resolver lists it: "Meowth ex MEG 150". */
+export const printingText = (printing: ImportPrinting) =>
+  `${printing.name} ${printing.set_code} ${printing.collector_number}`;
+
+/** What the resolver's catalog search starts on: the pasted name, with a name suffix the server read as the set token
+ * put back ("Giratina VSTAR"). */
+export const searchStart = (line: ReviewLine) =>
+  line.status === "unreadable" && line.set_code
+    ? `${line.name} ${line.set_code}`
+    : line.name;
 
 export const editionOf = (line: ReviewLine, editionId: string) =>
   line.editions.find((edition) => edition.edition_id === editionId);
