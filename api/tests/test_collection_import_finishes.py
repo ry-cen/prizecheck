@@ -357,9 +357,16 @@ def test_changes_are_all_or_nothing_and_refused_for_a_stale_revision_or_a_bad_ch
     # A descriptor with lookup IDs only names no finish.
     response = change(owner, import_id, 1, {"rows": [1], "finish": {"thirdParty": {"tcgplayer": 1}}})
     assert response.status_code == 422 and code(response) == "INVALID_FINISH", response.text
-    # Fields a later ticket adds are refused, not ignored; so are more rows than one change takes.
-    for bad in ({"location_id": str(uuid4())}, {"rows": [1], "group": "Main", "skip": True}, {"rows": [], "skip": True},
-                {"rows": [0], "skip": True}, {"rows": [2**31], "skip": True},
+    # A group or Location change (#232) names no rows and takes no other action; `include` goes with `group` alone.
+    for bad in ({"rows": [1], "group": "Main", "include": False}, {"filter": "all", "location_id": unsorted},
+                {"group": "Main"}, {"include": True}, {"rows": [1], "skip": True, "include": False},
+                {"group": "Main", "include": True, "skip": True}, {"location_id": unsorted, "include": True},
+                {"group": "Main", "include": True, "location_id": unsorted}):
+        response = change(owner, import_id, 1, bad)
+        assert response.status_code == 422 and code(response) == "INVALID_CHANGE", (bad, response.text)
+    # Unknown fields are refused, not ignored; so are more rows than one change takes.
+    for bad in ({"rows": [1], "skip": True, "folder": "Main"}, {"group": "", "include": True},
+                {"rows": [], "skip": True}, {"rows": [0], "skip": True}, {"rows": [2**31], "skip": True},
                 {"rows": list(range(1, 1002)), "skip": True}, {"filter": "graded", "skip": True}):
         assert change(owner, import_id, 1, bad).status_code == 422, bad
     response = change(owner, import_id, 2, {"rows": [1], "skip": True})

@@ -31,6 +31,7 @@ export function CollectionImportPage({ onCancel, onLanded }: Props) {
         fileName={review.fileName}
         onBack={() => setReview(null)}
         onLanded={onLanded}
+        onLocation={setLocationId}
       />
     );
   return (

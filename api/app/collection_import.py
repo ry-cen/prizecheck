@@ -1,4 +1,4 @@
-"""Collection Import (#226 to #231; spec "Collection import from other trackers", ADR 0014): a collector's file
+"""Collection Import (#226 to #232; spec "Collection import from other trackers", ADR 0014): a collector's file
 becomes an import draft on the server, which they review and then save into one Storage Leaf in one step.
 
 - POST /api/collection-imports?location_id=<Storage Leaf> takes the file's bytes as the request body (no multipart): a
@@ -11,17 +11,22 @@ becomes an import draft on the server, which they review and then save into one 
   one open draft per collector. A saved draft stays, without rows, as the receipt that answers a repeated save for 24
   hours; starting an import also deletes this collector's expired ones.
   A draft is not inventory, so starting one doesn't advance the owner revision.
-- GET /api/collection-imports/current is the open draft's summary: its counts, and the left-out rows' count per reason
-  with a few of each, as the file wrote them.
+- GET /api/collection-imports/current is the open draft's summary: its counts; the left-out rows' count per reason
+  with a few of each, as the file wrote them; the file's groups (portfolios, folders, lists) with their rows and
+  whether each is included (#232); and how many of the cards to add are of Card Editions the Collection already holds.
 - GET /api/collection-imports/<id>/rows pages through its rows, 100 at a time, by filter: needs (Needs you), finish
   (Finish unknown), name (Matched by name), all (every row not skipped) or skipped. Each row lists its card's active
-  Editions, for the finish picker, and its candidate cards, for Pick one and Change.
+  Editions, for the finish picker, its candidate cards, for Pick one and Change, its group, and the copies of its Card
+  Edition already in the Collection, in every Location and Deck (#232).
 - POST /api/collection-imports/<id>/changes applies the collector's changes at the draft's revision, in order and in one
   transaction, and answers the new summary (and revision) with what each change couldn't apply to. A change picks
   rows by number or by filter, and either picks their card (a Printing, whose Edition the row's finish then chooses,
   or one Edition), sets their finish (a Variant Descriptor; only where the row's card has exactly one active Edition
   that fits it, collection_import_finish), skips them or restores them. A skipped row is neither ready nor needs the
-  collector, so the save leaves it out.
+  collector, so the save leaves it out. Two changes name no rows (#232): `group` with `include` leaves a group of the
+  file out, or brings it back, and `location_id` moves the landing Storage Leaf. A row in a group left out is in no
+  count, filter, download or save, and no change reaches it; bringing the group back brings each row back as it was.
+  Groups are never Locations: every included row lands in the one Storage Leaf.
 - GET /api/collection-imports/<id>/skipped.csv and .../left-out.csv download the skipped rows and the left-out rows
   (#231) in the file's own columns: its header, then each row's cells as the file held them, as CSV (a tab-separated
   file comes back comma-separated).
@@ -75,6 +80,7 @@ NEEDS_YOU_ROW = matcher.NEEDS_YOU_ROW.format(r="r")
 FINISH_UNKNOWN_ROW = matcher.FINISH_UNKNOWN_ROW.format(r="r")
 SKIPPED_ROW = matcher.SKIPPED_ROW.format(r="r")
 LEFT_OUT_ROW = matcher.LEFT_OUT_ROW.format(r="r")
+INCLUDED_ROW = matcher.INCLUDED_ROW.format(r="r")
 BY_NAME_ROW = matcher.BY_NAME_ROW.format(r="r")
 # Each row's candidate cards in the active generation, for one page: (printing id, name, set name, number).
 CANDIDATE_CARDS = """SELECT gp.printing_id,gp.display_name,gp.set_name,gp.collector_number
@@ -93,6 +99,16 @@ LEFT_OUT = f"""SELECT reason,n,parsed FROM (
       row_number() OVER (PARTITION BY r.left_out_reason ORDER BY r.row_number) AS k
     FROM collection_import_row r WHERE r.import_id=%s AND {LEFT_OUT_ROW}) found
   WHERE k<=%s ORDER BY reason,k"""
+# The file's groups in file order (#232): the rows of each that weren't left out, and whether it is included.
+GROUPS = """SELECT r.group_name AS name,count(*) FILTER (WHERE r.left_out_reason IS NULL) AS n,
+    NOT (ci.excluded_groups @> jsonb_build_array(r.group_name)) AS included
+  FROM collection_import_row r JOIN collection_import ci ON ci.id=r.import_id
+  WHERE r.import_id=%s AND r.group_name IS NOT NULL
+  GROUP BY r.group_name,ci.excluded_groups ORDER BY min(r.row_number)"""
+# The copies of each of these Card Editions in the collector's Collection, every Location and Deck (as catalog search
+# counts a card's owned copies, catalog_browse).
+HELD = """SELECT edition_id,sum(quantity) AS held FROM holding WHERE owner_id=%s AND edition_id=ANY(%s::uuid[])
+  GROUP BY edition_id"""
 # One changes request holds at most MAX_CHANGES changes, and a change names at most MAX_CHANGE_ROWS rows by number: the
 # gateway's 64 KiB body limit for this route binds first. It fits every row of a 10,000-row file named one by one
 # (about 49 KB). Select all sends its filter instead.
@@ -101,7 +117,7 @@ MAX_CHANGE_ROWS = 1000
 
 
 class CollectionImportCounts(BaseModel):
-    # Every row in the file.
+    # Every row in the file, left-out rows and rows in groups left out included.
     rows: int
     needs_you: int
     ready: int
@@ -130,6 +146,15 @@ class CollectionImportLeftOut(BaseModel):
     examples: list[CollectionImportSource]
 
 
+class CollectionImportGroup(BaseModel):
+    """One of the file's groups (#232): a portfolio, folder or list, never a Location."""
+    name: str
+    # Its rows that weren't left out (#231), whether or not it is included.
+    rows: int
+    # False once the collector leaves it out: its rows are then in no count, filter, download or save.
+    included: bool
+
+
 class CollectionImportSummary(BaseModel):
     id: UUID
     draft_revision: int
@@ -141,8 +166,12 @@ class CollectionImportSummary(BaseModel):
     cards_to_add: str
     expires_at: str
     # The left-out rows (#231), one entry per reason that has any, in LEFT_OUT_REASONS order. counts.rows includes
-    # them; no other count does.
+    # them; no other count does. Rows in a group left out (#232) aren't counted.
     left_out: list[CollectionImportLeftOut]
+    # The file's groups in file order (#232); [] for a file without groups. Rows with no group are always included.
+    groups: list[CollectionImportGroup]
+    # Of cards_to_add, the copies whose Card Edition the Collection already holds (#232): importing adds to them.
+    already_held: str
 
 
 class CollectionImportCard(BaseModel):
@@ -179,6 +208,10 @@ class CollectionImportRow(BaseModel):
     picked: bool
     # The row's card came from its name within its set, whatever its finish; a pick clears it.
     by_name: bool
+    # The row's portfolio, folder or list in the file (#232), or None.
+    group: str | None
+    # The copies of the row's Card Edition already in the Collection, every Location and Deck (#232); "0" without one.
+    held: str
 
 
 class CollectionImportRowsPage(BaseModel):
@@ -202,10 +235,11 @@ class CollectionImportPick(BaseModel):
 
 
 class CollectionImportChange(BaseModel):
-    """One change: the rows it applies to, by `rows` (row numbers) or `filter` (the rows route's filter, as it stands
-    when this change applies), exactly one of them; and exactly one action, `pick`, `finish`, `skip` or `restore`.
-    Later tickets add actions as new fields: `group` with `include` and `location_id` (#232) without rows. Unknown
-    fields are refused, so an older API never ignores a newer change."""
+    """One change, with exactly one action. `pick`, `finish`, `skip` and `restore` apply to rows: by `rows` (row
+    numbers) or `filter` (the rows route's filter, as it stands when this change applies), exactly one of them.
+    `group` with `include` (#232) leaves one of the file's groups out (false) or brings it back (true), and
+    `location_id` (#232) moves the landing Storage Leaf; neither names rows. Unknown fields are refused, so an older
+    API never ignores a newer change."""
     model_config = ConfigDict(extra="forbid")
     rows: list[Annotated[int, Field(ge=1, le=reader.MAX_IMPORT_ROWS)]] | None = Field(
         default=None, min_length=1, max_length=MAX_CHANGE_ROWS)
@@ -216,6 +250,11 @@ class CollectionImportChange(BaseModel):
     finish: dict | None = None
     skip: bool = False
     restore: bool = False
+    # One of the summary's groups' names, with `include`.
+    group: str | None = Field(default=None, min_length=1)
+    include: bool | None = None
+    # The collector's Storage Leaf to land in instead.
+    location_id: UUID | None = None
 
 
 class ChangeCollectionImport(BaseModel):
@@ -225,11 +264,13 @@ class ChangeCollectionImport(BaseModel):
 
 
 class CollectionImportChangeResult(BaseModel):
-    # How many of the change's rows it applied to.
+    # How many of the change's rows it applied to; for a group, the group's rows that weren't left out when its
+    # inclusion changed, else 0; for a Location, 0.
     applied: int
     # The row numbers it couldn't apply to, in file order: for a pick, skipped rows and rows whose quantity can't be
     # read; for a finish, rows without a card, skipped rows and rows whose card has no Edition that fits; for skip and
-    # restore, rows already so (and left-out rows, #231).
+    # restore, rows already so. Left-out rows (#231) and rows in a group left out (#232) are never applied to. Always []
+    # for a group or a Location.
     not_applied: list[int]
 
 
@@ -280,19 +321,22 @@ def left_out(conn, import_id: UUID) -> list[CollectionImportLeftOut]:
 
 
 def summary(conn, user_id: str, import_id: UUID) -> CollectionImportSummary:
-    row = conn.execute(f"""SELECT ci.id,ci.draft_revision,ci.location_id,ci.expires_at,l.name AS location_name,
+    row = conn.execute(f"""WITH held AS (SELECT DISTINCT h.edition_id FROM holding h WHERE h.owner_id=%s)
+      SELECT ci.id,ci.draft_revision,ci.location_id,ci.expires_at,l.name AS location_name,
         count(r.row_number) AS rows,
         count(r.row_number) FILTER (WHERE {NEEDS_YOU_ROW}) AS needs_you,
         count(r.row_number) FILTER (WHERE {READY_ROW}) AS ready,
         count(r.row_number) FILTER (WHERE {FINISH_UNKNOWN_ROW}) AS finish_unknown,
         count(r.row_number) FILTER (WHERE {BY_NAME_ROW}) AS by_name,
         count(r.row_number) FILTER (WHERE {SKIPPED_ROW}) AS skipped,
-        coalesce(sum(r.quantity) FILTER (WHERE {READY_ROW}),0) AS cards
+        coalesce(sum(r.quantity) FILTER (WHERE {READY_ROW}),0) AS cards,
+        coalesce(sum(r.quantity) FILTER (WHERE {READY_ROW} AND held.edition_id IS NOT NULL),0) AS already_held
       FROM collection_import ci
       LEFT JOIN location l ON l.owner_id=ci.owner_id AND l.id=ci.location_id
       LEFT JOIN collection_import_row r ON r.import_id=ci.id
+      LEFT JOIN held ON held.edition_id=r.edition_id
       WHERE ci.owner_id=%s AND ci.id=%s AND ci.status='open'
-      GROUP BY ci.id,l.name""", (user_id, import_id)).fetchone()
+      GROUP BY ci.id,l.name""", (user_id, user_id, import_id)).fetchone()
     if row is None:
         refuse(404, "IMPORT_NOT_FOUND")
     return CollectionImportSummary(
@@ -302,7 +346,10 @@ def summary(conn, user_id: str, import_id: UUID) -> CollectionImportSummary:
                                       finish_unknown=row["finish_unknown"], by_name=row["by_name"],
                                       skipped=row["skipped"]),
         cards_to_add=str(int(row["cards"])), expires_at=row["expires_at"].isoformat(),
-        left_out=left_out(conn, import_id))
+        left_out=left_out(conn, import_id),
+        groups=[CollectionImportGroup(name=group["name"], rows=group["n"], included=group["included"])
+                for group in conn.execute(GROUPS, (import_id,))],
+        already_held=str(int(row["already_held"])))
 
 
 @router.post("", response_model=CollectionImportSummary, status_code=201)
@@ -378,8 +425,8 @@ def import_rows(import_id: UUID, filter_: RowFilter = Query(default="all", alias
                 refuse(404, "IMPORT_NOT_FOUND")
             generation = conn.execute("SELECT active_generation FROM catalog_state WHERE singleton").fetchone()
             found = conn.execute(f"""SELECT r.row_number,r.status,r.quantity,r.parsed,r.printing_id,r.edition_id,
-                r.skipped,r.left_out_reason,r.candidates,r.fix,gp.display_name,gp.set_name,gp.collector_number,
-                e.descriptor
+                r.skipped,r.left_out_reason,r.candidates,r.fix,r.group_name,gp.display_name,gp.set_name,
+                gp.collector_number,e.descriptor
               FROM (SELECT * FROM collection_import_row r WHERE r.import_id=%s AND r.row_number>%s AND {where}
                     ORDER BY r.row_number LIMIT %s) r
               LEFT JOIN catalog_generation_printing gp ON gp.generation_id=%s AND gp.printing_id=r.printing_id
@@ -397,6 +444,9 @@ def import_rows(import_id: UUID, filter_: RowFilter = Query(default="all", alias
                     printing_id=card["printing_id"], name=card["display_name"], set_name=card["set_name"],
                     collector_number=card["collector_number"])
                 for card in conn.execute(CANDIDATE_CARDS, (active, wanted))}
+            owned = sorted({str(row["edition_id"]) for row in page if row["edition_id"] is not None})
+            held = {} if not owned else {
+                found_held["edition_id"]: found_held["held"] for found_held in conn.execute(HELD, (user_id, owned))}
     except psycopg.Error:
         refuse(503, "INVENTORY_TEMPORARILY_UNAVAILABLE")
     rows = []
@@ -419,16 +469,28 @@ def import_rows(import_id: UUID, filter_: RowFilter = Query(default="all", alias
                 for choice in editions.get(row["printing_id"], [])],
             candidates=[cards[printing] for printing in row["candidates"] if printing in cards],
             picked=bool(row["fix"] and "pick" in row["fix"]),
-            by_name=parsed.get(matcher.BY_NAME_KEY) == "1"))
+            by_name=parsed.get(matcher.BY_NAME_KEY) == "1",
+            group=row["group_name"],
+            held=str(int(held.get(row["edition_id"], 0)))))
     next_cursor = str(page[-1]["row_number"]) if len(found) > PAGE_SIZE else None
     return CollectionImportRowsPage(rows=rows, next_cursor=next_cursor, draft_revision=draft["draft_revision"])
 
 
 def _action(change: CollectionImportChange) -> str:
-    """The change's one action; INVALID_CHANGE without exactly one action and exactly one of rows and filter."""
+    """The change's one action; INVALID_CHANGE without exactly one action, for a row action without exactly one of
+    rows and filter, for a group or Location change with either, and for `include` without `group` or `group`
+    without `include`."""
     actions = [name for name, given in (("pick", change.pick is not None), ("finish", change.finish is not None),
-                                        ("skip", change.skip), ("restore", change.restore)) if given]
-    if len(actions) != 1 or (change.rows is None) == (change.filter is None):
+                                        ("skip", change.skip), ("restore", change.restore),
+                                        ("group", change.group is not None),
+                                        ("location", change.location_id is not None)) if given]
+    if len(actions) != 1 or (actions[0] == "group") != (change.include is not None):
+        refuse(422, "INVALID_CHANGE")
+    if actions[0] in ("group", "location"):
+        if change.rows is not None or change.filter is not None:
+            refuse(422, "INVALID_CHANGE")
+        return actions[0]
+    if (change.rows is None) == (change.filter is None):
         refuse(422, "INVALID_CHANGE")
     if change.pick is not None and (change.pick.printing_id is None) == (change.pick.edition_id is None):
         refuse(422, "INVALID_CHANGE")
@@ -437,7 +499,8 @@ def _action(change: CollectionImportChange) -> str:
 
 def _targets(conn, import_id: UUID, change: CollectionImportChange) -> list:
     """The change's rows as they stand now, in file order; ROW_NOT_FOUND for a row number the draft doesn't have."""
-    columns = "r.row_number,r.status,r.quantity,r.parsed,r.printing_id,r.skipped,r.left_out_reason"
+    columns = (f"r.row_number,r.status,r.quantity,r.parsed,r.printing_id,r.skipped,r.left_out_reason,"
+               f"{INCLUDED_ROW} AS included")
     if change.filter is not None:
         return conn.execute(f"""SELECT {columns} FROM collection_import_row r WHERE r.import_id=%s
           AND {matcher.FILTER_ROWS[change.filter].format(r="r")} ORDER BY r.row_number""", (import_id,)).fetchall()
@@ -455,7 +518,7 @@ def _set_finish(conn, import_id: UUID, generation, targets: list, descriptor: di
     makes the row finish_unknown, a row matched by name (parsed's BY_NAME_KEY) is by_name, and anything else is
     matched."""
     eligible = [row for row in targets if row["printing_id"] is not None and not row["skipped"]
-                and row["left_out_reason"] is None]
+                and row["left_out_reason"] is None and row["included"]]
     editions = matcher.editions_of(conn, generation, (row["printing_id"] for row in eligible))
     numbers, chosen_ids, statuses = [], [], []
     for row in eligible:
@@ -504,7 +567,7 @@ def _pick(conn, import_id: UUID, generation, source: str, targets: list,
         if not choices:
             refuse(422, "INVALID_PICK")
     eligible = [row for row in targets if row["quantity"] is not None and not row["skipped"]
-                and row["left_out_reason"] is None]
+                and row["left_out_reason"] is None and row["included"]]
     numbers, edition_ids, statuses = [], [], []
     for row in eligible:
         if pick.edition_id is not None:
@@ -531,7 +594,7 @@ def _pick(conn, import_id: UUID, generation, source: str, targets: list,
 
 
 def _set_skipped(conn, import_id: UUID, targets: list, skipped: bool) -> CollectionImportChangeResult:
-    eligible = [row["row_number"] for row in targets if row["left_out_reason"] is None]
+    eligible = [row["row_number"] for row in targets if row["left_out_reason"] is None and row["included"]]
     changed: set[int] = set()
     if eligible:
         # Only rows whose flag differs count as changed; the rest are reported in not_applied.
@@ -544,12 +607,36 @@ def _set_skipped(conn, import_id: UUID, targets: list, skipped: bool) -> Collect
                                                      if row["row_number"] not in changed])
 
 
+def _set_group(conn, import_id: UUID, group: str, include: bool) -> CollectionImportChangeResult:
+    """Leaves the file's group out of the import (include false) or brings it back, keeping each of its rows as it
+    was. GROUP_NOT_FOUND for a name no row of the draft has."""
+    rows = conn.execute("""SELECT count(*) AS n,count(*) FILTER (WHERE left_out_reason IS NULL) AS kept
+      FROM collection_import_row WHERE import_id=%s AND group_name=%s""", (import_id, group)).fetchone()
+    if not rows["n"]:
+        refuse(422, "GROUP_NOT_FOUND")
+    changed = conn.execute("""UPDATE collection_import SET excluded_groups=CASE WHEN %s THEN excluded_groups-%s::text
+        ELSE excluded_groups||jsonb_build_array(%s::text) END
+      WHERE id=%s AND (excluded_groups @> jsonb_build_array(%s::text))=%s RETURNING id""",
+                           (include, group, group, import_id, group, include)).fetchone()
+    return CollectionImportChangeResult(applied=rows["kept"] if changed else 0, not_applied=[])
+
+
+def _set_location(conn, user_id: str, import_id: UUID, location_id: UUID) -> CollectionImportChangeResult:
+    """Moves the landing Location: NOT_STORAGE_LEAF, as the start route, unless it is this collector's Storage Leaf
+    (no Deck, no children)."""
+    if not storage_leaf(conn, user_id, location_id):
+        refuse(422, "NOT_STORAGE_LEAF")
+    conn.execute("UPDATE collection_import SET location_id=%s WHERE id=%s", (location_id, import_id))
+    return CollectionImportChangeResult(applied=0, not_applied=[])
+
+
 @router.post("/{import_id}/changes", response_model=CollectionImportChanges)
 def change_import(import_id: UUID, command: ChangeCollectionImport, user_id: str = Depends(verified_user)):
     """Applies the changes in order, each to its rows as the earlier ones left them, in one transaction: all or none.
     The draft revision advances once, even when nothing differs, and the draft's expiry moves to 24 hours from now.
     Refuses NO_CHANGES, INVALID_CHANGE, INVALID_FINISH (a descriptor with no physical facet), INVALID_PICK (a card the
-    catalog doesn't have, or no longer has), ROW_NOT_FOUND, IMPORT_NOT_FOUND and STALE_DRAFT. A change touches no
+    catalog doesn't have, or no longer has), ROW_NOT_FOUND, GROUP_NOT_FOUND, NOT_STORAGE_LEAF (a Location that isn't
+    this collector's Storage Leaf), IMPORT_NOT_FOUND and STALE_DRAFT. A change touches no
     Holding and not the owner revision; a repeated request after a lost response gets STALE_DRAFT, and the review
     reloads."""
     if not command.changes:
@@ -581,6 +668,12 @@ def change_import(import_id: UUID, command: ChangeCollectionImport, user_id: str
                 generation = catalog["active_generation"]
             results = []
             for change, action, wanted in plans:
+                if action == "group":
+                    results.append(_set_group(conn, import_id, change.group, change.include))
+                    continue
+                if action == "location":
+                    results.append(_set_location(conn, user_id, import_id, change.location_id))
+                    continue
                 targets = _targets(conn, import_id, change)
                 if action == "pick":
                     results.append(_pick(conn, import_id, generation, draft["source"], targets, change.pick))

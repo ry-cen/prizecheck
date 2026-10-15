@@ -1,14 +1,15 @@
 // Generated from FastAPI OpenAPI by scripts/generate_collection_import_client.py. Do not edit.
 export type CollectionImportCounts = { rows: number; needs_you: number; ready: number; finish_unknown: number; by_name: number; skipped: number };
-export type CollectionImportSummary = { id: string; draft_revision: number; location_id: string; location_name: string | null; counts: CollectionImportCounts; cards_to_add: string; expires_at: string; left_out: CollectionImportLeftOut[] };
+export type CollectionImportSummary = { id: string; draft_revision: number; location_id: string; location_name: string | null; counts: CollectionImportCounts; cards_to_add: string; expires_at: string; left_out: CollectionImportLeftOut[]; groups: CollectionImportGroup[]; already_held: string };
 export type CollectionImportSource = { quantity: string; name: string; set_name: string; number: string; finish: string };
 export type CollectionImportLeftOut = { reason: "watchlist" | "other_game" | "not_english" | "sealed"; rows: number; examples: CollectionImportSource[] };
+export type CollectionImportGroup = { name: string; rows: number; included: boolean };
 export type CollectionImportCard = { printing_id: string; name: string; set_name: string; collector_number: string };
 export type CollectionImportEdition = { edition_id: string; descriptor: Record<string, unknown> };
-export type CollectionImportRow = { row_number: number; status: "matched" | "finish_unknown" | "by_name" | "ambiguous" | "not_found" | "unreadable"; needs_you: boolean; quantity: string | null; source: CollectionImportSource; skipped: boolean; card: CollectionImportCard | null; edition: CollectionImportEdition | null; editions: CollectionImportEdition[]; candidates: CollectionImportCard[]; picked: boolean; by_name: boolean };
+export type CollectionImportRow = { row_number: number; status: "matched" | "finish_unknown" | "by_name" | "ambiguous" | "not_found" | "unreadable"; needs_you: boolean; quantity: string | null; source: CollectionImportSource; skipped: boolean; card: CollectionImportCard | null; edition: CollectionImportEdition | null; editions: CollectionImportEdition[]; candidates: CollectionImportCard[]; picked: boolean; by_name: boolean; group: string | null; held: string };
 export type CollectionImportRowsPage = { rows: CollectionImportRow[]; next_cursor: string | null; draft_revision: number };
 export type CollectionImportPick = { printing_id?: string | null; edition_id?: string | null };
-export type CollectionImportChange = { rows?: number[] | null; filter?: "needs" | "finish" | "name" | "all" | "skipped" | null; pick?: CollectionImportPick | null; finish?: Record<string, unknown> | null; skip?: boolean; restore?: boolean };
+export type CollectionImportChange = { rows?: number[] | null; filter?: "needs" | "finish" | "name" | "all" | "skipped" | null; pick?: CollectionImportPick | null; finish?: Record<string, unknown> | null; skip?: boolean; restore?: boolean; group?: string | null; include?: boolean | null; location_id?: string | null };
 export type ChangeCollectionImport = { draft_revision: number; changes: CollectionImportChange[] };
 export type CollectionImportChangeResult = { applied: number; not_applied: number[] };
 export type CollectionImportChanges = { summary: CollectionImportSummary; results: CollectionImportChangeResult[] };

@@ -6,7 +6,7 @@ import {
   type CollectionImportSource,
 } from "../collection_import_generated";
 
-/* Collection Import copy (#226, #227, #229 to #231). It never names the tracker a file came from, and shows no prices,
+/* Collection Import copy (#226, #227, #229 to #232). It never names the tracker a file came from, and shows no prices,
  * marketplace IDs, fetch times or internal reasons (AGENTS.md "UI copy"). Tracker names appear only in ExportHelp. */
 
 export const SPLIT_LARGE =
@@ -173,6 +173,7 @@ export function otherCandidates(
 }
 
 const CHANGE: Record<string, string> = {
+  NOT_STORAGE_LEAF: "Choose another Location to put the cards in.",
   STALE_DRAFT:
     "This import changed in another window, so nothing was changed. Check the rows and try again.",
   IMPORT_NOT_FOUND: "This import is no longer open. Choose your file again.",
@@ -208,4 +209,16 @@ export function exampleText(source: CollectionImportSource): string {
   return [source.name || "A row with no name", where]
     .filter(Boolean)
     .join(" · ");
+}
+
+/** The side column's note on copies already held (#232): "3 of these cards are already in your Collection. …". */
+export function heldText(count: string): string {
+  return `${count} of these cards ${count === "1" ? "is" : "are"} already in your Collection. Importing adds to them.`;
+}
+
+/** What leaving a group out, or bringing it back, did (#232). */
+export function groupText(group: string, include: boolean): string {
+  return include
+    ? `The rows in ${group} are back in this import.`
+    : `The rows in ${group} are left out of this import.`;
 }

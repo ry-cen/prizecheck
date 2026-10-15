@@ -60,7 +60,8 @@ function pillOf(
 const FINISH_TRIGGER =
   "box-border m-0 inline-flex h-control max-w-full min-w-0 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-control border border-border-strong bg-surface-raised px-3 font-sans text-control font-medium leading-none text-text hover:border-control-outline aria-expanded:border-accent-border aria-expanded:bg-surface-selected aria-expanded:text-accent-strong phone:h-control-phone phone:px-4";
 
-/** One row of Collection Import's review (#226, #229, #230): what the file said and what it matched, a checkbox for
+/** One row of Collection Import's review (#226, #229, #230, #232): what the file said and what it matched, its group
+ * and the copies already in the Collection, a checkbox for
  * bulk changes, the finish picker (the card's own Editions, when it has more than one), Skip or Restore, and the
  * resolver: Fix on a row that needs a card (Pick one, Not found, Can't read), Change on a row with a card the collector picked,
  * one matched by name, or a Basic Energy with other Printings. */
@@ -102,6 +103,13 @@ export function ImportRowItem({
         .join(" · ")
     : null;
   const shown = finish ?? "Pick a finish";
+  // The row's group in the file, and the copies of its Card Edition already in the Collection (#232).
+  const about = [
+    row.group,
+    row.held !== "0" ? `${row.held} already in your Collection` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
   const fix = !row.skipped && row.needs_you && !row.card;
   // Any row with a card the collector may still change: one they picked, one matched by name, one with other
   // Printings to choose (a Basic Energy), including a card still waiting for its finish.
@@ -135,6 +143,9 @@ export function ImportRowItem({
           <p className="m-0 text-meta text-text-muted wrap-anywhere">
             {detail}
           </p>
+        )}
+        {about && (
+          <p className="m-0 text-meta text-text-muted wrap-anywhere">{about}</p>
         )}
         <p className="m-0 text-meta text-text-muted wrap-anywhere">
           From your file: {fromFile || "an empty row"}
