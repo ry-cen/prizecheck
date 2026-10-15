@@ -496,6 +496,7 @@ export function ImportReview({
                 <ImportRowItem
                   key={row.row_number}
                   row={row}
+                  lines={current.lines}
                   selected={selection.all || selection.rows.has(row.row_number)}
                   onSelect={(on) => select(row.row_number, on)}
                   onFinish={(descriptor, label) =>
@@ -567,7 +568,9 @@ export function ImportReview({
               Import summary
             </h2>
             <dl className="m-0 grid grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-1 text-body">
-              <dt className="text-text-muted">Rows in file</dt>
+              <dt className="text-text-muted">
+                {current.lines ? "Rows in list" : "Rows in file"}
+              </dt>
               <dd className="m-0 text-right tabular-nums">{counts.rows}</dd>
               <dt className="text-text-muted">Need you</dt>
               <dd className="m-0 text-right tabular-nums">
@@ -621,7 +624,11 @@ export function ImportReview({
             )}
             onInclude={include}
           />
-          <ImportLeftOut importId={current.id} leftOut={current.left_out} />
+          <ImportLeftOut
+            importId={current.id}
+            lines={current.lines}
+            leftOut={current.left_out}
+          />
           {current.already_held !== "0" && (
             <p className={`${PANEL} m-0 text-meta text-text-muted`}>
               {heldText(current.already_held)}
@@ -717,7 +724,7 @@ export function ImportReview({
             <a
               className="inline-flex min-h-(--target-pointer) items-center text-meta text-accent underline underline-offset-2 hover:text-accent-strong phone:min-h-tap"
               href={collectionImportSkippedHref(current.id)}
-              download="skipped-rows.csv"
+              download={current.lines ? "skipped-rows.txt" : "skipped-rows.csv"}
             >
               Download skipped rows
             </a>

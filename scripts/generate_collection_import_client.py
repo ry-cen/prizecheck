@@ -59,6 +59,13 @@ async function send<T>(path: string, init: RequestInit = {}): Promise<T> {
 export const startCollectionImport = (locationId: string, file: Blob) =>
   send<CollectionImportSummary>(`/api/collection-imports?${new URLSearchParams({ location_id: locationId })}`,
     { method: 'POST', headers: { 'content-type': 'text/csv' }, body: file });
+/** The start body for pasted text (#234): JSON, as startCollectionImportPaste sends it. Its size counts against the
+ * start route's 5 MiB, escapes included. */
+export const collectionImportPasteBody = (text: string) => JSON.stringify({ text });
+/** Starts an import from pasted text; the draft lands in the Storage Leaf `locationId`. */
+export const startCollectionImportPaste = (locationId: string, text: string) =>
+  send<CollectionImportSummary>(`/api/collection-imports?${new URLSearchParams({ location_id: locationId })}`,
+    { method: 'POST', headers: { 'content-type': 'application/json' }, body: collectionImportPasteBody(text) });
 export const getCurrentCollectionImport = () => send<CollectionImportSummary>('/api/collection-imports/current');
 export const getCollectionImportRows = (importId: string, filter: CollectionImportRowFilter, cursor?: string | null) => {
   const query = new URLSearchParams({ filter, ...(cursor ? { cursor } : {}) });
@@ -71,10 +78,12 @@ export const changeCollectionImport = (importId: string, body: ChangeCollectionI
 export const saveCollectionImport = (importId: string, body: SaveCollectionImport) =>
   send<CollectionImportSaveResult>(`/api/collection-imports/${encodeURIComponent(importId)}/save`,
     { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
-/** The skipped rows as a CSV file in the file's own columns, for a download link. */
+/** The skipped rows as a CSV file in the file's own columns (a pasted list's: its lines, as text), for a download
+ * link. */
 export const collectionImportSkippedHref = (importId: string) =>
   `/api/collection-imports/${encodeURIComponent(importId)}/skipped.csv`;
-/** The rows left out (watchlist, sealed, other games, not in English) as a CSV file in the file's own columns. */
+/** The rows left out (watchlist, sealed, other games, not in English) as a CSV file in the file's own columns (a pasted
+ * list's: its lines, as text). */
 export const collectionImportLeftOutHref = (importId: string) =>
   `/api/collection-imports/${encodeURIComponent(importId)}/left-out.csv`;
 """)
