@@ -131,7 +131,7 @@ export function SwapList({
   );
 }
 
-/** One Edition to swap to: its name, set, number and Variant, copies free of owned, and its compact price. */
+/** One Edition to swap to: its name, set, number and Variant, copies free of owned, and its price. */
 function SwapRow({
   row,
   onSwap,
@@ -155,7 +155,7 @@ function SwapRow({
           {edition} · {ownedWords(row)}
         </span>
         <span id={priceId} className={`${TILE_PRICE} max-w-full tabular-nums`}>
-          <EditionPrice compact editionId={row.edition_id} />
+          <EditionPrice editionId={row.edition_id} />
         </span>
       </button>
     </li>

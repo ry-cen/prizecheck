@@ -1,5 +1,7 @@
 import type { RefObject } from "react";
+import { ChevronDown } from "lucide-react";
 import type { FormatCheck } from "../format_checks_generated";
+import { Icon } from "../ui/Icon";
 import { Menu } from "../ui/Menu";
 import {
   formatLabel,
@@ -37,7 +39,7 @@ const PART =
   "box-border m-0 h-control cursor-pointer border-0 bg-transparent font-sans text-control font-medium phone:h-control-phone";
 
 /**
- * The deck header's "Standard ▾ · ✓ Legal" control (#178): one rounded group holding the Target Format as a
+ * The deck header's "Standard · ✓ Legal" control, with a chevron after the Format (#178): one rounded group holding the Target Format as a
  * kit menu button (owner decision 2026-10-14: a styled menu, not the native select) and the result as a button
  * that opens the results dialog. The menu lists the three Formats as menuitemradio items, the Deck's checked;
  * it opens on the checked one, and arrow keys, Home, End, Enter and Escape work as in every kit Menu. While a
@@ -69,9 +71,7 @@ export function TargetFormatControl({
         trigger={
           <>
             {label}
-            <span aria-hidden="true" className="text-text-muted">
-              ▾
-            </span>
+            <Icon icon={ChevronDown} size={14} className="text-text-muted" />
           </>
         }
         items={TARGET_FORMATS.map((format) => ({

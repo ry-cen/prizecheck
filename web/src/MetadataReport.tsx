@@ -6,6 +6,7 @@ import {
   type MetadataReportInput,
   type MetadataReportView,
 } from "./metadata_generated";
+import { SelectBox } from "./ui/Select";
 
 export type ReportableEdition = { id: string; label: string };
 
@@ -108,28 +109,26 @@ export function MetadataReport({
 
   return (
     <section aria-label="Report card metadata" className="metadata-report">
-      <h4>Report card metadata for {printingName}</h4>
-      <p>
+      <h4 className="mb-1">Report card metadata for {printingName}</h4>
+      <p className="mb-3 text-text-muted">
         Reports go to the maintainer. They never change a card by themselves.
       </p>
       <form onSubmit={submit}>
         <label>
-          Metadata target{" "}
-          <select
+          What needs fixing{" "}
+          <SelectBox
             value={target}
             onChange={(event) =>
               setTarget(event.target.value as "live" | "marketplace")
             }
           >
-            <option value="live">Live identity (name, set code, number)</option>
-            <option value="marketplace">
-              Marketplace mapping (product, variant)
-            </option>
-          </select>
+            <option value="live">Name, set or number</option>
+            <option value="marketplace">Price match</option>
+          </SelectBox>
         </label>
         <label>
           Issue{" "}
-          <select
+          <SelectBox
             value={issue}
             onChange={(event) =>
               setIssue(event.target.value as "missing" | "incorrect")
@@ -137,13 +136,13 @@ export function MetadataReport({
           >
             <option value="incorrect">Incorrect</option>
             <option value="missing">Missing</option>
-          </select>
+          </SelectBox>
         </label>
         {target === "marketplace" ? (
           <>
             <label>
               Card Edition{" "}
-              <select
+              <SelectBox
                 value={editionId}
                 onChange={(event) => setEditionId(event.target.value)}
                 required
@@ -153,10 +152,10 @@ export function MetadataReport({
                     {edition.label}
                   </option>
                 ))}
-              </select>
+              </SelectBox>
             </label>
             <label>
-              Proposed product ID{" "}
+              Correct product number{" "}
               <input
                 inputMode="numeric"
                 pattern="[0-9]{1,10}"
@@ -165,7 +164,7 @@ export function MetadataReport({
               />
             </label>
             <label>
-              Proposed quote variant{" "}
+              Correct price variant{" "}
               <input
                 value={variant}
                 pattern="[a-z0-9\-]{1,40}"
@@ -177,19 +176,19 @@ export function MetadataReport({
         ) : (
           <>
             <label>
-              Proposed category{" "}
-              <select
+              Correct card type{" "}
+              <SelectBox
                 value={category}
                 onChange={(event) => setCategory(event.target.value)}
               >
                 <option value="">No change</option>
-                <option>Pokemon</option>
+                <option value="Pokemon">Pokémon</option>
                 <option>Trainer</option>
                 <option>Energy</option>
-              </select>
+              </SelectBox>
             </label>
             <label>
-              Proposed name{" "}
+              Correct name{" "}
               <input
                 value={name}
                 maxLength={160}
@@ -197,7 +196,7 @@ export function MetadataReport({
               />
             </label>
             <label>
-              Proposed set code{" "}
+              Correct set code{" "}
               <input
                 value={setCode}
                 pattern="[A-Za-z0-9\-]{1,10}"
@@ -206,7 +205,7 @@ export function MetadataReport({
               />
             </label>
             <label>
-              Proposed collector number{" "}
+              Correct collector number{" "}
               <input
                 value={number}
                 maxLength={20}
@@ -216,7 +215,7 @@ export function MetadataReport({
           </>
         )}
         <label>
-          Evidence URL{" "}
+          Evidence link{" "}
           <input
             type="url"
             value={evidence}
@@ -232,7 +231,7 @@ export function MetadataReport({
           />
         </label>
         <button type="submit" disabled={busy}>
-          Submit metadata report
+          Send report
         </button>
       </form>
       <p role="status">{message}</p>
@@ -277,8 +276,8 @@ export function MyMetadataReports({ refreshKey = 0 }: { refreshKey?: number }) {
             <li key={report.id}>
               <strong>
                 {report.target === "live"
-                  ? "Live identity"
-                  : "Marketplace mapping"}{" "}
+                  ? "Name, set or number"
+                  : "Price match"}{" "}
                 · {report.issue}
               </strong>{" "}
               · {report.status.replace("_", " ")}

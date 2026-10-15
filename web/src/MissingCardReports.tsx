@@ -5,6 +5,7 @@ import {
   submitMissingCardReport,
   type ReportView,
 } from "./generated";
+import { SelectBox } from "./ui/Select";
 
 type Kind = "printing" | "edition";
 
@@ -87,13 +88,13 @@ export function MissingCardReports({ printingId }: { printingId?: string }) {
       <form onSubmit={submit}>
         <label>
           Report type{" "}
-          <select
+          <SelectBox
             value={kind}
             onChange={(event) => setKind(event.target.value as Kind)}
           >
             <option value="printing">Missing Printing</option>
             <option value="edition">Missing Edition</option>
-          </select>
+          </SelectBox>
         </label>
         {kind === "printing" ? (
           <>

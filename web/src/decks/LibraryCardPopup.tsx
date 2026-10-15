@@ -3,7 +3,7 @@ import type {
   BrowseEdition,
   EditionStandings,
 } from "../catalog_browse_generated";
-import { ART_NOTE, FORMATS, STANDING_WORDS } from "../catalog/catalogText";
+import { FORMATS, STANDING_WORDS } from "../catalog/catalogText";
 import { EditionPrice } from "../EditionPrice";
 import { CardArt, CardPopup } from "../ui/CardPopup";
 import { Pill, type PillTone } from "../ui/Pill";
@@ -86,7 +86,6 @@ export function LibraryCardPopup({
       }
       returnFocus={returnFocus}
       art={<CardArt url={row?.image_url ?? null} name={name} />}
-      artNote={ART_NOTE}
     >
       {row && (
         <>

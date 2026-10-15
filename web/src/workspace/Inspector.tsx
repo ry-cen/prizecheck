@@ -122,7 +122,7 @@ const SECTION = "mt-4 border-t border-border pt-4";
 // The inspected Edition's price: the existing EditionPrice component in the inspector's colours, the amount
 // in the accent. EditionPrice has no stylesheet of its own (#184), so these are its only rules here.
 const PRICE =
-  "[&_.edition-price]:block [&_.edition-price]:text-text-muted [&_.edition-price[data-price-status=checking]]:italic [&_.edition-price_strong]:text-body [&_.edition-price_strong]:font-semibold [&_.edition-price_strong]:text-accent [&_.price-refresh]:text-text-subtle [&_.price-refresh[data-refresh=failed]]:text-warning";
+  "[&_.edition-price]:block [&_.edition-price]:text-text-muted [&_.edition-price[data-price-status=checking]]:italic [&_.edition-price_strong]:text-body [&_.edition-price_strong]:font-semibold [&_.edition-price_strong]:text-accent";
 
 /** The inspected card's facts: set, number and Variant, category and type, its Location, copies there,
  * copies owned and each Storage Leaf that holds them (#164), then its price. */
@@ -275,7 +275,8 @@ type InspectorProps = Omit<DetailsProps, "card" | "sheet"> & {
   card: Inspected | null;
 };
 
-/** The desktop inspector column. Its space is reserved; it is empty while nothing is hovered or selected.
+/** The desktop inspector column. Its space is reserved; while nothing is hovered or selected it holds a quiet
+ * card-shaped outline that says what goes there, so the column doesn't read as a gap.
  * It stays in view while the gallery scrolls, below the app shell's sticky header; when its content is
  * taller than the window (an Edition in many Leaves), it scrolls inside itself so nothing is cut off. */
 export function Inspector({ card, ...rest }: InspectorProps) {
@@ -284,7 +285,13 @@ export function Inspector({ card, ...rest }: InspectorProps) {
       className="sticky top-[calc(var(--space-4)+var(--layout-sticky-top))] mt-6 box-border max-h-[calc(100dvh-var(--space-4)-var(--layout-sticky-top))] min-w-0 self-start overflow-y-auto overscroll-contain pb-1 phone:hidden"
       aria-label="Card details"
     >
-      {card && <CardDetails card={card} {...rest} />}
+      {card ? (
+        <CardDetails card={card} {...rest} />
+      ) : (
+        <p className="m-0 box-border flex aspect-(--tile-aspect) w-full items-center justify-center rounded-card border border-dashed border-border p-6 text-center text-meta text-text-subtle">
+          Select a card to see its details.
+        </p>
+      )}
     </aside>
   );
 }

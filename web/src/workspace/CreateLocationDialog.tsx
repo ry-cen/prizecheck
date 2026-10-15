@@ -9,6 +9,7 @@ import { Button } from "../ui/Button";
 import { CONTROL } from "../ui/control";
 import { Dialog } from "../ui/Dialog";
 import { Icon } from "../ui/Icon";
+import { SelectBox } from "../ui/Select";
 import { KitLayer } from "./KitLayer";
 import type { LocationIndex } from "./locationTree";
 
@@ -185,8 +186,7 @@ export function CreateLocationDialog({
           </label>
           <label className="flex flex-col gap-2 text-meta text-text-muted">
             Parent location
-            <select
-              className={CONTROL}
+            <SelectBox
               value={parentId ?? ""}
               onChange={(event) => {
                 setParentId(event.target.value || null);
@@ -201,7 +201,7 @@ export function CreateLocationDialog({
                   {index.path(node.id)}
                 </option>
               ))}
-            </select>
+            </SelectBox>
           </label>
           {stocked && parent && (
             <fieldset className="m-0 flex min-w-0 flex-col gap-3 rounded-panel border border-border p-4">

@@ -28,7 +28,8 @@ export function Pill({
     <span
       className={`box-border inline-flex h-chip max-w-full items-center whitespace-nowrap rounded-round border px-2 text-caption font-medium leading-none ${TONES[tone]}`}
     >
-      {children}
+      {/* One inline run, so the spaces around a mark ("Standard · ✕ Not legal") aren't dropped at flex item edges. */}
+      <span className="min-w-0 truncate">{children}</span>
     </span>
   );
 }

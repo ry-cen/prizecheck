@@ -4,7 +4,7 @@ type Props = {
   title: string;
   /** The h1, for a page that moves focus to it (it then takes focus by script only: tabIndex -1). */
   headingRef?: Ref<HTMLHeadingElement>;
-  /** The page's actions, on the right: Add cards, Publish and the like. */
+  /** The page's actions, on the right (under the title, left-aligned, on a phone): Add cards, Publish and the like. */
   actions?: ReactNode;
 };
 
@@ -21,7 +21,9 @@ export function PageHeader({ title, actions, headingRef }: Props) {
         {title}
       </h1>
       {actions && (
-        <div className="ml-auto flex items-center gap-2">{actions}</div>
+        <div className="ml-auto flex flex-wrap items-center gap-2 phone:ml-0 phone:basis-full">
+          {actions}
+        </div>
       )}
     </div>
   );

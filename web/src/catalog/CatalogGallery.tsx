@@ -38,7 +38,6 @@ import { CatalogFilters } from "./CatalogFilters";
 import {
   batchFailed,
   CATALOG_UNAVAILABLE,
-  catalogLine,
   FORMAT_NAMES,
   MAX_ADD,
   QUEUE_FULL,
@@ -372,13 +371,12 @@ export function CatalogGallery({
           <p className="m-0 font-medium text-text">{browse.notice}</p>
         )}
         <p className="m-0 text-text-muted">
+          {/* No Printing count here: the results line under it already says how many cards match. */}
           {unavailable
             ? CATALOG_UNAVAILABLE
-            : first && first.printings !== null
-              ? catalogLine(first.printings, first.last_success)
-              : browse.loading
-                ? "Loading the catalog…"
-                : ""}
+            : !first && browse.loading
+              ? "Loading the catalog…"
+              : ""}
         </p>
       </div>
       {browse.error && !browse.errorMore && (
@@ -492,7 +490,7 @@ export function CatalogGallery({
   );
 }
 
-/** One gallery tile: an EditionTile with its compact price and, under a format chip, a "?" for an unknown standing. */
+/** One gallery tile: an EditionTile with its price and, under a format chip, a "?" for an unknown standing. */
 function CatalogTile({
   edition,
   format,
@@ -522,7 +520,7 @@ function CatalogTile({
       }
       price={
         <span className={TILE_PRICE}>
-          <EditionPrice compact editionId={edition.edition_id} />
+          <EditionPrice editionId={edition.edition_id} />
         </span>
       }
       priceId={priceId}

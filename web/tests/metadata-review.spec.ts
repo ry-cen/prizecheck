@@ -186,12 +186,12 @@ test("collector reports an Edition mapping, nothing changes until the maintainer
     .click();
   await popup.getByRole("button", { name: "Report this Edition" }).click();
   const form = page.getByRole("region", { name: "Report card metadata" });
-  await form.getByLabel("Metadata target").selectOption("marketplace");
-  await form.getByLabel("Proposed product ID").fill("4321");
-  await form.getByLabel("Proposed quote variant").fill("normal");
-  await form.getByLabel("Evidence URL").fill(EVIDENCE);
+  await form.getByLabel("What needs fixing").selectOption("marketplace");
+  await form.getByLabel("Correct product number").fill("4321");
+  await form.getByLabel("Correct price variant").fill("normal");
+  await form.getByLabel("Evidence link").fill(EVIDENCE);
   await form.getByLabel("Note").fill("Wrong product listed");
-  await form.getByRole("button", { name: "Submit metadata report" }).click();
+  await form.getByRole("button", { name: "Send report" }).click();
   await expect(form.getByRole("status")).toContainText(
     "Submitted for maintainer review; nothing changes until approved."
   );

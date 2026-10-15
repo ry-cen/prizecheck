@@ -101,7 +101,9 @@ export function Segmented<T extends string>(
       role={choice ? "radiogroup" : "tablist"}
       aria-label={label}
       onKeyDown={onKeyDown}
-      className="box-border flex max-w-full items-center gap-1 overflow-x-auto p-1"
+      // p-1 leaves the focus ring room inside the scroll box; -mx-1 takes it back, so the first option lines up
+      // with the text above it.
+      className="-mx-1 box-border flex max-w-[calc(100%+0.5rem)] items-center gap-1 overflow-x-auto p-1"
     >
       {options.map((option) => {
         const selected = option.value === value;

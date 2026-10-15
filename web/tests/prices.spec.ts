@@ -114,14 +114,12 @@ const tile = (page: Page, start: string) =>
     .getByRole("region", { name: "Catalog results" })
     .getByRole("button", { name: new RegExp(`^${start}`) });
 
-/** Opens a tile's card popup (#174): its Edition picker prices every Edition of the Printing in one short line, and the
- * picked Edition (the tile's) gets the full price sentence. */
+/** Opens a tile's card popup (#174): its Edition picker prices every Edition of the Printing, and with more than one
+ * Edition the picked one (the tile's) is priced again under it. */
 async function details(page: Page, start: string) {
   await tile(page, start).click();
   const dialog = page.getByRole("dialog", { name: "Furret" });
-  await expect(
-    dialog.getByRole("group", { name: "Selected Edition" })
-  ).toBeVisible();
+  await expect(dialog.getByRole("group", { name: "Editions" })).toBeVisible();
   return dialog;
 }
 
@@ -160,12 +158,14 @@ test("card information shows each Edition's own price with age, stale and finish
   await expect(
     tile(page, "Furret, DAA 1, Darkness Ablaze, Reverse Holo")
   ).toContainText("$0.43");
-  // The popup prices each Edition in its picker and gives the picked one the full sentence.
+  // The popup prices each Edition in its picker and the picked one again: the amount alone, with no source, age or
+  // last check.
   let card = await details(page, "Furret, DAA 1, Darkness Ablaze, Normal");
   await expect(card).toContainText("$0.25");
   await expect(card).toContainText("$0.43");
-  await expect(card).toContainText("Age unknown");
-  await expect(card).toContainText("Last checked");
+  await expect(card).not.toContainText("Age unknown");
+  await expect(card).not.toContainText("Last checked");
+  await expect(card).not.toContainText("cached TCGplayer");
   await expect(card).not.toContainText("Stale");
   await expect(card).not.toContainText("$0.00");
   await expect(
@@ -173,18 +173,18 @@ test("card information shows each Edition's own price with age, stale and finish
   ).toHaveCount(2);
   const picked = card.getByRole("group", { name: "Selected Edition" });
   await expect(picked.locator(".edition-price")).toHaveCount(1);
-  await expect(picked).toContainText("$0.25");
-  await expect(picked).toContainText("Last checked");
-  // Picking the Reverse Holo gives it the full sentence: no provider time, so its age is unknown.
+  await expect(picked.locator(".edition-price")).toHaveText("$0.25");
+  // Picking the Reverse Holo: no provider time, and still only the amount.
   await card
     .getByRole("group", { name: "Editions" })
     .getByRole("button", { name: /^Reverse Holo/ })
     .click();
   await expect(picked).toContainText("$0.43");
-  await expect(picked).toContainText("Age unknown");
+  await expect(picked).not.toContainText("Age unknown");
   await page.keyboard.press("Escape");
   card = await details(page, "Furret, DAA 2,");
-  await expect(card).toContainText("Price unavailable: finish not established");
+  await expect(card).toContainText("Price unavailable");
+  await expect(card).not.toContainText("finish not established");
 
   // A quote over 48 hours old still shows its price, with no Stale label.
   apply([
@@ -212,9 +212,7 @@ test("card information shows each Edition's own price with age, stale and finish
   apply([{ op: "quote", edition: ids.normal, amount: "1e3" }]);
   await search(page);
   card = await details(page, "Furret, DAA 1, Darkness Ablaze, Normal");
-  await expect(card).toContainText(
-    "Price unavailable: the cached price failed validation"
-  );
+  await expect(card).toContainText("Price unavailable");
   await expect(card).not.toContainText("1000");
 
   // A PostgreSQL quarantine hides the quote before anything reaches the store.
@@ -234,9 +232,7 @@ test("card information shows each Edition's own price with age, stale and finish
   ]);
   await search(page);
   card = await details(page, "Furret, DAA 1, Darkness Ablaze, Normal");
-  await expect(card).toContainText(
-    "Price unavailable: market matching is under review"
-  );
+  await expect(card).toContainText("Price unavailable");
   await expect(card).not.toContainText("$0.25");
 });
 
@@ -397,21 +393,17 @@ test("a gateway deadline answer becomes the same labelled fallback", async ({
   await expect(panel.getByRole("button")).toHaveCount(1);
 });
 
-const REFRESH_LABELS: [string | null, string | null, RegExp | null][] = [
-  ["background", null, /Refreshing in background/],
-  ["refreshed", null, /Refreshed just now/],
-  ["timeout", null, /Refresh timed out — showing cached/],
-  ["busy", null, /Refresh busy — showing cached/],
-  ["backoff", null, /Source backing off — showing cached/],
-  [
-    "failed",
-    "2026-01-02T03:04:05+00:00",
-    /Last refresh failed at 2026-01-02 03:04 UTC — showing cached/,
-  ],
-  [null, null, null],
+const REFRESH_OUTCOMES: [string | null, string | null][] = [
+  ["background", null],
+  ["refreshed", null],
+  ["timeout", null],
+  ["busy", null],
+  ["backoff", null],
+  ["failed", "2026-01-02T03:04:05+00:00"],
+  [null, null],
 ];
 
-test("each refresh outcome has its own label and never changes the cached price shown", async ({
+test("no refresh outcome adds a label or changes the cached price shown", async ({
   page,
 }) => {
   const ids = seed();
@@ -426,7 +418,7 @@ test("each refresh outcome has its own label and never changes the cached price 
   ]);
   await signIn(page);
   const held = await hold(page, [ids.normal]);
-  for (const [refresh, failedAt, label] of REFRESH_LABELS) {
+  for (const [refresh, failedAt] of REFRESH_OUTCOMES) {
     await page.route("**/api/prices/editions", async (route) => {
       const response = await route.fetch();
       const body = await response.json();
@@ -436,8 +428,8 @@ test("each refresh outcome has its own label and never changes the cached price 
       }
       await route.fulfill({ response, json: body });
     });
-    // The full price sentence, refresh label included, is in the inspector (a tile shows one short line, and Prices
-    // stays off so only the inspector asks). The inspector sits beside the gallery on a wide desktop window.
+    // The inspector shows the amount alone whatever the refresh did (Prices stays off so only the inspector asks). The
+    // inspector sits beside the gallery on a wide desktop window.
     await page.setViewportSize({ width: 1600, height: 900 });
     await page.goto(`${ORIGIN}/collection?location=${held}`);
     await page
@@ -448,10 +440,7 @@ test("each refresh outcome has its own label and never changes the cached price 
     const slot = page
       .getByRole("complementary", { name: "Card details" })
       .locator(".edition-price");
-    await expect(slot).toContainText("$0.25");
-    if (label) await expect(slot).toContainText(label);
-    else await expect(slot.locator(".price-refresh")).toHaveCount(0);
-    await expect(slot).not.toContainText("$0.00");
+    await expect(slot).toHaveText("$0.25");
     await expect(slot.getByRole("button")).toHaveCount(0);
     await page.unroute("**/api/prices/editions");
   }

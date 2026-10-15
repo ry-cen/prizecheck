@@ -89,7 +89,7 @@ export function EditionTile({
       <span aria-hidden="true" className={`${ART} ${QUEUED_ART} relative`}>
         <EditionArt imageUrl={imageUrl} dark={owned <= 0} />
         {owned > 0 && (
-          <span className="pointer-events-none absolute right-1 top-1 box-border flex h-5 min-w-5 items-center justify-center rounded-round border-2 border-solid border-bg bg-accent px-1 text-caption font-semibold leading-none text-on-accent tabular-nums">
+          <span className="pointer-events-none absolute right-1 bottom-1 box-border flex h-5 min-w-5 items-center justify-center rounded-round border-2 border-solid border-bg bg-accent px-1 text-caption font-semibold leading-none text-on-accent tabular-nums">
             {badge ?? `×${owned}`}
           </span>
         )}

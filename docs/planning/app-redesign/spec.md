@@ -153,9 +153,9 @@ The redesign is a **launch gate**: nobody besides the owner uses PrizeCheck unti
 74. As a collector, I want Catalog to show one tile per Card Edition, the same tile as Collection and the library, with set, number, Variant, price and an owned badge, and unowned Editions darkened, so that it looks like the rest of the app.
 75. As a collector, I want one search box where "PAL 185" or "svi 191" searches by set and collector number and anything else by name, with a hint showing which, so that I can type what's on the card.
 76. As a collector, I want format and type chips, a set picker and an Owned only chip in one row under the search box, so that filters stay in one place.
-77. As a collector, I want the status line ("N Printings · last pulled …", "changed, refreshed", and "unavailable until the first import"), so that I know how fresh the catalog is.
-78. As a collector, I want tapping a tile to open the card popup with ‹ N / M ›, the art, the Printing details, the source, legality pills, the Editions with owned counts and prices, and where my copies are, so that one popup answers everything.
-79. As a collector, I want the popup's Collection row (Location, − N +, Add N) and Deck List row (Deck, Plan 1), so that I can add a card where I need it.
+77. As a collector, I want the status line ("N Printings", "changed, refreshed", and "unavailable until the first import"), so that I know what the catalog holds.
+78. As a collector, I want tapping a tile to open the card popup with ‹ N / M ›, the art, the Printing details, legality pills, the Editions with owned counts and prices, and where my copies are, so that one popup answers everything.
+79. As a collector, I want the popup's Collection row (Location, − N +, Add N), so that I can add a card where I need it.
 80. As a collector, I want Report links (this Edition, Printing metadata, a missing Edition) in a quiet footer, and My reports at the foot of the page, so that reporting stays available but out of the way.
 81. As a collector entering a stack of cards, I want a Browse / Add switch in the page header, so that I can switch to adding.
 82. As a collector in Add mode, I want a + on every tile that becomes a −/N/+ stepper, with queued tiles outlined, so that I can queue many cards quickly.
@@ -298,9 +298,9 @@ From [Prototype the app shell and navigation](wayfinder/resolutions/decide-app-s
   - the PrizeCheck wordmark, then tabs: Collection, Decks, Catalog, Missing cards;
   - an avatar menu on the right with the email, Sign-ins, Owner controls (owner only) and Sign out;
   - the avatar shows the provider picture, or the first letter of the email ([OAuth spec](https://github.com/ry-cen/prizecheck/issues/147)).
-- **Side content and page headers.** A page with side content shows it in a left sidebar on desktop and a ☰ left drawer on phones. Collection's is the Location tree. Decks and Catalog have none. Each page has a page header with the title on the left and actions on the right.
+- **Side content and page headers.** A page with side content shows it in a left sidebar on desktop and a ☰ left drawer on phones. Collection's is the Location tree. Decks and Catalog have none. Each page has a page header with the title on the left and actions on the right; on a phone the actions sit on their own row under the title, left-aligned.
 - **Phone:**
-  - a slim top header with ☰ (or the wordmark), the page title and the page's header controls (Collection: Search, and Filters & display);
+  - a slim top header with ☰ (or the wordmark) and the page's header controls (Collection: Search, and Filters & display); the page title is the page header's h1 below it, not repeated here;
   - a bottom tab bar with Collection, Decks, Catalog and More. More opens a sheet with Missing cards, Sign-ins, Owner controls (owner only) and Sign out;
   - Collection's Actions strip and Undo toast sit above the tab bar.
 - **Pages keep their state.** Pages stay mounted when you leave them, keeping state, scroll and data, and return without placeholders or size changes. This covers [Workspace flashes gray placeholder tiles and jumps in size on every Location switch](https://github.com/ry-cen/prizecheck/issues/121). A reload or new visit starts fresh, which reverses the workspace's "leaving clears the selection" rule for tab switches only.
@@ -405,17 +405,18 @@ From [Prototype Catalog search in the shell](wayfinder/resolutions/decide-catalo
   - one SearchField. A query that starts with a known set id followed by a number is a set and collector number search; anything else is a name search;
   - a hint names the mode.
 - **Filters** sit in one row under the search box: format and type chips in a scrolling row that fades at its edge, a set picker styled as a chip, and an Owned only chip.
-- **Status line:** "N Printings · last pulled …", plus today's "changed, refreshed" and "unavailable until the first import" handling.
+- **Status line:** "N Printings", plus today's "changed, refreshed" and "unavailable until the first import" handling.
 - **CardPopup (Browse):**
   - ‹ N / M › beside ✕, with ← → stepping;
-  - the art, with the note that artwork doesn't prove an Edition's finish;
+  - the art;
   - set name, ID and number, and regulation mark;
   - the Card Identity when it differs from the name;
-  - the source (TCGdex, or owner-reviewed with evidence);
+  - an owner-reviewed note, with its evidence, on a manual record only;
   - legality pills for each Format;
   - an Edition picker, each Edition with Variant, owned count and price, plus owner-reviewed and unavailable badges;
+  - a price is the amount alone, or a short state ("Checking prices…", "Price check timed out", "Price unavailable"): no source, price age, last check, refresh state or reason, here or anywhere a collector sees a price;
   - where your copies are;
-  - the Add rows: Collection | Location | − N + | **Add N**, and Deck List | Deck | **Plan 1**;
+  - the Add row: Collection | Location | − N + | **Add N** (Deck Lists are planned in the deck builder, not here);
   - a quiet footer: "Report: this Edition · Printing metadata · a missing Edition". My reports sits at the foot of the page.
 - **Add mode:**
   - a **Browse / Add to a Location** Segmented in the page header;
@@ -749,7 +750,7 @@ Each page and the shell get specs against the per-worker stacks. Prior art: `wor
   - smart search modes;
   - filters, including an unknown-standing card kept with "?";
   - popup stepping;
-  - Add to Collection and Plan 1;
+  - Add to Collection;
   - Add mode queue, Add N cards and Undo;
   - the status line states.
 - **Published Deck and Discover:**

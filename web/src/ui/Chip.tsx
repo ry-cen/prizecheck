@@ -42,7 +42,7 @@ export function Chip({ selected, onChange, disabled, children }: Props) {
 }
 
 /**
- * A chip that opens a picker (Catalog's set picker, #173): drawn and sized like Chip, with a ▾. It is not a
+ * A chip that opens a picker (Catalog's set picker, #173): drawn and sized like Chip, with a chevron. It is not a
  * toggle; it shows the selected look while a value is chosen (`active`) and says it opens a dialog.
  */
 export function PickerChip({
