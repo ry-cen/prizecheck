@@ -8,8 +8,8 @@ import { OwnerControlsPage } from "./owner/OwnerControlsPage";
 import { ownerSection, ownerSectionPath } from "./owner/sections";
 import { Workspace } from "./workspace/Workspace";
 import { MissingCardsPage } from "./reports/MissingCardsPage";
+import { SettingsPage } from "./settings/SettingsPage";
 import { Shell } from "./shell/Shell";
-import { SignInsPage } from "./shell/SignInsPage";
 import {
   canonicalPath,
   DEFAULT_PATH,
@@ -116,9 +116,9 @@ function App() {
       navigate(pageDef(page).path, { replace: true });
   }, [signedIn, isPublic, def, page, navigate]);
   // A failure code in the address belongs to the sign-in page: signed in, it is never shown, only removed. The
-  // Sign-ins page reads and removes its own.
+  // Settings page's Sign-ins section reads and removes its own.
   useEffect(() => {
-    if (signedIn && page !== "sign-ins" && failureInAddress())
+    if (signedIn && page !== "settings" && failureInAddress())
       clearFailureFromAddress();
   }, [signedIn, page]);
 
@@ -277,8 +277,8 @@ function App() {
             onMessage={setMessage}
           />
         );
-      case "sign-ins":
-        return <SignInsPage email={accountEmail} />;
+      case "settings":
+        return <SettingsPage email={accountEmail} />;
     }
   }
   return (
@@ -307,8 +307,9 @@ function App() {
   );
 }
 
-// Old addresses for Collection (/, /workspace, /locations) are rewritten before anything renders, keeping
-// the query, so /workspace?location=<id> still opens that Location.
+// Old addresses (/, /workspace and /locations for Collection, /settings/sign-ins for Settings) are rewritten before
+// anything renders, keeping the query, so /workspace?location=<id> still opens that Location and a sign-in link
+// failure returned to /settings/sign-ins still reaches the Sign-ins section.
 if (canonicalPath(location.pathname) !== location.pathname)
   history.replaceState(
     null,
