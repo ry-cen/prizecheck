@@ -21,7 +21,7 @@ export function SwapHint({
   return (
     <div className="col-span-full flex flex-wrap items-center gap-x-3 gap-y-2 rounded-control border border-accent-border bg-accent-wash px-3 py-2">
       <p className="m-0 min-w-0 flex-1 text-meta wrap-anywhere">
-        {swapHintText(hint)}
+        <span aria-hidden="true">↻</span> {swapHintText(hint)}
       </p>
       <Button
         aria-label={swapLabel(line, hint)}
