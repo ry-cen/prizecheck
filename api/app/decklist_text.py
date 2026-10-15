@@ -11,6 +11,9 @@ Normalising, per line:
   as spaces;
 - NFC normalisation; trailing spaces are dropped;
 - a curly apostrophe (U+2019, U+2018) reads as ``'``;
+- ``normalise`` is the zero-width, no-break space, NFC and apostrophe steps, without stripping; Collection Import reads
+  every cell of an uploaded file through it too (``collection_import_reader.normalise_cell``). A line's display text
+  (``_display``) keeps curly apostrophes;
 - an optional ``* `` bullet (TCG Online) is dropped;
 - TCG Online's empty-set Energy line (``20 Water Energy  12``: two spaces before the number) is recognised before
   repeated spaces collapse, because collapsed it would read like the ``Energy N`` pseudo-set.
@@ -95,10 +98,22 @@ class Reading:
     ignored: tuple[IgnoredLine, ...]
 
 
+def _clean(raw: str) -> str:
+    """Invisible characters removed, no-break spaces as spaces, NFC."""
+    return unicodedata.normalize('NFC', raw.translate(_INVISIBLE).translate(_SPACES))
+
+
+def normalise(text: str) -> str:
+    """Text as decklist import reads it: zero-width characters (U+200B, U+200C, U+200D, U+2060, U+FEFF) removed,
+    no-break spaces (U+00A0, U+202F) as spaces, NFC, and curly apostrophes (U+2019, U+2018) as ``'``. Nothing is
+    stripped. Collection Import reads every cell through it (collection_import_reader.normalise_cell)."""
+    return _clean(text).translate(_APOSTROPHES)
+
+
 def _display(raw: str) -> str:
     """The line as the review shows it: invisible characters removed, no-break spaces as spaces, NFC, no trailing
     spaces. A bullet, doubled spaces, curly apostrophes and PH are kept, as pasted."""
-    return unicodedata.normalize('NFC', raw.translate(_INVISIBLE).translate(_SPACES)).rstrip()
+    return _clean(raw).rstrip()
 
 
 def _card(number: int, display: str, work: str, section: Section | None) -> CardLine | None:
@@ -132,7 +147,7 @@ def read(text: str) -> Reading:
     section: Section | None = None
     for number, raw in enumerate(_LINE_BREAK.split(text), 1):
         display = _display(raw)
-        work = display.strip().translate(_APOSTROPHES)
+        work = normalise(raw).strip()
         if not work:
             continue
         if work.startswith('* '):
