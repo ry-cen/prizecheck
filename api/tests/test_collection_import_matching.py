@@ -319,9 +319,10 @@ def test_dragon_shield_and_sorted_codes_go_first_and_other_trackers_codes_are_ne
     assert outcomes(owner, summary) == [("matched", "sv03.5-132"), ("matched", "sv01-013")]
     owner, _, summary = imported(SORTED, sorted_row("Sprigatito", "SVI", "Scarlet and Violet Base", "013"))
     assert outcomes(owner, summary) == [("matched", "sv01-013")]
-    # The TCGplayer app's codes are its own: BS with a set name nothing knows is not Base Set.
+    # The TCGplayer app's codes are its own: BS with a set name nothing knows is not Base Set, so the row is Pick one
+    # by its name (#229), never matched.
     owner, _, summary = imported(TCGPLAYER, tcgplayer("Starmie", "Base Set Mystery Edition", "064/102", code="BS"))
-    assert outcomes(owner, summary) == [("not_found", None)]
+    assert outcomes(owner, summary) == [("ambiguous", None)] and candidates(summary) == [["base1-64"]]
 
 
 def test_two_sets_of_one_name_ask_the_collector_with_both_cards_as_candidates():

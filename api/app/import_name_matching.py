@@ -33,6 +33,42 @@ from .import_match_core import ACTIVE, NEWEST_COLUMNS, RELEASE_JOINS, Match, new
 NAME_SUFFIXES = frozenset({'EX', 'GX', 'VMAX', 'VSTAR', 'VUNION', 'BREAK', 'LEGEND', 'PRIME', 'FB', 'GL'})
 
 
+# Every active Printing of the generation whose name matches each query name, by the query's own key: q(key,name).
+NAMED = f"""WITH q AS (
+    SELECT q.key,replace(catalog_search_words(q.name),' ','') AS name_key
+    FROM unnest(%s::int[],%s::text[]) AS q(key,name)),
+  names AS (
+    SELECT gp.printing_id,gp.search_key AS name_key FROM catalog_generation_printing gp
+      WHERE gp.generation_id=%s AND NOT gp.tombstoned AND gp.search_key IN (SELECT name_key FROM q WHERE name_key<>'')
+    UNION
+    SELECT gp.printing_id,replace(catalog_search_words(catalog_card_identity_key(gp.display_name)),' ','')
+      FROM catalog_generation_printing gp
+      WHERE gp.generation_id=%s AND NOT gp.tombstoned AND gp.display_name LIKE '%%(%%'
+        -- The base name's key is a prefix of the whole name's key, so this cheap test keeps every candidate and
+        -- spares the identity-key and normalisation work on the rest.
+        AND EXISTS (SELECT 1 FROM q WHERE name_key<>'' AND starts_with(gp.search_key,q.name_key)))
+  SELECT DISTINCT q.key,gp.printing_id,g.group_id,{NEWEST_COLUMNS}
+  FROM q JOIN names n ON n.name_key=q.name_key AND q.name_key<>''
+  JOIN catalog_generation_printing gp ON gp.generation_id=%s AND gp.printing_id=n.printing_id
+  LEFT JOIN catalog_reprint_group_member g ON g.printing_id=gp.printing_id
+  {RELEASE_JOINS}
+  WHERE {ACTIVE}"""
+
+
+def named_printings(conn, generation: UUID, wanted: list[tuple[int, str]]) -> dict[int, list]:
+    """(key, name) pairs -> each key's active Printings whose names match (the module docstring's comparison), newest
+    first, as rows with printing_id, group_id (None outside any Reprint Group), set_id and the newest-first columns. A
+    key nothing matches is left out. Collection Import's name step reads it too (``collection_import_matcher``)."""
+    if not wanted:
+        return {}
+    rows = conn.execute(NAMED, ([key for key, _ in wanted], [name for _, name in wanted], generation, generation,
+                                generation, *release_params())).fetchall()
+    found: dict[int, list] = {}
+    for row in sorted(rows, key=newest_first):
+        found.setdefault(row['key'], []).append(row)
+    return found
+
+
 def by_name(conn, generation: UUID, lines: list[CardLine]) -> dict[int, Match]:
     answers: dict[int, Match] = {}
     named: list[CardLine] = []
@@ -43,35 +79,13 @@ def by_name(conn, generation: UUID, lines: list[CardLine]) -> dict[int, Match]:
             answers[line.line] = Match('unreadable')
             continue
         named.append(line)
-    if not named:
-        return answers
-    rows = conn.execute(f"""WITH q AS (
-        SELECT q.line,replace(catalog_search_words(q.name),' ','') AS key FROM unnest(%s::int[],%s::text[]) AS q(line,name)),
-      names AS (
-        SELECT gp.printing_id,gp.search_key AS key FROM catalog_generation_printing gp
-          WHERE gp.generation_id=%s AND NOT gp.tombstoned AND gp.search_key IN (SELECT key FROM q WHERE key<>'')
-        UNION
-        SELECT gp.printing_id,replace(catalog_search_words(catalog_card_identity_key(gp.display_name)),' ','')
-          FROM catalog_generation_printing gp
-          WHERE gp.generation_id=%s AND NOT gp.tombstoned AND gp.display_name LIKE '%%(%%'
-            -- The base name's key is a prefix of the whole name's key, so this cheap test keeps every candidate and
-            -- spares the identity-key and normalisation work on the rest.
-            AND EXISTS (SELECT 1 FROM q WHERE key<>'' AND starts_with(gp.search_key,q.key)))
-      SELECT DISTINCT q.line,gp.printing_id,g.group_id,{NEWEST_COLUMNS}
-      FROM q JOIN names n ON n.key=q.key AND q.key<>''
-      JOIN catalog_generation_printing gp ON gp.generation_id=%s AND gp.printing_id=n.printing_id
-      LEFT JOIN catalog_reprint_group_member g ON g.printing_id=gp.printing_id
-      {RELEASE_JOINS}
-      WHERE {ACTIVE}""",
-                        ([line.line for line in named], [line.name for line in named], generation, generation,
-                         generation, *release_params())).fetchall()
-    groups: dict[int, dict[tuple, dict]] = {}
-    for row in sorted(rows, key=newest_first):
-        # An ungrouped Printing is a card of its own.
-        group = ('group', row['group_id']) if row['group_id'] is not None else ('printing', row['printing_id'])
-        groups.setdefault(row['line'], {}).setdefault(group, row)   # rows are newest first: keep each group's first
-    for line, newest in groups.items():
-        printings = [row['printing_id'] for row in sorted(newest.values(), key=newest_first)]
+    for line, rows in named_printings(conn, generation, [(line.line, line.name) for line in named]).items():
+        newest: dict[tuple, dict] = {}
+        for row in rows:
+            # An ungrouped Printing is a card of its own. Rows are newest first: keep each group's first.
+            group = ('group', row['group_id']) if row['group_id'] is not None else ('printing', row['printing_id'])
+            newest.setdefault(group, row)
+        printings = [row['printing_id'] for row in newest.values()]
         answers[line] = (Match('by_name', printing_id=printings[0]) if len(printings) == 1
                          else Match('ambiguous', candidates=tuple(printings)))
     return answers
