@@ -58,9 +58,8 @@ export function ExportDialog({
     setScope(start.scope);
   }, [start]);
 
-  const notOwned = detail.ownership
-    .reduce((total, line) => total + BigInt(line.not_owned), 0n)
-    .toString();
+  // The copies the Deck List still needs under the Want List counting setting (#208): what the not-owned scope sends.
+  const toGet = detail.to_get;
   const listChecks = detail.deck_list_checks;
   const revisions = {
     deckId: detail.deck.id,
@@ -102,7 +101,7 @@ export function ExportDialog({
               checked={scope === "not_owned"}
               onChange={() => setScope("not_owned")}
             />
-            Cards you don't own ({notOwned})
+            Cards you don't own ({toGet})
           </label>
           <label className={RADIO_ROW}>
             <input
@@ -136,10 +135,11 @@ export function ExportDialog({
             key="not_owned"
             {...revisions}
             scope="not_owned"
+            settingsRevision={detail.settings_revision}
             // Only the copies to buy: no size warning, and empty when every card is owned.
             checks={{
               ...listChecks,
-              total: notOwned,
+              total: toGet,
               size_status: "complete",
               shortage: "0",
               excess: "0",
