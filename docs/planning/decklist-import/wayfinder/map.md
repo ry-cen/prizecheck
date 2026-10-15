@@ -24,10 +24,11 @@ An agreed plan, ready for owner-invoked `/to-spec` and `/to-ticket`, for pasting
 - [Decide the import and Want List behaviour](https://github.com/ry-cen/prizecheck/issues/198): import creates a new Deck or replaces a Deck's list (drops go to Surplus) through a review step that must resolve every line; an **Exact printings** / **Use cards I own** setting decides whether owned copies in the Reprint Group are used first; Copy to my Decks reuses it for Published Decks. The Want List is derived only, grouped by Deck with a priced total, counts exact Editions with a Swap hint, and has an **Every Deck built at once** / **One Deck at a time** setting. [Resolution](resolutions/decide-import-and-want-list-behaviour.md)
 - [Research decklist text formats](https://github.com/ry-cen/prizecheck/issues/199): TCG Live headers count lines and Limitless headers count cards, so the parser treats headers as section breaks only and counts lines itself. Limitless rewrites promos (`PR-SV`), galleries (`CRZ-GG 25`) and older Basic Energy (`Energy 31`). No paste carries a format marker, so a Target Format can only be inferred. Nine fixtures; Live's `PH`/`SVALT` and line endings are unconfirmed. [Findings](research/decklist-text-formats.md)
 - [Research how set codes map to the catalog](https://github.com/ry-cen/prizecheck/issues/200): the catalog keeps only TCGdex set IDs and `localId`; today's search resolves 18,615 of 20,639 Limitless code and number pairs, and a checked-in import-alias table on top of `api/app/set_codes.tsv` would reach 3,031 of 3,037 non-Energy Standard Printings. ALT IDs, letter-suffix prints, unimported new cards and manual Printings still fail; a name alone picks one Reprint Group for every Standard Trainer but only half of Pokémon. [Findings](research/set-code-mapping.md)
+- [Prototype the Want List page](https://github.com/ry-cen/prizecheck/issues/201): the Want List is a My Decks / Want List view inside Decks, and a Deck card opens it scoped to that Deck; **Buy on TCGplayer** exports what is showing under the counting setting; Swap splits a line; the deck builder's "to complete" and Buy missing now follow the counting setting. [Resolution](resolutions/prototype-want-list.md)
 
 ## Not yet specified
 
-- Exporting the Want List total as Mass Entry, and its place in navigation (likely settled by the Want List prototype).
+<!-- Nothing is waiting in the fog: every open question is a ticket. -->
 
 ## Out of scope
 

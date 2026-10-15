@@ -45,7 +45,7 @@ How should the Want List page look and behave?
   A Deck that needs nothing collapses to "✓ Nothing to get". An **Open Deck ›** link goes to the deck builder.
 - **Combined total.** On desktop it is a sticky right-hand panel. On a phone it is a collapsed row under the summary. Each card appears once with its total, and a "Charizard ex 1 · Gardevoir ex 2" line shows which Decks need it.
 - **Swap hint.** A line can say "↻ You own a playable version (PAL 254) × 1" with **Swap 1 into this Deck List**. Swap moves that many copies of the line onto a line for the owned Edition, in the same Deck List. Every count and the total update, and an Undo toast appears.
-- **Builder difference note.** Under Every Deck built at once, a Deck's need can be larger than the deck builder's "to complete" figure. The builder counts copies sleeved in other Decks as yours. When the two differ, the section says so.
+- **Deck builder figure.** The first version noted when a Deck's need was larger than the deck builder's "to complete", which counted copies sleeved in other Decks as yours. After the owner's verdict, the builder's figure follows the counting setting, so the note is gone and the Decks index shows one number.
 - **Export dialog.** **Buy on TCGplayer** opens a dialog that follows the current counting setting. It uses the existing Mass Entry coverage wording and has **Open TCGplayer Mass Entry** (a stub).
 
 ## Variants: where the Want List lives
@@ -53,7 +53,7 @@ How should the Want List page look and behave?
 - **A — Its own tab.**
   - **Desktop:** a **Want List** tab sits between Decks and Catalog, with a count badge.
   - **Phone:** Want List takes a bottom-bar slot, and Catalog moves into More.
-- **B — A view inside Decks.** The Decks tab has a **My Decks / Want List** switch. Each Deck card on My Decks has a "Want List: 6 cards · $13.90" button that opens the Want List view.
+- **B — A view inside Decks.** The Decks tab has a **My Decks / Want List** switch, which opens **All Decks**. Each Deck card on My Decks has a "Want List: 6 cards · $13.90" button that opens the Want List scoped to that Deck. The heading, summary, cost and export then cover only that Deck. Deck chips switch the scope. Scoping was added after the owner's first reaction.
 - **C — Reached from Decks and from each Deck.**
   - **Decks index:** a gold banner ("Want List · 14 cards to get · $19.30 — Open Want List ›") opens the page.
   - **Each Deck:** the Deck card and the Deck's own page link to the page, filtered to that Deck.
@@ -78,6 +78,15 @@ These are prototype choices, marked in the UI, not decisions:
 - A Swap hint appears only for spare copies that no Deck has counted, never for copies sleeved in another Deck.
 - Swap moves only as many copies as are both needed and owned spare. It changes part of a line and does not re-point the whole line.
 
+## Owner verdict — 2026-10-14
+
+1. **Variant B.** The Want List is a view inside Decks, and a Deck card opens it scoped to that Deck.
+2. **Export.** **Buy on TCGplayer** exports what is showing: the combined total under All Decks, or one Deck's needs. It follows the counting setting.
+3. **Deck builder.** Its "to complete" and **Buy missing** follow the Want List counting setting, so they always agree with the Want List.
+4. **Swap.** Swap splits the line, moving only the copies you own spare.
+5. **Combined total.** It stays a sticky right-hand column on desktop and a collapsed row on phones.
+6. **Not taken forward.** Variants A and C. The full decision is in [the Want List page resolution](../../resolutions/prototype-want-list.md).
+
 ## Checks — 2026-10-14
 
 - **Desktop, 1280×800:**
@@ -91,4 +100,5 @@ These are prototype choices, marked in the UI, not decisions:
   - The Deck header stacks.
   - Swap buttons are full width at 36 px.
   - The phone frame toggle renders the same layout inside a desktop window.
+- **Scoped view (variant B):** Gardevoir ex's card opened a view with only its section. It showed 8 cards / $5.40, no total column, and an export dialog titled "Buy what Gardevoir ex needs". All Decks returned to 14 cards.
 - **Not verified:** real touch, screen readers, and focus handling in the dialog.
