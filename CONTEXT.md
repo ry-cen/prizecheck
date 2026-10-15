@@ -127,3 +127,47 @@ _Avoid_: Priced Editions count, price accuracy
 **Marketplace Mapping**:
 A proposed or verified correspondence between a Card Edition and a marketplace product, including the relevant physical finish. It supports pricing and marketplace exports without defining the Card Edition's physical identity.
 _Avoid_: Card Edition ID, physical equivalence
+
+**Friend**:
+Another collector with whom a collector has a mutual, accepted friendship. Friends can see each other's Collection, apart from Hidden Locations, and can lend each other cards. Either side can end the friendship at any time.
+_Avoid_: Follower, contact, connection
+
+**Friend Request**:
+One collector's invitation to another to become Friends. The friendship starts only when the other collector accepts.
+_Avoid_: Follow, add
+
+**Handle**:
+The unique name another collector types, exactly, to send a Friend Request. It is not a public profile: it is not searchable by partial match and does not appear on Published Decks.
+_Avoid_: Username, profile, display name
+
+**Invite Link**:
+A collector's personal link, shared outside the app, through which someone can send them a Friend Request without knowing their Handle.
+_Avoid_: Referral link, share link
+
+**Block**:
+A collector's choice to end any friendship with another collector and stop that collector from finding them by Handle, using their Invite Link or sending them Friend Requests.
+_Avoid_: Mute, report
+
+**Hidden Location**:
+A Location whose Holdings a collector's Friends cannot see. Friends never see Location or Deck names, hidden or not.
+_Avoid_: Private Location, locked binder
+
+**Loan**:
+An agreement for one collector, the lender, to let a Friend, the borrower, have some of the lender's copies. A Loan is accepted (reserving the lender's copies), then handed over, then returned, with both sides confirming the handover and the return. It may carry a return-by date and is overdue after it. The lender still owns lent copies. A Loan never transfers ownership; giving or trading cards is not a Loan.
+_Avoid_: Trade, gift, transfer
+
+**Borrow Request**:
+A borrower's proposal of a Loan: one or more Card Edition lines with quantities, from one Friend, optionally for one of the borrower's Decks. The lender may accept some lines and decline others.
+_Avoid_: Card request, ask
+
+**Lend Offer**:
+A lender's proposal of a Loan to a Friend, with the same lines a Borrow Request would have. The borrower accepts or declines it.
+_Avoid_: Loan offer, gift
+
+**Borrowed Copy**:
+A copy, held by the borrower, that a Friend has lent and handed over. It can sit in the borrower's Deck and fill its Deck List, but it is never part of the borrower's Collection and leaves when the Loan is returned or written off.
+_Avoid_: Owned copy, temporary Holding
+
+**Write-off**:
+The lender closing a handed-over Loan as not coming back. The lent copies leave the lender's Collection as an Inventory Removal, and the Borrowed Copies leave the borrower.
+_Avoid_: Lost card, gift
