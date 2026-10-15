@@ -1,8 +1,10 @@
-"""Collection Import (#226; spec "Collection import from other trackers", ADR 0014): a collector's file becomes an
+"""Collection Import (#226, #227; spec "Collection import from other trackers", ADR 0014): a collector's file becomes an
 import draft on the server, which they review and then save into one Storage Leaf in one step.
 
-- POST /api/collection-imports?location_id=<Storage Leaf> takes the file's bytes as the request body (no multipart).
-  It reads the file (collection_import_reader), matches every row (collection_import_matcher) and stores the draft,
+- POST /api/collection-imports?location_id=<Storage Leaf> takes the file's bytes as the request body (no multipart): a
+  CSV, TSV or TXT export from any supported tracker or with name-like columns, or a zip holding one such file, told
+  apart by its bytes, not its content type. It reads the file (collection_import_reader), matches every row
+  (collection_import_matcher) and stores the draft with the detected source (for matching only) and each row's group,
   replacing the collector's open draft: one open draft per collector. A saved draft stays, without rows, as the
   receipt that answers a repeated save for 24 hours; starting an import also deletes this collector's expired ones.
   A draft is not inventory, so starting one doesn't advance the owner revision.
@@ -13,7 +15,8 @@ import draft on the server, which they review and then save into one Storage Lea
   increment per Card Edition, in one transaction and one owner revision, then deletes the draft's rows. It records no
   Inventory Undo. A repeated key, or a second save of a saved draft, answers the stored result without writing.
 
-Responses carry no raw source text, prices, marketplace IDs or source names: the UI must not show them. Nothing here
+Responses carry no raw source text, prices, marketplace IDs or the detected source: the UI must not show them. The one
+response that names trackers is IMPORT_UNREADABLE's message, the list of trackers whose files are read. Nothing here
 reads or refreshes prices or starts a catalog pull. The gateway still caps request bodies (deferred follow-up); this
 API enforces MAX_IMPORT_BYTES and MAX_IMPORT_ROWS itself.
 """
@@ -37,6 +40,15 @@ PAGE_SIZE = 100
 SPLIT_MESSAGES = {
     "IMPORT_TOO_LARGE": "This file is larger than 5 MB. Split it into two files and import each one.",
     "IMPORT_TOO_MANY_ROWS": "This file has more than 10,000 rows. Split it into two files and import each one.",
+}
+# A start refusal's message, by code. IMPORT_UNREADABLE lists the trackers whose exports are read (the web shows its own
+# copy and opens its export steps instead).
+REFUSAL_MESSAGES = {
+    **SPLIT_MESSAGES,
+    "IMPORT_UNREADABLE": "PrizeCheck can't read this file. It reads CSV exports from the TCGplayer app, Collectr, "
+                         "PriceCharting, TCG Collector, Dragon Shield and Sorted, and CSV files with columns for each "
+                         "card's set and its number or name.",
+    "IMPORT_BAD_ZIP": "PrizeCheck can't read this zip file. It must hold one CSV, TSV or TXT file, with no password.",
 }
 READY_ROW = matcher.READY_ROW.format(r="r")
 NEEDS_YOU_ROW = matcher.NEEDS_YOU_ROW.format(r="r")
@@ -161,7 +173,7 @@ def start_import(location_id: UUID = Query(), body: bytes = Depends(import_body)
         try:
             source = reader.read(body)
         except reader.ImportRefused as refused:
-            refuse(422, refused.code, message=SPLIT_MESSAGES.get(refused.code))
+            refuse(422, refused.code, message=REFUSAL_MESSAGES.get(refused.code))
         with connect() as conn:
             catalog = conn.execute("SELECT active_generation,revision FROM catalog_state WHERE singleton").fetchone()
             if catalog is None or catalog["active_generation"] is None:
@@ -180,10 +192,11 @@ def start_import(location_id: UUID = Query(), body: bytes = Depends(import_body)
                          (import_id, user_id, location_id, source.source, json.dumps(source.header),
                           catalog["revision"]))
             with conn.cursor().copy("""COPY collection_import_row
-                (import_id,row_number,raw_text,parsed,quantity,status,printing_id,edition_id) FROM STDIN""") as copy:
+                (import_id,row_number,group_name,raw_text,parsed,quantity,status,printing_id,edition_id)
+                FROM STDIN""") as copy:
                 for row, found in zip(source.rows, matches):
-                    copy.write_row((import_id, row.row_number, row.raw_text, json.dumps(row.fields), found.quantity,
-                                    found.status, found.printing_id, found.edition_id))
+                    copy.write_row((import_id, row.row_number, row.group, row.raw_text, json.dumps(row.fields),
+                                    found.quantity, found.status, found.printing_id, found.edition_id))
             return summary(conn, user_id, import_id)
     except psycopg.Error:
         refuse(503, "INVENTORY_TEMPORARILY_UNAVAILABLE")

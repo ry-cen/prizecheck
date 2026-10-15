@@ -3,8 +3,11 @@
 // cards in, Unsorted by default), then Review import. The review is one list with Needs you and All, opening on Needs
 // you when a row doesn't match; nothing can be added while a row needs the collector. Add N cards to <Location> adds
 // every copy in one step and lands on that Location with a toast and no Undo. Checked at 1280×800 and 375×812 (no
-// horizontal scroll, 44 px controls). The files are small reconstructions of the TCGplayer app export, under the
-// gateway's present 16 KiB body limit; the catalog is api/tests/test_collection_import.py seed_import_catalog.
+// horizontal scroll, 44 px controls). Ticket #227: How do I export from my tracker? holds each tracker's steps, the
+// only place the UI names a tracker; a file PrizeCheck can't read opens it, and a Collectr export is read without the
+// collector saying where it came from. The files are small UTF-8 reconstructions of tracker exports, under the
+// gateway's present 16 KiB body limit (zips and Windows-1252 are covered by the API tests, which post straight to the
+// API); the catalog is api/tests/test_collection_import.py seed_import_catalog.
 import { test, expect, type Page } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -34,6 +37,22 @@ const CLEAN = [
   "1,Wigglytuff (32),Wigglytuff,Jungle,32/64,JU,Unlimited,Heavily Played,English,Rare,900004,800006,$2.00,$2.00",
   "",
 ].join("\r\n");
+/** Collectr's 16-column export, read without naming it: Starmie matches, and a graded Wigglytuff in another
+ * portfolio does too. 3 cards. */
+const COLLECTR = [
+  "Portfolio Name,Category,Set,Product Name,Card Number,Rarity,Variance,Grade,Card Condition,Average Cost Paid,Quantity,Market Price (As of 2026-08-26),Price Override,Watchlist,Date Added,Notes",
+  "Main,Pokemon,Base Set,Starmie ,064/102,Common,Normal,Ungraded,Near Mint,0,2,0.48,0,false,2026-01-04,",
+  'Trades,Pokemon,Jungle,Wigglytuff,32/64,Rare,Unlimited Holofoil,PSA 10.0,Near Mint,0,1,"1,055.48",0,false,2026-03-05,Slabbed',
+  "",
+].join("\n");
+const TRACKERS = [
+  "TCGplayer",
+  "Collectr",
+  "PriceCharting",
+  "TCG Collector",
+  "Dragon Shield",
+  "Sorted",
+];
 
 function seedImportCatalog() {
   execFileSync(
@@ -126,6 +145,10 @@ const chip = (page: Page, name: RegExp) =>
   page.getByRole("group", { name: "Show rows" }).getByRole("button", { name });
 const notifications = (page: Page) =>
   page.getByRole("region", { name: "Notifications" });
+const exportHelp = (page: Page) =>
+  page.getByRole("button", { name: "How do I export from my tracker?" });
+const exportSteps = (page: Page) =>
+  page.getByRole("list", { name: "Export steps" });
 
 /** Chooses `content` as the file `name` through the file picker that Choose file opens. */
 async function choose(page: Page, name: string, content: string, tap = false) {
@@ -245,6 +268,66 @@ test.describe("desktop", () => {
     await expect(page).toHaveURL(/\/collection$/);
     await expect(heading(page)).toHaveText("All owned");
   });
+
+  test("How do I export from my tracker? lists each tracker's steps, a file PrizeCheck can't read opens it, and a Collectr file is read without naming it", async ({
+    page,
+  }) => {
+    seedImportCatalog();
+    await signIn(page);
+    const unsorted = await unsortedId(page);
+    await page.getByRole("button", { name: "Import…" }).click();
+    await expect(heading(page)).toHaveText("Import your collection");
+    const main = page.locator("#main-content");
+
+    // Collapsed, nothing on the screen names a tracker.
+    await expect(exportHelp(page)).toHaveAttribute("aria-expanded", "false");
+    await expect(exportSteps(page)).toHaveCount(0);
+    for (const tracker of TRACKERS)
+      await expect(main).not.toContainText(tracker);
+    await exportHelp(page).click();
+    await expect(exportHelp(page)).toHaveAttribute("aria-expanded", "true");
+    await expect(exportSteps(page).getByRole("listitem")).toHaveCount(7);
+    for (const tracker of TRACKERS)
+      await expect(exportSteps(page)).toContainText(tracker);
+    await expect(exportSteps(page)).toContainText(
+      "Upload the zip file it emails you as it is."
+    );
+    await expectPageChecks(page, "Collection Import, export steps");
+    await exportHelp(page).click();
+    await expect(exportSteps(page)).toHaveCount(0);
+
+    // A file with no card columns is refused, and the export steps open.
+    await choose(page, "notes.csv", "Item,Cost\nStarmie,1\n");
+    await page.getByRole("button", { name: "Review import" }).click();
+    await expect(main.getByRole("status")).toHaveText(
+      "PrizeCheck can't read this file. Export it again with the steps under How do I export from my tracker?"
+    );
+    await expect(exportHelp(page)).toHaveAttribute("aria-expanded", "true");
+    await expect(exportSteps(page)).toBeVisible();
+
+    // A Collectr export is read as it is, and the review never names it.
+    await choose(page, "collectr.csv", COLLECTR);
+    await page.getByRole("button", { name: "Review import" }).click();
+    await expect(heading(page)).toHaveText("Review import");
+    await expect(chip(page, /^All 2$/)).toHaveAttribute("aria-pressed", "true");
+    const save = page.getByRole("region", { name: "Save" });
+    await expect(save.getByRole("status")).toHaveText(
+      "Ready: 3 cards from 2 rows."
+    );
+    await expect(rowsList(page).getByRole("listitem").first()).toContainText(
+      "2 × Starmie"
+    );
+    for (const hidden of [...TRACKERS, "Portfolio", "PSA", "1,055.48"])
+      await expect(main).not.toContainText(hidden);
+    await save.getByRole("button", { name: "Add 3 cards to Unsorted" }).click();
+    await expect(heading(page)).toHaveText("Unsorted");
+    await expect(notifications(page)).toContainText(
+      "Added 3 cards to Unsorted."
+    );
+    await expect
+      .poll(() => held(page, unsorted))
+      .toEqual(["1 Wigglytuff", "2 Starmie"]);
+  });
 });
 
 test.describe("phone", () => {
@@ -265,6 +348,10 @@ test.describe("phone", () => {
       page.getByRole("combobox", { name: "Put cards in" })
     );
     await expectPageChecks(page, "phone Collection Import, upload");
+    await expectTouchTarget(exportHelp(page));
+    await exportHelp(page).tap();
+    await expect(exportSteps(page).getByRole("listitem")).toHaveCount(7);
+    await expectPageChecks(page, "phone Collection Import, export steps");
     await choose(page, "clean.csv", CLEAN, true);
     await page.getByRole("button", { name: "Review import" }).tap();
     await expect(heading(page)).toHaveText("Review import");

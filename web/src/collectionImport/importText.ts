@@ -1,7 +1,7 @@
 import { CollectionImportError } from "../collection_import_generated";
 
-/* Collection Import copy (#226). It never names the tracker a file came from, and shows no prices, marketplace IDs,
- * fetch times or internal reasons (AGENTS.md "UI copy"). */
+/* Collection Import copy (#226, #227). It never names the tracker a file came from, and shows no prices, marketplace
+ * IDs, fetch times or internal reasons (AGENTS.md "UI copy"). Tracker names appear only in ExportHelp. */
 
 export const SPLIT_LARGE =
   "This file is larger than 5 MB. Split it into two files and import each one.";
@@ -12,7 +12,9 @@ const START: Record<string, string> = {
   IMPORT_TOO_LARGE: SPLIT_LARGE,
   IMPORT_TOO_MANY_ROWS: SPLIT_ROWS,
   IMPORT_UNREADABLE:
-    "PrizeCheck can't read this file. Choose the CSV file your collection app exported.",
+    "PrizeCheck can't read this file. Export it again with the steps under How do I export from my tracker?",
+  IMPORT_BAD_ZIP:
+    "PrizeCheck can't read this file. Choose a CSV, TSV or TXT file, or a zip file holding just one of them with no password.",
   IMPORT_EMPTY: "This file has no cards in it.",
   NOT_STORAGE_LEAF: "Choose another Location to put the cards in.",
   CATALOG_UNAVAILABLE:
