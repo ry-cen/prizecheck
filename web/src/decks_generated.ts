@@ -37,6 +37,20 @@ export type DeleteDeck = { name: string; version: number; idempotency_key: strin
 export type DeleteDeckResult = { deleted_id: string; unsorted_id: string | null; edition_count: number; copy_count: string; owner_revision: number };
 export type DeckListChange = { edition_id: string; quantity: string };
 export type ChangeDeckList = { revision: number; idempotency_key: string; changes: DeckListChange[] };
+export type ImportSource = { text: string };
+export type ImportFix = { line: number; drop?: boolean; printing_id?: string | null; edition_id?: string | null };
+export type ReviewImport = { source: ImportSource; fixes?: ImportFix[] };
+export type ImportPrinting = { printing_id: string; name: string; set_id: string; set_code: string; set_name: string; collector_number: string; image_url: string | null; card_kind: 'pokemon' | 'trainer' | 'energy' | null };
+export type ImportEdition = { edition_id: string; descriptor: Record<string, unknown>; display_price: string | null };
+export type ImportPart = { edition_id: string; quantity: string; source: 'in_deck' | 'elsewhere' | 'new'; chosen_by: 'cheapest_price' | 'catalog_order' | 'collector' | null };
+export type ReviewLine = { line: number; text: string; section: 'pokemon' | 'trainer' | 'energy' | null; quantity: string; name: string; set_code: string | null; number: string | null; ph: boolean; status: 'matched' | 'by_name' | 'energy' | 'picked' | 'ambiguous' | 'not_found' | 'unreadable' | 'dropped'; printing: ImportPrinting | null; candidates: ImportPrinting[]; editions: ImportEdition[]; parts: ImportPart[] };
+export type IgnoredImportLine = { line: number; text: string };
+export type ImportDeckListEntry = { edition_id: string; quantity: string };
+export type ImportTotals = { card_lines: number; cards: string; ignored: number; to_resolve: number };
+export type ImportReview = { lines: ReviewLine[]; ignored: IgnoredImportLine[]; deck_list: ImportDeckListEntry[]; totals: ImportTotals; owner_revision: number; catalog_revision: number };
+export type ImportDeckLine = { edition_id: string; quantity: string };
+export type ImportDeck = { name: string; target_format: string; lines: ImportDeckLine[]; idempotency_key: string };
+export type ImportDeckResult = { deck_id: string; deck_list: DeckList; target_format: 'standard' | 'expanded' | 'glc'; format_checks?: DeckFormatChecks | null; location: TreeNode; owner_revision: number };
 
 export class DeckError extends Error {
   constructor(public status: number, public code: string) { super(code); }
@@ -83,3 +97,7 @@ export const confirmPicks = (deckId: string, body: ConfirmPicks) =>
   request<PickConfirmResult>(`/api/decks/${encodeURIComponent(deckId)}/pick-list/confirm`, 'POST', body);
 export const deleteDeck = (id: string, body: DeleteDeck) =>
   request<DeleteDeckResult>(`/api/decks/${encodeURIComponent(id)}`, 'DELETE', body);
+// Decklist Import (#212): read a pasted list against the catalog (read-only; post again after every fix), then create
+// a Deck with the Editions the review resolved.
+export const reviewImport = (body: ReviewImport) => request<ImportReview>('/api/decks/import/review', 'POST', body);
+export const importDeck = (body: ImportDeck) => request<ImportDeckResult>('/api/decks/import', 'POST', body);

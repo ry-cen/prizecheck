@@ -67,4 +67,5 @@ def test_the_display_table_is_not_the_live_export_table():
     assert LiveRulesV1.SET_CODES == {}
     importers = sorted(path.name for path in APP.glob("*.py")
                        if re.search(r"^from \. import .*\bset_codes\b|^from \.set_codes import", path.read_text(), re.M))
-    assert importers == ["catalog_browse.py"]
+    # The decklist import (#212) reads the printed code table too, to match and show a pasted line; display, not export.
+    assert importers == ["catalog_browse.py", "deck_import.py", "import_matching.py"]
