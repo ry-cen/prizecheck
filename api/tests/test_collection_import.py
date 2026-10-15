@@ -32,6 +32,9 @@ FOURTEEN = (FIXTURES / "tcgplayer-app-14.csv").read_bytes()
 TWELVE = (FIXTURES / "tcgplayer-app-12-crlf.csv").read_bytes()
 HEADER_12 = TWELVE.split(b"\r\n", 1)[0]
 STARMIE_ROW = b"1,Starmie,Starmie,Base Set,064/102,BS,Normal,Near Mint,English,Common,900003,800003\n"
+UNREADABLE_MESSAGE = ("PrizeCheck can't read this file. It reads CSV exports from the TCGplayer app, Collectr, "
+                      "PriceCharting, TCG Collector, Dragon Shield and Sorted, and CSV files with columns for each "
+                      "card's set and its number or name.")
 
 
 def _card(source_id, name, number, set_id, set_name, variants=None, **extra):
@@ -289,12 +292,14 @@ def test_ten_thousand_rows_are_one_import():
 def test_unreadable_empty_and_undecodable_files_and_a_missing_catalog_are_refused():
     seed_import_catalog()
     owner, unsorted = collector()
-    cases = {b"": "IMPORT_UNREADABLE", b"Name,Set\nStarmie,Base Set\n": "IMPORT_UNREADABLE",
-             b"\x81\x8d\x8f\x90\x9d": "IMPORT_UNREADABLE", HEADER_12 + b"\n1,Star\x00mie\n": "IMPORT_UNREADABLE",
-             HEADER_12 + b"\r\n\r\n": "IMPORT_EMPTY"}
+    # #227's loose fallback reads a "Name,Set" file, so an unknown header is now one with no card columns at all, and
+    # IMPORT_UNREADABLE carries the message that lists the trackers whose files are read.
+    unreadable = {"code": "IMPORT_UNREADABLE", "message": UNREADABLE_MESSAGE}
+    cases = {b"": unreadable, b"Item,Cost\nStarmie,1\n": unreadable, b"\x81\x8d\x8f\x90\x9d": unreadable,
+             HEADER_12 + b"\n1,Star\x00mie\n": unreadable, HEADER_12 + b"\r\n\r\n": {"code": "IMPORT_EMPTY"}}
     for data, expected in cases.items():
         response = upload(owner, unsorted, data)
-        assert response.status_code == 422 and response.json()["detail"] == {"code": expected}, (data, response.text)
+        assert response.status_code == 422 and response.json()["detail"] == expected, (data, response.text)
     with connect() as conn:
         conn.execute("UPDATE catalog_state SET active_generation=NULL WHERE singleton")
     response = upload(owner, unsorted, TWELVE)

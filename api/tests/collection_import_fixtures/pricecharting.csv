@@ -1,0 +1,10 @@
+id,product-name,console-name,price-in-pennies,include-string,condition-string,sku,notes,cost-basis-in-pennies,quantity,date-entered,date-purchased,grading-company,grading-cert-id,folder
+5000001,Starmie #64,Pokemon Base Set,48,Ungraded,Normal wear,,,0,1,2026-03-27,,,,Collection
+5000001,Starmie #64,Pokemon Base Set,48,Ungraded,Normal wear,,,0,1,2026-02-22,,,,Hits
+5000002,Wigglytuff [Holo] #32,Pokemon Jungle,211,PSA 10,Normal wear,,,0,1,2026-03-10,2026-03-10,PSA,81234567,Hits
+5000003,Weepinbell #48 [1st Edition],Pokemon Jungle,210,Ungraded,Normal wear,,,0,2,2026-03-10,,,,
+5000004,Dark Golduck [Reverse Holo] #35,Pokemon Team Rocket Returns,1499,Ungraded,Normal wear,,,0,1,2026-03-10,,,,
+5000005,Starmie #64,Pokemon Japanese Base Set,90,Ungraded,Normal wear,,,0,1,2026-03-27,,,,
+5000006,Water Energy,Pokemon Base Set,33,Ungraded,Normal wear,,,0,1,2026-03-27,,,,
+5000007,Elite Trainer Box,Pokemon Jungle,27233,Ungraded,Normal wear,,,0,1,2026-05-18,2026-05-18,,,
+5000008,Dark Magician [1st Edition] #LOB-005,YuGiOh Legend of Blue Eyes,1500,Ungraded,Normal wear,,,0,1,2026-04-20,,,,Collection
