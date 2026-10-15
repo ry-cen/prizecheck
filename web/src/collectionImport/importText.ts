@@ -4,9 +4,10 @@ import {
   type CollectionImportLeftOut,
   type CollectionImportRow,
   type CollectionImportSource,
+  type CollectionImportSummary,
 } from "../collection_import_generated";
 
-/* Collection Import copy (#226, #227, #229 to #232). It never names the tracker a file came from, and shows no prices,
+/* Collection Import copy (#226, #227, #229 to #233). It never names the tracker a file came from, and shows no prices,
  * marketplace IDs, fetch times or internal reasons (AGENTS.md "UI copy"). Tracker names appear only in ExportHelp. */
 
 export const SPLIT_LARGE =
@@ -28,13 +29,15 @@ const START: Record<string, string> = {
   NOT_STORAGE_LEAF: "Choose another Location to put the cards in.",
   CATALOG_UNAVAILABLE:
     "Cards can't be matched right now. Try again in a few minutes.",
+  IMPORT_RATE_LIMITED: "You can start 20 imports a day. Try again tomorrow.",
 };
 
 const SAVE: Record<string, string> = {
   ROWS_NEED_YOU: "Some rows still need you.",
-  STALE_DRAFT: "This import changed. Choose your file again to review it.",
+  STALE_DRAFT:
+    "This import changed in another window, so nothing was added. Check the review and try again.",
   REVIEW_CHANGED:
-    "Your Locations or the cards changed. Choose your file again to review it.",
+    "Some cards or your Locations changed, so nothing was added. Check the review and try again.",
   IMPORT_NOT_FOUND: "This import is no longer open. Choose your file again.",
   REPLAY_OUTCOME_UNAVAILABLE:
     "This import is no longer open. Choose your file again.",
@@ -56,6 +59,20 @@ export function saveErrorText(error: unknown): string {
     return "Couldn't add the cards. Try again.";
   return SAVE[error.code] ?? "Couldn't add the cards. Try again.";
 }
+
+/** The upload's Unfinished import note (#233): what the collector's open import holds. */
+export function unfinishedText(summary: CollectionImportSummary): string {
+  const needs = summary.counts.needs_you;
+  const waiting =
+    needs > 0
+      ? `, and ${rowsText(needs)} ${needs === 1 ? "needs" : "need"} you`
+      : "";
+  return `You have an import you haven't added yet: ${cardsText(summary.cards_to_add)} to add${waiting}.`;
+}
+
+/** Continue import found no open import: it expired, or was saved or replaced in another window. */
+export const UNFINISHED_GONE =
+  "That import is no longer open. Start a new one.";
 
 /** "1 card", "9 cards"; the count is text because the API sends large counts as text. */
 export function cardsText(count: string): string {

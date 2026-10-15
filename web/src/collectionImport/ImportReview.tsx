@@ -40,8 +40,10 @@ import { useImportRows } from "./useImportRows";
 
 type Props = {
   summary: CollectionImportSummary;
-  fileName: string;
-  onBack: () => void;
+  /** What the review is of, shown before its row count: the file's name, or null for a continued import (#233). */
+  label: string | null;
+  /** Back to the upload, with the draft as the review last had it: it stays open there (#233). */
+  onBack: (summary: CollectionImportSummary) => void;
   /** After a save: show the Storage Leaf the cards went to. */
   onLanded: (locationId: string) => void;
   /** The landing Storage Leaf, whenever the review changes it, so Back keeps it chosen. */
@@ -88,10 +90,12 @@ const BULK_TRIGGER =
  * Finish unknown and Matched by name never block saving. Saving adds every ready row's copies in one step, with no
  * Undo. The side column (above the list on a phone) holds the summary, Put cards in (the landing Storage Leaf, which
  * can change until the save), In this file (the file's groups, which can be left out), the rows left out (#231) and
- * how many incoming cards the Collection already holds (#232). */
+ * how many incoming cards the Collection already holds (#232). A save refused because the Location or a card changed
+ * (REVIEW_CHANGED: the server has put those rows back under Needs you) or because the draft changed elsewhere reads the
+ * draft again and opens on Needs you (#233). */
 export function ImportReview({
   summary,
-  fileName,
+  label,
   onBack,
   onLanded,
   onLocation,
@@ -371,9 +375,27 @@ export function ImportReview({
       });
       onLanded(result.location_id);
     } catch (failure) {
+      if (
+        failure instanceof CollectionImportError &&
+        (failure.code === "REVIEW_CHANGED" || failure.code === "STALE_DRAFT")
+      )
+        await reload();
       setError(saveErrorText(failure));
       setSaving(false);
     }
+  }
+
+  /** Reads the draft again after a refused save, and opens on Needs you when rows wait there. */
+  async function reload() {
+    const latest = await getCurrentCollectionImport().catch(() => null);
+    if (latest?.id !== current.id) return;
+    server.current = latest;
+    setCurrent(latest);
+    setSelection(NOTHING);
+    setOpen(null);
+    places.reload();
+    if (latest.counts.needs_you > 0 && filter !== "needs") setFilter("needs");
+    else await list.refresh();
   }
 
   return (
@@ -383,13 +405,13 @@ export function ImportReview({
           title="Review import"
           headingRef={heading}
           actions={
-            <Button variant="quiet" onClick={onBack}>
+            <Button variant="quiet" onClick={() => onBack(current)}>
               Back
             </Button>
           }
         />
         <p className="m-0 text-body text-text-muted wrap-anywhere">
-          {fileName} · {rowsText(counts.rows)}
+          {[label, rowsText(counts.rows)].filter(Boolean).join(" · ")}
         </p>
       </div>
       <div className="grid grid-cols-[minmax(0,1fr)_16rem] items-start gap-6 phone:grid-cols-1">
