@@ -5,6 +5,7 @@ import { Pill } from "../../ui/Pill";
 import { EditionChooser } from "./EditionChooser";
 import { EnergyChooser } from "./EnergyChooser";
 import {
+  keptText,
   lineName,
   needsYou,
   noteText,
@@ -28,8 +29,9 @@ type Props = {
 };
 
 /**
- * One pasted line in the review (#212, #213): its quantity, the card it resolved to, a status Pill, the line as pasted,
- * the Deck List line(s) it becomes, and why it needs the collector or how it was matched. Fix, Edition, Change (Basic
+ * One pasted line in the review (#212, #213, #214): its quantity, the card it resolved to, a status Pill, the line as
+ * pasted, the Deck List line(s) it becomes (owned copies first), copies other Decks keep, and why it needs the collector
+ * or how it was matched. Fix, Edition, Change (Basic
  * Energy matched by type) or Restore sits on the right.
  */
 export function ReviewLineRow({
@@ -61,8 +63,19 @@ export function ReviewLineRow({
             {line.text}
           </p>
           {line.parts.map((part) => (
-            <p key={part.edition_id} className="m-0 text-meta">
+            <p
+              key={`${part.source}-${part.edition_id}`}
+              className="m-0 text-meta"
+            >
               {partText(line, part)}
+            </p>
+          ))}
+          {line.kept.map((kept) => (
+            <p
+              key={`${kept.reason}-${kept.deck_id}`}
+              className="m-0 text-meta text-text-muted"
+            >
+              {keptText(kept)}
             </p>
           ))}
           {note && (

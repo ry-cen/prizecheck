@@ -1,9 +1,12 @@
 import type {
   ImportEdition,
   ImportFix,
+  ImportKept,
   ImportPart,
+  ImportPlace,
   ImportPrinting,
   ImportReview,
+  ImportTotals,
   ReviewLine,
 } from "../../decks_generated";
 import { variantLabel } from "../../ui/variantLabel";
@@ -169,8 +172,10 @@ const HOW: Record<NonNullable<ImportPart["chosen_by"]>, string> = {
 };
 
 /** One Deck List line a pasted line becomes: "4 MEG 119 · Reverse Holo · your choice · no price". A Normal Edition's
- * variant is left out ("3 PAL 185 · cheapest priced · $0.35 each"). */
+ * variant is left out ("3 PAL 185 · cheapest priced · $0.35 each"). Owned copies (#214) name their own card, which
+ * can be another printing than the line's, and where they are: "Used 1 Iono PAL 254 · Holo you own · Binder". */
 export function partText(line: ReviewLine, part: ImportPart): string {
+  if (part.source !== "new") return ownedText(part);
   const edition = editionOf(line, part.edition_id);
   const variant = edition ? variantLabel(edition.descriptor) : null;
   const where = line.printing
@@ -185,6 +190,46 @@ export function partText(line: ReviewLine, part: ImportPart): string {
         ? `${edition.display_price} each${edition.stale ? STALE : ""}`
         : "no price"
     );
+  return words.join(" · ");
+}
+
+function ownedText(part: ImportPart): string {
+  const variant = variantLabel(part.descriptor);
+  const card = `Used ${part.quantity} ${part.name} ${part.set_code} ${part.collector_number}`;
+  const words =
+    variant === "Normal" ? [`${card} you own`] : [card, `${variant} you own`];
+  words.push(
+    part.source === "in_deck" ? "in this Deck" : placesText(part.places)
+  );
+  return words.join(" · ");
+}
+
+/** Where owned copies are: "Binder", "in Charizard ex", or "1 in Binder, 2 in Charizard ex". */
+export function placesText(places: ImportPlace[]): string {
+  if (places.length === 1)
+    return places[0].deck ? `in ${places[0].name}` : places[0].name;
+  return places.map((place) => `${place.quantity} in ${place.name}`).join(", ");
+}
+
+/** A note on copies another Deck keeps: "2 in Charizard ex stay there: they're that Deck's own." or "1 spare copy is
+ * counted for Charizard ex, an older Deck." */
+export function keptText(kept: ImportKept): string {
+  const one = kept.quantity === "1";
+  return kept.reason === "own_line"
+    ? `${kept.quantity} in ${kept.name} ${one ? "stays there: it's" : "stay there: they're"} that Deck's own.`
+    : `${kept.quantity} spare ${one ? "copy is" : "copies are"} counted for ${kept.name}, an older Deck.`;
+}
+
+/** The side column's cards to get: "3 cards · $1.05 · 1 unpriced", "4 cards · 4 unpriced", "0 cards". */
+export function toGetText(totals: ImportTotals): string {
+  const count = Number(totals.to_get);
+  const words = [plural(count, "card")];
+  if (count === 0) return words[0];
+  if (totals.to_get_priced === null)
+    return [...words, "cost incomplete"].join(" · ");
+  if (totals.to_get_display) words.push(totals.to_get_display);
+  const unpriced = count - Number(totals.to_get_priced);
+  if (unpriced > 0) words.push(`${unpriced} unpriced`);
   return words.join(" · ");
 }
 

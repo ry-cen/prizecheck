@@ -5,7 +5,7 @@ import { ROW } from "./LineResolver";
 
 /**
  * The Edition chooser under a resolved line (#212): every active Edition of its Printing with the stored price, the
- * current one pressed. Choosing one posts a fix that names it (the "your choice" Edition); the pressed button takes the
+ * Edition of the copies to get pressed (none when owned copies cover the line). Choosing one posts a fix that names it (the "your choice" Edition); the pressed button takes the
  * focus when the chooser opens, unless it sits inside Change (EnergyChooser), which places the focus itself.
  */
 export function EditionChooser({
@@ -18,6 +18,10 @@ export function EditionChooser({
   focus?: boolean;
 }) {
   const group = useRef<HTMLDivElement>(null);
+  // The Edition the copies to get have (#214: owned copies come first and keep their own Editions).
+  const newEdition = line.parts.find(
+    (part) => part.source === "new"
+  )?.edition_id;
   useEffect(() => {
     if (!focus) return;
     group.current
@@ -38,7 +42,7 @@ export function EditionChooser({
         <button
           key={edition.edition_id}
           type="button"
-          aria-pressed={edition.edition_id === line.parts[0]?.edition_id}
+          aria-pressed={edition.edition_id === newEdition}
           onClick={() => onEdition(edition.edition_id)}
           className={`${ROW} aria-pressed:border-accent-border aria-pressed:bg-surface-selected`}
         >
