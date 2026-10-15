@@ -16,6 +16,7 @@ import {
   type Filter,
   type Pick,
 } from "./importModel";
+import { useOwnedCards } from "./ownedCards";
 import { PasteStep } from "./PasteStep";
 import { ReviewStep, type OpenPanel } from "./ReviewStep";
 import { useImportReview } from "./useImportReview";
@@ -49,6 +50,7 @@ export function ImportPage({
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
   const [nameMessage, setNameMessage] = useState("");
+  const [owned, setOwned] = useOwnedCards();
 
   const pendingSave = useRef<{ payloadKey: string; key: string } | null>(null);
   const previousChoices = useRef<Choices>({
@@ -66,6 +68,7 @@ export function ImportPage({
   const state = useImportReview(
     text,
     fixesFor(picks, drops),
+    owned,
     step === "paste" ? 300 : 0
   );
   const toast = useToast();
@@ -254,6 +257,11 @@ export function ImportPage({
         state={state}
         name={name}
         targetFormat={targetFormat}
+        owned={owned}
+        onOwned={(next) => {
+          setSaveMessage("");
+          setOwned(next);
+        }}
         filter={filter}
         onFilter={setFilter}
         open={open}

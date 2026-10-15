@@ -3,6 +3,8 @@ import type { ImportReview, ReviewLine } from "../../decks_generated";
 import { PageHeader } from "../../shell/PageHeader";
 import { Button } from "../../ui/Button";
 import { Chip } from "../../ui/Chip";
+import { Segmented } from "../../ui/Segmented";
+import { countingLabel } from "../../settings/wantListCounting";
 import { formatLabel, type TargetFormat } from "../targetFormat";
 import {
   filterCount,
@@ -11,9 +13,11 @@ import {
   keeps,
   plural,
   sectionsOf,
+  toGetText,
   type Filter,
   type Pick,
 } from "./importModel";
+import { OWNED_OPTIONS, type OwnedCards } from "./ownedCards";
 import { ReviewLineRow } from "./ReviewLineRow";
 import type { ImportReviewState } from "./useImportReview";
 
@@ -24,6 +28,8 @@ type Props = {
   state: ImportReviewState;
   name: string;
   targetFormat: TargetFormat;
+  owned: OwnedCards;
+  onOwned: (owned: OwnedCards) => void;
   filter: Filter;
   onFilter: (filter: Filter) => void;
   open: OpenPanel;
@@ -42,15 +48,19 @@ type Props = {
 };
 
 /**
- * Import a decklist, step two (#212): "Check the list". The summary (Cards and the destination) sits beside the list
- * on a desktop and above it on a phone; the list shows Pokémon, Trainer, Energy and No section in paste order behind
- * four filter chips; the sticky save bar says how many lines still need the collector and holds Create Deck.
+ * Import a decklist, step two (#212): "Check the list". The summary sits beside the list on a desktop and above it on a
+ * phone: the cards, the cards you own and the cards to get with their stored cost (#214), the owned-cards setting with
+ * its explainer (switching it posts the review again, so every line recounts), and the destination. The list shows
+ * Pokémon, Trainer, Energy and No section in paste order behind four filter chips; the sticky save bar says how many
+ * lines still need the collector and holds Create Deck.
  */
 export function ReviewStep({
   review,
   state,
   name,
   targetFormat,
+  owned,
+  onOwned,
   filter,
   onFilter,
   open,
@@ -77,6 +87,9 @@ export function ReviewStep({
     }))
     .filter((section) => section.shown.length > 0);
   const blocked = !state.current || totals.to_resolve > 0 || saving;
+  const explainer = OWNED_OPTIONS.find(
+    (option) => option.value === owned
+  )!.explainer;
   const message = saveMessage || state.error;
   return (
     <main className="mx-auto box-border flex max-w-7xl flex-col gap-6 px-7 py-6 pb-24 phone:px-4 phone:py-4 phone:pb-28">
@@ -101,6 +114,29 @@ export function ReviewStep({
                   (not 60)
                 </span>
               )}
+            </p>
+          </div>
+          <dl className="m-0 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-body">
+            <dt className="text-text-muted">You own</dt>
+            <dd className="m-0 tabular-nums">
+              {plural(Number(totals.owned), "card")}
+            </dd>
+            <dt className="text-text-muted">To get</dt>
+            <dd className="m-0 tabular-nums">{toGetText(totals)}</dd>
+          </dl>
+          <div className="flex flex-col gap-1">
+            <p className="m-0 text-meta text-text-muted">Owned cards</p>
+            <Segmented
+              mode="choice"
+              label="Owned cards"
+              options={OWNED_OPTIONS}
+              value={owned}
+              onChange={onOwned}
+            />
+            <p className="m-0 text-meta text-text-muted">{explainer}</p>
+            <p className="m-0 text-meta text-text-muted">
+              Copies are counted as your Want List counts them:{" "}
+              {countingLabel(review.want_list_counting)}.
             </p>
           </div>
           <p className="m-0 text-body">
