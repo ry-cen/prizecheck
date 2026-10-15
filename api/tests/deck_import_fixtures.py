@@ -194,6 +194,30 @@ def seed_import_browser_catalog():
     _seed(BROWSER_CARDS)
 
 
+IONO = ("Each player shuffles their hand and puts it on the bottom of their deck. Then, each player draws a card for "
+        "each of their remaining Prize cards.")
+
+# The owned-cards catalog (#214: api/tests/test_import_owned.py and web/tests/import-owned.spec.ts). Iono PAL 185
+# (Normal and Reverse Holo) and Iono PAL 254 (Holo) share one effect, so they are one Reprint Group; Nest Ball is in no
+# group. Basic Psychic Energy has three Printings (SVE 5, SVE 13 and MEE 5) and Basic Darkness Energy one (SVE 15): for
+# the import's allocation alone each Energy type counts as one group.
+OWNED_CARDS = (
+    {**trainer("sv02", "Paldea Evolved", "185", "Iono", IONO), "variants": {"normal": True, "reverse": True}},
+    {**trainer("sv02", "Paldea Evolved", "254", "Iono", IONO), "variants": {"holo": True}},
+    {**trainer("sv01", "Scarlet & Violet", "181", "Nest Ball", "Search your deck for a Basic Pokémon.", "Item"),
+     "variants": {"normal": True, "reverse": True}},
+    basic_energy("sve", "Scarlet & Violet Energies", "005", "Basic Psychic Energy"),
+    basic_energy("sve", "Scarlet & Violet Energies", "013", "Basic Psychic Energy"),
+    basic_energy("sve", "Scarlet & Violet Energies", "015", "Basic Darkness Energy"),
+    basic_energy("mee", "Mega Evolution Energy", "005", "Basic Psychic Energy"),
+)
+
+
+def seed_import_owned_catalog():
+    """OWNED_CARDS through the real catalog import, replacing the catalog (and with it every Holding)."""
+    _seed(OWNED_CARDS)
+
+
 # What the review reads in each fixture against FIXTURE_CARDS with no fixes: every card line as (line, section,
 # quantity, status), the ignored lines as (line, text), and the card total. Line numbers count from 1 and include blank
 # lines. F7 reads the same posted with CRLF line endings, as its original was.

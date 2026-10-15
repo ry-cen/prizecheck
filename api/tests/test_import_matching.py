@@ -194,7 +194,8 @@ def test_change_picks_another_basic_energy_of_the_type_and_its_edition():
     edition = changed["editions"][0]["edition_id"]
     chosen = lines(owner, text, [{"line": 1, "edition_id": edition}])[0]
     assert found(chosen) == ("energy", "sve", "013")
-    assert chosen["parts"] == [{"edition_id": edition, "quantity": "6", "source": "new", "chosen_by": "collector"}]
+    assert [{key: part[key] for key in ("edition_id", "quantity", "source", "chosen_by")} for part in chosen["parts"]] == [
+        {"edition_id": edition, "quantity": "6", "source": "new", "chosen_by": "collector"}]
     refused = call("POST", REVIEW, owner, {"source": {"text": text}, "fixes": [
         {"line": 1, "edition_id": boss["parts"][0]["edition_id"]}]})
     assert refused.status_code == 422 and code(refused) == "INVALID_FIX"
