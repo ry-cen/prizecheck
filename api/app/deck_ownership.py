@@ -91,6 +91,20 @@ def held_in(conn, user_id: str, deck_id: UUID) -> dict[UUID, int]:
         'SELECT edition_id,quantity FROM holding WHERE owner_id=%s AND location_id=%s', (user_id, deck_id))}
 
 
+def beyond_list(holdings: dict[UUID, int], listed: dict[UUID, int]) -> list[tuple[UUID, int]]:
+    """The Deck's surplus: (Edition, copies held beyond its Deck List line), in Edition order; every copy of an Edition
+    with no line. The deck builder's Surplus group and Replace's preview (``import_replace``) both use this rule."""
+    return [(edition, quantity - listed.get(edition, 0))
+            for edition, quantity in sorted(holdings.items()) if quantity > listed.get(edition, 0)]
+
+
+def surplus_holdings(beyond: list[tuple[UUID, int]], versions: dict[UUID, int],
+                     display: dict[UUID, dict]) -> list[SurplusHolding]:
+    """``beyond_list``'s rows with the Deck's Holding versions and their display data (``read_line_display``)."""
+    return [SurplusHolding(edition_id=edition, quantity=str(quantity), version=versions[edition], **display[edition])
+            for edition, quantity in beyond]
+
+
 def read_ownership(conn, user_id: str, deck_id: UUID) -> DeckOwnership:
     """Read one Deck's ownership states.
 
@@ -111,8 +125,7 @@ def read_ownership(conn, user_id: str, deck_id: UUID) -> DeckOwnership:
         'SELECT edition_id,quantity FROM deck_list_line WHERE owner_id=%s AND deck_id=%s ORDER BY edition_id',
         (user_id, deck_id))]
     listed = {row['edition_id']: row['quantity'] for row in lines}
-    surplus = [{'edition_id': edition, 'quantity': quantity - listed.get(edition, 0)}
-               for edition, quantity in sorted(holdings.items()) if quantity > listed.get(edition, 0)]
+    surplus = beyond_list(holdings, listed)
     short = [row['edition_id'] for row in lines if row['quantity'] > row['held']]
     elsewhere: dict[UUID, list[dict]] = {}
     if short:
@@ -162,9 +175,5 @@ def read_ownership(conn, user_id: str, deck_id: UUID) -> DeckOwnership:
             competition.append(CompetitionWarning(edition_id=edition, spare=str(spare),
                                                   counted_elsewhere=str(counted), decks=decks))
     # Display data for surplus Editions is one more read keyed by Edition id, as for Deck List lines.
-    display = read_line_display(conn, [row['edition_id'] for row in surplus])
-    return DeckOwnership(
-        lines=owned,
-        surplus=[SurplusHolding(edition_id=row['edition_id'], quantity=str(row['quantity']),
-                                version=versions[row['edition_id']], **display[row['edition_id']]) for row in surplus],
-        competition=competition)
+    display = read_line_display(conn, [edition for edition, _ in surplus])
+    return DeckOwnership(lines=owned, surplus=surplus_holdings(surplus, versions, display), competition=competition)
