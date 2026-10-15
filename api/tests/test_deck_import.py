@@ -262,9 +262,20 @@ def test_new_copies_get_the_cheapest_stored_quote_and_no_runner_is_launched(stor
     assert line["parts"] == [{"edition_id": second, "quantity": "2", "source": "new", "chosen_by": "cheapest_price"}]
     assert [e["edition_id"] for e in line["editions"]] == [first, second]
     assert [e["display_price"] for e in line["editions"]] == ["$0.50", "$0.10"]
+    assert [e["stale"] for e in line["editions"]] == [False, False]
     assert launches == []
     assert scheduler(store) is None
     assert store.read_records(keys, deadline=time.monotonic() + 5).generation == generation
+
+
+def test_a_stored_quote_over_48_hours_old_is_marked_stale(store):
+    owner = str(uuid4())
+    printing, (first, second), by_id = furret_world(owner)
+    seed(store, by_id[first], "0.50")
+    seed(store, by_id[second], "0.10", updated=ago(timedelta(hours=49)))
+    [line] = review(owner, "2 Furret DAA 1\n")["lines"]
+    assert [e["display_price"] for e in line["editions"]] == ["$0.50", "$0.10"]
+    assert [e["stale"] for e in line["editions"]] == [False, True]
 
 
 def test_without_a_stored_quote_new_copies_take_the_first_edition_in_catalog_order():
@@ -275,6 +286,7 @@ def test_without_a_stored_quote_new_copies_take_the_first_edition_in_catalog_ord
     assert one["parts"][0]["chosen_by"] == "catalog_order" and one["parts"][0]["edition_id"] == first
     assert two["parts"][0]["chosen_by"] == "catalog_order" and two["parts"][0]["edition_id"] == only
     assert [e["display_price"] for e in two["editions"]] == [None]
+    assert [e["stale"] for e in two["editions"]] == [None]
 
 
 def test_an_unreadable_price_cache_is_prices_unavailable(monkeypatch):

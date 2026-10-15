@@ -95,6 +95,9 @@ export function ImportPage({
     if (!state.current || !review || after === null) return;
     focusAfter.current = null;
     const own = after.same ? actionButtons.current.get(after.line) : undefined;
+    // Focus moves on only from where the collector's fix left it: the page, or the control the fix removed.
+    const active = document.activeElement;
+    if (active && active !== document.body && active.isConnected) return;
     if (own) {
       own.focus();
       return;
@@ -114,6 +117,7 @@ export function ImportPage({
 
   const canReview =
     review !== null &&
+    state.current &&
     review.totals.card_lines > 0 &&
     name.trim() !== "" &&
     state.error === "";
@@ -146,6 +150,7 @@ export function ImportPage({
 
   function pick(line: number, choice: Pick) {
     remember();
+    setSaveMessage("");
     setPicks((previous) => new Map(previous).set(line, choice));
     setDrops((previous) => {
       const next = new Set(previous);
@@ -158,6 +163,7 @@ export function ImportPage({
 
   function drop(line: number) {
     remember();
+    setSaveMessage("");
     setDrops((previous) => new Set(previous).add(line));
     setOpen(null);
     focusAfter.current = { line, same: false };
@@ -165,6 +171,7 @@ export function ImportPage({
 
   function restore(line: number) {
     remember();
+    setSaveMessage("");
     setDrops((previous) => {
       const next = new Set(previous);
       next.delete(line);
@@ -175,6 +182,7 @@ export function ImportPage({
 
   function chooseEdition(line: number, editionId: string) {
     remember();
+    setSaveMessage("");
     setPicks((previous) =>
       new Map(previous).set(line, { edition_id: editionId })
     );
