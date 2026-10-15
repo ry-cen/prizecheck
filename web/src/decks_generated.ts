@@ -39,7 +39,7 @@ export type DeckListChange = { edition_id: string; quantity: string };
 export type ChangeDeckList = { revision: number; idempotency_key: string; changes: DeckListChange[] };
 export type ImportSource = { text: string };
 export type ImportFix = { line: number; drop?: boolean; printing_id?: string | null; edition_id?: string | null };
-export type ReviewImport = { source: ImportSource; owned?: 'exact' | 'owned'; fixes?: ImportFix[] };
+export type ReviewImport = { source: ImportSource; owned?: 'exact' | 'owned'; fixes?: ImportFix[]; deck_id?: string | null };
 export type ImportPrinting = { printing_id: string; name: string; set_id: string; set_code: string; set_name: string; collector_number: string; image_url: string | null; card_kind: 'pokemon' | 'trainer' | 'energy' | null };
 export type ImportEdition = { edition_id: string; descriptor: Record<string, unknown>; display_price: string | null; stale?: boolean | null };
 export type ImportPlace = { location_id: string; name: string; deck: boolean; quantity: string };
@@ -50,10 +50,12 @@ export type ReviewLine = { line: number; text: string; section: 'pokemon' | 'tra
 export type IgnoredImportLine = { line: number; text: string };
 export type ImportDeckListEntry = { edition_id: string; quantity: string };
 export type ImportTotals = { card_lines: number; cards: string; ignored: number; to_resolve: number; owned: string; to_get: string; to_get_priced: string | null; to_get_amount: string | null; to_get_display: string | null };
-export type ImportReview = { lines: ReviewLine[]; ignored: IgnoredImportLine[]; deck_list: ImportDeckListEntry[]; totals: ImportTotals; owned: 'exact' | 'owned'; want_list_counting: 'all_at_once' | 'one_at_a_time'; settings_revision: number; owner_revision: number; catalog_revision: number };
+export type ImportReview = { lines: ReviewLine[]; ignored: IgnoredImportLine[]; deck_list: ImportDeckListEntry[]; totals: ImportTotals; owned: 'exact' | 'owned'; want_list_counting: 'all_at_once' | 'one_at_a_time'; settings_revision: number; owner_revision: number; catalog_revision: number; replace?: ImportReplace | null };
 export type ImportDeckLine = { edition_id: string; quantity: string };
 export type ImportDeck = { name: string; target_format: string; lines: ImportDeckLine[]; idempotency_key: string };
 export type ImportDeckResult = { deck_id: string; deck_list: DeckList; target_format: 'standard' | 'expanded' | 'glc'; format_checks?: DeckFormatChecks | null; location: TreeNode; owner_revision: number };
+export type ReplaceLine = { edition_id: string; quantity: string };
+export type ImportReplace = { deck_id: string; name: string; deck_list_revision: number; current: ReplaceLine[]; changes: ReplaceLine[]; surplus: SurplusHolding[] };
 
 export class DeckError extends Error {
   constructor(public status: number, public code: string) { super(code); }

@@ -15,6 +15,11 @@ creates the caller's inventory owner; the stored quotes with no connection or lo
 nothing to PostgreSQL. A catalog change between the snapshot and the capture can leave an Edition the review offers
 unavailable; saving then answers 422 EDITION_UNAVAILABLE and the screen reviews again.
 
+With a ``deck_id`` (Replace, ticket #215) the review is of that Deck's new Deck List: the capture checks the Deck is the
+caller's (404 DECK_NOT_FOUND) and reads it under the same lock, its own copies come first, and ``replace`` carries the
+Deck List revision, the changes batch saving sends and the Surplus preview (``import_replace``). Replace has no route of
+its own: the web saves through the Deck List changes batch.
+
 ``POST /api/decks/import`` creates the Deck, sets its Target Format and writes its Deck List lines in one transaction,
 idempotently, like every Location and Deck List command. It trusts the Editions it is sent and never reads the text
 again. Undo is the existing Deck deletion (``deck_deletion``): an imported Deck holds no cards.
@@ -35,6 +40,7 @@ from .holdings import parse_quantity
 from .import_allocation import ChosenBy, OwnedCards, Part, Resolved, Source, merged, parts_for
 from .import_matching import Match, match_lines
 from .import_owned import capture_owned, groups
+from .import_replace import ImportReplace, replacement
 from .location_tree import TreeNode, check_name, cleaned_name, error, node_model, owner_and_rows, replay
 from .main import connect, verified_user
 from .settings import WantListCounting
@@ -66,6 +72,9 @@ class ReviewImport(BaseModel):
     # cards I own, the web's default) also uses the other Printings the line reaches.
     owned: OwnedCards = 'owned'
     fixes: list[ImportFix] = Field(default_factory=list, max_length=MAX_CARD_LINES)
+    # Replace (#215): the caller's Deck whose Deck List the paste replaces (404 DECK_NOT_FOUND otherwise). Its own
+    # copies are used first, and the answer carries ``replace``. None reviews a new Deck.
+    deck_id: UUID | None = None
 
 
 class ImportPrinting(BaseModel):
@@ -191,6 +200,8 @@ class ImportReview(BaseModel):
     settings_revision: int
     owner_revision: int
     catalog_revision: int
+    # Replace (#215): the Deck List revision, the batch saving sends and the Surplus preview; None for a new Deck.
+    replace: ImportReplace | None = None
 
 
 class ImportDeckLine(BaseModel):
@@ -341,7 +352,8 @@ def review_import(command: ReviewImport, user_id: str = Depends(verified_user)):
             error(422, 'PRINTING_UNAVAILABLE')
         printings = _printings(conn, generation, chosen | candidates | reached) if generation is not None else {}
     # 2. The owned copies of every Edition the lines reach, under the owner row lock.
-    capture = capture_owned(user_id, [edition['edition_id'] for found in editions.values() for edition in found])
+    capture = capture_owned(user_id, [edition['edition_id'] for found in editions.values() for edition in found],
+                            command.deck_id)
     # 3. Stored quotes only, with no connection or lock held. None means the cache could not be read in time.
     wanted = [edition['edition_id'] for printing in chosen for edition in editions[printing]]
     views = prices.stored_edition_quotes(wanted) if wanted else {}
@@ -392,7 +404,8 @@ def review_import(command: ReviewImport, user_id: str = Depends(verified_user)):
                             to_get_amount=cost.get('amount') if priced not in (None, '0') else None,
                             to_get_display=cost.get('display_amount') if priced not in (None, '0') else None),
         owned=command.owned, want_list_counting=capture.counting, settings_revision=capture.settings_revision,
-        owner_revision=capture.owner_revision, catalog_revision=state['revision'])
+        owner_revision=capture.owner_revision, catalog_revision=state['revision'],
+        replace=replacement(capture.replaced, deck_list) if capture.replaced is not None else None)
 
 
 def _display_price(view) -> str | None:
