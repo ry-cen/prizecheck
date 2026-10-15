@@ -5,6 +5,9 @@ import { CollectionImportError } from "../collection_import_generated";
 
 export const SPLIT_LARGE =
   "This file is larger than 5 MB. Split it into two files and import each one.";
+/** The largest file the start route takes: 5 MiB, the API's MAX_IMPORT_BYTES and the gateway's limit. A larger file
+ * is refused before it uploads. */
+export const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 export const SPLIT_ROWS =
   "This file has more than 10,000 rows. Split it into two files and import each one.";
 

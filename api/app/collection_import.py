@@ -25,8 +25,9 @@ Responses carry no raw source text, prices, marketplace IDs or the detected sour
 descriptor in a response keeps its physical keys only (collection_import_finish.public_descriptor), so TCGdex's
 marketplace lookup IDs stay out. The one
 response that names trackers is IMPORT_UNREADABLE's message, the list of trackers whose files are read. Nothing here
-reads or refreshes prices or starts a catalog pull. The gateway still caps request bodies (deferred follow-up); this
-API enforces MAX_IMPORT_BYTES and MAX_IMPORT_ROWS itself.
+reads or refreshes prices or starts a catalog pull. The gateway caps request bodies (auth/src/server.ts
+IMPORT_ROUTES): 5 MiB for the start route, forwarded as raw bytes, 64 KiB for changes and 16 KiB for the rest. This API
+enforces MAX_IMPORT_BYTES and MAX_IMPORT_ROWS itself too.
 """
 import hashlib
 import json
@@ -65,7 +66,8 @@ FINISH_UNKNOWN_ROW = matcher.FINISH_UNKNOWN_ROW.format(r="r")
 SKIPPED_ROW = matcher.SKIPPED_ROW.format(r="r")
 RowFilter = Literal["needs", "finish", "all", "skipped"]
 # One changes request holds at most MAX_CHANGES changes, and a change names at most MAX_CHANGE_ROWS rows by number: the
-# gateway's 16 KiB body limit is reached first. Select all sends its filter instead.
+# gateway's 64 KiB body limit for this route binds first. It fits every row of a 10,000-row file named one by one
+# (about 49 KB). Select all sends its filter instead.
 MAX_CHANGES = 100
 MAX_CHANGE_ROWS = 1000
 
