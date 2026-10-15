@@ -10,6 +10,7 @@ import {
   MAX_PASTE_CHARACTERS,
   reviewErrorText,
 } from "./importModel";
+import { copyErrorText } from "./copyModel";
 import type { OwnedCards } from "./ownedCards";
 
 export type ImportReviewState = {
@@ -36,6 +37,10 @@ type Answer = {
 };
 
 /**
+ * Copy to my Decks (#216): with `publication`, a Published Deck's token, the review reads that snapshot instead of
+ * `text`. The version the first answer read is sent with every later post, so a fix never lands on a row of another
+ * version; PUBLISHED_DECK_CHANGED forgets it, and the next post reads the new version.
+ *
  * Posts the paste to the review route (POST /api/decks/import/review, read-only) whenever the text, the owned-cards
  * setting (#214) or the fixes change, after `delay` ms without another change: the paste screen passes 300 so its
  * live count follows typing, the review passes 0 so a fix shows at once. Only the newest request's answer is kept. An
@@ -47,10 +52,12 @@ export function useImportReview(
   fixes: ImportFix[],
   owned: OwnedCards,
   delay: number,
-  deckId: string | null = null
+  deckId: string | null = null,
+  publication: string | null = null
 ): ImportReviewState {
   const fixesKey = JSON.stringify(fixes);
-  const key = `${text}\u0000${owned}\u0000${fixesKey}\u0000${deckId ?? ""}`;
+  const source = publication === null ? `t${text}` : `p${publication}`;
+  const key = `${source}\u0000${owned}\u0000${fixesKey}\u0000${deckId ?? ""}`;
   const [answer, setAnswer] = useState<Answer>({
     review: null,
     key: "",
@@ -60,14 +67,15 @@ export function useImportReview(
   });
   const [attempt, setAttempt] = useState(0);
   const ticket = useRef(0);
+  const version = useRef<number | null>(null);
 
   useEffect(() => {
     const mine = ++ticket.current;
-    if (!text.trim()) {
+    if (publication === null && !text.trim()) {
       setAnswer({ review: null, key, pending: false, error: "", code: "" });
       return;
     }
-    if (characters(text) > MAX_PASTE_CHARACTERS) {
+    if (publication === null && characters(text) > MAX_PASTE_CHARACTERS) {
       setAnswer({
         review: null,
         key,
@@ -80,30 +88,35 @@ export function useImportReview(
     setAnswer((previous) => ({ ...previous, pending: true }));
     const timer = setTimeout(() => {
       reviewImport({
-        source: { text },
+        source:
+          publication === null
+            ? { text }
+            : { publication, version: version.current },
         owned,
         fixes: JSON.parse(fixesKey) as ImportFix[],
         ...(deckId ? { deck_id: deckId } : {}),
       })
         .then((review) => {
-          if (mine === ticket.current)
-            setAnswer({ review, key, pending: false, error: "", code: "" });
+          if (mine !== ticket.current) return;
+          if (review.publication) version.current = review.publication.version;
+          setAnswer({ review, key, pending: false, error: "", code: "" });
         })
         .catch((cause: unknown) => {
           if (mine !== ticket.current) return;
           const status = cause instanceof DeckError ? cause.status : 0;
           const code = cause instanceof DeckError ? cause.code : "";
+          if (code === "PUBLISHED_DECK_CHANGED") version.current = null;
           setAnswer((previous) => ({
             ...previous,
             pending: false,
-            error: reviewErrorText(status, code),
+            error: copyErrorText(code) ?? reviewErrorText(status, code),
             code,
           }));
         });
     }, delay);
     return () => clearTimeout(timer);
-    // `key` is text, owned, fixesKey and deckId together; `attempt` posts the same request again.
-  }, [text, owned, fixesKey, delay, attempt, deckId]);
+    // `key` is the source, owned, fixesKey and deckId together; `attempt` posts the same request again.
+  }, [text, publication, owned, fixesKey, delay, attempt, deckId]);
 
   return {
     review: answer.review,
