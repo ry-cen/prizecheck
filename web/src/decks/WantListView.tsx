@@ -90,7 +90,12 @@ export function WantListView({ onOpenDeck, onNavigate }: Props) {
     load.kind === "ready" ? load.list : null,
     reload
   );
-  const swap = useWantListSwap({ reload, notify: setNotice });
+  const swap = useWantListSwap({
+    list: load.kind === "ready" ? load.list : null,
+    failed: load.kind === "failed",
+    reload,
+    notify: setNotice,
+  });
 
   function choose(deckId: string | null) {
     setNotice("");
