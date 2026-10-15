@@ -1,0 +1,522 @@
+<!doctype html>
+<!--
+  PROTOTYPE, throw me away. Want List page for "Prototype the Want List page" (ry-cen/prizecheck#201).
+  Three navigation placements of one Want List page, switchable with ?variant=A|B|C and the floating bar.
+  Mock data in memory only; nothing is saved. Colours and spacing come from web/src/tokens.css.
+-->
+<html lang="en" data-theme="prize-gold">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Want List prototype</title>
+<link rel="stylesheet" href="../../../../../../web/src/tokens.css">
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body { background: var(--color-bg); color: var(--color-text); font: var(--font-size-md)/var(--line-height) var(--font-sans); }
+  button { font: inherit; color: inherit; }
+  .num { font-variant-numeric: var(--numeric); }
+  .muted { color: var(--color-text-muted); }
+  .subtle { color: var(--color-text-subtle); }
+
+  /* The app area is a container, so the phone frame gets the phone layout without resizing the window. */
+  #stage { min-height: 100vh; }
+  #stage.framed { display: flex; justify-content: center; padding: 24px 0 96px; background: #0a0909; }
+  #stage.framed .app { width: 375px; height: 812px; overflow: auto; border: 1px solid var(--color-border-strong); border-radius: 24px; transform: translateZ(0); }
+  .app { container: app / inline-size; background: var(--color-bg); min-height: 100%; }
+
+  /* Kit controls: 30 px on desktop, 44 px on phones; 24 px chips. */
+  .btn { display: inline-flex; align-items: center; gap: 6px; height: var(--size-control); padding: 0 12px; border-radius: var(--radius-control); border: 1px solid var(--color-control-outline); background: var(--color-surface-raised); font-size: var(--font-size-control); cursor: pointer; white-space: nowrap; }
+  .btn:hover { border-color: var(--color-accent-border); }
+  .btn.primary { background: var(--color-accent); border-color: var(--color-accent); color: var(--color-on-accent); font-weight: 600; }
+  .btn.quiet { background: transparent; border-color: transparent; color: var(--color-text-muted); }
+  .btn.small { height: var(--size-quick); padding: 0 10px; font-size: var(--font-size-sm); }
+  .pill { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: var(--radius-round); border: 1px solid var(--color-border-strong); font-size: var(--font-size-xs); color: var(--color-text-muted); white-space: nowrap; }
+  .pill.gold { border-color: var(--color-accent-border); color: var(--color-accent-strong); background: var(--color-accent-fill); }
+  .seg { display: inline-flex; border: 1px solid var(--color-control-outline); border-radius: var(--radius-control); overflow: hidden; }
+  .seg button { height: calc(var(--size-control) - 2px); padding: 0 12px; border: 0; background: transparent; font-size: var(--font-size-control); cursor: pointer; color: var(--color-text-muted); white-space: nowrap; }
+  .seg button[aria-pressed="true"] { background: var(--color-surface-selected); color: var(--color-accent-strong); font-weight: 600; }
+  :focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: var(--focus-offset); }
+
+  /* Shell */
+  .hdr { position: sticky; top: 0; z-index: 10; height: var(--layout-header-height); display: flex; align-items: center; gap: 24px; padding: 0 24px; border-bottom: 1px solid var(--color-border); background: var(--color-bg); }
+  .word { font-size: var(--font-size-sm); font-weight: 700; letter-spacing: 2px; text-transform: uppercase; white-space: nowrap; }
+  .word b { color: var(--color-accent); margin-right: 8px; }
+  .tabs { display: flex; gap: 4px; }
+  .tab { height: 32px; padding: 0 12px; border-radius: var(--radius-control); border: 0; background: transparent; color: var(--color-text-muted); font-size: var(--font-size-control); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+  .tab[aria-current="page"] { background: var(--color-surface-selected); color: var(--color-accent-strong); font-weight: 600; }
+  .tab .count { font-size: var(--font-size-2xs); padding: 1px 6px; border-radius: var(--radius-round); background: var(--color-accent-fill); color: var(--color-accent-strong); }
+  .avatar { margin-left: auto; width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--color-accent-border); background: var(--color-accent-fill); color: var(--color-accent-strong); display: grid; place-items: center; font-weight: 600; font-size: var(--font-size-control); }
+  .phonehdr { display: none; }
+  .tabbar { display: none; }
+
+  .page { max-width: 1180px; margin: 0 auto; padding: 24px var(--layout-gutter) 120px; }
+  h1 { font-size: var(--font-size-xl); margin: 0; }
+  h2 { font-size: var(--font-size-lg); margin: 0; }
+  .lede { margin: 4px 0 0; color: var(--color-text-muted); font-size: var(--font-size-control); }
+
+  /* Collection-style sidebar (variant C uses none; kept for the Decks index) */
+  .crumbs { display: flex; align-items: center; gap: 8px; font-size: var(--font-size-control); margin-bottom: 12px; }
+  .crumbs a { color: var(--color-accent); text-decoration: none; cursor: pointer; }
+
+  /* Summary strip: the combined total and its cost, at the top. */
+  .summary { margin-top: 20px; display: flex; flex-wrap: wrap; align-items: center; gap: 16px 28px; padding: 16px 20px; border: 1px solid var(--color-border); border-radius: var(--radius-panel); background: var(--color-surface); }
+  .big { font-size: var(--font-size-xl); font-weight: 700; line-height: 1.1; }
+  .big.gold { color: var(--color-accent-strong); }
+  .stat .lbl { font-size: var(--font-size-xs); color: var(--color-text-subtle); text-transform: uppercase; letter-spacing: 1px; }
+  .summary .controls { margin-left: auto; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .explain { flex-basis: 100%; margin: 0; font-size: var(--font-size-sm); color: var(--color-text-muted); }
+  .proto-note { display: inline-block; margin-left: 6px; padding: 0 6px; border: 1px dashed var(--color-control-outline); border-radius: 4px; font-size: var(--font-size-2xs); color: var(--color-text-subtle); white-space: nowrap; }
+
+  .grid { margin-top: 20px; display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 20px; align-items: start; }
+  .panel { border: 1px solid var(--color-border); border-radius: var(--radius-panel); background: var(--color-surface); }
+  .panel-h { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px 16px; border-bottom: 1px solid var(--color-border); }
+  .panel-h .grow { flex: 1; min-width: 0; }
+  .decks { display: grid; gap: 16px; }
+  .total { position: sticky; top: calc(var(--layout-header-height) + 16px); }
+  .total summary { list-style: none; cursor: default; }
+  .total summary::-webkit-details-marker { display: none; }
+  .trow { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 8px; padding: 7px 16px; border-bottom: 1px solid var(--color-border); font-size: var(--font-size-control); align-items: baseline; }
+  .trow:last-child { border-bottom: 0; }
+  .trow .q { font-weight: 700; color: var(--color-accent-strong); }
+  .trow .for { font-size: var(--font-size-xs); color: var(--color-text-subtle); }
+  .ellip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .line { display: grid; grid-template-columns: 56px minmax(0, 1fr) 150px 84px; gap: 12px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--color-border); }
+  .line:last-child { border-bottom: 0; }
+  .art { width: 40px; aspect-ratio: var(--tile-aspect); border-radius: 4px; background: linear-gradient(160deg, var(--color-art-start), var(--color-art-end)); border: 1px solid var(--color-border); }
+  .need { font-weight: 700; font-size: var(--font-size-lg); color: var(--color-accent-strong); }
+  .need small { font-weight: 400; font-size: var(--font-size-sm); color: var(--color-text-subtle); }
+  .name { font-weight: 600; }
+  .meta { font-size: var(--font-size-sm); color: var(--color-text-muted); }
+  .src { font-size: var(--font-size-xs); color: var(--color-text-subtle); }
+  .price { text-align: right; font-size: var(--font-size-control); }
+  .swap { grid-column: 2 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 2px; padding: 6px 10px; border-radius: var(--radius-control); background: var(--color-accent-wash); border: 1px solid var(--color-accent-outline); font-size: var(--font-size-sm); }
+  .done-deck { padding: 12px 16px; display: flex; gap: 10px; align-items: center; font-size: var(--font-size-control); color: var(--color-text-muted); }
+  .differs { padding: 8px 16px; font-size: var(--font-size-xs); color: var(--color-text-subtle); border-top: 1px dashed var(--color-border); }
+
+  /* Decks index (variants B and C) */
+  .deckcards { margin-top: 20px; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+  .deckcard { padding: 14px 16px; border: 1px solid var(--color-border); border-radius: var(--radius-panel); background: var(--color-surface); display: grid; gap: 6px; }
+  .banner { margin-top: 20px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; padding: 14px 18px; border-radius: var(--radius-panel); border: 1px solid var(--color-accent-border); background: var(--color-accent-wash); }
+  .placeholder { margin-top: 40px; padding: 40px; text-align: center; border: 1px dashed var(--color-border-strong); border-radius: var(--radius-panel); color: var(--color-text-subtle); }
+  .filter { margin-top: 16px; display: flex; gap: 6px; overflow-x: auto; }
+  .chip { height: var(--size-chip); padding: 0 10px; border-radius: var(--radius-round); border: 1px solid var(--color-border-strong); background: transparent; font-size: var(--font-size-sm); color: var(--color-text-muted); cursor: pointer; white-space: nowrap; }
+  .chip[aria-pressed="true"] { border-color: var(--color-accent-border); background: var(--color-accent-fill); color: var(--color-accent-strong); }
+
+  /* Dialog and toast */
+  .scrim { position: fixed; inset: 0; background: var(--color-scrim); display: grid; place-items: center; z-index: 500; padding: 16px; }
+  .dialog { width: min(var(--layout-dialog-width), 100%); border-radius: var(--radius-dialog); background: var(--color-surface-raised); border: 1px solid var(--color-border-strong); padding: 20px; display: grid; gap: 12px; box-shadow: 0 10px 40px var(--color-shadow-strong); }
+  .dialog p { margin: 0; font-size: var(--font-size-control); }
+  .dialog .row { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+  .toast { position: fixed; left: 50%; bottom: 84px; transform: translateX(-50%); z-index: 400; display: flex; gap: 12px; align-items: center; padding: 10px 14px; border-radius: var(--radius-panel); background: var(--color-surface-raised); border: 1px solid var(--color-border-strong); box-shadow: 0 6px 24px var(--color-shadow-strong); font-size: var(--font-size-control); max-width: calc(100% - 32px); }
+
+  /* Phone layout */
+  @container app (max-width: 760px) {
+    .hdr { display: none; }
+    .phonehdr { display: flex; align-items: center; gap: 12px; height: var(--layout-header-height); padding: 0 12px; border-bottom: 1px solid var(--color-border); }
+    .phonehdr .t { font-weight: 600; }
+    .tabbar { display: flex; position: fixed; inset: auto 0 0 0; height: var(--layout-tabbar-height); border-top: 1px solid var(--color-border); background: var(--color-surface); z-index: 10; }
+    .tabbar button { flex: 1; border: 0; background: transparent; color: var(--color-text-muted); font-size: var(--font-size-xs); display: grid; place-items: center; gap: 0; padding: 6px 0; cursor: pointer; position: relative; }
+    .tabbar button .ico { font-size: 18px; line-height: 1; }
+    .tabbar button[aria-current="page"] { color: var(--color-accent-strong); font-weight: 600; }
+    .tabbar .count { position: absolute; top: 4px; left: calc(50% + 6px); font-size: var(--font-size-2xs); padding: 0 5px; border-radius: var(--radius-round); background: var(--color-accent); color: var(--color-on-accent); }
+    .page { padding: 16px var(--layout-gutter) 140px; }
+    .btn, .seg button { height: var(--size-control-phone); }
+    .btn.small { height: var(--size-quick-phone); }
+    .summary { padding: 14px; gap: 12px 20px; }
+    .summary .controls { margin-left: 0; width: 100%; }
+    .summary .controls .seg { width: 100%; }
+    .summary .controls .seg button { flex: 1; padding: 0 6px; white-space: normal; line-height: 1.2; }
+    .summary .controls .btn { width: 100%; justify-content: center; }
+    .grid { grid-template-columns: minmax(0, 1fr); }
+    .total { position: static; order: -1; }
+    .total summary { cursor: pointer; }
+    .total summary .chev::after { content: "▾"; }
+    .total:not([open]) summary .chev::after { content: "▸"; }
+    .line { grid-template-columns: 44px minmax(0, 1fr) auto; gap: 10px; padding: 10px 12px; }
+    .line .srccol { grid-column: 2 / -1; grid-row: 2; }
+    .swap { grid-column: 1 / -1; }
+    .swap .btn { width: 100%; justify-content: center; }
+    .panel-h { padding: 12px; }
+    .panel-h .grow { flex-basis: 100%; }
+    .total .panel-h .grow { flex-basis: auto; }
+  }
+
+  /* Prototype switcher: not part of the design. */
+  .proto-bar { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 1000; display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 999px; background: #f4f1ff; color: #1b1440; font: 600 12px/1 system-ui, sans-serif; box-shadow: 0 6px 24px #0009; white-space: nowrap; }
+  .proto-bar button { border: 0; background: #ddd6ff; color: #1b1440; border-radius: 999px; height: 26px; padding: 0 10px; font: inherit; cursor: pointer; }
+  .proto-bar button[aria-pressed="true"] { background: #1b1440; color: #f4f1ff; }
+  .proto-bar .lbl { padding: 0 8px; }
+  @media (max-width: 760px) { .proto-bar { bottom: 64px; transform: translateX(-50%) scale(.9); } .proto-bar .lbl { max-width: 120px; overflow: hidden; text-overflow: ellipsis; } }
+  #stage.framed ~ .proto-bar { bottom: 16px; }
+</style>
+</head>
+<body>
+<div id="stage"><div class="app" id="app"></div></div>
+<div class="proto-bar" role="toolbar" aria-label="Prototype switcher">
+  <button id="prev" aria-label="Previous variant">‹</button>
+  <span class="lbl" id="vlabel"></span>
+  <button id="next" aria-label="Next variant">›</button>
+  <button id="frame" aria-pressed="false" title="Show the phone layout in a 375 × 812 frame">Phone frame</button>
+  <button id="export" aria-pressed="true" title="Offer the Mass Entry export of the total">Export</button>
+</div>
+<div id="layer"></div>
+<script>
+// ---------- Mock catalog, Collection and Decks (in memory) ----------
+const ED = {
+  zard125:  { name: "Charizard ex", set: "OBF", num: "125", variant: "Holo", price: 9.5, group: "charizard-ex" },
+  charm004: { name: "Charmander", set: "MEW", num: "004", variant: "Normal", price: 0.25, group: "charmander" },
+  pidgey016:{ name: "Pidgey", set: "MEW", num: "016", variant: "Normal", price: 0.15, group: "pidgey" },
+  pidgeot164:{ name: "Pidgeot ex", set: "OBF", num: "164", variant: "Holo", price: 3.2, group: "pidgeot-ex" },
+  iono185:  { name: "Iono", set: "PAL", num: "185", variant: "Normal", price: 0.35, group: "iono" },
+  iono254:  { name: "Iono", set: "PAL", num: "254", variant: "Holo", price: 6.5, group: "iono" },
+  arven166: { name: "Arven", set: "SVI", num: "166", variant: "Normal", price: 0.4, group: "arven" },
+  candy191: { name: "Rare Candy", set: "SVI", num: "191", variant: "Normal", price: 0.3, group: "rare-candy" },
+  boss172:  { name: "Boss's Orders", set: "PAL", num: "172", variant: "Normal", price: 0.5, group: "boss" },
+  boss172r: { name: "Boss's Orders", set: "PAL", num: "172", variant: "Reverse Holo", price: 0.9, group: "boss" },
+  ultra196: { name: "Ultra Ball", set: "SVI", num: "196", variant: "Normal", price: 0.3, group: "ultra-ball" },
+  turo171:  { name: "Professor Turo's Scenario", set: "PAR", num: "171", variant: "Normal", price: null, group: "turo" },
+  gard086:  { name: "Gardevoir ex", set: "SVI", num: "086", variant: "Holo", price: 3.0, group: "gardevoir-ex" },
+  ralts084: { name: "Ralts", set: "SVI", num: "084", variant: "Normal", price: 0.15, group: "ralts" },
+  kirlia085:{ name: "Kirlia", set: "SVI", num: "085", variant: "Normal", price: 0.2, group: "kirlia" },
+  mirai081: { name: "Miraidon ex", set: "SVI", num: "081", variant: "Holo", price: 2.4, group: "miraidon-ex" },
+  gen170:   { name: "Electric Generator", set: "SVI", num: "170", variant: "Normal", price: 0.3, group: "generator" },
+};
+// Holdings: [Edition, where, quantity]. `where` is a Deck id, or a non-Deck Location (spare copies).
+const HOLDINGS = [
+  ["zard125","zard",2], ["charm004","zard",4], ["pidgey016","zard",2], ["pidgeot164","zard",1], ["iono185","zard",1],
+  ["arven166","zard",4], ["candy191","zard",1], ["ultra196","zard",4],
+  ["gard086","gard",1], ["ralts084","gard",4], ["kirlia085","gard",3], ["boss172","gard",1], ["ultra196","gard",2],
+  ["mirai081","mirai",3], ["gen170","mirai",4],
+  ["iono185","Binder",1], ["iono254","Binder",1], ["candy191","Unsorted",3], ["boss172","Unsorted",1], ["boss172r","Binder",1],
+];
+let decks = [
+  { id: "zard", name: "Charizard ex", format: "Standard", lines: [
+    ["zard125",3], ["charm004",4], ["pidgey016",2], ["pidgeot164",2], ["iono185",4], ["arven166",4], ["candy191",4],
+    ["boss172",2], ["ultra196",4], ["turo171",1] ] },
+  { id: "gard", name: "Gardevoir ex", format: "Standard", lines: [
+    ["gard086",2], ["ralts084",4], ["kirlia085",3], ["iono185",2], ["candy191",2], ["boss172",2], ["ultra196",4] ] },
+  { id: "mirai", name: "Miraidon ex", format: "Standard", lines: [ ["mirai081",3], ["gen170",4] ] },
+];
+const DECK_IDS = () => decks.map(d => d.id);
+
+// ---------- Prototype state ----------
+const params = new URLSearchParams(location.search);
+const VARIANTS = { A: "Own tab", B: "View inside Decks", C: "Reached from Decks and each Deck" };
+const state = {
+  variant: VARIANTS[params.get("variant")] ? params.get("variant") : "A",
+  mode: params.get("mode") === "one" ? "one" : "all",
+  frame: params.get("frame") === "phone",
+  exportOn: params.get("export") !== "off",
+  page: "want",          // which shell page is showing
+  decksView: "decks",    // B: "decks" | "want"
+  deckFilter: "all",     // C: a Deck id or "all"
+  totalOpen: false,      // phone: combined total expanded
+  undo: null, toast: null, dialog: null,
+};
+function syncUrl() {
+  const p = new URLSearchParams();
+  p.set("variant", state.variant);
+  if (state.mode === "one") p.set("mode", "one");
+  if (state.frame) p.set("frame", "phone");
+  if (!state.exportOn) p.set("export", "off");
+  history.replaceState(null, "", "?" + p);
+}
+
+// ---------- Counting ----------
+const held = (deckId, ed) => HOLDINGS.filter(h => h[0] === ed && h[1] === deckId).reduce((s, h) => s + h[2], 0);
+const spare = ed => HOLDINGS.filter(h => h[0] === ed && !DECK_IDS().includes(h[1])).reduce((s, h) => s + h[2], 0);
+const owned = ed => HOLDINGS.filter(h => h[0] === ed).reduce((s, h) => s + h[2], 0);
+const elsewhere = (deckId, ed) => HOLDINGS.filter(h => h[0] === ed && h[1] !== deckId && DECK_IDS().includes(h[1]));
+
+function compute(mode) {
+  const spareLeft = {};
+  Object.keys(ED).forEach(e => spareLeft[e] = spare(e));
+  const out = decks.map(d => ({ deck: d, lines: [] }));
+  out.forEach(sec => {
+    sec.deck.lines.forEach(([ed, qty]) => {
+      const h = Math.min(qty, held(sec.deck.id, ed));
+      let rest = qty - h, s = 0, other = [];
+      if (mode === "all") {
+        // Placeholder for "Decide the Want List contract": spare copies go to Decks in Decks-page order.
+        s = Math.min(rest, spareLeft[ed]); spareLeft[ed] -= s; rest -= s;
+      } else {
+        s = Math.min(rest, spare(ed)); rest -= s;
+        elsewhere(sec.deck.id, ed).forEach(([, where, q]) => {
+          const take = Math.min(rest, q); if (take) { other.push([where, take]); rest -= take; }
+        });
+      }
+      sec.lines.push({ ed, qty, held: h, spare: s, other, need: rest });
+    });
+  });
+  // Swap hints: a spare copy (in no Deck, not counted toward any Deck) of another Edition in the line's Reprint Group.
+  // Placeholder for the contract ticket: copies sleeved in other Decks never trigger a hint.
+  out.forEach(sec => sec.lines.forEach(l => {
+    if (!l.need) return;
+    const alt = Object.keys(ED).find(e => e !== l.ed && ED[e].group === ED[l.ed].group && (mode === "all" ? spareLeft[e] : spare(e)) > 0);
+    if (alt) l.swap = { ed: alt, count: Math.min(l.need, mode === "all" ? spareLeft[alt] : spare(alt)) };
+  }));
+  // Combined total: needs add together (all), or the largest need per Edition (one).
+  const total = {};
+  out.forEach(sec => sec.lines.forEach(l => {
+    if (!l.need) return;
+    const t = total[l.ed] ||= { ed: l.ed, qty: 0, for: [] };
+    t.qty = mode === "all" ? t.qty + l.need : Math.max(t.qty, l.need);
+    t.for.push([sec.deck.name, l.need]);
+  }));
+  const rows = Object.values(total).sort((a, b) => (ED[b.ed].price ?? -1) * b.qty - (ED[a.ed].price ?? -1) * a.qty);
+  return { sections: out, rows };
+}
+// What the deck builder's "to complete" counts: copies you don't own anywhere.
+const builderToComplete = deck => deck.lines.reduce((s, [ed, qty]) => s + Math.max(0, qty - owned(ed)), 0);
+
+const money = n => "$" + n.toFixed(2);
+function cost(items) {
+  let sum = 0, unpriced = 0, cards = 0;
+  items.forEach(([ed, q]) => { cards += q; if (ED[ed].price == null) unpriced += q; else sum += ED[ed].price * q; });
+  return { sum, unpriced, cards };
+}
+const edLabel = ed => `${ED[ed].set} ${ED[ed].num}${ED[ed].variant === "Normal" ? "" : " · " + ED[ed].variant}`;
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+// ---------- Actions ----------
+function swapLine(deckId, ed, alt, count) {
+  state.undo = JSON.parse(JSON.stringify(decks));
+  const d = decks.find(x => x.id === deckId);
+  const line = d.lines.find(l => l[0] === ed);
+  line[1] -= count;
+  const existing = d.lines.find(l => l[0] === alt);
+  if (existing) existing[1] += count; else d.lines.splice(d.lines.indexOf(line) + 1, 0, [alt, count]);
+  d.lines = d.lines.filter(l => l[1] > 0);
+  showToast(`Swapped ${count} ${ED[ed].name} ${edLabel(ed)} for ${edLabel(alt)} in ${d.name}'s Deck List.`, true);
+}
+function undo() { if (state.undo) { decks = state.undo; state.undo = null; } showToast("Deck List restored.", false); }
+let toastTimer;
+function showToast(text, canUndo) {
+  state.toast = { text, canUndo }; clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { state.toast = null; render(); }, 6000); render();
+}
+
+// ---------- Want List page ----------
+function wantList({ headerExtra = "", filter = null } = {}) {
+  const { sections, rows } = compute(state.mode);
+  const tc = cost(rows.map(r => [r.ed, r.qty]));
+  const shown = sections.filter(s => !filter || filter === "all" || s.deck.id === filter);
+  const modeText = state.mode === "all"
+    ? `Every Deck built at once: needs add together, and a spare copy counts toward one Deck at most.<span class="proto-note">placeholder: spares go to Decks in Decks-page order</span>`
+    : `One Deck at a time: every copy you own counts for every Deck, even copies sleeved in another Deck. The total takes the largest need per card.`;
+  return `
+    ${headerExtra}
+    <h1>Want List</h1>
+    <p class="lede">What your Decks name but can't get from your Collection. It changes when you change a Deck List.</p>
+    <section class="summary" aria-label="Combined total">
+      <div class="stat"><div class="lbl">To get</div><div class="big num">${tc.cards} cards</div></div>
+      <div class="stat"><div class="lbl">Estimated cost</div><div class="big gold num">${money(tc.sum)}</div>
+        <div class="src num">${tc.unpriced ? `${tc.cards - tc.unpriced} of ${tc.cards} cards priced` : `all ${tc.cards} cards priced`}</div></div>
+      <div class="controls">
+        <div class="seg" role="group" aria-label="Counting">
+          <button data-mode="all" aria-pressed="${state.mode === "all"}">Every Deck built at once</button>
+          <button data-mode="one" aria-pressed="${state.mode === "one"}">One Deck at a time</button>
+        </div>
+        ${state.exportOn ? `<button class="btn primary" data-act="export">Buy on TCGplayer</button>` : ""}
+      </div>
+      <p class="explain">${modeText}</p>
+    </section>
+    ${filter !== null ? `<div class="filter" role="group" aria-label="Show Decks">
+      <button class="chip" data-filter="all" aria-pressed="${filter === "all"}">All Decks</button>
+      ${decks.map(d => `<button class="chip" data-filter="${d.id}" aria-pressed="${filter === d.id}">${esc(d.name)}</button>`).join("")}
+    </div>` : ""}
+    <div class="grid">
+      <div class="decks">${shown.map(deckSection).join("")}</div>
+      ${totalPanel(rows, tc)}
+    </div>`;
+}
+function totalPanel(rows, tc) {
+  return `<details class="panel total" ${state.totalOpen || !isPhone() ? "open" : ""} data-total>
+    <summary class="panel-h"><span class="grow"><b>Combined total</b> <span class="muted num">· ${tc.cards} cards · ${money(tc.sum)}</span></span><span class="chev muted"></span></summary>
+    ${rows.length ? rows.map(r => `<div class="trow num">
+      <span class="q">${r.qty}</span>
+      <span class="ellip"><span>${esc(ED[r.ed].name)}</span> <span class="subtle">${edLabel(r.ed)}</span>
+        <div class="for ellip">${r.for.map(([n, q]) => `${esc(n)} ${q}`).join(" · ")}</div></span>
+      <span class="${ED[r.ed].price == null ? "subtle" : ""}">${ED[r.ed].price == null ? "No price" : money(ED[r.ed].price * r.qty)}</span>
+    </div>`).join("") : `<div class="done-deck">Every Deck can be built from your Collection.</div>`}
+  </details>`;
+}
+function deckSection(sec) {
+  const needs = sec.lines.filter(l => l.need);
+  const c = cost(needs.map(l => [l.ed, l.need]));
+  const head = `<div class="panel-h"><span class="grow"><h2 style="display:inline">${esc(sec.deck.name)}</h2> <span class="pill">${sec.deck.format}</span></span>
+    ${needs.length ? `<span class="num"><b>${c.cards}</b> <span class="muted">to get ·</span> <b class="num">${money(c.sum)}</b>${c.unpriced ? ` <span class="subtle">+ ${c.unpriced} unpriced</span>` : ""}</span>` : ""}
+    <button class="btn small quiet" data-act="open-deck" data-deck="${sec.deck.id}">Open Deck ›</button></div>`;
+  if (!needs.length) return `<section class="panel">${head}<div class="done-deck">✓ Nothing to get. This Deck can be built from your Collection.</div></section>`;
+  const b = builderToComplete(sec.deck);
+  const differs = state.mode === "all" && b !== c.cards
+    ? `<div class="differs">The deck builder says ${b} to complete: it counts copies sleeved in your other Decks as yours.</div>` : "";
+  return `<section class="panel">${head}${needs.map(l => lineRow(sec.deck, l)).join("")}${differs}</section>`;
+}
+function lineRow(deck, l) {
+  const parts = [];
+  if (l.held) parts.push(`${l.held} in this Deck`);
+  if (l.spare) parts.push(`${l.spare} spare`);
+  l.other.forEach(([where, q]) => parts.push(`${q} in ${esc(decks.find(d => d.id === where).name)}`));
+  const p = ED[l.ed].price;
+  return `<div class="line">
+    <div class="art" aria-hidden="true"></div>
+    <div style="min-width:0"><div class="name ellip">${esc(ED[l.ed].name)}</div><div class="meta ellip">${edLabel(l.ed)}</div></div>
+    <div class="srccol"><div class="need num">${l.need} <small>of ${l.qty}</small></div><div class="src">${parts.length ? "Have " + parts.join(" · ") : owned(l.ed) ? `Your ${owned(l.ed)} are counted for other Decks` : "None owned"}</div></div>
+    <div class="price num">${p == null ? `<span class="subtle">No price</span>` : `${money(p * l.need)}<div class="src">${money(p)} each</div>`}</div>
+    ${l.swap ? `<div class="swap"><span>↻ You own a playable version (${ED[l.swap.ed].set} ${ED[l.swap.ed].num}${ED[l.swap.ed].variant === "Reverse Holo" ? " Reverse Holo" : ""}) × ${l.swap.count}</span>
+      <button class="btn small" data-act="swap" data-deck="${deck.id}" data-ed="${l.ed}" data-alt="${l.swap.ed}" data-count="${l.swap.count}">Swap ${l.swap.count} into this Deck List</button></div>` : ""}
+  </div>`;
+}
+
+// ---------- Other pages (stubs) ----------
+function decksIndex(extra = "") {
+  const { sections } = compute(state.mode);
+  return `${extra}<div class="deckcards">${sections.map(sec => {
+    const needs = sec.lines.filter(l => l.need); const c = cost(needs.map(l => [l.ed, l.need]));
+    const n = sec.deck.lines.reduce((s, l) => s + l[1], 0);
+    return `<div class="deckcard"><div style="display:flex;gap:8px;align-items:center"><b>${esc(sec.deck.name)}</b><span class="pill">${sec.deck.format}</span></div>
+      <div class="meta num">${n} cards in Deck List · ${builderToComplete(sec.deck)} to complete</div>
+      ${needs.length ? `<button class="btn small" data-act="deck-want" data-deck="${sec.deck.id}">Want List: ${c.cards} cards · ${money(c.sum)}</button>` : `<span class="src">✓ Nothing to get</span>`}
+    </div>`; }).join("")}</div>`;
+}
+function deckPage(id) {
+  const d = decks.find(x => x.id === id);
+  const sec = compute(state.mode).sections.find(s => s.deck.id === id);
+  const needs = sec.lines.filter(l => l.need); const c = cost(needs.map(l => [l.ed, l.need]));
+  return `<div class="crumbs"><a data-act="nav" data-page="decks">‹ Decks</a></div>
+    <h1>${esc(d.name)}</h1><p class="lede">Deck builder (not part of this prototype).</p>
+    ${state.variant === "C" && needs.length ? `<div class="banner"><div><b>Needs ${c.cards} cards · ${money(c.sum)}</b><div class="src">Counted with your other Decks built at the same time.</div></div>
+      <button class="btn" data-act="deck-want" data-deck="${id}">See what this Deck needs ›</button></div>` : ""}
+    <div class="placeholder">Deck builder</div>`;
+}
+const stub = name => `<h1>${name}</h1><div class="placeholder">${name} is not part of this prototype.</div>`;
+
+// ---------- Shell ----------
+function tabsFor() {
+  const n = compute(state.mode).rows.reduce((s, r) => s + r.qty, 0);
+  const base = [["collection", "Collection", "▦"], ["decks", "Decks", "❏"]];
+  if (state.variant === "A") return { desktop: [...base, ["want", "Want List", "★", n], ["catalog", "Catalog", "⌕"], ["reports", "Missing cards", "!"]],
+                                      phone: [...base, ["want", "Want List", "★", n], ["more", "More", "⋯"]] };
+  return { desktop: [...base, ["catalog", "Catalog", "⌕"], ["reports", "Missing cards", "!"]],
+           phone: [...base, ["catalog", "Catalog", "⌕"], ["more", "More", "⋯"]] };
+}
+function currentTab() {
+  if (state.page === "want") return state.variant === "A" ? "want" : "decks";
+  if (state.page.startsWith("deck:")) return "decks";
+  return state.page;
+}
+function pageTitle() {
+  if (state.page === "want") return "Want List";
+  if (state.page.startsWith("deck:")) return decks.find(d => "deck:" + d.id === state.page).name;
+  return { collection: "Collection", decks: "Decks", catalog: "Catalog", reports: "Missing cards", more: "More" }[state.page];
+}
+function body() {
+  const v = state.variant;
+  if (state.page.startsWith("deck:")) return deckPage(state.page.slice(5));
+  if (v === "A") {
+    if (state.page === "want") return wantList();
+    if (state.page === "decks") return `<h1>Decks</h1>${decksIndex()}`;
+  }
+  if (v === "B" && (state.page === "decks" || state.page === "want")) {
+    const seg = `<div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;margin-bottom:16px">
+      <div class="seg" role="group" aria-label="Decks view"><button data-dview="decks" aria-pressed="${state.decksView === "decks"}">My Decks</button><button data-dview="want" aria-pressed="${state.decksView === "want"}">Want List</button></div></div>`;
+    return state.decksView === "want" ? wantList({ headerExtra: seg }) : `${seg}<h1>Decks</h1>${decksIndex()}`;
+  }
+  if (v === "C") {
+    if (state.page === "want") return wantList({ headerExtra: `<div class="crumbs"><a data-act="nav" data-page="decks">‹ Decks</a></div>`, filter: state.deckFilter });
+    if (state.page === "decks") {
+      const { rows } = compute(state.mode); const tc = cost(rows.map(r => [r.ed, r.qty]));
+      return `<h1>Decks</h1>${decksIndex(`<div class="banner"><div><b>Want List</b> <span class="muted">· ${tc.cards} cards to get · ${money(tc.sum)}</span>
+        <div class="src">What your Decks still need, all together.</div></div><button class="btn" data-act="open-want">Open Want List ›</button></div>`)}`;
+    }
+  }
+  if (state.page === "more") return `<h1>More</h1><div class="deckcards">${(state.variant === "A" ? ["Catalog", "Missing cards", "Sign-ins"] : ["Missing cards", "Sign-ins"]).map(n => `<div class="deckcard">${n}</div>`).join("")}</div>`;
+  return stub(pageTitle());
+}
+let phoneNow = false;
+const isPhone = () => phoneNow;
+function render() {
+  const app = document.getElementById("app");
+  phoneNow = state.frame || window.innerWidth <= 760;
+  const t = tabsFor(), cur = currentTab();
+  const scroll = (state.frame ? app : document.scrollingElement).scrollTop;
+  app.innerHTML = `
+    <header class="hdr"><span class="word"><b>✦</b>PrizeCheck</span>
+      <nav class="tabs" aria-label="Main views">${t.desktop.map(([id, label, , n]) => `<button class="tab" data-act="nav" data-page="${id}" ${cur === id ? 'aria-current="page"' : ""}>${label}${n ? `<span class="count num">${n}</span>` : ""}</button>`).join("")}</nav>
+      <span class="avatar">R</span></header>
+    <header class="phonehdr"><span class="word"><b>✦</b></span><span class="t">${esc(pageTitle())}</span></header>
+    <main class="page">${body()}</main>
+    <nav class="tabbar" aria-label="Main views">${t.phone.map(([id, label, ico, n]) => `<button data-act="nav" data-page="${id}" ${cur === id ? 'aria-current="page"' : ""}><span class="ico" aria-hidden="true">${ico}</span>${label}${n ? `<span class="count num">${n}</span>` : ""}</button>`).join("")}</nav>`;
+  (state.frame ? app : document.scrollingElement).scrollTop = scroll;
+  document.getElementById("stage").classList.toggle("framed", state.frame);
+  document.getElementById("vlabel").textContent = `${state.variant} (${VARIANTS[state.variant]})`;
+  document.getElementById("frame").setAttribute("aria-pressed", state.frame);
+  document.getElementById("export").setAttribute("aria-pressed", state.exportOn);
+  document.getElementById("export").textContent = state.exportOn ? "Export: on" : "Export: off";
+  renderLayer();
+  syncUrl();
+}
+function renderLayer() {
+  const layer = document.getElementById("layer");
+  let html = "";
+  if (state.dialog === "export") {
+    const { rows } = compute(state.mode); const tc = cost(rows.map(r => [r.ed, r.qty]));
+    const loose = rows.filter(r => ED[r.ed].variant === "Reverse Holo").length;
+    html += `<div class="scrim" data-act="close"><div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dlg-h">
+      <h2 id="dlg-h">Buy the Want List total</h2>
+      <p>Opens TCGplayer Mass Entry with <b class="num">${tc.cards} cards</b> in <b class="num">${rows.length} rows</b>, counted as <b>${state.mode === "all" ? "Every Deck built at once" : "One Deck at a time"}</b>.</p>
+      <p class="muted num">Every card has a verified TCGplayer product (${rows.length} of ${rows.length}).${loose ? ` Less specific: ${loose} of ${rows.length} rows give the card, not the Reverse Holo.` : ""}${tc.unpriced ? ` ${tc.unpriced} card has no price here.` : ""}</p>
+      <div class="row"><button class="btn" data-act="close">Cancel</button><button class="btn primary" data-act="mass-entry">Open TCGplayer Mass Entry</button></div>
+    </div></div>`;
+  }
+  if (state.toast) html += `<div class="toast" role="status"><span>${esc(state.toast.text)}</span>${state.toast.canUndo ? `<button class="btn small" data-act="undo">Undo</button>` : ""}</div>`;
+  layer.innerHTML = html;
+}
+
+// ---------- Events ----------
+document.addEventListener("click", e => {
+  const el = e.target.closest("[data-act],[data-mode],[data-dview],[data-filter]");
+  if (!el) return;
+  if (el.dataset.mode) { state.mode = el.dataset.mode; return render(); }
+  if (el.dataset.dview) { state.decksView = el.dataset.dview; state.page = "decks"; return render(); }
+  if (el.dataset.filter) { state.deckFilter = el.dataset.filter; return render(); }
+  const a = el.dataset.act;
+  if (a === "close" && e.target !== el && el.classList.contains("scrim")) return;
+  if (a === "nav") { state.page = el.dataset.page; if (state.variant === "B" && state.page === "decks") state.decksView = "decks"; window.scrollTo(0, 0); }
+  if (a === "open-want") { state.page = "want"; state.deckFilter = "all"; }
+  if (a === "open-deck") state.page = "deck:" + el.dataset.deck;
+  if (a === "deck-want") {
+    if (state.variant === "A") state.page = "want";
+    if (state.variant === "B") { state.page = "decks"; state.decksView = "want"; }
+    if (state.variant === "C") { state.page = "want"; state.deckFilter = el.dataset.deck; }
+  }
+  if (a === "swap") swapLine(el.dataset.deck, el.dataset.ed, el.dataset.alt, +el.dataset.count);
+  if (a === "undo") undo();
+  if (a === "export") state.dialog = "export";
+  if (a === "close") state.dialog = null;
+  if (a === "mass-entry") { state.dialog = null; showToast("Stub: would open TCGplayer Mass Entry in a new tab.", false); }
+  render();
+});
+document.addEventListener("toggle", e => { if (e.target.matches?.("[data-total]")) state.totalOpen = e.target.open; }, true);
+const keys = Object.keys(VARIANTS);
+function cycle(step) { state.variant = keys[(keys.indexOf(state.variant) + step + keys.length) % keys.length]; state.page = state.variant === "C" ? "decks" : "want"; state.decksView = "want"; render(); }
+document.getElementById("prev").onclick = () => cycle(-1);
+document.getElementById("next").onclick = () => cycle(1);
+document.getElementById("frame").onclick = () => { state.frame = !state.frame; render(); };
+document.getElementById("export").onclick = () => { state.exportOn = !state.exportOn; render(); };
+document.addEventListener("keydown", e => {
+  if (e.target.closest("input, textarea, [contenteditable]")) return;
+  if (e.key === "ArrowLeft") cycle(-1);
+  if (e.key === "ArrowRight") cycle(1);
+  if (e.key === "Escape" && state.dialog) { state.dialog = null; render(); }
+});
+addEventListener("resize", () => { const p = state.frame || innerWidth <= 760; if (p !== phoneNow) render(); });
+if (state.variant === "B") state.decksView = "want";
+if (state.variant === "C") state.page = "decks";
+render();
+</script>
+</body>
+</html>
