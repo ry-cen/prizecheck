@@ -80,6 +80,10 @@ _Avoid_: Main format, selected format, default format
 The cards in a Deck's Deck List that are stored elsewhere in the Collection, each with a suggested source Location. Confirming a pick moves those copies into the Deck.
 _Avoid_: Pull list, retrieval list
 
+**Want List**:
+The Card Editions a collector's Decks name in their Deck Lists but can't get from the Collection, grouped by Deck with a combined total. It is derived from Deck Lists and is never edited directly.
+_Avoid_: Wishlist, shopping list, standalone list
+
 **Unsorted**:
 The collector's root Storage Leaf that receives cards without a chosen Location. It always exists and cannot be renamed or moved.
 _Avoid_: Inbox, default Location
