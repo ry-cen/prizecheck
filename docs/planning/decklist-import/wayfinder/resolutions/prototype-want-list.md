@@ -16,8 +16,8 @@
 
 ### The page
 
-- **Summary at the top.** It shows the cards to get and their estimated cost, with how many of those cards are priced. An unpriced card is reported separately and never counted as $0. Beside the summary are the counting setting and **Buy on TCGplayer**.
-- **Counting setting.** The choices are **Every Deck built at once** (the default) and **One Deck at a time**, with a one-line explanation of the current choice. Switching recounts everything on the page.
+- **Summary at the top.** It shows the cards to get and their estimated cost, with how many of those cards are priced. An unpriced card is reported separately and never counted as $0. Beside the summary is **Buy on TCGplayer**.
+- **Counting setting.** The choices are **Every Deck built at once** (the default) and **One Deck at a time**. *Amended by [the Want List contract](decide-want-list-contract.md):* the setting lives on the Settings page. The Want List shows the counting it uses as text, with a link to Settings, and has no toggle of its own.
 - **One section per Deck.**
   - **Each line shows** the exact Card Edition, "N of M" still needed, where the counted copies are ("Have 1 in this Deck · 1 spare", and "1 in Gardevoir ex" under One Deck at a time), the line cost and the price of each copy.
   - **A line with no copies counted** says so: "Your 4 are counted for other Decks" when you own copies, or "None owned" when you don't.
