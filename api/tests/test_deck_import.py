@@ -1,7 +1,8 @@
 """Decklist import (ticket #212): signed HTTP against PostgreSQL and a real record store.
 
 The parser has no tests of its own; it is read through POST /api/decks/import/review, which reads a pasted list against
-the catalog by printed set code and number, and writes nothing. POST /api/decks/import creates the Deck. Prices are
+the catalog and writes nothing. Matching by the alias table, Basic Energy and names (ticket #213) is tested in
+test_import_matching.py. POST /api/decks/import creates the Deck. Prices are
 controlled by writing what the price runner writes (``test_prices.seed``); no real runner is ever started.
 """
 from datetime import timedelta
@@ -102,9 +103,10 @@ def test_the_nine_research_fixtures_read_by_section_quantity_and_status(launches
         assert totals["cards"] == expected["total"], key
         assert totals["card_lines"] == len(expected["cards"]), key
         assert totals["ignored"] == len(expected["ignored"]), key
-        assert totals["to_resolve"] == sum(1 for row in expected["cards"] if row[3] == "not_found"), key
+        assert totals["to_resolve"] == sum(
+            1 for row in expected["cards"] if row[3] in ("ambiguous", "not_found", "unreadable")), key
         assert sum(int(e["quantity"]) for e in body["deck_list"]) == sum(
-            int(row[2]) for row in expected["cards"] if row[3] == "matched"), key
+            int(row[2]) for row in expected["cards"] if row[3] in ("matched", "by_name", "energy")), key
     assert launches == []
 
 
@@ -211,12 +213,12 @@ def test_a_code_and_number_find_one_printing_without_a_name_cross_check():
     assert second["printing"]["collector_number"] == "097"
 
 
-def test_a_code_outside_the_printed_code_table_is_not_found():
+def test_a_tcgdex_set_id_is_not_a_set_code():
     seed_import_catalog()
-    body = review(str(uuid4()), "1 Mimikyu PR-SV 75\n6 Basic {P} Energy SVE 13\n1 Iono SV02 185\n"
-                                "7 Psychic Energy Energy 31\n")
-    assert [l["status"] for l in body["lines"]] == ["not_found"] * 4
-    assert [l["set_code"] for l in body["lines"]] == ["PR-SV", "SVE", "SV02", "Energy"]
+    [line] = review(str(uuid4()), "1 Iono SV02 185\n")["lines"]
+    # The code finds nothing, so the line falls back to its name (ticket #213), never to the TCGdex set ID.
+    assert line["status"] == "by_name" and line["set_code"] == "SV02"
+    assert (line["printing"]["set_code"], line["printing"]["collector_number"]) == ("PAL", "185")
 
 
 def test_several_printings_for_one_code_and_number_ask_the_collector_to_pick():

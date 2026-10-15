@@ -1,34 +1,26 @@
 """Match a pasted decklist's card lines to Card Printings (Decklist Import, spec "Matching").
 
 Each card line is matched by the steps in ``MATCHERS``, in order; the first step that answers a line wins, and a line no
-step answers is Not found. A line with no set code and number (Can't read) never reaches a step. Ticket #212 has one
-step, the code and number through the printed set code table. Ticket #213 adds the import alias table, Basic Energy by
-type and names as further steps, each in its own module, appended to ``MATCHERS``; nothing here changes for them.
+step answers is Not found. A line with no set code and number (Can't read) never reaches a step. The steps:
 
-Every step reads the active catalog generation inside the caller's transaction and answers only active Printings: not
-tombstoned, with at least one active Edition.
+1. the code and number: the printed set code table (``by_code_and_number``, ticket #212), then the import alias table
+   and its rules (``import_aliases.by_alias``, #213). There is no name cross-check after a code match;
+2. Basic Energy by type, when the name is a Basic Energy (``import_energy_matching.by_basic_energy``, #213);
+3. the name, counting Reprint Groups (``import_name_matching.by_name``, #213). A line with no code is never matched
+   by name.
+
+``Match`` and the lookups the steps share live in ``import_match_core``; each step lives in its own module.
 """
-from dataclasses import dataclass, field
-from typing import Callable, Literal
 from uuid import UUID
 
 from . import set_codes
-from .catalog_browse import NUMBER_KEY
 from .decklist_text import CardLine
+from .import_aliases import by_alias
+from .import_energy_matching import by_basic_energy
+from .import_match_core import Match, MatchStatus, Matcher, at_code_and_number
+from .import_name_matching import by_name
 
-MatchStatus = Literal['matched', 'by_name', 'energy', 'ambiguous', 'not_found', 'unreadable']
-
-
-@dataclass(frozen=True)
-class Match:
-    status: MatchStatus
-    printing_id: UUID | None = None                           # matched, by_name and energy
-    candidates: tuple[UUID, ...] = field(default_factory=tuple)  # ambiguous: one Printing per card to pick from
-
-
-# A step: (connection, active generation, the readable lines no earlier step answered) -> the answers it has, by line
-# number. A step leaves out the lines it can't answer, so the next step sees them.
-Matcher = Callable[[object, UUID, list[CardLine]], dict[int, Match]]
+__all__ = ['Match', 'MatchStatus', 'Matcher', 'MATCHERS', 'by_code_and_number', 'match_lines']
 
 
 def by_code_and_number(conn, generation: UUID, lines: list[CardLine]) -> dict[int, Match]:
@@ -37,29 +29,11 @@ def by_code_and_number(conn, generation: UUID, lines: list[CardLine]) -> dict[in
     active Printing is Matched; several (which the set code research never found) ask the collector to pick. A code
     the table doesn't hold, a TCGdex set ID included, answers nothing here: the import never falls back to set IDs.
     There is no name cross-check (the research found every name difference after a code match was a convention)."""
-    wanted = [(line.line, set_id, line.number) for line in lines for set_id in set_codes.sets_for_code(line.set_code)]
-    if not wanted:
-        return {}
-    rows = conn.execute(f"""SELECT q.line,gp.printing_id
-      FROM unnest(%s::int[],%s::text[],%s::text[]) AS q(line,set_id,number)
-      JOIN catalog_generation_printing gp ON gp.generation_id=%s AND gp.set_id=q.set_id AND NOT gp.tombstoned
-        AND {NUMBER_KEY.format('gp.collector_number')}={NUMBER_KEY.format('q.number')}
-      WHERE EXISTS (SELECT 1 FROM catalog_generation_edition ge
-                    WHERE ge.generation_id=gp.generation_id AND ge.printing_id=gp.printing_id AND ge.active)
-      ORDER BY q.line,gp.set_id,gp.printing_id""",
-                        ([line for line, _, _ in wanted], [set_id for _, set_id, _ in wanted],
-                         [number for _, _, number in wanted], generation)).fetchall()
-    found: dict[int, list[UUID]] = {}
-    for row in rows:
-        found.setdefault(row['line'], [])
-        if row['printing_id'] not in found[row['line']]:
-            found[row['line']].append(row['printing_id'])
-    return {line: Match('matched', printing_id=printings[0]) if len(printings) == 1
-            else Match('ambiguous', candidates=tuple(printings))
-            for line, printings in found.items()}
+    return at_code_and_number(conn, generation, [(line.line, set_id, line.number) for line in lines
+                                                 for set_id in set_codes.sets_for_code(line.set_code)])
 
 
-MATCHERS: tuple[Matcher, ...] = (by_code_and_number,)
+MATCHERS: tuple[Matcher, ...] = (by_code_and_number, by_alias, by_basic_energy, by_name)
 
 
 def match_lines(conn, generation: UUID | None, cards: list[CardLine]) -> dict[int, Match]:

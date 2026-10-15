@@ -1,7 +1,8 @@
 """Decklist Import (spec "Import interfaces"; ticket #212): review a pasted list, then create a Deck with it.
 
 ``POST /api/decks/import/review`` reads a pasted decklist (``decklist_text``), matches its card lines
-(``import_matching``) and says which Card Edition each line becomes (``import_allocation``). It is read-only and
+(``import_matching``) and says which Card Edition each line becomes (``import_allocation``). A Not found line carries
+the prefill of its Missing cards report (``MissingCardPrefill``, ticket #213). It is read-only and
 stateless: the review screen posts again, with the collector's fixes so far, whenever a fix changes. It is a POST only
 because the text is long, and it needs no idempotency key.
 
@@ -22,7 +23,7 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
-from . import prices, set_codes
+from . import import_aliases, prices, set_codes
 from .decklist_text import MAX_CARD_LINES, CardLine, TooLong, TooManyLines, read
 from .decks import MAX_DECK_LIST_CHANGES, DeckListCommandResult, advance_deck_list, keep_response, replayed
 from .format_evaluator import FORMATS
@@ -85,6 +86,21 @@ class ImportPart(BaseModel):
     chosen_by: ChosenBy | None   # how a new copy's Edition was chosen
 
 
+class MissingCardPrefill(BaseModel):
+    """What a Not found line's Missing cards link fills in on the existing report form (``missing_cards.ReportInput``):
+    a Missing Printing with the pasted English name and number. The pasted code goes into ``set_id`` only when a code
+    table maps it (``set_codes.tsv``, or ``import_aliases.tsv`` and its rules): that TCGdex set ID, with the number
+    those rules give (``PR-SW 281`` is ``swshp`` ``SWSH281``). Otherwise the code goes into ``set_name`` and the note,
+    never into ``set_id``: a manual Printing keyed by an unmapped code is one no code table can reach. Each value is cut
+    to the report form's limit."""
+    kind: Literal['printing']
+    english_name: str
+    collector_number: str | None
+    set_id: str | None
+    set_name: str | None
+    note: str
+
+
 class ReviewLine(BaseModel):
     line: int                  # the line number in the pasted text, from 1; fixes name it
     text: str                  # the line as pasted (PH, bullets and doubled spaces kept)
@@ -96,9 +112,12 @@ class ReviewLine(BaseModel):
     ph: bool
     status: LineStatus
     printing: ImportPrinting | None          # the card the line resolved to; None when it needs the collector or is dropped
-    candidates: list[ImportPrinting]         # ambiguous: the cards to pick from
+    # ambiguous: the cards to pick from (one per code and number, or one per Reprint Group for a name). energy: every
+    # Basic Energy Printing of the line's type, newest first, for Change.
+    candidates: list[ImportPrinting]
     editions: list[ImportEdition]            # the printing's active Editions; empty without a printing
     parts: list[ImportPart]                  # what the line becomes; empty unless resolved
+    report: MissingCardPrefill | None        # not_found: the Missing cards report form's prefill; None otherwise
 
 
 class IgnoredImportLine(BaseModel):
@@ -201,21 +220,44 @@ def _edition_printings(conn, generation, edition_ids) -> dict[UUID, UUID]:
         (generation, list(edition_ids))).fetchall()}
 
 
+def _own(match: Match) -> set[UUID]:
+    """The Printings a resolved line keeps its status on: its own, and for Basic Energy matched by type every Basic
+    Energy Printing of that type (Change)."""
+    if match.printing_id is None:
+        return set()
+    return {match.printing_id, *match.candidates} if match.status == 'energy' else {match.printing_id}
+
+
 def _resolve(card: CardLine, match: Match, fix: ImportFix | None,
              edition_printing: dict[UUID, UUID]) -> tuple[LineStatus, UUID | None, UUID | None]:
-    """(status, Printing, the collector's Edition) for one card line after its fix."""
+    """(status, Printing, the collector's Edition) for one card line after its fix. A resolved line (matched, by
+    name, or Basic Energy by type) keeps its status when the fix names one of its own Printings (``_own``); any other
+    card makes it picked."""
     if fix is not None and fix.drop:
         return 'dropped', None, None
     if fix is not None and fix.printing_id is not None:
-        same = match.status == 'matched' and match.printing_id == fix.printing_id
-        return ('matched' if same else 'picked'), fix.printing_id, None
+        return (match.status if fix.printing_id in _own(match) else 'picked'), fix.printing_id, None
     if fix is not None and fix.edition_id is not None:
         printing = edition_printing[fix.edition_id]
-        if match.printing_id is not None and printing != match.printing_id:
-            # The Edition chooser lists the line's own Printing's Editions; another card is picked by printing_id.
+        if match.printing_id is not None and printing not in _own(match):
+            # The Edition chooser lists the line's own Printings' Editions; another card is picked by printing_id.
             error(422, 'INVALID_FIX')
         return ('picked' if match.printing_id is None else match.status), printing, fix.edition_id
     return match.status, match.printing_id, None
+
+
+def _report(card: CardLine) -> MissingCardPrefill:
+    """The Missing cards prefill for a Not found line (``MissingCardPrefill``)."""
+    mapped = import_aliases.report_set(card.set_code, card.number) if card.set_code else None
+    note = f'Pasted decklist line: "{card.text}".'
+    if mapped is None and card.set_code:
+        note += f" PrizeCheck's code tables don't map the set code {card.set_code}."
+    return MissingCardPrefill(
+        kind='printing', english_name=card.name[:160],
+        collector_number=(mapped[1] if mapped else card.number or '')[:80] or None,
+        set_id=mapped[0][:80] if mapped else None,
+        set_name=None if mapped else (card.set_code or '')[:160] or None,
+        note=note[:2000])
 
 
 @router.post('/import/review', response_model=ImportReview)
@@ -266,13 +308,14 @@ def review_import(command: ReviewImport, user_id: str = Depends(verified_user)):
             line=card.line, text=card.text, section=card.section, quantity=str(card.quantity), name=card.name,
             set_code=card.set_code, number=card.number, ph=card.ph, status=status,
             printing=printings[printing] if printing is not None else None,
-            candidates=[printings[candidate] for candidate in matches[card.line].candidates] if status == 'ambiguous'
-            else [],
+            candidates=[printings[candidate] for candidate in matches[card.line].candidates]
+            if status in ('ambiguous', 'energy') else [],
             editions=[ImportEdition(edition_id=edition['edition_id'], descriptor=edition['descriptor'],
                                     display_price=_display_price(views.get(edition['edition_id'])),
                                     stale=_stale(views.get(edition['edition_id'])))
                       for edition in editions[printing]] if printing is not None else [],
-            parts=[_part(part) for part in parts.get(card.line, [])]))
+            parts=[_part(part) for part in parts.get(card.line, [])],
+            report=_report(card) if status == 'not_found' else None))
     deck_list = merged([part for card in cards for part in parts.get(card.line, [])])
     return ImportReview(
         lines=lines, ignored=[IgnoredImportLine(line=line.line, text=line.text) for line in reading.ignored],
