@@ -20,12 +20,14 @@ collector's Decks and Deck List lines, never with the rest of the Collection. Th
 capture commits, for the lines that still need copies only.
 
 This is not a price access (ADR 0006): it reads no quote, admits no refresh and waits for no runner. The cost of the
-same scope (#210) and its Mass Entry export reuse ``capture_want_list`` and ``combined``; the Swap hint (#211) adds an
-optional field to ``WantListLine``.
+same scope (#210) and its Mass Entry export reuse ``capture_want_list`` and ``combined``.
+
+The Swap hint (#211, ``swap_hints``) is ``WantListLine.swap``. The route asks the capture for it (``swaps=True``), which
+reads the Reprint Groups of the lines that still need copies in the same transaction; other callers don't pay for it.
 """
 import hashlib
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
@@ -36,6 +38,7 @@ from .deck_list_display import read_line_display
 from .location_tree import error, owner_and_rows
 from .main import connect, verified_user
 from .settings import WantListCounting, read_settings
+from .swap_hints import GroupEdition, SwapCapture, SwapHint, capture_swaps, hints, swap_hint
 
 router = APIRouter(prefix='/api/want-list', tags=['want-list'])
 
@@ -69,6 +72,7 @@ class WantListLine(BaseModel):
     counted_from: list[CountedFromDeck]  # Where ``other_decks`` come from, oldest Deck first.
     owned: str              # Every copy of the Edition the collector owns, wherever it is.
     need: str               # Copies still needed from outside the Collection (N in "N of M").
+    swap: SwapHint | None = None  # Another Edition of the line's Reprint Group the collector can Swap in (#211).
 
 
 class WantListSection(BaseModel):
@@ -128,6 +132,7 @@ class WantListCapture:
     scope: UUID | None
     decks: tuple[CapturedDeck, ...]       # Every Deck, oldest first.
     allocation: Allocation                # Every line naming an Edition the Decks in scope list.
+    swaps: SwapCapture = field(default_factory=SwapCapture)  # What the Swap hints read, when asked for (#211).
 
     def needs(self, deck_id: UUID) -> list[LineCount]:
         """The Deck's lines that still need copies, in Edition order."""
@@ -147,9 +152,11 @@ class WantListCapture:
         return hashlib.sha256(text.encode()).hexdigest()[:32]
 
 
-def capture_want_list(user_id: str, deck_id: UUID | None = None, timeout_ms: int | None = None) -> WantListCapture:
+def capture_want_list(user_id: str, deck_id: UUID | None = None, timeout_ms: int | None = None,
+                      swaps: bool = False) -> WantListCapture:
     """Raises 404 ``DECK_NOT_FOUND`` when ``deck_id`` names a missing, foreign or non-Deck Location. ``timeout_ms``
-    bounds every statement and lock wait, for a budgeted caller (#210)."""
+    bounds every statement and lock wait, for a budgeted caller (#210). ``swaps`` also reads what the Swap hints of the
+    lines in scope need (#211)."""
     with connect() as conn, conn.transaction():
         if timeout_ms is not None:
             conn.execute(f'SET LOCAL statement_timeout = {max(1, int(timeout_ms))}')
@@ -167,8 +174,12 @@ def capture_want_list(user_id: str, deck_id: UUID | None = None, timeout_ms: int
             f'SELECT edition_id FROM deck_list_line WHERE owner_id=%s{scoped}',
             (user_id, deck_id) if deck_id is not None else (user_id,))}
         allocation = allocate(conn, user_id, editions, settings.want_list_counting)
+        needed = {edition for (deck, edition), line in allocation.lines.items()
+                  if line.need > 0 and (deck_id is None or deck == deck_id)}
+        swap_capture = capture_swaps(conn, user_id, needed, settings.want_list_counting) if swaps else SwapCapture()
         capture = WantListCapture(counting=settings.want_list_counting, settings_revision=settings.revision,
-                                  owner_revision=revision, scope=deck_id, decks=decks, allocation=allocation)
+                                  owner_revision=revision, scope=deck_id, decks=decks, allocation=allocation,
+                                  swaps=swap_capture)
     return capture
 
 
@@ -202,7 +213,7 @@ DISPLAY_FIELDS = ('name', 'set_id', 'set_name', 'collector_number', 'descriptor'
 
 @router.get('', response_model=WantList)
 def want_list(deck: UUID | None = None, user_id: str = Depends(verified_user)):
-    capture = capture_want_list(user_id, deck)
+    capture = capture_want_list(user_id, deck, swaps=True)
     needs = {shown.id: capture.needs(shown.id) for shown in capture.shown()}
     with connect() as conn:
         display = read_line_display(conn, {line.edition_id for lines in needs.values() for line in lines})
@@ -217,6 +228,12 @@ def want_list(deck: UUID | None = None, user_id: str = Depends(verified_user)):
 
     for lines in needs.values():
         lines.sort(key=card_order)
+
+    # The Swap hints (#211), handed out in the same card order over every Deck, oldest first.
+    def group_order(edition: GroupEdition):
+        return edition.name.casefold(), edition.set_name, number_order(edition.collector_number), edition.edition_id
+
+    offered = hints(capture.swaps, [captured.id for captured in capture.decks], group_order)
     sections = [WantListSection(
         deck_id=shown.id, name=shown.name, deck_list_revision=shown.deck_list_revision,
         to_get=str(sum(line.need for line in needs[shown.id])),
@@ -224,7 +241,8 @@ def want_list(deck: UUID | None = None, user_id: str = Depends(verified_user)):
             edition_id=line.edition_id, **shown_of(line.edition_id), quantity=str(line.quantity), held=str(line.held),
             spare=str(line.spare), other_decks=str(line.other_decks),
             counted_from=[CountedFromDeck(deck_id=other, quantity=str(count)) for other, count in line.from_decks],
-            owned=str(capture.allocation.owned.get(line.edition_id, 0)), need=str(line.need))
+            owned=str(capture.allocation.owned.get(line.edition_id, 0)), need=str(line.need),
+            swap=swap_hint(offered.get((shown.id, line.edition_id)), capture.swaps))
             for line in needs[shown.id]]) for shown in capture.shown()]
     total = combined(capture, needs)
     rows = [CombinedRow(edition_id=edition, **shown_of(edition), need=str(need),
