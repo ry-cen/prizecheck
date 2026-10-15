@@ -33,10 +33,23 @@ List lines, never with the rest of the Collection.
 The Want List (#209, ``want_list``) passes every Edition the owner's Decks list and reads each line with where its
 counted copies are: ``spare`` is a count only ("1 spare"), and under One Deck at a time ``from_decks`` names the other
 Decks whose own copies the line counts ("1 in Gardevoir ex"). ``Allocation.owned`` is every copy of an Edition, for
-"Your 4 are counted for other Decks". Its sections come in ``deck_order``, the order Spare Copies go in. Later tickets
-extend this module additively, keeping ``allocate``'s signature and these counts: the Swap hint (#211) and the import's
-owned copies (#214) add the copies of an Edition available to one Deck, or to a new Deck counted as the newest, from the
-same per-Edition counts.
+"Your 4 are counted for other Decks". Its sections come in ``deck_order``, the order Spare Copies go in.
+
+``available_to`` (the import's owned copies, #214; Replace's step 1, #215; the Swap hint, #211) answers which copies of
+each given Edition the counting setting makes available to one Deck, or to a new Deck counted as the newest, and where
+they are. It runs ``allocate`` and hands Spare Copies out with the same rule (``_hand_out``):
+
+- **Every Deck built at once:** the asking Deck's own copies, then the Spare Copies left after the Decks older than it
+  have counted theirs. A new Deck is the newest, so it gets the Spare Copies no Deck counts. For Replace, the asking
+  Deck's copies (all of them, not only those its current line covers) come out of the pool before the walk, and its
+  current lines take no part in it: the new list replaces them.
+- **One Deck at a time:** the asking Deck's own copies, then every copy outside it: Spare Copies first, then the copies
+  other Decks hold for their own lines, oldest Deck first.
+
+Which Spare Copies are the available ones is a choice the counts don't make; ``available_to`` makes it once: the asking
+Deck uses loose copies first (Locations that aren't Decks, by name, then id), then other Decks' copies beyond their own
+lines (by Deck name, then id). The older Decks' counted Spare Copies are the rest. The Want List shows a Spare Copy as a
+count only, so it never contradicts these places.
 """
 from collections.abc import Iterable
 from dataclasses import dataclass, field
@@ -74,6 +87,8 @@ class Allocation:
     order: tuple[UUID, ...]
     # Every copy the owner holds of each given Edition, wherever it is; an Edition with no copies is absent.
     owned: dict[UUID, int] = field(default_factory=dict)
+    # The same copies by Location: Edition id -> {Location id: copies}. ``available_to`` reads where copies are.
+    places: dict[UUID, dict[UUID, int]] = field(default_factory=dict)
 
     def line(self, deck_id: UUID, edition_id: UUID) -> LineCount:
         return self.lines[(deck_id, edition_id)]
@@ -92,6 +107,17 @@ def deck_order(conn, user_id: str) -> tuple[UUID, ...]:
         "SELECT id,created_at FROM location WHERE owner_id=%s AND kind='deck'", (user_id,))})
 
 
+def _hand_out(shorts: Iterable[tuple[UUID, int]], spare_copies: int) -> dict[UUID, int]:
+    """Every Deck built at once: ``spare_copies`` Spare Copies go to the Decks in ``shorts`` ((Deck id, copies short),
+    oldest first), each taking what it is short of while any are left. Returns each Deck's share."""
+    handed: dict[UUID, int] = {}
+    left = spare_copies
+    for deck, short in shorts:
+        handed[deck] = min(short, left)
+        left -= handed[deck]
+    return handed
+
+
 def allocate(conn, user_id: str, editions: Iterable[UUID], counting: WantListCounting) -> Allocation:
     """Count every Deck List line of the owner that names one of ``editions``. The caller holds the owner row lock."""
     wanted = sorted(set(editions))
@@ -99,10 +125,12 @@ def allocate(conn, user_id: str, editions: Iterable[UUID], counting: WantListCou
         return Allocation(counting=counting, lines={}, order=())
     total: dict[UUID, int] = {}
     held: dict[tuple[UUID, UUID], int] = {}
+    places: dict[UUID, dict[UUID, int]] = {}
     for row in conn.execute('SELECT location_id,edition_id,quantity FROM holding WHERE owner_id=%s AND edition_id=ANY(%s)',
                             (user_id, wanted)):
         total[row['edition_id']] = total.get(row['edition_id'], 0) + row['quantity']
         held[(row['location_id'], row['edition_id'])] = row['quantity']
+        places.setdefault(row['edition_id'], {})[row['location_id']] = row['quantity']
     listed = conn.execute('SELECT deck_id,edition_id,quantity FROM deck_list_line WHERE owner_id=%s AND edition_id=ANY(%s)',
                           (user_id, wanted)).fetchall()
     decks = sorted({row['deck_id'] for row in listed})
@@ -119,14 +147,13 @@ def allocate(conn, user_id: str, editions: Iterable[UUID], counting: WantListCou
         own = {row['deck_id']: min(row['quantity'], held.get((row['deck_id'], edition), 0)) for row in rows}
         claimed = sum(own.values())
         spare_copies = total.get(edition, 0) - claimed
-        left = spare_copies
+        handed = _hand_out(((row['deck_id'], row['quantity'] - own[row['deck_id']]) for row in rows), spare_copies)
         for row in rows:
             deck, quantity = row['deck_id'], row['quantity']
             short = quantity - own[deck]
             from_decks: list[tuple[UUID, int]] = []
             if counting == 'all_at_once':
-                spare, others = min(short, left), 0
-                left -= spare
+                spare, others = handed[deck], 0
             else:
                 # A short Deck holds nothing beyond its line, so every Spare Copy is outside it, and so are the copies
                 # the other Decks hold for their own lines, taken from the oldest Deck first.
@@ -142,7 +169,7 @@ def allocate(conn, user_id: str, editions: Iterable[UUID], counting: WantListCou
                         wanted_from_others -= taken
             lines[(deck, edition)] = LineCount(deck_id=deck, edition_id=edition, quantity=quantity, held=own[deck],
                                                spare=spare, other_decks=others, from_decks=tuple(from_decks))
-    return Allocation(counting=counting, lines=lines, order=order, owned=total)
+    return Allocation(counting=counting, lines=lines, order=order, owned=total, places=places)
 
 
 def deck_lines(conn, user_id: str, deck_id: UUID, counting: WantListCounting) -> dict[UUID, LineCount]:
@@ -158,3 +185,101 @@ def deck_lines(conn, user_id: str, deck_id: UUID, counting: WantListCounting) ->
         (deck_id, row['edition_id']),
         LineCount(deck_id=deck_id, edition_id=row['edition_id'], quantity=row['quantity'], held=row['quantity'],
                   spare=0, other_decks=0)) for row in rows}
+
+
+@dataclass(frozen=True)
+class Kept:
+    """Copies of an Edition another Deck keeps, so the asking Deck can't use them (Every Deck built at once only)."""
+    deck_id: UUID
+    copies: int
+    counted: bool   # False: the Deck holds them for its own line. True: Spare Copies that older Deck counts.
+
+
+@dataclass(frozen=True)
+class Available:
+    """The copies of one Edition the counting setting makes available to the asking Deck."""
+    edition_id: UUID
+    in_deck: int    # Copies the asking Deck holds (Replace); 0 for a new Deck.
+    # Copies available outside the asking Deck: (Location id, copies), in the order they are used (the module's
+    # docstring). Under One Deck at a time other Decks' own copies come last, oldest Deck first.
+    elsewhere: tuple[tuple[UUID, int], ...]
+    kept: tuple[Kept, ...]   # Copies other Decks keep, oldest Deck first; empty under One Deck at a time.
+
+
+@dataclass(frozen=True)
+class Place:
+    name: str
+    deck: bool      # The Location is a Deck.
+
+
+@dataclass(frozen=True)
+class Availability:
+    counting: WantListCounting
+    # Every given Edition the owner holds a copy of; an Edition with none is absent.
+    editions: dict[UUID, Available]
+    # The name of every Location in ``elsewhere`` and every Deck in ``kept``.
+    places: dict[UUID, Place]
+    # Every Deck that lists one of the given Editions, oldest first (``Allocation.order``).
+    order: tuple[UUID, ...]
+
+
+def available_to(conn, user_id: str, editions: Iterable[UUID], counting: WantListCounting,
+                 deck_id: UUID | None = None) -> Availability:
+    """The copies of each of ``editions`` available to the Deck ``deck_id`` (Replace), or to a new Deck counted as the
+    newest when it is None, under ``counting``; see the module docstring. The caller holds the owner row lock, read
+    ``counting`` under it, and checked that ``deck_id`` is one of the owner's Decks. Its reads are ``allocate``'s and one
+    range read of the Locations it names, so the work grows with the given Editions' Holdings and the Deck List lines
+    naming them."""
+    allocation = allocate(conn, user_id, editions, counting)
+    ids = {location for found in allocation.places.values() for location in found} | set(allocation.order)
+    if deck_id is not None:
+        ids.add(deck_id)
+    rows = {row['id']: row for row in conn.execute(
+        'SELECT id,name,kind,created_at FROM location WHERE owner_id=%s AND id=ANY(%s)',
+        (user_id, sorted(ids)))} if ids else {}
+
+    def age(deck: UUID):
+        return rows[deck]['created_at'], deck
+
+    def loose_first(place: tuple[UUID, int]):
+        row = rows[place[0]]
+        return row['kind'] == 'deck', row['name'].casefold(), place[0]
+
+    found: dict[UUID, Available] = {}
+    for edition, held in allocation.places.items():
+        # Other Decks' lines naming the Edition, oldest first; the asking Deck's own lines are being replaced.
+        others = [allocation.lines[(deck, edition)] for deck in allocation.order
+                  if deck != deck_id and (deck, edition) in allocation.lines]
+        own = {line.deck_id: line.held for line in others}
+        spare = sorted(((location, copies - own.get(location, 0)) for location, copies in held.items()
+                        if location != deck_id and copies > own.get(location, 0)), key=loose_first)
+        spare_copies = sum(copies for _, copies in spare)
+        if counting == 'all_at_once':
+            older = [line for line in others if deck_id is None or age(line.deck_id) < age(deck_id)]
+            handed = _hand_out(((line.deck_id, line.quantity - line.held) for line in older), spare_copies)
+            elsewhere = _first(spare, spare_copies - sum(handed.values()))
+            kept: list[Kept] = []
+            for line in others:
+                if line.held:
+                    kept.append(Kept(line.deck_id, line.held, False))
+                if handed.get(line.deck_id):
+                    kept.append(Kept(line.deck_id, handed[line.deck_id], True))
+        else:
+            elsewhere = tuple(spare) + tuple((line.deck_id, line.held) for line in others if line.held)
+            kept = []
+        found[edition] = Available(edition_id=edition, in_deck=held.get(deck_id, 0) if deck_id is not None else 0,
+                                   elsewhere=elsewhere, kept=tuple(kept))
+    return Availability(counting=counting, editions=found,
+                        places={location: Place(row['name'], row['kind'] == 'deck') for location, row in rows.items()},
+                        order=allocation.order)
+
+
+def _first(places: list[tuple[UUID, int]], copies: int) -> tuple[tuple[UUID, int], ...]:
+    """The first ``copies`` copies of ``places``, in order."""
+    taken: list[tuple[UUID, int]] = []
+    for location, available in places:
+        if copies <= 0:
+            break
+        taken.append((location, min(available, copies)))
+        copies -= taken[-1][1]
+    return tuple(taken)
