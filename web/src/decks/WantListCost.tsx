@@ -39,9 +39,12 @@ export function useWantListCost(
   onChanged: () => void
 ): CostLoad {
   const [state, setState] = useState<{ list: WantList; load: CostLoad }>();
-  const reread = useRef(false);
+  // The Deck scope a re-read was asked for; a re-read for another scope is not this one's.
+  const reread = useRef<string | null | false>(false);
   useEffect(() => {
     if (!list) return;
+    if (reread.current !== false && reread.current !== list.deck_id)
+      reread.current = false;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), CLIENT_TIMEOUT_MS);
     let live = true;
@@ -54,12 +57,15 @@ export function useWantListCost(
         if (cost.owner_revision === null || answers(cost, list)) {
           reread.current = false;
           settle({ kind: "ready", cost });
-        } else if (!reread.current) {
-          reread.current = true;
+        } else if (reread.current === false) {
+          reread.current = list.deck_id;
           if (live) onChanged();
         } else settle({ kind: "unavailable" });
       })
-      .catch(() => settle({ kind: "unavailable" }))
+      .catch(() => {
+        reread.current = false;
+        settle({ kind: "unavailable" });
+      })
       .finally(() => clearTimeout(timer));
     return () => {
       live = false;

@@ -348,7 +348,18 @@ test.describe("on a phone", () => {
 
   test("the cost and Buy on TCGplayer fit the phone", async ({ page }) => {
     await signIn(page);
-    await world(page);
+    const names = await world(page);
+    await page.goto(`${ORIGIN}/decks`);
+    const indexButton = indexRow(page, names.gardevoir).getByRole("button", {
+      name: "Want List: 4 cards · $0.75 + 1 unpriced",
+      exact: true,
+    });
+    await expect(indexButton).toBeVisible();
+    await expectTouchTarget(indexButton);
+    await expectPageChecks(
+      page,
+      "the Decks index with Want List costs on a phone"
+    );
     await page.goto(`${ORIGIN}/decks/want-list`);
     await expect(
       page.getByText("Combined total · 6 cards · $1.25 + 1 unpriced")

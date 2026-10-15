@@ -38,6 +38,7 @@ export function MassEntryPanel({
   notice,
   emptyMessage = "No cards",
   subject = "this Deck",
+  deckWording = "Deck",
 }: {
   checks: MassEntryChecks;
   busy: boolean;
@@ -49,6 +50,8 @@ export function MassEntryPanel({
   emptyMessage?: string;
   /** What the export covers, in "shows no price for this Deck" (the Want List's Buy on TCGplayer: "these cards"). */
   subject?: string;
+  /** "Deck" or "Decks": the less-specific line compares a row with the Printing in your Deck(s). */
+  deckWording?: "Deck" | "Decks";
 }) {
   const [confirming, setConfirming] = useState(false);
   // A new or discarded export never inherits an open confirmation.
@@ -71,7 +74,7 @@ export function MassEntryPanel({
       <p>
         Less specific: {view.less_specific_count} of {view.line_count} rows give
         only a card name. TCGplayer may resolve a row to a different Printing
-        than the one in your Deck.
+        than the one in your {deckWording}.
       </p>
     ) : null;
   const warnings = (
