@@ -2,7 +2,7 @@ import { OWNER_SUBPATHS } from "../owner/sections";
 
 /** The signed-in pages inside the app shell, and the addresses that open them. Routing is client-side. */
 export type PageId =
-  "collection" | "decks" | "catalog" | "reports" | "sign-ins" | "owner";
+  "collection" | "decks" | "catalog" | "reports" | "settings" | "owner";
 
 export type PageDef = {
   id: PageId;
@@ -48,9 +48,9 @@ export const PAGES: readonly PageDef[] = [
     keepMounted: true,
   },
   {
-    id: "sign-ins",
-    path: "/settings/sign-ins",
-    label: "Sign-ins",
+    id: "settings",
+    path: "/settings",
+    label: "Settings",
     keepMounted: false,
   },
   {
@@ -72,16 +72,18 @@ export const DESKTOP_TABS: readonly PageId[] = [
 /** Phone bottom tab bar, before More. */
 export const PHONE_TABS: readonly PageId[] = ["collection", "decks", "catalog"];
 /** The phone More sheet's pages (Owner controls for the owner only), before Sign out. */
-export const MORE_PAGES: readonly PageId[] = ["reports", "sign-ins", "owner"];
+export const MORE_PAGES: readonly PageId[] = ["reports", "settings", "owner"];
 /** The desktop avatar menu's pages (Owner controls for the owner only), before Sign out. */
-export const ACCOUNT_PAGES: readonly PageId[] = ["sign-ins", "owner"];
+export const ACCOUNT_PAGES: readonly PageId[] = ["settings", "owner"];
 
 /** Where signing in lands by default. */
 export const DEFAULT_PATH = "/collection";
 
-/** Old addresses for Collection: the bare origin, the retired /workspace, /locations and /old-collection. Anything else
- * is returned unchanged. */
+/** Old addresses: for Collection the bare origin, the retired /workspace, /locations and /old-collection; for Settings
+ * (#207) the retired Sign-ins page's /settings/sign-ins, where the auth gateway still returns link starts with a
+ * failure in the query (auth/src/signIns.ts). Anything else is returned unchanged. */
 export function canonicalPath(path: string): string {
+  if (path === "/settings/sign-ins") return "/settings";
   return path === "/" ||
     path === "/workspace" ||
     path === "/locations" ||

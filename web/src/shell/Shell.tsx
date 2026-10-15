@@ -10,10 +10,10 @@ import {
   CircleUser,
   Ellipsis,
   Flag,
-  KeyRound,
   Layers,
   LayoutGrid,
   LogOut,
+  Settings,
   ShieldCheck,
   type LucideIcon,
 } from "lucide-react";
@@ -36,7 +36,7 @@ const ICONS: Record<PageId, LucideIcon> = {
   decks: Layers,
   catalog: BookOpen,
   reports: Flag,
-  "sign-ins": KeyRound,
+  settings: Settings,
   owner: ShieldCheck,
 };
 

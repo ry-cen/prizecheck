@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { SECONDARY } from "../public/controls";
 import { ProviderMark, SignInAlert } from "../public/SignIn";
 import {
@@ -7,10 +7,9 @@ import {
   signInMessage,
   type SignInMessage,
 } from "../signInMessages";
-import { PageHeader } from "./PageHeader";
 
-// The Sign-ins page (/settings/sign-ins, #156), in the shell and opened from the avatar menu and the More sheet
-// (sign-in decision "Sign-ins page"). It lists every configured provider from GET /auth/methods, so a new provider
+// The Settings page's Sign-ins section (#207; the Sign-ins page of #156, sign-in decision "Sign-ins page", until the
+// Settings page replaced it). It lists every configured provider from GET /auth/methods, so a new provider
 // appears with no change here, with the date it was linked or a Connect link, and offers Remove only while more than
 // one sign-in is linked. Every failure message comes from the allowlist in signInMessages.ts, naming a provider only
 // by its configured display name.
@@ -19,9 +18,9 @@ type Provider = { id: string; name: string };
 type LinkedSignIn = { provider: string; linkedAt: string };
 
 /** Where a stale session goes: sign in again, then come back here. */
-const SIGN_IN_AGAIN = `/sign-in?next=${encodeURIComponent("/settings/sign-ins")}`;
+const SIGN_IN_AGAIN = `/sign-in?next=${encodeURIComponent("/settings")}`;
 
-export function SignInsPage({ email }: { email: string | null }) {
+export function SignInsSection({ email }: { email: string | null }) {
   const [providers, setProviders] = useState<Provider[] | null>(null);
   const [linked, setLinked] = useState<LinkedSignIn[] | null>(null);
   const [unavailable, setUnavailable] = useState(false);
@@ -33,6 +32,7 @@ export function SignInsPage({ email }: { email: string | null }) {
   const arrivalShown = useRef(false);
   const failureRef = useRef<HTMLDivElement>(null);
   const heading = useRef<HTMLHeadingElement>(null);
+  const headingId = useId();
 
   async function load() {
     try {
@@ -114,9 +114,15 @@ export function SignInsPage({ email }: { email: string | null }) {
   }
 
   return (
-    // The app's page container, so the title lines up with every other page; the content keeps a reading width.
-    <main className="mx-auto box-border max-w-7xl px-7 py-7 phone:px-4 phone:py-5 [&>*]:max-w-3xl">
-      <PageHeader title="Sign-ins" headingRef={heading} />
+    <section aria-labelledby={headingId} className="flex flex-col gap-3">
+      <h2
+        id={headingId}
+        ref={heading}
+        tabIndex={-1}
+        className="m-0 text-heading font-semibold"
+      >
+        Sign-ins
+      </h2>
       <section
         aria-label="Your sign-ins"
         className="flex flex-col gap-4 text-body"
@@ -139,7 +145,7 @@ export function SignInsPage({ email }: { email: string | null }) {
                 <button
                   type="button"
                   onClick={() => {
-                    // The message (and this button) goes, so focus moves to the page's heading, not the page body.
+                    // The message (and this button) goes, so focus moves to the section's heading, not the page body.
                     heading.current?.focus();
                     setFailure(null);
                   }}
@@ -210,6 +216,6 @@ export function SignInsPage({ email }: { email: string | null }) {
           {notice}
         </p>
       </section>
-    </main>
+    </section>
   );
 }

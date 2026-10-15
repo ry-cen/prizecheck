@@ -181,6 +181,8 @@ from .collection import router as collection_router  # noqa: E402
 app.include_router(collection_router)
 from .catalog_browse import router as catalog_browse_router  # noqa: E402
 app.include_router(catalog_browse_router)
+from .settings import router as settings_router  # noqa: E402
+app.include_router(settings_router)
 
 from .decks import router as decks_router  # noqa: E402
 app.include_router(decks_router)
