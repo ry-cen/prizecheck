@@ -5,9 +5,10 @@
 // every copy in one step and lands on that Location with a toast and no Undo. Checked at 1280×800 and 375×812 (no
 // horizontal scroll, 44 px controls). Ticket #227: How do I export from my tracker? holds each tracker's steps, the
 // only place the UI names a tracker; a file PrizeCheck can't read opens it, and a Collectr export is read without the
-// collector saying where it came from. The files are small UTF-8 reconstructions of tracker exports, under the
-// gateway's present 16 KiB body limit (zips and Windows-1252 are covered by the API tests, which post straight to the
-// API); the catalog is api/tests/test_collection_import.py seed_import_catalog.
+// collector saying where it came from. The gateway follow-up to #226: a Windows-1252 file over 16 KiB arrives intact
+// through the gateway, a 5 MB file reaches the API, and a larger one is refused before it uploads. The other files are
+// small UTF-8 reconstructions of tracker exports (zips are covered by the API tests, which post straight to the API);
+// the catalog is api/tests/test_collection_import.py seed_import_catalog.
 import { test, expect, type Page } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -45,6 +46,19 @@ const COLLECTR = [
   'Trades,Pokemon,Jungle,Wigglytuff,32/64,Rare,Unlimited Holofoil,PSA 10.0,Near Mint,0,1,"1,055.48",0,false,2026-03-05,Slabbed',
   "",
 ].join("\n");
+/** A Windows-1252 file ("é" is the single byte 0xE9, which isn't UTF-8), padded past 16 KiB with blank lines. */
+const WINDOWS_1252 = Buffer.concat([
+  Buffer.from(
+    [
+      HEADER_12,
+      "2,Pok\xe9 Ball,Pok\xe9 Ball,Jungle,64/64,JU,Normal,Near Mint,English,Common,900007,800007",
+      "",
+    ].join("\r\n"),
+    "latin1"
+  ),
+  Buffer.from("\r\n".repeat(10_000)),
+]);
+const FIVE_MIB = 5 * 1024 * 1024;
 const TRACKERS = [
   "TCGplayer",
   "Collectr",
@@ -151,14 +165,35 @@ const exportSteps = (page: Page) =>
   page.getByRole("list", { name: "Export steps" });
 
 /** Chooses `content` as the file `name` through the file picker that Choose file opens. */
-async function choose(page: Page, name: string, content: string, tap = false) {
+async function choose(
+  page: Page,
+  name: string,
+  content: string | Buffer,
+  tap = false
+) {
   const chooser = page.waitForEvent("filechooser");
   if (tap) await chooseFile(page).tap();
   else await chooseFile(page).click();
   await (
     await chooser
-  ).setFiles({ name, mimeType: "text/csv", buffer: Buffer.from(content) });
+  ).setFiles({
+    name,
+    mimeType: "text/csv",
+    buffer: typeof content === "string" ? Buffer.from(content) : content,
+  });
   await expect(page.getByText(name, { exact: true })).toBeVisible();
+}
+
+/** A 12-column file of exactly `size` bytes: Starmie rows, then blank lines. */
+function sizedFile(size: number): Buffer {
+  const head = `${HEADER_12}\n`;
+  const row =
+    "1,Starmie,Starmie,Base Set,064/102,BS,Normal,Near Mint,English,Common,900003,800003\n";
+  const text = head + row.repeat(Math.floor((size - head.length) / row.length));
+  return Buffer.concat([
+    Buffer.from(text),
+    Buffer.alloc(size - text.length, "\n"),
+  ]);
 }
 
 test.describe("desktop", () => {
@@ -327,6 +362,60 @@ test.describe("desktop", () => {
     await expect
       .poll(() => held(page, unsorted))
       .toEqual(["1 Wigglytuff", "2 Starmie"]);
+  });
+});
+
+test.describe("large files", () => {
+  test.use({ viewport: { width: 1280, height: 800 } });
+
+  test("a Windows-1252 file over 16 KiB arrives intact, a 5 MB file reaches the server, and a larger one asks to be split before it uploads", async ({
+    page,
+  }) => {
+    seedImportCatalog();
+    await signIn(page);
+    await page.getByRole("button", { name: "Import…" }).click();
+    await expect(heading(page)).toHaveText("Import your collection");
+    const main = page.locator("#main-content");
+    const review = page.getByRole("button", { name: "Review import" });
+    const uploads: string[] = [];
+    page.on("request", (request) => {
+      if (
+        request.method() === "POST" &&
+        new URL(request.url()).pathname === "/api/collection-imports"
+      )
+        uploads.push(request.url());
+    });
+
+    // Its bytes reach the API as they are, so "é" reads as Windows-1252.
+    expect(WINDOWS_1252.length).toBeGreaterThan(16_384);
+    await choose(page, "windows.csv", WINDOWS_1252);
+    await review.click();
+    await expect(heading(page)).toHaveText("Review import");
+    await expect(chip(page, /^All 1$/)).toHaveAttribute("aria-pressed", "true");
+    await expect(rowsList(page).getByRole("listitem")).toContainText(
+      "From your file: 2 · Poké Ball · Jungle · 64/64 · Normal"
+    );
+    await expect(
+      page.getByRole("region", { name: "Save" }).getByRole("status")
+    ).toHaveText("Ready: 2 cards from 1 row.");
+    await page.getByRole("button", { name: "Back" }).click();
+    await expect(heading(page)).toHaveText("Import your collection");
+
+    // Exactly 5 MB goes through to the API, which reads it and finds too many rows.
+    await choose(page, "five.csv", sizedFile(FIVE_MIB));
+    await review.click();
+    await expect(main.getByRole("status")).toHaveText(
+      "This file has more than 10,000 rows. Split it into two files and import each one."
+    );
+    expect(uploads).toHaveLength(2);
+
+    // A byte more is refused on the page, before anything uploads.
+    await choose(page, "larger.csv", sizedFile(FIVE_MIB + 1));
+    await review.click();
+    await expect(main.getByRole("status")).toHaveText(
+      "This file is larger than 5 MB. Split it into two files and import each one."
+    );
+    expect(uploads).toHaveLength(2);
   });
 });
 

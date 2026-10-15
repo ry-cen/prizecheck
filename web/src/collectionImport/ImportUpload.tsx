@@ -9,7 +9,7 @@ import { PageHeader } from "../shell/PageHeader";
 import { Button } from "../ui/Button";
 import { Select } from "../ui/Select";
 import { ExportHelp } from "./ExportHelp";
-import { startErrorText } from "./importText";
+import { MAX_UPLOAD_BYTES, SPLIT_LARGE, startErrorText } from "./importText";
 
 type Props = {
   /** The chosen file, kept by the page so Back from the review keeps it. */
@@ -50,6 +50,11 @@ export function ImportUpload({
 
   async function review() {
     if (!file || !chosen) return;
+    // Refused here rather than by the gateway: a browser may report a refused upload as a lost connection.
+    if (file.size > MAX_UPLOAD_BYTES) {
+      setError(SPLIT_LARGE);
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
