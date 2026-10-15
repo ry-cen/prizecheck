@@ -268,8 +268,10 @@ function compute(mode) {
   const rows = Object.values(total).sort((a, b) => (ED[b.ed].price ?? -1) * b.qty - (ED[a.ed].price ?? -1) * a.qty);
   return { sections: out, rows };
 }
+function deckRows(sec) { return sec.lines.filter(l => l.need).map(l => ({ ed: l.ed, qty: l.need, for: [[sec.deck.name, l.need]] })); }
 // What the deck builder's "to complete" counts: copies you don't own anywhere.
-const builderToComplete = deck => deck.lines.reduce((s, [ed, qty]) => s + Math.max(0, qty - owned(ed)), 0);
+// Owner, 2026-10-14: the builder's "to complete" follows the Want List counting setting, so they always agree.
+const builderToComplete = deck => compute(state.mode).sections.find(s => s.deck.id === deck.id).lines.reduce((s, l) => s + l.need, 0);
 
 const money = n => "$" + n.toFixed(2);
 function cost(items) {
@@ -300,18 +302,20 @@ function showToast(text, canUndo) {
 
 // ---------- Want List page ----------
 function wantList({ headerExtra = "", filter = null } = {}) {
-  const { sections, rows } = compute(state.mode);
+  const { sections, rows: allRows } = compute(state.mode);
+  const one = filter && filter !== "all" ? decks.find(d => d.id === filter) : null;
+  const rows = one ? deckRows(sections.find(s => s.deck.id === filter)) : allRows;
   const tc = cost(rows.map(r => [r.ed, r.qty]));
-  const shown = sections.filter(s => !filter || filter === "all" || s.deck.id === filter);
+  const shown = sections.filter(s => !one || s.deck.id === filter);
   const modeText = state.mode === "all"
     ? `Every Deck built at once: needs add together, and a spare copy counts toward one Deck at most.<span class="proto-note">placeholder: spares go to Decks in Decks-page order</span>`
     : `One Deck at a time: every copy you own counts for every Deck, even copies sleeved in another Deck. The total takes the largest need per card.`;
   return `
     ${headerExtra}
-    <h1>Want List</h1>
+    <h1>Want List${one ? ` <span class="muted" style="font-weight:400">· ${esc(one.name)}</span>` : ""}</h1>
     <p class="lede">What your Decks name but can't get from your Collection. It changes when you change a Deck List.</p>
     <section class="summary" aria-label="Combined total">
-      <div class="stat"><div class="lbl">To get</div><div class="big num">${tc.cards} cards</div></div>
+      <div class="stat"><div class="lbl">${one ? esc(one.name) + " needs" : "To get"}</div><div class="big num">${tc.cards} cards</div></div>
       <div class="stat"><div class="lbl">Estimated cost</div><div class="big gold num">${money(tc.sum)}</div>
         <div class="src num">${tc.unpriced ? `${tc.cards - tc.unpriced} of ${tc.cards} cards priced` : `all ${tc.cards} cards priced`}</div></div>
       <div class="controls">
@@ -329,7 +333,7 @@ function wantList({ headerExtra = "", filter = null } = {}) {
     </div>` : ""}
     <div class="grid">
       <div class="decks">${shown.map(deckSection).join("")}</div>
-      ${totalPanel(rows, tc)}
+      ${one ? "" : totalPanel(rows, tc)}
     </div>`;
 }
 function totalPanel(rows, tc) {
@@ -350,9 +354,7 @@ function deckSection(sec) {
     ${needs.length ? `<span class="num"><b>${c.cards}</b> <span class="muted">to get ·</span> <b class="num">${money(c.sum)}</b>${c.unpriced ? ` <span class="subtle">+ ${c.unpriced} unpriced</span>` : ""}</span>` : ""}
     <button class="btn small quiet" data-act="open-deck" data-deck="${sec.deck.id}">Open Deck ›</button></div>`;
   if (!needs.length) return `<section class="panel">${head}<div class="done-deck">✓ Nothing to get. This Deck can be built from your Collection.</div></section>`;
-  const b = builderToComplete(sec.deck);
-  const differs = state.mode === "all" && b !== c.cards
-    ? `<div class="differs">The deck builder says ${b} to complete: it counts copies sleeved in your other Decks as yours.</div>` : "";
+  const differs = "";
   return `<section class="panel">${head}${needs.map(l => lineRow(sec.deck, l)).join("")}${differs}</section>`;
 }
 function lineRow(deck, l) {
@@ -423,7 +425,7 @@ function body() {
   if (v === "B" && (state.page === "decks" || state.page === "want")) {
     const seg = `<div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;margin-bottom:16px">
       <div class="seg" role="group" aria-label="Decks view"><button data-dview="decks" aria-pressed="${state.decksView === "decks"}">My Decks</button><button data-dview="want" aria-pressed="${state.decksView === "want"}">Want List</button></div></div>`;
-    return state.decksView === "want" ? wantList({ headerExtra: seg }) : `${seg}<h1>Decks</h1>${decksIndex()}`;
+    return state.decksView === "want" ? wantList({ headerExtra: seg, filter: state.deckFilter }) : `${seg}<h1>Decks</h1>${decksIndex()}`;
   }
   if (v === "C") {
     if (state.page === "want") return wantList({ headerExtra: `<div class="crumbs"><a data-act="nav" data-page="decks">‹ Decks</a></div>`, filter: state.deckFilter });
@@ -463,10 +465,12 @@ function renderLayer() {
   const layer = document.getElementById("layer");
   let html = "";
   if (state.dialog === "export") {
-    const { rows } = compute(state.mode); const tc = cost(rows.map(r => [r.ed, r.qty]));
+    const comp = compute(state.mode);
+    const f = (state.variant === "C" || state.variant === "B") && state.deckFilter !== "all" ? comp.sections.find(s => s.deck.id === state.deckFilter) : null;
+    const rows = f ? deckRows(f) : comp.rows; const tc = cost(rows.map(r => [r.ed, r.qty]));
     const loose = rows.filter(r => ED[r.ed].variant === "Reverse Holo").length;
     html += `<div class="scrim" data-act="close"><div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dlg-h">
-      <h2 id="dlg-h">Buy the Want List total</h2>
+      <h2 id="dlg-h">${f ? "Buy what " + esc(f.deck.name) + " needs" : "Buy the Want List total"}</h2>
       <p>Opens TCGplayer Mass Entry with <b class="num">${tc.cards} cards</b> in <b class="num">${rows.length} rows</b>, counted as <b>${state.mode === "all" ? "Every Deck built at once" : "One Deck at a time"}</b>.</p>
       <p class="muted num">Every card has a verified TCGplayer product (${rows.length} of ${rows.length}).${loose ? ` Less specific: ${loose} of ${rows.length} rows give the card, not the Reverse Holo.` : ""}${tc.unpriced ? ` ${tc.unpriced} card has no price here.` : ""}</p>
       <div class="row"><button class="btn" data-act="close">Cancel</button><button class="btn primary" data-act="mass-entry">Open TCGplayer Mass Entry</button></div>
@@ -481,7 +485,7 @@ document.addEventListener("click", e => {
   const el = e.target.closest("[data-act],[data-mode],[data-dview],[data-filter]");
   if (!el) return;
   if (el.dataset.mode) { state.mode = el.dataset.mode; return render(); }
-  if (el.dataset.dview) { state.decksView = el.dataset.dview; state.page = "decks"; return render(); }
+  if (el.dataset.dview) { state.decksView = el.dataset.dview; state.deckFilter = "all"; state.page = "decks"; return render(); }
   if (el.dataset.filter) { state.deckFilter = el.dataset.filter; return render(); }
   const a = el.dataset.act;
   if (a === "close" && e.target !== el && el.classList.contains("scrim")) return;
@@ -490,7 +494,7 @@ document.addEventListener("click", e => {
   if (a === "open-deck") state.page = "deck:" + el.dataset.deck;
   if (a === "deck-want") {
     if (state.variant === "A") state.page = "want";
-    if (state.variant === "B") { state.page = "decks"; state.decksView = "want"; }
+    if (state.variant === "B") { state.page = "decks"; state.decksView = "want"; state.deckFilter = el.dataset.deck; }
     if (state.variant === "C") { state.page = "want"; state.deckFilter = el.dataset.deck; }
   }
   if (a === "swap") swapLine(el.dataset.deck, el.dataset.ed, el.dataset.alt, +el.dataset.count);
