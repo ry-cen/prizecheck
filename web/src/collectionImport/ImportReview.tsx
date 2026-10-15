@@ -65,6 +65,8 @@ const FILTERS: { value: CollectionImportRowFilter; label: string }[] = [
 const PANEL =
   "box-border flex flex-col gap-2 rounded-panel border border-border bg-surface p-4";
 
+const NO_PENDING = { groups: {}, location: null };
+
 const EMPTY: Record<CollectionImportRowFilter, string> = {
   needs: "Nothing needs you. Every row is ready or skipped.",
   finish: "No rows have an unknown finish.",
@@ -107,6 +109,15 @@ export function ImportReview({
   const list = useImportRows(current.id, filter);
   const [selection, setSelection] = useState<Selection>(NOTHING);
   const changing = useRef(false);
+  // The newest summary the server answered, so a queued change goes at the revision the last one produced.
+  const server = useRef(summary);
+  // Group and Location changes made while a request is in flight (#232): sent together, in click order, once it
+  // returns. `pending` is what the controls show meanwhile, so a ticked-off group stays unticked.
+  const queued = useRef<{ change: CollectionImportChange; text: string }[]>([]);
+  const [pending, setPending] = useState<{
+    groups: Record<string, boolean>;
+    location: string | null;
+  }>(NO_PENDING);
   const [notice, setNotice] = useState("");
   // The row whose resolver is open, and the Fix or Change buttons, so Escape can return focus to the one that opened it.
   const [open, setOpen] = useState<number | null>(null);
@@ -131,6 +142,9 @@ export function ImportReview({
     all: counts.needs_you + counts.ready,
     skipped: counts.skipped,
   };
+  // A group or Location change is still on its way: saving now would leave it behind.
+  const moving =
+    pending.location !== null || Object.keys(pending.groups).length > 0;
   const selectedCount = selection.all ? shown[filter] : selection.rows.size;
 
   useEffect(() => {
@@ -209,21 +223,29 @@ export function ImportReview({
     setError(null);
     try {
       const result = await changeCollectionImport(current.id, {
-        draft_revision: current.draft_revision,
+        draft_revision: server.current.draft_revision,
         changes,
       });
+      server.current = result.summary;
       setCurrent(result.summary);
       setSelection(NOTHING);
       await list.refresh();
       setNotice(describe(result.results));
       setRefocus(after);
     } catch (failure) {
-      if (
+      const staleDraft =
         failure instanceof CollectionImportError &&
-        failure.code === "STALE_DRAFT"
-      ) {
+        failure.code === "STALE_DRAFT";
+      const moves = changes.some(
+        (item) => "group" in item || "location_id" in item
+      );
+      // A failed move, or a stale draft, drops what was queued behind it, and the controls show the server's state
+      // again. Any other failure leaves the queue to go at the revision now held.
+      if (staleDraft || moves) queued.current = [];
+      if (staleDraft || moves) {
         const latest = await getCurrentCollectionImport().catch(() => null);
         if (latest?.id === current.id) {
+          server.current = latest;
           setCurrent(latest);
           setSelection(NOTHING);
           await list.refresh();
@@ -238,7 +260,39 @@ export function ImportReview({
       setNotice(changeErrorText(failure));
     } finally {
       changing.current = false;
+      drain();
     }
+  }
+
+  /** Sends the group and Location changes queued while a request was in flight, as one request, in click order. The
+   * controls keep showing them until the answer is in. */
+  function drain() {
+    const waiting = queued.current;
+    if (!waiting.length) return setPending(NO_PENDING);
+    queued.current = [];
+    void apply(
+      waiting.map((item) => item.change),
+      () => waiting[waiting.length - 1].text,
+      { to: "rows" }
+    );
+  }
+
+  /** Group and Location changes: sent now, or queued behind the request in flight. The pending value shows at once. */
+  function move(change: CollectionImportChange, text: string) {
+    if (saving) return;
+    setPending((previous) =>
+      typeof change.group === "string"
+        ? {
+            ...previous,
+            groups: {
+              ...previous.groups,
+              [change.group]: change.include === true,
+            },
+          }
+        : { ...previous, location: change.location_id ?? null }
+    );
+    if (changing.current) queued.current.push({ change, text });
+    else void apply([change], () => text, { to: "rows" });
   }
 
   function total(results: CollectionImportChangeResult[]) {
@@ -292,21 +346,16 @@ export function ImportReview({
 
   /** Put cards in: the landing Storage Leaf changes on the server, as any change does. */
   function moveTo(locationId: string) {
-    if (locationId === current.location_id) return;
-    void apply(
-      [{ location_id: locationId }],
-      () => `Cards will go to ${places.path(locationId) ?? "that Location"}.`,
-      { to: "rows" }
+    if (locationId === (pending.location ?? current.location_id)) return;
+    move(
+      { location_id: locationId },
+      `Cards will go to ${places.path(locationId) ?? "that Location"}.`
     );
   }
 
   /** In this file: leaves a group's rows out, or brings them back as they were. */
   function include(group: CollectionImportGroup, on: boolean) {
-    void apply(
-      [{ group: group.name, include: on }],
-      () => groupText(group.name, on),
-      { to: "rows" }
-    );
+    move({ group: group.name, include: on }, groupText(group.name, on));
   }
 
   async function save() {
@@ -521,7 +570,7 @@ export function ImportReview({
           <div className={PANEL}>
             <Select
               label="Put cards in"
-              value={current.location_id}
+              value={pending.location ?? current.location_id}
               disabled={places.state !== "ready" || saving}
               aria-describedby="import-review-place-help"
               onChange={(event) => moveTo(event.target.value)}
@@ -542,7 +591,14 @@ export function ImportReview({
               Every card goes here, whatever its group.
             </p>
           </div>
-          <ImportGroups groups={current.groups} onInclude={include} />
+          <ImportGroups
+            groups={current.groups.map((group) =>
+              Object.hasOwn(pending.groups, group.name)
+                ? { ...group, included: pending.groups[group.name] }
+                : group
+            )}
+            onInclude={include}
+          />
           <ImportLeftOut importId={current.id} leftOut={current.left_out} />
           {current.already_held !== "0" && (
             <p className={`${PANEL} m-0 text-meta text-text-muted`}>
@@ -647,7 +703,7 @@ export function ImportReview({
           <Button
             variant="primary"
             className="min-w-0 max-w-full"
-            disabled={counts.needs_you > 0 || saving}
+            disabled={counts.needs_you > 0 || saving || moving}
             aria-describedby="import-save-status"
             onClick={() => void save()}
           >

@@ -239,8 +239,25 @@ def test_the_filters_order_their_reasons():
     assert matcher.left_out_reason({**row, "watchlist": ""}, "collectr", frozenset({"rarity"})) == "other_game"
     assert matcher.left_out_reason({**row, "watchlist": "", "category": "Pokémon"}, "collectr",
                                    frozenset({"rarity"})) == "not_english"
-    assert matcher.left_out_reason({**blank, "name": "Pikachu", "category": "POKEMON"}, "collectr",
-                                   frozenset({"rarity"})) == "sealed"
+    both = frozenset({"number", "rarity"})
+    assert matcher.left_out_reason({**blank, "name": "Pikachu", "category": "POKEMON"}, "collectr", both) == "sealed"
+    # A rarity column alone, with no number column, doesn't make a blank rarity mean sealed.
+    assert matcher.left_out_reason({**blank, "name": "Pikachu"}, "loose", frozenset({"rarity"})) is None
     assert matcher.left_out_reason({**blank, "name": "Pikachu"}, "loose", frozenset()) is None
     assert matcher.left_out_reason({**blank, "name": "Tinkaton", "number": "85"}, "loose", frozenset()) is None
     assert matcher.left_out_reason({**blank, "name": "Paldea Tin"}, "loose", frozenset()) == "sealed"
+    # A special Energy with no number or rarity is a card, Basic or not; a sealed name still wins.
+    assert matcher.left_out_reason({**blank, "name": "Double Turbo Energy"}, "collectr", both) is None
+    assert matcher.left_out_reason({**blank, "name": "Psychic Energy"}, "collectr", both) is None
+    assert matcher.left_out_reason({**blank, "name": "Energy Booster Box"}, "collectr", both) == "sealed"
+
+
+def test_a_language_is_english_by_its_first_word_and_a_loose_file_without_a_number_keeps_a_blank_rarity():
+    seed_import_catalog()
+    owner, unsorted = collector()
+    summary = started(owner, unsorted, b"Name,Set,Language\nStarmie,Base Set,English (US)\nStaryu,Base Set,en-GB\n"
+                                       b"Pikachu,Base Set,Japanese\nMew,Base Set,\nEevee,Base Set,ENG.\n"
+                                       b"Ditto,Base Set,English/Japanese\n")
+    assert reasons(summary["id"]) == [None, None, "not_english", None, None, None]
+    summary = started(owner, unsorted, b"Name,Set,Rarity\nStarmie,Base Set,\nBase Set Theme Deck,Base Set,\n")
+    assert reasons(summary["id"]) == [None, "sealed"]
