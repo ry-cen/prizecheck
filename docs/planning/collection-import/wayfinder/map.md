@@ -23,6 +23,7 @@ An agreed plan, ready for owner-invoked `/to-spec` and `/to-ticket`, that lets a
 <!-- One line per closed ticket: link plus a one-line gist. -->
 
 - [Research collection export formats from other trackers](https://github.com/ry-cen/prizecheck/issues/219): TCGplayer, Collectr (Pro), PriceCharting, TCG Collector (Premium), Dragon Shield and Sorted export CSVs. Dex+ columns are unconfirmed, and Pokellector has none. The shared key is set name plus number, with TCGplayer's Product ID as the strongest key for its own files. Naive set-name matching reaches 80–94% of rows. Files hold watchlist, sealed, other-game, Japanese and graded rows, and repeat copies. Real files run 92–3,178 rows, so decklist import's limits don't fit. [Findings](research/tracker-export-formats.md)
+- [Decide what the import accepts](https://github.com/ry-cen/prizecheck/issues/220): header presets for the six exporting trackers plus a loose fallback for other CSVs, with no mapping screen and the source never named in the UI. One paste box reads a header as a file and anything else as decklist-style lines, then by name. File groups can be left out in the review but never become Locations. Uploads take CSV, TSV, TXT or a one-file zip. [Resolution](resolutions/decide-what-the-import-accepts.md)
 
 ## Not yet specified
 
