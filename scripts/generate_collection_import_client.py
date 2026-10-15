@@ -24,14 +24,19 @@ def ts_type(value):
 
 schema = app.openapi()["components"]["schemas"]
 names = ("CollectionImportCounts", "CollectionImportSummary", "CollectionImportSource", "CollectionImportCard",
-         "CollectionImportEdition", "CollectionImportRow", "CollectionImportRowsPage", "SaveCollectionImport",
+         "CollectionImportEdition", "CollectionImportRow", "CollectionImportRowsPage", "CollectionImportChange",
+         "ChangeCollectionImport", "CollectionImportChangeResult", "CollectionImportChanges", "SaveCollectionImport",
          "CollectionImportSaveResult")
+# The rows route's filters, which a change's `filter` selects by too (collection_import.RowFilter).
+filters = next(part["enum"] for part in schema["CollectionImportChange"]["properties"]["filter"]["anyOf"]
+               if "enum" in part)
 lines = ["// Generated from FastAPI OpenAPI by scripts/generate_collection_import_client.py. Do not edit."]
 for name in names:
     definition = schema[name]
     fields = [f"{field}{'' if field in definition.get('required', []) else '?'}: {ts_type(value)}"
               for field, value in definition["properties"].items()]
     lines.append(f"export type {name} = {{ {'; '.join(fields)} }};")
+lines.append(f"export type CollectionImportRowFilter = {' | '.join(json.dumps(name) for name in filters)};")
 lines.append("""
 export class CollectionImportError extends Error {
   /** How many rows still need the collector, for ROWS_NEED_YOU. */
@@ -53,11 +58,14 @@ export const startCollectionImport = (locationId: string, file: Blob) =>
   send<CollectionImportSummary>(`/api/collection-imports?${new URLSearchParams({ location_id: locationId })}`,
     { method: 'POST', headers: { 'content-type': 'text/csv' }, body: file });
 export const getCurrentCollectionImport = () => send<CollectionImportSummary>('/api/collection-imports/current');
-export type CollectionImportRowFilter = 'needs' | 'all';
 export const getCollectionImportRows = (importId: string, filter: CollectionImportRowFilter, cursor?: string | null) => {
   const query = new URLSearchParams({ filter, ...(cursor ? { cursor } : {}) });
   return send<CollectionImportRowsPage>(`/api/collection-imports/${encodeURIComponent(importId)}/rows?${query}`);
 };
+/** Applies `body.changes` in order at `body.draft_revision`; 409 STALE_DRAFT when the draft has moved on. */
+export const changeCollectionImport = (importId: string, body: ChangeCollectionImport) =>
+  send<CollectionImportChanges>(`/api/collection-imports/${encodeURIComponent(importId)}/changes`,
+    { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
 export const saveCollectionImport = (importId: string, body: SaveCollectionImport) =>
   send<CollectionImportSaveResult>(`/api/collection-imports/${encodeURIComponent(importId)}/save`,
     { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
