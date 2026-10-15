@@ -188,6 +188,8 @@ from .decks import router as decks_router  # noqa: E402
 app.include_router(decks_router)
 from .deck_list_printing import router as deck_list_printing_router  # noqa: E402
 app.include_router(deck_list_printing_router)
+from .deck_import import router as deck_import_router  # noqa: E402
+app.include_router(deck_import_router)
 from .deck_pick_list import router as deck_pick_list_router  # noqa: E402
 app.include_router(deck_pick_list_router)
 from .deck_deletion import router as deck_deletion_router  # noqa: E402
