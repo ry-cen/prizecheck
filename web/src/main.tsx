@@ -34,6 +34,9 @@ import {
 } from "./public/publicRoutes";
 import { EmailCodeForms, SignInScreen } from "./public/SignIn";
 import { clearFailureFromAddress, failureInAddress } from "./signInMessages";
+import { CollectionImportPage } from "./collectionImport/CollectionImportPage";
+import { COLLECTION_IMPORT_PATH } from "./collectionImport/route";
+import { workspaceHref } from "./workspace/workspaceLink";
 import "./tokens.css";
 import "./tailwind.css";
 
@@ -238,10 +241,19 @@ function App() {
   function renderPage(id: PageId, active: boolean) {
     switch (id) {
       case "collection":
+        // Collection Import (#226) shows in Collection's place; saving lands on its Storage Leaf in a new Workspace.
+        if (path === COLLECTION_IMPORT_PATH)
+          return (
+            <CollectionImportPage
+              onCancel={() => navigate(pageDef("collection").path)}
+              onLanded={(id) => navigate(workspaceHref(id), { replace: true })}
+            />
+          );
         return (
           <Workspace
             userId={userId}
             active={active}
+            onImport={() => navigate(COLLECTION_IMPORT_PATH)}
             onOpenDeck={(id) =>
               navigate(`${pageDef("decks").path}/${encodeURIComponent(id)}`)
             }
