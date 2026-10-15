@@ -1,4 +1,4 @@
-"""Collection Import matching (#226, #228 to #231; spec "Matching"): each source row to one Card Edition of the
+"""Collection Import matching (#226, #228 to #232; spec "Matching"): each source row to one Card Edition of the
 active catalog, after the filters leave out the rows PrizeCheck can't hold.
 
 **Filters first (#231).** A row gets the first of these reasons that applies (``left_out_reason``), is never matched,
@@ -74,21 +74,25 @@ READY = ("matched", "finish_unknown", "by_name")
 NEEDS_YOU = ("ambiguous", "not_found", "unreadable")
 STATUSES = READY + NEEDS_YOU
 # Row predicates over collection_import_row, for an alias: READY_ROW.format(r="r"). A skipped or left-out row (#231)
-# is neither ready nor needs the collector.
+# is neither ready nor needs the collector, and a row in a group the collector left out (#232) is in none of them.
+# A row is in no group, or in one that isn't among its draft's collection_import.excluded_groups (#232).
+INCLUDED_ROW = ("({r}.group_name IS NULL OR NOT EXISTS (SELECT 1 FROM collection_import draft "
+                "WHERE draft.id={r}.import_id AND draft.excluded_groups @> jsonb_build_array({r}.group_name)))")
 READY_ROW = ("{r}.status IN ('matched','finish_unknown','by_name') AND NOT {r}.skipped "
-             "AND {r}.left_out_reason IS NULL")
+             "AND {r}.left_out_reason IS NULL AND " + INCLUDED_ROW)
 NEEDS_YOU_ROW = ("{r}.status IN ('ambiguous','not_found','unreadable') AND NOT {r}.skipped "
-                 "AND {r}.left_out_reason IS NULL")
-FINISH_UNKNOWN_ROW = "{r}.status='finish_unknown' AND NOT {r}.skipped AND {r}.left_out_reason IS NULL"
+                 "AND {r}.left_out_reason IS NULL AND " + INCLUDED_ROW)
+FINISH_UNKNOWN_ROW = ("{r}.status='finish_unknown' AND NOT {r}.skipped AND {r}.left_out_reason IS NULL AND "
+                      + INCLUDED_ROW)
 # Every row the review lists under All: ready or needing the collector.
-LISTED_ROW = "NOT {r}.skipped AND {r}.left_out_reason IS NULL"
-SKIPPED_ROW = "{r}.skipped AND {r}.left_out_reason IS NULL"
-# A row the filters left out (#231), whatever else it is.
-LEFT_OUT_ROW = "{r}.left_out_reason IS NOT NULL"
+LISTED_ROW = "NOT {r}.skipped AND {r}.left_out_reason IS NULL AND " + INCLUDED_ROW
+SKIPPED_ROW = "{r}.skipped AND {r}.left_out_reason IS NULL AND " + INCLUDED_ROW
+# A row the filters left out (#231), whatever else it is, unless its group is left out too.
+LEFT_OUT_ROW = "{r}.left_out_reason IS NOT NULL AND " + INCLUDED_ROW
 # The row's card came from step 4 (parsed holds BY_NAME_KEY, whatever its finish says); a collector's pick clears it.
 BY_NAME_KEY = "matched_by_name"
 BY_NAME_ROW = ("{r}.status IN ('matched','finish_unknown','by_name') AND {r}.parsed->>'matched_by_name'='1' "
-               "AND NOT {r}.skipped AND {r}.left_out_reason IS NULL")
+               "AND NOT {r}.skipped AND {r}.left_out_reason IS NULL AND " + INCLUDED_ROW)
 # The rows route's filters, which a change's `filter` selects by too.
 FILTER_ROWS = {"needs": NEEDS_YOU_ROW, "finish": FINISH_UNKNOWN_ROW, "name": BY_NAME_ROW, "all": LISTED_ROW,
                "skipped": SKIPPED_ROW}

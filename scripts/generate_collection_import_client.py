@@ -24,7 +24,7 @@ def ts_type(value):
 
 schema = app.openapi()["components"]["schemas"]
 names = ("CollectionImportCounts", "CollectionImportSummary", "CollectionImportSource", "CollectionImportLeftOut",
-         "CollectionImportCard",
+         "CollectionImportGroup", "CollectionImportCard",
          "CollectionImportEdition", "CollectionImportRow", "CollectionImportRowsPage", "CollectionImportPick",
          "CollectionImportChange",
          "ChangeCollectionImport", "CollectionImportChangeResult", "CollectionImportChanges", "SaveCollectionImport",

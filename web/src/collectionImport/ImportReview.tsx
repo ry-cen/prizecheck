@@ -9,6 +9,7 @@ import {
   saveCollectionImport,
   type CollectionImportChange,
   type CollectionImportChangeResult,
+  type CollectionImportGroup,
   type CollectionImportRowFilter,
   type CollectionImportSummary,
 } from "../collection_import_generated";
@@ -17,7 +18,9 @@ import { Button } from "../ui/Button";
 import { Chip } from "../ui/Chip";
 import { Icon } from "../ui/Icon";
 import { Menu } from "../ui/Menu";
+import { Select } from "../ui/Select";
 import { useToast } from "../ui/Toast";
+import { ImportGroups } from "./ImportGroups";
 import { ImportLeftOut } from "./ImportLeftOut";
 import { ImportRowItem } from "./ImportRowItem";
 import {
@@ -25,6 +28,8 @@ import {
   cardsText,
   changeErrorText,
   finishText,
+  groupText,
+  heldText,
   pickText,
   rowsText,
   saveErrorText,
@@ -39,6 +44,8 @@ type Props = {
   onBack: () => void;
   /** After a save: show the Storage Leaf the cards went to. */
   onLanded: (locationId: string) => void;
+  /** The landing Storage Leaf, whenever the review changes it, so Back keeps it chosen. */
+  onLocation?: (locationId: string) => void;
 };
 
 /** The rows a bulk change applies to: every row in the current filter (Select all), or these row numbers. */
@@ -54,6 +61,9 @@ const FILTERS: { value: CollectionImportRowFilter; label: string }[] = [
   { value: "all", label: "All" },
   { value: "skipped", label: "Skipped" },
 ];
+
+const PANEL =
+  "box-border flex flex-col gap-2 rounded-panel border border-border bg-surface p-4";
 
 const EMPTY: Record<CollectionImportRowFilter, string> = {
   needs: "Nothing needs you. Every row is ready or skipped.",
@@ -74,8 +84,16 @@ const BULK_TRIGGER =
  * finish or are skipped at once, Skip all skips every row in Needs you, and skipped rows can be restored or downloaded
  * in the file's own columns. Every change goes to the server at the draft's revision and answers the new counts.
  * Finish unknown and Matched by name never block saving. Saving adds every ready row's copies in one step, with no
- * Undo. The side column (above the list on a phone) holds the summary and the rows left out (#231). */
-export function ImportReview({ summary, fileName, onBack, onLanded }: Props) {
+ * Undo. The side column (above the list on a phone) holds the summary, Put cards in (the landing Storage Leaf, which
+ * can change until the save), In this file (the file's groups, which can be left out), the rows left out (#231) and
+ * how many incoming cards the Collection already holds (#232). */
+export function ImportReview({
+  summary,
+  fileName,
+  onBack,
+  onLanded,
+  onLocation,
+}: Props) {
   const places = usePlaces(true);
   const toast = useToast();
   const heading = useRef<HTMLHeadingElement>(null);
@@ -118,6 +136,10 @@ export function ImportReview({ summary, fileName, onBack, onLanded }: Props) {
   useEffect(() => {
     heading.current?.focus();
   }, []);
+
+  useEffect(() => {
+    onLocation?.(current.location_id);
+  }, [current.location_id, onLocation]);
 
   useEffect(() => {
     if (focusToggle === null) return;
@@ -208,6 +230,11 @@ export function ImportReview({ summary, fileName, onBack, onLanded }: Props) {
           setRefocus(after);
         }
       }
+      if (
+        failure instanceof CollectionImportError &&
+        failure.code === "NOT_STORAGE_LEAF"
+      )
+        places.reload();
       setNotice(changeErrorText(failure));
     } finally {
       changing.current = false;
@@ -260,6 +287,25 @@ export function ImportReview({ summary, fileName, onBack, onLanded }: Props) {
       [change],
       (results) => pickText(rowNumber, card, total(results).applied),
       { to: "row", index }
+    );
+  }
+
+  /** Put cards in: the landing Storage Leaf changes on the server, as any change does. */
+  function moveTo(locationId: string) {
+    if (locationId === current.location_id) return;
+    void apply(
+      [{ location_id: locationId }],
+      () => `Cards will go to ${places.path(locationId) ?? "that Location"}.`,
+      { to: "rows" }
+    );
+  }
+
+  /** In this file: leaves a group's rows out, or brings them back as they were. */
+  function include(group: CollectionImportGroup, on: boolean) {
+    void apply(
+      [{ group: group.name, include: on }],
+      () => groupText(group.name, on),
+      { to: "rows" }
     );
   }
 
@@ -442,10 +488,7 @@ export function ImportReview({ summary, fileName, onBack, onLanded }: Props) {
           aria-label="About this import"
           className="flex min-w-0 flex-col gap-4 phone:order-first"
         >
-          <section
-            aria-labelledby="import-summary-heading"
-            className="box-border flex flex-col gap-2 rounded-panel border border-border bg-surface p-4"
-          >
+          <section aria-labelledby="import-summary-heading" className={PANEL}>
             <h2
               id="import-summary-heading"
               className="m-0 text-heading font-semibold"
@@ -473,11 +516,39 @@ export function ImportReview({ summary, fileName, onBack, onLanded }: Props) {
               <dd className="m-0 text-right tabular-nums">
                 {current.cards_to_add}
               </dd>
-              <dt className="text-text-muted">Going to</dt>
-              <dd className="m-0 text-right wrap-anywhere">{where}</dd>
             </dl>
           </section>
+          <div className={PANEL}>
+            <Select
+              label="Put cards in"
+              value={current.location_id}
+              disabled={places.state !== "ready" || saving}
+              aria-describedby="import-review-place-help"
+              onChange={(event) => moveTo(event.target.value)}
+            >
+              {!places.leaves.some(
+                (leaf) => leaf.id === current.location_id
+              ) && <option value={current.location_id}>{where}</option>}
+              {places.leaves.map((leaf) => (
+                <option key={leaf.id} value={leaf.id}>
+                  {leaf.label}
+                </option>
+              ))}
+            </Select>
+            <p
+              id="import-review-place-help"
+              className="m-0 text-meta text-text-muted"
+            >
+              Every card goes here, whatever its group.
+            </p>
+          </div>
+          <ImportGroups groups={current.groups} onInclude={include} />
           <ImportLeftOut importId={current.id} leftOut={current.left_out} />
+          {current.already_held !== "0" && (
+            <p className={`${PANEL} m-0 text-meta text-text-muted`}>
+              {heldText(current.already_held)}
+            </p>
+          )}
         </aside>
       </div>
       <div className="sticky bottom-0 z-(--layer-sticky) box-border flex flex-col border-t border-border bg-bg phone:bottom-tabbar">
