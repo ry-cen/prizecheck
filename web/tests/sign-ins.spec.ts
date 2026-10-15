@@ -2,10 +2,11 @@ import { test, expect, type Page } from "@playwright/test";
 import { Pool } from "pg";
 import { signInAsOwner } from "./support/sign-in";
 
-// The Sign-ins page (#156) on an owner-only stack, through the OAuth test fake: the list, connecting and removing a
-// sign-in, Remove hidden for the last one, a sign-in that belongs to another collector, the stale-session path, and
-// the way in from the avatar menu on desktop and from the More sheet on a phone. Stacks are shared between specs, so every test
-// starts by leaving the owner with only their Google sign-in.
+// The Settings page's Sign-ins section (#156; part of Settings since #207) on an owner-only stack, through the OAuth
+// test fake: the list, connecting and removing a sign-in, Remove hidden for the last one, a sign-in that belongs to
+// another collector, the stale-session path, and the way in from the avatar menu on desktop and from the More sheet on
+// a phone. The gateway still returns link starts to the old /settings/sign-ins, which the app rewrites to /settings.
+// Stacks are shared between specs, so every test starts by leaving the owner with only their Google sign-in.
 const ORIGIN = process.env.TEST_ORIGIN || "http://localhost:5173";
 const OWNER_EMAIL = process.env.OWNER_EMAIL || "owner@example.test";
 const OTHER = "sign-ins-spec-other-collector";
@@ -45,8 +46,8 @@ test("lists, connects and removes sign-ins, never offering to remove the last", 
 }) => {
   await signInAsOwner(page, "/collection");
   await page.getByRole("button", { name: "Account" }).click();
-  await page.getByRole("menuitem", { name: "Sign-ins" }).click();
-  await expect(page).toHaveURL(`${ORIGIN}/settings/sign-ins`);
+  await page.getByRole("menuitem", { name: "Settings" }).click();
+  await expect(page).toHaveURL(`${ORIGIN}/settings`);
   await expect(page.getByRole("heading", { name: "Sign-ins" })).toBeVisible();
   await expect(signIns(page)).toContainText(
     `Your account email: ${OWNER_EMAIL}`
@@ -61,7 +62,7 @@ test("lists, connects and removes sign-ins, never offering to remove the last", 
   await expect(row(page, "Discord")).toContainText("Connected", {
     timeout: 15_000,
   });
-  await expect(page).toHaveURL(`${ORIGIN}/settings/sign-ins`);
+  await expect(page).toHaveURL(`${ORIGIN}/settings`);
   await expect(
     signIns(page).getByRole("button", { name: "Remove Google" })
   ).toBeVisible();
@@ -89,7 +90,7 @@ test("refuses a sign-in another collector holds, without naming them", async ({
     [`${OTHER}-discord`, NEWCOMER_DISCORD, OTHER]
   );
   try {
-    await signInAsOwner(page, "/settings/sign-ins");
+    await signInAsOwner(page, "/settings");
     await chooseIdentity(page, "newcomer");
     await signIns(page).getByRole("link", { name: "Connect Discord" }).click();
     const alert = page
@@ -100,17 +101,17 @@ test("refuses a sign-in another collector holds, without naming them", async ({
       { timeout: 15_000 }
     );
     await expect(alert).toBeFocused();
-    await expect(page).toHaveURL(`${ORIGIN}/settings/sign-ins`);
+    await expect(page).toHaveURL(`${ORIGIN}/settings`);
     await expect(page.locator("body")).not.toContainText("sign-ins-spec-other");
     await expect(page.locator("body")).not.toContainText("newcomer");
     await expect(
       row(page, "Discord").getByRole("link", { name: "Connect Discord" })
     ).toBeVisible();
-    // Back to Sign-ins dismisses the message and moves focus to the page's heading, not the page body.
+    // Back to Sign-ins dismisses the message and moves focus to the Sign-ins section's heading, not the page body.
     await alert.getByRole("button", { name: "Back to Sign-ins" }).click();
     await expect(alert).toHaveCount(0);
     await expect(
-      page.getByRole("heading", { level: 1, name: "Sign-ins" })
+      page.getByRole("heading", { level: 2, name: "Sign-ins" })
     ).toBeFocused();
     // Signing out afterwards shows the sign-in page without replaying the link failure.
     await page.getByRole("button", { name: "Account" }).click();
@@ -126,10 +127,10 @@ test("refuses a sign-in another collector holds, without naming them", async ({
   }
 });
 
-test("asks a stale session to sign in again, then returns to the Sign-ins page", async ({
+test("asks a stale session to sign in again, then returns to Settings", async ({
   page,
 }) => {
-  await signInAsOwner(page, "/settings/sign-ins");
+  await signInAsOwner(page, "/settings");
   await pool.query(
     `UPDATE session SET "createdAt"=now()-interval '25 hours' WHERE "userId" IN (SELECT id FROM "user" WHERE email=$1)`,
     [OWNER_EMAIL]
@@ -141,25 +142,27 @@ test("asks a stale session to sign in again, then returns to the Sign-ins page",
     { timeout: 15_000 }
   );
   await expect(alert).toBeFocused();
-  await expect(page).toHaveURL(`${ORIGIN}/settings/sign-ins`);
+  await expect(page).toHaveURL(`${ORIGIN}/settings`);
   await alert.getByRole("button", { name: "Sign in again" }).click();
-  await expect(page).toHaveURL(`${ORIGIN}/sign-in?next=%2Fsettings%2Fsign-ins`);
+  await expect(page).toHaveURL(`${ORIGIN}/sign-in?next=%2Fsettings`);
   await chooseIdentity(page, "owner");
   await page.getByRole("link", { name: "Continue with Google" }).click();
-  await expect(page).toHaveURL(`${ORIGIN}/settings/sign-ins`, {
+  await expect(page).toHaveURL(`${ORIGIN}/settings`, {
     timeout: 15_000,
   });
   await expect(row(page, "Google")).toContainText("Connected");
 });
 
-test("reaches Sign-ins from the More sheet on a phone", async ({ page }) => {
+test("reaches Sign-ins in Settings from the More sheet on a phone", async ({
+  page,
+}) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await signInAsOwner(page, "/collection");
   await page.getByRole("button", { name: "More" }).click();
   await page
     .getByRole("dialog", { name: "More" })
-    .getByRole("button", { name: "Sign-ins" })
+    .getByRole("button", { name: "Settings" })
     .click();
-  await expect(page).toHaveURL(`${ORIGIN}/settings/sign-ins`);
+  await expect(page).toHaveURL(`${ORIGIN}/settings`);
   await expect(row(page, "Google")).toContainText("Connected");
 });

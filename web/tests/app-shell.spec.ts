@@ -291,7 +291,7 @@ test.describe("desktop", () => {
     await expect(heading(page)).toHaveText("All owned");
   });
 
-  test("the avatar menu holds the email, Sign-ins, Owner controls for the owner and Sign out", async ({
+  test("the avatar menu holds the email, Settings, Owner controls for the owner and Sign out", async ({
     page,
   }) => {
     await signIn(page);
@@ -302,11 +302,11 @@ test.describe("desktop", () => {
       await account(page).click();
       await expect(page.getByText(OWNER_EMAIL, { exact: true })).toBeVisible();
       await expect(page.getByRole("menuitem")).toHaveText([
-        "Sign-ins",
+        "Settings",
         "Sign out",
       ]);
       await expect(
-        page.getByRole("menuitem", { name: "Sign-ins" })
+        page.getByRole("menuitem", { name: "Settings" })
       ).toBeFocused();
       await page.keyboard.press("ArrowUp");
       await expect(
@@ -328,22 +328,22 @@ test.describe("desktop", () => {
       await account(page).focus();
       await page.keyboard.press("ArrowDown");
       await expect(
-        page.getByRole("menuitem", { name: "Sign-ins" })
+        page.getByRole("menuitem", { name: "Settings" })
       ).toBeFocused();
       await page.keyboard.press("Enter");
-      await expect(page).toHaveURL(/\/settings\/sign-ins$/);
-      await expect(heading(page)).toHaveText("Sign-ins");
+      await expect(page).toHaveURL(/\/settings$/);
+      await expect(heading(page)).toHaveText("Settings");
       await expect(
         page.getByText(`Your account email: ${OWNER_EMAIL}`)
       ).toBeVisible();
-      await expectPageChecks(page, "Sign-ins");
+      await expectPageChecks(page, "Settings");
 
       await setOwner(true);
       await page.reload();
-      await expect(heading(page)).toHaveText("Sign-ins");
+      await expect(heading(page)).toHaveText("Settings");
       await account(page).click();
       await expect(page.getByRole("menuitem")).toHaveText([
-        "Sign-ins",
+        "Settings",
         "Owner controls",
         "Sign out",
       ]);
@@ -515,9 +515,9 @@ test.describe("desktop", () => {
   test("the shell passes the page check on desktop", async ({ page }) => {
     await signIn(page);
     await expectPageChecks(page, "Collection");
-    await page.goto(`${ORIGIN}/settings/sign-ins`);
-    await expect(heading(page)).toHaveText("Sign-ins");
-    await expectPageChecks(page, "Sign-ins");
+    await page.goto(`${ORIGIN}/settings`);
+    await expect(heading(page)).toHaveText("Settings");
+    await expectPageChecks(page, "Settings");
   });
 
   test("a failed sign-out says so in one toast, and signing out returns to the sign-in screen", async ({
@@ -556,7 +556,7 @@ test.describe("phone", () => {
     hasTouch: true,
   });
 
-  test("the bottom tab bar switches pages, and More opens a sheet with Missing cards, Sign-ins, Owner controls for the owner and Sign out", async ({
+  test("the bottom tab bar switches pages, and More opens a sheet with Missing cards, Settings, Owner controls for the owner and Sign out", async ({
     page,
   }) => {
     await signIn(page);
@@ -603,7 +603,7 @@ test.describe("phone", () => {
       expect(Math.abs(box.y + box.height - 812)).toBeLessThanOrEqual(0.5);
       await expect(sheet.getByRole("list").getByRole("button")).toHaveText([
         "Missing cards",
-        "Sign-ins",
+        "Settings",
         "Owner controls",
         "Sign out",
       ]);
@@ -647,7 +647,7 @@ test.describe("phone", () => {
       await tab(page, "More").tap();
       await expect(sheet.getByRole("list").getByRole("button")).toHaveText([
         "Missing cards",
-        "Sign-ins",
+        "Settings",
         "Sign out",
       ]);
       await sheet.getByRole("button", { name: "Sign out" }).tap();
@@ -803,8 +803,8 @@ test.describe("phone", () => {
   test("the shell passes the page check on a phone", async ({ page }) => {
     await signIn(page);
     await expectPageChecks(page, "Collection");
-    await page.goto(`${ORIGIN}/settings/sign-ins`);
-    await expect(heading(page)).toHaveText("Sign-ins");
-    await expectPageChecks(page, "Sign-ins");
+    await page.goto(`${ORIGIN}/settings`);
+    await expect(heading(page)).toHaveText("Settings");
+    await expectPageChecks(page, "Settings");
   });
 });
