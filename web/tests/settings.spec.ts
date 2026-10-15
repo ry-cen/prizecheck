@@ -211,7 +211,9 @@ test.describe("phone", () => {
     );
     await sheet.getByRole("button", { name: "Settings" }).tap();
     await expect(page).toHaveURL(`${ORIGIN}/settings`);
-    await expect(page.getByRole("banner")).toContainText("Settings");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+      "Settings"
+    );
     await expect(option(page, EVERY_DECK)).toBeChecked();
     for (const name of [EVERY_DECK, ONE_DECK])
       await expectTouchTarget(counting(page).getByText(name, { exact: true }));
