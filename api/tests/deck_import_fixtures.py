@@ -1,9 +1,9 @@
-"""Decklist import fixtures (ticket #212): the nine research fixtures F1-F9, verbatim from
+"""Decklist import fixtures (tickets #212 and #213): the nine research fixtures F1-F9, verbatim from
 docs/planning/decklist-import/wayfinder/research/decklist-text-formats.md (a cut list keeps its "…" lines, which read as
-ignored lines), the catalog the review test seeds for them, and what the review reads in each.
+ignored lines), the catalogs the review tests seed for them, and what the review reads in each.
 
-Not a test module: test_deck_import.py imports it, and web/tests/decklist-import.spec.ts seeds through
-seed_import_browser_catalog.
+Not a test module: test_deck_import.py and test_import_matching.py import it, and web/tests/decklist-import.spec.ts
+seeds through seed_import_browser_catalog.
 """
 
 # Each fixture exactly as the research file prints it, LF line endings, with its final newline.
@@ -21,14 +21,32 @@ FIXTURES = {
 
 
 def printed(set_id, set_name, number, name, category, **fields):
-    """A TCGdex-shaped card record with one Edition (Normal), the shape catalog import reads."""
+    """A TCGdex-shaped card record with one Edition (Normal), the shape catalog import reads. It has no rules text, so
+    it is in no Reprint Group."""
     return {"id": f"{set_id}-{number}", "name": name, "localId": number, "category": category,
             "set": {"id": set_id, "name": set_name}, "variants": {"normal": True}, **fields}
 
 
-# The Printings the fixture lines can match by printed set code (api/app/set_codes.tsv) and number. Every other card
-# line reads Not found in ticket #212: its code isn't in the printed code table (SVE, MEE, PR-SV, PR-SW, PR-SM, PR-BLW,
-# SMP, CRZ-GG, SVALT, the Energy pseudo-set, the empty set code) or no seeded Printing has its number.
+def pokemon(set_id, set_name, number, name, attack):
+    """A Pokémon record with rules text: Pokémon of one name with the same attack share a Reprint Group."""
+    return printed(set_id, set_name, number, name, "Pokemon", hp=170, types=["Colorless"],
+                   attacks=[{"name": attack, "cost": ["Colorless"], "damage": 60}])
+
+
+def trainer(set_id, set_name, number, name, effect, kind="Supporter"):
+    """A Trainer record with rules text: Trainers of one name with the same effect share a Reprint Group."""
+    return printed(set_id, set_name, number, name, "Trainer", trainerType=kind, effect=effect)
+
+
+def basic_energy(set_id, set_name, number, name):
+    """A Basic Energy record ("Psychic Energy" or "Basic Psychic Energy"). Basic Energy is in no Reprint Group."""
+    return printed(set_id, set_name, number, name, "Energy", energyType="Normal")
+
+
+# The Printings the fixture lines can match by printed set code (api/app/set_codes.tsv) and number. None has rules
+# text, so each is in no Reprint Group. Ticket #213 resolves four more lines (EXPECTED): Basic Energy by type on the
+# Grass and Lightning Energy here, and Boss's Orders MEG 114 and Mimikyu PR-SV 75 by name. Every other card line reads
+# Not found: no seeded Printing has its code and number, its Energy type or its name.
 FIXTURE_CARDS = (
     printed("sv02", "Paldea Evolved", "097", "Mimikyu", "Pokemon"),
     printed("sv02", "Paldea Evolved", "172", "Boss's Orders", "Trainer", trainerType="Supporter"),
@@ -56,10 +74,12 @@ FIXTURE_CARDS = (
 )
 
 # The browser spec's catalog (web/tests/decklist-import.spec.ts): every Printing the Limitless fixture F3 names except
-# Meowth ex POR 62, so F3 opens with four lines that need the collector (Meowth ex POR 62 and the three MEE Basic
-# Energy lines, whose code isn't in the printed code table). A Meowth ex in another set and three Scarlet & Violet Basic
-# Energy cards are there for the resolver's catalog search to find. Lillie's Determination has a Normal and a Reverse
-# Holo Edition for the Edition chooser. No prices are stored, so new copies take the first Edition in catalog order.
+# Meowth ex POR 62, Judge POR 76 and the MEE Basic Energy. F3 therefore opens with two lines that need the collector:
+# - Meowth ex POR 62 is Pick one, because the name names two Reprint Groups (me01 150 and sv02 120);
+# - Judge POR 76 is Not found, with its Missing cards link.
+# The three MEE lines are Basic Energy by type, on the Scarlet & Violet Energy below. Psychic has a second Printing
+# (sve 013) for Change. Lillie's Determination has a Normal and a Reverse Holo Edition for the Edition chooser. No
+# prices are stored, so new copies take the first Edition in catalog order.
 BROWSER_CARDS = (
     printed("sv06", "Twilight Masquerade", "128", "Dreepy", "Pokemon"),
     printed("sv06", "Twilight Masquerade", "129", "Drakloak", "Pokemon"),
@@ -74,7 +94,6 @@ BROWSER_CARDS = (
     printed("me01", "Mega Evolution", "114", "Boss's Orders", "Trainer", trainerType="Supporter"),
     printed("sv07", "Stellar Crown", "133", "Crispin", "Trainer", trainerType="Supporter"),
     printed("me03", "Perfect Order", "084", "Rosa's Encouragement", "Trainer", trainerType="Supporter"),
-    printed("me03", "Perfect Order", "076", "Judge", "Trainer", trainerType="Supporter"),
     printed("sv05", "Temporal Forces", "144", "Buddy-Buddy Poffin", "Trainer", trainerType="Item"),
     printed("me03", "Perfect Order", "081", "Poké Pad", "Trainer", trainerType="Item"),
     printed("me03", "Perfect Order", "071", "Crushing Hammer", "Trainer", trainerType="Item"),
@@ -82,14 +101,78 @@ BROWSER_CARDS = (
     printed("me02.5", "Ascended Heroes", "196", "Night Stretcher", "Trainer", trainerType="Item"),
     printed("sv06", "Twilight Masquerade", "165", "Unfair Stamp", "Trainer", trainerType="Item"),
     printed("me01", "Mega Evolution", "127", "Risky Ruins", "Trainer", trainerType="Stadium"),
-    printed("me01", "Mega Evolution", "150", "Meowth ex", "Pokemon"),
-    printed("sve", "Scarlet & Violet Energies", "002", "Basic Fire Energy", "Energy", energyType="Normal",
-            types=["Fire"]),
-    printed("sve", "Scarlet & Violet Energies", "005", "Basic Psychic Energy", "Energy", energyType="Normal",
-            types=["Psychic"]),
-    printed("sve", "Scarlet & Violet Energies", "007", "Basic Darkness Energy", "Energy", energyType="Normal",
-            types=["Darkness"]),
+    pokemon("me01", "Mega Evolution", "150", "Meowth ex", "Tuck Tail"),
+    pokemon("sv02", "Paldea Evolved", "120", "Meowth ex", "Scratch"),
+    basic_energy("sve", "Scarlet & Violet Energies", "002", "Basic Fire Energy"),
+    basic_energy("sve", "Scarlet & Violet Energies", "005", "Basic Psychic Energy"),
+    basic_energy("sve", "Scarlet & Violet Energies", "013", "Basic Psychic Energy"),
+    basic_energy("sve", "Scarlet & Violet Energies", "007", "Basic Darkness Energy"),
 )
+
+# The catalog the whole-list test seeds (test_import_matching.py): every Printing the TCG Live fixture F1 and the
+# Limitless fixture F3 name, with the Mega Evolution Energy that TCGdex holds (MEE 1-8: research set-code-mapping.md,
+# section 4). F1's SVALT lines and F3's MEE 10, 13 and 15 are Basic Energy by type; every other line matches by code.
+LIST_CARDS = (
+    printed("sv02", "Paldea Evolved", "097", "Mimikyu", "Pokemon"),
+    printed("swsh11", "Lost Origin", "074", "Cresselia", "Pokemon"),
+    printed("sv01", "Scarlet & Violet", "089", "Drifloon", "Pokemon"),
+    printed("sv04", "Paradox Rift", "086", "Scream Tail", "Pokemon"),
+    printed("sv06", "Twilight Masquerade", "095", "Munkidori", "Pokemon"),
+    printed("swsh9", "Brilliant Stars", "040", "Lumineon V", "Pokemon"),
+    printed("swsh12", "Silver Tempest", "068", "Kirlia", "Pokemon"),
+    printed("sv03.5", "151", "151", "Mew ex", "Pokemon"),
+    printed("swsh12", "Silver Tempest", "067", "Ralts", "Pokemon"),
+    printed("swsh10", "Astral Radiance", "046", "Radiant Greninja", "Pokemon"),
+    printed("sv01", "Scarlet & Violet", "096", "Klefki", "Pokemon"),
+    printed("sv01", "Scarlet & Violet", "086", "Gardevoir ex", "Pokemon"),
+    printed("sv08.5", "Prismatic Evolutions", "101", "Buddy-Buddy Poffin", "Trainer", trainerType="Item"),
+    printed("sv06", "Twilight Masquerade", "165", "Unfair Stamp", "Trainer", trainerType="Item"),
+    printed("sm4", "Crimson Invasion", "91", "Counter Catcher", "Trainer", trainerType="Item"),
+    printed("sv01", "Scarlet & Violet", "181", "Nest Ball", "Trainer", trainerType="Item"),
+    printed("sv02", "Paldea Evolved", "171", "Artazon", "Trainer", trainerType="Stadium"),
+    printed("sv02", "Paldea Evolved", "173", "Bravery Charm", "Trainer", trainerType="Tool"),
+    printed("sv05", "Temporal Forces", "144", "Buddy-Buddy Poffin", "Trainer", trainerType="Item"),
+    printed("sv02", "Paldea Evolved", "172", "Boss's Orders", "Trainer", trainerType="Supporter"),
+    printed("sv02", "Paldea Evolved", "185", "Iono", "Trainer", trainerType="Supporter"),
+    printed("sv01", "Scarlet & Violet", "166", "Arven", "Trainer", trainerType="Supporter"),
+    printed("sv04", "Paradox Rift", "171", "Professor Turo's Scenario", "Trainer", trainerType="Supporter"),
+    printed("sv04", "Paradox Rift", "178", "Technical Machine: Evolution", "Trainer", trainerType="Tool"),
+    printed("sv02", "Paldea Evolved", "188", "Super Rod", "Trainer", trainerType="Item"),
+    printed("sv07", "Stellar Crown", "133", "Crispin", "Trainer", trainerType="Supporter"),
+    printed("cel25", "Celebrations", "24", "Professor's Research", "Trainer", trainerType="Supporter"),
+    printed("sv01", "Scarlet & Violet", "196", "Ultra Ball", "Trainer", trainerType="Item"),
+    printed("sv01", "Scarlet & Violet", "191", "Rare Candy", "Trainer", trainerType="Item"),
+    printed("sv04", "Paradox Rift", "163", "Earthen Vessel", "Trainer", trainerType="Item"),
+    basic_energy("sve", "Scarlet & Violet Energies", "013", "Basic Psychic Energy"),
+    basic_energy("sve", "Scarlet & Violet Energies", "015", "Basic Darkness Energy"),
+    *(basic_energy("mee", "Mega Evolution Energy", f"00{number}", f"Basic {kind} Energy") for number, kind in
+      enumerate(("Grass", "Fire", "Water", "Lightning", "Psychic", "Fighting", "Darkness", "Metal"), 1)),
+    printed("sv06", "Twilight Masquerade", "128", "Dreepy", "Pokemon"),
+    printed("sv06", "Twilight Masquerade", "129", "Drakloak", "Pokemon"),
+    printed("sv06", "Twilight Masquerade", "130", "Dragapult ex", "Pokemon"),
+    printed("me02.5", "Ascended Heroes", "016", "Budew", "Pokemon"),
+    printed("sv05", "Temporal Forces", "128", "Dunsparce", "Pokemon"),
+    printed("sv05", "Temporal Forces", "129", "Dudunsparce", "Pokemon"),
+    printed("me03", "Perfect Order", "062", "Meowth ex", "Pokemon"),
+    printed("me02.5", "Ascended Heroes", "142", "Fezandipiti ex", "Pokemon"),
+    printed("me01", "Mega Evolution", "119", "Lillie's Determination", "Trainer", trainerType="Supporter"),
+    printed("me01", "Mega Evolution", "114", "Boss's Orders", "Trainer", trainerType="Supporter"),
+    printed("me03", "Perfect Order", "084", "Rosa's Encouragement", "Trainer", trainerType="Supporter"),
+    printed("me03", "Perfect Order", "076", "Judge", "Trainer", trainerType="Supporter"),
+    printed("me03", "Perfect Order", "081", "Poké Pad", "Trainer", trainerType="Item"),
+    printed("me03", "Perfect Order", "071", "Crushing Hammer", "Trainer", trainerType="Item"),
+    printed("me01", "Mega Evolution", "131", "Ultra Ball", "Trainer", trainerType="Item"),
+    printed("me02.5", "Ascended Heroes", "196", "Night Stretcher", "Trainer", trainerType="Item"),
+    printed("me01", "Mega Evolution", "127", "Risky Ruins", "Trainer", trainerType="Stadium"),
+)
+
+# What the review reads in F1 and F3 against LIST_CARDS with no fixes: (line, status) for every card line.
+LIST_EXPECTED = {
+    "F1": [*((line, "matched") for line in (*range(2, 14), *range(16, 34))),
+           (36, "energy"), (37, "energy"), (38, "matched"), (39, "matched")],
+    "F3": [*((line, "matched") for line in (*range(2, 11), *range(13, 25))),
+           (27, "energy"), (28, "energy"), (29, "energy")],
+}
 
 
 def _seed(records):
@@ -164,7 +247,7 @@ EXPECTED = {
             (8, 'pokemon', '1', 'not_found'),
             (13, 'trainer', '1', 'matched'),
             (15, 'trainer', '3', 'matched'),
-            (19, 'energy', '7', 'not_found'),
+            (19, 'energy', '7', 'energy'),
             (20, 'energy', '3', 'not_found'),
         ],
         "ignored": [(1, 'Deckliste:'), (7, '…'), (9, '…'), (12, '…'), (14, '…'), (16, '…'), (22, 'Karten insgesamt: 60')],
@@ -182,7 +265,7 @@ EXPECTED = {
             (9, 'pokemon', '1', 'not_found'),
             (10, 'pokemon', '1', 'not_found'),
             (13, 'trainer', '4', 'matched'),
-            (14, 'trainer', '3', 'not_found'),
+            (14, 'trainer', '3', 'by_name'),
             (15, 'trainer', '2', 'not_found'),
             (16, 'trainer', '1', 'not_found'),
             (17, 'trainer', '1', 'not_found'),
@@ -233,7 +316,7 @@ EXPECTED = {
             (6, 'pokemon', '1', 'matched'),
             (10, 'energy', '3', 'not_found'),
             (11, 'energy', '2', 'not_found'),
-            (12, 'energy', '2', 'not_found'),
+            (12, 'energy', '2', 'energy'),
             (13, 'energy', '2', 'not_found'),
         ],
         "ignored": [(1, 'BUY THE CHARIZARD LEAGUE BATTLE DECK FROM AMAZON (affiliate link): https://amzn.to/…'), (5, '…'), (7, '…')],
@@ -280,7 +363,7 @@ EXPECTED = {
             (1, None, '1', 'matched'),
             (2, None, '4', 'matched'),
             (3, None, '2', 'not_found'),
-            (4, None, '1', 'not_found'),
+            (4, None, '1', 'by_name'),
             (5, None, '1', 'matched'),
             (6, None, '6', 'matched'),
         ],

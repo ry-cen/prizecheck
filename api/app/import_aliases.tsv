@@ -1,0 +1,43 @@
+# The decklist import alias table (Decklist Import, spec "The import alias table"; ticket #213): set codes as pasted
+# decklists write them that the printed set code table (set_codes.tsv) doesn't hold, each with the TCGdex set it names.
+# Only api/app/import_aliases.py reads it, to match a pasted line and to fill a Missing cards report. Nothing reads it
+# for exports, Format Standing or public records, and it never feeds the Live export table
+# (catalog_targets.LiveRulesV1.SET_CODES). api/tests/test_import_aliases.py enforces that and the rules below.
+#
+# Rule for a row: at least one source shows decklists writing the code (F, L, O or V), and a row with a number prefix
+# also cites X. This table records pasted forms, not printed codes, so it doesn't follow set_codes.tsv's two-source
+# rule. Game-only codes (SVALT, SWSHALT) get no row: they name no printed card, so their lines fall through to Basic
+# Energy by type or to the name.
+#
+# Source keys:
+#   F  Limitless's deck-page clipboard formatter writes this code (decklist-11f9e903.js, read 2026-10-14;
+#      docs/planning/decklist-import/wayfinder/research/set-code-mapping.md, section 2)
+#   L  Limitless's card database set list, https://limitlesstcg.com/cards (read 2026-10-14): Limitless's own code
+#   O  a Pokémon TCG Online export writes this code (research decklist-text-formats.md, fixture F7)
+#   V  a TCG Live-shaped export writes this code (research decklist-text-formats.md, fixtures F1, F2, F6 and F9)
+#   X  TCGdex numbers the set's cards with this prefix: SWSH001, SM01, CC001 (research set-code-mapping.md, section 3)
+#
+# Number rules:
+#   add   the prefix goes before a pasted number that is digits only ("PR-SW 281" is SWSH281); a number that already
+#         starts with it is kept ("PR-SM SM62")
+#   only  the row applies only to a pasted number that starts with the prefix ("CEL CC1" is Classic Collection CC001;
+#         "CEL 24" stays Celebrations through set_codes.tsv)
+#   -     the number as pasted
+# Numbers then compare as catalog search compares them (zeros after a number's letters don't count). The -TG/-GG/-RC
+# split and the Shining Vault flat numbers are rules in import_aliases.py, not rows.
+#
+# Columns, tab-separated: pasted code, TCGdex set ID, number prefix (or -), number rule, sources.
+PR-SV	svp	-	-	F,V
+SVP	svp	-	-	L
+PR-SW	swshp	SWSH	add	F,V,X
+SP	swshp	SWSH	add	L,X
+SMP	smp	SM	add	L,F,X
+PR-SM	smp	SM	add	O,X
+XYP	xyp	XY	add	L,X
+BWP	bwp	BW	add	L,X
+PR-BLW	bwp	BW	add	O,X
+HSP	hgssp	HGSS	add	L,X
+DPP	dpp	DP	add	L,X
+SVE	sve	-	-	L,F,V
+MEE	mee	-	-	L,F
+CEL	cel25cc	CC	only	L,X
