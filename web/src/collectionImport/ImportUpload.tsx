@@ -8,6 +8,7 @@ import {
 import { PageHeader } from "../shell/PageHeader";
 import { Button } from "../ui/Button";
 import { Select } from "../ui/Select";
+import { ExportHelp } from "./ExportHelp";
 import { startErrorText } from "./importText";
 
 type Props = {
@@ -21,7 +22,8 @@ type Props = {
   onReviewed: (summary: CollectionImportSummary, fileName: string) => void;
 };
 
-/** Collection Import's first step (#226): choose a file and where its cards go, then Review import uploads it. */
+/** Collection Import's first step (#226, #227): choose a file and where its cards go, then Review import uploads it.
+ * A file PrizeCheck can't read opens How do I export from my tracker?, the one place the UI names trackers. */
 export function ImportUpload({
   file,
   onFile,
@@ -35,6 +37,7 @@ export function ImportUpload({
   const heading = useRef<HTMLHeadingElement>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [helpOpen, setHelpOpen] = useState(false);
   const fallback =
     places.leaves.find((leaf) => leaf.label === "Unsorted") ?? places.leaves[0];
   const chosen = places.leaves.some((leaf) => leaf.id === locationId)
@@ -53,6 +56,11 @@ export function ImportUpload({
       onReviewed(await startCollectionImport(chosen, file), file.name);
     } catch (failure) {
       setError(startErrorText(failure));
+      if (
+        failure instanceof CollectionImportError &&
+        failure.code === "IMPORT_UNREADABLE"
+      )
+        setHelpOpen(true);
       if (
         failure instanceof CollectionImportError &&
         failure.code === "NOT_STORAGE_LEAF"
@@ -91,10 +99,13 @@ export function ImportUpload({
           PrizeCheck keeps each card, its finish and how many you have.
           Condition, prices paid and notes aren&apos;t imported.
         </p>
+        <p className="m-0 text-body text-text-muted">
+          Choose a CSV, TSV or TXT file, or a zip file holding one.
+        </p>
         <input
           ref={input}
           type="file"
-          accept=".csv,text/csv"
+          accept=".csv,.tsv,.txt,.zip,text/csv,text/tab-separated-values,text/plain,application/zip"
           hidden
           onChange={(event) => {
             const next = event.target.files?.[0];
@@ -157,6 +168,10 @@ export function ImportUpload({
           {busy ? "Reading your file…" : (error ?? "")}
         </p>
       </div>
+      <ExportHelp
+        open={helpOpen}
+        onToggle={() => setHelpOpen((value) => !value)}
+      />
     </main>
   );
 }
