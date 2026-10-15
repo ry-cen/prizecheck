@@ -316,7 +316,46 @@ test.describe("on a desktop", () => {
     await expect(saveStatus(page)).toHaveText(
       "Ready · 9 cards · 5 Deck List lines"
     );
-    await page.getByRole("button", { name: "Replace Deck List" }).click();
+
+    // Over the cap: 201 changes disable Replace Deck List, say why, and send nothing.
+    const saves: string[] = [];
+    page.on("request", (request) => {
+      if (
+        request.method() === "POST" &&
+        /\/deck-list\/changes$/.test(request.url())
+      )
+        saves.push(request.url());
+    });
+    await page.route("**/api/decks/import/review", async (route) => {
+      const response = await route.fetch();
+      const body = await response.json();
+      const padding = Array.from(
+        { length: 201 - body.replace.changes.length },
+        () => ({
+          ...body.replace.changes[0],
+        })
+      );
+      body.replace.changes = [...body.replace.changes, ...padding];
+      await route.fulfill({ response, json: body });
+    });
+    await setting(page).getByRole("radio", { name: "Exact printings" }).click();
+    const replaceButton = page.getByRole("button", {
+      name: "Replace Deck List",
+    });
+    await expect(replaceButton).toHaveAttribute("aria-disabled", "true");
+    await expect(saveStatus(page)).toHaveText(
+      "This replaces 201 Deck List lines; one save changes at most 200."
+    );
+    await replaceButton.click({ force: true });
+    expect(saves).toHaveLength(0);
+    await page.unroute("**/api/decks/import/review");
+    const restored = page.waitForResponse(isReview);
+    await setting(page).getByRole("radio", { name: "Use cards I own" }).click();
+    await restored;
+    await expect(saveStatus(page)).toHaveText(
+      "Ready · 9 cards · 5 Deck List lines"
+    );
+    await replaceButton.click();
 
     // The builder: the new list, the preview as its Surplus group, and an Undo toast.
     await expect(page).toHaveURL(new RegExp(`/decks/${gardevoir.id}$`));
