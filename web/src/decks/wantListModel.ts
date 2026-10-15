@@ -14,9 +14,13 @@ export function wantListPath(deckId: string | null = null): string {
     : `/decks/${WANT_LIST_SEGMENT}`;
 }
 
-/** The Deck the address scopes the Want List to, or null for All Decks. */
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** The Deck the address scopes the Want List to, or null for All Decks (also for a value that isn't an id). */
 export function scopeInAddress(): string | null {
-  return new URLSearchParams(window.location.search).get("deck") || null;
+  const deck = new URLSearchParams(window.location.search).get("deck");
+  return deck && UUID_PATTERN.test(deck) ? deck : null;
 }
 
 /** "1 card", "3 cards". */
