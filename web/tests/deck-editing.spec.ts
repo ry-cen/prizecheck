@@ -648,6 +648,12 @@ test.describe("on a phone", () => {
     await page.getByRole("tab", { name: "Deck 2/60" }).tap();
     await page.getByRole("radio", { name: "List" }).click();
     await expectPageChecks(page, "phone List view with editing");
+    // The +1 edit's toast sits over the bottom of a phone screen, where the row lands below the header's four actions
+    // (Replace list…, #215): dismiss it first.
+    await page
+      .getByRole("region", { name: "Notifications" })
+      .getByRole("button", { name: "Dismiss", exact: true })
+      .tap();
     await page.getByRole("button", { name: "Add one Charmander" }).tap();
     await expect.poll(() => listed(built)).toEqual({ "edit-1": 3 });
   });

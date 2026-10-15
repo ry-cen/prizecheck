@@ -1,11 +1,10 @@
-import { useId, type Ref } from "react";
+import { useId, type ReactNode, type Ref } from "react";
 import type { ImportReview, ReviewLine } from "../../decks_generated";
 import { PageHeader } from "../../shell/PageHeader";
 import { Button } from "../../ui/Button";
 import { Chip } from "../../ui/Chip";
 import { Segmented } from "../../ui/Segmented";
 import { countingLabel } from "../../settings/wantListCounting";
-import { formatLabel, type TargetFormat } from "../targetFormat";
 import {
   filterCount,
   FILTERS,
@@ -26,8 +25,14 @@ export type OpenPanel = { line: number; kind: "fix" | "edition" } | null;
 type Props = {
   review: ImportReview;
   state: ImportReviewState;
-  name: string;
-  targetFormat: TargetFormat;
+  /** Where the list goes, in the side column: a new Deck's name and Target Format, or the Deck it replaces (#215). */
+  destination: ReactNode;
+  /** More of the side column, under the destination: Will become Surplus for Replace (#215). */
+  sidePanel?: ReactNode;
+  /** The save button's words: Create Deck, or Replace Deck List (#215). */
+  saveLabel: string;
+  /** Why saving is unavailable though every line is resolved (Replace over the batch cap), or null. */
+  saveBlocked?: string | null;
   owned: OwnedCards;
   onOwned: (owned: OwnedCards) => void;
   filter: Filter;
@@ -50,15 +55,17 @@ type Props = {
 /**
  * Import a decklist, step two (#212): "Check the list". The summary sits beside the list on a desktop and above it on a
  * phone: the cards, the cards you own and the cards to get with their stored cost (#214), the owned-cards setting with
- * its explainer (switching it posts the review again, so every line recounts), and the destination. The list shows
- * Pokémon, Trainer, Energy and No section in paste order behind four filter chips; the sticky save bar says how many
- * lines still need the collector and holds Create Deck.
+ * its explainer (switching it posts the review again, so every line recounts), the destination and any side panel
+ * (Will become Surplus, #215). The list shows Pokémon, Trainer, Energy and No section in paste order behind four filter
+ * chips; the sticky save bar says how many lines still need the collector and holds the save button.
  */
 export function ReviewStep({
   review,
   state,
-  name,
-  targetFormat,
+  destination,
+  sidePanel,
+  saveLabel,
+  saveBlocked = null,
   owned,
   onOwned,
   filter,
@@ -79,6 +86,9 @@ export function ReviewStep({
 }: Props) {
   const idBase = useId();
   const statusId = `${idBase}-status`;
+  const ownedLabelId = `${idBase}-owned-label`;
+  const explainerId = `${idBase}-owned-explainer`;
+  const countingId = `${idBase}-owned-counting`;
   const { totals } = review;
   const sections = sectionsOf(review.lines)
     .map((section) => ({
@@ -86,7 +96,8 @@ export function ReviewStep({
       shown: section.lines.filter((line: ReviewLine) => keeps(filter, line)),
     }))
     .filter((section) => section.shown.length > 0);
-  const blocked = !state.current || totals.to_resolve > 0 || saving;
+  const blocked =
+    !state.current || totals.to_resolve > 0 || saving || saveBlocked !== null;
   const explainer = OWNED_OPTIONS.find(
     (option) => option.value === owned
   )!.explainer;
@@ -125,27 +136,29 @@ export function ReviewStep({
             <dd className="m-0 tabular-nums">{toGetText(totals)}</dd>
           </dl>
           <div className="flex flex-col gap-1">
-            <p className="m-0 text-meta text-text-muted">Owned cards</p>
+            {/* The visible label names the radio group, and the explainer and the counting describe it. */}
+            <p id={ownedLabelId} className="m-0 text-meta text-text-muted">
+              Owned cards
+            </p>
             <Segmented
               mode="choice"
               label="Owned cards"
+              labelledBy={ownedLabelId}
+              describedBy={`${explainerId} ${countingId}`}
               options={OWNED_OPTIONS}
               value={owned}
               onChange={onOwned}
             />
-            <p className="m-0 text-meta text-text-muted">{explainer}</p>
-            <p className="m-0 text-meta text-text-muted">
+            <p id={explainerId} className="m-0 text-meta text-text-muted">
+              {explainer}
+            </p>
+            <p id={countingId} className="m-0 text-meta text-text-muted">
               Copies are counted as your Want List counts them:{" "}
               {countingLabel(review.want_list_counting)}.
             </p>
           </div>
-          <p className="m-0 text-body">
-            New Deck <strong className="font-semibold">{name}</strong> · Target
-            Format{" "}
-            <strong className="font-semibold">
-              {formatLabel(targetFormat)}
-            </strong>
-          </p>
+          {destination}
+          {sidePanel}
         </aside>
         <div className="col-start-1 row-start-1 flex min-w-0 flex-col gap-4 phone:row-start-2">
           <div
@@ -228,6 +241,8 @@ export function ReviewStep({
               </strong>{" "}
               before you can save
             </>
+          ) : saveBlocked !== null ? (
+            <strong className="text-warning">{saveBlocked}</strong>
           ) : (
             `Ready · ${plural(Number(totals.cards), "card")} · ${plural(review.deck_list.length, "Deck List line")}`
           )}
@@ -251,7 +266,7 @@ export function ReviewStep({
           aria-disabled={blocked || undefined}
           onClick={onCreate}
         >
-          Create Deck
+          {saveLabel}
         </Button>
       </section>
     </main>
