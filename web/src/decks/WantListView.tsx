@@ -20,6 +20,16 @@ import {
   scopeInAddress,
   wantListPath,
 } from "./wantListModel";
+import { WantListBuy } from "./WantListBuy";
+import {
+  CostSummary,
+  LineCost,
+  RowCost,
+  SectionCost,
+  useTotalCostSuffix,
+  useWantListCost,
+  WantListCostContext,
+} from "./WantListCost";
 
 type Props = {
   /** Opens a Deck in the deck builder (/decks/<id>). */
@@ -53,7 +63,11 @@ function follow(event: MouseEvent, go: () => void) {
  * - **Combined total:** each card once with the Decks that need it. A sticky right column on desktop and a collapsed
  *   row under the summary on a phone; hidden when the view is scoped to one Deck.
  *
- * Costs, Buy on TCGplayer (#210) and the Swap hint (#211) come later; the places they go are marked below.
+ * - **Cost (#210):** the estimated cost and cards priced in the summary, and each section's, line's and combined row's
+ *   cost, from one price access per answer (WantListCost) read after the page draws; **Buy on TCGplayer** exports what
+ *   the page shows (WantListBuy).
+ *
+ * The Swap hint (#211) comes later; the place it goes is marked below.
  */
 export function WantListView({ onOpenDeck, onNavigate }: Props) {
   const idBase = useId();
@@ -62,6 +76,12 @@ export function WantListView({ onOpenDeck, onNavigate }: Props) {
   const [load, setLoad] = useState<Load>({ kind: "loading" });
   const [attempt, setAttempt] = useState(0);
   const [notice, setNotice] = useState("");
+  const reload = () => setAttempt((n) => n + 1);
+  // #210: the cost of the answer on the page, read once it has drawn.
+  const cost = useWantListCost(
+    load.kind === "ready" ? load.list : null,
+    reload
+  );
 
   function choose(deckId: string | null) {
     setNotice("");
@@ -139,7 +159,7 @@ export function WantListView({ onOpenDeck, onNavigate }: Props) {
       </p>
     );
 
-  return (
+  const page = (
     <div className="flex min-w-0 flex-col gap-4" aria-busy={!current}>
       <section
         aria-labelledby={`${idBase}-summary`}
@@ -159,7 +179,8 @@ export function WantListView({ onOpenDeck, onNavigate }: Props) {
             {cards(list.to_get)}
           </span>
         </p>
-        {/* #210: the estimated cost, the cards priced and Buy on TCGplayer go here. */}
+        <CostSummary />
+        <WantListBuy list={list} onChanged={reload} />
         <p className="m-0 basis-full text-meta text-text-muted">
           Counting:{" "}
           <strong className="font-semibold text-text">{counting.label}</strong>.{" "}
@@ -222,6 +243,11 @@ export function WantListView({ onOpenDeck, onNavigate }: Props) {
       </div>
     </div>
   );
+  return (
+    <WantListCostContext.Provider value={cost}>
+      {page}
+    </WantListCostContext.Provider>
+  );
 }
 
 function DeckSection({
@@ -251,7 +277,7 @@ function DeckSection({
             {cards(section.to_get)} to get
           </span>
         )}
-        {/* #210: the section's cost goes here. */}
+        <SectionCost deckId={section.deck_id} />
         <a
           href={`/decks/${encodeURIComponent(section.deck_id)}`}
           onClick={(event) => follow(event, () => onOpenDeck(section.deck_id))}
@@ -272,7 +298,12 @@ function DeckSection({
           className="m-0 list-none border-t border-border p-0"
         >
           {section.lines.map((line) => (
-            <NeededLine key={line.edition_id} line={line} deckName={deckName} />
+            <NeededLine
+              key={line.edition_id}
+              deckId={section.deck_id}
+              line={line}
+              deckName={deckName}
+            />
           ))}
         </ul>
       )}
@@ -281,9 +312,11 @@ function DeckSection({
 }
 
 function NeededLine({
+  deckId,
   line,
   deckName,
 }: {
+  deckId: string;
   line: WantListLine;
   deckName: (id: string) => string;
 }) {
@@ -306,7 +339,8 @@ function NeededLine({
           {countedText(line, deckName)}
         </p>
       </div>
-      {/* #210: the line cost and the price each go here; #211: the Swap hint and Swap. */}
+      <LineCost deckId={deckId} editionId={line.edition_id} />
+      {/* #211: the Swap hint and Swap go here. */}
     </li>
   );
 }
@@ -324,6 +358,7 @@ function CombinedTotal({
   deckName: (id: string) => string;
 }) {
   const idBase = useId();
+  const costSuffix = useTotalCostSuffix();
   const list =
     rows.length === 0 ? (
       <p className="m-0 text-body text-text-muted">
@@ -350,13 +385,12 @@ function CombinedTotal({
                   .join(" · ")}
               </span>
             </span>
-            {/* #210: the row's cost goes here. */}
+            <RowCost editionId={row.edition_id} />
           </li>
         ))}
       </ul>
     );
-  // #210 appends " · $X" to the heading line.
-  const title = `Combined total · ${cards(toGet)}`;
+  const title = `Combined total · ${cards(toGet)}${costSuffix}`;
   if (phone)
     return (
       <details className="col-start-1 row-start-1 rounded-panel border border-border bg-surface">

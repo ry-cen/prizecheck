@@ -245,7 +245,9 @@ test.describe("on a desktop", () => {
     await expect(deckSection(page, names.miraidon)).toContainText(
       "Nothing to get"
     );
-    await expect(total(page)).toHaveAccessibleName("Combined total · 5 cards");
+    await expect(total(page)).toHaveAccessibleName(
+      "Combined total · 5 cards · $1.25"
+    );
     await expect(total(page).getByRole("listitem")).toHaveCount(1);
     await expect(total(page).getByRole("listitem")).toContainText(
       `${names.charizard} 2 · ${names.gardevoir} 3`
@@ -350,7 +352,9 @@ test.describe("on a desktop", () => {
     );
     await expect(needs(page, names.charizard)).toContainText("2 of 4");
     await expect(page.getByText("2 cards", { exact: true })).toBeVisible();
-    await expect(total(page)).toHaveAccessibleName("Combined total · 2 cards");
+    await expect(total(page)).toHaveAccessibleName(
+      "Combined total · 2 cards · $0.50"
+    );
     await expect(total(page).getByRole("listitem")).toContainText(
       `${names.charizard} 2 · ${names.gardevoir} 1`
     );
