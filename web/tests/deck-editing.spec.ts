@@ -622,6 +622,11 @@ test.describe("on a phone", () => {
 
     // The Deck tab keeps the library mounted behind it; its pile's sheet has the editing controls.
     await page.getByRole("tab", { name: "Deck 2/60" }).tap();
+    // The Deck read after the edit settles takes the copy out of the surplus group; until it lands, the surplus tile
+    // shares the pile's name.
+    await expect(
+      page.getByRole("button", { name: /^Charmander, Alpha Set · 4 .*surplus/ })
+    ).toHaveCount(0);
     await page
       .getByRole("button", { name: /^Charmander, Alpha Set · 4/ })
       .tap();

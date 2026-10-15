@@ -165,6 +165,10 @@ test("Revoke sends revocation after an uncertain republish rather than replaying
                 ownership: [],
                 surplus: [],
                 competition: [],
+                // The Deck's need under the Want List counting setting (#208).
+                to_get: "0",
+                want_list_counting: "all_at_once",
+                settings_revision: 1,
                 target_format: "standard",
                 format_checks: {
                   deck_id: deck.id,

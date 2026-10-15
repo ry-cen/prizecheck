@@ -302,7 +302,8 @@ export function DeckBuilderPage({ deckId, onAllDecks }: Props) {
     deckId,
     detail?.deck_list.revision ?? null,
     detail?.owner_revision ?? null,
-    () => void read()
+    () => void read(),
+    detail?.settings_revision ?? null
   );
   // Put away for the surplus group (#180): its dialog and Undo toast outlive the phone's Deck and Library tabs.
   const putAway = usePutAway({

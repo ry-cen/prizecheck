@@ -164,21 +164,36 @@ export function DeckMassEntryExport({
   onStale,
   scope = "not_owned",
   emptyMessage,
+  settingsRevision,
 }: DeckExportProps & {
   /** Which copies: the ones not owned (the default, Buy missing) or the whole Deck List (#181). */
   scope?: MassEntryScope;
   emptyMessage?: string;
+  /** The settings revision the page drew (#208): the not-owned copies follow the Want List counting setting, which
+   * moves neither revision above, so a result read under another setting is discarded too. */
+  settingsRevision?: number;
 }) {
   const [view, setView] = useState<MassEntryView | null>(null);
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
-  const revision = useRef({ owner: ownerRevision, list: deckListRevision });
+  const revision = useRef({
+    owner: ownerRevision,
+    list: deckListRevision,
+    settings: settingsRevision,
+  });
   const latest = useRef(0);
-  revision.current = { owner: ownerRevision, list: deckListRevision };
+  revision.current = {
+    owner: ownerRevision,
+    list: deckListRevision,
+    settings: settingsRevision,
+  };
   const matches = (result: MassEntryView) =>
     result.owner_revision === revision.current.owner &&
     (revision.current.list === undefined ||
-      result.deck_list_revision === revision.current.list);
+      result.deck_list_revision === revision.current.list) &&
+    (revision.current.settings === undefined ||
+      result.settings_revision == null ||
+      result.settings_revision === revision.current.settings);
 
   // An inventory or Deck List change makes a prepared export untrustworthy; discard it instead of showing old
   // quantities.
@@ -187,7 +202,7 @@ export function DeckMassEntryExport({
       setView(null);
       setNotice("Deck changed; export again");
     }
-  }, [ownerRevision, deckListRevision, view]);
+  }, [ownerRevision, deckListRevision, settingsRevision, view]);
 
   async function prepare() {
     const attempt = ++latest.current;
@@ -225,7 +240,10 @@ export function DeckMassEntryExport({
               scope,
               deckListRevision === undefined
                 ? undefined
-                : view.deck_list_revision
+                : view.deck_list_revision,
+              settingsRevision === undefined
+                ? undefined
+                : view.settings_revision
             )
           : undefined
       }

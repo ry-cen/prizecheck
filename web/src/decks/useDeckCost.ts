@@ -15,18 +15,30 @@ export type DeckCostSettled =
  * An answer belongs to one inventory revision and one Deck List revision. An answer for the revisions drawn is
  * shown; one naming a newer revision calls `onNewerRevision` (the page reads the Deck again, which asks again);
  * one for an older revision belongs to no live request and ends as "unavailable" instead of waiting.
+ *
+ * A page that draws the Deck's need (the deck builder's Buy missing) also passes the settings revision it read (#208):
+ * the cost to complete follows the Want List counting setting, which moves neither revision above.
  */
 export function useDeckCost(
   deckId: string,
   deckListRevision: number | null,
   ownerRevision: number | null,
-  onNewerRevision: () => void
+  onNewerRevision: () => void,
+  settingsRevision: number | null = null
 ): DeckCostSettled {
   const [settled, setSettled] = useState<DeckCostSettled>(null);
-  const latest = useRef({ deckList: deckListRevision, owner: ownerRevision });
+  const latest = useRef({
+    deckList: deckListRevision,
+    owner: ownerRevision,
+    settings: settingsRevision,
+  });
 
   useEffect(() => {
-    latest.current = { deckList: deckListRevision, owner: ownerRevision };
+    latest.current = {
+      deckList: deckListRevision,
+      owner: ownerRevision,
+      settings: settingsRevision,
+    };
     setSettled(null);
     if (deckListRevision === null || ownerRevision === null) return;
     const controller = new AbortController();
@@ -37,12 +49,21 @@ export function useDeckCost(
         if (!live) return;
         const owner = cost.owner_revision ?? null;
         const deckList = cost.deck_list_revision ?? null;
+        const settings = cost.settings_revision ?? null;
         const ownerMatches = owner === null || owner === ownerRevision;
         const listMatches = deckList === null || deckList === deckListRevision;
-        if (ownerMatches && listMatches) setSettled({ kind: "cost", cost });
+        const settingsMatch =
+          settingsRevision === null ||
+          settings === null ||
+          settings === settingsRevision;
+        if (ownerMatches && listMatches && settingsMatch)
+          setSettled({ kind: "cost", cost });
         else if (
           (owner !== null && owner > (latest.current.owner ?? 0)) ||
-          (deckList !== null && deckList > (latest.current.deckList ?? 0))
+          (deckList !== null && deckList > (latest.current.deckList ?? 0)) ||
+          (settingsRevision !== null &&
+            settings !== null &&
+            settings > (latest.current.settings ?? 0))
         )
           onNewerRevision();
         else setSettled({ kind: "unavailable" });
@@ -57,7 +78,7 @@ export function useDeckCost(
       controller.abort();
     };
     // onNewerRevision is a fresh closure on every render; only the Deck and its revisions start a new access.
-  }, [deckId, deckListRevision, ownerRevision]);
+  }, [deckId, deckListRevision, ownerRevision, settingsRevision]);
 
   return settled;
 }
