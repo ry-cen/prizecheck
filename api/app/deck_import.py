@@ -74,6 +74,7 @@ class ImportEdition(BaseModel):
     edition_id: UUID
     descriptor: dict
     display_price: str | None  # the stored quote, rounded ("$0.25", "<$0.01"); None when unpriced
+    stale: bool | None = None  # the quote is more than 48 hours old (ADR 0006); None when unpriced
 
 
 class ImportPart(BaseModel):
@@ -268,7 +269,8 @@ def review_import(command: ReviewImport, user_id: str = Depends(verified_user)):
             candidates=[printings[candidate] for candidate in matches[card.line].candidates] if status == 'ambiguous'
             else [],
             editions=[ImportEdition(edition_id=edition['edition_id'], descriptor=edition['descriptor'],
-                                    display_price=_display_price(views.get(edition['edition_id'])))
+                                    display_price=_display_price(views.get(edition['edition_id'])),
+                                    stale=_stale(views.get(edition['edition_id'])))
                       for edition in editions[printing]] if printing is not None else [],
             parts=[_part(part) for part in parts.get(card.line, [])]))
     deck_list = merged([part for card in cards for part in parts.get(card.line, [])])
@@ -284,6 +286,10 @@ def review_import(command: ReviewImport, user_id: str = Depends(verified_user)):
 
 def _display_price(view) -> str | None:
     return view.display_amount if view is not None and view.status == 'quote' else None
+
+
+def _stale(view) -> bool | None:
+    return bool(view.stale) if view is not None and view.status == 'quote' else None
 
 
 def _part(part: Part) -> ImportPart:

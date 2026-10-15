@@ -132,9 +132,14 @@ export function noteText(line: ReviewLine): string | null {
 export const editionOf = (line: ReviewLine, editionId: string) =>
   line.editions.find((edition) => edition.edition_id === editionId);
 
-/** An Edition as the chooser names it: "Reverse Holo · $0.43" or "Normal · no price". */
+/** An Edition as the chooser names it: "Reverse Holo · $0.43" or "Normal · no price". A quote over 48 hours old says
+ * so: "Reverse Holo · $0.43 · stale (price over 48 hours old)". */
 export const editionText = (edition: ImportEdition) =>
-  `${variantLabel(edition.descriptor)} · ${edition.display_price ?? "no price"}`;
+  `${variantLabel(edition.descriptor)} · ${edition.display_price ?? "no price"}${
+    edition.display_price && edition.stale ? STALE : ""
+  }`;
+
+const STALE = " · stale (price over 48 hours old)";
 
 const HOW: Record<NonNullable<ImportPart["chosen_by"]>, string> = {
   cheapest_price: "cheapest priced",
@@ -155,7 +160,9 @@ export function partText(line: ReviewLine, part: ImportPart): string {
   if (part.chosen_by) words.push(HOW[part.chosen_by]);
   if (part.chosen_by !== "catalog_order")
     words.push(
-      edition?.display_price ? `${edition.display_price} each` : "no price"
+      edition?.display_price
+        ? `${edition.display_price} each${edition.stale ? STALE : ""}`
+        : "no price"
     );
   return words.join(" · ");
 }
