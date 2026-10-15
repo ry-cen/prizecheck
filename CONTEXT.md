@@ -89,7 +89,7 @@ The Card Editions a collector's Decks name in their Deck Lists but can't get fro
 _Avoid_: Wishlist, shopping list, standalone list
 
 **Spare Copy**:
-A copy that isn't covering any Deck's own Deck List line: a loose copy outside every Deck, or a copy a Deck holds beyond its own Deck List line.
+An owned copy that isn't covering any Deck's own Deck List line and isn't promised to a Loan: a loose copy outside every Deck, or a copy a Deck holds beyond its own Deck List line. Reserved, lent and Borrowed Copies are never Spare Copies.
 _Avoid_: Free copy, unused copy
 
 **Unsorted**:
@@ -157,7 +157,7 @@ A Location whose Holdings a collector's Friends cannot see. Friends never see Lo
 _Avoid_: Private Location, locked binder
 
 **Loan**:
-An agreement for one collector, the lender, to let a Friend, the borrower, have some of the lender's copies. A Loan is accepted (reserving the lender's copies), then handed over, then returned, with both sides confirming the handover and the return. It may carry a return-by date and is overdue after it. The lender still owns lent copies. A Loan never transfers ownership; giving or trading cards is not a Loan.
+An agreement for one collector, the lender, to let a Friend, the borrower, have some of the lender's copies. A Loan is accepted, which promises a number of the lender's copies and gives the lender a Pick List of where to take them from; then handed over, when the copies leave the lender's Locations; then returned, when they go back. Both sides confirm the handover and the return. While lent, copies sit in no Location; the Loan remembers where they came from. It may carry a return-by date and is overdue after it. The lender still owns lent copies. A Loan never transfers ownership; giving or trading cards is not a Loan.
 _Avoid_: Trade, gift, transfer
 
 **Borrow Request**:
@@ -169,7 +169,7 @@ A lender's proposal of a Loan to a Friend, with the same lines a Borrow Request 
 _Avoid_: Loan offer, gift
 
 **Borrowed Copy**:
-A copy, held by the borrower, that a Friend has lent and handed over. It can sit in the borrower's Deck and fill its Deck List, but it is never part of the borrower's Collection and leaves when the Loan is returned or written off.
+A copy, held by the borrower, that a Friend has lent and handed over. It sits in any of the borrower's Locations and can be moved like an owned copy; in a Deck it fills, or adds, a Deck List line and counts toward that Deck's Estimated Deck Cost. It is never part of the borrower's Collection, never a Spare Copy and never removable, and leaves when the Loan is returned or written off.
 _Avoid_: Owned copy, temporary Holding
 
 **Write-off**:
