@@ -1,12 +1,13 @@
-"""Collection Import (#226, #227, #230; spec "Collection import from other trackers", ADR 0014): a collector's file
-becomes an import draft on the server, which they review and then save into one Storage Leaf in one step.
+"""Collection Import (#226, #227, #228, #230; spec "Collection import from other trackers", ADR 0014): a collector's
+file becomes an import draft on the server, which they review and then save into one Storage Leaf in one step.
 
 - POST /api/collection-imports?location_id=<Storage Leaf> takes the file's bytes as the request body (no multipart): a
   CSV, TSV or TXT export from any supported tracker or with name-like columns, or a zip holding one such file, told
   apart by its bytes, not its content type. It reads the file (collection_import_reader), matches every row
-  (collection_import_matcher) and stores the draft with the detected source (for matching only) and each row's group,
-  replacing the collector's open draft: one open draft per collector. A saved draft stays, without rows, as the
-  receipt that answers a repeated save for 24 hours; starting an import also deletes this collector's expired ones.
+  (collection_import_matcher) and stores the draft with the detected source (for matching only), each row's group and
+  each row's candidate Printings (Pick one, or a Basic Energy's other Printings), replacing the collector's open draft:
+  one open draft per collector. A saved draft stays, without rows, as the receipt that answers a repeated save for 24
+  hours; starting an import also deletes this collector's expired ones.
   A draft is not inventory, so starting one doesn't advance the owner revision.
 - GET /api/collection-imports/current is the open draft's summary.
 - GET /api/collection-imports/<id>/rows pages through its rows, 100 at a time, by filter: needs (Needs you), finish
@@ -260,11 +261,12 @@ def start_import(location_id: UUID = Query(), body: bytes = Depends(import_body)
                          (import_id, user_id, location_id, source.source, json.dumps(source.header),
                           catalog["revision"]))
             with conn.cursor().copy("""COPY collection_import_row
-                (import_id,row_number,group_name,raw_text,parsed,quantity,status,printing_id,edition_id)
+                (import_id,row_number,group_name,raw_text,parsed,quantity,status,printing_id,edition_id,candidates)
                 FROM STDIN""") as copy:
                 for row, found in zip(source.rows, matches):
                     copy.write_row((import_id, row.row_number, row.group, row.raw_text, json.dumps(row.fields),
-                                    found.quantity, found.status, found.printing_id, found.edition_id))
+                                    found.quantity, found.status, found.printing_id, found.edition_id,
+                                    json.dumps([str(printing) for printing in found.candidates])))
             return summary(conn, user_id, import_id)
     except psycopg.Error:
         refuse(503, "INVENTORY_TEMPORARILY_UNAVAILABLE")
