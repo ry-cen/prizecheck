@@ -13,6 +13,10 @@ type Common<T extends string> = {
   options: readonly SegmentedOption<T>[];
   value: T;
   onChange: (value: T) => void;
+  /** The id of visible text that names the group; it is the accessible name instead of `label` (aria-labelledby). */
+  labelledBy?: string;
+  /** The ids of text that describes the group, for example an explainer under it (aria-describedby). */
+  describedBy?: string;
 };
 /** Sub-tabs over a panel (the default). */
 type TabsProps<T extends string> = Common<T> & {
@@ -54,7 +58,7 @@ export const segmentId = (idBase: string, value: string) =>
 export function Segmented<T extends string>(
   props: TabsProps<T> | ChoiceProps<T>
 ) {
-  const { label, options, value, onChange } = props;
+  const { label, options, value, onChange, labelledBy, describedBy } = props;
   const choice = props.mode === "choice";
   const role = choice ? "radio" : "tab";
   const list = useRef<HTMLDivElement>(null);
@@ -99,7 +103,9 @@ export function Segmented<T extends string>(
     <div
       ref={list}
       role={choice ? "radiogroup" : "tablist"}
-      aria-label={label}
+      aria-label={labelledBy ? undefined : label}
+      aria-labelledby={labelledBy}
+      aria-describedby={describedBy}
       onKeyDown={onKeyDown}
       // p-1 leaves the focus ring room inside the scroll box; -mx-1 takes it back, so the first option lines up
       // with the text above it.

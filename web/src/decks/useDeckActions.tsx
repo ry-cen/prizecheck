@@ -21,15 +21,18 @@ type Options = {
   read: () => void;
   /** Back to the Decks index, after a delete. */
   onAllDecks: () => void;
+  /** Opens Replace list… (/decks/<id>/replace, #215). */
+  onReplaceList: () => void;
 };
 
 const plural = (count: string) =>
   `${count} ${count === "1" ? "card" : "cards"}`;
 
 /**
- * The deck builder's header actions (#181): Export, Publish and Delete for the page header, Buy missing for header
- * row 1, and their three dialogs.
+ * The deck builder's header actions (#181): Replace list… (#215), Export, Publish and Delete for the page header, Buy
+ * missing for header row 1, and their three dialogs.
  *
+ * - **Replace list…** opens the import on this Deck, to paste a new list over its Deck List.
  * - **Export** opens the export dialog on Pokémon TCG Live; **Buy missing** on TCGplayer Mass Entry with the copies
  *   not owned (disabled when every copy is owned).
  * - **Publish** is disabled, with its reason shown under the actions, while the Deck has no publication and its
@@ -44,6 +47,7 @@ export function useDeckActions({
   target,
   read,
   onAllDecks,
+  onReplaceList,
 }: Options) {
   const idBase = useId();
   const kit = useToast();
@@ -67,6 +71,7 @@ export function useDeckActions({
   const actions: ReactNode = detail && (
     <div className="flex flex-col items-end gap-1 phone:items-start">
       <div className="flex flex-wrap items-center gap-2">
+        <Button onClick={onReplaceList}>Replace list…</Button>
         <Button
           onClick={(event) => {
             exportOpener.current = event.currentTarget;

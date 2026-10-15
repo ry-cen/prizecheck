@@ -1,12 +1,14 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
+  changeDeckList,
   deleteDeck,
   DeckError,
   importDeck,
   type ImportDeckResult,
+  type ImportReplace,
 } from "../../decks_generated";
 import { useToast } from "../../ui/Toast";
-import type { TargetFormat } from "../targetFormat";
+import { formatLabel, type TargetFormat } from "../targetFormat";
 import {
   fixesFor,
   fixRefused,
@@ -18,6 +20,18 @@ import {
 } from "./importModel";
 import { useOwnedCards } from "./ownedCards";
 import { PasteStep } from "./PasteStep";
+import {
+  offerReplaceUndo,
+  STALE_REPLACE_TEXT,
+  tooManyChanges,
+  tooManyText,
+  type ReplaceTarget,
+} from "./replaceList";
+import {
+  ReplacePasteDestination,
+  ReplaceReviewDestination,
+  WillBecomeSurplus,
+} from "./ReplaceParts";
 import { ReviewStep, type OpenPanel } from "./ReviewStep";
 import { useImportReview } from "./useImportReview";
 
@@ -31,13 +45,20 @@ type FocusAfter = { line: number; same: boolean } | null;
  * every line ("Check the list") and Create Deck. The server reads the paste and answers every review; the page keeps
  * the collector's choices (a picked card or Edition, a dropped line) and posts them with the text. Create Deck is one
  * idempotent command; it lands in the Deck's builder with an Undo toast that deletes the Deck again.
+ *
+ * With `replace` (/decks/<id>/replace, Replace list…, #215) the paste replaces that Deck's Deck List: the review uses
+ * the Deck's own copies first and shows Will become Surplus, and Replace Deck List sends the review's changes batch at
+ * its Deck List revision (replaceList.ts). A save answered STALE_DECK_LIST reviews again; Undo is the inverse batch.
  */
 export function ImportPage({
   onOpenDeck,
   onAllDecks,
+  replace = null,
 }: {
   onOpenDeck: (id: string) => void;
   onAllDecks: () => void;
+  /** The Deck whose Deck List the paste replaces; null imports into a new Deck. */
+  replace?: ReplaceTarget | null;
 }) {
   const [step, setStep] = useState<"paste" | "review">("paste");
   const [text, setText] = useState("");
@@ -69,7 +90,8 @@ export function ImportPage({
     text,
     fixesFor(picks, drops),
     owned,
-    step === "paste" ? 300 : 0
+    step === "paste" ? 300 : 0,
+    replace?.deckId ?? null
   );
   const toast = useToast();
   const review = state.review;
@@ -122,8 +144,13 @@ export function ImportPage({
     review !== null &&
     state.current &&
     review.totals.card_lines > 0 &&
-    name.trim() !== "" &&
+    (replace !== null || name.trim() !== "") &&
     state.error === "";
+  // Replace (#215): a batch over the Deck List changes cap can't be saved.
+  const saveBlocked =
+    replace && review?.replace && tooManyChanges(review.replace)
+      ? tooManyText(review.replace)
+      : null;
 
   function remember() {
     previousChoices.current = { picks: new Map(picks), drops: new Set(drops) };
@@ -200,6 +227,11 @@ export function ImportPage({
   async function save() {
     if (!review || !state.current || review.totals.to_resolve > 0 || saving)
       return;
+    if (replace) {
+      if (review.replace && saveBlocked === null)
+        await saveReplace(review.replace);
+      return;
+    }
     setSaving(true);
     setSaveMessage("");
     const lines = review.deck_list.map(({ edition_id, quantity }) => ({
@@ -250,13 +282,85 @@ export function ImportPage({
     }
   }
 
+  /** Replace Deck List (#215): the review's changes batch at the Deck List revision it read, sent once per key. */
+  async function saveReplace(answer: ImportReplace) {
+    // Nothing listed before and nothing now: there is no batch to send.
+    if (answer.changes.length === 0) {
+      onOpenDeck(answer.deck_id);
+      return;
+    }
+    setSaving(true);
+    setSaveMessage("");
+    const payloadKey = JSON.stringify([
+      "replace",
+      answer.deck_id,
+      answer.deck_list_revision,
+      answer.changes,
+    ]);
+    const attempt =
+      pendingSave.current?.payloadKey === payloadKey
+        ? pendingSave.current
+        : { payloadKey, key: crypto.randomUUID() };
+    pendingSave.current = attempt;
+    try {
+      const result = await changeDeckList(answer.deck_id, {
+        revision: answer.deck_list_revision,
+        idempotency_key: attempt.key,
+        changes: answer.changes,
+      });
+      pendingSave.current = null;
+      offerReplaceUndo(toast, answer, result);
+      onOpenDeck(answer.deck_id);
+    } catch (cause) {
+      if (cause instanceof DeckError && cause.status < 500) {
+        pendingSave.current = null;
+        // A deleted Deck: its builder says so.
+        if (cause.status === 404) onOpenDeck(answer.deck_id);
+        else {
+          setSaveMessage(
+            cause.code === "STALE_DECK_LIST"
+              ? STALE_REPLACE_TEXT
+              : "Some cards changed in the catalog. The review is up to date now: check it and save again."
+          );
+          state.retry();
+        }
+      } else
+        setSaveMessage(
+          "Replacing may have completed. Press Replace Deck List again to check safely."
+        );
+    } finally {
+      setSaving(false);
+    }
+  }
+
   if (step === "review" && review)
     return (
       <ReviewStep
         review={review}
         state={state}
-        name={name}
-        targetFormat={targetFormat}
+        destination={
+          replace ? (
+            <ReplaceReviewDestination name={replace.name} />
+          ) : (
+            <p className="m-0 text-body">
+              New Deck <strong className="font-semibold">{name}</strong> ·
+              Target Format{" "}
+              <strong className="font-semibold">
+                {formatLabel(targetFormat)}
+              </strong>
+            </p>
+          )
+        }
+        sidePanel={
+          replace && review.replace ? (
+            <WillBecomeSurplus
+              rows={review.replace.surplus}
+              name={replace.name}
+            />
+          ) : undefined
+        }
+        saveLabel={replace ? "Replace Deck List" : "Create Deck"}
+        saveBlocked={saveBlocked}
         owned={owned}
         onOwned={(next) => {
           setSaveMessage("");
@@ -307,6 +411,17 @@ export function ImportPage({
       onAllDecks={onAllDecks}
       textAreaRef={textArea}
       nameRef={nameField}
+      {...(replace
+        ? {
+            heading: `Replace ${replace.name}'s list`,
+            back: {
+              label: replace.name,
+              href: `/decks/${encodeURIComponent(replace.deckId)}`,
+              onClick: () => onOpenDeck(replace.deckId),
+            },
+            destination: <ReplacePasteDestination name={replace.name} />,
+          }
+        : {})}
     />
   );
 }

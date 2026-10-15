@@ -262,6 +262,8 @@ export function reviewErrorText(status: number, code: string): string {
     return "That card can't be used any more. Search again.";
   if (code === "PRICES_UNAVAILABLE")
     return "Prices couldn't be read just now. Try again.";
+  if (code === "DECK_NOT_FOUND")
+    return "This Deck doesn't exist, or it was deleted.";
   return "The list couldn't be checked. Try again.";
 }
 

@@ -4,6 +4,8 @@ import { getOwnerCatalogStatus, type OwnerCatalogStatus } from "./generated";
 import { DeckBuilderPage } from "./decks/DeckBuilderPage";
 import { DecksPage } from "./decks/DecksPage";
 import { ImportPage } from "./decks/import/ImportPage";
+import { ReplaceListPage } from "./decks/import/ReplaceListPage";
+import { replacedDeckAt, replacePath } from "./decks/import/replaceList";
 import { WANT_LIST_SEGMENT } from "./decks/wantListModel";
 import { CatalogPage } from "./catalog/CatalogPage";
 import { OwnerControlsPage } from "./owner/OwnerControlsPage";
@@ -247,11 +249,24 @@ function App() {
         );
       case "decks": {
         // /decks is the index (My Decks) and /decks/want-list the Want List (#209), one page with a switch between
-        // them; /decks/import imports a list (#212); /decks/<id> opens that Deck in the deck builder (#176).
+        // them; /decks/import imports a list (#212); /decks/<id> opens that Deck in the deck builder (#176), and
+        // /decks/<id>/replace its Replace list… (#215).
         const deckId = sectionAt(path);
         if (deckId === "import")
           return (
             <ImportPage
+              onOpenDeck={(id) =>
+                navigate(`${pageDef("decks").path}/${encodeURIComponent(id)}`)
+              }
+              onAllDecks={() => navigate(pageDef("decks").path)}
+            />
+          );
+        const replacing = replacedDeckAt(deckId);
+        if (replacing)
+          return (
+            <ReplaceListPage
+              key={replacing}
+              deckId={replacing}
               onOpenDeck={(id) =>
                 navigate(`${pageDef("decks").path}/${encodeURIComponent(id)}`)
               }
@@ -263,6 +278,7 @@ function App() {
             key={deckId}
             deckId={deckId}
             onAllDecks={() => navigate(pageDef("decks").path)}
+            onReplaceList={() => navigate(replacePath(deckId))}
           />
         ) : (
           <DecksPage

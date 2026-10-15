@@ -5,8 +5,9 @@ import { ROW } from "./LineResolver";
 
 /**
  * The Edition chooser under a resolved line (#212): every active Edition of its Printing with the stored price, the
- * Edition of the copies to get pressed (none when owned copies cover the line). Choosing one posts a fix that names it (the "your choice" Edition); the pressed button takes the
- * focus when the chooser opens, unless it sits inside Change (EnergyChooser), which places the focus itself.
+ * Edition of the copies to get pressed (none when owned copies cover the line). Choosing one posts a fix that names
+ * it (the "your choice" Edition); the pressed button takes the focus when the chooser opens, unless it sits inside
+ * Change (EnergyChooser), which places the focus itself.
  */
 export function EditionChooser({
   line,

@@ -37,18 +37,20 @@ type Answer = {
 
 /**
  * Posts the paste to the review route (POST /api/decks/import/review, read-only) whenever the text, the owned-cards
- * setting (#214) or the fixes change, after `delay` ms without another change: the paste screen passes 300 so its live count follows typing, the review
- * passes 0 so a fix shows at once. Only the newest request's answer is kept. An empty paste posts nothing, and one over
- * 20,000 characters posts nothing and reads as IMPORT_TOO_LONG, as the API would answer.
+ * setting (#214) or the fixes change, after `delay` ms without another change: the paste screen passes 300 so its
+ * live count follows typing, the review passes 0 so a fix shows at once. Only the newest request's answer is kept. An
+ * empty paste posts nothing, and one over 20,000 characters posts nothing and reads as IMPORT_TOO_LONG, as the API
+ * would answer. `deckId` is the Deck Replace list… replaces (#215), or null for a new Deck.
  */
 export function useImportReview(
   text: string,
   fixes: ImportFix[],
   owned: OwnedCards,
-  delay: number
+  delay: number,
+  deckId: string | null = null
 ): ImportReviewState {
   const fixesKey = JSON.stringify(fixes);
-  const key = `${text}\u0000${owned}\u0000${fixesKey}`;
+  const key = `${text}\u0000${owned}\u0000${fixesKey}\u0000${deckId ?? ""}`;
   const [answer, setAnswer] = useState<Answer>({
     review: null,
     key: "",
@@ -81,6 +83,7 @@ export function useImportReview(
         source: { text },
         owned,
         fixes: JSON.parse(fixesKey) as ImportFix[],
+        ...(deckId ? { deck_id: deckId } : {}),
       })
         .then((review) => {
           if (mine === ticket.current)
@@ -99,8 +102,8 @@ export function useImportReview(
         });
     }, delay);
     return () => clearTimeout(timer);
-    // `key` is text, owned and fixesKey together; `attempt` posts the same request again.
-  }, [text, owned, fixesKey, delay, attempt]);
+    // `key` is text, owned, fixesKey and deckId together; `attempt` posts the same request again.
+  }, [text, owned, fixesKey, delay, attempt, deckId]);
 
   return {
     review: answer.review,

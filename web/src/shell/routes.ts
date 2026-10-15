@@ -19,6 +19,9 @@ export type PageDef = {
   /** Any one further segment opens this page on that item, for example /decks/<Deck id> for a Deck in the deck
    * builder (#176). The page reads the item with sectionAt. */
   param?: boolean;
+  /** With `param`: sub-addresses under an item, for example /decks/<Deck id>/replace for Replace list… (#215). The
+   * page reads "<item>/<sub-address>" with sectionAt. */
+  itemSections?: readonly string[];
 };
 
 export const PAGES: readonly PageDef[] = [
@@ -34,6 +37,7 @@ export const PAGES: readonly PageDef[] = [
     label: "Decks",
     keepMounted: false,
     param: true,
+    itemSections: ["replace"],
   },
   {
     id: "catalog",
@@ -100,8 +104,18 @@ export function pageAt(path: string): PageDef | undefined {
         (section) => path === `${page.path}/${section}`
       ) ||
       (page.param === true &&
-        /^[^/]+$/.test(path.slice(page.path.length + 1)) &&
-        path.startsWith(`${page.path}/`))
+        path.startsWith(`${page.path}/`) &&
+        isItemPath(page, path.slice(page.path.length + 1)))
+  );
+}
+
+/** "<item>", or "<item>/<one of the page's itemSections>". */
+function isItemPath(page: PageDef, rest: string): boolean {
+  const [item, sub, ...more] = rest.split("/");
+  return (
+    item !== "" &&
+    more.length === 0 &&
+    (sub === undefined || (page.itemSections ?? []).includes(sub))
   );
 }
 

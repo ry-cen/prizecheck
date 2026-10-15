@@ -1,4 +1,4 @@
-import type { Ref } from "react";
+import type { ReactNode, Ref } from "react";
 import { PageHeader } from "../../shell/PageHeader";
 import { Button } from "../../ui/Button";
 import { Select } from "../../ui/Select";
@@ -24,11 +24,18 @@ type Props = {
   onAllDecks: () => void;
   textAreaRef: Ref<HTMLTextAreaElement>;
   nameRef: Ref<HTMLInputElement>;
+  /** The page heading; "Import a decklist" by default. */
+  heading?: string;
+  /** The link above the heading; ‹ Decks by default. */
+  back?: { label: string; href: string; onClick: () => void };
+  /** Another destination in place of a new Deck's name and Target Format (Replace this Deck's list, #215). */
+  destination?: ReactNode;
 };
 
 /**
  * Import a decklist, step one (#212): paste a TCG Live or Limitless list, name the new Deck and choose its Target
- * Format. The server reads the paste as it is typed and answers the live count; Review opens the check.
+ * Format, or (with `destination`) paste over a Deck's list (#215). The server reads the paste as it is typed and
+ * answers the live count; Review opens the check.
  */
 export function PasteStep({
   text,
@@ -44,24 +51,27 @@ export function PasteStep({
   onAllDecks,
   textAreaRef,
   nameRef,
+  heading = "Import a decklist",
+  back = { label: "Decks", href: "/decks", onClick: onAllDecks },
+  destination,
 }: Props) {
   const totals = state.review?.totals;
-  const noName = !name.trim();
+  const noName = !destination && !name.trim();
   return (
     <main className="mx-auto box-border flex max-w-7xl flex-col gap-6 px-7 py-6 phone:px-4 phone:py-4">
       <div className="flex flex-col gap-2">
         <a
-          href="/decks"
+          href={back.href}
           onClick={(event) => {
             if (event.metaKey || event.ctrlKey || event.shiftKey) return;
             event.preventDefault();
-            onAllDecks();
+            back.onClick();
           }}
           className={`${LINK} self-start`}
         >
-          ‹ Decks
+          ‹ {back.label}
         </a>
-        <PageHeader title="Import a decklist" />
+        <PageHeader title={heading} />
         <p className="m-0 text-body text-text-muted">
           Paste a list from Pokémon TCG Live or Limitless. You'll check every
           line before anything is saved.
@@ -103,36 +113,40 @@ export function PasteStep({
           </p>
         </section>
         <aside aria-label="Destination" className="flex flex-col gap-3">
-          <div>
-            <p className="m-0 text-meta text-text-muted">Put it in</p>
-            <p className="m-0 text-body font-semibold">A new Deck</p>
-          </div>
-          <TextField
-            ref={nameRef}
-            label="Deck name"
-            required
-            maxLength={120}
-            value={name}
-            onChange={(event) => onName(event.target.value)}
-          />
-          {nameMessage && (
-            <p role="status" className="m-0 text-body text-warning">
-              {nameMessage}
-            </p>
+          {destination ?? (
+            <>
+              <div>
+                <p className="m-0 text-meta text-text-muted">Put it in</p>
+                <p className="m-0 text-body font-semibold">A new Deck</p>
+              </div>
+              <TextField
+                ref={nameRef}
+                label="Deck name"
+                required
+                maxLength={120}
+                value={name}
+                onChange={(event) => onName(event.target.value)}
+              />
+              {nameMessage && (
+                <p role="status" className="m-0 text-body text-warning">
+                  {nameMessage}
+                </p>
+              )}
+              <Select
+                label="Target Format"
+                value={targetFormat}
+                onChange={(event) =>
+                  onTargetFormat(event.target.value as TargetFormat)
+                }
+              >
+                {TARGET_FORMATS.map((format) => (
+                  <option key={format.value} value={format.value}>
+                    {format.label}
+                  </option>
+                ))}
+              </Select>
+            </>
           )}
-          <Select
-            label="Target Format"
-            value={targetFormat}
-            onChange={(event) =>
-              onTargetFormat(event.target.value as TargetFormat)
-            }
-          >
-            {TARGET_FORMATS.map((format) => (
-              <option key={format.value} value={format.value}>
-                {format.label}
-              </option>
-            ))}
-          </Select>
           <Button
             variant="primary"
             aria-disabled={!canReview || undefined}
