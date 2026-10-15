@@ -30,14 +30,17 @@ Holdings of the given Editions (``holding_owner_edition_location``), the owner's
 creation times of the Decks those lines belong to. The work grows with the given Editions' Holdings and the owner's Deck
 List lines, never with the rest of the Collection.
 
-Later tickets extend this module additively, keeping ``allocate``'s signature and these counts: the Want List (#209)
-passes every Edition its Decks list and reads ``lines`` in ``order``; the Swap hint (#211) and the import's owned copies
-(#214) add the copies of an Edition available to one Deck, or to a new Deck counted as the newest, from the same
-per-Edition counts. Where the counted copies are (which Location's spare copies a Deck counts) is still to be decided;
-``allocate`` already reads the per-Location Holdings it would need.
+The Want List (#209, ``want_list``) passes every Edition the owner's Decks list and reads each line with where its
+counted copies are: ``spare`` is a count only ("1 spare"), and under One Deck at a time ``from_decks`` names the other
+Decks whose own copies the line counts ("1 in Gardevoir ex"). ``Allocation.owned`` is every copy of an Edition, for
+"Your 4 are counted for other Decks". Its sections come in ``deck_order``, the order Spare Copies go in. Later tickets
+extend this module additively, keeping ``allocate``'s signature and these counts: the Swap hint (#211) and the import's
+owned copies (#214) add the copies of an Edition available to one Deck, or to a new Deck counted as the newest, from the
+same per-Edition counts.
 """
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime
 from uuid import UUID
 
 from .settings import WantListCounting
@@ -52,6 +55,9 @@ class LineCount:
     held: int         # The Deck's own copies: the lesser of the line and the Deck's Holding of the Edition.
     spare: int        # Spare Copies counted for the line.
     other_decks: int  # Copies other Decks hold for their own lines, counted for this one (One Deck at a time only).
+    # Where ``other_decks`` come from: (Deck id, copies) for each other Deck whose own line's copies this line counts,
+    # oldest Deck first, summing to ``other_decks``. Empty under Every Deck built at once.
+    from_decks: tuple[tuple[UUID, int], ...] = ()
 
     @property
     def need(self) -> int:
@@ -66,9 +72,24 @@ class Allocation:
     lines: dict[tuple[UUID, UUID], LineCount]
     # The Decks those lines belong to, oldest first: the order Spare Copies go in under Every Deck built at once.
     order: tuple[UUID, ...]
+    # Every copy the owner holds of each given Edition, wherever it is; an Edition with no copies is absent.
+    owned: dict[UUID, int] = field(default_factory=dict)
 
     def line(self, deck_id: UUID, edition_id: UUID) -> LineCount:
         return self.lines[(deck_id, edition_id)]
+
+
+def oldest_first(created: dict[UUID, datetime]) -> tuple[UUID, ...]:
+    """The one place Decks are ordered: oldest first, the Deck id breaking ties (Python orders UUIDs as PostgreSQL
+    does). Deck ids are random, so the id alone says nothing about age."""
+    return tuple(sorted(created, key=lambda deck: (created[deck], deck)))
+
+
+def deck_order(conn, user_id: str) -> tuple[UUID, ...]:
+    """Every Deck of the owner, oldest first, those with an empty Deck List included. The caller holds the owner row
+    lock."""
+    return oldest_first({row['id']: row['created_at'] for row in conn.execute(
+        "SELECT id,created_at FROM location WHERE owner_id=%s AND kind='deck'", (user_id,))})
 
 
 def allocate(conn, user_id: str, editions: Iterable[UUID], counting: WantListCounting) -> Allocation:
@@ -87,8 +108,7 @@ def allocate(conn, user_id: str, editions: Iterable[UUID], counting: WantListCou
     decks = sorted({row['deck_id'] for row in listed})
     created = {row['id']: row['created_at'] for row in conn.execute(
         'SELECT id,created_at FROM location WHERE owner_id=%s AND id=ANY(%s)', (user_id, decks))} if decks else {}
-    # The one place Decks are ordered: oldest first, the Deck id breaking ties (Python orders UUIDs as PostgreSQL does).
-    order = tuple(sorted(created, key=lambda deck: (created[deck], deck)))
+    order = oldest_first(created)
     rank = {deck: index for index, deck in enumerate(order)}
     by_edition: dict[UUID, list[dict]] = {}
     for row in listed:
@@ -103,17 +123,26 @@ def allocate(conn, user_id: str, editions: Iterable[UUID], counting: WantListCou
         for row in rows:
             deck, quantity = row['deck_id'], row['quantity']
             short = quantity - own[deck]
+            from_decks: list[tuple[UUID, int]] = []
             if counting == 'all_at_once':
                 spare, others = min(short, left), 0
                 left -= spare
             else:
                 # A short Deck holds nothing beyond its line, so every Spare Copy is outside it, and so are the copies
-                # the other Decks hold for their own lines.
+                # the other Decks hold for their own lines, taken from the oldest Deck first.
                 spare = min(short, spare_copies)
                 others = min(short - spare, claimed - own[deck])
+                wanted_from_others = others
+                for other in rows:
+                    if wanted_from_others == 0:
+                        break
+                    taken = min(wanted_from_others, own[other['deck_id']]) if other['deck_id'] != deck else 0
+                    if taken:
+                        from_decks.append((other['deck_id'], taken))
+                        wanted_from_others -= taken
             lines[(deck, edition)] = LineCount(deck_id=deck, edition_id=edition, quantity=quantity, held=own[deck],
-                                               spare=spare, other_decks=others)
-    return Allocation(counting=counting, lines=lines, order=order)
+                                               spare=spare, other_decks=others, from_decks=tuple(from_decks))
+    return Allocation(counting=counting, lines=lines, order=order, owned=total)
 
 
 def deck_lines(conn, user_id: str, deck_id: UUID, counting: WantListCounting) -> dict[UUID, LineCount]:
