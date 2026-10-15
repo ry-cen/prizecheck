@@ -23,6 +23,7 @@ This is not a price access (ADR 0006): it reads no quote, admits no refresh and 
 same scope (#210) and its Mass Entry export reuse ``capture_want_list`` and ``combined``; the Swap hint (#211) adds an
 optional field to ``WantListLine``.
 """
+import hashlib
 import re
 from dataclasses import dataclass
 from uuid import UUID
@@ -102,6 +103,9 @@ class WantList(BaseModel):
     # Deck List revision, so a figure reused later is paired on all three.
     settings_revision: int
     owner_revision: int
+    # Every Deck's id and Deck List revision as one opaque value (#210): a Deck List edit moves neither revision above,
+    # so the cost and the Mass Entry export of this answer are paired on it too.
+    deck_lists_digest: str
     deck_id: UUID | None          # The scope, or null for All Decks.
     decks: list[WantListDeck]     # Every Deck, oldest first, whatever the scope.
     sections: list[WantListSection]  # Every Deck oldest first, or the one in scope.
@@ -133,6 +137,14 @@ class WantListCapture:
     def shown(self) -> tuple[CapturedDeck, ...]:
         """The Decks whose sections the answer shows."""
         return tuple(deck for deck in self.decks if self.scope is None or deck.id == self.scope)
+
+    @property
+    def deck_lists_digest(self) -> str:
+        """Every Deck's id and Deck List revision, whatever the scope: under Every Deck built at once an older Deck's
+        list changes a newer Deck's need. A Deck List revision only grows, so an equal digest means the same Deck Lists."""
+        decks = sorted(self.decks, key=lambda deck: str(deck.id))
+        text = ','.join(f'{deck.id}:{deck.deck_list_revision}' for deck in decks)
+        return hashlib.sha256(text.encode()).hexdigest()[:32]
 
 
 def capture_want_list(user_id: str, deck_id: UUID | None = None, timeout_ms: int | None = None) -> WantListCapture:
@@ -219,6 +231,7 @@ def want_list(deck: UUID | None = None, user_id: str = Depends(verified_user)):
                         decks=[CombinedDeckNeed(deck_id=line.deck_id, need=str(line.need)) for line in lines])
             for edition, need, lines in total]
     return WantList(want_list_counting=capture.counting, settings_revision=capture.settings_revision,
-                    owner_revision=capture.owner_revision, deck_id=capture.scope,
+                    owner_revision=capture.owner_revision, deck_lists_digest=capture.deck_lists_digest,
+                    deck_id=capture.scope,
                     decks=[WantListDeck(id=shown.id, name=shown.name) for shown in capture.decks],
                     sections=sections, combined=rows, to_get=str(sum(need for _, need, _ in total)))

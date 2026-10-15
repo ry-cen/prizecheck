@@ -59,13 +59,9 @@ class MassEntryView(BaseModel):
     settings_revision: int | None = None
 
 
-def captured_rows(deck_id: UUID, user_id: str, scope: MassEntryScope):
-    """One consistent Deck List capture, then the current mappings; no lock is held across the two."""
-    contents = capture_deck_list(deck_id, user_id)
-    if scope == 'deck_list':
-        quantities = {line.edition_id: line.quantity for line in contents.lines}
-    else:
-        quantities = {line.edition_id: line.need for line in contents.lines if line.need > 0}
+def input_rows(quantities: dict[UUID, int]) -> list[MassEntryInputRow]:
+    """The formatter's rows for ``{edition_id: positive copies}``: each Edition's Printing, name and current verified
+    product, read in one REPEATABLE READ snapshot. Shared with the Want List's export (decklist import #210)."""
     rows = []
     if quantities:
         ids = list(quantities)
@@ -84,7 +80,17 @@ def captured_rows(deck_id: UUID, user_id: str, scope: MassEntryScope):
                 key=str(edition_id), printing_key=str(named['printing_id']), display_name=named['name'],
                 quantity=quantities[edition_id], product_id=target.product_id if target else None,
                 specificity=None))  # No verified TCGplayer set/number crosswalk exists; rows stay name-only.
-    return contents, rows
+    return rows
+
+
+def captured_rows(deck_id: UUID, user_id: str, scope: MassEntryScope):
+    """One consistent Deck List capture, then the current mappings; no lock is held across the two."""
+    contents = capture_deck_list(deck_id, user_id)
+    if scope == 'deck_list':
+        quantities = {line.edition_id: line.quantity for line in contents.lines}
+    else:
+        quantities = {line.edition_id: line.need for line in contents.lines if line.need > 0}
+    return contents, input_rows(quantities)
 
 
 def text_bytes(export: MassEntryExport) -> int:

@@ -222,6 +222,10 @@ from .deck_cost import router as deck_cost_router  # noqa: E402
 app.include_router(deck_cost_router)
 from .want_list import router as want_list_router  # noqa: E402
 app.include_router(want_list_router)
+from .want_list_cost import router as want_list_cost_router  # noqa: E402
+app.include_router(want_list_cost_router)
+from .want_list_mass_entry import router as want_list_mass_entry_router  # noqa: E402
+app.include_router(want_list_mass_entry_router)
 from .deck_format_checks import router as deck_format_checks_router  # noqa: E402
 app.include_router(deck_format_checks_router)
 from .published_cost import router as published_cost_router  # noqa: E402
