@@ -1,0 +1,36 @@
+# Decklist import and Want List — decision map
+
+**Label:** wayfinder:map
+
+**Status:** charted 2026-10-14.
+
+## Destination
+
+An agreed plan, ready for owner-invoked `/to-spec` and `/to-ticket`, for pasting a decklist (or copying a Published Deck) into a Deck, and for a private Want List derived from a collector's Deck Lists. This effort resolves decisions only. The spec at `docs/planning/decklist-import/spec.md`, the implementation tickets and the application code come after this map.
+
+## Notes
+
+- Owner request on 2026-10-14: build decklist import and a Want List, the top two follow-ups after the app redesign.
+- This effort reverses the "Pasted or imported decklists from outside the app" exclusion in the [Deck Lists and format validation spec](../../deck-format-validation/spec.md).
+- **Deck List lines stay one Card Edition each** (ADR 0009). "Any printing" lines are not introduced: import and the Want List both resolve to Editions, and Reprint Groups supply "the same card" where it matters.
+- Reuse what exists: add-by-Printing's cheapest-Edition rule, the Pick List, Gather, Surplus and Put away, the Missing cards report, Estimated Deck Cost and Mass Entry exports.
+- Use grilling and domain-modeling for decision tickets, prototype for prototype tickets and research for research tickets. Use `CONTEXT.md` vocabulary (Deck, Deck List, Pick List, Reprint Group, Card Edition, Want List) and record new terms there as they are resolved. Consult Laya before delegation. Commit and push only with owner approval; stage explicit paths.
+- Tickets are GitHub Issues labelled `wayfinder` and `feature: decklist import`, blocked with GitHub's native dependencies and a "Blocked by" body line. Prototypes, research and resolutions live beside this map.
+
+## Decisions so far
+
+<!-- One line per closed ticket: link plus a one-line gist. -->
+
+- [Decide the import and Want List behaviour](https://github.com/ry-cen/prizecheck/issues/198): import creates a new Deck or replaces a Deck's list (drops go to Surplus) through a review step that must resolve every line; an **Exact printings** / **Use cards I own** setting decides whether owned copies in the Reprint Group are used first; Copy to my Decks reuses it for Published Decks. The Want List is derived only, grouped by Deck with a priced total, counts exact Editions with a Swap hint, and has an **Every Deck built at once** / **One Deck at a time** setting. [Resolution](resolutions/decide-import-and-want-list-behaviour.md)
+
+## Not yet specified
+
+- Whether a format header in the paste sets the new Deck's Target Format (waits on the formats research).
+- Exporting the Want List total as Mass Entry, and its place in navigation (likely settled by the Want List prototype).
+
+## Out of scope
+
+- Binder, set-completion or other wants that aren't for a Deck; the Want List is derived only.
+- Sharing the Want List, or requesting cards from other collectors.
+- Importing a whole collection, and export formats beyond the existing ones.
+- Identity-level ("any printing") Deck List lines.
