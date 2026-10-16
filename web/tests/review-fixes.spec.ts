@@ -37,6 +37,11 @@ async function sessionFixture(
       });
       return;
     }
+    if (path === "/api/social/friends") {
+      // The shell reads the Friends badge on every page (social network #247): no Friends.
+      await route.fulfill({ json: { received: [], friends: [], sent: [] } });
+      return;
+    }
     const json =
       path === "/api/catalog/status"
         ? { available: false, revision: 0, last_success: null }
