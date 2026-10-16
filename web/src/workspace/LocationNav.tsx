@@ -30,6 +30,9 @@ type Props = {
   /** The Lent out entry (social network #253): copies lent to Friends, in no Location, and what opens their list.
    * Shown only while some copies are out. */
   lent?: { copies: string; onOpen: () => void } | null;
+  /** The Borrowed entry (social network #254): Friends' copies in the collector's Locations, and what opens their
+   * list. Shown only while some are here. */
+  borrowed?: { copies: string; onOpen: () => void } | null;
 };
 
 const LIST = "m-0 flex list-none flex-col gap-1 p-0";
@@ -89,7 +92,37 @@ export function LocationNav({
   drop,
   touch = false,
   lent,
+  borrowed,
 }: Props) {
+  // Lent out (#253) and Borrowed (#254): an entry that opens a list, with its copy count, while the count isn't 0.
+  const listEntry = (
+    label: string,
+    entry: { copies: string; onOpen: () => void } | null | undefined
+  ) =>
+    entry &&
+    entry.copies !== "0" && (
+      <li>
+        <button
+          type="button"
+          className={rowClass({
+            touch,
+            current: false,
+            folder: false,
+            droppable: false,
+            over: false,
+          })}
+          style={indent(0)}
+          aria-haspopup="dialog"
+          onClick={entry.onOpen}
+        >
+          <span className="inline-flex w-3 shrink-0" aria-hidden="true" />
+          <span className="min-w-0 flex-1 truncate">{label}</span>
+          <span className="shrink-0 text-text-muted tabular-nums">
+            {entry.copies}
+          </span>
+        </button>
+      </li>
+    );
   const branch = (node: TreeNode, level: number): React.ReactNode => {
     const folder = isFolder(node);
     const open = folder && expanded.has(node.id);
@@ -196,29 +229,8 @@ export function LocationNav({
             <span className="min-w-0 truncate">All owned</span>
           </button>
         </li>
-        {lent && lent.copies !== "0" && (
-          <li>
-            <button
-              type="button"
-              className={rowClass({
-                touch,
-                current: false,
-                folder: false,
-                droppable: false,
-                over: false,
-              })}
-              style={indent(0)}
-              aria-haspopup="dialog"
-              onClick={lent.onOpen}
-            >
-              <span className="inline-flex w-3 shrink-0" aria-hidden="true" />
-              <span className="min-w-0 flex-1 truncate">Lent out</span>
-              <span className="shrink-0 text-text-muted tabular-nums">
-                {lent.copies}
-              </span>
-            </button>
-          </li>
-        )}
+        {listEntry("Lent out", lent)}
+        {listEntry("Borrowed", borrowed)}
         {index.children(null).map((node) => branch(node, 0))}
       </ul>
     </nav>

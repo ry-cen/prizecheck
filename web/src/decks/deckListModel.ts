@@ -61,9 +61,12 @@ export type DeckLine = {
   /** Of `missing`, the copies lent to Friends (#253): still owned, but out of the Deck with a borrower. */
   lent: bigint;
   /** What Loans take of the line's copies, one entry per borrower: "2 reserved for Kim" (#252), copies still in
-   * this Deck, then "3 lent to Sam" (#253), copies out with a Friend. `loans` is both, in that order. */
+   * this Deck, then "3 lent to Sam" (#253), copies out with a Friend. */
   reservedFor: string[];
   lentTo: string[];
+  /** Friends' copies in this Deck (#254), one entry per lender: "1 from Misty W.". They count in `here`. */
+  borrowedFrom: string[];
+  /** Every note above, in the order reserved, borrowed, lent. */
   loans: string[];
 };
 
@@ -200,7 +203,7 @@ export function deckLine(
         : null,
     lent,
     ...notes,
-    loans: [...notes.reservedFor, ...notes.lentTo],
+    loans: [...notes.reservedFor, ...notes.borrowedFrom, ...notes.lentTo],
   };
 }
 
@@ -217,11 +220,14 @@ function markLent(copies: DeckCopy[], lent: bigint): DeckCopy[] {
 /**
  * "2 reserved for Kim" for each borrower whose Loan holds some of the line's copies in this Deck (#252), and "3 lent to
  * Sam" for each one who has copies taken from it (#253). Lent copies are out of the Deck, so the line counts them as
- * missing, and the note says where they are. A Deck answer from before #253 has no `lent`.
+ * missing, and the note says where they are. A Deck answer from before #253 has no `lent`. "1 from Misty W." for each
+ * Friend whose copies the collector borrowed into this Deck (#254): they count as in this Deck, and the note says
+ * whose they are. An answer from before #254 has no `borrowed`.
  */
 export function loanNotes(loans: DeckLoanLine | undefined): {
   reservedFor: string[];
   lentTo: string[];
+  borrowedFrom: string[];
 } {
   return {
     reservedFor: (loans?.reserved ?? []).map(
@@ -229,6 +235,9 @@ export function loanNotes(loans: DeckLoanLine | undefined): {
     ),
     lentTo: (loans?.lent ?? []).map(
       (label) => `${label.copies} lent to ${label.name}`
+    ),
+    borrowedFrom: (loans?.borrowed ?? []).map(
+      (label) => `${label.copies} from ${label.name}`
     ),
   };
 }
