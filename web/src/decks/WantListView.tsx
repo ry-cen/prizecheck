@@ -7,9 +7,13 @@ import {
 } from "react";
 import { ChevronRight } from "lucide-react";
 import { COUNTING_OPTIONS } from "../settings/wantListCounting";
+import type { FriendCopy } from "../social_generated";
+import { useFriendMatches } from "../social/useFriendMatches";
+import { FriendChips, GetFromFriends } from "../social/WantListFriends";
 import { Button } from "../ui/Button";
 import { Chip } from "../ui/Chip";
 import { Icon } from "../ui/Icon";
+import { Segmented } from "../ui/Segmented";
 import { MOBILE_QUERY, useMediaQuery } from "../workspace/media";
 import {
   getWantList,
@@ -49,6 +53,14 @@ type Props = {
 type Load =
   { kind: "loading" } | { kind: "ready"; list: WantList } | { kind: "failed" };
 
+/** The summary's switch (#251): the Want List as a shopping list, or as what Friends can lend. */
+type View = "buy" | "friends";
+const VIEWS = [
+  { value: "buy", label: "Buy" },
+  { value: "friends", label: "Get from Friends" },
+] as const;
+const NO_COPIES = new Map<string, FriendCopy[]>();
+
 const LINK =
   "inline-flex h-control items-center gap-1 rounded-control px-2 text-control font-medium text-accent-strong no-underline hover:bg-surface-raised phone:h-control-phone";
 
@@ -76,6 +88,9 @@ function follow(event: MouseEvent, go: () => void) {
  * - **Swap (#211):** a line that can use copies of another Edition the collector owns says so, and Swap changes that many
  *   copies of the line to it in one Deck List batch, with Undo in a toast (`useWantListSwap`). The Want List is read
  *   again after it, and the new answer's `deck_lists_digest` makes the cost re-pair.
+ * - **Friends' cards (#251):** a line a Friend can lend shows Friend chips, and the summary's **Buy / Get from Friends**
+ *   switch shows one panel per card instead of the sections (`WantListFriends`). Both read Friends' cards apart from
+ *   the Want List (`useFriendMatches`), so nothing above waits on them; without Friends there is no switch.
  */
 export function WantListView({ onOpenDeck, onNavigate }: Props) {
   const idBase = useId();
@@ -96,6 +111,8 @@ export function WantListView({ onOpenDeck, onNavigate }: Props) {
     reload,
     notify: setNotice,
   });
+  const friends = useFriendMatches(load.kind === "ready" ? load.list : null);
+  const [view, setView] = useState<View>("buy");
 
   function choose(deckId: string | null) {
     setNotice("");
@@ -164,6 +181,9 @@ export function WantListView({ onOpenDeck, onNavigate }: Props) {
   const counting = COUNTING_OPTIONS.find(
     (option) => option.value === list.want_list_counting
   )!;
+  const hasFriends = friends.kind === "ready" && friends.hasFriends;
+  const byCard = friends.kind === "ready" ? friends.byCard : NO_COPIES;
+  const shownView: View = hasFriends ? view : "buy";
 
   if (list.decks.length === 0)
     return (
@@ -195,6 +215,17 @@ export function WantListView({ onOpenDeck, onNavigate }: Props) {
         </p>
         <CostSummary />
         <WantListBuy list={list} onChanged={reload} />
+        {hasFriends && (
+          <div className="self-center phone:basis-full">
+            <Segmented
+              mode="choice"
+              label="Show the Want List as"
+              options={VIEWS}
+              value={view}
+              onChange={setView}
+            />
+          </div>
+        )}
         <p className="m-0 basis-full text-meta text-text-muted">
           Counting:{" "}
           <strong className="font-semibold text-text">{counting.label}</strong>.{" "}
@@ -229,33 +260,42 @@ export function WantListView({ onOpenDeck, onNavigate }: Props) {
       <p role="status" className="m-0 text-body text-warning empty:sr-only">
         {notice}
       </p>
-      <div
-        className={
-          shownScope
-            ? "flex min-w-0 flex-col gap-4"
-            : "grid grid-cols-[minmax(0,1fr)_18rem] items-start gap-6 phone:grid-cols-1 phone:gap-4"
-        }
-      >
-        {!shownScope && (
-          <CombinedTotal
-            rows={list.combined}
-            toGet={list.to_get}
-            phone={phone}
-            deckName={deckName}
-          />
-        )}
-        <div className="col-start-1 row-start-1 flex min-w-0 flex-col gap-4 phone:row-start-2">
-          {list.sections.map((section) => (
-            <DeckSection
-              key={section.deck_id}
-              section={section}
+      {shownView === "friends" ? (
+        <GetFromFriends
+          rows={list.combined}
+          byCard={byCard}
+          deckName={deckName}
+        />
+      ) : (
+        <div
+          className={
+            shownScope
+              ? "flex min-w-0 flex-col gap-4"
+              : "grid grid-cols-[minmax(0,1fr)_18rem] items-start gap-6 phone:grid-cols-1 phone:gap-4"
+          }
+        >
+          {!shownScope && (
+            <CombinedTotal
+              rows={list.combined}
+              toGet={list.to_get}
+              phone={phone}
               deckName={deckName}
-              onOpenDeck={onOpenDeck}
-              swap={swap}
             />
-          ))}
+          )}
+          <div className="col-start-1 row-start-1 flex min-w-0 flex-col gap-4 phone:row-start-2">
+            {list.sections.map((section) => (
+              <DeckSection
+                key={section.deck_id}
+                section={section}
+                deckName={deckName}
+                onOpenDeck={onOpenDeck}
+                swap={swap}
+                byCard={byCard}
+              />
+            ))}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
   return (
@@ -270,11 +310,14 @@ function DeckSection({
   deckName,
   onOpenDeck,
   swap,
+  byCard,
 }: {
   section: WantListSection;
   deckName: (id: string) => string;
   onOpenDeck: (id: string) => void;
   swap: WantListSwap;
+  /** Friends' copies by the card they match (#251). */
+  byCard: Map<string, FriendCopy[]>;
 }) {
   const idBase = useId();
   return (
@@ -322,6 +365,11 @@ function DeckSection({
               deckName={deckName}
             >
               <SwapHint section={section} line={line} swap={swap} />
+              <FriendChips
+                name={line.name}
+                wanted={line.edition_id}
+                copies={byCard.get(line.edition_id)}
+              />
             </NeededLine>
           ))}
         </ul>
@@ -339,7 +387,7 @@ function NeededLine({
   deckId: string;
   line: WantListLine;
   deckName: (id: string) => string;
-  /** The line's Swap hint (#211), under its card and counts. */
+  /** The line's Swap hint (#211) and Friend chips (#251), under its card and counts. */
   children?: ReactNode;
 }) {
   return (
