@@ -184,6 +184,9 @@ export function waitingText(loan: LoanView): string | null {
   const other = loan.other.display_name;
   if (loan.state === "requested" && loan.role === "borrower")
     return `Waiting for ${other} to answer`;
+  // A Lend Offer the borrower hasn't answered (#258).
+  if (loan.state === "offered" && loan.role === "lender")
+    return `Waiting for ${other} to answer`;
   if (
     loan.state === "accepted" &&
     loan.you_confirmed_handover &&
@@ -262,6 +265,10 @@ export function loanStepMessage(
       return "This Loan has changed. Check it and try again.";
     case "UNSORTED_UNAVAILABLE":
       return "Your top-level Unsorted can't hold cards. Make it a Storage Leaf in Collection, then try again.";
+    case "MORE_THAN_OFFERED":
+      return "Take at most the copies offered.";
+    case "DECK_NOT_FOUND":
+      return "That Deck is gone. Choose another, or Unsorted.";
     case "INVALID_RETURN_BY":
       return "Choose a return-by date from today on.";
     case "RETURN_BY_EARLIER":

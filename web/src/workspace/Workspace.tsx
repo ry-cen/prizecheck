@@ -9,6 +9,7 @@ import { Menu as MenuIcon, Plus } from "lucide-react";
 import type { AddedCards } from "../catalog/useAddToast";
 import { getLocationTree, type TreeNode } from "../location_generated";
 import { BorrowedDialog } from "../loans/BorrowedDialog";
+import { LendOfferDialog } from "../loans/LendOfferDialog";
 import { LentOutDialog } from "../loans/LentOutDialog";
 import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
@@ -37,6 +38,7 @@ import {
 } from "./galleryModel";
 import { useGalleryPrefs } from "./galleryPrefs";
 import { DetailsSheet, Inspector } from "./Inspector";
+import type { LendRow } from "./inventoryActionsModel";
 import { MoveDialog, RemovalDialog } from "./InventoryDialogs";
 import {
   LocationNav,
@@ -93,6 +95,8 @@ export function Workspace({
   // Friends' copies in the collector's Locations (#254): the tree's Borrowed entry.
   const [borrowedCopies, setBorrowedCopies] = useState("0");
   const [borrowedOpen, setBorrowedOpen] = useState(false);
+  // Lend to a Friend… (#258): the selected copies being offered, or null while the dialog is closed.
+  const [lending, setLending] = useState<LendRow[] | null>(null);
   const [ownerRevision, setOwnerRevision] = useState<number | null>(null);
   const [treeState, setTreeState] = useState<"loading" | "ready" | "error">(
     "loading"
@@ -635,6 +639,7 @@ export function Workspace({
           onDetails={selection.openDetails}
           onMove={actions.openMove}
           onRemove={actions.openRemoval}
+          onLend={() => setLending(actions.lendRows())}
           busy={actions.busy}
           status={actions.dialog ? "" : actions.progress}
           error={actions.barError}
@@ -703,6 +708,17 @@ export function Workspace({
         onClose={() => setLentOpen(false)}
         onOpenLoan={onOpenLoan}
         returnFocus={mobile ? drawerOpener : undefined}
+      />
+      <LendOfferDialog
+        open={active && lending !== null}
+        rows={lending ?? []}
+        onClose={() => setLending(null)}
+        onSent={actions.clearSelection}
+        onOpenLoan={(id) => {
+          setLending(null);
+          onOpenLoan(id);
+        }}
+        returnFocus={actions.actionsButton}
       />
       <BorrowedDialog
         open={active && borrowedOpen}

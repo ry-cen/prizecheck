@@ -61,6 +61,15 @@ export function carriedText(groups: SelectedGroup[]) {
 }
 
 /** One line of the Inventory Removal confirmation. */
+/** One selected Holding a Lend Offer (#258) offers: its Location, Card Edition, copies and card text. */
+export type LendRow = {
+  key: string;
+  locationId: string;
+  editionId: string;
+  count: number;
+  card: string;
+};
+
 export type RemovalRow = {
   key: string;
   quantity: number;

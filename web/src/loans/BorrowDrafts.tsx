@@ -529,7 +529,7 @@ type DecksLoad =
   | { kind: "failed" };
 
 /** Every Deck of the collector's, for For Deck: the index read page by page. */
-async function readDecks(): Promise<DeckIndexEntry[]> {
+export async function readDecks(): Promise<DeckIndexEntry[]> {
   const found: DeckIndexEntry[] = [];
   let cursor: string | undefined;
   for (;;) {
