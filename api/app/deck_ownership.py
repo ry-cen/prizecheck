@@ -1,9 +1,10 @@
 """Deck List ownership states: read from current Holdings on every Deck detail read, never stored.
 
-Each Deck List line splits its quantity into copies *in this Deck*, *elsewhere* in the Collection and *not owned*. All
-counts match the line's exact Card Edition. Copies the Deck holds beyond its Deck List are *surplus*. Nothing is
-reserved: *elsewhere* counts every copy outside the Deck, including copies another Deck's list needs and copies other
-short Decks also count. ``competition`` flags every such double count: it warns whenever the copies the short Decks
+Each Deck List line splits its quantity into copies *in this Deck*, *elsewhere* in the Collection, *lent* to a Friend
+from this Deck and *not owned*. All counts match the line's exact Card Edition. *In this Deck* counts the Deck's
+physical copies: its Holdings and the Borrowed Copies in it (social network #254), the Deck's own copies first.
+Copies the Deck holds beyond its Deck List are *surplus*. Nothing is reserved: *elsewhere* counts every copy outside
+the Deck, including copies another Deck's list needs and copies other short Decks also count. ``competition`` flags every such double count: it warns whenever the copies the short Decks
 count as elsewhere exceed the spare copies.
 
 Each surplus row carries the Deck's Holding version and the card's display data (app redesign #180): the deck builder
@@ -15,6 +16,7 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
+from .borrowed_copies import borrowed_at
 from .copy_allocation import held_for_line, spare_rule
 from .deck_list_display import CardKind, TrainerType, read_line_display
 from .social import counts
@@ -31,8 +33,12 @@ class ElsewhereLocation(BaseModel):
 class LineOwnership(BaseModel):
     edition_id: UUID
     quantity: str
+    # The Deck's physical copies for the line: its own, then Borrowed Copies (#254).
     in_deck: str
     elsewhere: str
+    # Copies lent to a Friend from this Deck (#253): still owned, so never ``not_owned``. ``in_deck + elsewhere + lent
+    # + not_owned == quantity``.
+    lent: str
     not_owned: str
     # The owner's other Locations holding the Edition; empty unless ``elsewhere`` is positive.
     locations: list[ElsewhereLocation]
@@ -133,12 +139,15 @@ def read_ownership(conn, user_id: str, deck_id: UUID) -> DeckOwnership:
                         (user_id, deck_id)).fetchall()
     holdings = {row['edition_id']: row['quantity'] for row in held}
     versions = {row['edition_id']: row['version'] for row in held}
-    lines = [{**row, 'held': holdings.get(row['edition_id'], 0)} for row in conn.execute(
+    # Borrowed Copies fill the Deck's lines after its own copies, and are never its Surplus (#254).
+    borrowed = borrowed_at(conn, user_id, deck_id)
+    lines = [{**row, 'held': holdings.get(row['edition_id'], 0), 'borrowed': borrowed.get(row['edition_id'], 0)}
+             for row in conn.execute(
         'SELECT edition_id,quantity FROM deck_list_line WHERE owner_id=%s AND deck_id=%s ORDER BY edition_id',
         (user_id, deck_id))]
     listed = {row['edition_id']: row['quantity'] for row in lines}
     surplus = beyond_list(holdings, listed)
-    short = [row['edition_id'] for row in lines if row['quantity'] > row['held']]
+    short = [row['edition_id'] for row in lines if row['quantity'] > row['held'] + row['borrowed']]
     elsewhere: dict[UUID, list[dict]] = {}
     if short:
         for row in conn.execute("""SELECT h.edition_id,h.location_id,h.quantity,l.name,l.kind
@@ -154,17 +163,19 @@ def read_ownership(conn, user_id: str, deck_id: UUID) -> DeckOwnership:
           ORDER BY l.edition_id,lower(d.name),d.id""", (user_id, deck_id, list(elsewhere))):
             others.setdefault(row['edition_id'], []).append(row)
     reserved = counts.reserved_counts(conn, user_id, list(elsewhere)) if elsewhere else {}
+    lent_from = counts.lent_picks(conn, user_id, short) if short else {}
     owned, competition = [], []
     for row in lines:
         edition, quantity = row['edition_id'], row['quantity']
-        in_deck = held_for_line(quantity, row['held'])
+        in_deck = held_for_line(quantity, row['held'] + row['borrowed'])
         need = quantity - in_deck
         places = elsewhere.get(edition, [])
         outside = sum(place['quantity'] for place in places)
         fetchable = min(need, outside)
+        lent = min(need - fetchable, lent_from.get(edition, {}).get(deck_id, 0))
         owned.append(LineOwnership(
             edition_id=edition, quantity=str(quantity), in_deck=str(in_deck), elsewhere=str(fetchable),
-            not_owned=str(need - fetchable),
+            lent=str(lent), not_owned=str(need - fetchable - lent),
             locations=[ElsewhereLocation(location_id=place['location_id'], name=place['name'], kind=place['kind'],
                                          quantity=str(place['quantity'])) for place in places]))
         if not places:

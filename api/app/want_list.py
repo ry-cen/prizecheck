@@ -56,7 +56,8 @@ class CountedFromDeck(BaseModel):
 
 
 class WantListLine(BaseModel):
-    """One Deck List line that still needs copies. ``held + spare + other_decks + lent + need == quantity``."""
+    """One Deck List line that still needs copies. ``held + borrowed + spare + other_decks + lent + need ==
+    quantity``."""
     edition_id: UUID
     # Display data, as a Deck List line carries it (``deck_list_display``).
     name: str
@@ -71,6 +72,7 @@ class WantListLine(BaseModel):
     other_decks: str        # Copies other Decks hold for their own lines, counted for this one (One Deck at a time).
     counted_from: list[CountedFromDeck]  # Where ``other_decks`` come from, oldest Deck first.
     lent: str               # Copies lent to Friends, counted for the line (social network #253): they come back.
+    borrowed: str           # Borrowed Copies in this Deck, counted for its line only (social network #254).
     owned: str              # Every copy of the Edition the collector owns, wherever it is.
     need: str               # Copies still needed from outside the Collection (N in "N of M").
     swap: SwapHint | None = None  # Another Edition of the line's Reprint Group the collector can Swap in (#211).
@@ -242,7 +244,7 @@ def want_list(deck: UUID | None = None, user_id: str = Depends(verified_user)):
             edition_id=line.edition_id, **shown_of(line.edition_id), quantity=str(line.quantity), held=str(line.held),
             spare=str(line.spare), other_decks=str(line.other_decks),
             counted_from=[CountedFromDeck(deck_id=other, quantity=str(count)) for other, count in line.from_decks],
-            lent=str(line.lent),
+            lent=str(line.lent), borrowed=str(line.borrowed),
             owned=str(capture.allocation.owned.get(line.edition_id, 0)), need=str(line.need),
             swap=swap_hint(offered.get((shown.id, line.edition_id)), capture.swaps))
             for line in needs[shown.id]]) for shown in capture.shown()]

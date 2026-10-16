@@ -1,5 +1,5 @@
 """Generate the social client module (Friends and Friend Requests, social network #247, Blocks, #248, Friends' cards,
-#250 and #251, and Loans, #252 and #253) from the API OpenAPI schema."""
+#250 and #251, Loans, #252 and #253, and Borrowed Copies, #254) from the API OpenAPI schema."""
 import sys
 from pathlib import Path
 
@@ -28,7 +28,8 @@ for name in ("Collector", "CollectorLookup", "InviteCollector", "FriendsView", "
              "FriendCommand", "FriendCommandResult", "BlockCollector", "BlockedList", "FriendCard", "FriendCollection",
              "FriendCopy", "WantedCard", "WantListMatches", "CardMatches", "LoanParty", "LoanCard", "LoanView",
              "LoansView", "LoanStep", "LoanLineRequest", "SendBorrowRequest", "PromisedLine", "AcceptBorrowRequest",
-             "PromiseLimit", "LoanPickPlace", "LoanDeck", "LoanSide", "LentCard", "LentOut"):
+             "PromiseLimit", "LoanPickPlace", "LoanDeck", "LoanSide", "LentCard", "LentOut", "BorrowedCard",
+             "BorrowedCopies", "MoveBorrowed"):
     definition = schema[name]
     fields = [f"{field}{'' if field in definition.get('required', []) else '?'}: {ts_type(value)}"
               for field, value in definition["properties"].items()]
@@ -119,6 +120,10 @@ export const useSuggestedPicks = (id: string, body: LoanStep) =>
   request<LoanView>(`/api/loans/${at(id)}/picks/use-suggested`, 'POST', body);
 // The Collection's Lent out entry: every copy you lent and haven't had back.
 export const getLentOut = (signal?: AbortSignal) => request<LentOut>('/api/loans/lent-out', 'GET', undefined, signal);
+// The Collection's Borrowed entry (#254): every Borrowed Copy you hold, and moving some to another of your Locations.
+export const getBorrowed = (signal?: AbortSignal) =>
+  request<BorrowedCopies>('/api/loans/borrowed', 'GET', undefined, signal);
+export const moveBorrowed = (body: MoveBorrowed) => request<BorrowedCopies>('/api/loans/borrowed/move', 'POST', body);
 """)
 content = "\n".join(lines)
 target = root / "web/src/social_generated.ts"

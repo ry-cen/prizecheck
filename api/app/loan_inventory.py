@@ -20,7 +20,14 @@ Holdings is here, under ``/api/loans``, and never answers one side's Locations o
 **The Loan Pick List** takes copies in the Deck Pick List's order (``deck_pick_list.suggest``): loose storage, largest
 Holding first, then other Decks' copies beyond their own lines, then copies Decks hold for their own lines; copies
 other Loans' picks take are left for them.
+
+**Borrowed Copies** (#254): ``GET /api/loans/borrowed`` lists the Borrowed Copies the collector holds, by Location, for
+the Collection's Borrowed entry, and ``POST /api/loans/borrowed/move`` moves some of one Loan's copies of a card to
+another of the borrower's Storage Leaves or Decks, under the borrower's own lock. It is its own route, never a general
+Move: a Borrowed Copy keeps its Loan and never joins the borrower's Holdings. A Borrowed Copy arriving in a Deck adds or
+raises its Deck List line as an owned copy would (migration 115).
 """
+import json
 from datetime import date
 from uuid import UUID, uuid4
 
@@ -29,7 +36,7 @@ from pydantic import BaseModel, Field
 
 from .deck_deletion import unsorted_leaf
 from .deck_pick_list import suggest
-from .location_tree import error
+from .location_tree import error, replay
 from .main import connect, verified_user
 from .moves import first_non_leaf, put_back, quantity, take_out
 from .social import counts
@@ -37,7 +44,7 @@ from .social.friend_copies import friend_copies
 from .social.friend_reads import card_facts
 from .social.friends import friend_ids
 from .social.loans import (NOW, LoanStep, LoanView, begin_command, advance_revision, run_step, store)
-from .social.owners import lock_owners
+from .social.owners import ensure_owner, lock_owners
 
 router = APIRouter(prefix='/api/loans', tags=['loans'])
 
@@ -122,6 +129,39 @@ class LentOut(BaseModel):
     """Every copy the collector lent and hasn't had back, by borrower and then card order; ``copies`` sums them."""
     cards: list[LentCard]
     copies: str
+
+
+class BorrowedCard(BaseModel):
+    """Borrowed Copies of one Card Edition from one Loan in one of the collector's own Locations: the Borrowed entry's
+    row. ``lender``: the lender's Display Name."""
+    loan_id: UUID
+    edition_id: UUID
+    name: str
+    set_code: str
+    set_name: str
+    collector_number: str
+    descriptor: dict
+    image_url: str | None
+    location_id: UUID
+    location_name: str
+    copies: str
+    lender: str
+
+
+class BorrowedCopies(BaseModel):
+    """Every Borrowed Copy the collector holds, by Location name, then card; ``copies`` sums them."""
+    cards: list[BorrowedCard]
+    copies: str
+
+
+class MoveBorrowed(BaseModel):
+    """Moves ``quantity`` of one Loan's Borrowed Copies of a card from one of the collector's Locations to another."""
+    loan_id: UUID
+    edition_id: UUID
+    from_location_id: UUID
+    to_location_id: UUID
+    quantity: str
+    idempotency_key: UUID
 
 
 def copies_count(raw: str) -> int:
@@ -351,6 +391,73 @@ def lent_out(user_id: str = Depends(verified_user)):
         collector_number=cards[row['edition_id']].collector_number, image_url=cards[row['edition_id']].image_url,
         copies=str(row['copies']), borrower=row['borrower_name']) for row in rows],
         copies=str(sum(int(row['copies']) for row in rows)))
+
+
+def borrowed_copies(conn, user_id: str) -> BorrowedCopies:
+    rows = conn.execute("""SELECT b.loan_id, b.edition_id, b.location_id, l.name AS location_name, o.lender_name,
+        b.quantity
+      FROM borrowed_holding b JOIN location l ON l.owner_id = b.borrower_id AND l.id = b.location_id
+      JOIN loan o ON o.id = b.loan_id
+      WHERE b.borrower_id = %s""", (user_id,)).fetchall()
+    cards = card_facts(conn, [row['edition_id'] for row in rows])
+    rows.sort(key=lambda row: (row['location_name'].casefold(), str(row['location_id']),
+                               cards[row['edition_id']].order(), row['lender_name'].casefold(), str(row['loan_id'])))
+    return BorrowedCopies(cards=[BorrowedCard(
+        loan_id=row['loan_id'], edition_id=row['edition_id'], name=cards[row['edition_id']].name,
+        set_code=cards[row['edition_id']].set_code, set_name=cards[row['edition_id']].set_name,
+        collector_number=cards[row['edition_id']].collector_number, descriptor=cards[row['edition_id']].descriptor,
+        image_url=cards[row['edition_id']].image_url, location_id=row['location_id'],
+        location_name=row['location_name'], copies=str(row['quantity']), lender=row['lender_name']) for row in rows],
+        copies=str(sum(int(row['quantity']) for row in rows)))
+
+
+@router.get('/borrowed', response_model=BorrowedCopies)
+def list_borrowed(user_id: str = Depends(verified_user)):
+    """The Collection's Borrowed entry: every Borrowed Copy the collector holds, where it is and whose it is."""
+    with connect() as conn, conn.transaction():
+        return borrowed_copies(conn, user_id)
+
+
+@router.post('/borrowed/move', response_model=BorrowedCopies)
+def move_borrowed(command: MoveBorrowed, user_id: str = Depends(verified_user)):
+    """Moves Borrowed Copies between the borrower's own Storage Leaves and Decks, under the borrower's lock, and
+    advances their revision. No Undo record: Undo never touches a Borrowed Copy. Answers the Borrowed list as it now
+    stands; the same key replays it. 404 LOCATION_NOT_FOUND for a destination that isn't one of the borrower's Storage
+    Leaves or Decks, 409 NOT_ENOUGH_BORROWED when the source holds fewer of the Loan's copies."""
+    copies = quantity(command.quantity)
+    payload = {'action': 'move_borrowed', **command.model_dump(mode='json', exclude={'idempotency_key'})}
+    with connect() as conn, conn.transaction():
+        ensure_owner(conn, user_id)
+        lock_owners(conn, user_id)
+        digest, stored = replay(conn, user_id, command.idempotency_key, payload)
+        if stored is not None:
+            return stored
+        if command.to_location_id == command.from_location_id:
+            error(422, 'SAME_LOCATION')
+        if first_non_leaf(conn, user_id, [command.to_location_id]) is not None:
+            error(404, 'LOCATION_NOT_FOUND')
+        held = conn.execute('SELECT quantity FROM borrowed_holding WHERE loan_id=%s AND borrower_id=%s '
+                            'AND location_id=%s AND edition_id=%s',
+                            (command.loan_id, user_id, command.from_location_id, command.edition_id)).fetchone()
+        if held is None or held['quantity'] < copies:
+            error(409, 'NOT_ENOUGH_BORROWED')
+        key = (command.loan_id, user_id, command.from_location_id, command.edition_id)
+        if held['quantity'] == copies:
+            conn.execute('DELETE FROM borrowed_holding WHERE loan_id=%s AND borrower_id=%s AND location_id=%s '
+                         'AND edition_id=%s', key)
+        else:
+            conn.execute('UPDATE borrowed_holding SET quantity=quantity-%s WHERE loan_id=%s AND borrower_id=%s '
+                         'AND location_id=%s AND edition_id=%s', (copies, *key))
+        # A Deck List line covers copies arriving in a Deck (migration 115's borrowed_holding trigger).
+        conn.execute("""INSERT INTO borrowed_holding AS b (loan_id, borrower_id, location_id, edition_id, quantity)
+          VALUES (%s, %s, %s, %s, %s)
+          ON CONFLICT (loan_id, location_id, edition_id) DO UPDATE SET quantity = b.quantity + EXCLUDED.quantity""",
+                     (command.loan_id, user_id, command.to_location_id, command.edition_id, copies))
+        advance_revision(conn, user_id)
+        answer = borrowed_copies(conn, user_id).model_dump(mode='json')
+        conn.execute('INSERT INTO location_command(owner_id,request_key,request_digest,response) VALUES (%s,%s,%s,%s)',
+                     (user_id, command.idempotency_key, digest, json.dumps(answer)))
+        return answer
 
 
 @router.get('/{loan_id}/side', response_model=LoanSide)

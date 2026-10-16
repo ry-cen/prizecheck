@@ -62,7 +62,9 @@ from . import format_evaluator as evaluator
 from . import format_standing, name_search, set_codes
 from .collection import anchor_json, anchor_value, cursor_key, encode_cursor
 from .holdings import fail
+from .borrowed_copies import borrowed_in
 from .main import connect, verified_user
+from .social import counts
 
 router = APIRouter(prefix="/api/catalog", tags=["catalog"])
 
@@ -149,9 +151,11 @@ class BrowseEdition(BaseModel):
     # The effective regulation mark (migration 041), or null when the card has none or it is unknown.
     regulation_mark: str | None
     standing: EditionStandings
-    # Copies the caller owns in every Location.
+    # Copies the caller owns in every Location, and those lent to Friends (social network #254): still theirs.
+    # Borrowed Copies are never owned.
     owned: int
-    # With deck_id only: copies in that Deck, and copies owned outside it (owned - in_deck). Otherwise null.
+    # With deck_id only: copies in that Deck, Borrowed Copies included (#254), and the owned copies in other Locations,
+    # which could be moved there. Otherwise null.
     in_deck: int | None
     free: int | None
 
@@ -357,8 +361,11 @@ def _listed(reading: Reading, generation, kind, format_name, set_id, owned, prin
         conditions += f" AND ca.{column}=%s"
         params.append(value)
     if owned:
-        conditions += " AND EXISTS (SELECT 1 FROM holding h WHERE h.owner_id=%s AND h.edition_id=ge.edition_id)"
-        params.append(user_id)
+        # Lent copies are still the caller's (#254): a pick handed over to an open Loan.
+        conditions += f""" AND (EXISTS (SELECT 1 FROM holding h WHERE h.owner_id=%s AND h.edition_id=ge.edition_id)
+          OR EXISTS (SELECT 1 FROM loan_pick p JOIN loan o ON o.id=p.loan_id WHERE p.owner_id=%s AND o.lender_id=%s
+            AND p.state='lent' AND p.edition_id=ge.edition_id AND {counts.LENDING}))"""
+        params.extend([user_id, user_id, user_id])
     return f"{LISTED}{joins} WHERE ge.generation_id=%s AND ge.active AND NOT gp.tombstoned{conditions}", params
 
 
@@ -411,11 +418,16 @@ def _page(conn, user_id, keys, text, kind, format_name, set_id, owned, deck_id, 
         """SELECT edition_id,sum(quantity) AS owned,coalesce(sum(quantity) FILTER (WHERE location_id=%s),0) AS in_deck
           FROM holding WHERE owner_id=%s AND edition_id=ANY(%s) GROUP BY edition_id""",
         (deck_id, user_id, ids)).fetchall()} if ids else {}
+    lent = counts.lent_counts(conn, user_id, ids) if ids else {}
+    borrowed = borrowed_in(conn, user_id, [deck_id], ids) if deck_id and ids else {}
     standings = format_standing.read_standings(conn, ids) if ids else {}
     editions = []
     for row in page:
         held = copies.get(row["edition_id"])
-        total, in_deck = (int(held["owned"]), int(held["in_deck"])) if held else (0, 0)
+        total, here = (int(held["owned"]), int(held["in_deck"])) if held else (0, 0)
+        free = total - here
+        total += lent.get(row["edition_id"], 0)
+        in_deck = here + borrowed.get((deck_id, row["edition_id"]), 0)
         found = standings.get(row["edition_id"], {})
         editions.append(BrowseEdition(
             edition_id=row["edition_id"], printing_id=row["printing_id"], name=row["name"], set_id=row["set_id"],
@@ -424,7 +436,7 @@ def _page(conn, user_id, keys, text, kind, format_name, set_id, owned, deck_id, 
             image_url=f'{row["image_url"]}/low.webp' if row["image_url"] else None, card_kind=row["card_kind"],
             trainer_type=row["trainer_type"], evolves_from=row["evolves_from"], regulation_mark=row["regulation_mark"],
             standing=EditionStandings(**{name: _standing(found.get(name)) for name in ("standard", "expanded", "glc")}),
-            owned=total, in_deck=in_deck if deck_id else None, free=total - in_deck if deck_id else None))
+            owned=total, in_deck=in_deck if deck_id else None, free=free if deck_id else None))
     printings = matches = None
     if not cursor:
         printings = conn.execute("""SELECT count(*) AS n FROM catalog_generation_printing

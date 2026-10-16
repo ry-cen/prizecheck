@@ -108,8 +108,9 @@ def test_undo_of_an_add_and_edition_reassignment_refuse_promised_copies(store):
     refused = call('POST', '/api/holdings/reassign', misty, body)
     assert (refused.status_code, refused.json()['detail']) == (
         409, {'code': 'PROMISED_TO_LOAN', 'edition_id': iono, 'promised': '1'})
-    assert call('POST', '/api/holdings/reassign', misty, {**body, 'quantity': '1',
-                                                          'idempotency_key': str(uuid4())}).status_code == 200
+    # The copy no Loan promises keeps its Edition too while the Loan is open (#254, spec "Open questions" 15).
+    refused = call('POST', '/api/holdings/reassign', misty, {**body, 'quantity': '1', 'idempotency_key': str(uuid4())})
+    assert (refused.status_code, refused.json()['detail']) == (409, {'code': 'EDITION_ON_LOAN'})
 
 
 def test_a_direct_write_that_breaks_a_promise_fails_at_commit_and_a_move_within_one_commit_does_not(store):
