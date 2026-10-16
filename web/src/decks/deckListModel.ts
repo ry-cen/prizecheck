@@ -455,17 +455,15 @@ export function stateWords(line: DeckLine): string {
     .join(", ");
 }
 
-/** A Stacked pile's summary, such as "×4 1↻ 1 lent 1$": the copies, then those owned elsewhere, lent out and not
- * owned. */
-export function pileSummary(line: DeckLine): string {
+/** A Stacked pile's summary in parts, such as ["×4", "1↻", "1 lent", "1$"]: the copies, then those owned elsewhere, lent
+ * out and not owned. Each part is drawn whole, so a narrow tile wraps between them. */
+export function pileParts(line: DeckLine): string[] {
   return [
     `×${line.quantity}`,
     line.elsewhere > 0n && `${line.elsewhere}↻`,
     line.lent > 0n && `${line.lent} lent`,
     line.missing > line.lent && `${line.missing - line.lent}$`,
-  ]
-    .filter(Boolean)
-    .join(" ");
+  ].filter((part): part is string => Boolean(part));
 }
 
 /** A Stacked pile's accessible name and hover title. */
