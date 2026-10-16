@@ -1,4 +1,5 @@
 import {
+  Fragment,
   useId,
   useRef,
   type KeyboardEvent,
@@ -14,7 +15,7 @@ import {
   editionText,
   lineTotal,
   pileLabel,
-  pileSummary,
+  pileParts,
   stateWords,
   type DeckLine,
   type DeckView,
@@ -240,11 +241,18 @@ function Pile({
           state={top}
         />
       </span>
+      {/* Each part whole, wrapping between parts: "×4 1↻ 1 lent 1$" is wider than a phone's tile. The spaces keep the
+          text "×4 1↻ 1 lent 1$"; the gap draws them. */}
       <span
         aria-hidden="true"
-        className="block whitespace-nowrap text-caption font-semibold tabular-nums"
+        className="flex flex-wrap gap-x-1 text-caption font-semibold tabular-nums"
       >
-        {pileSummary(line)}
+        {pileParts(line).map((part, index) => (
+          <Fragment key={part}>
+            {index > 0 && " "}
+            <span className="whitespace-nowrap">{part}</span>
+          </Fragment>
+        ))}
       </span>
     </button>
   );

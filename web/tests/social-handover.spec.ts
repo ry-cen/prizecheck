@@ -308,6 +308,24 @@ test("both sides confirm a handover for their own inventory, after the lender fi
   });
   await expect(bossPile).toContainText("×1 1 lent");
   await expect(bossPile).not.toContainText("$");
+  // A line with copies owned elsewhere, lent out and not owned still fits its pile on a phone: the summary wraps.
+  await hold(lender, mistyUnsorted, ids["PAL 185"], 1);
+  await setLine(lender, lugia, ids["PAL 185"], 4);
+  await lender.setViewportSize(PHONE);
+  await lender.reload();
+  await lender.getByRole("tab", { name: /^Deck/ }).click();
+  const ionoPile = lender.getByRole("button", {
+    name: /^Iono, Paldea Evolved/,
+  });
+  await expect(ionoPile).toContainText("×4 1↻ 1 lent 1$");
+  await expect(
+    ionoPile
+      .locator(":scope > span")
+      .last()
+      .evaluate((summary) => summary.scrollWidth <= summary.clientWidth)
+  ).resolves.toBe(true);
+  await expectPageChecks(lender, "a Deck's piles with lent copies on a phone");
+  await lender.setViewportSize(DESKTOP);
 
   // Ash: the Loan needs him; Yes, I have them puts it out on both sides.
   await page.goto(`${ORIGIN}/loans`);
