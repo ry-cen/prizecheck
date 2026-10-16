@@ -7,6 +7,7 @@ import base64, hashlib, hmac, json, os
 from pydantic import BaseModel
 from .main import connect, verified_user
 from .holdings import HoldingView, fail
+from .social import counts
 
 router = APIRouter(prefix='/api/collection', tags=['collection'])
 
@@ -262,6 +263,10 @@ class CollectionHoldingPage(BaseModel):
     catalog_revision: int
     next_cursor: str | None = None
     totals: CollectionTotals | None = None
+    # With ``totals``: copies lent to Friends (social network #253), in no Location and still the collector's, so the
+    # whole Collection's count adds them. "0" for a listing of one Location or with a search or filter, which only
+    # Holdings can match.
+    lent: str | None = None
 
 
 @router.get('/holdings', response_model=CollectionHoldingPage)
@@ -337,17 +342,20 @@ def collection_holdings(location_id: UUID | None = None,
         rows = conn.execute(f"""{HOLDING_PATHS} SELECT * FROM ({listed}) listed
           {after} ORDER BY {order} LIMIT %s""", [*base, *after_params, HOLDING_PAGE_SIZE + 1]).fetchall()
         page = rows[:HOLDING_PAGE_SIZE]
-        totals = None
+        totals, lent = None, None
         if not cursor:
             counted = conn.execute(f"""{HOLDING_PATHS} SELECT count(*) AS holdings,
               count(DISTINCT h.edition_id) AS editions,coalesce(sum(h.quantity),0) AS copies
               {HOLDING_FROM}{conditions}""", base).fetchone()
+            whole = location_id is None and not (name or set_id or category or trainer_type or elemental_type)
+            lent = str(sum(counts.lent_counts(conn, user_id, None).values()) if whole else 0)
             totals = CollectionTotals(holdings=counted['holdings'], editions=counted['editions'],
                                       copies=str(counted['copies']))
         next_cursor = (encode_cursor(context, [anchor_json(page[-1][column]) for column in anchor_columns(keys)])
                        if len(rows) > HOLDING_PAGE_SIZE else None)
         return CollectionHoldingPage(holdings=views(page, CollectionHoldingView), owner_revision=revision,
-                                     catalog_revision=state['revision'], next_cursor=next_cursor, totals=totals)
+                                     catalog_revision=state['revision'], next_cursor=next_cursor, totals=totals,
+                                     lent=None if totals is None else lent)
 
 
 class CollectionSet(BaseModel):

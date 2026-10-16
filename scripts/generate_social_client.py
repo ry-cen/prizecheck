@@ -1,5 +1,5 @@
 """Generate the social client module (Friends and Friend Requests, social network #247, Blocks, #248, Friends' cards,
-#250 and #251, and Loans, #252) from the API OpenAPI schema."""
+#250 and #251, and Loans, #252 and #253) from the API OpenAPI schema."""
 import sys
 from pathlib import Path
 
@@ -28,7 +28,7 @@ for name in ("Collector", "CollectorLookup", "InviteCollector", "FriendsView", "
              "FriendCommand", "FriendCommandResult", "BlockCollector", "BlockedList", "FriendCard", "FriendCollection",
              "FriendCopy", "WantedCard", "WantListMatches", "CardMatches", "LoanParty", "LoanCard", "LoanView",
              "LoansView", "LoanStep", "LoanLineRequest", "SendBorrowRequest", "PromisedLine", "AcceptBorrowRequest",
-             "PromiseLimit", "LoanPickPlace", "LoanDeck", "LoanSide"):
+             "PromiseLimit", "LoanPickPlace", "LoanDeck", "LoanSide", "LentCard", "LentOut"):
     definition = schema[name]
     fields = [f"{field}{'' if field in definition.get('required', []) else '?'}: {ts_type(value)}"
               for field, value in definition["properties"].items()]
@@ -110,6 +110,15 @@ export const withdrawLoan = (id: string, body: LoanStep) =>
   request<LoanView>(`/api/social/loans/${at(id)}/withdraw`, 'POST', body);
 export const cancelLoan = (id: string, body: LoanStep) =>
   request<LoanView>(`/api/social/loans/${at(id)}/cancel`, 'POST', body);
+// Handover (#253): each side confirms for its own inventory, and may take that back until the other side confirms.
+export const confirmHandover = (id: string, body: LoanStep) =>
+  request<LoanView>(`/api/loans/${at(id)}/handover`, 'POST', body);
+export const takeBackHandover = (id: string, body: LoanStep) =>
+  request<LoanView>(`/api/loans/${at(id)}/take-back`, 'POST', body);
+export const useSuggestedPicks = (id: string, body: LoanStep) =>
+  request<LoanView>(`/api/loans/${at(id)}/picks/use-suggested`, 'POST', body);
+// The Collection's Lent out entry: every copy you lent and haven't had back.
+export const getLentOut = (signal?: AbortSignal) => request<LentOut>('/api/loans/lent-out', 'GET', undefined, signal);
 """)
 content = "\n".join(lines)
 target = root / "web/src/social_generated.ts"

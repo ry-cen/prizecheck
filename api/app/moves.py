@@ -123,6 +123,40 @@ def check_promises(conn, user_id: str, losing: dict) -> None:
             fail(409, 'PROMISED_TO_LOAN', edition_id=edition, promised=promised[edition])
 
 
+def take_out(conn, user_id: str, items: list[tuple[UUID, UUID, int]], revision: int) -> int:
+    """Takes copies out of the owner's Holdings, ``items`` as (Location id, Edition id, copies), with no destination and
+    no Inventory Undo record: a lender's handover (social network #253), whose copies then sit in no Location. The
+    writes are a Removal's. The caller holds the owner lock, read ``revision`` under it and checked every Holding holds
+    its copies. Returns the owner's new revision, which the changed Holdings take as their version."""
+    new_revision = revision + 1
+    for location, edition, copies in items:
+        conn.execute('DELETE FROM holding WHERE owner_id=%s AND location_id=%s AND edition_id=%s AND quantity=%s',
+                     (user_id, location, edition, copies))
+        conn.execute('UPDATE holding SET quantity=quantity-%s,version=%s '
+                     'WHERE owner_id=%s AND location_id=%s AND edition_id=%s AND quantity>%s',
+                     (copies, new_revision, user_id, location, edition, copies))
+    conn.execute('UPDATE inventory_owner SET revision=%s WHERE user_id=%s', (new_revision, user_id))
+    return new_revision
+
+
+def put_back(conn, user_id: str, items: list[tuple[UUID, UUID, int]], revision: int) -> int:
+    """Puts copies back into the owner's Holdings, ``items`` as (Storage Leaf id, Edition id, copies), with no Inventory
+    Undo record: taking back a lender's handover (#253), and from #255 a lender's return. Copies returning to a Deck come
+    back as surplus, as a Put away's Undo does (migration 047): no Deck List line changes. The caller holds the owner
+    lock, read ``revision`` under it and checked every Location is one of the owner's Storage Leaves. Returns the new
+    revision."""
+    new_revision = revision + 1
+    conn.execute("SELECT set_config('tcg.undo_returns_surplus','on',true)")
+    for location, edition, copies in items:
+        conn.execute('INSERT INTO holding(owner_id,location_id,edition_id,quantity,version) VALUES (%s,%s,%s,%s,%s) '
+                     'ON CONFLICT(owner_id,location_id,edition_id) DO UPDATE '
+                     'SET quantity=holding.quantity+excluded.quantity,version=excluded.version',
+                     (user_id, location, edition, copies, new_revision))
+    conn.execute("SELECT set_config('tcg.undo_returns_surplus','off',true)")
+    conn.execute('UPDATE inventory_owner SET revision=%s WHERE user_id=%s', (new_revision, user_id))
+    return new_revision
+
+
 def lock_owner(conn, user_id: str):
     conn.execute("INSERT INTO inventory_owner(user_id) VALUES (%s) ON CONFLICT DO NOTHING", (user_id,))
     return conn.execute("SELECT revision FROM inventory_owner WHERE user_id=%s FOR UPDATE", (user_id,)).fetchone()["revision"]

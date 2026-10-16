@@ -85,8 +85,19 @@ def delete_deck(deck_id: UUID, command: DeleteDeck, user_id: str = Depends(verif
             held = conn.execute("""SELECT count(*) AS editions,coalesce(sum(quantity),0) AS copies
               FROM holding WHERE owner_id=%s AND location_id=%s""", (user_id, deck_id)).fetchone()
             unsorted_id = None
-            if held['editions']:
+            borrowed = conn.execute('SELECT 1 FROM borrowed_holding WHERE borrower_id=%s AND location_id=%s LIMIT 1',
+                                    (user_id, deck_id)).fetchone()
+            if borrowed:
+                # Borrowed Copies go to Unsorted too, still borrowed (social network #253).
                 unsorted_id = unsorted_leaf(conn, user_id, rows, deck_id)
+                conn.execute('''INSERT INTO borrowed_holding AS u (loan_id,borrower_id,location_id,edition_id,quantity)
+                  SELECT d.loan_id,d.borrower_id,%s,d.edition_id,d.quantity FROM borrowed_holding d
+                  WHERE d.borrower_id=%s AND d.location_id=%s
+                  ON CONFLICT (loan_id,location_id,edition_id) DO UPDATE SET quantity=u.quantity+EXCLUDED.quantity''',
+                             (unsorted_id, user_id, deck_id))
+                conn.execute('DELETE FROM borrowed_holding WHERE borrower_id=%s AND location_id=%s', (user_id, deck_id))
+            if held['editions']:
+                unsorted_id = unsorted_id or unsorted_leaf(conn, user_id, rows, deck_id)
                 if conn.execute("""SELECT 1 FROM holding d JOIN holding u
                     ON u.owner_id=d.owner_id AND u.location_id=%s AND u.edition_id=d.edition_id
                   WHERE d.owner_id=%s AND d.location_id=%s AND u.quantity>%s-d.quantity LIMIT 1""",

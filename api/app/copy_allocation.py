@@ -174,7 +174,8 @@ def spare_rule(held: Mapping[UUID, int], lines: Mapping[UUID, int], reserved: in
 
 @dataclass(frozen=True)
 class LineCount:
-    """One Deck List line's copies under the counting setting: ``held + spare + other_decks + need == quantity``."""
+    """One Deck List line's copies under the counting setting: ``held + spare + other_decks + lent + need ==
+    quantity``."""
     deck_id: UUID
     edition_id: UUID
     quantity: int     # The line's intended copies.
@@ -184,11 +185,14 @@ class LineCount:
     # Where ``other_decks`` come from: (Deck id, copies) for each other Deck whose own line's copies this line counts,
     # oldest Deck first, summing to ``other_decks``. Empty under Every Deck built at once.
     from_decks: tuple[tuple[UUID, int], ...] = ()
+    # Copies the collector lent to Friends, counted for the line (#253): they are the collector's and come back, so a
+    # lent line is never on the Want List. The Deck's own lent copies first, then other lent copies as Spare Copies go.
+    lent: int = 0
 
     @property
     def need(self) -> int:
         """Copies the line still needs from outside the Collection."""
-        return self.quantity - self.held - self.spare - self.other_decks
+        return self.quantity - self.held - self.spare - self.other_decks - self.lent
 
 
 @dataclass(frozen=True)
@@ -262,6 +266,8 @@ def allocate(conn, user_id: str, editions: Iterable[UUID], counting: WantListCou
                                   {row['deck_id']: row['quantity'] for row in by_edition.get(edition, [])},
                                   reserved.get(edition, 0), picked.get(edition))
               for edition in sorted(set(places) | set(by_edition))}
+    lent_total = counts.lent_counts(conn, user_id, wanted)
+    lent_at = counts.lent_picks(conn, user_id, list(lent_total)) if lent_total else {}
     lines: dict[tuple[UUID, UUID], LineCount] = {}
     for edition, rows in by_edition.items():
         rows.sort(key=lambda row: rank[row['deck_id']])
@@ -269,10 +275,16 @@ def allocate(conn, user_id: str, editions: Iterable[UUID], counting: WantListCou
         # Another Deck's own copies that are reserved stay counted by that Deck only (One Deck at a time).
         promised = copies[edition].reserved_own
         free_own = {deck: held - promised.get(deck, 0) for deck, held in own.items()}
-        handed = _hand_out(((row['deck_id'], row['quantity'] - own[row['deck_id']]) for row in rows), spare_copies)
+        # Copies a Deck lent from its own line count for that Deck first; the other lent copies are a pool.
+        own_lent = {row['deck_id']: min(row['quantity'] - own[row['deck_id']],
+                                        lent_at.get(edition, {}).get(row['deck_id'], 0)) for row in rows}
+        pool = max(0, lent_total.get(edition, 0) - sum(own_lent.values()))
+        handed = _hand_out(((row['deck_id'], row['quantity'] - own[row['deck_id']] - own_lent[row['deck_id']])
+                            for row in rows), spare_copies)
+        counted: list[tuple[dict, int, int, tuple]] = []
         for row in rows:
             deck, quantity = row['deck_id'], row['quantity']
-            short = quantity - own[deck]
+            short = quantity - own[deck] - own_lent[deck]
             from_decks: list[tuple[UUID, int]] = []
             if counting == 'all_at_once':
                 spare, others = handed[deck], 0
@@ -289,8 +301,18 @@ def allocate(conn, user_id: str, editions: Iterable[UUID], counting: WantListCou
                     if taken:
                         from_decks.append((other['deck_id'], taken))
                         wanted_from_others -= taken
-            lines[(deck, edition)] = LineCount(deck_id=deck, edition_id=edition, quantity=quantity, held=own[deck],
-                                               spare=spare, other_decks=others, from_decks=tuple(from_decks))
+            counted.append((row, spare, others, tuple(from_decks)))
+        # The pool of other lent copies: oldest Deck first under Every Deck built at once, every Deck under One Deck at
+        # a time, as Spare Copies go.
+        rests = [(row['deck_id'], row['quantity'] - own[row['deck_id']] - own_lent[row['deck_id']] - spare - others)
+                 for row, spare, others, _ in counted]
+        extra = (_hand_out(rests, pool) if counting == 'all_at_once'
+                 else {deck: min(rest, pool) for deck, rest in rests})
+        for row, spare, others, from_decks in counted:
+            deck = row['deck_id']
+            lines[(deck, edition)] = LineCount(deck_id=deck, edition_id=edition, quantity=row['quantity'],
+                                               held=own[deck], spare=spare, other_decks=others, from_decks=from_decks,
+                                               lent=own_lent[deck] + extra[deck])
     return Allocation(counting=counting, lines=lines, order=order, owned=total, places=places, copies=copies)
 
 
