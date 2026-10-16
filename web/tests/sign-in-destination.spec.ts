@@ -65,3 +65,22 @@ for (const [name, next] of [
     await expect(page).toHaveURL(`${ORIGIN}/collection`);
   });
 }
+
+// A signed-out visit to a Friend's Collection returns there after a provider sign-in.
+test("a provider link at /friends/<Handle> carries that page as next", async ({
+  page,
+}) => {
+  await page.route("**/auth/methods", (route) =>
+    route.fulfill({
+      json: {
+        providers: [{ id: "google", name: "Google" }],
+        emailSignIn: false,
+      },
+      headers: { "cache-control": "no-store" },
+    })
+  );
+  await page.goto(`${ORIGIN}/friends/misty`);
+  await expect(
+    page.getByRole("link", { name: "Continue with Google" })
+  ).toHaveAttribute("href", "/auth/sign-in/google?next=%2Ffriends%2Fmisty");
+});

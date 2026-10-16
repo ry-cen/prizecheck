@@ -7,6 +7,7 @@ import {
   type Ref,
 } from "react";
 import { canonicalPath, pageAt } from "../shell/routes";
+import { friendHandleAt } from "../social/friendCards";
 import {
   clearFailureFromAddress,
   failureInAddress,
@@ -128,7 +129,7 @@ export function providerNext(): string | null {
   const asked = new URLSearchParams(location.search).get("next");
   if (asked) return withoutFailure(asked);
   const path = canonicalPath(location.pathname);
-  return pageAt(path)
+  return pageAt(path) || friendHandleAt(path) !== null
     ? withoutFailure(`${path}${location.search}${location.hash}`)
     : null;
 }

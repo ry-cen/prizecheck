@@ -6,10 +6,16 @@
 // signs in afterwards as a new account.
 import { execFileSync } from "node:child_process";
 import { randomInt, randomUUID } from "node:crypto";
-import type { Page } from "@playwright/test";
+import type { Page, Route } from "@playwright/test";
 import { expect, test } from "./support/collectors";
 import { expectPageChecks } from "./support/page-check";
+import type {
+  OtherCollector,
+  OtherCollectorOptions,
+} from "./support/collectors";
 import { signInAsOwner } from "./support/sign-in";
+
+type SignInOther = (options?: OtherCollectorOptions) => Promise<OtherCollector>;
 
 const ORIGIN = process.env.TEST_ORIGIN || "http://localhost:5173";
 const PHONE = { width: 390, height: 844 };
@@ -251,4 +257,132 @@ test("a Friend's Collection opens from the Friends drawer on my Want List, with 
   await expect(page.getByRole("main")).toContainText(
     "This collector isn't one of your Friends."
   );
+});
+
+/** Misty with one loose Iono PAL 185 and Ash as her Friend; returns Misty's Handle. Ash's page is signed in. */
+async function befriendMisty(
+  page: Page,
+  collectors: { signIn: SignInOther }
+): Promise<string> {
+  const ids = seedCatalog();
+  const misty = await collectors.signIn({ next: "/decks" });
+  const handle = await nameCollector(misty.page, "Misty W");
+  await hold(misty.page, await unsorted(misty.page), ids["PAL 185"], 1);
+  await page.route(/^https:\/\/assets\.tcgdex\.net\//, (route) =>
+    route.abort()
+  );
+  await signInAsOwner(page, "/decks");
+  await nameCollector(page, "Ash K");
+  await befriend(page, misty.page);
+  return handle;
+}
+
+/**
+ * Answers every Friend's Collection read for real but says there is a second page, and hands the second page to
+ * `second`, which decides what it answers.
+ */
+async function withSecondPage(
+  page: Page,
+  second: (route: Route) => Promise<void>
+) {
+  await page.route("**/api/social/collections/**", async (route) => {
+    if (new URL(route.request().url()).searchParams.get("page") === "2")
+      return second(route);
+    const response = await route.fetch();
+    const body = await response.json();
+    await route.fulfill({ response, json: { ...body, next_page: 2 } });
+  });
+}
+
+const STALE_PAGE = {
+  collector_id: "stale",
+  handle: "stale",
+  display_name: "Misty W",
+  show: "all",
+  cards: [
+    {
+      edition_id: "stale",
+      name: "Stale Card",
+      set_code: "XXX",
+      set_name: "Stale",
+      collector_number: "1",
+      descriptor: {},
+      image_url: null,
+      spare: "1",
+      in_deck: "0",
+      wanted: false,
+    },
+  ],
+  next_page: null,
+};
+
+test("a Show more answer that arrives after the filter changed is dropped", async ({
+  page,
+  collectors,
+}) => {
+  const handle = await befriendMisty(page, collectors);
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  await withSecondPage(page, async (route) => {
+    await gate;
+    await route.fulfill({ json: STALE_PAGE });
+  });
+
+  await page.goto(`${ORIGIN}/friends/${handle}`);
+  await page
+    .getByRole("group", { name: "Show cards" })
+    .getByRole("button", { name: "All cards" })
+    .click();
+  const cards = page.getByRole("list", { name: "Misty W's cards" });
+  await expect(cards.getByRole("listitem")).toHaveCount(1);
+  const more = page.getByRole("button", { name: "Show more cards" });
+  await more.click();
+  const searched = page.waitForResponse(
+    (response) =>
+      response.url().includes("/api/social/collections/") &&
+      response.url().includes("q=iono")
+  );
+  await page
+    .getByRole("searchbox", { name: "Search Misty W's cards" })
+    .fill("iono");
+  await searched;
+  await expect(cards).toHaveAttribute("aria-busy", "false");
+  const late = page.waitForResponse(
+    (response) => new URL(response.url()).searchParams.get("page") === "2"
+  );
+  release();
+  await late;
+  // Let the late answer reach the page before looking for it.
+  await page.evaluate(
+    () => new Promise((done) => requestAnimationFrame(() => done(null)))
+  );
+  await expect(cards.getByRole("listitem")).toHaveCount(1);
+  await expect(page.getByRole("main")).not.toContainText("Stale Card");
+  await expect(more).toBeVisible();
+});
+
+test("Show more after the Friend is no longer a Friend says so instead of offering a retry", async ({
+  page,
+  collectors,
+}) => {
+  const handle = await befriendMisty(page, collectors);
+  await withSecondPage(page, (route) =>
+    route.fulfill({
+      status: 404,
+      json: { detail: { code: "FRIEND_NOT_FOUND" } },
+    })
+  );
+  await page.goto(`${ORIGIN}/friends/${handle}`);
+  await page
+    .getByRole("group", { name: "Show cards" })
+    .getByRole("button", { name: "All cards" })
+    .click();
+  await expect(
+    page.getByRole("list", { name: "Misty W's cards" }).getByRole("listitem")
+  ).toHaveCount(1);
+  await page.getByRole("button", { name: "Show more cards" }).click();
+  await expect(page.getByRole("main")).toContainText(
+    "This collector isn't one of your Friends."
+  );
+  await expect(page.getByRole("alert")).toHaveCount(0);
 });

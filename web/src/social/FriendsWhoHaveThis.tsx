@@ -36,7 +36,9 @@ export function FriendsWhoHaveThis({
   useEffect(() => {
     const controller = new AbortController();
     getCardMatches(printingId, { printings }, controller.signal).then(
-      (matches) => setAnswer({ printingId, matches }),
+      (matches) => {
+        if (!controller.signal.aborted) setAnswer({ printingId, matches });
+      },
       () => {
         if (!controller.signal.aborted) setAnswer(null);
       }
