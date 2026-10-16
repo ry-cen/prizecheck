@@ -11,6 +11,7 @@ import { CardImage } from "../social/FriendCollectionPage";
 import {
   acceptBorrowRequest,
   cancelLoan,
+  chooseWrittenOff,
   confirmHandover,
   confirmReturn,
   declineLoan,
@@ -21,6 +22,7 @@ import {
   takeBackHandover,
   useSuggestedPicks,
   withdrawLoan,
+  writeOff,
   type LoanCard,
   type LoanPickPlace,
   type LoanSide,
@@ -88,7 +90,9 @@ const ASK: Record<
  * Returns (#255): Record a return (lender) or Give cards back (borrower) puts a stepper on each line, every copy still
  * out to start with; the other side then confirms with Yes, they're back or Yes, I gave them back. Lines tag the copies
  * returned and those coming back. Choosing the copies moves focus to its button (Record return, Give these back), and
- * Not now moves it to the heading.
+ * Not now moves it to the heading. Write-off (#257): the lender's Write off… puts a stepper on each line and asks once,
+ * warning it can't be undone; Keep it returns focus to ⋯. The borrower then answers I still have it or It's gone for
+ * the copies they hold. Lines tag the copies written off.
  */
 export function LoanScreen({
   loanId,
@@ -104,6 +108,8 @@ export function LoanScreen({
   const [asking, setAsking] = useState<Asking | null>(null);
   // Choosing a return's copies (#255): each line's count, or null while not choosing.
   const [returning, setReturning] = useState<Map<string, number> | null>(null);
+  // Choosing a Write-off's copies (#257), as for a return.
+  const [writing, setWriting] = useState<Map<string, number> | null>(null);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   // One key per step until it settles, so a step whose outcome is unknown is retried safely.
@@ -233,6 +239,7 @@ export function LoanScreen({
       focusNext.current = "heading";
       setAsking(null);
       setReturning(null);
+      setWriting(null);
       const nextSide = await getLoanSide(loanId).catch(() => side);
       setLoad({ kind: "ready", loan: next, side: nextSide });
       setPromised(promiseStart(next, nextSide));
@@ -243,6 +250,7 @@ export function LoanScreen({
         focusNext.current = "heading";
         setAsking(null);
         setReturning(null);
+        setWriting(null);
         setAttempt((n) => n + 1);
       }
     } finally {
@@ -265,7 +273,23 @@ export function LoanScreen({
     (sum, n) => sum + n,
     0
   );
+  const writeTotal = [...(writing?.values() ?? [])].reduce(
+    (sum, n) => sum + n,
+    0
+  );
   const lender = loan.role === "lender";
+  // A line's copies the lender may write off: those out, less those a pending return brings back (#257).
+  const writable = (line: LoanCard) =>
+    Math.max(
+      0,
+      lineOut(line) -
+        Number(
+          loan.pending_return?.lines.find(
+            (item) => item.edition_id === line.edition_id
+          )?.copies ?? "0"
+        )
+    );
+  const awaiting = side.awaiting_choice ?? [];
   // The handover (#253): each side confirms for its own inventory. The lender's picks must be current first.
   const handing = loan.actions.includes("confirm_handover");
   const stale =
@@ -290,6 +314,20 @@ export function LoanScreen({
       : []),
     ...(loan.actions.includes("cancel")
       ? [{ label: "Cancel Loan", onSelect: () => ask("cancel") }]
+      : []),
+    ...(loan.actions.includes("write_off")
+      ? [
+          {
+            label: "Write off…",
+            onSelect: () => {
+              keys.current.delete("write_off");
+              setReturning(null);
+              setWriting(
+                new Map(loan.lines.map((line) => [line.edition_id, 0]))
+              );
+            },
+          },
+        ]
       : []),
     ...(loan.actions.includes("edit_and_resend") && drafts
       ? [
@@ -360,6 +398,45 @@ export function LoanScreen({
       </Button>
       <p className="m-0 text-meta text-text-muted">A pick is out of date.</p>
     </div>
+  ) : writing ? (
+    <div
+      role="group"
+      aria-label="Write off"
+      className="flex flex-wrap items-center gap-2 rounded-panel border border-border bg-surface p-3"
+    >
+      <p className="m-0 min-w-0 flex-1 text-body">
+        Write off {writeTotal === 1 ? "1 card" : `${writeTotal} cards`}? They
+        leave your Collection, and this can't be undone.
+      </p>
+      <Button
+        variant="danger"
+        disabled={writeTotal === 0}
+        aria-disabled={busy || undefined}
+        onClick={() =>
+          void step("write_off", (key) =>
+            writeOff(loan.id, {
+              ...body(key),
+              lines: loan.lines
+                .filter((line) => (writing.get(line.edition_id) ?? 0) > 0)
+                .map((line) => ({
+                  edition_id: line.edition_id,
+                  quantity: String(writing.get(line.edition_id)),
+                })),
+            })
+          )
+        }
+      >
+        Write off
+      </Button>
+      <Button
+        onClick={() => {
+          focusNext.current = "menu";
+          setWriting(null);
+        }}
+      >
+        Keep it
+      </Button>
+    </div>
   ) : returning ? (
     <div className="flex flex-wrap items-center gap-2">
       <Button
@@ -391,6 +468,37 @@ export function LoanScreen({
       >
         Not now
       </Button>
+    </div>
+  ) : loan.actions.includes("choose_written_off") ? (
+    <div className="flex flex-col gap-2">
+      <p className="m-0 text-body">
+        Do you still have {loan.awaiting_choice === "1" ? "it" : "them"}? Kept
+        cards become yours where they are.
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        {(["keep", "remove"] as const).map((choice) => (
+          <Button
+            key={choice}
+            variant={choice === "keep" ? "primary" : "secondary"}
+            aria-disabled={busy || undefined}
+            onClick={() =>
+              void step(`choose_${choice}`, (key) =>
+                chooseWrittenOff(loan.id, {
+                  ...body(key),
+                  choice,
+                  places: awaiting.map((place) => ({
+                    location_id: place.location_id ?? "",
+                    edition_id: place.edition_id,
+                    copies: place.copies,
+                  })),
+                })
+              )
+            }
+          >
+            {choice === "keep" ? "I still have it" : "It's gone"}
+          </Button>
+        ))}
+      </div>
     </div>
   ) : loan.actions.includes("confirm_return") ? (
     <div className="flex flex-wrap items-center gap-2">
@@ -458,10 +566,29 @@ export function LoanScreen({
             onValue={(value) =>
               setPromised(new Map(promised).set(line.edition_id, value))
             }
-            returning={returning?.get(line.edition_id) ?? null}
-            onReturning={(value) => {
-              keys.current.delete("start_return");
-              setReturning(new Map(returning).set(line.edition_id, value));
+            counting={
+              writing
+                ? {
+                    value: writing.get(line.edition_id) ?? 0,
+                    max: writable(line),
+                    verb: "write off",
+                  }
+                : returning
+                  ? {
+                      value: returning.get(line.edition_id) ?? 0,
+                      max: lineOut(line),
+                      verb: "return",
+                    }
+                  : null
+            }
+            onCounting={(value) => {
+              if (writing) {
+                keys.current.delete("write_off");
+                setWriting(new Map(writing).set(line.edition_id, value));
+              } else {
+                keys.current.delete("start_return");
+                setReturning(new Map(returning).set(line.edition_id, value));
+              }
             }}
           />
         ))}
@@ -529,6 +656,7 @@ function promiseStart(loan: LoanView, side: LoanSide): Map<string, number> {
 const RELOAD = new Set([
   "LOAN_CHANGED",
   "STEP_NOT_ALLOWED",
+  "CHOICE_CHANGED",
   "PICKS_OUT_OF_DATE",
   "PICKS_UP_TO_DATE",
 ]);
@@ -565,8 +693,8 @@ function LoanLine({
   answering,
   value,
   onValue,
-  returning,
-  onReturning,
+  counting,
+  onCounting,
 }: {
   loan: LoanView;
   line: LoanCard;
@@ -574,9 +702,9 @@ function LoanLine({
   answering: boolean;
   value: number;
   onValue: (value: number) => void;
-  /** The copies of this line to return while choosing a return (#255), else null. */
-  returning: number | null;
-  onReturning: (value: number) => void;
+  /** While choosing a return's (#255) or a Write-off's (#257) copies: this line's count, its most and the verb. */
+  counting: { value: number; max: number; verb: "return" | "write off" } | null;
+  onCounting: (value: number) => void;
 }) {
   const edition = lineEdition(line);
   const requested = Number(line.requested);
@@ -603,20 +731,20 @@ function LoanLine({
       (item) => item.edition_id === line.edition_id
     )?.copies ?? "0"
   );
-  const out = lineOut(line);
+  const writtenOff = Number(line.written_off);
   let count: ReactNode;
-  if (returning !== null)
+  if (counting !== null)
     count = (
       <div className="flex flex-col items-end gap-1 phone:items-start">
         <Stepper
-          label={`Copies of ${line.name}, ${edition} to return`}
-          value={returning}
+          label={`Copies of ${line.name}, ${edition} to ${counting.verb}`}
+          value={counting.value}
           min={0}
-          max={out}
-          onChange={onReturning}
+          max={counting.max}
+          onChange={onCounting}
         />
         <span className="text-meta text-text-muted">
-          {out === 0 ? "None out" : `of ${out} out`}
+          {counting.max === 0 ? "None out" : `of ${counting.max} out`}
         </span>
       </div>
     );
@@ -678,6 +806,11 @@ function LoanLine({
         {coming > 0 && (
           <p className="m-0 text-meta text-text-muted wrap-anywhere">
             {coming} coming back
+          </p>
+        )}
+        {writtenOff > 0 && (
+          <p className="m-0 text-meta text-text-muted wrap-anywhere">
+            {writtenOff} written off
           </p>
         )}
       </div>

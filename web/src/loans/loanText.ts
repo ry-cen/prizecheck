@@ -62,6 +62,10 @@ export function loanHeadline(loan: LoanView): string {
         ? `You're lending ${other} ${cards}`
         : `${other} is lending you ${cards}`;
     case "handed_over": {
+      // Written-off copies the borrower still has to answer for (#257).
+      const awaiting = Number(loan.awaiting_choice ?? "0");
+      if (!lender && awaiting > 0)
+        return `${other} wrote off ${cardCount(awaiting)} you have`;
       // A return the other side confirmed and the reader hasn't (#255).
       const pending = loan.pending_return;
       if (pending && pending.they_confirmed && !pending.you_confirmed) {
@@ -72,9 +76,16 @@ export function loanHeadline(loan: LoanView): string {
           ? `${other} says they gave back ${back}`
           : `${other} says they got ${back} back`;
       }
-      const out = cardCount(
-        loanLines(loan).reduce((sum, line) => sum + lineOut(line), 0)
+      const copies = loanLines(loan).reduce(
+        (sum, line) => sum + lineOut(line),
+        0
       );
+      // Everything written off while the borrower still answers for it (#257).
+      if (copies === 0)
+        return lender
+          ? `${other} has no cards of yours`
+          : `You have no cards of ${other}'s`;
+      const out = cardCount(copies);
       return lender
         ? `${other} has ${out} of yours`
         : `You have ${out} of ${other}'s`;
@@ -233,6 +244,12 @@ export function loanStepMessage(
     }
     case "NOTHING_RETURNED":
       return "Return at least one card.";
+    case "NOTHING_WRITTEN_OFF":
+      return "Write off at least one card.";
+    case "CHOICE_CHANGED":
+      return "This Loan has changed. Check it and try again.";
+    case "UNSORTED_UNAVAILABLE":
+      return "Your top-level Unsorted can't hold cards. Make it a Storage Leaf in Collection, then try again.";
     case "TOO_MANY_CHANGES":
       return `Too many changes. Try again in ${minutes(error)}.`;
     default:
