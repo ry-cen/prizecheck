@@ -27,11 +27,18 @@ is taken before any other collector's row is locked; a refused step rolls back w
 ``handed_over`` once both have. Until the other side confirms, a side may take its confirmation back, and while
 neither has, either may cancel.
 
+**Returns** (#255): either side starts a return of some or all of the copies out from its side, which is that side's
+confirmation, and the other side confirms it; each confirmation moves only that side's own inventory, with
+``app.loan_inventory``'s routes. A Loan has at most one pending return. A return only one side confirmed is complete
+when the other side's account no longer exists. ``loan_facts`` reads what the steps depend on beyond the Loan row: the
+pending return, the copies returned, the copies still out from each side and whether the other side exists.
+
 **Needs you** (``needs_you``) is the one definition the Loans tab and, from #259, the inbox read. ``section`` places a
 Loan on the Loans tab: needs you, out now, pending or history.
 """
 import json
 from collections.abc import Mapping
+from dataclasses import dataclass, field
 from datetime import date
 from typing import Literal
 from uuid import UUID
@@ -54,7 +61,8 @@ NOW = sql.SQL('now()')
 # Closed Loans the Loans tab lists under History, newest first.
 HISTORY = 50
 
-Action = Literal['accept', 'decline', 'confirm_handover', 'withdraw', 'take_back', 'cancel', 'edit_and_resend']
+Action = Literal['accept', 'decline', 'confirm_handover', 'start_return', 'confirm_return', 'withdraw', 'take_back',
+                 'cancel', 'edit_and_resend']
 Section = Literal['needs_you', 'out_now', 'pending', 'history']
 
 
@@ -79,6 +87,22 @@ class LoanCard(BaseModel):
     requested: str
     promised: str
     written_off: str
+    # Copies that came back in complete returns (#255).
+    returned: str = '0'
+
+
+class ReturnLine(BaseModel):
+    edition_id: UUID
+    copies: str
+
+
+class PendingReturn(BaseModel):
+    """The Loan's return one side has confirmed and the other hasn't (#255): who started it, its copies, and which
+    sides confirmed it."""
+    started_by: Literal['you', 'them']
+    lines: list[ReturnLine]
+    you_confirmed: bool
+    they_confirmed: bool
 
 
 class LoanView(BaseModel):
@@ -100,6 +124,8 @@ class LoanView(BaseModel):
     section: Section
     actions: list[Action]
     revision: int
+    # The return waiting for a side's confirmation (#255), or None.
+    pending_return: PendingReturn | None = None
 
 
 class LoansView(BaseModel):
@@ -124,10 +150,86 @@ def confirmed(user_id: str, row) -> tuple[bool, bool]:
     return (lender, borrower) if role_of(user_id, row) == 'lender' else (borrower, lender)
 
 
-def needs_you(user_id: str, row) -> bool:
+@dataclass(frozen=True)
+class LoanFacts:
+    """What a Loan's steps depend on beyond its row (#255). ``pending``: the return waiting for a confirmation, as
+    {'id', 'started_by' ('lender' or 'borrower'), 'lender_confirmed', 'borrower_confirmed', 'lines': {Edition id:
+    copies}}, or None. ``returned``: copies back in complete returns, by Edition. ``out``: copies still out from each
+    side, by role: the lender's lent picks, and the borrower's promised copies less those written off and those the
+    borrower confirmed returning (0 before the borrower confirmed the handover). ``any_return``: a return was ever
+    started."""
+    other_exists: bool = True
+    written_off: bool = False
+    pending: dict | None = None
+    returned: dict = field(default_factory=dict)
+    out: dict = field(default_factory=dict)
+    any_return: bool = False
+
+
+def loan_facts(conn, user_id: str, rows) -> dict[UUID, LoanFacts]:
+    """``LoanFacts`` for these Loan rows as the reader sees them, in four reads whatever the number of Loans. Reads no
+    inventory: ``loan_pick`` is Loan state."""
+    rows = list(rows)
+    ids = [row['id'] for row in rows]
+    if not ids:
+        return {}
+    others = {row['id']: row['borrower_id'] if row['lender_id'] == user_id else row['lender_id'] for row in rows}
+    wanted = sorted({other for other in others.values() if other is not None})
+    alive = {profile['user_id'] for profile in conn.execute(
+        'SELECT user_id FROM collector_profile WHERE user_id = ANY(%s)', (wanted,))} if wanted else set()
+    lines: dict[UUID, list] = {}
+    for line in conn.execute('SELECT loan_id, edition_id, promised, written_off FROM loan_line WHERE loan_id = ANY(%s)',
+                             (ids,)):
+        lines.setdefault(line['loan_id'], []).append(line)
+    returns: dict[UUID, dict] = {}
+    for line in conn.execute("""SELECT r.id, r.loan_id, r.started_by, r.lender_confirmed_at, r.borrower_confirmed_at,
+        r.completed_at, l.edition_id, l.quantity
+      FROM loan_return r JOIN loan_return_line l ON l.return_id = r.id
+      WHERE r.loan_id = ANY(%s) ORDER BY r.created_at, r.id""", (ids,)):
+        found = returns.setdefault(line['loan_id'], {}).setdefault(line['id'], {
+            'id': line['id'], 'started_by': line['started_by'],
+            'lender_confirmed': line['lender_confirmed_at'] is not None,
+            'borrower_confirmed': line['borrower_confirmed_at'] is not None,
+            'complete': line['completed_at'] is not None, 'lines': {}})
+        found['lines'][line['edition_id']] = int(line['quantity'])
+    lent = {row['loan_id']: int(row['copies']) for row in conn.execute(
+        """SELECT loan_id, sum(quantity)::bigint AS copies FROM loan_pick WHERE loan_id = ANY(%s) AND state = 'lent'
+        GROUP BY loan_id""", (ids,))}
+    facts = {}
+    for row in rows:
+        mine = list(returns.get(row['id'], {}).values())
+        returned: dict[UUID, int] = {}
+        given_back = 0
+        for found in mine:
+            if found['complete']:
+                for edition, copies in found['lines'].items():
+                    returned[edition] = returned.get(edition, 0) + copies
+            if found['borrower_confirmed']:
+                given_back += sum(found['lines'].values())
+        pending = next((found for found in mine if not found['complete']), None)
+        promised = sum(int(line['promised']) - int(line['written_off']) for line in lines.get(row['id'], []))
+        facts[row['id']] = LoanFacts(
+            other_exists=others[row['id']] in alive,
+            written_off=any(line['written_off'] > 0 for line in lines.get(row['id'], [])),
+            pending=pending, returned=returned,
+            out={'lender': lent.get(row['id'], 0),
+                 'borrower': promised - given_back if row['borrower_handover_at'] is not None else 0},
+            any_return=bool(mine))
+    return facts
+
+
+def needs_you(user_id: str, row, facts: LoanFacts | None = None) -> bool:
     """Whether the Loan waits on the reader: a Borrow Request to answer (lender) or a Lend Offer to answer (borrower,
-    #258), or a handover the other side confirmed and the reader hasn't (#253). #259's inbox adds its own items."""
+    #258), a handover the other side confirmed and the reader hasn't (#253), a return the other side confirmed and the
+    reader hasn't, or copies still out from the reader's side once the other side's account is gone (#255). #259's
+    inbox adds its own items."""
     role = role_of(user_id, row)
+    if facts is not None and row['state'] in ('accepted', 'handed_over'):
+        pending = facts.pending
+        if pending is not None and pending['started_by'] != role and not pending[f'{role}_confirmed']:
+            return True
+        if not facts.other_exists and facts.out.get(role, 0) > 0 and pending is None:
+            return True
     if row['state'] == 'requested':
         return role == 'lender'
     if row['state'] == 'offered':
@@ -138,20 +240,23 @@ def needs_you(user_id: str, row) -> bool:
     return False
 
 
-def section(user_id: str, row) -> str:
+def section(user_id: str, row, facts: LoanFacts | None = None) -> str:
     if row['state'] == 'closed':
         return 'history'
-    if needs_you(user_id, row):
+    if needs_you(user_id, row, facts):
         return 'needs_you'
     if row['state'] == 'handed_over' or row['lender_handover_at'] is not None or row['borrower_handover_at'] is not None:
         return 'out_now'
     return 'pending'
 
 
-def allowed(user_id: str, row, other_exists: bool = True, written_off: bool = False) -> list[str]:
+def allowed(user_id: str, row, other_exists: bool = True, written_off: bool = False,
+            facts: LoanFacts | None = None) -> list[str]:
     """The steps the reader may take now, in the order the Loan screen offers them. Each side confirms the handover
     for its own inventory (#253) and may take its confirmation back until the other side confirms, unless anything on
-    the Loan was written off (#257). ``written_off``: some copy on the Loan was."""
+    the Loan was written off (#257) or returned (#255). ``written_off``: some copy on the Loan was. With ``facts``
+    (#255): a side that confirmed the handover starts a return of copies still out from its side once the other side
+    confirmed too, or is gone, and no return is pending; the other side confirms a pending return."""
     role, state = role_of(user_id, row), row['state']
     mine, theirs = confirmed(user_id, row) if state == 'accepted' else (False, False)
     found = []
@@ -159,9 +264,16 @@ def allowed(user_id: str, row, other_exists: bool = True, written_off: bool = Fa
         found += ['accept', 'decline']
     if state == 'accepted' and not mine:
         found.append('confirm_handover')
+    if facts is not None and state in ('accepted', 'handed_over'):
+        handed, received = confirmed(user_id, row)
+        pending = facts.pending
+        if (pending is None and facts.out.get(role, 0) > 0 and handed and (received or not other_exists)):
+            found.append('start_return')
+        if pending is not None and pending['started_by'] != role and not pending[f'{role}_confirmed']:
+            found.append('confirm_return')
     if state == 'requested' and role == 'borrower':
         found.append('withdraw')
-    if state == 'accepted' and mine and not theirs and not written_off:
+    if state == 'accepted' and mine and not theirs and not written_off and not (facts and facts.any_return):
         found.append('take_back')
     if state == 'accepted' and row['lender_handover_at'] is None and row['borrower_handover_at'] is None:
         found.append('cancel')
@@ -186,6 +298,7 @@ def loan_views(conn, user_id: str, rows) -> list[LoanView]:
                              'WHERE loan_id = ANY(%s) ORDER BY loan_id, position', ([row['id'] for row in rows],)):
         lines.setdefault(line['loan_id'], []).append(line)
     cards = card_facts(conn, [line['edition_id'] for found in lines.values() for line in found])
+    facts = loan_facts(conn, user_id, rows)
     others = {row['borrower_id'] if row['lender_id'] == user_id else row['lender_id'] for row in rows} - {None}
     handles = {profile['user_id']: profile['handle'] for profile in conn.execute(
         'SELECT user_id, handle FROM collector_profile WHERE user_id = ANY(%s)', (sorted(others),))} if others else {}
@@ -194,6 +307,7 @@ def loan_views(conn, user_id: str, rows) -> list[LoanView]:
         role = role_of(user_id, row)
         other_id = row['borrower_id'] if role == 'lender' else row['lender_id']
         mine, theirs = confirmed(user_id, row)
+        known = facts[row['id']]
         card_lines = []
         for line in lines.get(row['id'], []):
             card = cards[line['edition_id']]
@@ -201,7 +315,16 @@ def loan_views(conn, user_id: str, rows) -> list[LoanView]:
                 edition_id=card.edition_id, name=card.name, set_code=card.set_code, set_name=card.set_name,
                 collector_number=card.collector_number, descriptor=card.descriptor, image_url=card.image_url,
                 requested=str(line['requested']), promised=str(line['promised']),
-                written_off=str(line['written_off'])))
+                written_off=str(line['written_off']), returned=str(known.returned.get(line['edition_id'], 0))))
+        pending = known.pending
+        if pending is not None:
+            order = {line['edition_id']: index for index, line in enumerate(lines.get(row['id'], []))}
+            pending = PendingReturn(
+                started_by='you' if pending['started_by'] == role else 'them',
+                lines=[ReturnLine(edition_id=edition, copies=str(copies)) for edition, copies in
+                       sorted(pending['lines'].items(), key=lambda item: order.get(item[0], 0))],
+                you_confirmed=pending[f'{role}_confirmed'],
+                they_confirmed=pending['borrower_confirmed' if role == 'lender' else 'lender_confirmed'])
         closed_by = None if row['closed_by'] is None else 'you' if row['closed_by'] == user_id else 'them'
         views.append(LoanView(
             id=row['id'], kind=row['kind'], state=row['state'], closed_reason=row['closed_reason'],
@@ -210,10 +333,10 @@ def loan_views(conn, user_id: str, rows) -> list[LoanView]:
                             display_name=row['borrower_name'] if role == 'lender' else row['lender_name'],
                             handle=handles.get(other_id)),
             return_by=row['return_by'], you_confirmed_handover=mine, they_confirmed_handover=theirs,
-            lines=card_lines, needs_you=needs_you(user_id, row), section=section(user_id, row),
+            lines=card_lines, needs_you=needs_you(user_id, row, known), section=section(user_id, row, known),
             actions=allowed(user_id, row, other_id in handles,
-                            any(line['written_off'] > 0 for line in lines.get(row['id'], []))),
-            revision=row['revision']))
+                            any(line['written_off'] > 0 for line in lines.get(row['id'], [])), known),
+            revision=row['revision'], pending_return=pending))
     return views
 
 
@@ -312,7 +435,7 @@ def run_step(user_id: str, loan_id: UUID, step: LoanStep, action: str, apply, lo
                                                         (other,)).fetchone() is not None
             written_off = conn.execute('SELECT 1 FROM loan_line WHERE loan_id=%s AND written_off > 0 LIMIT 1',
                                        (loan_id,)).fetchone() is not None
-            if action not in allowed(user_id, row, exists, written_off):
+            if action not in allowed(user_id, row, exists, written_off, loan_facts(conn, user_id, [row])[loan_id]):
                 error(409, 'STEP_NOT_ALLOWED')
             write_loan(conn, loan_id, apply(conn, row) or {})
             return store(conn, user_id, step.idempotency_key, digest, loan_id)

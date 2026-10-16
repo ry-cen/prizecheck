@@ -10,8 +10,8 @@ Deck's picked copies are reserved or lent to. ``move_picks`` is the one Loan wri
 deletion or leaf conversion moves a Location's Holdings, the picks that name it move with them.
 
 ``lent_counts`` (#253) reads the copies the lender handed over and hasn't had back or written off: they are in no
-Holding, still the lender's, and ``lent_picks`` says which Locations they came from. ``borrowed_in`` joins these in
-#254.
+Holding, still the lender's, and ``lent_picks`` says which Locations they came from. Both read the lent picks, which a
+lender's return (#255) and Write-off (#257) cut, so the two always agree.
 
 Nothing here reads another collector's inventory, and nothing names a Location to anyone but its owner.
 """
@@ -20,7 +20,7 @@ from uuid import UUID
 
 # The Loans whose promised copies are still reserved (migration 105's loan_reserving index).
 RESERVING = "o.state IN ('offered','accepted') AND o.lender_handover_at IS NULL"
-# The Loans whose promised copies the lender handed over and that haven't closed. #255 takes returned copies off.
+# The Loans whose promised copies the lender handed over and that haven't closed. Their lent picks are what is out.
 LENDING = "o.lender_handover_at IS NOT NULL AND o.state <> 'closed'"
 
 
@@ -82,17 +82,18 @@ def deck_loan_picks(conn, owner_id: str, deck_id: UUID) -> list[dict]:
 
 
 def lent_counts(conn, owner_id: str, edition_ids: Iterable[UUID] | None) -> dict[UUID, int]:
-    """Copies of each Edition the owner has handed over to open Loans and not had back or written off (#253; #255 takes
-    returns off), or of every Edition with None. They are in no Holding and still the owner's. Editions with none are
+    """Copies of each Edition the owner has handed over to open Loans and not had back (#255) or written off (#257), or
+    of every Edition with None: the lent picks. They are in no Holding and still the owner's. Editions with none are
     absent. Call it through the module."""
     editions = None if edition_ids is None else sorted(set(edition_ids))
     if editions == []:
         return {}
-    return {row['edition_id']: int(row['lent']) for row in conn.execute(f"""SELECT l.edition_id,
-        sum(l.promised - l.written_off)::bigint AS lent
-      FROM loan o JOIN loan_line l ON l.loan_id = o.id
-      WHERE o.lender_id = %s AND {LENDING} AND (%s::uuid[] IS NULL OR l.edition_id = ANY(%s::uuid[]))
-      GROUP BY l.edition_id HAVING sum(l.promised - l.written_off) > 0""", (owner_id, editions, editions))}
+    return {row['edition_id']: int(row['lent']) for row in conn.execute(f"""SELECT p.edition_id,
+        sum(p.quantity)::bigint AS lent
+      FROM loan o JOIN loan_pick p ON p.loan_id = o.id
+      WHERE o.lender_id = %s AND p.owner_id = %s AND p.state = 'lent' AND {LENDING}
+        AND (%s::uuid[] IS NULL OR p.edition_id = ANY(%s::uuid[]))
+      GROUP BY p.edition_id""", (owner_id, owner_id, editions, editions))}
 
 
 def lent_picks(conn, owner_id: str, edition_ids: Iterable[UUID]) -> dict[UUID, dict[UUID | None, int]]:

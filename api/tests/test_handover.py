@@ -117,10 +117,10 @@ def test_the_lenders_handover_takes_the_picked_copies_out_and_lends_them_with_no
     assert borrowed(loan) == {}
     # A filtered or one-Location listing counts only Holdings.
     assert ok(call('GET', f'/api/collection/holdings?location_id={binder}', misty))['lent'] == '0'
-    # The borrower confirms second: the Loan is handed over for both.
+    # The borrower confirms second: the Loan is handed over for both, and either side may start a return (#255).
     done = ok(handover(ash, loan))
-    assert (done['state'], done['section'], done['actions']) == ('handed_over', 'out_now', [])
-    assert (view(misty, loan)['state'], view(misty, loan)['actions']) == ('handed_over', [])
+    assert (done['state'], done['section'], done['actions']) == ('handed_over', 'out_now', ['start_return'])
+    assert (view(misty, loan)['state'], view(misty, loan)['actions']) == ('handed_over', ['start_return'])
 
 
 def test_the_borrowers_handover_puts_borrowed_copies_in_the_named_deck_and_never_in_holdings(store):
@@ -132,11 +132,12 @@ def test_the_borrowers_handover_puts_borrowed_copies_in_the_named_deck_and_never
     assert borrowed(loan) == {(charizard, iono): 3}
     assert ok(call('GET', f'/api/holdings/{charizard}', ash))['holdings'] == []
     assert whole_collection(ash) == ('0', '0')
-    # Misty is asked now; once she confirms, the Loan is handed over and nothing more can be taken back.
+    # Misty is asked now; once she confirms, the Loan is handed over and nothing more can be taken back: either side
+    # may start a return (#255).
     assert view(misty, loan)['needs_you'] is True
     done = ok(handover(misty, loan))
-    assert (done['state'], done['section'], done['actions']) == ('handed_over', 'out_now', [])
-    assert view(ash, loan)['actions'] == []
+    assert (done['state'], done['section'], done['actions']) == ('handed_over', 'out_now', ['start_return'])
+    assert view(ash, loan)['actions'] == ['start_return']
     assert code(take_back(ash, loan)) == (409, 'STEP_NOT_ALLOWED')
 
 

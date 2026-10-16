@@ -26,6 +26,15 @@ the Collection's Borrowed entry, and ``POST /api/loans/borrowed/move`` moves som
 another of the borrower's Storage Leaves or Decks, under the borrower's own lock. It is its own route, never a general
 Move: a Borrowed Copy keeps its Loan and never joins the borrower's Holdings. A Borrowed Copy arriving in a Deck adds or
 raises its Deck List line as an owned copy would (migration 115).
+
+**Returns** (#255): ``POST /api/loans/{id}/returns`` starts a return of some of the copies still out from the caller's
+side (the lender's **Record a return**, the borrower's **Give cards back**) and is that side's confirmation;
+``POST /api/loans/{id}/returns/confirm`` is the other side's (**Yes, they're back**, **Yes, I gave them back**). Each
+moves only the caller's own inventory, under the caller's own lock, with no Undo record: the lender's copies leave the
+Loan's lent picks, last pick first, and go back to each pick's source Location, or Unsorted when the source is gone or
+holds no cards now; the borrower's Borrowed Copies leave, loose Locations first, then Decks, whose lines stay. A return
+only one side confirmed is complete when the other side's account is gone. The step that leaves nothing out closes the
+Loan: ``returned`` when nothing was written off, else ``written_off``.
 """
 import json
 from datetime import date
@@ -43,7 +52,7 @@ from .social import counts
 from .social.friend_copies import friend_copies
 from .social.friend_reads import card_facts
 from .social.friends import friend_ids
-from .social.loans import (NOW, LoanStep, LoanView, begin_command, advance_revision, run_step, store)
+from .social.loans import (NOW, LoanStep, LoanView, begin_command, advance_revision, close, run_step, store)
 from .social.owners import ensure_owner, lock_owners
 
 router = APIRouter(prefix='/api/loans', tags=['loans'])
@@ -76,6 +85,17 @@ class PromisedLine(BaseModel):
 
 class AcceptBorrowRequest(LoanStep):
     lines: list[PromisedLine] = Field(min_length=1, max_length=MAX_LOAN_LINES)
+
+
+class ReturnedLine(BaseModel):
+    edition_id: UUID
+    # Copies returned, "0" to leave the line out.
+    quantity: str
+
+
+class StartReturn(LoanStep):
+    """A return of some of the copies out from the caller's side (#255)."""
+    lines: list[ReturnedLine] = Field(min_length=1, max_length=MAX_LOAN_LINES)
 
 
 class PromiseLimit(BaseModel):
@@ -379,10 +399,11 @@ def accept(loan_id: UUID, command: AcceptBorrowRequest, user_id: str = Depends(v
 def lent_out(user_id: str = Depends(verified_user)):
     """The Lent out entry: every copy the collector handed over to an open Loan and hasn't had back or written off."""
     with connect() as conn, conn.transaction():
-        rows = conn.execute(f"""SELECT o.id AS loan_id, o.borrower_name, l.edition_id,
-            (l.promised - l.written_off) AS copies
-          FROM loan o JOIN loan_line l ON l.loan_id = o.id
-          WHERE o.lender_id = %s AND {counts.LENDING} AND l.promised > l.written_off""", (user_id,)).fetchall()
+        # The lent picks: what is out once returns (#255) and Write-offs (#257) took theirs.
+        rows = conn.execute(f"""SELECT o.id AS loan_id, o.borrower_name, p.edition_id, sum(p.quantity)::bigint AS copies
+          FROM loan o JOIN loan_pick p ON p.loan_id = o.id
+          WHERE o.lender_id = %s AND p.owner_id = %s AND p.state = 'lent' AND {counts.LENDING}
+          GROUP BY o.id, o.borrower_name, p.edition_id""", (user_id, user_id)).fetchall()
         cards = card_facts(conn, [row['edition_id'] for row in rows])
     rows.sort(key=lambda row: (row['borrower_name'].casefold(), cards[row['edition_id']].order(), str(row['loan_id'])))
     return LentOut(cards=[LentCard(
@@ -614,3 +635,166 @@ def use_suggested_picks(loan_id: UUID, step: LoanStep, user_id: str = Depends(ve
     # Allowed while the lender may still confirm the handover; its own name keeps its digest apart from the handover's.
     return run_step(user_id, loan_id, step, 'confirm_handover', apply, lambda role, row: [user_id],
                     {'command': 'use_suggested_picks'})
+
+
+def lent_by_edition(conn, loan_id: UUID) -> dict[UUID, int]:
+    """The lender's copies out on a Loan, by Edition: its lent picks."""
+    return {row['edition_id']: int(row['copies']) for row in conn.execute(
+        """SELECT edition_id, sum(quantity)::bigint AS copies FROM loan_pick WHERE loan_id=%s AND state='lent'
+        GROUP BY edition_id""", (loan_id,))}
+
+
+def borrowed_out(conn, loan_id: UUID) -> dict[UUID, int]:
+    """The borrower's copies out on a Loan, by Edition: promised, less those written off (#257) and those the borrower
+    confirmed returning (#255). Copies written off and still held wait for the borrower's keep-or-remove choice."""
+    return {row['edition_id']: int(row['copies']) for row in conn.execute(
+        """SELECT l.edition_id, l.promised - l.written_off - coalesce((SELECT sum(rl.quantity) FROM loan_return_line rl
+            JOIN loan_return r ON r.id = rl.return_id
+            WHERE r.loan_id = l.loan_id AND rl.edition_id = l.edition_id AND r.borrower_confirmed_at IS NOT NULL), 0)
+            AS copies
+          FROM loan_line l WHERE l.loan_id = %s""", (loan_id,))}
+
+
+def return_lent(conn, user_id: str, loan_id: UUID, lines: dict[UUID, int]) -> None:
+    """The lender's side of a return: each Edition's copies leave the Loan's lent picks, last pick first, and go back to
+    the pick's source Location, or Unsorted when the source is gone or holds no cards now, with no Undo record (as a
+    take-back puts them back). 409 MORE_THAN_OUT when the picks hold fewer."""
+    rows = _locations(conn, user_id)
+    unsorted = None
+    items: dict[tuple, int] = {}
+    for edition, copies in sorted(lines.items(), key=lambda item: str(item[0])):
+        left = copies
+        for pick in conn.execute("""SELECT id, source_location_id, quantity FROM loan_pick
+          WHERE loan_id=%s AND owner_id=%s AND edition_id=%s AND state='lent' ORDER BY id DESC""",
+                                 (loan_id, user_id, edition)).fetchall():
+            if left == 0:
+                break
+            taken = min(left, int(pick['quantity']))
+            left -= taken
+            source = pick['source_location_id']
+            if source is None or first_non_leaf(conn, user_id, [source]) is not None:
+                unsorted = unsorted or unsorted_leaf(conn, user_id, rows, None)
+                source = unsorted
+            if taken == pick['quantity']:
+                conn.execute('DELETE FROM loan_pick WHERE id=%s', (pick['id'],))
+            else:
+                conn.execute('UPDATE loan_pick SET quantity=quantity-%s WHERE id=%s', (taken, pick['id']))
+            items[(source, edition)] = items.get((source, edition), 0) + taken
+        if left:
+            refuse(409, 'MORE_THAN_OUT', edition_id=edition, out=copies - left)
+    put_back(conn, user_id, [(source, edition, copies) for (source, edition), copies in
+                             sorted(items.items(), key=lambda item: (str(item[0][0]), str(item[0][1])))],
+             _owner_revision(conn, user_id))
+
+
+def give_back(conn, user_id: str, loan_id: UUID, lines: dict[UUID, int]) -> None:
+    """The borrower's side of a return: each Edition's Borrowed Copies of the Loan leave, from loose Locations first,
+    largest first, then Decks, whose lines stay (spec story 115). 409 MORE_THAN_OUT when fewer are held."""
+    for edition, copies in sorted(lines.items(), key=lambda item: str(item[0])):
+        left = copies
+        for place in conn.execute("""SELECT b.location_id, b.quantity FROM borrowed_holding b
+          JOIN location l ON l.owner_id = b.borrower_id AND l.id = b.location_id
+          WHERE b.loan_id=%s AND b.borrower_id=%s AND b.edition_id=%s
+          ORDER BY (l.kind = 'deck'), b.quantity DESC, b.location_id""", (loan_id, user_id, edition)).fetchall():
+            if left == 0:
+                break
+            taken = min(left, int(place['quantity']))
+            left -= taken
+            if taken == place['quantity']:
+                conn.execute('DELETE FROM borrowed_holding WHERE loan_id=%s AND location_id=%s AND edition_id=%s',
+                             (loan_id, place['location_id'], edition))
+            else:
+                conn.execute("""UPDATE borrowed_holding SET quantity=quantity-%s
+                  WHERE loan_id=%s AND location_id=%s AND edition_id=%s""",
+                             (taken, loan_id, place['location_id'], edition))
+        if left:
+            refuse(409, 'MORE_THAN_OUT', edition_id=edition, out=copies - left)
+    advance_revision(conn, user_id)
+
+
+def close_if_settled(conn, row, user_id: str) -> dict | None:
+    """Closes the Loan once nothing is out (spec "Closing"): no return pending, the lender's side settled (no lent
+    copies left, or the lender is gone) and the borrower's (no Borrowed Copies of the Loan left, never confirmed the
+    handover, or gone). ``returned`` when nothing was written off, else ``written_off``. Returns ``close``'s columns for
+    the step to return, so closing is part of the step's one write of the Loan row, or None when the Loan stays open.
+    Decided from ``row``, read under the Loan row lock. The borrower's copies are read by Loan, as a count, under the
+    Loan row lock every step that changes them holds."""
+    loan_id = row['id']
+    if conn.execute('SELECT 1 FROM loan_return WHERE loan_id=%s AND completed_at IS NULL', (loan_id,)).fetchone():
+        return None
+    sides = [side for side in (row['lender_id'], row['borrower_id']) if side is not None]
+    alive = {profile['user_id'] for profile in conn.execute(
+        'SELECT user_id FROM collector_profile WHERE user_id = ANY(%s)', (sides,))}
+    if row['lender_id'] in alive and (row['lender_handover_at'] is None or conn.execute(
+            "SELECT 1 FROM loan_pick WHERE loan_id=%s AND state='lent' LIMIT 1", (loan_id,)).fetchone()):
+        return None
+    if row['borrower_id'] in alive and row['borrower_handover_at'] is not None and conn.execute(
+            'SELECT 1 FROM borrowed_holding WHERE loan_id=%s LIMIT 1', (loan_id,)).fetchone():
+        return None
+    written_off = conn.execute('SELECT 1 FROM loan_line WHERE loan_id=%s AND written_off > 0 LIMIT 1',
+                               (loan_id,)).fetchone()
+    return close(conn, row, user_id, 'written_off' if written_off else 'returned')
+
+
+def _other_gone(conn, user_id: str, row) -> bool:
+    other = row['borrower_id'] if row['lender_id'] == user_id else row['lender_id']
+    return other is None or conn.execute('SELECT 1 FROM collector_profile WHERE user_id=%s',
+                                         (other,)).fetchone() is None
+
+
+@router.post('/{loan_id}/returns', response_model=LoanView)
+def start_return(loan_id: UUID, command: StartReturn, user_id: str = Depends(verified_user)):
+    """Either side starts a return of copies out from its side, which is its confirmation: its own inventory moves now
+    (``return_lent`` or ``give_back``). Each line is at most the copies out from the caller's side (409 MORE_THAN_OUT);
+    a line of 0 is left out (422 NOTHING_RETURNED when all are). Complete at once when the other side's account is
+    gone."""
+    lines: dict[UUID, int] = {}
+    for line in command.lines:
+        if line.edition_id in lines:
+            error(422, 'DUPLICATE_EDITION')
+        lines[line.edition_id] = copies_count(line.quantity)
+    lines = {edition: copies for edition, copies in lines.items() if copies}
+    if not lines:
+        error(422, 'NOTHING_RETURNED')
+
+    def apply(conn, row):
+        lender = row['lender_id'] == user_id
+        out = lent_by_edition(conn, loan_id) if lender else borrowed_out(conn, loan_id)
+        on_loan = {line['edition_id'] for line in conn.execute('SELECT edition_id FROM loan_line WHERE loan_id=%s',
+                                                                 (loan_id,))}
+        if set(lines) - on_loan:
+            error(422, 'NOT_ON_LOAN')
+        for edition, copies in sorted(lines.items(), key=lambda item: str(item[0])):
+            if copies > out.get(edition, 0):
+                refuse(409, 'MORE_THAN_OUT', edition_id=edition, out=out.get(edition, 0))
+        side = 'lender' if lender else 'borrower'
+        return_id = uuid4()
+        conn.execute(f"""INSERT INTO loan_return(id, loan_id, started_by, {side}_confirmed_at, completed_at)
+          VALUES (%s, %s, %s, now(), CASE WHEN %s THEN now() END)""",
+                     (return_id, loan_id, side, _other_gone(conn, user_id, row)))
+        for edition, copies in sorted(lines.items(), key=lambda item: str(item[0])):
+            conn.execute('INSERT INTO loan_return_line(return_id, loan_id, edition_id, quantity) VALUES (%s,%s,%s,%s)',
+                         (return_id, loan_id, edition, copies))
+        (return_lent if lender else give_back)(conn, user_id, loan_id, lines)
+        return close_if_settled(conn, row, user_id)
+
+    return run_step(user_id, loan_id, command, 'start_return', apply, lambda role, row: [user_id],
+                    {'lines': {str(edition): copies for edition, copies in sorted(lines.items(), key=str)}})
+
+
+@router.post('/{loan_id}/returns/confirm', response_model=LoanView)
+def confirm_return(loan_id: UUID, step: LoanStep, user_id: str = Depends(verified_user)):
+    """The other side confirms the pending return for its own inventory, which completes it."""
+    def apply(conn, row):
+        lender = row['lender_id'] == user_id
+        pending = conn.execute('SELECT id FROM loan_return WHERE loan_id=%s AND completed_at IS NULL',
+                               (loan_id,)).fetchone()
+        lines = {line['edition_id']: int(line['quantity']) for line in conn.execute(
+            'SELECT edition_id, quantity FROM loan_return_line WHERE return_id=%s', (pending['id'],))}
+        (return_lent if lender else give_back)(conn, user_id, loan_id, lines)
+        side = 'lender' if lender else 'borrower'
+        conn.execute(f'UPDATE loan_return SET {side}_confirmed_at=now(), completed_at=now() WHERE id=%s',
+                     (pending['id'],))
+        return close_if_settled(conn, row, user_id)
+
+    return run_step(user_id, loan_id, step, 'confirm_return', apply, lambda role, row: [user_id])
