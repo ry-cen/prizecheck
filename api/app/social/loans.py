@@ -44,6 +44,11 @@ Loan row. Overdue (from the day after the date, once a handover was confirmed) a
 nobody answered, or an accepted Loan nobody confirmed a handover for, story 89) are worked out on read, and each is a
 notice the reader sees once (``loan_notice_seen``).
 
+**Lend Offers** (#258): the lender sends one from the Collection, which reserves its copies (``app.loan_inventory``);
+the borrower accepts all or part of it there, or declines it here, and the lender withdraws it here. Declining or
+withdrawing releases the copies, so it moves the lender's revision: a decline locks both owners, a withdraw the
+lender. An offer nobody answered for 14 days nudges both sides once, as a Borrow Request does.
+
 **Needs you** (``needs_you``) is the one definition the Loans tab and, from #259, the inbox read. ``section`` places a
 Loan on the Loans tab: needs you, out now, pending or history.
 """
@@ -265,7 +270,7 @@ def loan_facts(conn, user_id: str, rows) -> dict[UUID, LoanFacts]:
                    and clock['today'] > row['return_by'])
         nudge = ((row['state'] == 'accepted' and not handed and row['accepted_at'] is not None
                   and row['accepted_at'] <= clock['stale'])
-                 or (row['state'] == 'requested' and row['created_at'] <= clock['stale']))
+                 or (row['state'] in ('requested', 'offered') and row['created_at'] <= clock['stale']))
         showing = [kind for kind, on in (('overdue', overdue), ('nudge', nudge)) if on]
         facts[row['id']] = LoanFacts(
             other_exists=others[row['id']] in alive,
@@ -326,7 +331,7 @@ def allowed(user_id: str, row, other_exists: bool = True, written_off: bool = Fa
     role, state = role_of(user_id, row), row['state']
     mine, theirs = confirmed(user_id, row) if state == 'accepted' else (False, False)
     found = []
-    if state == 'requested' and role == 'lender':
+    if (state, role) in (('requested', 'lender'), ('offered', 'borrower')):
         found += ['accept', 'decline']
     if state == 'accepted' and not mine:
         found.append('confirm_handover')
@@ -339,7 +344,7 @@ def allowed(user_id: str, row, other_exists: bool = True, written_off: bool = Fa
             found.append('confirm_return')
         if role == 'borrower' and facts.awaiting > 0:
             found.append('choose_written_off')
-    if state == 'requested' and role == 'borrower':
+    if (state, role) in (('requested', 'borrower'), ('offered', 'lender')):
         found.append('withdraw')
     if state == 'accepted' and mine and not theirs and not written_off and not (facts and facts.any_return):
         found.append('take_back')
@@ -568,18 +573,29 @@ def close(conn, row, user_id: str, reason: str) -> dict:
     return {'state': 'closed', 'closed_reason': reason, 'closed_by': user_id, 'closed_at': NOW}
 
 
+def release(conn, row, user_id: str, reason: str) -> dict:
+    """Ends a Borrow Request or Lend Offer nobody accepted: a Lend Offer's copies stop being reserved, which moves the
+    lender's revision (#258); a Borrow Request reserved nothing."""
+    if row['kind'] == 'lend_offer':
+        advance_revision(conn, row['lender_id'])
+    return close(conn, row, user_id, reason)
+
+
 @router.post('/{loan_id}/decline', response_model=LoanView)
 def decline(loan_id: UUID, step: LoanStep, user_id: str = Depends(verified_user)):
-    """The lender says no to a Borrow Request. Nothing was reserved, so no revision moves."""
-    return run_step(user_id, loan_id, step, 'decline', lambda conn, row: close(conn, row, user_id, 'declined'),
-                    lambda role, row: [row['lender_id']])
+    """The lender says no to a Borrow Request, locking only themself, or the borrower to a Lend Offer, which releases
+    its copies and locks both (#258)."""
+    return run_step(user_id, loan_id, step, 'decline', lambda conn, row: release(conn, row, user_id, 'declined'),
+                    lambda role, row: [row['lender_id']] if row['kind'] == 'borrow_request'
+                    else [row['lender_id'], row['borrower_id']])
 
 
 @router.post('/{loan_id}/withdraw', response_model=LoanView)
 def withdraw(loan_id: UUID, step: LoanStep, user_id: str = Depends(verified_user)):
-    """The borrower takes back a Borrow Request before it is answered. Only the Loan row is locked."""
-    return run_step(user_id, loan_id, step, 'withdraw', lambda conn, row: close(conn, row, user_id, 'withdrawn'),
-                    lambda role, row: [])
+    """The borrower takes back a Borrow Request before it is answered, locking only the Loan row; or the lender a Lend
+    Offer, which releases its copies under the lender's lock (#258)."""
+    return run_step(user_id, loan_id, step, 'withdraw', lambda conn, row: release(conn, row, user_id, 'withdrawn'),
+                    lambda role, row: [row['lender_id']] if row['kind'] == 'lend_offer' else [])
 
 
 @router.post('/{loan_id}/cancel', response_model=LoanView)

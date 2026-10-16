@@ -43,6 +43,14 @@ hold (``POST /api/loans/{id}/written-off``, under their own lock): **keep** turn
 with one Undo record per Location and no Deck List change (they were already there); **remove** takes them away. The
 count awaiting the choice is derived (``borrowed_copies.awaiting_choice``); the borrower's side lists where the copies
 are (``LoanSide.awaiting_choice``, loose Locations first), and the step names exactly those places.
+
+**Lend Offers** (#258): ``POST /api/loans/offers`` sends a Friend copies the lender selected in their Collection, each
+by its Location. Sending reserves them at once under the lender's lock: the Loan Pick List is the selected Holdings,
+in the order selected, and each is at most the copies there no other Loan's pick still covers, so the same copies are
+never offered or promised twice. ``POST /api/loans/{id}/accept-offer`` is the borrower's answer: a count per line (0
+leaves a line out) and the Deck the cards go to. It locks both owners: the borrower's, so the Deck checked is the Deck
+written (a Deck deletion waits for it, or it finds the Deck gone), and the lender's, as the copies not taken are
+released, last pick first, which moves the lender's revision.
 """
 import json
 from datetime import date
@@ -63,7 +71,7 @@ from .social.friend_copies import friend_copies
 from .social.friend_reads import card_facts
 from .social.friends import friend_ids
 from .social.loans import (NOW, LoanStep, LoanView, begin_command, advance_revision, close, return_by_columns, run_step,
-                           store)
+                           store, today)
 from .social.owners import ensure_owner, lock_owners
 
 router = APIRouter(prefix='/api/loans', tags=['loans'])
@@ -92,6 +100,29 @@ class PromisedLine(BaseModel):
     edition_id: UUID
     # Copies promised, "0" to leave the line out.
     promised: str
+
+
+class OfferedCopies(BaseModel):
+    """Copies of one Holding the lender selected: its Location and Card Edition."""
+    location_id: UUID
+    edition_id: UUID
+    quantity: str
+
+
+class SendLendOffer(BaseModel):
+    """A Lend Offer to a Friend (``borrower_id``, a ``collector_id`` the Friends list gave) of the copies the lender
+    selected in their Collection (#258)."""
+    borrower_id: str = Field(min_length=1, max_length=200)
+    copies: list[OfferedCopies] = Field(min_length=1, max_length=200)
+    return_by: date | None = None
+    idempotency_key: UUID
+
+
+class AcceptLendOffer(LoanStep):
+    """The borrower's answer to a Lend Offer (#258): the copies taken per line ("0" leaves a line out; the rest is
+    released) and one of their Decks for the cards (None for Unsorted)."""
+    lines: list[PromisedLine] = Field(min_length=1, max_length=MAX_LOAN_LINES)
+    deck_id: UUID | None = None
 
 
 class AcceptBorrowRequest(LoanStep):
@@ -409,6 +440,9 @@ def accept(loan_id: UUID, command: AcceptBorrowRequest, user_id: str = Depends(v
         promised[line.edition_id] = copies_count(line.promised)
 
     def apply(conn, row):
+        # 'accept' is also the borrower's answer to a Lend Offer, on its own route (#258).
+        if row['state'] != 'requested':
+            error(409, 'STEP_NOT_ALLOWED')
         if row['borrower_id'] not in friend_ids(conn, user_id):
             error(409, 'NOT_FRIENDS')
         asked = {line['edition_id']: int(line['requested']) for line in conn.execute(
@@ -435,6 +469,110 @@ def accept(loan_id: UUID, command: AcceptBorrowRequest, user_id: str = Depends(v
     return run_step(user_id, loan_id, command, 'accept', apply, lambda role, row: [row['lender_id']],
                     {'lines': {str(edition): copies for edition, copies in sorted(promised.items(), key=str)},
                      'return_by': 'keep' if keeps_date else command.return_by and command.return_by.isoformat()})
+
+
+@router.post('/offers', response_model=LoanView, status_code=201)
+def send_lend_offer(command: SendLendOffer, user_id: str = Depends(verified_user)):
+    """The lender offers a Friend copies from their Collection (**Lend to a Friend…**, #258), reserving them at once
+    under the lender's own lock: 409 NOT_ENOUGH_COPIES (with ``edition_id`` and ``available``) when a Location has
+    fewer free copies than selected, or the lender fewer copies of an Edition than all open Loans and this offer
+    need. Each line is offered and promised in full until the borrower answers."""
+    if command.borrower_id == user_id:
+        error(409, 'OWN_ACCOUNT')
+    places: dict[tuple[UUID, UUID], int] = {}
+    for item in command.copies:
+        key = (item.edition_id, item.location_id)
+        places[key] = places.get(key, 0) + quantity(item.quantity)
+    lines: dict[UUID, int] = {}
+    for (edition, _), copies in places.items():
+        lines[edition] = lines.get(edition, 0) + copies
+    if len(lines) > MAX_LOAN_LINES:
+        error(422, 'TOO_MANY_LINES')
+    payload = {'action': 'loan_offer', **command.model_dump(mode='json', exclude={'idempotency_key'})}
+    with connect() as conn, conn.transaction():
+        digest, stored = begin_command(conn, user_id, command.idempotency_key, payload)
+        if stored is not None:
+            return stored
+        if command.return_by is not None and command.return_by < today(conn):
+            error(422, 'INVALID_RETURN_BY')
+        # Only the lender's own rows are read and written; the borrower's are not locked.
+        lock_owners(conn, user_id)
+        if command.borrower_id not in friend_ids(conn, user_id):
+            error(409, 'NOT_FRIENDS')
+        editions = sorted(lines, key=str)
+        available = can_promise(conn, user_id, editions)
+        _, _, covered = pick_shortfalls(conn, user_id, editions)
+        held = {(row['edition_id'], row['location_id']): int(row['quantity']) for row in conn.execute(
+            'SELECT edition_id, location_id, quantity FROM holding WHERE owner_id=%s AND edition_id = ANY(%s)',
+            (user_id, editions))}
+        for (edition, location), copies in sorted(places.items(), key=lambda item: (str(item[0][0]), str(item[0][1]))):
+            free = held.get((edition, location), 0) - covered.get(edition, {}).get(location, 0)
+            if copies > free:
+                refuse(409, 'NOT_ENOUGH_COPIES', edition_id=edition, available=max(0, free))
+        for edition in editions:
+            if lines[edition] > available[edition]:
+                refuse(409, 'NOT_ENOUGH_COPIES', edition_id=edition, available=available[edition])
+        names = {row['user_id']: row['display_name'] for row in conn.execute(
+            'SELECT user_id, display_name FROM collector_profile WHERE user_id = ANY(%s)',
+            ([user_id, command.borrower_id],))}
+        loan_id = uuid4()
+        conn.execute("""INSERT INTO loan(id, kind, state, lender_id, borrower_id, lender_name, borrower_name, return_by)
+            VALUES (%s, 'lend_offer', 'offered', %s, %s, %s, %s, %s)""",
+                     (loan_id, user_id, command.borrower_id, names[user_id], names[command.borrower_id],
+                      command.return_by))
+        for position, (edition, copies) in enumerate(lines.items()):
+            conn.execute('INSERT INTO loan_line(loan_id, edition_id, position, requested, promised) '
+                         'VALUES (%s, %s, %s, %s, %s)', (loan_id, edition, position, copies, copies))
+        # The picks in the order selected, so a partial acceptance releases the last ones first.
+        for (edition, location), copies in places.items():
+            conn.execute('INSERT INTO loan_pick(loan_id, owner_id, edition_id, source_location_id, quantity) '
+                         'VALUES (%s, %s, %s, %s, %s)', (loan_id, user_id, edition, location, copies))
+        advance_revision(conn, user_id)
+        return store(conn, user_id, command.idempotency_key, digest, loan_id)
+
+
+@router.post('/{loan_id}/accept-offer', response_model=LoanView)
+def accept_offer(loan_id: UUID, command: AcceptLendOffer, user_id: str = Depends(verified_user)):
+    """The borrower accepts a Lend Offer in whole or in part (#258): each line at most what was offered (422
+    MORE_THAN_OFFERED), at least one copy in all (422 NOTHING_PROMISED), and the cards for one of their own Decks (404
+    DECK_NOT_FOUND) or Unsorted. The copies not taken stop being reserved, last pick first. Both owners are locked."""
+    taken: dict[UUID, int] = {}
+    for line in command.lines:
+        if line.edition_id in taken:
+            error(422, 'DUPLICATE_EDITION')
+        taken[line.edition_id] = copies_count(line.promised)
+
+    def apply(conn, row):
+        if row['state'] != 'offered':
+            error(409, 'STEP_NOT_ALLOWED')
+        if row['lender_id'] not in friend_ids(conn, user_id):
+            error(409, 'NOT_FRIENDS')
+        offered = {line['edition_id']: int(line['promised']) for line in conn.execute(
+            'SELECT edition_id, promised FROM loan_line WHERE loan_id=%s', (loan_id,))}
+        if set(offered) != set(taken):
+            error(422, 'LINES_DONT_MATCH')
+        if any(taken[edition] > offered[edition] for edition in offered):
+            error(422, 'MORE_THAN_OFFERED')
+        if not any(taken.values()):
+            error(422, 'NOTHING_PROMISED')
+        if command.deck_id is not None and conn.execute(
+                "SELECT 1 FROM location WHERE owner_id=%s AND id=%s AND kind='deck'",
+                (user_id, command.deck_id)).fetchone() is None:
+            error(404, 'DECK_NOT_FOUND')
+        released = {edition: offered[edition] - taken[edition] for edition in offered
+                    if offered[edition] > taken[edition]}
+        if released:
+            for edition in sorted(released, key=str):
+                conn.execute('UPDATE loan_line SET promised=%s WHERE loan_id=%s AND edition_id=%s',
+                             (taken[edition], loan_id, edition))
+            cut_picks(conn, row['lender_id'], loan_id, released, 'reserved')
+            advance_revision(conn, row['lender_id'])
+        return {'state': 'accepted', 'accepted_at': NOW, 'deck_id': command.deck_id}
+
+    return run_step(user_id, loan_id, command, 'accept', apply,
+                    lambda role, row: [row['lender_id'], row['borrower_id']],
+                    {'lines': {str(edition): copies for edition, copies in sorted(taken.items(), key=str)},
+                     'deck_id': str(command.deck_id) if command.deck_id else None})
 
 
 @router.get('/lent-out', response_model=LentOut)
@@ -844,13 +982,14 @@ def confirm_return(loan_id: UUID, step: LoanStep, user_id: str = Depends(verifie
     return run_step(user_id, loan_id, step, 'confirm_return', apply, lambda role, row: [user_id])
 
 
-def cut_lent(conn, user_id: str, loan_id: UUID, lines: dict[UUID, int]) -> None:
-    """Takes each Edition's copies off the Loan's lent picks, last pick first, putting them nowhere (a Write-off)."""
+def cut_picks(conn, user_id: str, loan_id: UUID, lines: dict[UUID, int], state: str = 'lent') -> None:
+    """Takes each Edition's copies off the Loan's picks in ``state``, last pick first, putting them nowhere: lent
+    copies a Write-off takes, or reserved copies a partly accepted Lend Offer releases (#258)."""
     for edition, copies in sorted(lines.items(), key=lambda item: str(item[0])):
         left = copies
         for pick in conn.execute("""SELECT id, quantity FROM loan_pick
-          WHERE loan_id=%s AND owner_id=%s AND edition_id=%s AND state='lent' ORDER BY id DESC""",
-                                 (loan_id, user_id, edition)).fetchall():
+          WHERE loan_id=%s AND owner_id=%s AND edition_id=%s AND state=%s ORDER BY id DESC""",
+                                 (loan_id, user_id, edition, state)).fetchall():
             if left == 0:
                 break
             taken = min(left, int(pick['quantity']))
@@ -890,7 +1029,7 @@ def write_off(loan_id: UUID, command: WriteOff, user_id: str = Depends(verified_
         for edition, copies in sorted(lines.items(), key=lambda item: str(item[0])):
             if copies > out.get(edition, 0):
                 refuse(409, 'MORE_THAN_OUT', edition_id=edition, out=max(0, out.get(edition, 0)))
-        cut_lent(conn, user_id, loan_id, lines)
+        cut_picks(conn, user_id, loan_id, lines)
         for edition, copies in lines.items():
             conn.execute('UPDATE loan_line SET written_off = written_off + %s WHERE loan_id=%s AND edition_id=%s',
                          (copies, loan_id, edition))
