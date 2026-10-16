@@ -27,6 +27,9 @@ type Props = {
    * it, the desktop sidebar: the tree stays in view while the gallery scrolls, so a drag can always
    * reach a leaf, and Add child overlays the row end, shown on hover or keyboard focus. */
   touch?: boolean;
+  /** The Lent out entry (social network #253): copies lent to Friends, in no Location, and what opens their list.
+   * Shown only while some copies are out. */
+  lent?: { copies: string; onOpen: () => void } | null;
 };
 
 const LIST = "m-0 flex list-none flex-col gap-1 p-0";
@@ -85,6 +88,7 @@ export function LocationNav({
   onAddChild,
   drop,
   touch = false,
+  lent,
 }: Props) {
   const branch = (node: TreeNode, level: number): React.ReactNode => {
     const folder = isFolder(node);
@@ -192,6 +196,29 @@ export function LocationNav({
             <span className="min-w-0 truncate">All owned</span>
           </button>
         </li>
+        {lent && lent.copies !== "0" && (
+          <li>
+            <button
+              type="button"
+              className={rowClass({
+                touch,
+                current: false,
+                folder: false,
+                droppable: false,
+                over: false,
+              })}
+              style={indent(0)}
+              aria-haspopup="dialog"
+              onClick={lent.onOpen}
+            >
+              <span className="inline-flex w-3 shrink-0" aria-hidden="true" />
+              <span className="min-w-0 flex-1 truncate">Lent out</span>
+              <span className="shrink-0 text-text-muted tabular-nums">
+                {lent.copies}
+              </span>
+            </button>
+          </li>
+        )}
         {index.children(null).map((node) => branch(node, 0))}
       </ul>
     </nav>

@@ -52,6 +52,8 @@ export function countedText(
   if (line.spare !== "0") parts.push(`${line.spare} spare`);
   for (const source of line.counted_from)
     parts.push(`${source.quantity} in ${deckName(source.deck_id)}`);
+  // Copies lent to Friends count for the line (#253): they come back. An older answer has no `lent`.
+  if (line.lent && line.lent !== "0") parts.push(`${line.lent} lent out`);
   if (parts.length > 0) return `Have ${parts.join(" · ")}`;
   if (line.owned === "0") return "None owned";
   return line.owned === "1"

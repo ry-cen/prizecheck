@@ -210,8 +210,13 @@ function Pile({
   editing?: LineEditing;
 }) {
   const label = pileLabel(line);
+  // Lent copies (#253) are owned, out of the Deck: drawn as owned elsewhere, never as not owned.
   const top =
-    line.missing > 0n ? "missing" : line.elsewhere > 0n ? "elsewhere" : "here";
+    line.missing > line.lent
+      ? "missing"
+      : line.elsewhere > 0n || line.lent > 0n
+        ? "elsewhere"
+        : "here";
   return (
     <button
       type="button"
@@ -303,8 +308,13 @@ function ListRow({
               {line.elsewhere.toString()}↻
             </span>
           )}
-          {line.missing > 0n && (
-            <span className="text-text-muted">{line.missing.toString()}$</span>
+          {line.lent > 0n && (
+            <span className="text-text-muted">{line.lent.toString()} lent</span>
+          )}
+          {line.missing > line.lent && (
+            <span className="text-text-muted">
+              {(line.missing - line.lent).toString()}$
+            </span>
           )}
         </span>
         <span className="sr-only">{stateWords(line)}</span>
