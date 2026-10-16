@@ -7,7 +7,7 @@ copies Decks hold for their own lines, placed at the Loan Pick List's picks firs
 ``reserved_counts`` and check that every caller reads the rule: the Deck figures on every route, the competition
 warning, the Swap hint and the copies Replace and import can count. Others make real Loans (#252) and check that the
 copies a Loan picked are the ones left out: Use cards I own, One Deck at a time's count of other Decks' copies, the Swap
-hint and Gather's suggestion.
+hint and Gather's suggestion, even after the copies a pick names moved away.
 """
 from uuid import UUID, uuid4
 
@@ -22,7 +22,9 @@ from test_deck_cost import launches, store  # noqa: F401  (autouse fixtures)
 from test_deck_counting import counting, deck, detail, hold, iono_world, line, need, new_owner
 from test_friend_copies import befriend, collector, ok
 from test_holdings import call
+from test_loan_promises import holding
 from test_loans import accept, sent, view
+from test_moves import commit, selected, stage, start
 from test_want_list import section, want_list
 from want_list_swap_fixtures import seed_swap_catalog
 
@@ -206,6 +208,55 @@ def test_gather_takes_unreserved_copies_first_and_can_still_take_a_reserved_one(
     # Reserved copies stay where they are and can still be gathered before handover.
     line(owner, gardevoir, iono, 2)
     assert suggested() == {a: "1", b: "1"}
+
+
+def move(owner, source, destination, edition, copies):
+    manifest = start(owner, source)
+    version = holding(owner, source, edition)['version']
+    assert stage(owner, manifest, [selected(edition, copies, version)]).status_code == 200
+    assert commit(owner, manifest, destination).status_code == 200
+
+
+def binder(owner, name):
+    return call("POST", "/api/location-tree", owner, {"name": name, "idempotency_key": str(uuid4())}).json()[
+        "location"]["id"]
+
+
+@pytest.mark.parametrize("setting", ["all_at_once", "one_at_a_time"])
+def test_copies_promised_from_a_deck_and_moved_out_of_it_are_never_offered_to_it(store, setting):
+    ids = seed_swap_catalog()
+    owner, _ = new_owner()
+    iono = ids["PAL 185"]
+    gardevoir = deck(owner, "Gardevoir ex", 0)
+    hold(owner, gardevoir, iono, 2)
+    line(owner, gardevoir, iono, 0)   # moving copies in listed them (migration 031): the Deck holds them unlisted
+    assert detail(owner, gardevoir)["deck_list"]["lines"] == []
+    promise(owner, iono, 2)
+    with connect() as conn:
+        assert counts.reserved_picks(conn, owner, [UUID(iono)]) == {UUID(iono): {UUID(gardevoir): 2}}
+    # Both promised copies move to a Binder: the picks still name the Deck, but the reserved copies are the Binder's.
+    shelf = binder(owner, "Binder")
+    move(owner, gardevoir, shelf, iono, 2)
+    with connect() as conn:
+        found = copy_allocation.available_to(conn, owner, [UUID(iono)], setting, deck_id=UUID(gardevoir))
+    assert (found.editions[UUID(iono)].in_deck, found.editions[UUID(iono)].elsewhere) == (0, ())
+
+
+def test_gather_leaves_the_copies_an_out_of_date_pick_still_reserves(store):
+    ids = seed_swap_catalog()
+    owner, _ = new_owner()
+    iono = ids["PAL 185"]
+    gardevoir = deck(owner, "Gardevoir ex", 0)
+    line(owner, gardevoir, iono, 1)
+    first = binder(owner, "Binder")
+    hold(owner, first, iono, 2)
+    promise(owner, iono, 2)
+    # The picked copies move to a Shelf, and a Box gets the one copy no Loan promised.
+    shelf, box = binder(owner, "Shelf"), binder(owner, "Box")
+    move(owner, first, shelf, iono, 2)
+    hold(owner, box, iono, 1)
+    [row] = call("GET", f"/api/decks/{gardevoir}/pick-list", owner).json()["rows"]
+    assert {source["location_id"]: source["suggested"] for source in row["sources"]} == {shelf: "0", box: "1"}
 
 
 def test_reserved_copies_leave_the_spare_copies_on_every_deck_route(store, monkeypatch):

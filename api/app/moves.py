@@ -123,18 +123,27 @@ def check_promises(conn, user_id: str, losing: dict) -> None:
             fail(409, 'PROMISED_TO_LOAN', edition_id=edition, promised=promised[edition])
 
 
+class HoldingShort(RuntimeError):
+    """``take_out`` found a Holding with fewer copies than its caller checked were there: a bug, never a refusal."""
+
+
 def take_out(conn, user_id: str, items: list[tuple[UUID, UUID, int]], revision: int) -> int:
     """Takes copies out of the owner's Holdings, ``items`` as (Location id, Edition id, copies), with no destination and
     no Inventory Undo record: a lender's handover (social network #253), whose copies then sit in no Location. The
     writes are a Removal's. The caller holds the owner lock, read ``revision`` under it and checked every Holding holds
-    its copies. Returns the owner's new revision, which the changed Holdings take as their version."""
+    its copies; ``items`` name each (Location, Edition) once. A Holding short of its copies raises ``HoldingShort``
+    rather than leave it as it was, so the caller's transaction rolls back. Returns the owner's new revision, which the
+    changed Holdings take as their version."""
     new_revision = revision + 1
     for location, edition, copies in items:
-        conn.execute('DELETE FROM holding WHERE owner_id=%s AND location_id=%s AND edition_id=%s AND quantity=%s',
-                     (user_id, location, edition, copies))
-        conn.execute('UPDATE holding SET quantity=quantity-%s,version=%s '
-                     'WHERE owner_id=%s AND location_id=%s AND edition_id=%s AND quantity>%s',
-                     (copies, new_revision, user_id, location, edition, copies))
+        changed = conn.execute('DELETE FROM holding WHERE owner_id=%s AND location_id=%s AND edition_id=%s '
+                               'AND quantity=%s', (user_id, location, edition, copies)).rowcount
+        if not changed:
+            changed = conn.execute('UPDATE holding SET quantity=quantity-%s,version=%s '
+                                   'WHERE owner_id=%s AND location_id=%s AND edition_id=%s AND quantity>%s',
+                                   (copies, new_revision, user_id, location, edition, copies)).rowcount
+        if changed != 1:
+            raise HoldingShort(f'Holding ({location}, {edition}) holds fewer than {copies} copies')
     conn.execute('UPDATE inventory_owner SET revision=%s WHERE user_id=%s', (new_revision, user_id))
     return new_revision
 

@@ -6,26 +6,32 @@ Location, still counted in the Collection and on the Lent out entry, read "lent 
 on the Want List. The borrower's puts Borrowed Copies into the Loan's Deck, or Unsorted, never into their Holdings.
 A side may take its confirmation back until the other confirms, which reverses only its own write; nobody can cancel
 once a side has confirmed. A pick that went out of date is flagged with a suggested source and must be replaced first.
-Steps from the two sides, on one Loan or on two, wait for each other and never deadlock.
+Steps from the two sides, on one Loan or on two, wait for each other and never deadlock, and neither does a step and the
+other collector's Deck deletion: a step writes its Loan row once.
 """
 import ast
 import os
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import psycopg
+import pytest
+from fastapi import HTTPException
 
 from app.main import connect  # noqa: F401  (main first: it includes every router while loading)
+from app import moves
 from app.social import counts
+from app.social.loans import LoanStep, run_step
 from test_batch_add import undo_records
 from test_catalog_targets import isolated_rules  # noqa: F401  (an autouse fixture)
 from test_deck_cost import launches, store  # noqa: F401  (autouse fixtures)
 from test_deck_counting import counting, deck, detail, hold, line
-from test_friend_copies import node, ok, place
+from test_friend_copies import collector, node, ok, place
 from test_holdings import call
-from test_loan_promises import holding
+from test_loan_promises import _waiting_on_a_row, holding
 from test_loans import accept, pair, sent, side, step, view
 from test_moves import commit, selected, stage, start
 from test_want_list import section, want_list
@@ -111,6 +117,10 @@ def test_the_lenders_handover_takes_the_picked_copies_out_and_lends_them_with_no
     assert borrowed(loan) == {}
     # A filtered or one-Location listing counts only Holdings.
     assert ok(call('GET', f'/api/collection/holdings?location_id={binder}', misty))['lent'] == '0'
+    # The borrower confirms second: the Loan is handed over for both.
+    done = ok(handover(ash, loan))
+    assert (done['state'], done['section'], done['actions']) == ('handed_over', 'out_now', [])
+    assert (view(misty, loan)['state'], view(misty, loan)['actions']) == ('handed_over', [])
 
 
 def test_the_borrowers_handover_puts_borrowed_copies_in_the_named_deck_and_never_in_holdings(store):
@@ -140,7 +150,7 @@ def test_borrowed_copies_go_to_unsorted_without_a_deck_and_follow_a_deleted_deck
     refused = call('DELETE', f"/api/location-tree/{found['id']}", ash,
                    {'version': found['version'], 'name': found['name'], 'idempotency_key': str(uuid4())})
     assert code(refused) == (409, 'LOCATION_NOT_EMPTY')
-    # A Deck the borrower deleted before confirming: the copies go to Unsorted.
+    # A Deck the borrower deletes after confirming: its Borrowed Copies follow it to Unsorted.
     gardevoir = deck(ash, 'Gardevoir', 0)
     second = ok(accept(misty, view(misty, sent(ash, misty, [(iono, 1)], deck_id=gardevoir)), [(iono, 1)]))
     ok(handover(ash, second))
@@ -149,6 +159,15 @@ def test_borrowed_copies_go_to_unsorted_without_a_deck_and_follow_a_deleted_deck
     assert call('DELETE', f'/api/decks/{gardevoir}', ash, {'name': named['name'], 'version': named['version'],
                                                            'idempotency_key': str(uuid4())}).status_code == 200
     assert borrowed(second) == {(unsorted, iono): 1}
+    # A Deck the borrower deletes before confirming: the Loan names no Deck now, and the copies go to Unsorted.
+    dragapult = deck(ash, 'Dragapult', 0)
+    third = ok(accept(misty, view(misty, sent(ash, misty, [(iono, 1)], deck_id=dragapult)), [(iono, 1)]))
+    named = node(ash, dragapult)
+    assert call('DELETE', f'/api/decks/{dragapult}', ash, {'name': named['name'], 'version': named['version'],
+                                                           'idempotency_key': str(uuid4())}).status_code == 200
+    assert side(ash, third)['deck'] is None
+    ok(handover(ash, third))
+    assert borrowed(third) == {(unsorted, iono): 1}
 
 
 def test_take_back_reverses_only_that_sides_write_and_nobody_cancels_after_a_confirmation(store):
@@ -171,6 +190,68 @@ def test_take_back_reverses_only_that_sides_write_and_nobody_cancels_after_a_con
     assert ok(take_back(ash, loan))['you_confirmed_handover'] is False
     assert borrowed(loan) == {} and holding(misty, binder, iono)['quantity'] == '3'
     assert code(take_back(ash, loan)) == (409, 'STEP_NOT_ALLOWED')
+
+
+def test_nobody_cancels_once_only_the_borrower_has_confirmed(store):
+    iono, ash, misty, binder, loan = accepted_loan(held=3, asked=2)
+    ok(handover(ash, loan))
+    assert code(step(ash, view(ash, loan), 'cancel')) == (409, 'STEP_NOT_ALLOWED')
+    assert code(step(misty, view(misty, loan), 'cancel')) == (409, 'STEP_NOT_ALLOWED')
+    assert 'cancel' not in view(ash, loan)['actions'] and 'cancel' not in view(misty, loan)['actions']
+    assert view(misty, loan)['state'] == 'accepted' and borrowed(loan) != {}
+
+
+def test_a_handover_or_take_back_replayed_with_its_key_writes_once(store):
+    iono, ash, misty, binder, loan = accepted_loan(held=3, asked=2)
+    path = f"/api/loans/{loan['id']}"
+
+    def twice(user, route):
+        body = {'revision': view(user, loan)['revision'], 'idempotency_key': str(uuid4())}
+        first = ok(call('POST', f'{path}/{route}', user, body))
+        before = (ok(call('GET', '/api/location-tree', user))['owner_revision'], view(user, loan)['revision'])
+        assert ok(call('POST', f'{path}/{route}', user, body)) == first
+        assert (ok(call('GET', '/api/location-tree', user))['owner_revision'], view(user, loan)['revision']) == before
+        return first
+
+    twice(misty, 'handover')
+    assert holding(misty, binder, iono)['quantity'] == '1' and tree_lent(misty) == '2'
+    twice(misty, 'take-back')
+    assert holding(misty, binder, iono)['quantity'] == '3' and tree_lent(misty) == '0'
+    unsorted = node(ash, 'Unsorted')['id']
+    twice(ash, 'handover')
+    assert borrowed(loan) == {(unsorted, iono): 2}
+    twice(ash, 'take-back')
+    assert borrowed(loan) == {}
+
+
+def test_copies_taken_back_to_a_source_that_is_no_longer_a_storage_leaf_go_to_unsorted(store):
+    iono, ash, misty, binder, loan = accepted_loan(held=2, asked=2)
+    ok(handover(misty, loan))
+    # Binder is empty while its copies are out, and gets a Location inside it: it can't hold cards now.
+    page = place(misty, 'Page 1', 'Binder')
+    assert node(misty, binder)['kind'] != 'storage_leaf'
+    ok(take_back(misty, loan))
+    unsorted = node(misty, 'Unsorted')['id']
+    assert holding(misty, unsorted, iono)['quantity'] == '2'
+    assert all(item['edition_id'] != iono for item in ok(call('GET', f'/api/holdings/{page}', misty))['holdings'])
+    assert [(pick['location_id'], pick['name'], pick['copies']) for pick in side(misty, loan)['picks']] == [
+        (unsorted, 'Unsorted', '2')]
+
+
+def test_take_out_refuses_a_holding_short_of_the_copies_asked_and_writes_nothing(store):
+    ids = seed_swap_catalog()
+    owner, _ = collector()
+    binder, box = place(owner, 'Binder'), place(owner, 'Box')
+    hold(owner, binder, ids['PAL 185'], 3)
+    hold(owner, box, ids['SVI 166'], 1)
+    before = ok(call('GET', '/api/location-tree', owner))['owner_revision']
+    with pytest.raises(moves.HoldingShort):
+        with connect() as conn, conn.transaction():
+            moves.take_out(conn, owner, [(UUID(binder), UUID(ids['PAL 185']), 1), (UUID(box), UUID(ids['SVI 166']), 2)],
+                           before)
+    assert holding(owner, binder, ids['PAL 185'])['quantity'] == '3'
+    assert holding(owner, box, ids['SVI 166'])['quantity'] == '1'
+    assert ok(call('GET', '/api/location-tree', owner))['owner_revision'] == before
 
 
 def test_copies_taken_back_return_to_a_deck_as_they_left_it_and_a_gone_source_returns_to_unsorted(store):
@@ -293,9 +374,61 @@ def test_two_loans_stepped_from_both_sides_at_once_never_deadlock(store):
     assert sorted(borrowed(second).values()) == [2]
 
 
+def test_a_lenders_step_and_the_borrowers_deck_deletion_both_commit(store):
+    # The Loan names Ash's Deck, so deleting it cascades into the Loan row Misty's handover holds. The handover writes
+    # that row once, so it never key-shares Ash's owner row, which the Deck deletion holds FOR UPDATE meanwhile.
+    iono, ash, misty, binder, loan = accepted_loan(held=2, asked=2, deck_name='Charizard')
+    charizard = side(ash, loan)['deck']['id']
+    named = node(ash, charizard)
+    drop = _sleeping('loan_pick', 'UPDATE', f"NEW.owner_id = '{misty}' AND NEW.state = 'lent'")
+    try:
+        with ThreadPoolExecutor(max_workers=2) as executor, \
+                psycopg.connect(os.environ['DATABASE_URL'], autocommit=True) as watch:
+            handed = executor.submit(handover, misty, loan)
+            _asleep(watch, 1, [handed])
+            deleted = executor.submit(call, 'DELETE', f'/api/decks/{charizard}', ash,
+                                      {'name': named['name'], 'version': named['version'],
+                                       'idempotency_key': str(uuid4())})
+            _waiting_on_a_row(watch, [handed, deleted])
+            handed, deleted = handed.result(), deleted.result()
+    finally:
+        drop()
+    assert handed.status_code == 200, handed.text
+    assert deleted.status_code == 200, deleted.text
+    assert view(misty, loan)['you_confirmed_handover'] is True and side(ash, loan)['deck'] is None
+
+
+def test_a_step_the_database_ends_in_a_deadlock_answers_503_and_its_retry_runs(store):
+    iono, ash, misty, binder, loan = accepted_loan(held=2, asked=2)
+    key, revision = uuid4(), view(misty, loan)['revision']
+
+    def deadlocked(conn, row):
+        raise psycopg.errors.DeadlockDetected('deadlock detected')
+
+    with pytest.raises(HTTPException) as refused:
+        run_step(misty, UUID(loan['id']), LoanStep(revision=revision, idempotency_key=key), 'confirm_handover',
+                 deadlocked, lambda role, row: [misty])
+    assert (refused.value.status_code, refused.value.detail) == (503, {'code': 'INVENTORY_TEMPORARILY_UNAVAILABLE'})
+    assert view(misty, loan)['revision'] == revision and holding(misty, binder, iono)['quantity'] == '2'
+    # Nothing was recorded for the key, so the client's retry with it runs the step.
+    retried = ok(call('POST', f"/api/loans/{loan['id']}/handover", misty,
+                      {'revision': revision, 'idempotency_key': str(key)}))
+    assert retried['you_confirmed_handover'] is True
+
+
+def test_a_loan_step_writes_its_loan_row_once():
+    # A second write of a Loan row in one transaction checks both collectors' keys again, key-sharing the other side's
+    # owner row after the step's own locks. Only run_step's write_loan writes the row of an existing Loan; the other
+    # write is a Borrow Request's Edit and resend, which closes the earlier request with one write of its row.
+    app = Path(__file__).resolve().parents[1] / 'app'
+    writes = {name: len(re.findall(r'\bUPDATE\s+loan\s', _string_constants(app / name)))
+              for name in ('social/owners.py', 'social/loans.py', 'loan_inventory.py')}
+    assert writes == {'social/owners.py': 0, 'social/loans.py': 1, 'loan_inventory.py': 1}
+
+
 def test_no_loan_step_takes_a_lock_that_holds_off_a_foreign_key_check():
-    # A loan row names both collectors, so a step writing it twice key-shares the other side's owner row; a FOR UPDATE
-    # on an owner or Loan row in any Loan step would close a cycle with the other side's steps.
+    # Other collectors' writes key-share an owner's row (a Borrow Request names its lender) and a Loan row (a Borrowed
+    # Holding names its Loan); a FOR UPDATE on an owner or Loan row in any Loan step would make them wait on it.
     app = Path(__file__).resolve().parents[1] / 'app'
     for name in ('social/owners.py', 'social/loans.py', 'loan_inventory.py'):
         sql = _string_constants(app / name)
