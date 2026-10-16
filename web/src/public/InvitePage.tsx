@@ -1,5 +1,15 @@
 import { useEffect, useState } from "react";
 import { getPublicInvite, ProfileError } from "../profile_generated";
+import { useFriendsRefresh } from "../social/FriendsDrawer";
+import { commandMessage } from "../social/socialMessages";
+import {
+  acceptFriendRequest,
+  getInvite,
+  sendFriendRequest,
+  SocialError,
+  type CollectorLookup,
+  type FriendCommandResult,
+} from "../social_generated";
 import { CARD, CENTRED_MAIN, PRIMARY } from "./controls";
 import { DeadEnd } from "./DeadEnd";
 import { followLink, SIGN_IN_PATH } from "./publicRoutes";
@@ -12,14 +22,16 @@ type Props = {
 
 type Load =
   | { kind: "loading" }
-  | { kind: "ready"; name: string }
+  | { kind: "ready"; name: string; collector: CollectorLookup | null }
   | { kind: "gone" }
   | { kind: "failed" };
 
 /**
  * The Invite Link page, /invite/<token> (social network #246, spec "Handles, Invite Links and lookup"): "<Display
- * Name> invited you to PrizeCheck" and nothing else about the collector. Signed out it offers Sign in, which comes back
- * here; signed in, sending a Friend Request from here arrives in #247. A replaced or unknown link is a dead end.
+ * Name> invited you to PrizeCheck" and nothing else about the collector. Signed out it reads the public record only
+ * and offers Sign in, which comes back here. Signed in it reads the authenticated invite route instead (#247), never
+ * the public record, and offers Send Friend Request, which is never sent by itself; when the two are already Friends,
+ * a request is pending or the link is the collector's own, it says so. A replaced or unknown link is a dead end.
  * Search engines never index it.
  */
 export function InvitePage({ token, signedIn, onNavigate }: Props) {
@@ -33,23 +45,30 @@ export function InvitePage({ token, signedIn, onNavigate }: Props) {
   }, []);
   useEffect(() => {
     let live = true;
-    getPublicInvite(token)
-      .then(
-        (invite) =>
-          live && setLoad({ kind: "ready", name: invite.display_name })
-      )
+    const read: Promise<Load> = signedIn
+      ? getInvite(token).then((collector) => ({
+          kind: "ready",
+          name: collector.display_name,
+          collector,
+        }))
+      : getPublicInvite(token).then((invite) => ({
+          kind: "ready",
+          name: invite.display_name,
+          collector: null,
+        }));
+    read
+      .then((next) => live && setLoad(next))
       .catch((cause) => {
         if (!live) return;
-        setLoad(
-          cause instanceof ProfileError && cause.status === 404
-            ? { kind: "gone" }
-            : { kind: "failed" }
-        );
+        const missing =
+          (cause instanceof ProfileError || cause instanceof SocialError) &&
+          cause.status === 404;
+        setLoad(missing ? { kind: "gone" } : { kind: "failed" });
       });
     return () => {
       live = false;
     };
-  }, [token]);
+  }, [token, signedIn]);
   if (load.kind === "gone")
     return (
       <DeadEnd kind="invite" signedIn={signedIn} onNavigate={onNavigate} />
@@ -80,9 +99,99 @@ export function InvitePage({ token, signedIn, onNavigate }: Props) {
                 Sign in
               </a>
             )}
+            {load.collector && (
+              <InviteActions
+                collector={load.collector}
+                onChange={(collector) =>
+                  setLoad({ kind: "ready", name: load.name, collector })
+                }
+              />
+            )}
           </>
         )}
       </section>
     </main>
+  );
+}
+
+/** Signed in: Send Friend Request, Accept, or how the two already stand. */
+function InviteActions({
+  collector,
+  onChange,
+}: {
+  collector: CollectorLookup;
+  onChange: (collector: CollectorLookup) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState("");
+  const refreshFriends = useFriendsRefresh();
+  const name = collector.display_name;
+
+  async function run(send: (key: string) => Promise<FriendCommandResult>) {
+    if (busy) return;
+    setBusy(true);
+    setProblem("");
+    try {
+      const { relation } = await send(crypto.randomUUID());
+      onChange({ ...collector, relation });
+      refreshFriends();
+    } catch (cause) {
+      setProblem(commandMessage(cause));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const note = {
+    self: "This is your own Invite Link.",
+    none: "",
+    friends: `You and ${name} are Friends.`,
+    request_sent: `You've sent ${name} a Friend Request.`,
+    request_received: `${name} has sent you a Friend Request.`,
+  }[collector.relation];
+  return (
+    <>
+      {collector.relation === "none" && (
+        <button
+          type="button"
+          className={PRIMARY}
+          disabled={busy}
+          onClick={() =>
+            void run((key) =>
+              sendFriendRequest({
+                collector_id: collector.collector_id,
+                idempotency_key: key,
+              })
+            )
+          }
+        >
+          Send Friend Request
+        </button>
+      )}
+      {collector.relation === "request_received" && (
+        <button
+          type="button"
+          className={PRIMARY}
+          disabled={busy}
+          onClick={() =>
+            void run((key) =>
+              acceptFriendRequest(collector.collector_id, {
+                idempotency_key: key,
+              })
+            )
+          }
+        >
+          Accept
+        </button>
+      )}
+      <p role="status" className="m-0 text-body text-text-muted">
+        {note}
+      </p>
+      {problem && (
+        <p role="alert" className="m-0 text-meta text-danger">
+          {problem}
+        </p>
+      )}
+    </>
   );
 }
