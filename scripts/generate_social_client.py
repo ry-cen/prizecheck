@@ -1,5 +1,5 @@
 """Generate the social client module (Friends and Friend Requests, social network #247, Blocks, #248, Friends' cards,
-#250 and #251, Loans, #252 and #253, and Borrowed Copies, #254) from the API OpenAPI schema."""
+#250 and #251, Loans, #252 and #253, Borrowed Copies, #254, and Returns, #255) from the API OpenAPI schema."""
 import sys
 from pathlib import Path
 
@@ -26,10 +26,11 @@ schema = app.openapi()["components"]["schemas"]
 lines = ["// Generated from FastAPI OpenAPI by scripts/generate_social_client.py. Do not edit."]
 for name in ("Collector", "CollectorLookup", "InviteCollector", "FriendsView", "LookupHandle", "SendFriendRequest",
              "FriendCommand", "FriendCommandResult", "BlockCollector", "BlockedList", "FriendCard", "FriendCollection",
-             "FriendCopy", "WantedCard", "WantListMatches", "CardMatches", "LoanParty", "LoanCard", "LoanView",
+             "FriendCopy", "WantedCard", "WantListMatches", "CardMatches", "LoanParty", "LoanCard", "ReturnLine",
+             "PendingReturn", "LoanView",
              "LoansView", "LoanStep", "LoanLineRequest", "SendBorrowRequest", "PromisedLine", "AcceptBorrowRequest",
              "PromiseLimit", "LoanPickPlace", "LoanDeck", "LoanSide", "LentCard", "LentOut", "BorrowedCard",
-             "BorrowedCopies", "MoveBorrowed"):
+             "BorrowedCopies", "MoveBorrowed", "ReturnedLine", "StartReturn"):
     definition = schema[name]
     fields = [f"{field}{'' if field in definition.get('required', []) else '?'}: {ts_type(value)}"
               for field, value in definition["properties"].items()]
@@ -124,6 +125,11 @@ export const getLentOut = (signal?: AbortSignal) => request<LentOut>('/api/loans
 export const getBorrowed = (signal?: AbortSignal) =>
   request<BorrowedCopies>('/api/loans/borrowed', 'GET', undefined, signal);
 export const moveBorrowed = (body: MoveBorrowed) => request<BorrowedCopies>('/api/loans/borrowed/move', 'POST', body);
+// Returns (#255): either side starts one (its confirmation), and the other side confirms it.
+export const startReturn = (id: string, body: StartReturn) =>
+  request<LoanView>(`/api/loans/${at(id)}/returns`, 'POST', body);
+export const confirmReturn = (id: string, body: LoanStep) =>
+  request<LoanView>(`/api/loans/${at(id)}/returns/confirm`, 'POST', body);
 """)
 content = "\n".join(lines)
 target = root / "web/src/social_generated.ts"
