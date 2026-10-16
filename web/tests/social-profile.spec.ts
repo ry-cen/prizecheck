@@ -3,7 +3,7 @@
 // the phone header's avatar opens the account sheet. Every test starts as a new owner, because a Handle can change
 // only once in 30 days.
 import { test, expect, type Page } from "@playwright/test";
-import { randomUUID } from "node:crypto";
+import { randomInt } from "node:crypto";
 import { Pool } from "pg";
 import { startAsNewOwner } from "./support/owner";
 import { fakeSignIn, signInAsOwner } from "./support/sign-in";
@@ -24,7 +24,10 @@ async function signIn(page: Page, next = "/settings") {
 }
 
 const privacy = (page: Page) => page.getByRole("region", { name: "Privacy" });
-const uniqueHandle = () => `ash_${randomUUID().replace(/-/g, "").slice(0, 12)}`;
+// Consonants only: a hex run can spell an entry of the name filter's word list, which made a random Handle refused
+// now and then. A run of consonants never trips it (api/tests/test_friends.py explains why).
+const uniqueHandle = () =>
+  `ash_${Array.from({ length: 12 }, () => "bcdfghjklmnpqrstvwxz"[randomInt(20)]).join("")}`;
 
 test("Settings › Privacy edits the Display Name and the Handle", async ({
   page,
