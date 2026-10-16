@@ -314,7 +314,8 @@ def test_lent_deck_copies_read_lent_to_count_as_missing_and_stay_off_the_want_li
     loan = ok(accept(misty, view(misty, sent(ash, misty, [(iono, 1)])), [(iono, 1)]))
     ok(handover(misty, loan))
     shown = detail(misty, gardevoir)
-    assert shown['loans'] == [{'edition_id': iono, 'reserved': [], 'lent': [{'name': 'Ash K.', 'copies': '1'}]}]
+    assert shown['loans'] == [{'edition_id': iono, 'reserved': [], 'lent': [{'name': 'Ash K.', 'copies': '1'}],
+                               'borrowed': []}]
     # Missing from the Deck itself, but owned: nothing to get, under either counting setting.
     assert [entry['in_deck'] for entry in shown['deck_list']['lines']] == ['1']
     assert shown['to_get'] == '0'
@@ -422,17 +423,18 @@ def test_a_loan_step_writes_its_loan_row_once():
     # write is a Borrow Request's Edit and resend, which closes the earlier request with one write of its row.
     app = Path(__file__).resolve().parents[1] / 'app'
     writes = {name: len(re.findall(r'\bUPDATE\s+loan\s', _string_constants(app / name)))
-              for name in ('social/owners.py', 'social/loans.py', 'loan_inventory.py')}
-    assert writes == {'social/owners.py': 0, 'social/loans.py': 1, 'loan_inventory.py': 1}
+              for name in ('social/owners.py', 'social/loans.py', 'loan_inventory.py', 'borrowed_copies.py')}
+    assert writes == {'social/owners.py': 0, 'social/loans.py': 1, 'loan_inventory.py': 1, 'borrowed_copies.py': 0}
 
 
 def test_no_loan_step_takes_a_lock_that_holds_off_a_foreign_key_check():
     # Other collectors' writes key-share an owner's row (a Borrow Request names its lender) and a Loan row (a Borrowed
     # Holding names its Loan); a FOR UPDATE on an owner or Loan row in any Loan step would make them wait on it.
     app = Path(__file__).resolve().parents[1] / 'app'
-    for name in ('social/owners.py', 'social/loans.py', 'loan_inventory.py'):
+    for name in ('social/owners.py', 'social/loans.py', 'loan_inventory.py', 'borrowed_copies.py'):
         sql = _string_constants(app / name)
-        assert 'FOR NO KEY UPDATE' in sql and 'FOR UPDATE' not in sql.replace('FOR NO KEY UPDATE', ''), name
+        assert 'FOR UPDATE' not in sql.replace('FOR NO KEY UPDATE', ''), name
+        assert 'FOR NO KEY UPDATE' in sql or name == 'borrowed_copies.py', name
     assert 'owner_and_rows(' not in (app / 'loan_inventory.py').read_text()
 
 

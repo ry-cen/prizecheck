@@ -15,6 +15,7 @@ from .deck_ownership import CompetitionWarning, LineOwnership, SurplusHolding, h
 from .deck_format_checks import DeckFormatChecks, TargetFormat, command_format_checks, held_format_checks
 from .format_evaluator import FORMATS
 from .deck_list_display import CardKind, TrainerType, read_line_display, with_line_display
+from .borrowed_copies import borrowed_at, borrowed_in, lenders_in, physical
 from .copy_allocation import deck_lines, held_for_line
 from .settings import WantListCounting, read_settings
 from .social import counts
@@ -169,10 +170,12 @@ class DeckLoanLine(BaseModel):
     """What Loans take of one Card Edition in this Deck (social network #252 and #253, spec "Lender-side data"):
     ``reserved``, copies the Loan Pick List takes from here and still in the Deck ("2 reserved for Kim"), and ``lent``,
     copies handed over from here and out with a Friend ("3 lent to Sam"), each oldest Loan first. Reserved copies stay
-    in the Deck and count for it until handover; lent copies are missing from it but never on the Want List."""
+    in the Deck and count for it until handover; lent copies are missing from it but never on the Want List.
+    ``borrowed`` (#254): the Borrowed Copies in this Deck, by lender ("1 from Ash K."); they fill the Deck's lines."""
     edition_id: UUID
     reserved: list[LoanLabel]
     lent: list[LoanLabel]
+    borrowed: list[LoanLabel] = []
 
 
 def read_deck_loans(conn, user_id: str, deck_id: UUID, held: dict) -> list[DeckLoanLine]:
@@ -181,18 +184,21 @@ def read_deck_loans(conn, user_id: str, deck_id: UUID, held: dict) -> list[DeckL
     oldest Loan first, so an out-of-date pick never names more copies than the Deck holds. The caller holds the owner
     row lock."""
     found: dict[UUID, dict[str, dict[str, int]]] = {}
+    for row in lenders_in(conn, user_id, deck_id):
+        names = found.setdefault(row['edition_id'], {'reserved': {}, 'lent': {}, 'borrowed': {}})['borrowed']
+        names[row['lender_name']] = names.get(row['lender_name'], 0) + int(row['copies'])
     left = dict(held)
     for row in counts.deck_loan_picks(conn, user_id, deck_id):
         edition, state = row['edition_id'], row['state']
         copies = min(left.get(edition, 0), int(row['copies'])) if state == 'reserved' else int(row['copies'])
         if copies > 0:
-            names = found.setdefault(edition, {'reserved': {}, 'lent': {}})[state]
+            names = found.setdefault(edition, {'reserved': {}, 'lent': {}, 'borrowed': {}})[state]
             names[row['borrower_name']] = names.get(row['borrower_name'], 0) + copies
             if state == 'reserved':
                 left[edition] -= copies
     return [DeckLoanLine(edition_id=edition, **{
         state: [LoanLabel(name=name, copies=str(copies)) for name, copies in found[edition][state].items()]
-        for state in ('reserved', 'lent')}) for edition in sorted(found)]
+        for state in ('reserved', 'lent', 'borrowed')}) for edition in sorted(found)]
 
 
 class DeckDetail(BaseModel):
@@ -310,6 +316,9 @@ def index_summaries(conn, user_id: str, deck_ids: list[UUID]) -> dict[UUID, dict
     held = {(row['location_id'], row['edition_id']): row['quantity'] for row in conn.execute(
         'SELECT location_id,edition_id,quantity FROM holding WHERE owner_id=%s AND location_id=ANY(%s)',
         (user_id, deck_ids))}
+    # A Deck's Borrowed Copies are in it too (#254).
+    for key, copies in borrowed_in(conn, user_id, deck_ids).items():
+        held[key] = held.get(key, 0) + copies
     totals = {deck_id: [0, 0] for deck_id in deck_ids}
     for row in conn.execute('SELECT deck_id,edition_id,quantity FROM deck_list_line WHERE owner_id=%s AND deck_id=ANY(%s)',
                             (user_id, deck_ids)):
@@ -322,10 +331,13 @@ def index_summaries(conn, user_id: str, deck_ids: list[UUID]) -> dict[UUID, dict
             for deck_id, (total, in_deck) in totals.items()}
 
 
-# Basic checks read one quantity source: the Deck's Holdings (``checks``) or its Deck List (``deck_list_checks``).
+# Basic checks read one quantity source: the Deck's physical copies (``checks``: its Holdings and its Borrowed Copies,
+# #254) or its Deck List (``deck_list_checks``).
 CHECK_SOURCES = {
-    'deck_list': 'SELECT edition_id,quantity FROM deck_list_line WHERE owner_id=%s AND deck_id=%s',
-    'holdings': 'SELECT edition_id,quantity FROM holding WHERE owner_id=%s AND location_id=%s',
+    'deck_list': 'SELECT edition_id,quantity FROM deck_list_line WHERE owner_id=%(owner)s AND deck_id=%(deck)s',
+    'holdings': 'SELECT edition_id,quantity FROM holding WHERE owner_id=%(owner)s AND location_id=%(deck)s '
+                'UNION ALL SELECT edition_id,quantity FROM borrowed_holding '
+                'WHERE borrower_id=%(owner)s AND location_id=%(deck)s',
 }
 
 
@@ -340,7 +352,7 @@ def basic_checks(conn, generation_id, user_id: str, deck_id: UUID, source: str) 
       JOIN catalog_printing p ON p.id=e.printing_id JOIN catalog_identity ci ON ci.id=p.identity_id
       LEFT JOIN catalog_card_attribute a ON a.printing_id=p.id
       GROUP BY ci.id,ci.display_name
-      ORDER BY ci.display_name,ci.id""", (user_id, deck_id)).fetchall()
+      ORDER BY ci.display_name,ci.id""", {'owner': user_id, 'deck': deck_id}).fetchall()
     evaluated = evaluate_checks([IdentityCount(int(g['quantity']),g['exempt'],g['unresolved']) for g in groups])
     identities = [IdentityCheck(identity_id=g['id'],name=g['display_name'],quantity=str(g['quantity']),status=status)
                   for g,status in zip(groups,evaluated.identity_statuses)]
@@ -364,7 +376,8 @@ def read_deck_list(conn, user_id: str, deck_id: UUID) -> DeckList:
     # Two primary-key range reads paired here, never a join (see deck_ownership.read_ownership).
     lines = conn.execute('SELECT edition_id,quantity FROM deck_list_line WHERE owner_id=%s AND deck_id=%s '
                          'ORDER BY edition_id', (user_id, deck_id)).fetchall()
-    held = held_in(conn, user_id, deck_id)
+    # The Deck's physical copies: its Holdings and its Borrowed Copies (#254).
+    held = physical(held_in(conn, user_id, deck_id), borrowed_at(conn, user_id, deck_id))
     display = read_line_display(conn, [row['edition_id'] for row in lines])
     return DeckList(revision=header['revision'], lines=[
         DeckListLine(edition_id=row['edition_id'], quantity=str(row['quantity']),
@@ -618,12 +631,12 @@ def capture_deck_contents(deck_id: UUID, user_id: str, timeout_ms: int | None = 
         catalog_revision = conn.execute(
             'SELECT revision FROM catalog_state WHERE singleton FOR SHARE'
         ).fetchone()['revision']
-        holdings = conn.execute("""SELECT edition_id,quantity FROM holding
-          WHERE owner_id=%s AND location_id=%s ORDER BY edition_id""",
-          (user_id, deck_id)).fetchall()
+        holdings = {row['edition_id']: row['quantity'] for row in conn.execute(
+            'SELECT edition_id,quantity FROM holding WHERE owner_id=%s AND location_id=%s', (user_id, deck_id))}
+        # The Deck's physical contents: its Holdings and its Borrowed Copies (#254), in Edition order.
         contents = DeckContents(
-            editions=[DeckEditionQuantity(edition_id=row['edition_id'], quantity=str(row['quantity']))
-                      for row in holdings],
+            editions=[DeckEditionQuantity(edition_id=edition, quantity=str(quantity))
+                      for edition, quantity in physical(holdings, borrowed_at(conn, user_id, deck_id)).items()],
             owner_revision=revision, catalog_revision=catalog_revision)
     # Both transaction locks and the connection are released before callers can wait.
     return contents

@@ -39,6 +39,9 @@ class TreeResponse(BaseModel):
     # Copies the collector lent to Friends (social network #253): in no Location, still theirs; the tree's Lent out
     # entry shows them (``GET /api/loans/lent-out``).
     lent_copies: str
+    # Borrowed Copies the collector holds (social network #254): in their Locations, never theirs, so in no count
+    # above; the tree's Borrowed entry lists them (``GET /api/loans/borrowed``).
+    borrowed_copies: str
 
 
 class LocationCommandResult(BaseModel):
@@ -202,7 +205,10 @@ def tree(user_id: str = Depends(verified_user)):
         return TreeResponse(locations=[TreeLocation(**row, depth=depth_of(row["id"], rows), copy_count=copies.get(row["id"], "0"),
                                                     hidden=row["id"] in hidden, hidden_by=above[row["id"]])
                                        for row in sorted(rows.values(), key=lambda r: (depth_of(r["id"], rows), r["name"].casefold(), str(r["id"])))],
-                            owner_revision=revision, lent_copies=str(sum(counts.lent_counts(conn, user_id, None).values())))
+                            owner_revision=revision, lent_copies=str(sum(counts.lent_counts(conn, user_id, None).values())),
+                            borrowed_copies=str(conn.execute(
+                                'SELECT coalesce(sum(quantity), 0) AS copies FROM borrowed_holding WHERE borrower_id=%s',
+                                (user_id,)).fetchone()['copies']))
 
 
 @router.post("", response_model=LocationCommandResult, status_code=201)
