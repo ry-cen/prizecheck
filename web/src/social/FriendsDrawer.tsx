@@ -10,6 +10,7 @@ import {
   type RefObject,
 } from "react";
 import { Ellipsis, Smile } from "lucide-react";
+import { useInboxRefresh } from "../inbox/Inbox";
 import { getProfile } from "../profile_generated";
 import { inviteUrl } from "../settings/PrivacySection";
 import {
@@ -43,7 +44,8 @@ import { commandMessage, lookupMessage } from "./socialMessages";
  *
  * The shell provides it; the desktop header and the phone headers (the shell's and Collection's own) draw the button.
  * The badge is read when the shell starts, when the drawer opens, after each change and when the window regains focus;
- * nothing polls.
+ * nothing polls. Remove Friend and Block cancel the Loans the two have that nobody handed over (#260), so each change
+ * reads the inbox again too, for the bell's and the Loans tab's badges.
  *
  * Focus: choosing Remove Friend or Block from a ⋯ swaps the row for its confirmation and focuses the confirming
  * button, and Cancel returns focus to that row's ⋯. A command that removes its own row moves focus to the "Your
@@ -85,6 +87,7 @@ export function FriendsProvider({
   const [load, setLoad] = useState<Load>({ kind: "loading" });
   const opener = useRef<HTMLElement | null>(null);
   const reads = useRef(0);
+  const refreshInbox = useInboxRefresh();
 
   const refresh = useCallback(() => {
     const read = ++reads.current;
@@ -135,7 +138,10 @@ export function FriendsProvider({
         load={load}
         opener={opener}
         onClose={() => setOpen(false)}
-        onChanged={refresh}
+        onChanged={() => {
+          refresh();
+          refreshInbox();
+        }}
         onPrivacy={onPrivacy}
         onOpenCollection={onOpenCollection}
       />
