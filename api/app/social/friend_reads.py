@@ -176,23 +176,24 @@ def friend_collection(handle: str, show: Literal['wanted', 'all'] = 'wanted', q:
     handle = handle.strip()
     if not name_rules.HANDLE.fullmatch(handle):
         error(404, 'FRIEND_NOT_FOUND')
-    wanted = wanted_editions(user_id)
+    # Resolve the Handle before anything costs: a refusal pays for no Want List read.
     with connect() as conn:
         friend = conn.execute(FRIEND_BY_HANDLE, {'viewer': user_id, 'key': handle.lower()}).fetchone()
-        if friend is None:
-            error(404, 'FRIEND_NOT_FOUND')
+    if friend is None:
+        error(404, 'FRIEND_NOT_FOUND')
+    wanted = wanted_editions(user_id)
+    with connect() as conn:
         copies = friend_copies(conn, user_id, [friend['collector_id']])
         cards = card_facts(conn, [copy.edition_id for copy in copies])
         reached = {edition for editions in reach(conn, wanted, printings).values() for edition in editions}
         key = search_key(conn, q) if q.strip() else ''
-    shown = sorted((copy for copy in copies
-                    if (show == 'all' or copy.edition_id in reached) and key in cards[copy.edition_id].search_key),
-                   key=lambda copy: cards[copy.edition_id].order())
-    identities: list[UUID] = []
-    for copy in shown:
-        identity = cards[copy.edition_id].identity_id
-        if identity not in identities:
-            identities.append(identity)
+    # A query of only punctuation has no letters or digits to match: it finds no card, not every card.
+    no_match = bool(q.strip()) and key == ''
+    shown = [] if no_match else sorted(
+        (copy for copy in copies
+         if (show == 'all' or copy.edition_id in reached) and key in cards[copy.edition_id].search_key),
+        key=lambda copy: cards[copy.edition_id].order())
+    identities = list(dict.fromkeys(cards[copy.edition_id].identity_id for copy in shown))
     on_page = set(identities[page * PAGE_IDENTITIES:(page + 1) * PAGE_IDENTITIES])
 
     def card(copy) -> FriendCard:
@@ -251,7 +252,7 @@ FRIEND_PROFILES = """SELECT p.user_id AS collector_id, p.handle, p.display_name
 
 def matches(conn, user_id: str, reached: dict[UUID, dict[UUID, bool]]) -> tuple[bool, dict[UUID, list[FriendCopy]]]:
     """Whether the viewer has Friends, and for each wanted Edition the Friends' copies of the Editions it reaches: one
-    ``friend_copies`` read for every Friend and Edition. Copies come spare first (a Friend with a spare copy before one
+    ``friend_copies`` read for every Friend and Edition. Copies come spare first (a copy with spare copies before one
     whose copies are all in a Deck), then the wanted card's own Printing first, then by Friend (Display Name, Handle),
     then in card order."""
     friends = {row['collector_id']: row for row in conn.execute(FRIEND_PROFILES, (user_id,))}

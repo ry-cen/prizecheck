@@ -119,7 +119,7 @@ def test_a_friend_sees_spare_and_in_deck_copies_per_edition_and_nothing_else(sto
 
 def test_strangers_requests_and_blocks_either_way_see_nothing(store):
     ids = seed_swap_catalog()
-    (ash, _), (misty, misty_handle), (brock, _) = collector(), collector(), collector()
+    (ash, ash_handle), (misty, misty_handle), (brock, _) = collector(), collector(), collector()
     hold(misty, node(misty, 'Unsorted')['id'], ids['PAL 185'], 2)
 
     def refused_handle(viewer, handle):
@@ -138,6 +138,8 @@ def test_strangers_requests_and_blocks_either_way_see_nothing(store):
     ok(call('POST', '/api/social/friend-requests', ash, {'collector_id': misty, 'idempotency_key': str(uuid4())}))
     assert copies(ash, [misty]) == {} and copies(misty, [ash]) == {}
     assert refused(ash) == unknown
+    # The recipient of a pending request sees the sender's Handle as unknown too, until it is accepted.
+    assert refused_handle(misty, ash_handle) == unknown
     ok(call('POST', f'/api/social/friend-requests/{ash}/accept', misty, {'idempotency_key': str(uuid4())}))
     assert copies(ash, [misty]) == {(misty, ids['PAL 185']): (2, 0)}
     # A Block either way ends it, and the Friend's Handle answers as an unknown one, byte for byte.
@@ -284,6 +286,11 @@ def test_search_and_pages_by_card_identity(store, monkeypatch):
     assert set(shown(ok(collection(ash, misty_handle, show='all', q='BOSS%27S')))) == {ids['PAL 172']}
     assert set(shown(ok(collection(ash, misty_handle, show='all', q='io no')))) == {ids['PAL 185'], ids['PAF 80']}
     assert ok(collection(ash, misty_handle, show='all', q='zzz'))['cards'] == []
+    # A query of only punctuation has no letters or digits: it matches no card, where an empty one matches all.
+    for punctuation in ('!!!', '%2E%2E', '%20-%20'):
+        body = ok(collection(ash, misty_handle, show='all', q=punctuation))
+        assert body['cards'] == [] and body['next_page'] is None, punctuation
+    assert shown(ok(collection(ash, misty_handle, show='all', q=''))) != {}
     # Two Card Identities a page: a card's Editions are never split, and pages come in card order.
     monkeypatch.setattr(friend_reads, 'PAGE_IDENTITIES', 2)
     first = ok(collection(ash, misty_handle, show='all'))
