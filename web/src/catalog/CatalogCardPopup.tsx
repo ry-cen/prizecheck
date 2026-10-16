@@ -10,6 +10,7 @@ import { Button } from "../ui/Button";
 import { CardArt, CardPopup } from "../ui/CardPopup";
 import { Pill, type PillTone } from "../ui/Pill";
 import { Select } from "../ui/Select";
+import { FriendsWhoHaveThis } from "../social/FriendsWhoHaveThis";
 import { Stepper } from "../ui/Stepper";
 import { variantLabel } from "../ui/variantLabel";
 import { TILE_PRICE } from "../workspace/Gallery";
@@ -103,8 +104,8 @@ type CardState = {
  * art and its note; set name, code and number; regulation mark; the Card Identity when it differs from the name; the
  * owner-reviewed note on a manual record; a legality Pill per Format with the reason for an unknown one; the Editions as a picker, each with its
  * Variant, copies owned and price, and Owner reviewed and Unavailable badges; where the picked Edition's copies are;
- * the Add row (Collection | Location | − N + | Add N); and a quiet footer that opens
- * today's report flows.
+ * "Friends who have this" (#251, FriendsWhoHaveThis); the Add row (Collection | Location | − N + | Add N); and a quiet
+ * footer that opens today's report flows.
  */
 export function CatalogCardPopup({
   request,
@@ -354,6 +355,10 @@ export function CatalogCardPopup({
             <SelectedEdition edition={selected} />
           )}
           <Where where={where} places={places} />
+          <FriendsWhoHaveThis
+            printingId={ready.printing.id}
+            editionId={selected?.id ?? null}
+          />
           {selected && (
             <AddRows
               key={`${cardKey}:${selected.id}`}

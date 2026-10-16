@@ -236,8 +236,9 @@ export function FriendCardTile({
   );
 }
 
-/** The card's small artwork, or "Artwork unavailable" when there is none or it fails. */
-function CardImage({ url }: { url: string | null }) {
+/** The card's small artwork, or "Artwork unavailable" when there is none or it fails. The Want List's Get from Friends
+ * panels (#251) draw it too. */
+export function CardImage({ url }: { url: string | null }) {
   const [failed, setFailed] = useState(false);
   useEffect(() => setFailed(false), [url]);
   return (
