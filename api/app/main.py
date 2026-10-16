@@ -249,6 +249,8 @@ from .social.friend_reads import router as friend_reads_router  # noqa: E402
 app.include_router(friend_reads_router)
 from .social.loans import router as loans_router  # noqa: E402
 app.include_router(loans_router)
+from .social.inbox import router as inbox_router  # noqa: E402
+app.include_router(inbox_router)
 from .loan_inventory import router as loan_inventory_router  # noqa: E402
 app.include_router(loan_inventory_router)
 
