@@ -1,4 +1,4 @@
-"""Friends' cards (social network #250, spec "Friend-facing reads: one choke point").
+"""Friends' cards (social network #250 and #251, spec "Friend-facing reads: one choke point").
 
 **A Friend's Collection** (``GET /api/social/collections/{handle}``) is a gallery of the Card Editions one Friend could
 lend now, each with its spare and in-a-Deck copies, from ``friend_copies`` and nothing else. The Friend is found by
@@ -14,6 +14,13 @@ that.
   (``catalog_search_words``, migration 048).
 - Cards come in card order (name, set, collector number), and pages hold ``PAGE_IDENTITIES`` Card Identities each,
   with every matching Edition of those Identities, so one card's Editions are never split over two pages.
+
+**Friends' cards for the Want List** (``GET /api/social/want-list-matches``, #251) answers, for each card the viewer's
+Want List still needs (every Deck, or the one in ``deck``, under the account's counting setting), the Friends' copies
+that match it. It is its own read, never part of ``GET /api/want-list``: it carries no need and no Deck, and the page
+takes both from the Want List's combined total. **Friends who have this** (``GET /api/social/card-matches``, #251)
+answers the Friends' copies of one Card Printing for the card popup. Both read every Friend's copies with one
+``friend_copies`` call, and list spare copies before copies in a Deck.
 
 **Matching** (``reach``) follows the viewer's choice of printings, the one Decklist Import calls Exact printings and Use
 cards I own: ``exact`` reaches every Edition of the wanted card's own Card Printing (any finish); ``reprint_group`` also
@@ -199,3 +206,104 @@ def friend_collection(handle: str, show: Literal['wanted', 'all'] = 'wanted', q:
         collector_id=friend['collector_id'], handle=friend['handle'], display_name=friend['display_name'], show=show,
         cards=[card(copy) for copy in shown if cards[copy.edition_id].identity_id in on_page],
         next_page=page + 1 if len(identities) > (page + 1) * PAGE_IDENTITIES else None)
+
+
+class FriendCopy(BaseModel):
+    """One Friend's copies of one Card Edition that matches what the viewer asked about. ``other_printing``: the
+    Edition is of another Card Printing of the wanted card's Reprint Group, so its set and number are worth showing.
+    ``collector_id`` addresses the Friend in commands (Ask to borrow, #252) and is never shown."""
+    collector_id: str
+    handle: str
+    display_name: str
+    edition_id: UUID
+    name: str
+    set_code: str
+    collector_number: str
+    descriptor: dict
+    other_printing: bool
+    spare: str
+    in_deck: str
+
+
+class WantedCard(BaseModel):
+    """The Friends' copies that match one card of the Want List's combined total (``edition_id`` is that card)."""
+    edition_id: UUID
+    copies: list[FriendCopy]
+
+
+class WantListMatches(BaseModel):
+    """Friends' cards for the Want List in scope: only the cards with at least one Friend's copy, in Edition id order.
+    ``has_friends`` is false when the viewer has no Friends, so the page can leave Get from Friends out."""
+    has_friends: bool
+    cards: list[WantedCard]
+
+
+class CardMatches(BaseModel):
+    """Friends' copies of one Card Printing (the card popup), under the viewer's ``printings`` choice."""
+    has_friends: bool
+    copies: list[FriendCopy]
+
+
+# The viewer's Friends with their Handles and Display Names.
+FRIEND_PROFILES = """SELECT p.user_id AS collector_id, p.handle, p.display_name
+  FROM friends_of(ARRAY[%s]::text[]) f JOIN collector_profile p ON p.user_id = f.friend_id"""
+
+
+def matches(conn, user_id: str, reached: dict[UUID, dict[UUID, bool]]) -> tuple[bool, dict[UUID, list[FriendCopy]]]:
+    """Whether the viewer has Friends, and for each wanted Edition the Friends' copies of the Editions it reaches: one
+    ``friend_copies`` read for every Friend and Edition. Copies come spare first (a Friend with a spare copy before one
+    whose copies are all in a Deck), then the wanted card's own Printing first, then by Friend (Display Name, Handle),
+    then in card order."""
+    friends = {row['collector_id']: row for row in conn.execute(FRIEND_PROFILES, (user_id,))}
+    editions = {edition for reaches in reached.values() for edition in reaches}
+    if not friends or not editions:
+        return bool(friends), {}
+    found = [copy for copy in friend_copies(conn, user_id, None, sorted(editions)) if copy.friend_id in friends]
+    cards = card_facts(conn, [copy.edition_id for copy in found])
+    by_edition: dict[UUID, list] = {}
+    for copy in found:
+        by_edition.setdefault(copy.edition_id, []).append(copy)
+    answer: dict[UUID, list[FriendCopy]] = {}
+    for wanted, reaches in reached.items():
+        rows = [(copy, reaches[edition]) for edition in reaches for copy in by_edition.get(edition, [])]
+        rows.sort(key=lambda item: (item[0].spare == 0, item[1], friends[item[0].friend_id]['display_name'].casefold(),
+                                    friends[item[0].friend_id]['handle'].casefold(), cards[item[0].edition_id].order()))
+        if rows:
+            answer[wanted] = [friend_copy(friends[copy.friend_id], cards[copy.edition_id], copy, other)
+                              for copy, other in rows]
+    return True, answer
+
+
+def friend_copy(friend, card: Card, copy, other: bool) -> FriendCopy:
+    return FriendCopy(collector_id=friend['collector_id'], handle=friend['handle'],
+                      display_name=friend['display_name'], edition_id=card.edition_id, name=card.name,
+                      set_code=card.set_code, collector_number=card.collector_number, descriptor=card.descriptor,
+                      other_printing=other, spare=str(copy.spare), in_deck=str(copy.in_deck))
+
+
+@router.get('/want-list-matches', response_model=WantListMatches)
+def want_list_matches(deck: UUID | None = None, printings: Printings = 'reprint_group',
+                      user_id: str = Depends(verified_user)):
+    """Friends' cards for the Want List (#251): for each card the Want List still needs, over every Deck or the one in
+    ``deck`` and under the account's counting setting, the Friends' copies it reaches under ``printings``. Its own
+    read, apart from the Want List's: a Friend's change never moves the Want List's revisions. 404 DECK_NOT_FOUND for a
+    Deck that isn't the viewer's."""
+    wanted = wanted_editions(user_id, deck)
+    with connect() as conn:
+        has_friends, found = matches(conn, user_id, reach(conn, wanted, printings))
+    return WantListMatches(has_friends=has_friends, cards=[WantedCard(edition_id=edition, copies=found[edition])
+                                                           for edition in sorted(found)])
+
+
+@router.get('/card-matches', response_model=CardMatches)
+def card_matches(printing_id: UUID, printings: Printings = 'reprint_group', user_id: str = Depends(verified_user)):
+    """Friends who have this card (#251, the card popup): the Friends' copies of every Edition of the Card Printing,
+    and under ``reprint_group`` of the other Printings of its Reprint Group too. An unknown Printing has none."""
+    with connect() as conn:
+        own = [row['id'] for row in conn.execute('SELECT id FROM catalog_edition WHERE printing_id=%s', (printing_id,))]
+        reached: dict[UUID, bool] = {}
+        for reaches in reach(conn, own, printings).values():
+            for edition, other in reaches.items():
+                reached[edition] = reached.get(edition, True) and other
+        has_friends, found = matches(conn, user_id, {printing_id: reached} if reached else {})
+    return CardMatches(has_friends=has_friends, copies=found.get(printing_id, []))

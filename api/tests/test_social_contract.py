@@ -94,7 +94,9 @@ def test_every_social_route_answers_success_with_a_schema_the_walk_reads():
     assert routes and all(routes.values()), [route for route, found in routes.items() if not found]
     # The Friend reads are among them.
     assert 'GET /api/social/collections/{handle}' in routes
-    assert any(field == 'in_deck' for _, field, _ in routes['GET /api/social/collections/{handle}'])
+    for route in ('GET /api/social/collections/{handle}', 'GET /api/social/want-list-matches',
+                  'GET /api/social/card-matches'):
+        assert any(field == 'in_deck' for _, field, _ in routes[route]), route
 
 
 def test_the_walk_finds_a_location_or_deck_field_at_any_depth():

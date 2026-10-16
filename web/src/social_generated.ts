@@ -11,6 +11,10 @@ export type BlockCollector = { collector_id: string; idempotency_key: string };
 export type BlockedList = { blocked: Collector[] };
 export type FriendCard = { edition_id: string; name: string; set_code: string; set_name: string; collector_number: string; descriptor: Record<string, unknown>; image_url: string | null; spare: string; in_deck: string; wanted: boolean };
 export type FriendCollection = { collector_id: string; handle: string; display_name: string; show: "wanted" | "all"; cards: FriendCard[]; next_page: number | null };
+export type FriendCopy = { collector_id: string; handle: string; display_name: string; edition_id: string; name: string; set_code: string; collector_number: string; descriptor: Record<string, unknown>; other_printing: boolean; spare: string; in_deck: string };
+export type WantedCard = { edition_id: string; copies: FriendCopy[] };
+export type WantListMatches = { has_friends: boolean; cards: WantedCard[] };
+export type CardMatches = { has_friends: boolean; copies: FriendCopy[] };
 
 /** A refused social request: the API's code, and for TOO_MANY_LOOKUPS the detail that says when to try again. */
 export class SocialError extends Error {
@@ -64,3 +68,10 @@ export const unblockCollector = (id: string, body: FriendCommand) =>
 export const getFriendCollection = (handle: string,
   params: { show?: 'wanted' | 'all'; q?: string; printings?: Printings; page?: number }, signal?: AbortSignal) =>
   request<FriendCollection>(`/api/social/collections/${at(handle)}${query(params)}`, 'GET', undefined, signal);
+// Friends' cards for the Want List in scope (#251): its own read, apart from the Want List's.
+export const getWantListMatches = (params: { deck?: string | null; printings?: Printings }, signal?: AbortSignal) =>
+  request<WantListMatches>(`/api/social/want-list-matches${query(params)}`, 'GET', undefined, signal);
+// Friends who have this (#251): Friends' copies of one Card Printing, for the card popup.
+export const getCardMatches = (printingId: string, params: { printings?: Printings }, signal?: AbortSignal) =>
+  request<CardMatches>(`/api/social/card-matches${query({ printing_id: printingId, ...params })}`, 'GET', undefined,
+    signal);
