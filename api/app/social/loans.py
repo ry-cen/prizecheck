@@ -56,6 +56,10 @@ the Loan waits on the reader for, or nothing. From #259 it includes the lender's
 
 **Updates** (#259): a step that answers or ends a request or offer, cancels a Loan or changes its return-by date stores
 an update for the other side (``record_update``), with the name of the collector who took it and never a reason.
+
+**Ending a friendship** (#260): Remove Friend and Block cancel the pair's Borrow Requests, Lend Offers and accepted
+Loans nobody has confirmed a handover for (``end_loans_between``), inside the Friend command that already locked both
+owners. A Loan either side confirmed a handover for counts as handed over and stays open.
 """
 import json
 from collections.abc import Mapping
@@ -578,7 +582,8 @@ def run_step(user_id: str, loan_id: UUID, step: LoanStep, action: str, apply, lo
 
 def write_loan(conn, loan_id: UUID, changes: Mapping[str, object]) -> None:
     """The step's one write of its Loan row: ``changes`` (column -> value, ``NOW`` for the transaction's time) and the
-    revision advanced. ``run_step`` calls it; nothing else in a step writes the row."""
+    revision advanced. ``run_step`` calls it, and ``end_loans_between`` once for each Loan it cancels; nothing else
+    writes the row of an existing Loan."""
     if 'revision' in changes or 'id' in changes:
         raise ValueError('run_step owns the Loan id and revision')
     assignments = [sql.SQL('revision = revision + 1')]
@@ -638,6 +643,29 @@ def release(conn, row, user_id: str, reason: str) -> dict:
     if row['kind'] == 'lend_offer':
         advance_revision(conn, row['lender_id'])
     return close(conn, row, user_id, reason)
+
+
+def end_loans_between(conn, user_id: str, other_id: str) -> None:
+    """Ending a friendship with open Loans (#260), from Remove Friend and Block (``friends.friendship_ended``) by
+    ``user_id``, with both owners already locked in ascending ``user_id``. Each Borrow Request, Lend Offer and accepted
+    Loan between the two, either way round, that nobody has confirmed a handover for is cancelled by ``user_id``: its
+    row locked (in id order) and written once, its picks gone, and the other side told it was cancelled
+    (``record_update``), as for any cancel and never why. A Loan either side confirmed a handover for counts as handed
+    over and stays open. A Lend Offer's or an accepted Loan's copies stop being reserved, so each such lender's
+    revision moves, once."""
+    rows = conn.execute("""SELECT * FROM loan
+      WHERE ((lender_id = %(a)s AND borrower_id = %(b)s) OR (lender_id = %(b)s AND borrower_id = %(a)s))
+        AND state IN ('requested', 'offered', 'accepted')
+        AND lender_handover_at IS NULL AND borrower_handover_at IS NULL
+      ORDER BY id FOR NO KEY UPDATE""", {'a': user_id, 'b': other_id}).fetchall()
+    lenders = set()
+    for row in rows:
+        if row['state'] in ('offered', 'accepted'):
+            lenders.add(row['lender_id'])
+        record_update(conn, row, user_id, 'cancelled')
+        write_loan(conn, row['id'], close(conn, row, user_id, 'cancelled'))
+    for lender in sorted(lenders):
+        advance_revision(conn, lender)
 
 
 @router.post('/{loan_id}/decline', response_model=LoanView)

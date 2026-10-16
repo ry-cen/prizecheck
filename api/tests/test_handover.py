@@ -427,12 +427,13 @@ def test_a_loan_step_writes_its_loan_row_once():
     # A second write of a Loan row in one transaction checks both collectors' keys again, key-sharing the other side's
     # owner row after the step's own locks. Only run_step's write_loan writes the row of an existing Loan; the other
     # write is a Borrow Request's Edit and resend, which closes the earlier request with one write of its row. The
-    # inbox (#259) and the pick reads write no Loan row.
+    # inbox (#259) and the pick reads write no Loan row, and an unfriend or a Block (#260) cancels Loans through
+    # write_loan, once for each Loan.
     app = Path(__file__).resolve().parents[1] / 'app'
     writes = {name: len(re.findall(r'\bUPDATE\s+loan\s', _string_constants(app / name)))
-              for name in LOAN_MODULES}
+              for name in (*LOAN_MODULES, 'social/friends.py')}
     assert writes == {'social/owners.py': 0, 'social/loans.py': 1, 'loan_inventory.py': 1, 'borrowed_copies.py': 0,
-                      'loan_picks.py': 0, 'social/inbox.py': 0}
+                      'loan_picks.py': 0, 'social/inbox.py': 0, 'social/friends.py': 0}
 
 
 def test_no_loan_step_takes_a_lock_that_holds_off_a_foreign_key_check():
