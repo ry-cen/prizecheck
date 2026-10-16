@@ -68,6 +68,21 @@ export async function accountId(page: Page): Promise<string> {
   return (await api(page, "GET", "/auth/session")).userId as string;
 }
 
+/** The page's collector deletes their account, as api/tests/test_returns.py's `leave` does: their owner row goes, its
+ * own rows with it, and their side of each Loan is set to NULL. */
+export async function leave(page: Page) {
+  const id = await accountId(page);
+  execFileSync(
+    ".venv/bin/python",
+    [
+      "-c",
+      "import sys\nfrom app.main import connect\nwith connect() as conn:\n    conn.execute('DELETE FROM inventory_owner WHERE user_id=%s', (sys.argv[1],))",
+      id,
+    ],
+    { env: { ...process.env, PYTHONPATH: "api" } }
+  );
+}
+
 /** A Friend Request from `from`, accepted by `to`, through the API. */
 export async function befriend(from: Page, to: Page) {
   await api(from, "POST", "/api/social/friend-requests", {

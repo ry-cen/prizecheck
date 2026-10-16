@@ -482,11 +482,38 @@ test("a Borrow Request drafted from a Friend's Collection and the card popup is 
   await expect(confirm).toHaveCount(0);
   await expect(decline).toBeFocused();
   await decline.click();
+  // While the screen reads its own side again, the confirmation stays and the heading keeps its old headline without
+  // focus: the heading takes focus only once it reads the answer.
+  let release = () => {};
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await lender.route(/\/api\/loans\/[^/]+\/side$/, async (route) => {
+    await held;
+    await route.continue();
+  });
+  await lender.evaluate(() => {
+    const seen: string[] = [];
+    (window as unknown as { headings: string[] }).headings = seen;
+    document.addEventListener("focusin", (event) => {
+      const target = event.target as HTMLElement;
+      if (target.tagName === "H1") seen.push(target.textContent ?? "");
+    });
+  });
+  const sideRead = lender.waitForRequest(/\/api\/loans\/[^/]+\/side$/);
   await confirm.getByRole("button", { name: "Decline", exact: true }).click();
+  await sideRead;
+  await expect(confirm).toBeVisible();
+  await expect(title(lender)).not.toBeFocused();
+  release();
   await expect(title(lender)).toHaveText(
     "You declined Ash K's request for 2 cards"
   );
   await expect(title(lender)).toBeFocused();
+  expect(
+    await lender.evaluate(
+      () => (window as unknown as { headings: string[] }).headings
+    )
+  ).toEqual(["You declined Ash K's request for 2 cards"]);
+  await lender.unroute(/\/api\/loans\/[^/]+\/side$/);
 
   // Ash finds it under History and edits and resends it.
   await page.goto(`${ORIGIN}/loans`);
