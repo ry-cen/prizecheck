@@ -166,29 +166,33 @@ class LoanLabel(BaseModel):
 
 
 class DeckLoanLine(BaseModel):
-    """What Loans take of one Card Edition in this Deck (social network #252, spec "Lender-side data"): ``reserved``,
-    copies the Loan Pick List takes from here and still in the Deck ("2 reserved for Kim"), oldest Loan first. Copies
-    stay in the Deck and count for it until handover."""
+    """What Loans take of one Card Edition in this Deck (social network #252 and #253, spec "Lender-side data"):
+    ``reserved``, copies the Loan Pick List takes from here and still in the Deck ("2 reserved for Kim"), and ``lent``,
+    copies handed over from here and out with a Friend ("3 lent to Sam"), each oldest Loan first. Reserved copies stay
+    in the Deck and count for it until handover; lent copies are missing from it but never on the Want List."""
     edition_id: UUID
     reserved: list[LoanLabel]
+    lent: list[LoanLabel]
 
 
 def read_deck_loans(conn, user_id: str, deck_id: UUID, held: dict) -> list[DeckLoanLine]:
-    """Each Card Edition of the Deck that Loans take copies of, in Edition order; a borrower named once per Edition.
-    ``held``: the Deck's Holdings by Edition (``held_in``). A pick is read up to the copies still here, oldest Loan
-    first, so an out-of-date pick never names more copies than the Deck holds. The caller holds the owner row lock."""
-    found: dict[UUID, dict[str, int]] = {}
+    """Each Card Edition of the Deck that Loans take copies of, in Edition order; a borrower named once per Edition and
+    state. ``held``: the Deck's Holdings by Edition (``held_in``). A reserved pick is read up to the copies still here,
+    oldest Loan first, so an out-of-date pick never names more copies than the Deck holds. The caller holds the owner
+    row lock."""
+    found: dict[UUID, dict[str, dict[str, int]]] = {}
     left = dict(held)
     for row in counts.deck_loan_picks(conn, user_id, deck_id):
-        edition = row['edition_id']
-        copies = min(left.get(edition, 0), int(row['copies']))
+        edition, state = row['edition_id'], row['state']
+        copies = min(left.get(edition, 0), int(row['copies'])) if state == 'reserved' else int(row['copies'])
         if copies > 0:
-            names = found.setdefault(edition, {})
+            names = found.setdefault(edition, {'reserved': {}, 'lent': {}})[state]
             names[row['borrower_name']] = names.get(row['borrower_name'], 0) + copies
-            left[edition] -= copies
-    return [DeckLoanLine(edition_id=edition, reserved=[LoanLabel(name=name, copies=str(copies))
-                                                       for name, copies in found[edition].items()])
-            for edition in sorted(found)]
+            if state == 'reserved':
+                left[edition] -= copies
+    return [DeckLoanLine(edition_id=edition, **{
+        state: [LoanLabel(name=name, copies=str(copies)) for name, copies in found[edition][state].items()]
+        for state in ('reserved', 'lent')}) for edition in sorted(found)]
 
 
 class DeckDetail(BaseModel):
@@ -214,7 +218,8 @@ class DeckDetail(BaseModel):
     to_get: str
     want_list_counting: WantListCounting
     settings_revision: int
-    # Social network #252: the Deck's copies that Loans take, for its lines' "reserved for Kim" (``read_deck_loans``).
+    # Social network #252 and #253: the Deck's copies that Loans take, for its lines' "reserved for Kim" and "lent to
+    # Sam" (``read_deck_loans``).
     loans: list[DeckLoanLine]
 
 
