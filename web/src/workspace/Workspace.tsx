@@ -8,6 +8,7 @@ import React, {
 import { Menu as MenuIcon, Plus } from "lucide-react";
 import type { AddedCards } from "../catalog/useAddToast";
 import { getLocationTree, type TreeNode } from "../location_generated";
+import { BorrowedDialog } from "../loans/BorrowedDialog";
 import { LentOutDialog } from "../loans/LentOutDialog";
 import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
@@ -89,6 +90,9 @@ export function Workspace({
   // Copies lent to Friends (#253): the tree's Lent out entry. A mocked tree may leave it out.
   const [lentCopies, setLentCopies] = useState("0");
   const [lentOpen, setLentOpen] = useState(false);
+  // Friends' copies in the collector's Locations (#254): the tree's Borrowed entry.
+  const [borrowedCopies, setBorrowedCopies] = useState("0");
+  const [borrowedOpen, setBorrowedOpen] = useState(false);
   const [ownerRevision, setOwnerRevision] = useState<number | null>(null);
   const [treeState, setTreeState] = useState<"loading" | "ready" | "error">(
     "loading"
@@ -136,6 +140,7 @@ export function Workspace({
       if (generation !== treeGeneration.current) return;
       setNodes(result.locations);
       setLentCopies(result.lent_copies ?? "0");
+      setBorrowedCopies(result.borrowed_copies ?? "0");
       setOwnerRevision(result.owner_revision);
       setTreeState("ready");
     } catch {
@@ -194,6 +199,7 @@ export function Workspace({
     setManageOpen(false);
     setAdding(null);
     setLentOpen(false);
+    setBorrowedOpen(false);
   }, [active, closeDetails]);
   // Ticket 107: Move, Inventory Removal and Undo, and the desktop tile drag.
   const actions = useInventoryActions({
@@ -386,6 +392,13 @@ export function Workspace({
           onOpen: () => {
             setDrawerOpen(false);
             setLentOpen(true);
+          },
+        }}
+        borrowed={{
+          copies: borrowedCopies,
+          onOpen: () => {
+            setDrawerOpen(false);
+            setBorrowedOpen(true);
           },
         }}
       />
@@ -689,6 +702,13 @@ export function Workspace({
         open={active && lentOpen}
         onClose={() => setLentOpen(false)}
         onOpenLoan={onOpenLoan}
+        returnFocus={mobile ? drawerOpener : undefined}
+      />
+      <BorrowedDialog
+        open={active && borrowedOpen}
+        onClose={() => setBorrowedOpen(false)}
+        index={index}
+        onMoved={() => void loadTree()}
         returnFocus={mobile ? drawerOpener : undefined}
       />
       {selection.details && (

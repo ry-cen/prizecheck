@@ -104,9 +104,9 @@ export function CopySheet({
             <ul className="m-0 flex list-none flex-col gap-1 p-0">
               <li>
                 {line.here.toString()} in this Deck
-                {line.reservedFor.length > 0 && (
+                {line.reservedFor.length + line.borrowedFrom.length > 0 && (
                   <ul className="m-0 mt-1 flex list-none flex-col gap-0.5 pl-4 text-meta text-text-muted">
-                    {line.reservedFor.map((note) => (
+                    {[...line.reservedFor, ...line.borrowedFrom].map((note) => (
                       <li key={note}>{note}</li>
                     ))}
                   </ul>
