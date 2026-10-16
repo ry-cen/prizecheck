@@ -47,7 +47,8 @@ BEGIN
 END $$;
 
 -- A Friend Request the recipient declined: the sender can't send that collector another for 7 days (social.friends).
--- Cleared when the recipient sends the sender a request, when the sender's next request goes through, and on Unblock.
+-- Cleared when the recipient sends the sender a request, when the sender's next request goes through, and when the
+-- recipient lifts a Block of the sender (an Unblock that removes no Block clears nothing).
 CREATE TABLE IF NOT EXISTS friend_request_declined (
   sender_id text NOT NULL REFERENCES collector_profile(user_id) ON DELETE CASCADE,
   recipient_id text NOT NULL REFERENCES collector_profile(user_id) ON DELETE CASCADE,

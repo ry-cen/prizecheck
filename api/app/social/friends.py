@@ -15,7 +15,9 @@ replayed by its idempotency key isn't counted again). The count is taken before 
 over the limit never locks another's row, and it commits with a miss's 404 as lookups do. Over the limit is 429
 TOO_MANY_CHANGES with ``retry_after_minutes``. A collector whose Friend Request was declined can't send that collector
 another for ``DECLINE_COOL_OFF_DAYS`` days (409 TRY_LATER; the collector sees "You can send another request later.");
-the decline is kept in ``friend_request_declined`` until then, Unblock, or the decliner's own request to them.
+the decline is kept in ``friend_request_declined`` until then, until the decliner sends the sender a request, or until
+the decliner Unblocks the sender (only a Block actually lifted clears it; the sender's own Unblock of the decliner, or
+an Unblock with no Block, leaves it). While the decliner's Block stands, the sender's send is 404, as for an unknown id.
 
 Commands address the other collector by ``collector_id``, the account id a lookup, an Invite Link read or the Friends
 list gave; screens never show it. Every command locks both owners in ascending ``user_id`` (``owners.lock_owners``)
@@ -250,9 +252,10 @@ def _count_command(conn, user_id: str) -> None:
 def _command(user_id: str, other: str, key: UUID, action: str, apply, *,
              blocked_you_ok: bool = False) -> FriendCommandResult:
     """Runs one Friend command: replayed by its idempotency key, else counted against the hourly limit, both owners
-    locked, the other collector checked, then ``apply(conn, row)`` with the pair's row from ``find_collector``, which returns the new relation (or a ``Refusal``). A collector who
-    blocked the caller is 404 COLLECTOR_NOT_FOUND, as an unknown one is, unless ``blocked_you_ok``: then they count as
-    a collector the caller has no friendship with, so the answer is the one an unfriend would give."""
+    locked, the other collector checked, then ``apply(conn, row)`` with the pair's row from ``find_collector``, which
+    returns the new relation (or a ``Refusal``). A collector who blocked the caller is 404 COLLECTOR_NOT_FOUND, as an
+    unknown one is, unless ``blocked_you_ok``: then they count as a collector the caller has no friendship with, so the
+    answer is the one an unfriend would give."""
     if other == user_id:
         error(409, 'OWN_ACCOUNT')
     payload = {'action': action, 'collector_id': other}
@@ -292,9 +295,9 @@ def _pair(a: str, b: str) -> tuple[str, str]:
 
 @router.post('/friend-requests', response_model=FriendCommandResult)
 def send_friend_request(command: SendFriendRequest, user_id: str = Depends(verified_user)):
-    """Send a Friend Request. Within a week of the other collector declining one, it is 409 TRY_LATER. When the two are already Friends, a request is pending either way or the caller blocked
-    the other collector, nothing changes and the answer says so. A collector who blocked the caller is 404
-    COLLECTOR_NOT_FOUND, as an unknown one is."""
+    """Send a Friend Request. Within a week of the other collector declining one, it is 409 TRY_LATER. When the two
+    are already Friends, a request is pending either way or the caller blocked the other collector, nothing changes and
+    the answer says so. A collector who blocked the caller is 404 COLLECTOR_NOT_FOUND, as an unknown one is."""
     other = command.collector_id
 
     def apply(conn, row):
@@ -397,10 +400,11 @@ def block(command: BlockCollector, user_id: str = Depends(verified_user)):
 def unblock(collector_id: str, command: FriendCommand, user_id: str = Depends(verified_user)):
     """Unblock a collector the caller blocked. Nothing else comes back: they are not Friends again."""
     def apply(conn, row):
-        conn.execute('DELETE FROM block WHERE blocker_id=%s AND blocked_id=%s', (user_id, collector_id))
-        conn.execute("""DELETE FROM friend_request_declined
-          WHERE (sender_id=%s AND recipient_id=%s) OR (sender_id=%s AND recipient_id=%s)""",
-                     (user_id, collector_id, collector_id, user_id))
+        lifted = conn.execute('DELETE FROM block WHERE blocker_id=%s AND blocked_id=%s RETURNING 1',
+                              (user_id, collector_id)).fetchone()
+        if lifted:  # the decliner lifting a Block ends the wait they set; nothing else does
+            conn.execute('DELETE FROM friend_request_declined WHERE sender_id=%s AND recipient_id=%s',
+                         (collector_id, user_id))
         after = find_collector(conn, user_id, 'collector', collector_id)
         return 'none' if after is None else relation(user_id, after)
     return _command(user_id, collector_id, command.idempotency_key, 'unblock', apply, blocked_you_ok=True)

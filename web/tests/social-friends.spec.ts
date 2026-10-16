@@ -77,6 +77,7 @@ test("finding a collector by Handle, requesting, accepting and removing a Friend
     "Friend Request sent to Misty W."
   );
   await expect(result).toContainText("You've sent Misty W a Friend Request.");
+  await expect(result).toBeFocused();
   await expect(
     drawer(page).getByRole("region", { name: "Requests sent" })
   ).toContainText("Misty W");
