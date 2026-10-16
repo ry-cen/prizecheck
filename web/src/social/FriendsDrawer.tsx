@@ -294,16 +294,18 @@ function FriendsDialog({
   // The collector whose ⋯ gets focus back after Cancel.
   const backTo = useRef<string | null>(null);
   useEffect(() => {
-    if (confirming || !backTo.current) return;
+    if (confirming || busy || !backTo.current) return;
     const id = backTo.current;
     backTo.current = null;
-    Array.from(
+    const row = Array.from(
       body.current?.querySelectorAll<HTMLElement>("li[data-collector]") ?? []
-    )
-      .find((row) => row.dataset.collector === id)
-      ?.querySelector<HTMLElement>('button[aria-haspopup="menu"]')
-      ?.focus();
-  }, [confirming]);
+    ).find((item) => item.dataset.collector === id);
+    // The row's ⋯, or its first button when it has none (a request sent).
+    (
+      row?.querySelector<HTMLElement>('button[aria-haspopup="menu"]') ??
+      row?.querySelector<HTMLElement>("button")
+    )?.focus();
+  }, [confirming, busy]);
 
   function cancel(person: Collector) {
     backTo.current = person.collector_id;
@@ -322,7 +324,7 @@ function FriendsDialog({
   async function run(
     send: (key: string) => Promise<FriendCommandResult>,
     done: (result: FriendCommandResult) => string,
-    options: { rowGoes?: boolean } = {}
+    options: { rowGoes?: boolean; row?: string } = {}
   ): Promise<FriendCommandResult | null> {
     if (busy) return null;
     setBusy(true);
@@ -336,6 +338,8 @@ function FriendsDialog({
       return result;
     } catch (cause) {
       setProblem(commandMessage(cause));
+      // The row stays: focus returns to it once the buttons are enabled again.
+      if (options.row) backTo.current = options.row;
       return null;
     } finally {
       setBusy(false);
@@ -352,7 +356,7 @@ function FriendsDialog({
           idempotency_key: key,
         }),
       () => `Blocked ${person.display_name}. They aren't told.`,
-      { rowGoes: true }
+      { rowGoes: true, row: person.collector_id }
     );
   }
 
@@ -431,7 +435,7 @@ function FriendsDialog({
                                 }),
                               () =>
                                 `You and ${person.display_name} are now Friends.`,
-                              { rowGoes: true }
+                              { rowGoes: true, row: person.collector_id }
                             )
                           }
                         >
@@ -447,7 +451,7 @@ function FriendsDialog({
                                   idempotency_key: key,
                                 }),
                               () => "Friend Request declined.",
-                              { rowGoes: true }
+                              { rowGoes: true, row: person.collector_id }
                             )
                           }
                         >
@@ -513,7 +517,7 @@ function FriendsDialog({
                               }),
                             () =>
                               `${person.display_name} is no longer a Friend.`,
-                            { rowGoes: true }
+                            { rowGoes: true, row: person.collector_id }
                           )
                         }
                         onCancel={() => cancel(person)}
@@ -566,7 +570,11 @@ function FriendsDialog({
               </h3>
               <ul className="m-0 list-none p-0">
                 {view.sent.map((person) => (
-                  <li key={person.collector_id} className={ROW}>
+                  <li
+                    key={person.collector_id}
+                    data-collector={person.collector_id}
+                    className={ROW}
+                  >
                     <Person person={person} after=" · request sent" />
                     <Button
                       variant="quiet"
@@ -579,7 +587,7 @@ function FriendsDialog({
                               idempotency_key: key,
                             }),
                           () => "Friend Request withdrawn.",
-                          { rowGoes: true }
+                          { rowGoes: true, row: person.collector_id }
                         )
                       }
                     >
@@ -618,7 +626,7 @@ function FriendsDialog({
 type Run = (
   send: (key: string) => Promise<FriendCommandResult>,
   done: (result: FriendCommandResult) => string,
-  options?: { rowGoes?: boolean }
+  options?: { rowGoes?: boolean; row?: string }
 ) => Promise<FriendCommandResult | null>;
 
 type Found =
@@ -665,12 +673,25 @@ function AddFriend({ run, busy }: { run: Run; busy: boolean }) {
     done: string
   ) {
     const result = await run(send, () => done);
-    if (result)
+    if (result) {
+      moved.current = true;
       setFound({
         kind: "found",
         collector: { ...collector, relation: result.relation },
       });
+    }
   }
+
+  // After a change to the result, focus goes to its new button, or to the result itself when it has none.
+  const moved = useRef(false);
+  const result = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!moved.current || busy) return;
+    moved.current = false;
+    (
+      result.current?.querySelector<HTMLElement>("button") ?? result.current
+    )?.focus();
+  }, [found, busy]);
 
   return (
     <div className="flex flex-col gap-2 border-b border-border pb-4">
@@ -702,7 +723,12 @@ function AddFriend({ run, busy }: { run: Run; busy: boolean }) {
         </p>
       )}
       {found.kind === "found" && (
-        <LookupResult collector={found.collector} busy={busy} act={act} />
+        <LookupResult
+          collector={found.collector}
+          busy={busy}
+          act={act}
+          groupRef={result}
+        />
       )}
       <div className="flex items-center gap-2">
         <span className="min-w-0 flex-1 text-meta text-text-muted">
@@ -719,7 +745,9 @@ function LookupResult({
   collector,
   busy,
   act,
+  groupRef,
 }: {
+  groupRef: RefObject<HTMLDivElement | null>;
   collector: CollectorLookup;
   busy: boolean;
   act: (
@@ -734,7 +762,9 @@ function LookupResult({
   );
   return (
     <div
-      className="flex flex-col gap-1"
+      ref={groupRef}
+      tabIndex={-1}
+      className="flex flex-col gap-1 outline-none"
       aria-label="Search result"
       role="group"
     >

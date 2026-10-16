@@ -11,6 +11,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import psycopg
+import pytest
 
 from app.main import app, connect  # noqa: F401  (main first: it includes every router while loading)
 from app.social import friends as friends_module
@@ -224,6 +225,7 @@ def test_a_request_racing_a_block_never_leaves_a_request_from_the_blocked_collec
         assert blocked(b) == [a]
 
 
+@pytest.mark.serial(reason='alters handle_lookup_event and friends_of, which other tests write to')
 def test_migration_103_runs_again():
     with connect() as conn, conn.transaction():
         conn.execute((ROOT / 'migrations' / '103_blocks.sql').read_text())
@@ -231,5 +233,32 @@ def test_migration_103_runs_again():
         kinds = conn.execute("""SELECT count(*) FROM pg_constraint WHERE conrelid='handle_lookup_event'::regclass
           AND contype='c' AND pg_get_constraintdef(oid) LIKE '%kind%'""").fetchone()['count']
         assert kinds == 1
-        conn.execute("INSERT INTO handle_lookup_event(user_id,kind) SELECT user_id,'friend_command' FROM inventory_owner LIMIT 1")
+        conn.execute("""INSERT INTO handle_lookup_event(user_id,kind)
+          SELECT user_id,'friend_command' FROM inventory_owner LIMIT 1""")
+        raise psycopg.Rollback()
+
+
+@pytest.mark.serial(reason='alters handle_lookup_event and friends_of, which other tests write to')
+def test_migration_103_widens_the_old_kind_check():
+    """Migration 100's check, as a database that has run 100 and 102 but not yet 103 has it."""
+    owner = new_owner()[0]
+    with connect() as conn, conn.transaction():
+        for name in conn.execute("""SELECT conname FROM pg_constraint WHERE conrelid='handle_lookup_event'::regclass
+          AND contype='c' AND pg_get_constraintdef(oid) LIKE '%kind%'""").fetchall():
+            conn.execute(f'ALTER TABLE handle_lookup_event DROP CONSTRAINT "{name["conname"]}"')
+        conn.execute("""ALTER TABLE handle_lookup_event ADD CONSTRAINT handle_lookup_event_kind_check
+          CHECK (kind IN ('lookup','handle_change')) NOT VALID""")
+        try:
+            with conn.transaction():
+                conn.execute("INSERT INTO handle_lookup_event(user_id,kind) VALUES (%s,'friend_command')", (owner,))
+            raise AssertionError('the old check should refuse friend_command')
+        except psycopg.errors.CheckViolation:
+            pass
+        conn.execute('DROP TABLE friend_request_declined')
+        conn.execute((ROOT / 'migrations' / '103_blocks.sql').read_text())
+        kinds = conn.execute("""SELECT count(*) FROM pg_constraint WHERE conrelid='handle_lookup_event'::regclass
+          AND contype='c' AND pg_get_constraintdef(oid) LIKE '%kind%'""").fetchone()['count']
+        assert kinds == 1
+        conn.execute("INSERT INTO handle_lookup_event(user_id,kind) VALUES (%s,'friend_command')", (owner,))
+        assert conn.execute("SELECT to_regclass('friend_request_declined') AS t").fetchone()['t']
         raise psycopg.Rollback()
