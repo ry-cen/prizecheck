@@ -11,12 +11,16 @@ import { CardImage } from "../social/FriendCollectionPage";
 import {
   acceptBorrowRequest,
   cancelLoan,
+  confirmHandover,
   declineLoan,
   getLoan,
   getLoanSide,
   SocialError,
+  takeBackHandover,
+  useSuggestedPicks,
   withdrawLoan,
   type LoanCard,
+  type LoanPickPlace,
   type LoanSide,
   type LoanStep,
   type LoanView,
@@ -69,13 +73,14 @@ const ASK: Record<
 
 /**
  * One Loan's screen (social network #252, Loans verdict variant E): the headline, then "You're lending" or "You're
- * borrowing", the borrower's Deck (theirs only) and the return-by date; each line's card, set and count, and while
- * accepted the lender's pick ("From Binder 1"). One primary button is the next step (Accept, with Decline beside
- * it); "Waiting for Misty W. to answer" stands in when the other side is next. Everything else is behind ⋯: Withdraw,
- * Cancel Loan and Edit and resend, each only when the Loan's `actions` allow it. Answering a request, a stepper per line
- * accepts part of it; a line at 0 reads "Not lent". No step tracker and no paragraphs. Focus never falls to the page:
- * asking moves it to the confirmation's button, Keep it returns it to the opener, and a step that lands moves it to
- * the heading, which reads the Loan's new state.
+ * borrowing", the borrower's Deck (theirs only) and the return-by date; each line's card, set and count, and from
+ * acceptance the lender's pick ("From Binder 1"). One primary button is the next step: Accept (with Decline beside
+ * it); Use suggested picks while a pick is out of date (#253); Mark as handed over, or Yes, I have them. "Waiting for
+ * Misty W. to answer" or "… to confirm" stands in when the other side is next. Everything else is behind ⋯: Withdraw,
+ * Cancel Loan, Edit and resend and Take back my confirmation, each only when the Loan's `actions` allow it. Answering a
+ * request, a stepper per line accepts part of it; a line at 0 reads "Not lent". No step tracker and no paragraphs.
+ * Focus never falls to the page: asking moves it to the confirmation's button, Keep it returns it to the opener, and a
+ * step that lands, or a refusal that reads the Loan again, moves it to the heading, which reads the Loan's new state.
  */
 export function LoanScreen({
   loanId,
@@ -219,10 +224,7 @@ export function LoanScreen({
     } catch (cause) {
       if (!outcomeUnknown(cause)) keys.current.delete(name);
       setMessage(loanStepMessage(cause, other, cardName));
-      if (
-        cause instanceof SocialError &&
-        (cause.code === "LOAN_CHANGED" || cause.code === "STEP_NOT_ALLOWED")
-      ) {
+      if (cause instanceof SocialError && RELOAD.has(cause.code)) {
         focusNext.current = "heading";
         setAsking(null);
         setAttempt((n) => n + 1);
@@ -243,10 +245,27 @@ export function LoanScreen({
     cancel: () => void step("cancel", (key) => cancelLoan(loan.id, body(key))),
   };
   const total = [...promised.values()].reduce((sum, n) => sum + n, 0);
+  // The handover (#253): each side confirms for its own inventory. The lender's picks must be current first.
+  const handing = loan.actions.includes("confirm_handover");
+  const stale =
+    handing &&
+    loan.role === "lender" &&
+    side.picks.some((place) => place.short !== "0");
 
   const menu: MenuItem[] = [
     ...(loan.actions.includes("withdraw")
       ? [{ label: "Withdraw request", onSelect: () => ask("withdraw") }]
+      : []),
+    ...(loan.actions.includes("take_back")
+      ? [
+          {
+            label: "Take back my confirmation",
+            onSelect: () =>
+              void step("take_back", (key) =>
+                takeBackHandover(loan.id, body(key))
+              ),
+          },
+        ]
       : []),
     ...(loan.actions.includes("cancel")
       ? [{ label: "Cancel Loan", onSelect: () => ask("cancel") }]
@@ -304,6 +323,33 @@ export function LoanScreen({
           Lend at least one card, or decline.
         </p>
       )}
+    </div>
+  ) : stale ? (
+    <div className="flex flex-wrap items-center gap-2">
+      <Button
+        variant="primary"
+        aria-disabled={busy || undefined}
+        onClick={() =>
+          void step("use_suggested", (key) =>
+            useSuggestedPicks(loan.id, body(key))
+          )
+        }
+      >
+        Use suggested picks
+      </Button>
+      <p className="m-0 text-meta text-text-muted">A pick is out of date.</p>
+    </div>
+  ) : handing ? (
+    <div className="flex flex-wrap items-center gap-2">
+      <Button
+        variant="primary"
+        aria-disabled={busy || undefined}
+        onClick={() =>
+          void step("handover", (key) => confirmHandover(loan.id, body(key)))
+        }
+      >
+        {loan.role === "lender" ? "Mark as handed over" : "Yes, I have them"}
+      </Button>
     </div>
   ) : (
     waitingText(loan) && (
@@ -392,19 +438,51 @@ function promiseStart(loan: LoanView, side: LoanSide): Map<string, number> {
   );
 }
 
-/** "Waiting for Misty W. to answer" while the other side is next, else null. */
+/** The refusals that mean the Loan or its picks moved on: the screen reads them again. */
+const RELOAD = new Set([
+  "LOAN_CHANGED",
+  "STEP_NOT_ALLOWED",
+  "PICKS_OUT_OF_DATE",
+  "PICKS_UP_TO_DATE",
+]);
+
+/** "Waiting for Misty W. to answer" or "… to confirm" while the other side is next, else null. */
 function waitingText(loan: LoanView): string | null {
+  const other = loan.other.display_name;
   if (loan.state === "requested" && loan.role === "borrower")
-    return `Waiting for ${loan.other.display_name} to answer`;
+    return `Waiting for ${other} to answer`;
+  if (
+    loan.state === "accepted" &&
+    loan.you_confirmed_handover &&
+    !loan.they_confirmed_handover
+  )
+    return `Waiting for ${other} to confirm`;
   return null;
 }
 
 /** Where the lender takes a line's copies from: "From Binder 1", or each place with its count. */
-function pickText(side: LoanSide, editionId: string): string | null {
-  const places = side.picks.filter((pick) => pick.edition_id === editionId);
-  if (places.length === 0) return null;
-  if (places.length === 1) return `From ${places[0].name}`;
-  return `From ${places.map((place) => `${place.name} (${place.copies})`).join(" · ")}`;
+function pickText(places: LoanPickPlace[], editionId: string): string | null {
+  const found = places.filter((place) => place.edition_id === editionId);
+  if (found.length === 0) return null;
+  if (found.length === 1) return `From ${found[0].name}`;
+  return `From ${found.map((place) => `${place.name} (${place.copies})`).join(" · ")}`;
+}
+
+/**
+ * Each out-of-date pick of a line (#253), with where the suggested picks take the copies from: "Binder 2 has only
+ * 1 Iono now", "Binder 2 has no Iono now". Read from the lender's own side; the borrower never sees a Location.
+ */
+function staleText(side: LoanSide, line: LoanCard): string[] {
+  return side.picks
+    .filter(
+      (place) => place.edition_id === line.edition_id && place.short !== "0"
+    )
+    .map((place) => {
+      const left = Number(place.copies) - Number(place.short);
+      return left > 0
+        ? `${place.name} has only ${left} ${line.name} now`
+        : `${place.name} has no ${line.name} now`;
+    });
 }
 
 function LoanLine({
@@ -432,9 +510,14 @@ function LoanLine({
     loan.state !== "requested" &&
     loan.lines.some((item) => item.promised !== "0");
   const pick =
-    loan.role === "lender" && loan.state === "accepted"
-      ? pickText(side, line.edition_id)
+    loan.role === "lender" &&
+    (loan.state === "accepted" || loan.state === "handed_over")
+      ? pickText(side.picks, line.edition_id)
       : null;
+  const stale = loan.role === "lender" ? staleText(side, line) : [];
+  const suggested = stale.length
+    ? pickText(side.suggested, line.edition_id)
+    : null;
   let count: ReactNode;
   if (answering)
     count = (
@@ -475,6 +558,16 @@ function LoanLine({
         <p className="m-0 text-meta text-text-muted wrap-anywhere">{edition}</p>
         {pick && (
           <p className="m-0 text-meta text-text-muted wrap-anywhere">{pick}</p>
+        )}
+        {stale.map((text) => (
+          <p key={text} className="m-0 text-meta text-warning wrap-anywhere">
+            {text}
+          </p>
+        ))}
+        {suggested && (
+          <p className="m-0 text-meta text-text-muted wrap-anywhere">
+            Suggested: {suggested}
+          </p>
         )}
       </div>
       <div className="min-w-0 text-right phone:col-start-2 phone:text-left">

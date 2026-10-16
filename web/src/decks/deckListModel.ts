@@ -40,6 +40,9 @@ export type DeckCopy = {
   state: CopyState;
   /** Where an owned-elsewhere copy is (a Place label); null otherwise. */
   place: string | null;
+  /** A copy lent to a Friend (#253): owned but out of the Deck, so drawn as owned elsewhere ("elsewhere", no place)
+   * and read "lent out". The first copies the line misses are the lent ones. */
+  lent?: boolean;
 };
 
 export type DeckLine = {
@@ -55,7 +58,12 @@ export type DeckLine = {
   places: Place[];
   /** One entry per copy, or null when the line has more than SPREAD_LIMIT copies. */
   copies: DeckCopy[] | null;
-  /** The line's copies Loans hold (#252): "2 reserved for Kim", one entry per borrower. */
+  /** Of `missing`, the copies lent to Friends (#253): still owned, but out of the Deck with a borrower. */
+  lent: bigint;
+  /** What Loans take of the line's copies, one entry per borrower: "2 reserved for Kim" (#252), copies still in
+   * this Deck, then "3 lent to Sam" (#253), copies out with a Friend. `loans` is both, in that order. */
+  reservedFor: string[];
+  lentTo: string[];
   loans: string[];
 };
 
@@ -172,6 +180,12 @@ export function deckLine(
     : big(ownership?.elsewhere);
   const elsewhere = outside < need ? outside : need;
   const missing = need - elsewhere;
+  const lentOut = (loans?.lent ?? []).reduce(
+    (total, label) => total + big(label.copies),
+    0n
+  );
+  const lent = lentOut < missing ? lentOut : missing;
+  const notes = loanNotes(loans);
   return {
     line,
     variant: variantLabel(line.descriptor),
@@ -182,17 +196,41 @@ export function deckLine(
     places,
     copies:
       quantity <= SPREAD_LIMIT
-        ? copiesOf(here, elsewhere, quantity, places)
+        ? markLent(copiesOf(here, elsewhere, quantity, places), lent)
         : null,
-    loans: loanNotes(loans),
+    lent,
+    ...notes,
+    loans: [...notes.reservedFor, ...notes.lentTo],
   };
 }
 
-/** "2 reserved for Kim" for each borrower whose Loan holds some of the line's copies in this Deck (#252). */
-export function loanNotes(loans: DeckLoanLine | undefined): string[] {
-  return (loans?.reserved ?? []).map(
-    (label) => `${label.copies} reserved for ${label.name}`
-  );
+/** Turns the first `lent` missing copies into lent ones (#253): owned elsewhere, with a Friend. */
+function markLent(copies: DeckCopy[], lent: bigint): DeckCopy[] {
+  let left = lent;
+  return copies.map((copy) => {
+    if (copy.state !== "missing" || left === 0n) return copy;
+    left--;
+    return { ...copy, state: "elsewhere", lent: true };
+  });
+}
+
+/**
+ * "2 reserved for Kim" for each borrower whose Loan holds some of the line's copies in this Deck (#252), and "3 lent to
+ * Sam" for each one who has copies taken from it (#253). Lent copies are out of the Deck, so the line counts them as
+ * missing, and the note says where they are. A Deck answer from before #253 has no `lent`.
+ */
+export function loanNotes(loans: DeckLoanLine | undefined): {
+  reservedFor: string[];
+  lentTo: string[];
+} {
+  return {
+    reservedFor: (loans?.reserved ?? []).map(
+      (label) => `${label.copies} reserved for ${label.name}`
+    ),
+    lentTo: (loans?.lent ?? []).map(
+      (label) => `${label.copies} lent to ${label.name}`
+    ),
+  };
 }
 
 /** A name as a grouping key: NFC, ASCII apostrophes, single spaces, case-folded. */
@@ -396,23 +434,26 @@ export function editionText(line: DeckLine): string {
   return `${line.line.set_name} · ${line.line.collector_number} · ${line.variant}`;
 }
 
-/** "1 in this Deck, 2 owned elsewhere, 1 not owned", leaving out the states with no copies. */
+/** "1 in this Deck, 2 owned elsewhere, 1 lent out, 1 not owned", leaving out the states with no copies. */
 export function stateWords(line: DeckLine): string {
   return [
     line.here > 0n && `${line.here} in this Deck`,
     line.elsewhere > 0n && `${line.elsewhere} owned elsewhere`,
-    line.missing > 0n && `${line.missing} not owned`,
+    line.lent > 0n && `${line.lent} lent out`,
+    line.missing > line.lent && `${line.missing - line.lent} not owned`,
   ]
     .filter(Boolean)
     .join(", ");
 }
 
-/** A Stacked pile's summary, such as "×4 1↻ 1$": the copies, then those owned elsewhere and not owned. */
+/** A Stacked pile's summary, such as "×4 1↻ 1 lent 1$": the copies, then those owned elsewhere, lent out and not
+ * owned. */
 export function pileSummary(line: DeckLine): string {
   return [
     `×${line.quantity}`,
     line.elsewhere > 0n && `${line.elsewhere}↻`,
-    line.missing > 0n && `${line.missing}$`,
+    line.lent > 0n && `${line.lent} lent`,
+    line.missing > line.lent && `${line.missing - line.lent}$`,
   ]
     .filter(Boolean)
     .join(" ");
@@ -439,8 +480,9 @@ const STATE_TEXT: Record<CopyState, string> = {
   missing: "not owned",
 };
 
-/** One copy's state in words: "in this Deck", "owned elsewhere, in Binder" or "not owned". */
+/** One copy's state in words: "in this Deck", "owned elsewhere, in Binder", "lent out" or "not owned". */
 export function copyStateText(copy: DeckCopy): string {
+  if (copy.lent) return "lent out";
   return copy.state === "elsewhere" && copy.place
     ? `${STATE_TEXT.elsewhere}, in ${copy.place}`
     : STATE_TEXT[copy.state];

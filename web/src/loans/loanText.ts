@@ -175,6 +175,8 @@ export function loanStepMessage(
       return "Lend at least one card, or decline the request.";
     case "PICKS_OUT_OF_DATE":
       return "A pick is out of date. Use the suggested picks first.";
+    case "PICKS_UP_TO_DATE":
+      return "Your picks are already up to date.";
     case "TOO_MANY_CHANGES":
       return `Too many changes. Try again in ${minutes(error)}.`;
     default:

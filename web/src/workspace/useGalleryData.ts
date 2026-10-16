@@ -115,6 +115,7 @@ export function useGalleryData(
                 holdings: page.totals.holdings,
                 editions: page.totals.editions,
                 copies: Number(page.totals.copies),
+                lent: Number(page.lent ?? 0),
               };
             cursor = page.next_cursor ?? undefined;
             const done = cursor === undefined;
