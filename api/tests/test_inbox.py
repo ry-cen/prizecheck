@@ -4,10 +4,12 @@ What waits on a collector is worked out from Loan, return and Write-off state on
 the step it waits for, and the Loans tab's badge counts the same Loans. Steps store an update for the other side (a
 request or offer accepted, partly accepted or declined, a Loan cancelled, the return-by date changed) naming who took
 it and never why. Overdue and the 14-day nudge are worked out on read and listed until cleared. The inbox marks what it
-showed read, Clear dismisses it, and updates read more than 90 days ago are deleted lazily.
+showed read, Clear dismisses it, and updates read more than 90 days ago are deleted lazily. Each update says when it
+happened, and a request or offer withdrawn reads as withdrawn, not cancelled (owner's decisions, 2026-10-16).
 """
 import os
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from uuid import uuid4
 
 import psycopg
@@ -123,7 +125,7 @@ def test_steps_store_an_update_for_the_other_side_naming_who_took_it_and_never_w
         ('cancelled', 'Misty W.', False), ('declined', 'Misty W.', False), ('partly_accepted', 'Misty W.', False),
         ('accepted', 'Misty W.', False)]
     assert [loan_id for _, loan_id, _, _ in told][-2:] == [part['id'], loan['id']]
-    assert [(kind, name) for kind, _, name, _ in updates(misty)] == [('cancelled', 'Ash K.')]
+    assert [(kind, name) for kind, _, name, _ in updates(misty)] == [('withdrawn', 'Ash K.')]
     # A Lend Offer's answers go to the lender.
     ids_, iono, ash, misty, binders = offering()
     taken = ok(offer(misty, ash, [(binders['Binder A'], iono, 2)]), 201)
@@ -206,3 +208,46 @@ def test_a_step_storing_an_update_never_waits_on_the_other_collectors_owner_row(
         assert executor.submit(step, misty, view(misty, loan), 'cancel').result(timeout=20).status_code == 200
         holder.rollback()
     assert [kind for kind, _, _, _ in updates(ash)] == ['cancelled', 'declined', 'return_by_changed', 'accepted']
+
+
+def test_each_update_says_when_it_happened_and_a_withdrawn_request_or_offer_reads_as_withdrawn(store):
+    iono, ash, misty, loan, more = requested(day(10), held=4)
+    ok(accept(misty, view(misty, loan), [(iono, 1)]))
+    withdrawn = more()
+    ok(step(ash, withdrawn, 'withdraw'))
+    # An event update happened when the step stored it; a withdraw reads as withdrawn, naming who withdrew.
+    with connect() as conn:
+        stored = {str(row['loan_id']): row['created_at'] for row in conn.execute(
+            'SELECT loan_id, created_at FROM inbox_update WHERE recipient_id = ANY(%s)', ([ash, misty],))}
+    (told,) = inbox(misty)['updates']
+    assert (told['kind'], told['loan_id'], told['other_name']) == ('withdrawn', withdrawn['id'], 'Ash K.')
+    assert datetime.fromisoformat(told['at']) == stored[withdrawn['id']]
+    (accepted,) = inbox(ash)['updates']
+    assert accepted['kind'] == 'accepted' and datetime.fromisoformat(accepted['at']) == stored[loan['id']]
+    # A time-based update happened when it began to apply: overdue from the start of the day after the return-by date,
+    # by the database's clock; a nudge 14 days after the request was sent or accepted.
+    ok(handover(misty, loan))
+    backdate(loan, return_by=day(-3))
+    unanswered, waiting_handover = more(), more()
+    ok(accept(misty, view(misty, waiting_handover), [(iono, 1)]))
+    with connect() as conn:
+        conn.execute("UPDATE loan SET created_at = now() - interval '15 days' WHERE id=%s", (unanswered['id'],))
+        conn.execute("UPDATE loan SET accepted_at = now() - interval '16 days' WHERE id=%s", (waiting_handover['id'],))
+        began = conn.execute("""SELECT (%s::date + 1)::timestamptz AS overdue,
+            (SELECT created_at + interval '14 days' FROM loan WHERE id=%s) AS answer,
+            (SELECT accepted_at + interval '14 days' FROM loan WHERE id=%s) AS handover""",
+                             (day(-3), unanswered['id'], waiting_handover['id'])).fetchone()
+    at = {(update['kind'], update['loan_id']): datetime.fromisoformat(update['at']) for update in inbox(misty)['updates']}
+    assert at == {('overdue', loan['id']): began['overdue'], ('nudge_answer', unanswered['id']): began['answer'],
+                  ('nudge_handover', waiting_handover['id']): began['handover'],
+                  ('withdrawn', withdrawn['id']): stored[withdrawn['id']]}
+    # A Lend Offer its lender withdraws reads as withdrawn to the borrower; a cancel still reads as cancelled.
+    ids_, iono, ash, misty, binders = offering()
+    offered = ok(offer(misty, ash, [(binders['Binder A'], iono, 1)]), 201)
+    ok(step(misty, view(misty, offered), 'withdraw'))
+    kept = ok(offer(misty, ash, [(binders['Binder A'], iono, 1)]), 201)
+    ok(take(ash, kept, [(iono, 1)]))
+    ok(step(ash, view(ash, kept), 'cancel'))
+    assert [(update['kind'], update['loan_kind'], update['other_name']) for update in inbox(ash)['updates']] == [
+        ('withdrawn', 'lend_offer', 'Misty W.')]
+    assert [(kind, name) for kind, _, name, _ in updates(misty)] == [('cancelled', 'Ash K.'), ('accepted', 'Ash K.')]

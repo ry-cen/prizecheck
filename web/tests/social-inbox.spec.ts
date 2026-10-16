@@ -1,7 +1,9 @@
 // Ticket #259: the inbox (spec "Inbox derivation", "Web screens"). Ash K. sends Misty W. two Borrow Requests through
 // the API. Misty's bell and Loans tab count both; the bell's drawer lists one line per Loan, she opens one from it and
 // declines it, and both badges count one. Ash's bell lists the decline under Earlier; he opens the Loan from it, and
-// Clear empties Earlier for good. Collection's phone header still fits its Search with the bell in it.
+// Clear empties Earlier for good. Collection's phone header still fits its Search with the bell in it. Each update says
+// when it happened (owner's decision, 2026-10-16), read on a clock fixed after it, so the words never depend on how long
+// the test took; Ash then withdraws his other request, and Misty's bell says he withdrew it.
 // The catalog is the Swap catalog (api/tests/want_list_swap_fixtures.py).
 import { randomUUID } from "node:crypto";
 import type { Page } from "@playwright/test";
@@ -14,6 +16,7 @@ import {
   api,
   befriend,
   hold,
+  loanStep,
   nameCollector,
   seedCatalog,
   unsorted,
@@ -28,6 +31,13 @@ const loansTab = (on: Page) =>
     .getByRole("button", { name: /^Loans/ });
 const drawer = (on: Page) => on.getByRole("dialog", { name: "Inbox" });
 const title = (on: Page) => on.getByRole("heading", { level: 1 });
+const HOUR = 3_600_000;
+
+/** Fixes `on`'s clock `ms` after the time of the reader's newest update, as the API says it happened. */
+async function fixClockAfterNewestUpdate(on: Page, ms: number) {
+  const { updates } = await api(on, "GET", "/api/social/inbox");
+  await on.clock.setFixedTime(new Date(Date.parse(updates[0].at) + ms));
+}
 
 test("the bell lists the Loans waiting on you, opens one, and Clear empties Earlier", async ({
   page,
@@ -57,7 +67,7 @@ test("the bell lists the Loans waiting on you, opens one, and Clear empties Earl
         idempotency_key: randomUUID(),
       })
     ).id as string;
-  await ask();
+  const older = await ask();
   const newer = await ask();
 
   // Misty: both requests wait on her, on the bell and on the Loans tab.
@@ -102,7 +112,8 @@ test("the bell lists the Loans waiting on you, opens one, and Clear empties Earl
   await expect(loansTab(lender)).toHaveAccessibleName("Loans, 1 needs you");
   await expectPageChecks(lender, "Collection on a phone with the bell");
 
-  // Ash: nothing waits on him; the decline is under Earlier, and opens its Loan.
+  // Ash: nothing waits on him; the decline is under Earlier, three hours ago by his clock, and opens its Loan.
+  await fixClockAfterNewestUpdate(page, 3 * HOUR);
   await page.goto(`${ORIGIN}/loans`);
   await expect(bell(page)).toHaveAccessibleName("Inbox");
   await expect(loansTab(page)).toHaveAccessibleName("Loans");
@@ -114,7 +125,7 @@ test("the bell lists the Loans waiting on you, opens one, and Clear empties Earl
   ).toContainText("Nothing is waiting on you.");
   const earlier = drawer(page).getByRole("region", { name: "Earlier" });
   await expect(earlier.getByRole("link")).toHaveText([
-    "New: Misty W declined your request",
+    "New: Misty W declined your request 3 hours ago",
   ]);
   await marked;
   await earlier.getByRole("link").click();
@@ -126,7 +137,7 @@ test("the bell lists the Loans waiting on you, opens one, and Clear empties Earl
   // The drawer marked it read; Clear empties Earlier, and it stays empty.
   await bell(page).click();
   await expect(earlier.getByRole("link")).toHaveText([
-    "Misty W declined your request",
+    "Misty W declined your request 3 hours ago",
   ]);
   await earlier.getByRole("button", { name: "Clear" }).click();
   await expect(earlier).toContainText("No updates.");
@@ -137,4 +148,14 @@ test("the bell lists the Loans waiting on you, opens one, and Clear empties Earl
   await page.reload();
   await bell(page).click();
   await expect(earlier).toContainText("No updates.");
+
+  // Ash withdraws his other request: Misty's bell says he withdrew it, two days ago by her clock, and nothing waits.
+  await loanStep(page, older, `/api/social/loans/${older}/withdraw`);
+  await fixClockAfterNewestUpdate(lender, 48 * HOUR);
+  await lender.goto(`${ORIGIN}/loans`);
+  await expect(bell(lender)).toHaveAccessibleName("Inbox");
+  await bell(lender).click();
+  await expect(
+    drawer(lender).getByRole("region", { name: "Earlier" }).getByRole("link")
+  ).toHaveText(["New: Ash K withdrew their request 2 days ago"]);
 });

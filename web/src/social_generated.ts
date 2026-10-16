@@ -47,7 +47,7 @@ export type SeenNotices = { kinds: ("overdue" | "nudge_answer" | "nudge_handover
 export type OfferedCopies = { location_id: string; edition_id: string; quantity: string };
 export type SendLendOffer = { borrower_id: string; copies: OfferedCopies[]; return_by?: string | null; idempotency_key: string };
 export type AcceptLendOffer = { revision: number; idempotency_key: string; lines: PromisedLine[]; deck_id?: string | null };
-export type InboxUpdate = { id: string; kind: "accepted" | "partly_accepted" | "declined" | "cancelled" | "return_by_changed" | "overdue" | "nudge_answer" | "nudge_handover"; loan_id: string; loan_kind: "borrow_request" | "lend_offer"; loan_state: "requested" | "offered" | "accepted" | "handed_over" | "closed"; role: "lender" | "borrower"; other_name: string; read: boolean; return_by?: string | null };
+export type InboxUpdate = { id: string; kind: "accepted" | "partly_accepted" | "declined" | "cancelled" | "withdrawn" | "return_by_changed" | "overdue" | "nudge_answer" | "nudge_handover"; loan_id: string; loan_kind: "borrow_request" | "lend_offer"; loan_state: "requested" | "offered" | "accepted" | "handed_over" | "closed"; role: "lender" | "borrower"; other_name: string; read: boolean; at: string; return_by?: string | null };
 export type InboxView = { waiting: LoanView[]; updates: InboxUpdate[] };
 export type InboxIds = { ids: string[] };
 
