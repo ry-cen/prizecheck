@@ -24,6 +24,8 @@ type Props = {
   /** Ticket 107: Actions → Move… and Inventory Removal… open their dialogs. */
   onMove: () => void;
   onRemove: () => void;
+  /** Lend to a Friend… (#258): offers the selected copies to a Friend. */
+  onLend: () => void;
   /** An action is running: Actions is unavailable until it settles. */
   busy: boolean;
   /** Progress of a drag Move (live, polite). */
@@ -49,6 +51,7 @@ export function SelectionBar({
   onDetails,
   onMove,
   onRemove,
+  onLend,
   busy,
   status,
   error,
@@ -173,6 +176,13 @@ export function SelectionBar({
                   onClick={() => choose(onRemove)}
                 >
                   Inventory Removal…
+                </button>
+                <button
+                  type="button"
+                  className={LIST_ITEM}
+                  onClick={() => choose(onLend)}
+                >
+                  Lend to a Friend…
                 </button>
                 <button
                   type="button"

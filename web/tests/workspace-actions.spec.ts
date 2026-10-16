@@ -897,6 +897,8 @@ test.describe("desktop", () => {
     await expect(actions).toBeFocused();
     await expect(bar(page)).toContainText("1 copy selected");
     await page.keyboard.press("Enter");
+    // Move…, Inventory Removal…, Lend to a Friend… (#258), then Clear selection.
+    await page.keyboard.press("Tab");
     await page.keyboard.press("Tab");
     await page.keyboard.press("Tab");
     await page.keyboard.press("Tab");
