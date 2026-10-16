@@ -67,12 +67,17 @@ ALLOWED_IMPORTS = {
         # (#259): a set of Loan ids from the lender's own Holdings, never a Location; the read stays in app.loan_picks.
         ('..loan_picks', 'stale_pick_loans'),
         ('..main', 'connect'), ('..main', 'verified_user'), ('..location_tree', 'error'), ('..location_tree', 'replay'),
-        ('.friend_reads', 'card_facts'), ('.owners', 'ensure_owner'), ('.owners', 'lock_owners')},
+        ('.friend_reads', 'card_facts'), ('.owners', 'ensure_owner'), ('.owners', 'lock_owners'),
+        # Whether the lender is still the reader's Friend, so Edit and resend is offered only then (owner's decision,
+        # 2026-10-16): the one definition of "are Friends", a set of account ids, never anything of their inventory.
+        ('.friends', 'friend_ids')},
     # The inbox (#259): the reader's own Loans through the Loans' one definition of what waits on them, and the updates
     # stored for them. Nothing of another collector's inventory.
     'social/inbox.py': {
         ('..main', 'connect'), ('..main', 'verified_user'), ('.loans', 'LOANS'), ('.loans', 'LoanView'),
-        ('.loans', 'loan_facts'), ('.loans', 'loan_views'), ('.loans', 'role_of')},
+        ('.loans', 'loan_facts'), ('.loans', 'loan_views'), ('.loans', 'role_of'),
+        # The nudge's 14 days, so a nudge's update says when it began to apply (owner's decision, 2026-10-16).
+        ('.loans', 'NUDGE_DAYS')},
     'social/profile.py': {
         ('.', 'name_rules'), ('..main', 'connect'), ('..main', 'verified_user'),
         ('..location_tree', 'error'), ('..location_tree', 'owner_and_rows'), ('..location_tree', 'replay'),

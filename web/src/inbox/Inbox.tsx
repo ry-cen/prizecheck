@@ -26,12 +26,14 @@ import {
   updateText,
   waitingLabel,
 } from "../loans/loanText";
+import { inboxTime } from "./inboxTime";
 
 /**
  * The inbox (social network #259, spec "Inbox derivation", variant E): the bell in the header, with a badge counting
  * the Loans waiting on the collector, opens it from any page. **Waiting on you** lists one line per Loan ("Kim · Hand
- * over"), then **Earlier** lists the updates with a single **Clear**. Each line opens its Loan. The Loans tab's badge
- * counts the same Loans; the Friends button's counts Friend Requests (FriendsDrawer).
+ * over"), then **Earlier** lists the updates with a single **Clear**, each saying when it happened ("3 hours ago",
+ * "Oct 3"; owner's decision, 2026-10-16). Each line opens its Loan. The Loans tab's badge counts the same Loans; the
+ * Friends button's counts Friend Requests (FriendsDrawer).
  *
  * The shell provides it; the desktop header and the phone headers (the shell's and Collection's own) draw the bell.
  * It is read when the shell starts, when the drawer opens and closes, when the window regains focus and after a change
@@ -230,6 +232,8 @@ function InboxDialog({
   // whatever a read in the meantime says.
   const [fresh, setFresh] = useState<ReadonlySet<string>>(new Set());
   const view = load.kind === "ready" ? load.view : null;
+  // "3 hours ago" is as of this drawing; nothing redraws it while the drawer stays open.
+  const now = Date.now();
   const toMark =
     open && view
       ? view.updates
@@ -368,7 +372,13 @@ function InboxDialog({
                           <span className="text-body wrap-anywhere">
                             {isNew && <span className="sr-only">New: </span>}
                             {updateText(update)}
-                          </span>
+                          </span>{" "}
+                          <time
+                            dateTime={update.at}
+                            className="text-meta font-normal text-text-muted"
+                          >
+                            {inboxTime(update.at, now)}
+                          </time>
                         </a>
                       </li>
                     );

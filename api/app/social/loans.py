@@ -59,7 +59,8 @@ an update for the other side (``record_update``), with the name of the collector
 
 **Ending a friendship** (#260): Remove Friend and Block cancel the pair's Borrow Requests, Lend Offers and accepted
 Loans nobody has confirmed a handover for (``end_loans_between``), inside the Friend command that already locked both
-owners. A Loan either side confirmed a handover for counts as handed over and stays open.
+owners. A Loan either side confirmed a handover for counts as handed over and stays open. Edit and resend sends a new
+request to the lender, so it is offered only while the lender is still the borrower's Friend.
 """
 import json
 from collections.abc import Mapping
@@ -366,14 +367,16 @@ def section(user_id: str, row, facts: LoanFacts | None = None) -> str:
 
 
 def allowed(user_id: str, row, other_exists: bool = True, written_off: bool = False,
-            facts: LoanFacts | None = None) -> list[str]:
+            facts: LoanFacts | None = None, *, friends: bool = True) -> list[str]:
     """The steps the reader may take now, in the order the Loan screen offers them. Each side confirms the handover
     for its own inventory (#253) and may take its confirmation back until the other side confirms, unless anything on
     the Loan was written off (#257) or returned (#255). ``written_off``: some copy on the Loan was. With ``facts``
     (#255): a side that confirmed the handover starts a return of copies still out from its side once the other side
     confirmed too, or is gone, and no return is pending; the other side confirms a pending return, and the side that
     started it finishes it alone once the other side is gone. The lender changes the return-by date while the Loan is
-    open, except once a handover was confirmed with no date set: every date would then be earlier."""
+    open, except once a handover was confirmed with no date set: every date would then be earlier. ``friends``: the
+    other side is the reader's Friend now; Edit and resend, a new request to the lender, needs it (owner's decision,
+    2026-10-16). It is no step, so ``run_step`` leaves it at its default."""
     role, state = role_of(user_id, row), row['state']
     mine, theirs = confirmed(user_id, row) if state == 'accepted' else (False, False)
     found = []
@@ -410,7 +413,7 @@ def allowed(user_id: str, row, other_exists: bool = True, written_off: bool = Fa
                 found += ['approve_extension', 'decline_extension']
         elif row['return_by'] is not None and row['extension_to'] is None:
             found.append('ask_for_more_time')
-    if (role == 'borrower' and row['kind'] == 'borrow_request' and other_exists
+    if (role == 'borrower' and row['kind'] == 'borrow_request' and other_exists and friends
             and (state == 'requested' or (state == 'closed'
                                           and row['closed_reason'] in ('declined', 'withdrawn', 'cancelled')))):
         found.append('edit_and_resend')
@@ -436,6 +439,11 @@ def loan_views(conn, user_id: str, rows, facts: dict[UUID, LoanFacts] | None = N
     others = {row['borrower_id'] if row['lender_id'] == user_id else row['lender_id'] for row in rows} - {None}
     handles = {profile['user_id']: profile['handle'] for profile in conn.execute(
         'SELECT user_id, handle FROM collector_profile WHERE user_id = ANY(%s)', (sorted(others),))} if others else {}
+    # Edit and resend needs the lender to be the reader's Friend still: read once, and only when a Loan could offer it.
+    # Imported here because app.social.friends imports this module (``end_loans_between``).
+    from .friends import friend_ids
+    friends = friend_ids(conn, user_id) if any(
+        row['borrower_id'] == user_id and row['kind'] == 'borrow_request' for row in rows) else set()
     views = []
     for row in rows:
         role = role_of(user_id, row)
@@ -470,7 +478,8 @@ def loan_views(conn, user_id: str, rows, facts: dict[UUID, LoanFacts] | None = N
             lines=card_lines, needs_you=needs_you(user_id, row, known), section=section(user_id, row, known),
             waiting=waiting_step(user_id, row, known),
             actions=allowed(user_id, row, other_id in handles,
-                            any(line['written_off'] > 0 for line in lines.get(row['id'], [])), known),
+                            any(line['written_off'] > 0 for line in lines.get(row['id'], [])), known,
+                            friends=other_id in friends),
             revision=row['revision'], pending_return=pending, awaiting_choice=str(known.awaiting),
             extension_to=row['extension_to'] if row['state'] in ('accepted', 'handed_over') else None,
             overdue_since=known.overdue_since, notices=list(known.notices)))
@@ -684,7 +693,8 @@ def decline(loan_id: UUID, step: LoanStep, user_id: str = Depends(verified_user)
 @router.post('/{loan_id}/withdraw', response_model=LoanView)
 def withdraw(loan_id: UUID, step: LoanStep, user_id: str = Depends(verified_user)):
     """The borrower takes back a Borrow Request before it is answered, locking only the Loan row; or the lender a Lend
-    Offer, which releases its copies under the lender's lock (#258). The other side gets a 'cancelled' update (#259).
+    Offer, which releases its copies under the lender's lock (#258). The other side gets a 'cancelled' update (#259),
+    which the inbox reads as 'withdrawn' from the Loan's ``closed_reason``.
     """
     def apply(conn, row):
         record_update(conn, row, user_id, 'cancelled')

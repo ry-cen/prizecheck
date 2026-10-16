@@ -11,6 +11,7 @@ import {
 } from "react";
 import { Ellipsis, Smile } from "lucide-react";
 import { useInboxRefresh } from "../inbox/Inbox";
+import { endingText, loansEnding } from "../loans/loanText";
 import { getProfile } from "../profile_generated";
 import { inviteUrl } from "../settings/PrivacySection";
 import {
@@ -18,6 +19,7 @@ import {
   blockCollector,
   declineFriendRequest,
   getFriends,
+  getLoans,
   lookupHandle,
   removeFriend,
   sendFriendRequest,
@@ -45,7 +47,9 @@ import { commandMessage, lookupMessage } from "./socialMessages";
  * The shell provides it; the desktop header and the phone headers (the shell's and Collection's own) draw the button.
  * The badge is read when the shell starts, when the drawer opens, after each change and when the window regains focus;
  * nothing polls. Remove Friend and Block cancel the Loans the two have that nobody handed over (#260), so each change
- * reads the inbox again too, for the bell's and the Loans tab's badges.
+ * reads the inbox again too, for the bell's and the Loans tab's badges. Their question says how many it cancels ("This
+ * cancels 2 open Loans that haven't been handed over."; owner's decision, 2026-10-16), from the Loans tab's read, and
+ * says nothing while that read is out, when it fails, or for none.
  *
  * Focus: choosing Remove Friend or Block from a ⋯ swaps the row for its confirmation and focuses the confirming
  * button, and Cancel returns focus to that row's ⋯. A command that removes its own row moves focus to the "Your
@@ -236,24 +240,34 @@ function Confirmation({
 
 function BlockConfirmation({
   person,
+  cancels,
   busy,
   onConfirm,
   onCancel,
 }: {
   person: Collector;
+  /** What the Block cancels ("This cancels 1 open Loan…"), or "". */
+  cancels: string;
   busy: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }) {
   return (
     <Confirmation
-      question={`Block ${person.display_name}? They won't be told.`}
+      question={withCancels(
+        `Block ${person.display_name}? They won't be told.`,
+        cancels
+      )}
       confirm="Block"
       busy={busy}
       onConfirm={onConfirm}
       onCancel={onCancel}
     />
   );
+}
+
+function withCancels(question: string, cancels: string): string {
+  return cancels ? `${question} ${cancels}` : question;
 }
 
 /** The ⋯ beside a collector's row. */
@@ -300,6 +314,24 @@ function FriendsDialog({
     id: string;
     action: "remove" | "block";
   } | null>(null);
+  // The open Loans nobody handed over that the waiting Remove Friend or Block would cancel, once read.
+  const [ending, setEnding] = useState<{ id: string; count: number } | null>(
+    null
+  );
+  const endingId = confirming?.id ?? null;
+  useEffect(() => {
+    setEnding(null);
+    if (!endingId) return;
+    const abort = new AbortController();
+    getLoans(abort.signal)
+      .then((view) =>
+        setEnding({ id: endingId, count: loansEnding(view.loans, endingId) })
+      )
+      .catch(() => undefined);
+    return () => abort.abort();
+  }, [endingId]);
+  const cancels = (person: Collector) =>
+    ending?.id === person.collector_id ? endingText(ending.count) : "";
   const base = useId();
   const body = useRef<HTMLDivElement>(null);
   const friendsHeading = useRef<HTMLHeadingElement>(null);
@@ -425,6 +457,7 @@ function FriendsDialog({
                     {confirming?.id === person.collector_id ? (
                       <BlockConfirmation
                         person={person}
+                        cancels={cancels(person)}
                         busy={busy}
                         onConfirm={() => void block(person)}
                         onCancel={() => cancel(person)}
@@ -518,7 +551,10 @@ function FriendsDialog({
                     {confirming?.id === person.collector_id &&
                     confirming.action === "remove" ? (
                       <Confirmation
-                        question={`Remove ${person.display_name} as a Friend?`}
+                        question={withCancels(
+                          `Remove ${person.display_name} as a Friend?`,
+                          cancels(person)
+                        )}
                         confirm="Remove"
                         busy={busy}
                         onConfirm={() =>
@@ -537,6 +573,7 @@ function FriendsDialog({
                     ) : confirming?.id === person.collector_id ? (
                       <BlockConfirmation
                         person={person}
+                        cancels={cancels(person)}
                         busy={busy}
                         onConfirm={() => void block(person)}
                         onCancel={() => cancel(person)}
