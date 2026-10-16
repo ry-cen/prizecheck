@@ -37,13 +37,20 @@ pending return, the copies returned, the copies still out from each side and whe
 the borrower then chooses to keep or remove the written-off copies they hold. The count awaiting that choice is the
 borrower's own, read through ``borrowed_copies.awaiting_choice`` for the borrower's Loans only.
 
+**Return-by date** (#256): the lender keeps, changes or clears the requested date on accepting (``loan_inventory``),
+then changes or clears it while the Loan is open, but never brings it earlier once either side confirmed the handover;
+the borrower asks for more time (``extension_to``) and the lender approves or declines it. These steps lock only the
+Loan row. Overdue (from the day after the date, once a handover was confirmed) and the 14-day nudge (a Borrow Request
+nobody answered, or an accepted Loan nobody confirmed a handover for, story 89) are worked out on read, and each is a
+notice the reader sees once (``loan_notice_seen``).
+
 **Needs you** (``needs_you``) is the one definition the Loans tab and, from #259, the inbox read. ``section`` places a
 Loan on the Loans tab: needs you, out now, pending or history.
 """
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 from typing import Literal
 from uuid import UUID
 
@@ -65,9 +72,13 @@ COMMANDS_PER_HOUR = 120
 NOW = sql.SQL('now()')
 # Closed Loans the Loans tab lists under History, newest first.
 HISTORY = 50
+# Days an unanswered Borrow Request or an accepted Loan waits before both sides are nudged once (#256).
+NUDGE_DAYS = 14
 
 Action = Literal['accept', 'decline', 'confirm_handover', 'start_return', 'confirm_return', 'choose_written_off',
-                 'withdraw', 'take_back', 'cancel', 'write_off', 'edit_and_resend']
+                 'withdraw', 'take_back', 'cancel', 'write_off', 'change_return_by', 'ask_for_more_time',
+                 'approve_extension', 'decline_extension', 'edit_and_resend']
+Notice = Literal['overdue', 'nudge']
 Section = Literal['needs_you', 'out_now', 'pending', 'history']
 
 
@@ -133,6 +144,12 @@ class LoanView(BaseModel):
     pending_return: PendingReturn | None = None
     # The borrower's written-off copies awaiting their keep-or-remove choice (#257); "0" for the lender.
     awaiting_choice: str = '0'
+    # The later date the borrower asked for and the lender hasn't answered (#256), or None.
+    extension_to: date | None = None
+    # The day after the return-by date once that day has come and a handover was confirmed (#256), else None.
+    overdue_since: date | None = None
+    # Time-based notices the reader hasn't seen yet (#256): 'overdue', and 'nudge' for a handover still to happen.
+    notices: list[Notice] = []
 
 
 class LoansView(BaseModel):
@@ -145,6 +162,21 @@ class LoansView(BaseModel):
 class LoanStep(BaseModel):
     revision: int = Field(ge=1)
     idempotency_key: UUID
+
+
+class ChangeReturnBy(LoanStep):
+    """The lender's new return-by date (#256), or None to clear it."""
+    return_by: date | None
+
+
+class AskForMoreTime(LoanStep):
+    """The later return-by date the borrower asks for (#256)."""
+    return_by: date
+
+
+class SeenNotices(BaseModel):
+    """Notices the reader was shown (#256); those not showing now are ignored."""
+    kinds: list[Notice] = Field(min_length=1, max_length=2)
 
 
 def role_of(user_id: str, row) -> str:
@@ -165,7 +197,8 @@ class LoanFacts:
     side, by role: the lender's lent picks, and the borrower's promised copies less those written off and those the
     borrower confirmed returning (0 before the borrower confirmed the handover). ``any_return``: a return was ever
     started. ``write_off_cap``: the lender's copies out less those a return the borrower confirmed and the lender hasn't
-    gives back (#257). ``awaiting``: the reader's written-off copies awaiting their choice, as borrower (#257)."""
+    gives back (#257). ``awaiting``: the reader's written-off copies awaiting their choice, as borrower (#257).
+    ``overdue_since`` and ``notices``: as ``LoanView``'s (#256)."""
     other_exists: bool = True
     written_off: bool = False
     pending: dict | None = None
@@ -174,10 +207,12 @@ class LoanFacts:
     any_return: bool = False
     write_off_cap: int = 0
     awaiting: int = 0
+    overdue_since: date | None = None
+    notices: tuple = ()
 
 
 def loan_facts(conn, user_id: str, rows) -> dict[UUID, LoanFacts]:
-    """``LoanFacts`` for these Loan rows as the reader sees them, in four reads whatever the number of Loans. Reads no
+    """``LoanFacts`` for these Loan rows as the reader sees them, in six reads whatever the number of Loans. Reads no
     inventory: ``loan_pick`` is Loan state."""
     rows = list(rows)
     ids = [row['id'] for row in rows]
@@ -206,6 +241,11 @@ def loan_facts(conn, user_id: str, rows) -> dict[UUID, LoanFacts]:
         """SELECT loan_id, sum(quantity)::bigint AS copies FROM loan_pick WHERE loan_id = ANY(%s) AND state = 'lent'
         GROUP BY loan_id""", (ids,))}
     awaiting = awaiting_choice(conn, user_id, [row['id'] for row in rows if row['borrower_id'] == user_id])
+    clock = conn.execute(f"SELECT current_date AS today, now() - interval '{NUDGE_DAYS} days' AS stale").fetchone()
+    seen: dict[UUID, set] = {}
+    for notice in conn.execute('SELECT loan_id, kind FROM loan_notice_seen WHERE loan_id = ANY(%s) AND user_id=%s',
+                               (ids, user_id)):
+        seen.setdefault(notice['loan_id'], set()).add(notice['kind'])
     facts = {}
     for row in rows:
         mine = list(returns.get(row['id'], {}).values())
@@ -220,6 +260,13 @@ def loan_facts(conn, user_id: str, rows) -> dict[UUID, LoanFacts]:
         pending = next((found for found in mine if not found['complete']), None)
         coming = sum(pending['lines'].values()) if pending and not pending['lender_confirmed'] else 0
         promised = sum(int(line['promised']) - int(line['written_off']) for line in lines.get(row['id'], []))
+        handed = row['lender_handover_at'] is not None or row['borrower_handover_at'] is not None
+        overdue = (row['state'] in ('accepted', 'handed_over') and handed and row['return_by'] is not None
+                   and clock['today'] > row['return_by'])
+        nudge = ((row['state'] == 'accepted' and not handed and row['accepted_at'] is not None
+                  and row['accepted_at'] <= clock['stale'])
+                 or (row['state'] == 'requested' and row['created_at'] <= clock['stale']))
+        showing = [kind for kind, on in (('overdue', overdue), ('nudge', nudge)) if on]
         facts[row['id']] = LoanFacts(
             other_exists=others[row['id']] in alive,
             written_off=any(line['written_off'] > 0 for line in lines.get(row['id'], [])),
@@ -227,16 +274,20 @@ def loan_facts(conn, user_id: str, rows) -> dict[UUID, LoanFacts]:
             out={'lender': lent.get(row['id'], 0),
                  'borrower': promised - given_back if row['borrower_handover_at'] is not None else 0},
             any_return=bool(mine), write_off_cap=lent.get(row['id'], 0) - coming,
-            awaiting=awaiting.get(row['id'], 0))
+            awaiting=awaiting.get(row['id'], 0),
+            overdue_since=row['return_by'] + timedelta(days=1) if overdue else None,
+            notices=tuple(kind for kind in showing if kind not in seen.get(row['id'], set())))
     return facts
 
 
 def needs_you(user_id: str, row, facts: LoanFacts | None = None) -> bool:
     """Whether the Loan waits on the reader: a Borrow Request to answer (lender) or a Lend Offer to answer (borrower,
     #258), a handover the other side confirmed and the reader hasn't (#253), a return the other side confirmed and the
-    reader hasn't, or copies still out from the reader's side once the other side's account is gone (#255). #259's
-    inbox adds its own items."""
+    reader hasn't, or copies still out from the reader's side once the other side's account is gone (#255), or more
+    time the borrower asked for (lender, #256). #259's inbox adds its own items."""
     role = role_of(user_id, row)
+    if role == 'lender' and row['state'] in ('accepted', 'handed_over') and row['extension_to'] is not None:
+        return True
     if facts is not None and row['state'] in ('accepted', 'handed_over'):
         pending = facts.pending
         if pending is not None and pending['started_by'] != role and not pending[f'{role}_confirmed']:
@@ -297,6 +348,14 @@ def allowed(user_id: str, row, other_exists: bool = True, written_off: bool = Fa
     if (facts is not None and role == 'lender' and state in ('accepted', 'handed_over')
             and row['lender_handover_at'] is not None and facts.write_off_cap > 0):
         found.append('write_off')
+    # The return-by date (#256): the lender's to change; the borrower asks for more time, one request at a time.
+    if state in ('accepted', 'handed_over'):
+        if role == 'lender':
+            found.append('change_return_by')
+            if row['extension_to'] is not None:
+                found += ['approve_extension', 'decline_extension']
+        elif row['return_by'] is not None and row['extension_to'] is None:
+            found.append('ask_for_more_time')
     if (role == 'borrower' and row['kind'] == 'borrow_request' and other_exists
             and (state == 'requested' or (state == 'closed'
                                           and row['closed_reason'] in ('declined', 'withdrawn', 'cancelled')))):
@@ -356,7 +415,9 @@ def loan_views(conn, user_id: str, rows) -> list[LoanView]:
             lines=card_lines, needs_you=needs_you(user_id, row, known), section=section(user_id, row, known),
             actions=allowed(user_id, row, other_id in handles,
                             any(line['written_off'] > 0 for line in lines.get(row['id'], [])), known),
-            revision=row['revision'], pending_return=pending, awaiting_choice=str(known.awaiting)))
+            revision=row['revision'], pending_return=pending, awaiting_choice=str(known.awaiting),
+            extension_to=row['extension_to'] if row['state'] in ('accepted', 'handed_over') else None,
+            overdue_since=known.overdue_since, notices=list(known.notices)))
     return views
 
 
@@ -481,6 +542,26 @@ def write_loan(conn, loan_id: UUID, changes: Mapping[str, object]) -> None:
                  [*params, loan_id])
 
 
+def today(conn) -> date:
+    return conn.execute('SELECT current_date AS today').fetchone()['today']
+
+
+def handed(row) -> bool:
+    """Either side confirmed the handover: the date can't be brought earlier any more (#256)."""
+    return row['lender_handover_at'] is not None or row['borrower_handover_at'] is not None
+
+
+def return_by_columns(conn, row, new: date | None) -> dict:
+    """The Loan columns for the lender's new return-by date (``new``, None to clear it): 422 INVALID_RETURN_BY for a
+    day before today, and 409 RETURN_BY_EARLIER for a date earlier than the current one (or any date once it was
+    cleared) after a handover confirmation. The lender's answer also answers any request for more time."""
+    if new is not None and new < today(conn):
+        error(422, 'INVALID_RETURN_BY')
+    if new is not None and handed(row) and (row['return_by'] is None or new < row['return_by']):
+        error(409, 'RETURN_BY_EARLIER')
+    return {'return_by': new, 'extension_to': None}
+
+
 def close(conn, row, user_id: str, reason: str) -> dict:
     """Ends the Loan: its picks go, and the columns ``run_step`` writes are returned."""
     conn.execute('DELETE FROM loan_pick WHERE loan_id=%s', (row['id'],))
@@ -511,3 +592,52 @@ def cancel(loan_id: UUID, step: LoanStep, user_id: str = Depends(verified_user))
 
     return run_step(user_id, loan_id, step, 'cancel', apply,
                     lambda role, row: [row['lender_id']] if role == 'lender' else [row['lender_id'], row['borrower_id']])
+
+
+@router.post('/{loan_id}/return-by', response_model=LoanView)
+def change_return_by(loan_id: UUID, step: ChangeReturnBy, user_id: str = Depends(verified_user)):
+    """The lender changes or clears the return-by date of an open Loan (#256). Only the Loan row is locked."""
+    return run_step(user_id, loan_id, step, 'change_return_by',
+                    lambda conn, row: return_by_columns(conn, row, step.return_by), lambda role, row: [],
+                    {'return_by': step.return_by.isoformat() if step.return_by else None})
+
+
+@router.post('/{loan_id}/extension', response_model=LoanView)
+def ask_for_more_time(loan_id: UUID, step: AskForMoreTime, user_id: str = Depends(verified_user)):
+    """The borrower asks for a later return-by date (#256): 422 EXTENSION_NOT_LATER unless it is after the current
+    one, and INVALID_RETURN_BY for a day before today. Only the Loan row is locked."""
+    def apply(conn, row):
+        if step.return_by < today(conn):
+            error(422, 'INVALID_RETURN_BY')
+        if step.return_by <= row['return_by']:
+            error(422, 'EXTENSION_NOT_LATER')
+        return {'extension_to': step.return_by}
+
+    return run_step(user_id, loan_id, step, 'ask_for_more_time', apply, lambda role, row: [],
+                    {'return_by': step.return_by.isoformat()})
+
+
+@router.post('/{loan_id}/extension/approve', response_model=LoanView)
+def approve_extension(loan_id: UUID, step: LoanStep, user_id: str = Depends(verified_user)):
+    """The lender approves the borrower's request for more time with one tap (#256)."""
+    return run_step(user_id, loan_id, step, 'approve_extension',
+                    lambda conn, row: {'return_by': row['extension_to'], 'extension_to': None}, lambda role, row: [])
+
+
+@router.post('/{loan_id}/extension/decline', response_model=LoanView)
+def decline_extension(loan_id: UUID, step: LoanStep, user_id: str = Depends(verified_user)):
+    """The lender says no to the borrower's request for more time (#256); the date stays."""
+    return run_step(user_id, loan_id, step, 'decline_extension', lambda conn, row: {'extension_to': None},
+                    lambda role, row: [])
+
+
+@router.post('/{loan_id}/notices/seen', response_model=LoanView)
+def see_notices(loan_id: UUID, seen: SeenNotices, user_id: str = Depends(verified_user)):
+    """Records that the reader was shown these notices (#256), so each shows once per side. A notice not showing now
+    is ignored, so it can still show later. No step: no revision, no key; recording twice changes nothing."""
+    with connect() as conn, conn.transaction():
+        showing = loan_view(conn, user_id, loan_id).notices
+        for kind in sorted(set(seen.kinds) & set(showing)):
+            conn.execute('INSERT INTO loan_notice_seen(loan_id, user_id, kind) VALUES (%s, %s, %s) '
+                         'ON CONFLICT DO NOTHING', (loan_id, user_id, kind))
+        return loan_view(conn, user_id, loan_id)

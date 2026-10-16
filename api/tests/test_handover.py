@@ -99,7 +99,7 @@ def test_the_lenders_handover_takes_the_picked_copies_out_and_lends_them_with_no
         'accepted', True, False)
     # Once handed over, the lender may also write copies off (#257).
     assert (confirmed['section'], confirmed['needs_you'], confirmed['actions']) == (
-        'out_now', False, ['take_back', 'write_off'])
+        'out_now', False, ['take_back', 'write_off', 'change_return_by'])
     assert holding(misty, binder, iono)['quantity'] == '2'
     assert undo_records(misty) == records
     assert ok(call('GET', '/api/location-tree', misty))['owner_revision'] == before + 1
@@ -123,7 +123,8 @@ def test_the_lenders_handover_takes_the_picked_copies_out_and_lends_them_with_no
     done = ok(handover(ash, loan))
     assert (done['state'], done['section'], done['actions']) == ('handed_over', 'out_now', ['start_return'])
     # The lender may also write copies off (#257).
-    assert (view(misty, loan)['state'], view(misty, loan)['actions']) == ('handed_over', ['start_return', 'write_off'])
+    assert (view(misty, loan)['state'], view(misty, loan)['actions']) == (
+        'handed_over', ['start_return', 'write_off', 'change_return_by'])
 
 
 def test_the_borrowers_handover_puts_borrowed_copies_in_the_named_deck_and_never_in_holdings(store):
@@ -140,7 +141,7 @@ def test_the_borrowers_handover_puts_borrowed_copies_in_the_named_deck_and_never
     assert view(misty, loan)['needs_you'] is True
     done = ok(handover(misty, loan))
     assert (done['state'], done['section'], done['actions']) == (
-        'handed_over', 'out_now', ['start_return', 'write_off'])
+        'handed_over', 'out_now', ['start_return', 'write_off', 'change_return_by'])
     assert view(ash, loan)['actions'] == ['start_return']
     assert code(take_back(ash, loan)) == (409, 'STEP_NOT_ALLOWED')
 
@@ -183,7 +184,7 @@ def test_take_back_reverses_only_that_sides_write_and_nobody_cancels_after_a_con
     records = undo_records(misty)
     back = ok(take_back(misty, loan))
     assert (back['state'], back['you_confirmed_handover'], back['actions']) == (
-        'accepted', False, ['confirm_handover', 'cancel'])
+        'accepted', False, ['confirm_handover', 'cancel', 'change_return_by'])
     assert holding(misty, binder, iono)['quantity'] == '3' and undo_records(misty) == records
     with connect() as conn:
         assert {str(edition): copies for edition, copies in counts.reserved_counts(conn, misty, [iono]).items()} == {

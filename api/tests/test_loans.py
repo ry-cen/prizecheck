@@ -95,7 +95,7 @@ def test_a_request_reserves_nothing_until_the_lender_accepts_part_of_it(store):
     before = revision_of(misty)
     accepted = ok(accept(misty, asked, [(ids['PAL 185'], 2), (ids['SVI 166'], 0)]))
     assert (accepted['state'], accepted['section'], accepted['needs_you'], accepted['actions']) == (
-        'accepted', 'pending', False, ['confirm_handover', 'cancel'])
+        'accepted', 'pending', False, ['confirm_handover', 'cancel', 'change_return_by'])
     assert lines_of(accepted) == [(ids['PAL 185'], '2', '2'), (ids['SVI 166'], '1', '0')]
     assert revision_of(misty) == before + 1
     # The promised copies are reserved: Ash sees one spare copy left; the line left out reserved nothing.
