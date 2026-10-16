@@ -9,8 +9,9 @@ import {
   SocialError,
   type CollectorLookup,
   type FriendCommandResult,
+  unblockCollector,
 } from "../social_generated";
-import { CARD, CENTRED_MAIN, PRIMARY } from "./controls";
+import { CARD, CENTRED_MAIN, PRIMARY, SECONDARY } from "./controls";
 import { DeadEnd } from "./DeadEnd";
 import { followLink, SIGN_IN_PATH } from "./publicRoutes";
 
@@ -31,7 +32,8 @@ type Load =
  * Name> invited you to PrizeCheck" and nothing else about the collector. Signed out it reads the public record only
  * and offers Sign in, which comes back here. Signed in it reads the authenticated invite route instead (#247), never
  * the public record, and offers Send Friend Request, which is never sent by itself; when the two are already Friends,
- * a request is pending or the link is the collector's own, it says so. A replaced or unknown link is a dead end.
+ * a request is pending or the link is the collector's own, it says so, and a collector the visitor blocked comes with
+ * Unblock (#248). A replaced or unknown link is a dead end, and so is the link of a collector who blocked the visitor.
  * Search engines never index it.
  */
 export function InvitePage({ token, signedIn, onNavigate }: Props) {
@@ -114,7 +116,7 @@ export function InvitePage({ token, signedIn, onNavigate }: Props) {
   );
 }
 
-/** Signed in: Send Friend Request, Accept, or how the two already stand. */
+/** Signed in: Send Friend Request, Accept, Unblock, or how the two already stand. */
 function InviteActions({
   collector,
   onChange,
@@ -148,6 +150,7 @@ function InviteActions({
     friends: `You and ${name} are Friends.`,
     request_sent: `You've sent ${name} a Friend Request.`,
     request_received: `${name} has sent you a Friend Request.`,
+    blocked: `You blocked ${name}.`,
   }[collector.relation];
   return (
     <>
@@ -182,6 +185,22 @@ function InviteActions({
           }
         >
           Accept
+        </button>
+      )}
+      {collector.relation === "blocked" && (
+        <button
+          type="button"
+          className={SECONDARY}
+          disabled={busy}
+          onClick={() =>
+            void run((key) =>
+              unblockCollector(collector.collector_id, {
+                idempotency_key: key,
+              })
+            )
+          }
+        >
+          Unblock
         </button>
       )}
       <p role="status" className="m-0 text-body text-text-muted">

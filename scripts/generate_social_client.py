@@ -1,4 +1,5 @@
-"""Generate the social client module (Friends and Friend Requests, social network #247) from the API OpenAPI schema."""
+"""Generate the social client module (Friends and Friend Requests, social network #247, and Blocks, #248) from the API
+OpenAPI schema."""
 import sys
 from pathlib import Path
 
@@ -23,7 +24,7 @@ def ts_type(value):
 schema = app.openapi()["components"]["schemas"]
 lines = ["// Generated from FastAPI OpenAPI by scripts/generate_social_client.py. Do not edit."]
 for name in ("Collector", "CollectorLookup", "FriendsView", "LookupHandle", "SendFriendRequest", "FriendCommand",
-             "FriendCommandResult"):
+             "FriendCommandResult", "BlockCollector", "BlockedList"):
     definition = schema[name]
     fields = [f"{field}{'' if field in definition.get('required', []) else '?'}: {ts_type(value)}"
               for field, value in definition["properties"].items()]
@@ -62,6 +63,11 @@ export const withdrawFriendRequest = (id: string, body: FriendCommand) =>
   request<FriendCommandResult>(`/api/social/friend-requests/${at(id)}/withdraw`, 'POST', body);
 export const removeFriend = (id: string, body: FriendCommand) =>
   request<FriendCommandResult>(`/api/social/friends/${at(id)}/remove`, 'POST', body);
+// Blocks: Settings › Privacy's list, Block (from a Friend's ⋯) and Unblock.
+export const getBlocked = () => request<BlockedList>('/api/social/blocks', 'GET');
+export const blockCollector = (body: BlockCollector) => request<FriendCommandResult>('/api/social/blocks', 'POST', body);
+export const unblockCollector = (id: string, body: FriendCommand) =>
+  request<FriendCommandResult>(`/api/social/blocks/${at(id)}/unblock`, 'POST', body);
 """)
 content = "\n".join(lines)
 target = root / "web/src/social_generated.ts"

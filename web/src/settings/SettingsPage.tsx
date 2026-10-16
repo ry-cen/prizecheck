@@ -1,5 +1,6 @@
 import { PageHeader } from "../shell/PageHeader";
 import { SignInsSection } from "../shell/SignInsSection";
+import { BlockedSection } from "./BlockedSection";
 import { HiddenLocationsSection } from "./HiddenLocationsSection";
 import { PrivacySection } from "./PrivacySection";
 import { WantListCountingSection } from "./WantListCountingSection";
@@ -17,6 +18,7 @@ export function SettingsPage({ email }: { email: string | null }) {
       <WantListCountingSection />
       <PrivacySection>
         <HiddenLocationsSection />
+        <BlockedSection />
       </PrivacySection>
       <SignInsSection email={email} />
     </main>
