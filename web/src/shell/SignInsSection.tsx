@@ -114,7 +114,11 @@ export function SignInsSection({ email }: { email: string | null }) {
   }
 
   return (
-    <section aria-labelledby={headingId} className="flex flex-col gap-3">
+    <section
+      id="sign-ins"
+      aria-labelledby={headingId}
+      className="flex flex-col gap-3"
+    >
       <h2
         id={headingId}
         ref={heading}

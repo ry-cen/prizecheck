@@ -240,6 +240,9 @@ from .format_standing import router as format_standing_router  # noqa: E402
 app.include_router(format_standing_router)
 from .collection_import import router as collection_import_router  # noqa: E402
 app.include_router(collection_import_router)
+from .social.profile import router as profile_router, public_router as public_invite_router  # noqa: E402
+app.include_router(profile_router)
+app.include_router(public_invite_router)
 
 
 from .price_budget import is_budgeted  # noqa: E402

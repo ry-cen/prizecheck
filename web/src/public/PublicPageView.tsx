@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { DiscoverPage } from "../discover/DiscoverPage";
 import { DeadEnd } from "./DeadEnd";
+import { InvitePage } from "./InvitePage";
 import { PublishedDeckPage } from "./PublishedDeckPage";
 import type { PublicPage } from "./publicRoutes";
 
@@ -16,6 +17,15 @@ type Props = {
  */
 export function PublicPageView({ page, signedIn, onNavigate }: Props) {
   if (page.kind === "discover") return <DiscoverPage onNavigate={onNavigate} />;
+  if (page.kind === "invite")
+    return (
+      <InvitePage
+        key={page.token}
+        token={page.token}
+        signedIn={signedIn}
+        onNavigate={onNavigate}
+      />
+    );
   return (
     <PublishedPage
       key={page.token}
