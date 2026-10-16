@@ -36,7 +36,7 @@ from .social import counts
 from .social.friend_copies import friend_copies
 from .social.friend_reads import card_facts
 from .social.friends import friend_ids
-from .social.loans import (LoanStep, LoanView, begin_command, advance_revision, run_step, store)
+from .social.loans import (NOW, LoanStep, LoanView, begin_command, advance_revision, run_step, store)
 from .social.owners import lock_owners
 
 router = APIRouter(prefix='/api/loans', tags=['loans'])
@@ -326,9 +326,10 @@ def accept(loan_id: UUID, command: AcceptBorrowRequest, user_id: str = Depends(v
                 refuse(409, 'NOT_ENOUGH_COPIES', edition_id=edition, available=available[edition])
         for edition, copies in promised.items():
             conn.execute('UPDATE loan_line SET promised=%s WHERE loan_id=%s AND edition_id=%s', (copies, loan_id, edition))
-        conn.execute("UPDATE loan SET state='accepted', accepted_at=now() WHERE id=%s", (loan_id,))
+        # The Loan turns accepted in run_step's one write of its row; the picks never read this Loan's state.
         make_picks(conn, user_id, loan_id, promised)
         advance_revision(conn, user_id)
+        return {'state': 'accepted', 'accepted_at': NOW}
 
     return run_step(user_id, loan_id, command, 'accept', apply, lambda role, row: [row['lender_id']],
                     {'lines': {str(edition): copies for edition, copies in sorted(promised.items(), key=str)}})
@@ -414,10 +415,10 @@ def _owner_revision(conn, user_id: str) -> int:
     return conn.execute('SELECT revision FROM inventory_owner WHERE user_id=%s', (user_id,)).fetchone()['revision']
 
 
-def _settle_handover(conn, loan_id: UUID) -> None:
-    """A Loan both sides confirmed the handover of is handed over."""
-    conn.execute("""UPDATE loan SET state='handed_over' WHERE id=%s AND state='accepted'
-      AND lender_handover_at IS NOT NULL AND borrower_handover_at IS NOT NULL""", (loan_id,))
+def _confirmed(row, column: str, other: str) -> dict:
+    """The Loan columns one side's handover confirmation sets: its own time, and ``handed_over`` when the other side
+    already confirmed. ``row`` is the Loan as ``run_step`` read it under its lock."""
+    return {column: NOW, **({'state': 'handed_over'} if row[other] is not None else {})}
 
 
 @router.post('/{loan_id}/handover', response_model=LoanView)
@@ -436,7 +437,7 @@ def confirm_handover(loan_id: UUID, step: LoanStep, user_id: str = Depends(verif
                 ORDER BY source_location_id, edition_id""", (loan_id, user_id))]
             take_out(conn, user_id, items, _owner_revision(conn, user_id))
             conn.execute("UPDATE loan_pick SET state='lent' WHERE loan_id=%s AND state='reserved'", (loan_id,))
-            conn.execute('UPDATE loan SET lender_handover_at=now() WHERE id=%s', (loan_id,))
+            return _confirmed(row, 'lender_handover_at', 'borrower_handover_at')
         else:
             rows = _locations(conn, user_id)
             destination = row['deck_id'] if row['deck_id'] in rows else unsorted_leaf(conn, user_id, rows, None)
@@ -445,9 +446,8 @@ def confirm_handover(loan_id: UUID, step: LoanStep, user_id: str = Depends(verif
               WHERE loan_id=%s AND promised > written_off
               ON CONFLICT (loan_id, location_id, edition_id) DO UPDATE SET quantity = b.quantity + EXCLUDED.quantity""",
                          (loan_id, user_id, destination, loan_id))
-            conn.execute('UPDATE loan SET borrower_handover_at=now() WHERE id=%s', (loan_id,))
             advance_revision(conn, user_id)
-        _settle_handover(conn, loan_id)
+            return _confirmed(row, 'borrower_handover_at', 'lender_handover_at')
 
     return run_step(user_id, loan_id, step, 'confirm_handover', apply, lambda role, row: [user_id])
 
@@ -480,11 +480,11 @@ def take_back(loan_id: UUID, step: LoanStep, user_id: str = Depends(verified_use
                                      sorted(items.items(), key=lambda item: (str(item[0][0]), str(item[0][1])))],
                      _owner_revision(conn, user_id))
             conn.execute("UPDATE loan_pick SET state='reserved' WHERE loan_id=%s AND state='lent'", (loan_id,))
-            conn.execute('UPDATE loan SET lender_handover_at=NULL WHERE id=%s', (loan_id,))
+            return {'lender_handover_at': None}
         else:
             conn.execute('DELETE FROM borrowed_holding WHERE loan_id=%s AND borrower_id=%s', (loan_id, user_id))
-            conn.execute('UPDATE loan SET borrower_handover_at=NULL WHERE id=%s', (loan_id,))
             advance_revision(conn, user_id)
+            return {'borrower_handover_at': None}
 
     return run_step(user_id, loan_id, step, 'take_back', apply, lambda role, row: [user_id])
 
@@ -502,6 +502,7 @@ def use_suggested_picks(loan_id: UUID, step: LoanStep, user_id: str = Depends(ve
         conn.execute("DELETE FROM loan_pick WHERE loan_id=%s AND state='reserved'", (loan_id,))
         insert_picks(conn, user_id, loan_id, replaced)
         advance_revision(conn, user_id)
+        return None
 
     # Allowed while the lender may still confirm the handover; its own name keeps its digest apart from the handover's.
     return run_step(user_id, loan_id, step, 'confirm_handover', apply, lambda role, row: [user_id],

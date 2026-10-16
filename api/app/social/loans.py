@@ -11,7 +11,8 @@ They run through ``run_step`` and answer ``loan_view`` too, so every step answer
 **Steps** name the Loan ``revision`` they read (409 LOAN_CHANGED when it moved on) and an idempotency key (replayed from
 ``location_command``, as Friend commands are). ``allowed`` is the one rule for which steps a collector may take now: the
 view's ``actions`` list them and a step not in it is 409 STEP_NOT_ALLOWED. A collector who isn't one of the Loan's two
-sides gets 404 LOAN_NOT_FOUND, as for a Loan that doesn't exist.
+sides gets 404 LOAN_NOT_FOUND, as for a Loan that doesn't exist. Every step on an existing Loan runs through
+``run_step``, which writes the ``loan`` row exactly once: the step's own columns and the revision in one UPDATE.
 
 **Locks** follow the spec's table ("Locks and revisions"): owner rows in ascending ``user_id`` (``owners.lock_owners``),
 then the ``loan`` row. Decline locks the lender; withdraw only the Loan; cancel the canceller and, when the borrower
@@ -30,11 +31,14 @@ neither has, either may cancel.
 Loan on the Loans tab: needs you, out now, pending or history.
 """
 import json
+from collections.abc import Mapping
 from datetime import date
 from typing import Literal
 from uuid import UUID
 
+import psycopg
 from fastapi import APIRouter, Depends, HTTPException
+from psycopg import sql
 from pydantic import BaseModel, Field
 
 from ..location_tree import error, replay
@@ -45,6 +49,8 @@ from .owners import ensure_owner, lock_owners
 router = APIRouter(prefix='/api/social/loans', tags=['social'])
 
 COMMANDS_PER_HOUR = 120
+# A Loan column value a step's ``apply`` returns for the transaction's time (``run_step``).
+NOW = sql.SQL('now()')
 # Closed Loans the Loans tab lists under History, newest first.
 HISTORY = 50
 
@@ -277,38 +283,65 @@ def advance_revision(conn, owner_id: str | None) -> None:
 
 def run_step(user_id: str, loan_id: UUID, step: LoanStep, action: str, apply, locks, extra: dict | None = None) -> dict:
     """Runs one step on an existing Loan: ``begin_command``, the owners ``locks(role, row)`` names locked in ascending
-    order, then the Loan row, its revision and ``allowed`` checked, then ``apply(conn, row)``, the Loan's revision
-    advanced, and the caller's view stored and returned. ``extra``: the step's own fields, part of its digest. The Loan
-    row is locked ``FOR NO KEY UPDATE``, like the owners (``lock_owners`` says why): a Borrowed Holding's foreign key
-    check on its Loan never waits on a step."""
+    order, then the Loan row, its revision and ``allowed`` checked, then ``apply(conn, row)``, then the Loan row written
+    once, and the caller's view stored and returned. ``extra``: the step's own fields, part of its digest.
+
+    ``apply`` writes everything but the ``loan`` row and returns the Loan columns the step sets (a mapping of column
+    name to value, empty or None for none; ``NOW`` for the transaction's time). ``run_step`` writes them and the
+    revision in one ``UPDATE loan``, the step's only write of that row. A second write of the row in one transaction
+    makes PostgreSQL check its foreign keys again, key-sharing both collectors' ``inventory_owner`` rows and the
+    borrower's Deck; that waited on the other collector's own commands (a Deck deletion holds its owner row and
+    cascades into this Loan row) and closed a cycle. The Loan row is locked ``FOR NO KEY UPDATE``, like the owners
+    (``lock_owners`` says why). A deadlock the database ends anyway leaves nothing changed and answers 503
+    INVENTORY_TEMPORARILY_UNAVAILABLE, which the client retries with the same key."""
     payload = {'action': f'loan_{action}', 'loan_id': str(loan_id), 'revision': step.revision, **(extra or {})}
-    with connect() as conn, conn.transaction():
-        digest, stored = begin_command(conn, user_id, step.idempotency_key, payload)
-        if stored is not None:
-            return stored
-        sides = conn.execute(LOANS + ' AND o.id = %(id)s', {'me': user_id, 'id': loan_id}).fetchone()
-        if sides is None:
-            error(404, 'LOAN_NOT_FOUND')
-        lock_owners(conn, *[owner for owner in locks(role_of(user_id, sides), sides) if owner is not None])
-        row = conn.execute('SELECT * FROM loan WHERE id = %s FOR NO KEY UPDATE', (loan_id,)).fetchone()
-        if row['revision'] != step.revision:
-            error(409, 'LOAN_CHANGED')
-        other = row['borrower_id'] if role_of(user_id, row) == 'lender' else row['lender_id']
-        exists = other is not None and conn.execute('SELECT 1 FROM collector_profile WHERE user_id=%s',
-                                                    (other,)).fetchone() is not None
-        written_off = conn.execute('SELECT 1 FROM loan_line WHERE loan_id=%s AND written_off > 0 LIMIT 1',
-                                   (loan_id,)).fetchone() is not None
-        if action not in allowed(user_id, row, exists, written_off):
-            error(409, 'STEP_NOT_ALLOWED')
-        apply(conn, row)
-        conn.execute('UPDATE loan SET revision = revision + 1 WHERE id = %s', (loan_id,))
-        return store(conn, user_id, step.idempotency_key, digest, loan_id)
+    try:
+        with connect() as conn, conn.transaction():
+            digest, stored = begin_command(conn, user_id, step.idempotency_key, payload)
+            if stored is not None:
+                return stored
+            sides = conn.execute(LOANS + ' AND o.id = %(id)s', {'me': user_id, 'id': loan_id}).fetchone()
+            if sides is None:
+                error(404, 'LOAN_NOT_FOUND')
+            lock_owners(conn, *[owner for owner in locks(role_of(user_id, sides), sides) if owner is not None])
+            row = conn.execute('SELECT * FROM loan WHERE id = %s FOR NO KEY UPDATE', (loan_id,)).fetchone()
+            if row['revision'] != step.revision:
+                error(409, 'LOAN_CHANGED')
+            other = row['borrower_id'] if role_of(user_id, row) == 'lender' else row['lender_id']
+            exists = other is not None and conn.execute('SELECT 1 FROM collector_profile WHERE user_id=%s',
+                                                        (other,)).fetchone() is not None
+            written_off = conn.execute('SELECT 1 FROM loan_line WHERE loan_id=%s AND written_off > 0 LIMIT 1',
+                                       (loan_id,)).fetchone() is not None
+            if action not in allowed(user_id, row, exists, written_off):
+                error(409, 'STEP_NOT_ALLOWED')
+            write_loan(conn, loan_id, apply(conn, row) or {})
+            return store(conn, user_id, step.idempotency_key, digest, loan_id)
+    except psycopg.errors.DeadlockDetected:
+        error(503, 'INVENTORY_TEMPORARILY_UNAVAILABLE')
 
 
-def close(conn, row, user_id: str, reason: str) -> None:
-    conn.execute("""UPDATE loan SET state='closed', closed_reason=%s, closed_by=%s, closed_at=now() WHERE id=%s""",
-                 (reason, user_id, row['id']))
+def write_loan(conn, loan_id: UUID, changes: Mapping[str, object]) -> None:
+    """The step's one write of its Loan row: ``changes`` (column -> value, ``NOW`` for the transaction's time) and the
+    revision advanced. ``run_step`` calls it; nothing else in a step writes the row."""
+    if 'revision' in changes or 'id' in changes:
+        raise ValueError('run_step owns the Loan id and revision')
+    assignments = [sql.SQL('revision = revision + 1')]
+    params: list = []
+    for column in sorted(changes):
+        value = changes[column]
+        if isinstance(value, sql.Composable):
+            assignments.append(sql.SQL('{} = {}').format(sql.Identifier(column), value))
+        else:
+            assignments.append(sql.SQL('{} = %s').format(sql.Identifier(column)))
+            params.append(value)
+    conn.execute(sql.SQL('UPDATE loan SET {} WHERE id = %s').format(sql.SQL(', ').join(assignments)),
+                 [*params, loan_id])
+
+
+def close(conn, row, user_id: str, reason: str) -> dict:
+    """Ends the Loan: its picks go, and the columns ``run_step`` writes are returned."""
     conn.execute('DELETE FROM loan_pick WHERE loan_id=%s', (row['id'],))
+    return {'state': 'closed', 'closed_reason': reason, 'closed_by': user_id, 'closed_at': NOW}
 
 
 @router.post('/{loan_id}/decline', response_model=LoanView)
@@ -330,8 +363,8 @@ def cancel(loan_id: UUID, step: LoanStep, user_id: str = Depends(verified_user))
     """Either side cancels an accepted Loan nobody has confirmed a handover for: its copies stop being reserved, so the
     lender's revision moves. The lender locks only themself; the borrower locks both."""
     def apply(conn, row):
-        close(conn, row, user_id, 'cancelled')
         advance_revision(conn, row['lender_id'])
+        return close(conn, row, user_id, 'cancelled')
 
     return run_step(user_id, loan_id, step, 'cancel', apply,
                     lambda role, row: [row['lender_id']] if role == 'lender' else [row['lender_id'], row['borrower_id']])

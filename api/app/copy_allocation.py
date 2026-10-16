@@ -395,12 +395,14 @@ def available_to(conn, user_id: str, editions: Iterable[UUID], counting: WantLis
         others = [allocation.lines[(deck, edition)] for deck in allocation.order
                   if deck != deck_id and (deck, edition) in allocation.lines]
         # The rule without the asking Deck: its copies come out of the pool, and its lines are being replaced. Copies
-        # reserved from the asking Deck's own Holding go with it.
+        # reserved from the asking Deck's own Holding go with it: those the rule places there, never the raw picks,
+        # which may name copies that have since moved out of it.
         whole = allocation.copies[edition]
         picked = {location: copies for location, copies in whole.picked.items() if location != deck_id}
+        placed_here = (whole.reserved_beyond.get(deck_id, 0) + whole.reserved_own.get(deck_id, 0)
+                       if deck_id is not None else 0)
         rule = spare_rule({location: copies for location, copies in held.items() if location != deck_id},
-                          {line.deck_id: line.quantity for line in others},
-                          max(0, whole.reserved - (whole.picked.get(deck_id, 0) if deck_id is not None else 0)), picked)
+                          {line.deck_id: line.quantity for line in others}, whole.reserved - placed_here, picked)
         promised = rule.reserved_beyond
         spare = sorted(((location, copies - promised.get(location, 0)) for location, copies in rule.beyond.items()
                         if copies > promised.get(location, 0)), key=loose_first)

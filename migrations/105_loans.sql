@@ -30,7 +30,8 @@ CREATE TABLE IF NOT EXISTS loan (
   closed_at timestamptz,
   closed_by text,
   revision bigint NOT NULL DEFAULT 1 CHECK (revision > 0),
-  CONSTRAINT loan_two_collectors CHECK (lender_id IS DISTINCT FROM borrower_id),
+  -- Two different collectors; either id goes NULL when that account is deleted, and both may (migration 107).
+  CONSTRAINT loan_two_collectors CHECK (lender_id <> borrower_id),
   CONSTRAINT loan_closed_has_reason CHECK ((state = 'closed') = (closed_reason IS NOT NULL)),
   CONSTRAINT loan_borrower_deck FOREIGN KEY (borrower_id, deck_id) REFERENCES location(owner_id, id)
     ON DELETE SET NULL (deck_id)

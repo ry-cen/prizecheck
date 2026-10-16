@@ -5,8 +5,9 @@ Per lender and Card Edition, the copies promised to Loans that are accepted (or 
 exceed the copies held, wherever they are. Inventory Removal, the Undo of an add and Edition reassignment refuse first
 with PROMISED_TO_LOAN; Moves are free, because a Location doesn't matter to a promise, and the Loan Pick List follows
 copies a Deck deletion or a leaf conversion moves. Migration 106's deferred trigger is the backstop for any other write.
-Two acceptances for the same copies both take the lender's owner lock, so they run one after the other, and steps
-racing from the two sides of one Loan wait for each other and never deadlock.
+Two acceptances for the same copies run one after the other: the lender's command lock puts one collector's steps in
+line, and behind it the lender's owner lock does, which the test shows with the command lock taken away. Steps racing
+from the two sides of one Loan wait for each other and never deadlock.
 """
 import os
 import time
@@ -17,7 +18,7 @@ import psycopg
 import pytest
 
 from app.main import connect  # noqa: F401  (main first: it includes every router while loading)
-from app.social import counts
+from app.social import counts, loans
 from test_batch_add import batch, undo, undo_records
 from test_catalog_targets import isolated_rules  # noqa: F401  (an autouse fixture)
 from test_deck_cost import launches, store  # noqa: F401  (autouse fixtures)
@@ -164,7 +165,10 @@ def test_deck_deletion_and_leaf_conversion_move_the_picks_with_the_copies(store)
     assert {item['id'] for item in tree(misty)} >= {child_id}
 
 
-def test_two_acceptances_for_the_same_copies_run_one_after_the_other(store):
+def test_two_acceptances_for_the_same_copies_run_one_after_the_other(store, monkeypatch):
+    # Misty's two steps would already wait for each other on her command lock (begin_command). Without it, the second
+    # acceptance still waits, on her owner row, and then sees the first's reservation.
+    monkeypatch.setattr(loans, 'begin_command', _without_command_lock)
     ids = seed_swap_catalog()
     ash, misty = pair()
     (brock, _) = collector('Brock S.')
@@ -179,6 +183,7 @@ def test_two_acceptances_for_the_same_copies_run_one_after_the_other(store):
             winner = executor.submit(accept, misty, first, [(iono, 2)])
             hold_until(watch, winner)
             loser = executor.submit(accept, misty, second, [(iono, 2)])
+            _waiting_on_a_row(watch, [winner, loser])
             winner, loser = winner.result(), loser.result()
     finally:
         held()
@@ -260,6 +265,26 @@ def test_both_sides_cancelling_at_once_run_one_after_the_other(store):
     assert (view(ash, loan)['state'], view(ash, loan)['closed_by']) == ('closed', 'them')
     with connect() as conn:
         assert counts.reserved_counts(conn, misty, [iono]) == {}
+
+
+def _without_command_lock(conn, user_id, key, payload):
+    """``loans.begin_command`` without the caller's command lock: the owner row is the only lock left between two of
+    one collector's steps."""
+    loans.ensure_owner(conn, user_id)
+    digest, stored = loans.replay(conn, user_id, key, payload)
+    if stored is None:
+        loans.count_loan_command(conn, user_id)
+    return digest, stored
+
+
+def _waiting_on_a_row(watch, submitted):
+    """Waits until a session waits on a row lock (never an advisory lock) while every submitted call still runs."""
+    deadline = time.monotonic() + 10
+    while not watch.execute("""SELECT 1 FROM pg_stat_activity WHERE datname=current_database()
+        AND wait_event_type='Lock' AND wait_event IN ('transactionid','tuple')""").fetchone():
+        assert time.monotonic() < deadline and not any(call.done() for call in submitted), \
+            'no step waited on a row lock'
+        time.sleep(0.01)
 
 
 def _hold_pick_insert(owner):
