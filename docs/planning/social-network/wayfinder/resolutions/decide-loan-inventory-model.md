@@ -30,7 +30,8 @@ Resolves [Decide the Loan inventory model](https://github.com/ry-cen/prizecheck/
 
 ## Write-off
 
-- A Write-off asks for confirmation once and is final. It can't be undone and takes no Undo slot. The lent copies leave the lender's Collection and the Borrowed Copies leave the borrower. Cards that turn up later are added back as new.
+- A Write-off asks for confirmation once and is final. It can't be undone and takes no Undo slot. The lent copies leave the lender's Collection. Cards that turn up later are added back as new.
+- *Amended by [Decide the Loan steps in detail](decide-loan-steps.md):* the borrower chooses whether to keep the written-off copies as owned copies or remove them. A Write-off no longer simply removes them.
 
 ## For the module boundary ticket
 
