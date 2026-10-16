@@ -183,6 +183,7 @@ export function WantListView({ onOpenDeck, onNavigate }: Props) {
   )!;
   const hasFriends = friends.kind === "ready" && friends.hasFriends;
   const byCard = friends.kind === "ready" ? friends.byCard : NO_COPIES;
+  const pending = friends.kind === "ready" && friends.pending;
   const shownView: View = hasFriends ? view : "buy";
 
   if (list.decks.length === 0)
@@ -265,6 +266,8 @@ export function WantListView({ onOpenDeck, onNavigate }: Props) {
           rows={list.combined}
           byCard={byCard}
           deckName={deckName}
+          scoped={scoped}
+          pending={pending}
         />
       ) : (
         <div
@@ -367,6 +370,7 @@ function DeckSection({
               <SwapHint section={section} line={line} swap={swap} />
               <FriendChips
                 name={line.name}
+                edition={editionText(line)}
                 wanted={line.edition_id}
                 copies={byCard.get(line.edition_id)}
               />

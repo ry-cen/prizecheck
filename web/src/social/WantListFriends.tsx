@@ -16,12 +16,15 @@ import { chipText, lendableText, otherEditionText } from "./friendCards";
  */
 export function FriendChips({
   name,
+  edition,
   wanted,
   copies,
   chip,
 }: {
   /** The card's name, for the list's accessible name. */
   name: string;
+  /** The line's Edition as text, so two Editions of one name get lists of their own. */
+  edition: string;
   /** The line's Edition. */
   wanted: string;
   copies: FriendCopy[] | undefined;
@@ -32,7 +35,7 @@ export function FriendChips({
     <div className="col-span-full flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
       <span className="text-meta text-text-muted">Friends:</span>
       <ul
-        aria-label={`Friends who can lend ${name}`}
+        aria-label={`Friends who can lend ${name}, ${edition}`}
         className="m-0 flex min-w-0 list-none flex-wrap gap-1 p-0"
       >
         {copies.map((copy) => {
@@ -64,17 +67,25 @@ export function GetFromFriends({
   rows,
   byCard,
   deckName,
+  scoped,
+  pending,
   action,
 }: {
   rows: CombinedRow[];
   byCard: Map<string, FriendCopy[]>;
   deckName: (id: string) => string;
+  /** The Deck the Want List is scoped to, or null for all Decks. */
+  scoped: string | null;
+  /** The Friends' cards for this scope aren't in yet (or couldn't be read): no line about what they lack. */
+  pending: boolean;
   action?: (row: CombinedRow, copy: FriendCopy) => ReactNode;
 }) {
   if (rows.length === 0)
     return (
       <p className="m-0 text-body text-text-muted">
-        Every Deck can be built from your Collection.
+        {scoped
+          ? `${scoped} can be built from your Collection.`
+          : "Every Deck can be built from your Collection."}
       </p>
     );
   const lendable = rows.filter(
@@ -83,9 +94,11 @@ export function GetFromFriends({
   const missing = rows.length - lendable.length;
   return (
     <div className="flex min-w-0 flex-col gap-4">
-      <p className="m-0 text-body text-text-muted">
-        Cards you need that Friends can lend.
-      </p>
+      {!pending && lendable.length > 0 && (
+        <p className="m-0 text-body text-text-muted">
+          Cards you need that Friends can lend.
+        </p>
+      )}
       {lendable.map((row) => (
         <CardPanel
           key={row.edition_id}
@@ -95,7 +108,7 @@ export function GetFromFriends({
           action={action}
         />
       ))}
-      {missing > 0 && (
+      {!pending && missing > 0 && (
         <p className="m-0 text-body text-text-muted">
           {missing === 1
             ? "1 card you need isn't available from any Friend."
@@ -118,10 +131,11 @@ function CardPanel({
   action?: (row: CombinedRow, copy: FriendCopy) => ReactNode;
 }) {
   const headingId = useId();
+  const editionId = useId();
   const decks = row.decks.map((deck) => deckName(deck.deck_id)).join(" · ");
   return (
     <section
-      aria-labelledby={headingId}
+      aria-labelledby={`${headingId} ${editionId}`}
       className="rounded-panel border border-border bg-surface"
     >
       <div className="grid grid-cols-[2.5rem_minmax(0,1fr)] items-center gap-3 px-4 py-3">
@@ -133,7 +147,10 @@ function CardPanel({
           >
             {row.name}
           </h3>
-          <p className="m-0 text-meta text-text-muted wrap-anywhere">
+          <p
+            id={editionId}
+            className="m-0 text-meta text-text-muted wrap-anywhere"
+          >
             {editionText(row)}
           </p>
           <p className="m-0 text-meta text-text-muted wrap-anywhere">
@@ -142,7 +159,7 @@ function CardPanel({
         </div>
       </div>
       <ul
-        aria-label={`Friends who can lend ${row.name}`}
+        aria-label={`Friends who can lend ${row.name}, ${editionText(row)}`}
         className="m-0 list-none border-t border-border p-0"
       >
         {copies.map((copy) => {
