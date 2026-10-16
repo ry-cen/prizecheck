@@ -57,6 +57,9 @@ ALLOWED_IMPORTS = {
     # lock and the command plumbing are the Friend commands'. Steps that touch a collector's own inventory are in
     # app.loan_inventory, outside this area.
     'social/loans.py': {
+        # The borrower's own count of written-off copies awaiting their keep-or-remove choice (#257): a count per Loan,
+        # read for the reader's Loans as borrower only, never a Location; the read stays in app.borrowed_copies.
+        ('..borrowed_copies', 'awaiting_choice'),
         ('..main', 'connect'), ('..main', 'verified_user'), ('..location_tree', 'error'), ('..location_tree', 'replay'),
         ('.friend_reads', 'card_facts'), ('.owners', 'ensure_owner'), ('.owners', 'lock_owners')},
     'social/profile.py': {

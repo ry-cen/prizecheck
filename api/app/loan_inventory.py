@@ -35,19 +35,29 @@ Loan's lent picks, last pick first, and go back to each pick's source Location, 
 holds no cards now; the borrower's Borrowed Copies leave, loose Locations first, then Decks, whose lines stay. A return
 only one side confirmed is complete when the other side's account is gone. The step that leaves nothing out closes the
 Loan: ``returned`` when nothing was written off, else ``written_off``.
+
+**Write-off** (#257): ``POST /api/loans/{id}/write-off`` is the lender's, under their own lock, once they confirmed the
+handover: it raises the lines' ``written_off`` and takes the copies off the Loan's lent picks, so they leave the
+lender's Collection, and never touches the borrower's rows. The borrower then chooses for the written-off copies they
+hold (``POST /api/loans/{id}/written-off``, under their own lock): **keep** turns them into owned copies where they sit,
+with one Undo record per Location and no Deck List change (they were already there); **remove** takes them away. The
+count awaiting the choice is derived (``borrowed_copies.awaiting_choice``); the borrower's side lists where the copies
+are (``LoanSide.awaiting_choice``, loose Locations first), and the step names exactly those places.
 """
 import json
 from datetime import date
-from uuid import UUID, uuid4
+from typing import Literal
+from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from .deck_deletion import unsorted_leaf
 from .deck_pick_list import suggest
+from .holdings import MAX_QUANTITY
 from .location_tree import error, replay
 from .main import connect, verified_user
-from .moves import first_non_leaf, put_back, quantity, take_out
+from .moves import first_non_leaf, put_back, quantity, record_undo, take_out, undo_id_for
 from .social import counts
 from .social.friend_copies import friend_copies
 from .social.friend_reads import card_facts
@@ -98,6 +108,30 @@ class StartReturn(LoanStep):
     lines: list[ReturnedLine] = Field(min_length=1, max_length=MAX_LOAN_LINES)
 
 
+class WriteOffLine(BaseModel):
+    edition_id: UUID
+    # Copies written off, "0" to leave the line out.
+    quantity: str
+
+
+class WriteOff(LoanStep):
+    """The lender writes off some of the copies out (#257). Final: there is no Undo."""
+    lines: list[WriteOffLine] = Field(min_length=1, max_length=MAX_LOAN_LINES)
+
+
+class ChosenPlace(BaseModel):
+    location_id: UUID
+    edition_id: UUID
+    copies: str
+
+
+class WrittenOffChoice(LoanStep):
+    """The borrower's choice for the written-off copies they hold (#257): ``keep`` them as their own or ``remove``
+    them. ``places``: where those copies are, as ``LoanSide.awaiting_choice`` lists them."""
+    choice: Literal['keep', 'remove']
+    places: list[ChosenPlace] = Field(min_length=1, max_length=200)
+
+
 class PromiseLimit(BaseModel):
     edition_id: UUID
     # Copies of the Edition the lender could promise now.
@@ -123,12 +157,14 @@ class LoanDeck(BaseModel):
 class LoanSide(BaseModel):
     """One side's own view of a Loan. The borrower's: ``deck``, the Deck the cards go to (None for Unsorted). The
     lender's: ``can_promise`` while the request is unanswered, ``picks``, the Loan Pick List, once accepted, and
-    ``suggested``, the Pick List **Use suggested picks** makes, when a pick is out of date (else empty)."""
+    ``suggested``, the Pick List **Use suggested picks** makes, when a pick is out of date (else empty). The
+    borrower's ``awaiting_choice`` (#257): where the written-off copies awaiting their choice are."""
     loan_id: UUID
     deck: LoanDeck | None
     can_promise: list[PromiseLimit]
     picks: list[LoanPickPlace]
     suggested: list[LoanPickPlace]
+    awaiting_choice: list[LoanPickPlace] = []
 
 
 class LentCard(BaseModel):
@@ -491,8 +527,10 @@ def loan_side(loan_id: UUID, user_id: str = Depends(verified_user)):
         if row['borrower_id'] == user_id:
             deck = conn.execute("SELECT id, name FROM location WHERE owner_id=%s AND id=%s AND kind='deck'",
                                 (user_id, row['deck_id'])).fetchone() if row['deck_id'] else None
+            awaiting = [LoanPickPlace(edition_id=edition, location_id=location, name=name, copies=str(copies), short='0')
+                        for edition, location, name, copies in awaiting_places(conn, user_id, loan_id)]
             return LoanSide(loan_id=loan_id, deck=LoanDeck(**deck) if deck else None, can_promise=[], picks=[],
-                            suggested=[])
+                            suggested=[], awaiting_choice=awaiting)
         limits = []
         editions = [line['edition_id'] for line in conn.execute(
             'SELECT edition_id FROM loan_line WHERE loan_id=%s ORDER BY position', (loan_id,))]
@@ -798,3 +836,143 @@ def confirm_return(loan_id: UUID, step: LoanStep, user_id: str = Depends(verifie
         return close_if_settled(conn, row, user_id)
 
     return run_step(user_id, loan_id, step, 'confirm_return', apply, lambda role, row: [user_id])
+
+
+def cut_lent(conn, user_id: str, loan_id: UUID, lines: dict[UUID, int]) -> None:
+    """Takes each Edition's copies off the Loan's lent picks, last pick first, putting them nowhere (a Write-off)."""
+    for edition, copies in sorted(lines.items(), key=lambda item: str(item[0])):
+        left = copies
+        for pick in conn.execute("""SELECT id, quantity FROM loan_pick
+          WHERE loan_id=%s AND owner_id=%s AND edition_id=%s AND state='lent' ORDER BY id DESC""",
+                                 (loan_id, user_id, edition)).fetchall():
+            if left == 0:
+                break
+            taken = min(left, int(pick['quantity']))
+            left -= taken
+            if taken == pick['quantity']:
+                conn.execute('DELETE FROM loan_pick WHERE id=%s', (pick['id'],))
+            else:
+                conn.execute('UPDATE loan_pick SET quantity=quantity-%s WHERE id=%s', (taken, pick['id']))
+
+
+@router.post('/{loan_id}/write-off', response_model=LoanView)
+def write_off(loan_id: UUID, command: WriteOff, user_id: str = Depends(verified_user)):
+    """The lender writes off copies out on the Loan (**Write off…**), under their own lock, once they confirmed the
+    handover. Each line is at most the copies out, less those a return the borrower confirmed gives back (409
+    MORE_THAN_OUT); a line of 0 is left out (422 NOTHING_WRITTEN_OFF when all are). Final: no Undo, and no take-back
+    of the handover after it. The copies leave the lender's Collection; the borrower's rows are untouched."""
+    lines: dict[UUID, int] = {}
+    for line in command.lines:
+        if line.edition_id in lines:
+            error(422, 'DUPLICATE_EDITION')
+        lines[line.edition_id] = copies_count(line.quantity)
+    lines = {edition: copies for edition, copies in lines.items() if copies}
+    if not lines:
+        error(422, 'NOTHING_WRITTEN_OFF')
+
+    def apply(conn, row):
+        on_loan = {line['edition_id'] for line in conn.execute('SELECT edition_id FROM loan_line WHERE loan_id=%s',
+                                                                 (loan_id,))}
+        if set(lines) - on_loan:
+            error(422, 'NOT_ON_LOAN')
+        out = lent_by_edition(conn, loan_id)
+        # A return the borrower confirmed and the lender hasn't brings those copies back: they can't be written off.
+        for line in conn.execute("""SELECT l.edition_id, l.quantity FROM loan_return r
+          JOIN loan_return_line l ON l.return_id = r.id
+          WHERE r.loan_id=%s AND r.completed_at IS NULL AND r.lender_confirmed_at IS NULL""", (loan_id,)):
+            out[line['edition_id']] = out.get(line['edition_id'], 0) - int(line['quantity'])
+        for edition, copies in sorted(lines.items(), key=lambda item: str(item[0])):
+            if copies > out.get(edition, 0):
+                refuse(409, 'MORE_THAN_OUT', edition_id=edition, out=max(0, out.get(edition, 0)))
+        cut_lent(conn, user_id, loan_id, lines)
+        for edition, copies in lines.items():
+            conn.execute('UPDATE loan_line SET written_off = written_off + %s WHERE loan_id=%s AND edition_id=%s',
+                         (copies, loan_id, edition))
+        advance_revision(conn, user_id)
+        return close_if_settled(conn, row, user_id)
+
+    return run_step(user_id, loan_id, command, 'write_off', apply, lambda role, row: [user_id],
+                    {'lines': {str(edition): copies for edition, copies in sorted(lines.items(), key=str)}})
+
+
+def awaiting_places(conn, user_id: str, loan_id: UUID) -> list[tuple[UUID, UUID, str, int]]:
+    """Where the borrower's written-off copies awaiting their choice are, as (Edition id, Location id, Location name,
+    copies): each Edition's count taken from its Borrowed Copies of the Loan in ``give_back``'s order, loose Locations
+    first, largest first, then Decks, so the copies a Deck holds stay borrowed in it longest."""
+    out = borrowed_out(conn, loan_id)
+    held: dict[UUID, list] = {}
+    for place in conn.execute("""SELECT b.edition_id, b.location_id, l.name, b.quantity FROM borrowed_holding b
+      JOIN location l ON l.owner_id = b.borrower_id AND l.id = b.location_id
+      WHERE b.loan_id=%s AND b.borrower_id=%s
+      ORDER BY b.edition_id, (l.kind = 'deck'), b.quantity DESC, b.location_id""", (loan_id, user_id)):
+        held.setdefault(place['edition_id'], []).append(place)
+    position = {line['edition_id']: line['position'] for line in conn.execute(
+        'SELECT edition_id, position FROM loan_line WHERE loan_id=%s', (loan_id,))}
+    found = []
+    for edition in sorted(held, key=lambda edition: position.get(edition, 0)):
+        left = sum(int(place['quantity']) for place in held[edition]) - out.get(edition, 0)
+        for place in held[edition]:
+            if left <= 0:
+                break
+            taken = min(left, int(place['quantity']))
+            left -= taken
+            found.append((edition, place['location_id'], place['name'], taken))
+    return found
+
+
+@router.post('/{loan_id}/written-off', response_model=LoanView)
+def choose_written_off(loan_id: UUID, command: WrittenOffChoice, user_id: str = Depends(verified_user)):
+    """The borrower's choice for the written-off copies they hold (**I still have it** or **It's gone**), under their
+    own lock. ``places`` must be exactly ``LoanSide.awaiting_choice`` (409 CHOICE_CHANGED otherwise). Keep turns the
+    copies into owned Holdings where they sit, with one Undo record per Location, as copies added there; they were
+    already there, so no Deck List line changes. Remove takes them away, with no Undo."""
+    places: dict[tuple[UUID, UUID], int] = {}
+    for place in command.places:
+        key = (place.location_id, place.edition_id)
+        if key in places:
+            error(422, 'DUPLICATE_PLACE')
+        places[key] = quantity(place.copies)
+
+    def apply(conn, row):
+        expected = {(location, edition): copies for edition, location, _, copies in
+                    awaiting_places(conn, user_id, loan_id)}
+        if places != expected:
+            error(409, 'CHOICE_CHANGED')
+        for (location, edition), copies in sorted(places.items(), key=lambda item: (str(item[0][0]), str(item[0][1]))):
+            conn.execute('DELETE FROM borrowed_holding WHERE loan_id=%s AND location_id=%s AND edition_id=%s '
+                         'AND quantity=%s', (loan_id, location, edition, copies))
+            conn.execute("""UPDATE borrowed_holding SET quantity=quantity-%s
+              WHERE loan_id=%s AND location_id=%s AND edition_id=%s AND quantity>%s""",
+                         (copies, loan_id, location, edition, copies))
+        if command.choice == 'keep':
+            new_revision = _owner_revision(conn, user_id) + 1
+            # Already in these Locations as Borrowed Copies: no Deck List line grows (migration 047's switch).
+            conn.execute("SELECT set_config('tcg.undo_returns_surplus','on',true)")
+            by_location: dict[UUID, list] = {}
+            for (location, edition), copies in places.items():
+                by_location.setdefault(location, []).append((edition, copies))
+            for location in sorted(by_location, key=str):
+                items = sorted(by_location[location], key=lambda item: str(item[0]))
+                for edition, copies in items:
+                    held = conn.execute('SELECT quantity FROM holding WHERE owner_id=%s AND location_id=%s '
+                                        'AND edition_id=%s', (user_id, location, edition)).fetchone()
+                    if held and held['quantity'] > MAX_QUANTITY - copies:
+                        error(409, 'QUANTITY_OVERFLOW')
+                    conn.execute("""INSERT INTO holding(owner_id,location_id,edition_id,quantity,version)
+                      VALUES (%s,%s,%s,%s,%s) ON CONFLICT (owner_id,location_id,edition_id) DO UPDATE
+                      SET quantity=holding.quantity+EXCLUDED.quantity, version=EXCLUDED.version""",
+                                 (user_id, location, edition, copies, new_revision))
+                record_undo(conn, user_id,
+                            undo_id_for(user_id, uuid5(NAMESPACE_URL, f'{command.idempotency_key}:{location}')),
+                            'add', location, [],
+                            json.dumps([{'edition_id': str(edition), 'quantity': str(copies)}
+                                        for edition, copies in items]))
+            conn.execute('UPDATE inventory_owner SET revision=%s WHERE user_id=%s', (new_revision, user_id))
+        else:
+            advance_revision(conn, user_id)
+        return close_if_settled(conn, row, user_id)
+
+    return run_step(user_id, loan_id, command, 'choose_written_off', apply, lambda role, row: [user_id],
+                    {'choice': command.choice,
+                     'places': sorted([str(location), str(edition), copies]
+                                      for (location, edition), copies in places.items())})

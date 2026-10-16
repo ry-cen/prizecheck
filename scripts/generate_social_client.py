@@ -1,5 +1,6 @@
 """Generate the social client module (Friends and Friend Requests, social network #247, Blocks, #248, Friends' cards,
-#250 and #251, Loans, #252 and #253, Borrowed Copies, #254, and Returns, #255) from the API OpenAPI schema."""
+#250 and #251, Loans, #252 and #253, Borrowed Copies, #254, Returns, #255, and Write-off, #257) from the API OpenAPI
+schema."""
 import sys
 from pathlib import Path
 
@@ -30,7 +31,8 @@ for name in ("Collector", "CollectorLookup", "InviteCollector", "FriendsView", "
              "PendingReturn", "LoanView",
              "LoansView", "LoanStep", "LoanLineRequest", "SendBorrowRequest", "PromisedLine", "AcceptBorrowRequest",
              "PromiseLimit", "LoanPickPlace", "LoanDeck", "LoanSide", "LentCard", "LentOut", "BorrowedCard",
-             "BorrowedCopies", "MoveBorrowed", "ReturnedLine", "StartReturn"):
+             "BorrowedCopies", "MoveBorrowed", "ReturnedLine", "StartReturn", "WriteOffLine", "WriteOff", "ChosenPlace",
+             "WrittenOffChoice"):
     definition = schema[name]
     fields = [f"{field}{'' if field in definition.get('required', []) else '?'}: {ts_type(value)}"
               for field, value in definition["properties"].items()]
@@ -130,6 +132,11 @@ export const startReturn = (id: string, body: StartReturn) =>
   request<LoanView>(`/api/loans/${at(id)}/returns`, 'POST', body);
 export const confirmReturn = (id: string, body: LoanStep) =>
   request<LoanView>(`/api/loans/${at(id)}/returns/confirm`, 'POST', body);
+// Write-off (#257): the lender's, final; then the borrower keeps or removes the written-off copies they hold.
+export const writeOff = (id: string, body: WriteOff) =>
+  request<LoanView>(`/api/loans/${at(id)}/write-off`, 'POST', body);
+export const chooseWrittenOff = (id: string, body: WrittenOffChoice) =>
+  request<LoanView>(`/api/loans/${at(id)}/written-off`, 'POST', body);
 """)
 content = "\n".join(lines)
 target = root / "web/src/social_generated.ts"

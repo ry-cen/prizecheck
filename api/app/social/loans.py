@@ -33,6 +33,10 @@ confirmation, and the other side confirms it; each confirmation moves only that 
 when the other side's account no longer exists. ``loan_facts`` reads what the steps depend on beyond the Loan row: the
 pending return, the copies returned, the copies still out from each side and whether the other side exists.
 
+**Write-off** (#257): once the lender confirmed the handover, they write off some of the copies out, which is final;
+the borrower then chooses to keep or remove the written-off copies they hold. The count awaiting that choice is the
+borrower's own, read through ``borrowed_copies.awaiting_choice`` for the borrower's Loans only.
+
 **Needs you** (``needs_you``) is the one definition the Loans tab and, from #259, the inbox read. ``section`` places a
 Loan on the Loans tab: needs you, out now, pending or history.
 """
@@ -48,6 +52,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from psycopg import sql
 from pydantic import BaseModel, Field
 
+from ..borrowed_copies import awaiting_choice
 from ..location_tree import error, replay
 from ..main import connect, verified_user
 from .friend_reads import card_facts
@@ -61,8 +66,8 @@ NOW = sql.SQL('now()')
 # Closed Loans the Loans tab lists under History, newest first.
 HISTORY = 50
 
-Action = Literal['accept', 'decline', 'confirm_handover', 'start_return', 'confirm_return', 'withdraw', 'take_back',
-                 'cancel', 'edit_and_resend']
+Action = Literal['accept', 'decline', 'confirm_handover', 'start_return', 'confirm_return', 'choose_written_off',
+                 'withdraw', 'take_back', 'cancel', 'write_off', 'edit_and_resend']
 Section = Literal['needs_you', 'out_now', 'pending', 'history']
 
 
@@ -126,6 +131,8 @@ class LoanView(BaseModel):
     revision: int
     # The return waiting for a side's confirmation (#255), or None.
     pending_return: PendingReturn | None = None
+    # The borrower's written-off copies awaiting their keep-or-remove choice (#257); "0" for the lender.
+    awaiting_choice: str = '0'
 
 
 class LoansView(BaseModel):
@@ -157,13 +164,16 @@ class LoanFacts:
     copies}}, or None. ``returned``: copies back in complete returns, by Edition. ``out``: copies still out from each
     side, by role: the lender's lent picks, and the borrower's promised copies less those written off and those the
     borrower confirmed returning (0 before the borrower confirmed the handover). ``any_return``: a return was ever
-    started."""
+    started. ``write_off_cap``: the lender's copies out less those a return the borrower confirmed and the lender hasn't
+    gives back (#257). ``awaiting``: the reader's written-off copies awaiting their choice, as borrower (#257)."""
     other_exists: bool = True
     written_off: bool = False
     pending: dict | None = None
     returned: dict = field(default_factory=dict)
     out: dict = field(default_factory=dict)
     any_return: bool = False
+    write_off_cap: int = 0
+    awaiting: int = 0
 
 
 def loan_facts(conn, user_id: str, rows) -> dict[UUID, LoanFacts]:
@@ -195,6 +205,7 @@ def loan_facts(conn, user_id: str, rows) -> dict[UUID, LoanFacts]:
     lent = {row['loan_id']: int(row['copies']) for row in conn.execute(
         """SELECT loan_id, sum(quantity)::bigint AS copies FROM loan_pick WHERE loan_id = ANY(%s) AND state = 'lent'
         GROUP BY loan_id""", (ids,))}
+    awaiting = awaiting_choice(conn, user_id, [row['id'] for row in rows if row['borrower_id'] == user_id])
     facts = {}
     for row in rows:
         mine = list(returns.get(row['id'], {}).values())
@@ -207,6 +218,7 @@ def loan_facts(conn, user_id: str, rows) -> dict[UUID, LoanFacts]:
             if found['borrower_confirmed']:
                 given_back += sum(found['lines'].values())
         pending = next((found for found in mine if not found['complete']), None)
+        coming = sum(pending['lines'].values()) if pending and not pending['lender_confirmed'] else 0
         promised = sum(int(line['promised']) - int(line['written_off']) for line in lines.get(row['id'], []))
         facts[row['id']] = LoanFacts(
             other_exists=others[row['id']] in alive,
@@ -214,7 +226,8 @@ def loan_facts(conn, user_id: str, rows) -> dict[UUID, LoanFacts]:
             pending=pending, returned=returned,
             out={'lender': lent.get(row['id'], 0),
                  'borrower': promised - given_back if row['borrower_handover_at'] is not None else 0},
-            any_return=bool(mine))
+            any_return=bool(mine), write_off_cap=lent.get(row['id'], 0) - coming,
+            awaiting=awaiting.get(row['id'], 0))
     return facts
 
 
@@ -229,6 +242,8 @@ def needs_you(user_id: str, row, facts: LoanFacts | None = None) -> bool:
         if pending is not None and pending['started_by'] != role and not pending[f'{role}_confirmed']:
             return True
         if not facts.other_exists and facts.out.get(role, 0) > 0 and pending is None:
+            return True
+        if facts.awaiting > 0:
             return True
     if row['state'] == 'requested':
         return role == 'lender'
@@ -271,12 +286,17 @@ def allowed(user_id: str, row, other_exists: bool = True, written_off: bool = Fa
             found.append('start_return')
         if pending is not None and pending['started_by'] != role and not pending[f'{role}_confirmed']:
             found.append('confirm_return')
+        if role == 'borrower' and facts.awaiting > 0:
+            found.append('choose_written_off')
     if state == 'requested' and role == 'borrower':
         found.append('withdraw')
     if state == 'accepted' and mine and not theirs and not written_off and not (facts and facts.any_return):
         found.append('take_back')
     if state == 'accepted' and row['lender_handover_at'] is None and row['borrower_handover_at'] is None:
         found.append('cancel')
+    if (facts is not None and role == 'lender' and state in ('accepted', 'handed_over')
+            and row['lender_handover_at'] is not None and facts.write_off_cap > 0):
+        found.append('write_off')
     if (role == 'borrower' and row['kind'] == 'borrow_request' and other_exists
             and (state == 'requested' or (state == 'closed'
                                           and row['closed_reason'] in ('declined', 'withdrawn', 'cancelled')))):
@@ -336,7 +356,7 @@ def loan_views(conn, user_id: str, rows) -> list[LoanView]:
             lines=card_lines, needs_you=needs_you(user_id, row, known), section=section(user_id, row, known),
             actions=allowed(user_id, row, other_id in handles,
                             any(line['written_off'] > 0 for line in lines.get(row['id'], [])), known),
-            revision=row['revision'], pending_return=pending))
+            revision=row['revision'], pending_return=pending, awaiting_choice=str(known.awaiting)))
     return views
 
 
