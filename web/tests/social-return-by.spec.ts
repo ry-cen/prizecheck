@@ -73,6 +73,26 @@ test("the lender extends the return-by date, and approves the borrower's request
   await lender.setViewportSize(PHONE);
   await expectPageChecks(lender, "changing the return-by date on a phone");
   await lender.setViewportSize(DESKTOP);
+  // A Save refused because the Loan moved on (held back by the test) reads the Loan again: the form closes and the
+  // heading takes focus once the Loan is drawn again.
+  await lender.route(
+    "**/api/social/loans/*/return-by",
+    (route) =>
+      route.fulfill({
+        status: 409,
+        json: { detail: { code: "LOAN_CHANGED" } },
+      }),
+    { times: 1 }
+  );
+  await lender.getByRole("button", { name: "Save" }).click();
+  await expect(lender.getByRole("alert")).toHaveText(
+    "This Loan has changed. Check it and try again."
+  );
+  await expect(field).toHaveCount(0);
+  await expect(lender.getByRole("heading", { level: 1 })).toBeFocused();
+  await lender.getByRole("button", { name: "More for this Loan" }).click();
+  await lender.getByRole("menuitem", { name: "Change return-by date" }).click();
+  await field.fill(later.value);
   await lender.getByRole("button", { name: "Save" }).click();
   await expect(main(lender)).toContainText(`Due back ${later.text}`);
 

@@ -2,7 +2,8 @@
 // Friend Misty for his Deck, whose line lists one (request, accept and both handover confirmations through the API, as
 // #252's and #253's specs cover). The Deck's line rises to two and reads "2 from Misty W"; his Collection counts only
 // his own Boss's Orders, and its Borrowed entry lists the Iono where they are. He moves one to Unsorted from that list,
-// and the Deck's line then reads "1 from Misty W". The catalog is the Swap catalog
+// and the Deck's line then reads "1 from Misty W". Before that, three Moves are refused (held back by the test): focus
+// stays on Move, goes to the alert, or back to Move to, never to the page. The catalog is the Swap catalog
 // (api/tests/want_list_swap_fixtures.py).
 import { randomUUID } from "node:crypto";
 import { expect, test } from "./support/collectors";
@@ -91,7 +92,43 @@ test("borrowed copies fill the borrower's Deck, labelled with their lender, and 
   });
   await form.getByRole("button", { name: "Decrease Copies" }).click();
   await expectPageChecks(page, "moving a borrowed card");
-  await form.getByRole("button", { name: "Move", exact: true }).click();
+  const move = form.getByRole("button", { name: "Move", exact: true });
+  const alert = borrowed.getByRole("alert");
+  const MOVE = "**/api/loans/borrowed/move";
+  // No answer: focus stays on Move, which stays enabled while the Move is out.
+  await page.route(MOVE, (route) => route.abort(), { times: 1 });
+  await move.click();
+  await expect(alert).toHaveText("The cards couldn't be moved. Try again.");
+  await expect(move).toBeFocused();
+  // The Location is gone: the choices are read again and focus waits on Move to.
+  const refuse = (code: string) =>
+    page.route(
+      MOVE,
+      (route) => route.fulfill({ status: 409, json: { detail: { code } } }),
+      { times: 1 }
+    );
+  await refuse("LOCATION_NOT_FOUND");
+  await move.click();
+  await expect(alert).toHaveText("That Location is gone. Choose another.");
+  await expect(form.getByRole("combobox", { name: "Move to" })).toBeFocused();
+  // The copies are no longer there: the form closes, the list is read again and the alert takes focus.
+  await form.getByRole("combobox", { name: "Move to" }).selectOption({
+    label: "Unsorted",
+  });
+  await refuse("NOT_ENOUGH_BORROWED");
+  await move.click();
+  await expect(alert).toHaveText(
+    "Those copies aren't there any more. The list is up to date now."
+  );
+  await expect(alert).toBeFocused();
+  await expect(form).toHaveCount(0);
+  await expect(rows).toHaveCount(1);
+  await moveFromDeck.click();
+  await form.getByRole("combobox", { name: "Move to" }).selectOption({
+    label: "Unsorted",
+  });
+  await form.getByRole("button", { name: "Decrease Copies" }).click();
+  await move.click();
   await expect(rows).toHaveCount(2);
   await expect(rows.filter({ hasText: "In Unsorted" })).toContainText(
     "1 from Misty W"

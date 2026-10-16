@@ -284,10 +284,13 @@ export function BorrowedDialog({
                     }}
                   />
                   <span className="flex gap-2">
+                    {/* Busy, it stays enabled and focused (confirmMove ignores the press), so a refusal's focus never
+                        falls to the page. */}
                     <Button
                       type="submit"
                       variant="primary"
-                      disabled={busy || !destination}
+                      disabled={!destination}
+                      aria-disabled={busy || undefined}
                     >
                       Move
                     </Button>
