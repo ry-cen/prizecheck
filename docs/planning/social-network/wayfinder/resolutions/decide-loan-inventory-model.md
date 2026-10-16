@@ -35,4 +35,6 @@ Resolves [Decide the Loan inventory model](https://github.com/ry-cen/prizecheck/
 
 ## For the module boundary ticket
 
+*Settled in [Decide the social module boundary and privacy enforcement](decide-social-module-boundary.md).*
+
 - The research's constraints apply: Holdings have one owner and no stable identity, locks and revisions are per owner, and there's no row-level security. The lender-side "promised" count and stale picks suggest something like the research's L2 Loan-line table rather than freezing Holdings. Borrowed Copies need representing separately from owned Holdings, along the lines of the research's B1. Those choices, cross-owner locking and the shared Spare Copy rule (now written out in five places) belong to [Decide the social module boundary and privacy enforcement](https://github.com/ry-cen/prizecheck/issues/241).

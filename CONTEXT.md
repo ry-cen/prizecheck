@@ -153,7 +153,7 @@ A collector's choice to end any friendship with another collector and stop that 
 _Avoid_: Mute, report
 
 **Hidden Location**:
-A Location whose Holdings a collector's Friends cannot see. Friends never see Location or Deck names, hidden or not.
+A Location whose Holdings a collector's Friends cannot see, together with every Location inside it. Friends never see Location or Deck names, hidden or not, and never see reserved, lent or Borrowed Copies.
 _Avoid_: Private Location, locked binder
 
 **Loan**:
