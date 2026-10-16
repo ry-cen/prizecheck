@@ -326,11 +326,8 @@ test("both sides confirm a handover for their own inventory, after the lender fi
   await lender.goto(`${ORIGIN}/loans/${sent.id}`);
   await expect(title(lender)).toHaveText("Ash K has 2 cards of yours");
   await expect(lender.getByRole("main")).not.toContainText("Waiting for");
-  // Neither side takes the handover back now; the lender's menu holds only Write off… (#257) and Change return-by
-  // date (#256).
+  // Neither side takes the handover back now; the lender's menu holds only Write off… (#257). The Loan has no
+  // return-by date, and none is added once the cards are out (#256).
   await lender.getByRole("button", { name: "More for this Loan" }).click();
-  await expect(lender.getByRole("menuitem")).toHaveText([
-    "Write off…",
-    "Change return-by date",
-  ]);
+  await expect(lender.getByRole("menuitem")).toHaveText(["Write off…"]);
 });

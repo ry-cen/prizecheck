@@ -51,6 +51,14 @@ never offered or promised twice. ``POST /api/loans/{id}/accept-offer`` is the bo
 leaves a line out) and the Deck the cards go to. It locks both owners: the borrower's, so the Deck checked is the Deck
 written (a Deck deletion waits for it, or it finds the Deck gone), and the lender's, as the copies not taken are
 released, last pick first, which moves the lender's revision.
+
+**Edition reassignment** (spec item 15): a collector's reassignment of copies of a deprecated Card Edition to its
+replacement (``catalog_reconciliation.reassign``) carries their open Loans that name it onto the replacement
+(``follow_replacement``): lines, picks, return lines and Borrowed Copies, merged with any the Loan already has for the
+replacement. Before the lender confirms the handover only the lender's own reassignment moves a Loan, because the
+promise is on the lender's copies; a Loan still reserving copies moves only when the lender's copies of the
+replacement then cover everything promised in it, and those Loans move together or not at all. Once the lender handed
+the copies over, either side's reassignment moves the Loan.
 """
 import json
 from datetime import date
@@ -71,7 +79,7 @@ from .social.friend_copies import friend_copies
 from .social.friend_reads import card_facts
 from .social.friends import friend_ids
 from .social.loans import (NOW, LoanStep, LoanView, begin_command, advance_revision, close, return_by_columns, run_step,
-                           store, today)
+                           store, today, write_loan)
 from .social.owners import ensure_owner, lock_owners
 
 router = APIRouter(prefix='/api/loans', tags=['loans'])
@@ -462,7 +470,8 @@ def accept(loan_id: UUID, command: AcceptBorrowRequest, user_id: str = Depends(v
         # The Loan turns accepted in run_step's one write of its row; the picks never read this Loan's state.
         make_picks(conn, user_id, loan_id, promised)
         advance_revision(conn, user_id)
-        dated = return_by_columns(conn, row, command.return_by) if not keeps_date else {}
+        # Keeping the requested date checks it as a new one: a date that has passed since the request is refused.
+        dated = return_by_columns(conn, row, row['return_by'] if keeps_date else command.return_by)
         return {'state': 'accepted', 'accepted_at': NOW, **dated}
 
     keeps_date = 'return_by' not in command.model_fields_set
@@ -695,7 +704,8 @@ def loan_side(loan_id: UUID, user_id: str = Depends(verified_user)):
 
         mine: dict = {}
         shortfall: dict = {}
-        if row['state'] == 'accepted' and row['lender_handover_at'] is None:
+        # A sent Lend Offer's picks (#258) can go out of date as an accepted Loan's can.
+        if row['state'] in ('offered', 'accepted') and row['lender_handover_at'] is None:
             picks, short, _ = pick_shortfalls(conn, user_id, editions)
             for pick in picks:
                 if pick['loan_id'] == loan_id:
@@ -966,15 +976,20 @@ def start_return(loan_id: UUID, command: StartReturn, user_id: str = Depends(ver
 
 @router.post('/{loan_id}/returns/confirm', response_model=LoanView)
 def confirm_return(loan_id: UUID, step: LoanStep, user_id: str = Depends(verified_user)):
-    """The other side confirms the pending return for its own inventory, which completes it."""
+    """The other side confirms the pending return for its own inventory, which completes it. Once the other side's
+    account is gone, the side that started the return finishes it alone: its own inventory already moved when it
+    started, so finishing moves nothing and only completes the return, and the Loan closes once nothing is out."""
     def apply(conn, row):
         lender = row['lender_id'] == user_id
-        pending = conn.execute('SELECT id FROM loan_return WHERE loan_id=%s AND completed_at IS NULL',
+        side = 'lender' if lender else 'borrower'
+        pending = conn.execute('SELECT id, started_by FROM loan_return WHERE loan_id=%s AND completed_at IS NULL',
                                (loan_id,)).fetchone()
+        if pending['started_by'] == side:
+            conn.execute('UPDATE loan_return SET completed_at=now() WHERE id=%s', (pending['id'],))
+            return close_if_settled(conn, row, user_id)
         lines = {line['edition_id']: int(line['quantity']) for line in conn.execute(
             'SELECT edition_id, quantity FROM loan_return_line WHERE return_id=%s', (pending['id'],))}
         (return_lent if lender else give_back)(conn, user_id, loan_id, lines)
-        side = 'lender' if lender else 'borrower'
         conn.execute(f'UPDATE loan_return SET {side}_confirmed_at=now(), completed_at=now() WHERE id=%s',
                      (pending['id'],))
         return close_if_settled(conn, row, user_id)
@@ -1112,6 +1127,8 @@ def choose_written_off(loan_id: UUID, command: WrittenOffChoice, user_id: str = 
                             'add', location, [],
                             json.dumps([{'edition_id': str(edition), 'quantity': str(copies)}
                                         for edition, copies in items]))
+            # The switch covers only the inserts above; nothing later in the step adds copies without growing a line.
+            conn.execute("SELECT set_config('tcg.undo_returns_surplus','off',true)")
             conn.execute('UPDATE inventory_owner SET revision=%s WHERE user_id=%s', (new_revision, user_id))
         else:
             advance_revision(conn, user_id)
@@ -1121,3 +1138,84 @@ def choose_written_off(loan_id: UUID, command: WrittenOffChoice, user_id: str = 
                     {'choice': command.choice,
                      'places': sorted([str(location), str(edition), copies]
                                       for (location, edition), copies in places.items())})
+
+
+# The reassigner's open Loans, either side, with a line for the Edition: read with ``%(me)s`` and ``%(edition)s``.
+_NAMING = """FROM loan o WHERE (o.lender_id = %(me)s OR o.borrower_id = %(me)s) AND o.state <> 'closed'
+  AND EXISTS (SELECT 1 FROM loan_line l WHERE l.loan_id = o.id AND l.edition_id = %(edition)s)"""
+
+
+def replacement_parties(conn, user_id: str, edition: UUID) -> set[str]:
+    """The other collectors on the reassigner's open Loans that name ``edition``. An unlocked read, so the reassignment
+    can lock every owner in ascending ``user_id`` before it reads those Loans again (``follow_replacement``)."""
+    return {row['other'] for row in conn.execute(
+        'SELECT CASE WHEN o.lender_id = %(me)s THEN o.borrower_id ELSE o.lender_id END AS other ' + _NAMING,
+        {'me': user_id, 'edition': edition})} - {None}
+
+
+def follow_replacement(conn, user_id: str, edition: UUID, replacement: UUID, copies: int, locked: set[str]) -> None:
+    """Carries the reassigner's open Loans that name ``edition`` onto ``replacement``, as their ``copies`` of it become
+    the replacement (spec item 15). The caller holds every owner in ``locked`` (the reassigner and each other side
+    ``replacement_parties`` found), taken in ascending ``user_id``; a Loan whose other side isn't among them (one made
+    since) stays as it is. The Loan rows are locked in id order.
+
+    Which Loans move: once the lender confirmed the handover, every one, whichever side reassigns. Before that, only
+    the lender's own reassignment moves a Loan: a request (nothing reserved) always; Lend Offers and accepted Loans,
+    which reserve the lender's copies, together, and only when the lender's copies of the replacement after this
+    reassignment cover everything then promised in it (otherwise none of them move, and the caller's promise check on
+    ``edition`` applies as before). Reassigning the lender's last copies of ``edition`` always passes that check.
+
+    Each Loan moved is written once (``write_loan``: its revision moves, so an open screen of either side reloads), and
+    each other side's inventory revision moves once. Nothing about either side's Locations or Decks reaches the
+    other."""
+    rows = conn.execute('SELECT o.* ' + _NAMING + ' ORDER BY o.id FOR NO KEY UPDATE OF o',
+                        {'me': user_id, 'edition': edition}).fetchall()
+    rows = [row for row in rows
+            if all(side is None or side in locked for side in (row['lender_id'], row['borrower_id']))]
+    moving = [row for row in rows if row['lender_handover_at'] is not None
+              or (row['lender_id'] == user_id and row['state'] == 'requested')]
+    reserving = [row for row in rows if row['lender_handover_at'] is None and row['lender_id'] == user_id
+                 and row['state'] in ('offered', 'accepted')]
+    if reserving:
+        promised = conn.execute('SELECT coalesce(sum(promised), 0) AS copies FROM loan_line '
+                                'WHERE loan_id = ANY(%s) AND edition_id = %s',
+                                ([row['id'] for row in reserving], edition)).fetchone()['copies']
+        held = conn.execute('SELECT coalesce(sum(quantity), 0) AS copies FROM holding '
+                            'WHERE owner_id=%s AND edition_id=%s', (user_id, replacement)).fetchone()['copies']
+        if held + copies >= counts.reserved_counts(conn, user_id, [replacement]).get(replacement, 0) + promised:
+            moving += reserving
+    others: set[str] = set()
+    for row in sorted(moving, key=lambda found: str(found['id'])):
+        _move_lines(conn, row['id'], edition, replacement)
+        write_loan(conn, row['id'], {})
+        others |= {side for side in (row['lender_id'], row['borrower_id']) if side not in (None, user_id)}
+    for other in sorted(others):
+        advance_revision(conn, other)
+
+
+def _move_lines(conn, loan_id: UUID, edition: UUID, replacement: UUID) -> None:
+    """Points one Loan's line for ``edition`` at ``replacement``, merging with a line it already has for it: the line's
+    counts, then its picks, its return lines and its Borrowed Copies (each merged on its own key), then the old line,
+    which nothing names any more. Borrowed Copies arriving in a Deck as the replacement raise its line for the
+    replacement, as owned copies reassigned there do; the old Edition's line stays."""
+    args = {'loan': loan_id, 'old': edition, 'new': replacement}
+    conn.execute("""INSERT INTO loan_line(loan_id, edition_id, position, requested, promised, written_off)
+      SELECT loan_id, %(new)s, position, requested, promised, written_off FROM loan_line
+      WHERE loan_id = %(loan)s AND edition_id = %(old)s
+      ON CONFLICT (loan_id, edition_id) DO UPDATE SET position = least(loan_line.position, EXCLUDED.position),
+        requested = loan_line.requested + EXCLUDED.requested, promised = loan_line.promised + EXCLUDED.promised,
+        written_off = loan_line.written_off + EXCLUDED.written_off""", args)
+    conn.execute('UPDATE loan_pick SET edition_id = %(new)s WHERE loan_id = %(loan)s AND edition_id = %(old)s', args)
+    conn.execute("""INSERT INTO loan_return_line(return_id, loan_id, edition_id, quantity)
+      SELECT return_id, loan_id, %(new)s, quantity FROM loan_return_line
+      WHERE loan_id = %(loan)s AND edition_id = %(old)s
+      ON CONFLICT (return_id, edition_id) DO UPDATE SET quantity = loan_return_line.quantity + EXCLUDED.quantity""",
+                 args)
+    conn.execute('DELETE FROM loan_return_line WHERE loan_id = %(loan)s AND edition_id = %(old)s', args)
+    conn.execute("""INSERT INTO borrowed_holding(loan_id, borrower_id, location_id, edition_id, quantity)
+      SELECT loan_id, borrower_id, location_id, %(new)s, quantity FROM borrowed_holding
+      WHERE loan_id = %(loan)s AND edition_id = %(old)s
+      ON CONFLICT (loan_id, location_id, edition_id)
+      DO UPDATE SET quantity = borrowed_holding.quantity + EXCLUDED.quantity""", args)
+    conn.execute('DELETE FROM borrowed_holding WHERE loan_id = %(loan)s AND edition_id = %(old)s', args)
+    conn.execute('DELETE FROM loan_line WHERE loan_id = %(loan)s AND edition_id = %(old)s', args)

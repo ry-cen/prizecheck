@@ -58,7 +58,7 @@ def test_a_write_off_leaves_the_lenders_collection_and_the_borrower_keeps_the_co
     records, before = undo_records(misty), owner_revision(misty)
     gone = ok(write_off(misty, loan, [(iono, 2)]))
     assert (gone['state'], written_off(gone), gone['actions']) == (
-        'handed_over', [(iono, '2')], ['start_return', 'write_off', 'change_return_by'])
+        'handed_over', [(iono, '2')], ['start_return', 'write_off'])
     assert (lent(misty)['copies'], whole_collection(misty)) == ('1', ('0', '1'))
     assert undo_records(misty) == records and owner_revision(misty) == before + 1
     # Ash's copies stay as they were until he chooses: the choice needs him.
@@ -109,7 +109,7 @@ def test_a_partial_write_off_across_several_decks_is_kept_where_each_copy_sits(s
 def test_remove_takes_the_written_off_copies_away_and_the_loan_closes_written_off(store):
     iono, ash, misty, binders, loan, charizard = lent_loan({'Binder': 2}, 2, 'Charizard')
     gone = ok(write_off(misty, loan, [(iono, 2)]))
-    assert (gone['state'], gone['actions'], gone['needs_you']) == ('handed_over', ['change_return_by'], False)
+    assert (gone['state'], gone['actions'], gone['needs_you']) == ('handed_over', [], False)
     records = undo_records(ash)
     closed = ok(choose(ash, loan, 'remove'))
     assert (closed['state'], closed['closed_reason'], closed['closed_by']) == ('closed', 'written_off', 'you')

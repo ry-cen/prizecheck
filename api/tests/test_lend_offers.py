@@ -18,8 +18,9 @@ from test_deck_counting import deck, hold
 from test_friend_copies import collector, copies, node, ok, place
 from test_handover import _asleep, _sleeping, borrowed, code, handover
 from test_holdings import call
-from test_loan_promises import remove
+from test_loan_promises import holding, remove
 from test_loans import accept, pair, revision_of, sent, side, step, view
+from test_moves import commit, selected, stage, start
 from want_list_swap_fixtures import seed_swap_catalog
 
 
@@ -145,14 +146,27 @@ def test_an_offer_is_refused_beyond_the_selected_holdings_or_to_anyone_but_a_fri
     assert ok(offer(misty, ash, [(binders['Binder A'], iono, 2), (binders['Binder B'], iono, 1)]), 201)
 
 
+def test_an_offers_pick_that_went_out_of_date_shows_on_the_lenders_side(store):
+    # Misty moves the offered copies out of Binder A (a Move doesn't check picks): her side of the offer says the pick
+    # is short, as an accepted Loan's does.
+    ids, iono, ash, misty, binders = offering()
+    loan = ok(offer(misty, ash, [(binders['Binder A'], iono, 2)]), 201)
+    manifest = start(misty, binders['Binder A'])
+    stage(misty, manifest, [selected(iono, 2, holding(misty, binders['Binder A'], iono)['version'])])
+    assert commit(misty, manifest, binders['Binder B']).status_code == 200
+    assert [(pick['location_id'], pick['copies'], pick['short']) for pick in side(misty, loan)['picks']] == [
+        (binders['Binder A'], '2', '2')]
+
+
 def test_an_unanswered_offer_nudges_both_sides_once_after_14_days(store):
     ids, iono, ash, misty, binders = offering()
     loan = ok(offer(misty, ash, [(binders['Binder A'], iono, 1)]), 201)
     with connect() as conn:
         conn.execute("UPDATE loan SET created_at = now() - interval '14 days' WHERE id=%s", (loan['id'],))
-    assert view(misty, loan)['notices'] == ['nudge'] and view(ash, loan)['notices'] == ['nudge']
-    assert ok(call('POST', f"/api/social/loans/{loan['id']}/notices/seen", ash, {'kinds': ['nudge']}))['notices'] == []
-    assert view(misty, loan)['notices'] == ['nudge']
+    assert view(misty, loan)['notices'] == ['nudge_answer'] and view(ash, loan)['notices'] == ['nudge_answer']
+    assert ok(call('POST', f"/api/social/loans/{loan['id']}/notices/seen", ash,
+                   {'kinds': ['nudge_answer']}))['notices'] == []
+    assert view(misty, loan)['notices'] == ['nudge_answer']
     ok(take(ash, loan, [(iono, 1)]))
     assert view(misty, loan)['notices'] == []
 

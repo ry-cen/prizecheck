@@ -217,33 +217,3 @@ def test_borrowed_copies_move_between_the_borrowers_locations_only_through_their
     refused = call('DELETE', f"/api/location-tree/{box}", ash,
                    {'version': found['version'], 'name': found['name'], 'idempotency_key': str(uuid4())})
     assert code(refused) == (409, 'LOCATION_NOT_EMPTY')
-
-
-def test_edition_reassignment_refuses_an_edition_on_an_open_loan_and_leaves_others_alone(store):
-    ids = seed_swap_catalog()
-    ash, misty = pair()
-    iono, arven = ids['PAL 185'], ids['SVI 166']
-    with connect() as conn:
-        reviewer = conn.execute('SELECT user_id FROM inventory_owner LIMIT 1').fetchone()['user_id']
-        for edition, replacement_id in ((iono, ids['PAL 254']), (arven, ids['PAF 80'])):
-            conn.execute("""INSERT INTO catalog_edition_replacement(edition_id, replacement_edition_id, reviewer_id,
-                evidence_url, reason) VALUES (%s, %s, %s, 'https://example.org/correction', 'Finish corrected')
-                ON CONFLICT DO NOTHING""", (edition, replacement_id, reviewer))
-    lend(ash, misty, iono, 1)
-    box = place(ash, 'Box')
-    hold(ash, box, iono, 1)
-    hold(ash, box, arven, 1)
-
-    def reassign(owner, location, edition, replacement_id):
-        return call('POST', '/api/holdings/reassign', owner, {
-            'location_id': location, 'edition_id': edition, 'replacement_edition_id': replacement_id,
-            'quantity': '1', 'expected_version': holding(owner, location, edition)['version'],
-            'idempotency_key': str(uuid4())})
-
-    # Ash holds a Borrowed Copy of Iono: Iono keeps its name. Misty lent hers: so does hers.
-    assert code(reassign(ash, box, iono, ids['PAL 254'])) == (409, 'EDITION_ON_LOAN')
-    binder = place(misty, 'Spare Binder')
-    hold(misty, binder, iono, 1)
-    assert code(reassign(misty, binder, iono, ids['PAL 254'])) == (409, 'EDITION_ON_LOAN')
-    # Another Edition is left alone.
-    assert ok(reassign(ash, box, arven, ids['PAF 80']))['quantity'] == '1'
