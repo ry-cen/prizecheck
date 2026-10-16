@@ -18,6 +18,11 @@ $$;
 -- The invariant, per lender and Card Edition: the copies reserved never exceed the copies the lender holds, wherever
 -- they are (Location doesn't matter, because lent copies sit in none). Picks are left out on purpose: they may go out
 -- of date. Writers check first and refuse with PROMISED_TO_LOAN; this is the backstop, checked at commit.
+-- It needs no lock of its own: every writer that lowers a lender's Holdings (Moves, Removal, Undo, reassignment, Deck
+-- deletion, leaf conversion, the lender's handover) and every step that raises what the lender has reserved (accept,
+-- the lender's take-back) holds the lender's inventory_owner row lock, FOR UPDATE or FOR NO KEY UPDATE, which conflict,
+-- from before its first read until its commit. Two such writers for one lender therefore commit one after the other,
+-- and the check at the second commit reads the first's committed rows.
 CREATE OR REPLACE FUNCTION check_loan_promises(owner text, edition uuid) RETURNS void LANGUAGE plpgsql AS $$
 DECLARE
   promised bigint;

@@ -132,10 +132,12 @@ def suggest(need: int, places: list[dict]) -> list[tuple[dict, int]]:
 
     ``places`` have ``location_id``, ``name``, ``kind``, ``available``, ``committed`` and ``spare`` (ints: every copy
     there, the copies another Deck holds there for its own line, and the copies beyond that line, by
-    ``copy_allocation.spare_rule``), and may have ``reserved``: copies there the Loan Pick List takes for open Loans
-    (``counts.reserved_picks``), out of the copies beyond a Deck's line first. Loose storage comes first, then other
-    Decks' copies beyond their own lines, then copies other Decks hold for their own lines (a Deck already giving up
-    copies first), then reserved copies, which can still be gathered before handover (spec "Inventory touch-points").
+    ``copy_allocation.spare_rule``), and may have ``reserved``: copies there reserved for open Loans, as the rule
+    places them (``reserved_beyond`` plus ``reserved_own``: at the Loan picks first, so an out-of-date pick still
+    leaves the right count reserved), out of the copies beyond a Deck's line first. Loose storage comes first, then
+    other Decks' copies beyond their own lines, then copies other Decks hold for their own lines (a Deck already giving
+    up copies first), then reserved copies, which can still be gathered before handover (spec "Inventory
+    touch-points").
     Each tier takes from the largest holding first, so a card comes from as few Locations as possible. The Loan Pick
     List (``loan_inventory``) uses the same order.
     """
@@ -179,9 +181,11 @@ def pick_list(deck_id: UUID, user_id: str = Depends(verified_user)):
         ownership = read_ownership(conn, user_id, deck_id)
         short = [line for line in ownership.lines if int(line.elsewhere) > 0]
         held = {}
+        reserved = {}
         picked = {}
         if short:
-            picked = counts.reserved_picks(conn, user_id, [line.edition_id for line in short])
+            reserved = counts.reserved_counts(conn, user_id, [line.edition_id for line in short])
+            picked = counts.reserved_picks(conn, user_id, list(reserved)) if reserved else {}
             for row in conn.execute("""SELECT h.location_id,h.edition_id,h.version,h.quantity,l.quantity AS listed
               FROM holding h LEFT JOIN deck_list_line l
                 ON l.owner_id=h.owner_id AND l.deck_id=h.location_id AND l.edition_id=h.edition_id
@@ -190,16 +194,21 @@ def pick_list(deck_id: UUID, user_id: str = Depends(verified_user)):
                 held[(row['location_id'], row['edition_id'])] = row
         picks = []
         for line in short:
-            # The Spare Copy rule over the copies outside this Deck: what each other Deck holds for its own line.
-            rule = spare_rule({place.location_id: held[(place.location_id, line.edition_id)]['quantity']
-                               for place in line.locations},
-                              {place.location_id: held[(place.location_id, line.edition_id)]['listed']
-                               for place in line.locations
-                               if held[(place.location_id, line.edition_id)]['listed'] is not None})
-            here = picked.get(line.edition_id, {})
+            # The Spare Copy rule over every copy of the Edition: this Deck's (all held for its short line) and each
+            # other Location's, with what each other Deck holds for its own line. It places the reserved copies, at the
+            # Loan picks first; a pick out of date never makes a reserved copy look free.
+            rule = spare_rule({**{place.location_id: held[(place.location_id, line.edition_id)]['quantity']
+                                  for place in line.locations}, deck_id: int(line.in_deck)},
+                              {**{place.location_id: held[(place.location_id, line.edition_id)]['listed']
+                                  for place in line.locations
+                                  if held[(place.location_id, line.edition_id)]['listed'] is not None},
+                               deck_id: int(line.quantity)},
+                              reserved.get(line.edition_id, 0), picked.get(line.edition_id))
             places = [{'location_id': place.location_id, 'name': place.name, 'kind': place.kind,
                        'available': int(place.quantity), 'committed': rule.own.get(place.location_id, 0),
-                       'spare': rule.beyond.get(place.location_id, 0), 'reserved': here.get(place.location_id, 0)}
+                       'spare': rule.beyond.get(place.location_id, 0),
+                       'reserved': rule.reserved_beyond.get(place.location_id, 0)
+                       + rule.reserved_own.get(place.location_id, 0)}
                       for place in line.locations]
             sources = []
             for place, taken in suggest(int(line.elsewhere), places):

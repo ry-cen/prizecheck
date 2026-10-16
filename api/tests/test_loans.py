@@ -8,6 +8,7 @@ Both sides read the same Loan, and each reads its own Locations or Deck only thr
 
 Every test seeds the Swap catalog (Iono PAL 185, PAL 254 and PAF 80; Arven SVI 166) and starts new collectors.
 """
+from pathlib import Path
 from uuid import uuid4
 
 from app.main import connect  # noqa: F401  (main first: it includes every router while loading)
@@ -340,3 +341,34 @@ def test_each_side_reads_its_own_locations_and_decks_and_never_the_others(store)
     seen_by_misty += str(accepted)
     for secret in ('Ash Secret Deck', ash_deck):
         assert secret not in seen_by_misty, secret
+
+
+def test_a_loan_outlives_both_collectors_accounts(store):
+    ids = seed_swap_catalog()
+    ash, misty = pair()
+    hold(misty, node(misty, 'Unsorted')['id'], ids['PAL 185'], 1)
+    loan = sent(ash, misty, [(ids['PAL 185'], 1)])
+    # Each account deletion clears that side's id on the Loan; the second leaves both NULL and the names stay.
+    for owner in (misty, ash):
+        with connect() as conn:
+            conn.execute('DELETE FROM inventory_owner WHERE user_id=%s', (owner,))
+    with connect() as conn:
+        row = conn.execute('SELECT lender_id, borrower_id, lender_name, borrower_name FROM loan WHERE id=%s',
+                           (loan['id'],)).fetchone()
+    assert row == {'lender_id': None, 'borrower_id': None, 'lender_name': 'Misty W.', 'borrower_name': 'Ash K.'}
+
+
+def test_migration_107_gives_an_older_loan_table_the_check_both_deleted_accounts_pass(store):
+    # A database that applied migration 105 before its check read <> has the IS DISTINCT FROM one; 107 replaces it,
+    # and running 107 again changes nothing. Rolled back, so the table keeps its check.
+    sql = (Path(__file__).resolve().parents[2] / 'migrations' / '107_loan_two_collectors.sql').read_text()
+    check = """SELECT pg_get_constraintdef(oid) AS check FROM pg_constraint
+      WHERE conrelid = 'loan'::regclass AND conname = 'loan_two_collectors'"""
+    with connect() as conn, conn.transaction(force_rollback=True):
+        conn.execute('ALTER TABLE loan DROP CONSTRAINT loan_two_collectors')
+        conn.execute('ALTER TABLE loan ADD CONSTRAINT loan_two_collectors '
+                     'CHECK (lender_id IS DISTINCT FROM borrower_id) NOT VALID')
+        conn.execute(sql)
+        assert conn.execute(check).fetchone()['check'] == 'CHECK ((lender_id <> borrower_id))'
+        conn.execute(sql)
+        assert conn.execute(check).fetchone()['check'] == 'CHECK ((lender_id <> borrower_id))'
