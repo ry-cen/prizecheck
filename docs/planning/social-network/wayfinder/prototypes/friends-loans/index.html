@@ -1,0 +1,805 @@
+<!doctype html>
+<!--
+  PROTOTYPE, throw me away. Friends, inbox and Loan screens (ry-cen/prizecheck#240).
+  Three placements of the inbox, Loans and Friends management, switchable with ?variant=A|B|C and the floating bar.
+  Every Loan step works in memory; the dashed ⟲ buttons play the other collector. Nothing is saved or sent.
+-->
+<html lang="en" data-theme="prize-gold">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Friends and Loans prototype</title>
+<link rel="stylesheet" href="../../../../../../web/src/tokens.css">
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body { background: var(--color-bg); color: var(--color-text); font: var(--font-size-md)/var(--line-height) var(--font-sans); }
+  button { font: inherit; color: inherit; }
+  .num { font-variant-numeric: var(--numeric); }
+  .muted { color: var(--color-text-muted); }
+  .subtle { color: var(--color-text-subtle); }
+
+  /* The app area is a container, so the phone frame gets the phone layout without resizing the window. */
+  #stage { min-height: 100vh; }
+  #stage.framed { display: flex; justify-content: center; padding: 24px 0 96px; background: #0a0909; }
+  #stage.framed .app { width: 375px; height: 812px; overflow: auto; border: 1px solid var(--color-border-strong); border-radius: 24px; transform: translateZ(0); }
+  .app { container: app / inline-size; background: var(--color-bg); min-height: 100%; }
+
+  /* Kit controls: 30 px on desktop, 44 px on phones; 24 px chips. */
+  .btn { display: inline-flex; align-items: center; gap: 6px; height: var(--size-control); padding: 0 12px; border-radius: var(--radius-control); border: 1px solid var(--color-control-outline); background: var(--color-surface-raised); font-size: var(--font-size-control); cursor: pointer; white-space: nowrap; }
+  .btn:hover { border-color: var(--color-accent-border); }
+  .btn.primary { background: var(--color-accent); border-color: var(--color-accent); color: var(--color-on-accent); font-weight: 600; }
+  .btn.quiet { background: transparent; border-color: transparent; color: var(--color-text-muted); }
+  .btn.small { height: var(--size-quick); padding: 0 10px; font-size: var(--font-size-sm); }
+  .pill { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: var(--radius-round); border: 1px solid var(--color-border-strong); font-size: var(--font-size-xs); color: var(--color-text-muted); white-space: nowrap; }
+  .pill.gold { border-color: var(--color-accent-border); color: var(--color-accent-strong); background: var(--color-accent-fill); }
+  .seg { display: inline-flex; border: 1px solid var(--color-control-outline); border-radius: var(--radius-control); overflow: hidden; }
+  .seg button { height: calc(var(--size-control) - 2px); padding: 0 12px; border: 0; background: transparent; font-size: var(--font-size-control); cursor: pointer; color: var(--color-text-muted); white-space: nowrap; }
+  .seg button[aria-pressed="true"] { background: var(--color-surface-selected); color: var(--color-accent-strong); font-weight: 600; }
+  :focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: var(--focus-offset); }
+
+  /* Shell */
+  .hdr { position: sticky; top: 0; z-index: 10; height: var(--layout-header-height); display: flex; align-items: center; gap: 24px; padding: 0 24px; border-bottom: 1px solid var(--color-border); background: var(--color-bg); }
+  .word { font-size: var(--font-size-sm); font-weight: 700; letter-spacing: 2px; text-transform: uppercase; white-space: nowrap; }
+  .word b { color: var(--color-accent); margin-right: 8px; }
+  .tabs { display: flex; gap: 4px; }
+  .tab { height: 32px; padding: 0 12px; border-radius: var(--radius-control); border: 0; background: transparent; color: var(--color-text-muted); font-size: var(--font-size-control); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+  .tab[aria-current="page"] { background: var(--color-surface-selected); color: var(--color-accent-strong); font-weight: 600; }
+  .tab .count { font-size: var(--font-size-2xs); padding: 1px 6px; border-radius: var(--radius-round); background: var(--color-accent-fill); color: var(--color-accent-strong); }
+  .avatar { margin-left: auto; width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--color-accent-border); background: var(--color-accent-fill); color: var(--color-accent-strong); display: grid; place-items: center; font-weight: 600; font-size: var(--font-size-control); }
+  .phonehdr { display: none; }
+  .tabbar { display: none; }
+
+  .page { max-width: 1180px; margin: 0 auto; padding: 24px var(--layout-gutter) 120px; }
+  h1 { font-size: var(--font-size-xl); margin: 0; }
+  h2 { font-size: var(--font-size-lg); margin: 0; }
+  .lede { margin: 4px 0 0; color: var(--color-text-muted); font-size: var(--font-size-control); }
+
+  /* Collection-style sidebar (variant C uses none; kept for the Decks index) */
+  .crumbs { display: flex; align-items: center; gap: 8px; font-size: var(--font-size-control); margin-bottom: 12px; }
+  .crumbs a { color: var(--color-accent); text-decoration: none; cursor: pointer; }
+
+  /* Summary strip: the combined total and its cost, at the top. */
+  .summary { margin-top: 20px; display: flex; flex-wrap: wrap; align-items: center; gap: 16px 28px; padding: 16px 20px; border: 1px solid var(--color-border); border-radius: var(--radius-panel); background: var(--color-surface); }
+  .big { font-size: var(--font-size-xl); font-weight: 700; line-height: 1.1; }
+  .big.gold { color: var(--color-accent-strong); }
+  .stat .lbl { font-size: var(--font-size-xs); color: var(--color-text-subtle); text-transform: uppercase; letter-spacing: 1px; }
+  .summary .controls { margin-left: auto; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .explain { flex-basis: 100%; margin: 0; font-size: var(--font-size-sm); color: var(--color-text-muted); }
+  .proto-note { display: inline-block; margin-left: 6px; padding: 0 6px; border: 1px dashed var(--color-control-outline); border-radius: 4px; font-size: var(--font-size-2xs); color: var(--color-text-subtle); white-space: nowrap; }
+
+  .grid { margin-top: 20px; display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 20px; align-items: start; }
+  .panel { border: 1px solid var(--color-border); border-radius: var(--radius-panel); background: var(--color-surface); }
+  .panel-h { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px 16px; border-bottom: 1px solid var(--color-border); }
+  .panel-h .grow { flex: 1; min-width: 0; }
+  .decks { display: grid; gap: 16px; }
+  .total { position: sticky; top: calc(var(--layout-header-height) + 16px); }
+  .total summary { list-style: none; cursor: default; }
+  .total summary::-webkit-details-marker { display: none; }
+  .trow { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 8px; padding: 7px 16px; border-bottom: 1px solid var(--color-border); font-size: var(--font-size-control); align-items: baseline; }
+  .trow:last-child { border-bottom: 0; }
+  .trow .q { font-weight: 700; color: var(--color-accent-strong); }
+  .trow .for { font-size: var(--font-size-xs); color: var(--color-text-subtle); }
+  .ellip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .line { display: grid; grid-template-columns: 56px minmax(0, 1fr) 150px 84px; gap: 12px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--color-border); }
+  .line:last-child { border-bottom: 0; }
+  .art { width: 40px; aspect-ratio: var(--tile-aspect); border-radius: 4px; background: linear-gradient(160deg, var(--color-art-start), var(--color-art-end)); border: 1px solid var(--color-border); }
+  .need { font-weight: 700; font-size: var(--font-size-lg); color: var(--color-accent-strong); }
+  .need small { font-weight: 400; font-size: var(--font-size-sm); color: var(--color-text-subtle); }
+  .name { font-weight: 600; }
+  .meta { font-size: var(--font-size-sm); color: var(--color-text-muted); }
+  .src { font-size: var(--font-size-xs); color: var(--color-text-subtle); }
+  .price { text-align: right; font-size: var(--font-size-control); }
+  .swap { grid-column: 2 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 2px; padding: 6px 10px; border-radius: var(--radius-control); background: var(--color-accent-wash); border: 1px solid var(--color-accent-outline); font-size: var(--font-size-sm); }
+  .done-deck { padding: 12px 16px; display: flex; gap: 10px; align-items: center; font-size: var(--font-size-control); color: var(--color-text-muted); }
+  .differs { padding: 8px 16px; font-size: var(--font-size-xs); color: var(--color-text-subtle); border-top: 1px dashed var(--color-border); }
+
+  /* Decks index (variants B and C) */
+  .deckcards { margin-top: 20px; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+  .deckcard { padding: 14px 16px; border: 1px solid var(--color-border); border-radius: var(--radius-panel); background: var(--color-surface); display: grid; gap: 6px; }
+  .banner { margin-top: 20px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; padding: 14px 18px; border-radius: var(--radius-panel); border: 1px solid var(--color-accent-border); background: var(--color-accent-wash); }
+  .placeholder { margin-top: 40px; padding: 40px; text-align: center; border: 1px dashed var(--color-border-strong); border-radius: var(--radius-panel); color: var(--color-text-subtle); }
+  .filter { margin-top: 16px; display: flex; gap: 6px; overflow-x: auto; }
+  .chip { height: var(--size-chip); padding: 0 10px; border-radius: var(--radius-round); border: 1px solid var(--color-border-strong); background: transparent; font-size: var(--font-size-sm); color: var(--color-text-muted); cursor: pointer; white-space: nowrap; }
+  .chip[aria-pressed="true"] { border-color: var(--color-accent-border); background: var(--color-accent-fill); color: var(--color-accent-strong); }
+
+  /* Dialog and toast */
+  .scrim { position: fixed; inset: 0; background: var(--color-scrim); display: grid; place-items: center; z-index: 500; padding: 16px; }
+  .dialog { width: min(var(--layout-dialog-width), 100%); border-radius: var(--radius-dialog); background: var(--color-surface-raised); border: 1px solid var(--color-border-strong); padding: 20px; display: grid; gap: 12px; box-shadow: 0 10px 40px var(--color-shadow-strong); }
+  .dialog p { margin: 0; font-size: var(--font-size-control); }
+  .dialog .row { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+  .toast { position: fixed; left: 50%; bottom: 84px; transform: translateX(-50%); z-index: 400; display: flex; gap: 12px; align-items: center; padding: 10px 14px; border-radius: var(--radius-panel); background: var(--color-surface-raised); border: 1px solid var(--color-border-strong); box-shadow: 0 6px 24px var(--color-shadow-strong); font-size: var(--font-size-control); max-width: calc(100% - 32px); }
+
+  /* Phone layout */
+    .swap .btn { width: 100%; justify-content: center; }
+    .panel-h { padding: 12px; }
+    .panel-h .grow { flex-basis: 100%; }
+    .total .panel-h .grow { flex-basis: auto; }
+  }
+
+  /* Prototype switcher: not part of the design. */
+  .proto-bar { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 1000; display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 999px; background: #f4f1ff; color: #1b1440; font: 600 12px/1 system-ui, sans-serif; box-shadow: 0 6px 24px #0009; white-space: nowrap; }
+  .proto-bar button { border: 0; background: #ddd6ff; color: #1b1440; border-radius: 999px; height: 26px; padding: 0 10px; font: inherit; cursor: pointer; }
+  .proto-bar button[aria-pressed="true"] { background: #1b1440; color: #f4f1ff; }
+  .proto-bar .lbl { padding: 0 8px; }
+  @media (max-width: 760px) { .proto-bar { bottom: 64px; transform: translateX(-50%) scale(.9); } .proto-bar .lbl { max-width: 120px; overflow: hidden; text-overflow: ellipsis; } }
+  #stage.framed ~ .proto-bar { bottom: 16px; }
+
+  /* Loans prototype additions */
+  .ini { width: 28px; height: 28px; flex: none; border-radius: 50%; display: grid; place-items: center; font-size: var(--font-size-xs); font-weight: 700; background: var(--color-surface-selected); color: var(--color-accent-strong); border: 1px solid var(--color-accent-border); }
+  .ini.lg { width: 40px; height: 40px; font-size: var(--font-size-md); }
+  .tag { font-size: var(--font-size-2xs); padding: 1px 6px; border-radius: var(--radius-round); border: 1px solid var(--color-border-strong); color: var(--color-text-muted); white-space: nowrap; }
+  .tag.gold { border-color: var(--color-accent-border); color: var(--color-accent-strong); background: var(--color-accent-fill); }
+  .tag.warn { border-color: var(--color-warning); color: var(--color-warning); }
+  .linkish { background: none; border: 0; padding: 0; color: var(--color-accent); cursor: pointer; font-size: inherit; text-decoration: underline; text-underline-offset: 2px; }
+  .row { display: flex; align-items: center; gap: 10px; }
+  .grow { flex: 1; min-width: 0; }
+  .item { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--color-border); cursor: pointer; background: transparent; border-left: 0; border-right: 0; border-top: 0; width: 100%; text-align: left; font-size: var(--font-size-control); }
+  .item:last-child { border-bottom: 0; }
+  .item:hover { background: var(--color-surface-raised); }
+  .item .when { font-size: var(--font-size-xs); color: var(--color-text-subtle); white-space: nowrap; }
+  .item.read { opacity: .7; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--color-accent); flex: none; }
+  .sect-h { padding: 10px 16px; font-size: var(--font-size-xs); text-transform: uppercase; letter-spacing: 1px; color: var(--color-text-subtle); border-bottom: 1px solid var(--color-border); }
+  .badge { font-size: var(--font-size-2xs); padding: 1px 6px; border-radius: var(--radius-round); background: var(--color-accent); color: var(--color-on-accent); font-weight: 700; }
+  .bell { position: relative; margin-left: auto; height: 32px; width: 32px; border-radius: 50%; border: 1px solid var(--color-border-strong); background: transparent; cursor: pointer; font-size: 15px; }
+  .bell .badge { position: absolute; top: -4px; right: -6px; }
+  .bell + .avatar { margin-left: 8px; }
+  .bell + .bell { margin-left: 8px; }
+  /* The drawer is narrow, so it takes the phone rules (stacked rows) at any window size. */
+  .drawer { container: app / inline-size; position: fixed; top: 0; right: 0; bottom: 0; width: min(420px, 100%); background: var(--color-surface); border-left: 1px solid var(--color-border-strong); z-index: 600; overflow: auto; box-shadow: -10px 0 40px var(--color-shadow-strong); }
+  .drawer-h { position: sticky; top: 0; display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--color-border); background: var(--color-surface); }
+  .steps { display: flex; gap: 0; margin-top: 16px; }
+  .step { flex: 1; padding: 8px 10px; border-top: 3px solid var(--color-border-strong); font-size: var(--font-size-xs); color: var(--color-text-subtle); }
+  .step.done { border-color: var(--color-accent); color: var(--color-text-muted); }
+  .step.now { border-color: var(--color-accent-strong); color: var(--color-accent-strong); font-weight: 600; }
+  .step .who { display: block; font-weight: 400; color: var(--color-text-subtle); }
+  .lt { width: 100%; border-collapse: collapse; font-size: var(--font-size-control); }
+  .lt th { text-align: left; font-weight: 600; font-size: var(--font-size-xs); color: var(--color-text-subtle); padding: 8px 16px; border-bottom: 1px solid var(--color-border); }
+  .lt td { padding: 8px 16px; border-bottom: 1px solid var(--color-border); vertical-align: middle; }
+  .lt tr:last-child td { border-bottom: 0; }
+  .lt .n { text-align: right; font-variant-numeric: var(--numeric); }
+  .stepper { display: inline-flex; align-items: center; border: 1px solid var(--color-control-outline); border-radius: var(--radius-control); }
+  .stepper button { width: 28px; height: 28px; border: 0; background: transparent; cursor: pointer; font-size: var(--font-size-md); color: inherit; }
+  .stepper span { min-width: 22px; text-align: center; font-weight: 600; }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--color-border); align-items: center; }
+  .callout { margin-top: 16px; padding: 12px 16px; border-radius: var(--radius-panel); border: 1px solid var(--color-accent-border); background: var(--color-accent-wash); font-size: var(--font-size-control); }
+  .callout.warn { border-color: var(--color-warning); background: transparent; }
+  .sim { border: 1px dashed #b9a6ff; color: #cbbdff; background: transparent; }
+  .sim:hover { border-color: #ddd6ff; }
+  select.inp, input.inp { height: var(--size-control); padding: 0 8px; border-radius: var(--radius-control); border: 1px solid var(--color-control-outline); background: var(--color-surface); color: var(--color-text); font: inherit; font-size: var(--font-size-control); }
+  .two { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 20px; margin-top: 20px; align-items: start; }
+  .tree .loc { display: flex; align-items: center; gap: 8px; padding: 7px 12px; font-size: var(--font-size-control); border-bottom: 1px solid var(--color-border); cursor: pointer; }
+  .tree .loc:last-child { border-bottom: 0; }
+  .tree .loc[aria-current="true"] { background: var(--color-surface-selected); color: var(--color-accent-strong); }
+  .tree .loc .hid { font-size: var(--font-size-2xs); color: var(--color-text-subtle); white-space: nowrap; }
+  .field { display: grid; gap: 4px; font-size: var(--font-size-sm); color: var(--color-text-muted); }
+  .kv { display: grid; grid-template-columns: 140px minmax(0, 1fr) auto; gap: 8px 12px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--color-border); font-size: var(--font-size-control); }
+  .kv:last-child { border-bottom: 0; }
+  .kv .k { color: var(--color-text-subtle); font-size: var(--font-size-sm); }
+  .subnav { display: flex; gap: 6px; margin-bottom: 16px; flex-wrap: wrap; }
+  .menu { position: relative; }
+  .item.freq { flex-wrap: wrap; }
+  .freq-btns { display: flex; gap: 8px; }
+  .menu { position: relative; display: inline-flex; }
+  .menu-pop { position: absolute; right: 0; bottom: calc(100% + 4px); z-index: 50; display: grid; min-width: 200px; padding: 4px; border-radius: var(--radius-panel); background: var(--color-surface-raised); border: 1px solid var(--color-border-strong); box-shadow: 0 6px 24px var(--color-shadow-strong); }
+  .drawer .menu-pop { bottom: auto; top: calc(100% + 4px); }
+  .menu-pop button { text-align: left; padding: 8px 10px; border: 0; background: transparent; border-radius: var(--radius-control); cursor: pointer; font-size: var(--font-size-control); color: var(--color-text); }
+  .menu-pop button:hover { background: var(--color-surface-selected); }
+  .hist summary { cursor: pointer; list-style: none; }
+  .actions .menu { margin-left: auto; }
+  .loanrow { cursor: pointer; flex-wrap: wrap; }
+  .row-acts { display: flex; gap: 6px; flex: none; }
+  .cardcell { display: flex; align-items: center; gap: 12px; }
+  .cardcell .art { flex: none; }
+  .dialog.wide { width: min(560px, 100%); max-height: calc(100vh - 32px); overflow: auto; }
+  .dialog h2 { font-size: var(--font-size-lg); }
+
+  @container app (max-width: 760px) {
+    .hdr { display: none; }
+    .phonehdr { display: flex; align-items: center; gap: 12px; height: var(--layout-header-height); padding: 0 12px; border-bottom: 1px solid var(--color-border); }
+    .phonehdr .t { font-weight: 600; }
+    .tabbar { display: flex; position: fixed; inset: auto 0 0 0; height: var(--layout-tabbar-height); border-top: 1px solid var(--color-border); background: var(--color-surface); z-index: 10; }
+    .tabbar button { flex: 1; border: 0; background: transparent; color: var(--color-text-muted); font-size: var(--font-size-xs); display: grid; place-items: center; padding: 6px 0; cursor: pointer; position: relative; }
+    .tabbar button .ico { font-size: 18px; line-height: 1; }
+    .tabbar button[aria-current="page"] { color: var(--color-accent-strong); font-weight: 600; }
+    .tabbar .badge { position: absolute; top: 4px; left: calc(50% + 6px); }
+    .page { padding: 16px var(--layout-gutter) 140px; }
+    .btn, .seg button { height: var(--size-control-phone); }
+    .btn.small { height: var(--size-quick-phone); }
+    .two { grid-template-columns: minmax(0, 1fr); }
+    .lt td, .lt th { padding: 8px 12px; }
+    .kv { grid-template-columns: minmax(0, 1fr) auto; }
+    .kv .k { grid-column: 1 / -1; }
+    .steps .step { padding: 6px 4px; font-size: var(--font-size-2xs); }
+    .actions .btn { flex: 1 1 auto; justify-content: center; }
+    .row-acts { flex-basis: 100%; padding-left: 44px; }
+    .row-acts .btn { flex: 1; justify-content: center; }
+    .freq-btns { flex-basis: 100%; padding-left: 48px; }
+    .freq-btns .btn { flex: 1; justify-content: center; }
+  }
+  @media (max-width: 760px) { .toast { top: 16px; bottom: auto; } }
+</style>
+</head>
+<body>
+<div id="stage"><div class="app" id="app"></div></div>
+<div class="proto-bar" role="toolbar" aria-label="Prototype switcher">
+  <button id="prev" aria-label="Previous variant">‹</button>
+  <span class="lbl" id="vlabel"></span>
+  <button id="next" aria-label="Next variant">›</button>
+  <button id="frame" aria-pressed="false" title="Show the phone layout in a 375 × 812 frame">Phone frame</button>
+  <button id="reset" title="Put every Loan back to its starting step">Reset</button>
+</div>
+<div id="layer"></div>
+<script>
+// ---------- Mock data (in memory; nothing is saved or sent) ----------
+const ED = {
+  candy191: { name: "Rare Candy", set: "SVI 191" }, arven166: { name: "Arven", set: "SVI 166" },
+  iono185: { name: "Iono", set: "PAL 185" }, zard125: { name: "Charizard ex", set: "OBF 125" },
+  gen170: { name: "Electric Generator", set: "SVI 170" }, pidgeot164: { name: "Pidgeot ex", set: "OBF 164" },
+  nest181: { name: "Nest Ball", set: "SVI 181" }, boss172: { name: "Boss's Orders", set: "PAL 172" },
+};
+const ME = { name: "Ryan C.", handle: "ryan_c" };
+let FRIENDS, BLOCKED, REQUESTS, LOANS, UPDATES, LOCS;
+function seed() {
+  FRIENDS = [
+    { id: "ash", name: "Ash K.", handle: "ashk" }, { id: "kim", name: "Kim", handle: "kimtcg" },
+    { id: "sam", name: "Sam", handle: "samplays" }, { id: "jo", name: "Jo R.", handle: "jo_r" },
+  ];
+  BLOCKED = [{ id: "pat", name: "Pat", handle: "pat_trades" }];
+  REQUESTS = [{ id: "lee", name: "Lee", handle: "leeplays", dir: "in" }, { id: "max", name: "Max", handle: "maxdraws", dir: "out" }];
+  // role: which side you are. Lines: requested, promised, returned, off (written off), src (lender's pick), stale.
+  LOANS = [
+    { id: "L1", friend: "kim", role: "lender", kind: "request", state: "requested", deck: "Kim's Deck", returnBy: "2026-11-08",
+      lines: [{ e: "candy191", req: 2, src: "Charizard ex (Deck)" }, { e: "arven166", req: 1, src: "Binder 2", stale: "Binder 2 has none now · use Unsorted" }] },
+    { id: "L2", friend: "ash", role: "borrower", kind: "request", state: "accepted", deck: "Charizard ex", returnBy: "2026-11-20", otherHandover: true,
+      lines: [{ e: "iono185", req: 2, promised: 2 }, { e: "zard125", req: 1, promised: 1 }] },
+    { id: "L3", friend: "sam", role: "lender", kind: "offer", state: "handed", returnBy: "2026-10-10", overdue: true,
+      lines: [{ e: "gen170", req: 3, promised: 3, src: "Miraidon ex (Deck)" }] },
+    { id: "L4", friend: "kim", role: "borrower", kind: "request", state: "handed", deck: "Charizard ex", returnBy: "2026-11-01",
+      lines: [{ e: "pidgeot164", req: 1, promised: 1 }], ret: { lines: { pidgeot164: 1 }, other: true } },
+    { id: "L5", friend: "jo", role: "borrower", kind: "offer", state: "offered", returnBy: null,
+      lines: [{ e: "nest181", req: 2 }] },
+    { id: "L6", friend: "ash", role: "borrower", kind: "request", state: "handed", deck: "Gardevoir ex", returnBy: "2026-12-01",
+      lines: [{ e: "boss172", req: 2, promised: 2, off: 1 }], offChoice: 1 },
+  ];
+  LOANS.forEach(l => l.lines.forEach(x => { x.promised ??= 0; x.returned ??= 0; x.off ??= 0; x.ask = x.req; }));
+  UPDATES = [
+    { id: "u1", text: "Sam's Loan is overdue since 10 Oct", loan: "L3", when: "5 days ago", read: false },
+    { id: "u2", text: "Ash accepted your Borrow Request", loan: "L2", when: "Yesterday", read: false },
+    { id: "u3", text: "Jo R. cancelled this Loan", loan: null, when: "Last week", read: true },
+  ];
+  LOCS = [
+    { id: "b1", name: "Binder 1", hidden: false }, { id: "b2", name: "Binder 2", hidden: false },
+    { id: "trade", name: "Trade Binders", hidden: true, kids: [{ id: "t1", name: "Trade Binder A" }, { id: "t2", name: "Trade Binder B" }] },
+    { id: "d1", name: "Charizard ex", deck: true, hidden: false }, { id: "d2", name: "Gardevoir ex", deck: true, hidden: false }, { id: "d3", name: "Miraidon ex", deck: true, hidden: false },
+    { id: "uns", name: "Unsorted", hidden: false },
+  ];
+}
+seed();
+
+const VARIANTS = { A: "Friends tab", B: "Inbox bell · Loans in Collection · Friends in Settings", C: "One Loans page", D: "Inbox bell · Loans tab · Friends drawer", E: "Streamlined D" };
+const KEYS = Object.keys(VARIANTS);
+const dl = (v = st.variant) => v === "D" || v === "E";
+const qs = new URLSearchParams(location.search);
+const st = { variant: KEYS.includes(qs.get("variant")) ? qs.get("variant") : "A", framed: qs.get("frame") === "phone", screen: "home", loan: null, sub: "inbox", drawer: false, loc: "b1", deck: "d1", lookup: null, overlay: "" };
+
+const esc = (s) => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fr = (id) => FRIENDS.find(f => f.id === id) || { id, name: "Someone", handle: "" };
+const ini = (n) => n.split(/\s+/).map(p => p[0]).join("").slice(0, 2).toUpperCase();
+const loanById = (id) => LOANS.find(l => l.id === id);
+const fmtDate = (d) => d ? new Date(d + "T12:00").toLocaleDateString("en-GB", { day: "numeric", month: "short" }) : "No date";
+const out = (x) => x.promised - x.returned - x.off;
+const total = (l, k) => l.lines.reduce((a, x) => a + (k === "out" ? out(x) : x[k]), 0);
+
+// ---------- Loan logic (follows the Loan steps resolution) ----------
+function mySide(l) { return l.role === "lender" ? "lender" : "borrower"; }
+function sentByMe(l) { return (l.kind === "request" && l.role === "borrower") || (l.kind === "offer" && l.role === "lender"); }
+function status(l) {
+  const f = fr(l.friend).name;
+  if (l.state === "requested" || l.state === "offered") return sentByMe(l) ? `Waiting for ${f} to answer` : (l.kind === "request" ? `${f} wants to borrow` : `${f} offers to lend`);
+  if (l.state === "accepted") {
+    if (l.myHandover && l.otherHandover) return "Handed over";
+    if (l.myHandover) return `Waiting for ${f} to confirm the handover`;
+    if (l.otherHandover) return l.role === "lender" ? `${f} says they have the cards` : `${f} says they handed these over`;
+    return "Accepted · ready to hand over";
+  }
+  if (l.state === "handed") {
+    if (l.offChoice) return `${f} wrote off ${l.offChoice}. Do you still have it?`;
+    if (l.ret) return l.ret.mine ? `Waiting for ${f} to confirm the return` : `${f} says ${l.role === "lender" ? "they gave cards back" : "they got cards back"}`;
+    if (l.overdue) return `Overdue since ${fmtDate(l.returnBy)}`;
+    return l.role === "lender" ? `Lent to ${f}` : `Borrowed from ${f}`;
+  }
+  return { declined: "Declined", withdrawn: "Withdrawn", cancelled: "Cancelled", returned: "Returned", written_off: "Written off" }[l.closed] || "Closed";
+}
+function waitingOnMe(l) {
+  if (l.state === "requested" || l.state === "offered") return !sentByMe(l);
+  if (l.state === "accepted") return !l.myHandover || (l.role === "lender" && l.lines.some(x => x.stale));
+  if (l.state === "handed") return !!l.offChoice || (l.ret && !l.ret.mine) || false;
+  return false;
+}
+function stage(l) { return { requested: 0, offered: 0, accepted: 1, handed: 2, closed: 3 }[l.state]; }
+function moveToHanded(l) { if (l.myHandover && l.otherHandover) { l.state = "handed"; l.myHandover = l.otherHandover = false; } }
+function finishReturn(l) {
+  if (!(l.ret && l.ret.mine && l.ret.other)) return;
+  l.lines.forEach(x => { x.returned += l.ret.lines[x.e] || 0; });
+  l.ret = null;
+  if (total(l, "out") === 0) { l.state = "closed"; l.closed = "returned"; }
+}
+function act(id, what, arg) {
+  const l = loanById(id); const f = fr(l.friend).name;
+  switch (what) {
+    case "accept": l.lines.forEach(x => { x.promised = x.ask; if (!x.promised) x.stale = null; }); l.state = "accepted"; toast(l.role === "lender" ? `Accepted. Your Pick List is ready.` : `Accepted ${f}'s Lend Offer`); break;
+    case "decline": l.state = "closed"; l.closed = "declined"; toast("Declined"); break;
+    case "withdraw": l.state = "closed"; l.closed = "withdrawn"; toast("Withdrawn"); break;
+    case "cancel": l.state = "closed"; l.closed = "cancelled"; toast(`Cancelled. ${f} will see "${ME.name} cancelled this Loan".`); break;
+    case "handover": l.myHandover = true; toast(l.role === "lender" ? "The copies left your Locations" : `The Borrowed Copies are in ${l.deck || "Unsorted"}`); moveToHanded(l); break;
+    case "takeback": l.myHandover = false; toast("Your confirmation is taken back"); break;
+    case "repick": l.lines.forEach(x => { if (x.stale) { x.src = "Unsorted"; x.stale = null; } }); toast("Picks updated"); break;
+    case "startReturn": l.ret = { lines: arg, mine: true, other: false }; toast(l.role === "borrower" ? "Those copies left your Collection" : "Return started"); break;
+    case "confirmReturn": l.ret.mine = true; toast(l.role === "lender" ? "The copies are back in their Locations" : "The Borrowed Copies left your Decks"); finishReturn(l); break;
+    case "writeoff": Object.entries(arg).forEach(([e, n]) => { l.lines.find(x => x.e === e).off += n; }); toast("Written off. This can't be undone."); if (total(l, "out") === 0) { l.state = "closed"; l.closed = "written_off"; } break;
+    case "keep": l.offChoice = 0; toast("Added to your Collection where it sits"); break;
+    case "remove": l.offChoice = 0; toast("Removed from your Decks"); break;
+    case "extend": l.returnBy = arg; l.overdue = false; toast(arg ? `Return by ${fmtDate(arg)}` : "Return-by date cleared"); break;
+    case "askTime": toast(`Asked ${f} for more time`); break;
+    // Simulations of the other side.
+    case "simHandover": l.otherHandover = true; moveToHanded(l); toast(`${f} confirmed the handover`); break;
+    case "simReturn": if (l.ret) { l.ret.other = true; finishReturn(l); } else { l.ret = { lines: Object.fromEntries(l.lines.map(x => [x.e, out(x)])), other: true }; } toast(`${f} confirmed`); break;
+    case "simAnswer": l.lines.forEach(x => x.promised = x.req); l.state = "accepted"; toast(`${f} accepted`); break;
+  }
+  render();
+}
+
+// ---------- Shared screens ----------
+function friendLine(id, sub = "") { const f = fr(id); return `<span class="ini">${ini(f.name)}</span><span class="grow"><b>${esc(f.name)}</b> <span class="subtle">@${esc(f.handle)}</span>${sub}</span>`; }
+function loanSummary(l) { return l.lines.filter(x => l.state === "requested" || l.state === "offered" || x.promised).map(x => `${x.promised || x.req} ${ED[x.e].name}`).join(" · "); }
+function inboxItems() {
+  const items = [];
+  REQUESTS.filter(r => r.dir === "in").forEach(r => items.push({ kind: "friend", r, text: `${r.name} sent you a Friend Request`, sub: `@${r.handle}` }));
+  LOANS.filter(waitingOnMe).forEach(l => items.push({ kind: "loan", l, text: status(l), sub: loanSummary(l) }));
+  return items;
+}
+function inboxList(compact) {
+  const w = inboxItems();
+  return `<div class="panel"><div class="sect-h">Waiting on you · ${w.length}</div>
+    ${w.map(i => i.kind === "friend"
+      ? `<div class="item freq" style="cursor:default"><span class="dot"></span><span class="ini">${ini(i.r.name)}</span><span class="grow">${esc(i.text)}<div class="subtle">${esc(i.sub)}</div></span>
+          <span class="freq-btns"><button class="btn small primary" data-freq="accept|${i.r.id}">Accept</button><button class="btn small" data-freq="decline|${i.r.id}">Decline</button></span></div>`
+      : `<button class="item" data-open="${i.l.id}"><span class="dot"></span><span class="ini">${ini(fr(i.l.friend).name)}</span><span class="grow">${esc(i.text)}<div class="subtle">${esc(i.sub)}</div></span><span>›</span></button>`).join("") || `<div class="item" style="cursor:default">Nothing waiting on you.</div>`}
+    <div class="sect-h">Updates</div>
+    ${UPDATES.filter(u => !u.dismissed).map(u => `<div class="item ${u.read ? "read" : ""}" style="cursor:default">${u.read ? "" : `<span class="dot"></span>`}
+      <span class="grow">${u.loan ? `<button class="linkish" style="color:inherit;text-decoration:none" data-open="${u.loan}">${esc(u.text)}</button>` : esc(u.text)}</span>
+      <span class="when">${esc(u.when)}</span><button class="btn quiet small" data-dismiss="${u.id}" aria-label="Dismiss">✕</button></div>`).join("") || `<div class="item">No updates.</div>`}
+  </div>`;
+}
+function loanGroups() {
+  const open = LOANS.filter(l => l.state !== "closed");
+  const g = (title, list) => list.length ? `<div class="sect-h">${title} · ${list.length}</div>${list.map(loanRow).join("")}` : "";
+  return `<div class="panel">${g("Lent out", open.filter(l => l.role === "lender" && l.state === "handed"))}
+    ${g("Borrowed", open.filter(l => l.role === "borrower" && l.state === "handed"))}
+    ${g("Ready to hand over", open.filter(l => l.state === "accepted"))}
+    ${g("Requests and offers", open.filter(l => l.state === "requested" || l.state === "offered"))}
+    ${g("Closed", LOANS.filter(l => l.state === "closed"))}</div>`;
+}
+function loanRow(l) {
+  const mine = waitingOnMe(l);
+  return `<button class="item" data-open="${l.id}">${mine ? `<span class="dot"></span>` : ""}<span class="ini">${ini(fr(l.friend).name)}</span>
+    <span class="grow"><b>${l.role === "lender" ? "To" : "From"} ${esc(fr(l.friend).name)}</b> · ${esc(loanSummary(l))}<div class="${l.overdue ? "" : "subtle"}" ${l.overdue ? 'style="color:var(--color-warning)"' : ""}>${esc(status(l))}</div></span>
+    ${l.returnBy && l.state !== "closed" ? `<span class="when">Return by ${fmtDate(l.returnBy)}</span>` : ""}<span>›</span></button>`;
+}
+
+function stepper(name, val, max) { return `<span class="stepper"><button data-stp="${name}|-1|${max}" aria-label="One fewer">−</button><span class="num">${val}</span><button data-stp="${name}|1|${max}" aria-label="One more">+</button></span>`; }
+function loanScreen(l) {
+  const f = fr(l.friend); const lender = l.role === "lender"; const s = stage(l);
+  const who = (side) => side === "lender" ? (lender ? "You" : f.name) : (lender ? f.name : "You");
+  const conf = (mine, other) => `${lender ? (mine ? "✓ You" : "· You") : (other ? `✓ ${f.name}` : `· ${f.name}`)} · ${lender ? (other ? `✓ ${f.name}` : `· ${f.name}`) : (mine ? "✓ You" : "· You")}`;
+  const steps = `<div class="steps">
+    <div class="step ${s > 0 ? "done" : "now"}">${l.kind === "request" ? "Requested" : "Offered"}<span class="who">by ${esc(l.kind === "request" ? who("borrower") : who("lender"))}</span></div>
+    <div class="step ${s > 1 ? "done" : s === 1 ? "now" : ""}">Accepted<span class="who">${s >= 1 ? "Copies reserved" : ""}</span></div>
+    <div class="step ${s > 2 ? "done" : s === 2 ? "now" : ""}">Handed over<span class="who">${s === 1 ? esc(conf(l.myHandover, l.otherHandover)) : s >= 2 ? "Both confirmed" : ""}</span></div>
+    <div class="step ${l.closed === "returned" ? "done" : ""}">Returned<span class="who">${l.ret ? "In progress" : ""}</span></div></div>`;
+  const ask = l.state === "requested" || l.state === "offered";
+  const answering = ask && !sentByMe(l);
+  const rows = l.lines.map(x => {
+    let qty;
+    if (answering && lender || answering && !lender) qty = stepper(`ask|${l.id}|${x.e}`, x.ask, x.req);
+    else if (ask) qty = `<span class="num">${x.req}</span>`;
+    else if (!x.promised) qty = `<span class="subtle">Not lent</span>`;
+    else qty = `<span class="num">${x.promised}${x.promised < x.req ? ` <span class="subtle">of ${x.req}</span>` : ""}</span>`;
+    const pick = lender && l.state === "accepted" && x.promised ? `<div class="subtle">Take from: ${esc(x.src)}</div>${x.stale ? `<div style="color:var(--color-warning)">⚠ ${esc(x.stale)}</div>` : ""}` : "";
+    const back = l.state === "handed" || l.state === "closed" ? `${x.returned ? `<span class="tag">${x.returned} returned</span> ` : ""}${x.off ? `<span class="tag warn">${x.off} written off</span> ` : ""}${out(x) && l.state !== "closed" ? `<span class="tag gold">${out(x)} out</span>` : ""}` : "";
+    return `<tr><td><div class="cardcell"><span class="art"></span><div><b>${esc(ED[x.e].name)}</b> <span class="subtle">${esc(ED[x.e].set)}</span>${pick}</div></div></td><td class="n keep">${qty}</td><td>${back}</td></tr>`;
+  }).join("");
+  const A = [];
+  const sim = (what, text) => A.push(`<button class="btn small sim" data-act="${l.id}|${what}" title="Prototype only: does the other side's step">⟲ ${esc(text)}</button>`);
+  if (answering) { A.push(`<button class="btn primary" data-act="${l.id}|accept">Accept${l.lines.some(x => x.ask < x.req) ? " these" : ""}</button>`, `<button class="btn" data-act="${l.id}|decline">Decline</button>`); }
+  else if (ask) { A.push(`<button class="btn" data-act="${l.id}|withdraw">Withdraw</button>`); sim("simAnswer", `${f.name} accepts`); }
+  else if (l.state === "accepted") {
+    if (lender && l.lines.some(x => x.stale)) A.push(`<button class="btn" data-act="${l.id}|repick">Use suggested picks</button>`);
+    if (!l.myHandover) A.push(`<button class="btn primary" data-act="${l.id}|handover" ${lender && l.lines.some(x => x.stale) ? "disabled" : ""}>${lender ? `I handed these to ${esc(f.name)}` : `I have these cards`}</button>`);
+    else A.push(`<button class="btn" data-act="${l.id}|takeback">Take back my confirmation</button>`);
+    if (!l.myHandover && !l.otherHandover) A.push(`<button class="btn quiet" data-act="${l.id}|cancel">Cancel Loan</button>`);
+    if (!l.otherHandover) sim("simHandover", `${f.name} confirms handover`);
+  } else if (l.state === "handed") {
+    if (l.offChoice) A.push(`<button class="btn primary" data-act="${l.id}|keep">I still have it: keep in my Collection</button>`, `<button class="btn" data-act="${l.id}|remove">It's gone: remove it</button>`);
+    else if (l.ret && !l.ret.mine) A.push(`<button class="btn primary" data-act="${l.id}|confirmReturn">${lender ? "I got these back" : "I gave these back"}</button>`);
+    else if (l.ret && l.ret.mine) sim("simReturn", `${f.name} confirms return`);
+    else {
+      A.push(`<button class="btn primary" data-dlg="return|${l.id}">${lender ? "Record a return" : "Give cards back"}</button>`);
+      if (lender) A.push(`<button class="btn" data-dlg="date|${l.id}">Change return-by date</button>`, `<button class="btn quiet" data-dlg="writeoff|${l.id}">Write off…</button>`);
+      else A.push(`<button class="btn" data-act="${l.id}|askTime">Ask for more time</button>`);
+      sim("simReturn", `${f.name} starts a return`);
+    }
+  }
+  const where = l.state === "handed" || l.state === "accepted" ? (lender
+    ? `<div class="subtle" style="padding:0 16px 12px">${l.state === "accepted" ? "Reserved copies stay in their Locations and Decks until you hand them over." : "Lent copies are in no Location. They come back to where they were taken from unless you choose otherwise."}</div>`
+    : `<div class="subtle" style="padding:0 16px 12px">${l.state === "accepted" ? `When you confirm, Borrowed Copies go into ${esc(l.deck || "Unsorted")}.` : `Borrowed Copies are in ${esc(l.deck || "Unsorted")}, labelled "from ${esc(f.name)}".`}</div>`) : "";
+  return `<div class="crumbs"><a data-back>‹ Back</a></div>
+    <div class="row"><span class="ini lg">${ini(f.name)}</span><div class="grow"><h1>${lender ? `Lending to ${esc(f.name)}` : `Borrowing from ${esc(f.name)}`}</h1>
+      <div class="subtle">@${esc(f.handle)} · ${l.deck && !lender ? `for ${esc(l.deck)} · ` : ""}Return by ${fmtDate(l.returnBy)}${l.overdue ? ` <span class="tag warn">Overdue</span>` : ""}</div></div></div>
+    <div class="callout ${l.overdue ? "warn" : ""}">${esc(status(l))}${l.state === "accepted" && l.myHandover && !l.otherHandover ? ". Your inventory already changed. You can take back your confirmation until they confirm." : ""}</div>
+    ${steps}
+    <section class="panel" style="margin-top:16px"><table class="lt"><thead><tr><th>Card</th><th class="n">${answering ? "Lend" : "Copies"}</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table>${where}
+    <div class="actions">${A.join("")}</div></section>`;
+}
+
+// Dialogs: return, write-off, return-by date
+function dialog(kind, id) {
+  const l = loanById(id); const f = fr(l.friend);
+  if (kind === "date") return `<div class="scrim"><div class="dialog" role="dialog"><h2>Return-by date</h2><p>You can make it later or clear it. You can't bring it earlier.</p>
+    <input class="inp" type="date" id="newdate" min="${l.returnBy || ""}" value="${l.returnBy || ""}"><div class="row"><button class="btn quiet" data-act="${id}|extend|">Clear date</button><button class="btn" data-close>Cancel</button><button class="btn primary" data-savedate="${id}">Save</button></div></div></div>`;
+  st.pick = st.pick || Object.fromEntries(l.lines.map(x => [x.e, out(x)]));
+  const lines = l.lines.filter(x => out(x) > 0).map(x => `<div class="row" style="padding:6px 0"><span class="art" style="width:32px"></span><span class="grow">${esc(ED[x.e].name)} <span class="subtle">${out(x)} out</span></span>${stepper(`pick|${x.e}`, st.pick[x.e], out(x))}</div>`).join("");
+  if (kind === "return") return `<div class="scrim"><div class="dialog wide" role="dialog"><h2>${l.role === "lender" ? `Cards ${esc(f.name)} gave back` : `Cards you're giving back to ${esc(f.name)}`}</h2>${lines}
+    <p class="subtle">${l.role === "lender" ? "They go back to where they were taken from." : "They leave your Decks now."} ${esc(f.name)} confirms on their side.</p>
+    <div class="row"><button class="btn" data-close>Cancel</button><button class="btn primary" data-doreturn="${id}">Confirm return</button></div></div></div>`;
+  return `<div class="scrim"><div class="dialog wide" role="dialog"><h2>Write off cards lent to ${esc(f.name)}</h2>${lines}
+    <p>Written-off cards leave your Collection for good. This can't be undone. ${esc(f.name)} then says whether they still have them.</p>
+    <div class="row"><button class="btn" data-close>Cancel</button><button class="btn primary" data-dowriteoff="${id}">Write off</button></div></div></div>`;
+}
+
+// Friends management (shared body; placement differs by variant)
+function friendsBody() { return friendsSocial() + privacyBody(); }
+function friendsSocial() {
+  const lk = st.lookup;
+  return `<section class="panel"><div class="panel-h"><h2 class="grow">Add a Friend</h2></div>
+      <div class="kv"><span class="k">By Handle</span><input class="inp" id="hq" placeholder="Their Handle, e.g. ashk"><button class="btn small" data-lookup>Look up</button></div>
+      ${lk ? `<div class="kv"><span class="k"></span><span>${lk}</span><span></span></div>` : ""}
+      <div class="kv"><span class="k">Your Invite Link</span><span class="ellip subtle">prizecheck.app/i/7Hq2…kP</span><span class="row"><button class="btn small" data-toast="Invite Link copied">Copy</button><button class="btn small quiet" data-toast="New link made. The old one stops working.">New link</button></span></div>
+    </section>
+    <section class="panel" style="margin-top:16px"><div class="panel-h"><h2 class="grow">Friends · ${FRIENDS.length}</h2></div>
+      ${FRIENDS.map(f => `<div class="item" style="cursor:default">${friendLine(f.id)}<button class="btn small quiet" data-unfriend="${f.id}">Remove</button><button class="btn small quiet" data-block="${f.id}">Block</button></div>`).join("")}
+      ${REQUESTS.filter(r => r.dir === "out").map(r => `<div class="item" style="cursor:default"><span class="ini">${ini(r.name)}</span><span class="grow"><b>${esc(r.name)}</b> <span class="subtle">@${esc(r.handle)} · request sent</span></span><button class="btn small quiet" data-freq="withdraw|${r.id}">Withdraw</button></div>`).join("")}
+    </section>`;
+}
+function privacyBody() {
+  return `<section class="panel" style="margin-top:16px"><div class="panel-h"><h2 class="grow">Blocked · ${BLOCKED.length}</h2></div>
+      ${BLOCKED.map(b => `<div class="item" style="cursor:default"><span class="ini">${ini(b.name)}</span><span class="grow"><b>${esc(b.name)}</b> <span class="subtle">@${esc(b.handle)}</span></span><button class="btn small" data-unblock="${b.id}">Unblock</button></div>`).join("") || `<div class="item">Nobody blocked.</div>`}
+    </section>
+    <section class="panel" style="margin-top:16px"><div class="panel-h"><h2 class="grow">Your names</h2></div>
+      <div class="kv"><span class="k">Display Name</span><span>${esc(ME.name)}</span><button class="btn small" data-toast="Display Name editor (not prototyped)">Edit</button></div>
+      <div class="kv"><span class="k">Handle</span><span>@${esc(ME.handle)} <span class="subtle">· can change again in 18 days</span></span><button class="btn small" disabled>Edit</button></div>
+      <div class="kv"><span class="k">Hidden from Friends</span><span>Trade Binders <span class="subtle">and 2 inside it</span></span><button class="btn small" data-go="collection">Manage</button></div>
+    </section>`;
+}
+
+// Collection with lent copies and Hidden Locations
+function collection() {
+  const lent = LOANS.filter(l => l.role === "lender" && l.state === "handed");
+  const borrowedIn = (name) => LOANS.filter(l => l.role === "borrower" && l.state === "handed" && l.deck === name);
+  const locRow = (x, depth, parentHidden) => {
+    const hidden = x.hidden || parentHidden;
+    return `<div class="loc" style="padding-left:${12 + depth * 16}px" data-loc="${x.id}" aria-current="${st.loc === x.id}">
+      <span class="grow">${x.deck ? "❏ " : x.kids ? "▾ " : ""}${esc(x.name)}</span>${hidden ? `<span class="hid">🙈 Hidden from Friends</span>` : ""}</div>${(x.kids || []).map(k => locRow(k, depth + 1, hidden)).join("")}`;
+  };
+  const cur = LOCS.flatMap(x => [x, ...(x.kids || []).map(k => ({ ...k, parent: x }))]).find(x => x.id === st.loc);
+  let right;
+  if (st.loc === "lent") {
+    right = `<div class="panel-h"><h2 class="grow">Lent out</h2><span class="subtle">${lent.reduce((a, l) => a + total(l, "out"), 0)} cards · still yours</span></div>
+      ${lent.map(l => l.lines.filter(x => out(x)).map(x => `<button class="item" data-open="${l.id}"><span class="art" style="width:32px"></span><span class="grow"><b>${out(x)} ${esc(ED[x.e].name)}</b><div class="subtle">Lent to ${esc(fr(l.friend).name)} · from ${esc(x.src)}${l.overdue ? " · overdue" : ""}</div></span>›</button>`).join("")).join("") || `<div class="item">Nothing lent out.</div>`}`;
+  } else {
+    const inherited = cur.parent && cur.parent.hidden;
+    const b = cur.deck ? borrowedIn(cur.name) : [];
+    right = `<div class="panel-h"><h2 class="grow">${esc(cur.name)}</h2>
+      ${inherited ? `<span class="subtle">Hidden because ${esc(cur.parent.name)} is hidden</span>` : `<button class="btn small" data-hide="${cur.id}">${cur.hidden ? "Show to Friends" : "Hide from Friends"}</button>`}</div>
+      <div class="item" style="cursor:default"><span class="art" style="width:32px"></span><span class="grow">Your cards here <span class="subtle">(not prototyped)</span></span></div>
+      ${b.map(l => l.lines.filter(x => out(x)).map(x => `<button class="item" data-open="${l.id}"><span class="art" style="width:32px"></span><span class="grow"><b>${out(x)} ${esc(ED[x.e].name)}</b> <span class="tag gold">from ${esc(fr(l.friend).name)}</span><div class="subtle">Borrowed · return by ${fmtDate(l.returnBy)}</div></span>›</button>`).join("")).join("")}`;
+  }
+  const lentRow = `<div class="loc" data-loc="lent" aria-current="${st.loc === "lent"}"><span class="grow">⇄ Lent out</span><span class="tag gold">${lent.reduce((a, l) => a + total(l, "out"), 0)}</span></div>`;
+  return `<h1>Collection</h1>${st.variant === "B" ? `<div class="filter"><div class="seg"><button aria-pressed="true">Locations</button><button data-go="loans">Loans${badge(LOANS.filter(waitingOnMe).length)}</button></div></div>` : ""}
+    <div class="two"><section class="panel tree">${LOCS.map(x => locRow(x, 0, false)).join("")}${lentRow}</section><section class="panel">${right}</section></div>`;
+}
+const badge = (n) => n ? ` <span class="badge">${n}</span>` : "";
+
+// A Deck, showing reserved, lent and Borrowed lines
+function deckView() {
+  const d = st.deck === "d1" ? "Charizard ex" : "Miraidon ex";
+  const L1 = loanById("L1"), L2 = loanById("L2"), L3 = loanById("L3"), L4 = loanById("L4");
+  const rows = d === "Charizard ex" ? [
+    ["Charizard ex", "3", L2.state === "handed" ? `2 yours · <span class="tag gold">1 from Ash K.</span>` : "2 yours · 1 missing"],
+    ["Iono", "4", L2.state === "handed" ? `2 yours · <span class="tag gold">2 from Ash K.</span>` : "2 yours · 2 missing"],
+    ["Pidgeot ex", "2", out(L4.lines[0]) ? `1 yours · <span class="tag gold">1 from Kim</span>` : "1 yours · 1 missing"],
+    ["Rare Candy", "4", L1.state === "accepted" ? `4 yours · <span class="tag">2 reserved for Kim</span>` : L1.state === "handed" ? `2 yours · <span class="tag warn">2 lent to Kim</span>` : "4 yours"],
+  ] : [
+    ["Miraidon ex", "3", "3 yours"],
+    ["Electric Generator", "4", out(L3.lines[0]) ? `1 yours · <span class="tag warn">3 lent to Sam</span>` : "4 yours"],
+  ];
+  return `<div class="filter" style="margin-top:0">${["d1", "d3"].map(id => `<button class="chip" aria-pressed="${st.deck === id}" data-deck="${id}">${id === "d1" ? "Charizard ex" : "Miraidon ex"}</button>`).join("")}</div>
+    <h1 style="margin-top:12px">${d}</h1><p class="lede">Deck List · Borrowed Copies count toward this Deck's cost. Lent lines are missing here but never go on your Want List.</p>
+    <section class="panel" style="margin-top:16px"><table class="lt"><thead><tr><th>Card</th><th class="n">List</th><th>In this Deck</th></tr></thead><tbody>
+    ${rows.map(r => `<tr><td><b>${r[0]}</b></td><td class="n">${r[1]}</td><td class="keep">${r[2]}</td></tr>`).join("")}</tbody></table></section>`;
+}
+
+// ---------- Variant E: streamlined D ----------
+// One next step per Loan, secondary actions behind ⋯, no explanatory copy, short rows.
+function nextStep(l) {
+  const f = fr(l.friend).name; const lender = l.role === "lender";
+  if (l.state === "requested" || l.state === "offered") return sentByMe(l) ? { wait: `Waiting for ${f} to answer` } : { label: "Accept", rowLabel: l.lines.length > 1 ? "Accept all" : "Accept", act: "accept", alt: { label: "Decline", act: "decline" }, chip: "Answer" };
+  if (l.state === "accepted") {
+    if (lender && l.lines.some(x => x.stale)) return { label: "Use suggested picks", act: "repick", chip: "Fix picks", note: "A pick is out of date." };
+    if (!l.myHandover) return { label: lender ? "Mark as handed over" : "Yes, I have them", act: "handover", chip: lender ? "Hand over" : "Got them?", note: l.otherHandover ? (lender ? `${f} says they have them.` : `${f} says they handed these over.`) : null };
+    return { wait: `Waiting for ${f} to confirm` };
+  }
+  if (l.state === "handed") {
+    if (l.offChoice) return { label: "I still have it", act: "keep", alt: { label: "It's gone", act: "remove" }, chip: "Choose", note: `${f} wrote off ${l.offChoice}.` };
+    if (l.ret && !l.ret.mine) return { label: lender ? "Yes, they're back" : "Yes, I gave them back", act: "confirmReturn", chip: "Confirm return" };
+    if (l.ret) return { wait: `Waiting for ${f} to confirm the return` };
+    return { label: lender ? "Record a return" : "Give cards back", dlg: "return" };
+  }
+  return { wait: status(l) };
+}
+function moreActions(l) {
+  const lender = l.role === "lender"; const m = [];
+  if ((l.state === "requested" || l.state === "offered") && sentByMe(l)) m.push(["Withdraw", `act|withdraw`]);
+  if (l.state === "accepted") { if (l.myHandover) m.push(["Take back my confirmation", "act|takeback"]); if (!l.myHandover && !l.otherHandover) m.push(["Cancel Loan", "act|cancel"]); }
+  if (l.state === "handed" && !l.offChoice) {
+    if (lender) m.push(["Change return-by date", "dlg|date"], ["Write off…", "dlg|writeoff"]);
+    else m.push(["Ask for more time", "act|askTime"]);
+  }
+  return m;
+}
+function dueText(l) { return l.overdue ? `Overdue` : l.returnBy && l.state !== "closed" ? `Due ${fmtDate(l.returnBy)}` : ""; }
+function count(l) { const n = l.lines.reduce((a, x) => a + (l.state === "handed" ? out(x) : (x.promised || x.req)), 0); return `${n} card${n === 1 ? "" : "s"}`; }
+// Plain-language headline for a Loan, from your point of view.
+function headline(l) {
+  const f = fr(l.friend).name; const lender = l.role === "lender"; const n = count(l);
+  if (l.state === "requested") return sentByMe(l) ? `You asked ${f} to borrow ${n}` : `${f} wants to borrow ${n}`;
+  if (l.state === "offered") return sentByMe(l) ? `You offered to lend ${f} ${n}` : `${f} offers to lend you ${n}`;
+  if (l.state === "accepted") {
+    if (l.myHandover) return lender ? `You handed ${f} ${n}` : `You got ${n} from ${f}`;
+    if (l.otherHandover) return lender ? `${f} says they got ${n}` : `${f} says they handed you ${n}`;
+    return lender ? `Hand ${f} ${n}` : `${f} will hand you ${n}`;
+  }
+  if (l.state === "handed") {
+    if (l.offChoice) return `${f} wrote off ${l.offChoice} card${l.offChoice === 1 ? "" : "s"}`;
+    if (l.ret && !l.ret.mine) return lender ? `${f} says they gave cards back` : `${f} says you gave cards back`;
+    return lender ? `${f} has ${n} of yours` : `You have ${n} of ${f}'s`;
+  }
+  return `${status(l)} · ${f}`;
+}
+function subline(l) {
+  const ns = nextStep(l);
+  const names = l.lines.filter(x => x.promised || l.state === "requested" || l.state === "offered").map(x => ED[x.e].name).join(", ");
+  const extra = ns.wait ? ns.wait : l.offChoice ? "Do you still have it?" : l.overdue ? `Overdue since ${fmtDate(l.returnBy)}` : l.state === "handed" && l.returnBy ? `Due back ${fmtDate(l.returnBy)}` : "";
+  return { names, extra, warn: l.overdue && !ns.act };
+}
+function rowE(l) {
+  const ns = nextStep(l); const sl = subline(l);
+  const btns = ns.wait || l.state === "closed" ? "" : `<span class="row-acts">${ns.alt ? `<button class="btn small" data-act="${l.id}|${ns.alt.act}">${esc(ns.alt.label)}</button>` : ""}<button class="btn small primary" ${ns.act ? `data-act="${l.id}|${ns.act}"` : `data-dlg="${ns.dlg}|${l.id}"`}>${esc(ns.rowLabel || ns.label)}</button></span>`;
+  return `<div class="item loanrow" data-open="${l.id}"><span class="art" style="width:32px"></span>
+    <span class="grow"><b>${esc(headline(l))}</b><div class="subtle ellip">${esc(sl.names)}</div>${sl.extra ? `<div class="${l.overdue ? "" : "subtle"}" ${l.overdue ? 'style="color:var(--color-warning)"' : ""}>${esc(sl.extra)}</div>` : ""}</span><span class="subtle">›</span></div>`;
+}
+function loansE() {
+  const open = LOANS.filter(l => l.state !== "closed");
+  const needs = open.filter(waitingOnMe), rest = open.filter(l => !waitingOnMe(l));
+  const outNow = rest.filter(l => l.state === "handed"), pending = rest.filter(l => l.state !== "handed");
+  const hist = LOANS.filter(l => l.state === "closed");
+  const sec = (t, list) => list.length ? `<div class="sect-h">${t}</div>${list.map(rowE).join("")}` : "";
+  return `<h1>Loans</h1><section class="panel" style="margin-top:16px">${sec("Needs you", needs)}${sec("Out now", outNow)}${sec("Pending", pending)}
+    ${hist.length ? `<details class="hist"><summary class="sect-h">History · ${hist.length}</summary>${hist.map(rowE).join("")}</details>` : ""}</section>`;
+}
+function loanE(l) {
+  const f = fr(l.friend); const lender = l.role === "lender"; const ns = nextStep(l); const more = moreActions(l);
+  const answering = (l.state === "requested" || l.state === "offered") && !sentByMe(l);
+  const lines = l.lines.map(x => {
+    let right;
+    if (answering) right = stepper(`ask|${l.id}|${x.e}`, x.ask, x.req);
+    else if (!x.promised && l.state !== "requested" && l.state !== "offered") right = `<span class="subtle">Not lent</span>`;
+    else right = `<span class="num"><b>${l.state === "handed" ? out(x) : (x.promised || x.req)}</b></span>`;
+    const tags = `${x.returned ? `<span class="tag">${x.returned} back</span> ` : ""}${x.off ? `<span class="tag warn">${x.off} written off</span>` : ""}`;
+    const pick = lender && l.state === "accepted" && x.promised ? `<div class="${x.stale ? "" : "subtle"}" ${x.stale ? 'style="color:var(--color-warning)"' : ""}>${x.stale ? "⚠ " + esc(x.stale) : "From " + esc(x.src)}</div>` : "";
+    return `<div class="item" style="cursor:default"><span class="art" style="width:40px"></span><span class="grow"><b>${esc(ED[x.e].name)}</b> <span class="subtle">${esc(ED[x.e].set)}</span>${pick}${tags ? `<div>${tags}</div>` : ""}</span>${right}</div>`;
+  }).join("");
+  const primary = ns.wait ? `<span class="subtle grow">${esc(ns.wait)}</span>`
+    : `${ns.alt ? `<button class="btn" data-act="${l.id}|${ns.alt.act}">${esc(ns.alt.label)}</button>` : ""}<button class="btn primary" ${ns.act ? `data-act="${l.id}|${ns.act}"` : `data-dlg="${ns.dlg}|${l.id}"`}>${esc(ns.label)}</button>`;
+  const menu = more.length ? `<span class="menu"><button class="btn quiet" data-menu="${l.id}" aria-label="More actions">⋯</button>${st.menu === l.id ? `<span class="menu-pop">${more.map(([t, a]) => { const [k, v] = a.split("|"); return k === "act" ? `<button data-act="${l.id}|${v}">${esc(t)}</button>` : `<button data-dlg="${v}|${l.id}">${esc(t)}</button>`; }).join("")}</span>` : ""}</span>` : "";
+  const sim = l.state === "closed" ? "" : !l.otherHandover && l.state === "accepted" ? ["simHandover", "confirms the handover"] : l.state === "handed" && !(l.ret && !l.ret.mine) && !l.offChoice ? ["simReturn", l.ret ? "confirms the return" : "starts a return"] : (l.state === "requested" || l.state === "offered") && sentByMe(l) ? ["simAnswer", "accepts"] : null;
+  return `<div class="crumbs"><a data-go="loans">‹ Loans</a></div>
+    <div class="row"><span class="ini lg">${ini(f.name)}</span><div class="grow"><h1>${esc(headline(l))}</h1>
+      <div class="subtle">${lender ? "You're lending" : "You're borrowing"}${l.deck && !lender ? ` for ${esc(l.deck)}` : ""}${dueText(l) ? ` · <span ${l.overdue ? 'style="color:var(--color-warning)"' : ""}>${dueText(l)}${l.overdue ? ` (${fmtDate(l.returnBy)})` : ""}</span>` : ""}</div></div></div>
+    ${ns.note ? `<div class="callout">${esc(ns.note)}</div>` : ""}
+    <section class="panel" style="margin-top:16px">${lines}<div class="actions">${primary}${menu}</div></section>
+    ${sim ? `<div style="margin-top:12px"><button class="btn small sim" data-act="${l.id}|${sim[0]}">⟲ ${esc(f.name)} ${sim[1]}</button></div>` : ""}`;
+}
+function friendsE() {
+  const inReq = REQUESTS.filter(r => r.dir === "in"), outReq = REQUESTS.filter(r => r.dir === "out");
+  return `<div class="scrim" data-closedrawer style="place-items:stretch;padding:0"></div><aside class="drawer"><div class="drawer-h"><h2 class="grow">Friends</h2>
+      <button class="btn small ${st.adding ? "" : "primary"}" data-adding>${st.adding ? "Done" : "Add"}</button><button class="btn small quiet" data-closedrawer aria-label="Close">✕</button></div>
+    ${st.adding ? `<div style="padding:12px 16px;display:grid;gap:8px;border-bottom:1px solid var(--color-border)">
+      <div class="row"><input class="inp grow" id="hq" placeholder="Their Handle"><button class="btn small" data-lookup>Find</button></div>
+      ${st.lookup ? `<div class="row">${st.lookup}</div>` : ""}
+      <div class="row subtle"><span class="grow">Or share your Invite Link</span><button class="btn small" data-toast="Invite Link copied">Copy link</button></div></div>` : ""}
+    ${inReq.map(r => `<div class="item freq" style="cursor:default"><span class="ini">${ini(r.name)}</span><span class="grow"><b>${esc(r.name)}</b> <span class="subtle">wants to be Friends</span></span><span class="freq-btns"><button class="btn small primary" data-freq="accept|${r.id}">Accept</button><button class="btn small" data-freq="decline|${r.id}">Decline</button></span></div>`).join("")}
+    ${FRIENDS.map(f => `<div class="item" style="cursor:default"><span class="ini">${ini(f.name)}</span><span class="grow"><b>${esc(f.name)}</b> <span class="subtle">@${esc(f.handle)}</span></span>
+      <span class="menu"><button class="btn quiet small" data-menu="f-${f.id}" aria-label="More for ${esc(f.name)}">⋯</button>${st.menu === "f-" + f.id ? `<span class="menu-pop"><button data-unfriend="${f.id}">Remove Friend</button><button data-block="${f.id}">Block</button></span>` : ""}</span></div>`).join("")}
+    ${outReq.map(r => `<div class="item read" style="cursor:default"><span class="ini">${ini(r.name)}</span><span class="grow">${esc(r.name)} <span class="subtle">· request sent</span></span><button class="btn quiet small" data-freq="withdraw|${r.id}">Withdraw</button></div>`).join("")}
+    <div style="padding:12px 16px"><button class="linkish" data-go="settings">Privacy and blocked</button></div></aside>`;
+}
+function inboxE() {
+  const w = inboxItems().filter(i => i.kind === "loan"); const ups = UPDATES.filter(u => !u.dismissed);
+  return `<div class="scrim" data-closedrawer style="place-items:stretch;padding:0"></div><aside class="drawer"><div class="drawer-h"><h2 class="grow">Inbox</h2><button class="btn small quiet" data-closedrawer aria-label="Close">✕</button></div>
+    ${w.map(i => `<button class="item" data-open="${i.l.id}"><span class="dot"></span><span class="grow"><b>${esc(fr(i.l.friend).name)}</b> · ${esc(nextStep(i.l).chip || "Needs you")}<div class="subtle ellip">${esc(i.sub)}</div></span>›</button>`).join("") || `<div class="item">You're all caught up.</div>`}
+    ${ups.length ? `<div class="sect-h row"><span class="grow">Earlier</span><button class="linkish" data-clearups>Clear</button></div>${ups.map(u => `<div class="item read" style="cursor:default"><span class="grow">${u.loan ? `<button class="linkish" style="color:inherit;text-decoration:none" data-open="${u.loan}">${esc(u.text)}</button>` : esc(u.text)}</span><span class="when">${esc(u.when)}</span></div>`).join("")}` : ""}</aside>`;
+}
+
+// ---------- Variant shells ----------
+const waitingCount = () => inboxItems().length;
+function tabsFor() {
+  const v = st.variant;
+  const t = [["collection", "Collection", "▦"], ["decks", "Decks", "❏"], ["catalog", "Catalog", "⌕"]];
+  if (v === "A") t.push(["friends", "Friends", "☺"]);
+  if (v === "C" || dl(v)) t.push(["loans", "Loans", "⇄"]);
+  return t;
+}
+function currentTab() {
+  const s = st.screen;
+  if (s === "collection") return "collection";
+  if (s === "deck") return "decks";
+  if (st.variant === "A" && ["home", "friends", "loan"].includes(s)) return "friends";
+  if (st.variant === "B" && ["loans", "loan"].includes(s)) return "collection";
+  if ((st.variant === "C" || dl()) && ["home", "loans", "loan"].includes(s)) return "loans";
+  if (s === "settings") return "settings";
+  return "";
+}
+function body() {
+  const v = st.variant;
+  if (v === "E" && st.screen === "loan") return loanE(loanById(st.loan));
+  if (v === "E" && !["settings", "collection", "deck", "catalog"].includes(st.screen)) return loansE();
+  if (st.screen === "loan") return loanScreen(loanById(st.loan));
+  if (st.screen === "collection") return collection();
+  if (st.screen === "deck") return deckView();
+  if (st.screen === "settings" && v !== "B" && !dl(v)) return `<h1>Settings</h1><div class="placeholder">Settings (unchanged in this variant)</div>`;
+  if (st.screen === "catalog") return `<h1>Catalog</h1><div class="placeholder">Catalog (see the Friends' cards prototype)</div>`;
+  if (v === "A") {
+    const sub = st.sub;
+    return `<h1>Friends</h1><div class="filter"><div class="seg">
+      <button aria-pressed="${sub === "inbox"}" data-sub="inbox">Inbox${badge(waitingCount())}</button>
+      <button aria-pressed="${sub === "loans"}" data-sub="loans">Loans</button>
+      <button aria-pressed="${sub === "friends"}" data-sub="friends">Friends</button></div></div>
+      <div style="margin-top:16px">${sub === "inbox" ? inboxList() : sub === "loans" ? loanGroups() : friendsBody()}</div>`;
+  }
+  if (dl(v) && st.screen !== "settings") {
+    const w = LOANS.filter(waitingOnMe);
+    return `<h1>Loans</h1><p class="lede">Everything you've lent and borrowed. Lent copies also show under Lent out in Collection.</p>${w.length ? `<div class="callout">${w.length} Loan${w.length === 1 ? " needs" : "s need"} you. They're marked with a dot and are also in your inbox.</div>` : ""}<div style="margin-top:16px">${loanGroups()}</div>`;
+  }
+  if (v === "B" || dl(v)) {
+    if (st.screen === "settings") return `<h1>Settings</h1><p class="lede">Account, Want List counting, and Friends.</p><div class="placeholder" style="margin-top:16px">Sign-in and Want List counting sections (existing)</div><h2 style="margin:24px 0 12px">${dl(v) ? "Privacy" : "Friends and privacy"}</h2>${dl(v) ? privacyBody() : friendsBody()}`;
+    if (st.screen === "loans") return `<h1>Collection</h1><div class="filter"><div class="seg"><button data-go="collection">Locations</button><button aria-pressed="true">Loans${badge(LOANS.filter(waitingOnMe).length)}</button></div></div><div style="margin-top:16px">${loanGroups()}</div>`;
+    return collection();
+  }
+  // C: one Loans page; inbox items lead, then everything grouped; Friends from the avatar menu.
+  if (st.screen === "friends") return `<div class="crumbs"><a data-go="loans">‹ Loans</a></div><h1>Friends</h1><div style="margin-top:16px">${friendsBody()}</div>`;
+  return `<div class="row"><h1 class="grow">Loans</h1><button class="btn small" data-go="friends">☺ Friends</button></div>
+    <p class="lede">Everything you've lent and borrowed, with what needs you on top.</p><div style="margin-top:16px">${inboxList()}</div><div style="margin-top:16px">${loanGroups()}</div>`;
+}
+function shell() {
+  const tabs = tabsFor(); const cur = currentTab(); const n = waitingCount();
+  const tn = (id) => dl() ? LOANS.filter(waitingOnMe).length : n;
+  const tabBtn = ([id, label]) => `<button class="tab" data-go="${id}" ${cur === id ? 'aria-current="page"' : ""}>${label}${(id === "friends" || id === "loans") ? (tn(id) ? ` <span class="count">${tn(id)}</span>` : "") : ""}</button>`;
+  const fbtn = dl() ? `<button class="bell" data-fdrawer aria-label="Friends" title="Friends">☺${REQUESTS.some(r => r.dir === "in") ? `<span class="badge">${REQUESTS.filter(r => r.dir === "in").length}</span>` : ""}</button>` : "";
+  const bell = fbtn + ((st.variant === "B" || dl()) ? `<button class="bell" data-drawer aria-label="Inbox">🔔${n ? `<span class="badge">${n}</span>` : ""}</button>` : "");
+  const title = st.screen === "loan" ? "Loan" : (tabs.find(t => t[0] === cur) || ["", st.screen === "settings" ? "Settings" : "Friends"])[1];
+  return `<header class="hdr"><span class="word"><b>◆</b>PrizeCheck</span><nav class="tabs">${tabs.map(tabBtn).join("")}</nav>${bell}<button class="avatar" data-go="${(st.variant === "B" || dl()) ? "settings" : st.variant === "C" ? "friends" : "settings"}" title="${(st.variant === "B" || dl()) ? "Settings" : st.variant === "C" ? "Friends" : "Settings"}" ${bell ? "" : ""}>R</button></header>
+  <header class="phonehdr"><span class="t grow">${esc(title)}</span>${bell}</header>
+  <main class="page">${body()}</main>
+  <nav class="tabbar">${tabs.map(([id, label, ico]) => `<button data-go="${id}" ${cur === id ? 'aria-current="page"' : ""}><span class="ico">${ico}</span>${label}${(id === "friends" || id === "loans") && tn(id) ? `<span class="badge">${tn(id)}</span>` : ""}</button>`).join("")}${tabs.length < 4 ? `<button data-go="settings"><span class="ico">⋯</span>More</button>` : ""}</nav>`;
+}
+function drawer() {
+  if (st.variant === "E" && st.fdrawer) return friendsE();
+  if (st.variant === "E" && st.drawer) return inboxE();
+  if (dl() && st.fdrawer) {
+    const inReq = REQUESTS.filter(r => r.dir === "in");
+    return `<div class="scrim" data-closedrawer style="place-items:stretch;padding:0"></div><aside class="drawer"><div class="drawer-h"><h2 class="grow">Friends</h2><button class="btn small quiet" data-closedrawer>✕</button></div>
+      ${inReq.length ? `<div class="panel" style="border-radius:0;border-left:0;border-right:0">${inReq.map(r => `<div class="item freq" style="cursor:default"><span class="dot"></span><span class="ini">${ini(r.name)}</span><span class="grow">${esc(r.name)} wants to be Friends<div class="subtle">@${esc(r.handle)}</div></span><span class="freq-btns"><button class="btn small primary" data-freq="accept|${r.id}">Accept</button><button class="btn small" data-freq="decline|${r.id}">Decline</button></span></div>`).join("")}</div>` : ""}
+      <div style="padding:12px">${friendsSocial()}</div>
+      <div style="padding:0 16px 16px" class="subtle">Blocked collectors, your names and Hidden Locations are in <button class="linkish" data-go="settings">Settings</button>.</div></aside>`;
+  }
+  if (!((st.variant === "B" || dl()) && st.drawer)) return "";
+  return `<div class="scrim" data-closedrawer style="place-items:stretch;padding:0"></div><aside class="drawer"><div class="drawer-h"><h2 class="grow">Inbox</h2><button class="btn small quiet" data-closedrawer>✕</button></div>${inboxList(true)}</aside>`;
+}
+
+// ---------- Render and events ----------
+let history_ = [];
+function go(screen, extra = {}) { history_.push({ screen: st.screen, loan: st.loan }); Object.assign(st, { screen }, extra); st.drawer = false; st.fdrawer = false; render(); }
+function render() {
+  document.getElementById("app").innerHTML = shell();
+  document.getElementById("layer").innerHTML = drawer() + (st.overlay || "");
+  document.getElementById("stage").classList.toggle("framed", st.framed);
+  document.getElementById("vlabel").textContent = `${st.variant} (${VARIANTS[st.variant]})`;
+  document.getElementById("frame").setAttribute("aria-pressed", st.framed);
+}
+function syncUrl() { const p = new URLSearchParams({ variant: st.variant }); if (st.framed) p.set("frame", "phone"); history.replaceState(null, "", "?" + p); }
+function toast(msg) { const t = document.createElement("div"); t.className = "toast"; t.textContent = msg; document.body.appendChild(t); setTimeout(() => t.remove(), 2800); }
+function setVariant(d) { st.variant = KEYS[(KEYS.indexOf(st.variant) + d + KEYS.length) % KEYS.length]; st.screen = "home"; st.drawer = st.fdrawer = false; st.overlay = ""; syncUrl(); render(); }
+function openDlg(kind, id) { st.pick = null; st.dlg = { kind, id }; st.overlay = dialog(kind, id); render(); }
+
+document.addEventListener("click", (ev) => {
+  const el = ev.target.closest("button,[data-loc],[data-back],a[data-go],.scrim[data-closedrawer],.loanrow");
+  if (!el) return;
+  const d = el.dataset;
+  if (!d.menu && st.menu) st.menu = null;
+  if (d.go) {
+    const g = d.go;
+    if (g === "decks") go("deck");
+    else if (g === "friends") { if (st.variant === "A") go("home", { sub: "friends" }); else go("friends"); }
+    else if (g === "loans") go((st.variant === "B" || dl()) ? "loans" : "home");
+    else go(g);
+  }
+  else if (d.sub) { st.sub = d.sub; render(); }
+  else if (d.open) { st.overlay = ""; go("loan", { loan: d.open }); }
+  else if ("back" in d) { const h = history_.pop() || { screen: "home" }; Object.assign(st, h); render(); }
+  else if (d.act) { const [id, what, arg] = d.act.split("|"); st.overlay = ""; act(id, what, arg); }
+  else if (d.stp) {
+    const [kind, a, b, delta, max] = d.stp.split("|");
+    if (kind === "ask") { const x = loanById(a).lines.find(x => x.e === b); x.ask = Math.max(0, Math.min(Number(max), x.ask + Number(delta))); render(); }
+    else { st.pick[a] = Math.max(0, Math.min(Number(max === undefined ? delta : max), st.pick[a] + Number(b))); st.overlay = dialog(st.dlg.kind, st.dlg.id); render(); }
+  }
+  else if (d.dlg) { const [k, id] = d.dlg.split("|"); openDlg(k, id); }
+  else if (d.doreturn) { const p = Object.fromEntries(Object.entries(st.pick).filter(([, n]) => n > 0)); st.overlay = ""; act(d.doreturn, "startReturn", p); }
+  else if (d.dowriteoff) { const p = Object.fromEntries(Object.entries(st.pick).filter(([, n]) => n > 0)); st.overlay = ""; act(d.dowriteoff, "writeoff", p); }
+  else if (d.savedate) { const v = document.getElementById("newdate").value; st.overlay = ""; act(d.savedate, "extend", v); }
+  else if ("close" in d) { st.overlay = ""; render(); }
+  else if (d.menu) { st.menu = st.menu === d.menu ? null : d.menu; render(); }
+  else if ("adding" in d) { st.adding = !st.adding; st.lookup = null; render(); }
+  else if ("clearups" in d) { UPDATES.forEach(u => u.dismissed = true); render(); }
+  else if ("fdrawer" in d) { st.fdrawer = true; st.drawer = false; render(); }
+  else if ("drawer" in d) { st.drawer = true; st.fdrawer = false; UPDATES.forEach(u => u.read = true); render(); }
+  else if ("closedrawer" in d) { st.drawer = false; st.fdrawer = false; render(); }
+  else if (d.dismiss) { UPDATES.find(u => u.id === d.dismiss).dismissed = true; render(); }
+  else if (d.freq) {
+    const [what, id] = d.freq.split("|"); const r = REQUESTS.find(r => r.id === id);
+    REQUESTS = REQUESTS.filter(x => x.id !== id);
+    if (what === "accept") { FRIENDS.push({ id: r.id, name: r.name, handle: r.handle }); toast(`You and ${r.name} are now Friends`); } else toast(what === "decline" ? "Declined" : "Request withdrawn");
+    render();
+  }
+  else if (d.unfriend) { const f = fr(d.unfriend); FRIENDS = FRIENDS.filter(x => x.id !== f.id); toast(`Removed ${f.name}. Loans not yet handed over were cancelled; handed-over Loans stay open.`); render(); }
+  else if (d.block) { const f = fr(d.block); FRIENDS = FRIENDS.filter(x => x.id !== f.id); BLOCKED.push(f); toast(`Blocked ${f.name}. They aren't told.`); render(); }
+  else if (d.unblock) { BLOCKED = BLOCKED.filter(x => x.id !== d.unblock); toast("Unblocked"); render(); }
+  else if ("lookup" in d) {
+    const q = (document.getElementById("hq").value || "").trim().toLowerCase();
+    const hit = FRIENDS.find(f => f.handle === q) ? "already" : BLOCKED.find(b => b.handle === q) ? "blocked" : q === "misty_w" ? "found" : "none";
+    st.lookup = { already: `@${esc(q)} is already your Friend.`, blocked: `You blocked @${esc(q)}. <button class="btn small" data-unblock="${BLOCKED.find(b => b.handle === q)?.id}">Unblock</button>`,
+      found: `<b>Misty W.</b> @misty_w <button class="btn small primary" data-toast="Friend Request sent to Misty W.">Send Friend Request</button>`, none: "No collector has that Handle." }[hit];
+    render();
+  }
+  else if (d.toast) { toast(d.toast); }
+  else if (d.loc) { st.loc = d.loc; render(); }
+  else if (d.hide) { const x = LOCS.find(x => x.id === d.hide); x.hidden = !x.hidden; toast(x.hidden ? `${x.name} is hidden from Friends` : `Friends can see ${x.name} again`); render(); }
+  else if (d.deck) { st.deck = d.deck; render(); }
+});
+document.getElementById("prev").onclick = () => setVariant(-1);
+document.getElementById("next").onclick = () => setVariant(1);
+document.getElementById("frame").onclick = () => { st.framed = !st.framed; syncUrl(); render(); };
+document.getElementById("reset").onclick = () => { seed(); st.screen = "home"; st.overlay = ""; toast("Every Loan is back to its starting step"); render(); };
+document.addEventListener("keydown", (ev) => {
+  if (ev.target.closest("input,textarea,select,[contenteditable]")) return;
+  if (ev.key === "ArrowLeft") setVariant(-1);
+  if (ev.key === "ArrowRight") setVariant(1);
+  if (ev.key === "Escape") { st.overlay = ""; st.drawer = st.fdrawer = false; render(); }
+});
+syncUrl(); render();
+</script>
+</body>
+</html>
