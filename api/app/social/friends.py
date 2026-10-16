@@ -21,9 +21,10 @@ an Unblock with no Block, leaves it). While the decliner's Block stands, the sen
 
 Commands address the other collector by ``collector_id``, the account id a lookup, an Invite Link read or the Friends
 list gave; screens never show it. Every command locks both owners in ascending ``user_id`` (``owners.lock_owners``)
-before it reads the pair, is idempotent through ``location_command``, and never moves the inventory revision.
+before it reads the pair and is idempotent through ``location_command``; only Loans it cancels move a revision.
 ``friendship_ended`` runs inside Remove Friend and Block, after both locks and before the row goes: Ending a
-friendship with open Loans (#260) cancels the pair's Loans there.
+friendship with open Loans (#260) cancels the pair's Loans nobody has confirmed a handover for there, which moves each
+of those lenders' revisions.
 
 Blocks (#248, migration 103): a Block deletes the pair's friendship row. While it stands, the blocked collector's
 lookup of the blocker's Handle, their read of the blocker's Invite Link and their Friend Request to the blocker each
@@ -42,6 +43,7 @@ from ..location_tree import error, replay
 from ..main import connect, verified_user
 from ..publications import TOKEN
 from . import name_rules
+from .loans import end_loans_between
 from .owners import ensure_owner, lock_owners
 from .profile import token_hash
 
@@ -158,8 +160,9 @@ def friend_ids(conn, viewer: str) -> set[str]:
 
 def friendship_ended(conn, user_id: str, other_id: str) -> None:
     """Runs when a friendship ends (Remove Friend) and on every Block, with both owners locked, before the friendship
-    row is deleted, in the same transaction. Ending a friendship with open Loans (#260) cancels the pair's Loans that
-    nobody has confirmed a handover for here. Nothing to do until Loans exist."""
+    row is deleted, in the same transaction: the pair's Loans nobody has confirmed a handover for are cancelled
+    (``loans.end_loans_between``, #260)."""
+    end_loans_between(conn, user_id, other_id)
 
 
 @router.get('/friends', response_model=FriendsView)
