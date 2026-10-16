@@ -125,6 +125,11 @@ def test_no_friends_strangers_blocks_and_hidden_locations_answer_nothing(store):
     nothing = ({'has_friends': False, 'cards': []}, {'has_friends': False, 'copies': []})
     # No Friends, a stranger, and a pending Friend Request: nothing, and the page can leave Get from Friends out.
     assert (ok(matches(ash)), ok(card(ash, printing))) == nothing
+    # A pending request from the other side, Misty's to Ash, answers nothing to either, until it is withdrawn.
+    ok(call('POST', '/api/social/friend-requests', misty, {'collector_id': ash, 'idempotency_key': str(uuid4())}))
+    for viewer, other in ((ash, printing), (misty, printing)):
+        assert (ok(matches(viewer)), ok(card(viewer, other))) == nothing
+    ok(call('POST', f'/api/social/friend-requests/{ash}/withdraw', misty, {'idempotency_key': str(uuid4())}))
     ok(call('POST', '/api/social/friend-requests', ash, {'collector_id': misty, 'idempotency_key': str(uuid4())}))
     assert (ok(matches(ash)), ok(card(ash, printing))) == nothing
     ok(call('POST', f'/api/social/friend-requests/{ash}/accept', misty, {'idempotency_key': str(uuid4())}))
@@ -137,6 +142,13 @@ def test_no_friends_strangers_blocks_and_hidden_locations_answer_nothing(store):
     assert by_card(ok(matches(ash))) == {ids['PAL 185']: [(misty, ids['PAL 185'], False, '1', '0')]}
     # A Block either way ends it.
     block(misty, ash)
+    assert (ok(matches(ash)), ok(card(ash, printing))) == nothing
+    assert (ok(matches(misty)), ok(card(misty, printing))) == nothing
+    # Lifting it and becoming Friends again brings the copies back; Ash's own Block ends it the same way.
+    ok(call('POST', f'/api/social/blocks/{ash}/unblock', misty, {'idempotency_key': str(uuid4())}))
+    befriend(ash, misty)
+    assert by_card(ok(matches(ash))) == {ids['PAL 185']: [(misty, ids['PAL 185'], False, '1', '0')]}
+    block(ash, misty)
     assert (ok(matches(ash)), ok(card(ash, printing))) == nothing
     assert (ok(matches(misty)), ok(card(misty, printing))) == nothing
 
