@@ -21,6 +21,12 @@ def ensure_owner(conn, user_id: str) -> None:
 
 def lock_owners(conn, *user_ids: str) -> None:
     """Locks the owners' ``inventory_owner`` rows one at a time in ascending ``user_id``, so two steps over the same
-    pair, started from either side, never wait on each other in a cycle. An id with no row locks nothing."""
+    pair, started from either side, never wait on each other in a cycle. An id with no row locks nothing.
+
+    The mode is ``FOR NO KEY UPDATE``: it waits on, and holds off, every other owner lock and every write of the row,
+    as ``FOR UPDATE`` would, but not the ``FOR KEY SHARE`` a foreign key check takes. A ``loan`` row names both
+    collectors, and PostgreSQL checks both keys again when one transaction writes that row twice (a step's own write,
+    then its revision), so a one-owner Loan step key-shares the other collector's row after its own locks. Under
+    ``FOR UPDATE`` that closed a cycle with a two-owner step holding the other row (#253). Keep this mode."""
     for user_id in sorted(set(user_ids)):
-        conn.execute('SELECT 1 FROM inventory_owner WHERE user_id=%s FOR UPDATE', (user_id,))
+        conn.execute('SELECT 1 FROM inventory_owner WHERE user_id=%s FOR NO KEY UPDATE', (user_id,))

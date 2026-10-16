@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from .main import connect, verified_user
+from .social import counts
 from .social.hidden_locations import hidden_by, own_hidden
 
 router = APIRouter(prefix="/api/location-tree", tags=["locations"])
@@ -151,6 +152,8 @@ def has_holdings(conn, node_id):
 def move_holdings(conn, owner_id, source_id, target_id, next_revision):
     conn.execute("""UPDATE holding SET location_id=%s,version=%s
       WHERE owner_id=%s AND location_id=%s""", (target_id, next_revision, owner_id, source_id))
+    # Loan picks follow the copies they take (social network #252).
+    counts.move_picks(conn, owner_id, source_id, target_id)
 
 
 def unsorted_child(conn, owner_id, parent_id, rows):

@@ -3,11 +3,13 @@ takes from ``social.counts.reserved_counts``.
 
 The pure tests pin the arithmetic: a Deck holds the lesser of its line and its Holding for its own line, every other
 copy is beyond some line, and copies reserved for open Loans come out of the Spare Copies first and then out of the
-copies Decks hold for their own lines. The route tests patch ``reserved_counts`` (nothing is reserved until Loans land,
-#252) and check that every caller reads the rule: the Deck figures on every route, the competition warning, the Swap
-hint and the copies Replace and import can count.
+copies Decks hold for their own lines, placed at the Loan Pick List's picks first. Some route tests patch
+``reserved_counts`` and check that every caller reads the rule: the Deck figures on every route, the competition
+warning, the Swap hint and the copies Replace and import can count. Others make real Loans (#252) and check that the
+copies a Loan picked are the ones left out: Use cards I own, One Deck at a time's count of other Decks' copies, the Swap
+hint and Gather's suggestion.
 """
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -17,8 +19,10 @@ from app.copy_allocation import held_for_line, spare_rule
 from app.social import counts
 from test_catalog_targets import isolated_rules  # noqa: F401  (an autouse fixture)
 from test_deck_cost import launches, store  # noqa: F401  (autouse fixtures)
-from test_deck_counting import deck, detail, hold, iono_world, line, need, new_owner
+from test_deck_counting import counting, deck, detail, hold, iono_world, line, need, new_owner
+from test_friend_copies import befriend, collector, ok
 from test_holdings import call
+from test_loans import accept, sent, view
 from test_want_list import section, want_list
 from want_list_swap_fixtures import seed_swap_catalog
 
@@ -90,10 +94,118 @@ def test_the_figures_add_up_whatever_is_reserved(reserved):
     assert rule.lendable_in_deck <= rule.claimed
 
 
-def test_the_stub_reserves_nothing():
-    # #252 replaces the stub with the read of open Loan lines and this test with its own.
+def test_nothing_is_reserved_without_an_open_loan():
+    # The read of open Loan lines (#252); test_loan_promises covers what Loans reserve.
     with connect() as conn:
         assert counts.reserved_counts(conn, 'nobody', [A, B]) == {}
+        assert counts.reserved_by_owner(conn, ['nobody'], None) == {} and counts.reserved_picks(conn, 'nobody', [A]) == {}
+
+
+def test_reserved_copies_are_placed_at_the_picked_locations_first_then_the_largest_holdings():
+    # No picks: the reserved count goes to the largest copies beyond a line first, as the Loan Pick List takes them.
+    rule = spare_rule({A: 3, LOOSE: 2}, {A: 2}, reserved=2)
+    assert (rule.reserved_beyond, rule.reserved_own) == ({LOOSE: 2}, {})
+    # Picks first: one beyond the Deck's line and two loose; the fourth copy is one the Deck holds for its line.
+    rule = spare_rule({A: 3, LOOSE: 2}, {A: 2}, reserved=4, picked={A: 3, LOOSE: 1})
+    assert (rule.reserved_beyond, rule.reserved_own) == ({A: 1, LOOSE: 2}, {A: 1})
+    # A pick in one Deck places that Deck's own copies, not another's.
+    rule = spare_rule({A: 3, B: 2, LOOSE: 2}, {A: 2, B: 2}, reserved=5, picked={B: 2, LOOSE: 2, A: 1})
+    assert (rule.reserved_beyond, rule.reserved_own) == ({LOOSE: 2, A: 1}, {B: 2})
+    # A pick whose Location is gone (None) or out of date never places more than is there.
+    rule = spare_rule({LOOSE: 1}, {}, reserved=1, picked={None: 1, A: 4})
+    assert (rule.reserved_beyond, rule.reserved_own) == ({LOOSE: 1}, {})
+
+
+@pytest.mark.parametrize('reserved', range(0, 8))
+def test_the_placed_copies_add_up_to_the_counts_whatever_the_picks(reserved):
+    for picked in ({}, {A: 3}, {B: 1, LOOSE: 2}, {None: 2, C: 1}):
+        rule = spare_rule({A: 3, B: 1, LOOSE: 2}, {A: 2, B: 4}, reserved=min(reserved, 6), picked=picked)
+        assert sum(rule.reserved_beyond.values()) == rule.reserved - rule.reserved_in_decks
+        assert sum(rule.reserved_own.values()) == rule.reserved_in_decks
+        assert sum(rule.beyond[place] - rule.reserved_beyond.get(place, 0) for place in rule.beyond) == rule.spare
+        assert all(rule.reserved_own[deck] <= rule.own[deck] for deck in rule.reserved_own)
+
+
+def promise(owner, edition, copies):
+    """A Friend of the owner asks for ``copies`` of the Edition and the owner accepts: a real reservation."""
+    borrower, _ = collector()
+    befriend(borrower, owner)
+    ok(accept(owner, view(owner, sent(borrower, owner, [(edition, copies)])), [(edition, copies)]))
+    return borrower
+
+
+def test_use_cards_i_own_never_offers_the_copies_a_loan_picked(store):
+    owner, charizard, gardevoir, edition = iono_world(store)
+    [unsorted] = [location["id"] for location in call("GET", "/api/location-tree", owner).json()["locations"]
+                  if location["name"] == "Unsorted"]
+    binder = call("POST", "/api/location-tree", owner, {"name": "Binder", "idempotency_key": str(uuid4())}).json()[
+        "location"]["id"]
+    hold(owner, binder, edition, 1)
+    key = UUID(edition)
+
+    def elsewhere():
+        with connect() as conn:
+            found = copy_allocation.available_to(conn, owner, [key], 'one_at_a_time')
+        return [(str(location), copies) for location, copies in found.editions[key].elsewhere]
+
+    assert elsewhere() == [(binder, 1), (unsorted, 1), (charizard, 1)]
+    # The Loan Pick List takes Binder's copy (the first by name of two the same size); the offer leaves exactly it.
+    promise(owner, edition, 1)
+    assert elsewhere() == [(unsorted, 1), (charizard, 1)]
+
+
+def test_one_deck_at_a_time_never_counts_another_decks_reserved_copies(store):
+    owner, charizard, gardevoir, edition = iono_world(store)
+    counting(owner, "one_at_a_time")
+    # Unreserved: Charizard ex counts the loose copy and needs 2; Gardevoir ex counts it and Charizard ex's own copy.
+    assert (need(owner, charizard), need(owner, gardevoir)) == ("2", "0")
+    # Both copies promised: the loose one, then the one Charizard ex holds for its line, which it still counts.
+    promise(owner, edition, 2)
+    assert (need(owner, charizard), need(owner, gardevoir)) == ("3", "2")
+    [line_count] = section(want_list(owner), gardevoir)["lines"]
+    assert (line_count["held"], line_count["spare"], line_count["other_decks"], line_count["need"]) == ("0", "0", "0", "2")
+    with connect() as conn:
+        found = copy_allocation.available_to(conn, owner, [UUID(edition)], 'one_at_a_time')
+    assert found.editions[UUID(edition)].elsewhere == ()
+
+
+def test_a_reserved_copy_is_not_offered_as_a_swap_one_deck_at_a_time(store):
+    ids = seed_swap_catalog()
+    owner, unsorted = new_owner()
+    charizard = deck(owner, "Charizard ex", 0)
+    line(owner, charizard, ids["PAL 185"], 4)
+    hold(owner, unsorted, ids["PAL 254"], 1)
+    counting(owner, "one_at_a_time")
+    [entry] = section(want_list(owner), charizard)["lines"]
+    assert entry["swap"]["edition_id"] == ids["PAL 254"]
+    promise(owner, ids["PAL 254"], 1)
+    [entry] = section(want_list(owner), charizard)["lines"]
+    assert entry["swap"] is None
+
+
+def test_gather_takes_unreserved_copies_first_and_can_still_take_a_reserved_one(store):
+    ids = seed_swap_catalog()
+    owner, _ = new_owner()
+    iono = ids["PAL 185"]
+    first = call("POST", "/api/location-tree", owner, {"name": "Binder A", "idempotency_key": str(uuid4())}).json()
+    second = call("POST", "/api/location-tree", owner, {"name": "Binder B", "idempotency_key": str(uuid4())}).json()
+    a, b = first["location"]["id"], second["location"]["id"]
+    hold(owner, a, iono, 1)
+    hold(owner, b, iono, 1)
+    gardevoir = deck(owner, "Gardevoir ex", 0)
+    line(owner, gardevoir, iono, 1)
+
+    def suggested():
+        [row] = call("GET", f"/api/decks/{gardevoir}/pick-list", owner).json()["rows"]
+        return {source["location_id"]: source["suggested"] for source in row["sources"]}
+
+    assert suggested() == {a: "1", b: "0"}
+    promise(owner, iono, 1)
+    # Binder A's copy is the Loan's pick: Gather suggests Binder B's.
+    assert suggested() == {a: "0", b: "1"}
+    # Reserved copies stay where they are and can still be gathered before handover.
+    line(owner, gardevoir, iono, 2)
+    assert suggested() == {a: "1", b: "1"}
 
 
 def test_reserved_copies_leave_the_spare_copies_on_every_deck_route(store, monkeypatch):
