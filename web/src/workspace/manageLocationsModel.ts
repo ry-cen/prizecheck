@@ -144,7 +144,7 @@ export const STALE_MESSAGE =
 export function locationErrorMessage(
   code: string,
   context: {
-    action: "rename" | "move" | "delete" | "add";
+    action: "rename" | "move" | "delete" | "add" | "hide";
     name?: string;
     where?: string;
   }
@@ -166,6 +166,8 @@ export function locationErrorMessage(
       return context.action === "delete"
         ? "Only an empty Location with no children can be deleted."
         : "The top-level Unsorted Location can only be renamed or moved once it is empty.";
+    case "LOCATION_HIDDEN_BY_PARENT":
+      return `This Location is inside ${context.where ?? "a hidden Location"}, so it stays hidden. Show that one to Friends first.`;
     case "LOCATION_NAME_CONFIRMATION_MISMATCH":
       return `Type ${context.name ?? "the name"} exactly to confirm.`;
     default:

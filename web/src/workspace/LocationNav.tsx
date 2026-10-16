@@ -1,8 +1,8 @@
 import React from "react";
-import { ChevronDown, ChevronRight, Plus } from "lucide-react";
+import { ChevronDown, ChevronRight, EyeOff, Plus } from "lucide-react";
 import type { TreeNode } from "../location_generated";
 import { Icon } from "../ui/Icon";
-import { isFolder, type LocationIndex } from "./locationTree";
+import { hidingLabel, isFolder, type LocationIndex } from "./locationTree";
 
 /** The workspace view: All owned or one Storage Leaf (including a Deck) by id. */
 export type WorkspaceView = "all" | string;
@@ -92,6 +92,9 @@ export function LocationNav({
     const listId = `${idPrefix}-children-${node.id}`;
     const active = !folder && view === node.id;
     const droppable = !folder && !!drop?.valid.has(node.id);
+    // A hidden Location keeps its name as the button's name; the eye-off mark says why, read as its description.
+    const hidden = hidingLabel(index.hiding(node.id));
+    const hiddenId = hidden ? `${idPrefix}-hidden-${node.id}` : undefined;
     return (
       <li key={node.id}>
         <div className="group/entry relative flex min-w-0 items-center">
@@ -110,6 +113,7 @@ export function LocationNav({
             aria-expanded={folder ? open : undefined}
             aria-controls={folder && open ? listId : undefined}
             aria-current={active ? "page" : undefined}
+            aria-describedby={hiddenId}
             onClick={() => (folder ? onToggle(node.id) : onChoose(node.id))}
           >
             <span
@@ -121,7 +125,21 @@ export function LocationNav({
               )}
             </span>
             <span className="min-w-0 truncate">{node.name}</span>
+            {hidden && (
+              <span
+                className="inline-flex shrink-0 text-text-subtle"
+                title={hidden}
+                data-testid="hidden-mark"
+              >
+                <Icon icon={EyeOff} size={12} />
+              </span>
+            )}
           </button>
+          {hiddenId && (
+            <span id={hiddenId} hidden>
+              {hidden}
+            </span>
+          )}
           {onAddChild && node.kind !== "deck" && (
             <button
               type="button"

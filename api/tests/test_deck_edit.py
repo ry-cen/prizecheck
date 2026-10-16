@@ -93,7 +93,7 @@ def test_deck_command_accepts_only_the_owners_decks_and_real_edits():
     # The Location edit still refuses Decks.
     location_edit = change(owner, deck, name="Via Location edit")
     assert location_edit.status_code == 409 and code(location_edit) == "DECK_REQUIRES_DECK_COMMAND"
-    assert node(owner, deck["id"]) == {**deck, "copy_count": "0"}
+    assert node(owner, deck["id"]) == {**deck, "copy_count": "0", "hidden": False, "hidden_by": None}
 
 
 def test_deck_edit_with_a_stale_version_changes_nothing():
@@ -126,7 +126,7 @@ def test_deck_edit_rejects_a_sibling_name_ignoring_case():
     folder = node(owner, folder["id"])
     moved = edit(owner, deck, **into(folder))
     assert moved.status_code == 409 and code(moved) == "LOCATION_NAME_CONFLICT"
-    assert node(owner, deck["id"]) == {**deck, "copy_count": "0"}
+    assert node(owner, deck["id"]) == {**deck, "copy_count": "0", "hidden": False, "hidden_by": None}
     assert node(owner, folder["id"]) == folder
 
 
@@ -141,7 +141,7 @@ def test_deck_cannot_move_into_a_deck_itself_or_a_missing_parent():
     for target in ({"id": str(uuid4()), "version": 1}, foreign):
         refused = edit(owner, deck, **into(target))
         assert refused.status_code == 404 and code(refused) == "LOCATION_NOT_FOUND"
-    assert node(owner, deck["id"]) == {**deck, "copy_count": "0"}
+    assert node(owner, deck["id"]) == {**deck, "copy_count": "0", "hidden": False, "hidden_by": None}
 
 
 def test_deck_move_respects_the_depth_limit():
