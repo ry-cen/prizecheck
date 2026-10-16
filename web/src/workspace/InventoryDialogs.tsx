@@ -64,7 +64,7 @@ type MoveProps = {
 };
 
 /** Every Storage Leaf and Deck in tree order (natural A–Z, depth first). */
-function leavesOf(index: LocationIndex): TreeNode[] {
+export function leavesOf(index: LocationIndex): TreeNode[] {
   const result: TreeNode[] = [];
   const visit = (parentId: string | null) => {
     for (const node of index.children(parentId)) {

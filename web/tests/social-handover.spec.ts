@@ -291,7 +291,10 @@ test("both sides confirm a handover for their own inventory, after the lender fi
     lender.getByRole("button", { name: /^(Iono|Boss's Orders),.*not owned/ })
   ).toHaveCount(0);
   await lender.getByRole("radio", { name: "Stacked" }).click();
-  const bossPile = lender.getByRole("button", { name: /^Boss's Orders,/ });
+  // The Deck List's pile, not the card panel's tile: lent copies are still owned there (#254), "0 free of 1 owned".
+  const bossPile = lender.getByRole("button", {
+    name: /^Boss's Orders, Paldea Evolved/,
+  });
   await expect(bossPile).toContainText("×1 1 lent");
   await expect(bossPile).not.toContainText("$");
 

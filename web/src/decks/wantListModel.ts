@@ -49,6 +49,9 @@ export function countedText(
 ): string {
   const parts: string[] = [];
   if (line.held !== "0") parts.push(`${line.held} in this Deck`);
+  // Friends' copies in this Deck (#254) fill its lines and no other. An older answer has no `borrowed`.
+  if (line.borrowed && line.borrowed !== "0")
+    parts.push(`${line.borrowed} borrowed`);
   if (line.spare !== "0") parts.push(`${line.spare} spare`);
   for (const source of line.counted_from)
     parts.push(`${source.quantity} in ${deckName(source.deck_id)}`);
