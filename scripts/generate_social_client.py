@@ -32,7 +32,8 @@ for name in ("Collector", "CollectorLookup", "InviteCollector", "FriendsView", "
              "LoansView", "LoanStep", "LoanLineRequest", "SendBorrowRequest", "PromisedLine", "AcceptBorrowRequest",
              "PromiseLimit", "LoanPickPlace", "LoanDeck", "LoanSide", "LentCard", "LentOut", "BorrowedCard",
              "BorrowedCopies", "MoveBorrowed", "ReturnedLine", "StartReturn", "WriteOffLine", "WriteOff", "ChosenPlace",
-             "WrittenOffChoice", "ChangeReturnBy", "AskForMoreTime", "SeenNotices"):
+             "WrittenOffChoice", "ChangeReturnBy", "AskForMoreTime", "SeenNotices", "OfferedCopies", "SendLendOffer",
+             "AcceptLendOffer"):
     definition = schema[name]
     fields = [f"{field}{'' if field in definition.get('required', []) else '?'}: {ts_type(value)}"
               for field, value in definition["properties"].items()]
@@ -146,6 +147,10 @@ export const approveExtension = (id: string, body: LoanStep) =>
   request<LoanView>(`/api/social/loans/${at(id)}/extension/approve`, 'POST', body);
 export const declineExtension = (id: string, body: LoanStep) =>
   request<LoanView>(`/api/social/loans/${at(id)}/extension/decline`, 'POST', body);
+// Lend Offers (#258): the lender sends copies from the Collection; the borrower accepts all or part of one.
+export const sendLendOffer = (body: SendLendOffer) => request<LoanView>('/api/loans/offers', 'POST', body);
+export const acceptLendOffer = (id: string, body: AcceptLendOffer) =>
+  request<LoanView>(`/api/loans/${at(id)}/accept-offer`, 'POST', body);
 // The time-based notices the reader was shown, so each shows once (#256).
 export const seeNotices = (id: string, body: SeenNotices) =>
   request<LoanView>(`/api/social/loans/${at(id)}/notices/seen`, 'POST', body);

@@ -44,6 +44,9 @@ export type WrittenOffChoice = { revision: number; idempotency_key: string; choi
 export type ChangeReturnBy = { revision: number; idempotency_key: string; return_by: string | null };
 export type AskForMoreTime = { revision: number; idempotency_key: string; return_by: string };
 export type SeenNotices = { kinds: ("overdue" | "nudge")[] };
+export type OfferedCopies = { location_id: string; edition_id: string; quantity: string };
+export type SendLendOffer = { borrower_id: string; copies: OfferedCopies[]; return_by?: string | null; idempotency_key: string };
+export type AcceptLendOffer = { revision: number; idempotency_key: string; lines: PromisedLine[]; deck_id?: string | null };
 
 /** A refused social request: the API's code, and for TOO_MANY_LOOKUPS the detail that says when to try again. */
 export class SocialError extends Error {
@@ -153,6 +156,10 @@ export const approveExtension = (id: string, body: LoanStep) =>
   request<LoanView>(`/api/social/loans/${at(id)}/extension/approve`, 'POST', body);
 export const declineExtension = (id: string, body: LoanStep) =>
   request<LoanView>(`/api/social/loans/${at(id)}/extension/decline`, 'POST', body);
+// Lend Offers (#258): the lender sends copies from the Collection; the borrower accepts all or part of one.
+export const sendLendOffer = (body: SendLendOffer) => request<LoanView>('/api/loans/offers', 'POST', body);
+export const acceptLendOffer = (id: string, body: AcceptLendOffer) =>
+  request<LoanView>(`/api/loans/${at(id)}/accept-offer`, 'POST', body);
 // The time-based notices the reader was shown, so each shows once (#256).
 export const seeNotices = (id: string, body: SeenNotices) =>
   request<LoanView>(`/api/social/loans/${at(id)}/notices/seen`, 'POST', body);
