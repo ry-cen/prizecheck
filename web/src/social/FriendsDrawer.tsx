@@ -14,6 +14,7 @@ import { getProfile } from "../profile_generated";
 import { inviteUrl } from "../settings/PrivacySection";
 import {
   acceptFriendRequest,
+  blockCollector,
   declineFriendRequest,
   getFriends,
   lookupHandle,
@@ -24,6 +25,7 @@ import {
   type CollectorLookup,
   type FriendCommandResult,
   type FriendsView,
+  unblockCollector,
 } from "../social_generated";
 import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
@@ -35,8 +37,8 @@ import { commandMessage, lookupMessage } from "./socialMessages";
 /**
  * The Friends drawer (social network #247, spec "Web screens", variant E): the ☺ button in the header, with a badge
  * counting Friend Requests received, opens it from any page. Requests received come first with Accept and Decline,
- * then the Friends, each with Remove Friend behind its ⋯, then requests sent with Withdraw. Add opens a Handle search
- * and Copy link for the Invite Link. The shell provides it; the desktop header and the phone headers (the shell's and
+ * then the Friends, each with Remove Friend and Block (#248) behind its ⋯, then requests sent with Withdraw. Add opens a
+ * Handle search and Copy link for the Invite Link; Privacy and blocked leads to Settings, where Unblock is. The shell provides it; the desktop header and the phone headers (the shell's and
  * Collection's own) draw the button. The badge is read when the shell starts, when the drawer opens, after each change
  * and when the window regains focus; nothing polls.
  */
@@ -61,7 +63,14 @@ type Load =
   | { kind: "ready"; view: FriendsView }
   | { kind: "failed" };
 
-export function FriendsProvider({ children }: { children: ReactNode }) {
+export function FriendsProvider({
+  onPrivacy,
+  children,
+}: {
+  /** Opens Settings, whose Privacy section lists Blocked collectors (#248). */
+  onPrivacy: () => void;
+  children: ReactNode;
+}) {
   const [open, setOpen] = useState(false);
   const [load, setLoad] = useState<Load>({ kind: "loading" });
   const opener = useRef<HTMLElement | null>(null);
@@ -117,6 +126,7 @@ export function FriendsProvider({ children }: { children: ReactNode }) {
         opener={opener}
         onClose={() => setOpen(false)}
         onChanged={refresh}
+        onPrivacy={onPrivacy}
       />
     </FriendsContext.Provider>
   );
@@ -179,19 +189,24 @@ function FriendsDialog({
   opener,
   onClose,
   onChanged,
+  onPrivacy,
 }: {
   open: boolean;
   load: Load;
   opener: RefObject<HTMLElement | null>;
   onClose: () => void;
   onChanged: () => void;
+  onPrivacy: () => void;
 }) {
   const [adding, setAdding] = useState(false);
   const [status, setStatus] = useState("");
   const [problem, setProblem] = useState("");
   const [busy, setBusy] = useState(false);
-  // The Friend whose Remove Friend is waiting for a yes.
-  const [confirming, setConfirming] = useState<string | null>(null);
+  // The Friend whose Remove Friend or Block is waiting for a yes.
+  const [confirming, setConfirming] = useState<{
+    id: string;
+    action: "remove" | "block";
+  } | null>(null);
   const base = useId();
 
   function close() {
@@ -336,7 +351,8 @@ function FriendsDialog({
               <ul className="m-0 list-none p-0">
                 {view.friends.map((person) => (
                   <li key={person.collector_id} className={ROW}>
-                    {confirming === person.collector_id ? (
+                    {confirming?.id === person.collector_id &&
+                    confirming.action === "remove" ? (
                       <>
                         <span className={`${NAME} text-body`}>
                           Remove {person.display_name} as a Friend?
@@ -361,6 +377,32 @@ function FriendsDialog({
                           Cancel
                         </Button>
                       </>
+                    ) : confirming?.id === person.collector_id ? (
+                      <>
+                        <span className={`${NAME} text-body`}>
+                          Block {person.display_name}? They won't be told.
+                        </span>
+                        <Button
+                          variant="danger"
+                          disabled={busy}
+                          onClick={() =>
+                            void run(
+                              (key) =>
+                                blockCollector({
+                                  collector_id: person.collector_id,
+                                  idempotency_key: key,
+                                }),
+                              () =>
+                                `Blocked ${person.display_name}. They aren't told.`
+                            )
+                          }
+                        >
+                          Block
+                        </Button>
+                        <Button onClick={() => setConfirming(null)}>
+                          Cancel
+                        </Button>
+                      </>
                     ) : (
                       <>
                         <Person person={person} />
@@ -372,7 +414,18 @@ function FriendsDialog({
                             {
                               label: "Remove Friend",
                               onSelect: () =>
-                                setConfirming(person.collector_id),
+                                setConfirming({
+                                  id: person.collector_id,
+                                  action: "remove",
+                                }),
+                            },
+                            {
+                              label: "Block",
+                              onSelect: () =>
+                                setConfirming({
+                                  id: person.collector_id,
+                                  action: "block",
+                                }),
                             },
                           ]}
                         />
@@ -424,6 +477,17 @@ function FriendsDialog({
           <p role="status" className="m-0 text-meta text-text-muted">
             {status}
           </p>
+          <div>
+            <Button
+              variant="quiet"
+              onClick={() => {
+                close();
+                onPrivacy();
+              }}
+            >
+              Privacy and blocked
+            </Button>
+          </div>
         </div>
       )}
     </Dialog>
@@ -570,6 +634,22 @@ function LookupResult({
             Send Friend Request
           </Button>
         )}
+        {collector.relation === "blocked" && (
+          <Button
+            onClick={() =>
+              void act(
+                collector,
+                (key) =>
+                  unblockCollector(collector.collector_id, {
+                    idempotency_key: key,
+                  }),
+                `Unblocked ${name}.`
+              )
+            }
+          >
+            Unblock
+          </Button>
+        )}
         {collector.relation === "request_received" && (
           <Button
             variant="primary"
@@ -589,6 +669,7 @@ function LookupResult({
         )}
       </div>
       {collector.relation === "self" && line("That's your own Handle.")}
+      {collector.relation === "blocked" && line(`You blocked ${name}.`)}
       {collector.relation === "friends" && line(`You and ${name} are Friends.`)}
       {collector.relation === "request_sent" &&
         line(`You've sent ${name} a Friend Request.`)}

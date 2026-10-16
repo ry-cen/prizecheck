@@ -1,11 +1,13 @@
 // Generated from FastAPI OpenAPI by scripts/generate_social_client.py. Do not edit.
 export type Collector = { collector_id: string; handle: string; display_name: string };
-export type CollectorLookup = { collector_id: string; handle: string; display_name: string; relation: "self" | "none" | "friends" | "request_sent" | "request_received" };
+export type CollectorLookup = { collector_id: string; handle: string; display_name: string; relation: "self" | "none" | "friends" | "request_sent" | "request_received" | "blocked" };
 export type FriendsView = { received: Collector[]; friends: Collector[]; sent: Collector[] };
 export type LookupHandle = { handle: string };
 export type SendFriendRequest = { collector_id: string; idempotency_key: string };
 export type FriendCommand = { idempotency_key: string };
-export type FriendCommandResult = { relation: "self" | "none" | "friends" | "request_sent" | "request_received" };
+export type FriendCommandResult = { relation: "self" | "none" | "friends" | "request_sent" | "request_received" | "blocked" };
+export type BlockCollector = { collector_id: string; idempotency_key: string };
+export type BlockedList = { blocked: Collector[] };
 
 /** A refused social request: the API's code, and for TOO_MANY_LOOKUPS the detail that says when to try again. */
 export class SocialError extends Error {
@@ -40,3 +42,8 @@ export const withdrawFriendRequest = (id: string, body: FriendCommand) =>
   request<FriendCommandResult>(`/api/social/friend-requests/${at(id)}/withdraw`, 'POST', body);
 export const removeFriend = (id: string, body: FriendCommand) =>
   request<FriendCommandResult>(`/api/social/friends/${at(id)}/remove`, 'POST', body);
+// Blocks: Settings › Privacy's list, Block (from a Friend's ⋯) and Unblock.
+export const getBlocked = () => request<BlockedList>('/api/social/blocks', 'GET');
+export const blockCollector = (body: BlockCollector) => request<FriendCommandResult>('/api/social/blocks', 'POST', body);
+export const unblockCollector = (id: string, body: FriendCommand) =>
+  request<FriendCommandResult>(`/api/social/blocks/${at(id)}/unblock`, 'POST', body);
