@@ -263,6 +263,32 @@ def test_a_store_outage_fails_the_command_and_its_retry_completes(monkeypatch):
         assert conn.execute('SELECT count(*) FROM invite_projection_outbox').fetchone()['count'] == 0
 
 
+def test_a_drain_that_times_out_after_a_batch_keeps_that_batch_drained(monkeypatch):
+    monkeypatch.setattr(profile_module, 'MAX_BATCH', 2)
+    with connect() as conn:
+        conn.execute('DELETE FROM invite_projection_outbox')
+        for index in range(9):
+            conn.execute('INSERT INTO invite_projection_outbox(token_hash,display_name) VALUES (%s,%s)',
+                         (f'{index:064x}', f'Name {index}'))
+    swaps = []
+    real = FilePublicRecords.compare_and_swap
+
+    def swap_then_time_out(self, *args, **kwargs):
+        if len(swaps) == 4:
+            raise ProjectionUnavailable()
+        swaps.append(1)
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(FilePublicRecords, 'compare_and_swap', swap_then_time_out)
+    # Four chunks of two make up the first batch of eight rows; the ninth is the next batch, which times out.
+    assert profile_module.drain_invites() is False
+    with connect() as conn:
+        left = conn.execute('SELECT count(*) FROM invite_projection_outbox').fetchone()['count']
+    assert left == 1
+    monkeypatch.undo()
+    assert profile_module.drain_invites() is True
+
+
 def test_profile_commands_never_move_the_inventory_revision():
     owner = new_owner()
     profile(owner)

@@ -22,6 +22,8 @@ def main():
         with connect() as conn, conn.transaction():
             # The drain's own lock: no drain runs while the rebuild queues, so every queued write follows the rows read.
             conn.execute("SELECT pg_advisory_xact_lock(hashtext('prizecheck.invite_projection'))")
+            # Share-lock every owner row so a concurrent Display Name change can't be overwritten by a stale row.
+            conn.execute('SELECT 1 FROM inventory_owner ORDER BY user_id FOR SHARE')
             queued = conn.execute("""INSERT INTO invite_projection_outbox(token_hash,display_name)
               SELECT l.token_hash,p.display_name FROM invite_link l JOIN collector_profile p USING (user_id)""").rowcount
     except psycopg.Error:
