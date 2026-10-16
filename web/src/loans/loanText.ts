@@ -61,10 +61,24 @@ export function loanHeadline(loan: LoanView): string {
       return lender
         ? `You're lending ${other} ${cards}`
         : `${other} is lending you ${cards}`;
-    case "handed_over":
+    case "handed_over": {
+      // A return the other side confirmed and the reader hasn't (#255).
+      const pending = loan.pending_return;
+      if (pending && pending.they_confirmed && !pending.you_confirmed) {
+        const back = cardCount(
+          pending.lines.reduce((sum, line) => sum + Number(line.copies), 0)
+        );
+        return lender
+          ? `${other} says they gave back ${back}`
+          : `${other} says they got ${back} back`;
+      }
+      const out = cardCount(
+        loanLines(loan).reduce((sum, line) => sum + lineOut(line), 0)
+      );
       return lender
-        ? `${other} has ${cards} of yours`
-        : `You have ${cards} of ${other}'s`;
+        ? `${other} has ${out} of yours`
+        : `You have ${out} of ${other}'s`;
+    }
     case "closed":
       if (loan.closed_reason === "declined")
         return by === "you"
@@ -82,6 +96,23 @@ export function loanHeadline(loan: LoanView): string {
         ? `Your Loan to ${other} ended`
         : `Your Loan from ${other} ended`;
   }
+}
+
+/**
+ * A line's copies still out (#255): promised, less those written off (#257) and those back in complete returns. With no
+ * return pending, both sides have this many out.
+ */
+export function lineOut(line: {
+  promised: string;
+  written_off: string;
+  returned?: string;
+}): number {
+  return Math.max(
+    0,
+    Number(line.promised) -
+      Number(line.written_off) -
+      Number(line.returned ?? "0")
+  );
 }
 
 /** The card names under a row's headline: "Iono, Boss's Orders and 2 more". */
@@ -115,6 +146,18 @@ export function today(): string {
  * return-by date. Null when there is nothing to say.
  */
 export function loanStatus(loan: LoanView): string | null {
+  const waiting = waitingText(loan);
+  if (waiting) return waiting;
+  if (loan.state !== "closed" && loan.return_by)
+    return `Due back ${dayText(loan.return_by)}`;
+  return null;
+}
+
+/**
+ * "Waiting for Misty W. to answer", or "… to confirm" a handover or a return (#255) the reader confirmed, while the
+ * other side is next; else null.
+ */
+export function waitingText(loan: LoanView): string | null {
   const other = loan.other.display_name;
   if (loan.state === "requested" && loan.role === "borrower")
     return `Waiting for ${other} to answer`;
@@ -124,8 +167,15 @@ export function loanStatus(loan: LoanView): string | null {
     !loan.they_confirmed_handover
   )
     return `Waiting for ${other} to confirm`;
-  if (loan.state !== "closed" && loan.return_by)
-    return `Due back ${dayText(loan.return_by)}`;
+  const pending = loan.pending_return;
+  if (
+    loan.state !== "closed" &&
+    pending &&
+    pending.you_confirmed &&
+    !pending.they_confirmed &&
+    loan.other.collector_id !== null
+  )
+    return `Waiting for ${other} to confirm`;
   return null;
 }
 
@@ -177,6 +227,12 @@ export function loanStepMessage(
       return "A pick is out of date. Use the suggested picks first.";
     case "PICKS_UP_TO_DATE":
       return "Your picks are already up to date.";
+    case "MORE_THAN_OUT": {
+      const out = String(error.detail.out ?? "0");
+      return `Only ${out} of ${card(String(error.detail.edition_id ?? ""))} ${out === "1" ? "is" : "are"} out now.`;
+    }
+    case "NOTHING_RETURNED":
+      return "Return at least one card.";
     case "TOO_MANY_CHANGES":
       return `Too many changes. Try again in ${minutes(error)}.`;
     default:

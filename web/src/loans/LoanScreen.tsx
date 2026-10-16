@@ -12,10 +12,12 @@ import {
   acceptBorrowRequest,
   cancelLoan,
   confirmHandover,
+  confirmReturn,
   declineLoan,
   getLoan,
   getLoanSide,
   SocialError,
+  startReturn,
   takeBackHandover,
   useSuggestedPicks,
   withdrawLoan,
@@ -33,10 +35,12 @@ import { useBorrowDrafts } from "./BorrowDrafts";
 import {
   dayText,
   lineEdition,
+  lineOut,
   loanHeadline,
   loanStepMessage,
   LOANS_PATH,
   outcomeUnknown,
+  waitingText,
 } from "./loanText";
 
 type Load =
@@ -51,7 +55,7 @@ type Asking = "decline" | "withdraw" | "cancel";
 /** Where focus goes after the next render, when the control that had it goes away: the confirmation's own button when
  * it asks, its opener after Keep it (Decline, or ⋯ for Withdraw and Cancel Loan), and the heading after a step or a
  * refusal that reads the Loan again. */
-type FocusNext = "ask" | "decline" | "menu" | "heading";
+type FocusNext = "ask" | "decline" | "menu" | "heading" | "count";
 
 const ASK: Record<
   Asking,
@@ -81,6 +85,10 @@ const ASK: Record<
  * request, a stepper per line accepts part of it; a line at 0 reads "Not lent". No step tracker and no paragraphs.
  * Focus never falls to the page: asking moves it to the confirmation's button, Keep it returns it to the opener, and a
  * step that lands, or a refusal that reads the Loan again, moves it to the heading, which reads the Loan's new state.
+ * Returns (#255): Record a return (lender) or Give cards back (borrower) puts a stepper on each line, every copy still
+ * out to start with; the other side then confirms with Yes, they're back or Yes, I gave them back. Lines tag the copies
+ * returned and those coming back. Choosing the copies moves focus to its button (Record return, Give these back), and
+ * Not now moves it to the heading.
  */
 export function LoanScreen({
   loanId,
@@ -94,6 +102,8 @@ export function LoanScreen({
   const [attempt, setAttempt] = useState(0);
   const [promised, setPromised] = useState<Map<string, number>>(new Map());
   const [asking, setAsking] = useState<Asking | null>(null);
+  // Choosing a return's copies (#255): each line's count, or null while not choosing.
+  const [returning, setReturning] = useState<Map<string, number> | null>(null);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   // One key per step until it settles, so a step whose outcome is unknown is retried safely.
@@ -103,6 +113,8 @@ export function LoanScreen({
   const askButton = useRef<HTMLButtonElement>(null);
   const declineButton = useRef<HTMLButtonElement>(null);
   const focusNext = useRef<FocusNext | null>(null);
+  // The button that sends the copies being chosen (#255): focus goes there when choosing starts.
+  const countButton = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -139,7 +151,9 @@ export function LoanScreen({
           ? declineButton.current
           : target === "menu"
             ? menuAnchor.current?.querySelector("button")
-            : heading.current;
+            : target === "count"
+              ? countButton.current
+              : heading.current;
     element?.focus();
   });
 
@@ -218,6 +232,7 @@ export function LoanScreen({
       keys.current.delete(name);
       focusNext.current = "heading";
       setAsking(null);
+      setReturning(null);
       const nextSide = await getLoanSide(loanId).catch(() => side);
       setLoad({ kind: "ready", loan: next, side: nextSide });
       setPromised(promiseStart(next, nextSide));
@@ -227,6 +242,7 @@ export function LoanScreen({
       if (cause instanceof SocialError && RELOAD.has(cause.code)) {
         focusNext.current = "heading";
         setAsking(null);
+        setReturning(null);
         setAttempt((n) => n + 1);
       }
     } finally {
@@ -245,6 +261,11 @@ export function LoanScreen({
     cancel: () => void step("cancel", (key) => cancelLoan(loan.id, body(key))),
   };
   const total = [...promised.values()].reduce((sum, n) => sum + n, 0);
+  const returnTotal = [...(returning?.values() ?? [])].reduce(
+    (sum, n) => sum + n,
+    0
+  );
+  const lender = loan.role === "lender";
   // The handover (#253): each side confirms for its own inventory. The lender's picks must be current first.
   const handing = loan.actions.includes("confirm_handover");
   const stale =
@@ -339,6 +360,52 @@ export function LoanScreen({
       </Button>
       <p className="m-0 text-meta text-text-muted">A pick is out of date.</p>
     </div>
+  ) : returning ? (
+    <div className="flex flex-wrap items-center gap-2">
+      <Button
+        ref={countButton}
+        variant="primary"
+        disabled={returnTotal === 0}
+        aria-disabled={busy || undefined}
+        onClick={() =>
+          void step("start_return", (key) =>
+            startReturn(loan.id, {
+              ...body(key),
+              lines: loan.lines
+                .filter((line) => (returning.get(line.edition_id) ?? 0) > 0)
+                .map((line) => ({
+                  edition_id: line.edition_id,
+                  quantity: String(returning.get(line.edition_id)),
+                })),
+            })
+          )
+        }
+      >
+        {lender ? "Record return" : "Give these back"}
+      </Button>
+      <Button
+        onClick={() => {
+          focusNext.current = "heading";
+          setReturning(null);
+        }}
+      >
+        Not now
+      </Button>
+    </div>
+  ) : loan.actions.includes("confirm_return") ? (
+    <div className="flex flex-wrap items-center gap-2">
+      <Button
+        variant="primary"
+        aria-disabled={busy || undefined}
+        onClick={() =>
+          void step("confirm_return", (key) =>
+            confirmReturn(loan.id, body(key))
+          )
+        }
+      >
+        {lender ? "Yes, they're back" : "Yes, I gave them back"}
+      </Button>
+    </div>
   ) : handing ? (
     <div className="flex flex-wrap items-center gap-2">
       <Button
@@ -349,6 +416,21 @@ export function LoanScreen({
         }
       >
         {loan.role === "lender" ? "Mark as handed over" : "Yes, I have them"}
+      </Button>
+    </div>
+  ) : loan.actions.includes("start_return") ? (
+    <div className="flex flex-wrap items-center gap-2">
+      <Button
+        variant="primary"
+        onClick={() => {
+          keys.current.delete("start_return");
+          focusNext.current = "count";
+          setReturning(
+            new Map(loan.lines.map((line) => [line.edition_id, lineOut(line)]))
+          );
+        }}
+      >
+        {lender ? "Record a return" : "Give cards back"}
       </Button>
     </div>
   ) : (
@@ -376,6 +458,11 @@ export function LoanScreen({
             onValue={(value) =>
               setPromised(new Map(promised).set(line.edition_id, value))
             }
+            returning={returning?.get(line.edition_id) ?? null}
+            onReturning={(value) => {
+              keys.current.delete("start_return");
+              setReturning(new Map(returning).set(line.edition_id, value));
+            }}
           />
         ))}
       </ul>
@@ -446,20 +533,6 @@ const RELOAD = new Set([
   "PICKS_UP_TO_DATE",
 ]);
 
-/** "Waiting for Misty W. to answer" or "… to confirm" while the other side is next, else null. */
-function waitingText(loan: LoanView): string | null {
-  const other = loan.other.display_name;
-  if (loan.state === "requested" && loan.role === "borrower")
-    return `Waiting for ${other} to answer`;
-  if (
-    loan.state === "accepted" &&
-    loan.you_confirmed_handover &&
-    !loan.they_confirmed_handover
-  )
-    return `Waiting for ${other} to confirm`;
-  return null;
-}
-
 /** Where the lender takes a line's copies from: "From Binder 1", or each place with its count. */
 function pickText(places: LoanPickPlace[], editionId: string): string | null {
   const found = places.filter((place) => place.edition_id === editionId);
@@ -492,6 +565,8 @@ function LoanLine({
   answering,
   value,
   onValue,
+  returning,
+  onReturning,
 }: {
   loan: LoanView;
   line: LoanCard;
@@ -499,6 +574,9 @@ function LoanLine({
   answering: boolean;
   value: number;
   onValue: (value: number) => void;
+  /** The copies of this line to return while choosing a return (#255), else null. */
+  returning: number | null;
+  onReturning: (value: number) => void;
 }) {
   const edition = lineEdition(line);
   const requested = Number(line.requested);
@@ -518,8 +596,31 @@ function LoanLine({
   const suggested = stale.length
     ? pickText(side.suggested, line.edition_id)
     : null;
+  // Returns (#255): copies back in complete returns, and those in the return waiting for a confirmation.
+  const returned = Number(line.returned ?? "0");
+  const coming = Number(
+    loan.pending_return?.lines.find(
+      (item) => item.edition_id === line.edition_id
+    )?.copies ?? "0"
+  );
+  const out = lineOut(line);
   let count: ReactNode;
-  if (answering)
+  if (returning !== null)
+    count = (
+      <div className="flex flex-col items-end gap-1 phone:items-start">
+        <Stepper
+          label={`Copies of ${line.name}, ${edition} to return`}
+          value={returning}
+          min={0}
+          max={out}
+          onChange={onReturning}
+        />
+        <span className="text-meta text-text-muted">
+          {out === 0 ? "None out" : `of ${out} out`}
+        </span>
+      </div>
+    );
+  else if (answering)
     count = (
       <div className="flex flex-col items-end gap-1 phone:items-start">
         <Stepper
@@ -567,6 +668,16 @@ function LoanLine({
         {suggested && (
           <p className="m-0 text-meta text-text-muted wrap-anywhere">
             Suggested: {suggested}
+          </p>
+        )}
+        {returned > 0 && (
+          <p className="m-0 text-meta text-text-muted wrap-anywhere">
+            {returned} returned
+          </p>
+        )}
+        {coming > 0 && (
+          <p className="m-0 text-meta text-text-muted wrap-anywhere">
+            {coming} coming back
           </p>
         )}
       </div>
