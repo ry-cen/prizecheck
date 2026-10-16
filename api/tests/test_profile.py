@@ -7,6 +7,7 @@ given-up Handle held for 30 days. The signed-out Invite Link page reads the publ
 """
 import os
 import re
+import secrets
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -62,8 +63,13 @@ def public(token, query=''):
     return client.get(f'/api/public/invites/{token}{query}')
 
 
+# Consonants only: a hex run can spell an entry of the name filter's word list, which made a random Handle refused now
+# and then. A run of consonants never trips it (test_friends.py explains why).
+QUIET = 'bcdfghjklmnpqrstvwxz'
+
+
 def unique_handle(prefix='h'):
-    return f'{prefix}_{uuid4().hex[:12]}'
+    return f"{prefix}_{''.join(secrets.choice(QUIET) for _ in range(12))}"
 
 
 def age_handle_change(owner, days):
