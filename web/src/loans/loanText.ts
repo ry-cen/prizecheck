@@ -145,6 +145,14 @@ export function dayText(day: string): string {
   return DATE.format(new Date(year, month - 1, date));
 }
 
+/** The calendar day after `day` ("2099-01-31" gives "2099-02-01"). */
+export function dayAfter(day: string): string {
+  const [year, month, date] = day.split("-").map(Number);
+  const next = new Date(year, month - 1, date + 1);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${next.getFullYear()}-${pad(next.getMonth() + 1)}-${pad(next.getDate())}`;
+}
+
 /** Today as the date input's value (local calendar day). */
 export function today(): string {
   const now = new Date();
@@ -159,6 +167,10 @@ export function today(): string {
 export function loanStatus(loan: LoanView): string | null {
   const waiting = waitingText(loan);
   if (waiting) return waiting;
+  // More time the borrower asked for, which the lender answers (#256).
+  if (loan.role === "lender" && loan.extension_to)
+    return `${loan.other.display_name} asked for more time`;
+  if (loan.overdue_since) return `Overdue since ${dayText(loan.overdue_since)}`;
   if (loan.state !== "closed" && loan.return_by)
     return `Due back ${dayText(loan.return_by)}`;
   return null;
@@ -250,6 +262,12 @@ export function loanStepMessage(
       return "This Loan has changed. Check it and try again.";
     case "UNSORTED_UNAVAILABLE":
       return "Your top-level Unsorted can't hold cards. Make it a Storage Leaf in Collection, then try again.";
+    case "INVALID_RETURN_BY":
+      return "Choose a return-by date from today on.";
+    case "RETURN_BY_EARLIER":
+      return "Once the cards are handed over, the return-by date can only move later.";
+    case "EXTENSION_NOT_LATER":
+      return "Choose a date after the current return-by date.";
     case "TOO_MANY_CHANGES":
       return `Too many changes. Try again in ${minutes(error)}.`;
     default:
