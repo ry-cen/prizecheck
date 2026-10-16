@@ -52,7 +52,10 @@ ALLOWED_IMPORTS = {
     'social/friends.py': {
         ('.', 'name_rules'), ('..main', 'connect'), ('..main', 'verified_user'), ('..publications', 'TOKEN'),
         ('..location_tree', 'error'), ('..location_tree', 'replay'), ('.owners', 'ensure_owner'),
-        ('.owners', 'lock_owners'), ('.profile', 'token_hash')},
+        ('.owners', 'lock_owners'), ('.profile', 'token_hash'),
+        # Ending a friendship cancels the pair's Loans nobody has confirmed a handover for (#260), inside the command
+        # that already locked both owners; the Loan rows are written in app.social.loans, never here.
+        ('.loans', 'end_loans_between')},
     # The Loans both sides read and the steps that change no inventory (#252). Card facts are catalog facts; the owner
     # lock and the command plumbing are the Friend commands'. Steps that touch a collector's own inventory are in
     # app.loan_inventory, outside this area.
