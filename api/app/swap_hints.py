@@ -141,7 +141,8 @@ def hints(capture: SwapCapture, decks: Sequence[UUID],
         if allocation.counting == 'one_at_a_time':
             own = allocation.lines.get((deck, edition))
             return owned - (own.quantity - own.need if own else 0)
-        spare = owned - sum(line.held for line in lines)
+        rule = allocation.copies.get(edition)
+        spare = rule.spare if rule else 0
         return spare - sum(line.spare for line in lines if rank[line.deck_id] <= rank[deck])
 
     found: dict[tuple[UUID, UUID], Hint] = {}
