@@ -39,6 +39,23 @@ def physical(held: dict[UUID, int], borrowed: dict[UUID, int]) -> dict[UUID, int
     return {edition: held.get(edition, 0) + borrowed.get(edition, 0) for edition in sorted({*held, *borrowed})}
 
 
+def awaiting_choice(conn, borrower_id: str, loan_ids: Iterable[UUID]) -> dict[UUID, int]:
+    """Written-off copies the borrower still holds and hasn't chosen to keep or remove (#257, spec "Write-off"), by
+    Loan: the Loan's Borrowed Copies less the copies still out (promised, less written off, less those the borrower
+    confirmed returning). Derived, never stored. Loans with none are absent. A count per Loan for its borrower, never a
+    Location; the social area reads it for the borrower's own Loans only."""
+    loans = sorted(set(loan_ids))
+    if not loans:
+        return {}
+    return {row['loan_id']: int(row['copies']) for row in conn.execute(
+        """SELECT b.loan_id, sum(b.quantity)
+            - (SELECT sum(l.promised - l.written_off) FROM loan_line l WHERE l.loan_id = b.loan_id)
+            + coalesce((SELECT sum(rl.quantity) FROM loan_return_line rl JOIN loan_return r ON r.id = rl.return_id
+                WHERE r.loan_id = b.loan_id AND r.borrower_confirmed_at IS NOT NULL), 0) AS copies
+          FROM borrowed_holding b WHERE b.borrower_id = %s AND b.loan_id = ANY(%s)
+          GROUP BY b.loan_id""", (borrower_id, loans)) if row['copies'] > 0}
+
+
 def lenders_in(conn, owner_id: str, location_id: UUID) -> list[dict]:
     """Whose Borrowed Copies a Location holds, for a Deck line's "1 from Ash K.": rows of ``edition_id``,
     ``lender_name`` (the name kept on the Loan) and ``copies``, one per Edition and lender, by Edition then oldest Loan

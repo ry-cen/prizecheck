@@ -331,7 +331,7 @@ def test_each_side_reads_its_own_locations_and_decks_and_never_the_others(store)
     lender_side, borrower_side = side(misty, loan), side(ash, loan)
     assert {pick['name'] for pick in lender_side['picks']} == {'Misty Private Binder', node(misty, misty_deck)['name']}
     assert borrower_side == {'loan_id': loan['id'], 'deck': {'id': ash_deck, 'name': node(ash, ash_deck)['name']},
-                             'can_promise': [], 'picks': [], 'suggested': []}
+                             'can_promise': [], 'picks': [], 'suggested': [], 'awaiting_choice': []}
     seen_by_ash = ' '.join(call(method, path, ash).text for method, path in (
         ('GET', '/api/social/loans'), ('GET', f"/api/social/loans/{loan['id']}"), ('GET', f"/api/loans/{loan['id']}/side")))
     seen_by_ash += str(loan)

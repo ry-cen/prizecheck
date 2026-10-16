@@ -19,7 +19,7 @@ export type LoanParty = { collector_id: string | null; display_name: string; han
 export type LoanCard = { edition_id: string; name: string; set_code: string; set_name: string; collector_number: string; descriptor: Record<string, unknown>; image_url: string | null; requested: string; promised: string; written_off: string; returned?: string };
 export type ReturnLine = { edition_id: string; copies: string };
 export type PendingReturn = { started_by: "you" | "them"; lines: ReturnLine[]; you_confirmed: boolean; they_confirmed: boolean };
-export type LoanView = { id: string; kind: "borrow_request" | "lend_offer"; state: "requested" | "offered" | "accepted" | "handed_over" | "closed"; closed_reason: "declined" | "withdrawn" | "cancelled" | "returned" | "written_off" | null; closed_by: "you" | "them" | null; role: "lender" | "borrower"; other: LoanParty; return_by: string | null; you_confirmed_handover: boolean; they_confirmed_handover: boolean; lines: LoanCard[]; needs_you: boolean; section: "needs_you" | "out_now" | "pending" | "history"; actions: ("accept" | "decline" | "confirm_handover" | "start_return" | "confirm_return" | "withdraw" | "take_back" | "cancel" | "edit_and_resend")[]; revision: number; pending_return?: PendingReturn | null };
+export type LoanView = { id: string; kind: "borrow_request" | "lend_offer"; state: "requested" | "offered" | "accepted" | "handed_over" | "closed"; closed_reason: "declined" | "withdrawn" | "cancelled" | "returned" | "written_off" | null; closed_by: "you" | "them" | null; role: "lender" | "borrower"; other: LoanParty; return_by: string | null; you_confirmed_handover: boolean; they_confirmed_handover: boolean; lines: LoanCard[]; needs_you: boolean; section: "needs_you" | "out_now" | "pending" | "history"; actions: ("accept" | "decline" | "confirm_handover" | "start_return" | "confirm_return" | "choose_written_off" | "withdraw" | "take_back" | "cancel" | "write_off" | "edit_and_resend")[]; revision: number; pending_return?: PendingReturn | null; awaiting_choice?: string };
 export type LoansView = { loans: LoanView[]; needs_you: number };
 export type LoanStep = { revision: number; idempotency_key: string };
 export type LoanLineRequest = { edition_id: string; quantity: string };
@@ -29,7 +29,7 @@ export type AcceptBorrowRequest = { revision: number; idempotency_key: string; l
 export type PromiseLimit = { edition_id: string; available: string };
 export type LoanPickPlace = { edition_id: string; location_id: string | null; name: string; copies: string; short: string };
 export type LoanDeck = { id: string; name: string };
-export type LoanSide = { loan_id: string; deck: LoanDeck | null; can_promise: PromiseLimit[]; picks: LoanPickPlace[]; suggested: LoanPickPlace[] };
+export type LoanSide = { loan_id: string; deck: LoanDeck | null; can_promise: PromiseLimit[]; picks: LoanPickPlace[]; suggested: LoanPickPlace[]; awaiting_choice?: LoanPickPlace[] };
 export type LentCard = { loan_id: string; edition_id: string; name: string; set_code: string; set_name: string; collector_number: string; image_url: string | null; copies: string; borrower: string };
 export type LentOut = { cards: LentCard[]; copies: string };
 export type BorrowedCard = { loan_id: string; edition_id: string; name: string; set_code: string; set_name: string; collector_number: string; descriptor: Record<string, unknown>; image_url: string | null; location_id: string; location_name: string; copies: string; lender: string };
@@ -37,6 +37,10 @@ export type BorrowedCopies = { cards: BorrowedCard[]; copies: string };
 export type MoveBorrowed = { loan_id: string; edition_id: string; from_location_id: string; to_location_id: string; quantity: string; idempotency_key: string };
 export type ReturnedLine = { edition_id: string; quantity: string };
 export type StartReturn = { revision: number; idempotency_key: string; lines: ReturnedLine[] };
+export type WriteOffLine = { edition_id: string; quantity: string };
+export type WriteOff = { revision: number; idempotency_key: string; lines: WriteOffLine[] };
+export type ChosenPlace = { location_id: string; edition_id: string; copies: string };
+export type WrittenOffChoice = { revision: number; idempotency_key: string; choice: "keep" | "remove"; places: ChosenPlace[] };
 
 /** A refused social request: the API's code, and for TOO_MANY_LOOKUPS the detail that says when to try again. */
 export class SocialError extends Error {
@@ -132,3 +136,8 @@ export const startReturn = (id: string, body: StartReturn) =>
   request<LoanView>(`/api/loans/${at(id)}/returns`, 'POST', body);
 export const confirmReturn = (id: string, body: LoanStep) =>
   request<LoanView>(`/api/loans/${at(id)}/returns/confirm`, 'POST', body);
+// Write-off (#257): the lender's, final; then the borrower keeps or removes the written-off copies they hold.
+export const writeOff = (id: string, body: WriteOff) =>
+  request<LoanView>(`/api/loans/${at(id)}/write-off`, 'POST', body);
+export const chooseWrittenOff = (id: string, body: WrittenOffChoice) =>
+  request<LoanView>(`/api/loans/${at(id)}/written-off`, 'POST', body);
