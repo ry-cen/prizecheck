@@ -53,15 +53,17 @@ type Props = {
   image?: string | null;
   owner: boolean;
   onNavigate: (page: PageId) => void;
+  /** Opens a Friend's Collection (#250) from the Friends drawer, by their Handle. */
+  onOpenFriend: (handle: string) => void;
   /** Resolves false when sign-out failed; the shell then says so in a toast. */
   onSignOut: () => Promise<boolean>;
   /** The scroll position the page at a path had when it was last left (useRoute). */
   scrollFor: (path: string) => number;
   /** Renders a page; `active` is false while a kept-mounted page is hidden. */
   renderPage: (page: PageId, active: boolean) => ReactNode;
-  /** A page that isn't one of the app's pages: Discover or a Published Deck, signed in (#163). While it is set
-   * the shell shows it instead of `page`, with no tab current; kept-mounted pages stay mounted, hidden. `key`
-   * changes when it is another such page. */
+  /** A page that isn't one of the app's pages: Discover or a Published Deck, signed in (#163), or a Friend's
+   * Collection (#250). While it is set the shell shows it instead of `page`, with no tab current; kept-mounted pages
+   * stay mounted, hidden. `key` changes when it is another such page. */
   other?: { key: string; label: string; content: ReactNode } | null;
 };
 
@@ -74,7 +76,10 @@ type Props = {
 export function Shell(props: Props) {
   return (
     <ToastProvider>
-      <FriendsProvider onPrivacy={() => props.onNavigate("settings")}>
+      <FriendsProvider
+        onPrivacy={() => props.onNavigate("settings")}
+        onOpenCollection={props.onOpenFriend}
+      >
         <ShellFrame {...props} />
       </FriendsProvider>
     </ToastProvider>

@@ -72,10 +72,13 @@ type Load =
 
 export function FriendsProvider({
   onPrivacy,
+  onOpenCollection,
   children,
 }: {
   /** Opens Settings, whose Privacy section lists Blocked collectors (#248). */
   onPrivacy: () => void;
+  /** Opens a Friend's Collection (#250), by their Handle. */
+  onOpenCollection: (handle: string) => void;
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -134,6 +137,7 @@ export function FriendsProvider({
         onClose={() => setOpen(false)}
         onChanged={refresh}
         onPrivacy={onPrivacy}
+        onOpenCollection={onOpenCollection}
       />
     </FriendsContext.Provider>
   );
@@ -271,6 +275,7 @@ function FriendsDialog({
   onClose,
   onChanged,
   onPrivacy,
+  onOpenCollection,
 }: {
   open: boolean;
   load: Load;
@@ -278,6 +283,7 @@ function FriendsDialog({
   onClose: () => void;
   onChanged: () => void;
   onPrivacy: () => void;
+  onOpenCollection: (handle: string) => void;
 }) {
   const [adding, setAdding] = useState(false);
   const [status, setStatus] = useState("");
@@ -532,6 +538,16 @@ function FriendsDialog({
                     ) : (
                       <>
                         <Person person={person} />
+                        <Button
+                          variant="quiet"
+                          aria-label={`Open ${person.display_name}'s Collection`}
+                          onClick={() => {
+                            close();
+                            onOpenCollection(person.handle);
+                          }}
+                        >
+                          Collection
+                        </Button>
                         <PersonMenu
                           person={person}
                           items={[
