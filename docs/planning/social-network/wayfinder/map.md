@@ -2,7 +2,7 @@
 
 **Label:** wayfinder:map
 
-**Status:** charted 2026-10-15.
+**Status:** charted 2026-10-15. Every ticket is closed, and the [spec](../spec.md) was published on 2026-10-15.
 
 ## Destination
 
