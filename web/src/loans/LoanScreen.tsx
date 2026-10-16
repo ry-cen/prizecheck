@@ -6,6 +6,7 @@ import {
   type ReactNode,
 } from "react";
 import { ChevronLeft, Ellipsis } from "lucide-react";
+import { useInboxRefresh } from "../inbox/Inbox";
 import { PageHeader } from "../shell/PageHeader";
 import { CardImage } from "../social/FriendCollectionPage";
 import type { DeckIndexEntry } from "../decks_generated";
@@ -133,6 +134,8 @@ export function LoanScreen({
   onAllLoans: () => void;
 }) {
   const drafts = useBorrowDrafts();
+  // The bell and the Loans tab's badge are read again after each step and notice seen here (#259).
+  const refreshInbox = useInboxRefresh();
   const [load, setLoad] = useState<Load>({ kind: "loading" });
   const [attempt, setAttempt] = useState(0);
   const [promised, setPromised] = useState<Map<string, number>>(new Map());
@@ -235,7 +238,7 @@ export function LoanScreen({
     );
     if (fresh.length === 0) return;
     for (const kind of fresh) noticed.current.add(`${loanId}:${kind}`);
-    seeNotices(loanId, { kinds: fresh }).catch(() => undefined);
+    seeNotices(loanId, { kinds: fresh }).then(refreshInbox, () => undefined);
   }, [loanId, showing.join(",")]);
 
   // The borrower's Decks, read once an offer waits for their answer (#258).
@@ -346,12 +349,14 @@ export function LoanScreen({
       closeModes();
       setLoad({ kind: "ready", loan: next, side: nextSide });
       setPromised(promiseStart(next, nextSide));
+      refreshInbox();
     } catch (cause) {
       if (!outcomeUnknown(cause)) keys.current.delete(name);
       setMessage(loanStepMessage(cause, other, cardName));
       if (cause instanceof SocialError && RELOAD.has(cause.code)) {
         reloading.current = true;
         setAttempt((n) => n + 1);
+        refreshInbox();
       }
     } finally {
       setBusy(false);

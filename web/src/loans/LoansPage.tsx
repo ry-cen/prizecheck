@@ -28,7 +28,7 @@ type Props = {
 /**
  * The Loans tab (social network #252, spec "Web screens", Loans verdict variant E): /loans lists the collector's Loans
  * in **Needs you**, **Out now** and **Pending**, with **History** folded away; /loans/<id> is one Loan's screen
- * (LoanScreen). The badge arrives with the inbox (#259).
+ * (LoanScreen). The tab's badge counts the Loans in Needs you, read through the inbox (#259).
  */
 export function LoansPage({ loanId, onOpenLoan, onAllLoans }: Props) {
   if (loanId)
