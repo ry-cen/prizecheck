@@ -1,0 +1,555 @@
+<!doctype html>
+<!--
+  PROTOTYPE, throw me away. Friends' cards on the Want List and in card search (ry-cen/prizecheck#239).
+  Three placements of "Friends who have this", switchable with ?variant=A|B|C and the floating bar.
+  Mock data in memory only; nothing is saved or sent. Colours and spacing come from web/src/tokens.css.
+-->
+<html lang="en" data-theme="prize-gold">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Friends' cards prototype</title>
+<link rel="stylesheet" href="../../../../../../web/src/tokens.css">
+<style>
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body { background: var(--color-bg); color: var(--color-text); font: var(--font-size-md)/var(--line-height) var(--font-sans); }
+  button { font: inherit; color: inherit; }
+  .num { font-variant-numeric: var(--numeric); }
+  .muted { color: var(--color-text-muted); }
+  .subtle { color: var(--color-text-subtle); }
+
+  /* The app area is a container, so the phone frame gets the phone layout without resizing the window. */
+  #stage { min-height: 100vh; }
+  #stage.framed { display: flex; justify-content: center; padding: 24px 0 96px; background: #0a0909; }
+  #stage.framed .app { width: 375px; height: 812px; overflow: auto; border: 1px solid var(--color-border-strong); border-radius: 24px; transform: translateZ(0); }
+  .app { container: app / inline-size; background: var(--color-bg); min-height: 100%; }
+
+  /* Kit controls: 30 px on desktop, 44 px on phones; 24 px chips. */
+  .btn { display: inline-flex; align-items: center; gap: 6px; height: var(--size-control); padding: 0 12px; border-radius: var(--radius-control); border: 1px solid var(--color-control-outline); background: var(--color-surface-raised); font-size: var(--font-size-control); cursor: pointer; white-space: nowrap; }
+  .btn:hover { border-color: var(--color-accent-border); }
+  .btn.primary { background: var(--color-accent); border-color: var(--color-accent); color: var(--color-on-accent); font-weight: 600; }
+  .btn.quiet { background: transparent; border-color: transparent; color: var(--color-text-muted); }
+  .btn.small { height: var(--size-quick); padding: 0 10px; font-size: var(--font-size-sm); }
+  .pill { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: var(--radius-round); border: 1px solid var(--color-border-strong); font-size: var(--font-size-xs); color: var(--color-text-muted); white-space: nowrap; }
+  .pill.gold { border-color: var(--color-accent-border); color: var(--color-accent-strong); background: var(--color-accent-fill); }
+  .seg { display: inline-flex; border: 1px solid var(--color-control-outline); border-radius: var(--radius-control); overflow: hidden; }
+  .seg button { height: calc(var(--size-control) - 2px); padding: 0 12px; border: 0; background: transparent; font-size: var(--font-size-control); cursor: pointer; color: var(--color-text-muted); white-space: nowrap; }
+  .seg button[aria-pressed="true"] { background: var(--color-surface-selected); color: var(--color-accent-strong); font-weight: 600; }
+  :focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: var(--focus-offset); }
+
+  /* Shell */
+  .hdr { position: sticky; top: 0; z-index: 10; height: var(--layout-header-height); display: flex; align-items: center; gap: 24px; padding: 0 24px; border-bottom: 1px solid var(--color-border); background: var(--color-bg); }
+  .word { font-size: var(--font-size-sm); font-weight: 700; letter-spacing: 2px; text-transform: uppercase; white-space: nowrap; }
+  .word b { color: var(--color-accent); margin-right: 8px; }
+  .tabs { display: flex; gap: 4px; }
+  .tab { height: 32px; padding: 0 12px; border-radius: var(--radius-control); border: 0; background: transparent; color: var(--color-text-muted); font-size: var(--font-size-control); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+  .tab[aria-current="page"] { background: var(--color-surface-selected); color: var(--color-accent-strong); font-weight: 600; }
+  .tab .count { font-size: var(--font-size-2xs); padding: 1px 6px; border-radius: var(--radius-round); background: var(--color-accent-fill); color: var(--color-accent-strong); }
+  .avatar { margin-left: auto; width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--color-accent-border); background: var(--color-accent-fill); color: var(--color-accent-strong); display: grid; place-items: center; font-weight: 600; font-size: var(--font-size-control); }
+  .phonehdr { display: none; }
+  .tabbar { display: none; }
+
+  .page { max-width: 1180px; margin: 0 auto; padding: 24px var(--layout-gutter) 120px; }
+  h1 { font-size: var(--font-size-xl); margin: 0; }
+  h2 { font-size: var(--font-size-lg); margin: 0; }
+  .lede { margin: 4px 0 0; color: var(--color-text-muted); font-size: var(--font-size-control); }
+
+  /* Collection-style sidebar (variant C uses none; kept for the Decks index) */
+  .crumbs { display: flex; align-items: center; gap: 8px; font-size: var(--font-size-control); margin-bottom: 12px; }
+  .crumbs a { color: var(--color-accent); text-decoration: none; cursor: pointer; }
+
+  /* Summary strip: the combined total and its cost, at the top. */
+  .summary { margin-top: 20px; display: flex; flex-wrap: wrap; align-items: center; gap: 16px 28px; padding: 16px 20px; border: 1px solid var(--color-border); border-radius: var(--radius-panel); background: var(--color-surface); }
+  .big { font-size: var(--font-size-xl); font-weight: 700; line-height: 1.1; }
+  .big.gold { color: var(--color-accent-strong); }
+  .stat .lbl { font-size: var(--font-size-xs); color: var(--color-text-subtle); text-transform: uppercase; letter-spacing: 1px; }
+  .summary .controls { margin-left: auto; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .explain { flex-basis: 100%; margin: 0; font-size: var(--font-size-sm); color: var(--color-text-muted); }
+  .proto-note { display: inline-block; margin-left: 6px; padding: 0 6px; border: 1px dashed var(--color-control-outline); border-radius: 4px; font-size: var(--font-size-2xs); color: var(--color-text-subtle); white-space: nowrap; }
+
+  .grid { margin-top: 20px; display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 20px; align-items: start; }
+  .panel { border: 1px solid var(--color-border); border-radius: var(--radius-panel); background: var(--color-surface); }
+  .panel-h { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px 16px; border-bottom: 1px solid var(--color-border); }
+  .panel-h .grow { flex: 1; min-width: 0; }
+  .decks { display: grid; gap: 16px; }
+  .total { position: sticky; top: calc(var(--layout-header-height) + 16px); }
+  .total summary { list-style: none; cursor: default; }
+  .total summary::-webkit-details-marker { display: none; }
+  .trow { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 8px; padding: 7px 16px; border-bottom: 1px solid var(--color-border); font-size: var(--font-size-control); align-items: baseline; }
+  .trow:last-child { border-bottom: 0; }
+  .trow .q { font-weight: 700; color: var(--color-accent-strong); }
+  .trow .for { font-size: var(--font-size-xs); color: var(--color-text-subtle); }
+  .ellip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .line { display: grid; grid-template-columns: 56px minmax(0, 1fr) 150px 84px; gap: 12px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--color-border); }
+  .line:last-child { border-bottom: 0; }
+  .art { width: 40px; aspect-ratio: var(--tile-aspect); border-radius: 4px; background: linear-gradient(160deg, var(--color-art-start), var(--color-art-end)); border: 1px solid var(--color-border); }
+  .need { font-weight: 700; font-size: var(--font-size-lg); color: var(--color-accent-strong); }
+  .need small { font-weight: 400; font-size: var(--font-size-sm); color: var(--color-text-subtle); }
+  .name { font-weight: 600; }
+  .meta { font-size: var(--font-size-sm); color: var(--color-text-muted); }
+  .src { font-size: var(--font-size-xs); color: var(--color-text-subtle); }
+  .price { text-align: right; font-size: var(--font-size-control); }
+  .swap { grid-column: 2 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 2px; padding: 6px 10px; border-radius: var(--radius-control); background: var(--color-accent-wash); border: 1px solid var(--color-accent-outline); font-size: var(--font-size-sm); }
+  .done-deck { padding: 12px 16px; display: flex; gap: 10px; align-items: center; font-size: var(--font-size-control); color: var(--color-text-muted); }
+  .differs { padding: 8px 16px; font-size: var(--font-size-xs); color: var(--color-text-subtle); border-top: 1px dashed var(--color-border); }
+
+  /* Decks index (variants B and C) */
+  .deckcards { margin-top: 20px; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+  .deckcard { padding: 14px 16px; border: 1px solid var(--color-border); border-radius: var(--radius-panel); background: var(--color-surface); display: grid; gap: 6px; }
+  .banner { margin-top: 20px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; padding: 14px 18px; border-radius: var(--radius-panel); border: 1px solid var(--color-accent-border); background: var(--color-accent-wash); }
+  .placeholder { margin-top: 40px; padding: 40px; text-align: center; border: 1px dashed var(--color-border-strong); border-radius: var(--radius-panel); color: var(--color-text-subtle); }
+  .filter { margin-top: 16px; display: flex; gap: 6px; overflow-x: auto; }
+  .chip { height: var(--size-chip); padding: 0 10px; border-radius: var(--radius-round); border: 1px solid var(--color-border-strong); background: transparent; font-size: var(--font-size-sm); color: var(--color-text-muted); cursor: pointer; white-space: nowrap; }
+  .chip[aria-pressed="true"] { border-color: var(--color-accent-border); background: var(--color-accent-fill); color: var(--color-accent-strong); }
+
+  /* Dialog and toast */
+  .scrim { position: fixed; inset: 0; background: var(--color-scrim); display: grid; place-items: center; z-index: 500; padding: 16px; }
+  .dialog { width: min(var(--layout-dialog-width), 100%); border-radius: var(--radius-dialog); background: var(--color-surface-raised); border: 1px solid var(--color-border-strong); padding: 20px; display: grid; gap: 12px; box-shadow: 0 10px 40px var(--color-shadow-strong); }
+  .dialog p { margin: 0; font-size: var(--font-size-control); }
+  .dialog .row { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+  .toast { position: fixed; left: 50%; bottom: 84px; transform: translateX(-50%); z-index: 400; display: flex; gap: 12px; align-items: center; padding: 10px 14px; border-radius: var(--radius-panel); background: var(--color-surface-raised); border: 1px solid var(--color-border-strong); box-shadow: 0 6px 24px var(--color-shadow-strong); font-size: var(--font-size-control); max-width: calc(100% - 32px); }
+
+  /* Phone layout */
+    .swap .btn { width: 100%; justify-content: center; }
+    .panel-h { padding: 12px; }
+    .panel-h .grow { flex-basis: 100%; }
+    .total .panel-h .grow { flex-basis: auto; }
+  }
+
+  /* Prototype switcher: not part of the design. */
+  .proto-bar { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 1000; display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 999px; background: #f4f1ff; color: #1b1440; font: 600 12px/1 system-ui, sans-serif; box-shadow: 0 6px 24px #0009; white-space: nowrap; }
+  .proto-bar button { border: 0; background: #ddd6ff; color: #1b1440; border-radius: 999px; height: 26px; padding: 0 10px; font: inherit; cursor: pointer; }
+  .proto-bar button[aria-pressed="true"] { background: #1b1440; color: #f4f1ff; }
+  .proto-bar .lbl { padding: 0 8px; }
+  @media (max-width: 760px) { .proto-bar { bottom: 64px; transform: translateX(-50%) scale(.9); } .proto-bar .lbl { max-width: 120px; overflow: hidden; text-overflow: ellipsis; } }
+  #stage.framed ~ .proto-bar { bottom: 16px; }
+  /* On phones the toast sits at the top so it never covers the Borrow Request tray. */
+  @media (max-width: 760px) { .toast { top: 16px; bottom: auto; } }
+
+  /* Friends prototype additions */
+  .fr-row { grid-column: 2 / -1; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 2px; font-size: var(--font-size-sm); }
+  .fr-row .lbl { color: var(--color-text-subtle); font-size: var(--font-size-xs); }
+  .fchip { display: inline-flex; align-items: center; gap: 6px; height: var(--size-chip); padding: 0 10px; border-radius: var(--radius-round); border: 1px solid var(--color-border-strong); background: var(--color-surface-raised); font-size: var(--font-size-sm); cursor: pointer; white-space: nowrap; }
+  .fchip:hover { border-color: var(--color-accent-border); }
+  .fchip.on { border-color: var(--color-accent-border); background: var(--color-accent-fill); color: var(--color-accent-strong); }
+  .tag { font-size: var(--font-size-2xs); padding: 1px 6px; border-radius: var(--radius-round); border: 1px solid var(--color-border-strong); color: var(--color-text-muted); white-space: nowrap; }
+  .tag.spare { border-color: var(--color-accent-border); color: var(--color-accent-strong); }
+  .tag.alt { border-style: dashed; }
+  .linkish { background: none; border: 0; padding: 0; color: var(--color-accent); cursor: pointer; font-size: inherit; text-decoration: underline; text-underline-offset: 2px; }
+  .ini { width: 28px; height: 28px; flex: none; border-radius: 50%; display: grid; place-items: center; font-size: var(--font-size-xs); font-weight: 700; background: var(--color-surface-selected); color: var(--color-accent-strong); border: 1px solid var(--color-accent-border); }
+  .ini.lg { width: 40px; height: 40px; font-size: var(--font-size-md); }
+  .tray { position: fixed; right: 24px; bottom: 72px; z-index: 300; display: grid; gap: 8px; width: 320px; }
+  .tray .draft { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: var(--radius-panel); background: var(--color-surface-raised); border: 1px solid var(--color-accent-border); box-shadow: 0 6px 24px var(--color-shadow-strong); font-size: var(--font-size-control); }
+  .tray .draft .grow { flex: 1; min-width: 0; }
+  .fpanel .fl { display: grid; grid-template-columns: 24px 40px minmax(0, 1fr) auto auto; gap: 10px; align-items: center; padding: 8px 16px; border-bottom: 1px solid var(--color-border); }
+  .fpanel .fl:last-child { border-bottom: 0; }
+  .stepper { display: inline-flex; align-items: center; border: 1px solid var(--color-control-outline); border-radius: var(--radius-control); }
+  .stepper button { width: 28px; height: 28px; border: 0; background: transparent; cursor: pointer; font-size: var(--font-size-md); }
+  .stepper span { min-width: 22px; text-align: center; font-weight: 600; }
+  .cline { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--color-border); }
+  .dialog.wide { width: min(560px, 100%); max-height: calc(100vh - 32px); overflow: auto; }
+  .dialog h2 { font-size: var(--font-size-lg); }
+  .field { display: grid; gap: 4px; font-size: var(--font-size-sm); color: var(--color-text-muted); }
+  .field select, .field input { height: var(--size-control); padding: 0 8px; border-radius: var(--radius-control); border: 1px solid var(--color-control-outline); background: var(--color-surface); color: var(--color-text); font: inherit; font-size: var(--font-size-control); }
+  .friendcards { margin-top: 20px; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+  .friendcard { padding: 14px 16px; border: 1px solid var(--color-border); border-radius: var(--radius-panel); background: var(--color-surface); display: grid; gap: 8px; cursor: pointer; text-align: left; }
+  .friendcard:hover { border-color: var(--color-accent-border); }
+  .fhead { display: flex; gap: 12px; align-items: center; }
+  .gallery { margin-top: 16px; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+  .tile { border: 1px solid var(--color-border); border-radius: var(--radius-panel); background: var(--color-surface); padding: 10px; display: grid; gap: 6px; }
+  .tile .art { width: 100%; }
+  .tile.want { border-color: var(--color-accent-border); }
+  .search { height: var(--size-control); padding: 0 10px; border-radius: var(--radius-control); border: 1px solid var(--color-control-outline); background: var(--color-surface); color: var(--color-text); font: inherit; font-size: var(--font-size-control); min-width: 220px; }
+  .popup .art.big { width: 120px; }
+  /* Variant D: card image on the left of its panel heading, at every width. */
+  .panel-h.cardhead { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; gap: 12px; align-items: center; }
+  .panel-h.cardhead .grow { min-width: 0; }
+
+  @container app (max-width: 760px) {
+    .hdr { display: none; }
+    .phonehdr { display: flex; align-items: center; gap: 12px; height: var(--layout-header-height); padding: 0 12px; border-bottom: 1px solid var(--color-border); }
+    .phonehdr .t { font-weight: 600; }
+    .tabbar { display: flex; position: fixed; inset: auto 0 0 0; height: var(--layout-tabbar-height); border-top: 1px solid var(--color-border); background: var(--color-surface); z-index: 10; }
+    .tabbar button { flex: 1; border: 0; background: transparent; color: var(--color-text-muted); font-size: var(--font-size-xs); display: grid; place-items: center; padding: 6px 0; cursor: pointer; }
+    .tabbar button .ico { font-size: 18px; line-height: 1; }
+    .tabbar button[aria-current="page"] { color: var(--color-accent-strong); font-weight: 600; }
+    .page { padding: 16px var(--layout-gutter) 180px; }
+    .btn, .seg button { height: var(--size-control-phone); }
+    .btn.small { height: var(--size-quick-phone); }
+    .summary { padding: 14px; gap: 12px 20px; }
+    .summary .controls { margin-left: 0; width: 100%; }
+    .summary .controls .seg { width: 100%; }
+    .summary .controls .seg button { flex: 1; }
+    .line { grid-template-columns: 44px minmax(0, 1fr) auto; gap: 10px; padding: 10px 12px; }
+    .line .price { display: none; }
+    .fr-row { grid-column: 1 / -1; }
+    .fchip { height: 32px; }
+    .fpanel .fl { grid-template-columns: 24px 36px minmax(0, 1fr) auto; padding: 8px 12px; }
+    .fpanel .fl .tags { grid-column: 3 / -1; grid-row: 2; }
+    .panel-h.cardhead { grid-template-columns: 40px minmax(0, 1fr); }
+    .panel-h.cardhead .pill { grid-column: 2; justify-self: start; }
+    .tray { left: 12px; right: 12px; width: auto; bottom: calc(var(--layout-tabbar-height) + 56px); }
+    .search { min-width: 0; width: 100%; }
+    .panel-h { padding: 12px; }
+  }
+</style>
+</head>
+<body>
+<div id="stage"><div class="app" id="app"></div></div>
+<div class="proto-bar" role="toolbar" aria-label="Prototype switcher">
+  <button id="prev" aria-label="Previous variant">‹</button>
+  <span class="lbl" id="vlabel"></span>
+  <button id="next" aria-label="Next variant">›</button>
+  <button id="frame" aria-pressed="false" title="Show the phone layout in a 375 × 812 frame">Phone frame</button>
+  <button id="alt" aria-pressed="true" title="Count Friends' copies of other Printings in the Reprint Group">Other printings</button>
+</div>
+<div id="layer"></div>
+<script>
+// ---------- Mock data (in memory; nothing is saved) ----------
+const ED = {
+  zard125:   { name: "Charizard ex", set: "OBF", num: "125", variant: "Holo", price: 9.5, group: "zard" },
+  pidgeot164:{ name: "Pidgeot ex", set: "OBF", num: "164", variant: "Holo", price: 3.2, group: "pidgeot" },
+  iono185:   { name: "Iono", set: "PAL", num: "185", variant: "Normal", price: 0.35, group: "iono" },
+  iono254:   { name: "Iono", set: "PAL", num: "254", variant: "Holo", price: 6.5, group: "iono" },
+  candy191:  { name: "Rare Candy", set: "SVI", num: "191", variant: "Normal", price: 0.3, group: "candy" },
+  boss172:   { name: "Boss's Orders", set: "PAL", num: "172", variant: "Normal", price: 0.5, group: "boss" },
+  turo171:   { name: "Professor Turo's Scenario", set: "PAR", num: "171", variant: "Normal", price: null, group: "turo" },
+  gard086:   { name: "Gardevoir ex", set: "SVI", num: "086", variant: "Holo", price: 3.0, group: "gard" },
+  ralts084:  { name: "Ralts", set: "SVI", num: "084", variant: "Normal", price: 0.15, group: "ralts" },
+  arven166:  { name: "Arven", set: "SVI", num: "166", variant: "Normal", price: 0.4, group: "arven" },
+  mirai081:  { name: "Miraidon ex", set: "SVI", num: "081", variant: "Holo", price: 2.4, group: "mirai" },
+  gen170:    { name: "Electric Generator", set: "SVI", num: "170", variant: "Normal", price: 0.3, group: "gen" },
+  nest181:   { name: "Nest Ball", set: "SVI", num: "181", variant: "Normal", price: 0.2, group: "nest" },
+};
+// Your Want List: what each Deck still needs (already worked out by the counting setting).
+const DECKS = [
+  { id: "zard", name: "Charizard ex", needs: [["zard125",1],["pidgeot164",1],["iono185",2],["candy191",1],["boss172",1],["turo171",1]] },
+  { id: "gard", name: "Gardevoir ex", needs: [["gard086",1],["iono185",2],["boss172",1]] },
+  { id: "mirai", name: "Miraidon ex", needs: [] },
+];
+// Friends. Only lendable copies: reserved and lent copies are already left out. No Location or Deck names exist here.
+const FRIENDS = [
+  { id: "ash", name: "Ash K.", handle: "ashk", cards: { zard125: [1,0], iono185: [2,1], boss172: [0,2], candy191: [3,0], arven166: [2,2], nest181: [4,0] } },
+  { id: "kim", name: "Kim", handle: "kimtcg", cards: { pidgeot164: [1,0], iono254: [1,0], gard086: [0,1], turo171: [1,0], ralts084: [3,4] } },
+  { id: "sam", name: "Sam", handle: "samplays", cards: { zard125: [0,1], iono185: [0,2], mirai081: [0,3], gen170: [2,4] } },
+  { id: "jo", name: "Jo R.", handle: "jo_r", cards: { nest181: [2,4], arven166: [1,0] } },
+];
+// cards[edition] = [spare, inDeck]
+
+const VARIANTS = { A: "On each Want List line", B: "Get from Friends view", C: "Friends page", D: "Chips + per-card Get from Friends" };
+const KEYS = Object.keys(VARIANTS);
+const qs = new URLSearchParams(location.search);
+const state = {
+  variant: KEYS.includes(qs.get("variant")) ? qs.get("variant") : "A",
+  framed: qs.get("frame") === "phone",
+  alt: qs.get("alt") !== "off",
+  tab: "decks",          // decks | catalog | friends
+  view: "want",          // want | fromFriends | friendList | friend
+  friend: null,
+  friendFilter: "want",  // want | all
+  friendSearch: "",
+  drafts: {},            // friendId -> { edition: qty }
+  sent: [],
+};
+
+const fmt = (n) => n == null ? "No price" : "$" + n.toFixed(2);
+const ed = (id) => ED[id];
+const label = (id) => `${ed(id).set} ${ed(id).num} · ${ed(id).variant}`;
+const friend = (id) => FRIENDS.find(f => f.id === id);
+const initials = (n) => n.split(/\s+/).map(p => p[0]).join("").slice(0, 2).toUpperCase();
+const esc = (s) => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+// Combined need per Edition across Decks (prototype: plain sum).
+function wantTotals() {
+  const t = {};
+  DECKS.forEach(d => d.needs.forEach(([e, q]) => { t[e] = (t[e] || 0) + q; }));
+  return t;
+}
+// Friends' copies for one wanted Edition: exact first, then other Printings in the Reprint Group; spares listed first.
+function matches(edition) {
+  const out = [];
+  FRIENDS.forEach(f => Object.entries(f.cards).forEach(([e, [spare, inDeck]]) => {
+    const exact = e === edition;
+    if (!exact && !(state.alt && ed(e).group === ed(edition).group)) return;
+    out.push({ f, e, spare, inDeck, exact });
+  }));
+  return out.sort((a, b) => (b.exact - a.exact) || ((b.spare > 0) - (a.spare > 0)) || (b.spare + b.inDeck) - (a.spare + a.inDeck));
+}
+const avail = (f, e) => { const c = f.cards[e]; return c ? c[0] + c[1] : 0; };
+function draftCount(fid) { return Object.values(state.drafts[fid] || {}).reduce((a, b) => a + b, 0); }
+function addToDraft(fid, e, n = 1) {
+  const d = state.drafts[fid] = state.drafts[fid] || {};
+  d[e] = Math.min(avail(friend(fid), e), (d[e] || 0) + n);
+  render();
+}
+function friendCoverage(f) {
+  const t = wantTotals(); let cards = 0;
+  Object.entries(t).forEach(([want, q]) => {
+    let have = 0;
+    Object.entries(f.cards).forEach(([e, [s, d]]) => { if (e === want || (state.alt && ed(e).group === ed(want).group)) have += s + d; });
+    cards += Math.min(q, have);
+  });
+  return cards;
+}
+const totalWanted = () => Object.values(wantTotals()).reduce((a, b) => a + b, 0);
+
+function tags(spare, inDeck, exact, e) {
+  return `${spare ? `<span class="tag spare">${spare} spare</span>` : ""}${inDeck ? `<span class="tag">${inDeck} in a Deck</span>` : ""}${exact ? "" : `<span class="tag alt">${esc(ed(e).set)} ${esc(ed(e).num)}</span>`}`;
+}
+
+// ---------- Shell ----------
+function shell(inner, title) {
+  const friendsTab = state.variant === "C";
+  const tab = (id, text) => `<button class="tab" data-tab="${id}" ${state.tab === id ? 'aria-current="page"' : ""}>${text}</button>`;
+  return `
+  <header class="hdr"><span class="word"><b>◆</b>PrizeCheck</span>
+    <nav class="tabs">${tab("collection", "Collection")}${tab("decks", "Decks")}${tab("catalog", "Catalog")}${friendsTab ? tab("friends", "Friends") : ""}</nav>
+    <span class="avatar">R</span></header>
+  <header class="phonehdr"><span class="t">${esc(title)}</span></header>
+  <main class="page">${inner}</main>
+  <nav class="tabbar">
+    <button data-tab="collection"><span class="ico">▦</span>Collection</button>
+    <button data-tab="decks" ${state.tab === "decks" ? 'aria-current="page"' : ""}><span class="ico">❏</span>Decks</button>
+    <button data-tab="catalog" ${state.tab === "catalog" ? 'aria-current="page"' : ""}><span class="ico">⌕</span>Catalog</button>
+    ${friendsTab ? `<button data-tab="friends" ${state.tab === "friends" ? 'aria-current="page"' : ""}><span class="ico">☺</span>Friends</button>` : `<button><span class="ico">⋯</span>More</button>`}
+  </nav>
+  ${tray()}`;
+}
+function tray() {
+  const ids = Object.keys(state.drafts).filter(id => draftCount(id) > 0);
+  if (!ids.length) return "";
+  return `<div class="tray">${ids.map(id => `<div class="draft"><span class="ini">${initials(friend(id).name)}</span>
+    <span class="grow"><b>Borrow Request to ${esc(friend(id).name)}</b><br><span class="muted">${draftCount(id)} card${draftCount(id) === 1 ? "" : "s"}</span></span>
+    <button class="btn primary small" data-review="${id}">Review</button></div>`).join("")}</div>`;
+}
+
+// ---------- Want List (Decks › Want List) ----------
+function wantHeader(extra = "") {
+  const n = totalWanted();
+  const cost = Object.entries(wantTotals()).reduce((a, [e, q]) => a + (ed(e).price || 0) * q, 0);
+  return `<div class="filter" style="margin-top:0"><div class="seg"><button data-nav="decksIndex">My Decks</button><button aria-pressed="true" data-nav="want">Want List</button></div></div>
+  <div class="summary">
+    <div class="stat"><div class="lbl">Cards to get</div><div class="big gold num">${n}</div></div>
+    <div class="stat"><div class="lbl">Estimated cost</div><div class="big num">${fmt(cost)}</div></div>
+    <div class="controls">${extra}<button class="btn">Buy on TCGplayer</button></div>
+  </div>`;
+}
+function wantLine(e, q, deck) {
+  const ms = matches(e);
+  let friendsRow = "";
+  if ((state.variant === "A" || state.variant === "D") && ms.length) {
+    friendsRow = `<div class="fr-row"><span class="lbl">Friends:</span>${ms.map(m => {
+      const inDraft = (state.drafts[m.f.id] || {})[m.e] || 0;
+      return `<button class="fchip ${inDraft ? "on" : ""}" data-add="${m.f.id}|${m.e}" title="Add to a Borrow Request to ${esc(m.f.name)}">
+        ${inDraft ? "✓ " : ""}${esc(m.f.name)} ${tags(m.spare, m.inDeck, m.exact, m.e)}</button>`; }).join("")}</div>`;
+  } else if (state.variant === "B" && ms.length) {
+    const n = new Set(ms.map(m => m.f.id)).size;
+    friendsRow = `<div class="fr-row"><button class="linkish" data-nav="fromFriends">${n} Friend${n === 1 ? "" : "s"} can lend this</button></div>`;
+  }
+  return `<div class="line"><span class="art"></span>
+    <div><div class="name"><button class="linkish" style="color:inherit;text-decoration:none" data-card="${e}">${esc(ed(e).name)}</button></div><div class="meta">${esc(label(e))}</div></div>
+    <div class="need num">${q}<small> to get</small></div>
+    <div class="price num">${fmt(ed(e).price)}</div>${friendsRow}</div>`;
+}
+function wantList() {
+  const n = totalWanted();
+  const cover = FRIENDS.reduce((a, f) => a + friendCoverage(f), 0);
+  let banner = "";
+  if (state.variant === "C") {
+    banner = `<div class="banner"><span>☺ <b>Friends can lend some of the ${n} cards you need.</b></span><button class="btn small" data-tab="friends">See Friends ›</button></div>`;
+  }
+  const seg = (state.variant === "B" || state.variant === "D") ? `<div class="seg"><button aria-pressed="true" data-nav="want">Buy</button><button data-nav="fromFriends">Get from Friends</button></div>` : "";
+  return wantHeader(seg) + banner + `<div class="decks" style="margin-top:20px">${DECKS.map(d => `
+    <section class="panel"><div class="panel-h"><h2 class="grow">${esc(d.name)}</h2><span class="muted num">${d.needs.reduce((a, [, q]) => a + q, 0)} to get</span></div>
+    ${d.needs.length ? d.needs.map(([e, q]) => wantLine(e, q, d)).join("") : `<div class="done-deck">✓ Nothing to get</div>`}</section>`).join("")}</div>`;
+}
+
+// ---------- Variant B: Get from Friends ----------
+function fromFriends() {
+  const t = wantTotals();
+  const panels = FRIENDS.map(f => ({ f, cover: friendCoverage(f) })).filter(x => x.cover > 0).sort((a, b) => b.cover - a.cover);
+  const seg = `<div class="seg"><button data-nav="want">Buy</button><button aria-pressed="true" data-nav="fromFriends">Get from Friends</button></div>`;
+  return wantHeader(seg) + `<p class="lede" style="margin-top:16px">Friends who can lend cards you need. Spare copies are listed first.</p>
+  <div class="decks" style="margin-top:12px">${panels.map(({ f, cover }) => {
+    const rows = [];
+    Object.entries(t).forEach(([want, q]) => Object.entries(f.cards).forEach(([e, [s, d]]) => {
+      const exact = e === want;
+      if (exact || (state.alt && ed(e).group === ed(want).group)) rows.push({ e, want, q, s, d, exact });
+    }));
+    rows.sort((a, b) => (b.s > 0) - (a.s > 0));
+    const dr = state.drafts[f.id] || {};
+    return `<section class="panel fpanel"><div class="panel-h"><span class="ini">${initials(f.name)}</span>
+      <div class="grow"><b>${esc(f.name)}</b> <span class="subtle">@${esc(f.handle)}</span><div class="meta">Can lend ${cover} of the ${totalWanted()} cards you need</div></div>
+      <button class="btn small" data-friend="${f.id}">Collection</button>
+      <button class="btn primary small" data-askall="${f.id}">Ask ${esc(f.name.split(" ")[0])} for these</button></div>
+      ${rows.map(r => `<div class="fl"><input type="checkbox" ${dr[r.e] ? "checked" : ""} data-toggle="${f.id}|${r.e}|${Math.min(r.q, r.s + r.d)}" aria-label="Include ${esc(ed(r.e).name)}">
+        <span class="art"></span><div><div class="name">${esc(ed(r.e).name)}</div><div class="meta">${esc(label(r.e))} · you need ${r.q}</div></div>
+        <span class="tags">${tags(r.s, r.d, r.exact, r.e)}</span><span></span></div>`).join("")}</section>`;
+  }).join("")}</div>`;
+}
+
+// ---------- Variant D: Get from Friends, one panel per card ----------
+function fromFriendsByCard() {
+  const seg = `<div class="seg"><button data-nav="want">Buy</button><button aria-pressed="true" data-nav="fromFriends">Get from Friends</button></div>`;
+  const t = wantTotals();
+  const cards = Object.entries(t).map(([e, q]) => ({ e, q, ms: matches(e) })).filter(c => c.ms.length);
+  const missing = Object.keys(t).length - cards.length;
+  return wantHeader(seg) + `<p class="lede" style="margin-top:16px">Cards you need that Friends can lend. Choose how many to ask each Friend for; each Friend gets their own Borrow Request.</p>
+  <div class="decks" style="margin-top:12px">${cards.map(({ e, q, ms }) => {
+    const asked = ms.reduce((a, m) => a + ((state.drafts[m.f.id] || {})[m.e] || 0), 0);
+    const forDecks = DECKS.filter(d => d.needs.some(([x]) => x === e)).map(d => d.name).join(" · ");
+    return `<section class="panel fpanel"><div class="panel-h cardhead"><span class="art"></span>
+      <div class="grow"><b><button class="linkish" style="color:inherit;text-decoration:none" data-card="${e}">${esc(ed(e).name)}</button></b> <span class="meta">${esc(label(e))}</span>
+        <div class="meta">You need ${q} · ${esc(forDecks)}</div></div>
+      <span class="${asked >= q ? "pill gold" : "pill"} num">${asked} of ${q} asked</span></div>
+      ${ms.map(m => { const n = (state.drafts[m.f.id] || {})[m.e] || 0; return `<div class="fl"><span class="ini">${initials(m.f.name)}</span><span></span>
+        <div><button class="linkish" data-friend="${m.f.id}">${esc(m.f.name)}</button> <span class="subtle">@${esc(m.f.handle)}</span></div>
+        <span class="tags">${tags(m.spare, m.inDeck, m.exact, m.e)}</span>
+        ${n ? `<div class="stepper"><button data-step="${m.f.id}|${m.e}|-1" aria-label="One fewer">−</button><span class="num">${n}</span><button data-step="${m.f.id}|${m.e}|1" aria-label="One more">+</button></div>`
+            : `<button class="btn small" data-add="${m.f.id}|${m.e}">Ask</button>`}</div>`; }).join("")}</section>`;
+  }).join("")}</div>${missing ? `<p class="muted" style="margin-top:12px">${missing} card${missing === 1 ? "" : "s"} you need ${missing === 1 ? "isn't" : "aren't"} available from any Friend.</p>` : ""}`;
+}
+
+// ---------- Variant C: Friends page ----------
+function friendList() {
+  return `<h1>Friends</h1><p class="lede">${FRIENDS.length} Friends</p>
+  <div class="friendcards">${FRIENDS.map(f => { const c = friendCoverage(f); return `<button class="friendcard" data-friend="${f.id}">
+    <div class="fhead"><span class="ini lg">${initials(f.name)}</span><div><b>${esc(f.name)}</b><div class="subtle">@${esc(f.handle)}</div></div></div>
+    <div class="meta">${c ? `<span class="pill gold">Has ${c} card${c === 1 ? "" : "s"} you need</span>` : "Nothing on your Want List"}</div></button>`; }).join("")}</div>`;
+}
+
+// ---------- One Friend's Collection (all variants) ----------
+function friendView() {
+  const f = friend(state.friend);
+  const t = wantTotals();
+  const wanted = (e) => Object.keys(t).some(w => w === e || (state.alt && ed(w).group === ed(e).group));
+  let cards = Object.entries(f.cards).map(([e, [s, d]]) => ({ e, s, d, want: wanted(e) }));
+  if (state.friendFilter === "want") cards = cards.filter(c => c.want);
+  if (state.friendSearch) cards = cards.filter(c => ed(c.e).name.toLowerCase().includes(state.friendSearch.toLowerCase()));
+  cards.sort((a, b) => (b.want - a.want) || ((b.s > 0) - (a.s > 0)));
+  const back = state.variant === "C" ? `<a data-tab="friends">‹ Friends</a>` : `<a data-nav="${state.variant === "B" || state.variant === "D" ? "fromFriends" : "want"}">‹ Want List</a>`;
+  const dr = state.drafts[f.id] || {};
+  return `<div class="crumbs">${back}</div>
+  <div class="fhead"><span class="ini lg">${initials(f.name)}</span><div><h1>${esc(f.name)}</h1><div class="subtle">@${esc(f.handle)}</div></div></div>
+  <div class="filter" style="align-items:center">
+    <button class="chip" aria-pressed="${state.friendFilter === "want"}" data-ffilter="want">On my Want List</button>
+    <button class="chip" aria-pressed="${state.friendFilter === "all"}" data-ffilter="all">All cards</button>
+    <input class="search" placeholder="Search ${esc(f.name)}'s cards" value="${esc(state.friendSearch)}" id="fsearch">
+  </div>
+  <div class="gallery">${cards.map(c => `<div class="tile ${c.want ? "want" : ""}"><span class="art"></span>
+    <div class="name ellip">${esc(ed(c.e).name)}</div><div class="meta">${esc(label(c.e))}</div>
+    <div>${tags(c.s, c.d, true, c.e)}${c.want ? ` <span class="pill gold">Want</span>` : ""}</div>
+    ${dr[c.e] ? `<div class="stepper"><button data-step="${f.id}|${c.e}|-1">−</button><span>${dr[c.e]}</span><button data-step="${f.id}|${c.e}|1">+</button></div>`
+              : `<button class="btn small" data-add="${f.id}|${c.e}">Ask to borrow</button>`}</div>`).join("") || `<p class="muted">No cards match.</p>`}</div>`;
+}
+
+// ---------- Catalog (card popup with Friends who have this) ----------
+function catalog() {
+  return `<h1>Catalog</h1><p class="lede">Select a card to see which Friends have it.</p>
+  <div class="gallery">${Object.keys(ED).map(e => `<button class="tile" style="cursor:pointer;text-align:left" data-card="${e}"><span class="art"></span><div class="name ellip">${esc(ed(e).name)}</div><div class="meta">${esc(label(e))}</div></button>`).join("")}</div>`;
+}
+function cardPopup(e) {
+  const ms = matches(e);
+  return `<div class="scrim" data-close><div class="dialog wide popup" role="dialog" aria-label="${esc(ed(e).name)}">
+    <div class="fhead"><span class="art big"></span><div><h2>${esc(ed(e).name)}</h2><div class="meta">${esc(label(e))}</div><div class="num">${fmt(ed(e).price)}</div></div></div>
+    <div><b>Friends who have this</b>${ms.length ? ms.map(m => `<div class="cline"><span class="ini">${initials(m.f.name)}</span>
+      <div><button class="linkish" data-friend="${m.f.id}">${esc(m.f.name)}</button> <span class="subtle">@${esc(m.f.handle)}</span><div>${tags(m.spare, m.inDeck, m.exact, m.e)}</div></div>
+      <button class="btn small" data-add="${m.f.id}|${m.e}">Ask to borrow</button></div>`).join("") : `<p class="muted">None of your Friends have this card.</p>`}</div>
+    <div class="row"><button class="btn" data-close>Close</button></div></div></div>`;
+}
+
+// ---------- Borrow Request composer ----------
+function composer(fid) {
+  const f = friend(fid); const d = state.drafts[fid] || {};
+  const lines = Object.entries(d).filter(([, q]) => q > 0);
+  return `<div class="scrim"><div class="dialog wide" role="dialog" aria-label="Borrow Request">
+    <h2>Borrow Request to ${esc(f.name)}</h2>
+    <p class="muted">${esc(f.name)} can accept all of it, part of it, or decline.</p>
+    <div>${lines.map(([e, q]) => `<div class="cline"><span class="art"></span>
+      <div><div class="name">${esc(ed(e).name)}</div><div class="meta">${esc(label(e))} · ${tags(...f.cards[e], true, e)}</div></div>
+      <div class="stepper"><button data-step="${fid}|${e}|-1" aria-label="One fewer">−</button><span class="num">${q}</span><button data-step="${fid}|${e}|1" aria-label="One more">+</button></div></div>`).join("")}</div>
+    <label class="field">For Deck<select><option>Charizard ex</option><option>Gardevoir ex</option><option>Miraidon ex</option><option>No Deck (they go to Unsorted)</option></select></label>
+    <label class="field">Return by (optional)<input type="date"></label>
+    <div class="row"><button class="btn quiet" data-discard="${fid}">Discard</button><button class="btn" data-close>Keep editing</button><button class="btn primary" data-send="${fid}">Send Borrow Request</button></div>
+  </div></div>`;
+}
+
+// ---------- Render and events ----------
+let overlay = "";
+function render() {
+  let inner, title;
+  if (state.tab === "catalog") { inner = catalog(); title = "Catalog"; }
+  else if (state.view === "friend") { inner = friendView(); title = friend(state.friend).name; }
+  else if (state.tab === "friends") { inner = friendList(); title = "Friends"; }
+  else if (state.view === "fromFriends" && state.variant === "B") { inner = fromFriends(); title = "Want List"; }
+  else if (state.view === "fromFriends" && state.variant === "D") { inner = fromFriendsByCard(); title = "Want List"; }
+  else if (state.view === "decksIndex") { inner = `<div class="filter" style="margin-top:0"><div class="seg"><button aria-pressed="true">My Decks</button><button data-nav="want">Want List</button></div></div><div class="placeholder">My Decks (not part of this prototype)</div>`; title = "Decks"; }
+  else { inner = wantList(); title = "Want List"; }
+  document.getElementById("app").innerHTML = shell(inner, title);
+  document.getElementById("layer").innerHTML = overlay;
+  document.getElementById("stage").classList.toggle("framed", state.framed);
+  document.getElementById("vlabel").textContent = `${state.variant} (${VARIANTS[state.variant]})`;
+  document.getElementById("frame").setAttribute("aria-pressed", state.framed);
+  document.getElementById("alt").setAttribute("aria-pressed", state.alt);
+  const s = document.getElementById("fsearch");
+  if (s) s.oninput = (ev) => { state.friendSearch = ev.target.value; const pos = ev.target.selectionStart; render(); const n = document.getElementById("fsearch"); n.focus(); n.setSelectionRange(pos, pos); };
+}
+function syncUrl() {
+  const p = new URLSearchParams({ variant: state.variant });
+  if (state.framed) p.set("frame", "phone");
+  if (!state.alt) p.set("alt", "off");
+  history.replaceState(null, "", "?" + p);
+}
+function toast(msg) {
+  const t = document.createElement("div"); t.className = "toast"; t.textContent = msg;
+  document.body.appendChild(t); setTimeout(() => t.remove(), 2600);
+}
+function setVariant(dir) {
+  const i = (KEYS.indexOf(state.variant) + dir + KEYS.length) % KEYS.length;
+  state.variant = KEYS[i];
+  if (state.tab === "friends" && state.variant !== "C") state.tab = "decks";
+  if (state.view === "fromFriends" && state.variant !== "B" && state.variant !== "D") state.view = "want";
+  if (state.view === "friendList") state.view = "want";
+  syncUrl(); render();
+}
+document.addEventListener("click", (ev) => {
+  const el = ev.target.closest("[data-tab],[data-nav],[data-add],[data-review],[data-step],[data-send],[data-discard],[data-close],[data-friend],[data-card],[data-askall],[data-toggle],[data-ffilter]");
+  if (!el) return;
+  const ds = el.dataset;
+  if ("close" in ds && ev.target.closest(".dialog") && !ev.target.matches("button[data-close]")) return;
+  if (ds.tab) { state.tab = ds.tab; state.view = ds.tab === "friends" ? "friendList" : "want"; overlay = ""; }
+  else if (ds.nav) { state.tab = "decks"; state.view = ds.nav; }
+  else if (ds.add) { const [f, e] = ds.add.split("|"); addToDraft(f, e); toast(`Added to your Borrow Request to ${friend(f).name}`); return; }
+  else if (ds.review) { overlay = composer(ds.review); }
+  else if (ds.step) { const [f, e, n] = ds.step.split("|"); const d = state.drafts[f]; d[e] = Math.max(0, Math.min(avail(friend(f), e), (d[e] || 0) + Number(n))); if (overlay) overlay = draftCount(f) ? composer(f) : ""; }
+  else if (ds.send) { const f = friend(ds.send); state.sent.push({ to: f.id, n: draftCount(f.id) }); delete state.drafts[ds.send]; overlay = ""; render(); toast(`Borrow Request sent to ${f.name}`); return; }
+  else if (ds.discard) { delete state.drafts[ds.discard]; overlay = ""; }
+  else if ("close" in ds) { overlay = ""; }
+  else if (ds.friend) { state.friend = ds.friend; state.view = "friend"; state.friendFilter = "want"; state.friendSearch = ""; overlay = ""; if (state.tab === "catalog") state.tab = state.variant === "C" ? "friends" : "decks"; }
+  else if (ds.card) { overlay = cardPopup(ds.card); }
+  else if (ds.askall) {
+    const f = friend(ds.askall); const t = wantTotals(); const d = state.drafts[f.id] = {};
+    Object.entries(t).forEach(([want, q]) => { let left = q; Object.keys(f.cards).forEach(e => { if (left > 0 && (e === want || (state.alt && ed(e).group === ed(want).group))) { const take = Math.min(left, avail(f, e)); d[e] = (d[e] || 0) + take; left -= take; } }); });
+    overlay = composer(f.id);
+  }
+  else if (ds.toggle) { const [f, e, q] = ds.toggle.split("|"); const d = state.drafts[f] = state.drafts[f] || {}; d[e] = d[e] ? 0 : Number(q); }
+  else if (ds.ffilter) { state.friendFilter = ds.ffilter; }
+  render();
+});
+document.getElementById("prev").onclick = () => setVariant(-1);
+document.getElementById("next").onclick = () => setVariant(1);
+document.getElementById("frame").onclick = () => { state.framed = !state.framed; syncUrl(); render(); };
+document.getElementById("alt").onclick = () => { state.alt = !state.alt; syncUrl(); render(); };
+document.addEventListener("keydown", (ev) => {
+  if (ev.target.closest("input,textarea,select,[contenteditable]")) return;
+  if (ev.key === "ArrowLeft") setVariant(-1);
+  if (ev.key === "ArrowRight") setVariant(1);
+  if (ev.key === "Escape" && overlay) { overlay = ""; render(); }
+});
+syncUrl(); render();
+</script>
+</body>
+</html>
