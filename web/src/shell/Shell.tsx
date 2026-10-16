@@ -20,6 +20,7 @@ import { Dialog } from "../ui/Dialog";
 import { Icon } from "../ui/Icon";
 import { Menu, type MenuItem } from "../ui/Menu";
 import { ToastProvider, useToast } from "../ui/Toast";
+import { FriendsButton, FriendsProvider } from "../social/FriendsDrawer";
 import { AccountSheetProvider, Avatar, SHEET_BUTTON } from "./AccountSheet";
 import { PhoneHeaderActions } from "./HeaderActions";
 import {
@@ -65,15 +66,17 @@ type Props = {
 };
 
 /**
- * The persistent app shell (#162): desktop header with tabs and the avatar menu, the phone header with the
- * account avatar (#246), bottom tab bar and More sheet, and the page area. Switching pages swaps only the page area. A kept-mounted
+ * The persistent app shell (#162): desktop header with tabs, the Friends button (#247) and the avatar menu, the
+ * phone header with the Friends button and the account avatar (#246), bottom tab bar and More sheet, and the page area. Switching pages swaps only the page area. A kept-mounted
  * page stays in the document, hidden, after its first visit, and is shown again with its scroll position;
  * other pages mount on each visit. A reload starts fresh.
  */
 export function Shell(props: Props) {
   return (
     <ToastProvider>
-      <ShellFrame {...props} />
+      <FriendsProvider>
+        <ShellFrame {...props} />
+      </FriendsProvider>
     </ToastProvider>
   );
 }
@@ -229,7 +232,8 @@ function ShellFrame({
               </button>
             ))}
           </nav>
-          <div className="ml-auto">
+          <div className="ml-auto flex items-center gap-2">
+            <FriendsButton />
             <Menu
               label="Account"
               triggerClassName="inline-flex size-8 cursor-pointer items-center justify-center rounded-round border border-accent-border bg-accent-fill p-0 text-control font-semibold text-accent-strong"

@@ -50,6 +50,16 @@ Review each `recovery_conflict` target in the maintainer queue; there is no bulk
 
 Check progress with the owner operations status: `catalog_outbox_pending` returns to 0 and `catalog_outbox_oldest_seconds` is empty when delivery is complete. A row stuck with `StoreAhead` or `RevisionValueMismatch` means the store holds a record PostgreSQL does not explain; run the rebuild.
 
+## Rebuilding Invite Link records
+
+The signed-out Invite Link page reads one record per collector's current link from the same records store (`docs/public-projections.md`, "Invite Link records"). After any of R1 to R3 above, rebuild them too, with the same `DATABASE_URL` and `PUBLIC_PROJECTION_DIR`:
+
+```sh
+.venv/bin/python scripts/rebuild_invite_records.py
+```
+
+It queues a write of every current Invite Link record and drains the queue, so it is safe to repeat. It exits 1, with a fixed message, when the database or the store is unreachable or the drain could not finish; run it again. Until it finishes, a link whose record is missing shows "This link no longer works" signed out, while signed-in visitors, who read PostgreSQL, are unaffected.
+
 ## Local proof
 
 2026-10-06, local PostgreSQL on port 55432, deterministic small private fixture, disposable `tcg_recovery_*` databases. Run with an administrative connection injected as `RECOVERY_TEST_DATABASE_URL`:
