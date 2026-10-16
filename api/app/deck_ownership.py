@@ -15,7 +15,9 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
+from .copy_allocation import held_for_line, spare_rule
 from .deck_list_display import CardKind, TrainerType, read_line_display
+from .social import counts
 
 
 class ElsewhereLocation(BaseModel):
@@ -91,11 +93,21 @@ def held_in(conn, user_id: str, deck_id: UUID) -> dict[UUID, int]:
         'SELECT edition_id,quantity FROM holding WHERE owner_id=%s AND location_id=%s', (user_id, deck_id))}
 
 
+# The one Deck ``beyond_list`` asks the Spare Copy rule about; any key would do.
+_DECK = UUID(int=0)
+
+
 def beyond_list(holdings: dict[UUID, int], listed: dict[UUID, int]) -> list[tuple[UUID, int]]:
     """The Deck's surplus: (Edition, copies held beyond its Deck List line), in Edition order; every copy of an Edition
-    with no line. The deck builder's Surplus group and Replace's preview (``import_replace``) both use this rule."""
-    return [(edition, quantity - listed.get(edition, 0))
-            for edition, quantity in sorted(holdings.items()) if quantity > listed.get(edition, 0)]
+    with no line. The deck builder's Surplus group and Replace's preview (``import_replace``) both use this rule, the
+    Spare Copy rule's ``beyond`` for the one Deck."""
+    found = []
+    for edition, quantity in sorted(holdings.items()):
+        rule = spare_rule({_DECK: quantity}, {_DECK: listed[edition]} if edition in listed else {})
+        extra = rule.beyond.get(_DECK, 0)
+        if extra:
+            found.append((edition, extra))
+    return found
 
 
 def surplus_holdings(beyond: list[tuple[UUID, int]], versions: dict[UUID, int],
@@ -141,10 +153,11 @@ def read_ownership(conn, user_id: str, deck_id: UUID) -> DeckOwnership:
           WHERE l.owner_id=%s AND l.deck_id<>%s AND l.edition_id=ANY(%s)
           ORDER BY l.edition_id,lower(d.name),d.id""", (user_id, deck_id, list(elsewhere))):
             others.setdefault(row['edition_id'], []).append(row)
+    reserved = counts.reserved_counts(conn, user_id, list(elsewhere)) if elsewhere else {}
     owned, competition = [], []
     for row in lines:
         edition, quantity = row['edition_id'], row['quantity']
-        in_deck = min(quantity, row['held'])
+        in_deck = held_for_line(quantity, row['held'])
         need = quantity - in_deck
         places = elsewhere.get(edition, [])
         outside = sum(place['quantity'] for place in places)
@@ -161,16 +174,17 @@ def read_ownership(conn, user_id: str, deck_id: UUID) -> DeckOwnership:
         # double counting only if spare copies can serve all of them at once.
         held_at = {place['location_id']: place['quantity'] for place in places}
         total = row['held'] + outside
-        claimed, counted, decks = 0, fetchable, []
+        lines_naming = {deck_id: quantity, **{other['deck_id']: other['quantity'] for other in others.get(edition, [])}}
+        rule = spare_rule({**held_at, deck_id: row['held']}, lines_naming, reserved.get(edition, 0))
+        counted, decks = fetchable, []
         for other in others.get(edition, []):
             held = held_at.get(other['deck_id'], 0)
-            covered = min(other['quantity'], held)
-            counts = min(other['quantity'] - covered, total - held)
-            claimed += covered
-            counted += counts
+            covered = rule.own[other['deck_id']]
+            counting = min(other['quantity'] - covered, total - held)
+            counted += counting
             decks.append(CompetingDeck(deck_id=other['deck_id'], name=other['name'], in_deck=str(covered),
-                                       elsewhere=str(counts)))
-        spare = outside - claimed
+                                       elsewhere=str(counting)))
+        spare = rule.spare
         if counted > spare:
             competition.append(CompetitionWarning(edition_id=edition, spare=str(spare),
                                                   counted_elsewhere=str(counted), decks=decks))

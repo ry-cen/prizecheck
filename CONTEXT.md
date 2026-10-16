@@ -80,9 +80,13 @@ _Avoid_: Main format, selected format, default format
 Creating a Deck, or replacing a Deck's Deck List, from a pasted decklist or a Published Deck, through a review in which every line is matched to Card Editions or dropped before anything is saved. Owned copies are used first as the collector's counting setting allows: of the named Card Printing only, or of any Card Printing in its Reprint Group.
 _Avoid_: Deck upload, list merge, sync
 
-**Pick List**:
-The cards in a Deck's Deck List that are stored elsewhere in the Collection, each with a suggested source Location. Confirming a pick moves those copies into the Deck.
+**Deck Pick List**:
+The cards in a Deck's Deck List that are stored elsewhere in the Collection, each with a suggested source Location. Confirming a pick moves those copies into the Deck. Where no Loan is involved it is simply the Pick List.
 _Avoid_: Pull list, retrieval list
+
+**Loan Pick List**:
+The suggested source Location for each copy a Loan promises, Spare Copies first. A pick whose source no longer holds enough copies is out of date and is shown with a new suggestion.
+_Avoid_: Deck Pick List, pull list
 
 **Want List**:
 The Card Editions a collector's Decks name in their Deck Lists but can't get from the Collection, grouped by Deck with a combined total. It is derived from Deck Lists and is never edited directly. The collector's counting setting decides whether Decks are counted as all built at once (spare copies go to the oldest Deck first) or one at a time.
@@ -157,7 +161,7 @@ A Location whose Holdings a collector's Friends cannot see, together with every 
 _Avoid_: Private Location, locked binder
 
 **Loan**:
-An agreement for one collector, the lender, to let a Friend, the borrower, have some of the lender's copies. A Loan is accepted, which promises a number of the lender's copies and gives the lender a Pick List of where to take them from; then handed over, when the copies leave the lender's Locations; then returned, when they go back. Each side confirms the handover and the return for their own inventory, and a step is complete once both have. Copies are reserved once the lender has said yes: on accepting a Borrow Request or on sending a Lend Offer. While lent, copies sit in no Location; the Loan remembers where they came from. It may carry a return-by date and is overdue after it. The lender still owns lent copies. A Loan never transfers ownership; giving or trading cards is not a Loan.
+An agreement for one collector, the lender, to let a Friend, the borrower, have some of the lender's copies. A Loan is accepted, which promises a number of the lender's copies and gives the lender a Loan Pick List of where to take them from; then handed over, when the copies leave the lender's Locations; then returned, when they go back. Each side confirms the handover and the return for their own inventory, and a step is complete once both have. Copies are reserved once the lender has said yes: on accepting a Borrow Request or on sending a Lend Offer. While lent, copies sit in no Location; the Loan remembers where they came from. It may carry a return-by date and is overdue after it. The lender still owns lent copies. A Loan never transfers ownership; giving or trading cards is not a Loan.
 _Avoid_: Trade, gift, transfer
 
 **Borrow Request**:
