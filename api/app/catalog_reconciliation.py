@@ -190,7 +190,7 @@ def replacements(user_id: str=Depends(verified_user)):
 @router.post('/api/holdings/reassign',response_model=ReassignResult)
 def reassign(command: ReassignHolding,user_id: str=Depends(verified_user)):
     import hashlib,json
-    from .moves import lock_owner,leaf,quantity,MAX_QUANTITY,check_promises
+    from .moves import leaf,quantity,MAX_QUANTITY,check_promises
     from .loan_inventory import follow_replacement,replacement_parties
     from .social.owners import lock_owners
     amount=quantity(command.quantity)
@@ -198,12 +198,14 @@ def reassign(command: ReassignHolding,user_id: str=Depends(verified_user)):
     digest=hashlib.sha256(json.dumps({'action':'reassign',**payload},sort_keys=True).encode()).hexdigest()
     with connect() as conn,conn.transaction():
         # Open Loans naming the Edition follow it (spec item 15): every owner they involve is locked in ascending
-        # user_id, the collector's own row FOR UPDATE as any inventory command takes it, the others' as Loan steps do.
+        # user_id FOR NO KEY UPDATE, as the Loan steps lock them (owners.lock_owners), the collector's own row too. It
+        # still waits on the collector's own inventory commands, which take it FOR UPDATE, but not on the key share
+        # another collector's Borrow Request or Lend Offer takes on it when it names the collector, while holding its
+        # own owner row: FOR UPDATE here closed that cycle.
         parties=replacement_parties(conn,user_id,command.edition_id)
-        revision=None
-        for owner in sorted(parties|{user_id}):
-            if owner==user_id:revision=lock_owner(conn,user_id)
-            else:lock_owners(conn,owner)
+        conn.execute('INSERT INTO inventory_owner(user_id) VALUES (%s) ON CONFLICT DO NOTHING',(user_id,))
+        lock_owners(conn,user_id,*parties)
+        revision=conn.execute('SELECT revision FROM inventory_owner WHERE user_id=%s',(user_id,)).fetchone()['revision']
         conn.execute('DELETE FROM mutation_request WHERE owner_id=%s AND expires_at<=now()',(user_id,))
         prior=conn.execute('''SELECT mr.command_digest,mr.result_revision,r.copy_count FROM mutation_request mr
           LEFT JOIN move_response r ON r.owner_id=mr.owner_id AND r.request_key=mr.request_key

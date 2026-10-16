@@ -11,7 +11,8 @@ DECLARE
   found text;
 BEGIN
   FOR found IN SELECT conname FROM pg_constraint
-      WHERE conrelid = 'loan_notice_seen'::regclass AND contype = 'c' AND conname <> 'loan_notice_seen_kind' LOOP
+      WHERE conrelid = 'loan_notice_seen'::regclass AND contype = 'c' AND conname <> 'loan_notice_seen_kind'
+        AND pg_get_constraintdef(oid) LIKE '%kind%' LOOP
     EXECUTE format('ALTER TABLE loan_notice_seen DROP CONSTRAINT %I', found);
   END LOOP;
 END $$;

@@ -6,9 +6,12 @@ it: lines, picks, return lines and Borrowed Copies, merged with any the Loan has
 lender's handover only the lender's own reassignment moves a Loan, and a Loan reserving copies moves only when the
 lender's copies of the replacement then cover every promise in it; after the handover either side's does. Each Loan
 moved changes its revision, the other side's inventory revision moves, and no Location or Deck crosses between sides.
+The reassignment locks every owner FOR NO KEY UPDATE, its own too, so another collector's request or offer naming the
+reassigner, holding that collector's own row, never deadlocks with it.
 """
 import json
 import os
+import time
 from concurrent.futures import ThreadPoolExecutor
 from uuid import uuid4
 
@@ -183,3 +186,80 @@ def test_a_reassignment_racing_the_other_sides_step_on_the_loan_waits_and_never_
     assert view(misty, loan)['pending_return']['lines'] == [{'edition_id': fixed, 'copies': '2'}]
     ok(confirm_return(misty, loan))
     assert holding(misty, binders['Binder'], fixed)['quantity'] == '3'
+
+
+def _held(table, event, condition, seconds):
+    """An injected trigger that sleeps ``seconds`` in each ``table`` row ``event`` meeting ``condition``. Returns a call
+    that drops it."""
+    suffix = uuid4().hex
+    function_name, trigger_name = f'held_{suffix}', f'held_trigger_{suffix}'
+    with psycopg.connect(os.environ['DATABASE_URL']) as conn:
+        conn.execute(f"CREATE FUNCTION {function_name}() RETURNS trigger LANGUAGE plpgsql AS $$ "
+                     f"BEGIN PERFORM pg_sleep({seconds}); RETURN NULL; END $$")
+        conn.execute(f"""CREATE TRIGGER {trigger_name} AFTER {event} ON {table} FOR EACH ROW
+          WHEN ({condition}) EXECUTE FUNCTION {function_name}()""")
+
+    def drop():
+        with psycopg.connect(os.environ['DATABASE_URL']) as conn:
+            conn.execute(f'DROP TRIGGER {trigger_name} ON {table}')
+            conn.execute(f'DROP FUNCTION {function_name}()')
+    return drop
+
+
+def _waiting_on_a_lock(watch, submitted):
+    """Waits until a session waits on a row lock."""
+    deadline = time.monotonic() + 10
+    while watch.execute("""SELECT count(*) FROM pg_stat_activity
+        WHERE datname = current_database() AND wait_event_type = 'Lock'""").fetchone()[0] < 1:
+        assert time.monotonic() < deadline and not any(call.done() for call in submitted), 'nothing waited on a lock'
+        time.sleep(0.01)
+
+
+def test_a_reassignment_racing_the_borrowers_edit_and_resend_waits_and_never_deadlocks(store):
+    # Ash's id sorts first, and Ash lends. Misty's Edit and resend holds her owner row and, asleep, the earlier
+    # request's row; then it inserts a request naming Ash, whose key check shares Ash's row. Ash's reassignment holds
+    # his own row and waits on Misty's: it holds his FOR NO KEY UPDATE, which the key check doesn't wait on.
+    ash, misty = pair(ordered=True)
+    iono, fixed = editions()
+    binder = place(ash, 'Binder')
+    hold(ash, binder, iono, 2)
+    earlier = sent(misty, ash, [(iono, 1)])
+    drop = _held('loan', 'UPDATE', f"NEW.id = '{earlier['id']}'", 2)
+    try:
+        with ThreadPoolExecutor(max_workers=2) as executor, \
+                psycopg.connect(os.environ['DATABASE_URL'], autocommit=True) as watch:
+            resent = executor.submit(call, 'POST', '/api/loans', misty, {
+                'lender_id': ash, 'lines': [{'edition_id': iono, 'quantity': '1'}], 'replaces': earlier['id'],
+                'deck_id': None, 'idempotency_key': str(uuid4())})
+            _asleep(watch, 1, [resent])
+            moved = executor.submit(reassign, ash, binder, iono, fixed, 1)
+            _waiting_on_a_lock(watch, [resent, moved])
+            resent, moved = resent.result(), moved.result()
+    finally:
+        drop()
+    assert resent.status_code == 201, resent.text
+    assert moved.status_code == 200, moved.text
+    # The reassignment read the Loans once Misty's request was in, and carried it.
+    assert lines(misty, resent.json()) == [(fixed, '1', '0')]
+    assert view(misty, earlier)['closed_reason'] == 'withdrawn'
+
+
+def test_a_reassignment_never_deadlocks_with_a_request_or_offer_naming_the_reassigner(store):
+    # Sending a Borrow Request or a Lend Offer, in the statements' order: the sender's own owner row first
+    # (lock_owners), then the loan row naming the other collector, whose key check shares that collector's row. Ash's
+    # reassignment holds his own row while it waits on Misty's; Misty's key share of his still goes through.
+    ash, misty = pair(ordered=True)
+    iono, fixed = editions()
+    binder = place(ash, 'Binder')
+    hold(ash, binder, iono, 2)
+    sent(misty, ash, [(iono, 1)])
+    with ThreadPoolExecutor(max_workers=1) as executor, \
+            psycopg.connect(os.environ['DATABASE_URL']) as sender, \
+            psycopg.connect(os.environ['DATABASE_URL'], autocommit=True) as watch:
+        sender.execute('SELECT 1 FROM inventory_owner WHERE user_id=%s FOR NO KEY UPDATE', (misty,))
+        moved = executor.submit(reassign, ash, binder, iono, fixed, 1)
+        _waiting_on_a_lock(watch, [moved])
+        sender.execute('SELECT 1 FROM inventory_owner WHERE user_id=%s FOR KEY SHARE', (ash,))
+        sender.commit()
+        moved = moved.result()
+    assert moved.status_code == 200, moved.text
