@@ -146,6 +146,9 @@ export type GalleryTotals = {
   holdings: number;
   editions: number;
   copies: number;
+  /** All owned, unfiltered: copies lent to Friends (social network #253), still the collector's but in no Location,
+   * so in no tile. 0 for any other view. */
+  lent: number;
 };
 
 /** loading: no page yet. partial: some pages shown, more loading or a later page failed. */

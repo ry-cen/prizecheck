@@ -104,9 +104,9 @@ export function CopySheet({
             <ul className="m-0 flex list-none flex-col gap-1 p-0">
               <li>
                 {line.here.toString()} in this Deck
-                {line.loans.length > 0 && (
+                {line.reservedFor.length > 0 && (
                   <ul className="m-0 mt-1 flex list-none flex-col gap-0.5 pl-4 text-meta text-text-muted">
-                    {line.loans.map((note) => (
+                    {line.reservedFor.map((note) => (
                       <li key={note}>{note}</li>
                     ))}
                   </ul>
@@ -124,7 +124,17 @@ export function CopySheet({
                   </ul>
                 )}
               </li>
-              <li>{line.missing.toString()} not owned</li>
+              {line.lent > 0n && (
+                <li>
+                  {line.lent.toString()} lent out
+                  <ul className="m-0 mt-1 flex list-none flex-col gap-0.5 pl-4 text-meta text-text-muted">
+                    {line.lentTo.map((note) => (
+                      <li key={note}>{note}</li>
+                    ))}
+                  </ul>
+                </li>
+              )}
+              <li>{(line.missing - line.lent).toString()} not owned</li>
             </ul>
           </section>
           {editing && (

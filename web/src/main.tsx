@@ -267,6 +267,7 @@ function App() {
             onOpenDeck={(id) =>
               navigate(`${pageDef("decks").path}/${encodeURIComponent(id)}`)
             }
+            onOpenLoan={(id) => navigate(loanPath(id))}
           />
         );
       case "decks": {

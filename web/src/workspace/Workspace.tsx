@@ -8,6 +8,7 @@ import React, {
 import { Menu as MenuIcon, Plus } from "lucide-react";
 import type { AddedCards } from "../catalog/useAddToast";
 import { getLocationTree, type TreeNode } from "../location_generated";
+import { LentOutDialog } from "../loans/LentOutDialog";
 import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
 import { SearchField } from "../ui/SearchField";
@@ -71,12 +72,23 @@ type Props = {
   onOpenDeck: (deckId: string) => void;
   /** Opens Collection Import (#226): Import… in the header, and Import from another tracker on an empty Collection. */
   onImport: () => void;
+  /** Opens a Loan on the Loans tab (/loans/<id>), from the Lent out list (social network #253). */
+  onOpenLoan: (loanId: string) => void;
 };
 
 /** The collector workspace (Collection, inside the app shell): the phone header, the Location sidebar
  * (desktop) or drawer (phone), and the gallery area. The shell draws the desktop header and the tabs. */
-export function Workspace({ userId, active, onOpenDeck, onImport }: Props) {
+export function Workspace({
+  userId,
+  active,
+  onOpenDeck,
+  onImport,
+  onOpenLoan,
+}: Props) {
   const [nodes, setNodes] = useState<TreeNode[]>([]);
+  // Copies lent to Friends (#253): the tree's Lent out entry. A mocked tree may leave it out.
+  const [lentCopies, setLentCopies] = useState("0");
+  const [lentOpen, setLentOpen] = useState(false);
   const [ownerRevision, setOwnerRevision] = useState<number | null>(null);
   const [treeState, setTreeState] = useState<"loading" | "ready" | "error">(
     "loading"
@@ -123,6 +135,7 @@ export function Workspace({ userId, active, onOpenDeck, onImport }: Props) {
       const result = await getLocationTree();
       if (generation !== treeGeneration.current) return;
       setNodes(result.locations);
+      setLentCopies(result.lent_copies ?? "0");
       setOwnerRevision(result.owner_revision);
       setTreeState("ready");
     } catch {
@@ -180,6 +193,7 @@ export function Workspace({ userId, active, onOpenDeck, onImport }: Props) {
     setCreateFor(undefined);
     setManageOpen(false);
     setAdding(null);
+    setLentOpen(false);
   }, [active, closeDetails]);
   // Ticket 107: Move, Inventory Removal and Undo, and the desktop tile drag.
   const actions = useInventoryActions({
@@ -367,6 +381,13 @@ export function Workspace({ userId, active, onOpenDeck, onImport }: Props) {
         onAddChild={openCreate}
         drop={drop}
         touch={idPrefix === "drawer"}
+        lent={{
+          copies: lentCopies,
+          onOpen: () => {
+            setDrawerOpen(false);
+            setLentOpen(true);
+          },
+        }}
       />
     );
 
@@ -457,6 +478,8 @@ export function Workspace({ userId, active, onOpenDeck, onImport }: Props) {
               <p className="m-0 text-meta text-text-subtle tabular-nums">
                 {plural(gallery.totals.copies, "copy", "copies")} ·{" "}
                 {plural(gallery.totals.editions, "edition", "editions")}
+                {gallery.totals.lent > 0 &&
+                  ` · ${gallery.totals.lent} lent out`}
               </p>
             )}
             <Button
@@ -662,6 +685,12 @@ export function Workspace({ userId, active, onOpenDeck, onImport }: Props) {
           }}
         />
       )}
+      <LentOutDialog
+        open={active && lentOpen}
+        onClose={() => setLentOpen(false)}
+        onOpenLoan={onOpenLoan}
+        returnFocus={mobile ? drawerOpener : undefined}
+      />
       {selection.details && (
         <DetailsSheet
           card={selection.details}
