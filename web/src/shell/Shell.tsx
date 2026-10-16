@@ -74,7 +74,7 @@ type Props = {
 export function Shell(props: Props) {
   return (
     <ToastProvider>
-      <FriendsProvider>
+      <FriendsProvider onPrivacy={() => props.onNavigate("settings")}>
         <ShellFrame {...props} />
       </FriendsProvider>
     </ToastProvider>
