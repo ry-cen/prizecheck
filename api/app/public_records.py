@@ -128,6 +128,7 @@ _FAMILIES = (
     ('admission', re.compile(r'admission:([A-Za-z0-9_.:-]{1,200})'), False),
     ('lease', re.compile(r'lease:([A-Za-z0-9_.:-]{1,200})'), False),
     ('backoff', re.compile(r'backoff:([A-Za-z0-9_.:-]{1,200})'), False),
+    ('invite', re.compile(r'invite:([0-9a-f]{64})'), False),
 )
 _REVISIONED = ('quote', 'result', 'fence', 'work')
 
@@ -192,6 +193,14 @@ def fence_key(edition_ref, mapping_revision):
 def work_key(edition_ref, mapping_revision):
     """In-flight source work for one Edition/mapping revision (coalescing)."""
     return 'work:' + _ref(edition_ref) + ':' + _revision(mapping_revision)
+
+
+def invite_key(token_hash):
+    """The signed-out Invite Link page's record (social network #246): the Display Name, keyed by the sha256 (hex) of
+    the link's token, so the store never holds a token."""
+    if not isinstance(token_hash, str) or not _HEX64.fullmatch(token_hash):
+        raise ValueError('invalid invite token hash')
+    return 'invite:' + token_hash
 
 
 def admission_key(scope):

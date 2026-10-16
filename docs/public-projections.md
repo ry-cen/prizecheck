@@ -213,3 +213,13 @@ A records-store outage (`ProjectionUnavailable`) never rolls back PostgreSQL. Th
 ### Recovery
 
 `scripts/backfill_public_catalog.py` (the name is kept) rebuilds the records from PostgreSQL. It first scans the store for the highest stored revision (`store_max`) and for records PostgreSQL does not explain, advances the clock with `greatest(revision, store_max)`, marks each unexplained target `quarantined` or `suspended` with reason `recovery_conflict` at a revision above `store_max`, then re-enqueues and delivers every target. It never initializes the store (run `init_public_records.py` first), exits 1 when the store is unreachable or delivery cannot finish, and a second run writes nothing. See `docs/operations/local-recovery.md` for the R1 to R3 procedures.
+
+## Invite Link records (social network #246)
+
+The signed-out Invite Link page (`/invite/<token>`) reads one record, `invite:<sha256 of the token, hex>`, whose value is `{"display_name": ...}` and nothing else. `GET /api/public/invites/{token}` reads it with a 2-second deadline and never connects to PostgreSQL; the gateway serves it like every `/api/public/` route (no session lookup, `PublicReadLimiter`, GET only). An unknown or replaced token is `404 INVITE_NOT_FOUND`, an unreadable store `503 PUBLIC_PROJECTION_UNAVAILABLE`. The store never holds the token itself, the Handle or the user id. These records sit in the shared records store, not the Deck manifest, so they never move the discovery revision or its cursors.
+
+Migration 100's triggers queue every change in `invite_projection_outbox` in the same transaction: a new link puts its record, a new token removes the old record and puts the new one, a changed Display Name rewrites the record, and a deleted link removes it. `social.profile.drain_invites` applies the queue after a profile command commits, one drain at a time under a transaction-scoped advisory lock, the last write of each record winning, and deletes the rows it wrote. Unlike the catalog drain it keeps its PostgreSQL transaction open during the store writes, bounded by a 3-second deadline. A command whose own record write is still queued answers `503 PROFILE_UNAVAILABLE`; its retry with the same idempotency key replays the stored answer and drains again. Profile reads drain best effort.
+
+### Recovery
+
+Run `scripts/rebuild_invite_records.py` after `init_public_records.py` whenever the records store was lost, re-initialized or restored from an older copy, or PostgreSQL was restored to a point older than the store. It queues a write of every current Invite Link record and drains; a second run writes the same values. It exits 1 when the database or store is unreachable or the drain could not finish; run it again.

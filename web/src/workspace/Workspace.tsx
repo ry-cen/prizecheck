@@ -11,6 +11,7 @@ import { getLocationTree, type TreeNode } from "../location_generated";
 import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
 import { SearchField } from "../ui/SearchField";
+import { PhoneHeaderActions } from "../shell/HeaderActions";
 import { AddCardsGallery } from "./AddCardsGallery";
 import { CorrectionsNotice } from "./CorrectionsNotice";
 import { CreateLocationDialog } from "./CreateLocationDialog";
@@ -402,7 +403,7 @@ export function Workspace({ userId, active, onOpenDeck, onImport }: Props) {
       className="box-border min-h-[calc(100dvh-var(--layout-header-height))] bg-bg font-sans text-body leading-(--line-height) text-text scheme-dark [&_*]:box-border"
     >
       {/* The phone header (the shell draws the desktop one, and the skip link): ☰ for the Location
-          drawer, the page title, then Search and Filters & display. */}
+          drawer, the page title, then Search, Filters & display and the shell's phone header actions (#246). */}
       <header className="box-border hidden h-header items-center gap-2 border-b border-border px-3 phone:flex">
         <Button
           ref={drawerOpener}
@@ -424,6 +425,7 @@ export function Workspace({ userId, active, onOpenDeck, onImport }: Props) {
           open={filtersDrawerOpen}
           onOpen={() => setFiltersDrawerOpen(true)}
         />
+        <PhoneHeaderActions />
       </header>
       <div className="grid min-h-[calc(100dvh-var(--layout-header-height))] grid-cols-[var(--layout-sidebar-width)_minmax(0,1fr)] phone:block">
         <aside
