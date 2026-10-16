@@ -122,8 +122,12 @@ test("Block ends the friendship and hides the blocker, and Settings › Privacy 
     `Misty W @${mistyHandle}`
   );
   await blocked.getByRole("button", { name: "Unblock Misty W" }).click();
-  await expect(blocked).toContainText("Unblocked Misty W.");
+  await expect(blocked.getByRole("status")).toHaveText("Unblocked Misty W.");
   await expect(blocked).toContainText("You haven't blocked anyone.");
+  // The row is gone; focus goes to the section's heading.
+  await expect(
+    blocked.getByRole("heading", { name: "Blocked collectors" })
+  ).toBeFocused();
 
   // Misty can find Ash and ask again; they aren't Friends until he accepts.
   await misty.page.goto(`${ORIGIN}/invite/${ashToken}`);
@@ -133,4 +137,73 @@ test("Block ends the friendship and hides the blocker, and Settings › Privacy 
   await expect(
     misty.page.getByRole("button", { name: "Send Friend Request" })
   ).toBeVisible();
+});
+
+test("Block from a received request's row removes the request, and the blocker unblocks from the Invite Link", async ({
+  page,
+  collectors,
+}) => {
+  const misty = await collectors.signIn({ next: "/decks" });
+  await nameCollector(misty.page, "Misty W");
+  await signInAsOwner(page, "/decks");
+  const ashHandle = await nameCollector(page, "Ash K");
+  const ash = (await api(misty.page, "POST", "/api/social/lookup", {
+    handle: ashHandle,
+  })) as { collector_id: string };
+  await api(misty.page, "POST", "/api/social/friend-requests", {
+    collector_id: ash.collector_id,
+  });
+  const mistyToken = (
+    (await (await misty.page.request.get(`${ORIGIN}/api/profile`)).json()) as {
+      invite_token: string;
+    }
+  ).invite_token;
+
+  // Ash blocks Misty from the request's own row, after the same confirmation.
+  await page.reload();
+  await page.getByRole("button", { name: "Friends, 1 request" }).click();
+  const received = drawer(page).getByRole("region", {
+    name: "Friend Requests",
+  });
+  await received.getByRole("button", { name: "More for Misty W" }).click();
+  await page.getByRole("menuitem", { name: "Block" }).click();
+  await expect(received).toContainText("Block Misty W? They won't be told.");
+  const confirm = received.getByRole("button", { name: "Block", exact: true });
+  await expect(confirm).toBeFocused();
+  await confirm.click();
+  await expect(drawer(page).getByRole("status")).toHaveText(
+    "Blocked Misty W. They aren't told."
+  );
+  await expect(received).toHaveCount(0);
+  await expect(
+    drawer(page).getByRole("heading", { name: "Your Friends" })
+  ).toBeFocused();
+
+  // Misty finds nobody by Ash's Handle, and nothing she sees says Block.
+  const missed = await misty.page.request.post(`${ORIGIN}/api/social/lookup`, {
+    headers: { origin: ORIGIN },
+    data: { handle: ashHandle },
+  });
+  expect(missed.status()).toBe(404);
+  await misty.page.reload();
+  await openFriends(misty.page);
+  await find(misty.page, ashHandle);
+  await expect(drawer(misty.page).getByRole("alert")).toHaveText(
+    "No collector has that Handle."
+  );
+  await expect(misty.page.locator("body")).not.toContainText("Block");
+
+  // Ash opens Misty's Invite Link: he sees he blocked her, and Unblock gives way to Send Friend Request.
+  await page.goto(`${ORIGIN}/invite/${mistyToken}`);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+    "Misty W invited you to PrizeCheck"
+  );
+  await expect(page.getByRole("main").getByRole("status")).toHaveText(
+    "You blocked Misty W."
+  );
+  await page.getByRole("button", { name: "Unblock" }).click();
+  await expect(
+    page.getByRole("button", { name: "Send Friend Request" })
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Unblock" })).toHaveCount(0);
 });

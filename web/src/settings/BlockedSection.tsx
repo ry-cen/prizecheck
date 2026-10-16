@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { commandMessage } from "../social/socialMessages";
 import {
   getBlocked,
@@ -23,6 +23,22 @@ export function BlockedSection() {
   const [status, setStatus] = useState("");
   const [problem, setProblem] = useState("");
   const headingId = `${useId()}-heading`;
+  const heading = useRef<HTMLHeadingElement>(null);
+  const list = useRef<HTMLUListElement>(null);
+  // Where focus goes once the list is read again: the next row's Unblock, or the heading.
+  const [focusNext, setFocusNext] = useState<{ id: string | null } | null>(
+    null
+  );
+  useEffect(() => {
+    if (!focusNext || busy) return;
+    const target = Array.from(
+      list.current?.querySelectorAll<HTMLElement>("li[data-collector]") ?? []
+    )
+      .find((row) => row.dataset.collector === focusNext.id)
+      ?.querySelector<HTMLElement>("button");
+    (target ?? heading.current)?.focus();
+    setFocusNext(null);
+  }, [focusNext, busy, load]);
 
   function read() {
     return getBlocked()
@@ -47,6 +63,11 @@ export function BlockedSection() {
         idempotency_key: crypto.randomUUID(),
       });
       setStatus(`Unblocked ${person.display_name}.`);
+      const rows = load.kind === "ready" ? load.blocked : [];
+      const at = rows.findIndex(
+        (row) => row.collector_id === person.collector_id
+      );
+      setFocusNext({ id: rows[at + 1]?.collector_id ?? null });
     } catch (cause) {
       setProblem(commandMessage(cause));
     } finally {
@@ -57,7 +78,12 @@ export function BlockedSection() {
 
   return (
     <section aria-labelledby={headingId} className="flex flex-col gap-2">
-      <h3 id={headingId} className="m-0 text-body font-semibold">
+      <h3
+        id={headingId}
+        ref={heading}
+        tabIndex={-1}
+        className="m-0 text-body font-semibold outline-none"
+      >
         Blocked collectors
       </h3>
       {load.kind === "loading" && (
@@ -81,12 +107,14 @@ export function BlockedSection() {
             Friend Requests.
           </p>
           <ul
+            ref={list}
             aria-labelledby={headingId}
             className="m-0 flex list-none flex-col gap-1 p-0"
           >
             {load.blocked.map((person) => (
               <li
                 key={person.collector_id}
+                data-collector={person.collector_id}
                 className="flex min-h-tap items-center gap-2"
               >
                 <span className="min-w-0 flex-1">
@@ -114,7 +142,9 @@ export function BlockedSection() {
           {problem}
         </p>
       )}
-      {status && <p className="m-0 text-meta text-text-muted">{status}</p>}
+      <p role="status" className="m-0 text-meta text-text-muted">
+        {status}
+      </p>
     </section>
   );
 }
