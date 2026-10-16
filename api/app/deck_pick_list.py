@@ -29,6 +29,7 @@ import psycopg
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from .copy_allocation import spare_rule
 from .deck_ownership import CompetitionWarning, read_ownership
 from .decks import check_revision, read_deck_list, require_deck
 from .location_tree import owner_and_rows
@@ -128,14 +129,15 @@ def order_key(place: dict, units: int):
 def suggest(need: int, places: list[dict]) -> list[tuple[dict, int]]:
     """Each place with the copies the suggestion takes from it, in the order the suggestion considers them.
 
-    ``places`` have ``location_id``, ``name``, ``kind``, ``available`` and ``committed`` (ints). Loose storage comes
-    first, then other Decks' copies beyond their own lines, then copies other Decks hold for their own lines (a Deck
-    already giving up copies first). Each tier takes from the largest holding first, so a card comes from as few
-    Locations as possible.
+    ``places`` have ``location_id``, ``name``, ``kind``, ``available``, ``committed`` and ``spare`` (ints: every copy
+    there, the copies another Deck holds there for its own line, and the copies beyond that line, by
+    ``copy_allocation.spare_rule``). Loose storage comes first, then other Decks' copies beyond their own lines, then
+    copies other Decks hold for their own lines (a Deck already giving up copies first). Each tier takes from the
+    largest holding first, so a card comes from as few Locations as possible.
     """
     loose = sorted((p for p in places if p['kind'] != 'deck'), key=lambda p: order_key(p, p['available']))
     decks = sorted((p for p in places if p['kind'] == 'deck'),
-                   key=lambda p: order_key(p, p['available'] - p['committed']))
+                   key=lambda p: order_key(p, p['spare']))
     taken = {p['location_id']: 0 for p in places}
 
     def take(tier):
@@ -147,7 +149,7 @@ def suggest(need: int, places: list[dict]) -> list[tuple[dict, int]]:
                 need -= amount
 
     take([(p, p['available']) for p in loose])
-    take([(p, p['available'] - p['committed']) for p in decks])
+    take([(p, p['spare']) for p in decks])
     # A Deck already giving up its unlisted copies is visited anyway, so its own copies are taken first.
     take(sorted(((p, p['committed']) for p in decks),
                 key=lambda pair: (taken[pair[0]['location_id']] == 0, *order_key(*pair))))
@@ -164,8 +166,7 @@ def pick_list(deck_id: UUID, user_id: str = Depends(verified_user)):
         short = [line for line in ownership.lines if int(line.elsewhere) > 0]
         held = {}
         if short:
-            for row in conn.execute("""SELECT h.location_id,h.edition_id,h.version,
-                least(h.quantity,coalesce(l.quantity,0)) AS committed
+            for row in conn.execute("""SELECT h.location_id,h.edition_id,h.version,h.quantity,l.quantity AS listed
               FROM holding h LEFT JOIN deck_list_line l
                 ON l.owner_id=h.owner_id AND l.deck_id=h.location_id AND l.edition_id=h.edition_id
               WHERE h.owner_id=%s AND h.location_id<>%s AND h.edition_id=ANY(%s)""",
@@ -173,13 +174,19 @@ def pick_list(deck_id: UUID, user_id: str = Depends(verified_user)):
                 held[(row['location_id'], row['edition_id'])] = row
         picks = []
         for line in short:
+            # The Spare Copy rule over the copies outside this Deck: what each other Deck holds for its own line.
+            rule = spare_rule({place.location_id: held[(place.location_id, line.edition_id)]['quantity']
+                               for place in line.locations},
+                              {place.location_id: held[(place.location_id, line.edition_id)]['listed']
+                               for place in line.locations
+                               if held[(place.location_id, line.edition_id)]['listed'] is not None})
             places = [{'location_id': place.location_id, 'name': place.name, 'kind': place.kind,
-                       'available': int(place.quantity),
-                       'committed': held[(place.location_id, line.edition_id)]['committed']}
+                       'available': int(place.quantity), 'committed': rule.own.get(place.location_id, 0),
+                       'spare': rule.beyond.get(place.location_id, 0)}
                       for place in line.locations]
             sources = []
             for place, taken in suggest(int(line.elsewhere), places):
-                spare = place['available'] - place['committed']
+                spare = place['spare']
                 warning = None
                 if place['kind'] == 'deck' and taken > spare:
                     warning = PickWarning(deck_id=place['location_id'], name=place['name'], short_by=str(taken - spare))

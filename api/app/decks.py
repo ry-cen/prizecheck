@@ -15,7 +15,7 @@ from .deck_ownership import CompetitionWarning, LineOwnership, SurplusHolding, h
 from .deck_format_checks import DeckFormatChecks, TargetFormat, command_format_checks, held_format_checks
 from .format_evaluator import FORMATS
 from .deck_list_display import CardKind, TrainerType, read_line_display, with_line_display
-from .copy_allocation import deck_lines
+from .copy_allocation import deck_lines, held_for_line
 from .settings import WantListCounting, read_settings
 
 router = APIRouter(prefix='/api/decks', tags=['decks'])
@@ -275,7 +275,7 @@ def index_summaries(conn, user_id: str, deck_ids: list[UUID]) -> dict[UUID, dict
                             (user_id, deck_ids)):
         total = totals[row['deck_id']]
         total[0] += row['quantity']
-        total[1] += min(row['quantity'], held.get((row['deck_id'], row['edition_id']), 0))
+        total[1] += held_for_line(row['quantity'], held.get((row['deck_id'], row['edition_id']), 0))
     # Migration 029 and its location trigger give every Deck a Deck List; a missing one reads as Standard and empty.
     return {deck_id: {'deck_list_total': str(total), 'in_deck': str(in_deck),
                       'target_format': formats.get(deck_id, 'standard')}
@@ -328,7 +328,8 @@ def read_deck_list(conn, user_id: str, deck_id: UUID) -> DeckList:
     display = read_line_display(conn, [row['edition_id'] for row in lines])
     return DeckList(revision=header['revision'], lines=[
         DeckListLine(edition_id=row['edition_id'], quantity=str(row['quantity']),
-                     in_deck=str(min(row['quantity'], held.get(row['edition_id'], 0))), **display[row['edition_id']])
+                     in_deck=str(held_for_line(row['quantity'], held.get(row['edition_id'], 0))),
+                     **display[row['edition_id']])
         for row in lines])
 
 
