@@ -36,6 +36,8 @@ import { EmailCodeForms, SignInScreen } from "./public/SignIn";
 import { clearFailureFromAddress, failureInAddress } from "./signInMessages";
 import { CollectionImportPage } from "./collectionImport/CollectionImportPage";
 import { COLLECTION_IMPORT_PATH } from "./collectionImport/route";
+import { FriendCollectionPage } from "./social/FriendCollectionPage";
+import { friendCollectionPath, friendHandleAt } from "./social/friendCards";
 import { workspaceHref } from "./workspace/workspaceLink";
 import "./tokens.css";
 import "./tailwind.css";
@@ -58,11 +60,13 @@ function avatarImage(image: unknown): string | null {
     : null;
 }
 
-/** Where signing in lands: a same-origin `next`, else the signed-in page being visited, else Collection. */
+/** Where signing in lands: a same-origin `next`, else the signed-in page being visited (a Friend's Collection
+ * included), else Collection. */
 function safeDestination(): string {
   const value = new URLSearchParams(location.search).get("next");
   if (!value)
-    return pageAt(canonicalPath(location.pathname))
+    return pageAt(canonicalPath(location.pathname)) ||
+      friendHandleAt(location.pathname) !== null
       ? `${canonicalPath(location.pathname)}${location.search}${location.hash}`
       : DEFAULT_PATH;
   if (!value.startsWith("/") || value.startsWith("//") || value.includes("\\"))
@@ -111,17 +115,18 @@ function App() {
   }, []);
 
   // Signed in, an address that is no page (or section of one) lands on Collection, except the public pages
-  // (Discover, a Published Deck), which open inside the shell (#163). Owner controls opened by someone else
-  // shows its heading and nothing else, as before.
+  // (Discover, a Published Deck), which open inside the shell (#163), and a Friend's Collection (#250), which does
+  // too. Owner controls opened by someone else shows its heading and nothing else, as before.
   const signedIn = session?.signedIn === true;
   const publicPage = useMemo(() => publicPageAt(path), [path]);
   const isPublic = publicPage !== null;
+  const friendHandle = friendHandleAt(path);
   const def = pageAt(path);
   const page: PageId = def ? def.id : "collection";
   useLayoutEffect(() => {
-    if (signedIn && !isPublic && !def)
+    if (signedIn && !isPublic && !def && friendHandle === null)
       navigate(pageDef(page).path, { replace: true });
-  }, [signedIn, isPublic, def, page, navigate]);
+  }, [signedIn, isPublic, def, friendHandle, page, navigate]);
   // A failure code in the address belongs to the sign-in page: signed in, it is never shown, only removed. The
   // Settings page's Sign-ins section reads and removes its own.
   useEffect(() => {
@@ -205,7 +210,7 @@ function App() {
           <PublicPageView page={publicPage} signedIn={false} onNavigate={go} />
         </PublicLayout>
       );
-    if (!def && path !== SIGN_IN_PATH)
+    if (!def && friendHandle === null && path !== SIGN_IN_PATH)
       return (
         <PublicLayout onNavigate={go}>
           <DeadEnd kind="not-found" signedIn={false} onNavigate={go} />
@@ -332,17 +337,34 @@ function App() {
       onNavigate={(next) => {
         if (pageDef(next).path !== path) navigate(pageDef(next).path);
       }}
+      onOpenFriend={(handle) => {
+        if (friendCollectionPath(handle) !== path)
+          navigate(friendCollectionPath(handle));
+      }}
       onSignOut={signOut}
       scrollFor={scrollFor}
       renderPage={renderPage}
       other={
-        publicPage && {
-          key: path,
-          label: publicPageLabel(publicPage),
-          content: (
-            <PublicPageView page={publicPage} signedIn onNavigate={go} />
-          ),
-        }
+        publicPage
+          ? {
+              key: path,
+              label: publicPageLabel(publicPage),
+              content: (
+                <PublicPageView page={publicPage} signedIn onNavigate={go} />
+              ),
+            }
+          : friendHandle !== null
+            ? {
+                key: path,
+                label: "Friend's Collection",
+                content: (
+                  <FriendCollectionPage
+                    key={friendHandle}
+                    handle={friendHandle}
+                  />
+                ),
+              }
+            : null
       }
     />
   );
