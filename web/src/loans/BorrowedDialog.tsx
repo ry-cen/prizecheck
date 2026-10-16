@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
 import { CardImage } from "../social/FriendCollectionPage";
 import {
   getBorrowed,
@@ -34,10 +41,15 @@ function moveMessage(cause: unknown): string {
   return "The cards couldn't be moved. Try again.";
 }
 
+/** Where focus goes after the Move form opens or closes, so it never falls to the page. */
+type FocusNext = { to: "form" } | { to: "row"; key: string } | { to: "alert" };
+
 /**
  * The Collection's **Borrowed** list (social network #254, spec "Inventory touch-points"): every Friend's copy in the
  * collector's Locations, each row "2 from Misty W." with the Location it is in, and Move… to put it in another of
  * their Locations. Borrowed Copies move only here: the gallery and its Move never show them. Read each time it opens.
+ * Move… opens its form with focus on Move to; Cancel or a Move that lands returns focus to the row's Move… (the list
+ * when the row is gone), and a refusal moves it to what went wrong.
  */
 export function BorrowedDialog({
   open,
@@ -50,7 +62,7 @@ export function BorrowedDialog({
   onClose: () => void;
   /** The collector's Locations: the Move destinations are its Storage Leaves and Decks. */
   index: LocationIndex;
-  /** A Move landed: the collector's inventory revision moved on. */
+  /** A Move landed, or one was refused because a Location is gone: read the collector's Locations again. */
   onMoved: () => void;
   returnFocus?: RefObject<HTMLElement | null>;
 }) {
@@ -64,13 +76,23 @@ export function BorrowedDialog({
   const [message, setMessage] = useState("");
   const pending = useRef<string | null>(null);
   const leaves = useMemo(() => leavesOf(index), [index]);
+  const focusNext = useRef<FocusNext | null>(null);
+  const moveButtons = useRef(new Map<string, HTMLButtonElement>());
+  const destinationField = useRef<HTMLSelectElement>(null);
+  const list = useRef<HTMLElement>(null);
+  const alert = useRef<HTMLParagraphElement>(null);
+
+  // Each opening starts afresh; a refusal that reads the list again keeps its message.
+  useEffect(() => {
+    if (!open) return;
+    setMoving(null);
+    setMessage("");
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
     const controller = new AbortController();
     setLoad({ kind: "loading" });
-    setMoving(null);
-    setMessage("");
     getBorrowed(controller.signal).then(
       (view) => {
         if (!controller.signal.aborted) setLoad({ kind: "ready", view });
@@ -82,7 +104,24 @@ export function BorrowedDialog({
     return () => controller.abort();
   }, [open, attempt]);
 
+  // After each render: a focus move asked for by the last press or answer.
+  useLayoutEffect(() => {
+    const target = focusNext.current;
+    if (!target) return;
+    // A row's button waits for the list that shows it.
+    if (target.to === "row" && load.kind === "loading") return;
+    focusNext.current = null;
+    const element =
+      target.to === "form"
+        ? destinationField.current
+        : target.to === "alert"
+          ? alert.current
+          : (moveButtons.current.get(target.key) ?? list.current);
+    element?.focus();
+  });
+
   function startMove(card: BorrowedCard) {
+    focusNext.current = { to: "form" };
     setMoving(rowKey(card));
     setDestination("");
     setCopies(Number(card.copies));
@@ -106,6 +145,7 @@ export function BorrowedDialog({
         idempotency_key: key,
       });
       pending.current = null;
+      focusNext.current = { to: "row", key: rowKey(card) };
       setMoving(null);
       setLoad({ kind: "ready", view });
       onMoved();
@@ -116,8 +156,17 @@ export function BorrowedDialog({
         cause instanceof SocialError &&
         cause.code === "NOT_ENOUGH_BORROWED"
       ) {
+        focusNext.current = { to: "alert" };
         setMoving(null);
         setAttempt((n) => n + 1);
+      } else if (
+        cause instanceof SocialError &&
+        cause.code === "LOCATION_NOT_FOUND"
+      ) {
+        // The Location chosen is gone: the choices are read again without it, and focus waits on Move to.
+        focusNext.current = { to: "form" };
+        setDestination("");
+        onMoved();
       }
     } finally {
       setBusy(false);
@@ -142,15 +191,25 @@ export function BorrowedDialog({
     );
   else if (load.view.cards.length === 0)
     body = (
-      <p className="m-0 text-body text-text-muted">
+      <p
+        ref={(element) => {
+          list.current = element;
+        }}
+        tabIndex={-1}
+        className="m-0 text-body text-text-muted outline-none"
+      >
         You have no borrowed cards now.
       </p>
     );
   else
     body = (
       <ul
+        ref={(element) => {
+          list.current = element;
+        }}
+        tabIndex={-1}
         aria-label="Borrowed cards"
-        className="m-0 list-none overflow-hidden rounded-panel border border-border bg-surface p-0"
+        className="m-0 list-none overflow-hidden rounded-panel border border-border bg-surface p-0 outline-none"
       >
         {load.view.cards.map((card) => {
           const key = rowKey(card);
@@ -176,6 +235,10 @@ export function BorrowedDialog({
                 </span>
                 {!open && (
                   <Button
+                    ref={(element) => {
+                      if (element) moveButtons.current.set(key, element);
+                      else moveButtons.current.delete(key);
+                    }}
                     onClick={() => startMove(card)}
                     aria-label={`Move ${card.name} from ${card.location_name}`}
                   >
@@ -193,6 +256,7 @@ export function BorrowedDialog({
                   }}
                 >
                   <Select
+                    ref={destinationField}
                     label="Move to"
                     value={destination}
                     onChange={(event) => {
@@ -227,7 +291,13 @@ export function BorrowedDialog({
                     >
                       Move
                     </Button>
-                    <Button onClick={() => setMoving(null)} disabled={busy}>
+                    <Button
+                      onClick={() => {
+                        focusNext.current = { to: "row", key };
+                        setMoving(null);
+                      }}
+                      disabled={busy}
+                    >
                       Cancel
                     </Button>
                   </span>
@@ -249,7 +319,12 @@ export function BorrowedDialog({
     >
       <div className="flex flex-col gap-3">
         {message && (
-          <p role="alert" className="m-0 text-body text-text">
+          <p
+            ref={alert}
+            role="alert"
+            tabIndex={-1}
+            className="m-0 text-body text-text outline-none"
+          >
             {message}
           </p>
         )}

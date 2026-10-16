@@ -2,6 +2,7 @@
 // both handover confirmations through the API, as #252's and #253's specs cover). Ash gives two back with Give cards
 // back, and Misty confirms with Yes, they're back; then Misty records the last one with Record a return, and Ash
 // confirms with Yes, I gave them back, which ends the Loan. Each line tags the copies returned and those coming back.
+// A return Ash started once Misty's account is gone: he finishes it on his own.
 // The catalog is the Swap catalog (api/tests/want_list_swap_fixtures.py).
 import { expect, test } from "./support/collectors";
 import {
@@ -10,7 +11,9 @@ import {
   PHONE,
   befriend,
   hold,
+  leave,
   lendHandedOver,
+  loanStep,
   nameCollector,
   seedCatalog,
   unsorted,
@@ -90,4 +93,42 @@ test("a return started by either side moves on once the other side confirms, and
   await page.setViewportSize(DESKTOP);
   await lender.reload();
   await expect(title(lender)).toHaveText("Your Loan to Ash K ended");
+});
+
+test("a return the borrower started is his to finish once the lender's account is gone", async ({
+  page,
+  collectors,
+}) => {
+  // Two collectors in two contexts, a catalog import and a page check: well over 30 s on a loaded host.
+  test.slow();
+  const ids = seedCatalog();
+  const misty = await collectors.signIn({ next: "/loans" });
+  const lender = misty.page;
+  await nameCollector(lender, "Misty W");
+  await hold(lender, await unsorted(lender), ids["PAL 185"], 1);
+
+  await page.route(/^https:\/\/assets\.tcgdex\.net\//, (route) =>
+    route.abort()
+  );
+  await signInAsOwner(page, "/loans");
+  await nameCollector(page, "Ash K");
+  await befriend(page, lender);
+  const loanId = await lendHandedOver(lender, page, [[ids["PAL 185"], 1]]);
+  const title = (on: typeof page) => on.getByRole("heading", { level: 1 });
+  // Ash gives the card back, and Misty deletes her account before confirming it.
+  await loanStep(page, loanId, `/api/loans/${loanId}/returns`, {
+    lines: [{ edition_id: ids["PAL 185"], quantity: "1" }],
+  });
+  await leave(lender);
+
+  await page.goto(`${ORIGIN}/loans/${loanId}`);
+  await expect(page.getByRole("main")).toContainText(
+    "Misty W deleted their account."
+  );
+  await page.setViewportSize(PHONE);
+  await expectPageChecks(page, "a return to finish on a phone");
+  await page.setViewportSize(DESKTOP);
+  await page.getByRole("button", { name: "Finish return" }).click();
+  await expect(title(page)).toHaveText("Your Loan from Misty W ended");
+  await expect(title(page)).toBeFocused();
 });

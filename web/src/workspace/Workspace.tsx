@@ -1,6 +1,7 @@
 import React, {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -48,7 +49,7 @@ import {
 import { ManageLocations, ManageLocationsButton } from "./ManageLocations";
 import { indexLocations, isFolder } from "./locationTree";
 import { MOBILE_QUERY, useMediaQuery } from "./media";
-import { SelectionBar } from "./SelectionBar";
+import { focusWorkspaceHeading, SelectionBar } from "./SelectionBar";
 import { selectedGroups, selectionScope } from "./selectionModel";
 import { StaleBanner } from "./StaleBanner";
 import { DragBadge, useTileDrag } from "./tileDrag";
@@ -204,6 +205,7 @@ export function Workspace({
     setAdding(null);
     setLentOpen(false);
     setBorrowedOpen(false);
+    setLending(null);
   }, [active, closeDetails]);
   // Ticket 107: Move, Inventory Removal and Undo, and the desktop tile drag.
   const actions = useInventoryActions({
@@ -215,6 +217,20 @@ export function Workspace({
     reloadGallery: gallery.reload,
     reloadTree: loadTree,
   });
+  // Lend to a Friend… (#258) closing: its Dialog gives focus back to Actions, but an offer that went out cleared the
+  // selection, and Actions with it, so the workspace heading takes focus then rather than the page.
+  const lendingOpen = active && lending !== null;
+  const wasLending = useRef(lendingOpen);
+  useLayoutEffect(() => {
+    if (
+      wasLending.current &&
+      !lendingOpen &&
+      active &&
+      !actions.actionsButton.current?.isConnected
+    )
+      focusWorkspaceHeading();
+    wasLending.current = lendingOpen;
+  }, [lendingOpen, active, actions.actionsButton]);
   const drag = useTileDrag({
     enabled: !mobile && !actions.busy,
     index,
@@ -710,7 +726,7 @@ export function Workspace({
         returnFocus={mobile ? drawerOpener : undefined}
       />
       <LendOfferDialog
-        open={active && lending !== null}
+        open={lendingOpen}
         rows={lending ?? []}
         onClose={() => setLending(null)}
         onSent={actions.clearSelection}

@@ -1,4 +1,10 @@
-import { useEffect, useRef, useState, type RefObject } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
 import {
   getFriends,
   sendLendOffer,
@@ -51,7 +57,8 @@ function offerMessage(
  * **Lend to a Friend…** from the Collection's selection bar (social network #258, spec "Starting a Lend Offer"): the
  * selected copies, a Friend to offer them to, an optional return-by date, and **Send offer**. Sending reserves the
  * copies where they are; the dialog then says so, with focus on Open the Loan. One key per offer until it settles,
- * so a retry after a lost answer never sends it twice.
+ * so a retry after a lost answer never sends it twice. Friends that couldn't be read offer Retry, which keeps focus on
+ * the Friend field.
  */
 export function LendOfferDialog({
   open,
@@ -75,7 +82,17 @@ export function LendOfferDialog({
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [sent, setSent] = useState<Sent | null>(null);
+  const [attempt, setAttempt] = useState(0);
   const key = useRef<string | null>(null);
+  // Retry after the Friends couldn't be read stays, busy, while they are read again; then focus moves to the Friend
+  // field, or stays on Retry if they still can't be read.
+  const friendField = useRef<HTMLSelectElement>(null);
+  const [retrying, setRetrying] = useState(false);
+  useLayoutEffect(() => {
+    if (!retrying || friends.kind === "loading") return;
+    setRetrying(false);
+    if (friends.kind === "ready") friendField.current?.focus();
+  }, [retrying, friends.kind]);
   // Sending replaces Send offer: focus moves to Open the Loan, so it never falls to the page.
   const openButton = useRef<HTMLButtonElement>(null);
   useEffect(() => {
@@ -84,13 +101,18 @@ export function LendOfferDialog({
 
   useEffect(() => {
     if (!open) return;
-    let live = true;
-    setFriends({ kind: "loading" });
     setFriendId("");
     setReturnBy("");
     setMessage("");
     setSent(null);
+    setRetrying(false);
     key.current = null;
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    let live = true;
+    setFriends({ kind: "loading" });
     getFriends().then(
       (view) => live && setFriends({ kind: "ready", friends: view.friends }),
       () => live && setFriends({ kind: "failed" })
@@ -98,7 +120,7 @@ export function LendOfferDialog({
     return () => {
       live = false;
     };
-  }, [open]);
+  }, [open, attempt]);
 
   const copies = rows.reduce((sum, row) => sum + row.count, 0);
   const friendName =
@@ -185,6 +207,7 @@ export function LendOfferDialog({
             </p>
           ) : (
             <Select
+              ref={friendField}
               label="Friend"
               value={friendId}
               disabled={friends.kind !== "ready"}
@@ -205,6 +228,19 @@ export function LendOfferDialog({
                   </option>
                 ))}
             </Select>
+          )}
+          {(friends.kind === "failed" || retrying) && (
+            <Button
+              aria-disabled={friends.kind === "loading" || undefined}
+              onClick={() => {
+                if (friends.kind !== "failed") return;
+                setRetrying(true);
+                setFriends({ kind: "loading" });
+                setAttempt((n) => n + 1);
+              }}
+            >
+              Retry
+            </Button>
           )}
           <TextField
             type="date"

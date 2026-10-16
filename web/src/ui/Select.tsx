@@ -1,9 +1,9 @@
-import type { ReactNode, SelectHTMLAttributes } from "react";
+import type { ComponentPropsWithRef, ReactNode } from "react";
 import { ChevronDown } from "lucide-react";
 import { FIELD_LABEL, SELECT } from "./control";
 import { Icon } from "./Icon";
 
-type Props = Omit<SelectHTMLAttributes<HTMLSelectElement>, "className"> & {
+type Props = Omit<ComponentPropsWithRef<"select">, "className"> & {
   /** The visible label above the select, which is also its accessible name. */
   label: string;
   /** Keep the label for assistive technology only (a select in a table cell). */
@@ -32,7 +32,7 @@ export function SelectBox({
   className = SELECT,
   children,
   ...rest
-}: SelectHTMLAttributes<HTMLSelectElement>) {
+}: ComponentPropsWithRef<"select">) {
   return (
     <span className="relative flex min-w-0 items-center">
       <select className={className} {...rest}>
