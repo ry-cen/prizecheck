@@ -30,6 +30,7 @@ import {
   trimOldest,
   type ActionTarget,
   type CardLabel,
+  type LendRow,
   type RemovalRow,
 } from "./inventoryActionsModel";
 import type { LocationIndex } from "./locationTree";
@@ -372,6 +373,21 @@ export function useInventoryActions({
     },
     [showToast]
   );
+  // A Lend Offer (#258): the selected copies with their cards' names, as the offer dialog lists them.
+  const lendRows = useCallback(
+    (): LendRow[] =>
+      Array.from(live.current.selection.selected.values(), (entry) => {
+        const label = labels.get(entry.key);
+        return {
+          key: entry.key,
+          locationId: entry.locationId,
+          editionId: entry.editionId,
+          count: entry.count,
+          card: label ? cardText(label) : "Unknown card",
+        };
+      }),
+    [labels]
+  );
   const clearSelection = useCallback(() => {
     carried.current = null;
     setBarError("");
@@ -623,6 +639,7 @@ export function useInventoryActions({
     actionsButton,
     openMove,
     openRemoval,
+    lendRows,
     closeDialog,
     confirmMove,
     confirmRemoval,
