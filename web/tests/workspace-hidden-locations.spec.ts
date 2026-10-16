@@ -127,3 +127,38 @@ test("hiding a parent marks everything inside it, and a Location inside can't be
     "Hidden from Friends"
   );
 });
+
+// Added at integration (Settings › Privacy comes from #246).
+test("Settings › Privacy lists the Locations hidden from Friends", async ({
+  page,
+}) => {
+  await signIn(page);
+  const storage = await create(page, "Storage");
+  const binder = await create(page, "Binder", storage);
+  await page.goto(`${ORIGIN}/settings`);
+  const summary = page.getByRole("region", { name: "Hidden from Friends" });
+  await expect(summary).toContainText("Friends can see every Location.");
+  for (const id of [storage, binder]) {
+    const tree = await page.request.get(`${ORIGIN}/api/location-tree`);
+    const nodes = (
+      (await tree.json()) as { locations: { id: string; version: number }[] }
+    ).locations;
+    const response = await page.request.put(
+      `${ORIGIN}/api/location-tree/${id}/hidden`,
+      {
+        headers: { origin: ORIGIN },
+        data: {
+          hidden: true,
+          version: nodes.find((node) => node.id === id)!.version,
+          idempotency_key: randomUUID(),
+        },
+      }
+    );
+    expect(response.status()).toBe(200);
+  }
+  await page.reload();
+  await expect(summary.getByRole("listitem")).toHaveText([
+    "Storage",
+    "Storage / Binder",
+  ]);
+});

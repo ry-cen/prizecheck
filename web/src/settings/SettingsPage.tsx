@@ -1,5 +1,6 @@
 import { PageHeader } from "../shell/PageHeader";
 import { SignInsSection } from "../shell/SignInsSection";
+import { HiddenLocationsSection } from "./HiddenLocationsSection";
 import { PrivacySection } from "./PrivacySection";
 import { WantListCountingSection } from "./WantListCountingSection";
 
@@ -14,7 +15,9 @@ export function SettingsPage({ email }: { email: string | null }) {
     <main className="mx-auto box-border flex max-w-7xl flex-col gap-8 px-7 py-7 phone:px-4 phone:py-5 [&>*]:max-w-3xl">
       <PageHeader title="Settings" />
       <WantListCountingSection />
-      <PrivacySection />
+      <PrivacySection>
+        <HiddenLocationsSection />
+      </PrivacySection>
       <SignInsSection email={email} />
     </main>
   );
