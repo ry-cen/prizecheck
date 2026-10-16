@@ -793,7 +793,8 @@ export function LoanScreen({
     loanHeadline(loan),
     <>
       <p className="m-0 text-meta text-text-muted">{facts.join(" · ")}</p>
-      {showing.includes("nudge") && (
+      {(showing.includes("nudge_answer") ||
+        showing.includes("nudge_handover")) && (
         <p role="status" className="m-0 text-body">
           {loan.state === "requested"
             ? loan.role === "lender"

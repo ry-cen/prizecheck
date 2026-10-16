@@ -87,7 +87,8 @@ def test_removal_refuses_promised_copies_and_takes_the_rest(store):
     assert remove(misty, other, iono, 1).json()['detail']['code'] == 'PROMISED_TO_LOAN'
 
 
-def test_undo_of_an_add_and_edition_reassignment_refuse_promised_copies(store):
+def test_undo_of_an_add_refuses_promised_copies(store):
+    # Edition reassignment's promise check is in test_reassign_loans.py (spec item 15).
     ids = seed_swap_catalog()
     ash, misty = pair()
     iono = ids['PAL 185']
@@ -98,19 +99,6 @@ def test_undo_of_an_add_and_edition_reassignment_refuse_promised_copies(store):
     refused = undo(misty, record['id'])
     assert (refused.status_code, refused.json()['detail']['code']) == (409, 'PROMISED_TO_LOAN')
     assert holding(misty, binder, iono)['quantity'] == '2'
-    with connect() as conn:
-        reviewer = conn.execute('SELECT user_id FROM inventory_owner LIMIT 1').fetchone()['user_id']
-        conn.execute("""INSERT INTO catalog_edition_replacement(edition_id, replacement_edition_id, reviewer_id,
-            evidence_url, reason) VALUES (%s, %s, %s, 'https://example.org/correction', 'Finish corrected')""",
-                     (iono, ids['PAL 254'], reviewer))
-    body = {'location_id': binder, 'edition_id': iono, 'replacement_edition_id': ids['PAL 254'], 'quantity': '2',
-            'expected_version': holding(misty, binder, iono)['version'], 'idempotency_key': str(uuid4())}
-    refused = call('POST', '/api/holdings/reassign', misty, body)
-    assert (refused.status_code, refused.json()['detail']) == (
-        409, {'code': 'PROMISED_TO_LOAN', 'edition_id': iono, 'promised': '1'})
-    # The copy no Loan promises keeps its Edition too while the Loan is open (#254, spec "Open questions" 15).
-    refused = call('POST', '/api/holdings/reassign', misty, {**body, 'quantity': '1', 'idempotency_key': str(uuid4())})
-    assert (refused.status_code, refused.json()['detail']) == (409, {'code': 'EDITION_ON_LOAN'})
 
 
 def test_a_direct_write_that_breaks_a_promise_fails_at_commit_and_a_move_within_one_commit_does_not(store):

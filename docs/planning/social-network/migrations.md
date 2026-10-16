@@ -15,7 +15,7 @@ So the social network takes its own block, **100 to 139**, and leaves **052 to 0
 | 110 to 114 | #253 Handover |
 | 115 to 119 | #254 Borrowed Copies across the app |
 | 120 to 124 | #255 Returns |
-| 125 to 129 | #256 Return-by date and overdue, #257 Write-off and #258 Lend Offers |
+| 125 to 129 | #256 Return-by date and overdue, #257 Write-off and #258 Lend Offers (`125_loan_return_by.sql`; `126_loan_notice_kinds.sql` from the wave E review fixes) |
 | 130 to 134 | #259 Inbox |
 | 135 to 139 | #260 Ending a friendship with open Loans, then spare |
 
