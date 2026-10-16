@@ -19,7 +19,7 @@ export type LoanParty = { collector_id: string | null; display_name: string; han
 export type LoanCard = { edition_id: string; name: string; set_code: string; set_name: string; collector_number: string; descriptor: Record<string, unknown>; image_url: string | null; requested: string; promised: string; written_off: string; returned?: string };
 export type ReturnLine = { edition_id: string; copies: string };
 export type PendingReturn = { started_by: "you" | "them"; lines: ReturnLine[]; you_confirmed: boolean; they_confirmed: boolean };
-export type LoanView = { id: string; kind: "borrow_request" | "lend_offer"; state: "requested" | "offered" | "accepted" | "handed_over" | "closed"; closed_reason: "declined" | "withdrawn" | "cancelled" | "returned" | "written_off" | null; closed_by: "you" | "them" | null; role: "lender" | "borrower"; other: LoanParty; return_by: string | null; you_confirmed_handover: boolean; they_confirmed_handover: boolean; lines: LoanCard[]; needs_you: boolean; section: "needs_you" | "out_now" | "pending" | "history"; actions: ("accept" | "decline" | "confirm_handover" | "start_return" | "confirm_return" | "choose_written_off" | "withdraw" | "take_back" | "cancel" | "write_off" | "change_return_by" | "ask_for_more_time" | "approve_extension" | "decline_extension" | "edit_and_resend")[]; revision: number; pending_return?: PendingReturn | null; awaiting_choice?: string; extension_to?: string | null; overdue_since?: string | null; notices?: ("overdue" | "nudge_answer" | "nudge_handover")[] };
+export type LoanView = { id: string; kind: "borrow_request" | "lend_offer"; state: "requested" | "offered" | "accepted" | "handed_over" | "closed"; closed_reason: "declined" | "withdrawn" | "cancelled" | "returned" | "written_off" | null; closed_by: "you" | "them" | null; role: "lender" | "borrower"; other: LoanParty; return_by: string | null; you_confirmed_handover: boolean; they_confirmed_handover: boolean; lines: LoanCard[]; needs_you: boolean; section: "needs_you" | "out_now" | "pending" | "history"; actions: ("accept" | "decline" | "confirm_handover" | "start_return" | "confirm_return" | "choose_written_off" | "withdraw" | "take_back" | "cancel" | "write_off" | "change_return_by" | "ask_for_more_time" | "approve_extension" | "decline_extension" | "edit_and_resend")[]; revision: number; pending_return?: PendingReturn | null; awaiting_choice?: string; extension_to?: string | null; overdue_since?: string | null; notices?: ("overdue" | "nudge_answer" | "nudge_handover")[]; waiting?: "answer" | "fix_picks" | "choose" | "confirm_return" | "finish_return" | "hand_over" | "receive" | "return" | "more_time" | null };
 export type LoansView = { loans: LoanView[]; needs_you: number };
 export type LoanStep = { revision: number; idempotency_key: string };
 export type LoanLineRequest = { edition_id: string; quantity: string };
@@ -47,6 +47,9 @@ export type SeenNotices = { kinds: ("overdue" | "nudge_answer" | "nudge_handover
 export type OfferedCopies = { location_id: string; edition_id: string; quantity: string };
 export type SendLendOffer = { borrower_id: string; copies: OfferedCopies[]; return_by?: string | null; idempotency_key: string };
 export type AcceptLendOffer = { revision: number; idempotency_key: string; lines: PromisedLine[]; deck_id?: string | null };
+export type InboxUpdate = { id: string; kind: "accepted" | "partly_accepted" | "declined" | "cancelled" | "return_by_changed" | "overdue" | "nudge_answer" | "nudge_handover"; loan_id: string; loan_kind: "borrow_request" | "lend_offer"; loan_state: "requested" | "offered" | "accepted" | "handed_over" | "closed"; role: "lender" | "borrower"; other_name: string; read: boolean; return_by?: string | null };
+export type InboxView = { waiting: LoanView[]; updates: InboxUpdate[] };
+export type InboxIds = { ids: string[] };
 
 /** A refused social request: the API's code, and for TOO_MANY_LOOKUPS the detail that says when to try again. */
 export class SocialError extends Error {
@@ -163,3 +166,7 @@ export const acceptLendOffer = (id: string, body: AcceptLendOffer) =>
 // The time-based notices the reader was shown, so each shows once (#256).
 export const seeNotices = (id: string, body: SeenNotices) =>
   request<LoanView>(`/api/social/loans/${at(id)}/notices/seen`, 'POST', body);
+// The inbox (#259): the Loans waiting on you and the updates; mark the shown updates read, or Clear them.
+export const getInbox = (signal?: AbortSignal) => request<InboxView>('/api/social/inbox', 'GET', undefined, signal);
+export const markInboxRead = (body: InboxIds) => request<InboxView>('/api/social/inbox/read', 'POST', body);
+export const clearInbox = (body: InboxIds) => request<InboxView>('/api/social/inbox/clear', 'POST', body);

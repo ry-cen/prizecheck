@@ -1,6 +1,6 @@
 """Generate the social client module (Friends and Friend Requests, social network #247, Blocks, #248, Friends' cards,
-#250 and #251, Loans, #252 and #253, Borrowed Copies, #254, Returns, #255, and Write-off, #257) from the API OpenAPI
-schema."""
+#250 and #251, Loans, #252 and #253, Borrowed Copies, #254, Returns, #255, Write-off, #257, and the inbox, #259) from
+the API OpenAPI schema."""
 import sys
 from pathlib import Path
 
@@ -33,7 +33,7 @@ for name in ("Collector", "CollectorLookup", "InviteCollector", "FriendsView", "
              "PromiseLimit", "LoanPickPlace", "LoanDeck", "LoanSide", "LentCard", "LentOut", "BorrowedCard",
              "BorrowedCopies", "MoveBorrowed", "ReturnedLine", "StartReturn", "WriteOffLine", "WriteOff", "ChosenPlace",
              "WrittenOffChoice", "ChangeReturnBy", "AskForMoreTime", "SeenNotices", "OfferedCopies", "SendLendOffer",
-             "AcceptLendOffer"):
+             "AcceptLendOffer", "InboxUpdate", "InboxView", "InboxIds"):
     definition = schema[name]
     fields = [f"{field}{'' if field in definition.get('required', []) else '?'}: {ts_type(value)}"
               for field, value in definition["properties"].items()]
@@ -154,6 +154,10 @@ export const acceptLendOffer = (id: string, body: AcceptLendOffer) =>
 // The time-based notices the reader was shown, so each shows once (#256).
 export const seeNotices = (id: string, body: SeenNotices) =>
   request<LoanView>(`/api/social/loans/${at(id)}/notices/seen`, 'POST', body);
+// The inbox (#259): the Loans waiting on you and the updates; mark the shown updates read, or Clear them.
+export const getInbox = (signal?: AbortSignal) => request<InboxView>('/api/social/inbox', 'GET', undefined, signal);
+export const markInboxRead = (body: InboxIds) => request<InboxView>('/api/social/inbox/read', 'POST', body);
+export const clearInbox = (body: InboxIds) => request<InboxView>('/api/social/inbox/clear', 'POST', body);
 """)
 content = "\n".join(lines)
 target = root / "web/src/social_generated.ts"

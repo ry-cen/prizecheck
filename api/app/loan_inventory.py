@@ -71,6 +71,7 @@ from pydantic import BaseModel, Field
 from .deck_deletion import unsorted_leaf
 from .deck_pick_list import suggest
 from .holdings import MAX_QUANTITY
+from .loan_picks import pick_shortfalls
 from .location_tree import error, replay
 from .main import connect, verified_user
 from .moves import first_non_leaf, put_back, quantity, record_undo, take_out, undo_id_for
@@ -78,8 +79,8 @@ from .social import counts
 from .social.friend_copies import friend_copies
 from .social.friend_reads import card_facts
 from .social.friends import friend_ids
-from .social.loans import (NOW, LoanStep, LoanView, begin_command, advance_revision, close, return_by_columns, run_step,
-                           store, today, write_loan)
+from .social.loans import (NOW, LoanStep, LoanView, begin_command, advance_revision, close, record_update,
+                           return_by_columns, run_step, store, today, write_loan)
 from .social.owners import ensure_owner, lock_owners
 
 router = APIRouter(prefix='/api/loans', tags=['loans'])
@@ -311,34 +312,6 @@ def _without(places: list[dict], taken: dict) -> list[dict]:
     return free
 
 
-def pick_shortfalls(conn, lender_id: str, edition_ids) -> tuple[list[dict], dict[int, int], dict[UUID, dict]]:
-    """Which reserved picks are out of date (spec "Stale picks are computed, not stored"): the lender's reserved picks
-    of these Editions, oldest accepted Loan first, each given the copies its source still holds after the older picks
-    there. Returns (the picks, copies each pick's source is short of by pick id, and the copies the picks still cover
-    by Edition and Location). A pick whose source was deleted is short of all its copies. The caller holds the
-    lender's owner row lock."""
-    editions = sorted(set(edition_ids))
-    picks = conn.execute(f"""SELECT p.id, p.loan_id, p.edition_id, p.source_location_id, p.quantity
-      FROM loan_pick p JOIN loan o ON o.id = p.loan_id
-      WHERE p.owner_id = %s AND o.lender_id = %s AND p.edition_id = ANY(%s) AND p.state = 'reserved'
-        AND {counts.RESERVING}
-      ORDER BY o.accepted_at NULLS LAST, o.created_at, o.id, p.id""", (lender_id, lender_id, editions)).fetchall()
-    left = {(row['location_id'], row['edition_id']): int(row['quantity']) for row in conn.execute(
-        'SELECT location_id, edition_id, quantity FROM holding WHERE owner_id=%s AND edition_id=ANY(%s)',
-        (lender_id, editions))} if editions else {}
-    short: dict[int, int] = {}
-    covered: dict[UUID, dict] = {}
-    for pick in picks:
-        key = (pick['source_location_id'], pick['edition_id'])
-        take = min(left.get(key, 0), int(pick['quantity'])) if pick['source_location_id'] else 0
-        if take:
-            left[key] -= take
-            found = covered.setdefault(pick['edition_id'], {})
-            found[pick['source_location_id']] = found.get(pick['source_location_id'], 0) + take
-        short[pick['id']] = int(pick['quantity']) - take
-    return picks, short, covered
-
-
 def suggest_picks(conn, lender_id: str, promised: dict[UUID, int], covered: dict[UUID, dict]
                   ) -> dict[tuple[UUID, UUID], int]:
     """Where to take ``promised`` copies per Edition from: the copies no other pick covers (``covered``), in the Deck
@@ -472,6 +445,9 @@ def accept(loan_id: UUID, command: AcceptBorrowRequest, user_id: str = Depends(v
         advance_revision(conn, user_id)
         # Keeping the requested date checks it as a new one: a date that has passed since the request is refused.
         dated = return_by_columns(conn, row, row['return_by'] if keeps_date else command.return_by)
+        # The borrower hears whether all of it was lent (#259).
+        record_update(conn, row, user_id,
+                      'partly_accepted' if any(promised[edition] < asked[edition] for edition in asked) else 'accepted')
         return {'state': 'accepted', 'accepted_at': NOW, **dated}
 
     keeps_date = 'return_by' not in command.model_fields_set
@@ -576,6 +552,8 @@ def accept_offer(loan_id: UUID, command: AcceptLendOffer, user_id: str = Depends
                              (taken[edition], loan_id, edition))
             cut_picks(conn, row['lender_id'], loan_id, released, 'reserved')
             advance_revision(conn, row['lender_id'])
+        # The lender hears whether all of it was taken (#259).
+        record_update(conn, row, user_id, 'partly_accepted' if released else 'accepted')
         return {'state': 'accepted', 'accepted_at': NOW, 'deck_id': command.deck_id}
 
     return run_step(user_id, loan_id, command, 'accept', apply,
