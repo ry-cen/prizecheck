@@ -15,6 +15,7 @@ moves neither the inventory revision nor the Deck List revision.
 from dataclasses import dataclass
 from uuid import UUID
 
+from .borrowed_copies import borrowed_at, physical
 from .copy_allocation import deck_lines
 from .location_tree import error, owner_and_rows
 from .main import connect
@@ -30,7 +31,7 @@ class CapturedLine:
 
 @dataclass(frozen=True)
 class DeckListCapture:
-    holdings: dict[UUID, int]        # The Deck's own Holdings by Edition, in Edition order.
+    holdings: dict[UUID, int]        # The Deck's physical copies by Edition (Holdings and Borrowed Copies), in order.
     lines: tuple[CapturedLine, ...]  # Every Deck List line, in Edition order.
     owner_revision: int
     deck_list_revision: int
@@ -57,9 +58,10 @@ def capture_deck_list(deck_id: UUID, user_id: str, timeout_ms: int | None = None
         if header is None:
             # Migration 029 and its location trigger give every Deck a Deck List.
             raise RuntimeError('Deck has no Deck List')
-        holdings = {row['edition_id']: int(row['quantity']) for row in conn.execute(
-            """SELECT edition_id,quantity FROM holding WHERE owner_id=%s AND location_id=%s
-               ORDER BY edition_id""", (user_id, deck_id))}
+        # The Deck's physical copies: its Holdings and its Borrowed Copies, which count toward its cost (#254).
+        holdings = physical({row['edition_id']: int(row['quantity']) for row in conn.execute(
+            'SELECT edition_id,quantity FROM holding WHERE owner_id=%s AND location_id=%s', (user_id, deck_id))},
+            borrowed_at(conn, user_id, deck_id))
         settings = read_settings(conn, user_id)
         counted = deck_lines(conn, user_id, deck_id, settings.want_list_counting)
         capture = DeckListCapture(

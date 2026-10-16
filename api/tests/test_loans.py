@@ -147,7 +147,8 @@ def test_a_deck_line_reads_reserved_for_the_borrower_while_the_copies_stay_in_th
     assert detail(misty, gardevoir)['loans'] == []
     ok(accept(misty, view(misty, loan), [(iono, 1)]))
     found = detail(misty, gardevoir)
-    assert found['loans'] == [{'edition_id': iono, 'reserved': [{'name': 'Ash K.', 'copies': '1'}], 'lent': []}]
+    assert found['loans'] == [{'edition_id': iono, 'reserved': [{'name': 'Ash K.', 'copies': '1'}], 'lent': [],
+                               'borrowed': []}]
     # The copies stay in the Deck and count for it: nothing to get, and the Deck List line is whole.
     assert found['to_get'] == '0' and [entry['in_deck'] for entry in found['deck_list']['lines']] == ['2']
     # A Display Name change reaches the label and the Loan.

@@ -30,6 +30,9 @@ export type LoanDeck = { id: string; name: string };
 export type LoanSide = { loan_id: string; deck: LoanDeck | null; can_promise: PromiseLimit[]; picks: LoanPickPlace[]; suggested: LoanPickPlace[] };
 export type LentCard = { loan_id: string; edition_id: string; name: string; set_code: string; set_name: string; collector_number: string; image_url: string | null; copies: string; borrower: string };
 export type LentOut = { cards: LentCard[]; copies: string };
+export type BorrowedCard = { loan_id: string; edition_id: string; name: string; set_code: string; set_name: string; collector_number: string; descriptor: Record<string, unknown>; image_url: string | null; location_id: string; location_name: string; copies: string; lender: string };
+export type BorrowedCopies = { cards: BorrowedCard[]; copies: string };
+export type MoveBorrowed = { loan_id: string; edition_id: string; from_location_id: string; to_location_id: string; quantity: string; idempotency_key: string };
 
 /** A refused social request: the API's code, and for TOO_MANY_LOOKUPS the detail that says when to try again. */
 export class SocialError extends Error {
@@ -116,3 +119,7 @@ export const useSuggestedPicks = (id: string, body: LoanStep) =>
   request<LoanView>(`/api/loans/${at(id)}/picks/use-suggested`, 'POST', body);
 // The Collection's Lent out entry: every copy you lent and haven't had back.
 export const getLentOut = (signal?: AbortSignal) => request<LentOut>('/api/loans/lent-out', 'GET', undefined, signal);
+// The Collection's Borrowed entry (#254): every Borrowed Copy you hold, and moving some to another of your Locations.
+export const getBorrowed = (signal?: AbortSignal) =>
+  request<BorrowedCopies>('/api/loans/borrowed', 'GET', undefined, signal);
+export const moveBorrowed = (body: MoveBorrowed) => request<BorrowedCopies>('/api/loans/borrowed/move', 'POST', body);

@@ -223,6 +223,13 @@ def reassign(command: ReassignHolding,user_id: str=Depends(verified_user)):
         if current and current['quantity']>MAX_QUANTITY-amount:fail(409,'QUANTITY_OVERFLOW')
         # The old Edition loses the copies: refused when open Loans promise them (social network #252).
         check_promises(conn,user_id,{command.edition_id:amount})
+        # An Edition on an open Loan of the collector's, either side, or held as a Borrowed Copy keeps its name until
+        # the Loan ends: the Loan's lines and the Borrowed Copies name it (#254). Other Editions are left alone.
+        on_loan=conn.execute('''SELECT 1 FROM loan o JOIN loan_line l ON l.loan_id=o.id
+          WHERE (o.lender_id=%s OR o.borrower_id=%s) AND o.state<>'closed' AND l.edition_id=%s
+          UNION ALL SELECT 1 FROM borrowed_holding WHERE borrower_id=%s AND edition_id=%s LIMIT 1''',
+          (user_id,user_id,command.edition_id,user_id,command.edition_id)).fetchone()
+        if on_loan:fail(409,'EDITION_ON_LOAN')
         new_revision=revision+1
         if source['quantity']==amount:
             conn.execute('DELETE FROM holding WHERE owner_id=%s AND location_id=%s AND edition_id=%s',
