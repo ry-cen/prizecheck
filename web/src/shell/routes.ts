@@ -2,7 +2,13 @@ import { OWNER_SUBPATHS } from "../owner/sections";
 
 /** The signed-in pages inside the app shell, and the addresses that open them. Routing is client-side. */
 export type PageId =
-  "collection" | "decks" | "catalog" | "reports" | "settings" | "owner";
+  | "collection"
+  | "decks"
+  | "catalog"
+  | "loans"
+  | "reports"
+  | "settings"
+  | "owner";
 
 export type PageDef = {
   id: PageId;
@@ -48,6 +54,14 @@ export const PAGES: readonly PageDef[] = [
     keepMounted: true,
   },
   {
+    // /loans/<Loan id>: one Loan (#252).
+    id: "loans",
+    path: "/loans",
+    label: "Loans",
+    keepMounted: false,
+    param: true,
+  },
+  {
     id: "reports",
     path: "/reports",
     label: "Missing cards",
@@ -73,12 +87,16 @@ export const DESKTOP_TABS: readonly PageId[] = [
   "collection",
   "decks",
   "catalog",
+  "loans",
   "reports",
 ];
-/** Phone bottom tab bar, before More. */
-export const PHONE_TABS: readonly PageId[] = ["collection", "decks", "catalog"];
-/** The phone More sheet's pages (Owner controls for the owner only), before Sign out. */
-export const MORE_PAGES: readonly PageId[] = ["reports", "settings", "owner"];
+/** Phone bottom tab bar (#252: Loans took the More slot; Missing cards moved to the account sheet). */
+export const PHONE_TABS: readonly PageId[] = [
+  "collection",
+  "decks",
+  "catalog",
+  "loans",
+];
 /** The desktop avatar menu's pages (Owner controls for the owner only), before Sign out. */
 export const ACCOUNT_PAGES: readonly PageId[] = ["settings", "owner"];
 

@@ -255,6 +255,7 @@ test.describe("desktop", () => {
       "Collection",
       "Decks",
       "Catalog",
+      "Loans",
       "Missing cards",
     ]);
     // A marker on the window survives only if no page load happens.
@@ -264,6 +265,7 @@ test.describe("desktop", () => {
     for (const [name, path, title] of [
       ["Decks", "/decks", "Decks"],
       ["Catalog", "/catalog", "Catalog"],
+      ["Loans", "/loans", "Loans"],
       ["Missing cards", "/reports", "Missing cards"],
       ["Collection", "/collection", "All owned"],
     ]) {
@@ -556,7 +558,7 @@ test.describe("phone", () => {
     hasTouch: true,
   });
 
-  test("the bottom tab bar switches pages, and More opens a sheet with Missing cards, Settings, Owner controls for the owner and Sign out", async ({
+  test("the bottom tab bar switches pages, Loans has the old More slot, and the account sheet holds Missing cards, Settings, Owner controls for the owner and Sign out", async ({
     page,
   }) => {
     await signIn(page);
@@ -568,7 +570,7 @@ test.describe("phone", () => {
         "Collection",
         "Decks",
         "Catalog",
-        "More",
+        "Loans",
       ]);
       const banner = page.getByRole("banner");
       await expect(banner).toContainText("Collection");
@@ -589,12 +591,19 @@ test.describe("phone", () => {
       await expect(page.getByRole("banner")).not.toContainText("Decks");
       await expect(tab(page, "Decks")).toHaveAttribute("aria-current", "page");
 
-      const more = tab(page, "More");
-      await more.tap();
-      const sheet = page.getByRole("dialog", { name: "More" });
+      await tab(page, "Loans").tap();
+      await expect(page).toHaveURL(/\/loans$/);
+      await expect(heading(page)).toHaveText("Loans");
+      await expect(tab(page, "Loans")).toHaveAttribute("aria-current", "page");
+
+      const avatar = page
+        .getByRole("banner")
+        .getByRole("button", { name: "Account", exact: true });
+      await avatar.tap();
+      const sheet = page.getByRole("dialog", { name: "Account" });
       await expect(sheet).toBeVisible();
       await expect(
-        sheet.getByRole("button", { name: "Close More" })
+        sheet.getByRole("button", { name: "Close account" })
       ).toBeFocused();
       // A bottom sheet: full width, along the bottom edge.
       const box = (await sheet.boundingBox())!;
@@ -602,16 +611,16 @@ test.describe("phone", () => {
       expect(box.width).toBe(375);
       expect(Math.abs(box.y + box.height - 812)).toBeLessThanOrEqual(0.5);
       await expect(sheet.getByRole("list").getByRole("button")).toHaveText([
-        "Missing cards",
         "Settings",
+        "Sign-ins",
+        "Missing cards",
         "Owner controls",
         "Sign out",
       ]);
-      await expectPageChecks(page, "More sheet");
-      // Focus stays in the sheet, and the close button returns it to More (Safari doesn't focus a
-      // tapped button, so this can't lean on document.activeElement).
+      await expectPageChecks(page, "Account sheet");
+      // Focus stays in the sheet, and the close button returns it to the avatar.
       const signOut = sheet.getByRole("button", { name: "Sign out" });
-      const close = sheet.getByRole("button", { name: "Close More" });
+      const close = sheet.getByRole("button", { name: "Close account" });
       await signOut.focus();
       await page.keyboard.press("Tab");
       await expect(close).toBeFocused();
@@ -619,35 +628,38 @@ test.describe("phone", () => {
       await expect(signOut).toBeFocused();
       await close.tap();
       await expect(sheet).toBeHidden();
-      await expect(more).toBeFocused();
-      await more.tap();
-      await page.keyboard.press("Escape");
-      await expect(sheet).toBeHidden();
-      await expect(more).toBeFocused();
+      await expect(avatar).toBeFocused();
 
-      await more.tap();
+      await avatar.tap();
       await sheet.getByRole("button", { name: "Missing cards" }).tap();
       await expect(page).toHaveURL(/\/reports$/);
       await expect(sheet).toBeHidden();
-      await expect(more).toHaveAttribute("aria-current", "page");
+      await expect(heading(page)).toHaveText("Missing cards");
+      // No tab is current on Missing cards; the sheet marks it.
+      await expect(
+        mainViews(page).locator('[aria-current="page"]')
+      ).toHaveCount(0);
+      await avatar.tap();
+      await expect(
+        sheet.getByRole("button", { name: "Missing cards" })
+      ).toHaveAttribute("aria-current", "page");
 
       // The scrim closes it.
-      await more.tap();
-      await expect(sheet).toBeVisible();
       await page.mouse.click(187, 60);
       await expect(sheet).toBeHidden();
 
-      await more.tap();
+      await avatar.tap();
       await sheet.getByRole("button", { name: "Owner controls" }).tap();
       await expect(page).toHaveURL(/\/owner$/);
 
       await setOwner(false);
       await page.reload();
       await expect(page).toHaveURL(/\/owner$/);
-      await tab(page, "More").tap();
+      await avatar.tap();
       await expect(sheet.getByRole("list").getByRole("button")).toHaveText([
-        "Missing cards",
         "Settings",
+        "Sign-ins",
+        "Missing cards",
         "Sign out",
       ]);
       await sheet.getByRole("button", { name: "Sign out" }).tap();

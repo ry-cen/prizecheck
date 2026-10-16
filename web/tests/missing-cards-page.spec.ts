@@ -301,7 +301,7 @@ test.describe("desktop", () => {
 test.describe("phone", () => {
   test.use({ viewport: { width: 375, height: 812 }, hasTouch: true });
 
-  test("on a phone Missing cards opens from More, its table and pinned Reply row scroll inside the table, and the page check passes", async ({
+  test("on a phone Missing cards opens from the account sheet, its table and pinned Reply row scroll inside the table, and the page check passes", async ({
     page,
   }) => {
     await signIn(page);
@@ -321,8 +321,9 @@ test.describe("phone", () => {
       );
       await mainTab(page, "Collection").tap();
       await expect(page).toHaveURL(/\/collection$/);
-      await mainTab(page, "More").tap();
-      const sheet = page.getByRole("dialog", { name: "More" });
+      // Loans took the More slot (#252): Missing cards is in the account sheet.
+      await page.getByRole("button", { name: "Account", exact: true }).tap();
+      const sheet = page.getByRole("dialog", { name: "Account" });
       await sheet.getByRole("button", { name: "Missing cards" }).tap();
       await expect(page).toHaveURL(/\/reports$/);
       await expect(sheet).toBeHidden();
@@ -374,9 +375,12 @@ test.describe("phone", () => {
       ).toBeVisible();
       await expectPageChecks(page, "Missing cards, Report a card (phone)");
 
-      await mainTab(page, "More").tap();
+      await page.getByRole("button", { name: "Account", exact: true }).tap();
       await expect(sheet).toBeVisible();
-      await expectPageChecks(page, "More sheet over Missing cards (phone)");
+      await expect(
+        sheet.getByRole("button", { name: "Missing cards" })
+      ).toHaveAttribute("aria-current", "page");
+      await expectPageChecks(page, "Account sheet over Missing cards (phone)");
       await page.keyboard.press("Escape");
       await expect(sheet).toBeHidden();
     } finally {

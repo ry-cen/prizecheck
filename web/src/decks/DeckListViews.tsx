@@ -289,6 +289,11 @@ function ListRow({
         <span className="block truncate text-caption text-text-subtle">
           {editionText(line)}
         </span>
+        {line.loans.length > 0 && (
+          <span className="block truncate text-caption text-text-muted">
+            {line.loans.join(" · ")}
+          </span>
+        )}
       </button>
       <span className="whitespace-nowrap text-meta tabular-nums">
         <span aria-hidden="true" className="flex gap-1.5">

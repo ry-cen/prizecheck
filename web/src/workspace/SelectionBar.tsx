@@ -42,7 +42,7 @@ const LIST_ITEM =
 /** The selection bar (the Actions strip): floating at the bottom centre on desktop, a compact strip above
  * the tab bar on a phone, on the kit (#165). Shown only while one or more copies are selected, and only
  * while Collection is the shown page. The toast host is raised by the bar's height, so a toast sits above
- * it at both widths. Actions opens a list of buttons above it (a disclosure, not a menu: Tab walks it). */
+ * it at both widths, and the Borrow Request drafts tray sits above it too (useLift). Actions opens a list of buttons above it (a disclosure, not a menu: Tab walks it). */
 export function SelectionBar({
   summary,
   onClear,
@@ -81,14 +81,17 @@ export function SelectionBar({
       const gap = parseFloat(
         getComputedStyle(bar).getPropertyValue("--space-2")
       );
-      toast.setLift(bar.getBoundingClientRect().height + (gap || 8));
+      toast.setLift(
+        "selection",
+        bar.getBoundingClientRect().height + (gap || 8)
+      );
     };
     lift();
     const observer = new ResizeObserver(lift);
     observer.observe(bar);
     return () => {
       observer.disconnect();
-      toast.setLift(0);
+      toast.setLift("selection", 0);
     };
   }, [toast, barRef]);
 

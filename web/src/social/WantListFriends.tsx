@@ -11,8 +11,8 @@ import { chipText, lendableText, otherEditionText } from "./friendCards";
  * that matches the line, "Misty W. · 2 spare · 1 in a Deck", spare copies first (the order the API gives). A copy of
  * another Edition says which. Nothing when no Friend has one.
  *
- * The chips only say who can lend until Borrow Requests (#252), which passes `chip` to draw each one as the control
- * that asks for a copy.
+ * Borrow Requests (#252) pass `chip` to draw each one as the control that asks for a copy (loans/BorrowDrafts'
+ * AskChip); without it a chip only says who can lend.
  */
 export function FriendChips({
   name,
@@ -61,7 +61,8 @@ export function FriendChips({
  * no Friend can lend are summed up in one line under the panels. The need and the Decks are the Want List's combined
  * total for the scope on the page, so they follow the counting setting and the Deck chips.
  *
- * Asking arrives with Borrow Requests (#252): it passes `action` for each Friend's row.
+ * Borrow Requests (#252) pass `action` for each Friend's row (Ask, then a stepper) and `asked`, the copies of a card
+ * the drafts ask for, which the panel's heading shows as "3 of 4 asked".
  */
 export function GetFromFriends({
   rows,
@@ -70,6 +71,7 @@ export function GetFromFriends({
   scoped,
   pending,
   action,
+  asked,
 }: {
   rows: CombinedRow[];
   byCard: Map<string, FriendCopy[]>;
@@ -79,6 +81,8 @@ export function GetFromFriends({
   /** The Friends' cards for this scope aren't in yet (or couldn't be read): no line about what they lack. */
   pending: boolean;
   action?: (row: CombinedRow, copy: FriendCopy) => ReactNode;
+  /** Copies of the row's card the Borrow Request drafts ask Friends for. */
+  asked?: (row: CombinedRow, copies: FriendCopy[]) => number;
 }) {
   if (rows.length === 0)
     return (
@@ -106,6 +110,7 @@ export function GetFromFriends({
           copies={byCard.get(row.edition_id)!}
           deckName={deckName}
           action={action}
+          asked={asked}
         />
       ))}
       {!pending && missing > 0 && (
@@ -124,13 +129,16 @@ function CardPanel({
   copies,
   deckName,
   action,
+  asked,
 }: {
   row: CombinedRow;
   copies: FriendCopy[];
   deckName: (id: string) => string;
   action?: (row: CombinedRow, copy: FriendCopy) => ReactNode;
+  asked?: (row: CombinedRow, copies: FriendCopy[]) => number;
 }) {
   const headingId = useId();
+  const askedCopies = asked?.(row, copies) ?? 0;
   const editionId = useId();
   const decks = row.decks.map((deck) => deckName(deck.deck_id)).join(" · ");
   return (
@@ -138,7 +146,7 @@ function CardPanel({
       aria-labelledby={`${headingId} ${editionId}`}
       className="rounded-panel border border-border bg-surface"
     >
-      <div className="grid grid-cols-[2.5rem_minmax(0,1fr)] items-center gap-3 px-4 py-3">
+      <div className="grid grid-cols-[2.5rem_minmax(0,1fr)_auto] items-center gap-3 px-4 py-3 phone:grid-cols-[2.5rem_minmax(0,1fr)]">
         <CardImage url={row.image_url} />
         <div className="min-w-0">
           <h3
@@ -157,6 +165,13 @@ function CardPanel({
             You need {row.need} · {decks}
           </p>
         </div>
+        {asked && (
+          <span className="phone:col-start-2">
+            <Pill tone={askedCopies >= Number(row.need) ? "ok" : "neutral"}>
+              {askedCopies} of {row.need} asked
+            </Pill>
+          </span>
+        )}
       </div>
       <ul
         aria-label={`Friends who can lend ${row.name}, ${editionText(row)}`}

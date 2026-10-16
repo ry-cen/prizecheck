@@ -10,6 +10,14 @@ import { COUNTING_OPTIONS } from "../settings/wantListCounting";
 import type { FriendCopy } from "../social_generated";
 import { useFriendMatches } from "../social/useFriendMatches";
 import { FriendChips, GetFromFriends } from "../social/WantListFriends";
+import {
+  AskChip,
+  AskControl,
+  copyCap,
+  copyCard,
+  useBorrowDrafts,
+} from "../loans/BorrowDrafts";
+import { lendableText } from "../social/friendCards";
 import { Button } from "../ui/Button";
 import { Chip } from "../ui/Chip";
 import { Icon } from "../ui/Icon";
@@ -112,6 +120,7 @@ export function WantListView({ onOpenDeck, onNavigate }: Props) {
     notify: setNotice,
   });
   const friends = useFriendMatches(load.kind === "ready" ? load.list : null);
+  const drafts = useBorrowDrafts();
   const [view, setView] = useState<View>("buy");
 
   function choose(deckId: string | null) {
@@ -268,6 +277,28 @@ export function WantListView({ onOpenDeck, onNavigate }: Props) {
           deckName={deckName}
           scoped={scoped}
           pending={pending}
+          action={(row, copy) => (
+            <AskControl
+              friend={copy}
+              card={copyCard(
+                copy,
+                copy.edition_id === row.edition_id ? row.image_url : null
+              )}
+              cap={copyCap(copy)}
+              lendable={lendableText(copy)}
+            />
+          )}
+          asked={
+            drafts
+              ? (_row, copies) =>
+                  copies.reduce(
+                    (total, copy) =>
+                      total +
+                      drafts.quantity(copy.collector_id, copy.edition_id),
+                    0
+                  )
+              : undefined
+          }
         />
       ) : (
         <div
@@ -373,6 +404,20 @@ function DeckSection({
                 edition={editionText(line)}
                 wanted={line.edition_id}
                 copies={byCard.get(line.edition_id)}
+                chip={(copy, text) => (
+                  <AskChip
+                    friend={copy}
+                    card={copyCard(
+                      copy,
+                      copy.edition_id === line.edition_id
+                        ? line.image_url
+                        : null
+                    )}
+                    cap={copyCap(copy)}
+                    lendable={lendableText(copy)}
+                    text={text}
+                  />
+                )}
               />
             </NeededLine>
           ))}
