@@ -4,7 +4,8 @@ Remove Friend and Block, from either side, cancel the pair's Borrow Requests, Le
 confirmed a handover for, either way round, and release what they reserved: each such lender's revision moves once.
 The other side is told only that the Loan was cancelled and by whom, as for any cancel. A Loan either side confirmed a
 handover for counts as handed over and stays open, and its steps still work. An unfriend racing a handover, or a
-cancel from the other side, waits for it and never deadlocks.
+cancel from the other side, waits for it and never deadlocks. Edit and resend, a new request to the lender, is offered
+only while the two are Friends (owner's decision, 2026-10-16).
 """
 import os
 from concurrent.futures import ThreadPoolExecutor
@@ -16,7 +17,8 @@ from app.main import connect  # noqa: F401  (main first: it includes every route
 from test_catalog_targets import isolated_rules  # noqa: F401  (an autouse fixture)
 from test_deck_cost import launches, store  # noqa: F401  (autouse fixtures)
 from test_deck_counting import hold
-from test_friend_copies import block, ok, place
+from test_blocks import unblock
+from test_friend_copies import befriend, block, ok, place
 from test_handover import _asleep, _sleeping, accepted_loan, borrowed, code, handover, take_back
 from test_holdings import call
 from test_inbox import inbox, updates
@@ -106,7 +108,8 @@ def test_a_block_by_either_side_cancels_them_too_and_the_blocked_collector_reads
     assert cancels(ash) == sorted((loans[name]['id'], 'Misty W.') for name in CANCELLED)
     told = next(update for update in inbox(ash)['updates']
                 if update['loan_id'] == loans['accepted']['id'])
-    assert set(told) == {'id', 'kind', 'loan_id', 'loan_kind', 'loan_state', 'role', 'other_name', 'read', 'return_by'}
+    assert set(told) == {'id', 'kind', 'loan_id', 'loan_kind', 'loan_state', 'role', 'other_name', 'read', 'at',
+                         'return_by'}
     # Misty confirmed the half-confirmed Loan: she may still take that back after the Block, and then it is a Loan
     # nobody confirmed a handover for, which either side may cancel.
     assert view(ash, loans['half'])['state'] == 'accepted'
@@ -189,3 +192,26 @@ def test_an_unfriend_and_a_cancel_from_the_other_side_lock_both_owners_in_order_
     assert shape(misty, first) == ('closed', 'cancelled', 'them')
     assert shape(misty, second) == ('closed', 'cancelled', 'you')
     assert revision_of(misty) == before + 2
+
+
+def test_edit_and_resend_is_offered_only_while_the_lender_is_still_a_friend(store):
+    iono, ash, misty, loans = loans_between()
+    declined = sent(ash, misty, [(iono, 1)])
+    ok(step(misty, view(misty, declined), 'decline'))
+    assert view(ash, declined)['actions'] == ['edit_and_resend']
+    # Ash removes Misty: the requests he sent, cancelled or declined, no longer offer it, on the Loan and the Loans tab.
+    ok(remove(ash, misty))
+    for name in ('requested', 'accepted'):
+        assert shape(ash, loans[name]) == ('closed', 'cancelled', 'you') and view(ash, loans[name])['actions'] == []
+    assert view(ash, declined)['actions'] == []
+    tab = {loan['id']: loan['actions'] for loan in ok(call('GET', '/api/social/loans', ash))['loans']}
+    assert tab[declined['id']] == [] and tab[loans['requested']['id']] == []
+    # Friends again, it is offered again.
+    befriend(ash, misty)
+    assert view(ash, declined)['actions'] == ['edit_and_resend']
+    assert view(ash, loans['requested'])['actions'] == ['edit_and_resend']
+    # Misty's Block hides it, and lifting the Block doesn't bring it back: they aren't Friends.
+    block(misty, ash)
+    assert view(ash, declined)['actions'] == []
+    assert ok(unblock(misty, ash))['relation'] == 'none'
+    assert view(ash, declined)['actions'] == []

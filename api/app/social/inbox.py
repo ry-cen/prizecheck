@@ -12,9 +12,13 @@ inbox showed it) and dismissed (Clear), so a cleared one never comes back. The i
 saw, so an update that arrived after the drawer opened is neither marked nor cleared. Event updates read more than
 ``PRUNE_DAYS`` days ago are deleted when the collector next marks or clears updates.
 
+Each update says when it happened (``at``), which the drawer shows as "3 hours ago" or a date (owner's decision,
+2026-10-16). A withdraw is stored as a 'cancelled' update, as any cancel; the inbox reads it as 'withdrawn' from the
+Loan's ``closed_reason``, which only a withdraw sets, so the drawer says "withdrew their request" (or offer).
+
 Every route reads only the reader's own Loans and updates, takes no lock, writes no Loan row and moves no revision.
 """
-from datetime import date
+from datetime import date, datetime, timedelta
 from typing import Annotated, Literal
 from uuid import UUID
 
@@ -22,7 +26,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from ..main import connect, verified_user
-from .loans import LOANS, LoanView, loan_facts, loan_views, role_of
+from .loans import LOANS, NUDGE_DAYS, LoanView, loan_facts, loan_views, role_of
 
 router = APIRouter(prefix='/api/social/inbox', tags=['social'])
 
@@ -31,8 +35,8 @@ PRUNE_DAYS = 90
 # The newest event updates the drawer lists.
 UPDATES = 50
 
-UpdateKind = Literal['accepted', 'partly_accepted', 'declined', 'cancelled', 'return_by_changed', 'overdue',
-                     'nudge_answer', 'nudge_handover']
+UpdateKind = Literal['accepted', 'partly_accepted', 'declined', 'cancelled', 'withdrawn', 'return_by_changed',
+                     'overdue', 'nudge_answer', 'nudge_handover']
 # The time-based kinds, as the Loan screen's notices (``loans.Notice``, migration 126).
 NOTICES = ('overdue', 'nudge_answer', 'nudge_handover')
 
@@ -40,7 +44,10 @@ NOTICES = ('overdue', 'nudge_answer', 'nudge_handover')
 class InboxUpdate(BaseModel):
     """One update under **Earlier**. ``id`` names it to the read and clear routes. ``other_name``: the collector who took
     the step, or for a time-based update the other side. ``loan_kind``, ``loan_state`` and ``role`` (the reader's side)
-    let the screen word it; ``read``: the reader was shown it."""
+    let the screen word it; ``read``: the reader was shown it. ``kind`` 'withdrawn': a 'cancelled' update on a Loan
+    its other side withdrew. ``at``: when it happened, the step's time for an event update; for a time-based one, when
+    it began to apply: the start of the day after the return-by date (overdue), or ``NUDGE_DAYS`` after the request or
+    offer was sent (nudge_answer) or accepted (nudge_handover)."""
     id: str
     kind: UpdateKind
     loan_id: UUID
@@ -49,6 +56,7 @@ class InboxUpdate(BaseModel):
     role: Literal['lender', 'borrower']
     other_name: str
     read: bool
+    at: datetime
     # The return-by date of an overdue Loan.
     return_by: date | None = None
 
@@ -77,6 +85,16 @@ def inbox_view(conn, user_id: str) -> InboxView:
     marks = {(mark['loan_id'], mark['kind']): mark['dismissed_at'] is not None for mark in conn.execute(
         'SELECT loan_id, kind, dismissed_at FROM loan_notice_seen WHERE user_id=%s AND loan_id = ANY(%s)',
         (user_id, [row['id'] for row in rows]))} if rows else {}
+    # The start of each overdue Loan's first overdue day, by the database's clock, which decided it is overdue.
+    days = sorted({row['return_by'] + timedelta(days=1) for row in rows if 'overdue' in facts[row['id']].showing})
+    starts = {found['day']: found['at'] for found in conn.execute(
+        'SELECT day, day::timestamptz AS at FROM unnest(%s::date[]) AS day', (days,))} if days else {}
+
+    def began(kind: str, row) -> datetime:
+        if kind == 'overdue':
+            return starts[row['return_by'] + timedelta(days=1)]
+        return row['created_at' if kind == 'nudge_answer' else 'accepted_at'] + timedelta(days=NUDGE_DAYS)
+
     updates = []
     for row, view in zip(rows, views):
         for kind in facts[row['id']].showing:
@@ -85,16 +103,18 @@ def inbox_view(conn, user_id: str) -> InboxView:
             updates.append(InboxUpdate(
                 id=notice_id(kind, row['id']), kind=kind, loan_id=row['id'], loan_kind=row['kind'],
                 loan_state=row['state'], role=view.role, other_name=view.other.display_name,
-                read=(row['id'], kind) in marks, return_by=row['return_by'] if kind == 'overdue' else None))
-    for event in conn.execute("""SELECT u.id, u.kind, u.loan_id, u.other_name, u.read_at, o.kind AS loan_kind,
-        o.state AS loan_state, o.lender_id, o.borrower_id
+                read=(row['id'], kind) in marks, at=began(kind, row),
+                return_by=row['return_by'] if kind == 'overdue' else None))
+    for event in conn.execute("""SELECT u.id, u.kind, u.loan_id, u.other_name, u.read_at, u.created_at,
+        o.kind AS loan_kind, o.state AS loan_state, o.closed_reason, o.lender_id, o.borrower_id
       FROM inbox_update u JOIN loan o ON o.id = u.loan_id
       WHERE u.recipient_id = %s AND u.dismissed_at IS NULL
       ORDER BY u.created_at DESC, u.id LIMIT %s""", (user_id, UPDATES)):
+        withdrawn = event['kind'] == 'cancelled' and event['closed_reason'] == 'withdrawn'
         updates.append(InboxUpdate(
-            id=str(event['id']), kind=event['kind'], loan_id=event['loan_id'], loan_kind=event['loan_kind'],
-            loan_state=event['loan_state'], role=role_of(user_id, event), other_name=event['other_name'],
-            read=event['read_at'] is not None))
+            id=str(event['id']), kind='withdrawn' if withdrawn else event['kind'], loan_id=event['loan_id'],
+            loan_kind=event['loan_kind'], loan_state=event['loan_state'], role=role_of(user_id, event),
+            other_name=event['other_name'], read=event['read_at'] is not None, at=event['created_at']))
     return InboxView(waiting=[view for view in views if view.waiting is not None], updates=updates)
 
 
