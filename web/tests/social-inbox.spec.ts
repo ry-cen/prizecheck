@@ -3,7 +3,8 @@
 // declines it, and both badges count one. Ash's bell lists the decline under Earlier; he opens the Loan from it, and
 // Clear empties Earlier for good. Collection's phone header still fits its Search with the bell in it. Each update says
 // when it happened (owner's decision, 2026-10-16), read on a clock fixed after it, so the words never depend on how long
-// the test took; Ash then withdraws his other request, and Misty's bell says he withdrew it.
+// the test took; Ash then withdraws his other request, and Misty's bell says he withdrew it. A Loan opened from the
+// bell in Collection's phone header takes focus on its heading, and a Clear that got no answer keeps focus on Clear.
 // The catalog is the Swap catalog (api/tests/want_list_swap_fixtures.py).
 import { randomUUID } from "node:crypto";
 import type { Page } from "@playwright/test";
@@ -87,13 +88,17 @@ test("the bell lists the Loans waiting on you, opens one, and Clear empties Earl
   await expectPageChecks(lender, "the inbox");
   await lender.setViewportSize(PHONE);
   await expectPageChecks(lender, "the inbox on a phone");
-  await lender.setViewportSize(DESKTOP);
 
-  // She opens the newer one from the inbox and declines it: one Loan waits on her now.
+  // She opens the newer one from the bell in Collection's phone header and declines it: one Loan waits on her now.
+  // That bell is hidden once the Loan is drawn, so the Loan's heading takes focus.
+  await drawer(lender).getByRole("button", { name: "Close Inbox" }).click();
+  await bell(lender).click();
   await waiting.first().click();
   await expect(drawer(lender)).toBeHidden();
   await expect(lender).toHaveURL(`${ORIGIN}/loans/${newer}`);
   await expect(title(lender)).toHaveText("Ash K wants to borrow 1 card");
+  await expect(title(lender)).toBeFocused();
+  await lender.setViewportSize(DESKTOP);
   await lender.getByRole("button", { name: "Decline", exact: true }).click();
   await lender
     .getByRole("group", { name: "Decline" })
@@ -134,12 +139,22 @@ test("the bell lists the Loans waiting on you, opens one, and Clear empties Earl
     "Misty W declined your request for 1 card"
   );
 
-  // The drawer marked it read; Clear empties Earlier, and it stays empty.
+  // The drawer marked it read; Clear empties Earlier, and it stays empty. A Clear that got no answer says so, and
+  // focus stays on Clear, which stays enabled while it is out.
   await bell(page).click();
   await expect(earlier.getByRole("link")).toHaveText([
     "Misty W declined your request 3 hours ago",
   ]);
-  await earlier.getByRole("button", { name: "Clear" }).click();
+  const clear = earlier.getByRole("button", { name: "Clear" });
+  await page.route("**/api/social/inbox/clear", (route) => route.abort(), {
+    times: 1,
+  });
+  await clear.click();
+  await expect(drawer(page).getByRole("alert")).toHaveText(
+    "Couldn't clear. Check your connection and try again."
+  );
+  await expect(clear).toBeFocused();
+  await clear.click();
   await expect(earlier).toContainText("No updates.");
   await expect(drawer(page).getByRole("status")).toHaveText("Cleared.");
   await expect(earlier.getByRole("heading", { name: "Earlier" })).toBeFocused();

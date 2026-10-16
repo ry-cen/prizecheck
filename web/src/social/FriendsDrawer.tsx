@@ -10,7 +10,7 @@ import {
   type RefObject,
 } from "react";
 import { Ellipsis, Smile } from "lucide-react";
-import { useInboxRefresh } from "../inbox/Inbox";
+import { useNoteLoansChanged } from "../inbox/Inbox";
 import { endingText, loansEnding } from "../loans/loanText";
 import { getProfile } from "../profile_generated";
 import { inviteUrl } from "../settings/PrivacySection";
@@ -47,7 +47,7 @@ import { commandMessage, lookupMessage } from "./socialMessages";
  * The shell provides it; the desktop header and the phone headers (the shell's and Collection's own) draw the button.
  * The badge is read when the shell starts, when the drawer opens, after each change and when the window regains focus;
  * nothing polls. Remove Friend and Block cancel the Loans the two have that nobody handed over (#260), so each change
- * reads the inbox again too, for the bell's and the Loans tab's badges. Their question says how many it cancels ("This
+ * reads the inbox again too, for the bell's and the Loans tab's badges, and the Loans list. Their question says how many it cancels ("This
  * cancels 2 open Loans that haven't been handed over."; owner's decision, 2026-10-16), from the Loans tab's read, and
  * says nothing while that read is out, when it fails, or for none.
  *
@@ -91,7 +91,7 @@ export function FriendsProvider({
   const [load, setLoad] = useState<Load>({ kind: "loading" });
   const opener = useRef<HTMLElement | null>(null);
   const reads = useRef(0);
-  const refreshInbox = useInboxRefresh();
+  const noteLoansChanged = useNoteLoansChanged();
 
   const refresh = useCallback(() => {
     const read = ++reads.current;
@@ -144,7 +144,7 @@ export function FriendsProvider({
         onClose={() => setOpen(false)}
         onChanged={() => {
           refresh();
-          refreshInbox();
+          noteLoansChanged();
         }}
         onPrivacy={onPrivacy}
         onOpenCollection={onOpenCollection}
