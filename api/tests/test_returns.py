@@ -73,7 +73,7 @@ def test_a_partial_return_moves_each_sides_inventory_as_it_confirms_and_the_last
     binder = binders['Binder']
     handed = view(misty, loan)
     assert (handed['state'], handed['actions'], handed['pending_return']) == (
-        'handed_over', ['start_return', 'write_off'], None)
+        'handed_over', ['start_return', 'write_off', 'change_return_by'], None)
     assert view(ash, loan)['actions'] == ['start_return']
     records = undo_records(misty)
     # Ash gives one back: his own Borrowed Copies leave at once; Misty's Collection waits for her.
@@ -87,7 +87,7 @@ def test_a_partial_return_moves_each_sides_inventory_as_it_confirms_and_the_last
     assert ok(call('GET', f'/api/holdings/{binder}', misty))['holdings'] == []
     asked = view(misty, loan)
     assert (asked['actions'], asked['needs_you'], asked['section']) == (
-        ['confirm_return', 'write_off'], True, 'needs_you')
+        ['confirm_return', 'write_off', 'change_return_by'], True, 'needs_you')
     assert asked['pending_return']['started_by'] == 'them'
     # Misty confirms: the copy is back in Binder, with no Undo record; the Loan shows it and stays out.
     misty_before = owner_revision(misty)
@@ -192,9 +192,9 @@ def test_no_return_before_both_sides_confirmed_the_handover_and_no_take_back_aft
     assert code(start_return(ash, loan, [(iono, 1)])) == (409, 'STEP_NOT_ALLOWED')
     # Ash leaves before confirming: Misty records the copies back on her own, and nothing reverses her write.
     leave(ash)
-    assert view(misty, loan)['actions'] == ['start_return', 'take_back', 'write_off']
+    assert view(misty, loan)['actions'] == ['start_return', 'take_back', 'write_off', 'change_return_by']
     ok(start_return(misty, loan, [(iono, 1)]))
-    assert view(misty, loan)['actions'] == ['start_return', 'write_off']
+    assert view(misty, loan)['actions'] == ['start_return', 'write_off', 'change_return_by']
     assert code(take_back(misty, loan)) == (409, 'STEP_NOT_ALLOWED')
 
 

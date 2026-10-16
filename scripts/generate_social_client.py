@@ -32,7 +32,7 @@ for name in ("Collector", "CollectorLookup", "InviteCollector", "FriendsView", "
              "LoansView", "LoanStep", "LoanLineRequest", "SendBorrowRequest", "PromisedLine", "AcceptBorrowRequest",
              "PromiseLimit", "LoanPickPlace", "LoanDeck", "LoanSide", "LentCard", "LentOut", "BorrowedCard",
              "BorrowedCopies", "MoveBorrowed", "ReturnedLine", "StartReturn", "WriteOffLine", "WriteOff", "ChosenPlace",
-             "WrittenOffChoice"):
+             "WrittenOffChoice", "ChangeReturnBy", "AskForMoreTime", "SeenNotices"):
     definition = schema[name]
     fields = [f"{field}{'' if field in definition.get('required', []) else '?'}: {ts_type(value)}"
               for field, value in definition["properties"].items()]
@@ -137,6 +137,18 @@ export const writeOff = (id: string, body: WriteOff) =>
   request<LoanView>(`/api/loans/${at(id)}/write-off`, 'POST', body);
 export const chooseWrittenOff = (id: string, body: WrittenOffChoice) =>
   request<LoanView>(`/api/loans/${at(id)}/written-off`, 'POST', body);
+// Return-by date (#256): the lender changes or clears it; the borrower asks for more time, which the lender answers.
+export const changeReturnBy = (id: string, body: ChangeReturnBy) =>
+  request<LoanView>(`/api/social/loans/${at(id)}/return-by`, 'POST', body);
+export const askForMoreTime = (id: string, body: AskForMoreTime) =>
+  request<LoanView>(`/api/social/loans/${at(id)}/extension`, 'POST', body);
+export const approveExtension = (id: string, body: LoanStep) =>
+  request<LoanView>(`/api/social/loans/${at(id)}/extension/approve`, 'POST', body);
+export const declineExtension = (id: string, body: LoanStep) =>
+  request<LoanView>(`/api/social/loans/${at(id)}/extension/decline`, 'POST', body);
+// The time-based notices the reader was shown, so each shows once (#256).
+export const seeNotices = (id: string, body: SeenNotices) =>
+  request<LoanView>(`/api/social/loans/${at(id)}/notices/seen`, 'POST', body);
 """)
 content = "\n".join(lines)
 target = root / "web/src/social_generated.ts"
