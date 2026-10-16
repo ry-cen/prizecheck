@@ -10,13 +10,18 @@ import { PageHeader } from "../shell/PageHeader";
 import { CardImage } from "../social/FriendCollectionPage";
 import {
   acceptBorrowRequest,
+  approveExtension,
+  askForMoreTime,
   cancelLoan,
+  changeReturnBy,
   chooseWrittenOff,
   confirmHandover,
   confirmReturn,
+  declineExtension,
   declineLoan,
   getLoan,
   getLoanSide,
+  seeNotices,
   SocialError,
   startReturn,
   takeBackHandover,
@@ -33,8 +38,10 @@ import { Button } from "../ui/Button";
 import { Icon } from "../ui/Icon";
 import { Menu, type MenuItem } from "../ui/Menu";
 import { Stepper } from "../ui/Stepper";
+import { TextField } from "../ui/TextField";
 import { useBorrowDrafts } from "./BorrowDrafts";
 import {
+  dayAfter,
   dayText,
   lineEdition,
   lineOut,
@@ -42,6 +49,7 @@ import {
   loanStepMessage,
   LOANS_PATH,
   outcomeUnknown,
+  today,
   waitingText,
 } from "./loanText";
 
@@ -57,7 +65,7 @@ type Asking = "decline" | "withdraw" | "cancel";
 /** Where focus goes after the next render, when the control that had it goes away: the confirmation's own button when
  * it asks, its opener after Keep it (Decline, or ⋯ for Withdraw and Cancel Loan), and the heading after a step or a
  * refusal that reads the Loan again. */
-type FocusNext = "ask" | "decline" | "menu" | "heading" | "count";
+type FocusNext = "ask" | "decline" | "menu" | "heading" | "count" | "date";
 
 const ASK: Record<
   Asking,
@@ -92,7 +100,11 @@ const ASK: Record<
  * returned and those coming back. Choosing the copies moves focus to its button (Record return, Give these back), and
  * Not now moves it to the heading. Write-off (#257): the lender's Write off… puts a stepper on each line and asks once,
  * warning it can't be undone; Keep it returns focus to ⋯. The borrower then answers I still have it or It's gone for
- * the copies they hold. Lines tag the copies written off.
+ * the copies they hold. Lines tag the copies written off. Return-by date (#256): the
+ * lender's Change return-by date and the borrower's Ask for more time open a date field in place of the primary
+ * button, with focus in it, and Cancel returns focus to ⋯; the lender answers a request for more time with Approve or
+ * Decline above it. Answering a request carries the date to keep, change or clear. The facts line reads "Overdue
+ * since …" from the day after the date, and a Loan nobody handed over for 14 days says so once.
  */
 export function LoanScreen({
   loanId,
@@ -110,6 +122,15 @@ export function LoanScreen({
   const [returning, setReturning] = useState<Map<string, number> | null>(null);
   // Choosing a Write-off's copies (#257), as for a return.
   const [writing, setWriting] = useState<Map<string, number> | null>(null);
+  // Changing the return-by date (lender) or asking for more time (borrower), #256: the date chosen so far.
+  const [dating, setDating] = useState<{
+    kind: "change" | "ask";
+    value: string;
+  } | null>(null);
+  // The return-by date the lender answers a request with (#256): the requested one to start with.
+  const [answerDate, setAnswerDate] = useState("");
+  // Notices already recorded as seen on this screen (#256), so each is recorded once.
+  const noticed = useRef(new Set<string>());
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   // One key per step until it settles, so a step whose outcome is unknown is retried safely.
@@ -121,6 +142,8 @@ export function LoanScreen({
   const focusNext = useRef<FocusNext | null>(null);
   // The button that sends the copies being chosen (#255): focus goes there when choosing starts.
   const countButton = useRef<HTMLButtonElement>(null);
+  // The date field of Change return-by date or Ask for more time (#256).
+  const dateField = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -132,6 +155,7 @@ export function LoanScreen({
         if (controller.signal.aborted) return;
         setLoad({ kind: "ready", loan, side });
         setPromised(promiseStart(loan, side));
+        setAnswerDate(loan.return_by ?? "");
       },
       (cause) => {
         if (controller.signal.aborted) return;
@@ -159,9 +183,22 @@ export function LoanScreen({
             ? menuAnchor.current?.querySelector("button")
             : target === "count"
               ? countButton.current
-              : heading.current;
+              : target === "date"
+                ? dateField.current
+                : heading.current;
     element?.focus();
   });
+
+  // A time-based notice shows on this visit and is recorded as seen, so it doesn't show again (#256).
+  const showing = load.kind === "ready" ? (load.loan.notices ?? []) : [];
+  useEffect(() => {
+    const fresh = showing.filter(
+      (kind) => !noticed.current.has(`${loanId}:${kind}`)
+    );
+    if (fresh.length === 0) return;
+    for (const kind of fresh) noticed.current.add(`${loanId}:${kind}`);
+    seeNotices(loanId, { kinds: fresh }).catch(() => undefined);
+  }, [loanId, showing.join(",")]);
 
   const back = (
     <a
@@ -240,6 +277,7 @@ export function LoanScreen({
       setAsking(null);
       setReturning(null);
       setWriting(null);
+      setDating(null);
       const nextSide = await getLoanSide(loanId).catch(() => side);
       setLoad({ kind: "ready", loan: next, side: nextSide });
       setPromised(promiseStart(next, nextSide));
@@ -251,6 +289,7 @@ export function LoanScreen({
         setAsking(null);
         setReturning(null);
         setWriting(null);
+        setDating(null);
         setAttempt((n) => n + 1);
       }
     } finally {
@@ -329,6 +368,30 @@ export function LoanScreen({
           },
         ]
       : []),
+    ...(loan.actions.includes("change_return_by")
+      ? [
+          {
+            label: "Change return-by date",
+            onSelect: () => {
+              keys.current.delete("change_return_by");
+              focusNext.current = "date";
+              setDating({ kind: "change", value: loan.return_by ?? "" });
+            },
+          },
+        ]
+      : []),
+    ...(loan.actions.includes("ask_for_more_time")
+      ? [
+          {
+            label: "Ask for more time",
+            onSelect: () => {
+              keys.current.delete("ask_for_more_time");
+              focusNext.current = "date";
+              setDating({ kind: "ask", value: "" });
+            },
+          },
+        ]
+      : []),
     ...(loan.actions.includes("edit_and_resend") && drafts
       ? [
           {
@@ -349,13 +412,35 @@ export function LoanScreen({
     loan.role === "borrower" && loan.state !== "closed"
       ? `For ${side.deck?.name ?? "Unsorted"}`
       : null,
-    loan.return_by && loan.state !== "closed"
-      ? `Due back ${dayText(loan.return_by)}`
+    loan.overdue_since
+      ? `Overdue since ${dayText(loan.overdue_since)}`
+      : loan.return_by && loan.state !== "closed"
+        ? `Due back ${dayText(loan.return_by)}`
+        : null,
+    loan.role === "borrower" && loan.extension_to
+      ? `You asked for more time, until ${dayText(loan.extension_to)}`
       : null,
   ].filter(Boolean);
+  // Once either side confirmed the handover, the lender's date only moves later (#256).
+  const handed = loan.you_confirmed_handover || loan.they_confirmed_handover;
+  const earliest = (day: string) => (day > today() ? day : today());
+  const dateMin = !dating
+    ? today()
+    : dating.kind === "ask"
+      ? earliest(dayAfter(loan.return_by ?? today()))
+      : handed && loan.return_by
+        ? earliest(loan.return_by)
+        : today();
 
   const primary = answering ? (
-    <div className="flex flex-wrap items-center gap-2">
+    <div className="flex flex-wrap items-end gap-2">
+      <TextField
+        type="date"
+        label="Return by (optional)"
+        min={today()}
+        value={answerDate}
+        onChange={(event) => setAnswerDate(event.target.value)}
+      />
       <Button
         variant="primary"
         disabled={total === 0}
@@ -368,6 +453,7 @@ export function LoanScreen({
                 edition_id: line.edition_id,
                 promised: String(promised.get(line.edition_id) ?? 0),
               })),
+              return_by: answerDate || null,
             })
           )
         }
@@ -397,6 +483,67 @@ export function LoanScreen({
         Use suggested picks
       </Button>
       <p className="m-0 text-meta text-text-muted">A pick is out of date.</p>
+    </div>
+  ) : dating ? (
+    <div
+      role="group"
+      aria-label={
+        dating.kind === "change" ? "Change return-by date" : "Ask for more time"
+      }
+      className="flex flex-wrap items-end gap-2 rounded-panel border border-border bg-surface p-3"
+    >
+      <TextField
+        type="date"
+        ref={dateField}
+        label={dating.kind === "change" ? "Return by" : "New return-by date"}
+        min={dateMin}
+        value={dating.value}
+        onChange={(event) =>
+          setDating({ ...dating, value: event.target.value })
+        }
+      />
+      <Button
+        variant="primary"
+        disabled={dating.value === ""}
+        aria-disabled={busy || undefined}
+        onClick={() =>
+          void step(
+            dating.kind === "change" ? "change_return_by" : "ask_for_more_time",
+            (key) =>
+              dating.kind === "change"
+                ? changeReturnBy(loan.id, {
+                    ...body(key),
+                    return_by: dating.value,
+                  })
+                : askForMoreTime(loan.id, {
+                    ...body(key),
+                    return_by: dating.value,
+                  })
+          )
+        }
+      >
+        {dating.kind === "change" ? "Save" : "Ask"}
+      </Button>
+      {dating.kind === "change" && loan.return_by && (
+        <Button
+          aria-disabled={busy || undefined}
+          onClick={() =>
+            void step("change_return_by", (key) =>
+              changeReturnBy(loan.id, { ...body(key), return_by: null })
+            )
+          }
+        >
+          Clear date
+        </Button>
+      )}
+      <Button
+        onClick={() => {
+          focusNext.current = "menu";
+          setDating(null);
+        }}
+      >
+        Cancel
+      </Button>
     </div>
   ) : writing ? (
     <div
@@ -551,6 +698,47 @@ export function LoanScreen({
     loanHeadline(loan),
     <>
       <p className="m-0 text-meta text-text-muted">{facts.join(" · ")}</p>
+      {showing.includes("nudge") && (
+        <p role="status" className="m-0 text-body">
+          {loan.state !== "requested"
+            ? "Still handing these over? Cancel to release them."
+            : loan.role === "lender"
+              ? "Still deciding? Accept or decline this request."
+              : "No answer yet. Withdraw the request if you no longer need these."}
+        </p>
+      )}
+      {loan.actions.includes("approve_extension") && loan.extension_to && (
+        <div
+          role="group"
+          aria-label="More time"
+          className="flex flex-wrap items-center gap-2 rounded-panel border border-border bg-surface p-3"
+        >
+          <p className="m-0 min-w-0 flex-1 text-body">
+            {other} asked for more time, until {dayText(loan.extension_to)}.
+          </p>
+          <Button
+            variant="primary"
+            aria-disabled={busy || undefined}
+            onClick={() =>
+              void step("approve_extension", (key) =>
+                approveExtension(loan.id, body(key))
+              )
+            }
+          >
+            Approve
+          </Button>
+          <Button
+            aria-disabled={busy || undefined}
+            onClick={() =>
+              void step("decline_extension", (key) =>
+                declineExtension(loan.id, body(key))
+              )
+            }
+          >
+            Decline
+          </Button>
+        </div>
+      )}
       <ul
         aria-label="Cards"
         className="m-0 list-none overflow-hidden rounded-panel border border-border bg-surface p-0"

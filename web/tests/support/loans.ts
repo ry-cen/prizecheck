@@ -143,13 +143,15 @@ export async function loanStep(
 /**
  * A Borrow Request from `borrower` to `lender` for these copies (for `deckId`, or none), accepted in full and
  * confirmed handed over by both sides: the lender's copies leave their Locations, and the borrower's arrive in the
- * Deck (or Unsorted) as Borrowed Copies. Returns the Loan id.
+ * Deck (or Unsorted) as Borrowed Copies. `returnBy`: the requested return-by date ("2099-01-31"), kept on accepting.
+ * Returns the Loan id.
  */
 export async function lendHandedOver(
   lender: Page,
   borrower: Page,
   lines: [edition: string, copies: number][],
-  deckId: string | null = null
+  deckId: string | null = null,
+  returnBy: string | null = null
 ): Promise<string> {
   const sent = await api(borrower, "POST", "/api/loans", {
     lender_id: await accountId(lender),
@@ -158,6 +160,7 @@ export async function lendHandedOver(
       quantity: String(copies),
     })),
     deck_id: deckId,
+    return_by: returnBy,
     idempotency_key: randomUUID(),
   });
   await loanStep(lender, sent.id, `/api/loans/${sent.id}/accept`, {
