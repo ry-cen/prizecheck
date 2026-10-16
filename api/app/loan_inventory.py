@@ -62,7 +62,8 @@ from .social import counts
 from .social.friend_copies import friend_copies
 from .social.friend_reads import card_facts
 from .social.friends import friend_ids
-from .social.loans import (NOW, LoanStep, LoanView, begin_command, advance_revision, close, run_step, store)
+from .social.loans import (NOW, LoanStep, LoanView, begin_command, advance_revision, close, return_by_columns, run_step,
+                           store)
 from .social.owners import ensure_owner, lock_owners
 
 router = APIRouter(prefix='/api/loans', tags=['loans'])
@@ -95,6 +96,8 @@ class PromisedLine(BaseModel):
 
 class AcceptBorrowRequest(LoanStep):
     lines: list[PromisedLine] = Field(min_length=1, max_length=MAX_LOAN_LINES)
+    # The return-by date (#256): left out to keep the requested one, None to clear it, else the lender's date.
+    return_by: date | None = None
 
 
 class ReturnedLine(BaseModel):
@@ -425,10 +428,13 @@ def accept(loan_id: UUID, command: AcceptBorrowRequest, user_id: str = Depends(v
         # The Loan turns accepted in run_step's one write of its row; the picks never read this Loan's state.
         make_picks(conn, user_id, loan_id, promised)
         advance_revision(conn, user_id)
-        return {'state': 'accepted', 'accepted_at': NOW}
+        dated = return_by_columns(conn, row, command.return_by) if not keeps_date else {}
+        return {'state': 'accepted', 'accepted_at': NOW, **dated}
 
+    keeps_date = 'return_by' not in command.model_fields_set
     return run_step(user_id, loan_id, command, 'accept', apply, lambda role, row: [row['lender_id']],
-                    {'lines': {str(edition): copies for edition, copies in sorted(promised.items(), key=str)}})
+                    {'lines': {str(edition): copies for edition, copies in sorted(promised.items(), key=str)},
+                     'return_by': 'keep' if keeps_date else command.return_by and command.return_by.isoformat()})
 
 
 @router.get('/lent-out', response_model=LentOut)

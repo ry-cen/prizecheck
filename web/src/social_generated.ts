@@ -19,13 +19,13 @@ export type LoanParty = { collector_id: string | null; display_name: string; han
 export type LoanCard = { edition_id: string; name: string; set_code: string; set_name: string; collector_number: string; descriptor: Record<string, unknown>; image_url: string | null; requested: string; promised: string; written_off: string; returned?: string };
 export type ReturnLine = { edition_id: string; copies: string };
 export type PendingReturn = { started_by: "you" | "them"; lines: ReturnLine[]; you_confirmed: boolean; they_confirmed: boolean };
-export type LoanView = { id: string; kind: "borrow_request" | "lend_offer"; state: "requested" | "offered" | "accepted" | "handed_over" | "closed"; closed_reason: "declined" | "withdrawn" | "cancelled" | "returned" | "written_off" | null; closed_by: "you" | "them" | null; role: "lender" | "borrower"; other: LoanParty; return_by: string | null; you_confirmed_handover: boolean; they_confirmed_handover: boolean; lines: LoanCard[]; needs_you: boolean; section: "needs_you" | "out_now" | "pending" | "history"; actions: ("accept" | "decline" | "confirm_handover" | "start_return" | "confirm_return" | "choose_written_off" | "withdraw" | "take_back" | "cancel" | "write_off" | "edit_and_resend")[]; revision: number; pending_return?: PendingReturn | null; awaiting_choice?: string };
+export type LoanView = { id: string; kind: "borrow_request" | "lend_offer"; state: "requested" | "offered" | "accepted" | "handed_over" | "closed"; closed_reason: "declined" | "withdrawn" | "cancelled" | "returned" | "written_off" | null; closed_by: "you" | "them" | null; role: "lender" | "borrower"; other: LoanParty; return_by: string | null; you_confirmed_handover: boolean; they_confirmed_handover: boolean; lines: LoanCard[]; needs_you: boolean; section: "needs_you" | "out_now" | "pending" | "history"; actions: ("accept" | "decline" | "confirm_handover" | "start_return" | "confirm_return" | "choose_written_off" | "withdraw" | "take_back" | "cancel" | "write_off" | "change_return_by" | "ask_for_more_time" | "approve_extension" | "decline_extension" | "edit_and_resend")[]; revision: number; pending_return?: PendingReturn | null; awaiting_choice?: string; extension_to?: string | null; overdue_since?: string | null; notices?: ("overdue" | "nudge")[] };
 export type LoansView = { loans: LoanView[]; needs_you: number };
 export type LoanStep = { revision: number; idempotency_key: string };
 export type LoanLineRequest = { edition_id: string; quantity: string };
 export type SendBorrowRequest = { lender_id: string; lines: LoanLineRequest[]; deck_id?: string | null; return_by?: string | null; replaces?: string | null; idempotency_key: string };
 export type PromisedLine = { edition_id: string; promised: string };
-export type AcceptBorrowRequest = { revision: number; idempotency_key: string; lines: PromisedLine[] };
+export type AcceptBorrowRequest = { revision: number; idempotency_key: string; lines: PromisedLine[]; return_by?: string | null };
 export type PromiseLimit = { edition_id: string; available: string };
 export type LoanPickPlace = { edition_id: string; location_id: string | null; name: string; copies: string; short: string };
 export type LoanDeck = { id: string; name: string };
@@ -41,6 +41,9 @@ export type WriteOffLine = { edition_id: string; quantity: string };
 export type WriteOff = { revision: number; idempotency_key: string; lines: WriteOffLine[] };
 export type ChosenPlace = { location_id: string; edition_id: string; copies: string };
 export type WrittenOffChoice = { revision: number; idempotency_key: string; choice: "keep" | "remove"; places: ChosenPlace[] };
+export type ChangeReturnBy = { revision: number; idempotency_key: string; return_by: string | null };
+export type AskForMoreTime = { revision: number; idempotency_key: string; return_by: string };
+export type SeenNotices = { kinds: ("overdue" | "nudge")[] };
 
 /** A refused social request: the API's code, and for TOO_MANY_LOOKUPS the detail that says when to try again. */
 export class SocialError extends Error {
@@ -141,3 +144,15 @@ export const writeOff = (id: string, body: WriteOff) =>
   request<LoanView>(`/api/loans/${at(id)}/write-off`, 'POST', body);
 export const chooseWrittenOff = (id: string, body: WrittenOffChoice) =>
   request<LoanView>(`/api/loans/${at(id)}/written-off`, 'POST', body);
+// Return-by date (#256): the lender changes or clears it; the borrower asks for more time, which the lender answers.
+export const changeReturnBy = (id: string, body: ChangeReturnBy) =>
+  request<LoanView>(`/api/social/loans/${at(id)}/return-by`, 'POST', body);
+export const askForMoreTime = (id: string, body: AskForMoreTime) =>
+  request<LoanView>(`/api/social/loans/${at(id)}/extension`, 'POST', body);
+export const approveExtension = (id: string, body: LoanStep) =>
+  request<LoanView>(`/api/social/loans/${at(id)}/extension/approve`, 'POST', body);
+export const declineExtension = (id: string, body: LoanStep) =>
+  request<LoanView>(`/api/social/loans/${at(id)}/extension/decline`, 'POST', body);
+// The time-based notices the reader was shown, so each shows once (#256).
+export const seeNotices = (id: string, body: SeenNotices) =>
+  request<LoanView>(`/api/social/loans/${at(id)}/notices/seen`, 'POST', body);
