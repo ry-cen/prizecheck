@@ -157,7 +157,7 @@ A Location whose Holdings a collector's Friends cannot see. Friends never see Lo
 _Avoid_: Private Location, locked binder
 
 **Loan**:
-An agreement for one collector, the lender, to let a Friend, the borrower, have some of the lender's copies. A Loan is accepted, which promises a number of the lender's copies and gives the lender a Pick List of where to take them from; then handed over, when the copies leave the lender's Locations; then returned, when they go back. Both sides confirm the handover and the return. While lent, copies sit in no Location; the Loan remembers where they came from. It may carry a return-by date and is overdue after it. The lender still owns lent copies. A Loan never transfers ownership; giving or trading cards is not a Loan.
+An agreement for one collector, the lender, to let a Friend, the borrower, have some of the lender's copies. A Loan is accepted, which promises a number of the lender's copies and gives the lender a Pick List of where to take them from; then handed over, when the copies leave the lender's Locations; then returned, when they go back. Each side confirms the handover and the return for their own inventory, and a step is complete once both have. Copies are reserved once the lender has said yes: on accepting a Borrow Request or on sending a Lend Offer. While lent, copies sit in no Location; the Loan remembers where they came from. It may carry a return-by date and is overdue after it. The lender still owns lent copies. A Loan never transfers ownership; giving or trading cards is not a Loan.
 _Avoid_: Trade, gift, transfer
 
 **Borrow Request**:
@@ -173,5 +173,5 @@ A copy, held by the borrower, that a Friend has lent and handed over. It sits in
 _Avoid_: Owned copy, temporary Holding
 
 **Write-off**:
-The lender closing a handed-over Loan as not coming back. The lent copies leave the lender's Collection as an Inventory Removal, and the Borrowed Copies leave the borrower.
+The lender closing a handed-over Loan as not coming back. The lent copies leave the lender's Collection as an Inventory Removal. The borrower then chooses to keep the Borrowed Copies as owned copies, when they still have the cards, or to remove them.
 _Avoid_: Lost card, gift
