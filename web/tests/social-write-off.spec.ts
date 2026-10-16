@@ -1,8 +1,8 @@
 // Ticket #257: Write-off (spec "Write-off", "Web screens"). Misty lends Ash three Iono PAL 185 and two Boss's Orders
 // PAL 172 on two Loans (request, accept and both handover confirmations through the API, as #252's and #253's specs
 // cover). Misty writes off two Iono with Write off…, which asks once and warns it can't be undone; Ash answers I still
-// have it, so they become his. Misty writes off both Boss's Orders; Ash answers It's gone, which ends that Loan. Lines
-// tag the copies written off. The catalog is the Swap catalog (api/tests/want_list_swap_fixtures.py).
+// have them, so they become his. Misty writes off both Boss's Orders; Ash answers They're gone, which ends that Loan.
+// Lines tag the copies written off. The catalog is the Swap catalog (api/tests/want_list_swap_fixtures.py).
 import { expect, test } from "./support/collectors";
 import {
   DESKTOP,
@@ -71,7 +71,7 @@ test("the lender writes off copies, and the borrower keeps them or says they're 
   await expect(title(lender)).toHaveText("Ash K has 1 card of yours");
   await expect(firstLine(lender)).toContainText("2 written off");
 
-  // Ash: the Write-off needs him; I still have it makes them his.
+  // Ash: the Write-off needs him; I still have them makes them his.
   await page.goto(`${ORIGIN}/loans`);
   await expect(
     page.getByRole("region", { name: "Needs you" }).getByRole("link")
@@ -81,7 +81,7 @@ test("the lender writes off copies, and the borrower keeps them or says they're 
   await page.setViewportSize(PHONE);
   await expectPageChecks(page, "a Write-off to answer on a phone");
   await page.setViewportSize(DESKTOP);
-  await page.getByRole("button", { name: "I still have it" }).click();
+  await page.getByRole("button", { name: "I still have them" }).click();
   await expect(title(page)).toHaveText("You have 1 card of Misty W's");
   await expect(firstLine(page)).toContainText("2 written off");
   // One Iono still borrowed, and both Boss's Orders on the other Loan.
@@ -101,7 +101,7 @@ test("the lender writes off copies, and the borrower keeps them or says they're 
   await expect(title(lender)).toHaveText("Ash K has no cards of yours");
   await page.goto(`${ORIGIN}/loans/${bossLoan}`);
   await expect(title(page)).toHaveText("Misty W wrote off 2 cards you have");
-  await page.getByRole("button", { name: "It's gone" }).click();
+  await page.getByRole("button", { name: "They're gone" }).click();
   await expect(title(page)).toHaveText("Your Loan from Misty W ended");
   await expect(firstLine(page)).toContainText("2 written off");
   await lender.reload();

@@ -76,12 +76,16 @@ test("borrowed copies fill the borrower's Deck, labelled with their lender, and 
   await expect(rows.first()).toContainText(`2 from Misty W · In ${deckName}`);
   await expectPageChecks(page, "the Borrowed list");
 
-  // Move one to Unsorted: the list shows each place.
-  await rows
-    .first()
-    .getByRole("button", { name: `Move Iono from ${deckName}` })
-    .click();
+  // Move one to Unsorted: the list shows each place. Move… puts focus in its form, and Cancel gives it back.
+  const moveFromDeck = borrowed.getByRole("button", {
+    name: `Move Iono from ${deckName}`,
+  });
+  await moveFromDeck.click();
   const form = borrowed.getByRole("form", { name: "Move Iono" });
+  await expect(form.getByRole("combobox", { name: "Move to" })).toBeFocused();
+  await form.getByRole("button", { name: "Cancel" }).click();
+  await expect(moveFromDeck).toBeFocused();
+  await moveFromDeck.click();
   await form.getByRole("combobox", { name: "Move to" }).selectOption({
     label: "Unsorted",
   });
@@ -95,6 +99,7 @@ test("borrowed copies fill the borrower's Deck, labelled with their lender, and 
   await expect(rows.filter({ hasText: `In ${deckName}` })).toContainText(
     "1 from Misty W"
   );
+  await expect(moveFromDeck).toBeFocused();
   await borrowed.getByRole("button", { name: "Close Borrowed" }).click();
 
   // On a phone the entry is in the locations drawer.
@@ -103,6 +108,10 @@ test("borrowed copies fill the borrower's Deck, labelled with their lender, and 
   await page.getByRole("button", { name: /^Borrowed/ }).click();
   await expect(rows).toHaveCount(2);
   await expectPageChecks(page, "the Borrowed list on a phone");
+  await moveFromDeck.click();
+  await expect(form.getByRole("combobox", { name: "Move to" })).toBeFocused();
+  await expectPageChecks(page, "moving a borrowed card on a phone");
+  await form.getByRole("button", { name: "Cancel" }).click();
   await borrowed.getByRole("button", { name: "Close Borrowed" }).click();
   await page.setViewportSize(DESKTOP);
 

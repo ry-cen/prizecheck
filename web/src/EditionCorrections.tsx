@@ -44,11 +44,9 @@ export function Correction({
       setMessage(
         cause instanceof HoldingError && cause.code === "PROMISED_TO_LOAN"
           ? "You promised some of these copies to a Loan. Reassign fewer copies, or cancel the Loan first."
-          : cause instanceof HoldingError && cause.code === "EDITION_ON_LOAN"
-            ? "This card is on a Loan that's still open. Reassign it once the Loan ends."
-            : cause instanceof HoldingError
-              ? `Reassignment failed: ${cause.code}. Refresh cards before retrying.`
-              : "Reassignment may have completed. Retry safely."
+          : cause instanceof HoldingError
+            ? `Reassignment failed: ${cause.code}. Refresh cards before retrying.`
+            : "Reassignment may have completed. Retry safely."
       );
     } finally {
       setBusy(false);

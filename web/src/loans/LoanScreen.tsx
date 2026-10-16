@@ -68,7 +68,8 @@ type Asking = "decline" | "withdraw" | "cancel";
 /** Where focus goes after the next render, when the control that had it goes away: the confirmation's own button when
  * it asks, its opener after Keep it (Decline, or ⋯ for Withdraw and Cancel Loan), and the heading after a step or a
  * refusal that reads the Loan again. */
-type FocusNext = "ask" | "decline" | "menu" | "heading" | "count" | "date";
+type FocusNext =
+  "ask" | "decline" | "menu" | "heading" | "count" | "date" | "decks";
 
 const ASK: Record<
   Asking,
@@ -111,8 +112,9 @@ const OFFER_ASK: typeof ASK = {
  * Focus never falls to the page: asking moves it to the confirmation's button, Keep it returns it to the opener, and a
  * step that lands, or a refusal that reads the Loan again, moves it to the heading, which reads the Loan's new state.
  * Returns (#255): Record a return (lender) or Give cards back (borrower) puts a stepper on each line, every copy still
- * out to start with; the other side then confirms with Yes, they're back or Yes, I gave them back. Lines tag the copies
- * returned and those coming back. Choosing the copies moves focus to its button (Record return, Give these back), and
+ * out to start with; the other side then confirms with Yes, they're back or Yes, I gave them back, and once the other
+ * side's account is gone the side that started it finishes it with Finish return. Lines tag the copies returned and
+ * those coming back. Choosing the copies moves focus to its button (Record return, Give these back), and
  * Not now moves it to the heading. Write-off (#257): the lender's Write off… puts a stepper on each line and asks once,
  * warning it can't be undone; Keep it returns focus to ⋯. The borrower then answers I still have it or It's gone for
  * the copies they hold. Lines tag the copies written off. Return-by date (#256): the
@@ -121,7 +123,7 @@ const OFFER_ASK: typeof ASK = {
  * Decline above it. Answering a request carries the date to keep, change or clear. The facts line reads "Overdue
  * since …" from the day after the date, and a Loan nobody handed over for 14 days says so once. Lend Offers (#258):
  * the borrower answers with a stepper per line, at most what was offered, and Put them in (a Deck or Unsorted); the
- * lender withdraws one from ⋯.
+ * lender withdraws one from ⋯. One form or question is open at a time: opening one closes the others.
  */
 export function LoanScreen({
   loanId,
@@ -149,7 +151,8 @@ export function LoanScreen({
   // Notices already recorded as seen on this screen (#256), so each is recorded once.
   const noticed = useRef(new Set<string>());
   // Answering a Lend Offer (#258): the borrower's Decks, and the one chosen ("" for Unsorted).
-  const [decks, setDecks] = useState<DeckIndexEntry[] | null>(null);
+  // "failed": they couldn't be read; Retry reads them again (null).
+  const [decks, setDecks] = useState<DeckIndexEntry[] | "failed" | null>(null);
   const [deckId, setDeckId] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
@@ -160,6 +163,11 @@ export function LoanScreen({
   const askButton = useRef<HTMLButtonElement>(null);
   const declineButton = useRef<HTMLButtonElement>(null);
   const focusNext = useRef<FocusNext | null>(null);
+  // A step refused because the Loan moved on reads it again: the open form closes and the heading takes focus once
+  // the new Loan is drawn, so focus never lands on the old headline.
+  const reloading = useRef(false);
+  // Put them in, answering a Lend Offer (#258): Retry after the Decks couldn't be read moves focus here.
+  const deckSelect = useRef<HTMLSelectElement>(null);
   // The button that sends the copies being chosen (#255): focus goes there when choosing starts.
   const countButton = useRef<HTMLButtonElement>(null);
   // The date field of Change return-by date or Ask for more time (#256).
@@ -173,6 +181,14 @@ export function LoanScreen({
     ]).then(
       ([loan, side]) => {
         if (controller.signal.aborted) return;
+        if (reloading.current) {
+          reloading.current = false;
+          focusNext.current = "heading";
+          setAsking(null);
+          setReturning(null);
+          setWriting(null);
+          setDating(null);
+        }
         setLoad({ kind: "ready", loan, side });
         setPromised(promiseStart(loan, side));
         setAnswerDate(loan.return_by ?? "");
@@ -205,7 +221,9 @@ export function LoanScreen({
               ? countButton.current
               : target === "date"
                 ? dateField.current
-                : heading.current;
+                : target === "decks"
+                  ? deckSelect.current
+                  : heading.current;
     element?.focus();
   });
 
@@ -230,7 +248,7 @@ export function LoanScreen({
     let live = true;
     readDecks().then(
       (found) => live && setDecks(found),
-      () => live && setDecks([])
+      () => live && setDecks("failed")
     );
     return () => {
       live = false;
@@ -297,8 +315,17 @@ export function LoanScreen({
   const cardName = (editionId: string) =>
     loan.lines.find((line) => line.edition_id === editionId)?.name ?? "a card";
 
+  /** Closes whichever form or question is open, before another opens: one at a time. */
+  function closeModes() {
+    setAsking(null);
+    setReturning(null);
+    setWriting(null);
+    setDating(null);
+  }
   /** Asks before a step that ends the Loan, with focus on the confirmation's button. */
   function ask(step: Asking) {
+    if (busy) return;
+    closeModes();
     focusNext.current = "ask";
     setAsking(step);
   }
@@ -312,23 +339,18 @@ export function LoanScreen({
     try {
       const next = await call(key);
       keys.current.delete(name);
-      focusNext.current = "heading";
-      setAsking(null);
-      setReturning(null);
-      setWriting(null);
-      setDating(null);
+      // The open form stays, its buttons busy, until the screen's own side is read again: the new Loan, the form
+      // closing and focus on the new headline then land in one render.
       const nextSide = await getLoanSide(loanId).catch(() => side);
+      focusNext.current = "heading";
+      closeModes();
       setLoad({ kind: "ready", loan: next, side: nextSide });
       setPromised(promiseStart(next, nextSide));
     } catch (cause) {
       if (!outcomeUnknown(cause)) keys.current.delete(name);
       setMessage(loanStepMessage(cause, other, cardName));
       if (cause instanceof SocialError && RELOAD.has(cause.code)) {
-        focusNext.current = "heading";
-        setAsking(null);
-        setReturning(null);
-        setWriting(null);
-        setDating(null);
+        reloading.current = true;
         setAttempt((n) => n + 1);
       }
     } finally {
@@ -368,6 +390,11 @@ export function LoanScreen({
         )
     );
   const awaiting = side.awaiting_choice ?? [];
+  // A return the reader started that the other side, whose account is gone, can never confirm: the reader finishes
+  // it alone, and nothing more moves (#255).
+  const finishing =
+    loan.pending_return?.you_confirmed === true &&
+    loan.other.collector_id === null;
   // The handover (#253): each side confirms for its own inventory. The lender's picks must be current first.
   const handing = loan.actions.includes("confirm_handover");
   const stale =
@@ -404,7 +431,7 @@ export function LoanScreen({
             label: "Write off…",
             onSelect: () => {
               keys.current.delete("write_off");
-              setReturning(null);
+              closeModes();
               setWriting(
                 new Map(loan.lines.map((line) => [line.edition_id, 0]))
               );
@@ -418,6 +445,7 @@ export function LoanScreen({
             label: "Change return-by date",
             onSelect: () => {
               keys.current.delete("change_return_by");
+              closeModes();
               focusNext.current = "date";
               setDating({ kind: "change", value: loan.return_by ?? "" });
             },
@@ -430,6 +458,7 @@ export function LoanScreen({
             label: "Ask for more time",
             onSelect: () => {
               keys.current.delete("ask_for_more_time");
+              closeModes();
               focusNext.current = "date";
               setDating({ kind: "ask", value: "" });
             },
@@ -482,12 +511,13 @@ export function LoanScreen({
     answering && offer ? (
       <div className="flex flex-wrap items-end gap-2">
         <Select
+          ref={deckSelect}
           label="Put them in"
           value={deckId}
           onChange={(event) => setDeckId(event.target.value)}
         >
           <option value="">Unsorted</option>
-          {(decks ?? []).map((deck) => (
+          {(Array.isArray(decks) ? decks : []).map((deck) => (
             <option key={deck.id} value={deck.id}>
               {deck.name}
             </option>
@@ -519,6 +549,21 @@ export function LoanScreen({
           <p className="m-0 text-meta text-text-muted">
             Take at least one card, or decline.
           </p>
+        )}
+        {decks === "failed" && (
+          <div className="flex flex-wrap items-center gap-2">
+            <p role="status" className="m-0 text-meta text-text-muted">
+              Your Decks couldn't be loaded.
+            </p>
+            <Button
+              onClick={() => {
+                focusNext.current = "decks";
+                setDecks(null);
+              }}
+            >
+              Retry
+            </Button>
+          </div>
         )}
       </div>
     ) : answering ? (
@@ -557,21 +602,6 @@ export function LoanScreen({
             Lend at least one card, or decline.
           </p>
         )}
-      </div>
-    ) : stale ? (
-      <div className="flex flex-wrap items-center gap-2">
-        <Button
-          variant="primary"
-          aria-disabled={busy || undefined}
-          onClick={() =>
-            void step("use_suggested", (key) =>
-              useSuggestedPicks(loan.id, body(key))
-            )
-          }
-        >
-          Use suggested picks
-        </Button>
-        <p className="m-0 text-meta text-text-muted">A pick is out of date.</p>
       </div>
     ) : dating ? (
       <div
@@ -709,6 +739,21 @@ export function LoanScreen({
           Not now
         </Button>
       </div>
+    ) : stale ? (
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          variant="primary"
+          aria-disabled={busy || undefined}
+          onClick={() =>
+            void step("use_suggested", (key) =>
+              useSuggestedPicks(loan.id, body(key))
+            )
+          }
+        >
+          Use suggested picks
+        </Button>
+        <p className="m-0 text-meta text-text-muted">A pick is out of date.</p>
+      </div>
     ) : loan.actions.includes("choose_written_off") ? (
       <div className="flex flex-col gap-2">
         <p className="m-0 text-body">
@@ -735,13 +780,22 @@ export function LoanScreen({
                 )
               }
             >
-              {choice === "keep" ? "I still have it" : "It's gone"}
+              {loan.awaiting_choice === "1"
+                ? choice === "keep"
+                  ? "I still have it"
+                  : "It's gone"
+                : choice === "keep"
+                  ? "I still have them"
+                  : "They're gone"}
             </Button>
           ))}
         </div>
       </div>
     ) : loan.actions.includes("confirm_return") ? (
       <div className="flex flex-wrap items-center gap-2">
+        {finishing && (
+          <p className="m-0 text-body">{other} deleted their account.</p>
+        )}
         <Button
           variant="primary"
           aria-disabled={busy || undefined}
@@ -751,7 +805,11 @@ export function LoanScreen({
             )
           }
         >
-          {lender ? "Yes, they're back" : "Yes, I gave them back"}
+          {finishing
+            ? "Finish return"
+            : lender
+              ? "Yes, they're back"
+              : "Yes, I gave them back"}
         </Button>
       </div>
     ) : handing ? (
@@ -772,6 +830,7 @@ export function LoanScreen({
           variant="primary"
           onClick={() => {
             keys.current.delete("start_return");
+            closeModes();
             focusNext.current = "count";
             setReturning(
               new Map(

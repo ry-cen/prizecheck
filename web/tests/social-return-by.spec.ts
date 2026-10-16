@@ -101,6 +101,9 @@ test("the lender extends the return-by date, and approves the borrower's request
     `Ash K asked for more time, until ${latest.text}.`
   );
   await expectPageChecks(lender, "a request for more time");
+  await lender.setViewportSize(PHONE);
+  await expectPageChecks(lender, "a request for more time on a phone");
+  await lender.setViewportSize(DESKTOP);
   await request.getByRole("button", { name: "Approve" }).click();
   await expect(main(lender)).toContainText(`Due back ${latest.text}`);
   await expect(request).toHaveCount(0);

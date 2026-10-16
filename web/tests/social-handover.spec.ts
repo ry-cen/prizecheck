@@ -233,6 +233,13 @@ test("both sides confirm a handover for their own inventory, after the lender fi
   await lender.setViewportSize(PHONE);
   await expectPageChecks(lender, "a Loan with an out-of-date pick on a phone");
   await lender.setViewportSize(DESKTOP);
+  // Change return-by date opens its form even while a pick is out of date; Cancel brings the next step back.
+  await lender.getByRole("button", { name: "More for this Loan" }).click();
+  await lender.getByRole("menuitem", { name: "Change return-by date" }).click();
+  const changing = lender.getByRole("group", { name: "Change return-by date" });
+  await expect(changing.getByLabel("Return by", { exact: true })).toBeFocused();
+  await changing.getByRole("button", { name: "Cancel" }).click();
+  await expect(changing).toHaveCount(0);
   await lender.getByRole("button", { name: "Use suggested picks" }).click();
   await expect(boss).toContainText(`From ${lugiaName}`);
   // The step's button now reads Mark as handed over: focus goes to the heading instead, never onto the next step.
@@ -250,6 +257,10 @@ test("both sides confirm a handover for their own inventory, after the lender fi
   await lender
     .getByRole("menuitem", { name: "Take back my confirmation" })
     .click();
+  await expect(
+    lender.getByRole("button", { name: "Mark as handed over" })
+  ).toBeVisible();
+  await expect(title(lender)).toBeFocused();
   await lender.getByRole("button", { name: "Mark as handed over" }).click();
   await expect(lender.getByRole("main")).toContainText(
     "Waiting for Ash K to confirm"
@@ -315,6 +326,7 @@ test("both sides confirm a handover for their own inventory, after the lender fi
   await page.setViewportSize(DESKTOP);
   await page.getByRole("button", { name: "Yes, I have them" }).click();
   await expect(title(page)).toHaveText("You have 2 cards of Misty W's");
+  await expect(title(page)).toBeFocused();
   await expect(
     page.getByRole("button", { name: "More for this Loan" })
   ).toHaveCount(0);

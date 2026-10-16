@@ -60,7 +60,6 @@ export function carriedText(groups: SelectedGroup[]) {
   return `${plural(copies, "copy", "copies")} · ${plural(editions, "edition", "editions")}`;
 }
 
-/** One line of the Inventory Removal confirmation. */
 /** One selected Holding a Lend Offer (#258) offers: its Location, Card Edition, copies and card text. */
 export type LendRow = {
   key: string;
@@ -70,6 +69,7 @@ export type LendRow = {
   card: string;
 };
 
+/** One line of the Inventory Removal confirmation. */
 export type RemovalRow = {
   key: string;
   quantity: number;

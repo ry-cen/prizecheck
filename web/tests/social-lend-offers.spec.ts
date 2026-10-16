@@ -1,7 +1,9 @@
 // Ticket #258: Lend Offers (spec "Borrow Requests and Lend Offers", "Web screens"). Misty selects her Iono PAL 185 in
 // the Collection and chooses Lend to a Friend…, picks Ash and sends the offer, which reserves the copy. Ash accepts it
-// into his Charizard Deck. The API tests cover reserving on send, partial acceptance, declining and withdrawing. The
-// catalog is the Swap catalog (api/tests/want_list_swap_fixtures.py).
+// into his Charizard Deck, after Retry reads his Decks again. Misty then offers her Boss's Orders, after Retry reads
+// her Friends again, and closes with Done: the selection went with the offer, so the Collection's heading takes focus.
+// The API tests cover reserving on send, partial acceptance, declining and withdrawing. The catalog is the Swap
+// catalog (api/tests/want_list_swap_fixtures.py).
 import { expect, test } from "./support/collectors";
 import {
   DESKTOP,
@@ -28,6 +30,7 @@ test("the lender offers selected copies from the Collection, and the borrower ac
   const lender = misty.page;
   await nameCollector(lender, "Misty W");
   await hold(lender, await unsorted(lender), ids["PAL 185"], 1);
+  await hold(lender, await unsorted(lender), ids["PAL 172"], 1);
 
   await page.route(/^https:\/\/assets\.tcgdex\.net\//, (route) =>
     route.abort()
@@ -68,6 +71,10 @@ test("the lender offers selected copies from the Collection, and the borrower ac
   await expect(dialog).toContainText("Offer sent to Ash K.");
   const open = dialog.getByRole("button", { name: "Open the Loan" });
   await expect(open).toBeFocused();
+  await expectPageChecks(lender, "an offer sent");
+  await lender.setViewportSize(PHONE);
+  await expectPageChecks(lender, "an offer sent on a phone");
+  await lender.setViewportSize(DESKTOP);
   await open.click();
   await expect(title(lender)).toHaveText("You offered Ash K 1 card");
   await expect(lender.getByRole("main")).toContainText(
@@ -75,12 +82,25 @@ test("the lender offers selected copies from the Collection, and the borrower ac
   );
   const loanPath = new URL(lender.url()).pathname;
 
-  // Ash: the offer needs him; he takes it into Charizard.
+  // Ash: the offer needs him; his Decks can't be read at first, and Retry reads them; he takes it into Charizard.
   await page.goto(`${ORIGIN}/loans`);
   await expect(
     page.getByRole("region", { name: "Needs you" }).getByRole("link")
   ).toContainText("Misty W offered to lend you 1 card");
+  await page.route(/\/api\/decks(\?.*)?$/, (route) => route.abort(), {
+    times: 1,
+  });
   await page.goto(`${ORIGIN}${loanPath}`);
+  await expect(page.getByRole("main")).toContainText(
+    "Your Decks couldn't be loaded."
+  );
+  await page.getByRole("button", { name: "Retry" }).click();
+  await expect(
+    page.getByRole("combobox", { name: "Put them in" })
+  ).toBeFocused();
+  await expect(page.getByRole("main")).not.toContainText(
+    "Your Decks couldn't be loaded."
+  );
   await expect(
     page.getByRole("group", { name: /^Copies of Iono, .* to borrow$/ })
   ).toContainText("1");
@@ -96,4 +116,30 @@ test("the lender offers selected copies from the Collection, and the borrower ac
   await expect(page.getByRole("main")).toContainText("For Charizard");
   await lender.reload();
   await expect(title(lender)).toHaveText("You're lending Ash K 1 card");
+
+  // Misty offers her Boss's Orders: her Friends can't be read at first, and Retry reads them. Done after sending
+  // leaves the Collection's heading with focus, since Actions went with the selection.
+  await lender.goto(`${ORIGIN}/`);
+  await lender
+    .getByRole("region", { name: "Cards" })
+    .getByRole("button", { name: /Boss's Orders/ })
+    .first()
+    .click();
+  await bar.getByRole("button", { name: "Actions" }).click();
+  await lender.route(/\/api\/social\/friends$/, (route) => route.abort(), {
+    times: 1,
+  });
+  await bar.getByRole("button", { name: "Lend to a Friend…" }).click();
+  const retry = dialog.getByRole("button", { name: "Retry" });
+  await expect(retry).toBeVisible();
+  await retry.click();
+  const friend = dialog.getByRole("combobox", { name: "Friend" });
+  await expect(friend).toBeFocused();
+  await expect(retry).toHaveCount(0);
+  await friend.selectOption({ label: "Ash K" });
+  await send.click();
+  await expect(dialog).toContainText("Offer sent to Ash K.");
+  await dialog.getByRole("button", { name: "Done" }).click();
+  await expect(dialog).toBeHidden();
+  await expect(lender.locator("#ws-heading")).toBeFocused();
 });
