@@ -457,7 +457,9 @@ export function Workspace({
       className="box-border min-h-[calc(100dvh-var(--layout-header-height))] bg-bg font-sans text-body leading-(--line-height) text-text scheme-dark [&_*]:box-border"
     >
       {/* The phone header (the shell draws the desktop one, and the skip link): ☰ for the Location
-          drawer, the page title, then Search, Filters & display and the shell's phone header actions (#246). */}
+          drawer, the page title (for screen readers only: the tab bar marks the section, and Search needs the room
+          once the bell joins the header actions, #259), then Search, Filters & display and the shell's phone header
+          actions (#246). */}
       <header className="box-border hidden h-header items-center gap-2 border-b border-border px-3 phone:flex">
         <Button
           ref={drawerOpener}
@@ -469,9 +471,7 @@ export function Workspace({
           aria-expanded={drawerOpen}
           onClick={() => setDrawerOpen(true)}
         />
-        <span className="text-body font-semibold whitespace-nowrap">
-          Collection
-        </span>
+        <span className="sr-only">Collection</span>
         <div className="min-w-0 flex-1">{search}</div>
         <FiltersDrawerButton
           ref={filtersOpener}

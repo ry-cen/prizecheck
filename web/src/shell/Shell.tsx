@@ -21,6 +21,13 @@ import { Icon } from "../ui/Icon";
 import { Menu, type MenuItem } from "../ui/Menu";
 import { ToastProvider, useToast } from "../ui/Toast";
 import { FriendsButton, FriendsProvider } from "../social/FriendsDrawer";
+import {
+  Badge,
+  InboxButton,
+  InboxProvider,
+  loansTabName,
+  useInboxWaiting,
+} from "../inbox/Inbox";
 import { AccountSheetProvider, Avatar } from "./AccountSheet";
 import { PhoneHeaderActions } from "./HeaderActions";
 import {
@@ -55,7 +62,7 @@ type Props = {
   /** The signed-in account id: Borrow Request drafts (#252) are kept per account. */
   userId: string;
   onNavigate: (page: PageId) => void;
-  /** Opens one Loan (/loans/<id>, #252), from the toast after a Borrow Request is sent. */
+  /** Opens one Loan (/loans/<id>, #252), from the toast after a Borrow Request is sent and from the inbox (#259). */
   onOpenLoan: (id: string) => void;
   /** Opens a Friend's Collection (#250) from the Friends drawer, by their Handle. */
   onOpenFriend: (handle: string) => void;
@@ -72,26 +79,29 @@ type Props = {
 };
 
 /**
- * The persistent app shell (#162): desktop header with tabs, the Friends button (#247) and the avatar menu, the
- * phone header with the Friends button and the account avatar (#246), the bottom tab bar (Loans in the old More slot,
- * #252), the Borrow Request drafts tray (#252) and the page area. Switching pages swaps only the page area. A kept-mounted
+ * The persistent app shell (#162): desktop header with tabs, the inbox's bell (#259), the Friends button (#247) and the
+ * avatar menu, the phone header with the bell, the Friends button and the account avatar (#246), the bottom tab bar
+ * (Loans in the old More slot, #252, with the inbox's count of Loans waiting on the collector), the Borrow Request
+ * drafts tray (#252) and the page area. Switching pages swaps only the page area. A kept-mounted
  * page stays in the document, hidden, after its first visit, and is shown again with its scroll position;
  * other pages mount on each visit. A reload starts fresh.
  */
 export function Shell(props: Props) {
   return (
     <ToastProvider>
-      <FriendsProvider
-        onPrivacy={() => props.onNavigate("settings")}
-        onOpenCollection={props.onOpenFriend}
-      >
-        <BorrowDraftsProvider
-          userId={props.userId}
-          onOpenLoan={props.onOpenLoan}
+      <InboxProvider onOpenLoan={props.onOpenLoan}>
+        <FriendsProvider
+          onPrivacy={() => props.onNavigate("settings")}
+          onOpenCollection={props.onOpenFriend}
         >
-          <ShellFrame {...props} />
-        </BorrowDraftsProvider>
-      </FriendsProvider>
+          <BorrowDraftsProvider
+            userId={props.userId}
+            onOpenLoan={props.onOpenLoan}
+          >
+            <ShellFrame {...props} />
+          </BorrowDraftsProvider>
+        </FriendsProvider>
+      </InboxProvider>
     </ToastProvider>
   );
 }
@@ -109,6 +119,8 @@ function ShellFrame({
   other = null,
 }: Props) {
   const toast = useToast();
+  // Loans waiting on the collector: the Loans tab's badge (#259).
+  const waiting = useInboxWaiting();
   // Pages shown so far; a kept-mounted one stays mounted from its first visit.
   const [visited, setVisited] = useState<ReadonlySet<PageId>>(
     () => new Set(other ? [] : [page])
@@ -238,14 +250,24 @@ function ShellFrame({
                 key={id}
                 type="button"
                 aria-current={showing === id ? "page" : undefined}
+                aria-label={id === "loans" ? loansTabName(waiting) : undefined}
                 onClick={() => go(id)}
-                className="inline-flex h-control cursor-pointer items-center whitespace-nowrap rounded-control border-0 bg-transparent px-3 text-control font-medium text-text-muted hover:text-text aria-[current=page]:bg-surface-selected aria-[current=page]:text-accent-strong"
+                className="inline-flex h-control cursor-pointer items-center gap-2 whitespace-nowrap rounded-control border-0 bg-transparent px-3 text-control font-medium text-text-muted hover:text-text aria-[current=page]:bg-surface-selected aria-[current=page]:text-accent-strong"
               >
                 {pageDef(id).label}
+                {id === "loans" && waiting > 0 && (
+                  <span
+                    aria-hidden="true"
+                    className="box-border inline-block h-4.5 min-w-4.5 rounded-round bg-accent px-1 text-center text-micro leading-4.5 font-bold text-on-accent tabular-nums"
+                  >
+                    {waiting}
+                  </span>
+                )}
               </button>
             ))}
           </nav>
           <div className="ml-auto flex items-center gap-2">
+            <InboxButton />
             <FriendsButton />
             <Menu
               label="Account"
@@ -268,7 +290,7 @@ function ShellFrame({
 
         {/* Phone header for pages that don't draw their own (Collection draws its own: ☰, title, Search,
           Filters & display and the same header actions): the wordmark, then the header actions (the account avatar,
-          #246). The page's own heading sits right under it and the tab bar marks the section, so a title here would
+          #246, and the bell, #259). The page's own heading sits right under it and the tab bar marks the section, so a title here would
           only repeat them. */}
         {showing !== "collection" && (
           <header className="box-border hidden h-header items-center gap-3 border-b border-border px-3 phone:flex">
@@ -314,10 +336,14 @@ function ShellFrame({
               key={id}
               type="button"
               aria-current={showing === id ? "page" : undefined}
+              aria-label={id === "loans" ? loansTabName(waiting) : undefined}
               onClick={() => go(id)}
               className={TAB_BAR_BUTTON}
             >
-              <Icon icon={ICONS[id]} size={20} />
+              <span className="relative inline-flex px-2">
+                <Icon icon={ICONS[id]} size={20} />
+                {id === "loans" && <Badge count={waiting} />}
+              </span>
               {pageDef(id).label}
             </button>
           ))}

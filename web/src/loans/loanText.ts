@@ -1,4 +1,8 @@
-import { SocialError, type LoanView } from "../social_generated";
+import {
+  SocialError,
+  type InboxUpdate,
+  type LoanView,
+} from "../social_generated";
 import { variantLabel } from "../ui/variantLabel";
 
 /** The Loans tab (social network #252): /loans, and one Loan at /loans/<id>. */
@@ -203,6 +207,70 @@ export function waitingText(loan: LoanView): string | null {
   )
     return `Waiting for ${other} to confirm`;
   return null;
+}
+
+/**
+ * The step a Loan waits on the reader for, as the inbox's line names it after the other collector (#259): "Kim · Hand
+ * over". Null when it waits on nothing.
+ */
+export function waitingLabel(loan: LoanView): string | null {
+  switch (loan.waiting) {
+    case "answer":
+      return "Answer";
+    case "fix_picks":
+      return "Update picks";
+    case "choose":
+      return "Keep or remove";
+    case "confirm_return":
+      return "Confirm return";
+    case "finish_return":
+      return "Finish return";
+    case "hand_over":
+      return "Hand over";
+    case "receive":
+      return "Confirm you have them";
+    case "return":
+      return loan.role === "lender" ? "Record a return" : "Give cards back";
+    case "more_time":
+      return "Asked for more time";
+    default:
+      return null;
+  }
+}
+
+/**
+ * An update under the inbox's Earlier (#259), from the reader's side: "Kim accepted your request", "Kim cancelled this
+ * Loan". It never says why: a Loan cancelled by an unfriend or a Block reads like any other cancel.
+ */
+export function updateText(update: InboxUpdate): string {
+  const other = update.other_name;
+  const what = update.loan_kind === "lend_offer" ? "offer" : "request";
+  switch (update.kind) {
+    case "accepted":
+      return `${other} accepted your ${what}`;
+    case "partly_accepted":
+      return `${other} accepted part of your ${what}`;
+    case "declined":
+      return `${other} declined your ${what}`;
+    case "cancelled":
+      return `${other} cancelled this Loan`;
+    case "return_by_changed":
+      return `${other} changed the return-by date`;
+    case "overdue":
+      return update.role === "lender"
+        ? `Your Loan to ${other} is overdue`
+        : `Your Loan from ${other} is overdue`;
+    case "nudge_answer":
+      if (update.loan_kind === "lend_offer")
+        return update.role === "lender"
+          ? `${other} hasn't answered your offer yet`
+          : `${other}'s offer is still waiting for your answer`;
+      return update.role === "lender"
+        ? `${other}'s request is still waiting for your answer`
+        : `${other} hasn't answered your request yet`;
+    case "nudge_handover":
+      return `Your Loan with ${other} hasn't been handed over yet`;
+  }
 }
 
 /** "PAL 185 · Reverse Holo": a Loan line's or draft line's Edition, as the Want List writes it. */
