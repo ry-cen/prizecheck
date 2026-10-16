@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from .main import connect, verified_user
+from .social import counts
 
 router = APIRouter(prefix="/api/moves", tags=["moves"])
 MAX_QUANTITY = 2**63 - 1
@@ -102,6 +103,24 @@ def record_undo(conn, user_id: str, undo_id: UUID, action: str, destination_id: 
     conn.execute("""DELETE FROM inventory_undo WHERE owner_id=%s AND id NOT IN
       (SELECT id FROM inventory_undo WHERE owner_id=%s ORDER BY created_at DESC,id DESC LIMIT %s)""",
                  (user_id, user_id, UNDO_LIMIT))
+
+
+def check_promises(conn, user_id: str, losing: dict) -> None:
+    """Refuses with 409 PROMISED_TO_LOAN when taking ``losing`` copies ({Edition id: copies}) out of the owner's
+    Collection would leave fewer copies of an Edition than open Loans promise (``counts.reserved_counts``; spec
+    "Lender-side data"). The detail names the lowest such Edition and how many copies are promised. Inventory Removal,
+    the Undo of an add and Edition reassignment call it under the owner lock before they write; Moves don't, because
+    where a copy is doesn't matter to a promise. Migration 106's deferred trigger is the backstop."""
+    editions = sorted(edition for edition, copies in losing.items() if copies > 0)
+    promised = counts.reserved_counts(conn, user_id, editions) if editions else {}
+    if not promised:
+        return
+    held = {row['edition_id']: row['copies'] for row in conn.execute(
+        'SELECT edition_id,sum(quantity) AS copies FROM holding WHERE owner_id=%s AND edition_id=ANY(%s) GROUP BY edition_id',
+        (user_id, sorted(promised)))}
+    for edition in sorted(promised):
+        if held.get(edition, 0) - losing[edition] < promised[edition]:
+            fail(409, 'PROMISED_TO_LOAN', edition_id=edition, promised=promised[edition])
 
 
 def lock_owner(conn, user_id: str):
@@ -326,6 +345,9 @@ def apply_selection(manifest_id, command, user_id):
                   ORDER BY first_source_id,edition_id LIMIT 1""", (MAX_QUANTITY,)).fetchone()
                 if over:
                     fail(409, "QUANTITY_OVERFLOW", source_id=over["first_source_id"], edition_id=over["edition_id"])
+            if destination is None:
+                check_promises(conn, user_id, {row["edition_id"]: row["copies"] for row in conn.execute(
+                    "SELECT edition_id,sum(quantity) AS copies FROM move_work GROUP BY edition_id")})
             new_revision = revision + 1
             conn.execute("""DELETE FROM holding h USING move_work w
               WHERE h.owner_id=%s AND h.location_id=w.source_id AND h.edition_id=w.edition_id
@@ -496,6 +518,8 @@ def undo_add(conn, user_id: str, undo_id: UUID, location_id: UUID, revision: int
       WHERE coalesce(h.quantity,0)<a.quantity ORDER BY a.edition_id LIMIT 1''', (user_id, location_id)).fetchone()
     if short:
         fail(409, 'UNDO_INCOMPATIBLE', destination_id=location_id, edition_id=short['edition_id'])
+    check_promises(conn, user_id, {row['edition_id']: row['quantity'] for row in conn.execute(
+        'SELECT edition_id,quantity FROM added_work')})
     new_revision = revision + 1
     conn.execute('''DELETE FROM holding h USING added_work a WHERE h.owner_id=%s AND h.location_id=%s
       AND h.edition_id=a.edition_id AND h.quantity=a.quantity''', (user_id, location_id))

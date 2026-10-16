@@ -1,5 +1,5 @@
-"""Generate the social client module (Friends and Friend Requests, social network #247, Blocks, #248, and Friends'
-cards, #250 and #251) from the API OpenAPI schema."""
+"""Generate the social client module (Friends and Friend Requests, social network #247, Blocks, #248, Friends' cards,
+#250 and #251, and Loans, #252) from the API OpenAPI schema."""
 import sys
 from pathlib import Path
 
@@ -16,7 +16,8 @@ def ts_type(value):
     if "enum" in value:
         return " | ".join(f'"{item}"' for item in value["enum"])
     if value.get("type") == "array":
-        return f"{ts_type(value['items'])}[]"
+        inner = ts_type(value["items"])
+        return f"({inner})[]" if " | " in inner else f"{inner}[]"
     return {"string": "string", "integer": "number", "number": "number", "boolean": "boolean",
             "null": "null", "object": "Record<string, unknown>"}[value["type"]]
 
@@ -25,7 +26,9 @@ schema = app.openapi()["components"]["schemas"]
 lines = ["// Generated from FastAPI OpenAPI by scripts/generate_social_client.py. Do not edit."]
 for name in ("Collector", "CollectorLookup", "InviteCollector", "FriendsView", "LookupHandle", "SendFriendRequest",
              "FriendCommand", "FriendCommandResult", "BlockCollector", "BlockedList", "FriendCard", "FriendCollection",
-             "FriendCopy", "WantedCard", "WantListMatches", "CardMatches"):
+             "FriendCopy", "WantedCard", "WantListMatches", "CardMatches", "LoanParty", "LoanCard", "LoanView",
+             "LoansView", "LoanStep", "LoanLineRequest", "SendBorrowRequest", "PromisedLine", "AcceptBorrowRequest",
+             "PromiseLimit", "LoanPickPlace", "LoanDeck", "LoanSide"):
     definition = schema[name]
     fields = [f"{field}{'' if field in definition.get('required', []) else '?'}: {ts_type(value)}"
               for field, value in definition["properties"].items()]
@@ -90,6 +93,23 @@ export const getWantListMatches = (params: { deck?: string | null; printings?: P
 export const getCardMatches = (printingId: string, params: { printings?: Printings }, signal?: AbortSignal) =>
   request<CardMatches>(`/api/social/card-matches${query({ printing_id: printingId, ...params })}`, 'GET', undefined,
     signal);
+// Loans (#252): the Loans tab and one Loan, as both sides read them.
+export const getLoans = (signal?: AbortSignal) => request<LoansView>('/api/social/loans', 'GET', undefined, signal);
+export const getLoan = (id: string, signal?: AbortSignal) =>
+  request<LoanView>(`/api/social/loans/${at(id)}`, 'GET', undefined, signal);
+// Your own side of a Loan: the Deck the cards go to, or what you could promise and where you take the cards from.
+export const getLoanSide = (id: string, signal?: AbortSignal) =>
+  request<LoanSide>(`/api/loans/${at(id)}/side`, 'GET', undefined, signal);
+// Loan steps, idempotent: retry a failed one with the same idempotency_key. Each answers the Loan as it now stands.
+export const sendBorrowRequest = (body: SendBorrowRequest) => request<LoanView>('/api/loans', 'POST', body);
+export const acceptBorrowRequest = (id: string, body: AcceptBorrowRequest) =>
+  request<LoanView>(`/api/loans/${at(id)}/accept`, 'POST', body);
+export const declineLoan = (id: string, body: LoanStep) =>
+  request<LoanView>(`/api/social/loans/${at(id)}/decline`, 'POST', body);
+export const withdrawLoan = (id: string, body: LoanStep) =>
+  request<LoanView>(`/api/social/loans/${at(id)}/withdraw`, 'POST', body);
+export const cancelLoan = (id: string, body: LoanStep) =>
+  request<LoanView>(`/api/social/loans/${at(id)}/cancel`, 'POST', body);
 """)
 content = "\n".join(lines)
 target = root / "web/src/social_generated.ts"

@@ -53,6 +53,12 @@ ALLOWED_IMPORTS = {
         ('.', 'name_rules'), ('..main', 'connect'), ('..main', 'verified_user'), ('..publications', 'TOKEN'),
         ('..location_tree', 'error'), ('..location_tree', 'replay'), ('.owners', 'ensure_owner'),
         ('.owners', 'lock_owners'), ('.profile', 'token_hash')},
+    # The Loans both sides read and the steps that change no inventory (#252). Card facts are catalog facts; the owner
+    # lock and the command plumbing are the Friend commands'. Steps that touch a collector's own inventory are in
+    # app.loan_inventory, outside this area.
+    'social/loans.py': {
+        ('..main', 'connect'), ('..main', 'verified_user'), ('..location_tree', 'error'), ('..location_tree', 'replay'),
+        ('.friend_reads', 'card_facts'), ('.owners', 'ensure_owner'), ('.owners', 'lock_owners')},
     'social/profile.py': {
         ('.', 'name_rules'), ('..main', 'connect'), ('..main', 'verified_user'),
         ('..location_tree', 'error'), ('..location_tree', 'owner_and_rows'), ('..location_tree', 'replay'),
@@ -68,7 +74,8 @@ ALLOWED = {'in_deck': {'type': 'string'}}
 # facts that names no Location or Deck.
 # ``ValidationError.ctx`` is FastAPI's own 422 body (the error's context, as the framework builds it): no social code
 # fills it with a Location or a Deck.
-OPAQUE = {('FriendCard', 'descriptor'), ('FriendCopy', 'descriptor'), ('ValidationError', 'ctx')}
+OPAQUE = {('FriendCard', 'descriptor'), ('FriendCopy', 'descriptor'), ('LoanCard', 'descriptor'),
+          ('ValidationError', 'ctx')}
 
 
 def words(name: str) -> set[str]:
