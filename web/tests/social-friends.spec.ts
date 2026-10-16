@@ -54,7 +54,7 @@ test("finding a collector by Handle, requesting, accepting and removing a Friend
   const misty = await collectors.signIn({ next: "/decks" });
   const mistyHandle = await nameCollector(misty.page, "Misty W");
   await signInAsOwner(page, "/decks");
-  await nameCollector(page, "Ash K");
+  const ashHandle = await nameCollector(page, "Ash K");
 
   await openFriends(page);
   await expect(friendsList(page)).toContainText("No Friends yet.");
@@ -87,11 +87,18 @@ test("finding a collector by Handle, requesting, accepting and removing a Friend
   const received = drawer(misty.page).getByRole("region", {
     name: "Friend Requests",
   });
-  await expect(received).toContainText("Ash K wants to be Friends");
+  // The request names its sender by Display Name and Handle.
+  await expect(received).toContainText(
+    `Ash K @${ashHandle} · wants to be Friends`
+  );
   await received.getByRole("button", { name: "Accept Ash K" }).click();
   await expect(drawer(misty.page).getByRole("status")).toHaveText(
     "You and Ash K are now Friends."
   );
+  // The request's row is gone; focus stays in the drawer, on the Friends heading.
+  await expect(
+    drawer(misty.page).getByRole("heading", { name: "Your Friends" })
+  ).toBeFocused();
   await expect(friendsList(misty.page)).toContainText("Ash K");
   await expect(received).toHaveCount(0);
   await drawer(misty.page)
@@ -115,13 +122,29 @@ test("finding a collector by Handle, requesting, accepting and removing a Friend
     .click();
   await page.getByRole("menuitem", { name: "Remove Friend" }).click();
   await expect(friendsList(page)).toContainText("Remove Misty W as a Friend?");
+  const remove = friendsList(page).getByRole("button", {
+    name: "Remove",
+    exact: true,
+  });
+  // The confirming button takes focus; Cancel gives it back to the Friend's ⋯.
+  await expect(remove).toBeFocused();
+  await friendsList(page).getByRole("button", { name: "Cancel" }).click();
+  await expect(
+    friendsList(page).getByRole("button", { name: "More for Misty W" })
+  ).toBeFocused();
   await friendsList(page)
-    .getByRole("button", { name: "Remove", exact: true })
+    .getByRole("button", { name: "More for Misty W" })
     .click();
+  await page.getByRole("menuitem", { name: "Remove Friend" }).click();
+  await expect(remove).toBeFocused();
+  await remove.click();
   await expect(drawer(page).getByRole("status")).toHaveText(
     "Misty W is no longer a Friend."
   );
   await expect(friendsList(page)).toContainText("No Friends yet.");
+  await expect(
+    drawer(page).getByRole("heading", { name: "Your Friends" })
+  ).toBeFocused();
   await misty.page.reload();
   await openFriends(misty.page);
   await expect(friendsList(misty.page)).toContainText("No Friends yet.");
@@ -175,9 +198,14 @@ test("the Invite Link page signed in offers Send Friend Request, and on a phone 
     drawer(misty.page).getByRole("region", { name: "Friend Requests" })
   ).toHaveCount(0);
 
-  // Declined, the page offers the request again; Ash's own link says it is theirs.
+  // Declined, the page still offers the request, but Misty's decline holds it back for a week, with no reason given.
   await page.reload();
   await expect(send).toBeVisible();
+  await send.click();
+  await expect(page.getByRole("alert")).toHaveText(
+    "You can send another request later."
+  );
+  // Ash's own link says it is theirs.
   await page.goto(`${ORIGIN}/invite/${await inviteToken(page)}`);
   await expect(page.getByRole("heading", { level: 1 })).toHaveText(
     "Ash K invited you to PrizeCheck"

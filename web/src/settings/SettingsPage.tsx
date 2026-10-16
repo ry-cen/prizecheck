@@ -16,9 +16,8 @@ export function SettingsPage({ email }: { email: string | null }) {
     <main className="mx-auto box-border flex max-w-7xl flex-col gap-8 px-7 py-7 phone:px-4 phone:py-5 [&>*]:max-w-3xl">
       <PageHeader title="Settings" />
       <WantListCountingSection />
-      <PrivacySection>
+      <PrivacySection blocked={<BlockedSection />}>
         <HiddenLocationsSection />
-        <BlockedSection />
       </PrivacySection>
       <SignInsSection email={email} />
     </main>
