@@ -35,6 +35,12 @@ export type OtherCollectorOptions = {
 
 /** Takes every account holding the owner email out of the owner seat. Their sessions keep working. */
 export async function retireOwnerSeat(pool: Pool): Promise<void> {
+  // Only against a verification stack's disposable database: by hand it would take the developer's own account out
+  // of the owner seat.
+  if (!process.env.VERIFY_BROWSER_STACKS)
+    throw new Error(
+      "retireOwnerSeat retires the owner's account; run specs through npm run verify"
+    );
   const { rows } = await pool.query<{ id: string }>(
     'SELECT id FROM "user" WHERE email=$1',
     [OWNER_EMAIL]
