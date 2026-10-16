@@ -126,6 +126,8 @@ promote({'reconciliation-1':'Review Pikachu'})`,
 test("collector explicitly confirms reviewed Edition reassignment without changing total copies", async ({
   page,
 }) => {
+  // Catalog imports through Python, a publication, a reassignment and a reload: about 20 s, near the 30 s budget.
+  test.slow();
   execFileSync(
     ".venv/bin/python",
     [

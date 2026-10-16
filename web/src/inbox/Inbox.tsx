@@ -40,6 +40,10 @@ import { inboxTime } from "./inboxTime";
  * elsewhere (`useInboxRefresh`: a Loan step, a Friend command); nothing polls. Opening the drawer marks the updates it
  * shows read; they are still drawn as new until it closes. Clear dismisses the updates it showed, and an update
  * that arrived since stays.
+ *
+ * Focus: a Loan opened from the drawer takes focus on its heading once it is drawn (`useOpenedFromInbox`), since the
+ * bell that opened the drawer may be hidden by then (Collection's phone header). A Friend command that cancels Loans
+ * (`useNoteLoansChanged`) also has the Loans list read them again (`useLoansChanged`).
  */
 type InboxApi = {
   open: (opener: RefObject<HTMLElement | null>) => void;
@@ -47,6 +51,11 @@ type InboxApi = {
   /** Loans waiting on the collector, for the bell's and the Loans tab's badges; 0 until the first read. */
   waiting: number;
   refresh: () => void;
+  /** How many times Loans were changed from outside the Loans tab (a Friend command), for the list to read again. */
+  loansChanged: number;
+  noteLoansChanged: () => void;
+  /** Whether the drawer just opened this Loan; true once, for the Loan's screen to focus its heading. */
+  takeOpened: (loanId: string) => boolean;
 };
 
 const InboxContext = createContext<InboxApi | null>(null);
@@ -54,6 +63,22 @@ const InboxContext = createContext<InboxApi | null>(null);
 /** Reads the inbox again after a change made elsewhere (a Loan step, a Friend command); nothing outside the shell. */
 export function useInboxRefresh(): () => void {
   return useContext(InboxContext)?.refresh ?? (() => {});
+}
+
+/** After a change that may have cancelled Loans outside the Loans tab (Remove Friend, Block): reads the inbox again,
+ * and has the Loans list read again. */
+export function useNoteLoansChanged(): () => void {
+  return useContext(InboxContext)?.noteLoansChanged ?? (() => {});
+}
+
+/** A count that moves on each such change, for the Loans list to read again; 0 outside the shell. */
+export function useLoansChanged(): number {
+  return useContext(InboxContext)?.loansChanged ?? 0;
+}
+
+/** Whether the inbox's drawer just opened this Loan, true once; false outside the shell. */
+export function useOpenedFromInbox(): (loanId: string) => boolean {
+  return useContext(InboxContext)?.takeOpened ?? (() => false);
 }
 
 /** The Loans waiting on the collector, for the Loans tab's badge; 0 outside the shell. */
@@ -84,6 +109,9 @@ export function InboxProvider({
   const [load, setLoad] = useState<Load>({ kind: "loading" });
   const opener = useRef<HTMLElement | null>(null);
   const reads = useRef(0);
+  const [loansChanged, setLoansChanged] = useState(0);
+  // The Loan the drawer last opened, until its screen takes it.
+  const opened = useRef<string | null>(null);
 
   const show = useCallback((body: unknown) => {
     const view = inboxView(body);
@@ -136,6 +164,16 @@ export function InboxProvider({
         isOpen: open,
         waiting,
         refresh,
+        loansChanged,
+        noteLoansChanged: () => {
+          setLoansChanged((n) => n + 1);
+          refresh();
+        },
+        takeOpened: (loanId) => {
+          if (opened.current !== loanId) return false;
+          opened.current = null;
+          return true;
+        },
       }}
     >
       {children}
@@ -152,7 +190,10 @@ export function InboxProvider({
           ++reads.current;
           show(body);
         }}
-        onOpenLoan={onOpenLoan}
+        onOpenLoan={(id) => {
+          opened.current = id;
+          onOpenLoan(id);
+        }}
       />
     </InboxContext.Provider>
   );
@@ -349,7 +390,10 @@ function InboxDialog({
                   Earlier
                 </h3>
                 {view.updates.length > 0 && (
-                  <Button disabled={busy} onClick={() => void clear()}>
+                  <Button
+                    aria-disabled={busy || undefined}
+                    onClick={() => void clear()}
+                  >
                     Clear
                   </Button>
                 )}

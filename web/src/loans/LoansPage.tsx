@@ -5,6 +5,7 @@ import {
   type MouseEvent,
   type ReactNode,
 } from "react";
+import { useLoansChanged } from "../inbox/Inbox";
 import { PageHeader } from "../shell/PageHeader";
 import { CardImage } from "../social/FriendCollectionPage";
 import { getLoans, type LoanView, type LoansView } from "../social_generated";
@@ -28,7 +29,8 @@ type Props = {
 /**
  * The Loans tab (social network #252, spec "Web screens", Loans verdict variant E): /loans lists the collector's Loans
  * in **Needs you**, **Out now** and **Pending**, with **History** folded away; /loans/<id> is one Loan's screen
- * (LoanScreen). The tab's badge counts the Loans in Needs you, read through the inbox (#259).
+ * (LoanScreen). The tab's badge counts the Loans in Needs you, read through the inbox (#259). The list is read again
+ * after a Friend command that may have cancelled Loans (#260, `useLoansChanged`).
  */
 export function LoansPage({ loanId, onOpenLoan, onAllLoans }: Props) {
   if (loanId)
@@ -48,6 +50,7 @@ const SECTIONS = [
 function LoansList({ onOpenLoan }: { onOpenLoan: (id: string) => void }) {
   const [load, setLoad] = useState<Load>({ kind: "loading" });
   const [attempt, setAttempt] = useState(0);
+  const changed = useLoansChanged();
 
   useEffect(() => {
     const controller = new AbortController();
@@ -60,7 +63,7 @@ function LoansList({ onOpenLoan }: { onOpenLoan: (id: string) => void }) {
       }
     );
     return () => controller.abort();
-  }, [attempt]);
+  }, [attempt, changed]);
 
   const frame = (children: ReactNode) => (
     <main className="mx-auto box-border flex max-w-3xl flex-col gap-5 px-7 py-7 phone:px-4 phone:py-5">

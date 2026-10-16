@@ -81,8 +81,8 @@ test("removing a Friend cancels the Loan nobody handed over and keeps the one ha
   );
   await friends(page).getByRole("button", { name: "Close Friends" }).click();
 
-  // His Loans: the one nobody handed over is cancelled; the one handed over is still out, and he can give it back.
-  await page.reload();
+  // His Loans, read again after the command: the one nobody handed over is cancelled; the one handed over is still
+  // out, and he can give it back.
   await expect(page.getByRole("region", { name: "Pending" })).toHaveCount(0);
   await expect(
     page.getByRole("region", { name: "Out now" }).getByRole("link")

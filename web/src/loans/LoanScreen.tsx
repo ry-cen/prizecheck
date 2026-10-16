@@ -6,7 +6,7 @@ import {
   type ReactNode,
 } from "react";
 import { ChevronLeft, Ellipsis } from "lucide-react";
-import { useInboxRefresh } from "../inbox/Inbox";
+import { useInboxRefresh, useOpenedFromInbox } from "../inbox/Inbox";
 import { PageHeader } from "../shell/PageHeader";
 import { CardImage } from "../social/FriendCollectionPage";
 import type { DeckIndexEntry } from "../decks_generated";
@@ -136,6 +136,8 @@ export function LoanScreen({
   const drafts = useBorrowDrafts();
   // The bell and the Loans tab's badge are read again after each step and notice seen here (#259).
   const refreshInbox = useInboxRefresh();
+  // Opened from the inbox's drawer: the heading takes focus once the Loan is drawn, as the bell may be hidden.
+  const openedFromInbox = useOpenedFromInbox();
   const [load, setLoad] = useState<Load>({ kind: "loading" });
   const [attempt, setAttempt] = useState(0);
   const [promised, setPromised] = useState<Map<string, number>>(new Map());
@@ -192,6 +194,7 @@ export function LoanScreen({
           setWriting(null);
           setDating(null);
         }
+        if (openedFromInbox(loanId)) focusNext.current = "heading";
         setLoad({ kind: "ready", loan, side });
         setPromised(promiseStart(loan, side));
         setAnswerDate(loan.return_by ?? "");
