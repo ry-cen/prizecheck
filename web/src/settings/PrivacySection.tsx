@@ -24,12 +24,19 @@ export function inviteUrl(token: string): string {
 }
 
 /**
- * Settings › Privacy (social network #246): the Display Name, the Handle and the Invite Link. Later tickets add
- * their parts as children (Hidden Locations, #249; Blocked collectors, #248). Each change is an idempotent owner
+ * Settings › Privacy (social network #246): Blocked collectors (#248, the `blocked` slot), then the Display Name,
+ * the Handle and the Invite Link, then the children (Hidden Locations, #249), as the spec orders them. Each change is an idempotent owner
  * command; a change that failed for a reason other than a refusal is sent again with the same key when the collector
  * retries the same value, so a change that was saved isn't made twice.
  */
-export function PrivacySection({ children }: { children?: ReactNode }) {
+export function PrivacySection({
+  blocked,
+  children,
+}: {
+  /** Blocked collectors (#248), first in the section. */
+  blocked?: ReactNode;
+  children?: ReactNode;
+}) {
   const [load, setLoad] = useState<Load>({ kind: "loading" });
   const [name, setName] = useState("");
   const [handle, setHandleText] = useState("");
@@ -112,6 +119,7 @@ export function PrivacySection({ children }: { children?: ReactNode }) {
           Your Privacy settings are temporarily unavailable. Please retry.
         </p>
       )}
+      {blocked}
       {profile && (
         <>
           <section

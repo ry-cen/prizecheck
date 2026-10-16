@@ -30,17 +30,24 @@ import {
 import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
 import { Icon } from "../ui/Icon";
-import { Menu } from "../ui/Menu";
+import { Menu, type MenuItem } from "../ui/Menu";
 import { TextField } from "../ui/TextField";
 import { commandMessage, lookupMessage } from "./socialMessages";
 
 /**
  * The Friends drawer (social network #247, spec "Web screens", variant E): the ☺ button in the header, with a badge
- * counting Friend Requests received, opens it from any page. Requests received come first with Accept and Decline,
- * then the Friends, each with Remove Friend and Block (#248) behind its ⋯, then requests sent with Withdraw. Add opens a
- * Handle search and Copy link for the Invite Link; Privacy and blocked leads to Settings, where Unblock is. The shell provides it; the desktop header and the phone headers (the shell's and
- * Collection's own) draw the button. The badge is read when the shell starts, when the drawer opens, after each change
- * and when the window regains focus; nothing polls.
+ * counting Friend Requests received, opens it from any page. Requests received come first with Accept and Decline and
+ * Block (#248) behind a ⋯, then the Friends, each with Remove Friend and Block behind its ⋯, then requests sent with
+ * Withdraw. Add opens a Handle search and Copy link for the Invite Link; Privacy and blocked leads to Settings, where
+ * Unblock is.
+ *
+ * The shell provides it; the desktop header and the phone headers (the shell's and Collection's own) draw the button.
+ * The badge is read when the shell starts, when the drawer opens, after each change and when the window regains focus;
+ * nothing polls.
+ *
+ * Focus: choosing Remove Friend or Block from a ⋯ swaps the row for its confirmation and focuses the confirming
+ * button, and Cancel returns focus to that row's ⋯. A command that removes its own row moves focus to the "Your
+ * Friends" heading, which is always there; the drawer's status line announces what happened.
  */
 type FriendsApi = {
   open: (opener: RefObject<HTMLElement | null>) => void;
@@ -183,6 +190,80 @@ function Person({ person, after }: { person: Collector; after?: string }) {
   );
 }
 
+/** A row's question with its confirming button, which takes focus when the row swaps in; Cancel is beside it. */
+function Confirmation({
+  question,
+  confirm,
+  busy,
+  onConfirm,
+  onCancel,
+}: {
+  question: string;
+  confirm: string;
+  busy: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const primary = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    primary.current?.focus();
+  }, []);
+  return (
+    <>
+      <span className={`${NAME} text-body`}>{question}</span>
+      <Button
+        ref={primary}
+        variant="danger"
+        disabled={busy}
+        onClick={onConfirm}
+      >
+        {confirm}
+      </Button>
+      <Button onClick={onCancel}>Cancel</Button>
+    </>
+  );
+}
+
+function BlockConfirmation({
+  person,
+  busy,
+  onConfirm,
+  onCancel,
+}: {
+  person: Collector;
+  busy: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <Confirmation
+      question={`Block ${person.display_name}? They won't be told.`}
+      confirm="Block"
+      busy={busy}
+      onConfirm={onConfirm}
+      onCancel={onCancel}
+    />
+  );
+}
+
+/** The ⋯ beside a collector's row. */
+function PersonMenu({
+  person,
+  items,
+}: {
+  person: Collector;
+  items: MenuItem[];
+}) {
+  return (
+    <Menu
+      label={`More for ${person.display_name}`}
+      triggerClassName="inline-flex size-control shrink-0 cursor-pointer items-center justify-center rounded-control border-0 bg-transparent p-0 text-text-muted hover:bg-surface-raised hover:text-text phone:size-tap"
+      trigger={<Icon icon={Ellipsis} />}
+      items={items}
+    />
+  );
+}
+
 function FriendsDialog({
   open,
   load,
@@ -208,6 +289,26 @@ function FriendsDialog({
     action: "remove" | "block";
   } | null>(null);
   const base = useId();
+  const body = useRef<HTMLDivElement>(null);
+  const friendsHeading = useRef<HTMLHeadingElement>(null);
+  // The collector whose ⋯ gets focus back after Cancel.
+  const backTo = useRef<string | null>(null);
+  useEffect(() => {
+    if (confirming || !backTo.current) return;
+    const id = backTo.current;
+    backTo.current = null;
+    Array.from(
+      body.current?.querySelectorAll<HTMLElement>("li[data-collector]") ?? []
+    )
+      .find((row) => row.dataset.collector === id)
+      ?.querySelector<HTMLElement>('button[aria-haspopup="menu"]')
+      ?.focus();
+  }, [confirming]);
+
+  function cancel(person: Collector) {
+    backTo.current = person.collector_id;
+    setConfirming(null);
+  }
 
   function close() {
     setAdding(false);
@@ -220,7 +321,8 @@ function FriendsDialog({
   /** Runs one change and reads the list again; `done` says what happened. */
   async function run(
     send: (key: string) => Promise<FriendCommandResult>,
-    done: (result: FriendCommandResult) => string
+    done: (result: FriendCommandResult) => string,
+    options: { rowGoes?: boolean } = {}
   ): Promise<FriendCommandResult | null> {
     if (busy) return null;
     setBusy(true);
@@ -229,6 +331,8 @@ function FriendsDialog({
     try {
       const result = await send(crypto.randomUUID());
       setStatus(done(result));
+      // The row the command was on is going: focus the list's heading, which stays.
+      if (options.rowGoes) friendsHeading.current?.focus();
       return result;
     } catch (cause) {
       setProblem(commandMessage(cause));
@@ -238,6 +342,18 @@ function FriendsDialog({
       setConfirming(null);
       onChanged();
     }
+  }
+
+  function block(person: Collector) {
+    return run(
+      (key) =>
+        blockCollector({
+          collector_id: person.collector_id,
+          idempotency_key: key,
+        }),
+      () => `Blocked ${person.display_name}. They aren't told.`,
+      { rowGoes: true }
+    );
   }
 
   const view = load.kind === "ready" ? load.view : null;
@@ -262,8 +378,8 @@ function FriendsDialog({
       }
     >
       {open && (
-        <div className="flex flex-col gap-4">
-          {adding && <AddFriend run={run} />}
+        <div ref={body} className="flex flex-col gap-4">
+          {adding && <AddFriend run={run} busy={busy} />}
           {load.kind === "loading" && (
             <p className="m-0 text-meta text-text-muted">Loading…</p>
           )}
@@ -285,47 +401,73 @@ function FriendsDialog({
               </h3>
               <ul className="m-0 list-none p-0">
                 {view.received.map((person) => (
-                  <li key={person.collector_id} className={ROW}>
-                    <span className={NAME}>
-                      <span className="font-semibold text-text">
-                        {person.display_name}
-                      </span>{" "}
-                      <span className="text-meta text-text-muted">
-                        wants to be Friends
-                      </span>
-                    </span>
-                    <Button
-                      variant="primary"
-                      disabled={busy}
-                      aria-label={`Accept ${person.display_name}`}
-                      onClick={() =>
-                        void run(
-                          (key) =>
-                            acceptFriendRequest(person.collector_id, {
-                              idempotency_key: key,
-                            }),
-                          () =>
-                            `You and ${person.display_name} are now Friends.`
-                        )
-                      }
-                    >
-                      Accept
-                    </Button>
-                    <Button
-                      disabled={busy}
-                      aria-label={`Decline ${person.display_name}`}
-                      onClick={() =>
-                        void run(
-                          (key) =>
-                            declineFriendRequest(person.collector_id, {
-                              idempotency_key: key,
-                            }),
-                          () => "Friend Request declined."
-                        )
-                      }
-                    >
-                      Decline
-                    </Button>
+                  <li
+                    key={person.collector_id}
+                    data-collector={person.collector_id}
+                    className={ROW}
+                  >
+                    {confirming?.id === person.collector_id ? (
+                      <BlockConfirmation
+                        person={person}
+                        busy={busy}
+                        onConfirm={() => void block(person)}
+                        onCancel={() => cancel(person)}
+                      />
+                    ) : (
+                      <>
+                        <Person
+                          person={person}
+                          after=" · wants to be Friends"
+                        />
+                        <Button
+                          variant="primary"
+                          disabled={busy}
+                          aria-label={`Accept ${person.display_name}`}
+                          onClick={() =>
+                            void run(
+                              (key) =>
+                                acceptFriendRequest(person.collector_id, {
+                                  idempotency_key: key,
+                                }),
+                              () =>
+                                `You and ${person.display_name} are now Friends.`,
+                              { rowGoes: true }
+                            )
+                          }
+                        >
+                          Accept
+                        </Button>
+                        <Button
+                          disabled={busy}
+                          aria-label={`Decline ${person.display_name}`}
+                          onClick={() =>
+                            void run(
+                              (key) =>
+                                declineFriendRequest(person.collector_id, {
+                                  idempotency_key: key,
+                                }),
+                              () => "Friend Request declined.",
+                              { rowGoes: true }
+                            )
+                          }
+                        >
+                          Decline
+                        </Button>
+                        <PersonMenu
+                          person={person}
+                          items={[
+                            {
+                              label: "Block",
+                              onSelect: () =>
+                                setConfirming({
+                                  id: person.collector_id,
+                                  action: "block",
+                                }),
+                            },
+                          ]}
+                        />
+                      </>
+                    )}
                   </li>
                 ))}
               </ul>
@@ -338,7 +480,9 @@ function FriendsDialog({
             >
               <h3
                 id={`${base}-friends`}
-                className="m-0 text-meta font-semibold text-text-muted"
+                ref={friendsHeading}
+                tabIndex={-1}
+                className="m-0 text-meta font-semibold text-text-muted outline-none"
               >
                 Your Friends
               </h3>
@@ -350,66 +494,42 @@ function FriendsDialog({
               )}
               <ul className="m-0 list-none p-0">
                 {view.friends.map((person) => (
-                  <li key={person.collector_id} className={ROW}>
+                  <li
+                    key={person.collector_id}
+                    data-collector={person.collector_id}
+                    className={ROW}
+                  >
                     {confirming?.id === person.collector_id &&
                     confirming.action === "remove" ? (
-                      <>
-                        <span className={`${NAME} text-body`}>
-                          Remove {person.display_name} as a Friend?
-                        </span>
-                        <Button
-                          variant="danger"
-                          disabled={busy}
-                          onClick={() =>
-                            void run(
-                              (key) =>
-                                removeFriend(person.collector_id, {
-                                  idempotency_key: key,
-                                }),
-                              () =>
-                                `${person.display_name} is no longer a Friend.`
-                            )
-                          }
-                        >
-                          Remove
-                        </Button>
-                        <Button onClick={() => setConfirming(null)}>
-                          Cancel
-                        </Button>
-                      </>
+                      <Confirmation
+                        question={`Remove ${person.display_name} as a Friend?`}
+                        confirm="Remove"
+                        busy={busy}
+                        onConfirm={() =>
+                          void run(
+                            (key) =>
+                              removeFriend(person.collector_id, {
+                                idempotency_key: key,
+                              }),
+                            () =>
+                              `${person.display_name} is no longer a Friend.`,
+                            { rowGoes: true }
+                          )
+                        }
+                        onCancel={() => cancel(person)}
+                      />
                     ) : confirming?.id === person.collector_id ? (
-                      <>
-                        <span className={`${NAME} text-body`}>
-                          Block {person.display_name}? They won't be told.
-                        </span>
-                        <Button
-                          variant="danger"
-                          disabled={busy}
-                          onClick={() =>
-                            void run(
-                              (key) =>
-                                blockCollector({
-                                  collector_id: person.collector_id,
-                                  idempotency_key: key,
-                                }),
-                              () =>
-                                `Blocked ${person.display_name}. They aren't told.`
-                            )
-                          }
-                        >
-                          Block
-                        </Button>
-                        <Button onClick={() => setConfirming(null)}>
-                          Cancel
-                        </Button>
-                      </>
+                      <BlockConfirmation
+                        person={person}
+                        busy={busy}
+                        onConfirm={() => void block(person)}
+                        onCancel={() => cancel(person)}
+                      />
                     ) : (
                       <>
                         <Person person={person} />
-                        <Menu
-                          label={`More for ${person.display_name}`}
-                          triggerClassName="inline-flex size-control shrink-0 cursor-pointer items-center justify-center rounded-control border-0 bg-transparent p-0 text-text-muted hover:bg-surface-raised hover:text-text phone:size-tap"
-                          trigger={<Icon icon={Ellipsis} />}
+                        <PersonMenu
+                          person={person}
                           items={[
                             {
                               label: "Remove Friend",
@@ -458,7 +578,8 @@ function FriendsDialog({
                             withdrawFriendRequest(person.collector_id, {
                               idempotency_key: key,
                             }),
-                          () => "Friend Request withdrawn."
+                          () => "Friend Request withdrawn.",
+                          { rowGoes: true }
                         )
                       }
                     >
@@ -496,7 +617,8 @@ function FriendsDialog({
 
 type Run = (
   send: (key: string) => Promise<FriendCommandResult>,
-  done: (result: FriendCommandResult) => string
+  done: (result: FriendCommandResult) => string,
+  options?: { rowGoes?: boolean }
 ) => Promise<FriendCommandResult | null>;
 
 type Found =
@@ -506,7 +628,7 @@ type Found =
   | { kind: "missed"; message: string };
 
 /** Add: find a collector by their exact Handle, or copy the Invite Link. */
-function AddFriend({ run }: { run: Run }) {
+function AddFriend({ run, busy }: { run: Run; busy: boolean }) {
   const [handle, setHandle] = useState("");
   const [found, setFound] = useState<Found>({ kind: "idle" });
   const [copied, setCopied] = useState("");
@@ -580,7 +702,7 @@ function AddFriend({ run }: { run: Run }) {
         </p>
       )}
       {found.kind === "found" && (
-        <LookupResult collector={found.collector} act={act} />
+        <LookupResult collector={found.collector} busy={busy} act={act} />
       )}
       <div className="flex items-center gap-2">
         <span className="min-w-0 flex-1 text-meta text-text-muted">
@@ -595,9 +717,11 @@ function AddFriend({ run }: { run: Run }) {
 
 function LookupResult({
   collector,
+  busy,
   act,
 }: {
   collector: CollectorLookup;
+  busy: boolean;
   act: (
     collector: CollectorLookup,
     send: (key: string) => Promise<FriendCommandResult>,
@@ -619,6 +743,7 @@ function LookupResult({
         {collector.relation === "none" && (
           <Button
             variant="primary"
+            disabled={busy}
             onClick={() =>
               void act(
                 collector,
@@ -636,6 +761,7 @@ function LookupResult({
         )}
         {collector.relation === "blocked" && (
           <Button
+            disabled={busy}
             onClick={() =>
               void act(
                 collector,
@@ -653,6 +779,7 @@ function LookupResult({
         {collector.relation === "request_received" && (
           <Button
             variant="primary"
+            disabled={busy}
             onClick={() =>
               void act(
                 collector,
