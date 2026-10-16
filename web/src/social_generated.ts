@@ -1,6 +1,7 @@
 // Generated from FastAPI OpenAPI by scripts/generate_social_client.py. Do not edit.
 export type Collector = { collector_id: string; handle: string; display_name: string };
 export type CollectorLookup = { collector_id: string; handle: string; display_name: string; relation: "self" | "none" | "friends" | "request_sent" | "request_received" | "blocked" };
+export type InviteCollector = { collector_id: string; display_name: string; relation: "self" | "none" | "friends" | "request_sent" | "request_received" | "blocked" };
 export type FriendsView = { received: Collector[]; friends: Collector[]; sent: Collector[] };
 export type LookupHandle = { handle: string };
 export type SendFriendRequest = { collector_id: string; idempotency_key: string };
@@ -30,7 +31,7 @@ export const getFriends = () => request<FriendsView>('/api/social/friends', 'GET
 // Find a collector by their exact Handle; counted toward the hourly limit.
 export const lookupHandle = (body: LookupHandle) => request<CollectorLookup>('/api/social/lookup', 'POST', body);
 // The Invite Link page signed in: whose link it is and how the two stand.
-export const getInvite = (token: string) => request<CollectorLookup>(`/api/social/invites/${at(token)}`, 'GET');
+export const getInvite = (token: string) => request<InviteCollector>(`/api/social/invites/${at(token)}`, 'GET');
 // Idempotent commands: retry a failed one with the same idempotency_key.
 export const sendFriendRequest = (body: SendFriendRequest) =>
   request<FriendCommandResult>('/api/social/friend-requests', 'POST', body);

@@ -9,6 +9,8 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from uuid import uuid4
 
+import psycopg
+
 from app.main import app, connect  # noqa: F401  (main first: it includes every router while loading)
 from app.social import friends as friends_module
 from test_catalog_targets import isolated_rules  # noqa: F401  (an autouse fixture)
@@ -71,6 +73,24 @@ def rows(a, b):
                             (low, high)).fetchall()
 
 
+def age_decline(sender, recipient, by):
+    with connect() as conn:
+        conn.execute('UPDATE friend_request_declined SET declined_at = declined_at - %s::interval '
+                     'WHERE sender_id=%s AND recipient_id=%s', (by, sender, recipient))
+
+
+def declines(sender, recipient):
+    with connect() as conn:
+        return conn.execute('SELECT count(*) FROM friend_request_declined WHERE sender_id=%s AND recipient_id=%s',
+                            (sender, recipient)).fetchone()['count']
+
+
+def commands_counted(owner):
+    with connect() as conn:
+        return conn.execute("SELECT count(*) FROM handle_lookup_event WHERE user_id=%s AND kind='friend_command'",
+                            (owner,)).fetchone()['count']
+
+
 def lookups_counted(owner):
     with connect() as conn:
         return conn.execute("SELECT count(*) FROM handle_lookup_event WHERE user_id=%s AND kind='lookup'",
@@ -91,6 +111,8 @@ def test_a_friend_request_becomes_a_mutual_friendship_when_accepted():
     assert view(ash) == {'received': [], 'friends': [], 'sent': [misty]}
     assert view(misty) == {'received': [ash], 'friends': [], 'sent': []}
     assert lookup(ash, misty_handle).json()['relation'] == 'request_sent'
+    with connect() as conn:
+        assert friends_module.friend_ids(conn, ash) == set()  # pending is not friendship
     assert relation(step(misty, 'accept', ash)) == 'friends'
     assert view(ash) == {'received': [], 'friends': [misty], 'sent': []}
     assert view(misty) == {'received': [], 'friends': [ash], 'sent': []}
@@ -108,7 +130,11 @@ def test_decline_and_withdraw_delete_the_request():
     assert relation(step(misty, 'decline', ash)) == 'none'
     assert rows(ash, misty) == []
     assert view(ash) == view(misty) == {'received': [], 'friends': [], 'sent': []}
-    # The sender can ask again, and withdraw.
+    # The sender can't ask again for a week, and then can; withdraw deletes the request.
+    again = send(ash, misty)
+    assert (again.status_code, again.json()) == (409, {'detail': {'code': 'TRY_LATER'}})
+    assert rows(ash, misty) == []
+    age_decline(ash, misty, '8 days')
     assert relation(send(ash, misty)) == 'request_sent'
     assert relation(step(ash, 'withdraw', misty)) == 'none'
     assert rows(ash, misty) == []
@@ -216,8 +242,8 @@ def test_the_invite_link_signed_in_names_its_collector_and_never_sends_a_request
     token = invite_token(misty)
     opened = call('GET', f'/api/social/invites/{token}', ash)
     assert opened.status_code == 200, opened.text
-    assert opened.json() == {'collector_id': misty, 'handle': misty_handle, 'display_name': 'Collector',
-                             'relation': 'none'}
+    # The link shows the Display Name only: no Handle.
+    assert opened.json() == {'collector_id': misty, 'display_name': 'Collector', 'relation': 'none'}
     assert rows(ash, misty) == []
     assert call('GET', f'/api/social/invites/{token}', misty).json()['relation'] == 'self'
     send(ash, misty)
@@ -302,6 +328,104 @@ def test_friends_are_listed_by_name_and_requests_oldest_first():
     assert view(ash) == {'received': asked, 'friends': [other for _, other in sorted(named)], 'sent': []}
 
 
+def test_a_declined_request_cannot_be_sent_again_for_a_week():
+    (ash, _), (misty, _), (brock, _) = new_owner(), new_owner(), new_owner()
+    send(ash, misty)
+    step(misty, 'decline', ash)
+    assert declines(ash, misty) == 1
+    for tries in (2, 3):  # refused every time, with the same neutral answer, and counted; nothing reaches Misty
+        refused = send(ash, misty)
+        assert (refused.status_code, refused.json()) == (409, {'detail': {'code': 'TRY_LATER'}})
+        assert commands_counted(ash) == tries
+    assert rows(ash, misty) == [] and view(misty)['received'] == []
+    # It is the sender's wait only: Misty can still ask Ash, and her request clears the wait.
+    age_decline(ash, misty, '6 days')
+    assert send(ash, misty).status_code == 409
+    assert relation(send(misty, ash)) == 'request_sent'
+    assert declines(ash, misty) == 0
+    assert relation(step(ash, 'accept', misty)) == 'friends'
+    # Another collector isn't held up by it, and a decline of an unrelated pair records nothing for this one.
+    assert relation(send(brock, misty)) == 'request_sent'
+    # A second decline starts a new week; the wait ends after 7 days, and a request that goes through clears the row.
+    send(brock, ash)
+    step(ash, 'decline', brock)
+    age_decline(brock, ash, '8 days')
+    assert relation(send(brock, ash)) == 'request_sent'
+    assert declines(brock, ash) == 0
+
+
+def test_unblocking_clears_a_decline_either_way():
+    (ash, _), (misty, _) = new_owner(), new_owner()
+    send(ash, misty)
+    step(misty, 'decline', ash)
+    assert call('POST', '/api/social/blocks', misty, {'collector_id': ash, 'idempotency_key': str(uuid4())}).status_code == 200
+    assert declines(ash, misty) == 1  # a Block alone doesn't change it, and Ash is told nothing
+    assert call('POST', f'/api/social/blocks/{ash}/unblock', misty, {'idempotency_key': str(uuid4())}).status_code == 200
+    assert declines(ash, misty) == 0
+    assert relation(send(ash, misty)) == 'request_sent'
+
+
+def seed_commands(owner, count, minutes_ago=0):
+    with connect() as conn:
+        conn.execute("""INSERT INTO handle_lookup_event(user_id,kind,created_at)
+          SELECT %s, 'friend_command', now() - make_interval(mins => %s) FROM generate_series(1, %s)""",
+                     (owner, minutes_ago, count))
+
+
+def test_a_hundred_and_twenty_friend_commands_an_hour_then_too_many_without_locking_anyone(monkeypatch):
+    (ash, _), (misty, _), (brock, _) = new_owner(), new_owner(), new_owner()
+    first = uuid4()
+    send(ash, misty, first)  # the first of the 120
+    assert commands_counted(ash) == 1
+    seed_commands(ash, friends_module.COMMANDS_PER_HOUR - 2, minutes_ago=50)
+    assert relation(step(ash, 'withdraw', misty)) == 'none'  # the 120th
+    assert commands_counted(ash) == friends_module.COMMANDS_PER_HOUR
+    locked = []
+    real = friends_module.lock_owners
+    monkeypatch.setattr(friends_module, 'lock_owners', lambda conn, *ids: (locked.append(ids), real(conn, *ids)))
+    over = send(ash, misty)
+    assert over.status_code == 429
+    assert over.json() == {'detail': {'code': 'TOO_MANY_CHANGES', 'retry_after_minutes': 10}}
+    assert locked == [] and rows(ash, misty) == []
+    assert commands_counted(ash) == friends_module.COMMANDS_PER_HOUR  # a refusal isn't counted
+    # Every kind of command is limited, and another collector isn't.
+    for action in ('accept', 'decline', 'withdraw', 'remove'):
+        assert step(ash, action, misty).status_code == 429
+    assert call('POST', '/api/social/blocks', ash, {'collector_id': misty, 'idempotency_key': str(uuid4())}
+                ).status_code == 429
+    assert call('POST', f'/api/social/blocks/{misty}/unblock', ash, {'idempotency_key': str(uuid4())}
+                ).status_code == 429
+    # A recorded key replays its answer past the limit, but only for the same command: it never gets a lock.
+    assert relation(send(ash, misty, first)) == 'request_sent'
+    assert send(ash, brock, first).status_code == 409
+    assert locked == []
+    assert commands_counted(ash) == friends_module.COMMANDS_PER_HOUR
+    assert relation(send(misty, ash)) == 'request_sent'
+    # Lookups, Invite Link reads and the lists are not Friend commands.
+    assert call('GET', '/api/social/friends', ash).status_code == 200
+    # The hour moves on: the old rows are pruned and commands work again.
+    with connect() as conn:
+        conn.execute("UPDATE handle_lookup_event SET created_at = created_at - interval '11 minutes' "
+                     "WHERE user_id=%s AND kind='friend_command'", (ash,))
+    assert relation(step(ash, 'accept', misty)) == 'friends'
+
+
+def test_a_replayed_friend_command_and_a_missing_collector_are_counted_once_each():
+    (ash, _), (misty, _) = new_owner(), new_owner()
+    key = uuid4()
+    assert relation(send(ash, misty, key)) == 'request_sent'
+    assert relation(send(ash, misty, key)) == 'request_sent'
+    assert commands_counted(ash) == 1
+    # A command naming nobody is answered 404 after its count commits, as a lookup's miss is.
+    assert send(ash, f'nobody-{uuid4()}').status_code == 404
+    assert commands_counted(ash) == 2
+    # Refused before anything runs: your own account isn't counted.
+    assert send(ash, ash).status_code == 409
+    assert commands_counted(ash) == 2
+
+
 def test_migration_102_runs_again():
+    # Rolled back: 102's friends_of has no Block check, and a committed rerun would put it back over 103's.
     with connect() as conn, conn.transaction():
         conn.execute((ROOT / 'migrations' / '102_friends.sql').read_text())
+        raise psycopg.Rollback()
