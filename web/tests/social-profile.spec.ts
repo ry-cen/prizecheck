@@ -166,7 +166,7 @@ test("the Invite Link page shows only the Display Name signed out, and a new lin
   }
 });
 
-test("on a phone the header avatar opens Settings, Sign-ins, Owner controls for the owner, and Sign out", async ({
+test("on a phone the header avatar opens Settings, Sign-ins, Missing cards, Owner controls for the owner, and Sign out", async ({
   page,
 }) => {
   await page.setViewportSize(PHONE);
@@ -180,6 +180,7 @@ test("on a phone the header avatar opens Settings, Sign-ins, Owner controls for 
   await expect(sheet.getByRole("list").getByRole("button")).toHaveText([
     "Settings",
     "Sign-ins",
+    "Missing cards",
     "Sign out",
   ]);
   await sheet.getByRole("button", { name: "Sign-ins" }).click();
@@ -203,6 +204,7 @@ test("on a phone the header avatar opens Settings, Sign-ins, Owner controls for 
   await expect(sheet.getByRole("list").getByRole("button")).toHaveText([
     "Settings",
     "Sign-ins",
+    "Missing cards",
     "Owner controls",
     "Sign out",
   ]);

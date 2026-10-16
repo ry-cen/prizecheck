@@ -42,9 +42,11 @@ export function Correction({
       if (cause instanceof HoldingError && cause.status < 500)
         pending.current = null;
       setMessage(
-        cause instanceof HoldingError
-          ? `Reassignment failed: ${cause.code}. Refresh cards before retrying.`
-          : "Reassignment may have completed. Retry safely."
+        cause instanceof HoldingError && cause.code === "PROMISED_TO_LOAN"
+          ? "You promised some of these copies to a Loan. Reassign fewer copies, or cancel the Loan first."
+          : cause instanceof HoldingError
+            ? `Reassignment failed: ${cause.code}. Refresh cards before retrying.`
+            : "Reassignment may have completed. Retry safely."
       );
     } finally {
       setBusy(false);

@@ -200,15 +200,12 @@ test("a change that couldn't be sent shows the saved setting again and can be re
 test.describe("phone", () => {
   test.use(PHONE);
 
-  test("the More sheet opens Settings, whose options are 44 px targets", async ({
+  test("the account sheet opens Settings, whose options are 44 px targets", async ({
     page,
   }) => {
     await signIn(page);
-    await page.getByRole("button", { name: "More" }).tap();
-    const sheet = page.getByRole("dialog", { name: "More" });
-    await expect(sheet.getByRole("button", { name: "Sign-ins" })).toHaveCount(
-      0
-    );
+    await page.getByRole("button", { name: "Account", exact: true }).tap();
+    const sheet = page.getByRole("dialog", { name: "Account" });
     await sheet.getByRole("button", { name: "Settings" }).tap();
     await expect(page).toHaveURL(`${ORIGIN}/settings`);
     await expect(page.getByRole("heading", { level: 1 })).toHaveText(

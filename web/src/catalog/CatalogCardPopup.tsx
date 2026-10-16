@@ -10,6 +10,8 @@ import { Button } from "../ui/Button";
 import { CardArt, CardPopup } from "../ui/CardPopup";
 import { Pill, type PillTone } from "../ui/Pill";
 import { Select } from "../ui/Select";
+import { AskControl, copyCap, copyCard } from "../loans/BorrowDrafts";
+import { lendableText } from "../social/friendCards";
 import { FriendsWhoHaveThis } from "../social/FriendsWhoHaveThis";
 import { Stepper } from "../ui/Stepper";
 import { variantLabel } from "../ui/variantLabel";
@@ -358,6 +360,15 @@ export function CatalogCardPopup({
           <FriendsWhoHaveThis
             printingId={ready.printing.id}
             editionId={selected?.id ?? null}
+            action={(copy) => (
+              <AskControl
+                friend={copy}
+                card={copyCard(copy, null)}
+                cap={copyCap(copy)}
+                lendable={lendableText(copy)}
+                text="Ask to borrow"
+              />
+            )}
           />
           {selected && (
             <AddRows

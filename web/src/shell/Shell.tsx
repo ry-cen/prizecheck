@@ -6,8 +6,8 @@ import React, {
   type ReactNode,
 } from "react";
 import {
+  ArrowLeftRight,
   BookOpen,
-  Ellipsis,
   Flag,
   Layers,
   LayoutGrid,
@@ -16,17 +16,16 @@ import {
   ShieldCheck,
   type LucideIcon,
 } from "lucide-react";
-import { Dialog } from "../ui/Dialog";
+import { BorrowDraftsProvider } from "../loans/BorrowDrafts";
 import { Icon } from "../ui/Icon";
 import { Menu, type MenuItem } from "../ui/Menu";
 import { ToastProvider, useToast } from "../ui/Toast";
 import { FriendsButton, FriendsProvider } from "../social/FriendsDrawer";
-import { AccountSheetProvider, Avatar, SHEET_BUTTON } from "./AccountSheet";
+import { AccountSheetProvider, Avatar } from "./AccountSheet";
 import { PhoneHeaderActions } from "./HeaderActions";
 import {
   ACCOUNT_PAGES,
   DESKTOP_TABS,
-  MORE_PAGES,
   PAGES,
   PHONE_TABS,
   pageDef,
@@ -37,6 +36,7 @@ const ICONS: Record<PageId, LucideIcon> = {
   collection: LayoutGrid,
   decks: Layers,
   catalog: BookOpen,
+  loans: ArrowLeftRight,
   reports: Flag,
   settings: Settings,
   owner: ShieldCheck,
@@ -52,7 +52,11 @@ type Props = {
   /** The provider picture (an https URL on a configured provider's image host, checked by the gateway). */
   image?: string | null;
   owner: boolean;
+  /** The signed-in account id: Borrow Request drafts (#252) are kept per account. */
+  userId: string;
   onNavigate: (page: PageId) => void;
+  /** Opens one Loan (/loans/<id>, #252), from the toast after a Borrow Request is sent. */
+  onOpenLoan: (id: string) => void;
   /** Opens a Friend's Collection (#250) from the Friends drawer, by their Handle. */
   onOpenFriend: (handle: string) => void;
   /** Resolves false when sign-out failed; the shell then says so in a toast. */
@@ -69,7 +73,8 @@ type Props = {
 
 /**
  * The persistent app shell (#162): desktop header with tabs, the Friends button (#247) and the avatar menu, the
- * phone header with the Friends button and the account avatar (#246), bottom tab bar and More sheet, and the page area. Switching pages swaps only the page area. A kept-mounted
+ * phone header with the Friends button and the account avatar (#246), the bottom tab bar (Loans in the old More slot,
+ * #252), the Borrow Request drafts tray (#252) and the page area. Switching pages swaps only the page area. A kept-mounted
  * page stays in the document, hidden, after its first visit, and is shown again with its scroll position;
  * other pages mount on each visit. A reload starts fresh.
  */
@@ -80,7 +85,12 @@ export function Shell(props: Props) {
         onPrivacy={() => props.onNavigate("settings")}
         onOpenCollection={props.onOpenFriend}
       >
-        <ShellFrame {...props} />
+        <BorrowDraftsProvider
+          userId={props.userId}
+          onOpenLoan={props.onOpenLoan}
+        >
+          <ShellFrame {...props} />
+        </BorrowDraftsProvider>
       </FriendsProvider>
     </ToastProvider>
   );
@@ -99,7 +109,6 @@ function ShellFrame({
   other = null,
 }: Props) {
   const toast = useToast();
-  const [moreOpen, setMoreOpen] = useState(false);
   // Pages shown so far; a kept-mounted one stays mounted from its first visit.
   const [visited, setVisited] = useState<ReadonlySet<PageId>>(
     () => new Set(other ? [] : [page])
@@ -107,7 +116,6 @@ function ShellFrame({
   if (!other && !visited.has(page)) setVisited(new Set([...visited, page]));
   const shown = useRef(new Set<PageId>());
   const containers = useRef(new Map<PageId, HTMLDivElement>());
-  const moreOpener = useRef<HTMLButtonElement>(null);
   const otherContainer = useRef<HTMLDivElement>(null);
   const current = pageDef(page);
   // The page whose tab is current: none while another page is shown.
@@ -158,13 +166,11 @@ function ShellFrame({
   }, [anchor, showing]);
 
   function go(next: PageId) {
-    setMoreOpen(false);
     // A page with item addresses (Decks: /decks/<id>) goes back to its own address when its tab is pressed
     // again; App ignores a press that would not change the address.
     if (next !== showing || pageDef(next).param) onNavigate(next);
   }
   async function signOut() {
-    setMoreOpen(false);
     if (!(await onSignOut()))
       toast.show({
         message: "Couldn't sign out. Check your connection and try again.",
@@ -207,6 +213,8 @@ function ShellFrame({
         go("settings");
       }}
       onOwner={() => go("owner")}
+      onReports={() => go("reports")}
+      current={showing}
       onSignOut={() => void signOut()}
     >
       <div
@@ -313,55 +321,7 @@ function ShellFrame({
               {pageDef(id).label}
             </button>
           ))}
-          <button
-            ref={moreOpener}
-            type="button"
-            aria-haspopup="dialog"
-            aria-expanded={moreOpen}
-            aria-current={
-              showing && MORE_PAGES.includes(showing) ? "page" : undefined
-            }
-            onClick={() => setMoreOpen(true)}
-            className={TAB_BAR_BUTTON}
-          >
-            <Icon icon={Ellipsis} size={20} />
-            More
-          </button>
         </nav>
-
-        <Dialog
-          open={moreOpen}
-          onClose={() => setMoreOpen(false)}
-          title="More"
-          closeLabel="Close More"
-          returnFocus={moreOpener}
-        >
-          <ul className="m-0 flex list-none flex-col gap-1 p-0">
-            {MORE_PAGES.filter(allowed).map((id) => (
-              <li key={id}>
-                <button
-                  type="button"
-                  aria-current={showing === id ? "page" : undefined}
-                  onClick={() => go(id)}
-                  className={SHEET_BUTTON}
-                >
-                  <Icon icon={ICONS[id]} size={20} />
-                  {pageDef(id).label}
-                </button>
-              </li>
-            ))}
-            <li className="mt-2 border-t border-border pt-2">
-              <button
-                type="button"
-                onClick={() => void signOut()}
-                className={SHEET_BUTTON}
-              >
-                <Icon icon={LogOut} size={20} />
-                Sign out
-              </button>
-            </li>
-          </ul>
-        </Dialog>
       </div>
     </AccountSheetProvider>
   );

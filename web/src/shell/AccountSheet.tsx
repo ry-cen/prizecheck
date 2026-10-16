@@ -8,6 +8,7 @@ import {
 } from "react";
 import {
   CircleUser,
+  Flag,
   KeyRound,
   LogOut,
   Settings,
@@ -18,9 +19,10 @@ import { Icon } from "../ui/Icon";
 
 /**
  * The phone account sheet (social network #246, spec "Web screens"): the avatar button in the phone header opens a
- * sheet with Settings, Sign-ins, Owner controls (the owner only) and Sign out, the account items the desktop avatar
- * menu has. The shell provides it; the phone headers (the shell's and Collection's own) draw the button through
- * PhoneHeaderActions. The More sheet keeps Missing cards until Loans take its place (#252).
+ * sheet with Settings, Sign-ins, Missing cards, Owner controls (the owner only) and Sign out: the account items the
+ * desktop avatar menu has, and Missing cards, whose desktop tab has no phone tab since Loans took the More slot (#252).
+ * The shell provides it; the phone headers (the shell's and Collection's own) draw the button through
+ * PhoneHeaderActions.
  */
 type AccountSheetApi = {
   open: (opener: RefObject<HTMLElement | null>) => void;
@@ -40,6 +42,10 @@ type ProviderProps = {
   onSettings: () => void;
   onSignIns: () => void;
   onOwner: () => void;
+  /** Opens Missing cards (/reports). */
+  onReports: () => void;
+  /** The page shown, so the sheet marks Settings, Missing cards or Owner controls when it is one of them. */
+  current: string | null;
   onSignOut: () => void;
   children: ReactNode;
 };
@@ -52,6 +58,8 @@ export function AccountSheetProvider({
   onSettings,
   onSignIns,
   onOwner,
+  onReports,
+  current,
   onSignOut,
   children,
 }: ProviderProps) {
@@ -65,15 +73,28 @@ export function AccountSheetProvider({
     label: string;
     icon: typeof Settings;
     onSelect: () => void;
+    current?: boolean;
   }[] = [
-    { label: "Settings", icon: Settings, onSelect: choose(onSettings) },
+    {
+      label: "Settings",
+      icon: Settings,
+      onSelect: choose(onSettings),
+      current: current === "settings",
+    },
     { label: "Sign-ins", icon: KeyRound, onSelect: choose(onSignIns) },
+    {
+      label: "Missing cards",
+      icon: Flag,
+      onSelect: choose(onReports),
+      current: current === "reports",
+    },
     ...(owner
       ? [
           {
             label: "Owner controls",
             icon: ShieldCheck,
             onSelect: choose(onOwner),
+            current: current === "owner",
           },
         ]
       : []),
@@ -111,6 +132,7 @@ export function AccountSheetProvider({
               <li key={item.label}>
                 <button
                   type="button"
+                  aria-current={item.current ? "page" : undefined}
                   onClick={item.onSelect}
                   className={SHEET_BUTTON}
                 >

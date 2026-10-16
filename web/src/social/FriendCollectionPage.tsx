@@ -18,7 +18,8 @@ import { Chip } from "../ui/Chip";
 import { Pill } from "../ui/Pill";
 import { SearchField } from "../ui/SearchField";
 import { variantLabel } from "../ui/variantLabel";
-import { readPrintings } from "./friendCards";
+import { AskControl, copyCap } from "../loans/BorrowDrafts";
+import { lendableText, readPrintings } from "./friendCards";
 
 type Show = FriendCollection["show"];
 
@@ -47,7 +48,8 @@ const SEARCH_DELAY_MS = 300;
  * more cards** reads the next page. A Handle that isn't one of the collector's Friends gets one plain sentence, the
  * same whatever the reason.
  *
- * Asking to borrow arrives with Borrow Requests (#252): it passes each tile an `action`.
+ * Each card has **Ask to borrow** (#252), which adds a copy to the Friend's Borrow Request draft and then turns into a
+ * stepper.
  */
 export function FriendCollectionPage({ handle }: { handle: string }) {
   const printings = useMemo(readPrintings, []);
@@ -209,6 +211,15 @@ export function FriendCollectionPage({ handle }: { handle: string }) {
               key={card.edition_id}
               card={card}
               markWanted={page.show === "all"}
+              action={
+                <AskControl
+                  friend={page}
+                  card={card}
+                  cap={copyCap(card)}
+                  lendable={lendableText(card)}
+                  text="Ask to borrow"
+                />
+              }
             />
           ))}
         </ul>
@@ -235,7 +246,7 @@ export function FriendCollectionPage({ handle }: { handle: string }) {
 
 /**
  * One card a Friend could lend: its art, name, set, number and Variant, and "N spare" or "N in a Deck". With
- * `markWanted`, a card that matches the Want List says "Want". `action` sits under it: Ask to borrow, from #252.
+ * `markWanted`, a card that matches the Want List says "Want". `action` sits under it: Ask to borrow (#252).
  */
 export function FriendCardTile({
   card,

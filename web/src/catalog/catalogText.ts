@@ -147,6 +147,9 @@ const UNDO_REFUSED: Record<string, string> = {
     "Undo unavailable: you've changed your collection since, so nothing was removed.",
   REPLAY_OUTCOME_UNAVAILABLE:
     "Undo may already have finished. Check your collection before trying again.",
+  // #252: undoing the add would leave fewer copies than open Loans promised.
+  PROMISED_TO_LOAN:
+    "Undo unavailable: you promised some of these copies to a Loan, so nothing was removed.",
 };
 
 /** Why the toast's Undo of a batch add did nothing. */

@@ -110,6 +110,9 @@ type Names = {
   place: (locationId: string) => string;
   /** A selected Card Edition in one source, as "Name (Set Number)", or "a card". */
   card: (sourceId: string, editionId: string) => string;
+  /** A selected Card Edition in any source, as "Name (Set Number)", or "a card" (#252's PROMISED_TO_LOAN names only
+   * the Edition). */
+  edition: (editionId: string) => string;
 };
 
 /** The inline message for a failed Move or Inventory Removal. It always says nothing changed (or that
@@ -187,6 +190,12 @@ export function describeFailure(
         refreshed,
         true,
         true
+      );
+    case "PROMISED_TO_LOAN":
+      // #252: an Inventory Removal that would leave fewer copies than open Loans promised.
+      return result(
+        `You promised copies of ${editionId ? names.edition(editionId) : "these cards"} to a Loan, so they can't all be removed. ${nothing}`,
+        `Remove fewer copies, or cancel the Loan first; ${kept.toLowerCase()}.`
       );
     case "MOVE_MANIFEST_EXPIRED":
     case "MOVE_MANIFEST_NOT_FOUND":

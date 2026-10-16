@@ -153,14 +153,14 @@ test("asks a stale session to sign in again, then returns to Settings", async ({
   await expect(row(page, "Google")).toContainText("Connected");
 });
 
-test("reaches Sign-ins in Settings from the More sheet on a phone", async ({
+test("reaches Sign-ins in Settings from the account sheet on a phone", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await signInAsOwner(page, "/collection");
-  await page.getByRole("button", { name: "More" }).click();
+  await page.getByRole("button", { name: "Account", exact: true }).click();
   await page
-    .getByRole("dialog", { name: "More" })
+    .getByRole("dialog", { name: "Account" })
     .getByRole("button", { name: "Settings" })
     .click();
   await expect(page).toHaveURL(`${ORIGIN}/settings`);
