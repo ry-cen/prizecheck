@@ -1030,16 +1030,24 @@ function pickText(places: LoanPickPlace[], editionId: string): string | null {
  * Each out-of-date pick of a line (#253), with where the suggested picks take the copies from: "Binder 2 has only
  * 1 Iono now", "Binder 2 has no Iono now". Read from the lender's own side; the borrower never sees a Location.
  */
-function staleText(side: LoanSide, line: LoanCard): string[] {
+function staleText(
+  side: LoanSide,
+  line: LoanCard
+): { key: string; text: string }[] {
   return side.picks
     .filter(
       (place) => place.edition_id === line.edition_id && place.short !== "0"
     )
-    .map((place) => {
+    .map((place, index) => {
       const left = Number(place.copies) - Number(place.short);
-      return left > 0
-        ? `${place.name} has only ${left} ${line.name} now`
-        : `${place.name} has no ${line.name} now`;
+      // Keyed by the Location: two Locations can share a leaf name.
+      return {
+        key: place.location_id ?? `place-${index}`,
+        text:
+          left > 0
+            ? `${place.name} has only ${left} ${line.name} now`
+            : `${place.name} has no ${line.name} now`,
+      };
     });
 }
 
@@ -1161,8 +1169,8 @@ function LoanLine({
         {pick && (
           <p className="m-0 text-meta text-text-muted wrap-anywhere">{pick}</p>
         )}
-        {stale.map((text) => (
-          <p key={text} className="m-0 text-meta text-warning wrap-anywhere">
+        {stale.map(({ key, text }) => (
+          <p key={key} className="m-0 text-meta text-warning wrap-anywhere">
             {text}
           </p>
         ))}
