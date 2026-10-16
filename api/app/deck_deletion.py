@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field
 from .location_tree import cleaned_name, error, owner_and_rows, replay
 from .main import connect, verified_user
 from .moves import MAX_QUANTITY
+from .social import counts
 
 router = APIRouter(prefix='/api/decks', tags=['decks'])
 
@@ -98,6 +99,8 @@ def delete_deck(deck_id: UUID, command: DeleteDeck, user_id: str = Depends(verif
                     SET quantity=u.quantity+EXCLUDED.quantity,version=EXCLUDED.version""",
                              (unsorted_id, new_revision, user_id, deck_id))
                 conn.execute('DELETE FROM holding WHERE owner_id=%s AND location_id=%s', (user_id, deck_id))
+                # Loan picks follow the copies they take, so a promise still names where its copies are.
+                counts.move_picks(conn, user_id, deck_id, unsorted_id)
             # The Deck List and its lines and any Move selection staged from the Deck cascade; publications are unlinked.
             conn.execute('DELETE FROM location WHERE owner_id=%s AND id=%s', (user_id, deck_id))
             parent_id = deck['parent_id']

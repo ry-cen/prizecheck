@@ -12,7 +12,8 @@ Deck D and an Edition E of the line's group:
 - **Every Deck built at once:** the Spare Copies of E (every copy no Deck's own line holds, Surplus included) less those
   that D and the Decks older than D count for their own lines of E (``LineCount.spare``). That is exactly what a line of
   E in D would count, since Spare Copies go oldest Deck first; Decks newer than D come after it.
-- **One Deck at a time:** every copy of E less the copies D's own line of E already counts. That is every copy outside
+- **One Deck at a time:** every copy of E less the copies D's own line of E already counts and less the copies promised
+  to open Loans (``EditionCopies.reserved``) that D doesn't hold for its own line. That is every unpromised copy outside
   D, plus D's own copies beyond its line.
 
 So sending a hint's batch lowers D's need by exactly ``count`` and leaves every older Deck's need as it was.
@@ -138,10 +139,13 @@ def hints(capture: SwapCapture, decks: Sequence[UUID],
     def available(deck: UUID, edition: UUID) -> int:
         owned = allocation.owned.get(edition, 0)
         lines = by_edition.get(edition, [])
-        if allocation.counting == 'one_at_a_time':
-            own = allocation.lines.get((deck, edition))
-            return owned - (own.quantity - own.need if own else 0)
         rule = allocation.copies.get(edition)
+        if allocation.counting == 'one_at_a_time':
+            # Every copy the Deck doesn't already count, less those promised to open Loans; the Deck's own reserved
+            # copies are among the ones it counts.
+            own = allocation.lines.get((deck, edition))
+            reserved = rule.reserved - rule.reserved_own.get(deck, 0) if rule else 0
+            return max(0, owned - reserved - (own.quantity - own.need if own else 0))
         spare = rule.spare if rule else 0
         return spare - sum(line.spare for line in lines if rank[line.deck_id] <= rank[deck])
 

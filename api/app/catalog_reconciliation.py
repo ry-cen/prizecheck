@@ -190,7 +190,7 @@ def replacements(user_id: str=Depends(verified_user)):
 @router.post('/api/holdings/reassign',response_model=ReassignResult)
 def reassign(command: ReassignHolding,user_id: str=Depends(verified_user)):
     import hashlib,json
-    from .moves import lock_owner,leaf,quantity,MAX_QUANTITY
+    from .moves import lock_owner,leaf,quantity,MAX_QUANTITY,check_promises
     amount=quantity(command.quantity)
     payload=command.model_dump(mode='json',exclude={'idempotency_key'})
     digest=hashlib.sha256(json.dumps({'action':'reassign',**payload},sort_keys=True).encode()).hexdigest()
@@ -221,6 +221,8 @@ def reassign(command: ReassignHolding,user_id: str=Depends(verified_user)):
         current=conn.execute('SELECT quantity FROM holding WHERE owner_id=%s AND location_id=%s AND edition_id=%s',
           (user_id,command.location_id,command.replacement_edition_id)).fetchone()
         if current and current['quantity']>MAX_QUANTITY-amount:fail(409,'QUANTITY_OVERFLOW')
+        # The old Edition loses the copies: refused when open Loans promise them (social network #252).
+        check_promises(conn,user_id,{command.edition_id:amount})
         new_revision=revision+1
         if source['quantity']==amount:
             conn.execute('DELETE FROM holding WHERE owner_id=%s AND location_id=%s AND edition_id=%s',

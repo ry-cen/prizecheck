@@ -15,6 +15,19 @@ export type FriendCopy = { collector_id: string; handle: string; display_name: s
 export type WantedCard = { edition_id: string; copies: FriendCopy[] };
 export type WantListMatches = { has_friends: boolean; cards: WantedCard[] };
 export type CardMatches = { has_friends: boolean; copies: FriendCopy[] };
+export type LoanParty = { collector_id: string | null; display_name: string; handle: string | null };
+export type LoanCard = { edition_id: string; name: string; set_code: string; set_name: string; collector_number: string; descriptor: Record<string, unknown>; image_url: string | null; requested: string; promised: string; written_off: string };
+export type LoanView = { id: string; kind: "borrow_request" | "lend_offer"; state: "requested" | "offered" | "accepted" | "handed_over" | "closed"; closed_reason: "declined" | "withdrawn" | "cancelled" | "returned" | "written_off" | null; closed_by: "you" | "them" | null; role: "lender" | "borrower"; other: LoanParty; return_by: string | null; you_confirmed_handover: boolean; they_confirmed_handover: boolean; lines: LoanCard[]; needs_you: boolean; section: "needs_you" | "out_now" | "pending" | "history"; actions: ("accept" | "decline" | "withdraw" | "cancel" | "edit_and_resend")[]; revision: number };
+export type LoansView = { loans: LoanView[]; needs_you: number };
+export type LoanStep = { revision: number; idempotency_key: string };
+export type LoanLineRequest = { edition_id: string; quantity: string };
+export type SendBorrowRequest = { lender_id: string; lines: LoanLineRequest[]; deck_id?: string | null; return_by?: string | null; replaces?: string | null; idempotency_key: string };
+export type PromisedLine = { edition_id: string; promised: string };
+export type AcceptBorrowRequest = { revision: number; idempotency_key: string; lines: PromisedLine[] };
+export type PromiseLimit = { edition_id: string; available: string };
+export type LoanPickPlace = { edition_id: string; location_id: string | null; name: string; copies: string };
+export type LoanDeck = { id: string; name: string };
+export type LoanSide = { loan_id: string; deck: LoanDeck | null; can_promise: PromiseLimit[]; picks: LoanPickPlace[] };
 
 /** A refused social request: the API's code, and for TOO_MANY_LOOKUPS the detail that says when to try again. */
 export class SocialError extends Error {
@@ -75,3 +88,20 @@ export const getWantListMatches = (params: { deck?: string | null; printings?: P
 export const getCardMatches = (printingId: string, params: { printings?: Printings }, signal?: AbortSignal) =>
   request<CardMatches>(`/api/social/card-matches${query({ printing_id: printingId, ...params })}`, 'GET', undefined,
     signal);
+// Loans (#252): the Loans tab and one Loan, as both sides read them.
+export const getLoans = (signal?: AbortSignal) => request<LoansView>('/api/social/loans', 'GET', undefined, signal);
+export const getLoan = (id: string, signal?: AbortSignal) =>
+  request<LoanView>(`/api/social/loans/${at(id)}`, 'GET', undefined, signal);
+// Your own side of a Loan: the Deck the cards go to, or what you could promise and where you take the cards from.
+export const getLoanSide = (id: string, signal?: AbortSignal) =>
+  request<LoanSide>(`/api/loans/${at(id)}/side`, 'GET', undefined, signal);
+// Loan steps, idempotent: retry a failed one with the same idempotency_key. Each answers the Loan as it now stands.
+export const sendBorrowRequest = (body: SendBorrowRequest) => request<LoanView>('/api/loans', 'POST', body);
+export const acceptBorrowRequest = (id: string, body: AcceptBorrowRequest) =>
+  request<LoanView>(`/api/loans/${at(id)}/accept`, 'POST', body);
+export const declineLoan = (id: string, body: LoanStep) =>
+  request<LoanView>(`/api/social/loans/${at(id)}/decline`, 'POST', body);
+export const withdrawLoan = (id: string, body: LoanStep) =>
+  request<LoanView>(`/api/social/loans/${at(id)}/withdraw`, 'POST', body);
+export const cancelLoan = (id: string, body: LoanStep) =>
+  request<LoanView>(`/api/social/loans/${at(id)}/cancel`, 'POST', body);

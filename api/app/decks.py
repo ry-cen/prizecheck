@@ -17,6 +17,7 @@ from .format_evaluator import FORMATS
 from .deck_list_display import CardKind, TrainerType, read_line_display, with_line_display
 from .copy_allocation import deck_lines, held_for_line
 from .settings import WantListCounting, read_settings
+from .social import counts
 
 router = APIRouter(prefix='/api/decks', tags=['decks'])
 from .construction_checks import DISCLAIMER, IdentityCount, evaluate_checks
@@ -158,6 +159,38 @@ class DeckListCommandResult(BaseModel):
     format_checks: DeckFormatChecks | None = None
 
 
+class LoanLabel(BaseModel):
+    """Copies of a line's Card Edition in this Deck that one borrower's Loans take: the borrower's Display Name."""
+    name: str
+    copies: str
+
+
+class DeckLoanLine(BaseModel):
+    """What Loans take of one Card Edition in this Deck (social network #252, spec "Lender-side data"): ``reserved``,
+    copies the Loan Pick List takes from here and still in the Deck ("2 reserved for Kim"), oldest Loan first. Copies
+    stay in the Deck and count for it until handover."""
+    edition_id: UUID
+    reserved: list[LoanLabel]
+
+
+def read_deck_loans(conn, user_id: str, deck_id: UUID, held: dict) -> list[DeckLoanLine]:
+    """Each Card Edition of the Deck that Loans take copies of, in Edition order; a borrower named once per Edition.
+    ``held``: the Deck's Holdings by Edition (``held_in``). A pick is read up to the copies still here, oldest Loan
+    first, so an out-of-date pick never names more copies than the Deck holds. The caller holds the owner row lock."""
+    found: dict[UUID, dict[str, int]] = {}
+    left = dict(held)
+    for row in counts.deck_loan_picks(conn, user_id, deck_id):
+        edition = row['edition_id']
+        copies = min(left.get(edition, 0), int(row['copies']))
+        if copies > 0:
+            names = found.setdefault(edition, {})
+            names[row['borrower_name']] = names.get(row['borrower_name'], 0) + copies
+            left[edition] -= copies
+    return [DeckLoanLine(edition_id=edition, reserved=[LoanLabel(name=name, copies=str(copies))
+                                                       for name, copies in found[edition].items()])
+            for edition in sorted(found)]
+
+
 class DeckDetail(BaseModel):
     deck: TreeNode
     checks: DeckChecks
@@ -181,6 +214,8 @@ class DeckDetail(BaseModel):
     to_get: str
     want_list_counting: WantListCounting
     settings_revision: int
+    # Social network #252: the Deck's copies that Loans take, for its lines' "reserved for Kim" (``read_deck_loans``).
+    loans: list[DeckLoanLine]
 
 
 @router.post('', response_model=LocationCommandResult, status_code=201)
@@ -354,7 +389,8 @@ def deck_detail(deck_id: UUID, user_id: str = Depends(verified_user)):
                           deck_list=deck_list, target_format=target_format, format_checks=format_checks,
                           ownership=ownership.lines, surplus=ownership.surplus, competition=ownership.competition,
                           to_get=str(sum(line.need for line in counted.values())),
-                          want_list_counting=settings.want_list_counting, settings_revision=settings.revision)
+                          want_list_counting=settings.want_list_counting, settings_revision=settings.revision,
+                          loans=read_deck_loans(conn, user_id, deck_id, held_in(conn, user_id, deck_id)))
 
 
 def read_target_format(conn, user_id: str, deck_id: UUID) -> str:
