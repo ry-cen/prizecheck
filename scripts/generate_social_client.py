@@ -1,5 +1,5 @@
-"""Generate the social client module (Friends and Friend Requests, social network #247, and Blocks, #248) from the API
-OpenAPI schema."""
+"""Generate the social client module (Friends and Friend Requests, social network #247, Blocks, #248, and Friends'
+cards, #250) from the API OpenAPI schema."""
 import sys
 from pathlib import Path
 
@@ -18,14 +18,13 @@ def ts_type(value):
     if value.get("type") == "array":
         return f"{ts_type(value['items'])}[]"
     return {"string": "string", "integer": "number", "number": "number", "boolean": "boolean",
-            "null": "null"}[value["type"]]
+            "null": "null", "object": "Record<string, unknown>"}[value["type"]]
 
 
 schema = app.openapi()["components"]["schemas"]
 lines = ["// Generated from FastAPI OpenAPI by scripts/generate_social_client.py. Do not edit."]
 for name in ("Collector", "CollectorLookup", "InviteCollector", "FriendsView", "LookupHandle", "SendFriendRequest",
-             "FriendCommand",
-             "FriendCommandResult", "BlockCollector", "BlockedList"):
+             "FriendCommand", "FriendCommandResult", "BlockCollector", "BlockedList", "FriendCard", "FriendCollection"):
     definition = schema[name]
     fields = [f"{field}{'' if field in definition.get('required', []) else '?'}: {ts_type(value)}"
               for field, value in definition["properties"].items()]
@@ -35,8 +34,8 @@ lines.append("""
 export class SocialError extends Error {
   constructor(public status: number, public code: string, public detail: Record<string, unknown> = {}) { super(code); }
 }
-async function request<T>(path: string, method: string, body?: object): Promise<T> {
-  const response = await fetch(path, { method, credentials: 'same-origin',
+async function request<T>(path: string, method: string, body?: object, signal?: AbortSignal): Promise<T> {
+  const response = await fetch(path, { method, credentials: 'same-origin', signal,
     headers: body ? { 'content-type': 'application/json' } : undefined,
     body: body ? JSON.stringify(body) : undefined });
   if (!response.ok) {
@@ -47,6 +46,16 @@ async function request<T>(path: string, method: string, body?: object): Promise<
   return response.json() as Promise<T>;
 }
 const at = (id: string) => encodeURIComponent(id);
+/** "?a=1&b=2" from the parameters that are set, or "" when none is. */
+const query = (params: Record<string, string | number | null | undefined>) => {
+  const search = new URLSearchParams();
+  for (const [name, value] of Object.entries(params))
+    if (value !== null && value !== undefined && value !== '') search.set(name, String(value));
+  const text = search.toString();
+  return text ? `?${text}` : '';
+};
+/** Which other Card Editions count for a wanted one (Decklist Import's Exact printings or Use cards I own). */
+export type Printings = 'exact' | 'reprint_group';
 // The Friends drawer: requests received, Friends and requests sent.
 export const getFriends = () => request<FriendsView>('/api/social/friends', 'GET');
 // Find a collector by their exact Handle; counted toward the hourly limit.
@@ -69,6 +78,10 @@ export const getBlocked = () => request<BlockedList>('/api/social/blocks', 'GET'
 export const blockCollector = (body: BlockCollector) => request<FriendCommandResult>('/api/social/blocks', 'POST', body);
 export const unblockCollector = (id: string, body: FriendCommand) =>
   request<FriendCommandResult>(`/api/social/blocks/${at(id)}/unblock`, 'POST', body);
+// A Friend's Collection (#250): one page of the cards they could lend now, found by their Handle among your Friends.
+export const getFriendCollection = (handle: string,
+  params: { show?: 'wanted' | 'all'; q?: string; printings?: Printings; page?: number }, signal?: AbortSignal) =>
+  request<FriendCollection>(`/api/social/collections/${at(handle)}${query(params)}`, 'GET', undefined, signal);
 """)
 content = "\n".join(lines)
 target = root / "web/src/social_generated.ts"
