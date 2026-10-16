@@ -1146,10 +1146,12 @@ def follow_replacement(conn, user_id: str, edition: UUID, replacement: UUID, cop
     Each Loan moved is written once (``write_loan``: its revision moves, so an open screen of either side reloads), and
     each other side's inventory revision moves once. Nothing about either side's Locations or Decks reaches the
     other."""
-    rows = conn.execute('SELECT o.* ' + _NAMING + ' ORDER BY o.id FOR NO KEY UPDATE OF o',
-                        {'me': user_id, 'edition': edition}).fetchall()
-    rows = [row for row in rows
-            if all(side is None or side in locked for side in (row['lender_id'], row['borrower_id']))]
+    # Only the Loans whose sides are all locked are locked and moved, filtered in the statement, so no other Loan's
+    # row is locked.
+    rows = conn.execute('SELECT o.* ' + _NAMING + """
+      AND (o.lender_id IS NULL OR o.lender_id = ANY(%(locked)s))
+      AND (o.borrower_id IS NULL OR o.borrower_id = ANY(%(locked)s))
+      ORDER BY o.id FOR NO KEY UPDATE OF o""", {'me': user_id, 'edition': edition, 'locked': sorted(locked)}).fetchall()
     moving = [row for row in rows if row['lender_handover_at'] is not None
               or (row['lender_id'] == user_id and row['state'] == 'requested')]
     reserving = [row for row in rows if row['lender_handover_at'] is None and row['lender_id'] == user_id
