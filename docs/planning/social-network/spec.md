@@ -418,7 +418,7 @@ Each site that assumes a Holding belongs to one collector, from the [research](w
 
 ### Account deletion requirements
 
-No deletion feature exists. When it is built, it must first cancel Loans not yet handed over (releasing reservations and sending updates), and leave handed-over Loans to the other side through `ON DELETE SET NULL`. Only then is the `inventory_owner` row deleted, which cascades the collector's own rows, including `collector_profile`, `invite_link` and the `invites` entry in the public projection. The other side's `borrowed_holding` and the Loan rows survive, because they belong to the remaining collector or to the Loan. The delete-account screen warns about open Loans but does not prevent deletion.
+No deletion feature exists. When it is built, it must first cancel Loans not yet handed over (releasing reservations and sending updates), and leave handed-over Loans to the other side through `ON DELETE SET NULL`. Only then is the `inventory_owner` row deleted, which cascades the collector's own rows, including `collector_profile`, `invite_link` and the `invites` entry in the public projection. `inbox_update.recipient_id` has no foreign key on purpose (migration 130), so deletion must also run `DELETE FROM inbox_update WHERE recipient_id = <id>` itself. The other side's `borrowed_holding` and the Loan rows survive, because they belong to the remaining collector or to the Loan. The delete-account screen warns about open Loans but does not prevent deletion.
 
 ### Rate limit
 
