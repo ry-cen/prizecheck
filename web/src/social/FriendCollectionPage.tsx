@@ -1,4 +1,11 @@
-import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { PageHeader } from "../shell/PageHeader";
 import {
   getFriendCollection,
@@ -24,6 +31,8 @@ type Load =
       page: FriendCollection;
       cards: FriendCard[];
       more: "idle" | "loading" | "failed";
+      /** The search the answer was read for. */
+      q: string;
     };
 
 // How long the search waits after the last keystroke before it reads again.
@@ -48,6 +57,8 @@ export function FriendCollectionPage({ handle }: { handle: string }) {
   const [load, setLoad] = useState<Load>({ kind: "loading" });
   const [attempt, setAttempt] = useState(0);
   const listId = useId();
+  // Bumped each time the main read starts, so a Show more read begun under an earlier filter is dropped on arrival.
+  const generation = useRef(0);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setQ(typed.trim()), SEARCH_DELAY_MS);
@@ -56,13 +67,15 @@ export function FriendCollectionPage({ handle }: { handle: string }) {
 
   useEffect(() => {
     const controller = new AbortController();
+    generation.current++;
     setLoad((current) =>
       current.kind === "ready" ? current : { kind: "loading" }
     );
     getFriendCollection(handle, { show, q, printings }, controller.signal)
-      .then((page) =>
-        setLoad({ kind: "ready", page, cards: page.cards, more: "idle" })
-      )
+      .then((page) => {
+        if (controller.signal.aborted) return;
+        setLoad({ kind: "ready", page, cards: page.cards, more: "idle", q });
+      })
       .catch((cause) => {
         if (controller.signal.aborted) return;
         setLoad(
@@ -75,23 +88,38 @@ export function FriendCollectionPage({ handle }: { handle: string }) {
   }, [handle, show, q, printings, attempt]);
 
   async function showMore() {
-    if (load.kind !== "ready" || load.page.next_page === null) return;
+    if (
+      load.kind !== "ready" ||
+      load.page.next_page === null ||
+      load.more === "loading" ||
+      load.page.show !== show ||
+      load.q !== q
+    )
+      return;
     const current = load;
+    const at = generation.current;
     setLoad({ ...current, more: "loading" });
     try {
       const page = await getFriendCollection(handle, {
-        show,
-        q,
+        show: current.page.show,
+        q: current.q,
         printings,
         page: current.page.next_page!,
       });
+      if (generation.current !== at) return;
       setLoad({
         kind: "ready",
         page,
         cards: [...current.cards, ...page.cards],
         more: "idle",
+        q: current.q,
       });
-    } catch {
+    } catch (cause) {
+      if (generation.current !== at) return;
+      if (cause instanceof SocialError && cause.status === 404) {
+        setLoad({ kind: "missing" });
+        return;
+      }
       setLoad({ ...current, more: "failed" });
     }
   }
@@ -131,9 +159,9 @@ export function FriendCollectionPage({ handle }: { handle: string }) {
   const { page, cards, more } = load;
   const name = page.display_name;
   // The answer on screen can be the previous filter's for a moment after a chip is pressed or a search is typed.
-  const current = page.show === show;
-  const empty = q
-    ? `No cards match “${q}”.`
+  const current = page.show === show && load.q === q;
+  const empty = load.q
+    ? `No cards match “${load.q}”.`
     : page.show === "wanted"
       ? `${name} has no cards from your Want List to lend right now.`
       : `${name} has no cards to lend right now.`;

@@ -11,7 +11,13 @@ import { randomInt, randomUUID } from "node:crypto";
 import type { Page } from "@playwright/test";
 import { expect, test } from "./support/collectors";
 import { expectPageChecks } from "./support/page-check";
+import type {
+  OtherCollector,
+  OtherCollectorOptions,
+} from "./support/collectors";
 import { signInAsOwner } from "./support/sign-in";
+
+type SignInOther = (options?: OtherCollectorOptions) => Promise<OtherCollector>;
 
 const ORIGIN = process.env.TEST_ORIGIN || "http://localhost:5173";
 const PHONE = { width: 390, height: 844 };
@@ -233,4 +239,87 @@ test("Friend chips on the Want List, the Get from Friends view and Friends who h
   await results.getByRole("button", { name: /^Iono, PAL 254/ }).click();
   await expect(friends.getByRole("listitem")).toHaveCount(2);
   await expectPageChecks(page, "Friends who have this on a phone");
+});
+
+/** Ash with a Deck that needs Iono PAL 185 and another that needs Boss's Orders, and Misty, a Friend with a spare Iono. */
+async function ashWithTwoDecks(
+  page: Page,
+  collectors: { signIn: SignInOther }
+) {
+  const ids = seedCatalog();
+  const misty = await collectors.signIn({ next: "/decks" });
+  await nameCollector(misty.page, "Misty W");
+  await hold(misty.page, await unsorted(misty.page), ids["PAL 185"], 1);
+  await page.route(/^https:\/\/assets\.tcgdex\.net\//, (route) =>
+    route.abort()
+  );
+  await signInAsOwner(page, "/decks");
+  await nameCollector(page, "Ash K");
+  const suffix = randomUUID().slice(0, 6);
+  const first = `Charizard ${suffix}`;
+  const second = `Gardevoir ${suffix}`;
+  await setLine(page, await createDeck(page, first), ids["PAL 185"], 1);
+  await setLine(page, await createDeck(page, second), ids["PAL 172"], 1);
+  await befriend(page, misty.page);
+  return { first, second };
+}
+
+test("changing the Deck scope in Get from Friends keeps the switch and the Friends view while the cards load", async ({
+  page,
+  collectors,
+}) => {
+  const { first } = await ashWithTwoDecks(page, collectors);
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  await page.route("**/api/social/want-list-matches**", async (route) => {
+    if (new URL(route.request().url()).searchParams.has("deck")) await gate;
+    await route.continue();
+  });
+
+  await page.goto(`${ORIGIN}/decks/want-list`);
+  const radios = views(page);
+  await radios.getByRole("radio", { name: "Get from Friends" }).click();
+  await expect(page.getByRole("region", { name: "Iono" })).toBeVisible();
+  await page
+    .getByRole("group", { name: "Show Decks" })
+    .getByRole("button", { name: first })
+    .click();
+  // The Want List for the Deck is in; Friends' cards for it are held back.
+  await expect(
+    page.getByRole("heading", { name: `Want List · ${first}` })
+  ).toBeVisible();
+  await expect(
+    radios.getByRole("radio", { name: "Get from Friends" })
+  ).toBeChecked();
+  await expect(page.getByRole("main")).not.toContainText("isn't available");
+  await expect(
+    page.getByRole("list", { name: `What ${first} needs` })
+  ).toHaveCount(0);
+  release();
+  await expect(page.getByRole("region", { name: "Iono" })).toBeVisible();
+  await expect(
+    radios.getByRole("radio", { name: "Get from Friends" })
+  ).toBeChecked();
+});
+
+test("a failed Friends' cards read leaves the Want List drawn without Friends", async ({
+  page,
+  collectors,
+}) => {
+  const { first } = await ashWithTwoDecks(page, collectors);
+  await page.route("**/api/social/want-list-matches**", (route) =>
+    route.fulfill({ status: 500, json: {} })
+  );
+  await page.goto(`${ORIGIN}/decks/want-list`);
+  await page
+    .getByRole("group", { name: "Show Decks" })
+    .getByRole("button", { name: first })
+    .click();
+  await expect(
+    page.getByRole("list", { name: `What ${first} needs` })
+  ).toContainText("Iono");
+  await expect(views(page)).toHaveCount(0);
+  await expect(
+    page.getByRole("list", { name: /^Friends who can lend/ })
+  ).toHaveCount(0);
 });
