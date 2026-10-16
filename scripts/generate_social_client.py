@@ -23,7 +23,8 @@ def ts_type(value):
 
 schema = app.openapi()["components"]["schemas"]
 lines = ["// Generated from FastAPI OpenAPI by scripts/generate_social_client.py. Do not edit."]
-for name in ("Collector", "CollectorLookup", "FriendsView", "LookupHandle", "SendFriendRequest", "FriendCommand",
+for name in ("Collector", "CollectorLookup", "InviteCollector", "FriendsView", "LookupHandle", "SendFriendRequest",
+             "FriendCommand",
              "FriendCommandResult", "BlockCollector", "BlockedList"):
     definition = schema[name]
     fields = [f"{field}{'' if field in definition.get('required', []) else '?'}: {ts_type(value)}"
@@ -51,7 +52,7 @@ export const getFriends = () => request<FriendsView>('/api/social/friends', 'GET
 // Find a collector by their exact Handle; counted toward the hourly limit.
 export const lookupHandle = (body: LookupHandle) => request<CollectorLookup>('/api/social/lookup', 'POST', body);
 // The Invite Link page signed in: whose link it is and how the two stand.
-export const getInvite = (token: string) => request<CollectorLookup>(`/api/social/invites/${at(token)}`, 'GET');
+export const getInvite = (token: string) => request<InviteCollector>(`/api/social/invites/${at(token)}`, 'GET');
 // Idempotent commands: retry a failed one with the same idempotency_key.
 export const sendFriendRequest = (body: SendFriendRequest) =>
   request<FriendCommandResult>('/api/social/friend-requests', 'POST', body);

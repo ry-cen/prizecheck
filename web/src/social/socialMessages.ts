@@ -23,5 +23,11 @@ export function commandMessage(cause: unknown): string {
   const code = cause instanceof SocialError ? cause.code : "";
   if (code === "COLLECTOR_NOT_FOUND")
     return "That collector can't be found anymore.";
+  if (code === "TRY_LATER") return "You can send another request later.";
+  if (code === "TOO_MANY_CHANGES") {
+    const detail = cause instanceof SocialError ? cause.detail : {};
+    const minutes = Number(detail.retry_after_minutes) || 60;
+    return `Too many changes. Try again in ${minutes} ${minutes === 1 ? "minute" : "minutes"}.`;
+  }
   return "Couldn't update. Check your connection and try again.";
 }
