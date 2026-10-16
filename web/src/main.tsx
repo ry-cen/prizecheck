@@ -36,6 +36,9 @@ import { EmailCodeForms, SignInScreen } from "./public/SignIn";
 import { clearFailureFromAddress, failureInAddress } from "./signInMessages";
 import { CollectionImportPage } from "./collectionImport/CollectionImportPage";
 import { COLLECTION_IMPORT_PATH } from "./collectionImport/route";
+import { forgetBorrowDrafts } from "./loans/BorrowDrafts";
+import { LoansPage } from "./loans/LoansPage";
+import { loanPath } from "./loans/loanText";
 import { FriendCollectionPage } from "./social/FriendCollectionPage";
 import { friendCollectionPath, friendHandleAt } from "./social/friendCards";
 import { workspaceHref } from "./workspace/workspaceLink";
@@ -189,6 +192,8 @@ function App() {
     } catch {
       return false;
     }
+    // Borrow Request drafts (#252) are the account's: none stay in this tab for whoever signs in next.
+    forgetBorrowDrafts();
     setSession({ signedIn: false, userId: null });
     setOwnerCatalog(null);
     navigate(DEFAULT_PATH, { replace: true });
@@ -310,6 +315,15 @@ function App() {
       }
       case "catalog":
         return <CatalogPage active={active} message={message} />;
+      case "loans":
+        // /loans lists the Loans; /loans/<id> is one Loan (#252).
+        return (
+          <LoansPage
+            loanId={sectionAt(path)}
+            onOpenLoan={(id) => navigate(loanPath(id))}
+            onAllLoans={() => navigate(pageDef("loans").path)}
+          />
+        );
       case "reports":
         return <MissingCardsPage active={active} message={message} />;
       case "owner":
@@ -334,6 +348,10 @@ function App() {
       name={session?.name ?? null}
       image={avatarImage(session?.image)}
       owner={ownerCatalog !== null}
+      userId={userId}
+      onOpenLoan={(id) => {
+        if (loanPath(id) !== path) navigate(loanPath(id));
+      }}
       onNavigate={(next) => {
         if (pageDef(next).path !== path) navigate(pageDef(next).path);
       }}

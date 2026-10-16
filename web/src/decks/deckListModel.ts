@@ -1,5 +1,6 @@
 import type {
   DeckDetail,
+  DeckLoanLine,
   DeckListLine,
   ElsewhereLocation,
   LineOwnership,
@@ -54,6 +55,8 @@ export type DeckLine = {
   places: Place[];
   /** One entry per copy, or null when the line has more than SPREAD_LIMIT copies. */
   copies: DeckCopy[] | null;
+  /** The line's copies Loans hold (#252): "2 reserved for Kim", one entry per borrower. */
+  loans: string[];
 };
 
 export type GroupKind =
@@ -157,7 +160,8 @@ export function copiesOf(
  */
 export function deckLine(
   line: DeckListLine,
-  ownership: LineOwnership | undefined
+  ownership: LineOwnership | undefined,
+  loans?: DeckLoanLine
 ): DeckLine {
   const quantity = big(line.quantity);
   const here = big(line.in_deck);
@@ -180,7 +184,15 @@ export function deckLine(
       quantity <= SPREAD_LIMIT
         ? copiesOf(here, elsewhere, quantity, places)
         : null,
+    loans: loanNotes(loans),
   };
+}
+
+/** "2 reserved for Kim" for each borrower whose Loan holds some of the line's copies in this Deck (#252). */
+export function loanNotes(loans: DeckLoanLine | undefined): string[] {
+  return (loans?.reserved ?? []).map(
+    (label) => `${label.copies} reserved for ${label.name}`
+  );
 }
 
 /** A name as a grouping key: NFC, ASCII apostrophes, single spaces, case-folded. */
@@ -364,8 +376,11 @@ export function deckListModel(detail: DeckDetail): DeckListModel {
   const ownership = new Map(
     detail.ownership.map((entry) => [entry.edition_id, entry])
   );
+  const loans = new Map(
+    (detail.loans ?? []).map((entry) => [entry.edition_id, entry])
+  );
   const lines = detail.deck_list.lines.map((line) =>
-    deckLine(line, ownership.get(line.edition_id))
+    deckLine(line, ownership.get(line.edition_id), loans.get(line.edition_id))
   );
   return {
     lines,
@@ -410,7 +425,12 @@ export function pileLabel(line: DeckLine): string {
     : "";
   return `${line.line.name}, ${editionText(line)}: ${line.quantity} ${
     line.quantity === 1n ? "copy" : "copies"
-  }, ${stateWords(line)}${line.elsewhere > 0n ? where : ""}`;
+  }, ${stateWords(line)}${line.elsewhere > 0n ? where : ""}${loanSuffix(line)}`;
+}
+
+/** "; 2 reserved for Kim" after a pile's or copy's label, or "". */
+function loanSuffix(line: DeckLine): string {
+  return line.loans.length ? `; ${line.loans.join(", ")}` : "";
 }
 
 const STATE_TEXT: Record<CopyState, string> = {
@@ -428,7 +448,7 @@ export function copyStateText(copy: DeckCopy): string {
 
 /** A Spread tile's accessible name and hover title. */
 export function copyLabel(line: DeckLine, copy: DeckCopy): string {
-  return `${line.line.name}, ${editionText(line)}, copy ${copy.ordinal} of ${line.quantity}: ${copyStateText(copy)}`;
+  return `${line.line.name}, ${editionText(line)}, copy ${copy.ordinal} of ${line.quantity}: ${copyStateText(copy)}${loanSuffix(line)}`;
 }
 
 /** "Pokémon · evolves from Charmeleon", "Trainer · Supporter", "Energy" or "Card type unknown". */

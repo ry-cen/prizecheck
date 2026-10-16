@@ -102,7 +102,16 @@ export function CopySheet({
               {line.quantity.toString()} on the Deck List
             </h3>
             <ul className="m-0 flex list-none flex-col gap-1 p-0">
-              <li>{line.here.toString()} in this Deck</li>
+              <li>
+                {line.here.toString()} in this Deck
+                {line.loans.length > 0 && (
+                  <ul className="m-0 mt-1 flex list-none flex-col gap-0.5 pl-4 text-meta text-text-muted">
+                    {line.loans.map((note) => (
+                      <li key={note}>{note}</li>
+                    ))}
+                  </ul>
+                )}
+              </li>
               <li>
                 {line.elsewhere.toString()} owned elsewhere
                 {line.elsewhere > 0n && line.places.length > 0 && (

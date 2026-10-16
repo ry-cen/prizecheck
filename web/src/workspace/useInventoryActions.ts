@@ -160,6 +160,15 @@ export function useInventoryActions({
     [labels]
   );
 
+  const edition = useCallback(
+    (editionId: string) => {
+      for (const [key, label] of labels)
+        if (key.endsWith(`:${editionId}`)) return cardText(label);
+      return "a card";
+    },
+    [labels]
+  );
+
   const showToast = useCallback((next: Omit<ToastState, "id">) => {
     toastId.current += 1;
     setToast({ ...next, id: toastId.current });
@@ -268,7 +277,11 @@ export function useInventoryActions({
           current && current.id === id ? { ...current, entry: mine } : current
         );
       } catch (cause) {
-        const failure = describeFailure(target, cause, { place, card });
+        const failure = describeFailure(target, cause, {
+          place,
+          card,
+          edition,
+        });
         if (!failure.retrySame) pending.current = null;
         // Only a refresh can empty the kept selection; then the empty-selection effect below moves
         // this failure to the toast.
@@ -293,7 +306,7 @@ export function useInventoryActions({
         finish();
       }
     },
-    [place, card, showToast]
+    [place, card, edition, showToast]
   );
 
   const openMove = useCallback(() => {
@@ -404,6 +417,16 @@ export function useInventoryActions({
                 : "the cards have changed";
         showToast({
           message: `Undo unavailable: ${reason}, so nothing was ${entry.action === "add" ? "removed" : "restored"}. Dismiss it to reach an earlier action.`,
+          entry,
+          unavailable: true,
+          focus: true,
+        });
+      } else if (code === "PROMISED_TO_LOAN") {
+        // #252: undoing the add would leave fewer copies than open Loans promised.
+        undoKeys.current.delete(entry.id);
+        showToast({
+          message:
+            "Undo unavailable: you promised some of these copies to a Loan, so nothing was removed. Dismiss it to reach an earlier action.",
           entry,
           unavailable: true,
           focus: true,

@@ -397,17 +397,16 @@ test.describe("phone", () => {
     hasTouch: true,
   });
 
-  test("Owner controls opens from More; the tab row and the health table scroll inside themselves, and the page check passes", async ({
+  test("Owner controls opens from the account sheet; the tab row and the health table scroll inside themselves, and the page check passes", async ({
     page,
   }) => {
     await signInAsOwner(page);
     const undoHealth = await seedHealth();
     try {
-      const more = page
-        .getByRole("navigation", { name: "Main views" })
-        .getByRole("button", { name: "More" });
+      // Loans took the More slot (#252): Owner controls is in the account sheet.
+      const more = page.getByRole("button", { name: "Account", exact: true });
       await more.tap();
-      const sheet = page.getByRole("dialog", { name: "More" });
+      const sheet = page.getByRole("dialog", { name: "Account" });
       await sheet.getByRole("button", { name: "Owner controls" }).tap();
       await expect(page).toHaveURL(/\/owner$/);
       await expect(page.getByRole("heading", { level: 1 })).toHaveText(
@@ -441,7 +440,10 @@ test.describe("phone", () => {
       await expect(
         sheet.getByRole("button", { name: "Owner controls" })
       ).toHaveAttribute("aria-current", "page");
-      await expectPageChecks(page, "Owner controls, More sheet open (phone)");
+      await expectPageChecks(
+        page,
+        "Owner controls, account sheet open (phone)"
+      );
       await page.keyboard.press("Escape");
       await expect(sheet).toBeHidden();
     } finally {

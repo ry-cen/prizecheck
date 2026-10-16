@@ -43,18 +43,31 @@ type ToastApi = {
   dismiss: (id?: number) => void;
   /** Focuses the first usable button of the toast with this id. False when it isn't on screen. */
   focus: (id: number) => boolean;
-  /** Raises the toast this many px above its usual place, so it clears a page's own bottom bar
-   * (Collection's Actions strip). 0 puts it back. */
-  setLift: (px: number) => void;
+  /** Raises the toast this many px for one bottom bar, so it clears them all: it rises by the sum of every
+   * source's lift. 0 takes that source's lift away. */
+  setLift: (source: LiftSource, px: number) => void;
 };
 
+/** The bottom bars that raise the toast, lowest first: Collection's Actions strip, then the Borrow Request
+ * drafts tray (#252), which sits above the strip. */
+export type LiftSource = "selection" | "drafts";
+
+type Lifts = Partial<Record<LiftSource, number>>;
+
 const ToastContext = createContext<ToastApi | null>(null);
+// Apart from ToastContext, so a lift that changes never changes the toast API that effects depend on.
+const LiftContext = createContext<Lifts>({});
 
 /** The app's one toast host. Call it from anything inside ToastProvider. */
 export function useToast(): ToastApi {
   const api = useContext(ToastContext);
   if (!api) throw new Error("useToast needs a ToastProvider");
   return api;
+}
+
+/** The px one bottom bar has raised the toast by (0 when none): the drafts tray sits that far above the strip. */
+export function useLift(source: LiftSource): number {
+  return useContext(LiftContext)[source] ?? 0;
 }
 
 const ACTION =
@@ -64,7 +77,7 @@ const ACTION =
  * One toast host for the app (ADR 0012): one toast at a time, and a new one replaces it, so its action
  * (Undo) always belongs to the message beside it. A toast stays until it is replaced, dismissed or its
  * action is used (unless the action keeps it open). It sits at the bottom centre, above the phone tab bar
- * and above a page's own bottom bar (setLift). The host is a "Notifications" region that stays mounted
+ * and above every bottom bar that has set a lift (setLift: the Actions strip and the drafts tray, added up). The host is a "Notifications" region that stays mounted
  * while empty, so each new message is announced; it has no status role, so pages' own status lines stay
  * the only ones. A toast that replaces one holding focus takes the focus over, so it never falls to the
  * page.
@@ -73,7 +86,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const [toast, setToast] = useState<(ToastInput & { id: number }) | null>(
     null
   );
-  const [lift, setLift] = useState(0);
+  const [lifts, setLifts] = useState<Lifts>({});
+  const lift = Object.values(lifts).reduce((sum, px) => sum + (px ?? 0), 0);
   const next = useRef(0);
   const host = useRef<HTMLElement>(null);
   const shownId = useRef<number | null>(null);
@@ -103,7 +117,10 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         button?.focus();
         return !!button;
       },
-      setLift,
+      setLift: (source, px) =>
+        setLifts((current) =>
+          (current[source] ?? 0) === px ? current : { ...current, [source]: px }
+        ),
     };
   }, []);
 
@@ -123,7 +140,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 
   return (
     <ToastContext.Provider value={api}>
-      {children}
+      <LiftContext.Provider value={lifts}>{children}</LiftContext.Provider>
       <section
         ref={host}
         aria-label="Notifications"
