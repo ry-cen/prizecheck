@@ -354,15 +354,48 @@ def test_a_declined_request_cannot_be_sent_again_for_a_week():
     assert declines(brock, ash) == 0
 
 
-def test_unblocking_clears_a_decline_either_way():
+def block_call(owner, other):
+    return call('POST', '/api/social/blocks', owner, {'collector_id': other, 'idempotency_key': str(uuid4())})
+
+
+def unblock_call(owner, other):
+    return call('POST', f'/api/social/blocks/{other}/unblock', owner, {'idempotency_key': str(uuid4())})
+
+
+def try_later(response):
+    return (response.status_code, response.json()) == (409, {'detail': {'code': 'TRY_LATER'}})
+
+
+def test_the_decliner_lifting_their_block_ends_the_wait_and_nothing_else_does():
     (ash, _), (misty, _) = new_owner(), new_owner()
     send(ash, misty)
     step(misty, 'decline', ash)
-    assert call('POST', '/api/social/blocks', misty, {'collector_id': ash, 'idempotency_key': str(uuid4())}).status_code == 200
-    assert declines(ash, misty) == 1  # a Block alone doesn't change it, and Ash is told nothing
-    assert call('POST', f'/api/social/blocks/{ash}/unblock', misty, {'idempotency_key': str(uuid4())}).status_code == 200
+    # An unblock with no Block in place leaves the decline, from either side.
+    assert unblock_call(misty, ash).status_code == 200
+    assert unblock_call(ash, misty).status_code == 200
+    assert declines(ash, misty) == 1 and try_later(send(ash, misty))
+    # Ash blocking and unblocking Misty leaves his own wait.
+    assert block_call(ash, misty).status_code == 200
+    assert unblock_call(ash, misty).status_code == 200
+    assert declines(ash, misty) == 1 and try_later(send(ash, misty))
+    # Misty blocks: her Block alone keeps the row.
+    assert block_call(misty, ash).status_code == 200
+    assert declines(ash, misty) == 1
+    assert unblock_call(misty, ash).status_code == 200
     assert declines(ash, misty) == 0
     assert relation(send(ash, misty)) == 'request_sent'
+
+
+def test_while_the_decliners_block_stands_the_sender_gets_the_unknown_answer_never_try_later():
+    (ash, _), (misty, _) = new_owner(), new_owner()
+    send(ash, misty)
+    step(misty, 'decline', ash)
+    assert block_call(misty, ash).status_code == 200
+    blocked_answer, unknown_answer = send(ash, misty), send(ash, f'nobody-{uuid4()}')
+    assert blocked_answer.status_code == unknown_answer.status_code == 404
+    assert blocked_answer.content == unknown_answer.content
+    assert blocked_answer.json() == {'detail': {'code': 'COLLECTOR_NOT_FOUND'}}
+    assert blocked_answer.headers.get('content-length') == unknown_answer.headers.get('content-length')
 
 
 def seed_commands(owner, count, minutes_ago=0):
@@ -403,6 +436,9 @@ def test_a_hundred_and_twenty_friend_commands_an_hour_then_too_many_without_lock
     assert relation(send(misty, ash)) == 'request_sent'
     # Lookups, Invite Link reads and the lists are not Friend commands.
     assert call('GET', '/api/social/friends', ash).status_code == 200
+    assert lookup(ash, 'nobody_here').status_code in (200, 404)
+    assert call('GET', f'/api/social/invites/{invite_token(misty)}', ash).status_code == 200
+    assert commands_counted(ash) == friends_module.COMMANDS_PER_HOUR
     # The hour moves on: the old rows are pruned and commands work again.
     with connect() as conn:
         conn.execute("UPDATE handle_lookup_event SET created_at = created_at - interval '11 minutes' "

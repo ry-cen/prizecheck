@@ -70,6 +70,7 @@ export function BlockedSection() {
       setFocusNext({ id: rows[at + 1]?.collector_id ?? null });
     } catch (cause) {
       setProblem(commandMessage(cause));
+      setFocusNext({ id: person.collector_id }); // the row stays: focus returns to its Unblock
     } finally {
       await read();
       setBusy(false);

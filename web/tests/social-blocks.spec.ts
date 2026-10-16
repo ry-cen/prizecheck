@@ -3,7 +3,7 @@
 // nobody by the blocker's Handle and a dead end at their Invite Link; the blocker unblocks in Settings › Privacy. The
 // other collector signs in first, so the test's own page signs in afterwards as a new account.
 import { randomInt, randomUUID } from "node:crypto";
-import type { Page } from "@playwright/test";
+import type { Page, Route } from "@playwright/test";
 import { expect, test } from "./support/collectors";
 import { signInAsOwner } from "./support/sign-in";
 
@@ -170,6 +170,21 @@ test("Block from a received request's row removes the request, and the blocker u
   await expect(received).toContainText("Block Misty W? They won't be told.");
   const confirm = received.getByRole("button", { name: "Block", exact: true });
   await expect(confirm).toBeFocused();
+  // A failed Block leaves the row, shows the problem and returns focus to the row's ⋯.
+  const refuse = (route: Route) =>
+    route.fulfill({ status: 500, body: "{}", contentType: "application/json" });
+  await page.route("**/api/social/blocks", refuse);
+  await confirm.click();
+  await expect(drawer(page).getByRole("alert")).toContainText(
+    "Couldn't update"
+  );
+  await expect(
+    received.getByRole("button", { name: "More for Misty W" })
+  ).toBeFocused();
+  await page.unroute("**/api/social/blocks", refuse);
+  await received.getByRole("button", { name: "More for Misty W" }).click();
+  await page.getByRole("menuitem", { name: "Block" }).click();
+  await expect(confirm).toBeFocused();
   await confirm.click();
   await expect(drawer(page).getByRole("status")).toHaveText(
     "Blocked Misty W. They aren't told."
@@ -204,6 +219,6 @@ test("Block from a received request's row removes the request, and the blocker u
   await page.getByRole("button", { name: "Unblock" }).click();
   await expect(
     page.getByRole("button", { name: "Send Friend Request" })
-  ).toBeVisible();
+  ).toBeFocused();
   await expect(page.getByRole("button", { name: "Unblock" })).toHaveCount(0);
 });

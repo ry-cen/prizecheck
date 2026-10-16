@@ -51,11 +51,11 @@ The design rests on a few rules:
 7. As a collector, I want a lookup result to tell me when we are already Friends or a request is pending, so that I do not send a duplicate.
 8. As a collector, I want a lookup miss to say "No collector has that Handle.", so that I know to check the spelling.
 9. As a collector, I want a Handle lookup to give the same answer for an unknown Handle and for someone who has Blocked me, so that nobody can tell they were Blocked.
-10. As a collector, I want lookups limited to 30 per hour with a message saying how long to wait, so that nobody can scan for Handles.
+10. As a collector, I want lookups limited to 30 per hour with a message saying how long to wait, so that nobody can scan for Handles. Friend commands are limited too, to 120 per hour (see Rate limit).
 11. As a collector, I want a Friends drawer in the header, opened by a button beside the bell, with a badge for incoming Friend Requests, so that I can manage Friends from anywhere.
 12. As a collector, I want the Friends drawer to show incoming requests first with Accept and Decline, then my Friends, then my outgoing requests with Withdraw, so that what needs me comes first.
 13. As a collector, I want an Add button in the drawer that opens a short Handle search and a Copy link button for my Invite Link, so that I can find people either way.
-14. As a collector, I want each Friend's overflow menu to hold Remove Friend and Block, so that destructive actions are not one tap away.
+14. As a collector, I want each Friend's overflow menu to hold Remove Friend and Block, and each received Friend Request's overflow menu to hold Block, so that destructive actions are not one tap away.
 
 ### Handles, Display Names and Invite Links
 
@@ -381,7 +381,7 @@ The owner chose [variant E](wayfinder/resolutions/prototype-friends-loans.md) fo
 - **Loan screen.** The heading is the same headline, then "You're lending" or "You're borrowing", the Deck, and the due or overdue date. Each line shows the card image, name, set and count. While accepted, the lender's line also shows its pick ("From Binder 1") or a warning when the pick is out of date. Returned and written-off copies are tagged. When answering a request or offer, a stepper on each line accepts part of it, and a line set to 0 reads "Not lent". There is no step tracker and no explanatory paragraphs.
 - **One primary button** is the next step: Accept (with Decline beside it); Use suggested picks; Mark as handed over, or Yes, I have them; Record a return, or Give cards back; Yes, they're back, or Yes, I gave them back; I still have it (with It's gone beside it). When the collector is waiting on the other side the button is replaced by "Waiting for Kim to confirm".
 - **Behind the overflow menu:** Withdraw, Take back my confirmation, Cancel Loan, Change return-by date, Write off… and Ask for more time. Each appears only when the Loan steps allow it.
-- **Friends drawer.** Incoming requests with Accept and Decline, then the Friends list, then outgoing requests with Withdraw. **Add** opens a short Handle search. **Copy link** copies the Invite Link. Each Friend's overflow menu holds Remove Friend and Block. A **Privacy and blocked** link leads to Settings.
+- **Friends drawer.** Incoming requests with Accept and Decline, then the Friends list, then outgoing requests with Withdraw. **Add** opens a short Handle search. **Copy link** copies the Invite Link. Each Friend's overflow menu holds Remove Friend and Block, and each received request's holds Block. Both ask first ("Block Kim? They won't be told."). A received request shows the sender's Display Name and Handle. A **Privacy and blocked** link leads to Settings.
 - **Settings** keeps only a Privacy section: the Blocked list, the collector's Display Name and Handle (with the 30-day wait shown when it applies), and Hidden Locations. A Hide from Friends control is on each Location in the Collection.
 - **Collection.** A **Lent out** entry in the Location tree lists lent copies. Borrowed Copies show in the Deck that holds them, tagged with the lender's Display Name. A Deck's lines read "2 yours · 1 from Ash K.", "2 reserved for Kim" or "3 lent to Sam". A Location hidden because an ancestor is hidden says so ("Hidden because Trade Binders is hidden").
 - **Want List.** Chips on each line, the Buy / Get from Friends switch, and the Get from Friends view (one panel per needed card, image on the left of the heading, one row per Friend, **Ask** that turns into a stepper). Cards no Friend can lend are summed in one line under the panels.
@@ -422,7 +422,11 @@ No deletion feature exists. When it is built, it must first cancel Loans not yet
 
 ### Rate limit
 
-Handle lookup: 30 per account per hour, using `handle_lookup_event`. Whether Invite Link page visits and Friend Request actions count toward it is not stated by any source; they do not (Details settled at publication, item 18).
+Handle lookup: 30 per account per hour, using `handle_lookup_event`. Invite Link page visits do not count toward it (Details settled at publication, item 18).
+
+Friend commands (send, accept, decline, withdraw, remove, Block and Unblock): 120 per account per hour, counted in `handle_lookup_event` under the kind `friend_command` and checked before any other collector's row is locked. A command replayed by its idempotency key is not counted again. Over the limit the answer is "Too many changes. Try again in N minutes." (Details settled at publication, item 20).
+
+Wait after a decline: a collector whose Friend Request was declined cannot send that collector another for 7 days, and sees "You can send another request later." It is cleared when the decliner sends them a request, when their next request goes through after the 7 days, or when the decliner lifts a Block of them (Details settled at publication, item 21).
 
 ### Migrations
 
@@ -536,8 +540,11 @@ The owner delegated technical choices. These gaps were left by the sources and a
 15. **Sites no source covers.** Proposals: Replace's Surplus preview excludes Borrowed Copies (as for Surplus); the catalog's `in_deck` count includes Borrowed Copies in a Deck, since it means "physical Deck" but the "owned" count does not; Edition reassignment refuses when the Edition has an open Loan line or a Borrowed Copy and leaves other Editions alone; a Location that holds only Borrowed Copies cannot be deleted. All four need confirmation.
 16. **Lazy pruning** of read and dismissed updates after 90 days is used as the module boundary states it. No scheduler is added.
 17. **No take-back after a Write-off.** The Loan steps let a lender write off once they have confirmed the handover, and let a confirmer take back until the other side confirms. Together they would let a lender write copies off and then take back their handover, re-inserting copies the Write-off said were gone. The rule: take-back is unavailable once any copy on the Loan is written off.
-18. **Lookup limit scope.** Only Handle lookups count toward the 30 per hour. Invite Link page visits and Friend Request actions do not.
+18. **Lookup limit scope.** Only Handle lookups count toward the 30 per hour. Invite Link page visits do not. Friend commands have their own limit (item 20).
 19. **Pending-choice count during a partial return.** The derived count of written-off copies awaiting the borrower's choice counts "still out" from the borrower's own confirmed returns, so a return only one side has confirmed does not distort it.
+20. **Friend command limit.** Decided during implementation on 2026-10-16. Friend commands are limited to 120 per account per hour, so a collector cannot use them to hammer another collector's data. Over the limit the collector sees "Too many changes. Try again in N minutes." Lookups keep their own limit of 30. The signed-in Invite Link read is not counted and no longer returns the Handle, so the link shows only the Display Name (story 27).
+21. **Wait after a decline.** Decided during implementation on 2026-10-16. A collector whose Friend Request was declined cannot send that collector another for 7 days, and sees "You can send another request later." without being told it was declined. The wait ends after 7 days, or sooner when the decliner sends the collector a request or lifts a Block of the collector. While the decliner's Block stands, the collector's send gets the unknown-collector answer, not this one.
+22. **Block from a received request.** Decided during implementation on 2026-10-16. A received Friend Request has an overflow menu with Block and the same inline confirmation as a Friend's. Blocking deletes the pending request, and the blocked collector is not told.
 
 ### Open questions and items not yet specified
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getPublicInvite, ProfileError } from "../profile_generated";
 import { useFriendsRefresh } from "../social/FriendsDrawer";
 import { commandMessage } from "../social/socialMessages";
@@ -127,6 +127,17 @@ function InviteActions({
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState("");
   const refreshFriends = useFriendsRefresh();
+  // After a change, focus goes to the new button, or to the status line when there is none.
+  const moved = useRef(false);
+  const actions = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!moved.current || busy) return;
+    moved.current = false;
+    (
+      actions.current?.querySelector<HTMLElement>("button") ??
+      actions.current?.querySelector<HTMLElement>('[role="status"]')
+    )?.focus();
+  }, [collector.relation, busy]);
   const name = collector.display_name;
 
   async function run(send: (key: string) => Promise<FriendCommandResult>) {
@@ -135,6 +146,7 @@ function InviteActions({
     setProblem("");
     try {
       const { relation } = await send(crypto.randomUUID());
+      moved.current = true;
       onChange({ ...collector, relation });
       refreshFriends();
     } catch (cause) {
@@ -153,7 +165,7 @@ function InviteActions({
     blocked: `You blocked ${name}.`,
   }[collector.relation];
   return (
-    <>
+    <div ref={actions} className="contents">
       {collector.relation === "none" && (
         <button
           type="button"
@@ -203,7 +215,11 @@ function InviteActions({
           Unblock
         </button>
       )}
-      <p role="status" className="m-0 text-body text-text-muted">
+      <p
+        role="status"
+        tabIndex={-1}
+        className="m-0 text-body text-text-muted outline-none"
+      >
         {note}
       </p>
       {problem && (
@@ -211,6 +227,6 @@ function InviteActions({
           {problem}
         </p>
       )}
-    </>
+    </div>
   );
 }
