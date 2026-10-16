@@ -12,6 +12,7 @@ import {
   editLocation,
   getLocationTree,
   LocationError,
+  setLocationHidden,
   type EditLocation,
   type TreeLocation,
 } from "../location_generated";
@@ -21,6 +22,7 @@ import { focusableIn } from "../ui/focusable";
 import { Icon } from "../ui/Icon";
 import { TextField } from "../ui/TextField";
 import { CreateLocationDialog } from "./CreateLocationDialog";
+import { hidingLabel } from "./locationTree";
 import {
   buildManageModel,
   cleanLocationName,
@@ -203,7 +205,7 @@ export function ManageLocations({ onClose, onChanged }: Props) {
     onChanged();
   }
   async function run(
-    action: "rename" | "move" | "delete",
+    action: "rename" | "move" | "delete" | "hide",
     request: () => Promise<unknown>,
     message: string,
     context: { name?: string; where?: string } = {}
@@ -386,6 +388,8 @@ export function ManageLocations({ onClose, onChanged }: Props) {
       const path = model.index.path(node.id);
       const deletable = model.deletable(node);
       const children = model.index.children(node.id);
+      const hiding = model.index.hiding(node.id);
+      const hidden = hidingLabel(hiding);
       return (
         <li key={node.id}>
           <div
@@ -413,6 +417,7 @@ export function ManageLocations({ onClose, onChanged }: Props) {
               </span>
               <small className="text-caption text-text-subtle tabular-nums">
                 {model.kindLabel(node)}
+                {hidden && ` · ${hidden}`}
               </small>
             </span>
             <span className="flex flex-none gap-1 phone:flex-[1_1_100%]">
@@ -470,6 +475,43 @@ export function ManageLocations({ onClose, onChanged }: Props) {
                 }
               >
                 Delete
+              </Button>
+            </span>
+            {/* Hide from Friends (social network #249), on its own line on a phone. A Location inside a hidden one
+                can't be shown on its own, so its button is off and says why. */}
+            <span className="flex flex-none phone:flex-[1_1_100%]">
+              <Button
+                className="phone:flex-1"
+                aria-label={
+                  node.hidden
+                    ? `Show ${path} to Friends`
+                    : `Hide ${path} from Friends`
+                }
+                title={hiding.kind === "parent" ? hidden : undefined}
+                disabled={hiding.kind === "parent" || busy}
+                data-manage-focus={`hide:${node.id}`}
+                onClick={() => {
+                  restoreFocus.current = `hide:${node.id}`;
+                  setNotice(null);
+                  void run(
+                    "hide",
+                    () =>
+                      setLocationHidden(node.id, {
+                        hidden: !node.hidden,
+                        version: node.version,
+                        idempotency_key: crypto.randomUUID(),
+                      }),
+                    node.hidden
+                      ? `${path} is shown to Friends again.`
+                      : `${path} and everything in it are hidden from Friends.`,
+                    {
+                      where:
+                        hiding.kind === "parent" ? hiding.by.name : undefined,
+                    }
+                  );
+                }}
+              >
+                {node.hidden ? "Show to Friends" : "Hide from Friends"}
               </Button>
             </span>
           </div>

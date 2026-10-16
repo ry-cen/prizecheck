@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from .main import connect, verified_user
+from .social.hidden_locations import hidden_by, own_hidden
 
 router = APIRouter(prefix="/api/location-tree", tags=["locations"])
 
@@ -23,8 +24,12 @@ class TreeNode(BaseModel):
 
 class TreeLocation(TreeNode):
     """A tree row with the copies stored directly in it: the sum of its Holdings' quantities as a
-    decimal string, "0" for Organizational Locations and empty leaves. Only the tree read carries it."""
+    decimal string, "0" for Organizational Locations and empty leaves. ``hidden``: the collector hid it
+    from Friends; ``hidden_by``: the nearest Location above it the collector hid, which hides it too
+    (social network #249). Only the tree read carries these; stored command answers keep ``TreeNode``."""
     copy_count: str
+    hidden: bool
+    hidden_by: UUID | None
 
 
 class TreeResponse(BaseModel):
@@ -63,6 +68,18 @@ class DeleteLocation(BaseModel):
 class DeleteLocationResult(BaseModel):
     deleted_id: UUID
     owner_revision: int
+
+
+class SetLocationHidden(BaseModel):
+    hidden: bool
+    version: int = Field(ge=1)
+    idempotency_key: UUID
+
+
+class LocationHiddenResult(BaseModel):
+    location: TreeNode
+    hidden: bool
+    hidden_by: UUID | None
 
 
 def error(status: int, code: str):
@@ -169,7 +186,10 @@ def tree(user_id: str = Depends(verified_user)):
         revision, rows = owner_and_rows(conn, user_id)
         copies = {row["location_id"]: row["copies"] for row in conn.execute(
             "SELECT location_id,sum(quantity)::text AS copies FROM holding WHERE owner_id=%s GROUP BY location_id", (user_id,)).fetchall()}
-        return TreeResponse(locations=[TreeLocation(**row, depth=depth_of(row["id"], rows), copy_count=copies.get(row["id"], "0"))
+        hidden = own_hidden(conn, user_id)
+        above = hidden_by({row_id: row["parent_id"] for row_id, row in rows.items()}, hidden)
+        return TreeResponse(locations=[TreeLocation(**row, depth=depth_of(row["id"], rows), copy_count=copies.get(row["id"], "0"),
+                                                    hidden=row["id"] in hidden, hidden_by=above[row["id"]])
                                        for row in sorted(rows.values(), key=lambda r: (depth_of(r["id"], rows), r["name"].casefold(), str(r["id"])))],
                             owner_revision=revision)
 
@@ -305,6 +325,37 @@ def delete_location(location_id: UUID, command: DeleteLocation, user_id: str = D
                          ("storage_leaf" if last_child else "organization", user_id, parent_id))
         result = DeleteLocationResult(deleted_id=location_id, owner_revision=revision + 1).model_dump(mode="json")
         conn.execute("UPDATE inventory_owner SET revision=revision+1 WHERE user_id=%s", (user_id,))
+        conn.execute("INSERT INTO location_command(owner_id,request_key,request_digest,response) VALUES (%s,%s,%s,%s)",
+                     (user_id, command.idempotency_key, digest, json.dumps(result)))
+        return result
+
+
+@router.put("/{location_id}/hidden", response_model=LocationHiddenResult)
+def set_location_hidden(location_id: UUID, command: SetLocationHidden, user_id: str = Depends(verified_user)):
+    """Hide a Location from Friends, or show it again (social network #249). Any kind: an Organizational Location, a
+    Storage Leaf, a Deck or Unsorted. Showing a Location inside a hidden one is refused (409 LOCATION_HIDDEN_BY_PARENT
+    with ``hidden_by``, the nearest hidden Location above it); hiding one there is allowed, and it stays hidden when
+    that Location is shown. Bumps the Location's version and never the inventory revision: nothing the collector counts
+    changes. Idempotent."""
+    with connect() as conn, conn.transaction():
+        _, rows = owner_and_rows(conn, user_id)
+        digest, previous = replay(conn, user_id, command.idempotency_key,
+                                  {"action": "set_hidden", "location_id": str(location_id), **command.model_dump(mode="json")})
+        if previous:
+            return previous
+        current = rows.get(location_id)
+        if current is None:
+            error(404, "LOCATION_NOT_FOUND")
+        if current["version"] != command.version:
+            error(409, "STALE_LOCATION")
+        above = hidden_by({row_id: row["parent_id"] for row_id, row in rows.items()}, own_hidden(conn, user_id))[location_id]
+        if not command.hidden and above is not None:
+            raise HTTPException(409, {"code": "LOCATION_HIDDEN_BY_PARENT", "hidden_by": str(above)})
+        row = conn.execute("""UPDATE location SET hidden=%s,version=version+1 WHERE owner_id=%s AND id=%s
+          RETURNING id,name,kind,parent_id,version""", (command.hidden, user_id, location_id)).fetchone()
+        rows[row["id"]] = row
+        result = LocationHiddenResult(location=node_model(row, rows), hidden=command.hidden,
+                                      hidden_by=above).model_dump(mode="json")
         conn.execute("INSERT INTO location_command(owner_id,request_key,request_digest,response) VALUES (%s,%s,%s,%s)",
                      (user_id, command.idempotency_key, digest, json.dumps(result)))
         return result
