@@ -245,6 +245,8 @@ app.include_router(profile_router)
 app.include_router(public_invite_router)
 from .social.friends import router as friends_router  # noqa: E402
 app.include_router(friends_router)
+from .social.friend_reads import router as friend_reads_router  # noqa: E402
+app.include_router(friend_reads_router)
 
 
 from .price_budget import is_budgeted  # noqa: E402
