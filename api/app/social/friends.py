@@ -6,9 +6,16 @@ names. Friendship is one ``friendship`` row per pair (migration 102): 'pending' 
 'accepted', which is mutual. Declining, withdrawing and Remove Friend delete the row.
 
 Lookups are limited to ``LOOKUPS_PER_HOUR`` per account, counted in ``handle_lookup_event`` (kind 'lookup'); a
-collector's rows older than an hour are pruned when they look up again. Only lookups count: Invite Link reads and
-Friend Request commands don't (spec item 18). A lookup is counted whatever it finds, and a miss is answered after the
-count commits, so misses can't be used to scan for Handles.
+collector's rows older than an hour are pruned when they look up again. Lookups are the only searches that count:
+Invite Link reads don't (spec item 18). A lookup is counted whatever it finds, and a miss is answered after the count
+commits, so misses can't be used to scan for Handles.
+
+Friend commands are limited too, to ``COMMANDS_PER_HOUR`` per account, counted under kind 'friend_command' (a command
+replayed by its idempotency key isn't counted again). The count is taken before any owner is locked, so a collector
+over the limit never locks another's row, and it commits with a miss's 404 as lookups do. Over the limit is 429
+TOO_MANY_CHANGES with ``retry_after_minutes``. A collector whose Friend Request was declined can't send that collector
+another for ``DECLINE_COOL_OFF_DAYS`` days (409 TRY_LATER; the collector sees "You can send another request later.");
+the decline is kept in ``friend_request_declined`` until then, Unblock, or the decliner's own request to them.
 
 Commands address the other collector by ``collector_id``, the account id a lookup, an Invite Link read or the Friends
 list gave; screens never show it. Every command locks both owners in ascending ``user_id`` (``owners.lock_owners``)
@@ -39,6 +46,8 @@ from .profile import token_hash
 router = APIRouter(prefix='/api/social', tags=['social'])
 
 LOOKUPS_PER_HOUR = 30
+COMMANDS_PER_HOUR = 120
+DECLINE_COOL_OFF_DAYS = 7
 
 # How the signed-in collector stands with another: 'self' is their own account; 'request_sent' and 'request_received'
 # are a pending Friend Request from them and to them; 'blocked' is a collector they blocked (#248).
@@ -54,6 +63,13 @@ class Collector(BaseModel):
 
 
 class CollectorLookup(Collector):
+    relation: Relation
+
+
+class InviteCollector(BaseModel):
+    """Whose Invite Link it is: the Display Name only (the link page never shows a Handle), and how the two stand."""
+    collector_id: str
+    display_name: str
     relation: Relation
 
 
@@ -194,7 +210,7 @@ def lookup(body: LookupHandle, user_id: str = Depends(verified_user)):
     return _lookup_answer(user_id, row)
 
 
-@router.get('/invites/{token}', response_model=CollectorLookup)
+@router.get('/invites/{token}', response_model=InviteCollector)
 def invite(token: str, user_id: str = Depends(verified_user)):
     """The Invite Link page signed in: who the link belongs to and how the two stand. An unknown or replaced link is 404
     INVITE_NOT_FOUND. Not counted as a lookup."""
@@ -204,32 +220,68 @@ def invite(token: str, user_id: str = Depends(verified_user)):
         row = find_collector(conn, user_id, 'invite', token_hash(token))
     if row is None:
         error(404, 'INVITE_NOT_FOUND')
-    return _lookup_answer(user_id, row)
+    return InviteCollector(collector_id=row['collector_id'], display_name=row['display_name'],
+                           relation=relation(user_id, row))
+
+
+class Refusal:
+    """What ``apply`` returns for a command it refuses with this status and code: the command stays counted, the
+    answer goes out after the commit (as a missing collector's does), and nothing else changes."""
+
+    def __init__(self, status: int, code: str):
+        self.status, self.code = status, code
+
+
+def _count_command(conn, user_id: str) -> None:
+    """Counts one Friend command against the hourly limit, before any owner is locked: rows older than an hour
+    pruned, and 429 TOO_MANY_CHANGES at the limit. The caller holds the collector's command lock and has already
+    answered a replay of a recorded key, which isn't counted."""
+    conn.execute("""DELETE FROM handle_lookup_event
+      WHERE user_id=%s AND kind='friend_command' AND created_at < now() - interval '1 hour'""", (user_id,))
+    recent = conn.execute("""SELECT count(*) AS commands, min(created_at) AS oldest FROM handle_lookup_event
+      WHERE user_id=%s AND kind='friend_command'""", (user_id,)).fetchone()
+    if recent['commands'] >= COMMANDS_PER_HOUR:
+        wait = conn.execute("SELECT ceil(extract(epoch FROM %s + interval '1 hour' - now()) / 60) AS wait",
+                            (recent['oldest'],)).fetchone()['wait']
+        raise HTTPException(429, {'code': 'TOO_MANY_CHANGES', 'retry_after_minutes': max(1, int(wait))})
+    conn.execute("INSERT INTO handle_lookup_event(user_id,kind) VALUES (%s,'friend_command')", (user_id,))
 
 
 def _command(user_id: str, other: str, key: UUID, action: str, apply, *,
              blocked_you_ok: bool = False) -> FriendCommandResult:
-    """Runs one Friend command: both owners locked, replayed by its idempotency key, the other collector checked, then
-    ``apply(conn, row)`` with the pair's row from ``find_collector``, which returns the new relation. A collector who
+    """Runs one Friend command: replayed by its idempotency key, else counted against the hourly limit, both owners
+    locked, the other collector checked, then ``apply(conn, row)`` with the pair's row from ``find_collector``, which returns the new relation (or a ``Refusal``). A collector who
     blocked the caller is 404 COLLECTOR_NOT_FOUND, as an unknown one is, unless ``blocked_you_ok``: then they count as
     a collector the caller has no friendship with, so the answer is the one an unfriend would give."""
     if other == user_id:
         error(409, 'OWN_ACCOUNT')
     payload = {'action': action, 'collector_id': other}
+    missing, refusal = False, None
     with connect() as conn, conn.transaction():
         ensure_owner(conn, user_id)
-        lock_owners(conn, user_id, other)
+        # One collector's commands one at a time. A replay is answered from the caller's own record, before anything
+        # is counted or any owner locked; a new command is counted, then both owners are locked.
+        conn.execute("SELECT pg_advisory_xact_lock(hashtext('prizecheck.friend_command:' || %s))", (user_id,))
         digest, stored = replay(conn, user_id, key, payload)
         if stored is None:
+            _count_command(conn, user_id)
+            lock_owners(conn, user_id, other)
             row = find_collector(conn, user_id, 'collector', other)
             if row is None and blocked_you_ok and conn.execute(
                     'SELECT 1 FROM collector_profile WHERE user_id=%s', (other,)).fetchone():
                 row = {'collector_id': other, 'state': None, 'requested_by': None, 'blocked': False}
             if row is None:
-                error(404, 'COLLECTOR_NOT_FOUND')
-            stored = FriendCommandResult(relation=apply(conn, row)).model_dump(mode='json')
-            conn.execute('INSERT INTO location_command(owner_id,request_key,request_digest,response) VALUES (%s,%s,%s,%s)',
-                         (user_id, key, digest, json.dumps(stored)))
+                missing = True  # answered after the commit, so the command stays counted
+            elif isinstance(outcome := apply(conn, row), Refusal):
+                refusal = outcome
+            else:
+                stored = FriendCommandResult(relation=outcome).model_dump(mode='json')
+                conn.execute('INSERT INTO location_command(owner_id,request_key,request_digest,response) '
+                             'VALUES (%s,%s,%s,%s)', (user_id, key, digest, json.dumps(stored)))
+    if missing:
+        error(404, 'COLLECTOR_NOT_FOUND')
+    if refusal:
+        error(refusal.status, refusal.code)
     return stored
 
 
@@ -240,7 +292,7 @@ def _pair(a: str, b: str) -> tuple[str, str]:
 
 @router.post('/friend-requests', response_model=FriendCommandResult)
 def send_friend_request(command: SendFriendRequest, user_id: str = Depends(verified_user)):
-    """Send a Friend Request. When the two are already Friends, a request is pending either way or the caller blocked
+    """Send a Friend Request. Within a week of the other collector declining one, it is 409 TRY_LATER. When the two are already Friends, a request is pending either way or the caller blocked
     the other collector, nothing changes and the answer says so. A collector who blocked the caller is 404
     COLLECTOR_NOT_FOUND, as an unknown one is."""
     other = command.collector_id
@@ -248,6 +300,14 @@ def send_friend_request(command: SendFriendRequest, user_id: str = Depends(verif
     def apply(conn, row):
         current = relation(user_id, row)
         if current == 'none':
+            if conn.execute("""SELECT 1 FROM friend_request_declined WHERE sender_id=%s AND recipient_id=%s
+                  AND declined_at > now() - make_interval(days => %s)""",
+                            (user_id, other, DECLINE_COOL_OFF_DAYS)).fetchone():
+                return Refusal(409, 'TRY_LATER')
+            # Their earlier decline of the other collector's request, and this collector's own expired one, are over.
+            conn.execute("""DELETE FROM friend_request_declined
+              WHERE (sender_id=%s AND recipient_id=%s) OR (sender_id=%s AND recipient_id=%s)""",
+                         (other, user_id, user_id, other))
             low, high = _pair(user_id, other)
             conn.execute("INSERT INTO friendship(user_low,user_high,state,requested_by) VALUES (%s,%s,'pending',%s)",
                          (low, high, user_id))
@@ -268,10 +328,14 @@ def accept_friend_request(collector_id: str, command: FriendCommand, user_id: st
     return _command(user_id, collector_id, command.idempotency_key, 'accept_friend_request', apply, blocked_you_ok=True)
 
 
-def _delete_pending(user_id: str, collector_id: str, key: UUID, action: str, expected: str) -> FriendCommandResult:
+def _delete_pending(user_id: str, collector_id: str, key: UUID, action: str, expected: str,
+                    declining: bool = False) -> FriendCommandResult:
     def apply(conn, row):
         if relation(user_id, row) != expected:
             return relation(user_id, row)
+        if declining:  # the sender can't ask this collector again for a week
+            conn.execute("""INSERT INTO friend_request_declined(sender_id,recipient_id) VALUES (%s,%s)
+              ON CONFLICT (sender_id,recipient_id) DO UPDATE SET declined_at=now()""", (collector_id, user_id))
         conn.execute("DELETE FROM friendship WHERE user_low=%s AND user_high=%s AND state='pending'",
                      _pair(user_id, collector_id))
         return 'none'
@@ -280,8 +344,10 @@ def _delete_pending(user_id: str, collector_id: str, key: UUID, action: str, exp
 
 @router.post('/friend-requests/{collector_id}/decline', response_model=FriendCommandResult)
 def decline_friend_request(collector_id: str, command: FriendCommand, user_id: str = Depends(verified_user)):
-    """Decline a Friend Request from this collector: it is deleted, and the sender isn't told."""
-    return _delete_pending(user_id, collector_id, command.idempotency_key, 'decline_friend_request', 'request_received')
+    """Decline a Friend Request from this collector: it is deleted, and the sender isn't told. The sender can't send
+    another for a week."""
+    return _delete_pending(user_id, collector_id, command.idempotency_key, 'decline_friend_request', 'request_received',
+                           declining=True)
 
 
 @router.post('/friend-requests/{collector_id}/withdraw', response_model=FriendCommandResult)
@@ -332,6 +398,9 @@ def unblock(collector_id: str, command: FriendCommand, user_id: str = Depends(ve
     """Unblock a collector the caller blocked. Nothing else comes back: they are not Friends again."""
     def apply(conn, row):
         conn.execute('DELETE FROM block WHERE blocker_id=%s AND blocked_id=%s', (user_id, collector_id))
+        conn.execute("""DELETE FROM friend_request_declined
+          WHERE (sender_id=%s AND recipient_id=%s) OR (sender_id=%s AND recipient_id=%s)""",
+                     (user_id, collector_id, collector_id, user_id))
         after = find_collector(conn, user_id, 'collector', collector_id)
         return 'none' if after is None else relation(user_id, after)
     return _command(user_id, collector_id, command.idempotency_key, 'unblock', apply, blocked_you_ok=True)

@@ -10,6 +10,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from uuid import uuid4
 
+import psycopg
+
 from app.main import app, connect  # noqa: F401  (main first: it includes every router while loading)
 from app.social import friends as friends_module
 from test_catalog_targets import isolated_rules  # noqa: F401  (an autouse fixture)
@@ -225,3 +227,9 @@ def test_a_request_racing_a_block_never_leaves_a_request_from_the_blocked_collec
 def test_migration_103_runs_again():
     with connect() as conn, conn.transaction():
         conn.execute((ROOT / 'migrations' / '103_blocks.sql').read_text())
+        # The kind check still allows Friend commands, and is there once.
+        kinds = conn.execute("""SELECT count(*) FROM pg_constraint WHERE conrelid='handle_lookup_event'::regclass
+          AND contype='c' AND pg_get_constraintdef(oid) LIKE '%kind%'""").fetchone()['count']
+        assert kinds == 1
+        conn.execute("INSERT INTO handle_lookup_event(user_id,kind) SELECT user_id,'friend_command' FROM inventory_owner LIMIT 1")
+        raise psycopg.Rollback()

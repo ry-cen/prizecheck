@@ -7,7 +7,7 @@ import {
   getInvite,
   sendFriendRequest,
   SocialError,
-  type CollectorLookup,
+  type InviteCollector,
   type FriendCommandResult,
   unblockCollector,
 } from "../social_generated";
@@ -23,7 +23,7 @@ type Props = {
 
 type Load =
   | { kind: "loading" }
-  | { kind: "ready"; name: string; collector: CollectorLookup | null }
+  | { kind: "ready"; name: string; collector: InviteCollector | null }
   | { kind: "gone" }
   | { kind: "failed" };
 
@@ -121,8 +121,8 @@ function InviteActions({
   collector,
   onChange,
 }: {
-  collector: CollectorLookup;
-  onChange: (collector: CollectorLookup) => void;
+  collector: InviteCollector;
+  onChange: (collector: InviteCollector) => void;
 }) {
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState("");
