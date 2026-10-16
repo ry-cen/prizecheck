@@ -29,4 +29,6 @@ Resolves [Decide Handle and Invite Link rules](https://github.com/ry-cen/prizech
 
 ## Left to the module boundary ticket
 
+*Settled in [Decide the social module boundary and privacy enforcement](decide-social-module-boundary.md).*
+
 - Lookup rate limits, and making responses for blocked, unknown and generated Handles indistinguishable. Owned by [Decide the social module boundary and privacy enforcement](https://github.com/ry-cen/prizecheck/issues/241).
