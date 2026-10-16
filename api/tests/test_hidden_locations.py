@@ -6,6 +6,7 @@ the collector counts and never moves the inventory revision. The SQL function Fr
 (``hidden_locations``) and the tree read's rule agree.
 """
 import os
+import random
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -79,7 +80,7 @@ def test_hiding_covers_every_location_inside_including_ones_added_later():
     # The nearest hidden Location is named.
     ok(hide(owner, binders['id']))
     assert marks(owner)['Binder 2'] == (False, 'Binders') and marks(owner)['Binders'] == (True, 'Storage')
-    assert late['id'] and binder['id']
+    assert node(owner, late['id'])['hidden_by'] == binders['id'] and node(owner, binder['id'])['hidden_by'] == binders['id']
 
 
 def test_a_location_inside_a_hidden_one_cannot_be_shown_on_its_own():
@@ -191,6 +192,33 @@ def test_the_sql_rule_friend_reads_use_agrees_with_the_tree_for_several_owners_a
     assert found.get(owners[0], set()) == effectively_hidden(owners[0]) and len(found[owners[0]]) == 3
     assert found.get(owners[1], set()) == effectively_hidden(owners[1]) and len(found[owners[1]]) == 2
     assert owners[2] not in found and effectively_hidden(owners[2]) == set()
+
+
+@pytest.mark.parametrize('seed', [1, 7, 42, 2026])
+def test_the_sql_rule_agrees_with_the_tree_on_random_trees(seed):
+    rng = random.Random(seed)
+    owners = [str(uuid4()) for _ in range(3)]
+    for owner in owners:
+        ids = []
+        for number in range(12):
+            parent = node(owner, rng.choice(ids)) if ids and rng.random() < 0.8 else None
+            response = make(owner, f'L{number}', parent)
+            if response.status_code == 201:  # The tree's own rules (depth, stocked leaves) may refuse a parent.
+                ids.append(response.json()['location']['id'])
+        assert len(ids) >= 6
+        for location_id in rng.sample(ids, rng.randint(2, 6)):
+            if not node(owner, location_id)['hidden']:  # Includes ones already hidden by a Location above.
+                ok(hide(owner, location_id))
+        # Move one Location into a hidden subtree (a refused move, such as into its own subtree, changes nothing).
+        hidden_ids = [row['id'] for row in tree(owner) if row['hidden'] and row['id'] in ids]
+        mover = node(owner, rng.choice(ids))
+        target = node(owner, rng.choice(hidden_ids))
+        change(owner, mover, parent_id=target['id'], parent_version=target['version'])
+    with connect() as conn:
+        found = hidden_location_ids(conn, owners)
+    for owner in owners:
+        assert found.get(owner, set()) == effectively_hidden(owner)
+    assert any(effectively_hidden(owner) for owner in owners)
 
 
 def test_migration_101_adds_the_flag_shown_and_runs_again():
