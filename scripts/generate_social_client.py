@@ -1,5 +1,5 @@
 """Generate the social client module (Friends and Friend Requests, social network #247, Blocks, #248, and Friends'
-cards, #250) from the API OpenAPI schema."""
+cards, #250 and #251) from the API OpenAPI schema."""
 import sys
 from pathlib import Path
 
@@ -24,7 +24,8 @@ def ts_type(value):
 schema = app.openapi()["components"]["schemas"]
 lines = ["// Generated from FastAPI OpenAPI by scripts/generate_social_client.py. Do not edit."]
 for name in ("Collector", "CollectorLookup", "InviteCollector", "FriendsView", "LookupHandle", "SendFriendRequest",
-             "FriendCommand", "FriendCommandResult", "BlockCollector", "BlockedList", "FriendCard", "FriendCollection"):
+             "FriendCommand", "FriendCommandResult", "BlockCollector", "BlockedList", "FriendCard", "FriendCollection",
+             "FriendCopy", "WantedCard", "WantListMatches", "CardMatches"):
     definition = schema[name]
     fields = [f"{field}{'' if field in definition.get('required', []) else '?'}: {ts_type(value)}"
               for field, value in definition["properties"].items()]
@@ -82,6 +83,13 @@ export const unblockCollector = (id: string, body: FriendCommand) =>
 export const getFriendCollection = (handle: string,
   params: { show?: 'wanted' | 'all'; q?: string; printings?: Printings; page?: number }, signal?: AbortSignal) =>
   request<FriendCollection>(`/api/social/collections/${at(handle)}${query(params)}`, 'GET', undefined, signal);
+// Friends' cards for the Want List in scope (#251): its own read, apart from the Want List's.
+export const getWantListMatches = (params: { deck?: string | null; printings?: Printings }, signal?: AbortSignal) =>
+  request<WantListMatches>(`/api/social/want-list-matches${query(params)}`, 'GET', undefined, signal);
+// Friends who have this (#251): Friends' copies of one Card Printing, for the card popup.
+export const getCardMatches = (printingId: string, params: { printings?: Printings }, signal?: AbortSignal) =>
+  request<CardMatches>(`/api/social/card-matches${query({ printing_id: printingId, ...params })}`, 'GET', undefined,
+    signal);
 """)
 content = "\n".join(lines)
 target = root / "web/src/social_generated.ts"
