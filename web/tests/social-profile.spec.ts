@@ -61,7 +61,15 @@ test("Settings › Privacy edits the Display Name and the Handle", async ({
     "You can change your Handle again on"
   );
   await handle.fill(chosen.toUpperCase());
+  const put = page.waitForResponse(
+    (r) =>
+      r.url().endsWith("/api/profile/handle") && r.request().method() === "PUT"
+  );
   await section.getByRole("button", { name: "Save Handle" }).click();
+  expect((await put).ok()).toBe(true);
+  await expect(
+    page.getByRole("status").filter({ hasText: "Handle saved." })
+  ).toBeVisible();
   await expect(section.getByRole("alert")).toHaveCount(0);
   await page.reload();
   await expect(

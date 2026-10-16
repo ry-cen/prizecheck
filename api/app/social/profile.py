@@ -104,11 +104,13 @@ def drain_invites() -> bool:
     """Apply every queued invite record write to the public records store, oldest first, the last write of each record
     winning. True when the queue is empty afterwards. One drain runs at a time (a transaction-scoped advisory lock);
     rows are deleted only after their records are written."""
-    deadline = time.monotonic() + DRAIN_SECONDS
     try:
         store = public_record_store()
         with connect() as conn, conn.transaction():
+            # A drain that can't take the lock within its budget gives up (LockNotAvailable is a psycopg.Error).
+            conn.execute("SELECT set_config('lock_timeout', %s, true)", (f'{int(DRAIN_SECONDS * 1000)}ms',))
             conn.execute("SELECT pg_advisory_xact_lock(hashtext('prizecheck.invite_projection'))")
+            deadline = time.monotonic() + DRAIN_SECONDS
             while True:
                 rows = conn.execute('SELECT id,token_hash,display_name FROM invite_projection_outbox ORDER BY id LIMIT %s',
                                     (MAX_BATCH * 4,)).fetchall()
@@ -118,18 +120,22 @@ def drain_invites() -> bool:
                 for row in rows:
                     latest[row['token_hash']] = row['display_name']
                 hashes = sorted(latest)
-                for start in range(0, len(hashes), MAX_BATCH):
-                    chunk = hashes[start:start + MAX_BATCH]
-                    keys = {invite_key(value): value for value in chunk}
-                    changes = {key: None if latest[value] is None else {'display_name': latest[value]}
-                               for key, value in keys.items()}
-                    for _ in range(DRAIN_TRIES):
-                        found = store.read_records(list(keys), deadline=deadline).records
-                        if store.compare_and_swap({key: found[key].version for key in keys}, changes,
-                                                  deadline=deadline) is True:
-                            break
-                    else:
-                        return False
+                try:
+                    for start in range(0, len(hashes), MAX_BATCH):
+                        chunk = hashes[start:start + MAX_BATCH]
+                        keys = {invite_key(value): value for value in chunk}
+                        changes = {key: None if latest[value] is None else {'display_name': latest[value]}
+                                   for key, value in keys.items()}
+                        for _ in range(DRAIN_TRIES):
+                            found = store.read_records(list(keys), deadline=deadline).records
+                            if store.compare_and_swap({key: found[key].version for key in keys}, changes,
+                                                      deadline=deadline) is True:
+                                break
+                        else:
+                            return False
+                except (ProjectionUnavailable, ValueError, OSError):
+                    # Leave this batch queued; the DELETEs of the batches already applied commit with the return.
+                    return False
                 conn.execute('DELETE FROM invite_projection_outbox WHERE id=ANY(%s)', ([row['id'] for row in rows],))
     except (ProjectionUnavailable, ValueError, OSError, psycopg.Error):
         return False
