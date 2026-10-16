@@ -426,22 +426,30 @@ def test_a_step_the_database_ends_in_a_deadlock_answers_503_and_its_retry_runs(s
 def test_a_loan_step_writes_its_loan_row_once():
     # A second write of a Loan row in one transaction checks both collectors' keys again, key-sharing the other side's
     # owner row after the step's own locks. Only run_step's write_loan writes the row of an existing Loan; the other
-    # write is a Borrow Request's Edit and resend, which closes the earlier request with one write of its row.
+    # write is a Borrow Request's Edit and resend, which closes the earlier request with one write of its row. The
+    # inbox (#259) and the pick reads write no Loan row.
     app = Path(__file__).resolve().parents[1] / 'app'
     writes = {name: len(re.findall(r'\bUPDATE\s+loan\s', _string_constants(app / name)))
-              for name in ('social/owners.py', 'social/loans.py', 'loan_inventory.py', 'borrowed_copies.py')}
-    assert writes == {'social/owners.py': 0, 'social/loans.py': 1, 'loan_inventory.py': 1, 'borrowed_copies.py': 0}
+              for name in LOAN_MODULES}
+    assert writes == {'social/owners.py': 0, 'social/loans.py': 1, 'loan_inventory.py': 1, 'borrowed_copies.py': 0,
+                      'loan_picks.py': 0, 'social/inbox.py': 0}
 
 
 def test_no_loan_step_takes_a_lock_that_holds_off_a_foreign_key_check():
     # Other collectors' writes key-share an owner's row (a Borrow Request names its lender) and a Loan row (a Borrowed
     # Holding names its Loan); a FOR UPDATE on an owner or Loan row in any Loan step would make them wait on it.
     app = Path(__file__).resolve().parents[1] / 'app'
-    for name in ('social/owners.py', 'social/loans.py', 'loan_inventory.py', 'borrowed_copies.py'):
+    for name in LOAN_MODULES:
         sql = _string_constants(app / name)
         assert 'FOR UPDATE' not in sql.replace('FOR NO KEY UPDATE', ''), name
-        assert 'FOR NO KEY UPDATE' in sql or name == 'borrowed_copies.py', name
+        # The modules that only read take no lock at all.
+        assert 'FOR NO KEY UPDATE' in sql or name in ('borrowed_copies.py', 'loan_picks.py', 'social/inbox.py'), name
     assert 'owner_and_rows(' not in (app / 'loan_inventory.py').read_text()
+
+
+# The modules with Loan steps or Loan reads.
+LOAN_MODULES = ('social/owners.py', 'social/loans.py', 'loan_inventory.py', 'borrowed_copies.py', 'loan_picks.py',
+                'social/inbox.py')
 
 
 def _string_constants(path):
