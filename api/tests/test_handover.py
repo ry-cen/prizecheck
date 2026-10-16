@@ -99,7 +99,7 @@ def test_the_lenders_handover_takes_the_picked_copies_out_and_lends_them_with_no
         'accepted', True, False)
     # Once handed over, the lender may also write copies off (#257).
     assert (confirmed['section'], confirmed['needs_you'], confirmed['actions']) == (
-        'out_now', False, ['take_back', 'write_off', 'change_return_by'])
+        'out_now', False, ['take_back', 'write_off'])
     assert holding(misty, binder, iono)['quantity'] == '2'
     assert undo_records(misty) == records
     assert ok(call('GET', '/api/location-tree', misty))['owner_revision'] == before + 1
@@ -124,7 +124,7 @@ def test_the_lenders_handover_takes_the_picked_copies_out_and_lends_them_with_no
     assert (done['state'], done['section'], done['actions']) == ('handed_over', 'out_now', ['start_return'])
     # The lender may also write copies off (#257).
     assert (view(misty, loan)['state'], view(misty, loan)['actions']) == (
-        'handed_over', ['start_return', 'write_off', 'change_return_by'])
+        'handed_over', ['start_return', 'write_off'])
 
 
 def test_the_borrowers_handover_puts_borrowed_copies_in_the_named_deck_and_never_in_holdings(store):
@@ -141,7 +141,7 @@ def test_the_borrowers_handover_puts_borrowed_copies_in_the_named_deck_and_never
     assert view(misty, loan)['needs_you'] is True
     done = ok(handover(misty, loan))
     assert (done['state'], done['section'], done['actions']) == (
-        'handed_over', 'out_now', ['start_return', 'write_off', 'change_return_by'])
+        'handed_over', 'out_now', ['start_return', 'write_off'])
     assert view(ash, loan)['actions'] == ['start_return']
     assert code(take_back(ash, loan)) == (409, 'STEP_NOT_ALLOWED')
 

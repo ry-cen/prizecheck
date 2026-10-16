@@ -191,11 +191,19 @@ def replacements(user_id: str=Depends(verified_user)):
 def reassign(command: ReassignHolding,user_id: str=Depends(verified_user)):
     import hashlib,json
     from .moves import lock_owner,leaf,quantity,MAX_QUANTITY,check_promises
+    from .loan_inventory import follow_replacement,replacement_parties
+    from .social.owners import lock_owners
     amount=quantity(command.quantity)
     payload=command.model_dump(mode='json',exclude={'idempotency_key'})
     digest=hashlib.sha256(json.dumps({'action':'reassign',**payload},sort_keys=True).encode()).hexdigest()
     with connect() as conn,conn.transaction():
-        revision=lock_owner(conn,user_id)
+        # Open Loans naming the Edition follow it (spec item 15): every owner they involve is locked in ascending
+        # user_id, the collector's own row FOR UPDATE as any inventory command takes it, the others' as Loan steps do.
+        parties=replacement_parties(conn,user_id,command.edition_id)
+        revision=None
+        for owner in sorted(parties|{user_id}):
+            if owner==user_id:revision=lock_owner(conn,user_id)
+            else:lock_owners(conn,owner)
         conn.execute('DELETE FROM mutation_request WHERE owner_id=%s AND expires_at<=now()',(user_id,))
         prior=conn.execute('''SELECT mr.command_digest,mr.result_revision,r.copy_count FROM mutation_request mr
           LEFT JOIN move_response r ON r.owner_id=mr.owner_id AND r.request_key=mr.request_key
@@ -221,15 +229,11 @@ def reassign(command: ReassignHolding,user_id: str=Depends(verified_user)):
         current=conn.execute('SELECT quantity FROM holding WHERE owner_id=%s AND location_id=%s AND edition_id=%s',
           (user_id,command.location_id,command.replacement_edition_id)).fetchone()
         if current and current['quantity']>MAX_QUANTITY-amount:fail(409,'QUANTITY_OVERFLOW')
-        # The old Edition loses the copies: refused when open Loans promise them (social network #252).
+        # The collector's open Loans naming the Edition follow it to the replacement where they can (social network
+        # spec item 15, loan_inventory.follow_replacement); then the old Edition loses the copies, refused when open
+        # Loans still on it promise them (#252).
+        follow_replacement(conn,user_id,command.edition_id,command.replacement_edition_id,amount,parties|{user_id})
         check_promises(conn,user_id,{command.edition_id:amount})
-        # An Edition on an open Loan of the collector's, either side, or held as a Borrowed Copy keeps its name until
-        # the Loan ends: the Loan's lines and the Borrowed Copies name it (#254). Other Editions are left alone.
-        on_loan=conn.execute('''SELECT 1 FROM loan o JOIN loan_line l ON l.loan_id=o.id
-          WHERE (o.lender_id=%s OR o.borrower_id=%s) AND o.state<>'closed' AND l.edition_id=%s
-          UNION ALL SELECT 1 FROM borrowed_holding WHERE borrower_id=%s AND edition_id=%s LIMIT 1''',
-          (user_id,user_id,command.edition_id,user_id,command.edition_id)).fetchone()
-        if on_loan:fail(409,'EDITION_ON_LOAN')
         new_revision=revision+1
         if source['quantity']==amount:
             conn.execute('DELETE FROM holding WHERE owner_id=%s AND location_id=%s AND edition_id=%s',

@@ -42,7 +42,8 @@ then changes or clears it while the Loan is open, but never brings it earlier on
 the borrower asks for more time (``extension_to``) and the lender approves or declines it. These steps lock only the
 Loan row. Overdue (from the day after the date, once a handover was confirmed) and the 14-day nudge (a Borrow Request
 nobody answered, or an accepted Loan nobody confirmed a handover for, story 89) are worked out on read, and each is a
-notice the reader sees once (``loan_notice_seen``).
+notice the reader sees once (``loan_notice_seen``): 'overdue', 'nudge_answer' and 'nudge_handover', so seeing a
+request's nudge never hides the accepted Loan's.
 
 **Lend Offers** (#258): the lender sends one from the Collection, which reserves its copies (``app.loan_inventory``);
 the borrower accepts all or part of it there, or declines it here, and the lender withdraws it here. Declining or
@@ -83,7 +84,9 @@ NUDGE_DAYS = 14
 Action = Literal['accept', 'decline', 'confirm_handover', 'start_return', 'confirm_return', 'choose_written_off',
                  'withdraw', 'take_back', 'cancel', 'write_off', 'change_return_by', 'ask_for_more_time',
                  'approve_extension', 'decline_extension', 'edit_and_resend']
-Notice = Literal['overdue', 'nudge']
+# 'nudge_answer': a Borrow Request or Lend Offer nobody answered; 'nudge_handover': an accepted Loan nobody confirmed a
+# handover for. Two kinds, so seeing the first never hides the second once the Loan is accepted (migration 126).
+Notice = Literal['overdue', 'nudge_answer', 'nudge_handover']
 Section = Literal['needs_you', 'out_now', 'pending', 'history']
 
 
@@ -153,7 +156,8 @@ class LoanView(BaseModel):
     extension_to: date | None = None
     # The day after the return-by date once that day has come and a handover was confirmed (#256), else None.
     overdue_since: date | None = None
-    # Time-based notices the reader hasn't seen yet (#256): 'overdue', and 'nudge' for a handover still to happen.
+    # Time-based notices the reader hasn't seen yet (#256): 'overdue', 'nudge_answer' for a request or offer nobody
+    # answered and 'nudge_handover' for a handover still to happen.
     notices: list[Notice] = []
 
 
@@ -181,7 +185,7 @@ class AskForMoreTime(LoanStep):
 
 class SeenNotices(BaseModel):
     """Notices the reader was shown (#256); those not showing now are ignored."""
-    kinds: list[Notice] = Field(min_length=1, max_length=2)
+    kinds: list[Notice] = Field(min_length=1, max_length=3)
 
 
 def role_of(user_id: str, row) -> str:
@@ -268,10 +272,11 @@ def loan_facts(conn, user_id: str, rows) -> dict[UUID, LoanFacts]:
         handed = row['lender_handover_at'] is not None or row['borrower_handover_at'] is not None
         overdue = (row['state'] in ('accepted', 'handed_over') and handed and row['return_by'] is not None
                    and clock['today'] > row['return_by'])
-        nudge = ((row['state'] == 'accepted' and not handed and row['accepted_at'] is not None
-                  and row['accepted_at'] <= clock['stale'])
-                 or (row['state'] in ('requested', 'offered') and row['created_at'] <= clock['stale']))
-        showing = [kind for kind, on in (('overdue', overdue), ('nudge', nudge)) if on]
+        nudge_handover = (row['state'] == 'accepted' and not handed and row['accepted_at'] is not None
+                          and row['accepted_at'] <= clock['stale'])
+        nudge_answer = row['state'] in ('requested', 'offered') and row['created_at'] <= clock['stale']
+        showing = [kind for kind, on in (('overdue', overdue), ('nudge_answer', nudge_answer),
+                                         ('nudge_handover', nudge_handover)) if on]
         facts[row['id']] = LoanFacts(
             other_exists=others[row['id']] in alive,
             written_off=any(line['written_off'] > 0 for line in lines.get(row['id'], [])),
@@ -288,14 +293,17 @@ def loan_facts(conn, user_id: str, rows) -> dict[UUID, LoanFacts]:
 def needs_you(user_id: str, row, facts: LoanFacts | None = None) -> bool:
     """Whether the Loan waits on the reader: a Borrow Request to answer (lender) or a Lend Offer to answer (borrower,
     #258), a handover the other side confirmed and the reader hasn't (#253), a return the other side confirmed and the
-    reader hasn't, or copies still out from the reader's side once the other side's account is gone (#255), or more
-    time the borrower asked for (lender, #256). #259's inbox adds its own items."""
+    reader hasn't, a return the reader started once the other side's account is gone, or copies still out from the
+    reader's side then (#255), or more time the borrower asked for (lender, #256). #259's inbox adds its own items."""
     role = role_of(user_id, row)
     if role == 'lender' and row['state'] in ('accepted', 'handed_over') and row['extension_to'] is not None:
         return True
     if facts is not None and row['state'] in ('accepted', 'handed_over'):
         pending = facts.pending
         if pending is not None and pending['started_by'] != role and not pending[f'{role}_confirmed']:
+            return True
+        # A return the reader started that the other side, now gone, can never confirm: the reader finishes it.
+        if pending is not None and pending['started_by'] == role and not facts.other_exists:
             return True
         if not facts.other_exists and facts.out.get(role, 0) > 0 and pending is None:
             return True
@@ -327,7 +335,9 @@ def allowed(user_id: str, row, other_exists: bool = True, written_off: bool = Fa
     for its own inventory (#253) and may take its confirmation back until the other side confirms, unless anything on
     the Loan was written off (#257) or returned (#255). ``written_off``: some copy on the Loan was. With ``facts``
     (#255): a side that confirmed the handover starts a return of copies still out from its side once the other side
-    confirmed too, or is gone, and no return is pending; the other side confirms a pending return."""
+    confirmed too, or is gone, and no return is pending; the other side confirms a pending return, and the side that
+    started it finishes it alone once the other side is gone. The lender changes the return-by date while the Loan is
+    open, except once a handover was confirmed with no date set: every date would then be earlier."""
     role, state = role_of(user_id, row), row['state']
     mine, theirs = confirmed(user_id, row) if state == 'accepted' else (False, False)
     found = []
@@ -340,7 +350,8 @@ def allowed(user_id: str, row, other_exists: bool = True, written_off: bool = Fa
         pending = facts.pending
         if (pending is None and facts.out.get(role, 0) > 0 and handed and (received or not other_exists)):
             found.append('start_return')
-        if pending is not None and pending['started_by'] != role and not pending[f'{role}_confirmed']:
+        if pending is not None and ((pending['started_by'] != role and not pending[f'{role}_confirmed'])
+                                    or (pending['started_by'] == role and not other_exists)):
             found.append('confirm_return')
         if role == 'borrower' and facts.awaiting > 0:
             found.append('choose_written_off')
@@ -356,7 +367,9 @@ def allowed(user_id: str, row, other_exists: bool = True, written_off: bool = Fa
     # The return-by date (#256): the lender's to change; the borrower asks for more time, one request at a time.
     if state in ('accepted', 'handed_over'):
         if role == 'lender':
-            found.append('change_return_by')
+            confirmed_any = row['lender_handover_at'] is not None or row['borrower_handover_at'] is not None
+            if not (confirmed_any and row['return_by'] is None):
+                found.append('change_return_by')
             if row['extension_to'] is not None:
                 found += ['approve_extension', 'decline_extension']
         elif row['return_by'] is not None and row['extension_to'] is None:
@@ -635,9 +648,14 @@ def ask_for_more_time(loan_id: UUID, step: AskForMoreTime, user_id: str = Depend
 
 @router.post('/{loan_id}/extension/approve', response_model=LoanView)
 def approve_extension(loan_id: UUID, step: LoanStep, user_id: str = Depends(verified_user)):
-    """The lender approves the borrower's request for more time with one tap (#256)."""
-    return run_step(user_id, loan_id, step, 'approve_extension',
-                    lambda conn, row: {'return_by': row['extension_to'], 'extension_to': None}, lambda role, row: [])
+    """The lender approves the borrower's request for more time with one tap (#256); 422 INVALID_RETURN_BY when the
+    date asked for has passed."""
+    def apply(conn, row):
+        if row['extension_to'] < today(conn):
+            error(422, 'INVALID_RETURN_BY')
+        return {'return_by': row['extension_to'], 'extension_to': None}
+
+    return run_step(user_id, loan_id, step, 'approve_extension', apply, lambda role, row: [])
 
 
 @router.post('/{loan_id}/extension/decline', response_model=LoanView)

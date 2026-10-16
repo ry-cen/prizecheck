@@ -73,7 +73,7 @@ def test_a_partial_return_moves_each_sides_inventory_as_it_confirms_and_the_last
     binder = binders['Binder']
     handed = view(misty, loan)
     assert (handed['state'], handed['actions'], handed['pending_return']) == (
-        'handed_over', ['start_return', 'write_off', 'change_return_by'], None)
+        'handed_over', ['start_return', 'write_off'], None)
     assert view(ash, loan)['actions'] == ['start_return']
     records = undo_records(misty)
     # Ash gives one back: his own Borrowed Copies leave at once; Misty's Collection waits for her.
@@ -87,7 +87,7 @@ def test_a_partial_return_moves_each_sides_inventory_as_it_confirms_and_the_last
     assert ok(call('GET', f'/api/holdings/{binder}', misty))['holdings'] == []
     asked = view(misty, loan)
     assert (asked['actions'], asked['needs_you'], asked['section']) == (
-        ['confirm_return', 'write_off', 'change_return_by'], True, 'needs_you')
+        ['confirm_return', 'write_off'], True, 'needs_you')
     assert asked['pending_return']['started_by'] == 'them'
     # Misty confirms: the copy is back in Binder, with no Undo record; the Loan shows it and stays out.
     misty_before = owner_revision(misty)
@@ -158,6 +158,35 @@ def test_a_one_sided_return_completes_only_once_the_other_account_is_gone(store)
     assert holding(misty, binders['Binder'], iono)['quantity'] == '2'
 
 
+def test_a_return_its_starter_began_before_the_other_side_left_is_finished_by_the_starter(store):
+    # Ash gives 1 back and Misty leaves before confirming: the return waits on Ash, who finishes it alone (his copy
+    # already went back when he started it), then returns the rest, and the Loan closes as returned.
+    iono, ash, misty, binders, loan, _ = lent_loan({'Binder': 3}, 3)
+    ok(start_return(ash, loan, [(iono, 1)]))
+    leave(misty)
+    alone = view(ash, loan)
+    assert (alone['actions'], alone['needs_you'], alone['section']) == (['confirm_return'], True, 'needs_you')
+    finished = ok(confirm_return(ash, loan))
+    assert (finished['state'], finished['pending_return'], finished['actions']) == ('handed_over', None, ['start_return'])
+    assert returned(finished) == [(iono, '1')] and borrowed(loan) == {(node(ash, 'Unsorted')['id'], iono): 2}
+    closed = ok(start_return(ash, loan, [(iono, 2)]))
+    assert (closed['state'], closed['closed_reason']) == ('closed', 'returned') and borrowed(loan) == {}
+    # The other way: Misty records 1 back and Ash leaves; Misty finishes it alone, writes off the rest, and the Loan
+    # closes as written off.
+    iono, ash, misty, binders, loan, _ = lent_loan({'Binder': 3}, 3)
+    ok(start_return(misty, loan, [(iono, 1)]))
+    assert holding(misty, binders['Binder'], iono)['quantity'] == '1'
+    leave(ash)
+    alone = view(misty, loan)
+    assert 'confirm_return' in alone['actions'] and alone['needs_you'] is True
+    ok(confirm_return(misty, loan))
+    assert holding(misty, binders['Binder'], iono)['quantity'] == '1'
+    closed = ok(call('POST', f"/api/loans/{loan['id']}/write-off", misty, {
+        'revision': view(misty, loan)['revision'], 'idempotency_key': str(uuid4()),
+        'lines': [{'edition_id': iono, 'quantity': '2'}]}))
+    assert (closed['state'], closed['closed_reason']) == ('closed', 'written_off')
+
+
 def test_a_return_is_refused_beyond_what_is_out_and_one_waits_at_a_time(store):
     iono, ash, misty, binders, loan, _ = lent_loan({'Binder': 3}, 2)
     assert code(start_return(ash, loan, [(iono, 3)])) == (409, 'MORE_THAN_OUT')
@@ -192,9 +221,9 @@ def test_no_return_before_both_sides_confirmed_the_handover_and_no_take_back_aft
     assert code(start_return(ash, loan, [(iono, 1)])) == (409, 'STEP_NOT_ALLOWED')
     # Ash leaves before confirming: Misty records the copies back on her own, and nothing reverses her write.
     leave(ash)
-    assert view(misty, loan)['actions'] == ['start_return', 'take_back', 'write_off', 'change_return_by']
+    assert view(misty, loan)['actions'] == ['start_return', 'take_back', 'write_off']
     ok(start_return(misty, loan, [(iono, 1)]))
-    assert view(misty, loan)['actions'] == ['start_return', 'write_off', 'change_return_by']
+    assert view(misty, loan)['actions'] == ['start_return', 'write_off']
     assert code(take_back(misty, loan)) == (409, 'STEP_NOT_ALLOWED')
 
 

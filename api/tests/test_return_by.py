@@ -100,8 +100,9 @@ def test_the_lender_extends_or_clears_the_date_but_never_brings_it_earlier_after
     assert ok(change(misty, loan, day(10)))['return_by'] == day(10)
     assert ok(change(misty, loan, day(20)))['return_by'] == day(20)
     assert ok(change(misty, loan, None))['return_by'] is None
-    # Once cleared after the handover, any date would bring it earlier.
-    assert code(change(misty, loan, day(60))) == (409, 'RETURN_BY_EARLIER')
+    # Once cleared after the handover, any date would bring it earlier: the change is no longer offered.
+    assert 'change_return_by' not in view(misty, loan)['actions']
+    assert code(change(misty, loan, day(60))) == (409, 'STEP_NOT_ALLOWED')
     ok(handover(ash, loan))
     assert 'ask_for_more_time' not in view(ash, loan)['actions']
 
@@ -143,7 +144,7 @@ def test_overdue_shows_from_the_day_after_the_date_and_its_notice_once_per_side(
     for user in (ash, misty):
         assert (view(user, loan)['overdue_since'], view(user, loan)['notices']) == (since, ['overdue'])
     # Ash was shown it: it stays for Misty, and the date stays for both.
-    assert seen(ash, loan, ['overdue', 'nudge'])['notices'] == []
+    assert seen(ash, loan, ['overdue', 'nudge_answer'])['notices'] == []
     assert view(ash, loan)['overdue_since'] == since and view(misty, loan)['notices'] == ['overdue']
     assert seen(ash, loan, ['overdue'])['notices'] == []
     # More time ends it.
@@ -159,9 +160,9 @@ def test_an_accepted_loan_or_a_request_waiting_14_days_nudges_both_sides_once(st
     assert view(misty, loan)['notices'] == []
     with connect() as conn:
         conn.execute("UPDATE loan SET accepted_at = now() - interval '14 days' WHERE id=%s", (loan['id'],))
-    assert view(misty, loan)['notices'] == ['nudge'] and view(ash, loan)['notices'] == ['nudge']
-    assert seen(misty, loan, ['nudge'])['notices'] == []
-    assert view(misty, loan)['notices'] == [] and view(ash, loan)['notices'] == ['nudge']
+    assert view(misty, loan)['notices'] == ['nudge_handover'] and view(ash, loan)['notices'] == ['nudge_handover']
+    assert seen(misty, loan, ['nudge_handover'])['notices'] == []
+    assert view(misty, loan)['notices'] == [] and view(ash, loan)['notices'] == ['nudge_handover']
     # A confirmed handover ends it. A Borrow Request nobody answered for 14 days nudges both sides too (story 89).
     ok(handover(misty, loan))
     assert view(ash, loan)['notices'] == []
@@ -171,12 +172,41 @@ def test_an_accepted_loan_or_a_request_waiting_14_days_nudges_both_sides_once(st
     assert view(misty, unanswered)['notices'] == []
     with connect() as conn:
         conn.execute("UPDATE loan SET created_at = now() - interval '14 days' WHERE id=%s", (unanswered['id'],))
-    assert view(misty, unanswered)['notices'] == ['nudge'] and view(ash, unanswered)['notices'] == ['nudge']
+    assert view(misty, unanswered)['notices'] == ['nudge_answer'] and view(ash, unanswered)['notices'] == ['nudge_answer']
+
+
+def test_seeing_a_requests_nudge_never_hides_the_nudge_once_it_is_accepted(store):
+    iono, ash, misty, loan, more = requested()
+    with connect() as conn:
+        conn.execute("UPDATE loan SET created_at = now() - interval '14 days' WHERE id=%s", (loan['id'],))
+    assert seen(misty, loan, ['nudge_answer'])['notices'] == []
+    ok(accept(misty, view(misty, loan), [(iono, 1)]))
+    assert view(misty, loan)['notices'] == []
+    with connect() as conn:
+        conn.execute("UPDATE loan SET accepted_at = now() - interval '14 days' WHERE id=%s", (loan['id'],))
+    assert view(misty, loan)['notices'] == ['nudge_handover']
+
+
+def test_a_date_that_has_passed_is_never_kept_or_approved_and_a_cleared_date_stays_cleared_after_a_handover(store):
+    # Accepting keeps the requested date only while it is today or later; approving more time likewise.
+    iono, ash, misty, loan, more = requested(day(10))
+    backdate(loan, return_by=today() - timedelta(days=1))
+    assert code(accept(misty, view(misty, loan), [(iono, 1)])) == (422, 'INVALID_RETURN_BY')
+    ok(accepting(misty, loan, iono, return_by=day(10)))
+    ok(handover(misty, loan))
+    ok(ask(ash, loan, day(20)))
+    with connect() as conn:
+        conn.execute("UPDATE loan SET extension_to = current_date - 1 WHERE id=%s", (loan['id'],))
+    assert code(answer(misty, loan, 'approve')) == (422, 'INVALID_RETURN_BY')
+    # Once handed over with the date cleared, any date would be earlier: the lender isn't offered the change.
+    ok(change(misty, loan, None))
+    assert 'change_return_by' not in view(misty, loan)['actions']
+    assert code(change(misty, loan, day(30))) == (409, 'STEP_NOT_ALLOWED')
 
 
 def test_date_steps_lock_only_the_loan_row(store):
-    # Misty's owner row is held by another transaction, as her own inventory commands hold it: the date steps of both
-    # sides still run.
+    # Both owner rows are held FOR NO KEY UPDATE by another transaction, as another Loan step holds them: the date
+    # steps of both sides still run.
     iono, ash, misty, loan, more = requested(day(10))
     ok(accept(misty, view(misty, loan), [(iono, 1)]))
     ok(handover(misty, loan))
