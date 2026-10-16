@@ -12,6 +12,12 @@ const COPY = {
     title: "This deck isn't published anymore",
     body: "Its owner stopped sharing it, or the link changed. Published decks are snapshots, so an old link can stop working.",
   },
+  // An Invite Link its collector replaced, or one that never existed (#246).
+  invite: {
+    mark: "⊘",
+    title: "This link no longer works",
+    body: "Ask whoever sent it for a new one.",
+  },
 } as const;
 
 type Props = {

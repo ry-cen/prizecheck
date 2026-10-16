@@ -4,18 +4,24 @@ import type { MouseEvent } from "react";
 export const SIGN_IN_PATH = "/sign-in";
 export const DISCOVER_PATH = "/discover";
 
-/** A public page: readable signed out under the public header, and inside the shell when signed in. */
+/** A public page: readable signed out under the public header, and inside the shell when signed in. An Invite Link
+ * (social network #246) is /invite/<token>. */
 export type PublicPage =
-  { kind: "discover" } | { kind: "published"; token: string };
+  | { kind: "discover" }
+  | { kind: "published"; token: string }
+  | { kind: "invite"; token: string };
 
 export function publicPageAt(path: string): PublicPage | null {
   if (path === DISCOVER_PATH) return { kind: "discover" };
   const published = /^\/published\/([^/]+)$/.exec(path);
-  return published ? { kind: "published", token: published[1] } : null;
+  if (published) return { kind: "published", token: published[1] };
+  const invite = /^\/invite\/([^/]+)$/.exec(path);
+  return invite ? { kind: "invite", token: invite[1] } : null;
 }
 
 /** The phone header's title for a public page inside the shell. */
 export function publicPageLabel(page: PublicPage): string {
+  if (page.kind === "invite") return "Invite";
   return page.kind === "discover" ? "Discover decks" : "Published Deck";
 }
 

@@ -7,7 +7,6 @@ import React, {
 } from "react";
 import {
   BookOpen,
-  CircleUser,
   Ellipsis,
   Flag,
   Layers,
@@ -21,6 +20,8 @@ import { Dialog } from "../ui/Dialog";
 import { Icon } from "../ui/Icon";
 import { Menu, type MenuItem } from "../ui/Menu";
 import { ToastProvider, useToast } from "../ui/Toast";
+import { AccountSheetProvider, Avatar, SHEET_BUTTON } from "./AccountSheet";
+import { PhoneHeaderActions } from "./HeaderActions";
 import {
   ACCOUNT_PAGES,
   DESKTOP_TABS,
@@ -64,8 +65,8 @@ type Props = {
 };
 
 /**
- * The persistent app shell (#162): desktop header with tabs and the avatar menu, the phone header, bottom
- * tab bar and More sheet, and the page area. Switching pages swaps only the page area. A kept-mounted
+ * The persistent app shell (#162): desktop header with tabs and the avatar menu, the phone header with the
+ * account avatar (#246), bottom tab bar and More sheet, and the page area. Switching pages swaps only the page area. A kept-mounted
  * page stays in the document, hidden, after its first visit, and is shown again with its scroll position;
  * other pages mount on each visit. A reload starts fresh.
  */
@@ -104,6 +105,8 @@ function ShellFrame({
   // The page whose tab is current: none while another page is shown.
   const showing = other ? null : page;
   const otherKey = other?.key ?? null;
+  // Sign-ins in the account sheet opens Settings at its Sign-ins section (#246): the section's id, until it is shown.
+  const [anchor, setAnchor] = useState<string | null>(null);
 
   // The shell restores scroll positions itself; the browser's own restoration would fight it.
   useEffect(() => {
@@ -133,6 +136,18 @@ function ShellFrame({
     shown.current.add(page);
     window.scrollTo(0, returning ? scrollFor(current.path) : 0);
   }, [page, otherKey]);
+
+  // After the page's own scroll reset (the layout effect above), bring the anchored section into view.
+  useEffect(() => {
+    if (!anchor || showing !== "settings") return;
+    const target = document.getElementById(anchor);
+    if (!target) return;
+    target.scrollIntoView({ block: "start" });
+    target
+      .querySelector<HTMLElement>("h2[tabindex]")
+      ?.focus({ preventScroll: true });
+    setAnchor(null);
+  }, [anchor, showing]);
 
   function go(next: PageId) {
     setMoreOpen(false);
@@ -173,196 +188,178 @@ function ShellFrame({
   );
 
   return (
-    <div
-      data-app-shell=""
-      className="min-h-dvh bg-bg font-sans text-text scheme-dark"
+    <AccountSheetProvider
+      email={email}
+      name={name}
+      image={image}
+      owner={owner}
+      onSettings={() => go("settings")}
+      onSignIns={() => {
+        setAnchor("sign-ins");
+        go("settings");
+      }}
+      onOwner={() => go("owner")}
+      onSignOut={() => void signOut()}
     >
-      <a
-        href="#main-content"
-        onClick={skipToContent}
-        className="fixed left-2 top-2 z-(--layer-modal) inline-flex min-h-tap -translate-y-[calc(100%+var(--space-4))] items-center rounded-control border border-control-outline bg-surface-raised px-3 text-body font-semibold text-text no-underline focus:translate-y-0"
+      <div
+        data-app-shell=""
+        className="min-h-dvh bg-bg font-sans text-text scheme-dark"
       >
-        Skip to main content
-      </a>
+        <a
+          href="#main-content"
+          onClick={skipToContent}
+          className="fixed left-2 top-2 z-(--layer-modal) inline-flex min-h-tap -translate-y-[calc(100%+var(--space-4))] items-center rounded-control border border-control-outline bg-surface-raised px-3 text-body font-semibold text-text no-underline focus:translate-y-0"
+        >
+          Skip to main content
+        </a>
 
-      {/* Desktop header: sticky, so the tabs are in reach wherever the page is scrolled. */}
-      <header className="sticky top-0 z-(--layer-sticky) box-border flex h-header items-center gap-6 border-b border-border bg-bg px-7 compact:px-5 phone:hidden">
-        <Wordmark />
-        <nav aria-label="Main views" className="flex items-center gap-1">
-          {DESKTOP_TABS.map((id) => (
+        {/* Desktop header: sticky, so the tabs are in reach wherever the page is scrolled. */}
+        <header className="sticky top-0 z-(--layer-sticky) box-border flex h-header items-center gap-6 border-b border-border bg-bg px-7 compact:px-5 phone:hidden">
+          <Wordmark />
+          <nav aria-label="Main views" className="flex items-center gap-1">
+            {DESKTOP_TABS.map((id) => (
+              <button
+                key={id}
+                type="button"
+                aria-current={showing === id ? "page" : undefined}
+                onClick={() => go(id)}
+                className="inline-flex h-control cursor-pointer items-center whitespace-nowrap rounded-control border-0 bg-transparent px-3 text-control font-medium text-text-muted hover:text-text aria-[current=page]:bg-surface-selected aria-[current=page]:text-accent-strong"
+              >
+                {pageDef(id).label}
+              </button>
+            ))}
+          </nav>
+          <div className="ml-auto">
+            <Menu
+              label="Account"
+              triggerClassName="inline-flex size-8 cursor-pointer items-center justify-center rounded-round border border-accent-border bg-accent-fill p-0 text-control font-semibold text-accent-strong"
+              trigger={<Avatar email={email} image={image} />}
+              header={
+                (name || email) && (
+                  <div className="m-0 border-b border-border px-3 pb-2 pt-1 text-meta">
+                    {name && (
+                      <p className="m-0 font-semibold text-text">{name}</p>
+                    )}
+                    {email && <p className="m-0 text-text-muted">{email}</p>}
+                  </div>
+                )
+              }
+              items={accountItems}
+            />
+          </div>
+        </header>
+
+        {/* Phone header for pages that don't draw their own (Collection draws its own: ☰, title, Search,
+          Filters & display and the same header actions): the wordmark, then the header actions (the account avatar,
+          #246). The page's own heading sits right under it and the tab bar marks the section, so a title here would
+          only repeat them. */}
+        {showing !== "collection" && (
+          <header className="box-border hidden h-header items-center gap-3 border-b border-border px-3 phone:flex">
+            <Wordmark />
+            <div className="ml-auto">
+              <PhoneHeaderActions />
+            </div>
+          </header>
+        )}
+
+        {mounted.map((def) => (
+          <div
+            key={def.id}
+            id={def.id === showing ? "main-content" : undefined}
+            hidden={def.id !== showing}
+            className="phone:pb-tabbar"
+            ref={(element) => {
+              if (element) containers.current.set(def.id, element);
+              else containers.current.delete(def.id);
+            }}
+          >
+            {renderPage(def.id, def.id === showing)}
+          </div>
+        ))}
+        {other && (
+          <div
+            key={other.key}
+            id="main-content"
+            className="phone:pb-tabbar"
+            ref={otherContainer}
+          >
+            {other.content}
+          </div>
+        )}
+
+        {/* Phone bottom tab bar. */}
+        <nav
+          aria-label="Main views"
+          className="fixed inset-x-0 bottom-0 z-(--layer-sticky) hidden h-tabbar border-t border-border bg-surface phone:flex"
+        >
+          {PHONE_TABS.map((id) => (
             <button
               key={id}
               type="button"
               aria-current={showing === id ? "page" : undefined}
               onClick={() => go(id)}
-              className="inline-flex h-control cursor-pointer items-center whitespace-nowrap rounded-control border-0 bg-transparent px-3 text-control font-medium text-text-muted hover:text-text aria-[current=page]:bg-surface-selected aria-[current=page]:text-accent-strong"
+              className={TAB_BAR_BUTTON}
             >
+              <Icon icon={ICONS[id]} size={20} />
               {pageDef(id).label}
             </button>
           ))}
-        </nav>
-        <div className="ml-auto">
-          <Menu
-            label="Account"
-            triggerClassName="inline-flex size-8 cursor-pointer items-center justify-center rounded-round border border-accent-border bg-accent-fill p-0 text-control font-semibold text-accent-strong"
-            trigger={<Avatar email={email} image={image} />}
-            header={
-              (name || email) && (
-                <div className="m-0 border-b border-border px-3 pb-2 pt-1 text-meta">
-                  {name && (
-                    <p className="m-0 font-semibold text-text">{name}</p>
-                  )}
-                  {email && <p className="m-0 text-text-muted">{email}</p>}
-                </div>
-              )
-            }
-            items={accountItems}
-          />
-        </div>
-      </header>
-
-      {/* Phone header for pages that don't draw their own (Collection draws its own: ☰, title, Search and
-          Filters & display): the wordmark alone. The page's own heading sits right under it and the tab bar marks
-          the section, so a title here would only repeat them. */}
-      {showing !== "collection" && (
-        <header className="box-border hidden h-header items-center gap-3 border-b border-border px-3 phone:flex">
-          <Wordmark />
-        </header>
-      )}
-
-      {mounted.map((def) => (
-        <div
-          key={def.id}
-          id={def.id === showing ? "main-content" : undefined}
-          hidden={def.id !== showing}
-          className="phone:pb-tabbar"
-          ref={(element) => {
-            if (element) containers.current.set(def.id, element);
-            else containers.current.delete(def.id);
-          }}
-        >
-          {renderPage(def.id, def.id === showing)}
-        </div>
-      ))}
-      {other && (
-        <div
-          key={other.key}
-          id="main-content"
-          className="phone:pb-tabbar"
-          ref={otherContainer}
-        >
-          {other.content}
-        </div>
-      )}
-
-      {/* Phone bottom tab bar. */}
-      <nav
-        aria-label="Main views"
-        className="fixed inset-x-0 bottom-0 z-(--layer-sticky) hidden h-tabbar border-t border-border bg-surface phone:flex"
-      >
-        {PHONE_TABS.map((id) => (
           <button
-            key={id}
+            ref={moreOpener}
             type="button"
-            aria-current={showing === id ? "page" : undefined}
-            onClick={() => go(id)}
+            aria-haspopup="dialog"
+            aria-expanded={moreOpen}
+            aria-current={
+              showing && MORE_PAGES.includes(showing) ? "page" : undefined
+            }
+            onClick={() => setMoreOpen(true)}
             className={TAB_BAR_BUTTON}
           >
-            <Icon icon={ICONS[id]} size={20} />
-            {pageDef(id).label}
+            <Icon icon={Ellipsis} size={20} />
+            More
           </button>
-        ))}
-        <button
-          ref={moreOpener}
-          type="button"
-          aria-haspopup="dialog"
-          aria-expanded={moreOpen}
-          aria-current={
-            showing && MORE_PAGES.includes(showing) ? "page" : undefined
-          }
-          onClick={() => setMoreOpen(true)}
-          className={TAB_BAR_BUTTON}
-        >
-          <Icon icon={Ellipsis} size={20} />
-          More
-        </button>
-      </nav>
+        </nav>
 
-      <Dialog
-        open={moreOpen}
-        onClose={() => setMoreOpen(false)}
-        title="More"
-        closeLabel="Close More"
-        returnFocus={moreOpener}
-      >
-        <ul className="m-0 flex list-none flex-col gap-1 p-0">
-          {MORE_PAGES.filter(allowed).map((id) => (
-            <li key={id}>
+        <Dialog
+          open={moreOpen}
+          onClose={() => setMoreOpen(false)}
+          title="More"
+          closeLabel="Close More"
+          returnFocus={moreOpener}
+        >
+          <ul className="m-0 flex list-none flex-col gap-1 p-0">
+            {MORE_PAGES.filter(allowed).map((id) => (
+              <li key={id}>
+                <button
+                  type="button"
+                  aria-current={showing === id ? "page" : undefined}
+                  onClick={() => go(id)}
+                  className={SHEET_BUTTON}
+                >
+                  <Icon icon={ICONS[id]} size={20} />
+                  {pageDef(id).label}
+                </button>
+              </li>
+            ))}
+            <li className="mt-2 border-t border-border pt-2">
               <button
                 type="button"
-                aria-current={showing === id ? "page" : undefined}
-                onClick={() => go(id)}
+                onClick={() => void signOut()}
                 className={SHEET_BUTTON}
               >
-                <Icon icon={ICONS[id]} size={20} />
-                {pageDef(id).label}
+                <Icon icon={LogOut} size={20} />
+                Sign out
               </button>
             </li>
-          ))}
-          <li className="mt-2 border-t border-border pt-2">
-            <button
-              type="button"
-              onClick={() => void signOut()}
-              className={SHEET_BUTTON}
-            >
-              <Icon icon={LogOut} size={20} />
-              Sign out
-            </button>
-          </li>
-        </ul>
-      </Dialog>
-    </div>
+          </ul>
+        </Dialog>
+      </div>
+    </AccountSheetProvider>
   );
 }
 
 const TAB_BAR_BUTTON =
   "flex min-w-0 flex-1 cursor-pointer flex-col items-center justify-center gap-1 border-0 bg-transparent p-0 text-caption font-medium text-text-muted aria-[current=page]:text-accent-strong";
-const SHEET_BUTTON =
-  "box-border flex min-h-tap w-full cursor-pointer items-center gap-3 rounded-control border-0 bg-transparent px-3 text-left text-body text-text hover:bg-surface-raised aria-[current=page]:bg-surface-selected aria-[current=page]:text-accent-strong";
-
-/**
- * The avatar (OAuth spec): the provider picture, loaded with no referrer, or the first letter of the email when
- * there is none or it fails to load.
- */
-function Avatar({
-  email,
-  image,
-}: {
-  email: string | null;
-  image: string | null;
-}) {
-  const [failed, setFailed] = useState<string | null>(null);
-  if (image && failed !== image)
-    return (
-      <img
-        src={image}
-        alt=""
-        width={32}
-        height={32}
-        referrerPolicy="no-referrer"
-        onError={() => setFailed(image)}
-        data-testid="profile-picture"
-        className="size-full rounded-round object-cover"
-      />
-    );
-  if (email)
-    return (
-      <span aria-hidden="true" data-testid="profile-initial">
-        {email.trim().charAt(0).toUpperCase() || "?"}
-      </span>
-    );
-  return <Icon icon={CircleUser} size={18} />;
-}
 
 /** The PrizeCheck wordmark, shared with the public header (#163). */
 export function Wordmark() {
