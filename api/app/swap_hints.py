@@ -142,10 +142,10 @@ def hints(capture: SwapCapture, decks: Sequence[UUID],
         rule = allocation.copies.get(edition)
         if allocation.counting == 'one_at_a_time':
             # Every copy the Deck doesn't already count, less those promised to open Loans; the Deck's own reserved
-            # copies are among the ones it counts.
+            # copies are among the ones it counts. Lent copies are in no Holding, so they never come off ``owned``.
             own = allocation.lines.get((deck, edition))
             reserved = rule.reserved - rule.reserved_own.get(deck, 0) if rule else 0
-            return max(0, owned - reserved - (own.quantity - own.need if own else 0))
+            return max(0, owned - reserved - (own.quantity - own.need - own.lent if own else 0))
         spare = rule.spare if rule else 0
         return spare - sum(line.spare for line in lines if rank[line.deck_id] <= rank[deck])
 

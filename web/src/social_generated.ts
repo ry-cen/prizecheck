@@ -17,7 +17,7 @@ export type WantListMatches = { has_friends: boolean; cards: WantedCard[] };
 export type CardMatches = { has_friends: boolean; copies: FriendCopy[] };
 export type LoanParty = { collector_id: string | null; display_name: string; handle: string | null };
 export type LoanCard = { edition_id: string; name: string; set_code: string; set_name: string; collector_number: string; descriptor: Record<string, unknown>; image_url: string | null; requested: string; promised: string; written_off: string };
-export type LoanView = { id: string; kind: "borrow_request" | "lend_offer"; state: "requested" | "offered" | "accepted" | "handed_over" | "closed"; closed_reason: "declined" | "withdrawn" | "cancelled" | "returned" | "written_off" | null; closed_by: "you" | "them" | null; role: "lender" | "borrower"; other: LoanParty; return_by: string | null; you_confirmed_handover: boolean; they_confirmed_handover: boolean; lines: LoanCard[]; needs_you: boolean; section: "needs_you" | "out_now" | "pending" | "history"; actions: ("accept" | "decline" | "withdraw" | "cancel" | "edit_and_resend")[]; revision: number };
+export type LoanView = { id: string; kind: "borrow_request" | "lend_offer"; state: "requested" | "offered" | "accepted" | "handed_over" | "closed"; closed_reason: "declined" | "withdrawn" | "cancelled" | "returned" | "written_off" | null; closed_by: "you" | "them" | null; role: "lender" | "borrower"; other: LoanParty; return_by: string | null; you_confirmed_handover: boolean; they_confirmed_handover: boolean; lines: LoanCard[]; needs_you: boolean; section: "needs_you" | "out_now" | "pending" | "history"; actions: ("accept" | "decline" | "confirm_handover" | "withdraw" | "take_back" | "cancel" | "edit_and_resend")[]; revision: number };
 export type LoansView = { loans: LoanView[]; needs_you: number };
 export type LoanStep = { revision: number; idempotency_key: string };
 export type LoanLineRequest = { edition_id: string; quantity: string };
@@ -25,9 +25,11 @@ export type SendBorrowRequest = { lender_id: string; lines: LoanLineRequest[]; d
 export type PromisedLine = { edition_id: string; promised: string };
 export type AcceptBorrowRequest = { revision: number; idempotency_key: string; lines: PromisedLine[] };
 export type PromiseLimit = { edition_id: string; available: string };
-export type LoanPickPlace = { edition_id: string; location_id: string | null; name: string; copies: string };
+export type LoanPickPlace = { edition_id: string; location_id: string | null; name: string; copies: string; short: string };
 export type LoanDeck = { id: string; name: string };
-export type LoanSide = { loan_id: string; deck: LoanDeck | null; can_promise: PromiseLimit[]; picks: LoanPickPlace[] };
+export type LoanSide = { loan_id: string; deck: LoanDeck | null; can_promise: PromiseLimit[]; picks: LoanPickPlace[]; suggested: LoanPickPlace[] };
+export type LentCard = { loan_id: string; edition_id: string; name: string; set_code: string; set_name: string; collector_number: string; image_url: string | null; copies: string; borrower: string };
+export type LentOut = { cards: LentCard[]; copies: string };
 
 /** A refused social request: the API's code, and for TOO_MANY_LOOKUPS the detail that says when to try again. */
 export class SocialError extends Error {
@@ -105,3 +107,12 @@ export const withdrawLoan = (id: string, body: LoanStep) =>
   request<LoanView>(`/api/social/loans/${at(id)}/withdraw`, 'POST', body);
 export const cancelLoan = (id: string, body: LoanStep) =>
   request<LoanView>(`/api/social/loans/${at(id)}/cancel`, 'POST', body);
+// Handover (#253): each side confirms for its own inventory, and may take that back until the other side confirms.
+export const confirmHandover = (id: string, body: LoanStep) =>
+  request<LoanView>(`/api/loans/${at(id)}/handover`, 'POST', body);
+export const takeBackHandover = (id: string, body: LoanStep) =>
+  request<LoanView>(`/api/loans/${at(id)}/take-back`, 'POST', body);
+export const useSuggestedPicks = (id: string, body: LoanStep) =>
+  request<LoanView>(`/api/loans/${at(id)}/picks/use-suggested`, 'POST', body);
+// The Collection's Lent out entry: every copy you lent and haven't had back.
+export const getLentOut = (signal?: AbortSignal) => request<LentOut>('/api/loans/lent-out', 'GET', undefined, signal);

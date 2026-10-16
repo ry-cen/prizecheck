@@ -22,6 +22,10 @@ inventory revision.
 'loan_command' (``count_loan_command``), apart from the Friend commands' count. A replay isn't counted again; the count
 is taken before any other collector's row is locked; a refused step rolls back with its count.
 
+**Handover** (#253): each side confirms for its own inventory, with ``app.loan_inventory``'s routes; the Loan is
+``handed_over`` once both have. Until the other side confirms, a side may take its confirmation back, and while
+neither has, either may cancel.
+
 **Needs you** (``needs_you``) is the one definition the Loans tab and, from #259, the inbox read. ``section`` places a
 Loan on the Loans tab: needs you, out now, pending or history.
 """
@@ -44,7 +48,7 @@ COMMANDS_PER_HOUR = 120
 # Closed Loans the Loans tab lists under History, newest first.
 HISTORY = 50
 
-Action = Literal['accept', 'decline', 'withdraw', 'cancel', 'edit_and_resend']
+Action = Literal['accept', 'decline', 'confirm_handover', 'withdraw', 'take_back', 'cancel', 'edit_and_resend']
 Section = Literal['needs_you', 'out_now', 'pending', 'history']
 
 
@@ -138,14 +142,21 @@ def section(user_id: str, row) -> str:
     return 'pending'
 
 
-def allowed(user_id: str, row, other_exists: bool = True) -> list[str]:
-    """The steps the reader may take now, in the order the Loan screen offers them."""
+def allowed(user_id: str, row, other_exists: bool = True, written_off: bool = False) -> list[str]:
+    """The steps the reader may take now, in the order the Loan screen offers them. Each side confirms the handover
+    for its own inventory (#253) and may take its confirmation back until the other side confirms, unless anything on
+    the Loan was written off (#257). ``written_off``: some copy on the Loan was."""
     role, state = role_of(user_id, row), row['state']
+    mine, theirs = confirmed(user_id, row) if state == 'accepted' else (False, False)
     found = []
     if state == 'requested' and role == 'lender':
         found += ['accept', 'decline']
+    if state == 'accepted' and not mine:
+        found.append('confirm_handover')
     if state == 'requested' and role == 'borrower':
         found.append('withdraw')
+    if state == 'accepted' and mine and not theirs and not written_off:
+        found.append('take_back')
     if state == 'accepted' and row['lender_handover_at'] is None and row['borrower_handover_at'] is None:
         found.append('cancel')
     if (role == 'borrower' and row['kind'] == 'borrow_request' and other_exists
@@ -194,7 +205,9 @@ def loan_views(conn, user_id: str, rows) -> list[LoanView]:
                             handle=handles.get(other_id)),
             return_by=row['return_by'], you_confirmed_handover=mine, they_confirmed_handover=theirs,
             lines=card_lines, needs_you=needs_you(user_id, row), section=section(user_id, row),
-            actions=allowed(user_id, row, other_id in handles), revision=row['revision']))
+            actions=allowed(user_id, row, other_id in handles,
+                            any(line['written_off'] > 0 for line in lines.get(row['id'], []))),
+            revision=row['revision']))
     return views
 
 
@@ -283,7 +296,9 @@ def run_step(user_id: str, loan_id: UUID, step: LoanStep, action: str, apply, lo
         other = row['borrower_id'] if role_of(user_id, row) == 'lender' else row['lender_id']
         exists = other is not None and conn.execute('SELECT 1 FROM collector_profile WHERE user_id=%s',
                                                     (other,)).fetchone() is not None
-        if action not in allowed(user_id, row, exists):
+        written_off = conn.execute('SELECT 1 FROM loan_line WHERE loan_id=%s AND written_off > 0 LIMIT 1',
+                                   (loan_id,)).fetchone() is not None
+        if action not in allowed(user_id, row, exists, written_off):
             error(409, 'STEP_NOT_ALLOWED')
         apply(conn, row)
         conn.execute('UPDATE loan SET revision = revision + 1 WHERE id = %s', (loan_id,))

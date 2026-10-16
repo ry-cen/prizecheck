@@ -94,13 +94,14 @@ def test_a_request_reserves_nothing_until_the_lender_accepts_part_of_it(store):
     before = revision_of(misty)
     accepted = ok(accept(misty, asked, [(ids['PAL 185'], 2), (ids['SVI 166'], 0)]))
     assert (accepted['state'], accepted['section'], accepted['needs_you'], accepted['actions']) == (
-        'accepted', 'pending', False, ['cancel'])
+        'accepted', 'pending', False, ['confirm_handover', 'cancel'])
     assert lines_of(accepted) == [(ids['PAL 185'], '2', '2'), (ids['SVI 166'], '1', '0')]
     assert revision_of(misty) == before + 1
     # The promised copies are reserved: Ash sees one spare copy left; the line left out reserved nothing.
     assert copies(ash, [misty]) == {(misty, ids['PAL 185']): (1, 0), (misty, ids['SVI 166']): (0, 1)}
     assert side(misty, accepted)['picks'] == [
-        {'edition_id': ids['PAL 185'], 'location_id': node(misty, 'Unsorted')['id'], 'name': 'Unsorted', 'copies': '2'}]
+        {'edition_id': ids['PAL 185'], 'location_id': node(misty, 'Unsorted')['id'], 'name': 'Unsorted', 'copies': '2',
+         'short': '0'}]
     assert view(ash, loan)['lines'] == accepted['lines']
     assert side(ash, loan)['deck']['id'] == charizard
 
@@ -145,7 +146,7 @@ def test_a_deck_line_reads_reserved_for_the_borrower_while_the_copies_stay_in_th
     assert detail(misty, gardevoir)['loans'] == []
     ok(accept(misty, view(misty, loan), [(iono, 1)]))
     found = detail(misty, gardevoir)
-    assert found['loans'] == [{'edition_id': iono, 'reserved': [{'name': 'Ash K.', 'copies': '1'}]}]
+    assert found['loans'] == [{'edition_id': iono, 'reserved': [{'name': 'Ash K.', 'copies': '1'}], 'lent': []}]
     # The copies stay in the Deck and count for it: nothing to get, and the Deck List line is whole.
     assert found['to_get'] == '0' and [entry['in_deck'] for entry in found['deck_list']['lines']] == ['2']
     # A Display Name change reaches the label and the Loan.
@@ -328,7 +329,7 @@ def test_each_side_reads_its_own_locations_and_decks_and_never_the_others(store)
     lender_side, borrower_side = side(misty, loan), side(ash, loan)
     assert {pick['name'] for pick in lender_side['picks']} == {'Misty Private Binder', node(misty, misty_deck)['name']}
     assert borrower_side == {'loan_id': loan['id'], 'deck': {'id': ash_deck, 'name': node(ash, ash_deck)['name']},
-                             'can_promise': [], 'picks': []}
+                             'can_promise': [], 'picks': [], 'suggested': []}
     seen_by_ash = ' '.join(call(method, path, ash).text for method, path in (
         ('GET', '/api/social/loans'), ('GET', f"/api/social/loans/{loan['id']}"), ('GET', f"/api/loans/{loan['id']}/side")))
     seen_by_ash += str(loan)

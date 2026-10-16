@@ -27,12 +27,14 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from .deck_deletion import unsorted_leaf
 from .deck_pick_list import suggest
 from .location_tree import error
 from .main import connect, verified_user
-from .moves import quantity
+from .moves import first_non_leaf, put_back, quantity, take_out
 from .social import counts
 from .social.friend_copies import friend_copies
+from .social.friend_reads import card_facts
 from .social.friends import friend_ids
 from .social.loans import (LoanStep, LoanView, begin_command, advance_revision, run_step, store)
 from .social.owners import lock_owners
@@ -77,11 +79,13 @@ class PromiseLimit(BaseModel):
 
 class LoanPickPlace(BaseModel):
     """Where the lender takes copies of one Edition from: one of their own Locations (``name``), or Unsorted when the
-    Location was deleted (``location_id`` None)."""
+    Location was deleted (``location_id`` None). ``short``: copies the Location no longer holds for this pick (the pick
+    is out of date when above "0"). Once handed over, where the copies came from and go back to."""
     edition_id: UUID
     location_id: UUID | None
     name: str
     copies: str
+    short: str
 
 
 class LoanDeck(BaseModel):
@@ -91,11 +95,33 @@ class LoanDeck(BaseModel):
 
 class LoanSide(BaseModel):
     """One side's own view of a Loan. The borrower's: ``deck``, the Deck the cards go to (None for Unsorted). The
-    lender's: ``can_promise`` while the request is unanswered, and ``picks``, the Loan Pick List, once accepted."""
+    lender's: ``can_promise`` while the request is unanswered, ``picks``, the Loan Pick List, once accepted, and
+    ``suggested``, the Pick List **Use suggested picks** makes, when a pick is out of date (else empty)."""
     loan_id: UUID
     deck: LoanDeck | None
     can_promise: list[PromiseLimit]
     picks: list[LoanPickPlace]
+    suggested: list[LoanPickPlace]
+
+
+class LentCard(BaseModel):
+    """Copies of one Card Edition out with one Friend on one Loan: the Lent out entry's row."""
+    loan_id: UUID
+    edition_id: UUID
+    name: str
+    set_code: str
+    set_name: str
+    collector_number: str
+    image_url: str | None
+    copies: str
+    # The borrower's Display Name.
+    borrower: str
+
+
+class LentOut(BaseModel):
+    """Every copy the collector lent and hasn't had back, by borrower and then card order; ``copies`` sums them."""
+    cards: list[LentCard]
+    copies: str
 
 
 def copies_count(raw: str) -> int:
@@ -120,35 +146,109 @@ def can_promise(conn, lender_id: str, edition_ids) -> dict[UUID, int]:
     return {edition: max(0, held.get(edition, 0) - reserved.get(edition, 0)) for edition in editions}
 
 
-def make_picks(conn, lender_id: str, loan_id: UUID, promised: dict[UUID, int]) -> None:
-    """The Loan Pick List for newly promised copies: per Edition, places in the Deck Pick List's order, leaving the
-    copies other Loans' picks take. The caller holds the lender's owner row lock and checked ``can_promise``, so the
-    copies no other pick takes always cover the promise."""
-    editions = sorted(edition for edition, copies in promised.items() if copies > 0)
-    if not editions:
-        return
+def _places(conn, lender_id: str, editions) -> dict[UUID, list[dict]]:
+    """The lender's Holdings of the Editions as places for ``deck_pick_list.suggest``: per Edition, each Location with
+    its name, kind, copies, the copies a Deck holds there for its own line (``committed``) and the rest (``spare``)."""
     places: dict[UUID, list[dict]] = {}
     for row in conn.execute("""SELECT h.location_id, h.edition_id, h.quantity, l.name, l.kind, d.quantity AS listed
       FROM holding h JOIN location l ON l.owner_id = h.owner_id AND l.id = h.location_id
       LEFT JOIN deck_list_line d ON d.owner_id = h.owner_id AND d.deck_id = h.location_id AND d.edition_id = h.edition_id
-      WHERE h.owner_id = %s AND h.edition_id = ANY(%s)""", (lender_id, editions)):
+      WHERE h.owner_id = %s AND h.edition_id = ANY(%s)""", (lender_id, sorted(set(editions)))):
         own = min(row['listed'] or 0, row['quantity']) if row['kind'] == 'deck' else 0
         places.setdefault(row['edition_id'], []).append({
             'location_id': row['location_id'], 'name': row['name'], 'kind': row['kind'],
             'available': int(row['quantity']), 'committed': int(own), 'spare': int(row['quantity'] - own)})
-    taken_by_others = counts.reserved_picks(conn, lender_id, editions)
+    return places
+
+
+def _without(places: list[dict], taken: dict) -> list[dict]:
+    """The places less the copies other picks take there ({Location id: copies}), out of the copies beyond a Deck's
+    line first, as the Loan Pick List takes them."""
+    free = []
+    for place in places:
+        gone = min(place['available'], taken.get(place['location_id'], 0))
+        spare = max(0, place['spare'] - gone)
+        free.append({**place, 'available': place['available'] - gone, 'spare': spare,
+                     'committed': place['available'] - gone - spare})
+    return free
+
+
+def pick_shortfalls(conn, lender_id: str, edition_ids) -> tuple[list[dict], dict[int, int], dict[UUID, dict]]:
+    """Which reserved picks are out of date (spec "Stale picks are computed, not stored"): the lender's reserved picks
+    of these Editions, oldest accepted Loan first, each given the copies its source still holds after the older picks
+    there. Returns (the picks, copies each pick's source is short of by pick id, and the copies the picks still cover
+    by Edition and Location). A pick whose source was deleted is short of all its copies. The caller holds the
+    lender's owner row lock."""
+    editions = sorted(set(edition_ids))
+    picks = conn.execute(f"""SELECT p.id, p.loan_id, p.edition_id, p.source_location_id, p.quantity
+      FROM loan_pick p JOIN loan o ON o.id = p.loan_id
+      WHERE p.owner_id = %s AND o.lender_id = %s AND p.edition_id = ANY(%s) AND p.state = 'reserved'
+        AND {counts.RESERVING}
+      ORDER BY o.accepted_at NULLS LAST, o.created_at, o.id, p.id""", (lender_id, lender_id, editions)).fetchall()
+    left = {(row['location_id'], row['edition_id']): int(row['quantity']) for row in conn.execute(
+        'SELECT location_id, edition_id, quantity FROM holding WHERE owner_id=%s AND edition_id=ANY(%s)',
+        (lender_id, editions))} if editions else {}
+    short: dict[int, int] = {}
+    covered: dict[UUID, dict] = {}
+    for pick in picks:
+        key = (pick['source_location_id'], pick['edition_id'])
+        take = min(left.get(key, 0), int(pick['quantity'])) if pick['source_location_id'] else 0
+        if take:
+            left[key] -= take
+            found = covered.setdefault(pick['edition_id'], {})
+            found[pick['source_location_id']] = found.get(pick['source_location_id'], 0) + take
+        short[pick['id']] = int(pick['quantity']) - take
+    return picks, short, covered
+
+
+def suggest_picks(conn, lender_id: str, promised: dict[UUID, int], covered: dict[UUID, dict]
+                  ) -> dict[tuple[UUID, UUID], int]:
+    """Where to take ``promised`` copies per Edition from: the copies no other pick covers (``covered``), in the Deck
+    Pick List's order. Returns copies by (Edition id, Location id). The caller holds the lender's owner row lock and
+    checked the copies are there (``can_promise``, or the invariant for picks already promised)."""
+    editions = sorted(edition for edition, copies in promised.items() if copies > 0)
+    places = _places(conn, lender_id, editions) if editions else {}
+    found: dict[tuple[UUID, UUID], int] = {}
     for edition in editions:
-        others = taken_by_others.get(edition, {})
-        free = [{**place, 'available': place['available'] - min(place['available'], others.get(place['location_id'], 0))}
-                for place in places.get(edition, [])]
-        for place in free:
-            reserved = place['spare'] + place['committed'] - place['available']
-            place['spare'] = max(0, place['spare'] - reserved)
-            place['committed'] = place['available'] - place['spare']
-        for place, copies in suggest(promised[edition], free):
+        for place, copies in suggest(promised[edition], _without(places.get(edition, []), covered.get(edition, {}))):
             if copies > 0:
-                conn.execute('INSERT INTO loan_pick(loan_id, owner_id, edition_id, source_location_id, quantity) '
-                             'VALUES (%s, %s, %s, %s, %s)', (loan_id, lender_id, edition, place['location_id'], copies))
+                found[(edition, place['location_id'])] = found.get((edition, place['location_id']), 0) + copies
+    return found
+
+
+def insert_picks(conn, lender_id: str, loan_id: UUID, picks: dict[tuple[UUID, UUID | None], int]) -> None:
+    for (edition, location), copies in sorted(picks.items(), key=lambda item: (str(item[0][0]), str(item[0][1]))):
+        conn.execute('INSERT INTO loan_pick(loan_id, owner_id, edition_id, source_location_id, quantity) '
+                     'VALUES (%s, %s, %s, %s, %s)', (loan_id, lender_id, edition, location, copies))
+
+
+def make_picks(conn, lender_id: str, loan_id: UUID, promised: dict[UUID, int]) -> None:
+    """The Loan Pick List for newly promised copies: per Edition, places in the Deck Pick List's order, leaving the
+    copies other Loans' picks still cover. The caller holds the lender's owner row lock and checked ``can_promise``, so
+    the copies no other pick covers always cover the promise."""
+    _, _, covered = pick_shortfalls(conn, lender_id, [edition for edition, copies in promised.items() if copies > 0])
+    insert_picks(conn, lender_id, loan_id, suggest_picks(conn, lender_id, promised, covered))
+
+
+def replacement_picks(conn, lender_id: str, loan_id: UUID) -> dict[tuple[UUID, UUID | None], int] | None:
+    """The Loan's Pick List with every out-of-date pick replaced (``Use suggested picks``): the copies its picks still
+    cover where they are, and the rest from the copies no pick covers. None when no pick is out of date."""
+    editions = [row['edition_id'] for row in conn.execute(
+        'SELECT edition_id FROM loan_line WHERE loan_id=%s AND promised > 0', (loan_id,))]
+    picks, short, covered = pick_shortfalls(conn, lender_id, editions)
+    mine = [pick for pick in picks if pick['loan_id'] == loan_id]
+    if not any(short[pick['id']] for pick in mine):
+        return None
+    kept: dict[tuple[UUID, UUID | None], int] = {}
+    missing: dict[UUID, int] = {}
+    for pick in mine:
+        key = (pick['edition_id'], pick['source_location_id'])
+        if int(pick['quantity']) > short[pick['id']]:
+            kept[key] = kept.get(key, 0) + int(pick['quantity']) - short[pick['id']]
+        missing[pick['edition_id']] = missing.get(pick['edition_id'], 0) + short[pick['id']]
+    for key, copies in suggest_picks(conn, lender_id, missing, covered).items():
+        kept[key] = kept.get(key, 0) + copies
+    return kept
 
 
 @router.post('', response_model=LoanView, status_code=201)
@@ -234,6 +334,24 @@ def accept(loan_id: UUID, command: AcceptBorrowRequest, user_id: str = Depends(v
                     {'lines': {str(edition): copies for edition, copies in sorted(promised.items(), key=str)}})
 
 
+@router.get('/lent-out', response_model=LentOut)
+def lent_out(user_id: str = Depends(verified_user)):
+    """The Lent out entry: every copy the collector handed over to an open Loan and hasn't had back or written off."""
+    with connect() as conn, conn.transaction():
+        rows = conn.execute(f"""SELECT o.id AS loan_id, o.borrower_name, l.edition_id,
+            (l.promised - l.written_off) AS copies
+          FROM loan o JOIN loan_line l ON l.loan_id = o.id
+          WHERE o.lender_id = %s AND {counts.LENDING} AND l.promised > l.written_off""", (user_id,)).fetchall()
+        cards = card_facts(conn, [row['edition_id'] for row in rows])
+    rows.sort(key=lambda row: (row['borrower_name'].casefold(), cards[row['edition_id']].order(), str(row['loan_id'])))
+    return LentOut(cards=[LentCard(
+        loan_id=row['loan_id'], edition_id=row['edition_id'], name=cards[row['edition_id']].name,
+        set_code=cards[row['edition_id']].set_code, set_name=cards[row['edition_id']].set_name,
+        collector_number=cards[row['edition_id']].collector_number, image_url=cards[row['edition_id']].image_url,
+        copies=str(row['copies']), borrower=row['borrower_name']) for row in rows],
+        copies=str(sum(int(row['copies']) for row in rows)))
+
+
 @router.get('/{loan_id}/side', response_model=LoanSide)
 def loan_side(loan_id: UUID, user_id: str = Depends(verified_user)):
     with connect() as conn, conn.transaction():
@@ -244,21 +362,147 @@ def loan_side(loan_id: UUID, user_id: str = Depends(verified_user)):
         if row['borrower_id'] == user_id:
             deck = conn.execute("SELECT id, name FROM location WHERE owner_id=%s AND id=%s AND kind='deck'",
                                 (user_id, row['deck_id'])).fetchone() if row['deck_id'] else None
-            return LoanSide(loan_id=loan_id, deck=LoanDeck(**deck) if deck else None, can_promise=[], picks=[])
+            return LoanSide(loan_id=loan_id, deck=LoanDeck(**deck) if deck else None, can_promise=[], picks=[],
+                            suggested=[])
         limits = []
+        editions = [line['edition_id'] for line in conn.execute(
+            'SELECT edition_id FROM loan_line WHERE loan_id=%s ORDER BY position', (loan_id,))]
         if row['state'] == 'requested':
-            editions = [line['edition_id'] for line in conn.execute(
-                'SELECT edition_id FROM loan_line WHERE loan_id=%s ORDER BY position', (loan_id,))]
             available = can_promise(conn, user_id, editions)
             limits = [PromiseLimit(edition_id=edition, available=str(available[edition])) for edition in editions]
-        picks = [LoanPickPlace(edition_id=pick['edition_id'], location_id=pick['location_id'],
-                               name=pick['name'] or 'Unsorted', copies=str(pick['copies']))
-                 for pick in conn.execute("""SELECT p.edition_id, p.source_location_id AS location_id, l.name,
-                     sum(p.quantity)::bigint AS copies
-                   FROM loan_pick p JOIN loan_line ll ON ll.loan_id = p.loan_id AND ll.edition_id = p.edition_id
-                   LEFT JOIN location l ON l.owner_id = p.owner_id AND l.id = p.source_location_id
-                   WHERE p.loan_id = %s AND p.owner_id = %s
-                   GROUP BY p.edition_id, p.source_location_id, l.name, ll.position
-                   ORDER BY ll.position, sum(p.quantity) DESC, lower(l.name), p.source_location_id""",
-                                         (loan_id, user_id))]
-        return LoanSide(loan_id=loan_id, deck=None, can_promise=limits, picks=picks)
+        names = {location['id']: location['name'] for location in conn.execute(
+            'SELECT id, name FROM location WHERE owner_id=%s', (user_id,))}
+        position = {edition: index for index, edition in enumerate(editions)}
+
+        def places(found: dict, short: dict) -> list[LoanPickPlace]:
+            ordered = sorted(found.items(), key=lambda item: (position.get(item[0][0], 0), -item[1],
+                                                               names.get(item[0][1], 'Unsorted').casefold(),
+                                                               str(item[0][1])))
+            return [LoanPickPlace(edition_id=edition, location_id=location, name=names.get(location, 'Unsorted'),
+                                  copies=str(copies), short=str(short.get((edition, location), 0)))
+                    for (edition, location), copies in ordered]
+
+        mine: dict = {}
+        shortfall: dict = {}
+        if row['state'] == 'accepted' and row['lender_handover_at'] is None:
+            picks, short, _ = pick_shortfalls(conn, user_id, editions)
+            for pick in picks:
+                if pick['loan_id'] == loan_id:
+                    key = (pick['edition_id'], pick['source_location_id'])
+                    mine[key] = mine.get(key, 0) + int(pick['quantity'])
+                    shortfall[key] = shortfall.get(key, 0) + short[pick['id']]
+            replaced = replacement_picks(conn, user_id, loan_id)
+        else:
+            for pick in conn.execute('SELECT edition_id, source_location_id, quantity FROM loan_pick WHERE loan_id=%s '
+                                     'AND owner_id=%s', (loan_id, user_id)):
+                key = (pick['edition_id'], pick['source_location_id'])
+                mine[key] = mine.get(key, 0) + int(pick['quantity'])
+            replaced = None
+        return LoanSide(loan_id=loan_id, deck=None, can_promise=limits, picks=places(mine, shortfall),
+                        suggested=places(replaced, {}) if replaced else [])
+
+
+def _locations(conn, user_id: str) -> dict:
+    """The owner's Locations by id, as ``location_tree.owner_and_rows`` gives them, read under the owner lock
+    ``run_step`` took. A Loan step never calls ``owner_and_rows``: its ``FOR UPDATE`` would block the foreign key checks
+    the other side's Loan steps take on this owner's row (``social.owners.lock_owners``)."""
+    return {row['id']: row for row in conn.execute(
+        'SELECT id,name,kind,parent_id,version FROM location WHERE owner_id=%s', (user_id,))}
+
+
+def _owner_revision(conn, user_id: str) -> int:
+    return conn.execute('SELECT revision FROM inventory_owner WHERE user_id=%s', (user_id,)).fetchone()['revision']
+
+
+def _settle_handover(conn, loan_id: UUID) -> None:
+    """A Loan both sides confirmed the handover of is handed over."""
+    conn.execute("""UPDATE loan SET state='handed_over' WHERE id=%s AND state='accepted'
+      AND lender_handover_at IS NOT NULL AND borrower_handover_at IS NOT NULL""", (loan_id,))
+
+
+@router.post('/{loan_id}/handover', response_model=LoanView)
+def confirm_handover(loan_id: UUID, step: LoanStep, user_id: str = Depends(verified_user)):
+    """One side confirms the handover for its own inventory, under its own lock. The lender's **Mark as handed over**
+    takes the picked copies out of their Locations (refused with 409 PICKS_OUT_OF_DATE while a pick is out of date);
+    the borrower's **Yes, I have them** puts the promised copies into the Loan's Deck, or Unsorted, as Borrowed Copies.
+    Neither takes an Undo record."""
+    def apply(conn, row):
+        if row['lender_id'] == user_id:
+            if replacement_picks(conn, user_id, loan_id) is not None:
+                error(409, 'PICKS_OUT_OF_DATE')
+            items = [(pick['source_location_id'], pick['edition_id'], int(pick['copies'])) for pick in conn.execute(
+                """SELECT source_location_id, edition_id, sum(quantity)::bigint AS copies FROM loan_pick
+                WHERE loan_id=%s AND owner_id=%s AND state='reserved' GROUP BY source_location_id, edition_id
+                ORDER BY source_location_id, edition_id""", (loan_id, user_id))]
+            take_out(conn, user_id, items, _owner_revision(conn, user_id))
+            conn.execute("UPDATE loan_pick SET state='lent' WHERE loan_id=%s AND state='reserved'", (loan_id,))
+            conn.execute('UPDATE loan SET lender_handover_at=now() WHERE id=%s', (loan_id,))
+        else:
+            rows = _locations(conn, user_id)
+            destination = row['deck_id'] if row['deck_id'] in rows else unsorted_leaf(conn, user_id, rows, None)
+            conn.execute("""INSERT INTO borrowed_holding AS b (loan_id, borrower_id, location_id, edition_id, quantity)
+              SELECT %s, %s, %s, edition_id, promised - written_off FROM loan_line
+              WHERE loan_id=%s AND promised > written_off
+              ON CONFLICT (loan_id, location_id, edition_id) DO UPDATE SET quantity = b.quantity + EXCLUDED.quantity""",
+                         (loan_id, user_id, destination, loan_id))
+            conn.execute('UPDATE loan SET borrower_handover_at=now() WHERE id=%s', (loan_id,))
+            advance_revision(conn, user_id)
+        _settle_handover(conn, loan_id)
+
+    return run_step(user_id, loan_id, step, 'confirm_handover', apply, lambda role, row: [user_id])
+
+
+@router.post('/{loan_id}/take-back', response_model=LoanView)
+def take_back(loan_id: UUID, step: LoanStep, user_id: str = Depends(verified_user)):
+    """A side takes back its own handover confirmation while the other side hasn't confirmed, under its own lock, and
+    only its own inventory write is reversed: the lender's copies go back to their picks' Locations (Unsorted when one
+    is gone), the borrower's Borrowed Copies leave. The Loan is accepted again, with its copies reserved."""
+    def apply(conn, row):
+        if row['lender_id'] == user_id:
+            rows = _locations(conn, user_id)
+            lent = conn.execute("""SELECT id, source_location_id, edition_id, quantity FROM loan_pick
+              WHERE loan_id=%s AND owner_id=%s AND state='lent' ORDER BY id""", (loan_id, user_id)).fetchall()
+            sources = sorted({pick['source_location_id'] for pick in lent if pick['source_location_id']}, key=str)
+            gone = set()
+            for source in sources:
+                if first_non_leaf(conn, user_id, [source]) is not None:
+                    gone.add(source)
+            unsorted = None
+            items: dict[tuple, int] = {}
+            for pick in lent:
+                source = pick['source_location_id']
+                if source is None or source in gone:
+                    unsorted = unsorted or unsorted_leaf(conn, user_id, rows, None)
+                    conn.execute('UPDATE loan_pick SET source_location_id=%s WHERE id=%s', (unsorted, pick['id']))
+                    source = unsorted
+                items[(source, pick['edition_id'])] = items.get((source, pick['edition_id']), 0) + int(pick['quantity'])
+            put_back(conn, user_id, [(source, edition, copies) for (source, edition), copies in
+                                     sorted(items.items(), key=lambda item: (str(item[0][0]), str(item[0][1])))],
+                     _owner_revision(conn, user_id))
+            conn.execute("UPDATE loan_pick SET state='reserved' WHERE loan_id=%s AND state='lent'", (loan_id,))
+            conn.execute('UPDATE loan SET lender_handover_at=NULL WHERE id=%s', (loan_id,))
+        else:
+            conn.execute('DELETE FROM borrowed_holding WHERE loan_id=%s AND borrower_id=%s', (loan_id, user_id))
+            conn.execute('UPDATE loan SET borrower_handover_at=NULL WHERE id=%s', (loan_id,))
+            advance_revision(conn, user_id)
+
+    return run_step(user_id, loan_id, step, 'take_back', apply, lambda role, row: [user_id])
+
+
+@router.post('/{loan_id}/picks/use-suggested', response_model=LoanView)
+def use_suggested_picks(loan_id: UUID, step: LoanStep, user_id: str = Depends(verified_user)):
+    """The lender replaces every out-of-date pick with the suggested one (``LoanSide.suggested``), under their lock.
+    409 PICKS_UP_TO_DATE when no pick is out of date."""
+    def apply(conn, row):
+        if row['lender_id'] != user_id:
+            error(409, 'STEP_NOT_ALLOWED')
+        replaced = replacement_picks(conn, user_id, loan_id)
+        if replaced is None:
+            error(409, 'PICKS_UP_TO_DATE')
+        conn.execute("DELETE FROM loan_pick WHERE loan_id=%s AND state='reserved'", (loan_id,))
+        insert_picks(conn, user_id, loan_id, replaced)
+        advance_revision(conn, user_id)
+
+    # Allowed while the lender may still confirm the handover; its own name keeps its digest apart from the handover's.
+    return run_step(user_id, loan_id, step, 'confirm_handover', apply, lambda role, row: [user_id],
+                    {'command': 'use_suggested_picks'})

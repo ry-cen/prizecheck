@@ -36,6 +36,9 @@ class TreeLocation(TreeNode):
 class TreeResponse(BaseModel):
     locations: list[TreeLocation]
     owner_revision: int
+    # Copies the collector lent to Friends (social network #253): in no Location, still theirs; the tree's Lent out
+    # entry shows them (``GET /api/loans/lent-out``).
+    lent_copies: str
 
 
 class LocationCommandResult(BaseModel):
@@ -146,14 +149,19 @@ def check_name(name, parent_id, rows, exclude=None):
 
 
 def has_holdings(conn, node_id):
-    return bool(conn.execute("SELECT 1 FROM holding WHERE location_id=%s LIMIT 1", (node_id,)).fetchone())
+    """Whether the Location holds copies: Holdings, or Borrowed Copies (social network #253), which a Location keeps
+    as it keeps Holdings."""
+    return bool(conn.execute("""SELECT 1 FROM holding WHERE location_id=%s
+      UNION ALL SELECT 1 FROM borrowed_holding WHERE location_id=%s LIMIT 1""", (node_id, node_id)).fetchone())
 
 
 def move_holdings(conn, owner_id, source_id, target_id, next_revision):
     conn.execute("""UPDATE holding SET location_id=%s,version=%s
       WHERE owner_id=%s AND location_id=%s""", (target_id, next_revision, owner_id, source_id))
-    # Loan picks follow the copies they take (social network #252).
+    # Loan picks follow the copies they take (social network #252), and Borrowed Copies move with the owned ones (#253).
     counts.move_picks(conn, owner_id, source_id, target_id)
+    conn.execute("UPDATE borrowed_holding SET location_id=%s WHERE borrower_id=%s AND location_id=%s",
+                 (target_id, owner_id, source_id))
 
 
 def unsorted_child(conn, owner_id, parent_id, rows):
@@ -194,7 +202,7 @@ def tree(user_id: str = Depends(verified_user)):
         return TreeResponse(locations=[TreeLocation(**row, depth=depth_of(row["id"], rows), copy_count=copies.get(row["id"], "0"),
                                                     hidden=row["id"] in hidden, hidden_by=above[row["id"]])
                                        for row in sorted(rows.values(), key=lambda r: (depth_of(r["id"], rows), r["name"].casefold(), str(r["id"])))],
-                            owner_revision=revision)
+                            owner_revision=revision, lent_copies=str(sum(counts.lent_counts(conn, user_id, None).values())))
 
 
 @router.post("", response_model=LocationCommandResult, status_code=201)
