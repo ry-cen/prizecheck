@@ -16,7 +16,7 @@ So the social network takes its own block, **100 to 139**, and leaves **052 to 0
 | 115 to 119 | #254 Borrowed Copies across the app |
 | 120 to 124 | #255 Returns |
 | 125 to 129 | #256 Return-by date and overdue, #257 Write-off and #258 Lend Offers (`125_loan_return_by.sql`; `126_loan_notice_kinds.sql` from the wave E review fixes) |
-| 130 to 134 | #259 Inbox |
+| 130 to 134 | #259 Inbox (`130_inbox.sql`; `131_loan_waiting_times.sql` for the time on each Waiting on you line) |
 | 135 to 139 | #260 Ending a friendship with open Loans, then spare |
 
 #245 has no migration. A ticket that needs more files than its range asks for the spare numbers first. A migration may be renumbered only before it reaches `dev`.
