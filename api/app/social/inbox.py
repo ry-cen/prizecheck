@@ -12,7 +12,8 @@ inbox showed it) and dismissed (Clear), so a cleared one never comes back. The i
 saw, so an update that arrived after the drawer opened is neither marked nor cleared. Event updates read more than
 ``PRUNE_DAYS`` days ago are deleted when the collector next marks or clears updates.
 
-Each update says when it happened (``at``), which the drawer shows as "3 hours ago" or a date (owner's decision,
+Each waiting line says how long it has waited (``since``), when the Loan reached the step that waits on the reader
+(owner's decision, 2026-10-16): see ``waiting_since``. Each update says when it happened (``at``), which the drawer shows as "3 hours ago" or a date (owner's decision,
 2026-10-16). A withdraw is stored as a 'cancelled' update, as any cancel; the inbox reads it as 'withdrawn' from the
 Loan's ``closed_reason``, which only a withdraw sets, so the drawer says "withdrew their request" (or offer).
 
@@ -61,10 +62,16 @@ class InboxUpdate(BaseModel):
     return_by: date | None = None
 
 
+class InboxWaiting(LoanView):
+    """A Loan waiting on the reader. ``since``: when it began to wait on them, the time of the step it waits for (see
+    ``waiting_since``); the drawer shows it as "3 hours ago" or a date."""
+    since: datetime
+
+
 class InboxView(BaseModel):
-    """The bell's drawer: the Loans waiting on the reader (each with its ``waiting`` step), newest first, then the
-    updates not cleared, time-based ones first, then event updates newest first."""
-    waiting: list[LoanView]
+    """The bell's drawer: the Loans waiting on the reader (each with its ``waiting`` step and ``since``), newest first,
+    then the updates not cleared, time-based ones first, then event updates newest first."""
+    waiting: list[InboxWaiting]
     updates: list[InboxUpdate]
 
 
@@ -75,6 +82,27 @@ class InboxIds(BaseModel):
 
 def notice_id(kind: str, loan_id) -> str:
     return f'{kind}:{loan_id}'
+
+
+def waiting_since(user_id: str, row, facts, step: str) -> datetime:
+    """When the Loan began to wait on the reader for ``step`` (``loans.Waiting``), from times the Loan already holds:
+    a Borrow Request or Lend Offer to answer, its ``created_at``; a handover the other side confirmed (hand_over,
+    receive), that confirmation; a return to confirm or finish, the return's start; written-off copies to keep or
+    remove, the newest Write-off (``written_off_at``); more time asked for, when it was asked (``extension_asked_at``).
+    Three have no moment of their own and use the nearest one the Loan holds: out-of-date picks (fix_picks) and a
+    Loan that predates ``written_off_at`` or ``extension_asked_at`` use ``accepted_at``, and copies still out once the
+    other side's account is gone (return) the reader's own handover confirmation, since nothing records when the
+    account went. Overdue isn't a waiting step; it is an update, whose time is ``at``."""
+    if step == 'answer':
+        return row['created_at']
+    if step in ('confirm_return', 'finish_return'):
+        return facts.pending['created_at']
+    if step in ('hand_over', 'receive'):
+        return row['borrower_handover_at' if step == 'hand_over' else 'lender_handover_at']
+    if step == 'return':
+        return row[f'{role_of(user_id, row)}_handover_at'] or row['accepted_at']
+    named = {'choose': 'written_off_at', 'more_time': 'extension_asked_at'}.get(step)
+    return (row[named] if named else None) or row['accepted_at'] or row['created_at']
 
 
 def inbox_view(conn, user_id: str) -> InboxView:
@@ -117,7 +145,9 @@ def inbox_view(conn, user_id: str) -> InboxView:
             other_name=event['other_name'], read=event['read_at'] is not None, at=event['created_at']))
     # Time-based notices and stored events interleave in time order, newest first.
     updates.sort(key=lambda update: update.at, reverse=True)
-    return InboxView(waiting=[view for view in views if view.waiting is not None], updates=updates)
+    waiting = [InboxWaiting(**dict(view), since=waiting_since(user_id, row, facts[row['id']], view.waiting))
+               for row, view in zip(rows, views) if view.waiting is not None]
+    return InboxView(waiting=waiting, updates=updates)
 
 
 def _split(ids: list[str]) -> tuple[list[UUID], dict[UUID, set[str]]]:
