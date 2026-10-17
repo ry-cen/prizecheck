@@ -105,7 +105,10 @@ test("removing a Friend cancels the Loan nobody handed over and keeps the one ha
   // handed over is still out.
   const { updates } = await api(lender, "GET", "/api/social/inbox");
   await lender.clock.setFixedTime(
-    new Date(Date.parse(updates[0].at) + 5 * 60_000)
+    new Date(
+      Math.max(...updates.map((u: { at: string }) => Date.parse(u.at))) +
+        5 * 60_000
+    )
   );
   await lender.goto(`${ORIGIN}/loans`);
   await expect(
@@ -121,4 +124,58 @@ test("removing a Friend cancels the Loan nobody handed over and keeps the one ha
   await earlier.getByRole("link").first().click();
   await expect(lender).toHaveURL(`${ORIGIN}/loans/${pending}`);
   await expect(title(lender)).toHaveText("Ash K cancelled this Loan");
+});
+
+test("the Block question says how many open Loans it cancels, and only that it is silent when the Loans can't be read", async ({
+  page,
+  collectors,
+}) => {
+  // Two collectors in two contexts and a catalog import: well over 30 s on a loaded host.
+  test.slow();
+  const ids = seedCatalog();
+  const misty = await collectors.signIn({ next: "/loans" });
+  const lender = misty.page;
+  await nameCollector(lender, "Misty W");
+  await hold(lender, await unsorted(lender), ids["PAL 185"], 1);
+
+  await page.route(/^https:\/\/assets\.tcgdex\.net\//, (route) =>
+    route.abort()
+  );
+  await signInAsOwner(page, "/loans");
+  await nameCollector(page, "Ash K");
+  await befriend(page, lender);
+  const pending = (
+    await api(page, "POST", "/api/loans", {
+      lender_id: await accountId(lender),
+      lines: [{ edition_id: ids["PAL 185"], quantity: "1" }],
+      deck_id: null,
+      idempotency_key: randomUUID(),
+    })
+  ).id as string;
+  await loanStep(lender, pending, `/api/loans/${pending}/accept`, {
+    lines: [{ edition_id: ids["PAL 185"], promised: "1" }],
+  });
+
+  // Ash chooses Block on Misty: the question counts the one Loan nobody handed over. Cancel leaves it all as it was.
+  const openBlock = async () => {
+    await page.getByRole("button", { name: "Friends", exact: true }).click();
+    const yours = friends(page).getByRole("region", { name: "Your Friends" });
+    await yours.getByRole("button", { name: "More for Misty W" }).click();
+    await page.getByRole("menuitem", { name: "Block" }).click();
+    return yours;
+  };
+  await page.goto(`${ORIGIN}/loans`);
+  const yours = await openBlock();
+  await expect(yours.getByText(/^Block Misty W\?/)).toHaveText(
+    "Block Misty W? They won't be told. This cancels 1 open Loan that hasn't been handed over."
+  );
+  await yours.getByRole("button", { name: "Cancel" }).click();
+
+  // With the Loans unreadable, the question says nothing about them.
+  await page.route(/\/api\/social\/loans/, (route) => route.abort());
+  await page.reload();
+  const again = await openBlock();
+  await expect(again.getByText(/^Block Misty W\?/)).toHaveText(
+    "Block Misty W? They won't be told."
+  );
 });
