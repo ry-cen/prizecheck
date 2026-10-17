@@ -115,6 +115,8 @@ def inbox_view(conn, user_id: str) -> InboxView:
             id=str(event['id']), kind='withdrawn' if withdrawn else event['kind'], loan_id=event['loan_id'],
             loan_kind=event['loan_kind'], loan_state=event['loan_state'], role=role_of(user_id, event),
             other_name=event['other_name'], read=event['read_at'] is not None, at=event['created_at']))
+    # Time-based notices and stored events interleave in time order, newest first.
+    updates.sort(key=lambda update: update.at, reverse=True)
     return InboxView(waiting=[view for view in views if view.waiting is not None], updates=updates)
 
 

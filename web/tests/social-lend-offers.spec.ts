@@ -142,4 +142,21 @@ test("the lender offers selected copies from the Collection, and the borrower ac
   await dialog.getByRole("button", { name: "Done" }).click();
   await expect(dialog).toBeHidden();
   await expect(lender.locator("#ws-heading")).toBeFocused();
+
+  // She withdraws that offer from its Loan screen: her heading says she did, and Ash's says so, naming the cards.
+  await lender.goto(`${ORIGIN}/loans`);
+  await lender.getByRole("link", { name: /You offered Ash K 1 card/ }).click();
+  await expect(title(lender)).toHaveText("You offered Ash K 1 card");
+  const second = new URL(lender.url()).pathname;
+  await lender.getByRole("button", { name: "More for this Loan" }).click();
+  await lender.getByRole("menuitem", { name: "Withdraw offer" }).click();
+  await lender
+    .getByRole("group", { name: "Withdraw offer" })
+    .getByRole("button", { name: "Withdraw offer" })
+    .click();
+  await expect(title(lender)).toHaveText("You withdrew your offer to Ash K");
+  await page.goto(`${ORIGIN}${second}`);
+  await expect(title(page)).toHaveText(
+    "Misty W withdrew their offer to lend you 1 card"
+  );
 });
