@@ -221,8 +221,8 @@ def confirmed(user_id: str, row) -> tuple[bool, bool]:
 @dataclass(frozen=True)
 class LoanFacts:
     """What a Loan's steps depend on beyond its row (#255). ``pending``: the return waiting for a confirmation, as
-    {'id', 'started_by' ('lender' or 'borrower'), 'lender_confirmed', 'borrower_confirmed', 'lines': {Edition id:
-    copies}}, or None. ``returned``: copies back in complete returns, by Edition. ``out``: copies still out from each
+    {'id', 'started_by' ('lender' or 'borrower'), 'lender_confirmed', 'borrower_confirmed', 'created_at', 'lines':
+    {Edition id: copies}}, or None. ``returned``: copies back in complete returns, by Edition. ``out``: copies still out from each
     side, by role: the lender's lent picks, and the borrower's promised copies less those written off and those the
     borrower confirmed returning (0 before the borrower confirmed the handover). ``any_return``: a return was ever
     started. ``write_off_cap``: the lender's copies out less those a return the borrower confirmed and the lender hasn't
@@ -260,14 +260,14 @@ def loan_facts(conn, user_id: str, rows) -> dict[UUID, LoanFacts]:
         lines.setdefault(line['loan_id'], []).append(line)
     returns: dict[UUID, dict] = {}
     for line in conn.execute("""SELECT r.id, r.loan_id, r.started_by, r.lender_confirmed_at, r.borrower_confirmed_at,
-        r.completed_at, l.edition_id, l.quantity
+        r.completed_at, r.created_at, l.edition_id, l.quantity
       FROM loan_return r JOIN loan_return_line l ON l.return_id = r.id
       WHERE r.loan_id = ANY(%s) ORDER BY r.created_at, r.id""", (ids,)):
         found = returns.setdefault(line['loan_id'], {}).setdefault(line['id'], {
             'id': line['id'], 'started_by': line['started_by'],
             'lender_confirmed': line['lender_confirmed_at'] is not None,
             'borrower_confirmed': line['borrower_confirmed_at'] is not None,
-            'complete': line['completed_at'] is not None, 'lines': {}})
+            'complete': line['completed_at'] is not None, 'created_at': line['created_at'], 'lines': {}})
         found['lines'][line['edition_id']] = int(line['quantity'])
     lent = {row['loan_id']: int(row['copies']) for row in conn.execute(
         """SELECT loan_id, sum(quantity)::bigint AS copies FROM loan_pick WHERE loan_id = ANY(%s) AND state = 'lent'
@@ -741,7 +741,7 @@ def ask_for_more_time(loan_id: UUID, step: AskForMoreTime, user_id: str = Depend
             error(422, 'INVALID_RETURN_BY')
         if step.return_by <= row['return_by']:
             error(422, 'EXTENSION_NOT_LATER')
-        return {'extension_to': step.return_by}
+        return {'extension_to': step.return_by, 'extension_asked_at': NOW}
 
     return run_step(user_id, loan_id, step, 'ask_for_more_time', apply, lambda role, row: [],
                     {'return_by': step.return_by.isoformat()})

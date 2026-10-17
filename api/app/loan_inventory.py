@@ -1027,7 +1027,7 @@ def write_off(loan_id: UUID, command: WriteOff, user_id: str = Depends(verified_
             conn.execute('UPDATE loan_line SET written_off = written_off + %s WHERE loan_id=%s AND edition_id=%s',
                          (copies, loan_id, edition))
         advance_revision(conn, user_id)
-        return close_if_settled(conn, row, user_id)
+        return {'written_off_at': NOW, **(close_if_settled(conn, row, user_id) or {})}
 
     return run_step(user_id, loan_id, command, 'write_off', apply, lambda role, row: [user_id],
                     {'lines': {str(edition): copies for edition, copies in sorted(lines.items(), key=str)}})

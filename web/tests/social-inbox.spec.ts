@@ -3,7 +3,7 @@
 // declines it, and both badges count one. Ash's bell lists the decline under Earlier; he opens the Loan from it, and
 // Clear empties Earlier for good. Collection's phone header still fits its Search with the bell in it. Each update says
 // when it happened (owner's decision, 2026-10-16), read on a clock fixed after it, so the words never depend on how long
-// the test took; Ash then withdraws his other request, and Misty's bell says he withdrew it. A Loan opened from the
+// the test took (a Waiting on you line too, from when its Loan began to wait); Ash then withdraws his other request, and Misty's bell says he withdrew it. A Loan opened from the
 // bell in Collection's phone header takes focus on its heading, and a Clear that got no answer keeps focus on Clear.
 // The catalog is the Swap catalog (api/tests/want_list_swap_fixtures.py).
 import { randomUUID } from "node:crypto";
@@ -40,6 +40,17 @@ async function fixClockAfterNewestUpdate(on: Page, ms: number) {
   await on.clock.setFixedTime(
     new Date(
       Math.max(...updates.map((u: { at: string }) => Date.parse(u.at))) + ms
+    )
+  );
+}
+
+/** Fixes `on`'s clock `ms` after the time its newest waiting line began to wait, as the API says. */
+async function fixClockAfterNewestWaiting(on: Page, ms: number) {
+  const { waiting } = await api(on, "GET", "/api/social/inbox");
+  await on.clock.setFixedTime(
+    new Date(
+      Math.max(...waiting.map((w: { since: string }) => Date.parse(w.since))) +
+        ms
     )
   );
 }
@@ -177,4 +188,15 @@ test("the bell lists the Loans waiting on you, opens one, and Clear empties Earl
   await expect(
     drawer(lender).getByRole("region", { name: "Earlier" }).getByRole("link")
   ).toHaveText(["New: Ash K withdrew their request 2 days ago"]);
+
+  // A new request waits on Misty; by her clock, five hours after it was sent, its line says so.
+  const third = await ask();
+  await fixClockAfterNewestWaiting(lender, 5 * HOUR);
+  await lender.goto(`${ORIGIN}/loans`);
+  await bell(lender).click();
+  await expect(
+    drawer(lender)
+      .getByRole("region", { name: "Waiting on you" })
+      .getByRole("link")
+  ).toHaveText([/^Ash K · Answer.* 5 hours ago$/]);
 });

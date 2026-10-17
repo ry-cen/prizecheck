@@ -33,7 +33,7 @@ for name in ("Collector", "CollectorLookup", "InviteCollector", "FriendsView", "
              "PromiseLimit", "LoanPickPlace", "LoanDeck", "LoanSide", "LentCard", "LentOut", "BorrowedCard",
              "BorrowedCopies", "MoveBorrowed", "ReturnedLine", "StartReturn", "WriteOffLine", "WriteOff", "ChosenPlace",
              "WrittenOffChoice", "ChangeReturnBy", "AskForMoreTime", "SeenNotices", "OfferedCopies", "SendLendOffer",
-             "AcceptLendOffer", "InboxUpdate", "InboxView", "InboxIds"):
+             "AcceptLendOffer", "InboxUpdate", "InboxWaiting", "InboxView", "InboxIds"):
     definition = schema[name]
     fields = [f"{field}{'' if field in definition.get('required', []) else '?'}: {ts_type(value)}"
               for field, value in definition["properties"].items()]

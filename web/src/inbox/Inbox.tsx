@@ -31,8 +31,9 @@ import { inboxTime } from "./inboxTime";
 /**
  * The inbox (social network #259, spec "Inbox derivation", variant E): the bell in the header, with a badge counting
  * the Loans waiting on the collector, opens it from any page. **Waiting on you** lists one line per Loan ("Kim · Hand
- * over"), then **Earlier** lists the updates with a single **Clear**, each saying when it happened ("3 hours ago",
- * "Oct 3"; owner's decision, 2026-10-16). Each line opens its Loan. The Loans tab's badge counts the same Loans; the
+ * over"), each saying how long it has waited, from when the Loan reached that step ("2 days ago"), then **Earlier**
+ * lists the updates with a single **Clear**, each saying when it happened ("3 hours ago", "Oct 3"; owner's decision,
+ * 2026-10-16). Each line opens its Loan. The Loans tab's badge counts the same Loans; the
  * Friends button's counts Friend Requests (FriendsDrawer).
  *
  * The shell provides it; the desktop header and the phone headers (the shell's and Collection's own) draw the bell.
@@ -367,7 +368,13 @@ function InboxDialog({
                         </span>
                         <span className="text-meta text-text-muted wrap-anywhere">
                           {loanCardNames(loan)}
-                        </span>
+                        </span>{" "}
+                        <time
+                          dateTime={loan.since}
+                          className="text-meta font-normal text-text-muted"
+                        >
+                          {inboxTime(loan.since, now)}
+                        </time>
                       </a>
                     </li>
                   ))}

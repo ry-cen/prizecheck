@@ -255,3 +255,57 @@ def test_each_update_says_when_it_happened_and_a_withdrawn_request_or_offer_read
     assert [(update['kind'], update['loan_kind'], update['other_name']) for update in inbox(ash)['updates']] == [
         ('withdrawn', 'lend_offer', 'Misty W.')]
     assert [(kind, name) for kind, _, name, _ in updates(misty)] == [('cancelled', 'Ash K.'), ('accepted', 'Ash K.')]
+
+
+def since(user, loan):
+    """The time the inbox says ``loan`` has waited on ``user`` since, as a datetime."""
+    (found,) = [line for line in inbox(user)['waiting'] if line['id'] == loan['id']]
+    return datetime.fromisoformat(found['since'])
+
+
+def stored(loan, *columns):
+    with connect() as conn:
+        row = conn.execute(f'SELECT {", ".join(columns)} FROM loan WHERE id=%s', (loan['id'],)).fetchone()
+    return tuple(row.values())
+
+
+def test_each_waiting_line_says_since_when_the_loan_reached_the_step_that_waits_on_the_reader(store):
+    iono, ash, misty, loan, more = requested(day(10), held=4)
+    # A request waits from when it was sent.
+    assert since(misty, loan) == stored(loan, 'created_at')[0]
+    ok(accept(misty, view(misty, loan), [(iono, 1)]))
+    # A handover the other side confirmed waits from that confirmation, for either side.
+    ok(handover(misty, loan))
+    assert since(ash, loan) == stored(loan, 'lender_handover_at')[0]
+    second = more(day(10))
+    ok(accept(misty, view(misty, second), [(iono, 1)]))
+    ok(handover(ash, second))
+    assert since(misty, second) == stored(second, 'borrower_handover_at')[0]
+    ok(handover(misty, second))
+    ok(handover(ash, loan))
+    # A return waits from when it was started.
+    ok(start_return(ash, loan, [(iono, 1)]))
+    with connect() as conn:
+        started = conn.execute('SELECT created_at FROM loan_return WHERE loan_id=%s', (loan['id'],)).fetchone()
+    assert since(misty, loan) == started['created_at']
+    # More time waits from when it was asked, not from a date: the ask moves nothing else on the Loan.
+    ok(ask(ash, second, day(20)))
+    assert since(misty, second) == stored(second, 'extension_asked_at')[0] != stored(second, 'accepted_at')[0]
+    # Each line carries a time and a Lend Offer waits from when it was sent.
+    ids_, iono, ash, misty, binders = offering()
+    offered = ok(offer(misty, ash, [(binders['Binder A'], iono, 2)]), 201)
+    assert since(ash, offered) == stored(offered, 'created_at')[0]
+
+
+def test_a_write_off_choice_waits_from_the_write_off_and_a_gone_collectors_loan_from_the_readers_handover(store):
+    iono, ash, misty, binders, loan, _ = lent_loan({'Binder': 3}, 3)
+    ok(write_off(misty, loan, [(iono, 1)]))
+    assert since(ash, loan) == stored(loan, 'written_off_at')[0] is not None
+    ok(choose(ash, loan, 'remove'))
+    ok(start_return(ash, loan, [(iono, 1)]))
+    with connect() as conn:
+        started = conn.execute('SELECT created_at FROM loan_return WHERE loan_id=%s', (loan['id'],)).fetchone()
+    leave(misty)
+    assert since(ash, loan) == started['created_at']
+    ok(confirm_return(ash, loan))
+    assert since(ash, loan) == stored(loan, 'borrower_handover_at')[0]
