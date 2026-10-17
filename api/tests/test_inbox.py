@@ -174,8 +174,9 @@ def test_overdue_and_the_nudge_are_listed_until_cleared_and_the_loan_screen_mark
     ok(handover(misty, loan))
     backdate(loan, return_by=day(-1))
     assert [(kind, read) for kind, _, _, read in updates(misty)] == [('overdue', False)]
-    assert [(kind, name) for kind, _, name, _ in updates(ash)] == [('overdue', 'Misty W.'), ('accepted', 'Misty W.')]
-    assert inbox(ash)['updates'][0]['return_by'] == day(-1)
+    # Newest first: the acceptance happened just now, the overdue day began at midnight.
+    assert [(kind, name) for kind, _, name, _ in updates(ash)] == [('accepted', 'Misty W.'), ('overdue', 'Misty W.')]
+    assert inbox(ash)['updates'][1]['return_by'] == day(-1)
     # Misty opens the Loan: the notice is read, and stays listed until she clears it.
     assert seen(misty, loan, ['overdue'])['notices'] == []
     assert [(kind, read) for kind, _, _, read in updates(misty)] == [('overdue', True)]
@@ -183,7 +184,7 @@ def test_overdue_and_the_nudge_are_listed_until_cleared_and_the_loan_screen_mark
     mark(ash, 'read', ids(ash))
     assert view(ash, loan)['notices'] == []
     mark(misty, 'clear', ids(misty))
-    assert updates(misty) == [] and [kind for kind, _, _, _ in updates(ash)] == ['overdue', 'accepted']
+    assert updates(misty) == [] and [kind for kind, _, _, _ in updates(ash)] == ['accepted', 'overdue']
     # A notice not showing yet can't be cleared ahead of time.
     second = more()
     ok(accept(misty, view(misty, second), [(iono, 1)]))
@@ -237,6 +238,9 @@ def test_each_update_says_when_it_happened_and_a_withdrawn_request_or_offer_read
             (SELECT created_at + interval '14 days' FROM loan WHERE id=%s) AS answer,
             (SELECT accepted_at + interval '14 days' FROM loan WHERE id=%s) AS handover""",
                              (day(-3), unanswered['id'], waiting_handover['id'])).fetchone()
+    # Time-based notices and stored events interleave in time order, newest first.
+    listed = [datetime.fromisoformat(update['at']) for update in inbox(misty)['updates']]
+    assert len(listed) > 1 and listed == sorted(listed, reverse=True)
     at = {(update['kind'], update['loan_id']): datetime.fromisoformat(update['at']) for update in inbox(misty)['updates']}
     assert at == {('overdue', loan['id']): began['overdue'], ('nudge_answer', unanswered['id']): began['answer'],
                   ('nudge_handover', waiting_handover['id']): began['handover'],

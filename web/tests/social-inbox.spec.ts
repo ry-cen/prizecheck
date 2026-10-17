@@ -37,7 +37,11 @@ const HOUR = 3_600_000;
 /** Fixes `on`'s clock `ms` after the time of the reader's newest update, as the API says it happened. */
 async function fixClockAfterNewestUpdate(on: Page, ms: number) {
   const { updates } = await api(on, "GET", "/api/social/inbox");
-  await on.clock.setFixedTime(new Date(Date.parse(updates[0].at) + ms));
+  await on.clock.setFixedTime(
+    new Date(
+      Math.max(...updates.map((u: { at: string }) => Date.parse(u.at))) + ms
+    )
+  );
 }
 
 test("the bell lists the Loans waiting on you, opens one, and Clear empties Earlier", async ({

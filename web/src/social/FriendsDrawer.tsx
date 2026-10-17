@@ -47,9 +47,9 @@ import { commandMessage, lookupMessage } from "./socialMessages";
  * The shell provides it; the desktop header and the phone headers (the shell's and Collection's own) draw the button.
  * The badge is read when the shell starts, when the drawer opens, after each change and when the window regains focus;
  * nothing polls. Remove Friend and Block cancel the Loans the two have that nobody handed over (#260), so each change
- * reads the inbox again too, for the bell's and the Loans tab's badges, and the Loans list. Their question says how many it cancels ("This
- * cancels 2 open Loans that haven't been handed over."; owner's decision, 2026-10-16), from the Loans tab's read, and
- * says nothing while that read is out, when it fails, or for none.
+ * reads the inbox again too, for the bell's and the Loans tab's badges, and the Loans list. Their question says how
+ * many it cancels ("This cancels 2 open Loans that haven't been handed over."; owner's decision, 2026-10-16), from the
+ * Loans tab's read, and says nothing while that read is out, when it fails, or for none.
  *
  * Focus: choosing Remove Friend or Block from a ⋯ swaps the row for its confirmation and focuses the confirming
  * button, and Cancel returns focus to that row's ⋯. A command that removes its own row moves focus to the "Your
@@ -219,14 +219,18 @@ function Confirmation({
   onCancel: () => void;
 }) {
   const primary = useRef<HTMLButtonElement>(null);
+  const asking = useId();
   useEffect(() => {
     primary.current?.focus();
   }, []);
   return (
     <>
-      <span className={`${NAME} text-body`}>{question}</span>
+      <span id={asking} className={`${NAME} text-body`}>
+        {question}
+      </span>
       <Button
         ref={primary}
+        aria-describedby={asking}
         variant="danger"
         disabled={busy}
         onClick={onConfirm}
