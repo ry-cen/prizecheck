@@ -197,8 +197,8 @@ def admit(store, edition, **over):
 def test_an_expired_queued_work_record_does_not_block_seeding(store):
     editions = world()
     normal = editions["normal"]
-    admit(store, normal, admitted_ms=quote_contract.wall_ms() - 120_000,
-          expires_ms=quote_contract.wall_ms() - 120_000 + quote_contract.JOB_TTL_MS)
+    old = quote_contract.wall_ms() - 120_000  # one clock read: the record needs expires_ms == admitted_ms + JOB_TTL_MS
+    admit(store, normal, admitted_ms=old, expires_ms=old + quote_contract.JOB_TTL_MS)
     outcome = run_seed(store)
     assert (outcome.seeded, outcome.skipped) == (2, {})
     assert cached(store, normal)[1]["amount"] == "0.25"
