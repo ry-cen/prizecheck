@@ -1,0 +1,1315 @@
+<!doctype html>
+<!--
+  PROTOTYPE, throw me away. Trading screens (ry-cen/prizecheck#266). Variants A|B|C; Options for destination default, Deck switch Undo and drafts. Nothing is saved or sent.
+-->
+<html lang="en" data-theme="prize-gold">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trading screens prototype</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../../../../../../web/src/tokens.css">
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body { background: var(--color-bg); color: var(--color-text); font: var(--font-size-md)/var(--line-height) var(--font-sans); }
+  button { font: inherit; color: inherit; }
+  .num { font-variant-numeric: var(--numeric); }
+  .muted { color: var(--color-text-muted); }
+  .subtle { color: var(--color-text-subtle); }
+
+  /* The app area is a container, so the phone frame gets the phone layout without resizing the window. */
+  #stage { min-height: 100vh; }
+  #stage.framed { display: flex; justify-content: center; padding: 24px 0 96px; background: #0a0909; }
+  #stage.framed .app { width: 375px; height: 812px; overflow: auto; border: 1px solid var(--color-border-strong); border-radius: 24px; transform: translateZ(0); }
+  .app { container: app / inline-size; background: var(--color-bg); min-height: 100%; }
+
+  /* Kit controls: 30 px on desktop, 44 px on phones; 24 px chips. */
+  .btn { display: inline-flex; align-items: center; gap: 6px; height: var(--size-control); padding: 0 12px; border-radius: var(--radius-control); border: 1px solid var(--color-control-outline); background: var(--color-surface-raised); font-size: var(--font-size-control); cursor: pointer; white-space: nowrap; }
+  .btn:hover { border-color: var(--color-accent-border); }
+  .btn.primary { background: var(--color-accent); border-color: var(--color-accent); color: var(--color-on-accent); font-weight: 600; }
+  .btn.quiet { background: transparent; border-color: transparent; color: var(--color-text-muted); }
+  .btn.small { height: var(--size-quick); padding: 0 10px; font-size: var(--font-size-sm); }
+  .pill { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: var(--radius-round); border: 1px solid var(--color-border-strong); font-size: var(--font-size-xs); color: var(--color-text-muted); white-space: nowrap; }
+  .pill.gold { border-color: var(--color-accent-border); color: var(--color-accent-strong); background: var(--color-accent-fill); }
+  .seg { display: inline-flex; border: 1px solid var(--color-control-outline); border-radius: var(--radius-control); overflow: hidden; }
+  .seg button { height: calc(var(--size-control) - 2px); padding: 0 12px; border: 0; background: transparent; font-size: var(--font-size-control); cursor: pointer; color: var(--color-text-muted); white-space: nowrap; }
+  .seg button[aria-pressed="true"] { background: var(--color-surface-selected); color: var(--color-accent-strong); font-weight: 600; }
+  :focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: var(--focus-offset); }
+
+  /* Shell */
+  .hdr { position: sticky; top: 0; z-index: 10; height: var(--layout-header-height); display: flex; align-items: center; gap: 24px; padding: 0 24px; border-bottom: 1px solid var(--color-border); background: var(--color-bg); }
+  .word { font-size: var(--font-size-sm); font-weight: 700; letter-spacing: 2px; text-transform: uppercase; white-space: nowrap; }
+  .word b { color: var(--color-accent); margin-right: 8px; }
+  .tabs { display: flex; gap: 4px; }
+  .tab { height: 32px; padding: 0 12px; border-radius: var(--radius-control); border: 0; background: transparent; color: var(--color-text-muted); font-size: var(--font-size-control); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+  .tab[aria-current="page"] { background: var(--color-surface-selected); color: var(--color-accent-strong); font-weight: 600; }
+  .tab .count { font-size: var(--font-size-2xs); padding: 1px 6px; border-radius: var(--radius-round); background: var(--color-accent-fill); color: var(--color-accent-strong); }
+  .avatar { margin-left: auto; width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--color-accent-border); background: var(--color-accent-fill); color: var(--color-accent-strong); display: grid; place-items: center; font-weight: 600; font-size: var(--font-size-control); }
+  .phonehdr { display: none; }
+  .tabbar { display: none; }
+
+  .page { max-width: 1180px; margin: 0 auto; padding: 24px var(--layout-gutter) 120px; }
+  h1 { font-size: var(--font-size-xl); margin: 0; }
+  h2 { font-size: var(--font-size-lg); margin: 0; }
+  .lede { margin: 4px 0 0; color: var(--color-text-muted); font-size: var(--font-size-control); }
+
+  /* Collection-style sidebar (variant C uses none; kept for the Decks index) */
+  .crumbs { display: flex; align-items: center; gap: 8px; font-size: var(--font-size-control); margin-bottom: 12px; }
+  .crumbs a { color: var(--color-accent); text-decoration: none; cursor: pointer; }
+
+  /* Summary strip: the combined total and its cost, at the top. */
+  .summary { margin-top: 20px; display: flex; flex-wrap: wrap; align-items: center; gap: 16px 28px; padding: 16px 20px; border: 1px solid var(--color-border); border-radius: var(--radius-panel); background: var(--color-surface); }
+  .big { font-size: var(--font-size-xl); font-weight: 700; line-height: 1.1; }
+  .big.gold { color: var(--color-accent-strong); }
+  .stat .lbl { font-size: var(--font-size-xs); color: var(--color-text-subtle); text-transform: uppercase; letter-spacing: 1px; }
+  .summary .controls { margin-left: auto; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .explain { flex-basis: 100%; margin: 0; font-size: var(--font-size-sm); color: var(--color-text-muted); }
+  .proto-note { display: inline-block; margin-left: 6px; padding: 0 6px; border: 1px dashed var(--color-control-outline); border-radius: 4px; font-size: var(--font-size-2xs); color: var(--color-text-subtle); white-space: nowrap; }
+
+  .grid { margin-top: 20px; display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 20px; align-items: start; }
+  .panel { border: 1px solid var(--color-border); border-radius: var(--radius-panel); background: var(--color-surface); }
+  .panel-h { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px 16px; border-bottom: 1px solid var(--color-border); }
+  .panel-h .grow { flex: 1; min-width: 0; }
+  .decks { display: grid; gap: 16px; }
+  .total { position: sticky; top: calc(var(--layout-header-height) + 16px); }
+  .total summary { list-style: none; cursor: default; }
+  .total summary::-webkit-details-marker { display: none; }
+  .trow { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 8px; padding: 7px 16px; border-bottom: 1px solid var(--color-border); font-size: var(--font-size-control); align-items: baseline; }
+  .trow:last-child { border-bottom: 0; }
+  .trow .q { font-weight: 700; color: var(--color-accent-strong); }
+  .trow .for { font-size: var(--font-size-xs); color: var(--color-text-subtle); }
+  .ellip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .line { display: grid; grid-template-columns: 56px minmax(0, 1fr) 150px 84px; gap: 12px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--color-border); }
+  .line:last-child { border-bottom: 0; }
+  .art { width: 40px; aspect-ratio: var(--tile-aspect); border-radius: 4px; background: linear-gradient(160deg, var(--color-art-start), var(--color-art-end)); border: 1px solid var(--color-border); }
+  .need { font-weight: 700; font-size: var(--font-size-lg); color: var(--color-accent-strong); }
+  .need small { font-weight: 400; font-size: var(--font-size-sm); color: var(--color-text-subtle); }
+  .name { font-weight: 600; }
+  .meta { font-size: var(--font-size-sm); color: var(--color-text-muted); }
+  .src { font-size: var(--font-size-xs); color: var(--color-text-subtle); }
+  .price { text-align: right; font-size: var(--font-size-control); }
+  .swap { grid-column: 2 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 2px; padding: 6px 10px; border-radius: var(--radius-control); background: var(--color-accent-wash); border: 1px solid var(--color-accent-outline); font-size: var(--font-size-sm); }
+  .done-deck { padding: 12px 16px; display: flex; gap: 10px; align-items: center; font-size: var(--font-size-control); color: var(--color-text-muted); }
+  .differs { padding: 8px 16px; font-size: var(--font-size-xs); color: var(--color-text-subtle); border-top: 1px dashed var(--color-border); }
+
+  /* Decks index (variants B and C) */
+  .deckcards { margin-top: 20px; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+  .deckcard { padding: 14px 16px; border: 1px solid var(--color-border); border-radius: var(--radius-panel); background: var(--color-surface); display: grid; gap: 6px; }
+  .banner { margin-top: 20px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; padding: 14px 18px; border-radius: var(--radius-panel); border: 1px solid var(--color-accent-border); background: var(--color-accent-wash); }
+  .placeholder { margin-top: 40px; padding: 40px; text-align: center; border: 1px dashed var(--color-border-strong); border-radius: var(--radius-panel); color: var(--color-text-subtle); }
+  .filter { margin-top: 16px; display: flex; gap: 6px; overflow-x: auto; }
+  .chip { height: var(--size-chip); padding: 0 10px; border-radius: var(--radius-round); border: 1px solid var(--color-border-strong); background: transparent; font-size: var(--font-size-sm); color: var(--color-text-muted); cursor: pointer; white-space: nowrap; }
+  .chip[aria-pressed="true"] { border-color: var(--color-accent-border); background: var(--color-accent-fill); color: var(--color-accent-strong); }
+
+  /* Dialog and toast */
+  .scrim { position: fixed; inset: 0; background: var(--color-scrim); display: grid; place-items: center; z-index: 500; padding: 16px; }
+  .dialog { width: min(var(--layout-dialog-width), 100%); border-radius: var(--radius-dialog); background: var(--color-surface-raised); border: 1px solid var(--color-border-strong); padding: 20px; display: grid; gap: 12px; box-shadow: 0 10px 40px var(--color-shadow-strong); }
+  .dialog p { margin: 0; font-size: var(--font-size-control); }
+  .dialog .row { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+  .toast { position: fixed; left: 50%; bottom: 84px; transform: translateX(-50%); z-index: 400; display: flex; gap: 12px; align-items: center; padding: 10px 14px; border-radius: var(--radius-panel); background: var(--color-surface-raised); border: 1px solid var(--color-border-strong); box-shadow: 0 6px 24px var(--color-shadow-strong); font-size: var(--font-size-control); max-width: calc(100% - 32px); }
+
+  /* Prototype switcher: not part of the design. */
+  .proto-bar { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 1000; display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 999px; background: #f4f1ff; color: #1b1440; font: 600 12px/1 system-ui, sans-serif; box-shadow: 0 6px 24px #0009; white-space: nowrap; }
+  .proto-bar button { border: 0; background: #ddd6ff; color: #1b1440; border-radius: 999px; height: 26px; padding: 0 10px; font: inherit; cursor: pointer; }
+  .proto-bar button[aria-pressed="true"] { background: #1b1440; color: #f4f1ff; }
+  .proto-bar .lbl { padding: 0 8px; }
+  @media (max-width: 760px) { .proto-bar { bottom: 64px; transform: translateX(-50%) scale(.9); } .proto-bar .lbl { max-width: 120px; overflow: hidden; text-overflow: ellipsis; } }
+  #stage.framed ~ .proto-bar { bottom: 16px; }
+
+  /* Loans prototype additions */
+  .ini { width: 28px; height: 28px; flex: none; border-radius: 50%; display: grid; place-items: center; font-size: var(--font-size-xs); font-weight: 700; background: var(--color-surface-selected); color: var(--color-accent-strong); border: 1px solid var(--color-accent-border); }
+  .ini.lg { width: 40px; height: 40px; font-size: var(--font-size-md); }
+  .tag { font-size: var(--font-size-2xs); padding: 1px 6px; border-radius: var(--radius-round); border: 1px solid var(--color-border-strong); color: var(--color-text-muted); white-space: nowrap; }
+  .tag.gold { border-color: var(--color-accent-border); color: var(--color-accent-strong); background: var(--color-accent-fill); }
+  .tag.warn { border-color: var(--color-warning); color: var(--color-warning); }
+  .linkish { background: none; border: 0; padding: 0; color: var(--color-accent); cursor: pointer; font-size: inherit; text-decoration: underline; text-underline-offset: 2px; }
+  .row { display: flex; align-items: center; gap: 10px; }
+  .grow { flex: 1; min-width: 0; }
+  .item { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--color-border); cursor: pointer; background: transparent; border-left: 0; border-right: 0; border-top: 0; width: 100%; text-align: left; font-size: var(--font-size-control); }
+  .item:last-child { border-bottom: 0; }
+  .item:hover { background: var(--color-surface-raised); }
+  .item .when { font-size: var(--font-size-xs); color: var(--color-text-subtle); white-space: nowrap; }
+  .item.read { opacity: .7; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--color-accent); flex: none; }
+  .sect-h { padding: 10px 16px; font-size: var(--font-size-xs); text-transform: uppercase; letter-spacing: 1px; color: var(--color-text-subtle); border-bottom: 1px solid var(--color-border); }
+  .badge { font-size: var(--font-size-2xs); padding: 1px 6px; border-radius: var(--radius-round); background: var(--color-accent); color: var(--color-on-accent); font-weight: 700; }
+  .bell { position: relative; margin-left: auto; height: 32px; width: 32px; border-radius: 50%; border: 1px solid var(--color-border-strong); background: transparent; cursor: pointer; font-size: 15px; }
+  .bell .badge { position: absolute; top: -4px; right: -6px; }
+  .bell + .avatar { margin-left: 8px; }
+  .bell + .bell { margin-left: 8px; }
+  /* The drawer is narrow, so it takes the phone rules (stacked rows) at any window size. */
+  .drawer { container: app / inline-size; position: fixed; top: 0; right: 0; bottom: 0; width: min(420px, 100%); background: var(--color-surface); border-left: 1px solid var(--color-border-strong); z-index: 600; overflow: auto; box-shadow: -10px 0 40px var(--color-shadow-strong); }
+  .drawer-h { position: sticky; top: 0; display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--color-border); background: var(--color-surface); }
+  .steps { display: flex; gap: 0; margin-top: 16px; }
+  .step { flex: 1; padding: 8px 10px; border-top: 3px solid var(--color-border-strong); font-size: var(--font-size-xs); color: var(--color-text-subtle); }
+  .step.done { border-color: var(--color-accent); color: var(--color-text-muted); }
+  .step.now { border-color: var(--color-accent-strong); color: var(--color-accent-strong); font-weight: 600; }
+  .step .who { display: block; font-weight: 400; color: var(--color-text-subtle); }
+  .lt { width: 100%; border-collapse: collapse; font-size: var(--font-size-control); }
+  .lt th { text-align: left; font-weight: 600; font-size: var(--font-size-xs); color: var(--color-text-subtle); padding: 8px 16px; border-bottom: 1px solid var(--color-border); }
+  .lt td { padding: 8px 16px; border-bottom: 1px solid var(--color-border); vertical-align: middle; }
+  .lt tr:last-child td { border-bottom: 0; }
+  .lt .n { text-align: right; font-variant-numeric: var(--numeric); }
+  .stepper { display: inline-flex; align-items: center; border: 1px solid var(--color-control-outline); border-radius: var(--radius-control); }
+  .stepper button { width: 28px; height: 28px; border: 0; background: transparent; cursor: pointer; font-size: var(--font-size-md); color: inherit; }
+  .stepper span { min-width: 22px; text-align: center; font-weight: 600; }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--color-border); align-items: center; }
+  .callout { margin-top: 16px; padding: 12px 16px; border-radius: var(--radius-panel); border: 1px solid var(--color-accent-border); background: var(--color-accent-wash); font-size: var(--font-size-control); }
+  .callout.warn { border-color: var(--color-warning); background: transparent; }
+  .sim { border: 1px dashed #b9a6ff; color: #cbbdff; background: transparent; }
+  .sim:hover { border-color: #ddd6ff; }
+  select.inp, input.inp { height: var(--size-control); padding: 0 8px; border-radius: var(--radius-control); border: 1px solid var(--color-control-outline); background: var(--color-surface); color: var(--color-text); font: inherit; font-size: var(--font-size-control); }
+  .two { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 20px; margin-top: 20px; align-items: start; }
+  .tree .loc { display: flex; align-items: center; gap: 8px; padding: 7px 12px; font-size: var(--font-size-control); border-bottom: 1px solid var(--color-border); cursor: pointer; }
+  .tree .loc:last-child { border-bottom: 0; }
+  .tree .loc[aria-current="true"] { background: var(--color-surface-selected); color: var(--color-accent-strong); }
+  .tree .loc .hid { font-size: var(--font-size-2xs); color: var(--color-text-subtle); white-space: nowrap; }
+  .field { display: grid; gap: 4px; font-size: var(--font-size-sm); color: var(--color-text-muted); }
+  .kv { display: grid; grid-template-columns: 140px minmax(0, 1fr) auto; gap: 8px 12px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--color-border); font-size: var(--font-size-control); }
+  .kv:last-child { border-bottom: 0; }
+  .kv .k { color: var(--color-text-subtle); font-size: var(--font-size-sm); }
+  .subnav { display: flex; gap: 6px; margin-bottom: 16px; flex-wrap: wrap; }
+  .menu { position: relative; }
+  .item.freq { flex-wrap: wrap; }
+  .freq-btns { display: flex; gap: 8px; }
+  .menu { position: relative; display: inline-flex; }
+  .menu-pop { position: absolute; right: 0; bottom: calc(100% + 4px); z-index: 50; display: grid; min-width: 200px; padding: 4px; border-radius: var(--radius-panel); background: var(--color-surface-raised); border: 1px solid var(--color-border-strong); box-shadow: 0 6px 24px var(--color-shadow-strong); }
+  .drawer .menu-pop { bottom: auto; top: calc(100% + 4px); }
+  .menu-pop button { text-align: left; padding: 8px 10px; border: 0; background: transparent; border-radius: var(--radius-control); cursor: pointer; font-size: var(--font-size-control); color: var(--color-text); }
+  .menu-pop button:hover { background: var(--color-surface-selected); }
+  .hist summary { cursor: pointer; list-style: none; }
+  .actions .menu { margin-left: auto; }
+  .loanrow { cursor: pointer; flex-wrap: wrap; }
+  .row-acts { display: flex; gap: 6px; flex: none; }
+  .cardcell { display: flex; align-items: center; gap: 12px; }
+  .cardcell .art { flex: none; }
+  .dialog.wide { width: min(560px, 100%); max-height: calc(100vh - 32px); overflow: auto; }
+  .dialog h2 { font-size: var(--font-size-lg); }
+
+  @container app (max-width: 760px) {
+    .hdr { display: none; }
+    .phonehdr { display: flex; align-items: center; gap: 12px; height: var(--layout-header-height); padding: 0 12px; border-bottom: 1px solid var(--color-border); }
+    .phonehdr .t { font-weight: 600; }
+    .tabbar { display: flex; position: fixed; inset: auto 0 0 0; height: var(--layout-tabbar-height); border-top: 1px solid var(--color-border); background: var(--color-surface); z-index: 10; }
+    .tabbar button { flex: 1; border: 0; background: transparent; color: var(--color-text-muted); font-size: var(--font-size-xs); display: grid; place-items: center; padding: 6px 0; cursor: pointer; position: relative; }
+    .tabbar button .ico { font-size: 18px; line-height: 1; }
+    .tabbar button[aria-current="page"] { color: var(--color-accent-strong); font-weight: 600; }
+    .tabbar .badge { position: absolute; top: 4px; left: calc(50% + 6px); }
+    .page { padding: 16px var(--layout-gutter) 140px; }
+    .btn, .seg button { height: var(--size-control-phone); }
+    .btn.small { height: var(--size-quick-phone); }
+    .two { grid-template-columns: minmax(0, 1fr); }
+    .lt td, .lt th { padding: 8px 12px; }
+    .kv { grid-template-columns: minmax(0, 1fr) auto; }
+    .kv .k { grid-column: 1 / -1; }
+    .steps .step { padding: 6px 4px; font-size: var(--font-size-2xs); }
+    .actions .btn { flex: 1 1 auto; justify-content: center; }
+    .row-acts { flex-basis: 100%; padding-left: 44px; }
+    .row-acts .btn { flex: 1; justify-content: center; }
+    .freq-btns { flex-basis: 100%; padding-left: 48px; }
+    .freq-btns .btn { flex: 1; justify-content: center; }
+  }
+  @media (max-width: 760px) { .toast { top: 16px; bottom: auto; } }
+
+  /* Trading screens additions */
+  .phone-only { display: none; }
+  .hdr .menu-pop, .phonehdr .menu-pop { bottom: auto; top: calc(100% + 4px); }
+  .menu > .avatar { margin-left: 0; }
+  .hdr .menu, .phonehdr .menu { margin-left: 8px; }
+  .phonehdr .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .draft-pill { margin-left: auto; max-width: 180px; overflow: hidden; text-overflow: ellipsis; cursor: pointer; background: transparent; }
+  .draft-pill + .bell { margin-left: 8px; }
+  .ln { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--color-border); }
+  .ln:last-child { border-bottom: 0; }
+  .ln .art { flex: none; }
+  .ln .tag { flex: none; }
+  .sides { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; margin-top: 16px; align-items: start; }
+  .sides.stack { grid-template-columns: minmax(0, 1fr); }
+  .foot { padding: 10px 16px; border-top: 1px solid var(--color-border); font-size: var(--font-size-sm); color: var(--color-text-muted); }
+  .warnline { font-size: var(--font-size-xs); color: var(--color-warning); }
+  .liability { margin-top: 16px; padding: 12px 16px; border: 1px dashed var(--color-border-strong); border-radius: var(--radius-panel); font-size: var(--font-size-sm); color: var(--color-text-muted); display: grid; gap: 6px; justify-items: start; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; margin-top: 16px; }
+  .match { margin-top: 12px; border: 1px solid var(--color-border); border-radius: var(--radius-panel); background: var(--color-surface); }
+  .match-head { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 16px; border: 0; background: transparent; text-align: left; cursor: pointer; font-size: var(--font-size-control); }
+  .match-body { padding: 0 16px 16px; }
+  .match-body .sides { margin-top: 0; }
+  .match .head-static { display: flex; align-items: center; gap: 12px; padding: 12px 16px; }
+  .match-tile { margin: 0; align-content: start; display: grid; gap: 8px; padding: 14px 16px; text-align: left; cursor: pointer; font-size: var(--font-size-control); }
+  .match-tile:hover { border-color: var(--color-accent-border); }
+  .chips { display: flex; flex-wrap: wrap; gap: 4px; align-content: flex-start; }
+  .chips .tag { white-space: normal; }
+  .tags { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .match-actions { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin-top: 16px; }
+  .gal { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; margin-top: 16px; }
+  .gtile { border: 1px solid var(--color-border); border-radius: var(--radius-panel); background: var(--color-surface); padding: 10px; display: grid; gap: 4px; }
+  .gtile .art { width: 100%; aspect-ratio: var(--tile-aspect); max-height: 120px; }
+  button[role="switch"] { flex: none; width: 40px; height: 22px; border-radius: 999px; border: 1px solid var(--color-control-outline); background: transparent; position: relative; cursor: pointer; padding: 0; }
+  button[role="switch"]::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--color-text-muted); }
+  button[role="switch"][aria-checked="true"] { background: var(--color-accent-fill); border-color: var(--color-accent-border); }
+  button[role="switch"][aria-checked="true"]::after { left: 20px; background: var(--color-accent); }
+  .swrow { display: flex; gap: 12px; align-items: flex-start; padding: 12px 16px; border: 1px solid var(--color-border); border-radius: var(--radius-panel); background: var(--color-surface); margin-top: 16px; }
+  .swrow .help { font-size: var(--font-size-sm); color: var(--color-text-muted); }
+  .chk { display: flex; gap: 8px; align-items: flex-start; font-size: var(--font-size-control); }
+  .chk input { margin-top: 3px; }
+  .radios { display: grid; gap: 8px; }
+  .radios label { display: flex; gap: 8px; align-items: center; font-size: var(--font-size-control); }
+  .tray { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 8px 16px; background: var(--color-surface-raised); border-top: 1px solid var(--color-border-strong); font-size: var(--font-size-control); }
+  .tray .grp { display: inline-flex; align-items: center; gap: 8px; }
+  .hist > summary { padding: 8px 0; color: var(--color-text-subtle); font-size: var(--font-size-xs); text-transform: uppercase; letter-spacing: 1px; }
+  .gap { margin-top: 16px; }
+  .back { margin-bottom: 12px; display: block; }
+  .dialog { max-height: calc(100vh - 32px); overflow: auto; }
+  .dialog .ln { padding: 8px 0; }
+  .step.muted { opacity: .5; }
+  .menu.rel { position: relative; }
+  details > summary { cursor: pointer; }
+  .rowline { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 12px; }
+
+  /* Prototype-only panels (Options, Wording) */
+  .proto-panel { position: fixed; right: 16px; bottom: 64px; z-index: 900; width: min(460px, calc(100vw - 32px)); max-height: calc(100vh - 100px); overflow: auto; padding: 14px 16px; border-radius: 16px; background: #f4f1ff; color: #1b1440; font: 13px/1.4 system-ui, sans-serif; box-shadow: 0 6px 24px #0009; display: grid; gap: 10px; }
+  .proto-panel h3 { margin: 0; font-size: 14px; }
+  .proto-panel fieldset { border: 1px solid #b9a6ff; border-radius: 10px; margin: 0; padding: 8px 10px; display: grid; gap: 4px; }
+  .proto-panel legend { font-weight: 700; padding: 0 4px; }
+  .proto-panel label { display: flex; gap: 6px; align-items: center; }
+  .proto-panel table { border-collapse: collapse; width: 100%; font-size: 12px; }
+  .proto-panel td, .proto-panel th { border-bottom: 1px solid #d6ccff; padding: 4px 6px; text-align: left; vertical-align: top; }
+  .proto-panel button { border: 0; background: #ddd6ff; color: #1b1440; border-radius: 999px; height: 26px; padding: 0 10px; font: inherit; cursor: pointer; justify-self: start; }
+  .has-tray .proto-bar { bottom: calc(var(--tray-h, 0px) + 8px); }
+  @media (max-width: 760px) { .has-tray .proto-bar { bottom: calc(var(--tray-h, 0px) + var(--layout-tabbar-height) + 8px); } }
+  @media (max-width: 760px) { .proto-bar { flex-wrap: wrap; max-width: calc(100vw - 16px); white-space: normal; border-radius: 16px; } }
+  @container app (max-width: 760px) {
+    .sides { grid-template-columns: minmax(0, 1fr); }
+    .tray { bottom: var(--layout-tabbar-height); }
+    .phone-only { display: block; }
+    .draft-pill { max-width: 110px; }
+    .match-head { flex-wrap: wrap; }
+    .page { padding-bottom: 260px; }
+  }
+</style>
+</head>
+<body>
+<div id="stage"><div class="app" id="app"></div></div>
+<div class="proto-bar" role="toolbar" aria-label="Prototype switcher">
+  <button id="prev" data-a="variant" data-v="-1" aria-label="Previous variant">‹</button>
+  <span class="lbl" id="vlabel"></span>
+  <button id="next" data-a="variant" data-v="1" aria-label="Next variant">›</button>
+  <button id="frame" data-a="frame" aria-pressed="false" title="Show the app in a 375 × 812 frame">Phone frame</button>
+  <button id="optb" data-a="panel" data-v="options" aria-pressed="false">Options</button>
+  <button id="wordb" data-a="panel" data-v="wording" aria-pressed="false">Wording</button>
+  <button id="reset" data-a="reset" title="Restore the mock data">Reset</button>
+</div>
+<div id="layer"></div>
+<script>
+// ---------- Mock data (in memory; nothing is saved or sent) ----------
+const ED = {};
+[
+  ["iono185n", "Iono", "PAL 185", "Normal", 0.90], ["iono185r", "Iono", "PAL 185", "Reverse Holo", 1.50], ["iono254", "Iono", "PAL 254", "Holo", 9.80],
+  ["iono269", "Iono", "PAL 269", "Holo", null], ["candy191", "Rare Candy", "SVI 191", "Normal", 0.35], ["ultra196", "Ultra Ball", "SVI 196", "Normal", 0.30],
+  ["zard223", "Charizard ex", "OBF 223", "Holo", 24.00], ["zard125", "Charizard ex", "OBF 125", "Holo", 3.10], ["zard228", "Charizard ex", "OBF 228", "Holo", 38.00],
+  ["pidgeot164", "Pidgeot ex", "OBF 164", "Holo", 3.20], ["vacuum135", "Lost Vacuum", "CRZ 135", "Normal", 0.60], ["moon251", "Roaring Moon ex", "PAR 251", "Holo", null],
+  ["gen170", "Electric Generator", "SVI 170", "Normal", 0.40], ["boss172", "Boss's Orders", "PAL 172", "Normal", 0.45], ["nest181", "Nest Ball", "SVI 181", "Normal", 0.25],
+  ["cart154", "Switch Cart", "ASR 154", "Normal", 0.25], ["arven166n", "Arven", "SVI 166", "Normal", 0.20], ["arven166r", "Arven", "SVI 166", "Reverse Holo", 1.10],
+  ["kirlia068", "Kirlia", "SIT 068", "Normal", 0.30], ["mew151", "Mew ex", "MEW 151", "Holo", 11.50], ["charmander004", "Charmander", "MEW 004", "Normal", 0.80],
+  ["charmeleon005", "Charmeleon", "MEW 005", "Normal", 0.60], ["gardy086", "Gardevoir ex", "SVI 086", "Holo", 1.60], ["ironhands070", "Iron Hands ex", "PAR 070", "Holo", 2.40],
+  ["miraidon081", "Miraidon ex", "SVI 081", "Holo", 1.90], ["vessel163", "Earthen Vessel", "PAR 163", "Normal", 0.70], ["rod188", "Super Rod", "PAL 188", "Normal", 0.40],
+  ["vip225", "Battle VIP Pass", "FST 225", "Normal", 0.30], ["research189", "Professor's Research", "SVI 189", "Normal", 0.15], ["pokegear186", "Pokégear 3.0", "SVI 186", "Normal", 0.20],
+  ["lumineon040", "Lumineon V", "BRS 040", "Holo", 0.90], ["manaphy041", "Manaphy", "BRS 041", "Holo", 0.50], ["pidgey162", "Pidgey", "OBF 162", "Normal", 0.10],
+  ["seal156", "Forest Seal Stone", "SIT 156", "Normal", 1.20], ["ccatcher160", "Counter Catcher", "PAR 160", "Normal", 0.30], ["jet190", "Jet Energy", "PAL 190", "Normal", 0.25],
+  ["squawk169", "Squawkabilly ex", "PAL 169", "Holo", 0.70], ["greninja046", "Radiant Greninja", "ASR 046", "Holo", 1.40], ["fezan038", "Fezandipiti ex", "SFA 038", "Holo", 2.10],
+  ["bundle056", "Iron Bundle", "PAR 056", "Holo", 0.60], ["ralts067", "Ralts", "SIT 067", "Normal", 0.20], ["drifloon089", "Drifloon", "SVI 089", "Normal", 0.15],
+  ["scream086", "Scream Tail", "PAR 086", "Normal", 0.20], ["catcher187", "Pokémon Catcher", "SVI 187", "Normal", 0.15], ["prime157", "Prime Catcher", "TEF 157", "Normal", 1.30],
+  ["tmevo178", "Technical Machine: Evolution", "PAR 178", "Normal", 0.20], ["poffin144", "Buddy-Buddy Poffin", "TEF 144", "Normal", 0.25], ["charm173", "Bravery Charm", "PAL 173", "Normal", 0.15],
+  ["stretcher061", "Night Stretcher", "SFA 061", "Normal", 0.30],
+].forEach(([k, name, set, fin, price]) => { ED[k] = { name, set, fin, price }; });
+
+const FR = {
+  ash: { id: "ash", name: "Ash K.", handle: "ashk", open: true }, kim: { id: "kim", name: "Kim", handle: "kimtcg", open: true },
+  lee: { id: "lee", name: "Lee", handle: "leeplays", open: false }, sam: { id: "sam", name: "Sam", handle: "samplays", open: false },
+  jo: { id: "jo", name: "Jo R.", handle: "jo_r", open: false },
+};
+const LEE_GET = ["research189", "pokegear186", "rod188", "seal156", "ccatcher160", "jet190", "squawk169", "lumineon040", "greninja046", "manaphy041", "fezan038", "pidgey162",
+  "charmeleon005", "bundle056", "ralts067", "drifloon089", "scream086", "catcher187", "prime157", "tmevo178", "poffin144", "charm173", "stretcher061", "vessel163"];
+let ME, FRIENDS, LOCS, FRIEND_LISTS, WANTS, TRADE_WANTS, TRADES, MATCHES, LOANS_STATIC, UPDATES, DRAFTS, SWITCHES, LAST_DEST, UNSORTED_BAD, SEQ;
+
+const L = (e, n, pick = null, stale = null) => ({ e, n, pick, stale });
+const G = (e, n) => ({ e, n });
+const TR = (id, friend, role, state, o) => ({ id, friend, role, state, closed: null, closedBy: null, counterOf: null, give: [], get: [], cash: null, youConfirmed: false, theyConfirmed: false, waited: "", when: "", switchOffers: [], ...o });
+const ML = (e, copies, need, deck, origin, accepts) => ({ e, copies, need, deck, origin, accepts });
+
+function seed(mode) {
+  ME = { name: "Ryan C.", handle: "ryan_c", openToCash: true };
+  LAST_DEST = "b1"; UNSORTED_BAD = false; SEQ = 100; DRAFTS = {}; SWITCHES = [];
+  const ft = (v) => (mode === "emptylist" ? false : v);
+  LOCS = [
+    { id: "b1", name: "Binder 1", parent: null, deck: false, hidden: false, forTrade: false, cards: { vacuum135: 1, research189: 4 } },
+    { id: "b3", name: "Binder 3", parent: null, deck: false, hidden: false, forTrade: ft(true), cards: {} },
+    { id: "b3h", name: "Binder 3 › Holos", parent: "b3", deck: false, hidden: false, forTrade: false, cards: { zard223: 1, pidgeot164: 2, vacuum135: 1 } },
+    { id: "b3f", name: "Binder 3 › Full arts", parent: "b3", deck: false, hidden: false, forTrade: false, cards: { moon251: 1 } },
+    { id: "spares", name: "Spares box", parent: null, deck: false, hidden: true, forTrade: ft(true), cards: { gen170: 4, boss172: 3, nest181: 3 } },
+    { id: "d1", name: "Charizard Pidgeot", parent: null, deck: true, hidden: false, forTrade: false, cards: { zard125: 2, pidgeot164: 2, candy191: 3 } },
+    { id: "d2", name: "Gardevoir Control", parent: null, deck: true, hidden: false, forTrade: false, cards: { gardy086: 2, kirlia068: 2 } },
+    { id: "d3", name: "Miraidon Box", parent: null, deck: true, hidden: false, forTrade: false, cards: { miraidon081: 2, gen170: 4 } },
+    { id: "uns", name: "Unsorted", parent: null, deck: false, hidden: false, forTrade: false, cards: { vip225: 4, gardy086: 1 } },
+  ];
+  FRIEND_LISTS = {
+    ash: { iono185r: 1, iono254: 1, candy191: 2, ultra196: 3, research189: 2, charmander004: 1, nest181: 1 },
+    lee: Object.fromEntries(LEE_GET.map((e) => [e, e === "vessel163" ? 2 : 1])),
+    kim: { arven166r: 2, kirlia068: 1, mew151: 1, pidgey162: 3 }, sam: {}, jo: { lumineon040: 1, manaphy041: 2 },
+  };
+  WANTS = [
+    { deck: "d1", e: "iono185n", need: 2, accept: "identity" }, { deck: "d1", e: "candy191", need: 1, accept: "edition" }, { deck: "d1", e: "charmander004", need: 1, accept: "edition" },
+    { deck: "d2", e: "ultra196", need: 2, accept: "edition" }, { deck: "d2", e: "kirlia068", need: 2, accept: "edition" }, { deck: "d2", e: "arven166n", need: 1, accept: "printing" },
+  ];
+  TRADE_WANTS = [G("ultra196", 1), G("mew151", 1), G("zard228", 1)];
+  UPDATES = [
+    { text: "Lee accepted your Trade Proposal", when: "2 days ago" }, { text: "Ash K. confirmed the swap", when: "Last week" },
+    { text: "Sam declined your Trade Proposal", when: "Last week" }, { text: "Jo R. cancelled this Trade", when: "Last week" },
+  ];
+  LOANS_STATIC = [
+    { id: "LK", friend: "kim", headline: "Kim wants to borrow 3 cards", sub: "2 Rare Candy · 1 Arven", section: "needs_you", handed: false },
+    { id: "LS", friend: "sam", headline: "Sam has 3 cards of yours", sub: "3 Electric Generator · Due 8 Nov", section: "out_now", handed: true },
+    { id: "LA", friend: "ash", headline: "Waiting for Ash K. to answer", sub: "2 Iono", section: "pending", handed: false },
+  ];
+  TRADES = [
+    TR("T1", "ash", "recipient", "proposed", { give: [L("zard223", 1)], get: [G("iono254", 1), G("candy191", 2)], cash: { cents: 1500, payer: "them" }, waited: "2 days" }),
+    TR("T2", "kim", "recipient", "proposed", { counterOf: "H1", give: [L("boss172", 1)], get: [G("arven166r", 2)], cash: { cents: 300, payer: "you" }, waited: "5 hours" }),
+    TR("T3", "sam", "recipient", "proposed", { give: [L("nest181", 2)], get: [], cash: { cents: 600, payer: "them" }, waited: "1 day" }),
+    TR("T4", "jo", "recipient", "proposed", { give: [], get: [G("charmander004", 1), G("charmeleon005", 1)], waited: "3 days" }),
+    TR("T5", "ash", "proposer", "accepted", { give: [L("pidgeot164", 1, "b3h")], get: [G("iono269", 1), G("ultra196", 2)], switchOffers: [{ deck: "d1", from: "iono185n", to: "iono269", n: 1 }] }),
+    TR("T6", "kim", "recipient", "accepted", { theyConfirmed: true, give: [L("vacuum135", 1, "b3h")], get: [G("kirlia068", 2)], waited: "4 hours" }),
+    TR("T7", "sam", "proposer", "accepted", { give: [L("gen170", 2, "spares")], get: [] }),
+    TR("T8", "lee", "proposer", "accepted", { youConfirmed: true, give: [L("cart154", 2)], get: [G("vip225", 4)] }),
+    TR("T9", "lee", "proposer", "proposed", { give: [L("boss172", 1, "spares"), L("vacuum135", 1, "b3h", { suggest: "b1" })], get: [G("vessel163", 2), G("rod188", 1)] }),
+    TR("T10", "kim", "proposer", "proposed", { give: [], get: [G("mew151", 1)], cash: { cents: 800, payer: "you" } }),
+    TR("H1", "kim", "proposer", "closed", { closed: "countered", closedBy: "them", give: [L("boss172", 1)], get: [G("arven166r", 2)], when: "14 Oct" }),
+    TR("H2", "ash", "proposer", "closed", { closed: "swapped", give: [L("ironhands070", 1)], get: [G("gardy086", 1)], when: "12 Oct" }),
+    TR("H3", "sam", "proposer", "closed", { closed: "withdrawn", closedBy: "you", give: [L("nest181", 1)], get: [], when: "9 Oct" }),
+    TR("H4", "lee", "proposer", "closed", { closed: "declined", closedBy: "them", give: [L("pidgeot164", 1)], get: [G("research189", 2)], when: "7 Oct" }),
+    TR("H5", "jo", "recipient", "closed", { closed: "cancelled", closedBy: "them", wasAccepted: true, give: [L("boss172", 1)], get: [G("pokegear186", 1)], when: "3 Oct" }),
+  ];
+  FRIENDS = ["ash", "kim", "lee", "sam", "jo"].map((id) => FR[id]);
+  MATCHES = [
+    { friend: "ash", kind: "two_way",
+      get: [ML("iono185r", 1, 2, 2, "want_list", "any_finish"), ML("iono254", 1, 2, 2, "want_list", "same_name"), ML("candy191", 2, 1, 1, "want_list", "exact"), ML("ultra196", 3, 3, 2, "both", "exact")],
+      give: [ML("zard223", 1, 1, 0, "trade_wants"), ML("pidgeot164", 1, 6, 2, "both")] },
+    { friend: "lee", kind: "two_way",
+      get: LEE_GET.map((e) => (e === "fezan038" || e === "prime157" || e === "seal156" ? ML(e, 1, 1, 0, "trade_wants", "exact") : ML(e, 1, 1, 1, "want_list", "exact"))),
+      give: [ML("boss172", 2, 1, 1, "want_list"), ML("moon251", 1, 1, 0, "trade_wants")] },
+    { friend: "kim", kind: "has_what_you_want",
+      get: [ML("arven166r", 2, 1, 1, "want_list", "any_finish"), ML("kirlia068", 1, 2, 2, "want_list", "exact"), ML("mew151", 1, 1, 0, "trade_wants", "exact")], give: [] },
+    { friend: "sam", kind: "wants_what_you_have", get: [], give: [ML("gen170", 2, 4, 4, "want_list"), ML("nest181", 3, 2, 0, "trade_wants")] },
+  ];
+  if (mode === "emptylist") {
+    MATCHES.forEach((m) => { m.give = []; m.kind = "has_what_you_want"; });
+    MATCHES = MATCHES.filter((m) => m.get.length);
+  }
+  if (mode === "nofriends") { FRIENDS = []; MATCHES = []; TRADES = []; LOANS_STATIC = []; UPDATES = []; }
+}
+
+// ---------- Helpers ----------
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fr = (id) => FR[id] || { id, name: "Someone", handle: "", open: false };
+const ini = (n) => n.split(/\s+/).map((p) => p[0]).join("").slice(0, 2).toUpperCase();
+const sum = (lines) => lines.reduce((a, l) => a + (l.n ?? l.copies ?? 0), 0);
+const count = (n) => (n === 1 ? "1 card" : `${n} cards`);
+const money = (c) => "$" + (c / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const cardName = (e) => `${ED[e].name} (${ED[e].set})`;
+const edLabel = (e) => `${ED[e].set} · ${ED[e].fin}`;
+const locById = (id) => LOCS.find((l) => l.id === id);
+const locName = (id) => (locById(id) || { name: "Somewhere" }).name;
+const tradeById = (id) => TRADES.find((t) => t.id === id);
+const ACC = { exact: "Exact", any_finish: "Any finish", same_name: "Same name" };
+const KIND = { two_way: "Two-way match", has_what_you_want: "You could buy", wants_what_you_have: "You could sell" };
+const WA = { edition: "This exact card", printing: "Any finish", identity: (name) => `Any card named ${name}` };
+const waLabel = (w) => (w.accept === "identity" ? WA.identity(ED[w.e].name) : WA[w.accept]);
+
+// ---------- Locations and the Trade List ----------
+function effectivelyForTrade(loc) {
+  if (loc.deck) return false;
+  for (let l = loc; l; l = l.parent ? locById(l.parent) : null) if (l.forTrade) return true;
+  return false;
+}
+function reservingLines() {
+  const out = [];
+  for (const t of TRADES) {
+    if (t.youConfirmed) continue;
+    if ((t.role === "proposer" && (t.state === "proposed" || t.state === "accepted")) || (t.role === "recipient" && t.state === "accepted")) out.push(...t.give);
+  }
+  return out;
+}
+function perLocs(e, res, taken = {}) {
+  const per = [];
+  for (const l of LOCS) {
+    if (!effectivelyForTrade(l) || !l.cards[e]) continue;
+    const r = res.filter((x) => x.e === e && x.pick === l.id && !x.stale).reduce((a, x) => a + x.n, 0);
+    per.push({ id: l.id, n: Math.max(0, l.cards[e] - r - (taken[e + "|" + l.id] || 0)) });
+  }
+  return per;
+}
+function listableMap() {
+  const res = reservingLines(); const byLoc = {}; const total = {}; const eds = new Set();
+  LOCS.forEach((l) => Object.keys(l.cards).forEach((e) => eds.add(e)));
+  for (const e of eds) {
+    const reserved = res.filter((r) => r.e === e).reduce((a, r) => a + r.n, 0);
+    const all = LOCS.reduce((a, l) => a + (l.cards[e] || 0), 0);
+    const cap = Math.max(0, all - reserved);
+    const per = perLocs(e, res);
+    const s = per.reduce((a, p) => a + p.n, 0); const lst = Math.min(s, cap); let diff = s - lst;
+    for (let i = per.length - 1; i >= 0 && diff > 0; i--) { const d = Math.min(per[i].n, diff); per[i].n -= d; diff -= d; }
+    total[e] = lst;
+    per.forEach((p) => { if (p.n > 0) (byLoc[p.id] ||= {})[e] = p.n; });
+  }
+  return { byLoc, total };
+}
+const listable = (e) => listableMap().total[e] || 0;
+function tradeListCount() { return Object.values(listableMap().total).reduce((a, n) => a + n, 0); }
+function assignPicks(lines) {
+  const res = reservingLines(); const taken = {};
+  for (const l of lines) {
+    if (l.pick && !l.stale) continue;
+    const per = perLocs(l.e, res, taken);
+    const hit = per.find((p) => p.n >= l.n) || LOCS.find((x) => x.cards[l.e] > 0) && { id: LOCS.find((x) => x.cards[l.e] > 0).id };
+    l.pick = hit ? hit.id : null; l.stale = null;
+    if (hit) taken[l.e + "|" + hit.id] = (taken[l.e + "|" + hit.id] || 0) + l.n;
+  }
+}
+function suggestFor(line) { const c = LOCS.filter((x) => x.id !== line.pick && !x.deck && x.cards[line.e] > 0); const o = c.find(effectivelyForTrade) || c[0]; return o ? o.id : "uns"; }
+
+// ---------- Trade derivations (pure) ----------
+const anyStale = (t) => t.give.some((l) => l.stale);
+function waiting(t) {
+  if (t.state === "proposed" && t.role === "recipient") return "answer";
+  if (t.state === "accepted" && !t.youConfirmed && anyStale(t)) return "fix_picks";
+  if (t.state === "accepted" && t.theyConfirmed && !t.youConfirmed) return "confirm_swap";
+  return null;
+}
+function section(t) {
+  if (waiting(t)) return "needs_you";
+  if (t.state === "closed") return "history";
+  if (t.state === "accepted" && !t.youConfirmed) return "to_swap";
+  return "pending";
+}
+function cashOnlyBlocked(t) { return t.state === "proposed" && t.role === "recipient" && !t.get.length && !!t.cash && t.cash.payer === "them" && !fr(t.friend).open; }
+function cashLine(t) {
+  if (!t.cash) return "";
+  const n = fr(t.friend).name;
+  return t.cash.payer === "them" ? `${n} pays you ${money(t.cash.cents)}` : `You pay ${n} ${money(t.cash.cents)}`;
+}
+function headline(t) {
+  const n = fr(t.friend).name; const c = t.cash;
+  if (t.state === "proposed") {
+    if (t.role === "recipient") {
+      if (t.counterOf) return `${n} countered your Trade Proposal`;
+      if (!t.get.length && c && c.payer === "them") return `${n} would pay ${money(c.cents)} for ${sum(t.give)} of your cards`;
+      if (!t.give.length) return `${n} wants to give you ${count(sum(t.get))}`;
+      return `${n} sent you a Trade Proposal`;
+    }
+    return `Waiting for ${n} to answer`;
+  }
+  if (t.state === "accepted") {
+    if (!t.youConfirmed && !t.theyConfirmed) return !t.get.length ? `Ready to give ${n} ${count(sum(t.give))}` : `Ready to swap with ${n}`;
+    if (t.theyConfirmed && !t.youConfirmed) return `${n} confirmed the swap`;
+    return `Waiting for ${n} to confirm the swap`;
+  }
+  const you = t.closedBy === "you";
+  switch (t.closed) {
+    case "swapped": return `Swapped with ${n}`;
+    case "withdrawn": return you ? "You withdrew this Trade Proposal" : `${n} withdrew this Trade Proposal`;
+    case "declined": return you ? "You declined" : `${n} declined`;
+    case "cancelled": return t.closedBy === "you" ? "You cancelled this Trade" : t.closedBy === "them" ? `${n} cancelled this Trade` : "This Trade was cancelled";
+    case "countered": return you ? "You countered this" : `${n} countered this`;
+  }
+  return n;
+}
+function subline(t) {
+  const g = t.give.length ? count(sum(t.give)) : "nothing"; const r = t.get.length ? count(sum(t.get)) : "nothing";
+  return `You give ${g} · You get ${r}` + (t.cash ? ` · ${cashLine(t)}` : "");
+}
+function note(t) {
+  const n = fr(t.friend).name;
+  if (anyStale(t)) return "A pick is out of date.";
+  if (t.theyConfirmed && !t.youConfirmed) return `${n} confirmed the swap. Confirm yours once you have the cards.`;
+  if (t.state === "accepted" && !t.youConfirmed && !t.theyConfirmed) return "Swap the cards in person, then confirm.";
+  if (cashOnlyBlocked(t)) return `${n} isn't open to cash offers, so you can accept or decline this, but not counter it.`;
+  return "";
+}
+function estimate(lines) {
+  const tot = sum(lines); if (!tot) return "Nothing";
+  let priced = 0, amt = 0;
+  for (const l of lines) { const p = ED[l.e].price; if (p != null) { priced += l.n; amt += p * l.n; } }
+  if (!priced) return "No estimate for these cards";
+  const m = "$" + amt.toFixed(2);
+  return priced === tot ? `Estimated ${m}` : `Estimated ${m} for ${priced} of ${tot} cards`;
+}
+function wantText(l, side) {
+  if (l.origin === "want_list" || l.origin === "both") return `${l.need} wanted (${l.deck} for Decks)`;
+  return `${l.need} wanted (${side === "get" ? "on your list" : "on their list"})`;
+}
+function joinParts(a) { return a.length <= 1 ? a.join("") : a.slice(0, -1).join(", ") + " and " + a[a.length - 1]; }
+function cancelSentence(fid) {
+  const loans = LOANS_STATIC.filter((l) => l.friend === fid && !l.handed).length;
+  const props = TRADES.filter((t) => t.friend === fid && t.state === "proposed").length;
+  const unsw = TRADES.filter((t) => t.friend === fid && t.state === "accepted" && !t.youConfirmed && !t.theyConfirmed).length;
+  const half = TRADES.filter((t) => t.friend === fid && t.state === "accepted" && (t.youConfirmed || t.theyConfirmed) && !(t.youConfirmed && t.theyConfirmed)).length;
+  const parts = [];
+  if (loans) parts.push(loans === 1 ? "1 open Loan that hasn't been handed over" : `${loans} open Loans that haven't been handed over`);
+  if (props) parts.push(props === 1 ? "1 Trade Proposal" : `${props} Trade Proposals`);
+  if (unsw) parts.push(unsw === 1 ? "1 Trade that hasn't been swapped" : `${unsw} Trades that haven't been swapped`);
+  let s = parts.length ? `This cancels ${joinParts(parts)}.` : "";
+  if (half) s += (s ? " " : "") + (half === 1 ? "1 Trade that one of you has confirmed stays open so it can finish." : `${half} Trades that one of you has confirmed stay open so they can finish.`);
+  return s;
+}
+function discoveryRows() {
+  const rank = { two_way: 0, has_what_you_want: 1, wants_what_you_have: 2 };
+  return MATCHES.filter((m) => FRIENDS.some((f) => f.id === m.friend))
+    .sort((a, b) => rank[a.kind] - rank[b.kind] || fr(a.friend).name.localeCompare(fr(b.friend).name) || fr(a.friend).handle.localeCompare(fr(b.friend).handle));
+}
+const waitingTrades = () => TRADES.filter((t) => section(t) === "needs_you");
+const waitingLoans = () => LOANS_STATIC.filter((l) => l.section === "needs_you");
+
+// ---------- State, URL and navigation ----------
+const VARIANTS = { A: "Trades tab", B: "Inside Loans", C: "Where the cards are" };
+const KEYS = Object.keys(VARIANTS);
+const SCREENS = ["home", "trades", "discovery", "match", "friendlist", "mylist", "draft", "trade", "wantlist", "collection", "settings", "catalog", "decks", "loans", "missing", "loanstub"];
+const qs = new URLSearchParams(location.search);
+const opt = (k, ok, d) => (ok.includes(qs.get(k)) ? qs.get(k) : d);
+const st = {
+  variant: opt("variant", KEYS, "A"), framed: qs.get("frame") === "phone",
+  screen: SCREENS.includes(qs.get("screen")) ? qs.get("screen") : "home", trade: qs.get("trade"), friend: qs.get("friend"),
+  dest: opt("dest", ["unsorted", "last", "none"], "unsorted"), undo: opt("undo", ["none", "toast", "screen"], "toast"),
+  draftMode: opt("draft", ["tray", "one"], "tray"), data: opt("data", ["usual", "nofriends", "emptylist"], "usual"),
+  loc: "b3h", open: {}, tf: "all", tlf: "all", wl: "buy", drawer: null, menu: null, dlg: null, panel: null, cdraft: null, err: null, locMsg: null, loanId: null, confirm: null, fq: "",
+};
+seed(st.data);
+const hist = [];
+const snap = () => ({ screen: st.screen, trade: st.trade, friend: st.friend, loc: st.loc, wl: st.wl });
+const scr = () => (st.screen === "home" ? (st.variant === "C" ? "discovery" : "trades") : st.screen);
+const curFriend = () => st.friend || (discoveryRows()[0] || {}).friend || (FRIENDS[0] || {}).id || "ash";
+function syncUrl() {
+  const p = new URLSearchParams({ variant: st.variant, screen: st.screen });
+  if (st.screen === "trade" && st.trade) p.set("trade", st.trade);
+  if (["match", "friendlist", "draft"].includes(st.screen) && st.friend) p.set("friend", st.friend);
+  if (st.framed) p.set("frame", "phone");
+  p.set("dest", st.dest); p.set("undo", st.undo); p.set("draft", st.draftMode); p.set("data", st.data);
+  history.replaceState(null, "", "?" + p);
+}
+function go(screen, extra = {}, replace = false) {
+  if (st.screen === "draft" && st.cdraft && screen !== "draft") { st.dlg = { kind: "discardCounter", next: { screen, extra, replace } }; st.menu = null; st.drawer = null; return render(); }
+  if (!replace) hist.push(snap());
+  if (screen !== "draft") st.cdraft = null;
+  Object.assign(st, { screen }, extra);
+  st.drawer = null; st.menu = null; st.err = null; st.dlg = null; st.locMsg = null;
+  render(); window.scrollTo(0, 0); document.getElementById("app").scrollTop = 0;
+}
+function toast(msg, withUndo = false) {
+  document.querySelectorAll(".toast").forEach((t) => t.remove());
+  const t = document.createElement("div"); t.className = "toast"; t.setAttribute("role", "status");
+  t.innerHTML = `<span>${esc(msg)}</span>${withUndo ? `<button class="btn small" data-a="undotoast">Undo</button>` : ""}`;
+  document.body.appendChild(t); setTimeout(() => t.remove(), withUndo ? 8000 : 2800);
+}
+function resetAll() { seed(st.data); hist.length = 0; Object.assign(st, { screen: "home", trade: null, friend: null, cdraft: null, drawer: null, menu: null, dlg: null, panel: null, err: null, open: {}, locMsg: null }); }
+
+// ---------- Small view helpers ----------
+const back = (label = "‹ Back") => `<button class="linkish back" data-back data-a="back">${label}</button>`;
+const art = `<span class="art"></span>`;
+const openBadge = (f) => (f.open ? `<span class="pill gold">Open to cash offers</span>` : "");
+const switchRow = () => `<div class="swrow"><button role="switch" aria-checked="${ME.openToCash}" aria-label="Open to cash offers" data-a="cashsw"></button><span><b>Open to cash offers</b><div class="help">Let Friends send you Trade Proposals where one side gives only cash.</div></span></div>`;
+function lineHTML(l, o = {}) {
+  const e = ED[l.e]; let sub = "";
+  if (l.stale) sub = `<div class="warnline">⚠ ${esc(locName(l.pick))} has none now · take it from ${esc(locName(l.stale.suggest))}</div>`;
+  else if (o.from && l.pick) sub = `<div class="src">From ${esc(locName(l.pick))}</div>`;
+  return `<div class="ln">${art}<span class="grow"><div class="name">${esc(e.name)}</div><div class="meta">${esc(edLabel(l.e))}</div>${sub}</span><b class="num">×${l.n}</b></div>`;
+}
+const sidePanel = (title, lines, o = {}) => `<div class="panel"><div class="panel-h"><h2 class="grow">${title}</h2></div>${lines.map((l) => lineHTML(l, o)).join("") || `<div class="ln"><span class="muted">Nothing</span></div>`}<div class="foot">${esc(estimate(lines))}</div></div>`;
+const rowsOrNone = (rows, none) => rows.join("") || `<div class="placeholder">${none}</div>`;
+
+// ---------- Shell ----------
+function currentTab() {
+  const s = scr(), v = st.variant;
+  if (s === "collection" || (v !== "A" && s === "mylist")) return "collection";
+  if (s === "decks" || s === "wantlist" || (v === "C" && s === "discovery")) return "decks";
+  if (s === "catalog") return "catalog";
+  if (s === "missing") return "missing";
+  if (v === "A") return s === "loans" ? "loans" : ["trades", "discovery", "mylist", "trade", "match", "friendlist", "draft"].includes(s) ? "trades" : "";
+  if (v === "B") return ["trades", "discovery", "trade", "match", "friendlist", "draft", "loanstub"].includes(s) ? "loans" : "";
+  return s === "loans" || s === "loanstub" ? "loans" : "";
+}
+function titleOf() {
+  const s = scr(), v = st.variant;
+  return { trades: v === "B" ? "Loans" : "Trades", discovery: v === "C" ? "Want List" : "Find trades", match: "Friend", friendlist: "Trade List", mylist: v === "A" ? "Trades" : "Collection", draft: "Draft", trade: "Trade",
+    wantlist: "Want List", collection: "Collection", settings: "Settings", catalog: "Catalog", decks: "Decks", loans: "Loans", missing: "Missing cards", loanstub: "Loan" }[s] || "";
+}
+function acct() {
+  return `<span class="menu"><button class="avatar" aria-label="Account" data-a="menu" data-v="acct">R</button>${st.menu === "acct" ? `<div class="menu-pop"><button data-a="go" data-v="settings">Settings</button>${st.variant === "C" ? `<button data-a="go" data-v="trades">Trades</button>` : ""}<button class="phone-only" data-a="tab" data-v="missing">Missing cards</button></div>` : ""}</span>`;
+}
+const draftsWithContent = () => Object.values(DRAFTS).filter(hasContent);
+function headerRight() {
+  const n = waitingLoans().length + waitingTrades().length; const one = st.draftMode === "one" ? draftsWithContent()[0] : null;
+  return `${one ? `<button class="pill gold draft-pill" data-a="propose" data-v="${one.friend}">Draft with ${esc(fr(one.friend).name)} · ${count(sum(one.give) + sum(one.get))}</button>` : ""}<button class="bell" data-a="drawer" data-v="inbox" aria-label="Inbox">🔔${n ? `<span class="badge">${n}</span>` : ""}</button><button class="bell" data-a="drawer" data-v="friends" aria-label="Friends">☺</button>${acct()}`;
+}
+function tray() {
+  if (st.draftMode !== "tray") return "";
+  const ds = draftsWithContent(); if (!ds.length) return "";
+  return `<div class="tray"><b>Drafts</b>${ds.map((d) => `<span class="grp"><span>${esc(fr(d.friend).name)} · ${count(sum(d.give) + sum(d.get))}</span><button class="btn small" data-a="propose" data-v="${d.friend}">Review</button></span>`).join("")}</div>`;
+}
+function shell() {
+  const v = st.variant, cur = currentTab(); const nT = waitingTrades().length, nL = waitingLoans().length;
+  const badge = { A: { trades: nT }, B: { loans: nT + nL }, C: { loans: nL } }[v];
+  const ico = { collection: "▦", decks: "❏", catalog: "⌕", loans: "⇄", trades: "⇆", missing: "?" };
+  const lbl = { collection: "Collection", decks: "Decks", catalog: "Catalog", loans: "Loans", trades: "Trades", missing: "Missing cards" };
+  const desk = v === "A" ? ["collection", "decks", "catalog", "loans", "trades", "missing"] : ["collection", "decks", "catalog", "loans", "missing"];
+  const phone = v === "A" ? ["collection", "decks", "catalog", "loans", "trades"] : ["collection", "decks", "catalog", "loans"];
+  const cnt = (id) => (badge[id] || 0);
+  return `<header class="hdr"><span class="word"><b>◆</b>PrizeCheck</span><nav class="tabs">${desk.map((id) => `<button class="tab" data-a="tab" data-v="${id}" ${cur === id ? 'aria-current="page"' : ""}>${lbl[id]}${cnt(id) ? ` <span class="count">${cnt(id)}</span>` : ""}</button>`).join("")}</nav>${headerRight()}</header>
+  <header class="phonehdr"><span class="t grow">${esc(titleOf())}</span>${headerRight()}</header>
+  <main class="page">${body()}</main>
+  <nav class="tabbar">${phone.map((id) => `<button data-a="tab" data-v="${id}" ${cur === id ? 'aria-current="page"' : ""}><span class="ico">${ico[id]}</span>${lbl[id]}${cnt(id) ? `<span class="badge">${cnt(id)}</span>` : ""}</button>`).join("")}</nav>${tray()}`;
+}
+function body() {
+  const s = scr();
+  const fn = { trades: tradesPage, discovery: discoveryPage, match: matchPage, friendlist: friendListPage, mylist: mylistPage, draft: draftPage, trade: tradePage, wantlist: () => wantlistPage(st.wl),
+    collection: collectionPage, settings: settingsPage, catalog: catalogPage, decks: decksPage, loanstub: loanStub,
+    loans: () => `<div class="placeholder">Loans (unchanged; see the Friends and Loans prototype)</div>`, missing: () => `<div class="placeholder">Missing cards (unchanged)</div>` }[s];
+  return fn();
+}
+function tabTarget(id) {
+  const v = st.variant;
+  if (id === "loans") return v === "B" ? "trades" : "loans";
+  return id;
+}
+
+// ---------- Trades list ----------
+function tradeRow(t, tag) {
+  const f = fr(t.friend); const needs = waiting(t);
+  return `<button class="item" data-a="trade" data-v="${t.id}"><span class="dot" ${needs ? "" : 'style="visibility:hidden"'}></span><span class="ini">${esc(ini(f.name))}</span><span class="grow"><b>${esc(headline(t))}</b>${tag ? ` <span class="tag">Trade</span>` : ""}<div class="subtle ellip">${esc(subline(t))}</div></span><span class="when">${esc(t.state === "closed" ? t.when : t.waited)}</span></button>`;
+}
+function loanRow(l) {
+  const f = fr(l.friend);
+  return `<button class="item" data-a="loan" data-v="${l.id}"><span class="dot" ${l.section === "needs_you" ? "" : 'style="visibility:hidden"'}></span><span class="ini">${esc(ini(f.name))}</span><span class="grow"><b>${esc(l.headline)}</b> <span class="tag">Loan</span><div class="subtle ellip">${esc(l.sub)}</div></span></button>`;
+}
+const groupPanel = (title, rows) => (rows.length ? `<div class="panel gap"><div class="sect-h">${title}</div>${rows.join("")}</div>` : "");
+const historyBlock = (rows) => (rows.length ? `<details class="hist gap"><summary>History · ${rows.length}</summary><div class="panel">${rows.join("")}</div></details>` : "");
+function tradesList() {
+  if (!TRADES.length) return `<div class="placeholder gap">No Trades yet.</div>`;
+  const rows = (sec) => TRADES.filter((t) => section(t) === sec).map((t) => tradeRow(t, false));
+  return groupPanel("Needs you", rows("needs_you")) + groupPanel("To swap", rows("to_swap")) + groupPanel("Pending", rows("pending")) + historyBlock(rows("history"));
+}
+function segA(active) {
+  const b = (id, label) => `<button aria-pressed="${active === id}" data-a="sw" data-v="${id}">${label}</button>`;
+  return `<div class="filter"><div class="seg">${b("trades", "Trades")}${b("discovery", "Find trades")}${b("mylist", "My Trade List")}</div></div>`;
+}
+function tradesPage() {
+  const v = st.variant;
+  if (v === "A") return `<h1>Trades</h1>${segA("trades")}${tradesList()}`;
+  if (v === "C") return `${back()}<div class="row"><h1 class="grow">Trades</h1><button class="linkish" data-a="go" data-v="discovery">Find trades</button></div>${tradesList()}`;
+  const tf = st.tf; const fb = (id, label) => `<button aria-pressed="${tf === id}" data-a="tf" data-v="${id}">${label}</button>`;
+  const rowsFor = (sec) => [...(tf === "trades" ? [] : LOANS_STATIC.filter((l) => l.section === sec).map(loanRow)), ...(tf === "loans" ? [] : TRADES.filter((t) => section(t) === sec).map((t) => tradeRow(t, true)))];
+  const hrows = tf === "loans" ? [] : TRADES.filter((t) => section(t) === "history").map((t) => tradeRow(t, true));
+  const body = groupPanel("Needs you", rowsFor("needs_you")) + groupPanel("Out now", rowsFor("out_now")) + groupPanel("To swap", rowsFor("to_swap")) + groupPanel("Pending", rowsFor("pending")) + historyBlock(hrows);
+  return `<div class="row"><h1 class="grow">Loans and Trades</h1><button class="btn" data-a="go" data-v="discovery">Find trades</button></div><div class="filter"><div class="seg">${fb("all", "All")}${fb("loans", "Loans")}${fb("trades", "Trades")}</div></div>${body || `<div class="placeholder gap">No Trades yet.</div>`}`;
+}
+function loanStub() { return `${back()}<div class="placeholder">Loan screen (see the Friends and Loans prototype)</div>`; }
+
+// ---------- Trade screen ----------
+function tradePage() {
+  const t = tradeById(st.trade); if (!t) return tradesPage();
+  const f = fr(t.friend); const v = st.variant; const n = note(t);
+  const orig = t.counterOf ? tradeById(t.counterOf) : null;
+  const promised = (t.role === "proposer" && (t.state === "proposed" || t.state === "accepted")) || t.state === "accepted";
+  const showFrom = promised && !t.youConfirmed;
+  const party = `<div class="rowline"><span class="ini lg">${esc(ini(f.name))}</span><span class="grow"><b>Trade with ${esc(f.name)}</b> <span class="subtle">@${esc(f.handle)}</span></span>${t.counterOf ? `<span class="tag gold">Counter</span>${orig ? `<button class="linkish" data-a="trade" data-v="${orig.id}">${orig.role === "proposer" ? "See what you sent" : "See what they sent"}</button>` : ""}` : ""}${openBadge(f)}</div>`;
+  let tracker = "";
+  if (v === "B") {
+    const reached = t.state === "closed" ? (t.closed === "swapped" ? 3 : t.closed === "cancelled" && t.wasAccepted ? 2 : 1) : t.state === "accepted" ? 2 : 1;
+      const c = (i) => (i <= reached ? (t.state === "closed" || i < reached ? "done" : "now") : (t.state === "closed" ? "muted" : ""));
+    const sw = `${t.youConfirmed || t.closed === "swapped" ? "✓" : "·"} You · ${t.theyConfirmed || t.closed === "swapped" ? "✓" : "·"} ${esc(f.name)}`;
+    tracker = `<div class="steps"><div class="step ${c(1)}">Proposed<span class="who">by ${t.role === "proposer" ? "you" : esc(f.name)}</span></div><div class="step ${c(2)}">Accepted</div><div class="step ${c(3)}">Swapped<span class="who">${sw}</span></div></div>`;
+  }
+  const sides = `<div class="sides ${v === "B" ? "stack" : ""}">${sidePanel("You give", t.give, { from: showFrom })}${sidePanel("You get", t.get)}</div>`;
+  const cash = `<div class="panel gap"><div class="panel-h"><b>Cash</b><span class="grow">${esc(t.cash ? cashLine(t) : "No cash")}</span></div></div>`;
+  const errBox = st.err && st.err.trade === t.id ? `<div class="callout warn">${esc(st.err.text)}</div>` : "";
+  return `${back()}<h1>${esc(headline(t))}</h1>${party}${tracker}${n ? `<div class="callout">${esc(n)}</div>` : ""}${errBox}${sides}${cash}<div class="liability"><span class="tag warn">Placeholder · not final wording</span><span>PrizeCheck only records the cash amount you agree on. It doesn't take, hold or check any money, and isn't responsible for money that changes hands.</span></div>${tradeActions(t)}${undoCallout(t)}`;
+}
+function tradeActions(t) {
+  const n = fr(t.friend).name; const stale = anyStale(t); const sim = (k, label) => `<button class="btn small sim" data-a="sim" data-v="${k}">⟲ ${esc(label)}</button>`;
+  const more = (items) => `<span class="menu"><button class="btn" aria-label="More actions" data-a="menu" data-v="more">⋯</button>${st.menu === "more" ? `<div class="menu-pop">${items}</div>` : ""}</span>`;
+  let btns = "", sims = "";
+  if (t.state === "proposed" && t.role === "recipient") {
+    btns = `<button class="btn primary" data-a="accept">Accept</button>${cashOnlyBlocked(t) ? "" : `<button class="btn" data-a="counter">Counter</button>`}<button class="btn" data-a="decline">Decline</button>`;
+  } else if (t.state === "proposed") {
+    btns = `${stale ? `<button class="btn primary" data-a="fixpicks">Use suggested picks</button>` : ""}${more(`<button data-a="withdraw">Withdraw</button>`)}`;
+    sims = sim("accepts", `${n} accepts`) + sim("declines", `${n} declines`) + sim("counters", `${n} counters`);
+  } else if (t.state === "accepted" && !t.youConfirmed) {
+    btns = `${stale ? `<button class="btn primary" data-a="fixpicks">Use suggested picks</button>` : `<button class="btn primary" data-a="confirmopen">Confirm swap</button>`}${t.theyConfirmed ? "" : more(`<button data-a="canceldlg">Cancel Trade</button>`)}`;
+    if (!t.theyConfirmed) sims = sim("confirms", `${n} confirms the swap`) + sim("cancels", `${n} cancels`);
+  } else if (t.state === "accepted") {
+    sims = sim("confirms", `${n} confirms the swap`);
+  }
+  return `${btns ? `<div class="actions" style="padding-left:0;padding-right:0">${btns}</div>` : ""}${sims ? `<div class="actions" style="padding-left:0;padding-right:0;border-top:0">${sims}</div>` : ""}`;
+}
+function undoCallout(t) {
+  const sw = SWITCHES.find((s) => s.trade === t.id);
+  if (!sw || st.undo !== "screen") return "";
+  const dn = locName(sw.deck);
+  return sw.undone ? `<div class="callout">${esc(dn)} uses ${esc(cardName(sw.from))} again.</div>` : `<div class="callout">${esc(dn)} now uses ${esc(cardName(sw.to))} instead of ${esc(cardName(sw.from))}. <button class="btn small" data-a="undoscreen">Undo switch</button></div>`;
+}
+
+// ---------- Discovery, match page, Friend's Trade List ----------
+const kindTag = (m) => `<span class="tag gold">${KIND[m.kind]}</span>`;
+function matchHeadline(m) {
+  const n = fr(m.friend).name, g = m.get.length, w = m.give.length;
+  if (m.kind === "two_way") return `${n} has ${g} cards you want and wants ${w} of yours`;
+  if (m.kind === "has_what_you_want") return `${n} has ${g} cards you want`;
+  return `${n} wants ${w} of your cards`;
+}
+function mLine(l, side) {
+  const e = ED[l.e];
+  return `<div class="ln">${art}<span class="grow"><div class="name">${esc(e.name)}</div><div class="meta">${esc(edLabel(l.e))}</div><div class="meta">${esc(wantText(l, side))}</div></span>${side === "get" && l.accepts ? `<span class="tag">${ACC[l.accepts]}</span>` : ""}<b class="num">×${l.copies}</b></div>`;
+}
+function mSide(m, side, cap) {
+  const lines = m[side]; const shown = lines.slice(0, cap);
+  const more = lines.length - shown.length;
+  return `<div class="panel"><div class="panel-h"><h2 class="grow">${side === "get" ? "You get" : "You give"}</h2></div>${shown.map((l) => mLine(l, side)).join("") || `<div class="ln"><span class="muted">Nothing</span></div>`}${more > 0 ? `<div class="foot"><button class="btn small" data-a="match" data-v="${m.friend}">${more} more</button></div>` : ""}</div>`;
+}
+const mActions = (f) => `<div class="match-actions"><button class="btn primary" data-a="propose" data-v="${f.id}" data-prefill="1">Propose trade</button><button class="linkish" data-a="flist" data-v="${f.id}">See all of ${esc(f.name)}'s Trade List</button></div>`;
+function headInner(m) {
+  const f = fr(m.friend);
+  return `<span class="ini">${esc(ini(f.name))}</span><span class="grow"><span class="row" style="flex-wrap:wrap"><b>${esc(f.name)}</b><span class="subtle">@${esc(f.handle)}</span>${kindTag(m)}${openBadge(f)}</span><span class="meta" style="display:block">${esc(matchHeadline(m))}</span></span>`;
+}
+function matchRow(m) {
+  const f = fr(m.friend); const v = st.variant;
+  if (v === "B") {
+    const chips = (side) => { const ls = m[side]; return `<span class="chips">${ls.slice(0, 20).map((l) => `<span class="tag">${esc(ED[l.e].name)} ×${l.copies}</span>`).join("") || `<span class="subtle">Nothing</span>`}${ls.length > 20 ? `<span class="subtle">${ls.length - 20} more</span>` : ""}</span>`; };
+    return `<button class="match match-tile" data-friend="${m.friend}" data-a="match" data-v="${m.friend}"><span class="row"><span class="ini">${esc(ini(f.name))}</span><span class="grow"><b>${esc(f.name)}</b> <span class="subtle">@${esc(f.handle)}</span></span></span><span class="tags">${kindTag(m)}${openBadge(f)}</span><span>${esc(matchHeadline(m))}</span><span class="meta">You get</span>${chips("get")}<span class="meta">You give</span>${chips("give")}</button>`;
+  }
+  const body = `<div class="match-body"><div class="sides">${mSide(m, "get", 20)}${mSide(m, "give", 20)}</div>${mActions(f)}</div>`;
+  if (v === "A") {
+    const open = !!st.open[m.friend];
+    return `<div class="match" data-friend="${m.friend}"><button class="match-head" data-a="toggle" data-v="${m.friend}" aria-expanded="${open}">${headInner(m)}<span class="subtle">${open ? "▴" : "▾"}</span></button>${open ? body : ""}</div>`;
+  }
+  return `<div class="match" data-friend="${m.friend}"><div class="head-static">${headInner(m)}</div>${body}</div>`;
+}
+function discoveryBody() {
+  if (!FRIENDS.length) return `<div class="panel gap" style="padding:24px;display:grid;gap:12px;justify-items:start"><h2>Trade with Friends</h2><p class="muted" style="margin:0">Trading matches you with your Friends. Add a Friend to see who has cards you want.</p><button class="btn primary" data-a="drawer" data-v="friends">Add a Friend</button></div>`;
+  const rows = discoveryRows();
+  const banner = st.data === "emptylist" ? `<div class="callout">Your Trade List is empty, so Friends can't see anything to ask for. Mark a Location For trade in Collection.</div>` : "";
+  const list = rows.length ? (st.variant === "B" ? `<div class="tiles">${rows.map(matchRow).join("")}</div>` : rows.map(matchRow).join("")) : `<div class="placeholder gap">None of your Friends has cards you want or wants yours yet.</div>`;
+  return `<p class="lede" style="margin-top:16px">Friends who have cards you want, or want cards you have.</p>${banner}${list}`;
+}
+function discoveryPage() {
+  const v = st.variant;
+  if (v === "A") return `<h1>Trades</h1>${segA("discovery")}${discoveryBody()}`;
+  if (v === "B") return `${back("‹ Loans")}<h1>Find trades</h1>${discoveryBody()}`;
+  return wantlistPage("trade");
+}
+function matchPage() {
+  const id = curFriend(); const f = fr(id); const m = MATCHES.find((x) => x.friend === id);
+  if (!m) return `${back()}<h1>${esc(f.name)}</h1><div class="placeholder gap">No match with ${esc(f.name)} right now.</div><div class="match-actions"><button class="linkish" data-a="flist" data-v="${f.id}">See all of ${esc(f.name)}'s Trade List</button></div>`;
+  return `${back()}<div class="row"><h1 class="grow">${esc(f.name)}</h1></div><div class="tags gap">${kindTag(m)}${openBadge(f)}</div><p class="lede">${esc(matchHeadline(m))}</p><div class="sides ${st.variant === "B" ? "stack" : ""}">${mSide(m, "get", 9999)}${mSide(m, "give", 9999)}</div>${mActions(f)}`;
+}
+function flistHTML(fid) {
+  const f = fr(fid); const q = st.fq.trim().toLowerCase(); const list = FRIEND_LISTS[fid] || {};
+  const all = Object.entries(list).filter(([, n]) => n > 0);
+  if (!all.length) return `<div class="placeholder gap">${esc(f.name)} has nothing on their Trade List.</div>`;
+  const groups = {};
+  all.filter(([e]) => ED[e].name.toLowerCase().includes(q)).forEach(([e, n]) => (groups[ED[e].name] ||= []).push([e, n]));
+  const names = Object.keys(groups).sort((a, b) => a.localeCompare(b));
+  if (!names.length) return `<div class="placeholder gap">No cards match that name.</div>`;
+  const d = DRAFTS[fid];
+  return names.map((nm) => `<div class="panel gap"><div class="sect-h">${esc(nm)}</div>${groups[nm].map(([e, n]) => {
+    const inD = d ? d.get.find((l) => l.e === e) : null;
+    return `<div class="ln"><span class="grow"><div>${esc(edLabel(e))}</div></span><b class="num">×${n}</b>${inD ? `<span class="stepper"><button data-a="fstep" data-v="${e}|-1" aria-label="Fewer ${esc(cardName(e))}">−</button><span>${inD.n}</span><button data-a="fstep" data-v="${e}|1" aria-label="More ${esc(cardName(e))}">+</button></span>` : `<button class="btn small" data-a="fadd" data-v="${e}" ${onGive(fid, e) ? "disabled" : ""}>Add</button>`}</div>`;
+  }).join("")}</div>`).join("");
+}
+function friendListPage() {
+  const id = curFriend(); const f = fr(id);
+  return `${back()}<h1>${esc(f.name)}'s Trade List</h1><div class="gap"><input class="inp" id="fq" style="width:100%" aria-label="Search by card name" placeholder="Search by card name" data-in="fq" value="${esc(st.fq)}"></div><div id="flist">${flistHTML(id)}</div>`;
+}
+
+// ---------- Own Trade List and Collection ----------
+const TL_FOOT = `<p class="subtle" style="margin-top:16px">Cards promised to a Trade or Loan leave this list until they're released.</p>`;
+const TL_LEDE = `<p class="lede">Friends see the cards and counts, never where they are.</p>`;
+function tlRows() {
+  const lm = listableMap(); const rows = [];
+  for (const l of LOCS) for (const [e, n] of Object.entries(lm.byLoc[l.id] || {})) rows.push({ loc: l, e, n });
+  return rows;
+}
+const tlEmpty = () => `<div class="placeholder gap">Your Trade List is empty. Mark a Location For trade in Collection, and its cards show here.<div style="margin-top:12px"><button class="btn" data-a="tab" data-v="collection">Open Collection</button></div></div>`;
+const HIDDEN_MARK = "Hidden from Friends · still on your Trade List";
+const hiddenLines = () => LOCS.filter((l) => l.hidden && effectivelyForTrade(l)).map((l) => `<div class="callout">${esc(l.name)}: ${HIDDEN_MARK}</div>`).join("");
+function mylistPage() {
+  if (st.variant !== "A") return collectionPage();
+  const rows = tlRows();
+  let panels = "";
+  for (const l of LOCS) {
+    const rs = rows.filter((r) => r.loc.id === l.id); if (!rs.length) continue;
+    panels += `<div class="panel gap"><div class="panel-h"><h2 class="grow">${esc(l.name)}</h2>${l.hidden ? `<span class="tag">${HIDDEN_MARK}</span>` : ""}</div>${rs.map((r) => lineHTML({ e: r.e, n: r.n })).join("")}</div>`;
+  }
+  return `<h1>Trades</h1>${segA("mylist")}${switchRow()}${TL_LEDE}${rows.length ? panels + TL_FOOT : tlEmpty()}`;
+}
+function tlBody() {
+  const rows = tlRows(); const v = st.variant;
+  if (!rows.length) return `<h2>Trade List</h2>${TL_LEDE}${tlEmpty()}`;
+  const locs = [...new Set(rows.map((r) => r.loc.id))];
+  const shown = (st.tlf === "all" ? rows : rows.filter((r) => r.loc.id === st.tlf)).slice().sort((a, b) => ED[a.e].name.localeCompare(ED[b.e].name) || ED[a.e].set.localeCompare(ED[b.e].set));
+  const chips = v === "B" ? `<div class="filter"><button class="chip" aria-pressed="${st.tlf === "all"}" data-a="tlf" data-v="all">All</button>${locs.map((id) => `<button class="chip" aria-pressed="${st.tlf === id}" data-a="tlf" data-v="${id}">${esc(locName(id))}</button>`).join("")}</div>` : "";
+  let list;
+  if (v === "B") list = `<div class="panel gap">${shown.map((r) => `<div class="ln">${art}<span class="grow"><div class="name">${esc(ED[r.e].name)}</div><div class="meta">${esc(edLabel(r.e))}</div><div class="src">${esc(r.loc.name)}</div></span><b class="num">×${r.n}</b></div>`).join("")}</div>`;
+  else list = `<div class="gal">${shown.map((r) => `<div class="gtile"><span class="art"></span><div class="name">${esc(ED[r.e].name)}</div><div class="meta">${esc(edLabel(r.e))}</div><div class="row"><b class="num grow">×${r.n}</b></div><div class="src">${esc(r.loc.name)}</div></div>`).join("")}</div>`;
+  return `<h2>Trade List</h2>${TL_LEDE}${hiddenLines()}${chips}${list}${TL_FOOT}`;
+}
+function locNode(l, sel) {
+  const tags = (effectivelyForTrade(l) ? `<span class="tag gold">For trade</span>` : "") + (l.hidden ? `<span class="hid">🙈 Hidden</span>` : "");
+  return `<div class="loc" role="button" tabindex="0" data-a="loc" data-v="${l.id}" aria-current="${sel === l.id}" style="padding-left:${12 + (l.parent ? 16 : 0)}px"><span class="grow">${esc(l.name)}${l.deck ? ` <span class="subtle">(Deck)</span>` : ""}</span>${tags}</div>`;
+}
+function locPanel(l) {
+  const eff = effectivelyForTrade(l); const covered = l.parent && !l.forTrade && eff;
+  const rows = Object.entries(l.cards).filter(([, n]) => n > 0);
+  const sw = (label, on, a) => `<div class="ln"><span class="grow">${label}</span><button role="switch" aria-checked="${on}" aria-label="${label}" data-a="${a}" data-v="${l.id}"></button></div>`;
+  return `<div class="panel"><div class="panel-h"><h2 class="grow">${esc(l.name)}</h2>${eff && st.variant === "A" ? `<button class="linkish" data-a="sw" data-v="mylist">See your Trade List</button>` : ""}</div>${sw("For trade", eff, "lft")}${sw("Hide from Friends", l.hidden, "lhide")}
+    ${covered ? `<div class="ln"><span class="muted">For trade because ${esc(locName(l.parent))} is.</span></div>` : ""}${l.hidden && eff ? `<div class="ln"><span class="muted">${HIDDEN_MARK}</span></div>` : ""}
+    ${rows.map(([e, n]) => `<div class="ln">${art}<span class="grow"><div class="name">${esc(ED[e].name)}</div><div class="meta">${esc(edLabel(e))}</div></span><b class="num">×${n}</b><button class="btn small quiet" data-a="remove1" data-v="${e}">Remove 1</button></div>`).join("") || `<div class="ln"><span class="muted">No cards directly in this Location.</span></div>`}</div>${st.locMsg ? `<div class="callout warn">${st.locMsg}</div>` : ""}`;
+}
+function collectionPage() {
+  const v = st.variant; const tl = v !== "A" && scr() === "mylist";
+  const sel = tl ? "tl" : st.loc; const nCards = tradeListCount();
+  const tree = `<div class="panel tree">${LOCS.map((l) => locNode(l, sel)).join("")}${v !== "A" ? `<div class="loc" role="button" tabindex="0" data-a="tlnode" aria-current="${tl}"><span class="grow">Trade List</span><span class="tag">${nCards}</span></div>` : ""}<div class="loc" role="button" tabindex="0" data-a="loc" data-v="lent" aria-current="${sel === "lent"}"><span class="grow">Lent out · 3</span></div></div>`;
+  const main = tl ? tlBody() : st.loc === "lent" ? `<div class="placeholder">Lent out (see the Friends and Loans prototype)</div>` : locPanel(locById(st.loc) || LOCS[2]);
+  return `<h1>Collection</h1><div class="two">${tree}<div>${main}</div></div>`;
+}
+
+// ---------- Composer ----------
+function newDraft(fid, prefill) {
+  const d = { friend: fid, give: [], get: [], payer: "none", amount: "", err: null };
+  const m = prefill && MATCHES.find((x) => x.friend === fid);
+  if (m) { m.get.forEach((l) => d.get.push(G(l.e, Math.min(l.copies, l.need)))); m.give.forEach((l) => d.give.push(G(l.e, Math.min(l.copies, l.need)))); }
+  return d;
+}
+function hasContent(d) { return !!(d.give.length || d.get.length || (d.payer !== "none" && d.amount)); }
+const onGive = (fid, e) => !!(DRAFTS[fid] && DRAFTS[fid].give.some((l) => l.e === e));
+const curDraft = () => (st.cdraft ? st.cdraft : (DRAFTS[curFriend()] ||= newDraft(curFriend(), true)));
+function ensureDraft(fid, prefill, after) {
+  if (st.draftMode === "one") {
+    const other = Object.keys(DRAFTS).find((k) => k !== fid && hasContent(DRAFTS[k]));
+    if (other) { st.dlg = { kind: "discard", other, fid, prefill, after }; render(); return; }
+    Object.keys(DRAFTS).forEach((k) => { if (k !== fid) delete DRAFTS[k]; });
+  }
+  if (!DRAFTS[fid]) DRAFTS[fid] = newDraft(fid, prefill);
+  after(DRAFTS[fid]);
+}
+function maxFor(d, side, e) {
+  if (side === "give") return listable(e);
+  const orig = d.counterOf ? tradeById(d.counterOf) : null;
+  return (FRIEND_LISTS[d.friend][e] || 0) + (orig ? orig.get.filter((l) => l.e === e).reduce((a, l) => a + l.n, 0) : 0);
+}
+function dPanel(d, side) {
+  const f = fr(d.friend); const lines = d[side];
+  const rows = lines.map((l) => `<div class="ln">${art}<span class="grow"><div class="name">${esc(ED[l.e].name)}</div><div class="meta">${esc(edLabel(l.e))}</div><div class="src">Up to ${maxFor(d, side, l.e)}</div></span><span class="stepper"><button data-a="dstep" data-v="${side}|${l.e}|-1" aria-label="Fewer ${esc(cardName(l.e))}">−</button><span>${l.n}</span><button data-a="dstep" data-v="${side}|${l.e}|1" aria-label="More ${esc(cardName(l.e))}">+</button></span></div>`).join("");
+  return `<div class="panel"><div class="panel-h"><h2 class="grow">${side === "give" ? "You give" : "You get"}</h2></div>${rows || `<div class="ln"><span class="muted">Nothing yet</span></div>`}<div class="foot">${esc(estimate(lines))}</div><div class="actions"><button class="btn small" data-a="pickopen" data-v="${side}">${side === "give" ? "Add from your Trade List" : `Add from ${esc(f.name)}'s Trade List`}</button></div></div>`;
+}
+function draftPage() {
+  const d = curDraft(); const f = fr(d.friend); const cm = !!st.cdraft;
+  const empty = !d.give.length && !d.get.length;
+  const payBtn = (id, label) => `<button aria-pressed="${d.payer === id}" data-a="payer" data-v="${id}">${esc(label)}</button>`;
+  const cash = `<div class="panel gap"><div class="panel-h"><b>Cash</b><div class="seg">${payBtn("none", "No cash")}${payBtn("you", "You pay")}${payBtn("them", `${f.name} pays`)}</div>${d.payer !== "none" ? `<span class="row"><span>$</span><input class="inp" id="cash" inputmode="decimal" placeholder="0.00" aria-label="Cash amount" data-in="cash" value="${esc(d.amount)}" style="width:120px"></span>` : ""}</div></div>`;
+  return `${back()}<h1>${cm ? `Counter ${esc(f.name)}'s Trade Proposal` : `Trade Proposal to ${esc(f.name)}`}</h1><div class="sides ${st.variant === "B" ? "stack" : ""}">${dPanel(d, "give")}${dPanel(d, "get")}</div>${cash}<div class="liability"><span class="tag warn">Placeholder · not final wording</span><span>PrizeCheck only records the cash amount you agree on. It doesn't take, hold or check any money, and isn't responsible for money that changes hands.</span></div>${d.err ? `<div class="callout warn">${esc(d.err)}</div>` : ""}<div class="actions" style="padding-left:0;padding-right:0"><button class="btn primary" data-a="send" ${empty ? "disabled" : ""}>${cm ? "Send Counter" : "Send Trade Proposal"}</button>${empty ? `<span class="muted">Add at least one card to either side.</span>` : ""}</div><div class="actions" style="padding-left:0;padding-right:0;border-top:0"><button class="btn small sim" data-a="sim" data-v="copies">⟲ ${esc(f.name)}'s copies changed</button></div>`;
+}
+function sendDraft() {
+  const d = curDraft(); const f = fr(d.friend); const cm = !!st.cdraft; d.err = null;
+  const both = d.give.find((l) => d.get.some((g) => g.e === l.e));
+  if (both) { d.err = `${cardName(both.e)} can't be on both sides. Remove it from one side, then send again.`; return render(); }
+  let cash = null;
+  if (d.payer !== "none") {
+    const raw = d.amount.trim().replace(/[$,]/g, "");
+    if (!(/^\d+(\.\d{1,2})?$/.test(raw) && Number(raw) >= 0.01 && Number(raw) <= 999999.99)) { d.err = "Enter an amount from $0.01 to $999,999.99."; return render(); }
+    cash = { cents: Math.round(Number(raw) * 100), payer: d.payer };
+    if (cash.payer === "them" && !d.get.length && !f.open) { d.err = `${f.name} isn't open to cash offers, so ${f.name} can't give only cash. Add a card from ${f.name}'s Trade List, or remove the cash.`; return render(); }
+    if (cash.payer === "you" && !d.give.length && !f.open) { d.err = `${f.name} isn't open to cash offers, so you can't give only cash. Add a card from your Trade List, or remove the cash.`; return render(); }
+  }
+  for (const l of d.give) { const mx = maxFor(d, "give", l.e); if (l.n > mx) { d.err = mx === 0 ? `${cardName(l.e)} isn't on your Trade List now. Remove it, then send again.` : `You can trade only ${mx} ${cardName(l.e)} now. Lower it to ${mx}, then send again.`; return render(); } }
+  for (const l of d.get) { const mx = maxFor(d, "get", l.e); if (l.n > mx) { d.err = getErr(f, l.e, mx); return render(); } }
+  const give = d.give.map((l) => L(l.e, l.n)); assignPicks(give);
+  const id = "N" + (++SEQ);
+  TRADES.unshift(TR(id, d.friend, "proposer", "proposed", { give, get: d.get.map((l) => G(l.e, l.n)), cash, counterOf: cm ? d.counterOf : null, waited: "Just now" }));
+  if (cm) { const o = tradeById(d.counterOf); o.state = "closed"; o.closed = "countered"; o.closedBy = "you"; o.when = "Just now"; } else delete DRAFTS[d.friend];
+  st.cdraft = null; toast(cm ? `Counter sent to ${f.name}` : `Trade Proposal sent to ${f.name}`);
+  go("trade", { trade: id }, true);
+}
+const getErr = (f, e, mx) => (mx === 0 ? `${f.name} doesn't have ${cardName(e)} on their Trade List now. Remove it, then send again.` : `${f.name} can trade only ${mx} ${cardName(e)} now. Lower it to ${mx}, then send again.`);
+
+// ---------- Decks, Want List, Settings, Catalog ----------
+function decksPage() {
+  const decks = LOCS.filter((l) => l.deck);
+  return `<div class="row"><h1 class="grow">Decks</h1><button class="btn" data-a="go" data-v="wantlist">Want List</button></div><div class="deckcards">${decks.map((d) => `<div class="deckcard"><b>${esc(d.name)}</b><span class="muted">${sum(Object.entries(d.cards).map(([, n]) => ({ n })))} cards</span></div>`).join("")}</div>`;
+}
+function waChoices(w) { return [["edition", "This exact card"], ["printing", "Any finish"], ["identity", `Any card named ${ED[w.e].name}`]]; }
+function wantLine(w, i) {
+  const v = st.variant; const card = cardName(w.e);
+  let ctl = "";
+  if (v === "A") ctl = `<select class="inp" aria-label="Will accept for ${esc(card)}" data-ch="wacc" data-v="${i}">${waChoices(w).map(([k, lab]) => `<option value="${k}" ${w.accept === k ? "selected" : ""}>${esc(lab)}</option>`).join("")}</select>`;
+  if (v === "B" && w.accept !== "edition") ctl = `<span class="tag">${w.accept === "printing" ? "Any finish" : "Same name"}</span>`;
+  if (v === "C") ctl = `<span class="menu" style="display:inline-flex"><button class="tag" data-a="menu" data-v="wa:${i}">${esc(waLabel(w))} ▾</button>${st.menu === "wa:" + i ? `<div class="menu-pop" style="left:0;right:auto">${waChoices(w).map(([k, lab]) => `<button data-a="setwa" data-v="${i}|${k}">${esc(lab)}</button>`).join("")}</div>` : ""}</span>`;
+  const more = v === "B" ? `<span class="menu"><button class="btn small quiet" aria-label="More for ${esc(card)}" data-a="menu" data-v="wm:${i}">⋯</button>${st.menu === "wm:" + i ? `<div class="menu-pop"><button data-a="wadlg" data-v="${i}">Will accept…</button></div>` : ""}</span>` : "";
+  return `<div class="ln">${art}<span class="grow"><div class="name">${esc(ED[w.e].name)}</div><div class="meta">${esc(edLabel(w.e))}</div>${ctl ? `<div style="margin-top:4px">${ctl}</div>` : ""}</span><span class="need">${"Need " + w.need}</span>${more}</div>`;
+}
+function tradeWantRows() {
+  return TRADE_WANTS.map((w, i) => `<div class="ln">${art}<span class="grow"><div class="name">${esc(ED[w.e].name)}</div><div class="meta">${esc(edLabel(w.e))}</div></span><span class="stepper"><button data-a="twstep" data-v="${i}|-1" aria-label="Fewer ${esc(cardName(w.e))}">−</button><span>${w.n}</span><button data-a="twstep" data-v="${i}|1" aria-label="More ${esc(cardName(w.e))}">+</button></span></div>`).join("") || `<div class="ln"><span class="muted">No Trade Wants yet.</span></div>`;
+}
+const tradeWantsPanel = () => `<div class="panel gap"><div class="panel-h"><h2 class="grow">Trade Wants</h2></div><p class="lede" style="padding:0 16px">Cards you want in trades that no Deck names.</p>${tradeWantRows()}<div class="actions"><button class="btn small" data-a="twadd">Add a card</button></div></div>`;
+function wantlistPage(view) {
+  const v = st.variant; const isTrade = view === "trade";
+  const sb = (id, label) => `<button aria-pressed="${view === id}" data-a="wlview" data-v="${id}">${label}</button>`;
+  const seg = `<div class="filter"><div class="seg">${sb("buy", "Buy")}${sb("friends", "Get from Friends")}${v === "C" ? sb("trade", "Trade") : ""}</div></div>`;
+  const head = `${scr() === "wantlist" ? back("‹ Decks") : ""}<div class="row"><h1 class="grow">Want List</h1>${v === "B" ? `<button class="btn" data-a="twdlg">Trade Wants (${TRADE_WANTS.length})</button>` : ""}</div>${seg}`;
+  if (isTrade) {
+    return `${head}${switchRow()}<details open class="gap"><summary><b>Your Trade Wants · ${TRADE_WANTS.length}</b></summary><div class="panel" style="margin-top:8px">${tradeWantRows()}<div class="actions"><button class="btn small" data-a="twadd">Add a card</button></div></div></details>${discoveryBody()}`;
+  }
+  if (view === "friends") return `${head}<div class="placeholder gap">(see the Friends' cards prototype)</div>`;
+  const decks = ["d1", "d2"].map((id) => `<div class="panel gap"><div class="panel-h"><h2 class="grow">${esc(locName(id))}</h2></div>${WANTS.map((w, i) => ({ w, i })).filter((x) => x.w.deck === id).map((x) => wantLine(x.w, x.i)).join("")}</div>`).join("");
+  return `${head}${decks}${v === "A" ? tradeWantsPanel() : ""}`;
+}
+function settingsPage() {
+  const ph = (t) => `<div class="panel gap"><div class="panel-h"><h2 class="grow">${t}</h2></div><div class="ln"><span class="muted">(unchanged)</span></div></div>`;
+  return `<h1>Settings</h1>${ph("Want List counting")}${ph("Privacy")}${ph("Sign-ins")}${st.variant === "B" ? `<div class="panel gap"><div class="panel-h"><h2 class="grow">Trading</h2></div><div style="padding:0 16px 16px">${switchRow()}</div></div>` : ""}`;
+}
+const CAT = ["iono254", "candy191", "mew151"];
+function catalogPage() {
+  return `<h1>Catalog</h1><div class="tiles">${CAT.map((e) => `<button class="gtile" style="text-align:left;cursor:pointer" data-a="catopen" data-v="${e}"><span class="art"></span><b>${esc(ED[e].name)}</b><span class="meta">${esc(edLabel(e))}</span></button>`).join("")}</div>`;
+}
+
+// ---------- Dialogs, drawers and prototype panels ----------
+const DEST_IDS = ["unsorted", "b1", "b3h", "b3f", "spares", "d1", "d2", "d3"];
+const destLabel = (id) => (id === "unsorted" ? "Unsorted" : locName(id) + (locById(id).deck ? " (Deck)" : ""));
+const destLoc = (id) => (id === "unsorted" ? "uns" : id);
+const MSG_PICKS = "A pick is out of date. Use the suggested picks first.";
+const MSG_UNS = "Your top-level Unsorted can't hold cards. Choose another place for the cards you get, or make Unsorted a Storage Leaf in Collection.";
+const MSG_DECK = "Your Decks changed since you opened this, so nothing was swapped. Check the Deck switches and confirm again.";
+function confirmState(d) {
+  const t = tradeById(d.trade); const gets = t.get.length > 0;
+  const msgs = [];
+  if (anyStale(t)) msgs.push(MSG_PICKS);
+  if (gets && UNSORTED_BAD && d.dest === "unsorted") msgs.push(MSG_UNS);
+  if (d.deckChanged) msgs.push(MSG_DECK);
+  const blocked = (gets && d.dest === "") || anyStale(t) || (gets && UNSORTED_BAD && d.dest === "unsorted");
+  return { t, gets, msgs, blocked };
+}
+function confirmDlg(d) {
+  const { t, gets, msgs, blocked } = confirmState(d); const f = fr(t.friend);
+  const gl = t.give.map((l) => `<div class="ln"><span class="grow">${esc(cardName(l.e))} ×${l.n}${l.pick ? ` · from ${esc(locName(l.pick))}` : ""}</span></div>`).join("");
+  const rl = t.get.map((l) => `<div class="ln"><span class="grow">${esc(cardName(l.e))} ×${l.n}</span></div>`).join("");
+  const opts = (st.dest === "none" ? [`<option value="" ${d.dest === "" ? "selected" : ""}>Choose a place</option>`] : []).concat(DEST_IDS.map((id) => `<option value="${id}" ${d.dest === id ? "selected" : ""}>${esc(destLabel(id))}${st.dest === "last" && id === LAST_DEST ? " · last used" : ""}</option>`));
+  const offers = t.switchOffers.map((o) => `<div><label class="chk"><input type="checkbox" data-ch="sw" ${d.on ? "checked" : ""}>Use for ${esc(locName(o.deck))} instead of ${esc(cardName(o.from))}?</label><div class="meta" style="margin-left:24px">The Deck's list changes to the card you get.</div></div>`).join("");
+  return `<div class="scrim"><div class="dialog" role="dialog" aria-label="Confirm swap"><h2>Confirm swap with ${esc(f.name)}?</h2>
+    ${gl ? `<div><div class="meta">You give</div>${gl}</div>` : ""}${rl ? `<div><div class="meta">You get</div>${rl}</div>` : ""}
+    ${gets ? `<div class="field"><label for="dest">Put the cards you get in</label><select class="inp" id="dest" data-ch="dest">${opts.join("")}</select></div>` : ""}
+    ${offers}${t.cash ? `<p>${esc(cashLine(t))}</p>` : ""}${msgs.map((m) => `<div class="callout warn" style="margin-top:0">${esc(m)}</div>`).join("")}
+    <p class="muted">The swap can't be undone.</p>
+    <div class="row"><button class="btn" data-a="closedlg">Back</button><button class="btn primary" data-a="doconfirm" ${blocked ? "disabled" : ""}>Confirm swap</button></div>
+    <div class="row" style="justify-content:flex-start"><button class="btn small sim" data-a="dsim" data-v="moved">⟲ A card moved meanwhile</button><button class="btn small sim" data-a="dsim" data-v="unsorted">⟲ Unsorted can't hold cards</button><button class="btn small sim" data-a="dsim" data-v="deck">⟲ The Deck changed meanwhile</button></div></div></div>`;
+}
+function pickItems() {
+  const dl = st.dlg; const q = (dl.q || "").trim().toLowerCase(); let keys;
+  if (dl.side === "wants") keys = Object.keys(ED);
+  else {
+    const dr = curDraft(); const other = dl.side === "give" ? dr.get : dr.give;
+    keys = dl.side === "give" ? Object.keys(ED).filter((e) => listable(e) > 0) : Object.keys(FRIEND_LISTS[dr.friend] || {}).filter((e) => FRIEND_LISTS[dr.friend][e] > 0);
+    keys = keys.filter((e) => !other.some((l) => l.e === e));
+  }
+  return keys.filter((e) => ED[e].name.toLowerCase().includes(q));
+}
+function pickList() {
+  const groups = {}; pickItems().forEach((e) => (groups[ED[e].name] ||= []).push(e));
+  const names = Object.keys(groups).sort((a, b) => a.localeCompare(b));
+  return names.map((n) => `<div><div class="sect-h" style="padding:6px 0">${esc(n)}</div>${groups[n].map((e) => `<div class="ln"><span class="grow">${esc(edLabel(e))}</span><button class="btn small" data-a="padd" data-v="${e}">Add</button></div>`).join("")}</div>`).join("") || `<p class="muted">No cards match that name.</p>`;
+}
+function dialogHTML() {
+  const d = st.dlg; if (!d) return "";
+  const wrap = (inner, wide) => `<div class="scrim"><div class="dialog ${wide ? "wide" : ""}" role="dialog">${inner}</div></div>`;
+  if (d.kind === "confirm") return confirmDlg(d);
+  if (d.kind === "canceltrade") { const f = fr(tradeById(d.trade).friend); return wrap(`<h2>Cancel this Trade with ${esc(f.name)}? None of these cards stay promised.</h2><div class="row"><button class="btn" data-a="closedlg">Back</button><button class="btn primary" data-a="docancel">Cancel Trade</button></div>`); }
+  if (d.kind === "pick") {
+    const title = d.side === "wants" ? "Add a card" : d.side === "give" ? "Add from your Trade List" : `Add from ${fr(curDraft().friend).name}'s Trade List`;
+    return wrap(`<h2>${esc(title)}</h2><input class="inp" id="pq" aria-label="Search by card name" placeholder="Search by card name" data-in="pq" value="${esc(d.q)}"><div id="picklist">${pickList()}</div><div class="row"><button class="btn" data-a="closedlg">Done</button></div>`, true);
+  }
+  if (d.kind === "discard") return wrap(`<h2>Discard your draft with ${esc(fr(d.other).name)}?</h2><p>You can keep one draft at a time.</p><div class="row"><button class="btn" data-a="dkeep">Keep it</button><button class="btn primary" data-a="ddiscard">Discard and start</button></div>`);
+  if (d.kind === "discardCounter") return wrap(`<h2>Discard your Counter?</h2><div class="row"><button class="btn" data-a="closedlg">Keep editing</button><button class="btn primary" data-a="dcdiscard">Discard</button></div>`);
+  if (d.kind === "wadlg") {
+    const w = WANTS[d.i];
+    return wrap(`<h2>What will you accept for ${esc(cardName(w.e))} in trades?</h2><div class="radios">${waChoices(w).map(([k, lab]) => `<label><input type="radio" name="wa" value="${k}" data-ch="wasel" ${d.val === k ? "checked" : ""}> ${esc(lab)}</label>`).join("")}</div><div class="row"><button class="btn" data-a="closedlg">Back</button><button class="btn primary" data-a="wasave">Save</button></div>`);
+  }
+  if (d.kind === "twdlg") return wrap(`<div class="row"><h2 class="grow">Trade Wants</h2><button class="btn small quiet" data-a="closedlg" aria-label="Close">✕</button></div><p class="lede" style="margin:0">Cards you want in trades that no Deck names.</p><div class="panel">${tradeWantRows()}</div><div class="row"><button class="btn small" data-a="twadd">Add a card</button></div>`, true);
+  if (d.kind === "catalog") {
+    const rows = Object.entries(FRIEND_LISTS).filter(([fid, l]) => l[d.e] > 0 && FRIENDS.some((f) => f.id === fid));
+    return wrap(`<h2>${esc(ED[d.e].name)}</h2><div class="meta">${esc(edLabel(d.e))}</div><b>Friends with this on their Trade List</b>${rows.map(([fid, l]) => `<div class="ln"><span class="grow">${esc(fr(fid).name)} ×${l[d.e]}</span><button class="btn small" data-a="askt" data-v="${fid}|${d.e}" ${onGive(fid, d.e) ? "disabled" : ""}>Ask to trade</button></div>`).join("") || `<p class="muted">None of your Friends has this on their Trade List.</p>`}<div class="row"><button class="btn" data-a="closedlg">Close</button></div>`, true);
+  }
+  return "";
+}
+function inboxDrawer() {
+  const step = (t) => ({ answer: t.counterOf ? "Answer Counter" : "Answer", confirm_swap: "Confirm swap", fix_picks: "Fix picks" }[waiting(t)]);
+  const items = waitingTrades().map((t) => `<button class="item" data-a="trade" data-v="${t.id}"><span class="dot"></span><span class="grow"><b>${esc(fr(t.friend).name)}</b> · ${esc(step(t))}</span>›</button>`)
+    .concat(waitingLoans().map((l) => `<button class="item" data-a="loan" data-v="${l.id}"><span class="dot"></span><span class="grow"><b>${esc(fr(l.friend).name)}</b> · Answer</span>›</button>`));
+  return `<div class="scrim" data-a="closedrawer" style="place-items:stretch;padding:0"></div><aside class="drawer"><div class="drawer-h"><h2 class="grow">Inbox</h2><button class="btn small quiet" data-a="closedrawer" aria-label="Close">✕</button></div>
+    ${items.join("") || `<div class="item" style="cursor:default">You're all caught up.</div>`}
+    ${UPDATES.length ? `<div class="sect-h row"><span class="grow">Earlier</span><button class="linkish" data-a="clearups">Clear</button></div>${UPDATES.map((u) => `<div class="item read" style="cursor:default"><span class="grow">${esc(u.text)}</span><span class="when">${esc(u.when)}</span></div>`).join("")}` : ""}
+    ${st.variant === "C" ? `<div style="padding:12px 16px"><button class="btn" data-a="go" data-v="trades">All Trades ›</button></div>` : ""}</aside>`;
+}
+function friendsDrawer() {
+  const rows = FRIENDS.map((f) => {
+    const c = st.confirm && st.confirm.id === f.id ? st.confirm : null;
+    const sentence = c ? (c.kind === "remove" ? `Remove ${f.name} as a Friend?` : `Block ${f.name}? They won't be told.`) + " " + cancelSentence(f.id) : "";
+    return `<div class="item" style="cursor:default;flex-wrap:wrap"><span class="ini">${esc(ini(f.name))}</span><span class="grow"><button class="linkish" style="color:inherit;text-decoration:none" data-a="flist" data-v="${f.id}">${esc(f.name)}</button><div class="subtle">@${esc(f.handle)}</div></span><span class="menu"><button class="btn small quiet" aria-label="More for ${esc(f.name)}" data-a="menu" data-v="f:${f.id}">⋯</button>${st.menu === "f:" + f.id ? `<div class="menu-pop"><button data-a="fconfirm" data-v="remove|${f.id}">Remove Friend</button><button data-a="fconfirm" data-v="block|${f.id}">Block</button></div>` : ""}</span>${c ? `<div class="callout warn" style="flex-basis:100%;margin-top:0"><p style="margin:0 0 8px">${esc(sentence.trim())}</p><div class="row"><button class="btn small primary" data-a="fdo" data-v="${c.kind}|${f.id}">${c.kind === "remove" ? "Remove" : "Block"}</button><button class="btn small" data-a="fcancel">Cancel</button></div></div>` : ""}</div>`;
+  }).join("");
+  return `<div class="scrim" data-a="closedrawer" style="place-items:stretch;padding:0"></div><aside class="drawer"><div class="drawer-h"><h2 class="grow">Friends</h2><button class="btn small quiet" data-a="closedrawer" aria-label="Close">✕</button></div>${rows || `<div class="item" style="cursor:default">No Friends yet. Add a Friend by their Handle.</div>`}</aside>`;
+}
+const WORDING = [
+  ["PROMISED_TO_TRADE · Removal", "You promised copies of Pidgeot ex (OBF 164) to a Trade, so they can't all be removed. Nothing was removed. Remove fewer copies, or cancel the Trade first.", "Collection: Remove 1 on a card with a valid pick in that Location"],
+  ["PROMISED_TO_TRADE · Undo of an add", "Undo unavailable: you promised some of these copies to a Trade, so nothing was removed.", "Wording panel only"],
+  ["PROMISED_TO_TRADE · Edition reassignment", "You promised some of these copies to a Trade. Reassign fewer copies, or confirm the swap or cancel the Trade first.", "Wording panel only"],
+  ["Remove Friend and Block counts", "Remove Ash K. as a Friend? This cancels 1 open Loan that hasn't been handed over, 1 Trade Proposal and 1 Trade that hasn't been swapped. | Block Kim? They won't be told. This cancels 1 open Loan that hasn't been handed over and 2 Trade Proposals. 1 Trade that one of you has confirmed stays open so it can finish.", "Friends drawer, inline confirmation"],
+  ["NOT_TRADEABLE · you_give (send, Counter)", "You can trade only {n} {card} now. Lower it to {n}, then send again. (n = 0: {card} isn't on your Trade List now. Remove it, then send again.)", "Draft, on Send"],
+  ["NOT_TRADEABLE · you_get (send, Counter)", "{name} can trade only {n} {card} now. Lower it to {n}, then send again. (n = 0: {name} doesn't have {card} on their Trade List now. Remove it, then send again.)", "Draft, after the sim copies changed"],
+  ["NOT_TRADEABLE · at Accept", "You can trade only {n} {card} now, so you can't accept this. Decline it, or send a Counter. (n = 0: {card} isn't on your Trade List now, so you can't accept this. Decline it, or send a Counter.)", "Trade screen when Accept fails: propose to Ash from Find trades, then accept the proposal from Ash"],
+  ["CASH_ONLY_NOT_OPEN · their side", "{name} isn't open to cash offers, so {name} can't give only cash. Add a card from {name}'s Trade List, or remove the cash.", "Draft to Sam with Sam pays and no cards from Sam"],
+  ["CASH_ONLY_NOT_OPEN · your side", "{name} isn't open to cash offers, so you can't give only cash. Add a card from your Trade List, or remove the cash.", "Draft to Lee or Sam with You pay and no cards from you"],
+  ["PICKS_OUT_OF_DATE", MSG_PICKS, "Confirm swap dialog after the sim A card moved meanwhile; also the line warning and note"],
+  ["UNSORTED_UNAVAILABLE", MSG_UNS, "Confirm swap dialog after the sim Unsorted can't hold cards, with Unsorted chosen"],
+  ["DECK_SWITCH_CHANGED", MSG_DECK, "Confirm swap dialog after the sim The Deck changed meanwhile, with a ticked switch"],
+  ["DECK_NOT_FOR_TRADE", "A Deck can't be marked For trade.", "Collection, For trade switch on a Deck"],
+  ["LOCATION_FOR_TRADE_BY_PARENT", "{child} is For trade because {parent} is. Change it on {parent}.", "Collection, For trade switch on Binder 3 › Holos"],
+  ["INVALID_CASH", "Enter an amount from $0.01 to $999,999.99.", "Draft, on Send"],
+  ["TRADE_HAS_NO_CARDS", "Add at least one card to either side.", "Draft, hint beside the disabled Send button"],
+];
+function panelHTML() {
+  if (st.panel === "options") {
+    const grp = (k, legend, items) => `<fieldset><legend>${legend}</legend>${items.map(([val, lab]) => `<label><input type="radio" name="o-${k}" data-ch="opt" value="${k}|${val}" ${st[k] === val ? "checked" : ""}> ${lab}</label>`).join("")}</fieldset>`;
+    return `<div class="proto-panel" role="dialog" aria-label="Options"><h3>Options</h3>${grp("dest", "Received cards go to", [["unsorted", "Unsorted"], ["last", "Last place used"], ["none", "No default (choose each time)"]])}${grp("undo", "Undo of a Deck switch", [["none", "None"], ["toast", "Undo in the toast"], ["screen", "Undo switch on the Trade screen"]])}${grp("draftMode", "Drafts", [["tray", "One per Friend, kept while you browse"], ["one", "One draft at a time"]])}${grp("data", "Mock data", [["usual", "Usual"], ["nofriends", "No Friends"], ["emptylist", "Empty Trade List"]])}<button data-a="panel" data-v="options">Close</button></div>`;
+  }
+  if (st.panel === "wording") {
+    return `<div class="proto-panel" role="dialog" aria-label="Wording"><h3>Proposed wording</h3><table><tr><th>Code</th><th>Wording</th><th>Where it shows</th></tr>${WORDING.map(([c, w, where]) => `<tr><td>${esc(c)}</td><td>${esc(w)}</td><td>${esc(where)}</td></tr>`).join("")}</table><button data-a="panel" data-v="wording">Close</button></div>`;
+  }
+  return "";
+}
+function layerHTML() {
+  const dr = st.drawer === "inbox" ? inboxDrawer() : st.drawer === "friends" ? friendsDrawer() : "";
+  return dr + dialogHTML() + panelHTML();
+}
+
+// ---------- Actions ----------
+const pushUpdate = (text) => UPDATES.unshift({ text, when: "Just now" });
+function acceptTrade(t) {
+  const bad = t.give.find((l) => listable(l.e) < l.n);
+  if (bad) {
+    const n = listable(bad.e);
+    st.err = { trade: t.id, text: n === 0 ? `${cardName(bad.e)} isn't on your Trade List now, so you can't accept this. Decline it, or send a Counter.` : `You can trade only ${n} ${cardName(bad.e)} now, so you can't accept this. Decline it, or send a Counter.` };
+    return render();
+  }
+  assignPicks(t.give); t.state = "accepted"; st.err = null;
+  toast("Accepted. Swap the cards in person, then confirm."); render();
+}
+function closeTrade(t, reason, by, msg) { t.state = "closed"; t.closed = reason; t.closedBy = by; t.when = "Just now"; toast(msg); render(); }
+function simTrade(k) {
+  const t = tradeById(st.trade); const n = fr(t.friend).name;
+  if (k === "accepts") { t.state = "accepted"; assignPicks(t.give.filter((l) => !l.pick)); pushUpdate(`${n} accepted your Trade Proposal`); toast(headline(t)); return render(); }
+  if (k === "declines") { t.state = "closed"; t.closed = "declined"; t.closedBy = "them"; t.when = "Just now"; pushUpdate(`${n} declined your Trade Proposal`); toast(headline(t)); return render(); }
+  if (k === "counters") {
+    t.state = "closed"; t.closed = "countered"; t.closedBy = "them"; t.when = "Just now";
+    const id = "N" + (++SEQ);
+    TRADES.unshift(TR(id, t.friend, "recipient", "proposed", { counterOf: t.id, give: t.give.map((l) => L(l.e, l.n)), get: t.get.map((l) => G(l.e, l.n)), cash: t.cash ? { ...t.cash } : null, waited: "Just now" }));
+    pushUpdate(`${n} countered your Trade Proposal`); toast(headline(tradeById(id))); return go("trade", { trade: id });
+  }
+  if (k === "confirms") {
+    t.theyConfirmed = true; if (t.youConfirmed) { t.state = "closed"; t.closed = "swapped"; t.when = "Just now"; }
+    pushUpdate(`${n} confirmed the swap`); toast(headline(t)); return render();
+  }
+  if (k === "cancels") { t.wasAccepted = t.state === "accepted"; t.state = "closed"; t.closed = "cancelled"; t.closedBy = "them"; t.when = "Just now"; pushUpdate(`${n} cancelled this Trade`); toast(headline(t)); return render(); }
+}
+function removeCopies(l) {
+  const loc = (l.pick && locById(l.pick)) || LOCS.find((x) => x.cards[l.e] > 0); if (!loc) return;
+  loc.cards[l.e] = Math.max(0, (loc.cards[l.e] || 0) - l.n);
+}
+function doConfirm() {
+  const d = st.dlg; const cs = confirmState(d); const t = cs.t;
+  if (cs.blocked) return render();
+  t.give.forEach(removeCopies);
+  const dest = destLoc(d.dest);
+  if (cs.gets) { const loc = locById(dest); t.get.forEach((l) => { loc.cards[l.e] = (loc.cards[l.e] || 0) + l.n; }); LAST_DEST = d.dest; }
+  let sw = null;
+  if (t.switchOffers.length && d.on) { const o = t.switchOffers[0]; sw = { trade: t.id, deck: o.deck, from: o.from, to: o.to, n: o.n, undone: false }; SWITCHES.push(sw); }
+  t.youConfirmed = true; if (t.theyConfirmed) { t.state = "closed"; t.closed = "swapped"; t.when = "Just now"; }
+  const nGet = sum(t.get);
+  let msg = cs.gets ? `Swapped. ${nGet} ${nGet === 1 ? "card is" : "cards are"} in ${locName(dest) === "Somewhere" ? "Unsorted" : locName(dest)}.` : "Swapped. The cards you gave left your Collection.";
+  if (sw) msg += ` ${locName(sw.deck)} now uses ${cardName(sw.to)}.`;
+  st.dlg = null; toast(msg, !!sw && st.undo === "toast"); render();
+}
+function stepList(list, e, delta, mx) {
+  const l = list.find((x) => x.e === e); if (!l) return;
+  if (delta > 0) { if (l.n < mx) l.n += 1; } else l.n -= 1;
+  if (l.n <= 0) list.splice(list.indexOf(l), 1);
+}
+function setVariant(dlt) {
+  st.variant = KEYS[(KEYS.indexOf(st.variant) + dlt + KEYS.length) % KEYS.length];
+  st.screen = "home"; st.drawer = st.menu = st.dlg = st.panel = null; st.cdraft = null; st.err = null; hist.length = 0; render();
+}
+const A = {
+  variant: (v) => setVariant(Number(v)),
+  frame: () => { st.framed = !st.framed; render(); },
+  panel: (v) => { st.panel = st.panel === v ? null : v; render(); },
+  reset: () => { resetAll(); toast("Back to the starting mock data"); render(); },
+  go: (v) => go(v), sw: (v) => go(v, {}, true),
+  tab: (v) => { hist.length = 0; go(tabTarget(v), {}, true); },
+  back: () => {
+    if (st.screen === "draft" && st.cdraft) { st.dlg = { kind: "discardCounter" }; return render(); }
+    const h = hist.pop();
+    if (h) { Object.assign(st, h); st.cdraft = null; st.err = null; st.dlg = null; st.menu = null; return render(); }
+    Object.assign(st, { screen: "home" }); st.cdraft = null; render();
+  },
+  trade: (v) => go("trade", { trade: v }), loan: (v) => go("loanstub", { loanId: v }),
+  tf: (v) => { st.tf = v; render(); }, tlf: (v) => { st.tlf = v; render(); }, toggle: (v) => { st.open[v] = !st.open[v]; render(); },
+  match: (v) => go("match", { friend: v }),
+  flist: (v) => { st.fq = ""; go("friendlist", { friend: v }); },
+  propose: (v, el) => ensureDraft(v, el.dataset.prefill === "1", () => go("draft", { friend: v })),
+  fadd: (e) => { const fid = curFriend(); if (onGive(fid, e)) return; ensureDraft(fid, false, (d) => { const mx = FRIEND_LISTS[fid][e] || 0; if (!d.get.find((l) => l.e === e)) d.get.push(G(e, 1)); else stepList(d.get, e, 1, mx); render(); }); },
+  fstep: (v) => { const [e, dl] = v.split("|"); const d = DRAFTS[curFriend()]; if (d) stepList(d.get, e, Number(dl), FRIEND_LISTS[d.friend][e] || 0); render(); },
+  dstep: (v) => { const [side, e, dl] = v.split("|"); const d = curDraft(); stepList(d[side], e, Number(dl), maxFor(d, side, e)); d.err = null; render(); },
+  payer: (v) => { const d = curDraft(); d.payer = v; if (v === "none") d.amount = ""; d.err = null; render(); },
+  pickopen: (v) => { st.dlg = { kind: "pick", side: v, q: "" }; render(); },
+  padd: (e) => {
+    const dl = st.dlg;
+    if (dl.side === "wants") { const w = TRADE_WANTS.find((x) => x.e === e); if (w) w.n++; else TRADE_WANTS.push(G(e, 1)); toast("Added to Trade Wants"); }
+    else { const d = curDraft(); const line = d[dl.side].find((l) => l.e === e); const mx = maxFor(d, dl.side, e); if (line) line.n = Math.min(mx, line.n + 1); else d[dl.side].push(G(e, 1)); d.err = null; }
+    render();
+  },
+  closedlg: () => { const dl = st.dlg; st.dlg = dl && dl.ret ? { kind: dl.ret } : null; render(); },
+  send: () => sendDraft(),
+  accept: () => acceptTrade(tradeById(st.trade)),
+  decline: () => closeTrade(tradeById(st.trade), "declined", "you", "Declined"),
+  withdraw: () => closeTrade(tradeById(st.trade), "withdrawn", "you", "Withdrawn"),
+  counter: () => {
+    const t = tradeById(st.trade);
+    st.cdraft = { friend: t.friend, give: t.give.map((l) => G(l.e, l.n)), get: t.get.map((l) => G(l.e, l.n)), payer: t.cash ? t.cash.payer : "none", amount: t.cash ? (t.cash.cents / 100).toFixed(2) : "", err: null, counterOf: t.id };
+    go("draft", { friend: t.friend });
+  },
+  fixpicks: () => { const t = tradeById(st.trade); t.give.forEach((l) => { if (l.stale) { l.pick = l.stale.suggest; l.stale = null; } }); toast("Picks updated"); render(); },
+  canceldlg: () => { st.dlg = { kind: "canceltrade", trade: st.trade }; render(); },
+  docancel: () => { st.dlg = null; tradeById(st.trade).wasAccepted = true; closeTrade(tradeById(st.trade), "cancelled", "you", "Trade cancelled"); },
+  confirmopen: () => { st.dlg = { kind: "confirm", trade: st.trade, dest: st.dest === "unsorted" ? "unsorted" : st.dest === "last" ? LAST_DEST : "", on: true, deckChanged: false }; render(); },
+  doconfirm: () => doConfirm(),
+  dsim: (v) => {
+    const d = st.dlg; const t = tradeById(d.trade);
+    if (v === "moved") { const l = t.give.find((x) => !x.stale); if (l) l.stale = { suggest: suggestFor(l) }; else toast("Nothing of yours to move"); }
+    if (v === "unsorted") UNSORTED_BAD = true;
+    if (v === "deck") { if (t.switchOffers.length && d.on) { t.switchOffers = []; d.deckChanged = true; } else toast("No Deck switch is ticked"); }
+    render();
+  },
+  sim: (v) => (v === "copies" ? simCopies() : simTrade(v)),
+  undotoast: () => { const sw = SWITCHES[SWITCHES.length - 1]; if (sw && !sw.undone) { sw.undone = true; toast(`${locName(sw.deck)} uses ${cardName(sw.from)} again.`); } render(); },
+  undoscreen: () => { const sw = SWITCHES.find((s) => s.trade === st.trade); if (sw) sw.undone = true; render(); },
+  cashsw: () => { ME.openToCash = !ME.openToCash; toast(ME.openToCash ? "Friends can now send you Trade Proposals where one side gives only cash." : "Friends can't send you cash-only Trade Proposals now."); render(); },
+  lft: (v) => {
+    const l = locById(v);
+    if (l.deck) st.locMsg = "A Deck can't be marked For trade.";
+    else if (l.parent && !l.forTrade && effectivelyForTrade(l)) st.locMsg = `${esc(l.name)} is For trade because ${esc(locName(l.parent))} is. Change it on ${esc(locName(l.parent))}.`;
+    else { l.forTrade = !l.forTrade; st.locMsg = null; }
+    render();
+  },
+  lhide: (v) => { const l = locById(v); l.hidden = !l.hidden; st.locMsg = null; toast(l.hidden ? `${l.name} is hidden from Friends` : `Friends can see ${l.name} again`); render(); },
+  loc: (v) => { st.loc = v; st.locMsg = null; if (scr() === "mylist") st.screen = "collection"; render(); },
+  tlnode: () => go("mylist", {}, true),
+  remove1: (e) => {
+    const loc = locById(st.loc); const picked = reservingLines().filter((l) => l.e === e && l.pick === loc.id && !l.stale).reduce((a, l) => a + l.n, 0); const hit = picked > 0 && (loc.cards[e] || 0) - 1 < picked;
+    if (hit) st.locMsg = `You promised copies of ${esc(cardName(e))} to a Trade, so they can't all be removed. Nothing was removed.<br>Remove fewer copies, or cancel the Trade first.`;
+    else { st.locMsg = null; toast("Removing isn't part of this prototype."); }
+    render();
+  },
+  drawer: (v) => { st.drawer = v; st.confirm = null; render(); },
+  closedrawer: () => { st.drawer = null; st.confirm = null; render(); },
+  clearups: () => { UPDATES = []; render(); },
+  menu: (v) => { st.menu = lastMenu === v ? null : v; render(); },
+  fconfirm: (v) => { const [kind, id] = v.split("|"); st.confirm = { kind, id }; render(); },
+  fcancel: () => { st.confirm = null; render(); },
+  fdo: (v) => {
+    const [kind, id] = v.split("|"); const f = fr(id);
+    TRADES.forEach((t) => { if (t.friend === id && (t.state === "proposed" || (t.state === "accepted" && !t.youConfirmed && !t.theyConfirmed))) { t.wasAccepted = t.state === "accepted"; t.state = "closed"; t.closed = "cancelled"; t.closedBy = null; t.when = "Just now"; } });
+    LOANS_STATIC = LOANS_STATIC.filter((l) => l.friend !== id || l.handed);
+    FRIENDS = FRIENDS.filter((x) => x.id !== id); MATCHES = MATCHES.filter((m) => m.friend !== id);
+    st.confirm = null; toast(kind === "remove" ? `${f.name} is no longer a Friend.` : `Blocked ${f.name}.`); render();
+  },
+  wlview: (v) => { if (v === "trade") return go("discovery", {}, true); st.wl = v; go("wantlist", {}, true); },
+  setwa: (v) => { const [i, k] = v.split("|"); setWa(Number(i), k); },
+  wadlg: (v) => { st.dlg = { kind: "wadlg", i: Number(v), val: WANTS[Number(v)].accept }; render(); },
+  wasave: () => { const d = st.dlg; st.dlg = null; setWa(d.i, d.val); },
+  twstep: (v) => { const [i, dl] = v.split("|"); const w = TRADE_WANTS[Number(i)]; w.n += Number(dl); if (w.n <= 0) { TRADE_WANTS.splice(Number(i), 1); toast("Removed from Trade Wants"); } render(); },
+  twadd: () => { st.dlg = { kind: "pick", side: "wants", q: "", ret: st.dlg && st.dlg.kind === "twdlg" ? "twdlg" : null }; render(); },
+  twdlg: () => { st.dlg = { kind: "twdlg" }; render(); },
+  catopen: (e) => { st.dlg = { kind: "catalog", e }; render(); },
+  askt: (v) => { const [fid, e] = v.split("|"); if (onGive(fid, e)) return toast("That card is on the give side of your draft."); ensureDraft(fid, false, (d) => { const l = d.get.find((x) => x.e === e); if (l) l.n = Math.min(FRIEND_LISTS[fid][e], l.n + 1); else d.get.push(G(e, 1)); st.dlg = null; toast(`Added to your draft with ${fr(fid).name}`); render(); }); },
+  ddiscard: () => { const { fid, prefill, after } = st.dlg; Object.keys(DRAFTS).forEach((k) => delete DRAFTS[k]); DRAFTS[fid] = newDraft(fid, prefill); st.dlg = null; after(DRAFTS[fid]); },
+  dkeep: () => { st.dlg = null; render(); },
+  dcdiscard: () => { const nx = st.dlg.next; st.cdraft = null; st.dlg = null; if (nx) return go(nx.screen, nx.extra, nx.replace); const h = hist.pop(); if (h) Object.assign(st, h); else st.screen = "home"; render(); },
+};
+function setWa(i, k) {
+  const w = WANTS[i]; w.accept = k; toast(`Trades will match ${waLabel(w).replace(/^\w/, (c) => c.toLowerCase())} for ${cardName(w.e)}.`); render();
+}
+function simCopies() {
+  const d = curDraft(); const f = fr(d.friend); const l = d.get[0];
+  if (!l) return toast("Add a card from " + f.name + " first");
+  const list = FRIEND_LISTS[d.friend]; list[l.e] = Math.max(0, (list[l.e] || 0) - 1);
+  const mx = maxFor(d, "get", l.e); d.err = l.n > mx ? getErr(f, l.e, mx) : null; render();
+}
+
+// ---------- Events ----------
+let lastMenu = null;
+document.addEventListener("click", (ev) => {
+  const el = ev.target.closest("[data-a]"); lastMenu = st.menu;
+  const closing = !!st.menu && !(el && el.dataset.a === "menu");
+  if (closing) st.menu = null;
+  if (!el) { if (closing) render(); return; }
+  if (el.disabled) return;
+  const fn = A[el.dataset.a]; if (!fn) return;
+  fn(el.dataset.v, el, ev);
+});
+document.addEventListener("change", (ev) => {
+  const el = ev.target; const ch = el.dataset && el.dataset.ch; if (!ch) return;
+  if (ch === "dest") { st.dlg.dest = el.value; render(); }
+  else if (ch === "sw") { st.dlg.on = el.checked; st.dlg.deckChanged = false; render(); }
+  else if (ch === "wacc") setWa(Number(el.dataset.v), el.value);
+  else if (ch === "wasel") st.dlg.val = el.value;
+  else if (ch === "opt") {
+    const [k, val] = el.value.split("|"); st[k] = val;
+    if (k === "data") { seed(val); hist.length = 0; Object.assign(st, { screen: "home", trade: null, friend: null, cdraft: null, drawer: null, dlg: null, menu: null, err: null, open: {} }); }
+    render();
+  }
+});
+document.addEventListener("input", (ev) => {
+  const el = ev.target; const k = el.dataset && el.dataset.in; if (!k) return;
+  if (k === "cash") curDraft().amount = el.value;
+  else if (k === "fq") { st.fq = el.value; document.getElementById("flist").innerHTML = flistHTML(curFriend()); }
+  else if (k === "pq") { st.dlg.q = el.value; document.getElementById("picklist").innerHTML = pickList(); }
+});
+document.addEventListener("keydown", (ev) => {
+  if (ev.key === "Escape") { st.menu = null; st.dlg = null; st.drawer = null; st.panel = null; st.confirm = null; render(); return; }
+  if (ev.target.closest && ev.target.closest("input,textarea,select,[contenteditable]")) return;
+  if (ev.key === "ArrowLeft") setVariant(-1);
+  if (ev.key === "ArrowRight") setVariant(1);
+});
+
+// ---------- Render ----------
+function render() {
+  syncUrl();
+  const appEl = document.getElementById("app"); const sc = appEl.scrollTop;
+  appEl.innerHTML = shell();
+  document.getElementById("layer").innerHTML = layerHTML();
+  appEl.scrollTop = sc;
+  const tr = appEl.querySelector(".tray"); document.body.classList.toggle("has-tray", !!tr); document.body.style.setProperty("--tray-h", (tr ? tr.getBoundingClientRect().height : 0) + "px");
+  document.getElementById("stage").classList.toggle("framed", st.framed);
+  document.getElementById("vlabel").textContent = `${st.variant} (${VARIANTS[st.variant]})`;
+  document.getElementById("frame").setAttribute("aria-pressed", st.framed);
+  document.getElementById("optb").setAttribute("aria-pressed", st.panel === "options");
+  document.getElementById("wordb").setAttribute("aria-pressed", st.panel === "wording");
+}
+render();
+</script>
+</body>
+</html>

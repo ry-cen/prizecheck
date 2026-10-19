@@ -213,5 +213,5 @@ One side's confirmation that the in-person swap happened, which changes only the
 _Avoid_: Handover, complete trade, accept
 
 **Open to cash offers**:
-A collector's setting that lets Friends send them Trade Proposals in which one side gives only cash. It is off until the collector turns it on; cash alongside cards is always allowed.
+A collector's setting that lets Friends send them Trade Proposals in which one side gives only cash. It is off until the collector turns it on; cash alongside cards is always allowed, and a collector who sends a cash-only proposal can be countered with cash whatever their setting.
 _Avoid_: For sale, selling, cash mode
