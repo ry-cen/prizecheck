@@ -36,6 +36,8 @@ A handoff-ready spec at `docs/planning/trading/spec.md` for trading cards, built
 - Cash-only offers (owner, 2026-10-17, before tickets): a collector opts in with one Open to cash offers setting. Off, nobody can send them a proposal with only cash on one side (cash alongside cards is still allowed). On, their discovery row says so.
 - For trade Location rules (owner, 2026-10-17, before tickets): the mark covers every child Location, including ones added later. A Deck cannot be marked. For trade and hidden are separate: a hidden For trade Location is still on the trade list, and its screen says so. Listing reserves nothing; a copy is reserved only when a proposal or Loan promises it, and promised copies leave the trade list until released. Borrowed Copies in a For trade Location never appear on the trade list.
 - Plumbing (delegated, 2026-10-17): [decide-trading-plumbing](resolutions/decide-trading-plumbing.md) — Trades live in the social area, share the Loan promise invariant, and move ownership by each side's Confirm swap.
+- Gifts (owner, 2026-10-19): a proposal may have cards on one side and nothing on the other, in either direction. A proposal with no cards at all is refused.
+- Nine plumbing follow-ups (owner, 2026-10-19): the other eight defaults in the [plumbing resolution](resolutions/decide-trading-plumbing.md) are approved as written.
 
 ## Candidate tickets
 

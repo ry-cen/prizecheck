@@ -4,17 +4,17 @@ Resolves the candidate ticket "Decide the module boundary, ownership-transfer pl
 
 ## What collectors see
 
-The nine questions below were not individually put to the owner. Each was decided with the default shown, and each is **Default, pending owner confirmation (2026-10-17)**. A different answer changes only the dependent lines named beside it.
+The nine questions below were put to the owner with a default each. On 2026-10-19 the owner allowed gifts (question 5) and approved the other eight defaults as written.
 
-1. **A Deck inside a For trade Location.** **Default, pending owner confirmation (2026-10-17):** its cards are not on the Trade List; Decks never are. Alternative: they are, which removes the Deck exclusion from `for_trade_locations`. Dependent: Data model 1, and the Trade step tests in Testing.
-2. **Wants from a Deck in a Hidden Location.** **Default, pending owner confirmation (2026-10-17):** Friends do not see them in trade discovery. Lines of Decks inside Hidden Locations are left out of what Friends read. The collector's own matching still uses every want. Dependent: Matching reads, and the privacy tests.
-3. **Will accept scope.** **Default, pending owner confirmation (2026-10-17):** one choice per card (Card Edition), wherever it appears on the Want List, not per Deck. Dependent: Data model 3.
-4. **Trade Wants quantity.** **Default, pending owner confirmation (2026-10-17):** a line goes down by the copies received at Confirm swap and is deleted at 0. Alternative: it stays until edited. Dependent: Data model 2, Confirm swap step 4, and the Confirm swap tests.
-5. **Gifts.** **Default, pending owner confirmation (2026-10-17):** a proposal may not have cards on one side and nothing (no cards, no cash) on the other; it is refused with `TRADE_SIDE_EMPTY`. The map names one one-sided shape, "Cards for cash". Alternative: allow it, which drops the rule. Dependent: the shape rules under Data model.
-6. **Counters and the cash-only rule.** **Default, pending owner confirmation (2026-10-17):** a collector who is not Open to cash offers sends "my $10 for your card"; the other side cannot counter with "$15", because a Counter is a proposal sent to its recipient and their setting applies. The Counter is refused with `CASH_ONLY_NOT_OPEN`; the other side can only accept or decline. Alternative: skip the check when the countered proposal already had a cash-only side. Dependent: the shape rules under Data model.
-7. **Out-of-date picks at Confirm swap.** **Default, pending owner confirmation (2026-10-17):** refuse and ask the collector to Use suggested picks, as Loans do. Alternative: re-pick automatically at confirm. Dependent: Confirm swap step 1.
-8. **Take back a Confirm swap.** **Default, pending owner confirmation (2026-10-17):** no. It is final for that side, which fits "no partial swap" and "not undoable". Alternative: allow take-back before the other side confirms, which adds a take-back step and an `allowed` entry.
-9. **"Same name" across languages.** **Default, pending owner confirmation (2026-10-17):** Will accept "any card with the same name" uses Card Identity as defined, which may include Printings in other languages that the catalog links to the same identity. Dependent: the `accepts` expansion under Matching reads.
+1. **A Deck inside a For trade Location.** **Owner's choice (2026-10-19):** its cards are not on the Trade List; Decks never are. Alternative: they are, which removes the Deck exclusion from `for_trade_locations`. Dependent: Data model 1, and the Trade step tests in Testing.
+2. **Wants from a Deck in a Hidden Location.** **Owner's choice (2026-10-19):** Friends do not see them in trade discovery. Lines of Decks inside Hidden Locations are left out of what Friends read. The collector's own matching still uses every want. Dependent: Matching reads, and the privacy tests.
+3. **Will accept scope.** **Owner's choice (2026-10-19):** one choice per card (Card Edition), wherever it appears on the Want List, not per Deck. Dependent: Data model 3.
+4. **Trade Wants quantity.** **Owner's choice (2026-10-19):** a line goes down by the copies received at Confirm swap and is deleted at 0. Alternative: it stays until edited. Dependent: Data model 2, Confirm swap step 4, and the Confirm swap tests.
+5. **Gifts.** **Owner's choice (2026-10-19):** gifts are allowed. A proposal may have cards on one side and nothing (no cards, no cash) on the other. Only a proposal with no cards on either side is refused, with `TRADE_HAS_NO_CARDS`, so a Trade is never cash for nothing. Dependent: the shape rules under Data model.
+6. **Counters and the cash-only rule.** **Owner's choice (2026-10-19):** a collector who is not Open to cash offers sends "my $10 for your card"; the other side cannot counter with "$15", because a Counter is a proposal sent to its recipient and their setting applies. The Counter is refused with `CASH_ONLY_NOT_OPEN`; the other side can only accept or decline. Alternative: skip the check when the countered proposal already had a cash-only side. Dependent: the shape rules under Data model.
+7. **Out-of-date picks at Confirm swap.** **Owner's choice (2026-10-19):** refuse and ask the collector to Use suggested picks, as Loans do. Alternative: re-pick automatically at confirm. Dependent: Confirm swap step 1.
+8. **Take back a Confirm swap.** **Owner's choice (2026-10-19):** no. It is final for that side, which fits "no partial swap" and "not undoable". Alternative: allow take-back before the other side confirms, which adds a take-back step and an `allowed` entry.
+9. **"Same name" across languages.** **Owner's choice (2026-10-19):** Will accept "any card with the same name" uses Card Identity as defined, which may include Printings in other languages that the catalog links to the same identity. Dependent: the `accepts` expansion under Matching reads.
 
 Not blocking, left to the prototype ticket (listed again under "Not yet specified"): where Trades are listed, the destination picker's default for received copies, the wording of `PROMISED_TO_TRADE` and of the Remove Friend and Block counts, and the liability notice.
 
@@ -122,7 +122,7 @@ Every table is new apart from three columns: `location.for_trade`, `collector_pr
    - A Counter closes the old row as `countered` and inserts a new `proposed` row with `countered_from = old.id`, both in one transaction.
 9. **Migrations, trading block 140-179.** See [the Trading migrations note](../../migrations.md). Migrations 140-144 are additive and re-runnable. Migration 142 redefines `reserved_copies` and `check_loan_promises` (both from migration 106). Whoever merges second applies the 106 rule from the [social migrations note](../../../social-network/migrations.md): the last definition applied must be the union.
 
-**Valid shapes of a proposal** (checked on send and Counter): each side gives at least one card, or is the cash payer. Otherwise the step answers 422 `TRADE_SIDE_EMPTY`, so a proposal with cards on one side and nothing on the other is refused. The map's only one-sided shape is "Cards for cash" (question 5). A side that gives only cash requires `recipient.open_to_cash_offers`, else 409 `CASH_ONLY_NOT_OPEN`. That applies to both directions (buying and selling), because the map says "nobody can send them a proposal with only cash on one side". A Counter is a proposal sent to its recipient, so the Counter's recipient's setting applies too, with no exemption (question 6).
+**Valid shapes of a proposal** (checked on send and Counter): at least one side gives at least one card. Otherwise the step answers 422 `TRADE_HAS_NO_CARDS`. A side may give nothing, so a gift in either direction is valid (question 5). A side that gives only cash requires `recipient.open_to_cash_offers`, else 409 `CASH_ONLY_NOT_OPEN`. That applies to both directions (buying and selling), because the map says "nobody can send them a proposal with only cash on one side". A Counter is a proposal sent to its recipient, so the Counter's recipient's setting applies too, with no exemption (question 6).
 
 ## Reservations
 
@@ -338,7 +338,7 @@ Today `migrations/130_inbox.sql` creates `inbox_update(id, recipient_id [no FK o
   | `NOT_TRADEABLE` | 409 | `{edition_id, available, side}` |
   | `TRADE_NOT_FOUND` | 404 | also for non-parties |
   | `TRADE_CHANGED` | 409 | stale revision |
-  | `TRADE_SIDE_EMPTY` | 422 | a side gives nothing |
+  | `TRADE_HAS_NO_CARDS` | 422 | no side gives a card |
   | `CASH_ONLY_NOT_OPEN` | 409 | a cash-only side to a collector not Open to cash offers |
   | `INVALID_CASH` | 422 | out of range, or payer missing or extra |
   | `DECK_NOT_FOR_TRADE` | 409 | marking a Deck For trade |
@@ -394,7 +394,7 @@ Tests use the same seams as the social spec: signed HTTP against PostgreSQL, the
    - `TRADE_CHANGED` on a stale revision;
    - idempotent replay;
    - the 120-per-hour limit;
-   - every shape rule (`TRADE_SIDE_EMPTY`, `CASH_ONLY_NOT_OPEN` both directions and on a Counter whose recipient is not Open to cash offers, `INVALID_CASH`, cash alongside cards always allowed);
+   - every shape rule (`TRADE_HAS_NO_CARDS`, a gift with nothing on one side accepted, `CASH_ONLY_NOT_OPEN` both directions and on a Counter whose recipient is not Open to cash offers, `INVALID_CASH`, cash alongside cards always allowed);
    - lines capped at listable copies, with a hidden For trade Location counting, a Deck inside a For trade Location never counting, and Borrowed Copies never counting.
 4. **Confirm swap (`test_trade_swap.py`):**
    - given copies leave their picks with no Undo record and Deck List lines unchanged;
