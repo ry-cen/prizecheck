@@ -12,6 +12,7 @@ import {
   editLocation,
   getLocationTree,
   LocationError,
+  setLocationForTrade,
   setLocationHidden,
   type EditLocation,
   type TreeLocation,
@@ -22,7 +23,7 @@ import { focusableIn } from "../ui/focusable";
 import { Icon } from "../ui/Icon";
 import { TextField } from "../ui/TextField";
 import { CreateLocationDialog } from "./CreateLocationDialog";
-import { hidingLabel } from "./locationTree";
+import { forTradeLabel, hidingLabel, stillOfferedLine } from "./locationTree";
 import {
   buildManageModel,
   cleanLocationName,
@@ -205,7 +206,7 @@ export function ManageLocations({ onClose, onChanged }: Props) {
     onChanged();
   }
   async function run(
-    action: "rename" | "move" | "delete" | "hide",
+    action: "rename" | "move" | "delete" | "hide" | "for_trade",
     request: () => Promise<unknown>,
     message: string,
     context: { name?: string; where?: string } = {}
@@ -390,6 +391,9 @@ export function ManageLocations({ onClose, onChanged }: Props) {
       const children = model.index.children(node.id);
       const hiding = model.index.hiding(node.id);
       const hidden = hidingLabel(hiding);
+      const forTrade = model.index.forTrade(node.id);
+      const trading = forTradeLabel(forTrade);
+      const stillOffered = stillOfferedLine(hiding, forTrade);
       return (
         <li key={node.id}>
           <div
@@ -418,7 +422,13 @@ export function ManageLocations({ onClose, onChanged }: Props) {
               <small className="text-caption text-text-subtle tabular-nums">
                 {model.kindLabel(node)}
                 {hidden && ` · ${hidden}`}
+                {trading && ` · ${trading}`}
               </small>
+              {stillOffered && (
+                <small className="text-caption text-text-muted">
+                  {stillOffered}
+                </small>
+              )}
             </span>
             <span className="flex flex-none gap-1 phone:flex-[1_1_100%]">
               <Button
@@ -479,7 +489,7 @@ export function ManageLocations({ onClose, onChanged }: Props) {
             </span>
             {/* Hide from Friends (social network #249), on its own line on a phone. A Location inside a hidden one
                 can't be shown on its own, so its button is off and says why. */}
-            <span className="flex flex-none phone:flex-[1_1_100%]">
+            <span className="flex flex-none gap-1 phone:flex-[1_1_100%]">
               <Button
                 className="phone:flex-1"
                 aria-label={
@@ -512,6 +522,45 @@ export function ManageLocations({ onClose, onChanged }: Props) {
                 }}
               >
                 {node.hidden ? "Show to Friends" : "Hide from Friends"}
+              </Button>
+              {/* For trade (Trading #267), beside Hide from Friends. A Location inside a marked one can't be
+                  un-marked on its own, so its button is off and says why. A Deck keeps the button: the server
+                  refuses it (DECK_NOT_FOR_TRADE) and the panel says why in plain words. */}
+              <Button
+                className="phone:flex-1"
+                aria-label={
+                  node.for_trade
+                    ? `Mark ${path} Not for trade`
+                    : `Mark ${path} For trade`
+                }
+                title={forTrade.kind === "parent" ? trading : undefined}
+                disabled={forTrade.kind === "parent" || busy}
+                data-manage-focus={`trade:${node.id}`}
+                onClick={() => {
+                  restoreFocus.current = `trade:${node.id}`;
+                  setNotice(null);
+                  void run(
+                    "for_trade",
+                    () =>
+                      setLocationForTrade(node.id, {
+                        for_trade: !node.for_trade,
+                        version: node.version,
+                        idempotency_key: crypto.randomUUID(),
+                      }),
+                    node.for_trade
+                      ? `${path} is no longer For trade.`
+                      : `${path} and everything in it, apart from Decks, are For trade.`,
+                    {
+                      name: path,
+                      where:
+                        forTrade.kind === "parent"
+                          ? forTrade.by.name
+                          : undefined,
+                    }
+                  );
+                }}
+              >
+                {node.for_trade ? "Not for trade" : "For trade"}
               </Button>
             </span>
           </div>

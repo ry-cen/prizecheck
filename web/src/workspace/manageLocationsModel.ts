@@ -144,7 +144,7 @@ export const STALE_MESSAGE =
 export function locationErrorMessage(
   code: string,
   context: {
-    action: "rename" | "move" | "delete" | "add" | "hide";
+    action: "rename" | "move" | "delete" | "add" | "hide" | "for_trade";
     name?: string;
     where?: string;
   }
@@ -168,6 +168,10 @@ export function locationErrorMessage(
         : "The top-level Unsorted Location can only be renamed or moved once it is empty.";
     case "LOCATION_HIDDEN_BY_PARENT":
       return `This Location is inside ${context.where ?? "a hidden Location"}, so it stays hidden. Show that one to Friends first.`;
+    case "DECK_NOT_FOR_TRADE":
+      return "A Deck can't be marked For trade.";
+    case "LOCATION_FOR_TRADE_BY_PARENT":
+      return `${context.name ?? "This Location"} is For trade because ${context.where ?? "a Location above it"} is. Change it on ${context.where ?? "that Location"}.`;
     case "LOCATION_NAME_CONFIRMATION_MISMATCH":
       return `Type ${context.name ?? "the name"} exactly to confirm.`;
     default:
