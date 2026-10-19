@@ -93,7 +93,7 @@ The Card Editions a collector's Decks name in their Deck Lists but can't get fro
 _Avoid_: Wishlist, shopping list, standalone list
 
 **Spare Copy**:
-An owned copy that isn't covering any Deck's own Deck List line and isn't promised to a Loan: a loose copy outside every Deck, or a copy a Deck holds beyond its own Deck List line. Reserved, lent and Borrowed Copies are never Spare Copies.
+An owned copy that isn't covering any Deck's own Deck List line and isn't promised to a Loan or a Trade: a loose copy outside every Deck, or a copy a Deck holds beyond its own Deck List line. Reserved, lent and Borrowed Copies are never Spare Copies.
 _Avoid_: Free copy, unused copy
 
 **Unsorted**:
@@ -133,7 +133,7 @@ A proposed or verified correspondence between a Card Edition and a marketplace p
 _Avoid_: Card Edition ID, physical equivalence
 
 **Friend**:
-Another collector with whom a collector has a mutual, accepted friendship. Friends can see each other's Collection, apart from Hidden Locations, and can lend each other cards. Either side can end the friendship at any time.
+Another collector with whom a collector has a mutual, accepted friendship. Friends can see each other's Collection, apart from Hidden Locations, and each other's Trade Lists, and can lend and trade each other cards. Either side can end the friendship at any time.
 _Avoid_: Follower, contact, connection
 
 **Friend Request**:
@@ -157,7 +157,7 @@ A collector's choice to end any friendship with another collector and stop that 
 _Avoid_: Mute, report
 
 **Hidden Location**:
-A Location whose Holdings a collector's Friends cannot see, together with every Location inside it. Friends never see Location or Deck names, hidden or not, and never see reserved, lent or Borrowed Copies.
+A Location whose Holdings a collector's Friends cannot see, together with every Location inside it. A hidden For trade Location's copies still appear on its owner's Trade List, though never its name. Friends never see Location or Deck names, hidden or not, and never see reserved, lent or Borrowed Copies.
 _Avoid_: Private Location, locked binder
 
 **Loan**:
@@ -179,3 +179,39 @@ _Avoid_: Owned copy, temporary Holding
 **Write-off**:
 The lender closing a handed-over Loan as not coming back. The lent copies leave the lender's Collection as an Inventory Removal. The borrower then chooses to keep the Borrowed Copies as owned copies, when they still have the cards, or to remove them.
 _Avoid_: Lost card, gift
+
+**Trade**:
+An agreement between two Friends to swap copies in person, and optionally an agreed cash amount paid by one side, that transfers ownership both ways. It is a Trade Proposal one side accepted; from then both sides' copies are promised until each side's Confirm swap. Copies a collector gives leave their Collection, and copies they get become their own. The app records an agreed cash amount but never handles, holds or verifies money. A Trade with cards on one side and only cash on the other is still a Trade.
+_Avoid_: Loan, sale, deal, exchange, gift
+
+**Trade Proposal**:
+One collector's offer of a Trade to a Friend: the cards each side would give and any cash. The other side accepts or declines it whole, or counters, which closes it and sends back a new Trade Proposal prefilled with the same cards. Sending a Trade Proposal promises the sender's copies; accepting promises the other side's and makes it a Trade.
+_Avoid_: Offer, trade request, bid, Lend Offer
+
+**For trade Location**:
+A Location the collector marks as holding cards they will trade, together with every Location inside it, including ones added later, except Decks. A Deck can't be marked. For trade is separate from hidden: a hidden For trade Location's cards are still on the Trade List, and no one else ever sees its name.
+_Avoid_: Trade binder, trade folder, Hidden Location
+
+**Trade List**:
+The copies a collector offers to trade: their owned copies in For trade Locations that no Loan or Trade promises. It always matches what is in those Locations and is never edited directly. Borrowed Copies are never on it.
+_Avoid_: Haves, trade binder, Collection
+
+**Trade Wants**:
+The Card Editions and quantities a collector lists by hand as wanted in trades, beside their Want List, usually for cards no Deck names. Each line is one exact Card Edition.
+_Avoid_: Wishlist, Want List, wants list
+
+**Will accept**:
+A Want List card's choice of which cards count for it in trades: this exact Card Edition (the default), any Card Edition of the same Card Printing, or any card with the same Card Identity. It changes only trade matching, never the Want List's own counts.
+_Avoid_: Match rule, flexibility, substitute
+
+**Trade Pick List**:
+The suggested source Location for each copy a Trade promises from one side, For trade Locations first. A pick whose source no longer holds enough copies is out of date and is shown with a new suggestion.
+_Avoid_: Loan Pick List, Deck Pick List, pull list
+
+**Confirm swap**:
+One side's confirmation that the in-person swap happened, which changes only their own inventory: the copies they give leave their Collection and the copies they get arrive as new Holdings. It is not an Inventory Removal, and it can't be undone. Nobody can cancel a Trade once either side has confirmed, and it is complete once both have.
+_Avoid_: Handover, complete trade, accept
+
+**Open to cash offers**:
+A collector's setting that lets Friends send them Trade Proposals in which one side gives only cash. It is off until the collector turns it on; cash alongside cards is always allowed.
+_Avoid_: For sale, selling, cash mode

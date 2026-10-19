@@ -1,0 +1,27 @@
+# Trades share the Loan promise invariant, and Friend reads become one module
+
+**Status:** accepted on 2026-10-17. Claude decided it under the owner's delegation of technical plumbing for the [Trading map](../planning/trading/wayfinder/map.md). It extends [ADR 0014](0014-friend-reads-and-two-owner-loans.md). The full reasoning is in [the Trading plumbing resolution](../planning/trading/wayfinder/resolutions/decide-trading-plumbing.md).
+
+Loans never change who owns a copy, so ADR 0014's invariant only had to stop a lender promising a copy twice. A Trade does change ownership, and it promises copies on both sides at once. It also needs the first cross-collector read of a Friend's Want List, because discovery pairs what one collector wants with what another offers.
+
+**Decision.**
+
+- **One promise definition.** The SQL function `reserved_copies` (migration 106) stays the one definition of "reserved". Migration 142 redefines it as the union of the Loan part, unchanged, and a new Trade part: the proposer's lines while a Trade Proposal is proposed or accepted and the proposer has not confirmed the swap, and the recipient's lines once accepted until the recipient confirms. `check_loan_promises`, every deferred constraint trigger, `reserved_counts`, `reserved_by_owner` and every Python caller then cover Trades with no change. Deferred constraint triggers on `trade` and `trade_line` call the same check. A new function, `reserving_picks`, returns the reserved `loan_pick` and `trade_pick` rows together, so the Spare Copy rule and the Pick Lists place Trade-reserved copies at their picks, and a Lend Offer and a Trade never pick the same copy.
+- **Lock order.** `inventory_owner` rows in ascending `user_id`, then `loan` rows in id order, then `trade` rows in id order. Each step writes its `trade` row exactly once. Unfriend and Block cancel Loans, then Trades, inside the Friend command that already holds both owner locks. Any future step that touches both a Loan and a Trade keeps that order.
+- **The choke point becomes a module.** Every cross-collector read of inventory, Trade Lists and wants stays in the module `social.friend_copies`, which now holds `friend_copies`, `friend_trade_copies` and `friend_wants`. ADR 0014's "one function" becomes "one module". No other module may read several collectors' Holdings, Deck List lines, Locations or Borrowed Copies in one statement, and a contract test enforces that. It still never returns a Location or Deck name or id.
+- **A batched, lock-free Friend allocation read.** A Friend's need for a card is the Want List figure that Friend would see themselves, so `friend_wants` runs the Want List allocation. It does so without calling `allocate` once per Friend and without locking any Friend. First, `allocate` is split into a frozen set of input rows, a single-owner reader and a pure `allocate_rows`, with no change to any figure. Then `friend_wants` reads the rows for all prefiltered Friends in a few batched statements, inside one `REPEATABLE READ READ ONLY` transaction, and calls `allocate_rows` per Friend in memory. One snapshot and no locks mean a Friend read never waits on a Friend's writes and never needs a Friend's `inventory_owner` lock. It returns only the Edition, the need, where the want came from (the Want List or the Trade Wants) and the Will accept rule.
+
+**Rejected.**
+
+- **A parallel Trade reservation mechanism**, with its own table of reserved copies and its own trigger. A copy could then be promised once to a Loan and once to a Trade, which the map forbids, and every inventory reader would have to learn a second definition.
+- **Calling `allocate` once per Friend**, as ADR 0014 already forbids. With a design target of 200 Friends it would issue a set of statements per Friend and would need a Friend's rows locked or read at different moments.
+- **Pricing in the client.** Trade value totals come from a budgeted server route that folds quotes with the shared Deck cost fold. Calling the price route from the browser would put a 64-Edition cap below a full proposal, expose quote metadata to screen code and move the money arithmetic out of the one exact fold.
+
+**Consequences.**
+
+- Every inventory figure reads `reserved_copies`, so its redefinition is the riskiest change. The allocation split and the redefinition must land with figure-neutral tests: with no Trades present, every existing figure is identical.
+- Migration 142 redefines two functions from migration 106. Whoever merges second applies the rule in the social migrations note: the last definition applied must be the union of both.
+- Pick ids come from `loan_pick`'s sequence, so a pick id is unique across both pick tables and code keyed by pick id keeps working.
+- Edition reassignment does not carry Trades. The existing promise check refuses a reassignment that would break a Trade, with `PROMISED_TO_TRADE`, and the collector swaps or cancels first. This keeps the reassignment's lock set unchanged.
+- Reservations never expire, so a half-confirmed Trade whose remaining side never confirms keeps that side's copies promised indefinitely.
+- Stage 2 adds a second filter beside the friendship filter in the same module rather than a new one.
