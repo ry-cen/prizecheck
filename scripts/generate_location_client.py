@@ -7,7 +7,7 @@ sys.path.insert(0, str(root / "api"))
 from app.main import app  # noqa: E402
 
 schema = app.openapi()
-names = ("TreeNode", "TreeLocation", "TreeResponse", "LocationCommandResult", "CreateLocation", "EditLocation", "DeleteLocation", "DeleteLocationResult", "SetLocationHidden", "LocationHiddenResult")
+names = ("TreeNode", "TreeLocation", "TreeResponse", "LocationCommandResult", "CreateLocation", "EditLocation", "DeleteLocation", "DeleteLocationResult", "SetLocationHidden", "LocationHiddenResult", "SetLocationForTrade", "LocationForTradeResult")
 
 
 def ts_type(value):
@@ -42,6 +42,7 @@ export const createLocation = (body: CreateLocation) => locationRequest<Location
 export const editLocation = (id: string, body: EditLocation) => locationRequest<LocationCommandResult>(`/api/location-tree/${id}`, 'PATCH', body);
 export const deleteLocation = (id: string, body: DeleteLocation) => locationRequest<DeleteLocationResult>(`/api/location-tree/${id}`, 'DELETE', body);
 export const setLocationHidden = (id: string, body: SetLocationHidden) => locationRequest<LocationHiddenResult>(`/api/location-tree/${id}/hidden`, 'PUT', body);
+export const setLocationForTrade = (id: string, body: SetLocationForTrade) => locationRequest<LocationForTradeResult>(`/api/location-tree/${id}/for-trade`, 'PUT', body);
 """)
 content = "\n".join(lines)
 target = root / "web/src/location_generated.ts"

@@ -27,10 +27,16 @@ class TreeLocation(TreeNode):
     """A tree row with the copies stored directly in it: the sum of its Holdings' quantities as a
     decimal string, "0" for Organizational Locations and empty leaves. ``hidden``: the collector hid it
     from Friends; ``hidden_by``: the nearest Location above it the collector hid, which hides it too
-    (social network #249). Only the tree read carries these; stored command answers keep ``TreeNode``."""
+    (social network #249). ``for_trade``: its cards are offered for trade, because the collector marked it
+    or a Location above it (Trading #267); unlike ``hidden`` it is the effective answer, not only the
+    collector's own mark. ``for_trade_by``: the nearest marked Location above it, or None. A Deck is never
+    For trade, even inside a marked Location: False and None. Only the tree read carries these; stored
+    command answers keep ``TreeNode``."""
     copy_count: str
     hidden: bool
     hidden_by: UUID | None
+    for_trade: bool
+    for_trade_by: UUID | None
 
 
 class TreeResponse(BaseModel):
@@ -87,6 +93,19 @@ class LocationHiddenResult(BaseModel):
     location: TreeNode
     hidden: bool
     hidden_by: UUID | None
+
+
+class SetLocationForTrade(BaseModel):
+    for_trade: bool
+    version: int = Field(ge=1)
+    idempotency_key: UUID
+
+
+class LocationForTradeResult(BaseModel):
+    """``for_trade`` and ``for_trade_by`` as the tree read now reports them for this Location."""
+    location: TreeNode
+    for_trade: bool
+    for_trade_by: UUID | None
 
 
 def error(status: int, code: str):
@@ -176,6 +195,22 @@ def unsorted_child(conn, owner_id, parent_id, rows):
     return row
 
 
+def own_for_trade(conn, owner_id: str) -> set[UUID]:
+    """The Locations the owner marked For trade themselves (migration 140). Never a Deck: the
+    location_deck_not_for_trade constraint refuses one. The tree read and the setter work out what is inside them with
+    ``hidden_by`` over the tree already in memory; the SQL rule of migration 140 is for the Trade List's reads."""
+    return {row["id"] for row in conn.execute("SELECT id FROM location WHERE owner_id=%s AND for_trade", (owner_id,))}
+
+
+def for_trade_fields(row, marked: set[UUID], above: dict[UUID, UUID | None]) -> dict:
+    """``for_trade`` and ``for_trade_by`` of one tree row: For trade when the collector marked it (``marked``) or a
+    Location above it, ``above`` naming the nearest marked one. A Deck never is, even inside a marked Location."""
+    if row["kind"] == "deck":
+        return {"for_trade": False, "for_trade_by": None}
+    by = above[row["id"]]
+    return {"for_trade": row["id"] in marked or by is not None, "for_trade_by": by}
+
+
 def replay(conn, user_id, key, payload):
     digest = hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()
     row = conn.execute("SELECT request_digest,response FROM location_command WHERE owner_id=%s AND request_key=%s", (user_id, key)).fetchone()
@@ -200,10 +235,14 @@ def tree(user_id: str = Depends(verified_user)):
         revision, rows = owner_and_rows(conn, user_id)
         copies = {row["location_id"]: row["copies"] for row in conn.execute(
             "SELECT location_id,sum(quantity)::text AS copies FROM holding WHERE owner_id=%s GROUP BY location_id", (user_id,)).fetchall()}
+        parents = {row_id: row["parent_id"] for row_id, row in rows.items()}
         hidden = own_hidden(conn, user_id)
-        above = hidden_by({row_id: row["parent_id"] for row_id, row in rows.items()}, hidden)
+        above = hidden_by(parents, hidden)
+        marked = own_for_trade(conn, user_id)
+        trade_above = hidden_by(parents, marked)
         return TreeResponse(locations=[TreeLocation(**row, depth=depth_of(row["id"], rows), copy_count=copies.get(row["id"], "0"),
-                                                    hidden=row["id"] in hidden, hidden_by=above[row["id"]])
+                                                    hidden=row["id"] in hidden, hidden_by=above[row["id"]],
+                                                    **for_trade_fields(row, marked, trade_above))
                                        for row in sorted(rows.values(), key=lambda r: (depth_of(r["id"], rows), r["name"].casefold(), str(r["id"])))],
                             owner_revision=revision, lent_copies=str(sum(counts.lent_counts(conn, user_id, None).values())),
                             borrowed_copies=str(conn.execute(
@@ -373,6 +412,40 @@ def set_location_hidden(location_id: UUID, command: SetLocationHidden, user_id: 
         rows[row["id"]] = row
         result = LocationHiddenResult(location=node_model(row, rows), hidden=command.hidden,
                                       hidden_by=above).model_dump(mode="json")
+        conn.execute("INSERT INTO location_command(owner_id,request_key,request_digest,response) VALUES (%s,%s,%s,%s)",
+                     (user_id, command.idempotency_key, digest, json.dumps(result)))
+        return result
+
+
+@router.put("/{location_id}/for-trade", response_model=LocationForTradeResult)
+def set_location_for_trade(location_id: UUID, command: SetLocationForTrade, user_id: str = Depends(verified_user)):
+    """Mark a Location For trade, or not (Trading #267). Any kind but a Deck: a Deck is refused either way (409
+    DECK_NOT_FOR_TRADE), and one inside a marked Location stays off the Trade List. Un-marking a Location inside a
+    marked one is refused (409 LOCATION_FOR_TRADE_BY_PARENT with ``for_trade_by``, the nearest marked Location above
+    it); marking one there is allowed, and it stays For trade when that Location is un-marked. Independent of hiding.
+    Bumps the Location's version and never the inventory revision, and reserves nothing: nothing the collector counts
+    changes. Idempotent."""
+    with connect() as conn, conn.transaction():
+        _, rows = owner_and_rows(conn, user_id)
+        digest, previous = replay(conn, user_id, command.idempotency_key,
+                                  {"action": "set_for_trade", "location_id": str(location_id), **command.model_dump(mode="json")})
+        if previous:
+            return previous
+        current = rows.get(location_id)
+        if current is None:
+            error(404, "LOCATION_NOT_FOUND")
+        if current["version"] != command.version:
+            error(409, "STALE_LOCATION")
+        if current["kind"] == "deck":
+            error(409, "DECK_NOT_FOR_TRADE")
+        above = hidden_by({row_id: row["parent_id"] for row_id, row in rows.items()}, own_for_trade(conn, user_id))[location_id]
+        if not command.for_trade and above is not None:
+            raise HTTPException(409, {"code": "LOCATION_FOR_TRADE_BY_PARENT", "for_trade_by": str(above)})
+        row = conn.execute("""UPDATE location SET for_trade=%s,version=version+1 WHERE owner_id=%s AND id=%s
+          RETURNING id,name,kind,parent_id,version""", (command.for_trade, user_id, location_id)).fetchone()
+        rows[row["id"]] = row
+        result = LocationForTradeResult(location=node_model(row, rows), for_trade=command.for_trade or above is not None,
+                                        for_trade_by=above).model_dump(mode="json")
         conn.execute("INSERT INTO location_command(owner_id,request_key,request_digest,response) VALUES (%s,%s,%s,%s)",
                      (user_id, command.idempotency_key, digest, json.dumps(result)))
         return result
