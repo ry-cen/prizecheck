@@ -23,6 +23,13 @@ export function isFolder(node: TreeNode): boolean {
 export type Hiding =
   { kind: "visible" } | { kind: "own" } | { kind: "parent"; by: TreeNode };
 
+/** Whether a Location's cards are offered for trade (Trading #267): not, marked For trade by the collector ("own"),
+ * or For trade because a Location above it is ("parent", naming the nearest marked one). A marked parent wins over the
+ * Location's own mark, since the Location can't be un-marked on its own. A Deck is never For trade. Read from the
+ * tree read's `for_trade` and `for_trade_by`; nodes from any other read are not For trade. */
+export type ForTrade =
+  { kind: "none" } | { kind: "own" } | { kind: "parent"; by: TreeNode };
+
 export type LocationIndex = {
   byId: Map<string, TreeNode>;
   /** Sorted children; pass null for the top level. */
@@ -32,6 +39,7 @@ export type LocationIndex = {
   /** Ids of every ancestor, nearest first. */
   ancestors: (id: string) => string[];
   hiding: (id: string) => Hiding;
+  forTrade: (id: string) => ForTrade;
 };
 
 export function indexLocations(nodes: TreeNode[]): LocationIndex {
@@ -72,6 +80,13 @@ export function indexLocations(nodes: TreeNode[]): LocationIndex {
       if (by) return { kind: "parent", by };
       return node?.hidden === true ? { kind: "own" } : { kind: "visible" };
     },
+    forTrade: (id) => {
+      const node = byId.get(id) as Partial<TreeLocation> | undefined;
+      if (!node || node.kind === "deck") return { kind: "none" };
+      const by = node.for_trade_by ? byId.get(node.for_trade_by) : undefined;
+      if (by) return { kind: "parent", by };
+      return node.for_trade === true ? { kind: "own" } : { kind: "none" };
+    },
   };
 }
 
@@ -82,4 +97,20 @@ export function hidingLabel(hiding: Hiding): string {
   if (hiding.kind === "parent")
     return `Hidden because ${hiding.by.name} is hidden`;
   return "";
+}
+
+/** The words for a For trade Location, on the collector's own screens: "For trade", or "For trade because <parent> is.". Empty when its cards are not offered. */
+export function forTradeLabel(forTrade: ForTrade): string {
+  if (forTrade.kind === "own") return "For trade";
+  if (forTrade.kind === "parent")
+    return `For trade because ${forTrade.by.name} is.`;
+  return "";
+}
+
+/** The line a Location that is both hidden from Friends and For trade shows, so the collector knows its cards are
+ * still offered. Empty otherwise. */
+export function stillOfferedLine(hiding: Hiding, forTrade: ForTrade): string {
+  return hiding.kind !== "visible" && forTrade.kind !== "none"
+    ? "Its cards are still offered for trade."
+    : "";
 }
