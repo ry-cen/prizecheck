@@ -1,8 +1,8 @@
 # Trading for PrizeCheck: Stage 1, trading between Friends
 
-**Status:** drafted 2026-10-17, not yet implemented. Not yet approved by the owner.
+**Status:** drafted 2026-10-17, not yet implemented. Collector-facing details approved by the owner on 2026-10-19.
 
-This spec turns the [Trading decision map](wayfinder/map.md) and the [plumbing resolution](wayfinder/resolutions/decide-trading-plumbing.md) into one implementation handoff for Stage 1: trade lists, wants, matching among Friends, and a Trade that transfers ownership on both sides. Stage 2 (open discovery for collectors who are not Friends) is a separate, later spec. Terms follow [`CONTEXT.md`](../../../CONTEXT.md). The cross-owner pattern is recorded in [ADR 0015](../../adr/0015-trades-share-the-promise-invariant-and-friend-reads.md), and the migration numbers are in the [Trading migrations note](migrations.md). The map is the authority on what collectors see; the resolution is the authority on plumbing. Nine collector-facing details were decided as defaults and are not yet confirmed by the owner; they are listed in Further Notes, and the user stories that rest on them are marked "(default, pending owner confirmation)".
+This spec turns the [Trading decision map](wayfinder/map.md) and the [plumbing resolution](wayfinder/resolutions/decide-trading-plumbing.md) into one implementation handoff for Stage 1: trade lists, wants, matching among Friends, and a Trade that transfers ownership on both sides. Stage 2 (open discovery for collectors who are not Friends) is a separate, later spec. Terms follow [`CONTEXT.md`](../../../CONTEXT.md). The cross-owner pattern is recorded in [ADR 0015](../../adr/0015-trades-share-the-promise-invariant-and-friend-reads.md), and the migration numbers are in the [Trading migrations note](migrations.md). The map is the authority on what collectors see; the resolution is the authority on plumbing. Nine collector-facing details were proposed as defaults; on 2026-10-19 the owner allowed gifts and approved the other eight. They are listed in Further Notes.
 
 ## Problem Statement
 
@@ -28,7 +28,7 @@ Add Trades to the `social` area of the API and the web app, on top of Friends, L
 
 **Trade Proposals.** A proposal lists the cards each side gives and an optional US-dollar amount paid by one side. The sender's copies are promised the moment it is sent. The other side can Accept, Decline or Counter, always as a whole. Counter closes the proposal and opens a reply prefilled with the same cards, which either side can edit. Accepting promises the recipient's copies and makes it a Trade. While building or reviewing a proposal, each side shows its estimated total, and there is no suggested cash amount.
 
-**Cash.** A proposal may carry cash from either side, and a Trade may have cards on one side and only cash on the other, so it can be a sale. The app records the agreed amount but never processes, holds or verifies money, and the Trade screen shows a notice saying so. A collector who has not turned on Open to cash offers cannot be sent a proposal in which one side gives only cash.
+**Cash.** A proposal may carry cash from either side, and a Trade may have cards on one side and only cash on the other, so it can be a sale. A side may also give nothing at all, so a proposal can be a gift; only a proposal with no cards on either side is refused. The app records the agreed amount but never processes, holds or verifies money, and the Trade screen shows a notice saying so. A collector who has not turned on Open to cash offers cannot be sent a proposal in which one side gives only cash.
 
 **Swapping.** The cards change hands in one in-person swap. Each side presses **Confirm swap** for their own inventory: their copies leave their Collection and the other side's arrive as new Holdings, in a Location they choose. There is no auto-confirm, no take-back and no partial swap. Either side can cancel until either side has confirmed.
 
@@ -51,7 +51,7 @@ The design rests on a few rules, recorded in [ADR 0015](../../adr/0015-trades-sh
 2. As a collector, I want the mark to cover every Location inside the marked one, including ones I add later, so that I do not have to re-mark a binder when I add a page to it.
 3. As a collector, I want my Trade List to always match what is physically in my For trade Locations, so that I never have to maintain a second list.
 4. As a collector, I want to be unable to mark a Deck as For trade, so that a built Deck is never offered by accident.
-5. As a collector, I want a Deck inside a For trade Location to stay off my Trade List, so that marking a box does not offer the Decks stored in it. (default, pending owner confirmation)
+5. As a collector, I want a Deck inside a For trade Location to stay off my Trade List, so that marking a box does not offer the Decks stored in it.
 6. As a collector, I want to be told plainly that a Deck cannot be marked For trade, so that I understand why the mark was refused.
 7. As a collector, I want to be unable to un-mark a Location that sits inside a marked one, and to be told which marked Location covers it, so that I know where to change it.
 8. As a collector, I want For trade and hidden to be separate settings, so that I can keep a Location off my Friends' view of my Collection and still offer its cards.
@@ -77,13 +77,13 @@ The design rests on a few rules, recorded in [ADR 0015](../../adr/0015-trades-sh
 25. As a collector, I want each Trade Wants line to be one exact Card Edition with a quantity, so that I get the finish and printing I mean.
 26. As a collector, I want to set a Trade Wants quantity to zero to remove the line, so that taking it off is one step.
 27. As a collector, I want to be limited to 500 Trade Wants lines, so that the list stays usable.
-28. As a collector, I want a Trade Wants line to go down by the copies I receive in a confirmed swap and disappear at zero, so that the list does not keep asking for cards I already got. (default, pending owner confirmation)
+28. As a collector, I want a Trade Wants line to go down by the copies I receive in a confirmed swap and disappear at zero, so that the list does not keep asking for cards I already got.
 29. As a collector, I want to choose, for each Want List card, whether trades should match this exact card, any finish of the same Card Printing, or any card with the same name, so that I can accept a cheaper finish without changing my Deck.
 30. As a collector, I want the default for every Want List card to be this exact card, so that nothing is widened without my choice.
-31. As a collector, I want one Will accept choice per card, applying wherever that card appears on my Want List, so that I do not set it again for each Deck. (default, pending owner confirmation)
+31. As a collector, I want one Will accept choice per card, applying wherever that card appears on my Want List, so that I do not set it again for each Deck.
 32. As a collector, I want my Will accept choice to be remembered if the card leaves my Want List and returns, so that I do not lose it.
 33. As a collector, I want Will accept to change only trade matching and never my Want List's own counts, totals, exports or pinned figures, so that nothing else moves.
-34. As a collector, I want "any card with the same name" to follow the catalog's Card Identity, including Printings the catalog links to the same identity in other languages, so that the name rule means what the catalog means. (default, pending owner confirmation)
+34. As a collector, I want "any card with the same name" to follow the catalog's Card Identity, including Printings the catalog links to the same identity in other languages, so that the name rule means what the catalog means.
 35. As a collector, I want Trade Wants lines to always match the exact Edition, with no Will accept choice, so that a hand-entered want is never silently widened.
 36. As a collector, I want to see the Will accept choice on my Want List page beside each card, so that I can set it where I see the need.
 37. As a collector, I want my Trade Wants and Will accept choices to be deleted with my account, so that nothing of mine outlives it.
@@ -130,8 +130,8 @@ The design rests on a few rules, recorded in [ADR 0015](../../adr/0015-trades-sh
 69. As a proposer, I want to be unable to offer more copies of a card than I can list, so that I cannot promise what I do not have.
 70. As a proposer, I want to be unable to ask for more copies than my Friend lists, so that I do not ask for cards they are not offering.
 71. As a proposer, I want to be told which card and how many copies are available when a line is too high, so that I can correct it.
-72. As a proposer, I want each side to give at least one card or be the one paying cash, so that a proposal is never one-sided without cash. (default, pending owner confirmation)
-73. As a proposer, I want a proposal with cards on one side and nothing on the other to be refused, so that a proposal cannot be a gift. (default, pending owner confirmation)
+72. As a proposer, I want to send a gift, with cards on my side and nothing on the other, so that I can give a Friend cards through the same steps as a trade.
+73. As a proposer, I want a proposal with no cards on either side to be refused, so that a Trade is always about cards and never only money.
 74. As a proposer, I want sending a Trade Proposal to promise the copies I give immediately, so that I cannot promise them again elsewhere while I wait.
 75. As a proposer, I want my promised copies to stay promised with no expiry until the proposal is answered or I withdraw it, so that I know where my cards stand.
 76. As a proposer, I want to withdraw a proposal before it is answered, so that I can take it back and free my copies.
@@ -163,8 +163,8 @@ The design rests on a few rules, recorded in [ADR 0015](../../adr/0015-trades-sh
 96. As a collector, I want to turn Open to cash offers on or off with one setting, and to have it off by default, so that I choose whether to receive cash-only proposals.
 97. As a collector, I want my discovery row to say I am Open to cash offers only while it is on, so that Friends know what I accept.
 98. As a collector, I want a one-way match on the discovery page to read as a possible sale or purchase, so that I understand what cash would make it.
-99. As a proposer who is not Open to cash offers and who sent "my $10 for your card" to a Friend who is, I want my Friend unable to counter with "$15", because a Counter is a Trade Proposal sent back to me and my setting applies, so that I am never sent a cash-only proposal I have not opted in to. (default, pending owner confirmation)
-100. As a recipient of such a proposal, I want to understand that I can only Accept or Decline it, because a Counter would be refused when the sender is not Open to cash offers, so that I know my options. (default, pending owner confirmation)
+99. As a proposer who is not Open to cash offers and who sent "my $10 for your card" to a Friend who is, I want my Friend unable to counter with "$15", because a Counter is a Trade Proposal sent back to me and my setting applies, so that I am never sent a cash-only proposal I have not opted in to.
+100. As a recipient of such a proposal, I want to understand that I can only Accept or Decline it, because a Counter would be refused when the sender is not Open to cash offers, so that I know my options.
 101. As a collector, I want the app to record the agreed amount and never process, hold or verify money, so that the app is never a payment service.
 102. As a collector, I want the Trade screen to show a notice that the app only records the amount and is not liable for any money exchanged, so that I understand the app's limits.
 103. As a collector, I want cash to be handled between us, outside the app, at the in-person swap, so that no payment step is added to the app.
@@ -222,10 +222,10 @@ The design rests on a few rules, recorded in [ADR 0015](../../adr/0015-trades-sh
 146. As a collector, I want to choose a Deck as the destination, and to have that Deck's list rise as an add would, so that a card I got for a Deck counts toward it.
 147. As a collector, I want the destination choice to be a Storage Leaf or a Deck, so that cards land in a place that can hold them.
 148. As a collector, I want my totals to change only when I confirm, and not when the other side does, so that my Collection never moves without me.
-149. As a collector, I want Confirm swap to ask me to refresh my picks first when any pick is out of date, so that I never give from a Location that no longer holds the card. (default, pending owner confirmation)
-150. As a collector, I want Confirm swap to be final, with no take-back, so that a confirmed side is certain. (default, pending owner confirmation)
+149. As a collector, I want Confirm swap to ask me to refresh my picks first when any pick is out of date, so that I never give from a Location that no longer holds the card.
+150. As a collector, I want Confirm swap to be final, with no take-back, so that a confirmed side is certain.
 151. As a collector, I want a confirmed swap not to be undoable, and older Undo records to keep their usual checks, so that Undo stays predictable.
-152. As a collector, I want my Trade Wants lowered by the copies I received, so that I am not asked again. (default, pending owner confirmation)
+152. As a collector, I want my Trade Wants lowered by the copies I received, so that I am not asked again.
 153. As a collector, I want a Trade to complete once both sides have confirmed, so that I can see it is done.
 154. As a collector, I want to be told when the other side confirms first, so that I know it is my turn.
 155. As a collector, I want to be told when the second side confirms, so that I know the Trade is complete.
@@ -287,8 +287,8 @@ The design rests on a few rules, recorded in [ADR 0015](../../adr/0015-trades-sh
 
 194. As a collector, I want non-Friends, collectors who have Blocked me or whom I have Blocked, and collectors with a pending request to see nothing of my Trade List or wants, so that only accepted Friends can see them.
 195. As a collector, I want a Friend to see only Edition-level facts about my Trade List and wants, never a Location or Deck name, so that my organisation stays private.
-196. As a collector, I want wants that come from a Deck in a Hidden Location to be left out of what Friends see, so that Friends cannot learn what a hidden Deck lacks. (default, pending owner confirmation)
-197. As a collector, I want my own matching to still use every one of my wants, including those from hidden Decks, so that my own results are complete. (default, pending owner confirmation)
+196. As a collector, I want wants that come from a Deck in a Hidden Location to be left out of what Friends see, so that Friends cannot learn what a hidden Deck lacks.
+197. As a collector, I want my own matching to still use every one of my wants, including those from hidden Decks, so that my own results are complete.
 198. As a collector, I want a Friend's view of my wants to say whether each is from a Deck or from my own list without naming the Deck, so that the reason is clear and private.
 199. As a collector, I want Friends to see only the copies I could trade now, so that promised and Borrowed Copies are never revealed.
 200. As a collector, I want other Friends' proposals and Trades to be invisible to me, so that a proposal is seen only by its two sides.
@@ -360,20 +360,20 @@ A new function, `reserving_picks`, returns the reserved Loan picks and Trade pic
 
 **Trade Pick List.** Picks are made at reservation, per Edition, For trade Locations first (largest Holding first, then name, then id), never from copies other reserving picks cover. The listable cap guarantees enough. "Use suggested picks" may draw on any Location, For trade first and then the Deck Pick List order. Stale picks are computed, not stored.
 
-**Shapes of a proposal**, checked on send and Counter: each side gives at least one card or is the cash payer, else 422 `TRADE_SIDE_EMPTY` (default, pending owner confirmation). A side that gives only cash requires the recipient to be Open to cash offers, else 409 `CASH_ONLY_NOT_OPEN`, in both directions. A Counter is a proposal sent to its recipient, so the recipient's setting applies with no exemption (default, pending owner confirmation). Cash outside the range, or a payer without an amount or an amount without a payer, is 422 `INVALID_CASH`. Cash alongside cards is always allowed.
+**Shapes of a proposal**, checked on send and Counter: at least one side gives at least one card, else 422 `TRADE_HAS_NO_CARDS`. A side may give nothing, so a proposal can be a gift either way (owner's choice, 2026-10-19). A side that gives only cash requires the recipient to be Open to cash offers, else 409 `CASH_ONLY_NOT_OPEN`, in both directions. A Counter is a proposal sent to its recipient, so the recipient's setting applies with no exemption. Cash outside the range, or a payer without an amount or an amount without a payer, is 422 `INVALID_CASH`. Cash alongside cards is always allowed.
 
 ### Confirm swap and ownership transfer
 
 Confirm swap runs under the confirmer's own owner lock only and changes only the confirmer's inventory:
 
-1. If the confirmer gives cards and any of their picks is out of date, it answers 409 `PICKS_OUT_OF_DATE`, and use suggested picks fixes them (409 `PICKS_UP_TO_DATE` when nothing is out of date). This mirrors the Loan handover (default, pending owner confirmation).
+1. If the confirmer gives cards and any of their picks is out of date, it answers 409 `PICKS_OUT_OF_DATE`, and use suggested picks fixes them (409 `PICKS_UP_TO_DATE` when nothing is out of date). This mirrors the Loan handover.
 2. **Copies given** leave through the same inventory write as a Loan handover: Removal semantics, no Undo record, Deck List lines not lowered. The side's picks are deleted and its reservation ends in the same transaction, so Holdings and promises fall by the same count.
 3. **Copies received** arrive as new Holdings in the chosen destination, which must be one of the confirmer's Storage Leaves or Decks and defaults to Unsorted (404 `LOCATION_NOT_FOUND` otherwise). A new inventory write adds them without the surplus setting that returns use, so copies arriving in a Deck raise its lines as an Add does. It writes no Undo record and advances the revision. It does not depend on the other account still existing, because it reads only `trade_line`.
-4. The confirmer's Trade Wants fall by the copies received per Edition, and rows reaching zero are deleted (default, pending owner confirmation).
+4. The confirmer's Trade Wants fall by the copies received per Edition, and rows reaching zero are deleted.
 5. The side's swap time is set. When the other side has already confirmed, the Trade closes as `swapped` and the other side gets a `swapped` update.
 6. Cash changes nothing: the app never handles money.
 
-A confirmed swap is not an Inventory Removal and takes no Undo slot. It has no take-back (default, pending owner confirmation) and nothing reverses it. Undo records older than the swap keep their usual checks, as after a Loan handover. A giver short at confirm cannot happen while the invariant holds; a failure there is a bug and rolls back.
+A confirmed swap is not an Inventory Removal and takes no Undo slot. It has no take-back and nothing reverses it. Undo records older than the swap keep their usual checks, as after a Loan handover. A giver short at confirm cannot happen while the invariant holds; a failure there is a bug and rolls back.
 
 ### Locks, revisions, cancel and ending a friendship
 
@@ -403,9 +403,9 @@ A confirmed swap is not an Inventory Removal and takes no Undo slot. It has no t
 All cross-collector Trade reads are in the `friend_copies` module, which ADR 0015 treats as one module rather than one function.
 
 - **`friend_trade_copies`** is one statement that keeps only Friends with no Block either way, reads the Holdings of the asked-about Editions, takes For trade membership from `for_trade_locations` with no hidden filter, takes reservations from `reserved_copies` and placement from `reserving_picks`, and aggregates the listable rule per Friend and Edition. It returns no Location id, never reads Borrowed Copies, and returns only positive listable counts.
-- **`friend_wants`** returns, per Friend and Edition, the need, the origin (`want_list` or `trade_wants`) and the Will accept rule. The Want List part is each Friend's combined-total need computed exactly as their own Want List would (their counting setting, Borrowed and lent copies, every Deck), leaving out lines of Decks inside Hidden Locations (default, pending owner confirmation), combined per Edition by sum or maximum as their setting says. The Trade Wants part is their `trade_want` rows with the exact rule. It never names a Deck. The field is `origin`, not a Deck field, because the contract guard forbids the word.
+- **`friend_wants`** returns, per Friend and Edition, the need, the origin (`want_list` or `trade_wants`) and the Will accept rule. The Want List part is each Friend's combined-total need computed exactly as their own Want List would (their counting setting, Borrowed and lent copies, every Deck), leaving out lines of Decks inside Hidden Locations, combined per Edition by sum or maximum as their setting says. The Trade Wants part is their `trade_want` rows with the exact rule. It never names a Deck. The field is `origin`, not a Deck field, because the contract guard forbids the word.
 - **The batched, lock-free allocation read.** First, a figure-neutral refactor splits `allocate` into a frozen set of input rows (`AllocationRows`), a single-owner reader (`read_allocation_rows`) and a pure `allocate_rows`. `allocate` becomes the composition with unchanged figures. No multi-owner reader is added to `copy_allocation`, `counts` or `borrowed_copies`. `friend_wants` builds one set of rows per prefiltered Friend from its own batched statements inside `friend_copies`, in one `REPEATABLE READ READ ONLY` transaction with no locks, and calls the pure function in memory. It is restricted to candidate Editions that could match the viewer's Trade List, by Card Identity and the widest Will accept, and Friends whose Deck Lists name none of them are skipped by a prefilter statement.
-- **Expansion for Will accept** is a new function beside the existing reach function: `edition` gives the exact Edition, `printing` gives every Edition of its Card Printing, and `identity` gives every Edition of every Card Printing with the same Card Identity (default, pending owner confirmation). It does not involve the counting setting.
+- **Expansion for Will accept** is a new function beside the existing reach function: `edition` gives the exact Edition, `printing` gives every Edition of its Card Printing, and `identity` gives every Edition of every Card Printing with the same Card Identity. It does not involve the counting setting.
 - **`GET /api/social/trade-matches`** reads the viewer's wants (the Want List under the viewer's own lock, plus Trade Wants) and the viewer's Trade List, then on a separate connection in one read-only repeatable-read transaction reads the Friends' listable copies and wants, and pairs them in memory. It answers `TradeMatches { has_friends, rows }`. Each row has the Friend's id, Handle and Display Name, `open_to_cash_offers`, the match kind (`two_way`, `has_what_you_want`, `wants_what_you_have`), up to 20 `you_get` and 20 `you_give` cards each with card facts, copies, need, origin and (for cards the viewer would get) `accepts_as` (`exact`, `any_finish`, `same_name`), and `more_you_get` and `more_you_give` counts. Rows sort by match kind, then Display Name, then Handle. A per-Friend route returns the full lists. There are no values in discovery. The opaque card descriptor is registered in the contract guard's allow-list.
 - **`GET /api/social/trade-lists/{handle}`** is a Friend's whole Trade List, with the same 404 `FRIEND_NOT_FOUND` rule as a Friend's Collection, paging by Card Identity and a search parameter.
 - **`GET /api/social/trade-card-matches?printing_id=`** backs Ask to trade: Friends with listable copies of the Printing's Editions.
@@ -431,7 +431,7 @@ New codes:
 - `NOT_TRADEABLE` (409), with the Edition, how many are available and which side.
 - `TRADE_NOT_FOUND` (404), also for non-parties.
 - `TRADE_CHANGED` (409), on a stale revision.
-- `TRADE_SIDE_EMPTY` (422).
+- `TRADE_HAS_NO_CARDS` (422).
 - `CASH_ONLY_NOT_OPEN` (409).
 - `INVALID_CASH` (422).
 - `DECK_NOT_FOR_TRADE` (409).
@@ -471,7 +471,7 @@ Plus two guards: the allocation refactor is figure-neutral, and a capacity test 
 **Which modules get tested.**
 
 - **Promise invariant (a trade promises test, real PostgreSQL).** Reserved counts sum Loan and Trade promises; a copy promised to a Loan cannot go in a proposal (`NOT_TRADEABLE`) and the other way round; Removal, add Undo and reassignment refuse with `PROMISED_TO_TRADE`, and still with `PROMISED_TO_LOAN` when only Loans promise; Moves are free and make picks out of date; a direct write that breaks the invariant fails at commit through the `trade` and `trade_line` triggers; Deck deletion and leaf conversion carry `trade_pick`; Lend Offers never pick copies a Trade covers; two concurrent sends, or a send racing an accept, for the same copies leave one success and sums that hold.
-- **Trade steps (a trades test).** Every state and closed reason; Counter closes, reopens prefilled, swaps the reserved side and sets `countered_from`; accept and decline are whole only; cancel only while nobody has confirmed; a half-confirmed Trade allows only Confirm swap for the other side; `TRADE_CHANGED` on a stale revision; idempotent replay; the 120-per-hour limit; every shape rule (`TRADE_SIDE_EMPTY`; `CASH_ONLY_NOT_OPEN` in both directions and on a Counter whose recipient is not Open to cash offers; `INVALID_CASH`; cash alongside cards always allowed); lines capped at listable copies, with a hidden For trade Location counting, a Deck inside a For trade Location never counting and Borrowed Copies never counting. Marking a Deck, un-marking inside a marked ancestor, and For trade versus hidden independence belong with the Location tree tests.
+- **Trade steps (a trades test).** Every state and closed reason; Counter closes, reopens prefilled, swaps the reserved side and sets `countered_from`; accept and decline are whole only; cancel only while nobody has confirmed; a half-confirmed Trade allows only Confirm swap for the other side; `TRADE_CHANGED` on a stale revision; idempotent replay; the 120-per-hour limit; every shape rule (`TRADE_HAS_NO_CARDS`, and a gift with nothing on one side accepted; `CASH_ONLY_NOT_OPEN` in both directions and on a Counter whose recipient is not Open to cash offers; `INVALID_CASH`; cash alongside cards always allowed); lines capped at listable copies, with a hidden For trade Location counting, a Deck inside a For trade Location never counting and Borrowed Copies never counting. Marking a Deck, un-marking inside a marked ancestor, and For trade versus hidden independence belong with the Location tree tests.
 - **Confirm swap (a trade swap test).** Given copies leave their picks with no Undo record and Deck List lines unchanged; received copies land in the destination, or Unsorted, and raise a Deck's line; totals change on each side only after that side's own confirm; out-of-date picks give `PICKS_OUT_OF_DATE`, then use suggested picks; Trade Wants fall by the copies received; the second confirm closes the Trade as `swapped`; confirming alone after the other account is gone and after a Block; an older Undo record behaves as after a Loan handover.
 - **Ending a friendship (extend the ending friendship test).** Remove Friend and Block cancel unconfirmed Trades and release both sides' reservations with the right revisions; half-confirmed Trades stay; the update reads cancelled with no reason and is byte-identical for unfriend, Block and a plain cancel.
 - **Privacy (a trade matches test, extend the social contract test).** Non-Friends, a Blocked collector either way and pending requests see no Trade List and no wants; promised copies leave the Trade List at once and come back when released; wants from Decks in Hidden Locations are absent; no `/api/social` trade response has a Location or Deck field; only the choke point reads `trade_want` or `trade_accept`, or calls `for_trade_locations`, in the social area; the Trade List statement never reads Borrowed Copies; and a new guard fails when any module outside the choke point filters several collectors' inventory.
@@ -488,8 +488,7 @@ Plus two guards: the allocation refactor is figure-neutral, and a capacity test 
 - **Stage 2:** discovery for collectors who are not Friends, zip codes, distance bands, sorting by distance, a card search ("who near me has this card"), messaging or a meetup step for strangers, reporting, blocking non-Friends, and safety for minors and for sales between strangers. Stage 1 must not depend on any of them.
 - Processing, holding or verifying any payment. Cash is a recorded agreement only.
 - Shipping and mail trades.
-- Gifts: a proposal with cards on one side and nothing on the other. (default, pending owner confirmation)
-- Take-back of a Confirm swap. (default, pending owner confirmation)
+- Take-back of a Confirm swap.
 - Proposal expiry. Reservations never expire.
 - Partial swaps and partial acceptance of a proposal.
 - Adding single cards to the Trade List outside a For trade Location.
@@ -507,15 +506,15 @@ Plus two guards: the allocation refactor is figure-neutral, and a capacity test 
 - [`CONTEXT.md`](../../../CONTEXT.md), as amended by the resolution.
 - The [social network spec](../social-network/spec.md), the Friends and Loans spec Trading builds on, and [ADR 0014](../../adr/0014-friend-reads-and-two-owner-loans.md).
 
-### Defaults pending owner confirmation
+### The nine owner answers
 
-The owner did not individually answer these nine questions. Each was recorded as decided, marked **Default, pending owner confirmation (2026-10-17)**, and keeps the plumbing as described above. A different answer changes only the lines named.
+These nine questions were put to the owner with a default each. On 2026-10-19 the owner allowed gifts (5) and approved the other eight as written.
 
 1. **A Deck inside a For trade Location** is not on the Trade List; Decks never are. Alternative: they are, which removes the Deck exclusion from the For trade function.
 2. **Wants from a Deck in a Hidden Location** are not shown to Friends in discovery. The collector's own matching uses every want.
 3. **Will accept scope** is one choice per card, wherever it appears on the Want List, not per Deck.
 4. **Trade Wants quantity** falls by the copies received at Confirm swap and is deleted at zero. Alternative: it stays until edited.
-5. **Gifts** are refused: a proposal needs something from both sides, or cash from one. Alternative: allow it, which drops the rule.
+5. **Gifts** — answered by the owner on 2026-10-19: gifts are allowed. A proposal may have cards on one side and nothing on the other; only a proposal with no cards at all is refused.
 6. **Counters and the cash-only rule:** a Counter is a proposal sent to its recipient, so their Open to cash offers setting applies. A collector not Open to cash offers who sends a cash-only proposal can be answered only with Accept or Decline. Alternative: skip the check when the countered proposal already had a cash-only side.
 7. **Out-of-date picks at Confirm swap** are refused and the collector uses suggested picks, as for Loans. Alternative: re-pick automatically at confirm.
 8. **Take-back of a Confirm swap** is not allowed. Alternative: allow it before the other side confirms, which adds a step and an allowed-step entry.

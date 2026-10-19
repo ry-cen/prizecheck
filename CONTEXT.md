@@ -181,8 +181,8 @@ The lender closing a handed-over Loan as not coming back. The lent copies leave 
 _Avoid_: Lost card, gift
 
 **Trade**:
-An agreement between two Friends to swap copies in person, and optionally an agreed cash amount paid by one side, that transfers ownership both ways. It is a Trade Proposal one side accepted; from then both sides' copies are promised until each side's Confirm swap. Copies a collector gives leave their Collection, and copies they get become their own. The app records an agreed cash amount but never handles, holds or verifies money. A Trade with cards on one side and only cash on the other is still a Trade.
-_Avoid_: Loan, sale, deal, exchange, gift
+An agreement between two Friends to swap copies in person, and optionally an agreed cash amount paid by one side, that transfers ownership both ways. It is a Trade Proposal one side accepted; from then both sides' copies are promised until each side's Confirm swap. Copies a collector gives leave their Collection, and copies they get become their own. The app records an agreed cash amount but never handles, holds or verifies money. A Trade with cards on one side and only cash, or nothing, on the other is still a Trade; one with nothing on one side is a gift. A Trade always has at least one card.
+_Avoid_: Loan, sale, deal, exchange
 
 **Trade Proposal**:
 One collector's offer of a Trade to a Friend: the cards each side would give and any cash. The other side accepts or declines it whole, or counters, which closes it and sends back a new Trade Proposal prefilled with the same cards. Sending a Trade Proposal promises the sender's copies; accepting promises the other side's and makes it a Trade.
