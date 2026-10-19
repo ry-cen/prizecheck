@@ -30,6 +30,10 @@ Holdings of the given Editions (``holding_owner_edition_location``), the owner's
 creation times of the Decks those lines belong to. The work grows with the given Editions' Holdings and the owner's Deck
 List lines, never with the rest of the Collection.
 
+``allocate`` is two steps (trading #265): ``read_allocation_rows`` makes those reads and the Loan and Borrowed Copy
+reads below for one owner, into an ``AllocationRows``, and ``allocate_rows`` counts from the rows alone, with no I/O.
+Nothing in this module reads several owners at once.
+
 **The Spare Copy rule** is ``spare_rule``, the one place it is written (social network #245, spec "The Spare Copy rule
 moves into one function"). ``allocate``, ``available_to``, ``deck_ownership`` (Surplus and the competition warning),
 ``swap_hints`` and ``deck_pick_list`` all read it, and every "copies in the Deck" figure (the Deck detail, its Deck List
@@ -245,57 +249,100 @@ def _hand_out(shorts: Iterable[tuple[UUID, int]], spare_copies: int) -> dict[UUI
     return handed
 
 
-def allocate(conn, user_id: str, editions: Iterable[UUID], counting: WantListCounting) -> Allocation:
-    """Count every Deck List line of the owner that names one of ``editions``. The caller holds the owner row lock."""
+@dataclass(frozen=True)
+class AllocationRows:
+    """The inputs one owner's allocation reads, so that ``allocate_rows`` does no I/O (trading #265). The one reader is
+    ``read_allocation_rows``, for a single owner. ``allocate_rows`` ignores the rows of any Edition it isn't asked
+    about, and of any Deck with no line naming one, and never changes them."""
+    # (Location id, Edition id, copies): each of the owner's Holdings of the Editions, in the order they were read.
+    holdings: tuple[tuple[UUID, UUID, int], ...] = ()
+    # (Deck id, Edition id, quantity): each of the owner's Deck List lines naming them, in the order they were read.
+    lines: tuple[tuple[UUID, UUID, int], ...] = ()
+    # Deck id -> ``location.created_at``, for every Deck those lines belong to (``oldest_first`` orders them).
+    deck_created: Mapping[UUID, datetime] = field(default_factory=dict)
+    # Edition id -> copies promised to open Loans and not yet handed over (``counts.reserved_counts``).
+    reserved: Mapping[UUID, int] = field(default_factory=dict)
+    # Edition id -> {source Location id or None: copies}: where the reserved copies are picked
+    # (``counts.reserved_picks``).
+    picked: Mapping[UUID, Mapping[UUID | None, int]] = field(default_factory=dict)
+    # Edition id -> copies handed over to open Loans and not had back (``counts.lent_counts``).
+    lent: Mapping[UUID, int] = field(default_factory=dict)
+    # Edition id -> {source Location id or None: copies}: where the lent copies came from (``counts.lent_picks``).
+    lent_at: Mapping[UUID, Mapping[UUID | None, int]] = field(default_factory=dict)
+    # (Deck id, Edition id) -> Borrowed Copies in that Deck (``borrowed_copies.borrowed_in``).
+    borrowed: Mapping[tuple[UUID, UUID], int] = field(default_factory=dict)
+
+
+def read_allocation_rows(conn, user_id: str, editions: Iterable[UUID]) -> AllocationRows:
+    """Everything ``allocate_rows`` reads for the owner's Deck List lines naming one of ``editions``: today's reads of
+    ``allocate``, moved unchanged. The caller holds the owner row lock. With no Editions it reads nothing."""
     wanted = sorted(set(editions))
+    if not wanted:
+        return AllocationRows()
+    holdings = tuple((row['location_id'], row['edition_id'], row['quantity']) for row in conn.execute(
+        'SELECT location_id,edition_id,quantity FROM holding WHERE owner_id=%s AND edition_id=ANY(%s)',
+        (user_id, wanted)))
+    lines = tuple((row['deck_id'], row['edition_id'], row['quantity']) for row in conn.execute(
+        'SELECT deck_id,edition_id,quantity FROM deck_list_line WHERE owner_id=%s AND edition_id=ANY(%s)',
+        (user_id, wanted)).fetchall())
+    decks = sorted({deck for deck, _, _ in lines})
+    created = {row['id']: row['created_at'] for row in conn.execute(
+        'SELECT id,created_at FROM location WHERE owner_id=%s AND id=ANY(%s)', (user_id, decks))} if decks else {}
+    reserved = counts.reserved_counts(conn, user_id, wanted)
+    picked = counts.reserved_picks(conn, user_id, list(reserved)) if reserved else {}
+    lent = counts.lent_counts(conn, user_id, wanted)
+    lent_at = counts.lent_picks(conn, user_id, list(lent)) if lent else {}
+    # Borrowed Copies count for the Deck they are in only, after its own copies (#254).
+    borrowed = borrowed_in(conn, user_id, decks, wanted)
+    return AllocationRows(holdings=holdings, lines=lines, deck_created=created, reserved=reserved, picked=picked,
+                          lent=lent, lent_at=lent_at, borrowed=borrowed)
+
+
+def allocate_rows(rows: AllocationRows, editions: Iterable[UUID], counting: WantListCounting) -> Allocation:
+    """Count every Deck List line in ``rows`` that names one of ``editions``, under ``counting``. Pure: no I/O, and
+    ``rows`` is never changed. Rows of other Editions, and Decks with no line naming one of ``editions``, take no
+    part."""
+    wanted = set(editions)
     if not wanted:
         return Allocation(counting=counting, lines={}, order=())
     total: dict[UUID, int] = {}
-    held: dict[tuple[UUID, UUID], int] = {}
     places: dict[UUID, dict[UUID, int]] = {}
-    for row in conn.execute('SELECT location_id,edition_id,quantity FROM holding WHERE owner_id=%s AND edition_id=ANY(%s)',
-                            (user_id, wanted)):
-        total[row['edition_id']] = total.get(row['edition_id'], 0) + row['quantity']
-        held[(row['location_id'], row['edition_id'])] = row['quantity']
-        places.setdefault(row['edition_id'], {})[row['location_id']] = row['quantity']
-    listed = conn.execute('SELECT deck_id,edition_id,quantity FROM deck_list_line WHERE owner_id=%s AND edition_id=ANY(%s)',
-                          (user_id, wanted)).fetchall()
+    for location, edition, quantity in rows.holdings:
+        if edition in wanted:
+            total[edition] = total.get(edition, 0) + quantity
+            places.setdefault(edition, {})[location] = quantity
+    listed = [{'deck_id': deck, 'edition_id': edition, 'quantity': quantity}
+              for deck, edition, quantity in rows.lines if edition in wanted]
     decks = sorted({row['deck_id'] for row in listed})
-    created = {row['id']: row['created_at'] for row in conn.execute(
-        'SELECT id,created_at FROM location WHERE owner_id=%s AND id=ANY(%s)', (user_id, decks))} if decks else {}
-    order = oldest_first(created)
+    order = oldest_first({deck: rows.deck_created[deck] for deck in decks})
     rank = {deck: index for index, deck in enumerate(order)}
     by_edition: dict[UUID, list[dict]] = {}
     for row in listed:
         by_edition.setdefault(row['edition_id'], []).append(row)
-    reserved = counts.reserved_counts(conn, user_id, wanted)
-    picked = counts.reserved_picks(conn, user_id, list(reserved)) if reserved else {}
     copies = {edition: spare_rule(places.get(edition, {}),
                                   {row['deck_id']: row['quantity'] for row in by_edition.get(edition, [])},
-                                  reserved.get(edition, 0), picked.get(edition))
+                                  rows.reserved.get(edition, 0), rows.picked.get(edition))
               for edition in sorted(set(places) | set(by_edition))}
-    lent_total = counts.lent_counts(conn, user_id, wanted)
-    lent_at = counts.lent_picks(conn, user_id, list(lent_total)) if lent_total else {}
-    # Borrowed Copies count for the Deck they are in only, after its own copies (#254).
-    borrowed = borrowed_in(conn, user_id, decks, wanted)
+    lent_total, lent_at, borrowed = rows.lent, rows.lent_at, rows.borrowed
     lines: dict[tuple[UUID, UUID], LineCount] = {}
-    for edition, rows in by_edition.items():
-        rows.sort(key=lambda row: rank[row['deck_id']])
+    for edition, deck_rows in by_edition.items():
+        deck_rows.sort(key=lambda row: rank[row['deck_id']])
         own, spare_copies = copies[edition].own, copies[edition].spare
         # Another Deck's own copies that are reserved stay counted by that Deck only (One Deck at a time).
         promised = copies[edition].reserved_own
         free_own = {deck: held - promised.get(deck, 0) for deck, held in own.items()}
         own_borrowed = {row['deck_id']: min(row['quantity'] - own[row['deck_id']],
-                                            borrowed.get((row['deck_id'], edition), 0)) for row in rows}
+                                            borrowed.get((row['deck_id'], edition), 0)) for row in deck_rows}
         # Copies a Deck lent from its own line count for that Deck first; the other lent copies are a pool.
         own_lent = {row['deck_id']: min(row['quantity'] - own[row['deck_id']] - own_borrowed[row['deck_id']],
-                                        lent_at.get(edition, {}).get(row['deck_id'], 0)) for row in rows}
+                                        lent_at.get(edition, {}).get(row['deck_id'], 0)) for row in deck_rows}
         pool = max(0, lent_total.get(edition, 0) - sum(own_lent.values()))
         filled = {row['deck_id']: own[row['deck_id']] + own_borrowed[row['deck_id']] + own_lent[row['deck_id']]
-                  for row in rows}
-        handed = _hand_out(((row['deck_id'], row['quantity'] - filled[row['deck_id']]) for row in rows), spare_copies)
+                  for row in deck_rows}
+        handed = _hand_out(((row['deck_id'], row['quantity'] - filled[row['deck_id']]) for row in deck_rows),
+                           spare_copies)
         counted: list[tuple[dict, int, int, tuple]] = []
-        for row in rows:
+        for row in deck_rows:
             deck, quantity = row['deck_id'], row['quantity']
             short = quantity - filled[deck]
             from_decks: list[tuple[UUID, int]] = []
@@ -307,7 +354,7 @@ def allocate(conn, user_id: str, editions: Iterable[UUID], counting: WantListCou
                 spare = min(short, spare_copies)
                 others = min(short - spare, sum(free_own.values()) - free_own[deck])
                 wanted_from_others = others
-                for other in rows:
+                for other in deck_rows:
                     if wanted_from_others == 0:
                         break
                     taken = min(wanted_from_others, free_own[other['deck_id']]) if other['deck_id'] != deck else 0
@@ -327,6 +374,13 @@ def allocate(conn, user_id: str, editions: Iterable[UUID], counting: WantListCou
                                                held=own[deck], spare=spare, other_decks=others, from_decks=from_decks,
                                                lent=own_lent[deck] + extra[deck], borrowed=own_borrowed[deck])
     return Allocation(counting=counting, lines=lines, order=order, owned=total, places=places, copies=copies)
+
+
+def allocate(conn, user_id: str, editions: Iterable[UUID], counting: WantListCounting) -> Allocation:
+    """Count every Deck List line of the owner that names one of ``editions``: ``allocate_rows`` over
+    ``read_allocation_rows``. The caller holds the owner row lock."""
+    wanted = sorted(set(editions))
+    return allocate_rows(read_allocation_rows(conn, user_id, wanted), wanted, counting)
 
 
 def deck_lines(conn, user_id: str, deck_id: UUID, counting: WantListCounting) -> dict[UUID, LineCount]:
