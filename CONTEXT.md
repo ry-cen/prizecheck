@@ -197,11 +197,11 @@ The copies a collector offers to trade: their owned copies in For trade Location
 _Avoid_: Haves, trade binder, Collection
 
 **Trade Wants**:
-The Card Editions and quantities a collector lists by hand as wanted in trades, beside their Want List, usually for cards no Deck names. Each line is one exact Card Edition.
+The Card Editions and quantities a collector lists by hand as wanted in trades, beside their Want List, usually for cards no Deck names. Each line is one exact Card Edition. A line adds to any Deck need for the same Card Edition.
 _Avoid_: Wishlist, Want List, wants list
 
 **Will accept**:
-A Want List card's choice of which cards count for it in trades: this exact Card Edition (the default), any Card Edition of the same Card Printing, or any card with the same Card Identity. It changes only trade matching, never the Want List's own counts.
+A Want List card's choice of which cards count for it in trades: this exact Card Edition (the default), any Card Edition of the same Card Printing, or any card with the same Card Identity. It changes trade matching and the Swap hint's suggestions, never the Want List's own counts. A received card taken through a widened rule can switch the Deck line, offered at Confirm swap.
 _Avoid_: Match rule, flexibility, substitute
 
 **Trade Pick List**:

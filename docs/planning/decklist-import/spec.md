@@ -349,6 +349,7 @@ From [the Want List page](wayfinder/resolutions/prototype-want-list.md) and [the
   - **One Deck at a time:** any copy outside this Deck.
 
   Swap is one Deck List changes batch that lowers the line and raises or adds the other, and its Undo is the inverse batch.
+- **Swap hint and trading.** The [trading spec](../trading/spec.md) widens the Swap hint to also offer Editions a line's Will accept rule accepts. With Will accept left at this exact card, the hint is unchanged.
 - **`GET /api/want-list`, optionally scoped to one Deck:**
   - one capture under the owner row lock, bounded by Deck List lines;
   - returns the counting setting, each Deck's section in creation order (per line: Edition, quantity, held, spare counted, counted from other Decks, need, Swap hint) and the combined rows.
