@@ -24,7 +24,7 @@ Add Trades to the `social` area of the API and the web app, on top of Friends, L
 
 **What a collector wants.** The Want List counts automatically. Beside it, **Trade Wants** is a short hand-edited list of exact Card Editions for cards no Deck names. Each Want List card also has a **Will accept** choice for trades: this exact card (the default), any finish of the same Card Printing, or any card with the same name. Discovery marks each want as coming from a Deck or from the collector's own list, and never names a Deck. A collector's own spare copies of a card their Will accept choice takes do not reduce the need shown in discovery until the Deck line is switched to that card, which the Want List's Swap hint offers for copies already owned and Confirm swap offers for copies just received.
 
-**Finding matches.** A discovery page shows one row per Friend: two-way matches first, then Friends who have what the viewer wants, then Friends who want what the viewer has. A row shows both sides and a badge when the Friend is **Open to cash offers**, and shows no values. **Propose trade** opens a draft prefilled with the matched cards. The catalog card popup gains **Ask to trade**.
+**Finding matches.** A discovery page shows one row per Friend: two-way matches first, then Friends who have what the viewer wants, then Friends who want what the viewer has. A row shows only the matched cards on each side and a badge when the Friend is **Open to cash offers**, and shows no values. **Propose trade** opens an empty draft with the matched cards listed as suggestions at the top, each added with one tap. The catalog card popup gains **Ask to trade**.
 
 **Trade Proposals.** A proposal lists the cards each side gives and an optional US-dollar amount paid by one side. The sender's copies are promised the moment it is sent. The other side can Accept, Decline or Counter, always as a whole. Counter closes the proposal and opens a reply prefilled with the same cards, which either side can edit. Accepting promises the recipient's copies and makes it a Trade. While building or reviewing a proposal, each side shows its estimated total, and there is no suggested cash amount.
 
@@ -121,7 +121,7 @@ The design rests on a few rules, recorded in [ADR 0015](../../adr/0015-trades-sh
 
 ### Proposing a trade
 
-63. As a proposer, I want to start a draft from a discovery row with the matched cards prefilled on both sides, so that the common case is one tap.
+63. As a proposer, I want Propose trade from a discovery row to open an empty draft with the matched cards suggested at the top, each added with one tap, so that I choose which cards to trade instead of starting with every match on both sides.
 64. As a proposer, I want to edit the draft before sending, adding or removing cards and changing quantities, so that the proposal says what I mean.
 65. As a proposer, I want a draft to cover one Friend at a time, so that a proposal is always between two collectors.
 66. As a proposer, I want to be unable to propose a trade with myself, so that a proposal always has two sides.
@@ -163,8 +163,8 @@ The design rests on a few rules, recorded in [ADR 0015](../../adr/0015-trades-sh
 96. As a collector, I want to turn Open to cash offers on or off with one setting, and to have it off by default, so that I choose whether to receive cash-only proposals.
 97. As a collector, I want my discovery row to say I am Open to cash offers only while it is on, so that Friends know what I accept.
 98. As a collector, I want a one-way match on the discovery page to read as a possible sale or purchase, so that I understand what cash would make it.
-99. As a proposer who is not Open to cash offers and who sent "my $10 for your card" to a Friend who is, I want my Friend unable to counter with "$15", because a Counter is a Trade Proposal sent back to me and my setting applies, so that I am never sent a cash-only proposal I have not opted in to.
-100. As a recipient of such a proposal, I want to understand that I can only Accept or Decline it, because a Counter would be refused when the sender is not Open to cash offers, so that I know my options.
+99. As a proposer who is not Open to cash offers and who sent "my $10 for your card", I want my Friend able to counter with "$15", so that a cash offer I started can be negotiated instead of only accepted or declined.
+100. As a collector not Open to cash offers, I want a Counter with only cash on one side to be refused when the proposal it answers had no cash-only side, so that I am never sent a sale or purchase I did not start or opt in to.
 101. As a collector, I want the app to record the agreed amount and never process, hold or verify money, so that the app is never a payment service.
 102. As a collector, I want the Trade screen to show a notice that the app only records the amount and is not liable for any money exchanged, so that I understand the app's limits.
 103. As a collector, I want cash to be handled between us, outside the app, at the in-person swap, so that no payment step is added to the app.
@@ -388,7 +388,7 @@ A new function, `reserving_picks`, returns the reserved Loan picks and Trade pic
 
 **Trade Pick List.** Picks are made at reservation, per Edition, For trade Locations first (largest Holding first, then name, then id), never from copies other reserving picks cover. The listable cap guarantees enough. "Use suggested picks" may draw on any Location, For trade first and then the Deck Pick List order. Stale picks are computed, not stored.
 
-**Shapes of a proposal**, checked on send and Counter: at least one side gives at least one card, else 422 `TRADE_HAS_NO_CARDS`. A side may give nothing, so a proposal can be a gift either way (owner's choice, 2026-10-19). A side that gives only cash requires the recipient to be Open to cash offers, else 409 `CASH_ONLY_NOT_OPEN`, in both directions. A Counter is a proposal sent to its recipient, so the recipient's setting applies with no exemption. Cash is sent as an amount and a payer together, or not at all; an amount that is not a whole number of cents from 1 to 99,999,999 is 422 `INVALID_CASH`. Cash alongside cards is always allowed. "Gives only cash" means a side gives no cards and pays the cash, so a gift plus cash (one side gives cards and pays, the other gives nothing) needs no Open to cash offers check. One Edition on both sides is 422 `SAME_CARD_BOTH_SIDES`.
+**Shapes of a proposal**, checked on send and Counter: at least one side gives at least one card, else 422 `TRADE_HAS_NO_CARDS`. A side may give nothing, so a proposal can be a gift either way (owner's choice, 2026-10-19). A side that gives only cash requires the recipient to be Open to cash offers, else 409 `CASH_ONLY_NOT_OPEN`, in both directions. A Counter is a proposal sent to its recipient, so the recipient's setting applies, except when the countered proposal already had a cash-only side: then the Counter may keep or change a cash-only side (owner, 2026-10-19). Cash is sent as an amount and a payer together, or not at all; an amount that is not a whole number of cents from 1 to 99,999,999 is 422 `INVALID_CASH`. Cash alongside cards is always allowed. "Gives only cash" means a side gives no cards and pays the cash, so a gift plus cash (one side gives cards and pays, the other gives nothing) needs no Open to cash offers check. One Edition on both sides is 422 `SAME_CARD_BOTH_SIDES`.
 
 ### Step contracts
 
@@ -565,7 +565,7 @@ These nine questions were put to the owner with a default each. On 2026-10-19 th
 3. **Will accept scope** is one choice per card, wherever it appears on the Want List, not per Deck.
 4. **Trade Wants quantity** falls at Confirm swap and is deleted at zero. Refined by the owner on 2026-10-19: Trade Wants add to the Want List's need for the same Edition, received copies fill Deck needs first, and the line falls only by the rest; discovery shows the combined count with the Deck part, for example "6 wanted (2 for Decks)".
 5. **Gifts** — answered by the owner on 2026-10-19: gifts are allowed. A proposal may have cards on one side and nothing on the other; only a proposal with no cards at all is refused.
-6. **Counters and the cash-only rule:** a Counter is a proposal sent to its recipient, so their Open to cash offers setting applies. A collector not Open to cash offers who sends a cash-only proposal can be answered only with Accept or Decline. Alternative: skip the check when the countered proposal already had a cash-only side.
+6. **Counters and the cash-only rule:** a Counter is a proposal sent to its recipient, so their Open to cash offers setting applies, except when the countered proposal already had a cash-only side. A collector not Open to cash offers who sends a cash-only proposal can be countered with cash (the owner reversed the first default after the prototype, 2026-10-19).
 7. **Out-of-date picks at Confirm swap** are refused and the collector uses suggested picks, as for Loans. Alternative: re-pick automatically at confirm.
 8. **Take-back of a Confirm swap** is not allowed. Alternative: allow it before the other side confirms, which adds a step and an allowed-step entry.
 9. **"Same name" across languages** uses Card Identity as defined, which may include Printings in other languages that the catalog links to the same identity.
