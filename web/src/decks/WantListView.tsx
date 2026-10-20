@@ -50,6 +50,8 @@ import {
 } from "./WantListCost";
 import { SwapHint } from "./SwapHint";
 import { useWantListSwap, type WantListSwap } from "./useWantListSwap";
+import { TradeWantsPanel, WillAcceptSelect } from "./TradeWantsPanel";
+import { useTradeWants, type TradeWantsApi } from "./useTradeWants";
 
 type Props = {
   /** Opens a Deck in the deck builder (/decks/<id>). */
@@ -99,6 +101,9 @@ function follow(event: MouseEvent, go: () => void) {
  * - **Friends' cards (#251):** a line a Friend can lend shows Friend chips, and the summary's **Buy / Get from Friends**
  *   switch shows one panel per card instead of the sections (`WantListFriends`). Both read Friends' cards apart from
  *   the Want List (`useFriendMatches`), so nothing above waits on them; without Friends there is no switch.
+ * - **Trading (#275):** each line has a Will accept select (this exact card, any finish, or any card with the same
+ *   name), which reads the Want List again because the Swap hints follow it; and All Decks ends with the Trade Wants
+ *   panel (`useTradeWants`), shown even without Decks. Neither changes a figure on the page.
  */
 export function WantListView({ onOpenDeck, onNavigate }: Props) {
   const idBase = useId();
@@ -121,6 +126,7 @@ export function WantListView({ onOpenDeck, onNavigate }: Props) {
   });
   const friends = useFriendMatches(load.kind === "ready" ? load.list : null);
   const drafts = useBorrowDrafts();
+  const trade = useTradeWants(reload);
   const [view, setView] = useState<View>("buy");
 
   function choose(deckId: string | null) {
@@ -197,10 +203,13 @@ export function WantListView({ onOpenDeck, onNavigate }: Props) {
 
   if (list.decks.length === 0)
     return (
-      <p className="m-0 text-body text-text-muted">
-        No Decks yet. Create one on My Decks, and the Want List shows what it
-        still needs.
-      </p>
+      <div className="flex min-w-0 flex-col gap-4">
+        <p className="m-0 text-body text-text-muted">
+          No Decks yet. Create one on My Decks, and the Want List shows what it
+          still needs.
+        </p>
+        <TradeWantsPanel api={trade} />
+      </div>
     );
 
   const page = (
@@ -325,8 +334,10 @@ export function WantListView({ onOpenDeck, onNavigate }: Props) {
                 onOpenDeck={onOpenDeck}
                 swap={swap}
                 byCard={byCard}
+                trade={trade}
               />
             ))}
+            {!shownScope && <TradeWantsPanel api={trade} />}
           </div>
         </div>
       )}
@@ -345,6 +356,7 @@ function DeckSection({
   onOpenDeck,
   swap,
   byCard,
+  trade,
 }: {
   section: WantListSection;
   deckName: (id: string) => string;
@@ -352,6 +364,8 @@ function DeckSection({
   swap: WantListSwap;
   /** Friends' copies by the card they match (#251). */
   byCard: Map<string, FriendCopy[]>;
+  /** The collector's Will accept choices (#275). */
+  trade: TradeWantsApi;
 }) {
   const idBase = useId();
   return (
@@ -397,8 +411,18 @@ function DeckSection({
               deckId={section.deck_id}
               line={line}
               deckName={deckName}
+              accept={<WillAcceptSelect line={line} api={trade} />}
             >
-              <SwapHint section={section} line={line} swap={swap} />
+              <SwapHint
+                section={section}
+                line={line}
+                swap={swap}
+                rule={
+                  trade.state.kind === "ready"
+                    ? trade.state.rules.get(line.edition_id)
+                    : undefined
+                }
+              />
               <FriendChips
                 name={line.name}
                 edition={editionText(line)}
@@ -431,11 +455,14 @@ function NeededLine({
   deckId,
   line,
   deckName,
+  accept,
   children,
 }: {
   deckId: string;
   line: WantListLine;
   deckName: (id: string) => string;
+  /** The line's Will accept select (#275), under its card's name. */
+  accept?: ReactNode;
   /** The line's Swap hint (#211) and Friend chips (#251), under its card and counts. */
   children?: ReactNode;
 }) {
@@ -446,6 +473,7 @@ function NeededLine({
         <p className="m-0 text-meta text-text-muted wrap-anywhere">
           {editionText(line)}
         </p>
+        {accept}
       </div>
       <div className="min-w-0 text-right phone:text-left">
         <p className="m-0 text-heading font-semibold tabular-nums text-accent-strong">

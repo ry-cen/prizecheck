@@ -12,11 +12,20 @@ import { expectTouchTarget } from "./support/touch-target";
 // × 1" when another Edition of its group has copies the counting setting makes available; Swap sends one Deck List
 // changes batch that moves that many copies onto a line for the owned Edition, every count follows, and the toast's
 // Undo sends the inverse batch. A Swap or an Undo after the list changed elsewhere is refused and the page reads again.
+// Will accept (Trading #275) widens the hint: Basic Psychic Energy SVE 13 and SVE 5 share a name and no Reprint Group, so
+// with "Any card with the same name" a line needing SVE 13 says "↻ You own a card with the same name (sve 005) × 2" for
+// two spare SVE 5 (their set has no printed code, so the hint names it by its set ID).
 
 const ORIGIN = process.env.TEST_ORIGIN || "http://localhost:5173";
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
-type Editions = { "PAL 185": string; "PAL 254": string; "PAF 80": string };
+type Editions = {
+  "PAL 185": string;
+  "PAL 254": string;
+  "PAF 80": string;
+  "SVE 5": string;
+  "SVE 13": string;
+};
 
 /** The Swap catalog through the real catalog import (it replaces the catalog); returns the Edition ids by key. */
 function seedCatalog(): Editions {
@@ -140,6 +149,25 @@ const hintText = "↻ You own a playable version (PAL 254) × 1";
 const swapButton = (page: Page) =>
   page.getByRole("button", {
     name: "Swap 1 Iono Paldea Evolved 185 for PAL 254",
+  });
+
+/** Trading #275's example: a Deck listing 4 Basic Psychic Energy SVE 13 and two loose SVE 5 on a Shelf. */
+async function sameName(page: Page, ids: Editions) {
+  const name = `Gardevoir ex ${randomUUID().slice(0, 6)}`;
+  const deck = await createDeck(page, name, 1);
+  await setLine(page, deck, ids["SVE 13"], 4);
+  await hold(page, await shelf(page), ids["SVE 5"], 2);
+  return { name, deck };
+}
+
+const willAccept = (page: Page) =>
+  page.getByRole("combobox", {
+    name: /^Will accept for Basic Psychic Energy \(Scarlet & Violet Energies · 013 /,
+  });
+const sameNameHint = "↻ You own a card with the same name (sve 005) × 2";
+const energySwap = (page: Page) =>
+  page.getByRole("button", {
+    name: "Swap 2 Basic Psychic Energy Scarlet & Violet Energies 013 for sve 005",
   });
 
 test.afterAll(async () => {
@@ -302,6 +330,39 @@ test.describe("on a desktop", () => {
       [ids["PAF 80"]]: "1",
     });
   });
+
+  test("Any card with the same name offers an owned spare in no Reprint Group, and Swap takes it", async ({
+    page,
+  }) => {
+    const ids = seedCatalog();
+    await signIn(page);
+    const { name, deck } = await sameName(page, ids);
+    await page.goto(`${ORIGIN}/decks/want-list`);
+    await expect(needs(page, name)).toContainText("4 of 4");
+    // This exact card, the default: the Energy is in no Reprint Group, so there is no hint.
+    await expect(willAccept(page)).toHaveValue("edition");
+    await expect(page.getByText(/You own a/)).toHaveCount(0);
+
+    await willAccept(page).selectOption({
+      label: "Any card with the same name",
+    });
+    await expect(needs(page, name)).toContainText(sameNameHint);
+    // The choice changes no figure: the Deck still needs 4.
+    await expect(needs(page, name)).toContainText("4 of 4");
+    await expect(page.getByText("4 cards", { exact: true })).toBeVisible();
+    await expectPageChecks(page, "the Want List with a same-name Swap hint");
+
+    await energySwap(page).click();
+    await expect(notifications(page)).toContainText(
+      `Swapped 2 Basic Psychic Energy for sve 005 in ${name}.`
+    );
+    await expect(needs(page, name)).toContainText("2 of 2");
+    await expect(page.getByText(/You own a/)).toHaveCount(0);
+    expect(await deckList(page, deck)).toEqual({
+      [ids["SVE 13"]]: "2",
+      [ids["SVE 5"]]: "2",
+    });
+  });
 });
 
 test.describe("on a phone", () => {
@@ -322,5 +383,26 @@ test.describe("on a phone", () => {
     await expect(
       notifications(page).getByRole("button", { name: "Undo" })
     ).toBeVisible();
+  });
+
+  test("Will accept and the same-name hint fit a phone, and Swap takes the spare", async ({
+    page,
+  }) => {
+    const ids = seedCatalog();
+    await signIn(page);
+    const { name } = await sameName(page, ids);
+    await page.goto(`${ORIGIN}/decks/want-list`);
+    await expectTouchTarget(willAccept(page));
+    await willAccept(page).selectOption({
+      label: "Any card with the same name",
+    });
+    await expect(needs(page, name)).toContainText(sameNameHint);
+    await expectTouchTarget(energySwap(page));
+    await expectPageChecks(
+      page,
+      "the Want List with a same-name Swap hint on a phone"
+    );
+    await energySwap(page).tap();
+    await expect(needs(page, name)).toContainText("2 of 2");
   });
 });

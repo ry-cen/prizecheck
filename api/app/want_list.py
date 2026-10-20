@@ -24,6 +24,13 @@ same scope (#210) and its Mass Entry export reuse ``capture_want_list`` and ``co
 
 The Swap hint (#211, ``swap_hints``) is ``WantListLine.swap``. The route asks the capture for it (``swaps=True``), which
 reads the Reprint Groups of the lines that still need copies in the same transaction; other callers don't pay for it.
+The collector's Will accept choices (Trading #275, ``trade_accept``) widen only the hint: no count, total, export or
+pin reads them. None of the three pins the cost and the Mass Entry export are paired on (``owner_revision``,
+``settings_revision`` and ``deck_lists_digest``) covers the hint, and a Will accept choice moves none of them.
+
+``edition_needs`` (Trading #275) is the combined need of some Card Editions over every Deck, hidden ones included, as
+the combined total counts it, for Confirm swap: received copies fill the Decks' needs first and only the rest lowers
+the collector's Trade Wants. It runs under the shared owner lock the Trade step took and takes no ``FOR UPDATE`` lock.
 """
 import hashlib
 import re
@@ -38,7 +45,7 @@ from .deck_list_display import read_line_display
 from .location_tree import error, owner_and_rows
 from .main import connect, verified_user
 from .settings import WantListCounting, read_settings
-from .swap_hints import GroupEdition, SwapCapture, SwapHint, capture_swaps, hints, swap_hint
+from .swap_hints import GroupEdition, SwapCapture, SwapHint, capture_swaps, has_rules, hints, swap_hint
 
 router = APIRouter(prefix='/api/want-list', tags=['want-list'])
 
@@ -179,6 +186,13 @@ def capture_want_list(user_id: str, deck_id: UUID | None = None, timeout_ms: int
         allocation = allocate(conn, user_id, editions, settings.want_list_counting)
         needed = {edition for (deck, edition), line in allocation.lines.items()
                   if line.need > 0 and (deck_id is None or deck == deck_id)}
+        if swaps and deck_id is not None and has_rules(conn, user_id):
+            # Will accept isn't closed under Reprint Groups (#275): hand the hints out over every Deck's needed lines,
+            # as the All Decks read does, so this Deck is offered exactly what that read offers it.
+            every = {row['edition_id'] for row in conn.execute(
+                'SELECT edition_id FROM deck_list_line WHERE owner_id=%s', (user_id,))}
+            needed = {edition for (_, edition), line in allocate(
+                conn, user_id, every, settings.want_list_counting).lines.items() if line.need > 0}
         swap_capture = capture_swaps(conn, user_id, needed, settings.want_list_counting) if swaps else SwapCapture()
         capture = WantListCapture(counting=settings.want_list_counting, settings_revision=settings.revision,
                                   owner_revision=revision, scope=deck_id, decks=decks, allocation=allocation,
@@ -197,6 +211,23 @@ def combined(capture: WantListCapture, needs: dict[UUID, list[LineCount]]) -> li
             rows.setdefault(line.edition_id, []).append(line)
     pick = sum if capture.counting == 'all_at_once' else max
     return [(edition, pick(line.need for line in lines), lines) for edition, lines in rows.items()]
+
+
+def edition_needs(conn, user_id: str, edition_ids) -> dict[UUID, int]:
+    """Each given Card Edition's combined need over every Deck of the owner, hidden ones included, under the account's
+    counting setting: the sum of the lines' needs under Every Deck built at once, the largest under One Deck at a time,
+    as ``combined`` counts it. An Edition no Deck needs is absent. Plain reads only: the caller holds the shared owner
+    lock (``social.owners.lock_owners``), and nothing here takes ``FOR UPDATE``."""
+    wanted = sorted(set(edition_ids))
+    if not wanted:
+        return {}
+    counting = read_settings(conn, user_id).want_list_counting
+    lines: dict[UUID, list[int]] = {}
+    for (_, edition), line in allocate(conn, user_id, wanted, counting).lines.items():
+        if line.need > 0:
+            lines.setdefault(edition, []).append(line.need)
+    pick = sum if counting == 'all_at_once' else max
+    return {edition: pick(needs) for edition, needs in lines.items()}
 
 
 NUMBER_PARTS = re.compile(r'^([a-z]*)(\d*)(.*)$', re.DOTALL)

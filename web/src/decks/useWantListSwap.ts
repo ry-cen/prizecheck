@@ -12,6 +12,7 @@ import type {
   WantListLine,
   WantListSection,
 } from "../want_list_generated";
+import type { WillAcceptRule } from "./tradeWantsModel";
 
 /** The owned Edition a hint names, as the hint reads it: "PAL 254", or "PAL 254 Reverse Holo" for any variant but
  * Normal. */
@@ -20,9 +21,13 @@ export function swapVersion(hint: SwapHint): string {
   return `${hint.set_code} ${hint.collector_number}${variant === "Normal" ? "" : ` ${variant}`}`;
 }
 
-/** "You own a playable version (PAL 254) × 1" (spec user story 80); the hint draws "↻" before it, hidden from readers. */
-export function swapHintText(hint: SwapHint): string {
-  return `You own a playable version (${swapVersion(hint)}) × ${hint.count}`;
+/** "You own a playable version (PAL 254) × 1" (spec user story 80); the hint draws "↻" before it, hidden from readers.
+ * A line whose Will accept choice is any card with the same name (Trading #275) says "You own a card with the same name
+ * (SVE 005) × 1" instead, because a card with the same name can play differently. */
+export function swapHintText(hint: SwapHint, rule?: WillAcceptRule): string {
+  const what =
+    rule === "identity" ? "a card with the same name" : "a playable version";
+  return `You own ${what} (${swapVersion(hint)}) × ${hint.count}`;
 }
 
 /** The Swap button's accessible name: it starts with the button's text and names the line's own version and the owned
