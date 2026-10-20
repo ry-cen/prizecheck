@@ -2,27 +2,44 @@ import { useId } from "react";
 import { PageHeader } from "../shell/PageHeader";
 import { Segmented, segmentId } from "../ui/Segmented";
 import { MyTradeList } from "./MyTradeList";
+import { TradeDraftPage } from "./TradeDraftPage";
+import { TradeScreen } from "./TradeScreen";
+import { TradesList } from "./TradesList";
 import {
+  TRADES_PATH,
   TRADES_VIEWS,
+  tradePath,
+  tradesRoute,
   tradesViewPath,
-  type TradesView,
 } from "./tradeListModel";
 
 type Props = {
-  /** The view the address opens. */
-  view: TradesView;
+  /** The section the address names (``sectionAt``): null for /trades, "list", "draft", or a Trade id. */
+  section: string | null;
   /** Goes to another address in the app. */
   onNavigate: (to: string) => void;
 };
 
 /**
- * The Trades tab (Trading #269, prototype verdict variant A): the page header and the switch over the tab's views,
- * `Trades · Find trades · My Trade List`. My Trade List is the first view; the Trades list and Find trades join the
- * switch in later tickets. The switch stays mounted across the views' addresses, as the Decks page's does.
+ * The Trades tab (Trading #269 and #270, prototype verdict variant A): the page header and the switch over the tab's
+ * views, `Trades · Find trades · My Trade List`, here the Trades list (/trades) and My Trade List (/trades/list); Find
+ * trades joins with discovery (#276). The switch stays mounted across the views' addresses, as the Decks page's does.
+ * The Trade Proposal draft (/trades/draft) and one Trade (/trades/<id>) are pages of their own under the tab.
  */
-export function TradesPage({ view, onNavigate }: Props) {
+export function TradesPage({ section, onNavigate }: Props) {
   const idBase = useId();
   const panelId = `${idBase}-panel`;
+  const route = tradesRoute(section);
+  if (route.kind === "draft") return <TradeDraftPage onNavigate={onNavigate} />;
+  if (route.kind === "trade" || route.kind === "missing")
+    return (
+      <TradeScreen
+        key={route.kind === "trade" ? route.id : "missing"}
+        tradeId={route.kind === "trade" ? route.id : null}
+        onAllTrades={() => onNavigate(TRADES_PATH)}
+      />
+    );
+  const view = route.view;
   return (
     <main className="mx-auto box-border flex max-w-3xl flex-col gap-6 px-7 py-6 phone:px-4 phone:py-4">
       {/* The switch sits right under the title, closer than the page's sections are to each other. */}
@@ -43,7 +60,11 @@ export function TradesPage({ view, onNavigate }: Props) {
         aria-labelledby={segmentId(idBase, view)}
         className="flex min-w-0 flex-col gap-5"
       >
-        <MyTradeList onOpenCollection={() => onNavigate("/collection")} />
+        {view === "trades" ? (
+          <TradesList onOpenTrade={(id) => onNavigate(tradePath(id))} />
+        ) : (
+          <MyTradeList onOpenCollection={() => onNavigate("/collection")} />
+        )}
       </div>
     </main>
   );

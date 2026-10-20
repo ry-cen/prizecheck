@@ -18,6 +18,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { BorrowDraftsProvider } from "../loans/BorrowDrafts";
+import { TradeDraftProvider } from "../trades/TradeDraft";
 import { Icon } from "../ui/Icon";
 import { Menu, type MenuItem } from "../ui/Menu";
 import { ToastProvider, useToast } from "../ui/Toast";
@@ -68,6 +69,8 @@ type Props = {
   onOpenLoan: (id: string) => void;
   /** Opens a Friend's Collection (#250) from the Friends drawer, by their Handle. */
   onOpenFriend: (handle: string) => void;
+  /** Opens the Trade Proposal draft (/trades/draft, Trading #270), from the draft bar's Review. */
+  onOpenTradeDraft: () => void;
   /** Resolves false when sign-out failed; the shell then says so in a toast. */
   onSignOut: () => Promise<boolean>;
   /** The scroll position the page at a path had when it was last left (useRoute). */
@@ -84,7 +87,7 @@ type Props = {
  * The persistent app shell (#162): desktop header with tabs, the inbox's bell (#259), the Friends button (#247) and the
  * avatar menu, the phone header with the bell, the Friends button and the account avatar (#246), the bottom tab bar
  * (Loans in the old More slot, #252, with the inbox's count of Loans waiting on the collector), the Borrow Request
- * drafts tray (#252) and the page area. Switching pages swaps only the page area. A kept-mounted
+ * drafts tray (#252), the Trade Proposal draft bar (Trading #270) and the page area. Switching pages swaps only the page area. A kept-mounted
  * page stays in the document, hidden, after its first visit, and is shown again with its scroll position;
  * other pages mount on each visit. A reload starts fresh.
  */
@@ -100,7 +103,12 @@ export function Shell(props: Props) {
             userId={props.userId}
             onOpenLoan={props.onOpenLoan}
           >
-            <ShellFrame {...props} />
+            <TradeDraftProvider
+              userId={props.userId}
+              onOpenDraft={props.onOpenTradeDraft}
+            >
+              <ShellFrame {...props} />
+            </TradeDraftProvider>
           </BorrowDraftsProvider>
         </FriendsProvider>
       </InboxProvider>

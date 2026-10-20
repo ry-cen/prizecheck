@@ -437,12 +437,11 @@ export function useInventoryActions({
           unavailable: true,
           focus: true,
         });
-      } else if (code === "PROMISED_TO_LOAN") {
-        // #252: undoing the add would leave fewer copies than open Loans promised.
+      } else if (code === "PROMISED_TO_LOAN" || code === "PROMISED_TO_TRADE") {
+        // #252 and Trading #270: undoing the add would leave fewer copies than open Loans or Trades promised.
         undoKeys.current.delete(entry.id);
         showToast({
-          message:
-            "Undo unavailable: you promised some of these copies to a Loan, so nothing was removed. Dismiss it to reach an earlier action.",
+          message: `Undo unavailable: you promised some of these copies to a ${code === "PROMISED_TO_TRADE" ? "Trade" : "Loan"}, so nothing was removed. Dismiss it to reach an earlier action.`,
           entry,
           unavailable: true,
           focus: true,

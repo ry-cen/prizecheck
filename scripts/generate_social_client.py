@@ -1,6 +1,6 @@
 """Generate the social client module (Friends and Friend Requests, social network #247, Blocks, #248, Friends' cards,
 #250 and #251, Loans, #252 and #253, Borrowed Copies, #254, Returns, #255, Write-off, #257, the inbox, #259, and a
-Friend's Trade List, trading #269) from the API OpenAPI schema."""
+Friend's Trade List, trading #269, and Trades as both sides read them, trading #270) from the API OpenAPI schema."""
 import sys
 from pathlib import Path
 
@@ -34,7 +34,7 @@ for name in ("Collector", "CollectorLookup", "InviteCollector", "FriendsView", "
              "BorrowedCopies", "MoveBorrowed", "ReturnedLine", "StartReturn", "WriteOffLine", "WriteOff", "ChosenPlace",
              "WrittenOffChoice", "ChangeReturnBy", "AskForMoreTime", "SeenNotices", "OfferedCopies", "SendLendOffer",
              "AcceptLendOffer", "InboxUpdate", "InboxWaiting", "InboxView", "InboxIds", "FriendTradeCard",
-             "FriendTradeList"):
+             "FriendTradeList", "TradeParty", "TradeCard", "TradeCash", "TradeView", "TradesView", "TradeStep"):
     definition = schema[name]
     fields = [f"{field}{'' if field in definition.get('required', []) else '?'}: {ts_type(value)}"
               for field, value in definition["properties"].items()]
@@ -163,6 +163,13 @@ export const seeNotices = (id: string, body: SeenNotices) =>
 export const getInbox = (signal?: AbortSignal) => request<InboxView>('/api/social/inbox', 'GET', undefined, signal);
 export const markInboxRead = (body: InboxIds) => request<InboxView>('/api/social/inbox/read', 'POST', body);
 export const clearInbox = (body: InboxIds) => request<InboxView>('/api/social/inbox/clear', 'POST', body);
+// Trades (trading #270): the Trades list and one Trade, as both sides read them. Sending one is in the Trades client.
+export const getTrades = (signal?: AbortSignal) => request<TradesView>('/api/social/trades', 'GET', undefined, signal);
+export const getTrade = (id: string, signal?: AbortSignal) =>
+  request<TradeView>(`/api/social/trades/${at(id)}`, 'GET', undefined, signal);
+// Trade steps, idempotent: retry a failed one with the same idempotency_key. Each answers the Trade as it now stands.
+export const withdrawTrade = (id: string, body: TradeStep) =>
+  request<TradeView>(`/api/social/trades/${at(id)}/withdraw`, 'POST', body);
 """)
 content = "\n".join(lines)
 target = root / "web/src/social_generated.ts"

@@ -150,6 +150,9 @@ const UNDO_REFUSED: Record<string, string> = {
   // #252: undoing the add would leave fewer copies than open Loans promised.
   PROMISED_TO_LOAN:
     "Undo unavailable: you promised some of these copies to a Loan, so nothing was removed.",
+  // Trading #268 and #270: undoing the add would leave fewer copies than open Trades promised.
+  PROMISED_TO_TRADE:
+    "Undo unavailable: you promised some of these copies to a Trade, so nothing was removed.",
 };
 
 /** Why the toast's Undo of a batch add did nothing. */

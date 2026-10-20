@@ -53,6 +53,12 @@ export type InboxView = { waiting: InboxWaiting[]; updates: InboxUpdate[] };
 export type InboxIds = { ids: string[] };
 export type FriendTradeCard = { edition_id: string; name: string; set_code: string; set_name: string; collector_number: string; descriptor: Record<string, unknown>; image_url: string | null; copies: string };
 export type FriendTradeList = { collector_id: string; handle: string; display_name: string; cards: FriendTradeCard[]; next_page: number | null };
+export type TradeParty = { collector_id: string | null; display_name: string; handle: string | null; open_to_cash_offers: boolean };
+export type TradeCard = { edition_id: string; name: string; set_code: string; set_name: string; collector_number: string; descriptor: Record<string, unknown>; image_url: string | null; copies: string };
+export type TradeCash = { cents: string; payer: "you" | "them" };
+export type TradeView = { id: string; state: "proposed" | "accepted" | "closed"; closed_reason: "declined" | "withdrawn" | "countered" | "cancelled" | "swapped" | null; closed_by: "you" | "them" | null; role: "proposer" | "recipient"; other: TradeParty; countered_from: string | null; you_give: TradeCard[]; you_get: TradeCard[]; cash: TradeCash | null; you_confirmed_swap: boolean; they_confirmed_swap: boolean; needs_you: boolean; waiting: "answer" | "fix_picks" | "confirm_swap" | null; section: "needs_you" | "to_swap" | "pending" | "history"; actions: ("accept" | "decline" | "counter" | "confirm_swap" | "use_suggested_picks" | "withdraw" | "cancel")[]; revision: number; created_at: string };
+export type TradesView = { trades: TradeView[]; needs_you: number };
+export type TradeStep = { revision: number; idempotency_key: string };
 
 /** A refused social request: the API's code, and for TOO_MANY_LOOKUPS the detail that says when to try again. */
 export class SocialError extends Error {
@@ -177,3 +183,10 @@ export const seeNotices = (id: string, body: SeenNotices) =>
 export const getInbox = (signal?: AbortSignal) => request<InboxView>('/api/social/inbox', 'GET', undefined, signal);
 export const markInboxRead = (body: InboxIds) => request<InboxView>('/api/social/inbox/read', 'POST', body);
 export const clearInbox = (body: InboxIds) => request<InboxView>('/api/social/inbox/clear', 'POST', body);
+// Trades (trading #270): the Trades list and one Trade, as both sides read them. Sending one is in the Trades client.
+export const getTrades = (signal?: AbortSignal) => request<TradesView>('/api/social/trades', 'GET', undefined, signal);
+export const getTrade = (id: string, signal?: AbortSignal) =>
+  request<TradeView>(`/api/social/trades/${at(id)}`, 'GET', undefined, signal);
+// Trade steps, idempotent: retry a failed one with the same idempotency_key. Each answers the Trade as it now stands.
+export const withdrawTrade = (id: string, body: TradeStep) =>
+  request<TradeView>(`/api/social/trades/${at(id)}/withdraw`, 'POST', body);

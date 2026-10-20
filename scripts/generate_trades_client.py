@@ -1,6 +1,7 @@
-"""Generate the Trades client module (trading #269: the collector's own Trade List; later Trading tickets add the rest of
-``/api/trades`` and ``/api/trade-wants``) from the API OpenAPI schema. Shared Trade facts under ``/api/social`` stay in
-the social client (scripts/generate_social_client.py)."""
+"""Generate the Trades client module (trading #269: the collector's own Trade List; #270: sending a Trade Proposal;
+later Trading tickets add the rest of ``/api/trades`` and ``/api/trade-wants``) from the API OpenAPI schema. Shared
+Trade facts under ``/api/social`` stay in the social client (scripts/generate_social_client.py), which this module
+imports its ``TradeView`` from."""
 import sys
 from pathlib import Path
 
@@ -24,8 +25,10 @@ def ts_type(value):
 
 
 schema = app.openapi()["components"]["schemas"]
-lines = ["// Generated from FastAPI OpenAPI by scripts/generate_trades_client.py. Do not edit."]
-for name in ("TradeListPlace", "TradeListLocation", "TradeListCard", "OwnTradeList"):
+lines = ["// Generated from FastAPI OpenAPI by scripts/generate_trades_client.py. Do not edit.",
+         'import type { TradeView } from "./social_generated";']
+for name in ("TradeListPlace", "TradeListLocation", "TradeListCard", "OwnTradeList", "TradeLineRequest",
+             "SendTradeProposal"):
     definition = schema[name]
     fields = [f"{field}{'' if field in definition.get('required', []) else '?'}: {ts_type(value)}"
               for field, value in definition["properties"].items()]
@@ -48,6 +51,9 @@ async function request<T>(path: string, method: string, body?: object, signal?: 
 }
 // Your own Trade List (#269): every card you offer now, with its copies and the For trade Locations they sit in.
 export const getTradeList = (signal?: AbortSignal) => request<OwnTradeList>('/api/trades/list', 'GET', undefined, signal);
+// Send a Friend a Trade Proposal (#270), idempotent: retry a failed one with the same idempotency_key. It reserves the
+// cards you give, and answers the Trade as both sides read it.
+export const sendTradeProposal = (body: SendTradeProposal) => request<TradeView>('/api/trades', 'POST', body);
 """)
 content = "\n".join(lines)
 target = root / "web/src/trades_generated.ts"

@@ -8,24 +8,60 @@ import type { SegmentedOption } from "../ui/Segmented";
 import { FRIENDS_PATH } from "../social/friendCards";
 import { compareNames } from "../workspace/locationTree";
 
-/** The Trades tab's views (Trading #269, prototype verdict variant A: `Trades · Find trades · My Trade List`). My
- * Trade List is the first to exist; the Trades list (/trades) and Find trades (/trades/find) join it in later
- * tickets, in that order before it. */
-export type TradesView = "list";
+/** The Trades tab's views (Trading #269 and #270, prototype verdict variant A: `Trades · Find trades · My Trade
+ * List`): the Trades list (/trades) and My Trade List (/trades/list). Find trades (/trades/find) joins between them
+ * with discovery (#276). */
+export type TradesTabView = "trades" | "list";
 
-export const TRADES_VIEWS: readonly SegmentedOption<TradesView>[] = [
+export const TRADES_VIEWS: readonly SegmentedOption<TradesTabView>[] = [
+  { value: "trades", label: "Trades" },
   { value: "list", label: "My Trade List" },
 ];
+
+/** The Trades list's address: the Trades tab itself. */
+export const TRADES_PATH = "/trades";
 
 /** My Trade List's address. */
 export const TRADE_LIST_PATH = "/trades/list";
 
+/** The Trade Proposal draft's address (#270). */
+export const TRADE_DRAFT_PATH = "/trades/draft";
+
 /** The address of one of the Trades tab's views. */
-export function tradesViewPath(view: TradesView): string {
+export function tradesViewPath(view: TradesTabView): string {
   switch (view) {
+    case "trades":
+      return TRADES_PATH;
     case "list":
       return TRADE_LIST_PATH;
   }
+}
+
+/** One Trade's address (#270): /trades/<Trade id>. */
+export function tradePath(id: string): string {
+  return `${TRADES_PATH}/${encodeURIComponent(id)}`;
+}
+
+/** What the Trades tab shows for its address's section (``sectionAt``): a view, the draft, or one Trade by id. */
+export type TradesRoute =
+  | { kind: "view"; view: TradesTabView }
+  | { kind: "draft" }
+  | { kind: "trade"; id: string }
+  | { kind: "missing" };
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function tradesRoute(section: string | null): TradesRoute {
+  if (section === null) return { kind: "view", view: "trades" };
+  if (section === "list") return { kind: "view", view: "list" };
+  if (section === "draft") return { kind: "draft" };
+  let id = section;
+  try {
+    id = decodeURIComponent(section);
+  } catch {
+    // Left as written: it is not a Trade id.
+  }
+  return UUID.test(id) ? { kind: "trade", id } : { kind: "missing" };
 }
 
 /** A Friend's Trade List (Trading #269): /friends/<Handle>/trade-list, beside their Collection at /friends/<Handle>. */

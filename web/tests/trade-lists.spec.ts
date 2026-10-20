@@ -177,12 +177,19 @@ async function story(
   await hold(misty.page, vault, ids["PAL 172"], 1);
   await hold(misty.page, await unsorted(misty.page), ids["SVI 166"], 1);
 
-  // A: Misty's own Trade List, from the Trades tab.
+  // A: Misty's own Trade List, from the Trades tab: the tab opens the Trades list (#270), and the switch My Trade List.
   await noArtwork(misty.page);
   await misty.page.goto(`${ORIGIN}/collection`);
   await tradesTab(misty.page).click();
   await expect(misty.page).toHaveURL(`${ORIGIN}/trades`);
   await expect(heading(misty.page)).toHaveText("Trades");
+  await expect(
+    misty.page.getByRole("tab", { name: "Trades", exact: true })
+  ).toHaveAttribute("aria-selected", "true");
+  await misty.page
+    .getByRole("tab", { name: "My Trade List", exact: true })
+    .click();
+  await expect(misty.page).toHaveURL(`${ORIGIN}/trades/list`);
   await expect(
     misty.page.getByRole("tab", { name: "My Trade List", exact: true })
   ).toHaveAttribute("aria-selected", "true");
@@ -288,6 +295,9 @@ async function story(
   // Ash's own Trade List is empty and says how to fill it.
   await tradesTab(page).click();
   await expect(page).toHaveURL(`${ORIGIN}/trades`);
+  await expect(page.getByRole("main")).toContainText("No Trades yet.");
+  await page.getByRole("tab", { name: "My Trade List", exact: true }).click();
+  await expect(page).toHaveURL(`${ORIGIN}/trades/list`);
   await expect(page.getByRole("main")).toContainText(
     "Your Trade List is empty. Mark a Location For trade in Collection, and its cards show here."
   );
