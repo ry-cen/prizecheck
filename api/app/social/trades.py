@@ -38,8 +38,15 @@ Move or a Removal left out of date (``TradeFacts.stale_picks``, from ``trade_pic
 reader's own Holdings), or a swap the other side confirmed. ``trade_waiting_since`` says since when. The inbox
 (``social.inbox``) lists the waiting Trades and the stored Trade updates.
 
-Later tickets add ending a friendship's Trades (#274), cash and the Open to cash offers setting (#277) and Counter
-(#278).
+**Ending a friendship** (``end_trades_between``, Trading #274): Remove Friend and Block, by either side, cancel every
+Trade Proposal and Trade between the two that nobody has confirmed the swap for, inside the Friend command that
+already locked both owners, after the pair's Loans (``loans.end_loans_between``): owner rows, then ``loan`` rows, then
+``trade`` rows. Each is closed as 'cancelled' by the collector who ended the friendship, its picks gone, and the other
+side gets the 'cancelled' update a plain cancel stores, which never says why, so an unfriend and a Block read the same.
+A Trade one side has confirmed stays open: the remaining side may still Confirm swap alone, and since no step checks
+the friendship once a Trade is accepted, nothing they see changes.
+
+Later tickets add cash and the Open to cash offers setting (#277) and Counter (#278).
 """
 import json
 from collections.abc import Mapping
@@ -385,8 +392,8 @@ def side_gives(conn, trade_id: UUID, side: str) -> bool:
 
 def write_trade(conn, trade_id: UUID, changes: Mapping[str, object]) -> None:
     """The step's one write of its Trade row: ``changes`` (column -> value, ``NOW`` for the transaction's time) and the
-    revision advanced. ``run_trade_step`` calls it; nothing else writes the row of an existing Trade (Trading #274's
-    ``end_trades_between`` will, once per Trade)."""
+    revision advanced. ``run_trade_step`` calls it, and ``end_trades_between`` once for each Trade it cancels; nothing
+    else writes the row of an existing Trade."""
     if 'revision' in changes or 'id' in changes:
         raise ValueError('run_trade_step owns the Trade id and revision')
     assignments = [sql.SQL('revision = revision + 1')]
@@ -419,6 +426,31 @@ def close_trade(conn, row, user_id: str, reason: str) -> dict:
     are returned."""
     conn.execute('DELETE FROM trade_pick WHERE trade_id=%s', (row['id'],))
     return {'state': 'closed', 'closed_reason': reason, 'closed_by': user_id, 'closed_at': NOW}
+
+
+def end_trades_between(conn, user_id: str, other_id: str) -> None:
+    """Ending a friendship with open Trades (Trading #274), from Remove Friend and Block (``friends.friendship_ended``)
+    by ``user_id``, after ``loans.end_loans_between``, with both owners already locked in ascending ``user_id``. Each
+    Trade Proposal and accepted Trade between the two, either way round, that nobody has confirmed the swap for is
+    cancelled by ``user_id``: its row locked (in id order, after any ``loan`` row) and written once, its picks gone,
+    and the other side told it was cancelled (``record_trade_update``), as for any cancel and never why. A Trade either
+    side confirmed stays open for the other side to finish. The copies a cancelled Trade's sides gave stop being
+    reserved, so the revision of each side that gave cards in one moves, once: a proposal's proposer, and both sides
+    of an accepted Trade (a recipient reserves nothing before accepting)."""
+    rows = conn.execute("""SELECT * FROM trade
+      WHERE ((proposer_id = %(a)s AND recipient_id = %(b)s) OR (proposer_id = %(b)s AND recipient_id = %(a)s))
+        AND state IN ('proposed', 'accepted')
+        AND proposer_swap_at IS NULL AND recipient_swap_at IS NULL
+      ORDER BY id FOR NO KEY UPDATE""", {'a': user_id, 'b': other_id}).fetchall()
+    released = set()
+    for row in rows:
+        for side_name in ('proposer', 'recipient') if row['state'] == 'accepted' else ('proposer',):
+            if side_gives(conn, row['id'], side_name):
+                released.add(row[f'{side_name}_id'])
+        record_trade_update(conn, row, user_id, 'cancelled')
+        write_trade(conn, row['id'], close_trade(conn, row, user_id, 'cancelled'))
+    for owner in sorted(released):
+        advance_revision(conn, owner)
 
 
 @router.post('/{trade_id}/withdraw', response_model=TradeView)
