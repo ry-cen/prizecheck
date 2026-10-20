@@ -14,7 +14,7 @@ import { expectPageChecks } from "./support/page-check";
 import { signInAsOwner } from "./support/sign-in";
 
 const ORIGIN = process.env.TEST_ORIGIN || "http://localhost:5173";
-const HIDDEN_MARK = "Hidden from Friends · still on your Trade List";
+const HIDDEN_MARK = "Hidden from Friends";
 
 type Editions = Record<
   "PAL 185" | "PAL 254" | "PAF 80" | "SVI 166" | "PAL 172",
@@ -316,6 +316,8 @@ test.describe("desktop", () => {
     page,
     collectors,
   }) => {
+    // Three collectors in three contexts, a catalog seed and several page checks: over 30 s on a loaded host.
+    test.slow();
     await story(page, collectors, size, "desktop width");
   });
 });
@@ -332,6 +334,8 @@ test.describe("phone", () => {
     page,
     collectors,
   }) => {
+    // Three collectors in three contexts, a catalog seed and several page checks: over 30 s on a loaded host.
+    test.slow();
     await story(page, collectors, size, "375 px");
   });
 });

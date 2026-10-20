@@ -3,7 +3,7 @@ import { CardImage } from "../social/FriendCollectionPage";
 import { getTradeList, type OwnTradeList } from "../trades_generated";
 import { Button } from "../ui/Button";
 import { variantLabel } from "../ui/variantLabel";
-import { HIDDEN_AND_FOR_TRADE } from "../workspace/locationTree";
+import { HIDDEN_ON_TRADE_LIST } from "../workspace/locationTree";
 import { tradeListPanels, type TradeListPanel } from "./tradeListModel";
 
 type Load =
@@ -106,7 +106,7 @@ function LocationPanel({ panel }: { panel: TradeListPanel }) {
         </h2>
         {panel.location.hidden && (
           <p className="m-0 text-meta text-text-muted">
-            {HIDDEN_AND_FOR_TRADE}
+            {HIDDEN_ON_TRADE_LIST}
           </p>
         )}
       </div>
