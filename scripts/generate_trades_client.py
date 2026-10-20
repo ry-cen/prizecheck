@@ -1,5 +1,5 @@
 """Generate the Trades client module (trading #269: the collector's own Trade List; #270: sending a Trade Proposal;
-#271: accepting one; later Trading tickets add the rest of ``/api/trades`` and ``/api/trade-wants``) from the API
+#271: accepting one; #272: each side's own view, Use suggested picks and Confirm swap; later Trading tickets add the rest of ``/api/trades`` and ``/api/trade-wants``) from the API
 OpenAPI schema. Shared Trade facts under ``/api/social`` stay in the social client (scripts/generate_social_client.py),
 which this module imports its ``TradeStep`` and ``TradeView`` from."""
 import sys
@@ -28,7 +28,7 @@ schema = app.openapi()["components"]["schemas"]
 lines = ["// Generated from FastAPI OpenAPI by scripts/generate_trades_client.py. Do not edit.",
          'import type { TradeStep, TradeView } from "./social_generated";']
 for name in ("TradeListPlace", "TradeListLocation", "TradeListCard", "OwnTradeList", "TradeLineRequest",
-             "SendTradeProposal"):
+             "SendTradeProposal", "TradePickPlace", "OwnTradeSide", "ConfirmSwap"):
     definition = schema[name]
     fields = [f"{field}{'' if field in definition.get('required', []) else '?'}: {ts_type(value)}"
               for field, value in definition["properties"].items()]
@@ -57,6 +57,17 @@ export const sendTradeProposal = (body: SendTradeProposal) => request<TradeView>
 // Accept a Trade Proposal sent to you, whole (#271), idempotent: it reserves the cards you give and answers the Trade.
 export const acceptTrade = (id: string, body: TradeStep) =>
   request<TradeView>(`/api/trades/${encodeURIComponent(id)}/accept`, 'POST', body);
+// Your own side of a Trade (#272): where your picks take the cards you give from, which are out of date, and the
+// suggested picks.
+export const getTradeSide = (id: string, signal?: AbortSignal) =>
+  request<OwnTradeSide>(`/api/trades/${encodeURIComponent(id)}/side`, 'GET', undefined, signal);
+// Replace your out-of-date picks with the suggested ones (#272), idempotent.
+export const useSuggestedTradePicks = (id: string, body: TradeStep) =>
+  request<TradeView>(`/api/trades/${encodeURIComponent(id)}/picks/use-suggested`, 'POST', body);
+// Confirm the swap for your own Collection (#272), idempotent: the cards you give leave it, the cards you get arrive in
+// destination_id (null: Unsorted), and the second confirmation closes the Trade.
+export const confirmSwap = (id: string, body: ConfirmSwap) =>
+  request<TradeView>(`/api/trades/${encodeURIComponent(id)}/confirm-swap`, 'POST', body);
 """)
 content = "\n".join(lines)
 target = root / "web/src/trades_generated.ts"

@@ -6,7 +6,9 @@ each side gives, each side's swap confirmation and the other collector's Display
 to cash offers, never a pick, a Location or a Deck of either side. The steps that change no inventory of the reader's
 own are here too: the proposer's withdraw (Trading #270), the recipient's decline and either side's cancel (#271).
 Sending a Trade Proposal reads and reserves the sender's own inventory, so it is inventory code in
-``app.trade_inventory`` under ``/api/trades``; it answers ``trade_view`` too, so every step answers the same Trade.
+``app.trade_inventory`` under ``/api/trades``; it answers ``trade_view`` too, so every step answers the same Trade. So
+are Confirm swap, which moves the confirmer's own cards, and Use suggested picks, which re-picks their own copies
+(Trading #272).
 
 **Steps** name the Trade ``revision`` they read (409 TRADE_CHANGED when it moved on) and an idempotency key (replayed
 from ``location_command``, as Loan commands are). ``allowed`` is the one rule for which steps a collector may take now:
@@ -29,8 +31,11 @@ a 'cancelled' update for the other side, never saying why. The recipient's accep
 copies, so it is inventory code in ``app.trade_inventory`` and stores an 'accepted' update for the proposer there. The
 inbox lists Trade updates from Trading #273.
 
-Later tickets add Confirm swap and Use suggested picks (#272), the inbox lines (#273), ending a friendship's Trades
-(#274), cash and the Open to cash offers setting (#277) and Counter (#278).
+A confirmed swap stores a 'swapped' update for the side that confirmed first, once the second side confirms
+(Trading #272, in ``app.trade_inventory``).
+
+Later tickets add the inbox lines and the 'fix_picks' waiting step (#273), ending a friendship's Trades (#274), cash and
+the Open to cash offers setting (#277) and Counter (#278).
 """
 import json
 from collections.abc import Mapping
@@ -126,7 +131,7 @@ class TradeStep(BaseModel):
 @dataclass(frozen=True)
 class TradeFacts:
     """What a Trade's view and steps depend on beyond its row. ``stale_picks``: the reader's own reserved picks of this
-    Trade are out of date; Trading #272 reads it (``trade_picks.stale_pick_trades``), until then it is always False."""
+    Trade are out of date; Trading #273 reads it (``trade_picks.stale_pick_trades``), until then it is always False."""
     stale_picks: bool = False
 
 
@@ -152,7 +157,7 @@ def confirmed(user_id: str, row) -> tuple[bool, bool]:
 def waiting_trade_step(user_id: str, row, facts: TradeFacts | None = None) -> str | None:
     """What the Trade waits on the reader for, or None: 'answer' when they received a proposal nobody has answered;
     'confirm_swap' once accepted, when the other side confirmed the swap and the reader has not. An accepted Trade
-    nobody has confirmed waits on neither side. Trading #272 adds 'fix_picks'."""
+    nobody has confirmed waits on neither side. Trading #273 adds 'fix_picks'."""
     mine, theirs = confirmed(user_id, row)
     if row['state'] == 'proposed':
         return 'answer' if role_of(user_id, row) == 'recipient' else None
@@ -179,14 +184,20 @@ def section(user_id: str, row, facts: TradeFacts | None = None) -> str:
 def allowed(user_id: str, row, gives: bool) -> list[str]:
     """The steps the reader may take on this Trade now, in ``TradeAction`` order. Pure on the row. ``gives``: the
     reader's side has at least one card. A proposal nobody has answered: the recipient accepts or declines it, the
-    proposer withdraws it. An accepted Trade nobody has confirmed: either side cancels it. Once either side has
-    confirmed, and on a closed row, nothing. Counter (#278), Confirm swap and Use suggested picks (#272) are added by
-    their tickets."""
+    proposer withdraws it and, when they give cards, may use suggested picks. An accepted Trade the reader hasn't
+    confirmed: they confirm the swap and, when they give cards, may use suggested picks; while the other side hasn't
+    confirmed either, either side cancels it. Once the reader has confirmed, and on a closed row, nothing. Use suggested
+    picks is listed while the reader's side gives cards and still reserves them; the step answers PICKS_UP_TO_DATE when
+    no pick is out of date. Counter is added by #278."""
+    mine, theirs = confirmed(user_id, row)
     found = []
     if row['state'] == 'proposed':
-        found += ['accept', 'decline'] if role_of(user_id, row) == 'recipient' else ['withdraw']
-    elif row['state'] == 'accepted' and row['proposer_swap_at'] is None and row['recipient_swap_at'] is None:
-        found.append('cancel')
+        if role_of(user_id, row) == 'recipient':
+            found += ['accept', 'decline']
+        else:
+            found += ['withdraw', *(['use_suggested_picks'] if gives else [])]
+    elif row['state'] == 'accepted' and not mine:
+        found += ['confirm_swap', *(['use_suggested_picks'] if gives else []), *([] if theirs else ['cancel'])]
     return [action for action in ACTION_ORDER if action in found]
 
 
