@@ -33,12 +33,15 @@ export type TradeWantsApi = {
   busy: boolean;
   /** Why the last Trade Wants change wasn't made, or "". */
   refusal: string;
+  clearRefusal: () => void;
   /** Sets a line to `quantity` copies ("0" removes it). Resolves true when it was saved. */
   setQuantity: (
     card: Card,
     quantity: number,
     toast?: "added"
   ) => Promise<boolean>;
+  /** The Will accept choice being saved, shown by its select until the answer lands or fails. */
+  pendingRule: { edition_id: string; rule: WillAcceptRule } | null;
   setRule: (card: Card, rule: WillAcceptRule) => void;
   retry: () => void;
 };
@@ -55,6 +58,8 @@ export function useTradeWants(onRulesChanged: () => void): TradeWantsApi {
   const [attempt, setAttempt] = useState(0);
   const [busy, setBusy] = useState(false);
   const [refusal, setRefusal] = useState("");
+  const [pendingRule, setPendingRule] =
+    useState<TradeWantsApi["pendingRule"]>(null);
   const working = useRef(false);
   const mounted = useRef(true);
   const live = useRef(onRulesChanged);
@@ -125,6 +130,7 @@ export function useTradeWants(onRulesChanged: () => void): TradeWantsApi {
 
   async function setRule(card: Card, rule: WillAcceptRule) {
     if (working.current) return;
+    setPendingRule({ edition_id: card.edition_id, rule });
     try {
       await run(() => setWillAccept(card.edition_id, { rule }));
       kit.show({ message: willAcceptToast(rule, card) });
@@ -133,7 +139,10 @@ export function useTradeWants(onRulesChanged: () => void): TradeWantsApi {
         message: "That choice couldn't be saved. Please try again.",
       });
     } finally {
-      if (mounted.current) live.current();
+      if (mounted.current) {
+        setPendingRule(null);
+        live.current();
+      }
     }
   }
 
@@ -141,6 +150,8 @@ export function useTradeWants(onRulesChanged: () => void): TradeWantsApi {
     state,
     busy,
     refusal,
+    pendingRule,
+    clearRefusal: () => setRefusal(""),
     setQuantity,
     setRule: (card, rule) => void setRule(card, rule),
     retry: () => {
