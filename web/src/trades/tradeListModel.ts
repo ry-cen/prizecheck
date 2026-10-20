@@ -8,18 +8,21 @@ import type { SegmentedOption } from "../ui/Segmented";
 import { FRIENDS_PATH } from "../social/friendCards";
 import { compareNames } from "../workspace/locationTree";
 
-/** The Trades tab's views (Trading #269 and #270, prototype verdict variant A: `Trades · Find trades · My Trade
- * List`): the Trades list (/trades) and My Trade List (/trades/list). Find trades (/trades/find) joins between them
- * with discovery (#276). */
-export type TradesTabView = "trades" | "list";
+/** The Trades tab's views (Trading #269, #270 and #276, prototype verdict variant A: `Trades · Find trades · My Trade
+ * List`): the Trades list (/trades), Find trades (/trades/find) and My Trade List (/trades/list). */
+export type TradesTabView = "trades" | "find" | "list";
 
 export const TRADES_VIEWS: readonly SegmentedOption<TradesTabView>[] = [
   { value: "trades", label: "Trades" },
+  { value: "find", label: "Find trades" },
   { value: "list", label: "My Trade List" },
 ];
 
 /** The Trades list's address: the Trades tab itself. */
 export const TRADES_PATH = "/trades";
+
+/** Find trades' address (#276): Friends who have cards you want, or want cards you have. */
+export const TRADE_FIND_PATH = "/trades/find";
 
 /** My Trade List's address. */
 export const TRADE_LIST_PATH = "/trades/list";
@@ -32,6 +35,8 @@ export function tradesViewPath(view: TradesTabView): string {
   switch (view) {
     case "trades":
       return TRADES_PATH;
+    case "find":
+      return TRADE_FIND_PATH;
     case "list":
       return TRADE_LIST_PATH;
   }
@@ -53,6 +58,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function tradesRoute(section: string | null): TradesRoute {
   if (section === null) return { kind: "view", view: "trades" };
+  if (section === "find") return { kind: "view", view: "find" };
   if (section === "list") return { kind: "view", view: "list" };
   if (section === "draft") return { kind: "draft" };
   let id = section;

@@ -95,6 +95,14 @@ def own_wants(conn, user_id: str) -> dict[UUID, int]:
         'SELECT edition_id, quantity FROM trade_want WHERE owner_id = %s', (user_id,))}
 
 
+def own_rules(conn, user_id: str) -> dict[UUID, WillAcceptRule]:
+    """The collector's widened Will accept choices, rule by Card Edition, for the social matches module (Trading #276).
+    An Edition with no row is absent: it accepts this exact card. They widen only what the Want List needs, never a
+    Trade Wants line."""
+    return {row['edition_id']: row['rule'] for row in conn.execute(
+        'SELECT edition_id, rule FROM trade_accept WHERE owner_id = %s', (user_id,))}
+
+
 def read_trade_wants(conn, user_id: str) -> TradeWants:
     wanted = own_wants(conn, user_id)
     display = read_line_display(conn, wanted)
