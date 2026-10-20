@@ -10,8 +10,8 @@ and nothing carries a price.
 Every test seeds the Swap catalog (``want_list_swap_fixtures``: Iono PAL 185, PAL 254 and PAF 80; Arven SVI 166 in two
 Editions; Boss's Orders PAL 172 in two Editions; Basic Psychic Energy SVE 5 and SVE 13, one Card Identity in two
 Printings) and starts new collectors. Loans go through their routes; Trades are seeded rows
-(``test_trade_promises.seed_trade``) released with ``test_trade_promises.close``. Open to cash offers has no route yet
-(#277), so it is set directly.
+(``test_trade_promises.seed_trade``) released with ``test_trade_promises.close``. Open to cash offers is set through its
+route (#277).
 """
 import json
 import threading
@@ -91,8 +91,7 @@ def needed(owner, edition):
 
 
 def open_to_cash(owner, value=True):
-    with connect() as conn:
-        conn.execute('UPDATE collector_profile SET open_to_cash_offers=%s WHERE user_id=%s', (value, owner))
+    ok(call('PUT', '/api/social/trade-settings', owner, {'open_to_cash_offers': value}))
 
 
 def printing_of(edition):
@@ -540,6 +539,34 @@ def test_no_answer_names_a_location_or_a_deck_or_carries_a_value(store):
                                                                      'location', 'deck', 'estimate'))}, keys
 
 
+def test_open_to_cash_offers_from_its_route_marks_one_way_rows_only_while_on(store):
+    ids = seed_swap_catalog()
+    viewer, _ = collector('Misty W.')
+    iono, arven = ids['PAL 185'], ids['SVI 166']
+    ok(set_want(viewer, iono, 1))
+    hold(viewer, binder(viewer), arven, 1)
+    seller, _ = collector('Brock')
+    buyer, _ = collector('Gary')
+    for friend in (seller, buyer):
+        befriend(viewer, friend)
+    hold(seller, binder(seller), iono, 1)          # has what the viewer wants
+    ok(set_want(buyer, arven, 1))                  # wants what the viewer has
+    assert [row['match'] for row in matches(viewer)['rows']] == ['has_what_you_want', 'wants_what_you_have']
+
+    def flags():
+        rows = {row['collector_id']: row for row in matches(viewer)['rows']}
+        single = {friend: ok(one(viewer, friend)) for friend in (seller, buyer)}
+        assert all(rows[friend] == single[friend] for friend in (seller, buyer))
+        return [rows[seller]['open_to_cash_offers'], rows[buyer]['open_to_cash_offers']]
+    assert flags() == [False, False]
+    open_to_cash(seller)
+    open_to_cash(buyer)
+    assert flags() == [True, True]
+    open_to_cash(seller, False)
+    assert flags() == [False, True]
+    assert [row['match'] for row in matches(viewer)['rows']] == ['has_what_you_want', 'wants_what_you_have']
+
+
 # Ask to trade.
 
 
@@ -565,8 +592,10 @@ def test_ask_to_trade_lists_each_friends_copies_of_the_printings_editions_and_no
                                                                              normal, 1)])
     body = offers(viewer, printing_of(normal))
     assert body['has_friends'] is True
+    # The two Editions of one Printing tie on name, set and number, so card order falls to the Edition id.
+    brock = sorted([('Brock', normal, '2'), ('Brock', reverse, '1')], key=lambda item: UUID(item[1]))
     assert [(item['display_name'], item['edition_id'], item['copies']) for item in body['offers']] == [
-        ('Ash K.', reverse, '1'), ('Brock', normal, '2'), ('Brock', reverse, '1')]
+        ('Ash K.', reverse, '1'), *brock]
     assert set(body['offers'][0]) == {'collector_id', 'handle', 'display_name', 'edition_id', 'name', 'set_code',
                                       'set_name', 'collector_number', 'descriptor', 'image_url', 'copies'}
     assert (body['offers'][1]['collector_id'], body['offers'][1]['name'], body['offers'][1]['set_code'],
@@ -631,8 +660,9 @@ def test_friend_wants_reads_as_many_statements_for_one_friend_as_for_many(store)
         first = friend_wants(alone, viewer, friends[:1], editions)
         every = friend_wants(together, viewer, None, editions)
     assert alone.statements == together.statements
-    assert first == [FriendWant(friends[0], UUID(ids['PAL 185']), 2, 0, 'printing'),
-                     FriendWant(friends[0], UUID(ids['SVI 166']), 0, 1, 'edition')]
+    assert first == sorted([FriendWant(friends[0], UUID(ids['PAL 185']), 2, 0, 'printing'),
+                            FriendWant(friends[0], UUID(ids['SVI 166']), 0, 1, 'edition')],
+                           key=lambda item: item.edition_id)
     assert sorted(every, key=lambda item: (item.friend_id, item.edition_id)) == every
     assert {(item.friend_id, str(item.edition_id)) for item in every} == {
         (friend, ids[key]) for friend in friends for key in ('PAL 185', 'SVI 166')}
