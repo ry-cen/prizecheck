@@ -46,6 +46,7 @@ import { FriendTradeListPage } from "./trades/FriendTradeListPage";
 import {
   friendTradeListHandleAt,
   TRADE_DRAFT_PATH,
+  tradePath,
 } from "./trades/tradeListModel";
 import { TradesPage } from "./trades/TradesPage";
 import { workspaceHref } from "./workspace/workspaceLink";
@@ -386,6 +387,9 @@ function App() {
       userId={userId}
       onOpenLoan={(id) => {
         if (loanPath(id) !== path) navigate(loanPath(id));
+      }}
+      onOpenTrade={(id) => {
+        if (tradePath(id) !== path) navigate(tradePath(id));
       }}
       onNavigate={(next) => {
         if (pageDef(next).path !== path) navigate(pageDef(next).path);

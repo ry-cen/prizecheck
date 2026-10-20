@@ -28,6 +28,8 @@ import {
   InboxButton,
   InboxProvider,
   loansTabName,
+  tradesTabName,
+  useInboxTradesWaiting,
   useInboxWaiting,
 } from "../inbox/Inbox";
 import { AccountSheetProvider, Avatar } from "./AccountSheet";
@@ -67,6 +69,8 @@ type Props = {
   onNavigate: (page: PageId) => void;
   /** Opens one Loan (/loans/<id>, #252), from the toast after a Borrow Request is sent and from the inbox (#259). */
   onOpenLoan: (id: string) => void;
+  /** Opens one Trade (/trades/<id>), from the inbox (Trading #273). */
+  onOpenTrade: (id: string) => void;
   /** Opens a Friend's Collection (#250) from the Friends drawer, by their Handle. */
   onOpenFriend: (handle: string) => void;
   /** Opens the Trade Proposal draft (/trades/draft, Trading #270), from the draft bar's Review. */
@@ -86,7 +90,8 @@ type Props = {
 /**
  * The persistent app shell (#162): desktop header with tabs, the inbox's bell (#259), the Friends button (#247) and the
  * avatar menu, the phone header with the bell, the Friends button and the account avatar (#246), the bottom tab bar
- * (Loans in the old More slot, #252, with the inbox's count of Loans waiting on the collector), the Borrow Request
+ * (Loans in the old More slot, #252, with the inbox's count of Loans waiting on the collector, and Trades with its count
+ * of Trades waiting on them, Trading #273), the Borrow Request
  * drafts tray (#252), the Trade Proposal draft bar (Trading #270) and the page area. Switching pages swaps only the page area. A kept-mounted
  * page stays in the document, hidden, after its first visit, and is shown again with its scroll position;
  * other pages mount on each visit. A reload starts fresh.
@@ -94,7 +99,10 @@ type Props = {
 export function Shell(props: Props) {
   return (
     <ToastProvider>
-      <InboxProvider onOpenLoan={props.onOpenLoan}>
+      <InboxProvider
+        onOpenLoan={props.onOpenLoan}
+        onOpenTrade={props.onOpenTrade}
+      >
         <FriendsProvider
           onPrivacy={() => props.onNavigate("settings")}
           onOpenCollection={props.onOpenFriend}
@@ -129,8 +137,17 @@ function ShellFrame({
   other = null,
 }: Props) {
   const toast = useToast();
-  // Loans waiting on the collector: the Loans tab's badge (#259).
+  // Loans waiting on the collector: the Loans tab's badge (#259); Trades waiting on them: the Trades tab's (#273).
   const waiting = useInboxWaiting();
+  const tradesWaiting = useInboxTradesWaiting();
+  const tabCount = (id: PageId) =>
+    id === "loans" ? waiting : id === "trades" ? tradesWaiting : 0;
+  const tabName = (id: PageId) =>
+    id === "loans"
+      ? loansTabName(waiting)
+      : id === "trades"
+        ? tradesTabName(tradesWaiting)
+        : undefined;
   // Pages shown so far; a kept-mounted one stays mounted from its first visit.
   const [visited, setVisited] = useState<ReadonlySet<PageId>>(
     () => new Set(other ? [] : [page])
@@ -252,7 +269,8 @@ function ShellFrame({
         </a>
 
         {/* Desktop header: sticky, so the tabs are in reach wherever the page is scrolled. At compact widths the gaps and
-          the tabs' padding tighten so six tabs and the header actions fit down to 761 px (Trading #269 added Trades). */}
+          the tabs' padding tighten so six tabs, two-digit Loans and Trades badges and the header actions fit down to 761 px
+          (Trading #269 added Trades, #273 its badge). */}
         <header className="sticky top-0 z-(--layer-sticky) box-border flex h-header items-center gap-6 border-b border-border bg-bg px-7 compact:gap-4 compact:px-5 phone:hidden">
           <Wordmark />
           <nav aria-label="Main views" className="flex items-center gap-1">
@@ -261,17 +279,17 @@ function ShellFrame({
                 key={id}
                 type="button"
                 aria-current={showing === id ? "page" : undefined}
-                aria-label={id === "loans" ? loansTabName(waiting) : undefined}
+                aria-label={tabName(id)}
                 onClick={() => go(id)}
-                className="inline-flex h-control cursor-pointer items-center gap-2 whitespace-nowrap rounded-control border-0 bg-transparent px-3 text-control font-medium text-text-muted hover:text-text compact:px-2 aria-[current=page]:bg-surface-selected aria-[current=page]:text-accent-strong"
+                className="inline-flex h-control cursor-pointer items-center gap-2 whitespace-nowrap rounded-control border-0 bg-transparent px-3 text-control font-medium text-text-muted hover:text-text compact:px-1.5 aria-[current=page]:bg-surface-selected aria-[current=page]:text-accent-strong"
               >
                 {pageDef(id).label}
-                {id === "loans" && waiting > 0 && (
+                {tabCount(id) > 0 && (
                   <span
                     aria-hidden="true"
                     className="box-border inline-block h-4.5 min-w-4.5 rounded-round bg-accent px-1 text-center text-micro leading-4.5 font-bold text-on-accent tabular-nums"
                   >
-                    {waiting}
+                    {tabCount(id)}
                   </span>
                 )}
               </button>
@@ -347,13 +365,13 @@ function ShellFrame({
               key={id}
               type="button"
               aria-current={showing === id ? "page" : undefined}
-              aria-label={id === "loans" ? loansTabName(waiting) : undefined}
+              aria-label={tabName(id)}
               onClick={() => go(id)}
               className={TAB_BAR_BUTTON}
             >
               <span className="relative inline-flex px-2">
                 <Icon icon={ICONS[id]} size={20} />
-                {id === "loans" && <Badge count={waiting} />}
+                <Badge count={tabCount(id)} />
               </span>
               {pageDef(id).label}
             </button>

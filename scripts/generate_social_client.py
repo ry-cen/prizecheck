@@ -1,7 +1,7 @@
 """Generate the social client module (Friends and Friend Requests, social network #247, Blocks, #248, Friends' cards,
 #250 and #251, Loans, #252 and #253, Borrowed Copies, #254, Returns, #255, Write-off, #257, the inbox, #259, and a
-Friend's Trade List, trading #269, Trades as both sides read them, trading #270, and declining and cancelling one,
-trading #271) from the API OpenAPI schema."""
+Friend's Trade List, trading #269, Trades as both sides read them, trading #270, declining and cancelling one,
+trading #271, and the inbox's Trade lines, trading #273) from the API OpenAPI schema."""
 import sys
 from pathlib import Path
 
@@ -35,7 +35,8 @@ for name in ("Collector", "CollectorLookup", "InviteCollector", "FriendsView", "
              "BorrowedCopies", "MoveBorrowed", "ReturnedLine", "StartReturn", "WriteOffLine", "WriteOff", "ChosenPlace",
              "WrittenOffChoice", "ChangeReturnBy", "AskForMoreTime", "SeenNotices", "OfferedCopies", "SendLendOffer",
              "AcceptLendOffer", "InboxUpdate", "InboxWaiting", "InboxView", "InboxIds", "FriendTradeCard",
-             "FriendTradeList", "TradeParty", "TradeCard", "TradeCash", "TradeView", "TradesView", "TradeStep"):
+             "FriendTradeList", "TradeParty", "TradeCard", "TradeCash", "TradeView", "TradesView", "TradeStep",
+             "InboxTradeWaiting", "InboxTradeUpdate"):
     definition = schema[name]
     fields = [f"{field}{'' if field in definition.get('required', []) else '?'}: {ts_type(value)}"
               for field, value in definition["properties"].items()]
