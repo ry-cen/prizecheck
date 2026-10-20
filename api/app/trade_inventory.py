@@ -38,7 +38,9 @@ other:
   missing), read from the Trade's own lines only, so it works after the other account is gone; arriving in a Deck they
   raise its lines as an Add does. The confirmer's revision moves exactly once. The second confirmation closes the Trade
   as swapped and tells the side that confirmed first. Nothing is undoable, and cash changes nothing (the app never
-  handles money). Trading #279 adds the Deck switches and #275 the Trade Wants that fall at this step.
+  handles money). The copies they get fill their Decks' needs for each exact Edition first, read before anything is
+  written (``want_list.edition_needs``), and only the rest lower their Trade Wants line for it
+  (``trade_wants.lower_trade_wants``, Trading #275). Trading #279 adds the Deck switches.
 
 **Locks**: the stepping collector's own owner row only (``owners.lock_owners``), so a send, an accept, a Confirm swap
 or a Use suggested picks and a Loan step or inventory command over the same copies run one after the other and the
@@ -69,6 +71,8 @@ from .social.trades import (TradeStep, TradeView, begin_trade_command, close_tra
 from .trade_list import own_trade_copies
 from .trade_picks import (insert_trade_picks, make_trade_picks, replacement_trade_picks, stale_pick_trades,
                           trade_pick_shortfalls)
+from .trade_wants import lower_trade_wants
+from .want_list import edition_needs
 
 router = APIRouter(prefix='/api/trades', tags=['trades'])
 
@@ -289,8 +293,9 @@ def confirm_swap(trade_id: UUID, command: ConfirmSwap, user_id: str = Depends(ve
     ``run_trade_step``'s checks (404 TRADE_NOT_FOUND, 409 TRADE_CHANGED, 409 STEP_NOT_ALLOWED, so a side confirms once),
     and before any write: 409 PICKS_OUT_OF_DATE while a pick of theirs is out of date; for a side that gets cards, 404
     LOCATION_NOT_FOUND or 409 UNSORTED_UNAVAILABLE for where they go. Then the copies they give leave, the copies they
-    get arrive, their revision moves once and their swap time is set; when the other side already confirmed, the Trade
-    closes as swapped and the other side gets a 'swapped' update. Nothing changes on a refusal, and nothing undoes it.
+    get arrive, their revision moves once, the copies they get beyond their Decks' needs lower their Trade Wants, and
+    their swap time is set; when the other side already confirmed, the Trade closes as swapped and the other side gets
+    a 'swapped' update. Nothing changes on a refusal, and nothing undoes it.
     """
     def apply(conn, row):
         side = role_of(user_id, row)
@@ -305,6 +310,9 @@ def confirm_swap(trade_id: UUID, command: ConfirmSwap, user_id: str = Depends(ve
         received = [(line['edition_id'], int(line['quantity'])) for line in conn.execute(
             'SELECT edition_id, quantity FROM trade_line WHERE trade_id = %s AND side = %s ORDER BY position',
             (row['id'], other))]
+        # Their Decks' needs for the cards they get, before anything is written: the received copies fill those first,
+        # and only the rest lower their Trade Wants (#275). Plain reads under the lock this step took.
+        needs = edition_needs(conn, user_id, [edition for edition, _ in received]) if received else {}
         destination = _destination(conn, user_id, command.destination_id) if received else None
         new_revision = revision + 1
         if gives:
@@ -318,7 +326,8 @@ def confirm_swap(trade_id: UUID, command: ConfirmSwap, user_id: str = Depends(ve
             conn.execute('DELETE FROM trade_pick WHERE trade_id = %s AND side = %s', (row['id'], side))
         if received:
             add_in(conn, user_id, destination, received, new_revision)
-        # Trading #279 applies the chosen Deck switches here, after the received copies, and #275 lowers Trade Wants.
+            # Trading #279 applies the chosen Deck switches here, after the received copies and before Trade Wants.
+            lower_trade_wants(conn, user_id, received, needs)
         changes = {f'{side}_swap_at': NOW}
         if row[f'{other}_swap_at'] is not None:
             record_trade_update(conn, row, user_id, 'swapped')

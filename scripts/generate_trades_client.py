@@ -1,5 +1,6 @@
 """Generate the Trades client module (trading #269: the collector's own Trade List; #270: sending a Trade Proposal;
-#271: accepting one; #272: each side's own view, Use suggested picks and Confirm swap; later Trading tickets add the rest of ``/api/trades`` and ``/api/trade-wants``) from the API
+#271: accepting one; #272: each side's own view, Use suggested picks and Confirm swap; #275: ``/api/trade-wants``, the
+collector's own Trade Wants and Will accept choices; later Trading tickets add the rest of ``/api/trades``) from the API
 OpenAPI schema. Shared Trade facts under ``/api/social`` stay in the social client (scripts/generate_social_client.py),
 which this module imports its ``TradeStep`` and ``TradeView`` from."""
 import sys
@@ -28,7 +29,8 @@ schema = app.openapi()["components"]["schemas"]
 lines = ["// Generated from FastAPI OpenAPI by scripts/generate_trades_client.py. Do not edit.",
          'import type { TradeStep, TradeView } from "./social_generated";']
 for name in ("TradeListPlace", "TradeListLocation", "TradeListCard", "OwnTradeList", "TradeLineRequest",
-             "SendTradeProposal", "TradePickPlace", "OwnTradeSide", "ConfirmSwap"):
+             "SendTradeProposal", "TradePickPlace", "OwnTradeSide", "ConfirmSwap", "TradeWantLine", "WillAcceptChoice",
+             "TradeWants", "SetTradeWant", "SetWillAccept"):
     definition = schema[name]
     fields = [f"{field}{'' if field in definition.get('required', []) else '?'}: {ts_type(value)}"
               for field, value in definition["properties"].items()]
@@ -68,6 +70,15 @@ export const useSuggestedTradePicks = (id: string, body: TradeStep) =>
 // destination_id (null: Unsorted), and the second confirmation closes the Trade.
 export const confirmSwap = (id: string, body: ConfirmSwap) =>
   request<TradeView>(`/api/trades/${encodeURIComponent(id)}/confirm-swap`, 'POST', body);
+// Your own Trade Wants and Will accept choices (#275).
+export const getTradeWants = (signal?: AbortSignal) =>
+  request<TradeWants>('/api/trade-wants', 'GET', undefined, signal);
+// Set one Trade Wants line ("0" removes it), idempotent by value; answers the whole list.
+export const setTradeWant = (editionId: string, body: SetTradeWant) =>
+  request<TradeWants>(`/api/trade-wants/${encodeURIComponent(editionId)}`, 'PUT', body);
+// Set what trades will accept for one card ('edition' is this exact card), idempotent by value; answers the whole list.
+export const setWillAccept = (editionId: string, body: SetWillAccept) =>
+  request<TradeWants>(`/api/trade-wants/will-accept/${encodeURIComponent(editionId)}`, 'PUT', body);
 """)
 content = "\n".join(lines)
 target = root / "web/src/trades_generated.ts"

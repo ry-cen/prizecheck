@@ -9,6 +9,11 @@ export type SendTradeProposal = { recipient_id: string; you_give?: TradeLineRequ
 export type TradePickPlace = { edition_id: string; location_id: string | null; name: string; copies: string; short: string };
 export type OwnTradeSide = { trade_id: string; picks: TradePickPlace[]; suggested: TradePickPlace[] };
 export type ConfirmSwap = { revision: number; idempotency_key: string; destination_id?: string | null };
+export type TradeWantLine = { edition_id: string; name: string; set_id: string; set_name: string; collector_number: string; descriptor: Record<string, unknown>; image_url: string | null; quantity: string };
+export type WillAcceptChoice = { edition_id: string; rule: "edition" | "printing" | "identity" };
+export type TradeWants = { lines: TradeWantLine[]; will_accept: WillAcceptChoice[] };
+export type SetTradeWant = { quantity: string };
+export type SetWillAccept = { rule: "edition" | "printing" | "identity" };
 
 /** A refused Trades request: the API's code, and its detail. */
 export class TradesError extends Error {
@@ -44,3 +49,12 @@ export const useSuggestedTradePicks = (id: string, body: TradeStep) =>
 // destination_id (null: Unsorted), and the second confirmation closes the Trade.
 export const confirmSwap = (id: string, body: ConfirmSwap) =>
   request<TradeView>(`/api/trades/${encodeURIComponent(id)}/confirm-swap`, 'POST', body);
+// Your own Trade Wants and Will accept choices (#275).
+export const getTradeWants = (signal?: AbortSignal) =>
+  request<TradeWants>('/api/trade-wants', 'GET', undefined, signal);
+// Set one Trade Wants line ("0" removes it), idempotent by value; answers the whole list.
+export const setTradeWant = (editionId: string, body: SetTradeWant) =>
+  request<TradeWants>(`/api/trade-wants/${encodeURIComponent(editionId)}`, 'PUT', body);
+// Set what trades will accept for one card ('edition' is this exact card), idempotent by value; answers the whole list.
+export const setWillAccept = (editionId: string, body: SetWillAccept) =>
+  request<TradeWants>(`/api/trade-wants/will-accept/${encodeURIComponent(editionId)}`, 'PUT', body);

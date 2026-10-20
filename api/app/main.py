@@ -261,6 +261,8 @@ from .trade_list import router as trade_list_router  # noqa: E402
 app.include_router(trade_list_router)
 from .trade_inventory import router as trade_inventory_router  # noqa: E402
 app.include_router(trade_inventory_router)
+from .trade_wants import router as trade_wants_router  # noqa: E402
+app.include_router(trade_wants_router)
 
 
 from .price_budget import is_budgeted  # noqa: E402

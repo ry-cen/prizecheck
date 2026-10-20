@@ -32,10 +32,22 @@ isn't withdrawn, as the batch route checks), unless D already lists it.
 **No group, no hint.** A Printing in no Reprint Group (every Basic Energy among them) gets no hint, not even for its own
 other Editions. The import's Basic Energy grouping (spec "Allocation and Edition choice") does not apply here.
 
+**Will accept (Trading #275).** A line whose Card Edition has a widened Will accept choice (a ``trade_accept`` row:
+any finish, or any card with the same name, ``card_accepts.accepts``) is also offered the Editions that choice accepts,
+with the same availability, the same one-pass, never-offered-twice rules and one Edition per hint, even when its
+Printing is in no Reprint Group: "no group, no hint" is relaxed only for the Editions the rule accepts. Taking such a
+hint is the same Deck List changes batch, and it is how a spare copy of an accepted card comes to count for the Deck.
+With no row (this exact card) nothing is read beyond the empty rule read, and every hint is what it was before. The
+choice changes no count: the Editions it brings in only add lines to this capture's own allocation, which is per
+Edition, so no figure of another Edition moves, and only lines that need copies are ever hinted.
+
 The capture (``capture_swaps``) runs inside the Want List's capture, under the owner row lock, so the hints belong to
 the same committed state as the counts. Its reads are bounded by the Reprint Groups of the lines that need copies: the
 groups, their Editions (catalog reads keyed by group), and ``allocate``'s range reads of the owner's Holdings and Deck
-List lines of those Editions.
+List lines of those Editions; plus the owner's Will accept rows for those lines and the Editions they accept. Will
+accept is not closed under Reprint Groups, so a scoped read whose owner has any Will accept row hands hints out over
+every Deck's needed lines (``want_list.capture_want_list``), and still offers exactly what the All Decks read offers
+that Deck.
 """
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
@@ -44,6 +56,7 @@ from uuid import UUID
 from pydantic import BaseModel
 
 from . import set_codes
+from .card_accepts import accepts
 from .copy_allocation import Allocation, LineCount, allocate
 from .settings import WantListCounting
 
@@ -68,6 +81,26 @@ MEMBERS = """SELECT e.id AS edition_id,g.group_id,coalesce(pd.display_name,ci.di
   LEFT JOIN catalog_printing_display pd ON pd.printing_id=p.id
   WHERE g.group_id=ANY(%s)"""
 
+# The owner's Will accept choices for the given Editions (trading #275): an own read, outside the social area.
+RULES = 'SELECT edition_id,rule FROM trade_accept WHERE owner_id=%s AND edition_id=ANY(%s)'
+
+# Whether the owner has any Will accept choice at all.
+ANY_RULE = 'SELECT EXISTS (SELECT 1 FROM trade_accept WHERE owner_id=%s) AS found'
+
+# MEMBERS' facts for Editions read by id, for a line's Edition or an accepted Edition outside the groups read.
+FACTS = """SELECT e.id AS edition_id,NULL::uuid AS group_id,coalesce(pd.display_name,ci.display_name) AS name,
+  coalesce(pd.set_id,'') AS set_id,coalesce(pd.set_name,'') AS set_name,
+  coalesce(pd.collector_number,'') AS collector_number,e.descriptor,
+  EXISTS (SELECT 1 FROM catalog_state s
+    JOIN catalog_generation_edition ge ON ge.generation_id=s.active_generation AND ge.edition_id=e.id AND ge.active
+    JOIN catalog_generation_printing gp ON gp.generation_id=ge.generation_id AND gp.printing_id=ge.printing_id
+    WHERE s.singleton AND NOT gp.tombstoned) AS available
+  FROM catalog_edition e
+  JOIN catalog_printing p ON p.id=e.printing_id
+  JOIN catalog_identity ci ON ci.id=p.identity_id
+  LEFT JOIN catalog_printing_display pd ON pd.printing_id=p.id
+  WHERE e.id=ANY(%s)"""
+
 
 class SwapHint(BaseModel):
     """A Want List line's Swap hint: "↻ You own a playable version (PAL 254) × 1"."""
@@ -82,7 +115,7 @@ class SwapHint(BaseModel):
 @dataclass(frozen=True)
 class GroupEdition:
     edition_id: UUID
-    group_id: UUID
+    group_id: UUID | None   # None: read by id (FACTS), outside every group this capture read.
     name: str
     set_id: str
     set_name: str
@@ -97,6 +130,9 @@ class SwapCapture:
     editions: dict[UUID, GroupEdition] = field(default_factory=dict)
     # ``allocate`` over those Editions: every Deck's line naming one of them, and every copy of each.
     allocation: Allocation | None = None
+    # A needed line's Edition -> the other Editions its Will accept choice accepts (trading #275); absent for this
+    # exact card. Every Edition named here is in ``editions``.
+    accepted: dict[UUID, frozenset[UUID]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -113,10 +149,21 @@ def capture_swaps(conn, user_id: str, needed: Iterable[UUID], counting: WantList
     if not wanted:
         return SwapCapture()
     groups = [row['group_id'] for row in conn.execute(GROUPS, (wanted,))]
-    if not groups:
+    rules = {row['edition_id']: row['rule'] for row in conn.execute(RULES, (user_id, wanted))}
+    accepted = {edition: frozenset(found - {edition}) for edition, found in accepts(conn, rules).items()
+                if found - {edition}}
+    if not groups and not accepted:
         return SwapCapture()
-    editions = {row['edition_id']: GroupEdition(**row) for row in conn.execute(MEMBERS, (groups,))}
-    return SwapCapture(editions=editions, allocation=allocate(conn, user_id, editions, counting))
+    editions = {row['edition_id']: GroupEdition(**row) for row in conn.execute(MEMBERS, (groups,))} if groups else {}
+    outside = sorted((set(accepted) | {edition for found in accepted.values() for edition in found}) - set(editions))
+    if outside:
+        editions.update({row['edition_id']: GroupEdition(**row) for row in conn.execute(FACTS, (outside,))})
+    return SwapCapture(editions=editions, allocation=allocate(conn, user_id, editions, counting), accepted=accepted)
+
+
+def has_rules(conn, user_id: str) -> bool:
+    """Whether the owner has made any Will accept choice (a scoped read then hands hints out over every Deck)."""
+    return conn.execute(ANY_RULE, (user_id,)).fetchone()['found']
 
 
 def hints(capture: SwapCapture, decks: Sequence[UUID],
@@ -134,7 +181,17 @@ def hints(capture: SwapCapture, decks: Sequence[UUID],
         by_deck.setdefault(deck, []).append(line)
     members: dict[UUID, list[GroupEdition]] = {}
     for edition in capture.editions.values():
-        members.setdefault(edition.group_id, []).append(edition)
+        if edition.group_id is not None:
+            members.setdefault(edition.group_id, []).append(edition)
+
+    def candidates(edition: UUID) -> list[GroupEdition]:
+        """The Editions a line of ``edition`` may be offered: its Reprint Group's, then those its Will accept choice
+        accepts (trading #275), each once."""
+        group = capture.editions[edition].group_id
+        found = {other.edition_id: other for other in (members.get(group, []) if group is not None else [])}
+        for other in sorted(capture.accepted.get(edition, ())):
+            found.setdefault(other, capture.editions[other])
+        return list(found.values())
 
     def available(deck: UUID, edition: UUID) -> int:
         owned = allocation.owned.get(edition, 0)
@@ -159,7 +216,7 @@ def hints(capture: SwapCapture, decks: Sequence[UUID],
                        key=lambda line: order(capture.editions[line.edition_id]))
         for line in short:
             best: tuple[int, GroupEdition] | None = None
-            for other in members[capture.editions[line.edition_id].group_id]:
+            for other in candidates(line.edition_id):
                 if other.edition_id == line.edition_id:
                     continue
                 if not other.available and (deck, other.edition_id) not in allocation.lines:
