@@ -160,8 +160,9 @@ def test_a_swap_reserves_only_the_senders_copies_at_once_and_a_withdraw_releases
     iono, arven = ids['PAL 185'], ids['SVI 166']
     before = revision_of(misty), revision_of(ash)
     trade = proposed(misty, ash, give=[(iono, 2)], get=[(arven, 1)])
+    # A proposer who gives cards may also replace an out-of-date pick while the proposal waits (Trading #272).
     assert (trade['state'], trade['role'], trade['section'], trade['actions']) == (
-        'proposed', 'proposer', 'pending', ['withdraw'])
+        'proposed', 'proposer', 'pending', ['use_suggested_picks', 'withdraw'])
     assert sides(trade) == ([(iono, '2')], [(arven, '1')])
     assert (trade['waiting'], trade['needs_you'], trade['cash'], trade['countered_from']) == (None, False, None, None)
     # Misty's two copies are promised at once, from her For trade binder; nothing of Ash's is.
@@ -373,17 +374,21 @@ def test_withdraw_is_the_proposers_on_the_revision_they_read_and_tells_the_recip
 
 
 @pytest.mark.parametrize('state, reader, swaps, gives, expected', [
-    ('proposed', 'proposer', (None, None), True, ['withdraw']),
+    ('proposed', 'proposer', (None, None), True, ['use_suggested_picks', 'withdraw']),
     ('proposed', 'proposer', (None, None), False, ['withdraw']),
     ('proposed', 'recipient', (None, None), True, ['accept', 'decline']),
     ('proposed', 'recipient', (None, None), False, ['accept', 'decline']),
-    ('accepted', 'proposer', (None, None), True, ['cancel']),
-    ('accepted', 'proposer', (None, None), False, ['cancel']),
-    ('accepted', 'recipient', (None, None), True, ['cancel']),
-    ('accepted', 'recipient', (None, None), False, ['cancel']),
+    ('accepted', 'proposer', (None, None), True, ['confirm_swap', 'use_suggested_picks', 'cancel']),
+    ('accepted', 'proposer', (None, None), False, ['confirm_swap', 'cancel']),
+    ('accepted', 'recipient', (None, None), True, ['confirm_swap', 'use_suggested_picks', 'cancel']),
+    ('accepted', 'recipient', (None, None), False, ['confirm_swap', 'cancel']),
+    # Once a side confirmed the swap (Trading #272) it has no step left, and the other side may only confirm theirs
+    # (and fix its picks first): nobody cancels.
     ('accepted', 'proposer', ('now', None), True, []),
-    ('accepted', 'proposer', (None, 'now'), True, []),
-    ('accepted', 'recipient', ('now', None), True, []),
+    ('accepted', 'proposer', (None, 'now'), True, ['confirm_swap', 'use_suggested_picks']),
+    ('accepted', 'proposer', (None, 'now'), False, ['confirm_swap']),
+    ('accepted', 'recipient', ('now', None), True, ['confirm_swap', 'use_suggested_picks']),
+    ('accepted', 'recipient', ('now', None), False, ['confirm_swap']),
     ('accepted', 'recipient', (None, 'now'), True, []),
     ('closed', 'proposer', (None, None), True, []),
     ('closed', 'recipient', (None, None), False, []),
@@ -554,7 +559,8 @@ def test_accept_reserves_the_recipients_copies_at_once_and_a_cancel_releases_bot
     accepted = ok(accept_trade(ash, ok(read(ash, trade))))
     assert (accepted['state'], accepted['role'], accepted['section'], accepted['waiting'], accepted['needs_you'],
             accepted['actions'], accepted['revision']) == (
-        'accepted', 'recipient', 'to_swap', None, False, ['cancel'], trade['revision'] + 1)
+        'accepted', 'recipient', 'to_swap', None, False, ['confirm_swap', 'use_suggested_picks', 'cancel'],
+        trade['revision'] + 1)
     assert sides(accepted) == ([(arven, '1')], [(iono, '2')])
     assert row_of(trade)['accepted_at'] is not None
     # Ash's copy is promised at once, from his For trade Box; Misty's stay promised from her send.
@@ -568,8 +574,8 @@ def test_accept_reserves_the_recipients_copies_at_once_and_a_cancel_releases_bot
     assert (revision_of(misty), revision_of(ash)) == (before[0], before[1] + 1)
     assert updates(trade) == [(misty, 'accepted', 'Ash K.')]
     seen = ok(read(misty, trade))
-    assert (seen['state'], seen['section'], seen['actions'], seen['needs_you']) == ('accepted', 'to_swap', ['cancel'],
-                                                                                    False)
+    assert (seen['state'], seen['section'], seen['actions'], seen['needs_you']) == (
+        'accepted', 'to_swap', ['confirm_swap', 'use_suggested_picks', 'cancel'], False)
     # Either side may cancel while nobody has confirmed: Misty does, and both sides' copies come back at once.
     cancelled = ok(trade_step(misty, seen, 'cancel'))
     assert (cancelled['state'], cancelled['closed_reason'], cancelled['closed_by'], cancelled['section'],
@@ -591,7 +597,7 @@ def test_the_recipient_cancels_too_and_a_side_that_gives_nothing_keeps_its_revis
     gift = proposed(misty, ash, give=[(iono, 1)])
     before = revision_of(misty), revision_of(ash)
     accepted = ok(accept_trade(ash, gift))
-    assert (accepted['state'], accepted['actions']) == ('accepted', ['cancel'])
+    assert (accepted['state'], accepted['actions']) == ('accepted', ['confirm_swap', 'cancel'])
     assert trade_picks(gift['id']) == [('proposer', misty, binder, 1)]
     assert (revision_of(misty), revision_of(ash)) == before
     cancelled = ok(trade_step(ash, accepted, 'cancel'))
@@ -680,13 +686,14 @@ def test_only_the_recipient_answers_and_only_an_accepted_trade_nobody_confirmed_
     for user, step_ in ((ash, 'decline'), (misty, 'withdraw')):
         assert detail(trade_step(user, accepted, step_)) == refused
     assert detail(accept_trade(ash, accepted)) == refused
-    # Once either side has confirmed the swap nobody cancels (Confirm swap is Trading #272; set here directly).
-    for confirmed_column in ('proposer_swap_at', 'recipient_swap_at'):
+    # Once either side has confirmed the swap nobody cancels (set here directly; test_trade_swap confirms through
+    # the API): the side that confirmed has no step left, and the other may only confirm theirs.
+    for confirmed_column, confirmer in (('proposer_swap_at', misty), ('recipient_swap_at', ash)):
         with connect() as conn:
             conn.execute(f'UPDATE trade SET {confirmed_column} = now() WHERE id=%s', (trade['id'],))
         for user in (misty, ash):
             seen = ok(read(user, trade))
-            assert seen['actions'] == []
+            assert seen['actions'] == ([] if user == confirmer else ['confirm_swap', 'use_suggested_picks'])
             assert detail(trade_step(user, seen, 'cancel')) == refused
         with connect() as conn:
             conn.execute(f'UPDATE trade SET {confirmed_column} = NULL WHERE id=%s', (trade['id'],))

@@ -15,6 +15,8 @@ test("mobile collector can search, Add, Move, Undo, check and publish a physical
   page,
   browser,
 }) => {
+  // A long journey with a catalog import: usually 5-26 s, over 30 s on a loaded host.
+  test.slow();
   execFileSync(
     ".venv/bin/python",
     [

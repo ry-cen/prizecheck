@@ -1,6 +1,6 @@
 import { cardCount } from "../loans/loanText";
 import { SocialError, type TradeView } from "../social_generated";
-import { TradesError } from "../trades_generated";
+import { TradesError, type TradePickPlace } from "../trades_generated";
 import { variantLabel } from "../ui/variantLabel";
 
 /** A card as the Trade messages name it (prototype "Proposed wording"): "Iono (PAL 185)". A finish other than Normal
@@ -64,6 +64,98 @@ export function tradeHeadline(trade: TradeView): string {
           return n;
       }
   }
+}
+
+/**
+ * The one note under the person row, or "" (prototype "Proposed wording"): an out-of-date pick first, then what the
+ * swap waits on. `stale`: one of the reader's own picks is out of date.
+ */
+export function tradeNote(trade: TradeView, stale: boolean): string {
+  if (trade.state === "closed") return "";
+  if (stale) return "A pick is out of date.";
+  if (trade.state !== "accepted" || trade.you_confirmed_swap) return "";
+  if (trade.they_confirmed_swap)
+    return `${trade.other.display_name} confirmed the swap. Confirm yours once you have the cards.`;
+  return "Swap the cards in person, then confirm.";
+}
+
+/** Where the reader's picks take one card's copies from: "From Binder 1", or each place with its copies. Only the
+ * reader's own Locations, from their own side read. `lower`: "from …", inside the confirm dialog's line. */
+export function tradePickText(
+  places: readonly TradePickPlace[],
+  editionId: string,
+  lower = false
+): string | null {
+  const found = places.filter((place) => place.edition_id === editionId);
+  if (found.length === 0) return null;
+  const from = lower ? "from" : "From";
+  if (found.length === 1) return `${from} ${found[0].name}`;
+  return `${from} ${found.map((place) => `${place.name} (${place.copies})`).join(" · ")}`;
+}
+
+/**
+ * Each out-of-date pick of one card (prototype "Proposed wording"): "Binder 1 has none now · take it from Box", or
+ * "Binder 1 has only 1 now · take them from Box" when part of the pick is still there. The places named after "take"
+ * are those the suggested picks add, named on the card's last out-of-date pick only.
+ */
+export function tradeStaleText(
+  picks: readonly TradePickPlace[],
+  suggested: readonly TradePickPlace[],
+  editionId: string
+): { key: string; text: string }[] {
+  const mine = picks.filter((place) => place.edition_id === editionId);
+  const stale = mine.filter((place) => place.short !== "0");
+  if (stale.length === 0) return [];
+  const kept = new Map<string | null, number>();
+  for (const place of mine)
+    kept.set(
+      place.location_id,
+      (kept.get(place.location_id) ?? 0) +
+        Number(place.copies) -
+        Number(place.short)
+    );
+  const added = suggested
+    .filter((place) => place.edition_id === editionId)
+    .map((place) => ({
+      name: place.name,
+      copies: Number(place.copies) - (kept.get(place.location_id) ?? 0),
+    }))
+    .filter((place) => place.copies > 0);
+  const short = stale.reduce((total, place) => total + Number(place.short), 0);
+  const take =
+    added.length === 0
+      ? ""
+      : ` · take ${short === 1 ? "it" : "them"} from ${
+          added.length === 1
+            ? added[0].name
+            : added
+                .map((place) => `${place.name} (${place.copies})`)
+                .join(" · ")
+        }`;
+  return stale.map((place, index) => {
+    const left = Number(place.copies) - Number(place.short);
+    return {
+      // Keyed by the Location: two Locations can share a leaf name.
+      key: place.location_id ?? `place-${index}`,
+      text:
+        (left > 0
+          ? `${place.name} has only ${left} now`
+          : `${place.name} has none now`) +
+        (index === stale.length - 1 ? take : ""),
+    };
+  });
+}
+
+/** The toast after the reader's Confirm swap (prototype "Proposed wording"). `destination`: where the cards they got
+ * went, as the picker named it, or null when they got none. */
+export function swapDoneMessage(
+  trade: TradeView,
+  destination: string | null
+): string {
+  if (destination === null || trade.you_get.length === 0)
+    return "Swapped. The cards you gave left your Collection.";
+  const n = sideCopies(trade.you_get);
+  return `Swapped. ${n} ${n === 1 ? "card is" : "cards are"} in ${destination}.`;
 }
 
 /** "You give 2 cards · You get nothing". */
@@ -174,6 +266,15 @@ export function tradeStepMessage(cause: unknown, trade: TradeView): string {
       return "This Trade has changed. Check it and try again.";
     case "TRADE_NOT_FOUND":
       return "This Trade can't be found.";
+    // Confirm swap and Use suggested picks (#272).
+    case "PICKS_OUT_OF_DATE":
+      return "A pick is out of date. Use the suggested picks first.";
+    case "PICKS_UP_TO_DATE":
+      return "Your picks are already up to date.";
+    case "UNSORTED_UNAVAILABLE":
+      return "Your top-level Unsorted can't hold cards. Choose another place for the cards you get, or make Unsorted a Storage Leaf in Collection.";
+    case "LOCATION_NOT_FOUND":
+      return "That place isn't in your Collection now. Choose another place for the cards you get.";
     case "TOO_MANY_CHANGES":
       return `Too many changes. Try again in ${minutes(error.detail)}.`;
     default:

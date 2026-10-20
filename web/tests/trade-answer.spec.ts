@@ -269,7 +269,7 @@ async function story(
   await expect(heading(ash.page)).toHaveText("Ready to swap with Misty W");
   await expect(heading(ash.page)).toBeFocused();
   await expect(toast(ash.page)).toContainText(
-    "Accepted. Swap the cards in person."
+    "Accepted. Swap the cards in person, then confirm."
   );
   await expect(ashMain.getByRole("button", { name: "Accept" })).toHaveCount(0);
   await expect(ashMain.getByRole("button", { name: "Decline" })).toHaveCount(0);
