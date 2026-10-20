@@ -244,6 +244,14 @@ test.describe("on a desktop", () => {
       .getByRole("button", { name: /^Add Iono \(Paldea Evolved · 254 / })
       .click();
     await expect(picker(page)).toContainText("2 in Trade Wants");
+    // Refuse again, then close the picker: the old refusal doesn't stay on the panel.
+    await picker(page)
+      .getByRole("button", { name: /^Add Iono \(Paldean Fates · 080 / })
+      .click();
+    await expect(picker(page).getByRole("status")).toContainText("up to 500");
+    await picker(page).getByRole("button", { name: "Done" }).click();
+    await expect(picker(page)).toHaveCount(0);
+    await expect(panel(page)).not.toContainText("up to 500");
     const after = await tradeWants(page);
     expect(Object.keys(after.lines)).toHaveLength(500);
     expect(after.lines[ids["PAL 254"]]).toBe("2");
@@ -280,8 +288,122 @@ test.describe("on a desktop", () => {
     await expect(energy(page).first()).toHaveValue("printing");
     await expect(energy(page).nth(1)).toHaveValue("printing");
     await energy(page).nth(1).selectOption({ label: "This exact card" });
+    // The select shows the choice at once; wait for the save to land before reading it back.
+    await expect(energy(page).nth(1)).not.toHaveAttribute(
+      "aria-disabled",
+      "true"
+    );
     await expect(energy(page).first()).toHaveValue("edition");
     expect((await tradeWants(page)).rules).toEqual({});
+  });
+
+  test("a Will accept choice shows at once while it saves, and the saved one returns when it fails", async ({
+    page,
+  }) => {
+    const ids = seedCatalog();
+    await signIn(page);
+    const deck = await createDeck(page, `Deck ${randomUUID().slice(0, 6)}`, 1);
+    await setLine(page, deck, ids["SVE 13"], 1);
+    await page.goto(`${ORIGIN}/decks/want-list`);
+    await expect(energy(page)).toHaveValue("edition");
+
+    // Held PUT: the select already shows the new choice, and the stored one hasn't changed.
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const held = (url: URL) =>
+      url.pathname === `/api/trade-wants/will-accept/${ids["SVE 13"]}`;
+    await page.route(held, async (route) => {
+      await gate;
+      await route.continue();
+    });
+    await energy(page).selectOption({ label: "Any finish" });
+    await expect(energy(page)).toHaveAttribute("aria-disabled", "true");
+    await expect(energy(page)).toHaveValue("printing");
+    expect((await tradeWants(page)).rules).toEqual({});
+    release();
+    await expect(notifications(page)).toContainText(/^Trades will match any/);
+    await expect(energy(page)).toHaveValue("printing");
+    await page.unroute(held);
+
+    // A failed PUT puts the saved choice back.
+    await page.route(held, (route) =>
+      route.fulfill({
+        status: 500,
+        contentType: "application/json",
+        body: JSON.stringify({ detail: { code: "INTERNAL" } }),
+      })
+    );
+    await energy(page).selectOption({ label: "This exact card" });
+    await expect(notifications(page)).toContainText(
+      "That choice couldn't be saved. Please try again."
+    );
+    await expect(energy(page)).toHaveValue("printing");
+    expect((await tradeWants(page)).rules).toEqual({
+      [ids["SVE 13"]]: "printing",
+    });
+  });
+
+  test("the Trade Wants panel is not part of a one-Deck Want List", async ({
+    page,
+  }) => {
+    const ids = seedCatalog();
+    await signIn(page);
+    const deck = await createDeck(page, `Deck ${randomUUID().slice(0, 6)}`, 1);
+    await setLine(page, deck, ids["SVE 13"], 1);
+    await page.goto(`${ORIGIN}/decks/want-list`);
+    await expect(panel(page)).toBeVisible();
+    await page.goto(`${ORIGIN}/decks/want-list?deck=${deck}`);
+    await expect(energy(page)).toHaveCount(1);
+    await expect(panel(page)).toHaveCount(0);
+  });
+
+  test("the picker shows more results with Show more until no page remains", async ({
+    page,
+  }) => {
+    seedCatalog();
+    await signIn(page);
+    await page.goto(`${ORIGIN}/decks/want-list`);
+    // The catalog is small, so the first page is answered with a cursor and the second page is another search's rows.
+    await page.route(
+      (url) => url.pathname === "/api/catalog/editions",
+      async (route) => {
+        const url = new URL(route.request().url());
+        if (url.searchParams.has("cursor")) {
+          url.searchParams.delete("cursor");
+          url.searchParams.set("q", "Boss");
+          const second = await route.fetch({ url: url.toString() });
+          await route.fulfill({
+            response: second,
+            json: { ...(await second.json()), next_cursor: null },
+          });
+        } else {
+          const first = await route.fetch();
+          await route.fulfill({
+            response: first,
+            json: { ...(await first.json()), next_cursor: "more" },
+          });
+        }
+      }
+    );
+    await panel(page).getByRole("button", { name: "Add a card" }).click();
+    await picker(page)
+      .getByRole("searchbox", { name: "Search by card name" })
+      .fill("Iono");
+    await expect(
+      picker(page).getByRole("list", { name: "Iono" }).getByRole("listitem")
+    ).toHaveCount(3);
+    await expect(picker(page).getByRole("list", { name: /^Boss/ })).toHaveCount(
+      0
+    );
+    const more = picker(page).getByRole("button", { name: "Show more" });
+    await more.click();
+    await expect(picker(page).getByRole("list", { name: /^Boss/ })).toHaveCount(
+      1
+    );
+    await expect(
+      picker(page).getByRole("list", { name: "Iono" }).getByRole("listitem")
+    ).toHaveCount(3);
+    await expect(more).toHaveCount(0);
   });
 });
 

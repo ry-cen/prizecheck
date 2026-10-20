@@ -31,7 +31,10 @@ export function WillAcceptSelect({
   api: TradeWantsApi;
 }) {
   if (api.state.kind !== "ready") return null;
-  const rule = api.state.rules.get(line.edition_id) ?? "edition";
+  const rule =
+    api.pendingRule?.edition_id === line.edition_id
+      ? api.pendingRule.rule
+      : (api.state.rules.get(line.edition_id) ?? "edition");
   return (
     <div className="mt-1 max-w-64">
       <SelectBox
@@ -145,7 +148,10 @@ export function TradeWantsPanel({ api }: { api: TradeWantsApi }) {
           </div>
           <AddTradeWant
             open={adding}
-            onClose={() => setAdding(false)}
+            onClose={() => {
+              setAdding(false);
+              api.clearRefusal();
+            }}
             api={api}
           />
         </>
@@ -157,7 +163,12 @@ export function TradeWantsPanel({ api }: { api: TradeWantsApi }) {
 type Found =
   | { status: "idle" }
   | { status: "searching"; editions: BrowseEdition[] }
-  | { status: "done"; editions: BrowseEdition[] }
+  | {
+      status: "done";
+      editions: BrowseEdition[];
+      next: string | null;
+      more: boolean;
+    }
   | { status: "failed" };
 
 /**
@@ -188,12 +199,36 @@ function AddTradeWant({
       editions: previous.status === "done" ? previous.editions : [],
     }));
     browseEditions({ q }, null, controller.signal)
-      .then((page) => setFound({ status: "done", editions: page.editions }))
+      .then((page) =>
+        setFound({
+          status: "done",
+          editions: page.editions,
+          next: page.next_cursor,
+          more: false,
+        })
+      )
       .catch(() => {
         if (!controller.signal.aborted) setFound({ status: "failed" });
       });
     return () => controller.abort();
   }, [open, q]);
+
+  async function showMore() {
+    if (found.status !== "done" || !found.next || found.more) return;
+    setFound({ ...found, more: true });
+    try {
+      const page = await browseEditions({ q }, found.next);
+      setFound({
+        status: "done",
+        editions: [...found.editions, ...page.editions],
+        next: page.next_cursor,
+        more: false,
+      });
+    } catch {
+      // A moved catalog (409) or a failure: search again from the start.
+      setFound({ status: "failed" });
+    }
+  }
 
   const quantities =
     api.state.kind === "ready"
@@ -287,6 +322,15 @@ function AddTradeWant({
             </ul>
           </div>
         ))}
+        {found.status === "done" && found.next && (
+          <Button
+            className="self-start"
+            aria-disabled={found.more || undefined}
+            onClick={() => void showMore()}
+          >
+            Show more
+          </Button>
+        )}
         <Button
           onClick={() => {
             setQuery("");

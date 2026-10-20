@@ -131,6 +131,18 @@ def test_an_edition_that_cannot_start_a_line_is_refused_but_an_existing_line_sti
     assert lines_of(ok(set_want(owner, ids['PAF 80'], 0))) == []
 
 
+def test_a_tombstoned_printing_cannot_start_a_line_but_an_existing_line_still_changes(store):
+    ids = seed_swap_catalog()
+    owner, _ = new_owner()
+    ok(set_want(owner, ids['PAL 254'], 2))
+    with connect() as conn:
+        conn.execute("""UPDATE catalog_generation_printing SET tombstoned=true WHERE printing_id IN
+                     (SELECT printing_id FROM catalog_edition WHERE id = ANY(%s))""", ([ids['PAL 254'], ids['PAF 80']],))
+    assert code(set_want(owner, ids['PAF 80'], 1)) == (422, 'EDITION_UNAVAILABLE')
+    assert lines_of(ok(set_want(owner, ids['PAL 254'], 5))) == [(ids['PAL 254'], '5')]
+    assert lines_of(ok(set_want(owner, ids['PAL 254'], 0))) == []
+
+
 def test_a_collector_has_at_most_500_lines_and_can_always_change_one_they_have(store):
     ids = seed_swap_catalog()
     owner, _ = new_owner()
