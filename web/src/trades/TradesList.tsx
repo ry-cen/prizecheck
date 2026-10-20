@@ -7,7 +7,7 @@ import {
 } from "../social_generated";
 import { Button } from "../ui/Button";
 import { tradePath } from "./tradeListModel";
-import { tradeHeadline, tradeSubline } from "./tradeText";
+import { tradeHeadline, tradeSubline, tradeWaitingLabel } from "./tradeText";
 
 type Load =
   | { kind: "loading" }
@@ -23,7 +23,7 @@ const SECTIONS = [
 /**
  * The Trades list (Trading #270, prototype verdict variant A), the Trades tab's first view at /trades: the collector's
  * Trade Proposals and Trades in **Needs you**, **To swap** and **Pending**, with **History** folded away. Each row is
- * one link to its Trade, with the headline and what each side gives. The tab's badge arrives with the inbox (#273).
+ * one link to its Trade, with the headline and what each side gives. A Trade that waits on the reader to fix a pick adds the inbox's "Fix picks" to its second line.
  */
 export function TradesList({
   onOpenTrade,
@@ -156,6 +156,8 @@ function TradeRows({
               </span>
               <span className="text-meta text-text-muted wrap-anywhere">
                 {tradeSubline(trade)}
+                {trade.waiting === "fix_picks" &&
+                  ` · ${tradeWaitingLabel(trade)}`}
               </span>
             </span>
           </a>
