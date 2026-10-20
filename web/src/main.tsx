@@ -41,6 +41,9 @@ import { LoansPage } from "./loans/LoansPage";
 import { loanPath } from "./loans/loanText";
 import { FriendCollectionPage } from "./social/FriendCollectionPage";
 import { friendCollectionPath, friendHandleAt } from "./social/friendCards";
+import { FriendTradeListPage } from "./trades/FriendTradeListPage";
+import { friendTradeListHandleAt } from "./trades/tradeListModel";
+import { TradesPage } from "./trades/TradesPage";
 import { workspaceHref } from "./workspace/workspaceLink";
 import "./tokens.css";
 import "./tailwind.css";
@@ -63,13 +66,14 @@ function avatarImage(image: unknown): string | null {
     : null;
 }
 
-/** Where signing in lands: a same-origin `next`, else the signed-in page being visited (a Friend's Collection
- * included), else Collection. */
+/** Where signing in lands: a same-origin `next`, else the signed-in page being visited (a Friend's Collection or
+ * Trade List included), else Collection. */
 function safeDestination(): string {
   const value = new URLSearchParams(location.search).get("next");
   if (!value)
     return pageAt(canonicalPath(location.pathname)) ||
-      friendHandleAt(location.pathname) !== null
+      friendHandleAt(location.pathname) !== null ||
+      friendTradeListHandleAt(location.pathname) !== null
       ? `${canonicalPath(location.pathname)}${location.search}${location.hash}`
       : DEFAULT_PATH;
   if (!value.startsWith("/") || value.startsWith("//") || value.includes("\\"))
@@ -124,12 +128,27 @@ function App() {
   const publicPage = useMemo(() => publicPageAt(path), [path]);
   const isPublic = publicPage !== null;
   const friendHandle = friendHandleAt(path);
+  const friendTradeHandle = friendTradeListHandleAt(path);
   const def = pageAt(path);
   const page: PageId = def ? def.id : "collection";
   useLayoutEffect(() => {
-    if (signedIn && !isPublic && !def && friendHandle === null)
+    if (
+      signedIn &&
+      !isPublic &&
+      !def &&
+      friendHandle === null &&
+      friendTradeHandle === null
+    )
       navigate(pageDef(page).path, { replace: true });
-  }, [signedIn, isPublic, def, friendHandle, page, navigate]);
+  }, [
+    signedIn,
+    isPublic,
+    def,
+    friendHandle,
+    friendTradeHandle,
+    page,
+    navigate,
+  ]);
   // A failure code in the address belongs to the sign-in page: signed in, it is never shown, only removed. The
   // Settings page's Sign-ins section reads and removes its own.
   useEffect(() => {
@@ -215,7 +234,12 @@ function App() {
           <PublicPageView page={publicPage} signedIn={false} onNavigate={go} />
         </PublicLayout>
       );
-    if (!def && friendHandle === null && path !== SIGN_IN_PATH)
+    if (
+      !def &&
+      friendHandle === null &&
+      friendTradeHandle === null &&
+      path !== SIGN_IN_PATH
+    )
       return (
         <PublicLayout onNavigate={go}>
           <DeadEnd kind="not-found" signedIn={false} onNavigate={go} />
@@ -325,6 +349,9 @@ function App() {
             onAllLoans={() => navigate(pageDef("loans").path)}
           />
         );
+      case "trades":
+        // /trades/list is My Trade List (Trading #269); until the Trades list arrives, /trades opens it too.
+        return <TradesPage view="list" onNavigate={navigate} />;
       case "reports":
         return <MissingCardsPage active={active} message={message} />;
       case "owner":
@@ -380,10 +407,23 @@ function App() {
                   <FriendCollectionPage
                     key={friendHandle}
                     handle={friendHandle}
+                    onNavigate={go}
                   />
                 ),
               }
-            : null
+            : friendTradeHandle !== null
+              ? {
+                  key: path,
+                  label: "Friend's Trade List",
+                  content: (
+                    <FriendTradeListPage
+                      key={friendTradeHandle}
+                      handle={friendTradeHandle}
+                      onNavigate={go}
+                    />
+                  ),
+                }
+              : null
       }
     />
   );

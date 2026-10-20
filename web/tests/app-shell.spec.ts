@@ -256,6 +256,7 @@ test.describe("desktop", () => {
       "Decks",
       "Catalog",
       "Loans",
+      "Trades",
       "Missing cards",
     ]);
     // A marker on the window survives only if no page load happens.
@@ -266,6 +267,7 @@ test.describe("desktop", () => {
       ["Decks", "/decks", "Decks"],
       ["Catalog", "/catalog", "Catalog"],
       ["Loans", "/loans", "Loans"],
+      ["Trades", "/trades", "Trades"],
       ["Missing cards", "/reports", "Missing cards"],
       ["Collection", "/collection", "All owned"],
     ]) {
@@ -571,6 +573,7 @@ test.describe("phone", () => {
         "Decks",
         "Catalog",
         "Loans",
+        "Trades",
       ]);
       const banner = page.getByRole("banner");
       await expect(banner).toContainText("Collection");
