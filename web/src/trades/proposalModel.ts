@@ -92,6 +92,36 @@ export function proposalCopies(proposal: Proposal): number {
   );
 }
 
+/** The reader's view of a countered Trade as a proposal (Trading #278). It is already relative to the reader, so
+ * nothing is swapped: You get is the Trade's `you_get`, You give its `you_give`, each line at its copies, which are
+ * also the line's cap until the collector taps that card in the library. */
+export function counterProposal(trade: {
+  you_give: readonly ProposalCard[];
+  you_get: readonly ProposalCard[];
+}): Proposal {
+  const line = (card: ProposalCard): ProposalLine => ({
+    ...toProposalCard(card),
+    quantity: Number(card.copies),
+  });
+  return { get: trade.you_get.map(line), give: trade.you_give.map(line) };
+}
+
+/** On a Counter, the copies the countered proposal's sender gave are reserved by it, so they are missing from their
+ * Trade List until the Counter frees them. This gives each card whose Edition is in `released` those copies back, so
+ * the library offers them and a tap never caps below them. The same array comes back when nothing was released. */
+export function withReleased<T extends { edition_id: string; copies: string }>(
+  cards: readonly T[],
+  released: ReadonlyMap<string, number>
+): T[] {
+  if (released.size === 0) return cards as T[];
+  return cards.map((card) => {
+    const extra = released.get(card.edition_id);
+    return extra === undefined
+      ? card
+      : { ...card, copies: String(Number(card.copies) + extra) };
+  });
+}
+
 /** The lines as the send request writes them. */
 export function requestLines(
   lines: readonly ProposalLine[]
@@ -125,6 +155,14 @@ export function parseCents(text: string): string | null {
     Number(match[1].replace(/,/g, "")) * 100 +
     Number((match[2] ?? "").padEnd(2, "0"));
   return cents >= 1 && cents <= 99_999_999 ? String(cents) : null;
+}
+
+/** Whole cents as a typed amount, with no "$" and no commas ("1500" is "15.00", "5" is "0.05"). Integer arithmetic
+ * only; it round-trips through `parseCents`. */
+export function centsAmount(cents: string): string {
+  const n = Number(cents);
+  const whole = Math.floor(n / 100);
+  return `${whole}.${String(n - whole * 100).padStart(2, "0")}`;
 }
 
 type ValueCard = { edition_id: string; quantity: number | string };

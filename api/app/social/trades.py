@@ -47,8 +47,9 @@ A Trade one side has confirmed stays open: the remaining side may still Confirm 
 the friendship once a Trade is accepted, nothing they see changes.
 
 **Cash and Open to cash offers** (Trading #277): ``TradeView.cash`` is the amount and payer relative to the reader. The
-Open to cash offers setting is changed through ``/api/social/trade-settings`` (``settings_router`` below); Counter
-(#278) comes later.
+Open to cash offers setting is changed through ``/api/social/trade-settings`` (``settings_router`` below). A Counter
+(#278) is inventory code in ``app.trade_inventory``; it stores no update, because the reply is the other side's waiting
+answer.
 """
 import json
 from collections.abc import Mapping
@@ -188,7 +189,7 @@ def confirmed(user_id: str, row) -> tuple[bool, bool]:
 
 def waiting_trade_step(user_id: str, row, facts: TradeFacts | None = None) -> str | None:
     """What the Trade waits on the reader for, or None, the first that applies: 'answer' when they received a proposal
-    nobody has answered (a Counter is the same step, #278); 'fix_picks' once accepted, when the reader hasn't confirmed
+    nobody has answered (a Counter is the same step); 'fix_picks' once accepted, when the reader hasn't confirmed
     the swap and a pick of theirs is out of date (``facts.stale_picks``; without facts, never); 'confirm_swap' once
     accepted, when the other side confirmed the swap and the reader has not. An accepted Trade nobody has confirmed,
     with the reader's picks up to date, waits on neither side. One Trade is one step, whatever else it needs."""
@@ -237,12 +238,12 @@ def allowed(user_id: str, row, gives: bool) -> list[str]:
     confirmed: they confirm the swap and, when they give cards, may use suggested picks; while the other side hasn't
     confirmed either, either side cancels it. Once the reader has confirmed, and on a closed row, nothing. Use suggested
     picks is listed while the reader's side gives cards and still reserves them; the step answers PICKS_UP_TO_DATE when
-    no pick is out of date. Counter is added by #278."""
+    no pick is out of date. The recipient of a proposal may also counter it (#278), in every round."""
     mine, theirs = confirmed(user_id, row)
     found = []
     if row['state'] == 'proposed':
         if role_of(user_id, row) == 'recipient':
-            found += ['accept', 'decline']
+            found += ['accept', 'decline', 'counter']
         else:
             found += ['withdraw', *(['use_suggested_picks'] if gives else [])]
     elif row['state'] == 'accepted' and not mine:
@@ -406,8 +407,9 @@ def side_gives(conn, trade_id: UUID, side: str) -> bool:
 
 def write_trade(conn, trade_id: UUID, changes: Mapping[str, object]) -> None:
     """The step's one write of its Trade row: ``changes`` (column -> value, ``NOW`` for the transaction's time) and the
-    revision advanced. ``run_trade_step`` calls it, and ``end_trades_between`` once for each Trade it cancels; nothing
-    else writes the row of an existing Trade."""
+    revision advanced. ``run_trade_step`` calls it, ``end_trades_between`` once for each Trade it cancels, and
+    ``trade_inventory.counter_trade`` once for the proposal it closes; nothing else writes the row of an existing
+    Trade."""
     if 'revision' in changes or 'id' in changes:
         raise ValueError('run_trade_step owns the Trade id and revision')
     assignments = [sql.SQL('revision = revision + 1')]

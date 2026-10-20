@@ -40,7 +40,7 @@ import { useToast } from "../ui/Toast";
 import { indexLocations } from "../workspace/locationTree";
 import { LiabilityNotice } from "./LiabilityNotice";
 import { valueLines } from "./proposalModel";
-import { TRADES_PATH } from "./tradeListModel";
+import { counterPath, TRADES_PATH, tradePath } from "./tradeListModel";
 import {
   swapDoneMessage,
   tradeCardName,
@@ -127,16 +127,22 @@ const DONE: Record<Asking | "accept" | "use_suggested", string> = {
  * an out-of-date pick says what the suggestion takes instead. Those are the reader's own Locations, from their own side
  * read (`GET /api/trades/{id}/side`); the other side's never reach this screen.
  *
+ * Counter (#278) sits between Accept and Decline on a proposal sent to you and opens the Counter builder; a Counter
+ * shows one line linking the proposal it answers.
+ *
  * The inbox (Trading #273): the bell and the Trades tab's badge are read again after each step and after a refusal that
  * reads the Trade again, and a Trade opened from the drawer takes focus on its heading once it is drawn, as a Loan does.
  */
 export function TradeScreen({
   tradeId,
   onAllTrades,
+  onNavigate,
 }: {
   /** The Trade's id, or null for an address that names no Trade: it shows the same not-found as a missing Trade. */
   tradeId: string | null;
   onAllTrades: () => void;
+  /** Goes to another address in the app: the Counter builder, or the proposal a Counter answers. */
+  onNavigate: (to: string) => void;
 }) {
   const toast = useToast();
   const refreshInbox = useInboxRefresh();
@@ -403,7 +409,9 @@ export function TradeScreen({
   }
 
   const answering =
-    trade.actions.includes("accept") || trade.actions.includes("decline");
+    trade.actions.includes("accept") ||
+    trade.actions.includes("decline") ||
+    trade.actions.includes("counter");
   const menu: MenuItem[] = [
     ...(trade.actions.includes("withdraw")
       ? [{ label: "Withdraw", onSelect: () => ask("withdraw") }]
@@ -428,6 +436,16 @@ export function TradeScreen({
           }
         >
           Accept
+        </Button>
+      )}
+      {trade.actions.includes("counter") && (
+        <Button
+          aria-disabled={busy || undefined}
+          onClick={() => {
+            if (!busy) onNavigate(counterPath(trade.id));
+          }}
+        >
+          Counter
         </Button>
       )}
       {trade.actions.includes("decline") && (
@@ -474,6 +492,27 @@ export function TradeScreen({
           <span className="text-text-muted"> @{trade.other.handle}</span>
         )}
       </p>
+      {trade.countered_from && (
+        <p className="m-0 text-body wrap-anywhere">
+          {trade.role === "recipient"
+            ? "This is a Counter to "
+            : "This is your Counter to "}
+          <a
+            href={tradePath(trade.countered_from)}
+            onClick={(event) => {
+              if (event.metaKey || event.ctrlKey || event.shiftKey) return;
+              event.preventDefault();
+              onNavigate(tradePath(trade.countered_from!));
+            }}
+            className="text-accent-strong underline"
+          >
+            {trade.role === "recipient"
+              ? "your Trade Proposal"
+              : `${name}'s Trade Proposal`}
+          </a>
+          .
+        </p>
+      )}
       {note && <p className="m-0 text-body text-text-muted">{note}</p>}
       <div className="grid grid-cols-2 items-start gap-4 phone:grid-cols-1">
         <TradeSide
