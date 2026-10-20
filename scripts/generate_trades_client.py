@@ -1,7 +1,7 @@
 """Generate the Trades client module (trading #269: the collector's own Trade List; #270: sending a Trade Proposal;
 #271: accepting one; #272: each side's own view, Use suggested picks and Confirm swap; #275: ``/api/trade-wants``, the
-collector's own Trade Wants and Will accept choices; #277: cash on a send, and the value route; later Trading tickets
-add the rest of ``/api/trades``) from the API
+collector's own Trade Wants and Will accept choices; #277: cash on a send, and the value route; #278: Counter; later
+Trading tickets add the rest of ``/api/trades``) from the API
 OpenAPI schema. Shared Trade facts under ``/api/social`` stay in the social client (scripts/generate_social_client.py),
 which this module imports its ``TradeStep`` and ``TradeView`` from."""
 import sys
@@ -30,8 +30,8 @@ schema = app.openapi()["components"]["schemas"]
 lines = ["// Generated from FastAPI OpenAPI by scripts/generate_trades_client.py. Do not edit.",
          'import type { TradeStep, TradeView } from "./social_generated";']
 for name in ("TradeListPlace", "TradeListLocation", "TradeListCard", "OwnTradeList", "TradeLineRequest",
-             "TradeCashRequest", "SendTradeProposal", "TradePickPlace", "OwnTradeSide", "ConfirmSwap", "TradeWantLine",
-             "WillAcceptChoice",
+             "TradeCashRequest", "SendTradeProposal", "CounterTrade", "TradePickPlace", "OwnTradeSide", "ConfirmSwap",
+             "TradeWantLine", "WillAcceptChoice",
              "TradeWants", "SetTradeWant", "SetWillAccept",
              "TradeValueLine", "TradeValueRequest", "SideValue", "TradeValue"):
     definition = schema[name]
@@ -62,6 +62,10 @@ export const sendTradeProposal = (body: SendTradeProposal) => request<TradeView>
 // Accept a Trade Proposal sent to you, whole (#271), idempotent: it reserves the cards you give and answers the Trade.
 export const acceptTrade = (id: string, body: TradeStep) =>
   request<TradeView>(`/api/trades/${encodeURIComponent(id)}/accept`, 'POST', body);
+// Counter a Trade Proposal sent to you (#278), idempotent: it closes that proposal, frees the cards its sender gave,
+// and sends them this proposal instead, reserving the cards you give. Answers the new Trade as you read it.
+export const counterTrade = (id: string, body: CounterTrade) =>
+  request<TradeView>(`/api/trades/${encodeURIComponent(id)}/counter`, 'POST', body);
 // Your own side of a Trade (#272): where your picks take the cards you give from, which are out of date, and the
 // suggested picks.
 export const getTradeSide = (id: string, signal?: AbortSignal) =>

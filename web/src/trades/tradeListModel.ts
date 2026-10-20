@@ -47,16 +47,25 @@ export function tradePath(id: string): string {
   return `${TRADES_PATH}/${encodeURIComponent(id)}`;
 }
 
+/** The section name after a Trade's id in its Counter builder's address. */
+export const TRADE_COUNTER_SEGMENT = "counter";
+
+/** The Counter builder for a proposal sent to you (Trading #278): /trades/<Trade id>/counter. */
+export function counterPath(id: string): string {
+  return `${tradePath(id)}/${TRADE_COUNTER_SEGMENT}`;
+}
+
 /** A Friend's proposal builder (Trading #284): /trades/new/<Handle>. */
 export function proposalPath(handle: string): string {
   return `${TRADES_PATH}/${TRADE_NEW_SEGMENT}/${encodeURIComponent(handle)}`;
 }
 
-/** What the Trades tab shows for its address's section (``sectionAt``): a view, a Friend's proposal builder, or one
- * Trade by id. */
+/** What the Trades tab shows for its address's section (``sectionAt``): a view, a Friend's proposal builder, the
+ * Counter builder for one Trade (#278), or one Trade by id. */
 export type TradesRoute =
   | { kind: "view"; view: TradesTabView }
   | { kind: "new"; handle: string }
+  | { kind: "counter"; id: string }
   | { kind: "trade"; id: string }
   | { kind: "missing" };
 
@@ -72,6 +81,18 @@ export function tradesRoute(section: string | null): TradesRoute {
         kind: "new",
         handle: decodeURIComponent(section.slice(TRADE_NEW_SEGMENT.length + 1)),
       };
+    } catch {
+      return { kind: "missing" };
+    }
+  }
+  if (section.endsWith(`/${TRADE_COUNTER_SEGMENT}`)) {
+    try {
+      const counterId = decodeURIComponent(
+        section.slice(0, -(TRADE_COUNTER_SEGMENT.length + 1))
+      );
+      return UUID.test(counterId)
+        ? { kind: "counter", id: counterId }
+        : { kind: "missing" };
     } catch {
       return { kind: "missing" };
     }

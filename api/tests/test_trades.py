@@ -1,5 +1,6 @@
-"""Send a Friend a Trade Proposal and withdraw it (Trading #270), and accept, decline or cancel it (#271): ``POST
-/api/trades`` and ``POST /api/trades/{id}/accept`` (``app.trade_inventory``), the Trade reads and the withdraw, decline
+"""Send a Friend a Trade Proposal and withdraw it (Trading #270), accept, decline or cancel it (#271) and counter it
+(#278): ``POST /api/trades``, ``POST /api/trades/{id}/accept`` and ``POST /api/trades/{id}/counter``
+(``app.trade_inventory``), the Trade reads and the withdraw, decline
 and cancel steps under ``/api/social/trades`` (``app.social.trades``) and the Trade Pick List (``app.trade_picks``),
 through signed HTTP against PostgreSQL.
 
@@ -72,6 +73,28 @@ def accept_trade(user, trade, key=None, revision=None):
     """The recipient's accept, on the revision ``trade`` was read at unless ``revision`` says otherwise."""
     return call('POST', f"/api/trades/{trade['id']}/accept", user,
                 {'revision': revision or trade['revision'], 'idempotency_key': str(key or uuid4())})
+
+
+def counter(user, trade, give=(), get=(), cash=None, key=None, revision=None):
+    body = {'revision': revision or trade['revision'], 'idempotency_key': str(key or uuid4()),
+            'you_give': lines(give), 'you_get': lines(get)}
+    if cash is not None:
+        body['cash'] = cash
+    return call('POST', f"/api/trades/{trade['id']}/counter", user, body)
+
+
+def countered(user, trade, give=(), get=(), cash=None):
+    return ok(counter(user, trade, give, get, cash))
+
+
+def inbox(user):
+    return ok(call('GET', '/api/social/inbox', user))
+
+
+def counters_of(trade):
+    """The ids of the rows that answer ``trade``."""
+    with connect() as conn:
+        return [str(row['id']) for row in conn.execute('SELECT id FROM trade WHERE countered_from=%s', (trade['id'],))]
 
 
 def updates(trade):
@@ -337,7 +360,7 @@ def test_the_friend_sees_the_proposal_from_their_side_and_a_stranger_gets_not_fo
     trade = proposed(misty, ash, give=[(iono, 2)], get=[(arven, 1)])
     seen = ok(read(ash, trade))
     assert (seen['role'], seen['state'], seen['waiting'], seen['needs_you'], seen['section'], seen['actions']) == (
-        'recipient', 'proposed', 'answer', True, 'needs_you', ['accept', 'decline'])
+        'recipient', 'proposed', 'answer', True, 'needs_you', ['accept', 'decline', 'counter'])
     assert sides(seen) == ([(arven, '1')], [(iono, '2')])
     assert seen['other'] == {'collector_id': misty, 'display_name': 'Misty W.', 'handle': handle_of(misty),
                              'open_to_cash_offers': False}
@@ -386,8 +409,8 @@ def test_withdraw_is_the_proposers_on_the_revision_they_read_and_tells_the_recip
 @pytest.mark.parametrize('state, reader, swaps, gives, expected', [
     ('proposed', 'proposer', (None, None), True, ['use_suggested_picks', 'withdraw']),
     ('proposed', 'proposer', (None, None), False, ['withdraw']),
-    ('proposed', 'recipient', (None, None), True, ['accept', 'decline']),
-    ('proposed', 'recipient', (None, None), False, ['accept', 'decline']),
+    ('proposed', 'recipient', (None, None), True, ['accept', 'decline', 'counter']),
+    ('proposed', 'recipient', (None, None), False, ['accept', 'decline', 'counter']),
     ('accepted', 'proposer', (None, None), True, ['confirm_swap', 'use_suggested_picks', 'cancel']),
     ('accepted', 'proposer', (None, None), False, ['confirm_swap', 'cancel']),
     ('accepted', 'recipient', (None, None), True, ['confirm_swap', 'use_suggested_picks', 'cancel']),
@@ -985,3 +1008,243 @@ def test_a_trade_accept_and_a_loan_accept_of_the_same_copies_run_one_after_the_o
         assert detail(loser) == (409, {'code': 'NOT_TRADEABLE', 'edition_id': arven, 'available': '0',
                                        'side': 'you_give'})
         assert reserved(ash, arven) == (2, 0) and row_of(trade)['state'] == 'proposed'
+
+
+def test_a_counter_closes_the_proposal_and_sends_the_reply_with_the_reserved_side_swapped(store):
+    ids, ash, misty, binder, box = trading()
+    iono, arven = ids['PAL 185'], ids['SVI 166']
+    original = proposed(misty, ash, give=[(iono, 2)], get=[(arven, 1)])
+    before = revision_of(misty), revision_of(ash)
+    new = countered(ash, original, give=[(arven, 2)], get=[(iono, 1)], cash={'cents': '500', 'payer': 'them'})
+    assert (new['role'], new['state'], new['countered_from'], new['waiting'], new['section']) == (
+        'proposer', 'proposed', original['id'], None, 'pending')
+    assert sides(new) == ([(arven, '2')], [(iono, '1')])
+    assert new['cash'] == {'cents': '500', 'payer': 'them'}
+    assert new['actions'] == ['use_suggested_picks', 'withdraw'] and new['other']['display_name'] == 'Misty W.'
+    old = row_of(original)
+    assert (old['state'], old['closed_reason'], old['closed_by'], old['revision']) == (
+        'closed', 'countered', ash, original['revision'] + 1)
+    assert trade_picks(original['id']) == []
+    theirs, mine = ok(read(misty, original)), ok(read(ash, original))
+    assert sides(theirs) == ([(iono, '2')], [(arven, '1')])
+    assert (theirs['closed_by'], theirs['actions'], mine['closed_by']) == ('them', [], 'you')
+    row = row_of(new)
+    assert (row['proposer_id'], row['recipient_id'], row['countered_from'], row['cash_cents'], row['cash_payer'],
+            row['proposer_name'], row['recipient_name'], row['revision']) == (
+        ash, misty, old['id'], 500, 'recipient', 'Ash K.', 'Misty W.', 1)
+    assert trade_picks(new['id']) == [('proposer', ash, box, 2)]
+    assert reserved(misty, iono) == (0, 0) and reserved(ash, arven) == (2, 2)
+    assert (revision_of(misty), revision_of(ash)) == (before[0] + 1, before[1] + 1)
+    assert updates(original) == [] and updates(new) == [] and commands(ash) == 1
+    seen = ok(read(misty, new))
+    assert (seen['role'], seen['waiting'], seen['needs_you'], seen['actions'], seen['cash']) == (
+        'recipient', 'answer', True, ['accept', 'decline', 'counter'], {'cents': '500', 'payer': 'you'})
+    waiting = inbox(misty)['trade_waiting']
+    assert [(line['id'], line['countered_from']) for line in waiting] == [(new['id'], original['id'])]
+    assert inbox(misty)['trade_updates'] == [] and inbox(ash)['trade_waiting'] == []
+    # A Counter of a Counter works the same way.
+    again = countered(misty, seen, give=[(iono, 1)], get=[(arven, 1)])
+    assert again['countered_from'] == new['id']
+    assert (row_of(new)['closed_reason'], row_of(new)['closed_by']) == ('countered', misty)
+    assert reserved(ash, arven) == (0, 0) and reserved(misty, iono) == (1, 1)
+
+
+def test_a_counter_keeping_every_card_the_sender_listed_exactly_succeeds(store):
+    ids, ash, misty, binder, box = trading()
+    iono, arven = ids['PAL 185'], ids['SVI 166']
+    original = proposed(ash, misty, give=[(arven, 2)], get=[(iono, 1)])
+    new = countered(misty, original, give=[(iono, 1)], get=[(arven, 2)])
+    assert (row_of(original)['state'], row_of(original)['closed_reason']) == ('closed', 'countered')
+    assert (row_of(new)['state'], str(row_of(new)['countered_from'])) == ('proposed', original['id'])
+    assert reserved(ash, arven) == (0, 0) and reserved(misty, iono) == (1, 1)
+
+
+def test_a_refused_counter_leaves_the_original_proposal_and_its_picks(store):
+    ids, ash, misty, binder, box = trading()
+    iono, arven = ids['PAL 185'], ids['SVI 166']
+    original = proposed(ash, misty, give=[(arven, 2)], get=[(iono, 1)])
+    before = revision_of(misty), revision_of(ash)
+    assert detail(counter(misty, original, give=[(iono, 1)], get=[(arven, 3)])) == (
+        409, {'code': 'NOT_TRADEABLE', 'edition_id': arven, 'available': '2', 'side': 'you_get'})
+    old = row_of(original)
+    assert (old['state'], old['revision']) == ('proposed', original['revision'])
+    assert trade_picks(original['id']) == [('proposer', ash, box, 2)] and reserved(ash, arven) == (2, 2)
+    assert counters_of(original) == [] and commands(misty) == 0
+    assert (revision_of(misty), revision_of(ash)) == before
+
+
+def test_a_counter_refuses_each_shape_rule_in_order_and_changes_nothing(store):
+    ids, ash, misty, binder, box = trading()
+    iono, arven = ids['PAL 185'], ids['SVI 166']
+    original = proposed(misty, ash, give=[(iono, 1)], get=[(arven, 1)])
+    many = [(str(uuid4()), 1) for _ in range(51)]
+    cases = [
+        (counter(ash, original, give=[(arven, 0)]), 422, 'INVALID_QUANTITY'),
+        (counter(ash, original, give=[(arven, 10000)]), 422, 'INVALID_QUANTITY'),
+        (counter(ash, original, give=[(arven, 1), (arven, 1)]), 422, 'DUPLICATE_EDITION'),
+        (counter(ash, original, give=[(arven, 1)], get=[(arven, 1)]), 422, 'SAME_CARD_BOTH_SIDES'),
+        (counter(ash, original, give=many), 422, 'TOO_MANY_LINES'),
+        (counter(ash, original), 422, 'TRADE_HAS_NO_CARDS'),
+        (counter(ash, original, give=[(arven, 1)], cash={'cents': '0', 'payer': 'you'}), 422, 'INVALID_CASH'),
+    ]
+    assert [(response.status_code, response.json()['detail']['code']) for response, _, _ in cases] == \
+        [(status, code) for _, status, code in cases]
+    assert detail(counter(ash, original, give=[(arven, 3)])) == (
+        409, {'code': 'NOT_TRADEABLE', 'edition_id': arven, 'available': '2', 'side': 'you_give'})
+    old = row_of(original)
+    assert (old['state'], old['revision']) == ('proposed', original['revision'])
+    assert trade_picks(original['id']) == [('proposer', misty, binder, 1)]
+    assert counters_of(original) == [] and commands(ash) == 0
+
+
+def test_cash_alongside_cards_and_a_gift_plus_cash_counter_with_no_open_to_cash_offers(store):
+    ids, ash, misty, binder, box = trading()
+    iono, arven = ids['PAL 185'], ids['SVI 166']
+    assert trade_settings(misty) is False
+    shapes = [
+        dict(give=[(arven, 1)], get=[(iono, 1)], cash={'cents': '300', 'payer': 'you'}),
+        dict(give=[(arven, 1)], get=[(iono, 1)], cash={'cents': '300', 'payer': 'them'}),
+        dict(give=[(arven, 1)], cash={'cents': '300', 'payer': 'you'}),
+        dict(get=[(iono, 1)], cash={'cents': '300', 'payer': 'them'}),
+    ]
+    for shape in shapes:
+        original = proposed(misty, ash, give=[(iono, 1)], get=[(arven, 1)])
+        new = countered(ash, original, **shape)
+        assert new['cash'] == shape['cash']
+        ok(trade_step(ash, new, 'withdraw'))     # frees Ash's copy for the next shape
+
+
+@pytest.mark.parametrize('original, reply', [
+    ('misty_buys', 'ash_sells'), ('misty_buys', 'ash_buys'), ('misty_sells', 'ash_sells'), ('misty_sells', 'ash_buys')])
+def test_a_counter_may_answer_a_cash_only_proposal_with_a_cash_only_side_whatever_its_recipients_setting(
+        store, original, reply):
+    ids, ash, misty, binder, box = trading()
+    iono, arven = ids['PAL 185'], ids['SVI 166']
+    trade_settings(ash, True)
+    assert trade_settings(misty) is False
+    first = {'misty_buys': dict(get=[(arven, 1)], cash={'cents': '1000', 'payer': 'you'}),
+             'misty_sells': dict(give=[(iono, 1)], cash={'cents': '1000', 'payer': 'them'})}[original]
+    answer = {'ash_sells': dict(give=[(arven, 1)], cash={'cents': '1500', 'payer': 'them'}),
+              'ash_buys': dict(get=[(iono, 1)], cash={'cents': '500', 'payer': 'you'})}[reply]
+    trade = proposed(misty, ash, **first)
+    new = countered(ash, trade, **answer)
+    assert new['cash'] == answer['cash'] and row_of(trade)['closed_reason'] == 'countered'
+
+
+@pytest.mark.parametrize('original', ['no_cash', 'cash_beside_cards', 'gift_plus_cash'])
+def test_a_counter_that_brings_a_cash_only_side_to_a_recipient_not_open_is_refused_and_leaves_the_original(
+        store, original):
+    ids, ash, misty, binder, box = trading()
+    iono, arven = ids['PAL 185'], ids['SVI 166']
+    first = {'no_cash': dict(give=[(iono, 1)], get=[(arven, 1)]),
+             'cash_beside_cards': dict(give=[(iono, 1)], get=[(arven, 1)], cash={'cents': '300', 'payer': 'you'}),
+             'gift_plus_cash': dict(give=[(iono, 1)], cash={'cents': '300', 'payer': 'you'})}[original]
+    trade = proposed(misty, ash, **first)
+    sells = dict(give=[(arven, 1)], cash={'cents': '1500', 'payer': 'them'})
+    buys = dict(get=[(iono, 1)], cash={'cents': '500', 'payer': 'you'})
+    assert detail(counter(ash, trade, **sells)) == (409, {'code': 'CASH_ONLY_NOT_OPEN', 'side': 'you_get'})
+    assert detail(counter(ash, trade, **buys)) == (409, {'code': 'CASH_ONLY_NOT_OPEN', 'side': 'you_give'})
+    assert (row_of(trade)['state'], row_of(trade)['revision']) == ('proposed', trade['revision'])
+    assert trade_picks(trade['id']) == [('proposer', misty, binder, 1)] and commands(ash) == 0
+    # The check reads the Counter recipient's setting now.
+    trade_settings(misty, True)
+    assert counter(ash, trade, **sells).status_code == 200
+
+
+def test_a_counter_is_the_recipients_on_the_revision_they_read_and_only_while_proposed(store):
+    ids, ash, misty, binder, box = trading()
+    iono, arven = ids['PAL 185'], ids['SVI 166']
+    (gary, _) = collector('Gary O.')
+    original = proposed(misty, ash, give=[(iono, 1)], get=[(arven, 1)])
+    asked = dict(get=[(iono, 1)])
+    assert counter(gary, original, **asked).content == UNKNOWN
+    assert counter(ash, {'id': str(uuid4()), 'revision': 1}, **asked).content == UNKNOWN
+    assert commands(gary) == 0
+    assert detail(counter(misty, original, give=[(iono, 1)])) == (409, {'code': 'STEP_NOT_ALLOWED'})
+    assert detail(counter(ash, original, revision=original['revision'] + 1, **asked)) == (
+        409, {'code': 'TRADE_CHANGED'})
+    taken = ok(accept_trade(ash, proposed(misty, ash, give=[(iono, 1)], get=[(arven, 1)])))
+    assert detail(counter(ash, taken, **asked)) == (409, {'code': 'STEP_NOT_ALLOWED'})
+    other = proposed(misty, ash, give=[(iono, 1)], get=[(arven, 1)])
+    ok(trade_step(misty, other, 'withdraw'))
+    assert detail(counter(ash, ok(read(ash, other)), **asked)) == (409, {'code': 'STEP_NOT_ALLOWED'})
+    answered = proposed(misty, ash, give=[(iono, 1)], get=[(arven, 1)])
+    countered(ash, answered, **asked)
+    assert detail(counter(ash, ok(read(ash, answered)), **asked)) == (409, {'code': 'STEP_NOT_ALLOWED'})
+    last = proposed(misty, ash, give=[(iono, 1)], get=[(arven, 1)])
+    with connect() as conn:
+        conn.execute('DELETE FROM friendship WHERE user_low=%s AND user_high=%s', tuple(sorted([ash, misty])))
+    assert detail(counter(ash, last, **asked)) == (409, {'code': 'NOT_FRIENDS'})
+    assert row_of(last)['state'] == 'proposed' and trade_picks(last['id']) == [('proposer', misty, binder, 1)]
+
+
+def test_a_retried_counter_answers_the_same_trade_and_writes_once(store):
+    ids, ash, misty, binder, box = trading()
+    iono, arven = ids['PAL 185'], ids['SVI 166']
+    original = proposed(misty, ash, give=[(iono, 1)], get=[(arven, 1)])
+    key = uuid4()
+    first = counter(ash, original, give=[(arven, 1)], get=[(iono, 1)], key=key)
+    again = counter(ash, original, give=[(arven, 1)], get=[(iono, 1)], key=key)
+    assert (first.status_code, again.status_code) == (200, 200) and first.json() == again.json()
+    assert len(counters_of(original)) == 1 and commands(ash) == 1
+    assert detail(counter(ash, original, give=[(arven, 2)], get=[(iono, 1)], key=key)) == (
+        409, {'code': 'IDEMPOTENCY_KEY_REUSED'})
+
+
+def test_a_counter_moves_only_the_revisions_of_sides_whose_cards_it_releases_or_reserves(store):
+    ids, ash, misty, binder, box = trading()
+    iono, arven = ids['PAL 185'], ids['SVI 166']
+    asking = proposed(misty, ash, get=[(arven, 1)])
+    before = revision_of(misty), revision_of(ash)
+    new = countered(ash, asking, get=[(iono, 1)])
+    assert (revision_of(misty), revision_of(ash)) == before and trade_picks(new['id']) == []
+    giving = proposed(misty, ash, give=[(iono, 1)])
+    before = revision_of(misty), revision_of(ash)
+    countered(ash, giving, get=[(iono, 2)])
+    assert (revision_of(misty), revision_of(ash)) == (before[0] + 1, before[1])
+
+
+def test_a_counter_counts_toward_the_hourly_limit(store):
+    ids, ash, misty, binder, box = trading()
+    iono, arven = ids['PAL 185'], ids['SVI 166']
+    original = proposed(misty, ash, give=[(iono, 1)], get=[(arven, 1)])
+    with connect() as conn:
+        conn.execute("""INSERT INTO handle_lookup_event(user_id, kind, created_at)
+          SELECT %s, 'trade_command', now() - interval '20 minutes' FROM generate_series(1, 120)""", (ash,))
+    assert detail(counter(ash, original, give=[(arven, 1)], get=[(iono, 1)])) == (
+        429, {'code': 'TOO_MANY_CHANGES', 'retry_after_minutes': 40})
+    assert row_of(original)['state'] == 'proposed'
+
+
+@pytest.mark.parametrize('first', ['counter', 'withdraw'])
+def test_a_counter_and_a_withdraw_of_one_proposal_run_one_after_the_other(store, first):
+    ids, ash, misty, binder, box = trading()
+    iono, arven = ids['PAL 185'], ids['SVI 166']
+    original = proposed(misty, ash, give=[(iono, 1)], get=[(arven, 1)])
+    before = revision_of(misty), revision_of(ash)
+    # Both steps delete Misty's pick: the first to reach it holds the Trade row while it sleeps there, and the
+    # second waits on that row without ever reaching its own delete.
+    held = _sleeping('trade_pick', 'DELETE', f"OLD.owner_id = '{misty}'")
+    steps = {'counter': lambda: counter(ash, original, give=[(arven, 1)], get=[(iono, 1)]),
+             'withdraw': lambda: trade_step(misty, original, 'withdraw')}
+    second = 'withdraw' if first == 'counter' else 'counter'
+    try:
+        with ThreadPoolExecutor(max_workers=2) as executor, \
+                psycopg.connect(os.environ['DATABASE_URL'], autocommit=True) as watch:
+            winner = executor.submit(steps[first])
+            _asleep(watch, 1, [winner])
+            loser = executor.submit(steps[second])
+            _waiting_on_a_row(watch, [winner, loser])
+            winner, loser = winner.result(), loser.result()
+    finally:
+        held()
+    assert winner.status_code == 200, winner.text
+    assert detail(loser) == (409, {'code': 'TRADE_CHANGED'})
+    if first == 'counter':
+        assert row_of(original)['closed_reason'] == 'countered' and len(counters_of(original)) == 1
+        assert reserved(misty, iono) == (0, 0) and reserved(ash, arven) == (1, 1)
+        assert (revision_of(misty), revision_of(ash)) == (before[0] + 1, before[1] + 1)
+    else:
+        assert row_of(original)['closed_reason'] == 'withdrawn' and counters_of(original) == []
+        assert reserved(misty, iono) == (0, 0) and reserved(ash, arven) == (0, 0)
+        assert (revision_of(misty), revision_of(ash)) == (before[0] + 1, before[1])

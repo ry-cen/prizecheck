@@ -8,16 +8,24 @@ import {
   type MouseEvent,
   type ReactNode,
 } from "react";
+import { useInboxRefresh } from "../inbox/Inbox";
 import { lineEdition } from "../loans/loanText";
 import { PageHeader } from "../shell/PageHeader";
 import { useLeaveGuard, type LeaveGuard } from "../shell/useRoute";
 import { CardImage } from "../social/FriendCollectionPage";
 import {
   getFriendTradeList,
+  getTrade,
   getTradeMatch,
   SocialError,
+  type TradeView,
 } from "../social_generated";
-import { getTradeList, sendTradeProposal } from "../trades_generated";
+import {
+  counterTrade,
+  getTradeList,
+  sendTradeProposal,
+  TradesError,
+} from "../trades_generated";
 import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
 import { Icon } from "../ui/Icon";
@@ -29,7 +37,10 @@ import { MOBILE_QUERY, useMediaQuery } from "../workspace/media";
 import { takeFromTradeList, takeProposalSeed } from "./openProposal";
 import { LiabilityNotice } from "./LiabilityNotice";
 import {
+  centsAmount,
+  counterProposal,
   EMPTY_PROPOSAL,
+  matchesSearch,
   NO_CASH,
   parseCents,
   proposalCopies,
@@ -39,9 +50,11 @@ import {
   setQuantity,
   toProposalCard,
   valueLines,
+  withReleased,
   type CashDraft,
   type CashPayer,
   type LibraryCard,
+  type ProposalCard,
   type Proposal,
   type ProposalLine,
   type ProposalSide,
@@ -58,6 +71,8 @@ import {
   tradePath,
 } from "./tradeListModel";
 import {
+  COUNTER_CHANGED_TEXT,
+  COUNTER_GONE_TEXT,
   INVALID_CASH_TEXT,
   sendTradeMessage,
   tradeCardName,
@@ -102,23 +117,37 @@ const BACK =
  * Cash (Trading #277): a **Cash** section under You give takes an amount in US dollars and who pays it, recorded
  * only; the app never handles money. Each side shows its estimated total under its list, and nothing suggests an
  * amount. The liability notice shows while a payer is chosen. A cash change makes a new send key and counts as an edit.
+ *
+ * Counter mode (Trading #278), at /trades/<id>/counter through CounterPage, which passes the Trade being countered.
+ * The builder starts from that Trade as the server read it, both sides and the cash, on the Proposal pane on a phone;
+ * a reload reads it again. The prefill isn't an edit, so leaving asks "Discard this Counter to <name>?" only after the
+ * collector's own change. The copies the proposal's sender gave are reserved by it, so the library offers them again
+ * on You get. The back link returns to the Trade, and **Send Counter** closes it and sends the reply. A Counter
+ * refused because the proposal changed takes the new revision and asks for one more tap; one refused because the
+ * proposal no longer waits for the answer disables Send, and the leave guard stops.
  */
 export function ProposalBuilderPage({
   handle,
   onNavigate,
+  counter,
 }: {
   handle: string;
   onNavigate: (to: string) => void;
+  /** The Trade being countered, as the reader sees it: set in counter mode. */
+  counter?: TradeView;
 }) {
   const toast = useToast();
   const idBase = useId();
   const libraryId = useId();
   const phone = useMediaQuery(MOBILE_QUERY);
   const [proposal, setProposal] = useState<Proposal>(() => {
+    if (counter) return counterProposal(counter);
     const card = takeProposalSeed(handle);
     return card ? seededProposal(card) : EMPTY_PROPOSAL;
   });
-  const [fromTradeList] = useState(() => takeFromTradeList(handle));
+  const [fromTradeList] = useState(() =>
+    counter ? false : takeFromTradeList(handle)
+  );
   const [friend, setFriend] = useState<Friend | null>(null);
   const [theirs, setTheirs] = useState<Theirs>({ kind: "loading" });
   const [match, setMatch] = useState<MatchLoad>({ kind: "loading" });
@@ -127,17 +156,36 @@ export function ProposalBuilderPage({
   const [attempt, setAttempt] = useState(0);
   const [matchAttempt, setMatchAttempt] = useState(0);
   const [mineAttempt, setMineAttempt] = useState(0);
-  const [pane, setPane] = useState<Pane>("cards");
+  const [pane, setPane] = useState<Pane>(counter ? "proposal" : "cards");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [announce, setAnnounce] = useState("");
   const [asking, setAsking] = useState<{ leave: () => void } | null>(null);
-  const [cash, setCash] = useState<CashDraft>(NO_CASH);
+  const [cash, setCash] = useState<CashDraft>(() =>
+    counter?.cash
+      ? {
+          payer: counter.cash.payer,
+          amount: centsAmount(counter.cash.cents),
+        }
+      : NO_CASH
+  );
   const cashHeadingId = useId();
   const value = useTradeValue(
     useMemo(() => valueLines(proposal.give, proposal.get), [proposal])
   );
 
+  // A Counter: the copies the proposal's sender gave are reserved by it, so the library offers them again.
+  const released = useMemo(
+    () =>
+      new Map(
+        (counter?.you_get ?? []).map((c) => [c.edition_id, Number(c.copies)])
+      ),
+    [counter]
+  );
+  const revision = useRef(counter?.revision ?? 0);
+  const [gone, setGone] = useState(false);
+  const goneRef = useRef(false);
+  const refreshInbox = useInboxRefresh();
   const key = useRef<string | null>(null);
   const sent = useRef(false);
   const edited = useRef(false);
@@ -234,6 +282,47 @@ export function ProposalBuilderPage({
     return () => controller.abort();
   }, [mineAttempt]);
 
+  // A released Edition the Friend lists no copy of now has no tile, so it is added back after the list (when the search
+  // matches it), at the copies the proposal held.
+  function releasedCards<T extends ProposalCard>(
+    cards: readonly T[],
+    q: string
+  ): ProposalCard[] {
+    const adjusted: ProposalCard[] = withReleased(cards, released);
+    if (!counter) return adjusted;
+    const listed = new Set(cards.map((card) => card.edition_id));
+    return [
+      ...adjusted,
+      ...counter.you_get
+        .filter(
+          (card) => !listed.has(card.edition_id) && matchesSearch(card.name, q)
+        )
+        .map(toProposalCard),
+    ];
+  }
+  const libraryTheirs = useMemo<TheirsLoad>(
+    () =>
+      theirs.kind === "ready"
+        ? { ...theirs, cards: releasedCards(theirs.cards, theirs.q) }
+        : theirs.kind === "loading"
+          ? { kind: "loading" }
+          : { kind: "failed" }, // a missing Friend shows its own frame, never the library
+    [theirs, released, counter]
+  );
+  const libraryMatch = useMemo<MatchLoad>(
+    () =>
+      match.kind === "ready"
+        ? {
+            ...match,
+            row: {
+              ...match.row,
+              you_get: withReleased(match.row.you_get, released),
+            },
+          }
+        : match,
+    [match, released]
+  );
+
   async function showMore() {
     if (
       theirs.kind !== "ready" ||
@@ -319,6 +408,60 @@ export function ProposalBuilderPage({
     if (side) sideHeading[side].current?.focus();
   }, [proposal]);
 
+  async function sendCounter(
+    target: TradeView,
+    current: Proposal,
+    name: string,
+    cashBody: { cents: string; payer: "you" | "them" } | null
+  ) {
+    try {
+      key.current ??= crypto.randomUUID();
+      const trade = await counterTrade(target.id, {
+        revision: revision.current,
+        idempotency_key: key.current,
+        you_give: requestLines(current.give),
+        you_get: requestLines(current.get),
+        cash: cashBody,
+      });
+      sent.current = true;
+      toast.show({ message: `Counter sent to ${name}` });
+      refreshInbox();
+      if (mounted.current) onNavigate(tradePath(trade.id));
+    } catch (cause) {
+      if (!tradeOutcomeUnknown(cause)) key.current = null;
+      const other = () =>
+        setMessage(
+          sendTradeMessage(cause, name, current.give, current.get, "counter")
+        );
+      if (!(
+        cause instanceof TradesError &&
+        ["TRADE_CHANGED", "STEP_NOT_ALLOWED", "TRADE_NOT_FOUND"].includes(
+          cause.code
+        )
+      )) {
+        other();
+        return;
+      }
+      refreshInbox();
+      const settleGone = () => {
+        goneRef.current = true;
+        setGone(true);
+        setMessage(COUNTER_GONE_TEXT);
+      };
+      try {
+        const fresh = await getTrade(target.id);
+        if (fresh.state === "proposed" && fresh.actions.includes("counter")) {
+          revision.current = fresh.revision;
+          setMessage(COUNTER_CHANGED_TEXT);
+        } else settleGone();
+      } catch (readCause) {
+        if (readCause instanceof SocialError && readCause.status === 404)
+          settleGone();
+        else other();
+      }
+    }
+  }
+
   async function send() {
     if (busy || !friend) return;
     const current = proposal;
@@ -335,6 +478,15 @@ export function ProposalBuilderPage({
     setBusy(true);
     sending.current = true;
     setMessage("");
+    if (counter) {
+      try {
+        await sendCounter(counter, current, name, cashBody);
+      } finally {
+        sending.current = false;
+        setBusy(false);
+      }
+      return;
+    }
     try {
       key.current ??= crypto.randomUUID();
       const trade = await sendTradeProposal({
@@ -365,6 +517,7 @@ export function ProposalBuilderPage({
         !sent.current &&
         !sending.current &&
         reachable.current &&
+        !goneRef.current &&
         edited.current &&
         proposalCopies(latest.current) > 0,
       ask: (leave) => {
@@ -386,7 +539,10 @@ export function ProposalBuilderPage({
 
   // The browser's own warning on reload or close, while something the collector changed is unsent.
   const dirty =
-    reachable.current && edited.current && proposalCopies(proposal) > 0;
+    reachable.current &&
+    !gone &&
+    edited.current &&
+    proposalCopies(proposal) > 0;
   useEffect(() => {
     if (!dirty) return;
     const warn = (event: BeforeUnloadEvent) => {
@@ -402,15 +558,22 @@ export function ProposalBuilderPage({
     event.preventDefault();
     onNavigate(to);
   };
-  const backTo = fromTradeList ? friendTradeListPath(handle) : TRADE_FIND_PATH;
+  const backTo = counter
+    ? tradePath(counter.id)
+    : fromTradeList
+      ? friendTradeListPath(handle)
+      : TRADE_FIND_PATH;
   const back = (
     <a href={backTo} onClick={go(backTo)} className={BACK}>
       <Icon icon={ChevronLeft} />
-      {fromTradeList
-        ? `${friend?.display_name ?? "Friend"}'s Trade List`
-        : "Find trades"}
+      {counter
+        ? `${counter.other.display_name}'s Trade Proposal`
+        : fromTradeList
+          ? `${friend?.display_name ?? "Friend"}'s Trade List`
+          : "Find trades"}
     </a>
   );
+  const frameTitle = counter ? "Counter" : "Trade Proposal";
   const frame = (title: string, children: ReactNode) => (
     <main className={FRAME}>
       {back}
@@ -421,14 +584,14 @@ export function ProposalBuilderPage({
 
   if (theirs.kind === "missing")
     return frame(
-      "Trade Proposal",
+      frameTitle,
       <p className="m-0 text-body text-text-muted">
         This collector isn't one of your Friends.
       </p>
     );
   if (theirs.kind === "failed" && !friend)
     return frame(
-      "Trade Proposal",
+      frameTitle,
       <div className="flex flex-wrap items-center gap-3">
         <p role="alert" className="m-0 text-body text-danger">
           This proposal couldn't be opened. Please retry.
@@ -438,7 +601,7 @@ export function ProposalBuilderPage({
     );
   if (!friend)
     return frame(
-      "Trade Proposal",
+      frameTitle,
       <p role="status" className="m-0 text-body text-text-muted">
         Loading…
       </p>
@@ -509,12 +672,12 @@ export function ProposalBuilderPage({
       <div className="flex flex-wrap items-center gap-3">
         <Button
           variant="primary"
-          disabled={empty}
+          disabled={empty || gone}
           aria-disabled={busy || undefined}
           aria-describedby={empty ? reasonId : undefined}
           onClick={() => void send()}
         >
-          Send Trade Proposal
+          {counter ? "Send Counter" : "Send Trade Proposal"}
         </Button>
         {empty && (
           <p id={reasonId} className="m-0 text-meta text-text-muted">
@@ -532,9 +695,9 @@ export function ProposalBuilderPage({
       headingId={libraryId}
       ownScroll={!phone}
       friendName={name}
-      theirs={theirs.kind === "ready" ? theirs : { kind: theirs.kind }}
+      theirs={libraryTheirs}
       mine={mine}
-      match={match}
+      match={libraryMatch}
       onTheirSearch={setTheirQ}
       onShowMore={() => void showMore()}
       onRetry={(which) => {
@@ -551,7 +714,10 @@ export function ProposalBuilderPage({
   return (
     <main className={FRAME}>
       {back}
-      <PageHeader title={`Trade Proposal to ${name}`} headingRef={headingRef} />
+      <PageHeader
+        title={counter ? `Counter to ${name}` : `Trade Proposal to ${name}`}
+        headingRef={headingRef}
+      />
       {phone ? (
         <>
           <Segmented
@@ -584,12 +750,20 @@ export function ProposalBuilderPage({
       <Dialog
         open={asking !== null}
         onClose={() => setAsking(null)}
-        title={`Discard this proposal to ${name}?`}
+        title={
+          counter
+            ? `Discard this Counter to ${name}?`
+            : `Discard this proposal to ${name}?`
+        }
         closeLabel="Back to the proposal"
         returnFocus={returnTo}
       >
         <div className="flex flex-col gap-4">
-          <p className="m-0 text-body">The cards you added aren't kept.</p>
+          <p className="m-0 text-body">
+            {counter
+              ? `Your changes aren't kept. ${name}'s Trade Proposal stays as it was.`
+              : "The cards you added aren't kept."}
+          </p>
           <div className="flex flex-wrap items-center justify-end gap-2">
             <Button variant="secondary" onClick={() => setAsking(null)}>
               Keep editing
