@@ -39,6 +39,7 @@ import { LiabilityNotice } from "./LiabilityNotice";
 import {
   centsAmount,
   counterProposal,
+  termsKey,
   EMPTY_PROPOSAL,
   matchesSearch,
   NO_CASH,
@@ -183,6 +184,8 @@ export function ProposalBuilderPage({
     [counter]
   );
   const revision = useRef(counter?.revision ?? 0);
+  // The terms the Counter answers: the Trade as read, or as read again after a refusal that took a new revision.
+  const [answered, setAnswered] = useState(counter);
   const [gone, setGone] = useState(false);
   const goneRef = useRef(false);
   const refreshInbox = useInboxRefresh();
@@ -452,6 +455,7 @@ export function ProposalBuilderPage({
         const fresh = await getTrade(target.id);
         if (fresh.state === "proposed" && fresh.actions.includes("counter")) {
           revision.current = fresh.revision;
+          setAnswered(fresh);
           setMessage(COUNTER_CHANGED_TEXT);
         } else settleGone();
       } catch (readCause) {
@@ -611,6 +615,23 @@ export function ProposalBuilderPage({
   const copies = proposalCopies(proposal);
   const empty = copies === 0;
   const reasonId = `${idBase}-reason`;
+  const unchanged =
+    answered !== undefined &&
+    termsKey(proposal, cash) ===
+      termsKey(
+        counterProposal(answered),
+        answered.cash
+          ? {
+              payer: answered.cash.payer,
+              amount: centsAmount(answered.cash.cents),
+            }
+          : NO_CASH
+      );
+  const reason = empty
+    ? "Add at least one card to either side."
+    : unchanged
+      ? "Change a card, a quantity or the cash to send a Counter."
+      : null;
 
   const sideSection = (side: ProposalSide) => (
     <ProposalSideSection
@@ -672,16 +693,16 @@ export function ProposalBuilderPage({
       <div className="flex flex-wrap items-center gap-3">
         <Button
           variant="primary"
-          disabled={empty || gone}
+          disabled={empty || gone || unchanged}
           aria-disabled={busy || undefined}
-          aria-describedby={empty ? reasonId : undefined}
+          aria-describedby={reason ? reasonId : undefined}
           onClick={() => void send()}
         >
           {counter ? "Send Counter" : "Send Trade Proposal"}
         </Button>
-        {empty && (
+        {reason && (
           <p id={reasonId} className="m-0 text-meta text-text-muted">
-            Add at least one card to either side.
+            {reason}
           </p>
         )}
       </div>
