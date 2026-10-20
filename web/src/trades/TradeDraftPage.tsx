@@ -1,6 +1,7 @@
 import {
   useEffect,
   useId,
+  useRef,
   useState,
   type MouseEvent,
   type ReactNode,
@@ -8,6 +9,11 @@ import {
 import { lineEdition } from "../loans/loanText";
 import { PageHeader } from "../shell/PageHeader";
 import { CardImage } from "../social/FriendCollectionPage";
+import {
+  getTradeMatch,
+  type TradeMatchCard,
+  type TradeMatchRow,
+} from "../social_generated";
 import { sendTradeProposal } from "../trades_generated";
 import { Button } from "../ui/Button";
 import { Stepper } from "../ui/Stepper";
@@ -23,6 +29,7 @@ import {
   TRADE_LIST_PATH,
   tradePath,
 } from "./tradeListModel";
+import { suggestedQuantity, wantText } from "./tradeMatchText";
 import {
   sendTradeMessage,
   tradeCardName,
@@ -38,6 +45,11 @@ const LINK =
  * Trade Proposal** and **Discard draft**. Sending reserves the cards the collector gives; until then nothing is
  * promised. A refused send keeps the draft and says which card and how many are on the Trade List now; a sent one
  * clears the draft and opens the Trade.
+ *
+ * **Suggested** (Trading #276, owner's verdict 2026-10-19): at the top of each side, the cards Find trades matches
+ * between the collector and the draft's Friend now, read again each time the page opens, each added with one tap
+ * (as many as are wanted, up to the copies offered). A card already on either side of the draft isn't suggested.
+ * Nothing shows while the read is out or when it fails: the draft is complete without it.
  */
 export function TradeDraftPage({
   onNavigate,
@@ -48,6 +60,7 @@ export function TradeDraftPage({
   const toast = useToast();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const suggested = useSuggestions(drafts?.draft?.friend.collector_id ?? null);
 
   // The page shows the draft itself, so the bar stays down while it is open. setBarHidden is a state setter: stable.
   const hideBar = drafts?.setBarHidden;
@@ -120,6 +133,7 @@ export function TradeDraftPage({
           title="You give"
           side="give"
           draft={draft}
+          suggestions={suggested?.you_give ?? []}
           add={
             <a
               href={TRADE_LIST_PATH}
@@ -134,6 +148,7 @@ export function TradeDraftPage({
           title="You get"
           side="get"
           draft={draft}
+          suggestions={suggested?.you_get ?? []}
           add={
             handle ? (
               <a
@@ -172,28 +187,118 @@ export function TradeDraftPage({
   );
 }
 
-/** One side of the draft: its lines with steppers (0 takes a line out), "Nothing yet" when empty, and its Add link. */
+/** The draft Friend's discovery row (Find trades' per-Friend read), for the suggestions; null while it is out, when it
+ * fails (a Friend no longer, say) or for no Friend. Aborted when the page closes or the draft's Friend changes. */
+function useSuggestions(friendId: string | null): TradeMatchRow | null {
+  const [answer, setAnswer] = useState<{
+    friendId: string;
+    row: TradeMatchRow;
+  } | null>(null);
+  useEffect(() => {
+    if (!friendId) return;
+    const controller = new AbortController();
+    getTradeMatch(friendId, controller.signal).then(
+      (row) => {
+        if (!controller.signal.aborted) setAnswer({ friendId, row });
+      },
+      () => {
+        if (!controller.signal.aborted) setAnswer(null);
+      }
+    );
+    return () => controller.abort();
+  }, [friendId]);
+  return answer && answer.friendId === friendId ? answer.row : null;
+}
+
+/** One side of the draft: Suggested (the matched cards on neither side yet), its lines with steppers (0 takes a line
+ * out), "Nothing yet" when empty, and its Add link. */
 function DraftSide({
   title,
   side,
   draft,
+  suggestions,
   add,
 }: {
   title: string;
   side: TradeDraftSide;
   draft: TradeDraft;
+  suggestions: TradeMatchCard[];
   add: ReactNode;
 }) {
   const headingId = useId();
+  const suggestedId = useId();
+  const heading = useRef<HTMLHeadingElement>(null);
+  const drafts = useTradeDraft();
   const lines = draft[side];
+  // A card can't be on both sides of a Trade, so one on either side already isn't suggested.
+  const taken = new Set(
+    [...draft.give, ...draft.get].map((line) => line.edition_id)
+  );
+  const offered = suggestions.filter((card) => !taken.has(card.edition_id));
+  const verb = side === "give" ? "give" : "get";
   return (
     <section
       aria-labelledby={headingId}
       className="flex min-w-0 flex-col gap-2"
     >
-      <h2 id={headingId} className="m-0 text-heading font-semibold">
+      <h2
+        ref={heading}
+        id={headingId}
+        tabIndex={-1}
+        className="m-0 text-heading font-semibold"
+      >
         {title}
       </h2>
+      {drafts && offered.length > 0 && (
+        <div className="flex min-w-0 flex-col gap-1">
+          <h3
+            id={suggestedId}
+            className="m-0 text-meta font-semibold text-text-muted"
+          >
+            Suggested
+          </h3>
+          <ul
+            aria-label={`Suggested to ${verb}`}
+            className="m-0 list-none overflow-hidden rounded-panel border border-dashed border-border-strong bg-surface p-0"
+          >
+            {offered.map((card) => (
+              <li
+                key={card.edition_id}
+                className="grid grid-cols-[2.5rem_minmax(0,1fr)_auto] items-center gap-3 border-b border-border px-4 py-3 last:border-b-0"
+              >
+                <CardImage url={card.image_url} />
+                <span className="flex min-w-0 flex-col">
+                  <span className="text-body font-semibold wrap-anywhere">
+                    {card.name}
+                  </span>
+                  <span className="text-meta text-text-muted tabular-nums wrap-anywhere">
+                    {lineEdition(card)}
+                  </span>
+                  <span className="text-meta text-text-subtle tabular-nums">
+                    ×{card.copies} · {wantText(card)}
+                  </span>
+                </span>
+                <Button
+                  aria-label={`Add ${tradeCardName(card)} to what you ${verb}`}
+                  onClick={() => {
+                    drafts.set(
+                      draft.friend,
+                      side,
+                      card,
+                      suggestedQuantity(card),
+                      Number(card.copies)
+                    );
+                    // The button leaves with its suggestion: focus goes to the side's heading, above the new line.
+                    heading.current?.focus();
+                  }}
+                >
+                  Add
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       <ul
         aria-label={title}
         className="m-0 list-none overflow-hidden rounded-panel border border-border bg-surface p-0"

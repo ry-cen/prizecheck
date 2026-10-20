@@ -79,6 +79,13 @@ export function useFriendsRefresh(): () => void {
   return useContext(FriendsContext)?.refresh ?? (() => {});
 }
 
+/** Opens the Friends drawer from a page's own button (Find trades' Add a Friend, #276), returning focus to `opener` when
+ * it closes; null outside the shell. */
+export function useOpenFriends():
+  ((opener: RefObject<HTMLElement | null>) => void) | null {
+  return useContext(FriendsContext)?.open ?? null;
+}
+
 type Load =
   | { kind: "loading" }
   | { kind: "ready"; view: FriendsView }

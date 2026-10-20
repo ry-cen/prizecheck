@@ -1,6 +1,7 @@
 import { useId } from "react";
 import { PageHeader } from "../shell/PageHeader";
 import { Segmented, segmentId } from "../ui/Segmented";
+import { FindTrades } from "./FindTrades";
 import { MyTradeList } from "./MyTradeList";
 import { TradeDraftPage } from "./TradeDraftPage";
 import { TradeScreen } from "./TradeScreen";
@@ -14,16 +15,16 @@ import {
 } from "./tradeListModel";
 
 type Props = {
-  /** The section the address names (``sectionAt``): null for /trades, "list", "draft", or a Trade id. */
+  /** The section the address names (``sectionAt``): null for /trades, "find", "list", "draft", or a Trade id. */
   section: string | null;
   /** Goes to another address in the app. */
   onNavigate: (to: string) => void;
 };
 
 /**
- * The Trades tab (Trading #269 and #270, prototype verdict variant A): the page header and the switch over the tab's
- * views, `Trades · Find trades · My Trade List`, here the Trades list (/trades) and My Trade List (/trades/list); Find
- * trades joins with discovery (#276). The switch stays mounted across the views' addresses, as the Decks page's does.
+ * The Trades tab (Trading #269, #270 and #276, prototype verdict variant A): the page header and the switch over the
+ * tab's views, `Trades · Find trades · My Trade List`: the Trades list (/trades), Find trades (/trades/find) and My
+ * Trade List (/trades/list). The switch stays mounted across the views' addresses, as the Decks page's does.
  * The Trade Proposal draft (/trades/draft) and one Trade (/trades/<id>) are pages of their own under the tab.
  */
 export function TradesPage({ section, onNavigate }: Props) {
@@ -62,6 +63,8 @@ export function TradesPage({ section, onNavigate }: Props) {
       >
         {view === "trades" ? (
           <TradesList onOpenTrade={(id) => onNavigate(tradePath(id))} />
+        ) : view === "find" ? (
+          <FindTrades onNavigate={onNavigate} />
         ) : (
           <MyTradeList onOpenCollection={() => onNavigate("/collection")} />
         )}

@@ -42,8 +42,8 @@ READERS = {'social/friend_copies.py', 'social/hidden_locations.py'}
 # rule, matched against string constants only (SQL text and f-string pieces, never docstrings), as inventory_reads
 # matches: no error message or other string may write a call form. Only these modules may call them: counts for one
 # owner, and the choke point for Friends, for the placement rule; the Trade List and the choke point for the listable
-# rule (trading #269); the Trade List alone for the For trade rule. The choke point doesn't call the placement rule yet
-# (its Friend wants read, trading #276, will), so that guard still allows it to be absent.
+# rule (trading #269); the Trade List alone for the For trade rule. The choke point calls the placement rule for its
+# Friend wants read (trading #276).
 RESERVING_PICKS_CALL = re.compile(r'\breserving_picks\s*\(')
 LISTABLE_CALL = re.compile(r'\btrade_listable\s*\(')
 FOR_TRADE_CALL = re.compile(r'\bfor_trade_locations\s*\(')
@@ -66,18 +66,26 @@ ALLOWED_IMPORTS = {
     'social/hidden_locations.py': set(),
     'social/name_rules.py': set(),
     'social/owners.py': set(),
-    'social/friend_copies.py': {('.', 'counts'), ('..', 'copy_allocation')},
+    # The choke point counts each Friend's wants with the pure allocation over rows it reads itself (trading #276).
+    'social/friend_copies.py': {('.', 'counts'), ('..', 'copy_allocation'), ('..copy_allocation', 'allocate_rows'),
+                                ('..copy_allocation', 'AllocationRows')},
     'social/friend_reads.py': {
         ('.', 'name_rules'), ('..', 'set_codes'), ('..main', 'connect'), ('..main', 'verified_user'),
         # Only the error helper of the Location readers; the Want List's capture and card order drive the wanted cards.
         ('..location_tree', 'error'), ('..want_list', 'capture_want_list'), ('..want_list', 'number_order'),
         ('.friend_copies', 'friend_copies')},
     # A Friend's Trade List (trading #269): the Friend by Handle and the card facts as a Friend's Collection reads them,
-    # and their listable copies from the choke point. Discovery's imports (trading #276) are added with discovery.
+    # and their listable copies from the choke point. Discovery and Ask to trade (trading #276): the viewer's own wants
+    # (the Want List's capture, their Trade Wants and their Will accept choices) and Trade List from the inventory
+    # modules, the Friends' copies and wants from the choke point, the catalog's Will accept expansion, and the one
+    # definition of "are Friends", a set of account ids.
     'social/trade_matches.py': {
         ('.', 'name_rules'), ('..main', 'connect'), ('..main', 'verified_user'), ('..location_tree', 'error'),
         ('.friend_copies', 'friend_trade_copies'), ('.friend_reads', 'FRIEND_BY_HANDLE'),
-        ('.friend_reads', 'PAGE_IDENTITIES'), ('.friend_reads', 'card_facts'), ('.friend_reads', 'search_key')},
+        ('.friend_reads', 'PAGE_IDENTITIES'), ('.friend_reads', 'card_facts'), ('.friend_reads', 'search_key'),
+        ('..trade_list', 'own_trade_copies'), ('..trade_wants', 'own_wants'), ('..trade_wants', 'own_rules'),
+        ('..want_list', 'capture_want_list'), ('.friend_copies', 'friend_wants'), ('..card_accepts', 'accepts'),
+        ('.friends', 'friend_ids')},
     'social/friends.py': {
         ('.', 'name_rules'), ('..main', 'connect'), ('..main', 'verified_user'), ('..publications', 'TOKEN'),
         ('..location_tree', 'error'), ('..location_tree', 'replay'), ('.owners', 'ensure_owner'),
@@ -140,7 +148,8 @@ ALLOWED = {'in_deck': {'type': 'string'}}
 # ``ValidationError.ctx`` is FastAPI's own 422 body (the error's context, as the framework builds it): no social code
 # fills it with a Location or a Deck.
 OPAQUE = {('FriendCard', 'descriptor'), ('FriendCopy', 'descriptor'), ('LoanCard', 'descriptor'),
-          ('FriendTradeCard', 'descriptor'), ('TradeCard', 'descriptor'), ('ValidationError', 'ctx')}
+          ('FriendTradeCard', 'descriptor'), ('TradeCard', 'descriptor'), ('TradeMatchCard', 'descriptor'),
+          ('TradeCardOffer', 'descriptor'), ('ValidationError', 'ctx')}
 
 
 def words(name: str) -> set[str]:
@@ -299,6 +308,13 @@ def test_every_social_route_answers_success_with_a_schema_the_walk_reads():
     # A Friend's Trade List (trading #269): cards and their copies, read by the walk like every other route.
     trade_list = {field for _, field, _ in routes['GET /api/social/trade-lists/{handle}']}
     assert {'copies', 'descriptor', 'next_page'} <= trade_list, trade_list
+    # Discovery and Ask to trade (trading #276): matched cards with their counts, read by the walk like the rest.
+    for route in ('GET /api/social/trade-matches', 'GET /api/social/trade-matches/{collector_id}'):
+        matched = {field for _, field, _ in routes[route]}
+        assert {'you_get', 'you_give', 'copies', 'need', 'want_list_need', 'origin', 'accepts_as', 'descriptor',
+                'open_to_cash_offers', 'more_you_get'} <= matched, (route, matched)
+    offers = {field for _, field, _ in routes['GET /api/social/trade-card-matches']}
+    assert {'offers', 'copies', 'descriptor', 'display_name'} <= offers, offers
     # Trades (trading #270): both sides' cards and the other side, read by the walk on the list, one Trade and each
     # step under /api/social (withdraw, #270; decline and cancel, #271).
     for route in ('GET /api/social/trades', 'GET /api/social/trades/{trade_id}',

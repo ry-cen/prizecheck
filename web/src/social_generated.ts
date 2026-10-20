@@ -61,6 +61,11 @@ export type TradesView = { trades: TradeView[]; needs_you: number };
 export type TradeStep = { revision: number; idempotency_key: string };
 export type InboxTradeWaiting = { id: string; state: "proposed" | "accepted" | "closed"; closed_reason: "declined" | "withdrawn" | "countered" | "cancelled" | "swapped" | null; closed_by: "you" | "them" | null; role: "proposer" | "recipient"; other: TradeParty; countered_from: string | null; you_give: TradeCard[]; you_get: TradeCard[]; cash: TradeCash | null; you_confirmed_swap: boolean; they_confirmed_swap: boolean; needs_you: boolean; waiting: "answer" | "fix_picks" | "confirm_swap" | null; section: "needs_you" | "to_swap" | "pending" | "history"; actions: ("accept" | "decline" | "counter" | "confirm_swap" | "use_suggested_picks" | "withdraw" | "cancel")[]; revision: number; created_at: string; since: string };
 export type InboxTradeUpdate = { id: string; kind: "accepted" | "declined" | "cancelled" | "withdrawn" | "swapped"; trade_id: string; trade_state: "proposed" | "accepted" | "closed"; role: "proposer" | "recipient"; other_name: string; read: boolean; at: string };
+export type TradeMatchCard = { edition_id: string; name: string; set_code: string; set_name: string; collector_number: string; descriptor: Record<string, unknown>; image_url: string | null; copies: string; need: string; want_list_need: string; origin: "want_list" | "trade_wants" | "both"; accepts_as: "exact" | "any_finish" | "same_name" | null };
+export type TradeMatchRow = { collector_id: string; handle: string; display_name: string; open_to_cash_offers: boolean; match: "two_way" | "has_what_you_want" | "wants_what_you_have" | null; you_get: TradeMatchCard[]; you_give: TradeMatchCard[]; more_you_get: number; more_you_give: number };
+export type TradeMatches = { has_friends: boolean; rows: TradeMatchRow[] };
+export type TradeCardOffer = { collector_id: string; handle: string; display_name: string; edition_id: string; name: string; set_code: string; set_name: string; collector_number: string; descriptor: Record<string, unknown>; image_url: string | null; copies: string };
+export type TradeCardMatches = { has_friends: boolean; offers: TradeCardOffer[] };
 
 /** A refused social request: the API's code, and for TOO_MANY_LOOKUPS the detail that says when to try again. */
 export class SocialError extends Error {
@@ -198,3 +203,13 @@ export const declineTrade = (id: string, body: TradeStep) =>
   request<TradeView>(`/api/social/trades/${at(id)}/decline`, 'POST', body);
 export const cancelTrade = (id: string, body: TradeStep) =>
   request<TradeView>(`/api/social/trades/${at(id)}/cancel`, 'POST', body);
+// Find trades (trading #276): every Friend who matches, with at most 20 cards a side, and one Friend's row with every
+// card (a null match when nothing matches now).
+export const getTradeMatches = (signal?: AbortSignal) =>
+  request<TradeMatches>('/api/social/trade-matches', 'GET', undefined, signal);
+export const getTradeMatch = (collectorId: string, signal?: AbortSignal) =>
+  request<TradeMatchRow>(`/api/social/trade-matches/${at(collectorId)}`, 'GET', undefined, signal);
+// Ask to trade (trading #276): Friends' Trade List copies of one Card Printing, for the card popup.
+export const getTradeCardMatches = (printingId: string, signal?: AbortSignal) =>
+  request<TradeCardMatches>(`/api/social/trade-card-matches${query({ printing_id: printingId })}`, 'GET', undefined,
+    signal);
