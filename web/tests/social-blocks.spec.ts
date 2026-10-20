@@ -10,8 +10,10 @@ import type { BrowserContextOptions, Page, Route } from "@playwright/test";
 import { expect, test } from "./support/collectors";
 import {
   accountId,
+  api as loansApi,
   befriend,
   hold,
+  loanStep,
   nameCollector as named,
   seedCatalog,
 } from "./support/loans";
@@ -278,8 +280,21 @@ async function tradeStory(
   const half = await propose(page, mistyId, [[arven, 1]], []);
   await tradeStep(misty, half, "accept");
   await tradeStep(page, half, "confirm-swap");
+  // Ash asked Misty for a Loan and she accepted it, but nobody has handed it over: the Block cancels it too.
+  const loan = (
+    await loansApi(page, "POST", "/api/loans", {
+      lender_id: mistyId,
+      lines: [{ edition_id: iono, quantity: "1" }],
+      deck_id: null,
+      idempotency_key: randomUUID(),
+    })
+  ).id as string;
+  await loanStep(misty, loan, `/api/loans/${loan}/accept`, {
+    lines: [{ edition_id: iono, promised: "1" }],
+  });
 
-  // With the Trades unreadable, the question says nothing it can't count.
+  // With the Trades unreadable, the question says nothing it can't count, though the
+  // Loan exists.
   const offline = (route: Route) => route.abort();
   await page.route(/\/api\/social\/trades$/, offline);
   await page.goto(`${ORIGIN}/trades`);
@@ -299,7 +314,7 @@ async function tradeStory(
   await friends.getByRole("button", { name: "More for Misty W" }).click();
   await page.getByRole("menuitem", { name: "Block" }).click();
   await expect(friends.getByText(/^Block Misty W\?/)).toHaveText(
-    "Block Misty W? They won't be told. This cancels 1 Trade Proposal and 1 Trade that hasn't been swapped. 1 Trade that one of you has confirmed stays open so it can finish."
+    "Block Misty W? They won't be told. This cancels 1 open Loan that hasn't been handed over, 1 Trade Proposal and 1 Trade that hasn't been swapped. 1 Trade that one of you has confirmed stays open so it can finish."
   );
   await expectPageChecks(page, `the Block question with Trades at ${width}`);
   await friends.getByRole("button", { name: "Block", exact: true }).click();
@@ -334,6 +349,11 @@ async function tradeStory(
       .getByRole("region", { name: "Earlier" })
       .getByRole("link", { name: /Ash K cancelled this Trade/ })
   ).toHaveCount(2);
+  await expect(
+    inbox
+      .getByRole("region", { name: "Earlier" })
+      .getByRole("link", { name: /Ash K cancelled this Loan/ })
+  ).toHaveCount(1);
   await expect(inbox).not.toContainText(/block/i);
   await expectPageChecks(misty, `a Blocked collector's inbox at ${width}`);
   await inbox.getByRole("button", { name: "Close Inbox" }).click();
