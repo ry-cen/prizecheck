@@ -301,6 +301,21 @@ def test_every_social_route_answers_success_with_a_schema_the_walk_reads():
         assert {'you_give', 'you_get', 'other', 'copies', 'descriptor', 'open_to_cash_offers'} <= trade, (route, trade)
 
 
+def test_each_sides_own_trade_reads_and_inventory_steps_stay_outside_the_social_area():
+    # Trading #272: a side's own picks name its own Locations, so its side read, Use suggested picks and Confirm swap
+    # live under /api/trades (app.trade_inventory), never under /api/social, and the Trade both sides read never grows
+    # a pick, a suggestion or a destination.
+    paths = app.openapi()['paths']
+    for route, method in (('/api/trades/{trade_id}/side', 'get'),
+                          ('/api/trades/{trade_id}/picks/use-suggested', 'post'),
+                          ('/api/trades/{trade_id}/confirm-swap', 'post')):
+        assert method in paths[route], route
+    assert not [route for route in paths if route.startswith('/api/social') and
+                ('/side' in route or 'confirm-swap' in route or 'use-suggested' in route)]
+    trade_view = app.openapi()['components']['schemas']['TradeView']['properties']
+    assert not {'picks', 'suggested', 'destination_id', 'deck_switches'} & set(trade_view)
+
+
 def test_the_walk_finds_a_location_or_deck_field_at_any_depth():
     components = {
         'Inner': {'properties': {'spare': {'type': 'string'}, 'deckName': {'type': 'string'}}},

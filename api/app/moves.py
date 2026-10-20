@@ -170,6 +170,22 @@ def put_back(conn, user_id: str, items: list[tuple[UUID, UUID, int]], revision: 
     return new_revision
 
 
+def add_in(conn, user_id: str, location_id: UUID, items: list[tuple[UUID, int]], new_revision: int) -> None:
+    """Adds newly owned copies to one of the owner's Storage Leaves or Decks, ``items`` as (Edition id, copies), with no
+    Inventory Undo record: the cards a Trade's Confirm swap brings in (Trading #272). It is ``put_back``'s Holding
+    upsert without the surplus setting, so copies arriving in a Deck raise its Deck List lines as an Add does (migrations
+    031 and 047). The caller holds the owner lock, checked ``location_id`` is one of the owner's Storage Leaves or Decks
+    (``leaf``) and names each Edition once; ``new_revision`` is the revision the step moves to (``take_out``'s answer
+    when the same step took copies out, else the revision it read plus one), which the changed Holdings take as their
+    version, so the step advances the owner's revision exactly once."""
+    for edition, copies in items:
+        conn.execute('INSERT INTO holding(owner_id,location_id,edition_id,quantity,version) VALUES (%s,%s,%s,%s,%s) '
+                     'ON CONFLICT(owner_id,location_id,edition_id) DO UPDATE '
+                     'SET quantity=holding.quantity+excluded.quantity,version=excluded.version',
+                     (user_id, location_id, edition, copies, new_revision))
+    conn.execute('UPDATE inventory_owner SET revision=%s WHERE user_id=%s', (new_revision, user_id))
+
+
 def lock_owner(conn, user_id: str):
     conn.execute("INSERT INTO inventory_owner(user_id) VALUES (%s) ON CONFLICT DO NOTHING", (user_id,))
     return conn.execute("SELECT revision FROM inventory_owner WHERE user_id=%s FOR UPDATE", (user_id,)).fetchone()["revision"]

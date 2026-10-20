@@ -20,13 +20,34 @@ other:
   (``make_trade_picks``) and turns the proposal into a Trade. The proposer's copies were reserved by the send and stay
   so. A recipient who gives nothing (a gift to them) accepts with no cap and no pick.
 
-**Locks**: the stepping collector's own owner row only (``owners.lock_owners``), so a send or an accept and a Loan step
-over the same copies run one after the other and the second sees the first's reservation; migration 142's deferred
-triggers are the backstop. Each step moves its collector's revision when they give cards. The command lock, replay and
-hourly count are ``social.trades``' (``begin_trade_command``); an accept runs through ``social.trades.run_trade_step``,
-which locks the Trade row after the owner and writes it once.
+- **Each side's own view** (``GET /api/trades/{id}/side``, Trading #272): the reader's own Trade Pick List, with their
+  own Location names, how many copies each pick's Location is short of (a Move or a Removal can leave a pick out of
+  date) and, when one is, the picks **Use suggested picks** would make. Never the other side's, and never under
+  ``/api/social``.
 
-Later tickets add each side's own view of a Trade with its picks (#272).
+- **Use suggested picks** (``POST /api/trades/{id}/picks/use-suggested``, #272). The side that gives cards, while they
+  still reserve (the proposer as soon as the proposal is sent), replaces every out-of-date pick with the suggestion
+  (``trade_picks.replacement_trade_picks``): For trade copies first, then any of their Locations. Only that side's
+  picks change; 409 PICKS_UP_TO_DATE when none is out of date.
+
+- **Confirm swap** (``POST /api/trades/{id}/confirm-swap``, #272). After the in-person swap, each side confirms for
+  their own inventory only. The copies they give leave their Collection through ``moves.take_out`` (Removal semantics,
+  no Undo record, no Deck List line lowered) and their picks go in the same transaction, so their Holdings and their
+  promises fall by the same count; refused with 409 PICKS_OUT_OF_DATE while a pick is out of date. The copies they get
+  arrive as new Holdings through ``moves.add_in`` in the Storage Leaf or Deck they chose, or Unsorted (made when
+  missing), read from the Trade's own lines only, so it works after the other account is gone; arriving in a Deck they
+  raise its lines as an Add does. The confirmer's revision moves exactly once. The second confirmation closes the Trade
+  as swapped and tells the side that confirmed first. Nothing is undoable, and cash changes nothing (the app never
+  handles money). Trading #279 adds the Deck switches and #275 the Trade Wants that fall at this step.
+
+**Locks**: the stepping collector's own owner row only (``owners.lock_owners``), so a send, an accept, a Confirm swap
+or a Use suggested picks and a Loan step or inventory command over the same copies run one after the other and the
+second sees the first's writes; migration 142's deferred triggers are the backstop. No step takes the inventory lock
+(``moves.lock_owner``) or reads the Location tree with ``location_tree.owner_and_rows``: their ``FOR UPDATE`` would hold
+off the foreign key checks the other side's steps take on this owner's row (``social.owners.lock_owners``). Each step
+moves its collector's revision when it changes what they hold or promise. The command lock, replay and hourly count are
+``social.trades``' (``begin_trade_command``); every step on an existing Trade runs through
+``social.trades.run_trade_step``, which locks the Trade row after the owner and writes it once.
 """
 from uuid import UUID, uuid4
 
@@ -34,18 +55,20 @@ import psycopg
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
+from .deck_deletion import unsorted_leaf
 from .loan_inventory import refuse
 from .location_tree import error
 from .main import connect, verified_user
-from .moves import quantity
+from .moves import add_in, leaf, quantity, take_out
 from .social.friend_copies import friend_trade_copies
 from .social.friends import friend_ids
 from .social.loans import NOW, advance_revision
 from .social.owners import lock_owners
-from .social.trades import (TradeStep, TradeView, begin_trade_command, record_trade_update, run_trade_step,
-                            store_trade)
+from .social.trades import (TradeStep, TradeView, begin_trade_command, close_trade, other_side, record_trade_update,
+                            role_of, run_trade_step, side_gives, store_trade)
 from .trade_list import own_trade_copies
-from .trade_picks import make_trade_picks
+from .trade_picks import (insert_trade_picks, make_trade_picks, replacement_trade_picks, stale_pick_trades,
+                          trade_pick_shortfalls)
 
 router = APIRouter(prefix='/api/trades', tags=['trades'])
 
@@ -65,6 +88,33 @@ class SendTradeProposal(BaseModel):
     you_give: list[TradeLineRequest] = []
     you_get: list[TradeLineRequest] = []
     idempotency_key: UUID
+
+
+class ConfirmSwap(TradeStep):
+    """Confirm swap. ``destination_id``: one of the confirmer's own Storage Leaves or Decks for the cards they get, or
+    None for Unsorted; ignored when they get none. Trading #279 adds the Deck switches the collector left ticked."""
+    destination_id: UUID | None = None
+
+
+class TradePickPlace(BaseModel):
+    """Where the reader takes copies of one Card Edition they give from: one of their own Locations (``name``), or
+    Unsorted when the Location was deleted (``location_id`` None), as the Loan Pick List names it. ``short``: copies
+    that Location no longer holds for this pick (the pick is out of date when above "0")."""
+    edition_id: UUID
+    location_id: UUID | None
+    name: str
+    copies: str
+    short: str
+
+
+class OwnTradeSide(BaseModel):
+    """The reader's own side of a Trade. ``picks``: their Trade Pick List while their copies are promised (empty when
+    they give nothing, once they confirmed the swap, and once the Trade closed). ``suggested``: the Pick List **Use
+    suggested picks** makes, when a pick is out of date, else empty. Trading #279 adds the Deck switches Confirm swap
+    offers."""
+    trade_id: UUID
+    picks: list[TradePickPlace]
+    suggested: list[TradePickPlace]
 
 
 def trade_quantity(raw: str) -> int:
@@ -161,3 +211,119 @@ def accept_trade(trade_id: UUID, step: TradeStep, user_id: str = Depends(verifie
     # Only the recipient may accept, so only the caller's own owner row is ever locked; a proposer's try locks none.
     return run_trade_step(user_id, trade_id, step, 'accept', apply,
                           lambda role, row: [row['recipient_id']] if role == 'recipient' else [])
+
+
+@router.get('/{trade_id}/side', response_model=OwnTradeSide)
+def trade_side(trade_id: UUID, user_id: str = Depends(verified_user)):
+    """The reader's own Trade Pick List with their own Location names, which picks are out of date and what Use
+    suggested picks would make. One snapshot, no lock, no write. 404 TRADE_NOT_FOUND for anyone who isn't one of the
+    Trade's two sides, as for a Trade that doesn't exist."""
+    with connect() as conn, conn.transaction():
+        conn.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY')
+        row = conn.execute(
+            'SELECT id, proposer_id FROM trade WHERE id = %s AND (proposer_id = %s OR recipient_id = %s)',
+            (trade_id, user_id, user_id)).fetchone()
+        if row is None:
+            error(404, 'TRADE_NOT_FOUND')
+        side = 'proposer' if row['proposer_id'] == user_id else 'recipient'
+        position = {line['edition_id']: index for index, line in enumerate(conn.execute(
+            'SELECT edition_id FROM trade_line WHERE trade_id = %s AND side = %s ORDER BY position', (trade_id, side)))}
+        picks, short, _ = trade_pick_shortfalls(conn, user_id, {trade_id})
+        mine: dict[tuple[UUID, UUID | None], int] = {}
+        shortfall: dict[tuple[UUID, UUID | None], int] = {}
+        for pick in picks:
+            key = (pick['edition_id'], pick['source_location_id'])
+            mine[key] = mine.get(key, 0) + int(pick['quantity'])
+            shortfall[key] = shortfall.get(key, 0) + short[pick['id']]
+        replaced = replacement_trade_picks(conn, user_id, trade_id) if any(shortfall.values()) else None
+        names = {location['id']: location['name'] for location in conn.execute(
+            'SELECT id, name FROM location WHERE owner_id = %s', (user_id,))}
+
+    def places(found: dict, missing: dict) -> list[TradePickPlace]:
+        ordered = sorted(found.items(), key=lambda item: (position.get(item[0][0], len(position)), -item[1],
+                                                           names.get(item[0][1], 'Unsorted').casefold(),
+                                                           str(item[0][1])))
+        return [TradePickPlace(edition_id=edition, location_id=location, name=names.get(location, 'Unsorted'),
+                               copies=str(copies), short=str(missing.get((edition, location), 0)))
+                for (edition, location), copies in ordered]
+
+    return OwnTradeSide(trade_id=trade_id, picks=places(mine, shortfall),
+                        suggested=places(replaced, {}) if replaced else [])
+
+
+@router.post('/{trade_id}/picks/use-suggested', response_model=TradeView)
+def use_suggested_trade_picks(trade_id: UUID, step: TradeStep, user_id: str = Depends(verified_user)):
+    """The side that gives cards replaces every out-of-date pick of theirs with the suggested one
+    (``OwnTradeSide.suggested``), under their own lock; only their picks change and only their revision moves. After
+    ``run_trade_step``'s checks (404 TRADE_NOT_FOUND, 409 TRADE_CHANGED, 409 STEP_NOT_ALLOWED for a side that gives
+    nothing or no longer reserves), 409 PICKS_UP_TO_DATE when no pick is out of date."""
+    def apply(conn, row):
+        side = role_of(user_id, row)
+        replaced = replacement_trade_picks(conn, user_id, row['id'])
+        if replaced is None:
+            error(409, 'PICKS_UP_TO_DATE')
+        conn.execute('DELETE FROM trade_pick WHERE trade_id = %s AND side = %s', (row['id'], side))
+        insert_trade_picks(conn, user_id, row['id'], side, replaced)
+        advance_revision(conn, user_id)
+        return None
+
+    return run_trade_step(user_id, trade_id, step, 'use_suggested_picks', apply, lambda role, row: [user_id])
+
+
+def _destination(conn, user_id: str, destination_id: UUID | None) -> UUID:
+    """Where the confirmer's received cards go: the Storage Leaf or Deck they chose, else 404 LOCATION_NOT_FOUND; or,
+    with none chosen, their root Unsorted, made when missing (409 UNSORTED_UNAVAILABLE when the root named Unsorted
+    can't hold cards). Plain selects under the owner lock the step took, never ``location_tree.owner_and_rows``."""
+    if destination_id is not None:
+        if not leaf(conn, user_id, destination_id):
+            error(404, 'LOCATION_NOT_FOUND')
+        return destination_id
+    rows = {row['id']: row for row in conn.execute(
+        'SELECT id, name, kind, parent_id, version FROM location WHERE owner_id = %s', (user_id,))}
+    return unsorted_leaf(conn, user_id, rows, None)
+
+
+@router.post('/{trade_id}/confirm-swap', response_model=TradeView)
+def confirm_swap(trade_id: UUID, command: ConfirmSwap, user_id: str = Depends(verified_user)):
+    """One side confirms the in-person swap for their own inventory, under their own lock only. After
+    ``run_trade_step``'s checks (404 TRADE_NOT_FOUND, 409 TRADE_CHANGED, 409 STEP_NOT_ALLOWED, so a side confirms once),
+    and before any write: 409 PICKS_OUT_OF_DATE while a pick of theirs is out of date; for a side that gets cards, 404
+    LOCATION_NOT_FOUND or 409 UNSORTED_UNAVAILABLE for where they go. Then the copies they give leave, the copies they
+    get arrive, their revision moves once and their swap time is set; when the other side already confirmed, the Trade
+    closes as swapped and the other side gets a 'swapped' update. Nothing changes on a refusal, and nothing undoes it.
+    """
+    def apply(conn, row):
+        side = role_of(user_id, row)
+        other = other_side(side)
+        # Read under the confirmer's own lock, with no FOR UPDATE, before anything is written.
+        revision = conn.execute('SELECT revision FROM inventory_owner WHERE user_id = %s',
+                                (user_id,)).fetchone()['revision']
+        gives = side_gives(conn, row['id'], side)
+        if gives and row['id'] in stale_pick_trades(conn, user_id, [row['id']]):
+            error(409, 'PICKS_OUT_OF_DATE')
+        # The other side's cards, from the Trade's own lines: their account may be gone.
+        received = [(line['edition_id'], int(line['quantity'])) for line in conn.execute(
+            'SELECT edition_id, quantity FROM trade_line WHERE trade_id = %s AND side = %s ORDER BY position',
+            (row['id'], other))]
+        destination = _destination(conn, user_id, command.destination_id) if received else None
+        new_revision = revision + 1
+        if gives:
+            items = [(pick['source_location_id'], pick['edition_id'], int(pick['copies'])) for pick in conn.execute(
+                """SELECT source_location_id, edition_id, sum(quantity)::bigint AS copies FROM trade_pick
+                WHERE trade_id = %s AND side = %s GROUP BY source_location_id, edition_id
+                ORDER BY source_location_id, edition_id""", (row['id'], side))]
+            # A Holding short of its picked copies can't happen while the picks are current: HoldingShort is a bug,
+            # and the whole step rolls back.
+            new_revision = take_out(conn, user_id, items, revision)
+            conn.execute('DELETE FROM trade_pick WHERE trade_id = %s AND side = %s', (row['id'], side))
+        if received:
+            add_in(conn, user_id, destination, received, new_revision)
+        # Trading #279 applies the chosen Deck switches here, after the received copies, and #275 lowers Trade Wants.
+        changes = {f'{side}_swap_at': NOW}
+        if row[f'{other}_swap_at'] is not None:
+            record_trade_update(conn, row, user_id, 'swapped')
+            changes.update(close_trade(conn, row, user_id, 'swapped'))
+        return changes
+
+    return run_trade_step(user_id, trade_id, command, 'confirm_swap', apply, lambda role, row: [user_id],
+                          {'destination_id': None if command.destination_id is None else str(command.destination_id)})
