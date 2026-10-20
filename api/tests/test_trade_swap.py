@@ -29,8 +29,8 @@ import test_holdings
 from test_batch_add import undo, undo_records
 from test_catalog_targets import isolated_rules  # noqa: F401  (an autouse fixture)
 from test_deck_cost import launches, store  # noqa: F401  (autouse fixtures)
-from test_deck_counting import detail as deck_detail, hold, line
-from test_for_trade_locations import deck_in, mark
+from test_deck_counting import counting, detail as deck_detail, hold, line
+from test_for_trade_locations import deck_in, hide, mark
 from test_friend_copies import befriend, collector, copies, node, ok, place
 from test_handover import _asleep, _sleeping, whole_collection
 from test_holdings import call
@@ -41,6 +41,7 @@ from test_trade_lists import friend_cards, own_cards
 from test_trade_promises import reserved, trade_picks
 from test_trades import (UNKNOWN, accept_trade, commands, detail, handle_of, move_one, proposed, read, row_of,
                          trade_step, trading, updates)
+from test_trade_wants import lines_of, set_rule, set_want, wants
 from test_want_list import want_list
 from want_list_swap_fixtures import seed_swap_catalog
 
@@ -520,6 +521,145 @@ def test_a_swap_leaves_every_deck_want_list_and_loan_figure_as_a_removal_and_an_
     assert whole_collection(gary) == whole_collection(twin)
     assert copies(brock, [gary], [arven, iono])[(gary, arven)] == copies(brock, [twin], [arven, iono])[(twin, arven)]
     assert copies(brock, [gary], [arven, iono])[(gary, iono)] == copies(brock, [twin], [arven, iono])[(twin, iono)]
+
+
+# Trade Wants at Confirm swap (Trading #275): the Decks' needs for the received Edition come first.
+
+
+def getting_iono(get=3):
+    """``trading``'s collectors with an accepted Trade: Misty gives ``get`` Iono PAL 185 for 1 of Ash's Arven. Returns
+    (ids, ash, misty, box, trade as Ash read it after accepting)."""
+    ids, ash, misty, binder, box = trading()
+    trade = proposed(misty, ash, give=[(ids['PAL 185'], get)], get=[(ids['SVI 166'], 1)])
+    return ids, ash, misty, box, ok(accept_trade(ash, trade))
+
+
+def test_received_copies_fill_the_decks_first_and_only_the_rest_lower_trade_wants(store):
+    ids, ash, misty, box, trade = getting_iono(3)
+    iono = ids['PAL 185']
+    ladder = deck_in(ash, 'Ladder')
+    line(ash, ladder, iono, 2)
+    ok(set_want(ash, iono, 4))
+    ok(set_want(ash, ids['PAF 80'], 1))
+    # The spec's example: the Decks need 2, Trade Wants say 4, 3 arrive. The Decks take 2 and the line goes to 3.
+    ok(confirm(ash, trade))
+    assert lines_of(wants(ash)) == [(iono, '3'), (ids['PAF 80'], '1')]
+    assert deck_detail(ash, ladder)['to_get'] == '0'
+
+
+def test_a_trade_wants_line_the_copies_cover_goes_and_is_never_set_to_zero(store):
+    for quantity in (2, 3):
+        ids, ash, misty, box, trade = getting_iono(3)
+        ok(set_want(ash, ids['PAL 185'], quantity))
+        ok(confirm(ash, trade))
+        assert wants(ash)['lines'] == [], quantity
+    # Copies the Decks need are never taken off the line: with no copies left over it stays as it was.
+    ids, ash, misty, box, trade = getting_iono(2)
+    line(ash, deck_in(ash, 'Ladder'), ids['PAL 185'], 2)
+    ok(set_want(ash, ids['PAL 185'], 1))
+    ok(confirm(ash, trade))
+    assert lines_of(wants(ash)) == [(ids['PAL 185'], '1')]
+
+
+def test_another_card_received_through_will_accept_lowers_no_line_and_fills_no_other_deck_line(store):
+    ids, ash, misty, box, trade = getting_iono(3)
+    iono, other = ids['PAL 185'], ids['PAL 254']
+    ladder = deck_in(ash, 'Ladder')
+    line(ash, ladder, other, 1)
+    ok(set_rule(ash, other, 'identity'))
+    ok(set_want(ash, other, 2))
+    ok(confirm(ash, trade))
+    # Only the exact Edition counts: the line for PAL 254 keeps its 2, and the Deck still asks for PAL 254.
+    assert lines_of(wants(ash)) == [(other, '2')]
+    [needed] = section_lines(want_list(ash), ladder)
+    assert (needed['edition_id'], needed['need']) == (other, '1')
+    assert held(ash, unsorted(ash)) == {iono: '3'}
+
+
+def section_lines(body, deck_id):
+    return next(entry for entry in body['sections'] if entry['deck_id'] == deck_id)['lines']
+
+
+def test_the_decks_needs_follow_the_counting_setting_and_count_hidden_decks(store):
+    ids, ash, misty, box, trade = getting_iono(3)
+    iono = ids['PAL 185']
+    older, newer = deck_in(ash, 'Older'), deck_in(ash, 'Newer')
+    for deck_id in (older, newer):
+        line(ash, deck_id, iono, 2)
+    counting(ash, 'one_at_a_time')
+    ok(set_want(ash, iono, 4))
+    # One Deck at a time: the need is the largest one Deck has, 2, so 1 copy is left over.
+    ok(confirm(ash, trade))
+    assert lines_of(wants(ash)) == [(iono, '3')]
+    # Every Deck built at once: the needs add up to 4, so nothing is left over.
+    ids, ash, misty, box, trade = getting_iono(3)
+    for deck_id in (deck_in(ash, 'Older'), deck_in(ash, 'Newer')):
+        line(ash, deck_id, ids['PAL 185'], 2)
+    ok(set_want(ash, ids['PAL 185'], 4))
+    ok(confirm(ash, trade))
+    assert lines_of(wants(ash)) == [(ids['PAL 185'], '4')]
+    # A Deck inside a Hidden Location counts as on the collector's own Want List.
+    ids, ash, misty, box, trade = getting_iono(3)
+    shelf = place(ash, 'Shelf')
+    hide(ash, shelf)
+    line(ash, deck_in(ash, 'Secret', parent=shelf), ids['PAL 185'], 2)
+    ok(set_want(ash, ids['PAL 185'], 4))
+    ok(confirm(ash, trade))
+    assert lines_of(wants(ash)) == [(ids['PAL 185'], '3')]
+
+
+def test_the_destination_does_not_change_how_far_trade_wants_fall(store):
+    ids, ash, misty, box, trade = getting_iono(3)
+    iono = ids['PAL 185']
+    ladder = deck_in(ash, 'Ladder')
+    line(ash, ladder, iono, 2)
+    ok(set_want(ash, iono, 4))
+    ok(confirm(ash, trade, destination=ladder))
+    assert held(ash, ladder) == {iono: '3'} and lines_of(wants(ash)) == [(iono, '3')]
+
+
+def test_a_replayed_confirm_lowers_trade_wants_once_and_a_side_that_gets_nothing_lowers_none(store):
+    ids, ash, misty, box, trade = getting_iono(3)
+    ok(set_want(ash, ids['PAL 185'], 5))
+    ok(set_want(misty, ids['SVI 166'], 5))
+    key = uuid4()
+    for _ in range(2):
+        ok(confirm(ash, trade, key=key, revision=trade['revision']))
+    assert lines_of(wants(ash)) == [(ids['PAL 185'], '2')]
+    # Misty gets 1 Arven and her Decks need none: her line falls by 1. A gift giver's lines don't move.
+    ok(confirm(misty, trade))
+    assert lines_of(wants(misty)) == [(ids['SVI 166'], '4')]
+    ids, ash, misty, binder, box, gift = swapping(give=2, get=0)
+    ok(set_want(misty, ids['PAL 185'], 5))
+    ok(confirm(misty, gift))
+    assert lines_of(wants(misty)) == [(ids['PAL 185'], '5')]
+
+
+@pytest.mark.parametrize('first', ['confirm', 'set'])
+def test_a_trade_wants_change_and_a_confirm_of_the_same_collector_run_one_after_the_other(store, first):
+    ids, ash, misty, box, trade = getting_iono(3)
+    iono = ids['PAL 185']
+    line(ash, deck_in(ash, 'Ladder'), iono, 2)
+    ok(set_want(ash, iono, 4))
+    steps = {'confirm': lambda: confirm(ash, trade, revision=trade['revision']),
+             'set': lambda: set_want(ash, iono, 10)}
+    # The confirm sleeps adding Ash's received Holding; the change sleeps updating his line.
+    held_ = (_sleeping('holding', 'INSERT', f"NEW.owner_id = '{ash}'") if first == 'confirm'
+             else _sleeping('trade_want', 'UPDATE', f"NEW.owner_id = '{ash}'"))
+    second = 'set' if first == 'confirm' else 'confirm'
+    try:
+        with ThreadPoolExecutor(max_workers=2) as executor, \
+                psycopg.connect(os.environ['DATABASE_URL'], autocommit=True) as watch:
+            winner = executor.submit(steps[first])
+            _asleep(watch, 1, [winner])
+            loser = executor.submit(steps[second])
+            _waiting_on_a_row(watch, [winner, loser])
+            winner, loser = winner.result(), loser.result()
+    finally:
+        held_()
+    assert (winner.status_code, loser.status_code) == (200, 200), (winner.text, loser.text)
+    # Set after the swap: the line is what was set. Set before it: the swap lowers the new value by the 1 left over.
+    assert lines_of(wants(ash)) == [(iono, '10' if first == 'confirm' else '9')]
 
 
 # Privacy.
