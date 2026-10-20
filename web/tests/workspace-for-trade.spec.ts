@@ -228,3 +228,165 @@ test.describe("mobile", () => {
     ).toBeLessThanOrEqual(375);
   });
 });
+
+/** Marks (or hides) a Location through the API. */
+async function setFlag(
+  page: Page,
+  id: string,
+  flag: "for-trade" | "hidden",
+  on = true
+) {
+  const response = await page.request.put(
+    `${ORIGIN}/api/location-tree/${id}/${flag}`,
+    {
+      headers: { origin: ORIGIN },
+      data: {
+        [flag === "hidden" ? "hidden" : "for_trade"]: on,
+        version: await versionOf(page, id),
+        idempotency_key: randomUUID(),
+      },
+    }
+  );
+  expect(response.status()).toBe(200);
+}
+
+/** Ticket #282: the sidebar marks For trade Locations like it marks hidden ones. `tree` returns the tree's scope. */
+async function sidebarMarks(
+  page: Page,
+  openTree: () => Promise<Locator>,
+  openManage: () => Promise<void>
+) {
+  await signIn(page);
+  const storage = await create(page, "Storage");
+  await create(page, "Binder 1", storage);
+  await createDeck(page, "Lugia Deck", storage);
+  await create(page, "Shelf");
+  await setFlag(page, storage, "hidden");
+  await page.reload();
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("All owned");
+
+  let tree = await openTree();
+  const rowOf = (name: string) => button(tree, name);
+  await button(tree, "Storage").click();
+  await expect(rowOf("Binder 1")).toBeVisible();
+  // Nothing is marked yet.
+  await expect(tree.getByTestId("for-trade-mark")).toHaveCount(0);
+
+  await setFlag(page, storage, "for-trade");
+  await page.reload();
+  tree = await openTree();
+  await button(tree, "Storage").click();
+  const marks = tree.getByTestId("for-trade-mark");
+  // Storage, and Binder 1 inside it; not the Deck, not Shelf.
+  await expect(marks).toHaveCount(2);
+  await expect(rowOf("Storage").getByTestId("for-trade-mark")).toHaveText(
+    "For trade"
+  );
+  await expect(rowOf("Binder 1").getByTestId("for-trade-mark")).toHaveText(
+    "For trade"
+  );
+  await expect(rowOf("Lugia Deck").getByTestId("for-trade-mark")).toHaveCount(
+    0
+  );
+  await expect(rowOf("Shelf").getByTestId("for-trade-mark")).toHaveCount(0);
+  // Hidden and For trade shows both marks on the one row; names are unchanged and the marks are descriptions.
+  await expect(rowOf("Storage").getByTestId("hidden-mark")).toBeVisible();
+  await expect(rowOf("Storage")).toHaveAccessibleDescription(
+    "Hidden from Friends For trade"
+  );
+  await expect(rowOf("Binder 1")).toHaveAccessibleDescription(
+    "Hidden because Storage is hidden For trade because Storage is."
+  );
+  // The Deck is hidden with its box but gets no For trade description.
+  await expect(rowOf("Lugia Deck")).toHaveAccessibleDescription(
+    "Hidden because Storage is hidden"
+  );
+  await expect(rowOf("Shelf")).not.toHaveAttribute("aria-describedby");
+
+  // Un-marking in Manage locations clears the marks without a reload.
+  await openManage();
+  const panel = panelOf(page);
+  await button(panel, "Mark Storage Not for trade").click();
+  await expect(panel.getByRole("status")).toHaveText(
+    "Storage is no longer For trade."
+  );
+  await button(panel, "Close manage locations").click();
+  tree = await openTree();
+  await expect(tree.getByTestId("for-trade-mark")).toHaveCount(0);
+  await expect(button(tree, "Storage")).toHaveAccessibleDescription(
+    "Hidden from Friends"
+  );
+
+  // Marking again in Manage locations brings the marks back without a reload.
+  await openManage();
+  await button(panelOf(page), "Mark Storage For trade").click();
+  await expect(panelOf(page).getByRole("status")).toContainText("For trade");
+  await button(panelOf(page), "Close manage locations").click();
+  tree = await openTree();
+  await expect(tree.getByTestId("for-trade-mark")).toHaveCount(2);
+}
+
+test.describe("sidebar marks, desktop", () => {
+  test.use({ viewport: { width: 1280, height: 900 } });
+
+  test("the sidebar shows For trade on a marked box and what is inside it, but not on its Deck", async ({
+    page,
+  }) => {
+    const sidebar = page.getByRole("complementary", { name: "Sidebar" });
+    await sidebarMarks(
+      page,
+      async () => sidebar,
+      async () => {
+        await button(sidebar, "Manage locations").click();
+      }
+    );
+  });
+});
+
+test.describe("sidebar marks, mobile", () => {
+  test.use({
+    viewport: { width: 375, height: 812 },
+    isMobile: true,
+    hasTouch: true,
+  });
+
+  test("the same at 375 px, with both marks on one row and no overflow", async ({
+    page,
+  }) => {
+    const drawer = page.getByRole("dialog", { name: "Locations", exact: true });
+    const openDrawer = async () => {
+      await button(page.getByRole("banner"), "Open locations").click();
+      await expect(drawer).toBeVisible();
+      return drawer;
+    };
+    await sidebarMarks(page, openDrawer, async () => {
+      await button(drawer, "Manage locations").click();
+      await expect(drawer).toBeHidden();
+    });
+    // Both marks on a long-named row still fit inside the drawer.
+    const long = await create(
+      page,
+      "A long Location name that has to be cut short to fit"
+    );
+    await setFlag(page, long, "hidden");
+    await setFlag(page, long, "for-trade");
+    await page.reload();
+    const tree = await openDrawer();
+    const longRow = tree.getByRole("button", { name: /^A long Location/ });
+    await expect(longRow.getByTestId("hidden-mark")).toBeVisible();
+    await expect(longRow.getByTestId("for-trade-mark")).toBeVisible();
+    const box = await longRow.boundingBox();
+    const drawerBox = await drawer.boundingBox();
+    expect(box!.x + box!.width).toBeLessThanOrEqual(
+      drawerBox!.x + drawerBox!.width
+    );
+    const mark = await longRow.getByTestId("for-trade-mark").boundingBox();
+    expect(mark!.x + mark!.width).toBeLessThanOrEqual(box!.x + box!.width);
+    expect(
+      await longRow.evaluate((el) => el.scrollWidth <= el.clientWidth)
+    ).toBe(true);
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth)
+    ).toBeLessThanOrEqual(375);
+  });
+});
