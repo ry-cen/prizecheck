@@ -10,7 +10,12 @@ import {
 import { Button } from "../ui/Button";
 import { SearchField } from "../ui/SearchField";
 import { variantLabel } from "../ui/variantLabel";
-import { groupByName } from "./tradeListModel";
+import {
+  DraftControl,
+  useTradeDraft,
+  type TradeDraftFriend,
+} from "./TradeDraft";
+import { groupByName, TRADE_DRAFT_PATH } from "./tradeListModel";
 
 type Load =
   | { kind: "loading" }
@@ -37,7 +42,9 @@ const SEARCH_DELAY_MS = 300;
  * Deck of theirs, hidden or not. Search narrows by card name; **Show more cards** reads the next page. A Handle that
  * isn't one of the collector's Friends gets the same plain sentence as a Friend's Collection, whatever the reason.
  *
- * Propose trade and adding a Friend's card to a draft join this page in a later ticket.
+ * **Propose trade** opens the Trade Proposal draft to this Friend, and **Add** puts one of their cards in its You get
+ * side, a stepper then setting how many (Trading #270). Either asks to discard a draft to another Friend first. A card
+ * on the draft's You give side can't be added here too.
  */
 export function FriendTradeListPage({
   handle,
@@ -53,6 +60,7 @@ export function FriendTradeListPage({
   // Whether the first unfiltered answer for this Friend listed nothing at all, so a search can't hide that.
   const [nothingListed, setNothingListed] = useState(false);
   const listId = useId();
+  const drafts = useTradeDraft();
   // Bumped each time the main read starts, so a Show more read begun under an earlier search is dropped on arrival.
   const generation = useRef(0);
 
@@ -154,6 +162,11 @@ export function FriendTradeListPage({
 
   const { page, cards, more } = load;
   const name = page.display_name;
+  const friend: TradeDraftFriend = {
+    collector_id: page.collector_id,
+    display_name: page.display_name,
+    handle: page.handle,
+  };
   // The answer on screen can be the previous search's for a moment after a search is typed.
   const current = load.q === q;
   const collection = friendCollectionPath(page.handle);
@@ -180,7 +193,12 @@ export function FriendTradeListPage({
           className="flex min-w-0 flex-col gap-4"
         >
           {groupByName(cards).map((group) => (
-            <NameGroup key={group.name} name={group.name} cards={group.cards} />
+            <NameGroup
+              key={group.name}
+              name={group.name}
+              cards={group.cards}
+              friend={friend}
+            />
           ))}
         </div>
       )}
@@ -201,29 +219,44 @@ export function FriendTradeListPage({
         </div>
       )}
     </>,
-    <a
-      href={collection}
-      onClick={(event) => {
-        if (event.metaKey || event.ctrlKey || event.shiftKey) return;
-        event.preventDefault();
-        onNavigate(collection);
-      }}
-      className={LINK}
-    >
-      See {name}'s Collection
-    </a>
+    <>
+      <a
+        href={collection}
+        onClick={(event) => {
+          if (event.metaKey || event.ctrlKey || event.shiftKey) return;
+          event.preventDefault();
+          onNavigate(collection);
+        }}
+        className={LINK}
+      >
+        See {name}'s Collection
+      </a>
+      {drafts && (
+        <Button
+          onClick={() =>
+            drafts.start(friend, () => onNavigate(TRADE_DRAFT_PATH))
+          }
+        >
+          Propose trade
+        </Button>
+      )}
+    </>
   );
 }
 
-/** One card name on a Friend's Trade List, with each of its Editions and how many copies they offer. */
+/** One card name on a Friend's Trade List, with each of its Editions, how many copies they offer, and Add (or, once in
+ * the draft, a stepper up to those copies). */
 function NameGroup({
   name,
   cards,
+  friend,
 }: {
   name: string;
   cards: FriendTradeCard[];
+  friend: TradeDraftFriend;
 }) {
   const headingId = useId();
+  const drafts = useTradeDraft();
   return (
     <section aria-labelledby={headingId} className="flex flex-col gap-2">
       <h2
@@ -239,7 +272,7 @@ function NameGroup({
         {cards.map((card) => (
           <li
             key={card.edition_id}
-            className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-border px-4 py-3 last:border-b-0"
+            className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-3 border-b border-border px-4 py-3 last:border-b-0"
           >
             <span className="flex min-w-0 flex-col">
               <span className="text-body wrap-anywhere">{card.set_name}</span>
@@ -251,6 +284,27 @@ function NameGroup({
             <span className="text-body font-semibold tabular-nums">
               ×{card.copies}
             </span>
+            {drafts && (
+              <DraftControl
+                card={card}
+                friend={friend}
+                inDraft={drafts.quantity(
+                  friend.collector_id,
+                  "get",
+                  card.edition_id
+                )}
+                onOtherSide={
+                  drafts.quantity(
+                    friend.collector_id,
+                    "give",
+                    card.edition_id
+                  ) > 0
+                }
+                onSet={(quantity) =>
+                  drafts.set(friend, "get", card, quantity, Number(card.copies))
+                }
+              />
+            )}
           </li>
         ))}
       </ul>

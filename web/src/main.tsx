@@ -37,12 +37,16 @@ import { clearFailureFromAddress, failureInAddress } from "./signInMessages";
 import { CollectionImportPage } from "./collectionImport/CollectionImportPage";
 import { COLLECTION_IMPORT_PATH } from "./collectionImport/route";
 import { forgetBorrowDrafts } from "./loans/BorrowDrafts";
+import { forgetTradeDraft } from "./trades/TradeDraft";
 import { LoansPage } from "./loans/LoansPage";
 import { loanPath } from "./loans/loanText";
 import { FriendCollectionPage } from "./social/FriendCollectionPage";
 import { friendCollectionPath, friendHandleAt } from "./social/friendCards";
 import { FriendTradeListPage } from "./trades/FriendTradeListPage";
-import { friendTradeListHandleAt } from "./trades/tradeListModel";
+import {
+  friendTradeListHandleAt,
+  TRADE_DRAFT_PATH,
+} from "./trades/tradeListModel";
 import { TradesPage } from "./trades/TradesPage";
 import { workspaceHref } from "./workspace/workspaceLink";
 import "./tokens.css";
@@ -211,8 +215,10 @@ function App() {
     } catch {
       return false;
     }
-    // Borrow Request drafts (#252) are the account's: none stay in this tab for whoever signs in next.
+    // Borrow Request drafts (#252) and the Trade Proposal draft (Trading #270) are the account's: none stay in this
+    // tab for whoever signs in next.
     forgetBorrowDrafts();
+    forgetTradeDraft();
     setSession({ signedIn: false, userId: null });
     setOwnerCatalog(null);
     navigate(DEFAULT_PATH, { replace: true });
@@ -350,8 +356,9 @@ function App() {
           />
         );
       case "trades":
-        // /trades/list is My Trade List (Trading #269); until the Trades list arrives, /trades opens it too.
-        return <TradesPage view="list" onNavigate={navigate} />;
+        // /trades is the Trades list, /trades/list My Trade List (Trading #269), /trades/draft the Trade Proposal draft
+        // and /trades/<id> one Trade (#270).
+        return <TradesPage section={sectionAt(path)} onNavigate={navigate} />;
       case "reports":
         return <MissingCardsPage active={active} message={message} />;
       case "owner":
@@ -386,6 +393,9 @@ function App() {
       onOpenFriend={(handle) => {
         if (friendCollectionPath(handle) !== path)
           navigate(friendCollectionPath(handle));
+      }}
+      onOpenTradeDraft={() => {
+        if (path !== TRADE_DRAFT_PATH) navigate(TRADE_DRAFT_PATH);
       }}
       onSignOut={signOut}
       scrollFor={scrollFor}

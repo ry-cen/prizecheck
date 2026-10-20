@@ -107,6 +107,16 @@ ALLOWED_IMPORTS = {
         ('.loans', 'loan_facts'), ('.loans', 'loan_views'), ('.loans', 'role_of'),
         # The nudge's 14 days, so a nudge's update says when it began to apply (owner's decision, 2026-10-16).
         ('.loans', 'NUDGE_DAYS')},
+    # Trade Proposals and Trades both sides read (trading #270), as the Loans read theirs: card facts, the owner lock and
+    # the Loans' revision helper. Steps that touch a collector's own inventory are in app.trade_inventory. The stale
+    # picks read (``trade_picks.stale_pick_trades``, #272) and the Friends set (#274's Counter and unfriend paths) are
+    # allowed ahead of their tickets, as the resolution lists them; ``friend_ids`` is imported inside the function
+    # that uses it, as in social/loans.py, because app.social.friends will import this module.
+    'social/trades.py': {
+        ('..trade_picks', 'stale_pick_trades'), ('..main', 'connect'), ('..main', 'verified_user'),
+        ('..location_tree', 'error'), ('..location_tree', 'replay'), ('.friend_reads', 'card_facts'),
+        ('.owners', 'ensure_owner'), ('.owners', 'lock_owners'), ('.loans', 'advance_revision'), ('.loans', 'NOW'),
+        ('.friends', 'friend_ids')},
     'social/profile.py': {
         ('.', 'name_rules'), ('..main', 'connect'), ('..main', 'verified_user'),
         ('..location_tree', 'error'), ('..location_tree', 'owner_and_rows'), ('..location_tree', 'replay'),
@@ -123,7 +133,7 @@ ALLOWED = {'in_deck': {'type': 'string'}}
 # ``ValidationError.ctx`` is FastAPI's own 422 body (the error's context, as the framework builds it): no social code
 # fills it with a Location or a Deck.
 OPAQUE = {('FriendCard', 'descriptor'), ('FriendCopy', 'descriptor'), ('LoanCard', 'descriptor'),
-          ('FriendTradeCard', 'descriptor'), ('ValidationError', 'ctx')}
+          ('FriendTradeCard', 'descriptor'), ('TradeCard', 'descriptor'), ('ValidationError', 'ctx')}
 
 
 def words(name: str) -> set[str]:
@@ -282,6 +292,11 @@ def test_every_social_route_answers_success_with_a_schema_the_walk_reads():
     # A Friend's Trade List (trading #269): cards and their copies, read by the walk like every other route.
     trade_list = {field for _, field, _ in routes['GET /api/social/trade-lists/{handle}']}
     assert {'copies', 'descriptor', 'next_page'} <= trade_list, trade_list
+    # Trades (trading #270): both sides' cards and the other side, read by the walk on the list, one Trade and a step.
+    for route in ('GET /api/social/trades', 'GET /api/social/trades/{trade_id}',
+                  'POST /api/social/trades/{trade_id}/withdraw'):
+        trade = {field for _, field, _ in routes[route]}
+        assert {'you_give', 'you_get', 'other', 'copies', 'descriptor', 'open_to_cash_offers'} <= trade, (route, trade)
 
 
 def test_the_walk_finds_a_location_or_deck_field_at_any_depth():

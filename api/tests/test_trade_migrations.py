@@ -1,10 +1,11 @@
-"""Trading migrations 141 to 143 (Trading #268), each on its own disposable database.
+"""Trading migrations 141 to 144 (Trading #268 and #270), each on its own disposable database.
 
 Each runs again with nothing changed. Migration 142 redefines migration 106's ``reserved_copies`` and
 ``check_loan_promises``, so an older API build that is still serving while the migrations apply must keep working: its
 Loan reads, the Loan placement read and the inbox join answer exactly what they answered before, and the invariant
 still refuses under its old constraint name. The previous build's statements are copied below as they were before
-#268, never imported, so a later change to the app can't make this test check itself.
+#268, never imported, so a later change to the app can't make this test check itself. Migration 144 (#270) lets an
+inbox update name a Trade instead of a Loan; the older build's inbox join never sees those rows.
 """
 import os
 from pathlib import Path
@@ -19,7 +20,7 @@ from psycopg.rows import dict_row
 from test_catalog_references import migrate
 
 ROOT = Path(__file__).resolve().parents[2]
-TRADING = ('141_trades.sql', '142_trade_promises.sql', '143_trade_wants.sql')
+TRADING = ('141_trades.sql', '142_trade_promises.sql', '143_trade_wants.sql', '144_trade_inbox.sql')
 
 # The previous API build's statements, copied from api/app/social/counts.py, api/app/loan_picks.py and
 # api/app/social/inbox.py as they were at commit c2371c2, with counts.RESERVING written out.
@@ -188,3 +189,52 @@ def test_an_older_api_build_still_reads_loans_and_the_inbox_once_migrations_140_
     for name in TRADING:
         run_again(scratch, name)
     assert previous_reads() == before
+
+
+def test_migration_144_lets_an_update_name_a_trade_and_an_older_build_never_sees_one(scratch):
+    migrate(scratch, before='144_trade_inbox.sql')
+    lender, borrower = 'lender-' + uuid4().hex, 'borrower-' + uuid4().hex
+    with psycopg.connect(scratch, row_factory=dict_row) as conn:
+        card = edition(conn)
+        collector(conn, lender)
+        collector(conn, borrower)
+        loan = uuid4()
+        conn.execute("""INSERT INTO loan(id, kind, state, lender_id, borrower_id, lender_name, borrower_name)
+          VALUES (%s, 'borrow_request', 'requested', %s, %s, 'Misty W.', 'Ash K.')""", (loan, lender, borrower))
+        conn.execute("""INSERT INTO inbox_update(id, recipient_id, kind, loan_id, other_name)
+          VALUES (%s, %s, 'declined', %s, 'Misty W.')""", (uuid4(), borrower, loan))
+    with psycopg.connect(scratch, row_factory=dict_row) as conn:
+        before = conn.execute(PREVIOUS_INBOX_EVENTS, (borrower, 50)).fetchall()
+    assert len(before) == 1
+    migrate(scratch)
+    run_again(scratch, '144_trade_inbox.sql')
+    run_again(scratch, '144_trade_inbox.sql')
+    with psycopg.connect(scratch, row_factory=dict_row) as conn:
+        trade = uuid4()
+        conn.execute("""INSERT INTO trade(id, state, proposer_id, recipient_id, proposer_name, recipient_name)
+          VALUES (%s, 'proposed', %s, %s, 'Misty W.', 'Ash K.')""", (trade, lender, borrower))
+        conn.execute("""INSERT INTO trade_line(trade_id, side, edition_id, position, quantity)
+          VALUES (%s, 'recipient', %s, 0, 1)""", (trade, card))
+        for kind in ('cancelled', 'swapped'):
+            conn.execute("""INSERT INTO inbox_update(id, recipient_id, kind, trade_id, other_name)
+              VALUES (%s, %s, %s, %s, 'Misty W.')""", (uuid4(), borrower, kind, trade))
+        # The older build's inbox join reads exactly what it read before: never a Trade row.
+        assert conn.execute(PREVIOUS_INBOX_EVENTS, (borrower, 50)).fetchall() == before
+        # One subject each: a Loan or a Trade, never both and never neither.
+        for loan_id, trade_id in ((loan, trade), (None, None)):
+            with pytest.raises(psycopg.errors.CheckViolation) as refused, conn.transaction():
+                conn.execute("""INSERT INTO inbox_update(id, recipient_id, kind, loan_id, trade_id, other_name)
+                  VALUES (%s, %s, 'cancelled', %s, %s, 'Misty W.')""", (uuid4(), borrower, loan_id, trade_id))
+            assert refused.value.diag.constraint_name == 'inbox_update_one_subject'
+        with pytest.raises(psycopg.errors.CheckViolation), conn.transaction():
+            conn.execute("""INSERT INTO inbox_update(id, recipient_id, kind, trade_id, other_name)
+              VALUES (%s, %s, 'countered', %s, 'Misty W.')""", (uuid4(), borrower, trade))
+        [kinds] = conn.execute("""SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
+          WHERE conrelid = 'inbox_update'::regclass AND contype = 'c' AND pg_get_constraintdef(oid) LIKE '%%kind%%'""").fetchall()
+        for kind in ('accepted', 'partly_accepted', 'declined', 'cancelled', 'return_by_changed', 'swapped'):
+            assert f"'{kind}'" in kinds['definition'], kind
+        assert conn.execute("SELECT 1 FROM pg_indexes WHERE indexname = 'inbox_update_trade'").fetchone()
+        # A Trade's updates go with it.
+        conn.execute('DELETE FROM trade WHERE id=%s', (trade,))
+        assert conn.execute('SELECT count(*) AS n FROM inbox_update WHERE recipient_id=%s',
+                            (borrower,)).fetchone() == {'n': 1}

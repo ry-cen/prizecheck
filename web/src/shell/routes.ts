@@ -63,14 +63,15 @@ export const PAGES: readonly PageDef[] = [
     param: true,
   },
   {
-    // The Trades tab (Trading #269, prototype verdict variant A): /trades/list is My Trade List. The Trades list
-    // (/trades) and Find trades (/trades/find) arrive in later tickets, and one Trade at /trades/<id>; until the Trades
-    // list exists, /trades opens My Trade List.
+    // The Trades tab (Trading #269 and #270, prototype verdict variant A): /trades is the Trades list, /trades/list My
+    // Trade List, /trades/draft the Trade Proposal draft and /trades/<Trade id> one Trade. Find trades (/trades/find)
+    // arrives with discovery (#276). A section name is never a Trade id: Trade ids are UUIDs.
     id: "trades",
     path: "/trades",
     label: "Trades",
     keepMounted: false,
-    sections: ["list"],
+    sections: ["list", "draft"],
+    param: true,
   },
   {
     id: "reports",

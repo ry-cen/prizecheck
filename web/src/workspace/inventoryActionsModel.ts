@@ -206,6 +206,12 @@ export function describeFailure(
         `You promised copies of ${editionId ? names.edition(editionId) : "these cards"} to a Loan, so they can't all be removed. ${nothing}`,
         `Remove fewer copies, or cancel the Loan first; ${kept.toLowerCase()}.`
       );
+    case "PROMISED_TO_TRADE":
+      // Trading #268 and #270: an Inventory Removal that would leave fewer copies than open Trades promised.
+      return result(
+        `You promised copies of ${editionId ? names.edition(editionId) : "these cards"} to a Trade, so they can't all be removed. ${nothing}`,
+        `Remove fewer copies, or cancel the Trade first; ${kept.toLowerCase()}.`
+      );
     case "MOVE_MANIFEST_EXPIRED":
     case "MOVE_MANIFEST_NOT_FOUND":
       return result(

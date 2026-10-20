@@ -6,7 +6,8 @@ boundary").
 eyes only, which of their For trade Locations those copies sit in, so they know where to look when a Trade is agreed.
 Each Location says whether it is hidden from Friends, by itself or by a Location above it: a hidden For trade
 Location's cards are still on the Trade List. ``own_trade_copies`` is the same listable read for one collector, for
-the Trade steps and discovery to import.
+the Trade steps and discovery to import, and ``for_trade_places`` the collector's own Holdings in their For trade
+Locations, for the Trade Pick List (trading #270).
 
 Where the copies sit is shown, never counted. Per For trade Location, a card shows the copies held there less the
 copies that reserving Loan and Trade picks take from there (``counts.reserved_picks``); those are then cut back, from
@@ -38,6 +39,13 @@ FOR_TRADE_HOLDINGS = """WITH ft AS (SELECT DISTINCT f.location_id FROM for_trade
   WHERE h.owner_id = %s"""
 # The collector's own Locations: names, the tree and what they hid.
 OWN_LOCATIONS = 'SELECT id, name, parent_id, hidden FROM location WHERE owner_id = %s'
+# The collector's own Holdings of some Editions in their For trade Locations, with each Location's name and kind, for
+# the Trade Pick List (trading #270, ``app.trade_picks``).
+FOR_TRADE_PLACES = """WITH ft AS (SELECT DISTINCT f.location_id FROM for_trade_locations(ARRAY[%s]::text[]) f)
+  SELECT h.location_id, h.edition_id, h.quantity, l.name, l.kind
+  FROM holding h JOIN ft ON ft.location_id = h.location_id
+  JOIN location l ON l.owner_id = h.owner_id AND l.id = h.location_id
+  WHERE h.owner_id = %s AND h.edition_id = ANY(%s)"""
 
 
 class TradeListPlace(BaseModel):
@@ -85,6 +93,21 @@ def own_trade_copies(conn, user_id: str, edition_ids: Iterable[UUID] | None = No
     if editions == []:
         return {}
     return {row['edition_id']: int(row['listable']) for row in conn.execute(OWN_LISTABLE, (user_id, editions))}
+
+
+def for_trade_places(conn, user_id: str, edition_ids: Iterable[UUID]) -> dict[UUID, list[dict]]:
+    """The collector's own Holdings of these Editions in their For trade Locations (migration 140's rule, which never
+    answers a Deck), hidden or not: per Edition, each Location's ``location_id``, ``name``, ``kind`` and ``held``
+    copies. Runs on the caller's connection and transaction: the Trade Pick List (``app.trade_picks``) reads it under
+    the collector's owner lock. Takes no lock and writes nothing."""
+    editions = sorted(set(edition_ids))
+    if not editions:
+        return {}
+    found: dict[UUID, list[dict]] = {}
+    for row in conn.execute(FOR_TRADE_PLACES, (user_id, user_id, editions)):
+        found.setdefault(row['edition_id'], []).append({
+            'location_id': row['location_id'], 'name': row['name'], 'kind': row['kind'], 'held': int(row['quantity'])})
+    return found
 
 
 def tree_order(parents: dict[UUID, UUID | None], names: dict[UUID, str]) -> list[UUID]:
