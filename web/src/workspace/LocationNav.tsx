@@ -2,7 +2,12 @@ import React from "react";
 import { ChevronDown, ChevronRight, EyeOff, Plus } from "lucide-react";
 import type { TreeNode } from "../location_generated";
 import { Icon } from "../ui/Icon";
-import { hidingLabel, isFolder, type LocationIndex } from "./locationTree";
+import {
+  forTradeLabel,
+  hidingLabel,
+  isFolder,
+  type LocationIndex,
+} from "./locationTree";
 
 /** The workspace view: All owned or one Storage Leaf (including a Deck) by id. */
 export type WorkspaceView = "all" | string;
@@ -132,6 +137,13 @@ export function LocationNav({
     // A hidden Location keeps its name as the button's name; the eye-off mark says why, read as its description.
     const hidden = hidingLabel(index.hiding(node.id));
     const hiddenId = hidden ? `${idPrefix}-hidden-${node.id}` : undefined;
+    // A For trade Location (Trading #282) is marked the same way; both marks can show on one row.
+    const forTrade = forTradeLabel(index.forTrade(node.id));
+    const forTradeId = forTrade
+      ? `${idPrefix}-for-trade-${node.id}`
+      : undefined;
+    const describedBy =
+      [hiddenId, forTradeId].filter(Boolean).join(" ") || undefined;
     return (
       <li key={node.id}>
         <div className="group/entry relative flex min-w-0 items-center">
@@ -150,7 +162,7 @@ export function LocationNav({
             aria-expanded={folder ? open : undefined}
             aria-controls={folder && open ? listId : undefined}
             aria-current={active ? "page" : undefined}
-            aria-describedby={hiddenId}
+            aria-describedby={describedBy}
             onClick={() => (folder ? onToggle(node.id) : onChoose(node.id))}
           >
             <span
@@ -171,10 +183,25 @@ export function LocationNav({
                 <Icon icon={EyeOff} size={12} />
               </span>
             )}
+            {forTrade && (
+              <span
+                className="shrink-0 whitespace-nowrap text-meta text-text-subtle"
+                title={forTrade}
+                aria-hidden="true"
+                data-testid="for-trade-mark"
+              >
+                For trade
+              </span>
+            )}
           </button>
           {hiddenId && (
             <span id={hiddenId} hidden>
               {hidden}
+            </span>
+          )}
+          {forTradeId && (
+            <span id={forTradeId} hidden>
+              {forTrade}
             </span>
           )}
           {onAddChild && node.kind !== "deck" && (
