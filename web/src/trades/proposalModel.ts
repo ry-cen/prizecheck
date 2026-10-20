@@ -122,6 +122,21 @@ export function withReleased<T extends { edition_id: string; copies: string }>(
   });
 }
 
+/** A proposal's terms as one comparable text (Trading #278): each side's Editions and quantities in Edition order, and
+ * the cash as payer and whole cents. An amount that doesn't parse reads as its own text, so it never equals a Trade's. */
+export function termsKey(proposal: Proposal, cash: CashDraft): string {
+  const side = (lines: readonly { edition_id: string; quantity: number }[]) =>
+    lines
+      .map((line) => `${line.edition_id}:${line.quantity}`)
+      .sort()
+      .join(",");
+  const money =
+    cash.payer === "none"
+      ? "none"
+      : `${cash.payer}:${parseCents(cash.amount) ?? `invalid ${cash.amount}`}`;
+  return `${side(proposal.get)}|${side(proposal.give)}|${money}`;
+}
+
 /** The lines as the send request writes them. */
 export function requestLines(
   lines: readonly ProposalLine[]

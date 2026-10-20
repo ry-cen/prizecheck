@@ -253,6 +253,7 @@ async function story(
   await expect(region(ash.page, "You get")).toContainText("Iono");
   await expect(region(ash.page, "You give")).toContainText("Arven");
   await expect(ash.page.getByRole("radio", { name: "No cash" })).toBeChecked();
+  const sendCounter = ash.page.getByRole("button", { name: "Send Counter" });
   const backToProposal = ash.page.getByRole("link", {
     name: "Misty W's Trade Proposal",
   });
@@ -261,6 +262,15 @@ async function story(
   await expect(ash.page).toHaveURL(originalAddress);
   await counterButton().click();
   await expect(heading(ash.page)).toHaveText("Counter to Misty W");
+  // An unchanged Counter can't be sent; a change makes it available.
+  await expect(sendCounter).toBeDisabled();
+  await expect(ash.page.getByRole("main")).toContainText(
+    "Change a card, a quantity or the cash to send a Counter."
+  );
+  await ash.page.getByRole("radio", { name: "You pay" }).click();
+  await expect(sendCounter).toBeEnabled();
+  await ash.page.getByRole("radio", { name: "No cash" }).click();
+  await expect(sendCounter).toBeDisabled();
 
   // 5: a Counter where Ash gives only cash is refused while Misty is not open to cash offers, and her proposal waits.
   await show(ash.page, "Proposal");
