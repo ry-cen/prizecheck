@@ -223,3 +223,108 @@ test.describe("phone", () => {
     await expect(option(page, ONE_DECK)).toBeChecked();
   });
 });
+
+// Ticket #283: Settings › Privacy lists the For trade Locations, topmost marks only, beside the hidden list.
+async function location(page: Page, name: string, parentId?: string) {
+  const tree = async () =>
+    (
+      (await (
+        await page.request.get(`${ORIGIN}/api/location-tree`)
+      ).json()) as {
+        locations: { id: string; version: number }[];
+      }
+    ).locations;
+  const parent_version = parentId
+    ? (await tree()).find((node) => node.id === parentId)!.version
+    : null;
+  const response = await page.request.post(`${ORIGIN}/api/location-tree`, {
+    headers: { origin: ORIGIN },
+    data: {
+      name,
+      parent_id: parentId ?? null,
+      parent_version,
+      idempotency_key: randomUUID(),
+    },
+  });
+  expect(response.status()).toBe(201);
+  return ((await response.json()) as { location: { id: string } }).location.id;
+}
+
+async function flag(page: Page, id: string, key: "for_trade" | "hidden") {
+  const nodes = (
+    (await (await page.request.get(`${ORIGIN}/api/location-tree`)).json()) as {
+      locations: { id: string; version: number }[];
+    }
+  ).locations;
+  const response = await page.request.put(
+    `${ORIGIN}/api/location-tree/${id}/${key === "hidden" ? "hidden" : "for-trade"}`,
+    {
+      headers: { origin: ORIGIN },
+      data: {
+        [key]: true,
+        version: nodes.find((node) => node.id === id)!.version,
+        idempotency_key: randomUUID(),
+      },
+    }
+  );
+  expect(response.status()).toBe(200);
+}
+
+async function forTradeSettings(page: Page) {
+  await signIn(page, "/settings");
+  const section = page.getByRole("region", { name: "For trade" });
+  await expect(section).toContainText("Nothing is offered for trade.");
+  await expect(section).toHaveText(
+    "For tradeNothing is offered for trade. To offer a Location's cards, choose For trade in Collection › Manage locations."
+  );
+  const storage = await location(page, "Storage");
+  const binder = await location(page, "Binder", storage);
+  const shelf = await location(page, "Shelf");
+  await location(page, "Plain");
+  // The child is marked first, then the box above it: only the box is listed.
+  await flag(page, binder, "for_trade");
+  await flag(page, storage, "for_trade");
+  await flag(page, shelf, "for_trade");
+  await flag(page, shelf, "hidden");
+  await page.reload();
+  await expect(section).toContainText(
+    "Friends can trade for the cards in these Locations and everything inside them, apart from Decks. Change this in Collection › Manage locations."
+  );
+  await expect(section.getByRole("listitem")).toHaveText(["Shelf", "Storage"]);
+  // The hidden and For trade Location is listed in both sections.
+  await expect(
+    page
+      .getByRole("region", { name: "Hidden from Friends" })
+      .getByRole("listitem")
+  ).toHaveText(["Shelf"]);
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth)
+  ).toBeLessThanOrEqual(page.viewportSize()!.width);
+}
+
+test("Settings › Privacy lists the For trade Locations, topmost marks only", async ({
+  page,
+}) => {
+  await forTradeSettings(page);
+});
+
+test.describe("phone, For trade", () => {
+  test.use(PHONE);
+
+  test("the same at 375 px", async ({ page }) => {
+    await forTradeSettings(page);
+  });
+});
+
+test("Settings says the For trade Locations are unavailable when they can't be read", async ({
+  page,
+}) => {
+  await signIn(page, "/settings");
+  await page.route("**/api/location-tree", (route) => route.abort());
+  await page.reload();
+  await expect(
+    page.getByRole("region", { name: "For trade" }).getByRole("alert")
+  ).toHaveText(
+    "Your For trade Locations are temporarily unavailable. Please retry."
+  );
+});
