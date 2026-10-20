@@ -339,6 +339,10 @@ async function tradeStory(
   await page.reload();
   await expect(bell(page)).toHaveAccessibleName("Inbox, 1 waiting");
   await expect(tradesTab(page)).toHaveAccessibleName("Trades, 1 needs you");
+  await tradesTab(page).click();
+  await expect(
+    page.getByRole("region", { name: "Needs you" }).getByRole("link")
+  ).toContainText("· Fix picks");
   await bell(page).click();
   await expect(waitingOn(page)).toHaveText([/^Ash K · Fix picks/]);
   await waitingOn(page).click();
