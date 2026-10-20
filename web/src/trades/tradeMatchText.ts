@@ -71,8 +71,3 @@ export function acceptsText(card: TradeMatchCard): string | null {
       return null;
   }
 }
-
-/** One tap's worth of a suggested card: as many as are wanted, never more than are offered, at least one. */
-export function suggestedQuantity(card: TradeMatchCard): number {
-  return Math.max(1, Math.min(Number(card.copies), Number(card.need)));
-}

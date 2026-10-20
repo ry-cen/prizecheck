@@ -49,8 +49,8 @@ type ToastApi = {
 };
 
 /** The bottom bars that raise the toast, lowest first: Collection's Actions strip, then the Borrow Request
- * drafts tray (#252), which sits above the strip, then the Trade Proposal draft bar (Trading #270), above both. */
-export type LiftSource = "selection" | "drafts" | "tradeDraft";
+ * drafts tray (#252), which sits above the strip. */
+export type LiftSource = "selection" | "drafts";
 
 type Lifts = Partial<Record<LiftSource, number>>;
 
