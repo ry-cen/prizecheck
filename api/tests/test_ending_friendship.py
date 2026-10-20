@@ -338,6 +338,7 @@ def test_a_block_by_either_side_cancels_them_too_and_the_remaining_side_finishes
     seen = ok(read(misty, trades['half']))
     [line] = [line for line in inbox(misty)['trade_waiting'] if line['id'] == trades['half']['id']]
     before = {owner: revision_of(owner) for owner in (ash, misty)}
+    ash_half, ash_inbox = ok(read(ash, trades['half'])), inbox(ash)
     if blocker == 'confirmed':
         block(ash, misty)
     else:
@@ -357,9 +358,19 @@ def test_a_block_by_either_side_cancels_them_too_and_the_remaining_side_finishes
     assert inbox(misty)['trade_waiting'] == [line]
     for body in (seen, line, inbox(misty), ok(call('GET', '/api/social/trades', misty))):
         _no_block(body)
+    if blocker == 'remaining':
+        # Ash, the blocked side, sees his half-confirmed Trade unchanged, and nothing he reads says Block.
+        assert ok(read(ash, trades['half'])) == ash_half
+        for key in ('trade_waiting', 'trade_updates'):
+            assert [line for line in inbox(ash)[key] if line.get('id', line.get('trade_id')) == trades['half']['id']] \
+                == [line for line in ash_inbox[key] if line.get('id', line.get('trade_id')) == trades['half']['id']], key
+        for body in (ok(read(ash, trades['half'])), inbox(ash), ok(call('GET', '/api/social/trades', ash))):
+            _no_block(body)
     # She confirms alone: the Trade is swapped, and Ash, who confirmed first, hears it.
     done = ok(confirm(misty, trades['half']))
     _no_block(done)
+    if blocker == 'remaining':
+        _no_block(ok(read(ash, trades['half'])))
     assert (done['closed_reason'], done['other']['display_name']) == ('swapped', 'Ash K.')
     assert held(misty, unsorted(misty)) == {arven: '1'}
     assert stored_updates(trades['half'])[-1] == (ash, 'swapped', 'Misty W.')
@@ -382,6 +393,7 @@ def _normal_entry(user, trade):
 
 def _normal_view(user, trade):
     found = ok(read(user, trade))
+    assert found['other']['collector_id'] is not None and 'handle' in found['other']
     found['other'] = {key: value for key, value in found['other'].items() if key not in ('collector_id', 'handle')}
     return {key: value for key, value in found.items() if key not in ('id', 'created_at')}
 
@@ -505,40 +517,45 @@ def test_a_deleted_account_leaves_its_name_and_the_remaining_side_confirms_alone
 # a step while it writes a pick (an accept or a send inserting one, a confirm deleting its own), the unfriend or Block
 # while it deletes the friendship row, after it cancelled the Trades.
 
-def _race_setup(step_name):
+def _race_setup(step_name, mirrored=False):
     ids = seed_swap_catalog()
     iono, arven = ids['PAL 185'], ids['SVI 166']
     ash, misty = pair(ordered=True)
-    binder, box = place(misty, 'Trade Binder'), place(ash, 'Box')
-    hold(misty, binder, iono, 2)
-    hold(ash, box, arven, 2)
-    ok(mark(misty, binder))
-    ok(mark(ash, box))
+    # The giver proposes Iono for Arven; the taker accepts or confirms. Mirrored, Misty (the higher id) is the taker.
+    giver, taker = (ash, misty) if mirrored else (misty, ash)
+    binder, box = place(giver, 'Trade Binder'), place(taker, 'Box')
+    hold(giver, binder, iono, 2)
+    hold(taker, box, arven, 2)
+    ok(mark(giver, binder))
+    ok(mark(taker, box))
     trade = None
     if step_name == 'accept':
-        trade = proposed(misty, ash, give=[(iono, 1)], get=[(arven, 1)])
+        trade = proposed(giver, taker, give=[(iono, 1)], get=[(arven, 1)])
     elif step_name == 'confirm':
-        trade = ok(accept_trade(ash, proposed(misty, ash, give=[(iono, 1)], get=[(arven, 1)])))
-    return ids, ash, misty, binder, box, trade
+        trade = ok(accept_trade(taker, proposed(giver, taker, give=[(iono, 1)], get=[(arven, 1)])))
+    return ids, giver, taker, binder, box, trade
 
 
 @pytest.mark.parametrize('action', ['remove', 'block'])
 @pytest.mark.parametrize('first', ['step', 'end'])
-@pytest.mark.parametrize('step_name', ['accept', 'confirm', 'send'])
-def test_ending_a_friendship_and_a_trade_step_of_the_pair_run_one_after_the_other(store, step_name, first, action):
-    ids, ash, misty, binder, box, trade = _race_setup(step_name)
+@pytest.mark.parametrize('step_name, mirrored', [('accept', False), ('confirm', False), ('send', False),
+                                                 ('accept', True), ('confirm', True)])
+def test_ending_a_friendship_and_a_trade_step_of_the_pair_run_one_after_the_other(
+        store, step_name, mirrored, first, action):
+    ids, giver, taker, binder, box, trade = _race_setup(step_name, mirrored)
     iono, arven = ids['PAL 185'], ids['SVI 166']
-    stepper, ender = (misty, ash) if step_name == 'send' else (ash, misty)
+    low = min(giver, taker)
+    stepper, ender = (giver, taker) if step_name == 'send' else (taker, giver)
     revision = trade['revision'] if trade else None
-    steps = {'accept': lambda: accept_trade(ash, trade, revision=revision),
-             'confirm': lambda: confirm(ash, trade, revision=revision),
-             'send': lambda: propose(misty, ash, give=[(iono, 1)], get=[(arven, 1)])}
-    before = {owner: revision_of(owner) for owner in (ash, misty)}
+    steps = {'accept': lambda: accept_trade(taker, trade, revision=revision),
+             'confirm': lambda: confirm(taker, trade, revision=revision),
+             'send': lambda: propose(giver, taker, give=[(iono, 1)], get=[(arven, 1)])}
+    before = {owner: revision_of(owner) for owner in (giver, taker)}
     if first == 'step':
         held_ = _sleeping('trade_pick', 'DELETE' if step_name == 'confirm' else 'INSERT',
                           f"{'OLD' if step_name == 'confirm' else 'NEW'}.owner_id = '{stepper}'")
     else:
-        held_ = _sleeping('friendship', 'DELETE', f"OLD.user_low = '{ash}'")
+        held_ = _sleeping('friendship', 'DELETE', f"OLD.user_low = '{low}'")
     run = {'step': steps[step_name], 'end': lambda: end(action, ender, stepper)}
     second = 'end' if first == 'step' else 'step'
     try:
@@ -555,39 +572,39 @@ def test_ending_a_friendship_and_a_trade_step_of_the_pair_run_one_after_the_othe
     stepped = results['step']
     with connect() as conn:
         rows = conn.execute('SELECT * FROM trade WHERE proposer_id = ANY(%(pair)s) AND recipient_id = ANY(%(pair)s)',
-                            {'pair': [ash, misty]}).fetchall()
+                            {'pair': [giver, taker]}).fetchall()
     if first == 'step':
         assert stepped.status_code == (201 if step_name == 'send' else 200), stepped.text
         [row] = rows
         if step_name == 'confirm':
             # Ash confirmed first: the Trade stays open for Misty to finish alone.
             assert (row['state'], row['recipient_swap_at'] is not None) == ('accepted', True)
-            assert trade_picks(row['id']) == [('proposer', misty, binder, 1)]
-            assert held(ash, box) == {arven: '1'} and held(ash, unsorted(ash)) == {iono: '1'}
-            assert revision_of(ash) == before[ash] + 1 and revision_of(misty) == before[misty]
-            assert ok(confirm(misty, row))['closed_reason'] == 'swapped'
+            assert trade_picks(row['id']) == [('proposer', giver, binder, 1)]
+            assert held(taker, box) == {arven: '1'} and held(taker, unsorted(taker)) == {iono: '1'}
+            assert revision_of(taker) == before[taker] + 1 and revision_of(giver) == before[giver]
+            assert ok(confirm(giver, row))['closed_reason'] == 'swapped'
         else:
             # The accepted Trade, or the new proposal, is then cancelled by the unfriend or Block.
             assert (row['state'], row['closed_reason'], row['closed_by']) == ('closed', 'cancelled', ender)
-            assert trade_picks(row['id']) == [] and reserved(misty, iono) == (0, 0) and reserved(ash, arven) == (0, 0)
+            assert trade_picks(row['id']) == [] and reserved(giver, iono) == (0, 0) and reserved(taker, arven) == (0, 0)
             # The step moved its collector's revision; the cancel moved each side's that it released.
             if step_name == 'accept':
-                assert revision_of(ash) == before[ash] + 2 and revision_of(misty) == before[misty] + 1
+                assert revision_of(taker) == before[taker] + 2 and revision_of(giver) == before[giver] + 1
             else:
-                assert revision_of(misty) == before[misty] + 2 and revision_of(ash) == before[ash]
+                assert revision_of(giver) == before[giver] + 2 and revision_of(taker) == before[taker]
     else:
         if step_name == 'send':
             # No Trade is sent once the friendship is gone.
             assert detail(stepped) == (409, {'code': 'NOT_FRIENDS'}) and rows == []
-            assert revision_of(misty) == before[misty] and reserved(misty, iono) == (0, 0)
+            assert revision_of(giver) == before[giver] and reserved(giver, iono) == (0, 0)
         else:
             # The step read the Trade before the unfriend or Block cancelled it: its revision moved on. Read again,
             # nothing is left to do.
             assert detail(stepped) == (409, {'code': 'TRADE_CHANGED'})
             [row] = rows
-            assert (row['state'], row['closed_reason'], row['closed_by']) == ('closed', 'cancelled', misty)
-            assert trade_picks(row['id']) == [] and reserved(misty, iono) == (0, 0) and reserved(ash, arven) == (0, 0)
-            assert held(ash, box) == {arven: '2'}
-            fresh = ok(read(ash, trade))['revision']
-            retried = accept_trade(ash, trade, revision=fresh) if step_name == 'accept' else confirm(ash, trade)
+            assert (row['state'], row['closed_reason'], row['closed_by']) == ('closed', 'cancelled', giver)
+            assert trade_picks(row['id']) == [] and reserved(giver, iono) == (0, 0) and reserved(taker, arven) == (0, 0)
+            assert held(taker, box) == {arven: '2'}
+            fresh = ok(read(taker, trade))['revision']
+            retried = accept_trade(taker, trade, revision=fresh) if step_name == 'accept' else confirm(taker, trade)
             assert detail(retried) == (409, {'code': 'STEP_NOT_ALLOWED'})
