@@ -147,12 +147,28 @@ export function sendTradeMessage(
   }
 }
 
-/** What a Trade step that failed says. */
-export function tradeStepMessage(cause: unknown): string {
+/**
+ * What a Trade step that failed says (prototype "Proposed wording" where it has one). `trade` is the Trade the step
+ * was taken on, to name the other side and the card a refusal is about.
+ */
+export function tradeStepMessage(cause: unknown, trade: TradeView): string {
   if (tradeOutcomeUnknown(cause))
     return "The Trade may not have been updated. Check your connection and try again.";
-  const error = cause as SocialError;
+  const error = cause as SocialError | TradesError;
   switch (error.code) {
+    case "NOT_TRADEABLE": {
+      // Only an accept refuses this way, for a card the reader gives. Counter (#278) adds "or send a Counter".
+      const n = String(error.detail.available ?? "0");
+      const line = trade.you_give.find(
+        (card) => card.edition_id === String(error.detail.edition_id ?? "")
+      );
+      const card = line ? tradeCardName(line) : "A card";
+      return n === "0"
+        ? `${card} isn't on your Trade List now, so you can't accept this. Decline it instead.`
+        : `You can trade only ${n} ${card} now, so you can't accept this. Decline it instead.`;
+    }
+    case "NOT_FRIENDS":
+      return `${trade.other.display_name} isn't one of your Friends anymore.`;
     case "TRADE_CHANGED":
     case "STEP_NOT_ALLOWED":
       return "This Trade has changed. Check it and try again.";

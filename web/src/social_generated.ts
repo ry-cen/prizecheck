@@ -190,3 +190,9 @@ export const getTrade = (id: string, signal?: AbortSignal) =>
 // Trade steps, idempotent: retry a failed one with the same idempotency_key. Each answers the Trade as it now stands.
 export const withdrawTrade = (id: string, body: TradeStep) =>
   request<TradeView>(`/api/social/trades/${at(id)}/withdraw`, 'POST', body);
+// The recipient declines a Trade Proposal; either side cancels an accepted Trade nobody has confirmed (#271). Accepting
+// one reserves your cards, so it is in the Trades client.
+export const declineTrade = (id: string, body: TradeStep) =>
+  request<TradeView>(`/api/social/trades/${at(id)}/decline`, 'POST', body);
+export const cancelTrade = (id: string, body: TradeStep) =>
+  request<TradeView>(`/api/social/trades/${at(id)}/cancel`, 'POST', body);

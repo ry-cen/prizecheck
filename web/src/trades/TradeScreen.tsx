@@ -1,15 +1,26 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { ChevronLeft, Ellipsis } from "lucide-react";
 import { lineEdition } from "../loans/loanText";
 import { PageHeader } from "../shell/PageHeader";
 import { CardImage } from "../social/FriendCollectionPage";
 import {
+  cancelTrade,
+  declineTrade,
   getTrade,
   SocialError,
   withdrawTrade,
   type TradeCard,
+  type TradeStep,
   type TradeView,
 } from "../social_generated";
+import { acceptTrade, TradesError } from "../trades_generated";
 import { Button } from "../ui/Button";
 import { Icon } from "../ui/Icon";
 import { Menu, type MenuItem } from "../ui/Menu";
@@ -30,11 +41,50 @@ type Load =
 /** The refusals that mean the Trade moved on: the screen reads it again. */
 const RELOAD = new Set(["TRADE_CHANGED", "STEP_NOT_ALLOWED"]);
 
+/** A step that asks first (owner, 2026-10-20): Decline, Withdraw and Cancel Trade end the Trade for both sides. */
+type Asking = "decline" | "withdraw" | "cancel";
+
+/** Where focus goes after the next render, when the control that had it goes away: the confirmation's own button when
+ * it asks, its opener after Keep it (Decline, or ⋯ for Withdraw and Cancel Trade), and the heading after a step or a
+ * refusal that reads the Trade again. */
+type FocusNext = "ask" | "decline" | "menu" | "heading";
+
+const ASK: Record<
+  Asking,
+  { question: (other: string) => string; yes: string }
+> = {
+  decline: {
+    question: (other) => `Decline ${other}'s Trade Proposal?`,
+    yes: "Decline",
+  },
+  withdraw: {
+    question: (other) => `Withdraw your Trade Proposal to ${other}?`,
+    yes: "Withdraw",
+  },
+  cancel: {
+    question: (other) =>
+      `Cancel this Trade with ${other}? None of these cards stay promised.`,
+    yes: "Cancel Trade",
+  },
+};
+
+/** What each step's toast says once it went through. */
+const DONE: Record<Asking | "accept", string> = {
+  accept: "Accepted. Swap the cards in person.",
+  decline: "Declined",
+  withdraw: "Withdrawn",
+  cancel: "Trade cancelled",
+};
+
 /**
  * One Trade's screen (Trading #270, prototype verdict variant A), at /trades/<id>: the headline, who the Trade is
- * with, and two columns, **You give** and **You get** (one column on a phone), each card with its copies. The
- * proposer withdraws a proposal nobody has answered from **⋯**. It never names a Location or a Deck: where the
- * collector's own cards are taken from joins with Confirm swap (#272). The recipient's answers arrive with #271.
+ * with, and two columns, **You give** and **You get** (one column on a phone), each card with its copies. A recipient
+ * answers a proposal with **Accept** or **Decline** under the two sides (#271); the proposer withdraws it from **⋯**,
+ * and either side cancels an accepted Trade nobody has confirmed from **⋯** (**Cancel Trade**). Decline, Withdraw and
+ * Cancel Trade ask first, as the Loan steps that end a Loan do: the question replaces the answer buttons, with the
+ * step's own button and **Keep it**, which puts focus back on the opener. Only the steps the Trade's `actions` list
+ * show. It never names a Location or a Deck: where the collector's own cards are taken from joins with Confirm swap
+ * (#272).
  */
 export function TradeScreen({
   tradeId,
@@ -51,21 +101,34 @@ export function TradeScreen({
   const [attempt, setAttempt] = useState(0);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const [asking, setAsking] = useState<Asking | null>(null);
   // One key per step until it settles, so a step whose outcome is unknown is retried safely.
-  const key = useRef<string | null>(null);
+  const keys = useRef(new Map<string, string>());
   const heading = useRef<HTMLHeadingElement>(null);
-  // After a step the ⋯ menu that had focus may be gone: the heading takes it once the new Trade is drawn.
-  const focusHeading = useRef(false);
+  const menuAnchor = useRef<HTMLDivElement>(null);
+  const askButton = useRef<HTMLButtonElement>(null);
+  const declineButton = useRef<HTMLButtonElement>(null);
+  const focusNext = useRef<FocusNext | null>(null);
+  // A step refused because the Trade moved on reads it again: an open question closes and the heading takes focus
+  // once the new Trade is drawn, so focus never lands on the old headline.
+  const reloading = useRef(false);
 
   useEffect(() => {
     if (tradeId === null) return;
     const controller = new AbortController();
     getTrade(tradeId, controller.signal).then(
       (trade) => {
-        if (!controller.signal.aborted) setLoad({ kind: "ready", trade });
+        if (controller.signal.aborted) return;
+        if (reloading.current) {
+          reloading.current = false;
+          focusNext.current = "heading";
+          setAsking(null);
+        }
+        setLoad({ kind: "ready", trade });
       },
       (cause) => {
         if (controller.signal.aborted) return;
+        reloading.current = false;
         setLoad(
           cause instanceof SocialError && cause.status === 404
             ? { kind: "missing" }
@@ -76,14 +139,21 @@ export function TradeScreen({
     return () => controller.abort();
   }, [tradeId, attempt]);
 
-  useEffect(() => {
-    const element = heading.current;
-    if (!focusHeading.current || load.kind !== "ready" || !element) return;
-    focusHeading.current = false;
-    if (!element.hasAttribute("tabindex"))
-      element.setAttribute("tabindex", "-1");
-    element.focus({ preventScroll: true });
-  }, [load]);
+  // After each render: a focus move asked for by the last press or step (FocusNext).
+  useLayoutEffect(() => {
+    const target = focusNext.current;
+    if (!target) return;
+    focusNext.current = null;
+    const element =
+      target === "ask"
+        ? askButton.current
+        : target === "decline"
+          ? declineButton.current
+          : target === "menu"
+            ? menuAnchor.current?.querySelector("button")
+            : heading.current;
+    element?.focus({ preventScroll: target === "heading" });
+  });
 
   const back = (
     <a
@@ -140,37 +210,83 @@ export function TradeScreen({
     );
 
   const { trade } = load;
+  const name = trade.other.display_name;
 
-  async function withdraw() {
+  /** Asks before a step that ends the Trade, with focus on the confirmation's button. */
+  function ask(step: Asking) {
+    if (busy) return;
+    setMessage("");
+    focusNext.current = "ask";
+    setAsking(step);
+  }
+  /** Runs one step: the answer replaces the Trade, the question closes and the heading takes focus. */
+  async function step(
+    action: Asking | "accept",
+    call: (id: string, body: TradeStep) => Promise<TradeView>
+  ) {
     if (busy) return;
     setBusy(true);
     setMessage("");
-    key.current ??= crypto.randomUUID();
+    const key = keys.current.get(action) ?? crypto.randomUUID();
+    keys.current.set(action, key);
     try {
-      const next = await withdrawTrade(trade.id, {
+      const next = await call(trade.id, {
         revision: trade.revision,
-        idempotency_key: key.current,
+        idempotency_key: key,
       });
-      key.current = null;
-      focusHeading.current = true;
+      keys.current.delete(action);
+      focusNext.current = "heading";
+      setAsking(null);
       setLoad({ kind: "ready", trade: next });
-      toast.show({ message: "Withdrawn" });
+      toast.show({ message: DONE[action] });
     } catch (cause) {
-      if (!tradeOutcomeUnknown(cause)) key.current = null;
-      setMessage(tradeStepMessage(cause));
-      if (cause instanceof SocialError && RELOAD.has(cause.code)) {
-        focusHeading.current = true;
+      if (!tradeOutcomeUnknown(cause)) keys.current.delete(action);
+      setMessage(tradeStepMessage(cause, trade));
+      if (
+        (cause instanceof SocialError || cause instanceof TradesError) &&
+        RELOAD.has(cause.code)
+      ) {
+        reloading.current = true;
         setAttempt((n) => n + 1);
       }
     } finally {
       setBusy(false);
     }
   }
+  const run: Record<Asking, () => void> = {
+    decline: () => void step("decline", declineTrade),
+    withdraw: () => void step("withdraw", withdrawTrade),
+    cancel: () => void step("cancel", cancelTrade),
+  };
 
-  const menu: MenuItem[] = trade.actions.includes("withdraw")
-    ? [{ label: "Withdraw", onSelect: () => void withdraw() }]
-    : [];
-  const name = trade.other.display_name;
+  const answering =
+    trade.actions.includes("accept") || trade.actions.includes("decline");
+  const menu: MenuItem[] = [
+    ...(trade.actions.includes("withdraw")
+      ? [{ label: "Withdraw", onSelect: () => ask("withdraw") }]
+      : []),
+    ...(trade.actions.includes("cancel")
+      ? [{ label: "Cancel Trade", onSelect: () => ask("cancel") }]
+      : []),
+  ];
+  const answers = answering && (
+    <div className="flex flex-wrap items-center gap-2">
+      {trade.actions.includes("accept") && (
+        <Button
+          variant="primary"
+          aria-disabled={busy || undefined}
+          onClick={() => void step("accept", acceptTrade)}
+        >
+          Accept
+        </Button>
+      )}
+      {trade.actions.includes("decline") && (
+        <Button ref={declineButton} onClick={() => ask("decline")}>
+          Decline
+        </Button>
+      )}
+    </div>
+  );
   return frame(
     tradeHeadline(trade),
     <>
@@ -184,17 +300,48 @@ export function TradeScreen({
         <TradeSide title="You give" cards={trade.you_give} />
         <TradeSide title="You get" cards={trade.you_get} />
       </div>
+      {asking ? (
+        <div
+          role="group"
+          aria-label={ASK[asking].yes}
+          className="flex flex-wrap items-center gap-2 rounded-panel border border-border bg-surface p-3"
+        >
+          <p className="m-0 min-w-0 flex-1 text-body">
+            {ASK[asking].question(name)}
+          </p>
+          <Button
+            ref={askButton}
+            variant="danger"
+            aria-disabled={busy || undefined}
+            onClick={run[asking]}
+          >
+            {ASK[asking].yes}
+          </Button>
+          <Button
+            onClick={() => {
+              focusNext.current = asking === "decline" ? "decline" : "menu";
+              setAsking(null);
+            }}
+          >
+            Keep it
+          </Button>
+        </div>
+      ) : (
+        answers
+      )}
       <p role="alert" className="m-0 text-meta text-danger empty:hidden">
         {message}
       </p>
     </>,
     menu.length > 0 && (
-      <Menu
-        label="More for this Trade"
-        triggerClassName="inline-flex size-control shrink-0 cursor-pointer items-center justify-center rounded-control border-0 bg-transparent p-0 text-text-muted hover:bg-surface-raised hover:text-text phone:size-tap"
-        trigger={<Icon icon={Ellipsis} />}
-        items={menu}
-      />
+      <div ref={menuAnchor}>
+        <Menu
+          label="More for this Trade"
+          triggerClassName="inline-flex size-control shrink-0 cursor-pointer items-center justify-center rounded-control border-0 bg-transparent p-0 text-text-muted hover:bg-surface-raised hover:text-text phone:size-tap"
+          trigger={<Icon icon={Ellipsis} />}
+          items={menu}
+        />
+      </div>
     )
   );
 }
