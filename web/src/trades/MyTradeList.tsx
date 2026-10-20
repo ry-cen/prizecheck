@@ -4,6 +4,7 @@ import { getTradeList, type OwnTradeList } from "../trades_generated";
 import { Button } from "../ui/Button";
 import { variantLabel } from "../ui/variantLabel";
 import { HIDDEN_ON_TRADE_LIST } from "../workspace/locationTree";
+import { OpenToCashOffers } from "./OpenToCashOffers";
 import { tradeListPanels, type TradeListPanel } from "./tradeListModel";
 
 type Load =
@@ -17,13 +18,23 @@ type Load =
  * Location hidden from Friends says its cards are still on the Trade List. Copies promised to a Trade or Loan are not
  * shown. Friends see the same cards and counts, never a Location.
  *
- * The Open to cash offers switch joins the top of this view in a later ticket.
+ * The Open to cash offers setting (Trading #277) sits at the top, above the list, whatever state the list is in.
  */
 export function MyTradeList({
   onOpenCollection,
 }: {
   onOpenCollection: () => void;
 }) {
+  // The setting is mounted once, first, so it never reloads as the list goes from loading to ready or is retried.
+  return (
+    <>
+      <OpenToCashOffers />
+      <TradeListBody onOpenCollection={onOpenCollection} />
+    </>
+  );
+}
+
+function TradeListBody({ onOpenCollection }: { onOpenCollection: () => void }) {
   const [load, setLoad] = useState<Load>({ kind: "loading" });
   const [attempt, setAttempt] = useState(0);
 

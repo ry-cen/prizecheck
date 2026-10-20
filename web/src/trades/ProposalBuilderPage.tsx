@@ -23,17 +23,24 @@ import { Dialog } from "../ui/Dialog";
 import { Icon } from "../ui/Icon";
 import { Segmented, segmentId } from "../ui/Segmented";
 import { Stepper } from "../ui/Stepper";
+import { TextField } from "../ui/TextField";
 import { useToast } from "../ui/Toast";
 import { MOBILE_QUERY, useMediaQuery } from "../workspace/media";
 import { takeFromTradeList, takeProposalSeed } from "./openProposal";
+import { LiabilityNotice } from "./LiabilityNotice";
 import {
   EMPTY_PROPOSAL,
+  NO_CASH,
+  parseCents,
   proposalCopies,
   quantityIn,
   requestLines,
   seededProposal,
   setQuantity,
   toProposalCard,
+  valueLines,
+  type CashDraft,
+  type CashPayer,
   type LibraryCard,
   type Proposal,
   type ProposalLine,
@@ -51,10 +58,12 @@ import {
   tradePath,
 } from "./tradeListModel";
 import {
+  INVALID_CASH_TEXT,
   sendTradeMessage,
   tradeCardName,
   tradeOutcomeUnknown,
 } from "./tradeText";
+import { sideValueText, useTradeValue } from "./useTradeValue";
 
 type Friend = { collector_id: string; handle: string; display_name: string };
 
@@ -89,6 +98,10 @@ const BACK =
  * left as it opened, when the Friend didn't load, or after a successful send. A card can't be on both sides; a
  * refused send keeps the proposal and says which card and how many are on the Trade List now. The back link returns
  * to the Friend's Trade List when the builder was opened from it, and to Find trades otherwise.
+ *
+ * Cash (Trading #277): a **Cash** section under You give takes an amount in US dollars and who pays it, recorded
+ * only; the app never handles money. Each side shows its estimated total under its list, and nothing suggests an
+ * amount. The liability notice shows while a payer is chosen. A cash change makes a new send key and counts as an edit.
  */
 export function ProposalBuilderPage({
   handle,
@@ -119,6 +132,11 @@ export function ProposalBuilderPage({
   const [message, setMessage] = useState("");
   const [announce, setAnnounce] = useState("");
   const [asking, setAsking] = useState<{ leave: () => void } | null>(null);
+  const [cash, setCash] = useState<CashDraft>(NO_CASH);
+  const cashHeadingId = useId();
+  const value = useTradeValue(
+    useMemo(() => valueLines(proposal.give, proposal.get), [proposal])
+  );
 
   const key = useRef<string | null>(null);
   const sent = useRef(false);
@@ -257,6 +275,13 @@ export function ProposalBuilderPage({
     key.current = null;
   }
 
+  // A cash change is an edit like a card: it makes a new send key.
+  function editCash(next: CashDraft) {
+    edited.current = true;
+    key.current = null;
+    setCash(next);
+  }
+
   // The same words twice are announced twice: the line is cleared first, then set a moment later.
   const announceTimer = useRef<number | undefined>(undefined);
   useEffect(() => () => window.clearTimeout(announceTimer.current), []);
@@ -298,6 +323,15 @@ export function ProposalBuilderPage({
     if (busy || !friend) return;
     const current = proposal;
     const name = friend.display_name;
+    let cashBody: { cents: string; payer: "you" | "them" } | null = null;
+    if (cash.payer !== "none") {
+      const cents = parseCents(cash.amount);
+      if (cents === null) {
+        setMessage(INVALID_CASH_TEXT);
+        return;
+      }
+      cashBody = { cents, payer: cash.payer };
+    }
     setBusy(true);
     sending.current = true;
     setMessage("");
@@ -307,6 +341,7 @@ export function ProposalBuilderPage({
         recipient_id: friend.collector_id,
         you_give: requestLines(current.give),
         you_get: requestLines(current.get),
+        cash: cashBody,
         idempotency_key: key.current,
       });
       sent.current = true;
@@ -420,6 +455,11 @@ export function ProposalBuilderPage({
       side={side}
       lines={proposal[side]}
       heading={sideHeading[side]}
+      total={sideValueText(
+        value,
+        side === "get" ? "you_get" : "you_give",
+        proposal[side].length > 0
+      )}
       onChange={(line, quantity) => {
         if (quantity === 0) refocus.current = side;
         change((p) => setQuantity(p, side, line, quantity));
@@ -430,7 +470,42 @@ export function ProposalBuilderPage({
     <section aria-label="Proposal" className="flex min-w-0 flex-col gap-4">
       {sideSection("get")}
       {sideSection("give")}
-      {/* #277 adds each side's estimated total and cash here. */}
+      <section
+        aria-labelledby={cashHeadingId}
+        className="flex min-w-0 flex-col gap-2"
+      >
+        <h2 id={cashHeadingId} className="m-0 text-heading font-semibold">
+          Cash
+        </h2>
+        <Segmented<CashPayer>
+          mode="choice"
+          label="Cash"
+          labelledBy={cashHeadingId}
+          value={cash.payer}
+          onChange={(payer) =>
+            editCash(payer === "none" ? NO_CASH : { ...cash, payer })
+          }
+          options={[
+            { value: "none", label: "No cash" },
+            { value: "you", label: "You pay" },
+            { value: "them", label: `${name} pays` },
+          ]}
+        />
+        {cash.payer !== "none" && (
+          <TextField
+            label="Amount in US dollars"
+            inputMode="decimal"
+            placeholder="0.00"
+            autoComplete="off"
+            maxLength={14}
+            value={cash.amount}
+            onChange={(event) =>
+              editCash({ ...cash, amount: event.currentTarget.value })
+            }
+          />
+        )}
+      </section>
+      {cash.payer !== "none" && <LiabilityNotice />}
       <div className="flex flex-wrap items-center gap-3">
         <Button
           variant="primary"
@@ -542,11 +617,14 @@ function ProposalSideSection({
   side,
   lines,
   heading,
+  total,
   onChange,
 }: {
   side: ProposalSide;
   lines: ProposalLine[];
   heading: React.RefObject<HTMLHeadingElement | null>;
+  /** The side's estimated total, or null when it has no lines. */
+  total: string | null;
   onChange: (line: ProposalLine, quantity: number) => void;
 }) {
   const headingId = useId();
@@ -603,6 +681,9 @@ function ProposalSideSection({
           })
         )}
       </ul>
+      {total && (
+        <p className="m-0 text-meta text-text-muted tabular-nums">{total}</p>
+      )}
     </section>
   );
 }

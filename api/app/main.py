@@ -253,14 +253,17 @@ from .social.loans import router as loans_router  # noqa: E402
 app.include_router(loans_router)
 from .social.inbox import router as inbox_router  # noqa: E402
 app.include_router(inbox_router)
-from .social.trades import router as trades_router  # noqa: E402
+from .social.trades import router as trades_router, settings_router as trade_settings_router  # noqa: E402
 app.include_router(trades_router)
+app.include_router(trade_settings_router)
 from .loan_inventory import router as loan_inventory_router  # noqa: E402
 app.include_router(loan_inventory_router)
 from .trade_list import router as trade_list_router  # noqa: E402
 app.include_router(trade_list_router)
 from .trade_inventory import router as trade_inventory_router  # noqa: E402
 app.include_router(trade_inventory_router)
+from .trade_value import router as trade_value_router  # noqa: E402
+app.include_router(trade_value_router)
 from .trade_wants import router as trade_wants_router  # noqa: E402
 app.include_router(trade_wants_router)
 

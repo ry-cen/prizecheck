@@ -46,7 +46,9 @@ side gets the 'cancelled' update a plain cancel stores, which never says why, so
 A Trade one side has confirmed stays open: the remaining side may still Confirm swap alone, and since no step checks
 the friendship once a Trade is accepted, nothing they see changes.
 
-Later tickets add cash and the Open to cash offers setting (#277) and Counter (#278).
+**Cash and Open to cash offers** (Trading #277): ``TradeView.cash`` is the amount and payer relative to the reader. The
+Open to cash offers setting is changed through ``/api/social/trade-settings`` (``settings_router`` below); Counter
+(#278) comes later.
 """
 import json
 from collections.abc import Mapping
@@ -68,6 +70,7 @@ from .loans import NOW, advance_revision
 from .owners import ensure_owner, lock_owners
 
 router = APIRouter(prefix='/api/social/trades', tags=['social'])
+settings_router = APIRouter(prefix='/api/social/trade-settings', tags=['social'])
 
 COMMANDS_PER_HOUR = 120
 
@@ -80,7 +83,8 @@ ACTION_ORDER = ('accept', 'decline', 'counter', 'confirm_swap', 'use_suggested_p
 
 class TradeParty(BaseModel):
     """The other side of the Trade: ``collector_id`` and ``handle`` are None once that account is deleted; the name is
-    kept. ``open_to_cash_offers``: their own setting (Trading #277 adds the route that changes it)."""
+    kept. ``open_to_cash_offers``: their own setting, changed through
+    ``/api/social/trade-settings`` (this module's ``settings_router``, Trading #277)."""
     collector_id: str | None
     display_name: str
     handle: str | None
@@ -138,6 +142,16 @@ class TradesView(BaseModel):
 class TradeStep(BaseModel):
     revision: int = Field(ge=1)
     idempotency_key: UUID
+
+
+class TradeSettings(BaseModel):
+    """The collector's own trading settings. ``open_to_cash_offers``: Friends may send them a Trade Proposal in which
+    one side gives only cash (Trading #277); off by default."""
+    open_to_cash_offers: bool
+
+
+class SetTradeSettings(BaseModel):
+    open_to_cash_offers: bool
 
 
 @dataclass(frozen=True)
@@ -499,3 +513,29 @@ def cancel(trade_id: UUID, step: TradeStep, user_id: str = Depends(verified_user
 
     return run_trade_step(user_id, trade_id, step, 'cancel', apply,
                           lambda role, row: [row['proposer_id'], row['recipient_id']])
+
+
+def read_trade_settings(conn, user_id: str) -> TradeSettings:
+    """The collector's own trading settings; off for a collector with no profile row yet."""
+    row = conn.execute('SELECT open_to_cash_offers FROM collector_profile WHERE user_id=%s', (user_id,)).fetchone()
+    return TradeSettings(open_to_cash_offers=bool(row and row['open_to_cash_offers']))
+
+
+@settings_router.get('', response_model=TradeSettings)
+def get_trade_settings(user_id: str = Depends(verified_user)):
+    """The caller's own trading settings. Writes nothing and makes no owner row."""
+    with connect() as conn, conn.transaction():
+        return read_trade_settings(conn, user_id)
+
+
+@settings_router.put('', response_model=TradeSettings)
+def set_trade_settings(command: SetTradeSettings, user_id: str = Depends(verified_user)):
+    """Turns Open to cash offers on or off for the caller only (Trading #277). Idempotent by value: no key, no revision,
+    the last write wins. Moves no inventory revision and counts against no limit."""
+    with connect() as conn, conn.transaction():
+        ensure_owner(conn, user_id)
+        update = 'UPDATE collector_profile SET open_to_cash_offers=%s WHERE user_id=%s'
+        if conn.execute(update, (command.open_to_cash_offers, user_id)).rowcount == 0:
+            conn.execute('SELECT create_collector_profile(%s)', (user_id,))
+            conn.execute(update, (command.open_to_cash_offers, user_id))
+        return read_trade_settings(conn, user_id)

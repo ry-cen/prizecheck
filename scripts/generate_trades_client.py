@@ -1,6 +1,7 @@
 """Generate the Trades client module (trading #269: the collector's own Trade List; #270: sending a Trade Proposal;
 #271: accepting one; #272: each side's own view, Use suggested picks and Confirm swap; #275: ``/api/trade-wants``, the
-collector's own Trade Wants and Will accept choices; later Trading tickets add the rest of ``/api/trades``) from the API
+collector's own Trade Wants and Will accept choices; #277: cash on a send, and the value route; later Trading tickets
+add the rest of ``/api/trades``) from the API
 OpenAPI schema. Shared Trade facts under ``/api/social`` stay in the social client (scripts/generate_social_client.py),
 which this module imports its ``TradeStep`` and ``TradeView`` from."""
 import sys
@@ -29,8 +30,10 @@ schema = app.openapi()["components"]["schemas"]
 lines = ["// Generated from FastAPI OpenAPI by scripts/generate_trades_client.py. Do not edit.",
          'import type { TradeStep, TradeView } from "./social_generated";']
 for name in ("TradeListPlace", "TradeListLocation", "TradeListCard", "OwnTradeList", "TradeLineRequest",
-             "SendTradeProposal", "TradePickPlace", "OwnTradeSide", "ConfirmSwap", "TradeWantLine", "WillAcceptChoice",
-             "TradeWants", "SetTradeWant", "SetWillAccept"):
+             "TradeCashRequest", "SendTradeProposal", "TradePickPlace", "OwnTradeSide", "ConfirmSwap", "TradeWantLine",
+             "WillAcceptChoice",
+             "TradeWants", "SetTradeWant", "SetWillAccept",
+             "TradeValueLine", "TradeValueRequest", "SideValue", "TradeValue"):
     definition = schema[name]
     fields = [f"{field}{'' if field in definition.get('required', []) else '?'}: {ts_type(value)}"
               for field, value in definition["properties"].items()]
@@ -79,6 +82,10 @@ export const setTradeWant = (editionId: string, body: SetTradeWant) =>
 // Set what trades will accept for one card ('edition' is this exact card), idempotent by value; answers the whole list.
 export const setWillAccept = (editionId: string, body: SetWillAccept) =>
   request<TradeWants>(`/api/trade-wants/will-accept/${encodeURIComponent(editionId)}`, 'PUT', body);
+// Each side's estimated total for a proposal being built or reviewed (#277): a budgeted price access, never a
+// suggested amount. Cash is not part of it.
+export const getTradeValue = (body: TradeValueRequest, signal?: AbortSignal) =>
+  request<TradeValue>('/api/trades/value', 'POST', body, signal);
 """)
 content = "\n".join(lines)
 target = root / "web/src/trades_generated.ts"

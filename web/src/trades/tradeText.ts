@@ -24,6 +24,27 @@ export function sideCopies(cards: readonly { copies: string }[]): number {
   return cards.reduce((total, card) => total + Number(card.copies), 0);
 }
 
+/** Whole US cents as dollars: "1500" is "$15.00", "99999999" is "$999,999.99". Integer arithmetic only. */
+export function formatCents(cents: string): string {
+  const n = Number(cents);
+  const dollars = Math.floor(n / 100).toLocaleString("en-US");
+  return `$${dollars}.${String(n % 100).padStart(2, "0")}`;
+}
+
+/** The cash line of a Trade from the reader's side: "You pay Ash K $15.00" or "Ash K pays you $15.00". */
+export function tradeCashText(
+  cash: { cents: string; payer: "you" | "them" },
+  name: string
+): string {
+  const money = formatCents(cash.cents);
+  return cash.payer === "you"
+    ? `You pay ${name} ${money}`
+    : `${name} pays you ${money}`;
+}
+
+/** The refusal for an amount the server won't take (and the local check's message). */
+export const INVALID_CASH_TEXT = "Enter an amount from $0.01 to $999,999.99.";
+
 /**
  * The plain-language headline from the reader's side (prototype verdict variant A): "Ash K. sent you a Trade
  * Proposal", "Waiting for Ash K. to answer", "You withdrew this Trade Proposal". It names no Location, Deck or reason.
@@ -35,6 +56,10 @@ export function tradeHeadline(trade: TradeView): string {
     case "proposed":
       if (trade.role === "proposer") return `Waiting for ${n} to answer`;
       if (trade.countered_from) return `${n} countered your Trade Proposal`;
+      if (trade.you_get.length === 0 && trade.cash?.payer === "them")
+        return `${n} would pay ${formatCents(trade.cash.cents)} for ${cardCount(sideCopies(trade.you_give))}`;
+      if (trade.you_give.length === 0 && trade.cash?.payer === "you")
+        return `${n} would sell you ${cardCount(sideCopies(trade.you_get))} for ${formatCents(trade.cash.cents)}`;
       if (trade.you_give.length === 0)
         return `${n} wants to give you ${cardCount(sideCopies(trade.you_get))}`;
       return `${n} sent you a Trade Proposal`;
@@ -203,7 +228,7 @@ export function tradeUpdateText(update: InboxTradeUpdate): string {
   }
 }
 
-/** "You give 2 cards · You get nothing". */
+/** "You give 2 cards · You get nothing", then " · Misty W pays you $15.00" when the Trade has cash. */
 export function tradeSubline(trade: TradeView): string {
   const give = trade.you_give.length
     ? cardCount(sideCopies(trade.you_give))
@@ -211,7 +236,10 @@ export function tradeSubline(trade: TradeView): string {
   const get = trade.you_get.length
     ? cardCount(sideCopies(trade.you_get))
     : "nothing";
-  return `You give ${give} · You get ${get}`;
+  const cash = trade.cash
+    ? ` · ${tradeCashText(trade.cash, trade.other.display_name)}`
+    : "";
+  return `You give ${give} · You get ${get}${cash}`;
 }
 
 /** Whether a failed Trade request's outcome is unknown (no answer, or a server error): retry it with the same key. */
@@ -238,7 +266,7 @@ type NamedLine = {
 
 /**
  * What a Trade Proposal that couldn't be sent says (prototype "Proposed wording" where it has one). `friend` is the
- * Friend's Display Name; `give` and `get` are the draft's lines, to name the card a refusal is about.
+ * Friend's Display Name; `give` and `get` are the proposal's lines, to name the card a refusal is about.
  */
 export function sendTradeMessage(
   cause: unknown,
@@ -275,6 +303,12 @@ export function sendTradeMessage(
       return "Add at least one card to either side.";
     case "TOO_MANY_LINES":
       return "A Trade Proposal can list up to 50 cards on each side. Remove some, then send again.";
+    case "INVALID_CASH":
+      return INVALID_CASH_TEXT;
+    case "CASH_ONLY_NOT_OPEN":
+      return error.detail.side === "you_get"
+        ? `${friend} isn't open to cash offers, so ${friend} can't give only cash. Add a card from ${friend}'s Trade List, or remove the cash.`
+        : `${friend} isn't open to cash offers, so you can't give only cash. Add a card from your Trade List, or remove the cash.`;
     case "NOT_FRIENDS":
       return `${friend} isn't one of your Friends anymore.`;
     case "TOO_MANY_CHANGES":

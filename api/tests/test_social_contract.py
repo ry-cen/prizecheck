@@ -322,6 +322,9 @@ def test_every_social_route_answers_success_with_a_schema_the_walk_reads():
                   'POST /api/social/trades/{trade_id}/cancel'):
         trade = {field for _, field, _ in routes[route]}
         assert {'you_give', 'you_get', 'other', 'copies', 'descriptor', 'open_to_cash_offers'} <= trade, (route, trade)
+    # Open to cash offers (trading #277): one setting, read and set by value.
+    for route in ('GET /api/social/trade-settings', 'PUT /api/social/trade-settings'):
+        assert {field for _, field, _ in routes[route]} == {'open_to_cash_offers'}, route
 
 
 def test_each_sides_own_trade_reads_and_inventory_steps_stay_outside_the_social_area():

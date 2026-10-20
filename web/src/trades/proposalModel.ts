@@ -1,4 +1,5 @@
 import type { TradeMatchCard } from "../social_generated";
+import type { TradeValueLine } from "../trades_generated";
 
 /** A card on a proposal: the facts a line and its tile show, and the copies the library offered when it was added. */
 export type ProposalCard = {
@@ -99,6 +100,52 @@ export function requestLines(
     edition_id: line.edition_id,
     quantity: String(line.quantity),
   }));
+}
+
+/** Who pays the cash on a proposal, relative to the collector building it: "none" is no cash. */
+export type CashPayer = "none" | "you" | "them";
+
+/** The cash fields as typed: a payer and a dollar amount (text, parsed to cents at send). */
+export type CashDraft = { payer: CashPayer; amount: string };
+
+export const NO_CASH: CashDraft = { payer: "none", amount: "" };
+
+/**
+ * A typed dollar amount as whole cents in the API's decimal string ("15" is "1500", "$1,234.5" is "123450"), or null
+ * for anything that isn't dollars and cents from $0.01 to $999,999.99. String and integer arithmetic only, so no
+ * floating-point rounding can move a cent.
+ */
+export function parseCents(text: string): string | null {
+  const cleaned = text.replace(/\s/g, "").replace(/^\$/, "");
+  const match =
+    /^(\d{1,6}|\d{1,3}(?:,\d{3})+)(?:\.(\d{0,2}))?$/.exec(cleaned) ??
+    /^()\.(\d{1,2})$/.exec(cleaned);
+  if (!match) return null;
+  const cents =
+    Number(match[1].replace(/,/g, "")) * 100 +
+    Number((match[2] ?? "").padEnd(2, "0"));
+  return cents >= 1 && cents <= 99_999_999 ? String(cents) : null;
+}
+
+type ValueCard = { edition_id: string; quantity: number | string };
+
+/** The lines of both sides as the value request writes them: You give first, then You get. */
+export function valueLines(
+  give: readonly ValueCard[],
+  get: readonly ValueCard[]
+): TradeValueLine[] {
+  return [
+    ...give.map((line) => ({
+      side: "you_give" as const,
+      edition_id: line.edition_id,
+      quantity: String(line.quantity),
+    })),
+    ...get.map((line) => ({
+      side: "you_get" as const,
+      edition_id: line.edition_id,
+      quantity: String(line.quantity),
+    })),
+  ];
 }
 
 /** The letters and digits of a name or query, as the server's search compares them (accents, apostrophes, periods,
