@@ -284,9 +284,13 @@ export function updateText(update: InboxUpdate): string {
 /**
  * How many of the collector's Loans with this collector Remove Friend or Block would cancel (#260): the Borrow
  * Requests, Lend Offers and accepted Loans, either way round, that nobody has confirmed a handover for. The same rule
- * as the API's `end_loans_between`, over the Loans tab's read, which lists every open Loan.
+ * as the API's `end_loans_between`, over the Loans tab's read, which lists every open Loan. The question's wording,
+ * with the Trades it cancels too, is `social/friendshipEnding`'s (Trading #274).
  */
-export function loansEnding(loans: LoanView[], collectorId: string): number {
+export function loansEnding(
+  loans: readonly LoanView[],
+  collectorId: string
+): number {
   return loans.filter(
     (loan) =>
       loan.other.collector_id === collectorId &&
@@ -296,14 +300,6 @@ export function loansEnding(loans: LoanView[], collectorId: string): number {
       !loan.you_confirmed_handover &&
       !loan.they_confirmed_handover
   ).length;
-}
-
-/** "This cancels 2 open Loans that haven't been handed over.", for Remove Friend's and Block's question; "" for 0. */
-export function endingText(count: number): string {
-  if (count <= 0) return "";
-  return count === 1
-    ? "This cancels 1 open Loan that hasn't been handed over."
-    : `This cancels ${count} open Loans that haven't been handed over.`;
 }
 
 /** "PAL 185 · Reverse Holo": a Loan line's or draft line's Edition, as the Want List writes it. */
