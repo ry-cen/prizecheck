@@ -31,6 +31,8 @@ type Props = Omit<
   /** Copies queued to add (Catalog's Add mode, #175): above 0 the art is outlined, as a selected CopyTile's is, and
    * the label and title say "N to add". */
   queued?: number;
+  /** Words read first in the name and title, such as "Add to You get" in the proposal builder's library. */
+  action?: string;
 };
 
 // A queued tile's outline: a dark gap, then an accent ring around the art (CopyTile's selected ring). Its focus ring
@@ -64,11 +66,13 @@ export function EditionTile({
   price,
   priceId,
   queued = 0,
+  action,
   className,
   ...button
 }: Props) {
   const ownership = ownedText ?? (owned > 0 ? `${owned} owned` : "not owned");
   const facts = [
+    ...(action ? [action] : []),
     name,
     `${setCode} ${collectorNumber}`,
     setName,
@@ -94,8 +98,8 @@ export function EditionTile({
           </span>
         )}
         {flag && (
-          <span className="pointer-events-none absolute left-1 top-1 box-border flex h-5 min-w-5 items-center justify-center rounded-round border border-solid border-control-outline bg-surface-raised px-1 text-caption font-semibold leading-none text-text">
-            {flag.text}
+          <span className="pointer-events-none absolute left-1 top-1 box-border flex h-5 min-w-5 max-w-[calc(100%-0.5rem)] items-center justify-start overflow-hidden whitespace-nowrap rounded-round border border-solid border-control-outline bg-surface-raised px-1 text-caption font-semibold leading-none text-text">
+            <span className="min-w-0 truncate">{flag.text}</span>
           </span>
         )}
       </span>

@@ -37,17 +37,13 @@ import { clearFailureFromAddress, failureInAddress } from "./signInMessages";
 import { CollectionImportPage } from "./collectionImport/CollectionImportPage";
 import { COLLECTION_IMPORT_PATH } from "./collectionImport/route";
 import { forgetBorrowDrafts } from "./loans/BorrowDrafts";
-import { forgetTradeDraft } from "./trades/TradeDraft";
+import { OpenProposalProvider } from "./trades/openProposal";
 import { LoansPage } from "./loans/LoansPage";
 import { loanPath } from "./loans/loanText";
 import { FriendCollectionPage } from "./social/FriendCollectionPage";
 import { friendCollectionPath, friendHandleAt } from "./social/friendCards";
 import { FriendTradeListPage } from "./trades/FriendTradeListPage";
-import {
-  friendTradeListHandleAt,
-  TRADE_DRAFT_PATH,
-  tradePath,
-} from "./trades/tradeListModel";
+import { friendTradeListHandleAt, tradePath } from "./trades/tradeListModel";
 import { TradesPage } from "./trades/TradesPage";
 import { workspaceHref } from "./workspace/workspaceLink";
 import "./tokens.css";
@@ -216,13 +212,12 @@ function App() {
     } catch {
       return false;
     }
-    // Borrow Request drafts (#252) and the Trade Proposal draft (Trading #270) are the account's: none stay in this
-    // tab for whoever signs in next.
+    // Borrow Request drafts (#252) are the account's: none stay in this tab for whoever signs in next.
     forgetBorrowDrafts();
-    forgetTradeDraft();
     setSession({ signedIn: false, userId: null });
     setOwnerCatalog(null);
-    navigate(DEFAULT_PATH, { replace: true });
+    // An unsent proposal is lost with the session: sign-out never asks.
+    navigate(DEFAULT_PATH, { replace: true, force: true });
     return true;
   }
 
@@ -357,8 +352,8 @@ function App() {
           />
         );
       case "trades":
-        // /trades is the Trades list, /trades/list My Trade List (Trading #269), /trades/draft the Trade Proposal draft
-        // and /trades/<id> one Trade (#270).
+        // /trades is the Trades list, /trades/list My Trade List (Trading #269), /trades/new/<Handle> the proposal
+        // builder for that Friend (#284) and /trades/<id> one Trade (#270).
         return <TradesPage section={sectionAt(path)} onNavigate={navigate} />;
       case "reports":
         return <MissingCardsPage active={active} message={message} />;
@@ -378,68 +373,67 @@ function App() {
     }
   }
   return (
-    <Shell
-      page={page}
-      email={accountEmail}
-      name={session?.name ?? null}
-      image={avatarImage(session?.image)}
-      owner={ownerCatalog !== null}
-      userId={userId}
-      onOpenLoan={(id) => {
-        if (loanPath(id) !== path) navigate(loanPath(id));
-      }}
-      onOpenTrade={(id) => {
-        if (tradePath(id) !== path) navigate(tradePath(id));
-      }}
-      onNavigate={(next) => {
-        if (pageDef(next).path !== path) navigate(pageDef(next).path);
-      }}
-      onOpenFriend={(handle) => {
-        if (friendCollectionPath(handle) !== path)
-          navigate(friendCollectionPath(handle));
-      }}
-      onOpenTradeDraft={() => {
-        if (path !== TRADE_DRAFT_PATH) navigate(TRADE_DRAFT_PATH);
-      }}
-      onSignOut={signOut}
-      scrollFor={scrollFor}
-      renderPage={renderPage}
-      other={
-        publicPage
-          ? {
-              key: path,
-              label: publicPageLabel(publicPage),
-              content: (
-                <PublicPageView page={publicPage} signedIn onNavigate={go} />
-              ),
-            }
-          : friendHandle !== null
+    <OpenProposalProvider onNavigate={go}>
+      <Shell
+        page={page}
+        email={accountEmail}
+        name={session?.name ?? null}
+        image={avatarImage(session?.image)}
+        owner={ownerCatalog !== null}
+        userId={userId}
+        onOpenLoan={(id) => {
+          if (loanPath(id) !== path) navigate(loanPath(id));
+        }}
+        onOpenTrade={(id) => {
+          if (tradePath(id) !== path) navigate(tradePath(id));
+        }}
+        onNavigate={(next) => {
+          if (pageDef(next).path !== path) navigate(pageDef(next).path);
+        }}
+        onOpenFriend={(handle) => {
+          if (friendCollectionPath(handle) !== path)
+            navigate(friendCollectionPath(handle));
+        }}
+        onSignOut={signOut}
+        scrollFor={scrollFor}
+        renderPage={renderPage}
+        other={
+          publicPage
             ? {
                 key: path,
-                label: "Friend's Collection",
+                label: publicPageLabel(publicPage),
                 content: (
-                  <FriendCollectionPage
-                    key={friendHandle}
-                    handle={friendHandle}
-                    onNavigate={go}
-                  />
+                  <PublicPageView page={publicPage} signedIn onNavigate={go} />
                 ),
               }
-            : friendTradeHandle !== null
+            : friendHandle !== null
               ? {
                   key: path,
-                  label: "Friend's Trade List",
+                  label: "Friend's Collection",
                   content: (
-                    <FriendTradeListPage
-                      key={friendTradeHandle}
-                      handle={friendTradeHandle}
+                    <FriendCollectionPage
+                      key={friendHandle}
+                      handle={friendHandle}
                       onNavigate={go}
                     />
                   ),
                 }
-              : null
-      }
-    />
+              : friendTradeHandle !== null
+                ? {
+                    key: path,
+                    label: "Friend's Trade List",
+                    content: (
+                      <FriendTradeListPage
+                        key={friendTradeHandle}
+                        handle={friendTradeHandle}
+                        onNavigate={go}
+                      />
+                    ),
+                  }
+                : null
+        }
+      />
+    </OpenProposalProvider>
   );
 }
 

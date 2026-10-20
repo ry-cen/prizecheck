@@ -27,8 +27,8 @@ export const TRADE_FIND_PATH = "/trades/find";
 /** My Trade List's address. */
 export const TRADE_LIST_PATH = "/trades/list";
 
-/** The Trade Proposal draft's address (#270). */
-export const TRADE_DRAFT_PATH = "/trades/draft";
+/** The section name before a Friend's Handle in a proposal builder's address. */
+export const TRADE_NEW_SEGMENT = "new";
 
 /** The address of one of the Trades tab's views. */
 export function tradesViewPath(view: TradesTabView): string {
@@ -47,10 +47,16 @@ export function tradePath(id: string): string {
   return `${TRADES_PATH}/${encodeURIComponent(id)}`;
 }
 
-/** What the Trades tab shows for its address's section (``sectionAt``): a view, the draft, or one Trade by id. */
+/** A Friend's proposal builder (Trading #284): /trades/new/<Handle>. */
+export function proposalPath(handle: string): string {
+  return `${TRADES_PATH}/${TRADE_NEW_SEGMENT}/${encodeURIComponent(handle)}`;
+}
+
+/** What the Trades tab shows for its address's section (``sectionAt``): a view, a Friend's proposal builder, or one
+ * Trade by id. */
 export type TradesRoute =
   | { kind: "view"; view: TradesTabView }
-  | { kind: "draft" }
+  | { kind: "new"; handle: string }
   | { kind: "trade"; id: string }
   | { kind: "missing" };
 
@@ -60,7 +66,16 @@ export function tradesRoute(section: string | null): TradesRoute {
   if (section === null) return { kind: "view", view: "trades" };
   if (section === "find") return { kind: "view", view: "find" };
   if (section === "list") return { kind: "view", view: "list" };
-  if (section === "draft") return { kind: "draft" };
+  if (section.startsWith(`${TRADE_NEW_SEGMENT}/`)) {
+    try {
+      return {
+        kind: "new",
+        handle: decodeURIComponent(section.slice(TRADE_NEW_SEGMENT.length + 1)),
+      };
+    } catch {
+      return { kind: "missing" };
+    }
+  }
   let id = section;
   try {
     id = decodeURIComponent(section);

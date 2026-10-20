@@ -5,22 +5,22 @@ import {
 } from "../social_generated";
 import { Pill } from "../ui/Pill";
 import { variantLabel } from "../ui/variantLabel";
-import { DraftControl, useTradeDraft } from "./TradeDraft";
+import { Button } from "../ui/Button";
+import { useOpenProposal } from "./openProposal";
+import { tradeCardName } from "./tradeText";
 
 /**
  * Ask to trade in Catalog's card popup (Trading #276, spec stories 58 to 62): the Friends with a copy of the Card
  * Printing on their Trade List, each Edition with its Variant and how many copies they offer, and **Ask to trade**,
- * which puts the card in the You get side of the Trade Proposal draft to that Friend (a stepper then sets how many,
- * up to the copies offered). Several asks to one Friend build one draft; an ask to another Friend asks to discard the
- * open draft first (one draft at a time). A card on the draft's You give side can't be asked for too. Nothing shows
- * while it loads, when it fails, outside the signed-in shell, or when no Friend offers the card: Ask to trade appears
- * only for Friends with a copy on offer. It never names a Location or a Deck.
+ * which opens the proposal builder for that Friend with one copy of the card in You get (Trading #284); the popup
+ * closes as the page changes. Nothing shows while it loads, when it fails, outside the signed-in shell, or when no
+ * Friend offers the card: Ask to trade appears only for Friends with a copy on offer. It never names a Location or a Deck.
  */
 export function AskToTrade({ printingId }: { printingId: string }) {
   const headingId = useId();
-  const drafts = useTradeDraft();
-  // Outside the signed-in shell there is no draft, so nothing is read. The draft changes on every ask; the read doesn't.
-  const signedIn = drafts !== null;
+  const open = useOpenProposal();
+  // Outside the signed-in shell there is no way to open a builder, so nothing is read.
+  const signedIn = open !== null;
   const [answer, setAnswer] = useState<{
     printingId: string;
     matches: TradeCardMatches;
@@ -40,7 +40,7 @@ export function AskToTrade({ printingId }: { printingId: string }) {
     return () => controller.abort();
   }, [printingId, signedIn]);
 
-  if (!drafts || !answer || answer.printingId !== printingId) return null;
+  if (!open || !answer || answer.printingId !== printingId) return null;
   const { offers } = answer.matches;
   if (offers.length === 0) return null;
   return (
@@ -56,11 +56,6 @@ export function AskToTrade({ printingId }: { printingId: string }) {
         className="m-0 flex list-none flex-col gap-1 p-0"
       >
         {offers.map((offer) => {
-          const friend = {
-            collector_id: offer.collector_id,
-            display_name: offer.display_name,
-            handle: offer.handle,
-          };
           return (
             <li
               key={`${offer.collector_id}:${offer.edition_id}`}
@@ -76,32 +71,12 @@ export function AskToTrade({ printingId }: { printingId: string }) {
                 <Pill>{variantLabel(offer.descriptor)}</Pill>
                 <Pill>×{offer.copies}</Pill>
               </span>
-              <DraftControl
-                ask
-                card={offer}
-                friend={friend}
-                inDraft={drafts.quantity(
-                  offer.collector_id,
-                  "get",
-                  offer.edition_id
-                )}
-                onOtherSide={
-                  drafts.quantity(
-                    offer.collector_id,
-                    "give",
-                    offer.edition_id
-                  ) > 0
-                }
-                onSet={(quantity) =>
-                  drafts.set(
-                    friend,
-                    "get",
-                    offer,
-                    quantity,
-                    Number(offer.copies)
-                  )
-                }
-              />
+              <Button
+                aria-label={`Ask ${offer.display_name} to trade ${tradeCardName(offer)}`}
+                onClick={() => open(offer.handle, offer)}
+              >
+                Ask to trade
+              </Button>
             </li>
           );
         })}

@@ -3,7 +3,7 @@ import { PageHeader } from "../shell/PageHeader";
 import { Segmented, segmentId } from "../ui/Segmented";
 import { FindTrades } from "./FindTrades";
 import { MyTradeList } from "./MyTradeList";
-import { TradeDraftPage } from "./TradeDraftPage";
+import { ProposalBuilderPage } from "./ProposalBuilderPage";
 import { TradeScreen } from "./TradeScreen";
 import { TradesList } from "./TradesList";
 import {
@@ -15,7 +15,7 @@ import {
 } from "./tradeListModel";
 
 type Props = {
-  /** The section the address names (``sectionAt``): null for /trades, "find", "list", "draft", or a Trade id. */
+  /** The section the address names (``sectionAt``): null for /trades, "find", "list", "new/<Handle>", or a Trade id. */
   section: string | null;
   /** Goes to another address in the app. */
   onNavigate: (to: string) => void;
@@ -25,13 +25,21 @@ type Props = {
  * The Trades tab (Trading #269, #270 and #276, prototype verdict variant A): the page header and the switch over the
  * tab's views, `Trades · Find trades · My Trade List`: the Trades list (/trades), Find trades (/trades/find) and My
  * Trade List (/trades/list). The switch stays mounted across the views' addresses, as the Decks page's does.
- * The Trade Proposal draft (/trades/draft) and one Trade (/trades/<id>) are pages of their own under the tab.
+ * A Friend's proposal builder (/trades/new/<Handle>, #284) and one Trade (/trades/<id>) are pages of their own under
+ * the tab.
  */
 export function TradesPage({ section, onNavigate }: Props) {
   const idBase = useId();
   const panelId = `${idBase}-panel`;
   const route = tradesRoute(section);
-  if (route.kind === "draft") return <TradeDraftPage onNavigate={onNavigate} />;
+  if (route.kind === "new")
+    return (
+      <ProposalBuilderPage
+        key={route.handle.toLowerCase()}
+        handle={route.handle}
+        onNavigate={onNavigate}
+      />
+    );
   if (route.kind === "trade" || route.kind === "missing")
     return (
       <TradeScreen
