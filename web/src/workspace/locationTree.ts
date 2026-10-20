@@ -112,10 +112,9 @@ export function forTradeLabel(forTrade: ForTrade): string {
   return "";
 }
 
-/** What a Location that is both hidden from Friends and For trade says on My Trade List
- * (Trading #269, the prototype's wording), so the collector knows its cards are still offered. */
-export const HIDDEN_AND_FOR_TRADE =
-  "Hidden from Friends · still on your Trade List";
+/** What a hidden Location's panel says on My Trade List (owner, 2026-10-20): being on the page already says its
+ * cards are still offered. */
+export const HIDDEN_ON_TRADE_LIST = "Hidden from Friends";
 
 /** The line a Location that is both hidden from Friends and For trade shows in Manage locations, where its caption
  * already says it is hidden (owner, 2026-10-20). Empty otherwise. */
