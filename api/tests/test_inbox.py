@@ -41,7 +41,7 @@ from test_moves import commit, selected, stage, start
 from test_return_by import answer, ask, backdate, change, day, requested, seen
 from test_returns import confirm_return, leave, lent_loan, start_return
 from test_trade_migrations import PREVIOUS_INBOX_EVENTS
-from test_trade_swap import confirm, use_suggested as use_suggested_picks
+from test_trade_swap import confirm, picks, use_suggested as use_suggested_picks
 from test_trades import accept_trade, move_one, proposed, read, row_of, trade_step, trading
 from test_write_off import choose, write_off
 
@@ -445,6 +445,7 @@ def test_trades_wait_on_the_side_whose_step_it_is_one_line_each(store):
     hold(misty, binder, iono, 2)
     waiting_ = proposed(misty, ash, give=[(iono, 2)])
     move_one(misty, binder, iono, shelf)
+    assert [short for _, _, short in picks(misty, waiting_)] == ['1']
     assert trade_lines(misty) == [] and trade_lines(ash) == [(waiting_['id'], 'answer')]
 
 
