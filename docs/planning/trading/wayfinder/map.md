@@ -47,6 +47,9 @@ A handoff-ready spec at `docs/planning/trading/spec.md` for trading cards, built
 - Reaching a Friend's Trade List (owner, 2026-10-20): from the link on that Friend's Collection page, and from Find trades once it exists. The Friends drawer gets no Trade List link; it stays about managing Friends, and the link can be added later if collectors look for it there. The Open to cash offers switch ships with the cash ticket ([#277](https://github.com/ry-cen/prizecheck/issues/277)), since its setting arrives with proposals ([#270](https://github.com/ry-cen/prizecheck/issues/270)).
 - Confirmations (owner, 2026-10-20): withdrawing, declining and cancelling a Trade each ask first, as Loans do; accepting does not.
 - Draft bar (owner, 2026-10-20): the open draft shows as a bar fixed to the bottom of the screen with Review, like the Borrow tray, hidden while the draft is empty; the header has no room for the prototype's pill.
+- Will accept wording (owner, 2026-10-20, #275): the three choices read "This exact card", "Any finish" and "Any card with the same name"; the card's name is already on the line, so the label stays the same length everywhere.
+- Header at 761 px (owner, 2026-10-20, #273): the tabs use tighter padding at that width so both badges show full counts, rather than capping them at "9+".
+- Ending a friendship with a confirmed Trade (owner, 2026-10-20, #274): the Remove Friend and Block questions keep the sentence that names Trades one side has confirmed, which stay open so they can finish.
 - Inbox order (plumbing, 2026-10-20, #273): the drawer shows Trade lines before Loan lines, as in the prototype, rather than merging the two by time as the [plumbing resolution](resolutions/decide-trading-plumbing.md) first said: Loan lines are ordered by when they were made, not by when they started waiting, so a merge by time is not well defined. Earlier updates still merge by time.
 
 ## Candidate tickets
