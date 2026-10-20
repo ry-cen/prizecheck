@@ -79,7 +79,7 @@ The existing `x-internal-*` identity message is unchanged. Client-supplied `x-in
 
 - `Budget(hard, caller, wait_until=hard-0.5)` with `remaining()`, `wait_remaining()`, `expired()` and `pg_timeout_ms(final=False)`. The timeout is never 0, because PostgreSQL reads 0 as "no timeout". The final phase leaves a 50 ms margin to answer.
 - `trusted_budget(request)` is the FastAPI dependency. It verifies the budget signature against the exact method, path, body hash, caller, milliseconds and time. A route that identifies a user also depends on `verified_user` and checks `budget.caller == f"user:{user_id}"`.
-- `BUDGETED_ROUTES` / `is_budgeted(method, path)` list the budgeted routes. Keep them in step with `BUDGETED_ROUTES` in `auth/src/server.ts`. Today they are `POST /api/prices/editions`, `GET /api/decks/{id}/cost`, `GET /api/public/decks/{token}/versions/{version}/cost` and `GET /api/want-list/cost`.
+- `BUDGETED_ROUTES` / `is_budgeted(method, path)` list the budgeted routes. Keep them in step with `BUDGETED_ROUTES` in `auth/src/server.ts`. Today they are `POST /api/prices/editions`, `GET /api/decks/{id}/cost`, `GET /api/public/decks/{token}/versions/{version}/cost`, `GET /api/want-list/cost` and `POST /api/trades/value`.
 
 Read order in `private_edition_quotes(edition_ids, budget)`:
 
@@ -177,6 +177,14 @@ The answer names `want_list_counting`, `settings_revision`, `owner_revision` and
 `GET /api/want-list/exports/tcgplayer` (`app.want_list_mass_entry`, optional `deck=<id>`) is the TCGplayer Mass Entry export of the same copies: the combined total with no `deck`, that Deck's needs with one. It reuses the private Deck export's rows, formatter and view (`deck_mass_entry.input_rows`, `formatted`, `view_fields`), so the link, text, coverage reason and less-specific rows are the Deck export's, and a scoped export equals that Deck's Buy missing. It names the same four values as the cost. `.../tcgplayer.txt` takes the required pins `owner_revision` (409 `INVENTORY_CHANGED`), `deck_lists` (the digest, 409 `DECK_LIST_CHANGED`) and `settings_revision` (409 `SETTINGS_CHANGED`), and answers 422 `NOTHING_NOT_OWNED` when nothing is needed. Neither export route reads a price or carries a budget, so a download is never cut at three seconds.
 
 The Decks index's "Want List: N cards · $X" is each row's existing cost read (`cost_to_complete`, the same allocation): the index reads no Want List price.
+
+## Trade value (trading #277)
+
+`POST /api/trades/value` (`app.trade_value`) estimates each side of a Trade Proposal while it is built in the proposal builder, and of a received proposal still waiting for an answer. The body is `{lines: [{side: 'you_give'|'you_get', edition_id, quantity}]}`, read as a declared request model with extra fields refused (so cash can never be sent to it). It is budgeted like Deck cost (same gateway signing, same three seconds from receipt), and the caller check and `trusted_budget` answer 401 before the body is validated or any price is read. The gateway's 16 KiB budgeted-body limit bounds the size.
+
+Refusals, in order: 422 `INVALID_QUANTITY`, 422 `DUPLICATE_EDITION` for a repeat on one side, 422 `TOO_MANY_LINES` for more than 100 lines in all. One Edition on both sides is allowed and read once: a single `private_edition_quotes` call covers every distinct Edition, and each side is folded with `deck_cost.summarize`.
+
+Each side answers only `status` (`priced`, `empty`, `no_quotes`, `incomplete`), `display_total` (for `priced` and `empty`), `priced_copies` (null only for `incomplete`) and `total_copies`. A partial estimate is `priced` with `priced_copies` below `total_copies`; `incomplete` means the read failed. No provider, check time, refresh state, reason or exact amount is returned, and nothing compares or subtracts the two sides.
 
 ## Published Deck cost (ticket 12)
 

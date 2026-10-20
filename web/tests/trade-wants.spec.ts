@@ -405,6 +405,74 @@ test.describe("on a desktop", () => {
     ).toHaveCount(3);
     await expect(more).toHaveCount(0);
   });
+
+  test("a Show more page that arrives after the search changed is dropped", async ({
+    page,
+  }) => {
+    seedCatalog();
+    await signIn(page);
+    await page.goto(`${ORIGIN}/decks/want-list`);
+    // Every first page offers Show more; the second page is held until the search has changed, then answers Boss rows.
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => (release = resolve));
+    await page.route(
+      (url) => url.pathname === "/api/catalog/editions",
+      async (route) => {
+        const url = new URL(route.request().url());
+        if (url.searchParams.has("cursor")) {
+          await released;
+          url.searchParams.delete("cursor");
+          url.searchParams.set("q", "Boss");
+          const second = await route.fetch({ url: url.toString() });
+          await route.fulfill({
+            response: second,
+            json: { ...(await second.json()), next_cursor: null },
+          });
+        } else {
+          const first = await route.fetch();
+          await route.fulfill({
+            response: first,
+            json: { ...(await first.json()), next_cursor: "more" },
+          });
+        }
+      }
+    );
+    await panel(page).getByRole("button", { name: "Add a card" }).click();
+    const search = picker(page).getByRole("searchbox", {
+      name: "Search by card name",
+    });
+    await search.fill("Iono");
+    await expect(
+      picker(page).getByRole("list", { name: "Iono" }).getByRole("listitem")
+    ).toHaveCount(3);
+    await picker(page).getByRole("button", { name: "Show more" }).click();
+    await search.fill("Arven");
+    await expect(
+      picker(page).getByRole("list", { name: "Arven" })
+    ).toBeVisible();
+    await expect(picker(page).getByRole("list", { name: "Iono" })).toHaveCount(
+      0
+    );
+    // Release the held page, wait for it to arrive and for a frame to render, then check it was dropped.
+    const stale = page.waitForResponse(
+      (r) =>
+        r.url().includes("/api/catalog/editions") && r.url().includes("cursor=")
+    );
+    release();
+    await stale;
+    await page.evaluate(
+      () => new Promise((resolve) => requestAnimationFrame(() => resolve(null)))
+    );
+    await expect(picker(page).getByRole("list", { name: /^Boss/ })).toHaveCount(
+      0
+    );
+    await expect(
+      picker(page).getByRole("button", { name: "Show more" })
+    ).toBeVisible();
+    await expect(
+      picker(page).getByRole("list", { name: "Arven" })
+    ).toBeVisible();
+  });
 });
 
 test.describe("on a phone", () => {

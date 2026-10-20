@@ -5,7 +5,8 @@ export type TradeListLocation = { id: string; name: string; path: string[]; hidd
 export type TradeListCard = { edition_id: string; name: string; set_code: string; set_name: string; collector_number: string; descriptor: Record<string, unknown>; image_url: string | null; copies: string; places: TradeListPlace[] };
 export type OwnTradeList = { locations: TradeListLocation[]; cards: TradeListCard[] };
 export type TradeLineRequest = { edition_id: string; quantity: string };
-export type SendTradeProposal = { recipient_id: string; you_give?: TradeLineRequest[]; you_get?: TradeLineRequest[]; idempotency_key: string };
+export type TradeCashRequest = { cents: string; payer: "you" | "them" };
+export type SendTradeProposal = { recipient_id: string; you_give?: TradeLineRequest[]; you_get?: TradeLineRequest[]; cash?: TradeCashRequest | null; idempotency_key: string };
 export type TradePickPlace = { edition_id: string; location_id: string | null; name: string; copies: string; short: string };
 export type OwnTradeSide = { trade_id: string; picks: TradePickPlace[]; suggested: TradePickPlace[] };
 export type ConfirmSwap = { revision: number; idempotency_key: string; destination_id?: string | null };
@@ -14,6 +15,10 @@ export type WillAcceptChoice = { edition_id: string; rule: "edition" | "printing
 export type TradeWants = { lines: TradeWantLine[]; will_accept: WillAcceptChoice[] };
 export type SetTradeWant = { quantity: string };
 export type SetWillAccept = { rule: "edition" | "printing" | "identity" };
+export type TradeValueLine = { side: "you_give" | "you_get"; edition_id: string; quantity: string };
+export type TradeValueRequest = { lines: TradeValueLine[] };
+export type SideValue = { status: "priced" | "empty" | "no_quotes" | "incomplete"; display_total: string | null; priced_copies: string | null; total_copies: string };
+export type TradeValue = { you_give: SideValue; you_get: SideValue };
 
 /** A refused Trades request: the API's code, and its detail. */
 export class TradesError extends Error {
@@ -58,3 +63,7 @@ export const setTradeWant = (editionId: string, body: SetTradeWant) =>
 // Set what trades will accept for one card ('edition' is this exact card), idempotent by value; answers the whole list.
 export const setWillAccept = (editionId: string, body: SetWillAccept) =>
   request<TradeWants>(`/api/trade-wants/will-accept/${encodeURIComponent(editionId)}`, 'PUT', body);
+// Each side's estimated total for a proposal being built or reviewed (#277): a budgeted price access, never a
+// suggested amount. Cash is not part of it.
+export const getTradeValue = (body: TradeValueRequest, signal?: AbortSignal) =>
+  request<TradeValue>('/api/trades/value', 'POST', body, signal);

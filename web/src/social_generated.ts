@@ -66,6 +66,8 @@ export type TradeMatchRow = { collector_id: string; handle: string; display_name
 export type TradeMatches = { has_friends: boolean; rows: TradeMatchRow[] };
 export type TradeCardOffer = { collector_id: string; handle: string; display_name: string; edition_id: string; name: string; set_code: string; set_name: string; collector_number: string; descriptor: Record<string, unknown>; image_url: string | null; copies: string };
 export type TradeCardMatches = { has_friends: boolean; offers: TradeCardOffer[] };
+export type TradeSettings = { open_to_cash_offers: boolean };
+export type SetTradeSettings = { open_to_cash_offers: boolean };
 
 /** A refused social request: the API's code, and for TOO_MANY_LOOKUPS the detail that says when to try again. */
 export class SocialError extends Error {
@@ -213,3 +215,8 @@ export const getTradeMatch = (collectorId: string, signal?: AbortSignal) =>
 export const getTradeCardMatches = (printingId: string, signal?: AbortSignal) =>
   request<TradeCardMatches>(`/api/social/trade-card-matches${query({ printing_id: printingId })}`, 'GET', undefined,
     signal);
+// Your own Open to cash offers setting (trading #277): off until you turn it on; set by value, idempotent.
+export const getTradeSettings = (signal?: AbortSignal) =>
+  request<TradeSettings>('/api/social/trade-settings', 'GET', undefined, signal);
+export const setTradeSettings = (body: SetTradeSettings) =>
+  request<TradeSettings>('/api/social/trade-settings', 'PUT', body);
