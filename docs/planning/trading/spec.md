@@ -24,9 +24,11 @@ Add Trades to the `social` area of the API and the web app, on top of Friends, L
 
 **What a collector wants.** The Want List counts automatically. Beside it, **Trade Wants** is a short hand-edited list of exact Card Editions for cards no Deck names. Each Want List card also has a **Will accept** choice for trades: this exact card (the default), any finish of the same Card Printing, or any card with the same name. Discovery marks each want as coming from a Deck or from the collector's own list, and never names a Deck. A collector's own spare copies of a card their Will accept choice takes do not reduce the need shown in discovery until the Deck line is switched to that card, which the Want List's Swap hint offers for copies already owned and Confirm swap offers for copies just received.
 
-**Finding matches.** A discovery page shows one row per Friend: two-way matches first, then Friends who have what the viewer wants, then Friends who want what the viewer has. A row shows only the matched cards on each side and a badge when the Friend is **Open to cash offers**, and shows no values. **Propose trade** opens an empty draft with the matched cards listed as suggestions at the top, each added with one tap. The catalog card popup gains **Ask to trade**.
+**Finding matches.** A discovery page shows one row per Friend: two-way matches first, then Friends who have what the viewer wants, then Friends who want what the viewer has. A row shows only the matched cards on each side and a badge when the Friend is **Open to cash offers**, and shows no values. **Propose trade** opens the proposal builder for that Friend with an empty proposal, so a proposal never starts as every matched card for every matched card. The catalog card popup gains **Ask to trade**, which opens that screen for a Friend who lists the card with one copy of it already on the get side.
 
 **Trade Proposals.** A proposal lists the cards each side gives and an optional US-dollar amount paid by one side. The sender's copies are promised the moment it is sent. The other side can Accept, Decline or Counter, always as a whole. Counter closes the proposal and opens a reply prefilled with the same cards, which either side can edit. Accepting promises the recipient's copies and makes it a Trade. While building or reviewing a proposal, each side shows its estimated total, and there is no suggested cash amount.
+
+**Building a proposal.** Each proposal is built in its own proposal builder for one Friend (not the Trade screen, which shows a proposal already sent or a Trade), with no draft kept while the collector browses. Proposals are quick and usually hold a few cards. Beside the proposal is a card library with a switch between that Friend's Trade List (cards to ask for) and the collector's own Trade List (cards to give); the get side may hold only the Friend's Trade List and the give side only the collector's own. Both lists have search, and each card shows the copies available and a mark when it matches a want. The library lists the cards that match that Friend first, then the rest of the list. Matches are never added by themselves. One tap on a card adds one copy, and the proposal's quantity control raises it. Leaving the screen after adding cards without sending asks whether to discard the proposal; discarding removes it for good, and nothing is asked when no card was added.
 
 **Cash.** A proposal may carry cash from either side, and a Trade may have cards on one side and only cash on the other, so it can be a sale. A side may also give nothing at all, so a proposal can be a gift; only a proposal with no cards on either side is refused. The app records the agreed amount but never processes, holds or verifies money, and the Trade screen shows a notice saying so. A collector who has not turned on Open to cash offers cannot be sent a proposal in which one side gives only cash.
 
@@ -100,7 +102,7 @@ The design rests on a few rules, recorded in [ADR 0015](../../adr/0015-trades-sh
 45. As a collector, I want a Friend's row to show a badge when they are Open to cash offers, so that I know they can be sent a cash-only proposal.
 46. As a collector, I want discovery rows to show no prices or values, so that matching stays about cards.
 47. As a collector, I want a row to show at most 20 cards per side with a count of the rest, and to open a Friend's full lists on request, so that a large match stays readable.
-48. As a collector, I want to browse a Friend's whole Trade List, so that I can add cards beyond the matches to a draft.
+48. As a collector, I want to browse a Friend's whole Trade List, so that I can add cards beyond the matches to a proposal.
 49. As a collector, I want browsing a Friend's Trade List to be by Card Identity with a search box, so that I can find one card in a long list.
 50. As a collector, I want a Handle that is not a Friend to answer exactly as an unknown Handle does when I ask for a Trade List, so that nobody can probe who exists.
 51. As a collector with no Friends, I want the discovery page to say that matching needs Friends, so that I know what to do next.
@@ -115,15 +117,15 @@ The design rests on a few rules, recorded in [ADR 0015](../../adr/0015-trades-sh
 
 58. As a collector, I want an Ask to trade action in the catalog card popup, so that I can start a trade from any card I am looking at.
 59. As a collector, I want the popup to list the Friends who have a copy on their Trade List, so that I know whom to ask.
-60. As a collector, I want Ask to trade to add the card to a draft proposal for that Friend, so that several asks build one draft.
+60. As a collector, I want Ask to trade to open the proposal builder for that Friend with the card already on the get side, so that I can ask for it at once and add anything else before sending.
 61. As a collector, I want Ask to trade to appear only for Friends with a listable copy, so that I never ask for a card that is not offered.
 62. As a collector, I want the popup to show no Location or Deck name for the Friend's copy, so that nothing about their organisation leaks.
 
 ### Proposing a trade
 
-63. As a proposer, I want Propose trade from a discovery row to open an empty draft with the matched cards suggested at the top, each added with one tap, so that I choose which cards to trade instead of starting with every match on both sides.
-64. As a proposer, I want to edit the draft before sending, adding or removing cards and changing quantities, so that the proposal says what I mean.
-65. As a proposer, I want a draft to cover one Friend at a time, so that a proposal is always between two collectors.
+63. As a proposer, I want Propose trade from a discovery row to open the proposal builder with an empty proposal and the matched cards listed first in the card library, so that I choose which cards to trade instead of starting with every match on both sides.
+64. As a proposer, I want to edit the proposal before sending, adding a card with one tap, removing cards and changing quantities, so that the proposal says what I mean.
+65. As a proposer, I want each proposal builder to cover one Friend, and to be asked before leaving it with cards added but not sent, so that a proposal is always between two collectors and I never lose cards by accident.
 66. As a proposer, I want to be unable to propose a trade with myself, so that a proposal always has two sides.
 67. As a proposer, I want to be unable to send a proposal to someone who is not my Friend, so that trading stays among Friends in Stage 1.
 68. As a proposer, I want each side to have at most 50 lines, so that a proposal stays readable.
@@ -143,7 +145,7 @@ The design rests on a few rules, recorded in [ADR 0015](../../adr/0015-trades-sh
 
 80. As a collector building or reviewing a proposal, I want each side to show its estimated total, so that I can judge whether the trade is fair.
 81. As a collector, I want the totals to say when they cover only some of the copies, so that I do not read a partial total as complete.
-82. As a collector, I want the totals to work on an unsaved draft and on a Counter, so that I see them before I commit.
+82. As a collector, I want the totals to work on an unsent proposal and on a Counter, so that I see them before I commit.
 83. As a collector, I want no suggested cash amount, so that I type any amount I like.
 84. As a collector, I want the totals never to name a price source or show when a price was fetched or refreshed, so that I see only what helps me decide.
 85. As a collector, I want the totals to use the same estimate as my Deck costs, so that figures agree across the app.
@@ -461,7 +463,7 @@ All cross-collector Trade reads are in the `friend_copies` module, which ADR 001
 
 ### Value cues
 
-`POST /api/trades/value` takes lines tagged `you_give` or `you_get` (at most 100, counted in code, else 422 `TOO_MANY_LINES`; 422 `DUPLICATE_EDITION` for a repeat on one side; 100 lines, about 9 KB, fit the gateway's 16,384-byte body limit), prices the Editions once through the existing private quote read, and folds each side with the shared Deck cost fold. It answers a status (`priced`, `empty`, `no_quotes`, `incomplete`), a display total and priced and total copy counts per side. No provider, check time, refresh state or source name ever appears in the response. It is a POST so unsaved drafts and Counters can be valued, and cash is not part of it. It is a budgeted route, so it is added to both the API's budgeted-route list and the gateway's list, which must change together. The client never calls the Edition price route directly.
+`POST /api/trades/value` takes lines tagged `you_give` or `you_get` (at most 100, counted in code, else 422 `TOO_MANY_LINES`; 422 `DUPLICATE_EDITION` for a repeat on one side; 100 lines, about 9 KB, fit the gateway's 16,384-byte body limit), prices the Editions once through the existing private quote read, and folds each side with the shared Deck cost fold. It answers a status (`priced`, `empty`, `no_quotes`, `incomplete`), a display total and priced and total copy counts per side. No provider, check time, refresh state or source name ever appears in the response. It is a POST so unsent proposals and Counters can be valued, and cash is not part of it. It is a budgeted route, so it is added to both the API's budgeted-route list and the gateway's list, which must change together. The client never calls the Edition price route directly.
 
 ### Inbox integration
 
