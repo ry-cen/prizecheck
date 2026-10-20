@@ -56,7 +56,8 @@ if (!emailSignIn && providers.length === 0) {
   );
 }
 
-// Routes that carry a trusted three-second budget. Keep in step with BUDGETED_ROUTES in api/app/price_budget.py.
+// Routes that carry a trusted three-second budget. Keep in step with BUDGETED_ROUTES in api/app/price_budget.py;
+// api/tests/test_trade_value.py fails when they differ.
 const BUDGETED_ROUTES: { method: string; pattern: RegExp }[] = [
   { method: "POST", pattern: /^\/api\/prices\/editions$/ },
   { method: "GET", pattern: /^\/api\/decks\/[^/]+\/cost$/ },
@@ -65,6 +66,7 @@ const BUDGETED_ROUTES: { method: string; pattern: RegExp }[] = [
     pattern: /^\/api\/public\/decks\/[^/]+\/versions\/[^/]+\/cost$/,
   },
   { method: "GET", pattern: /^\/api\/want-list\/cost$/ },
+  { method: "POST", pattern: /^\/api\/trades\/value$/ },
 ];
 const BUDGET_MS = 3_000;
 // The answer is gated at 3.0 s, so the abort fires early enough to write the 504 inside it.

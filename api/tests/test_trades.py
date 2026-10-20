@@ -40,13 +40,23 @@ def lines(cards):
     return [{'edition_id': edition, 'quantity': str(count)} for edition, count in cards]
 
 
-def propose(sender, recipient, give=(), get=(), key=None):
-    return call('POST', '/api/trades', sender, {'recipient_id': recipient, 'you_give': lines(give),
-                                                'you_get': lines(get), 'idempotency_key': str(key or uuid4())})
+def propose(sender, recipient, give=(), get=(), key=None, cash=None):
+    body = {'recipient_id': recipient, 'you_give': lines(give), 'you_get': lines(get),
+            'idempotency_key': str(key or uuid4())}
+    if cash is not None:
+        body['cash'] = cash
+    return call('POST', '/api/trades', sender, body)
 
 
-def proposed(sender, recipient, give=(), get=()):
-    return ok(propose(sender, recipient, give, get), 201)
+def proposed(sender, recipient, give=(), get=(), cash=None):
+    return ok(propose(sender, recipient, give, get, cash=cash), 201)
+
+
+def trade_settings(user, value=None):
+    """Open to cash offers: read with GET, or set to ``value`` with PUT."""
+    if value is None:
+        return ok(call('GET', '/api/social/trade-settings', user))['open_to_cash_offers']
+    return ok(call('PUT', '/api/social/trade-settings', user, {'open_to_cash_offers': value}))['open_to_cash_offers']
 
 
 def trade_step(user, trade, action, key=None, revision=None):
@@ -433,10 +443,121 @@ def test_a_deleted_counterparty_keeps_their_name_with_no_id_or_handle(store):
 def test_the_other_sides_open_to_cash_offers_is_read_from_their_profile(store):
     ids, ash, misty, binder, box = trading()
     trade = proposed(misty, ash, give=[(ids['PAL 185'], 1)])
-    with connect() as conn:
-        conn.execute('UPDATE collector_profile SET open_to_cash_offers = true WHERE user_id=%s', (misty,))
+    trade_settings(misty, True)
     assert ok(read(ash, trade))['other']['open_to_cash_offers'] is True
     assert ok(read(misty, trade))['other']['open_to_cash_offers'] is False
+
+
+def test_cash_is_an_amount_and_a_payer_or_nothing_and_is_refused_after_the_card_rules(store):
+    ids, ash, misty, binder, box = trading()
+    iono, arven = ids['PAL 185'], ids['SVI 166']
+    bad_cash = {'cents': '0', 'payer': 'you'}
+    assert detail(propose(misty, ash, cash=bad_cash))[1]['code'] == 'TRADE_HAS_NO_CARDS'
+    many = [(str(uuid4()), 1) for _ in range(51)]
+    assert detail(propose(misty, ash, give=many, cash=bad_cash))[1]['code'] == 'TOO_MANY_LINES'
+    for cents in ('0', '01', '-1', '1.5', ' 1', '1 ', '100000000', '', 'abc', '\uff11'):
+        assert detail(propose(misty, ash, give=[(iono, 1)], cash={'cents': cents, 'payer': 'you'})) == (
+            422, {'code': 'INVALID_CASH'}), cents
+    for cash in ({'cents': '500'}, {'cents': 500, 'payer': 'you'}, {'cents': '500', 'payer': 'proposer'}):
+        response = propose(misty, ash, give=[(iono, 1)], cash=cash)
+        assert response.status_code == 422 and 'code' not in response.text, cash
+    for cents in ('1', '99999999'):
+        assert detail(propose(misty, ash, get=[(arven, 9999)], cash={'cents': cents, 'payer': 'them'}))[1][
+            'code'] == 'NOT_TRADEABLE'
+    assert commands(misty) == 0
+    with connect() as conn:
+        assert conn.execute('SELECT count(*) AS n FROM trade WHERE proposer_id=%s', (misty,)).fetchone()['n'] == 0
+
+
+def test_a_side_giving_only_cash_needs_the_recipient_open_to_cash_offers_in_both_directions(store):
+    ids, ash, misty, binder, box = trading()
+    iono, arven = ids['PAL 185'], ids['SVI 166']
+    trade_settings(misty, True)           # the sender's own setting doesn't matter
+    buying = propose(misty, ash, get=[(arven, 1)], cash={'cents': '1500', 'payer': 'you'})
+    assert detail(buying) == (409, {'code': 'CASH_ONLY_NOT_OPEN', 'side': 'you_give'})
+    selling = propose(misty, ash, give=[(iono, 1)], cash={'cents': '1500', 'payer': 'them'})
+    assert detail(selling) == (409, {'code': 'CASH_ONLY_NOT_OPEN', 'side': 'you_get'})
+    assert reserved(misty, iono) == (0, 0) and commands(misty) == 0
+    with connect() as conn:
+        assert conn.execute('SELECT count(*) AS n FROM trade WHERE proposer_id=%s', (misty,)).fetchone()['n'] == 0
+    trade_settings(ash, True)
+    bought = proposed(misty, ash, get=[(arven, 1)], cash={'cents': '1500', 'payer': 'you'})
+    sold = proposed(misty, ash, give=[(iono, 1)], cash={'cents': '1500', 'payer': 'them'})
+    assert bought['cash'] == {'cents': '1500', 'payer': 'you'} and sold['cash'] == {'cents': '1500', 'payer': 'them'}
+    assert ok(read(ash, bought))['cash'] == {'cents': '1500', 'payer': 'them'}
+    assert ok(read(ash, sold))['cash'] == {'cents': '1500', 'payer': 'you'}
+    assert (row_of(bought)['cash_cents'], row_of(bought)['cash_payer']) == (1500, 'proposer')
+    assert (row_of(sold)['cash_cents'], row_of(sold)['cash_payer']) == (1500, 'recipient')
+
+
+def test_cash_alongside_cards_and_a_gift_plus_cash_need_no_open_to_cash_offers(store):
+    ids, ash, misty, binder, box = trading()
+    iono, arven = ids['PAL 185'], ids['SVI 166']
+    shapes = [
+        (dict(give=[(iono, 1)], get=[(arven, 1)]), {'cents': '800', 'payer': 'you'}),
+        (dict(give=[(iono, 1)], get=[(arven, 1)]), {'cents': '800', 'payer': 'them'}),
+        (dict(give=[(iono, 1)]), {'cents': '300', 'payer': 'you'}),
+        (dict(get=[(arven, 1)]), {'cents': '300', 'payer': 'them'}),
+    ]
+    for cards, cash in shapes:
+        assert proposed(misty, ash, cash=cash, **cards)['cash'] == cash
+
+
+def test_a_stranger_is_refused_as_not_friends_even_when_open_and_sent_only_cash(store):
+    ids, ash, misty, binder, box = trading()
+    (gary, _) = collector('Gary O.')
+    trade_settings(gary, True)
+    response = propose(misty, gary, get=[(ids['SVI 166'], 1)], cash={'cents': '500', 'payer': 'you'})
+    assert detail(response) == (409, {'code': 'NOT_FRIENDS'})
+
+
+def test_cash_is_kept_through_withdraw_and_confirm_swap_moves_only_the_cards(store):
+    ids, ash, misty, binder, box = trading()
+    iono, arven = ids['PAL 185'], ids['SVI 166']
+    withdrawn = proposed(misty, ash, give=[(iono, 1)], cash={'cents': '700', 'payer': 'you'})
+    closed = ok(trade_step(misty, withdrawn, 'withdraw'))
+    assert closed['state'] == 'closed' and closed['cash'] == {'cents': '700', 'payer': 'you'}
+    assert ok(read(ash, withdrawn))['cash'] == {'cents': '700', 'payer': 'them'}
+
+    for step, actor in (('decline', ash), ('cancel', misty)):
+        closed = proposed(misty, ash, give=[(iono, 1)], get=[(arven, 1)], cash={'cents': '900', 'payer': 'them'})
+        if step == 'cancel':
+            closed = ok(accept_trade(ash, closed))
+        ok(trade_step(actor, closed, step))
+        assert (row_of(closed)['state'], row_of(closed)['cash_cents'], row_of(closed)['cash_payer']) == (
+            'closed', 900, 'recipient'), step
+
+    trade = proposed(misty, ash, give=[(iono, 1)], get=[(arven, 1)], cash={'cents': '500', 'payer': 'you'})
+    ok(accept_trade(ash, trade))
+    for user in (misty, ash):
+        revision = ok(read(user, trade))['revision']
+        ok(call('POST', f"/api/trades/{trade['id']}/confirm-swap", user,
+                {'revision': revision, 'idempotency_key': str(uuid4()), 'destination_id': None}))
+    final = ok(read(misty, trade))
+    assert (final['state'], final['closed_reason']) == ('closed', 'swapped')
+    assert final['cash'] == {'cents': '500', 'payer': 'you'}
+    assert own_cards(misty) == {iono: ('2', {'Trade Binder': '2'})}
+    assert own_cards(ash) == {arven: ('1', {'Box': '1'})}
+    with connect() as conn:
+        tables = [row['table_name'] for row in conn.execute(
+            "SELECT table_name FROM information_schema.columns WHERE table_schema='public' "
+            "AND column_name ILIKE '%cash%'")]
+    assert set(tables) <= {'trade', 'collector_profile'}
+
+
+def test_open_to_cash_offers_is_off_by_default_and_set_only_by_its_own_route(store):
+    (gary, _) = collector('Gary O.')
+    assert trade_settings(gary) is False
+    ids, ash, misty, binder, box = trading()
+    trade = proposed(misty, ash, give=[(ids['PAL 185'], 1)])
+    before = revision_of(misty)
+    assert trade_settings(misty, True) is True and trade_settings(misty, True) is True
+    assert trade_settings(misty) is True and revision_of(misty) == before
+    assert ok(read(ash, trade))['other']['open_to_cash_offers'] is True
+    assert trade_settings(ash) is False
+    assert trade_settings(misty, False) is False
+    assert ok(read(ash, trade))['other']['open_to_cash_offers'] is False
+    assert call('PUT', '/api/social/trade-settings', misty, {'open_to_cash_offers': 'maybe'}).status_code == 422
 
 
 def test_no_location_or_deck_name_or_id_reaches_either_side(store):

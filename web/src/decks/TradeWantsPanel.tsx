@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import {
   browseEditions,
   type BrowseEdition,
@@ -187,8 +187,12 @@ function AddTradeWant({
   const [query, setQuery] = useState("");
   const q = useDebouncedValue(query.trim(), 250);
   const [found, setFound] = useState<Found>({ status: "idle" });
+  // Counts the searches (and closes): a Show more page started under an earlier search, or before the picker closed,
+  // is dropped on arrival.
+  const generation = useRef(0);
 
   useEffect(() => {
+    generation.current++;
     if (!open || !q) {
       setFound({ status: "idle" });
       return;
@@ -199,14 +203,15 @@ function AddTradeWant({
       editions: previous.status === "done" ? previous.editions : [],
     }));
     browseEditions({ q }, null, controller.signal)
-      .then((page) =>
+      .then((page) => {
+        if (controller.signal.aborted) return;
         setFound({
           status: "done",
           editions: page.editions,
           next: page.next_cursor,
           more: false,
-        })
-      )
+        });
+      })
       .catch(() => {
         if (!controller.signal.aborted) setFound({ status: "failed" });
       });
@@ -215,16 +220,20 @@ function AddTradeWant({
 
   async function showMore() {
     if (found.status !== "done" || !found.next || found.more) return;
-    setFound({ ...found, more: true });
+    const current = found;
+    const at = generation.current;
+    setFound({ ...current, more: true });
     try {
-      const page = await browseEditions({ q }, found.next);
+      const page = await browseEditions({ q }, current.next);
+      if (generation.current !== at) return;
       setFound({
         status: "done",
-        editions: [...found.editions, ...page.editions],
+        editions: [...current.editions, ...page.editions],
         next: page.next_cursor,
         more: false,
       });
     } catch {
+      if (generation.current !== at) return;
       // A moved catalog (409) or a failure: search again from the start.
       setFound({ status: "failed" });
     }

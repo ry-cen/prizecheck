@@ -1,5 +1,5 @@
 """Trusted request budget for deadline-bound routes (Edition prices, private Deck cost, Published Deck cost, Want List
-cost).
+cost, Trade value).
 
 The gateway takes the receipt time, spends part of the three seconds on its own work, and signs what is
 left for the API: milliseconds remaining, the epoch millisecond it signed at, and the caller. A client can
@@ -31,12 +31,13 @@ MAX_BODY_BYTES = 16 * 1024
 FINAL_MARGIN_MS = 50              # Left after the final validation times out, to build the response.
 
 # (method, path pattern) for every route that carries a gateway budget. Keep in step with BUDGETED_ROUTES in
-# auth/src/server.ts.
+# auth/src/server.ts; api/tests/test_trade_value.py fails when they differ.
 BUDGETED_ROUTES = (
     ('POST', re.compile(r'^/api/prices/editions$')),
     ('GET', re.compile(r'^/api/decks/[^/]+/cost$')),
     ('GET', re.compile(r'^/api/public/decks/[^/]+/versions/[^/]+/cost$')),
     ('GET', re.compile(r'^/api/want-list/cost$')),
+    ('POST', re.compile(r'^/api/trades/value$')),
 )
 
 

@@ -38,6 +38,8 @@ import { Menu, type MenuItem } from "../ui/Menu";
 import { Select } from "../ui/Select";
 import { useToast } from "../ui/Toast";
 import { indexLocations } from "../workspace/locationTree";
+import { LiabilityNotice } from "./LiabilityNotice";
+import { valueLines } from "./proposalModel";
 import { TRADES_PATH } from "./tradeListModel";
 import {
   swapDoneMessage,
@@ -47,8 +49,10 @@ import {
   tradeOutcomeUnknown,
   tradePickText,
   tradeStaleText,
+  tradeCashText,
   tradeStepMessage,
 } from "./tradeText";
+import { sideValueText, useTradeValue } from "./useTradeValue";
 
 type Load =
   | { kind: "loading" }
@@ -209,6 +213,31 @@ export function TradeScreen({
             : heading.current;
     element?.focus({ preventScroll: target === "heading" });
   });
+
+  // A Trade still waiting for an answer shows each side's estimated total (Trading #277), for both parties.
+  const cashId = useId();
+  const proposedTrade =
+    load.kind === "ready" && load.trade.state === "proposed"
+      ? load.trade
+      : null;
+  const value = useTradeValue(
+    useMemo(
+      () =>
+        proposedTrade
+          ? valueLines(
+              proposedTrade.you_give.map((c) => ({
+                edition_id: c.edition_id,
+                quantity: c.copies,
+              })),
+              proposedTrade.you_get.map((c) => ({
+                edition_id: c.edition_id,
+                quantity: c.copies,
+              }))
+            )
+          : null,
+      [proposedTrade]
+    )
+  );
 
   const back = (
     <a
@@ -447,9 +476,42 @@ export function TradeScreen({
       </p>
       {note && <p className="m-0 text-body text-text-muted">{note}</p>}
       <div className="grid grid-cols-2 items-start gap-4 phone:grid-cols-1">
-        <TradeSide title="You give" cards={trade.you_give} side={side} />
-        <TradeSide title="You get" cards={trade.you_get} />
+        <TradeSide
+          title="You give"
+          cards={trade.you_give}
+          side={side}
+          total={
+            trade.state === "proposed"
+              ? sideValueText(value, "you_give", trade.you_give.length > 0)
+              : null
+          }
+        />
+        <TradeSide
+          title="You get"
+          cards={trade.you_get}
+          total={
+            trade.state === "proposed"
+              ? sideValueText(value, "you_get", trade.you_get.length > 0)
+              : null
+          }
+        />
       </div>
+      {trade.cash && (
+        <>
+          <section
+            aria-labelledby={cashId}
+            className="flex min-w-0 flex-col gap-2"
+          >
+            <h2 id={cashId} className="m-0 text-heading font-semibold">
+              Cash
+            </h2>
+            <p className="m-0 text-body tabular-nums">
+              {tradeCashText(trade.cash, name)}
+            </p>
+          </section>
+          <LiabilityNotice />
+        </>
+      )}
       {asking ? (
         <div
           role="group"
@@ -678,10 +740,13 @@ function TradeSide({
   title,
   cards,
   side,
+  total,
 }: {
   title: string;
   cards: TradeCard[];
   side?: OwnTradeSide;
+  /** The side's estimated total while the Trade is waiting for an answer, or null. */
+  total?: string | null;
 }) {
   const headingId = useId();
   return (
@@ -721,6 +786,9 @@ function TradeSide({
           ))
         )}
       </ul>
+      {total && (
+        <p className="m-0 text-meta text-text-muted tabular-nums">{total}</p>
+      )}
     </section>
   );
 }

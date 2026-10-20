@@ -8,7 +8,8 @@ other:
 
 - **Send a Trade Proposal** (``POST /api/trades``). The sender names a Friend, the Card Editions they give
   (``you_give``) and the ones they ask for (``you_get``); either side may be empty, so a gift either way is a
-  proposal too, but not both. Each line the sender gives is capped at their own listable copies
+  proposal too, but not both. Cash is an amount and a payer together (Trading #277); the app records it and never
+  handles money. Each line the sender gives is capped at their own listable copies
   (``trade_list.own_trade_copies``), and each line they ask for at the Friend's (``friend_copies.friend_trade_copies``),
   both through migration 142's one listable rule on this step's own connection. Sending reserves the copies the sender
   gives at once (``trade_picks.make_trade_picks``), so they leave both Trade Lists, stop counting as Spare Copies and
@@ -51,6 +52,8 @@ moves its collector's revision when it changes what they hold or promise. The co
 ``social.trades``' (``begin_trade_command``); every step on an existing Trade runs through
 ``social.trades.run_trade_step``, which locks the Trade row after the owner and writes it once.
 """
+import re
+from typing import Literal
 from uuid import UUID, uuid4
 
 import psycopg
@@ -87,10 +90,16 @@ class TradeLineRequest(BaseModel):
     quantity: str           # "1" to "9999"
 
 
+class TradeCashRequest(BaseModel):
+    cents: str                       # whole US cents "1".."99999999", else 422 INVALID_CASH
+    payer: Literal['you', 'them']    # relative to the collector sending this proposal
+
+
 class SendTradeProposal(BaseModel):
     recipient_id: str = Field(min_length=1, max_length=200)
     you_give: list[TradeLineRequest] = []
     you_get: list[TradeLineRequest] = []
+    cash: TradeCashRequest | None = None
     idempotency_key: UUID
 
 
@@ -129,13 +138,38 @@ def trade_quantity(raw: str) -> int:
     return value
 
 
+CASH_CENTS = re.compile(r'[1-9][0-9]{0,7}')   # 1..99,999,999: migration 141's CHECK and the spec's sanity bound
+
+
+def trade_cash(cash: TradeCashRequest | None) -> tuple[int, str] | None:
+    """(cents, payer 'you'|'them') or None for no cash; 422 INVALID_CASH for any other amount text (Trading #277)."""
+    if cash is None:
+        return None
+    if not cash.cents.isascii() or not CASH_CENTS.fullmatch(cash.cents):
+        error(422, 'INVALID_CASH')
+    return int(cash.cents), cash.payer
+
+
+def cash_only_side(give, get, cash: tuple[int, str] | None) -> str | None:
+    """The sender-relative side that gives only cash (no cards, and pays), or None. A gift plus cash has none."""
+    if cash is None:
+        return None
+    if cash[1] == 'you' and not give:
+        return 'you_give'
+    if cash[1] == 'them' and not get:
+        return 'you_get'
+    return None
+
+
 @router.post('', response_model=TradeView, status_code=201)
 def send_trade_proposal(command: SendTradeProposal, user_id: str = Depends(verified_user)):
     """Sends a Friend a Trade Proposal and reserves the copies the sender gives. Refused before anything is read, in
     this order: 409 OWN_ACCOUNT, 422 INVALID_QUANTITY, 422 DUPLICATE_EDITION (one Edition twice on one side), 422
-    SAME_CARD_BOTH_SIDES, 422 TOO_MANY_LINES, 422 TRADE_HAS_NO_CARDS. Then, under the sender's lock: 409 NOT_FRIENDS,
-    and 409 NOT_TRADEABLE (``edition_id``, ``available`` and ``side``, 'you_give' or 'you_get') for the first line, the
-    sender's lines first, that asks for more copies than are on that side's Trade List now."""
+    SAME_CARD_BOTH_SIDES, 422 TOO_MANY_LINES, 422 TRADE_HAS_NO_CARDS, 422 INVALID_CASH. Then, under the sender's lock:
+    409 NOT_FRIENDS, 409 CASH_ONLY_NOT_OPEN (``side``: the sender's side that gives no cards and pays, when the
+    recipient isn't Open to cash offers), and 409 NOT_TRADEABLE (``edition_id``, ``available`` and ``side``, 'you_give'
+    or 'you_get') for the first line, the sender's lines first, that asks for more copies than are on that side's Trade
+    List now."""
     if command.recipient_id == user_id:
         error(409, 'OWN_ACCOUNT')
     give = [(line.edition_id, trade_quantity(line.quantity)) for line in command.you_give]
@@ -149,7 +183,10 @@ def send_trade_proposal(command: SendTradeProposal, user_id: str = Depends(verif
         error(422, 'TOO_MANY_LINES')
     if not give and not get:
         error(422, 'TRADE_HAS_NO_CARDS')
+    cash = trade_cash(command.cash)
     payload = {'action': 'trade_send', **command.model_dump(mode='json', exclude={'idempotency_key'})}
+    if command.cash is None:
+        payload.pop('cash')     # a cash-free send keeps the digest it had before cash, so replays survive the deploy
     try:
         with connect() as conn, conn.transaction():
             digest, stored = begin_trade_command(conn, user_id, command.idempotency_key, payload)
@@ -159,6 +196,12 @@ def send_trade_proposal(command: SendTradeProposal, user_id: str = Depends(verif
             lock_owners(conn, user_id)
             if command.recipient_id not in friend_ids(conn, user_id):
                 error(409, 'NOT_FRIENDS')
+            profiles = {row['user_id']: row for row in conn.execute(
+                'SELECT user_id, display_name, open_to_cash_offers FROM collector_profile WHERE user_id = ANY(%s)',
+                ([user_id, command.recipient_id],))}
+            cash_side = cash_only_side(give, get, cash)
+            if cash_side and not (profiles.get(command.recipient_id) or {}).get('open_to_cash_offers'):
+                refuse(409, 'CASH_ONLY_NOT_OPEN', side=cash_side)
             mine = own_trade_copies(conn, user_id, [edition for edition, _ in give])
             for edition, copies in give:
                 if copies > mine.get(edition, 0):
@@ -168,13 +211,13 @@ def send_trade_proposal(command: SendTradeProposal, user_id: str = Depends(verif
             for edition, copies in get:
                 if copies > theirs.get(edition, 0):
                     refuse(409, 'NOT_TRADEABLE', edition_id=edition, available=theirs.get(edition, 0), side='you_get')
-            names = {row['user_id']: row['display_name'] for row in conn.execute(
-                'SELECT user_id, display_name FROM collector_profile WHERE user_id = ANY(%s)',
-                ([user_id, command.recipient_id],))}
             trade_id = uuid4()
-            conn.execute("""INSERT INTO trade(id, state, proposer_id, recipient_id, proposer_name, recipient_name)
-                VALUES (%s, 'proposed', %s, %s, %s, %s)""",
-                         (trade_id, user_id, command.recipient_id, names[user_id], names[command.recipient_id]))
+            conn.execute("""INSERT INTO trade(id, state, proposer_id, recipient_id, proposer_name, recipient_name,
+                                  cash_cents, cash_payer)
+                VALUES (%s, 'proposed', %s, %s, %s, %s, %s, %s)""",
+                         (trade_id, user_id, command.recipient_id, profiles[user_id]['display_name'],
+                          profiles[command.recipient_id]['display_name'], cash[0] if cash else 0,
+                          ('proposer' if cash[1] == 'you' else 'recipient') if cash else None))
             for side, lines in (('proposer', give), ('recipient', get)):
                 for position, (edition, copies) in enumerate(lines):
                     conn.execute('INSERT INTO trade_line(trade_id, side, edition_id, position, quantity) '
