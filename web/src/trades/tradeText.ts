@@ -1,5 +1,9 @@
 import { cardCount } from "../loans/loanText";
-import { SocialError, type TradeView } from "../social_generated";
+import {
+  SocialError,
+  type InboxTradeUpdate,
+  type TradeView,
+} from "../social_generated";
 import { TradesError, type TradePickPlace } from "../trades_generated";
 import { variantLabel } from "../ui/variantLabel";
 
@@ -156,6 +160,47 @@ export function swapDoneMessage(
     return "Swapped. The cards you gave left your Collection.";
   const n = sideCopies(trade.you_get);
   return `Swapped. ${n} ${n === 1 ? "card is" : "cards are"} in ${destination}.`;
+}
+
+/**
+ * What a Trade waits on the reader for, as the inbox's line says it after the name (prototype inbox drawer, Trading
+ * #273): "Answer", "Fix picks" or "Confirm swap"; null when it waits on nobody. A Counter is answered the same way;
+ * #278 labels it.
+ */
+export function tradeWaitingLabel(
+  trade: Pick<TradeView, "waiting">
+): string | null {
+  switch (trade.waiting) {
+    case "answer":
+      return "Answer";
+    case "fix_picks":
+      return "Fix picks";
+    case "confirm_swap":
+      return "Confirm swap";
+    default:
+      return null;
+  }
+}
+
+/**
+ * A Trade update under the inbox's Earlier (prototype "Proposed wording", Trading #273), from the reader's side: "Kim
+ * accepted your Trade Proposal", "Kim cancelled this Trade", "Kim confirmed the swap". It never says why: a Trade
+ * cancelled for any reason reads like any other cancel.
+ */
+export function tradeUpdateText(update: InboxTradeUpdate): string {
+  const other = update.other_name;
+  switch (update.kind) {
+    case "accepted":
+      return `${other} accepted your Trade Proposal`;
+    case "declined":
+      return `${other} declined your Trade Proposal`;
+    case "cancelled":
+      return `${other} cancelled this Trade`;
+    case "withdrawn":
+      return `${other} withdrew their Trade Proposal`;
+    case "swapped":
+      return `${other} confirmed the swap`;
+  }
 }
 
 /** "You give 2 cards · You get nothing". */
