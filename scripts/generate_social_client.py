@@ -1,6 +1,7 @@
 """Generate the social client module (Friends and Friend Requests, social network #247, Blocks, #248, Friends' cards,
 #250 and #251, Loans, #252 and #253, Borrowed Copies, #254, Returns, #255, Write-off, #257, the inbox, #259, and a
-Friend's Trade List, trading #269, and Trades as both sides read them, trading #270) from the API OpenAPI schema."""
+Friend's Trade List, trading #269, Trades as both sides read them, trading #270, and declining and cancelling one,
+trading #271) from the API OpenAPI schema."""
 import sys
 from pathlib import Path
 
@@ -170,6 +171,12 @@ export const getTrade = (id: string, signal?: AbortSignal) =>
 // Trade steps, idempotent: retry a failed one with the same idempotency_key. Each answers the Trade as it now stands.
 export const withdrawTrade = (id: string, body: TradeStep) =>
   request<TradeView>(`/api/social/trades/${at(id)}/withdraw`, 'POST', body);
+// The recipient declines a Trade Proposal; either side cancels an accepted Trade nobody has confirmed (#271). Accepting
+// one reserves your cards, so it is in the Trades client.
+export const declineTrade = (id: string, body: TradeStep) =>
+  request<TradeView>(`/api/social/trades/${at(id)}/decline`, 'POST', body);
+export const cancelTrade = (id: string, body: TradeStep) =>
+  request<TradeView>(`/api/social/trades/${at(id)}/cancel`, 'POST', body);
 """)
 content = "\n".join(lines)
 target = root / "web/src/social_generated.ts"

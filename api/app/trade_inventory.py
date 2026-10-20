@@ -14,10 +14,17 @@ other:
   gives at once (``trade_picks.make_trade_picks``), so they leave both Trade Lists, stop counting as Spare Copies and
   stop being lendable until the proposal closes. Nothing of the Friend's is reserved or locked.
 
-**Locks**: the sender's owner row only (``owners.lock_owners``), so a send and a Loan step over the same copies run one
-after the other and the second sees the first's reservation; migration 142's deferred triggers are the backstop. The
-sender's revision moves when they give cards. The command lock, replay and hourly count are ``social.trades``'
-(``begin_trade_command``).
+- **Accept a Trade Proposal** (``POST /api/trades/{id}/accept``, Trading #271). The recipient takes it whole: the
+  body names only the revision they read and an idempotency key. Under the recipient's lock it checks the friendship
+  (as the Loan accept does), caps each line they give at their own listable copies, reserves those copies at once
+  (``make_trade_picks``) and turns the proposal into a Trade. The proposer's copies were reserved by the send and stay
+  so. A recipient who gives nothing (a gift to them) accepts with no cap and no pick.
+
+**Locks**: the stepping collector's own owner row only (``owners.lock_owners``), so a send or an accept and a Loan step
+over the same copies run one after the other and the second sees the first's reservation; migration 142's deferred
+triggers are the backstop. Each step moves its collector's revision when they give cards. The command lock, replay and
+hourly count are ``social.trades``' (``begin_trade_command``); an accept runs through ``social.trades.run_trade_step``,
+which locks the Trade row after the owner and writes it once.
 
 Later tickets add each side's own view of a Trade with its picks (#272).
 """
@@ -33,9 +40,10 @@ from .main import connect, verified_user
 from .moves import quantity
 from .social.friend_copies import friend_trade_copies
 from .social.friends import friend_ids
-from .social.loans import advance_revision
+from .social.loans import NOW, advance_revision
 from .social.owners import lock_owners
-from .social.trades import TradeView, begin_trade_command, store_trade
+from .social.trades import (TradeStep, TradeView, begin_trade_command, record_trade_update, run_trade_step,
+                            store_trade)
 from .trade_list import own_trade_copies
 from .trade_picks import make_trade_picks
 
@@ -123,3 +131,33 @@ def send_trade_proposal(command: SendTradeProposal, user_id: str = Depends(verif
             return store_trade(conn, user_id, command.idempotency_key, digest, trade_id)
     except psycopg.errors.DeadlockDetected:
         error(503, 'INVENTORY_TEMPORARILY_UNAVAILABLE')
+
+
+@router.post('/{trade_id}/accept', response_model=TradeView)
+def accept_trade(trade_id: UUID, step: TradeStep, user_id: str = Depends(verified_user)):
+    """The recipient accepts a Trade Proposal whole, and it becomes a Trade. After ``run_trade_step``'s checks (404
+    TRADE_NOT_FOUND, 409 TRADE_CHANGED, 409 STEP_NOT_ALLOWED), under the recipient's own lock: 409 NOT_FRIENDS once the
+    proposer isn't their Friend, then 409 NOT_TRADEABLE (``edition_id``, ``available``, ``side`` 'you_give') for the
+    first line they give, in the order listed, that asks for more copies than are on their Trade List now. Nothing
+    changes on a refusal. The proposer gets an 'accepted' update."""
+    def apply(conn, row):
+        if row['proposer_id'] not in friend_ids(conn, user_id):
+            error(409, 'NOT_FRIENDS')
+        give = [(line['edition_id'], int(line['quantity'])) for line in conn.execute(
+            "SELECT edition_id, quantity FROM trade_line WHERE trade_id=%s AND side='recipient' ORDER BY position",
+            (row['id'],))]
+        if give:
+            # This Trade's recipient side doesn't reserve until the row turns accepted, so it never counts against
+            # itself here.
+            mine = own_trade_copies(conn, user_id, [edition for edition, _ in give])
+            for edition, copies in give:
+                if copies > mine.get(edition, 0):
+                    refuse(409, 'NOT_TRADEABLE', edition_id=edition, available=mine.get(edition, 0), side='you_give')
+            make_trade_picks(conn, user_id, row['id'], 'recipient', dict(give))
+            advance_revision(conn, user_id)
+        record_trade_update(conn, row, user_id, 'accepted')
+        return {'state': 'accepted', 'accepted_at': NOW}
+
+    # Only the recipient may accept, so only the caller's own owner row is ever locked; a proposer's try locks none.
+    return run_trade_step(user_id, trade_id, step, 'accept', apply,
+                          lambda role, row: [row['recipient_id']] if role == 'recipient' else [])

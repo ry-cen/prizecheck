@@ -1,5 +1,5 @@
 // Generated from FastAPI OpenAPI by scripts/generate_trades_client.py. Do not edit.
-import type { TradeView } from "./social_generated";
+import type { TradeStep, TradeView } from "./social_generated";
 export type TradeListPlace = { location_id: string; copies: string };
 export type TradeListLocation = { id: string; name: string; path: string[]; hidden: boolean };
 export type TradeListCard = { edition_id: string; name: string; set_code: string; set_name: string; collector_number: string; descriptor: Record<string, unknown>; image_url: string | null; copies: string; places: TradeListPlace[] };
@@ -27,3 +27,6 @@ export const getTradeList = (signal?: AbortSignal) => request<OwnTradeList>('/ap
 // Send a Friend a Trade Proposal (#270), idempotent: retry a failed one with the same idempotency_key. It reserves the
 // cards you give, and answers the Trade as both sides read it.
 export const sendTradeProposal = (body: SendTradeProposal) => request<TradeView>('/api/trades', 'POST', body);
+// Accept a Trade Proposal sent to you, whole (#271), idempotent: it reserves the cards you give and answers the Trade.
+export const acceptTrade = (id: string, body: TradeStep) =>
+  request<TradeView>(`/api/trades/${encodeURIComponent(id)}/accept`, 'POST', body);

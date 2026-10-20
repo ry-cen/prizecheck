@@ -4,9 +4,9 @@ resolution "Module boundary" and "API contract").
 Both sides read the same Trade facts here (``GET /api/social/trades`` and ``GET /api/social/trades/{id}``): the cards
 each side gives, each side's swap confirmation and the other collector's Display Name, Handle and whether they are Open
 to cash offers, never a pick, a Location or a Deck of either side. The steps that change no inventory of the reader's
-own are here too; the one in this ticket is the proposer's withdraw. Sending a Trade Proposal reads and reserves the
-sender's own inventory, so it is inventory code in ``app.trade_inventory`` under ``/api/trades``; it answers
-``trade_view`` too, so every step answers the same Trade.
+own are here too: the proposer's withdraw (Trading #270), the recipient's decline and either side's cancel (#271).
+Sending a Trade Proposal reads and reserves the sender's own inventory, so it is inventory code in
+``app.trade_inventory`` under ``/api/trades``; it answers ``trade_view`` too, so every step answers the same Trade.
 
 **Steps** name the Trade ``revision`` they read (409 TRADE_CHANGED when it moved on) and an idempotency key (replayed
 from ``location_command``, as Loan commands are). ``allowed`` is the one rule for which steps a collector may take now:
@@ -15,19 +15,22 @@ two sides gets 404 TRADE_NOT_FOUND, as for a Trade that doesn't exist. Every ste
 ``run_trade_step``, which writes the ``trade`` row exactly once: the step's own columns and the revision in one UPDATE.
 
 **Locks** follow the spec's table ("Locks and revisions"): owner rows in ascending ``user_id`` (``owners.lock_owners``),
-then any ``loan`` row, then the ``trade`` row. Withdraw locks the proposer, whose copies it releases, and advances the
-proposer's inventory revision when they gave cards.
+then any ``loan`` row, then the ``trade`` row. Withdraw locks the proposer, whose copies it releases; decline and cancel
+lock both sides. A step advances a side's inventory revision when it releases copies that side gives: withdraw and
+decline the proposer's, cancel each side's. A side that gives nothing has nothing released, so its revision stays.
 
 **Limit.** Trade steps count against ``COMMANDS_PER_HOUR`` per account under kind 'trade_command'
 (``count_trade_command``), apart from the Friend and Loan commands' counts, under a command lock of their own
 (``begin_trade_command``). A replay isn't counted again; a refused step rolls back with its count.
 
-**Updates**: a withdraw stores a 'cancelled' update for the recipient (``record_trade_update``), which the inbox reads
-as withdrawn from the Trade's ``closed_reason``. The inbox lists Trade updates from Trading #273.
+**Updates** (``record_trade_update``): a withdraw stores a 'cancelled' update for the recipient, which the inbox reads
+as withdrawn from the Trade's ``closed_reason``; a decline stores a 'declined' update for the proposer; a cancel stores
+a 'cancelled' update for the other side, never saying why. The recipient's accept (Trading #271) reserves their own
+copies, so it is inventory code in ``app.trade_inventory`` and stores an 'accepted' update for the proposer there. The
+inbox lists Trade updates from Trading #273.
 
-Later tickets add the recipient's accept and decline and either side's cancel (#271), Confirm swap and Use suggested
-picks (#272), the inbox lines (#273), ending a friendship's Trades (#274), cash and the Open to cash offers setting
-(#277) and Counter (#278).
+Later tickets add Confirm swap and Use suggested picks (#272), the inbox lines (#273), ending a friendship's Trades
+(#274), cash and the Open to cash offers setting (#277) and Counter (#278).
 """
 import json
 from collections.abc import Mapping
@@ -175,12 +178,15 @@ def section(user_id: str, row, facts: TradeFacts | None = None) -> str:
 
 def allowed(user_id: str, row, gives: bool) -> list[str]:
     """The steps the reader may take on this Trade now, in ``TradeAction`` order. Pure on the row. ``gives``: the
-    reader's side has at least one card. This ticket's one step is the proposer's withdraw of a proposal nobody has
-    answered; the recipient's answers (#271, #278), Confirm swap, Use suggested picks (#272) and cancel (#271) are
-    added by their tickets."""
+    reader's side has at least one card. A proposal nobody has answered: the recipient accepts or declines it, the
+    proposer withdraws it. An accepted Trade nobody has confirmed: either side cancels it. Once either side has
+    confirmed, and on a closed row, nothing. Counter (#278), Confirm swap and Use suggested picks (#272) are added by
+    their tickets."""
     found = []
-    if row['state'] == 'proposed' and role_of(user_id, row) == 'proposer':
-        found.append('withdraw')
+    if row['state'] == 'proposed':
+        found += ['accept', 'decline'] if role_of(user_id, row) == 'recipient' else ['withdraw']
+    elif row['state'] == 'accepted' and row['proposer_swap_at'] is None and row['recipient_swap_at'] is None:
+        found.append('cancel')
     return [action for action in ACTION_ORDER if action in found]
 
 
@@ -195,11 +201,13 @@ def trade_views(conn, user_id: str, rows, facts: dict[UUID, TradeFacts] | None =
         return []
     lines: dict[tuple[UUID, str], list] = {}
     for line in conn.execute('SELECT trade_id, side, edition_id, quantity FROM trade_line '
-                             'WHERE trade_id = ANY(%s) ORDER BY trade_id, side, position', ([row['id'] for row in rows],)):
+                             'WHERE trade_id = ANY(%s) ORDER BY trade_id, side, position',
+                             ([row['id'] for row in rows],)):
         lines.setdefault((line['trade_id'], line['side']), []).append(line)
     cards = card_facts(conn, [line['edition_id'] for found in lines.values() for line in found])
     facts = facts if facts is not None else trade_facts(conn, user_id, rows)
-    others = {row['recipient_id'] if role_of(user_id, row) == 'proposer' else row['proposer_id'] for row in rows} - {None}
+    others = {row['recipient_id'] if role_of(user_id, row) == 'proposer' else row['proposer_id']
+              for row in rows} - {None}
     profiles = {profile['user_id']: profile for profile in conn.execute(
         'SELECT user_id, handle, open_to_cash_offers FROM collector_profile WHERE user_id = ANY(%s)',
         (sorted(others),))} if others else {}
@@ -322,14 +330,18 @@ def run_trade_step(user_id: str, trade_id: UUID, step: TradeStep, action: str, a
             row = conn.execute('SELECT * FROM trade WHERE id = %s FOR NO KEY UPDATE', (trade_id,)).fetchone()
             if row['revision'] != step.revision:
                 error(409, 'TRADE_CHANGED')
-            gives = conn.execute('SELECT 1 FROM trade_line WHERE trade_id=%s AND side=%s LIMIT 1',
-                                 (trade_id, role_of(user_id, row))).fetchone() is not None
-            if action not in allowed(user_id, row, gives):
+            if action not in allowed(user_id, row, side_gives(conn, trade_id, role_of(user_id, row))):
                 error(409, 'STEP_NOT_ALLOWED')
             write_trade(conn, trade_id, apply(conn, row) or {})
             return store_trade(conn, user_id, step.idempotency_key, digest, trade_id)
     except psycopg.errors.DeadlockDetected:
         error(503, 'INVENTORY_TEMPORARILY_UNAVAILABLE')
+
+
+def side_gives(conn, trade_id: UUID, side: str) -> bool:
+    """Whether that side of the Trade ('proposer' or 'recipient') gives at least one card."""
+    return conn.execute('SELECT 1 FROM trade_line WHERE trade_id=%s AND side=%s LIMIT 1',
+                        (trade_id, side)).fetchone() is not None
 
 
 def write_trade(conn, trade_id: UUID, changes: Mapping[str, object]) -> None:
@@ -376,11 +388,43 @@ def withdraw(trade_id: UUID, step: TradeStep, user_id: str = Depends(verified_us
     proposer's own lock, which moves their revision when they gave cards; the recipient gets a 'cancelled' update."""
     def apply(conn, row):
         record_trade_update(conn, row, user_id, 'cancelled')
-        if conn.execute("SELECT 1 FROM trade_line WHERE trade_id=%s AND side='proposer' LIMIT 1",
-                        (row['id'],)).fetchone() is not None:
+        if side_gives(conn, row['id'], 'proposer'):
             advance_revision(conn, row['proposer_id'])
         return close_trade(conn, row, user_id, 'withdrawn')
 
     # Only the proposer may withdraw, so only the caller's own owner row is ever locked; a recipient's try locks none.
     return run_trade_step(user_id, trade_id, step, 'withdraw', apply,
                           lambda role, row: [row['proposer_id']] if role == 'proposer' else [])
+
+
+@router.post('/{trade_id}/decline', response_model=TradeView)
+def decline(trade_id: UUID, step: TradeStep, user_id: str = Depends(verified_user)):
+    """The recipient turns down a Trade Proposal, whole. It releases the copies the proposer gives, under both sides'
+    locks, which moves the proposer's revision when they gave cards; the proposer gets a 'declined' update. No
+    friendship check: unfriending and Blocking close the pair's open Trades first, under the same locks (#274)."""
+    def apply(conn, row):
+        record_trade_update(conn, row, user_id, 'declined')
+        if side_gives(conn, row['id'], 'proposer'):
+            advance_revision(conn, row['proposer_id'])
+        return close_trade(conn, row, user_id, 'declined')
+
+    # Only the recipient may decline; a proposer's try locks nothing before it is refused.
+    return run_trade_step(user_id, trade_id, step, 'decline', apply,
+                          lambda role, row: [row['proposer_id'], row['recipient_id']] if role == 'recipient' else [])
+
+
+@router.post('/{trade_id}/cancel', response_model=TradeView)
+def cancel(trade_id: UUID, step: TradeStep, user_id: str = Depends(verified_user)):
+    """Either side calls off an accepted Trade nobody has confirmed. It releases both sides' copies in one transaction,
+    under both sides' locks, and moves the revision of each side that gives cards; the other side gets a 'cancelled'
+    update that never says why. A proposal (withdraw or decline it) and a Trade either side confirmed are 409
+    STEP_NOT_ALLOWED."""
+    def apply(conn, row):
+        record_trade_update(conn, row, user_id, 'cancelled')
+        for side_name in ('proposer', 'recipient'):
+            if side_gives(conn, row['id'], side_name):
+                advance_revision(conn, row[f'{side_name}_id'])
+        return close_trade(conn, row, user_id, 'cancelled')
+
+    return run_trade_step(user_id, trade_id, step, 'cancel', apply,
+                          lambda role, row: [row['proposer_id'], row['recipient_id']])
