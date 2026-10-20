@@ -82,9 +82,10 @@ ALLOWED_IMPORTS = {
         ('.', 'name_rules'), ('..main', 'connect'), ('..main', 'verified_user'), ('..publications', 'TOKEN'),
         ('..location_tree', 'error'), ('..location_tree', 'replay'), ('.owners', 'ensure_owner'),
         ('.owners', 'lock_owners'), ('.profile', 'token_hash'),
-        # Ending a friendship cancels the pair's Loans nobody has confirmed a handover for (#260), inside the command
-        # that already locked both owners; the Loan rows are written in app.social.loans, never here.
-        ('.loans', 'end_loans_between')},
+        # Ending a friendship cancels the pair's Loans nobody has confirmed a handover for (#260), then their Trades
+        # nobody has confirmed the swap for (trading #274), inside the command that already locked both owners; the
+        # Loan and Trade rows are written in app.social.loans and app.social.trades, never here.
+        ('.loans', 'end_loans_between'), ('.trades', 'end_trades_between')},
     # The Loans both sides read and the steps that change no inventory (#252). Card facts are catalog facts; the owner
     # lock and the command plumbing are the Friend commands'. Steps that touch a collector's own inventory are in
     # app.loan_inventory, outside this area.
@@ -115,9 +116,9 @@ ALLOWED_IMPORTS = {
     # the Loans' revision helper. Steps that touch a collector's own inventory are in app.trade_inventory. Which of the
     # reader's Trades have a pick out of date, so Needs you and the inbox list them (``trade_picks.stale_pick_trades``,
     # #273): a set of Trade ids from the reader's own Holdings, never a Location; the read stays in app.trade_picks. The
-    # Friends set (#274's Counter and unfriend paths) is allowed ahead of its ticket, as the resolution lists it;
-    # ``friend_ids`` is imported inside the function that uses it, as in social/loans.py, because app.social.friends
-    # will import this module.
+    # Friends set is allowed ahead of Counter (#278), as the resolution lists it; ending a friendship's Trades (#274)
+    # needs none. ``friend_ids`` must be imported inside the function that uses it, as in social/loans.py, because
+    # app.social.friends imports this module (``end_trades_between``).
     'social/trades.py': {
         ('..trade_picks', 'stale_pick_trades'), ('..main', 'connect'), ('..main', 'verified_user'),
         ('..location_tree', 'error'), ('..location_tree', 'replay'), ('.friend_reads', 'card_facts'),

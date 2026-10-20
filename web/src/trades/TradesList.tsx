@@ -1,4 +1,5 @@
 import { useEffect, useId, useState, type MouseEvent } from "react";
+import { useTradesChanged } from "../inbox/Inbox";
 import { CardImage } from "../social/FriendCollectionPage";
 import {
   getTrades,
@@ -24,6 +25,7 @@ const SECTIONS = [
  * The Trades list (Trading #270, prototype verdict variant A), the Trades tab's first view at /trades: the collector's
  * Trade Proposals and Trades in **Needs you**, **To swap** and **Pending**, with **History** folded away. Each row is
  * one link to its Trade, with the headline and what each side gives. A Trade that waits on the reader to fix a pick adds the inbox's "Fix picks" to its second line.
+ * The list is read again after a Friend command that may have cancelled Trades (Trading #274, `useTradesChanged`).
  */
 export function TradesList({
   onOpenTrade,
@@ -32,6 +34,7 @@ export function TradesList({
 }) {
   const [load, setLoad] = useState<Load>({ kind: "loading" });
   const [attempt, setAttempt] = useState(0);
+  const changed = useTradesChanged();
 
   useEffect(() => {
     const controller = new AbortController();
@@ -44,7 +47,7 @@ export function TradesList({
       }
     );
     return () => controller.abort();
-  }, [attempt]);
+  }, [attempt, changed]);
 
   if (load.kind === "loading")
     return (

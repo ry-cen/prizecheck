@@ -55,7 +55,8 @@ import { inboxTime } from "./inboxTime";
  *
  * Focus: a Loan opened from the drawer takes focus on its heading once it is drawn (`useOpenedFromInbox`), since the
  * bell that opened the drawer may be hidden by then (Collection's phone header). A Friend command that cancels Loans
- * (`useNoteLoansChanged`) also has the Loans list read them again (`useLoansChanged`).
+ * and Trades (`useNoteLoansChanged`) also has the Loans list and the Trades list read them again (`useLoansChanged`,
+ * `useTradesChanged`, Trading #274).
  */
 type InboxApi = {
   open: (opener: RefObject<HTMLElement | null>) => void;
@@ -66,7 +67,8 @@ type InboxApi = {
    * read. */
   tradesWaiting: number;
   refresh: () => void;
-  /** How many times Loans were changed from outside the Loans tab (a Friend command), for the list to read again. */
+  /** How many times Loans and Trades were changed from outside their tabs (a Friend command), for the lists to read
+   * again. */
   loansChanged: number;
   noteLoansChanged: () => void;
   /** Whether the drawer just opened this Loan or Trade; true once, for its screen to focus its heading. */
@@ -81,14 +83,19 @@ export function useInboxRefresh(): () => void {
   return useContext(InboxContext)?.refresh ?? (() => {});
 }
 
-/** After a change that may have cancelled Loans outside the Loans tab (Remove Friend, Block): reads the inbox again,
- * and has the Loans list read again. */
+/** After a change that may have cancelled Loans and Trades outside their tabs (Remove Friend, Block): reads the inbox
+ * again, and has the Loans list and the Trades list read again. */
 export function useNoteLoansChanged(): () => void {
   return useContext(InboxContext)?.noteLoansChanged ?? (() => {});
 }
 
 /** A count that moves on each such change, for the Loans list to read again; 0 outside the shell. */
 export function useLoansChanged(): number {
+  return useContext(InboxContext)?.loansChanged ?? 0;
+}
+
+/** The same count, for the Trades list to read again (Trading #274); 0 outside the shell. */
+export function useTradesChanged(): number {
   return useContext(InboxContext)?.loansChanged ?? 0;
 }
 
