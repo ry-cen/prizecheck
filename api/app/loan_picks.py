@@ -12,17 +12,15 @@ from .social import counts
 
 
 def pick_shortfalls(conn, lender_id: str, edition_ids) -> tuple[list[dict], dict[int, int], dict[UUID, dict]]:
-    """Which reserved picks are out of date (spec "Stale picks are computed, not stored"): the lender's reserved picks
-    of these Editions, oldest accepted Loan first, each given the copies its source still holds after the older picks
-    there. Returns (the picks, copies each pick's source is short of by pick id, and the copies the picks still cover
-    by Edition and Location). A pick whose source was deleted is short of all its copies. The caller holds the
-    lender's owner row lock."""
+    """Which reserved picks are out of date (spec "Stale picks are computed, not stored"): the collector's reserving
+    Loan and Trade picks of these Editions (``counts.reserving_pick_rows``, trading #268), oldest accepted first and
+    unaccepted last, each given the copies its source still holds after the older picks there. Returns (the picks, copies
+    each pick's source is short of by pick id, and the copies the picks still cover by Edition and Location). A pick
+    whose source was deleted is short of all its copies. A Trade pick's ``loan_id`` is None, so the Loan readers that
+    filter on their own Loan never take it for theirs; pick ids are unique across both pick tables. With no Trades this
+    is exactly the Loan picks in today's order. The caller holds the lender's owner row lock."""
     editions = sorted(set(edition_ids))
-    picks = conn.execute(f"""SELECT p.id, p.loan_id, p.edition_id, p.source_location_id, p.quantity
-      FROM loan_pick p JOIN loan o ON o.id = p.loan_id
-      WHERE p.owner_id = %s AND o.lender_id = %s AND p.edition_id = ANY(%s) AND p.state = 'reserved'
-        AND {counts.RESERVING}
-      ORDER BY o.accepted_at NULLS LAST, o.created_at, o.id, p.id""", (lender_id, lender_id, editions)).fetchall()
+    picks = counts.reserving_pick_rows(conn, lender_id, editions)
     left = {(row['location_id'], row['edition_id']): int(row['quantity']) for row in conn.execute(
         'SELECT location_id, edition_id, quantity FROM holding WHERE owner_id=%s AND edition_id=ANY(%s)',
         (lender_id, editions))} if editions else {}

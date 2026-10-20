@@ -106,11 +106,13 @@ def record_undo(conn, user_id: str, undo_id: UUID, action: str, destination_id: 
 
 
 def check_promises(conn, user_id: str, losing: dict) -> None:
-    """Refuses with 409 PROMISED_TO_LOAN when taking ``losing`` copies ({Edition id: copies}) out of the owner's
-    Collection would leave fewer copies of an Edition than open Loans promise (``counts.reserved_counts``; spec
-    "Lender-side data"). The detail names the lowest such Edition and how many copies are promised. Inventory Removal,
-    the Undo of an add and Edition reassignment call it under the owner lock before they write; Moves don't, because
-    where a copy is doesn't matter to a promise. Migration 106's deferred trigger is the backstop."""
+    """Refuses with 409 when taking ``losing`` copies ({Edition id: copies}) out of the owner's Collection would leave
+    fewer copies of an Edition than open Loans and Trades promise (``counts.reserved_counts``; spec "Lender-side data",
+    trading #268): PROMISED_TO_TRADE when an open Trade promises some of that Edition's copies
+    (``counts.trade_reserved_counts``), otherwise PROMISED_TO_LOAN. The detail names the lowest such Edition and how
+    many copies are promised, Loans and Trades together. Inventory Removal, the Undo of an add and Edition reassignment
+    call it under the owner lock before they write; Moves don't, because where a copy is doesn't matter to a promise.
+    The deferred triggers of migrations 106 and 142 are the backstop."""
     editions = sorted(edition for edition, copies in losing.items() if copies > 0)
     promised = counts.reserved_counts(conn, user_id, editions) if editions else {}
     if not promised:
@@ -120,7 +122,9 @@ def check_promises(conn, user_id: str, losing: dict) -> None:
         (user_id, sorted(promised)))}
     for edition in sorted(promised):
         if held.get(edition, 0) - losing[edition] < promised[edition]:
-            fail(409, 'PROMISED_TO_LOAN', edition_id=edition, promised=promised[edition])
+            traded = counts.trade_reserved_counts(conn, user_id, [edition]).get(edition, 0)
+            fail(409, 'PROMISED_TO_TRADE' if traded > 0 else 'PROMISED_TO_LOAN', edition_id=edition,
+                 promised=promised[edition])
 
 
 class HoldingShort(RuntimeError):
