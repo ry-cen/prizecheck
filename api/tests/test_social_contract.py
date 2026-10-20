@@ -106,12 +106,18 @@ ALLOWED_IMPORTS = {
         ('..main', 'connect'), ('..main', 'verified_user'), ('.loans', 'LOANS'), ('.loans', 'LoanView'),
         ('.loans', 'loan_facts'), ('.loans', 'loan_views'), ('.loans', 'role_of'),
         # The nudge's 14 days, so a nudge's update says when it began to apply (owner's decision, 2026-10-16).
-        ('.loans', 'NUDGE_DAYS')},
+        ('.loans', 'NUDGE_DAYS'),
+        # The reader's own Trades through the Trades' one definition of what waits on them, and since when (trading
+        # #273): the Trade view both sides read, never a pick or a Location.
+        ('.trades', 'TRADES'), ('.trades', 'TradeView'), ('.trades', 'trade_facts'), ('.trades', 'trade_views'),
+        ('.trades', 'waiting_trade_step'), ('.trades', 'trade_waiting_since')},
     # Trade Proposals and Trades both sides read (trading #270), as the Loans read theirs: card facts, the owner lock and
-    # the Loans' revision helper. Steps that touch a collector's own inventory are in app.trade_inventory. The stale
-    # picks read (``trade_picks.stale_pick_trades``, #272) and the Friends set (#274's Counter and unfriend paths) are
-    # allowed ahead of their tickets, as the resolution lists them; ``friend_ids`` is imported inside the function
-    # that uses it, as in social/loans.py, because app.social.friends will import this module.
+    # the Loans' revision helper. Steps that touch a collector's own inventory are in app.trade_inventory. Which of the
+    # reader's Trades have a pick out of date, so Needs you and the inbox list them (``trade_picks.stale_pick_trades``,
+    # #273): a set of Trade ids from the reader's own Holdings, never a Location; the read stays in app.trade_picks. The
+    # Friends set (#274's Counter and unfriend paths) is allowed ahead of its ticket, as the resolution lists it;
+    # ``friend_ids`` is imported inside the function that uses it, as in social/loans.py, because app.social.friends
+    # will import this module.
     'social/trades.py': {
         ('..trade_picks', 'stale_pick_trades'), ('..main', 'connect'), ('..main', 'verified_user'),
         ('..location_tree', 'error'), ('..location_tree', 'replay'), ('.friend_reads', 'card_facts'),

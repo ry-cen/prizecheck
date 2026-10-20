@@ -17,6 +17,12 @@ import {
   markInboxRead,
   type InboxView,
 } from "../social_generated";
+import { tradePath } from "../trades/tradeListModel";
+import {
+  tradeSubline,
+  tradeUpdateText,
+  tradeWaitingLabel,
+} from "../trades/tradeText";
 import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
 import { Icon } from "../ui/Icon";
@@ -36,6 +42,11 @@ import { inboxTime } from "./inboxTime";
  * 2026-10-16). Each line opens its Loan. The Loans tab's badge counts the same Loans; the
  * Friends button's counts Friend Requests (FriendsDrawer).
  *
+ * Trades (Trading #273, prototype inbox drawer): Waiting on you lists one line per Trade waiting on the collector first
+ * ("Kim · Confirm swap"), then the Loans' lines as before; Earlier lists the Trade updates among the Loan updates,
+ * newest first ("Kim accepted your Trade Proposal"), and one Clear clears both. Each opens its Trade. The bell counts
+ * Loans and Trades; the Trades tab's badge counts the Trades. With no Trades the drawer is exactly the Loans' drawer.
+ *
  * The shell provides it; the desktop header and the phone headers (the shell's and Collection's own) draw the bell.
  * It is read when the shell starts, when the drawer opens and closes, when the window regains focus and after a change
  * elsewhere (`useInboxRefresh`: a Loan step, a Friend command); nothing polls. Opening the drawer marks the updates it
@@ -51,17 +62,21 @@ type InboxApi = {
   isOpen: boolean;
   /** Loans waiting on the collector, for the bell's and the Loans tab's badges; 0 until the first read. */
   waiting: number;
+  /** Trades waiting on the collector (Trading #273), for the bell's and the Trades tab's badges; 0 until the first
+   * read. */
+  tradesWaiting: number;
   refresh: () => void;
   /** How many times Loans were changed from outside the Loans tab (a Friend command), for the list to read again. */
   loansChanged: number;
   noteLoansChanged: () => void;
-  /** Whether the drawer just opened this Loan; true once, for the Loan's screen to focus its heading. */
-  takeOpened: (loanId: string) => boolean;
+  /** Whether the drawer just opened this Loan or Trade; true once, for its screen to focus its heading. */
+  takeOpened: (id: string) => boolean;
 };
 
 const InboxContext = createContext<InboxApi | null>(null);
 
-/** Reads the inbox again after a change made elsewhere (a Loan step, a Friend command); nothing outside the shell. */
+/** Reads the inbox again after a change made elsewhere (a Loan or Trade step, a Friend command); nothing outside the
+ * shell. */
 export function useInboxRefresh(): () => void {
   return useContext(InboxContext)?.refresh ?? (() => {});
 }
@@ -77,8 +92,8 @@ export function useLoansChanged(): number {
   return useContext(InboxContext)?.loansChanged ?? 0;
 }
 
-/** Whether the inbox's drawer just opened this Loan, true once; false outside the shell. */
-export function useOpenedFromInbox(): (loanId: string) => boolean {
+/** Whether the inbox's drawer just opened this Loan or Trade, true once; false outside the shell. */
+export function useOpenedFromInbox(): (id: string) => boolean {
   return useContext(InboxContext)?.takeOpened ?? (() => false);
 }
 
@@ -87,23 +102,36 @@ export function useInboxWaiting(): number {
   return useContext(InboxContext)?.waiting ?? 0;
 }
 
+/** The Trades waiting on the collector, for the Trades tab's badge (Trading #273); 0 outside the shell. */
+export function useInboxTradesWaiting(): number {
+  return useContext(InboxContext)?.tradesWaiting ?? 0;
+}
+
 type Load =
   { kind: "loading" } | { kind: "ready"; view: InboxView } | { kind: "failed" };
 
-/** An answer with the inbox's two lists, so an unexpected body reads as a failed read rather than breaking the shell. */
+/** An answer with the inbox's Loan lists, so an unexpected body reads as a failed read rather than breaking the shell.
+ * Trade lists an answer lacks read as empty. */
 function inboxView(body: unknown): InboxView | null {
   const view = body as InboxView | null;
-  return view && Array.isArray(view.waiting) && Array.isArray(view.updates)
-    ? view
-    : null;
+  if (!view || !Array.isArray(view.waiting) || !Array.isArray(view.updates))
+    return null;
+  return {
+    ...view,
+    trade_waiting: Array.isArray(view.trade_waiting) ? view.trade_waiting : [],
+    trade_updates: Array.isArray(view.trade_updates) ? view.trade_updates : [],
+  };
 }
 
 export function InboxProvider({
   onOpenLoan,
+  onOpenTrade,
   children,
 }: {
   /** Opens one Loan (/loans/<id>). */
   onOpenLoan: (id: string) => void;
+  /** Opens one Trade (/trades/<id>, Trading #273). */
+  onOpenTrade: (id: string) => void;
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -111,7 +139,7 @@ export function InboxProvider({
   const opener = useRef<HTMLElement | null>(null);
   const reads = useRef(0);
   const [loansChanged, setLoansChanged] = useState(0);
-  // The Loan the drawer last opened, until its screen takes it.
+  // The Loan or Trade the drawer last opened, until its screen takes it.
   const opened = useRef<string | null>(null);
 
   const show = useCallback((body: unknown) => {
@@ -154,6 +182,8 @@ export function InboxProvider({
   }, [refresh]);
 
   const waiting = load.kind === "ready" ? load.view.waiting.length : 0;
+  const tradesWaiting =
+    load.kind === "ready" ? load.view.trade_waiting.length : 0;
   return (
     <InboxContext.Provider
       value={{
@@ -164,14 +194,15 @@ export function InboxProvider({
         },
         isOpen: open,
         waiting,
+        tradesWaiting,
         refresh,
         loansChanged,
         noteLoansChanged: () => {
           setLoansChanged((n) => n + 1);
           refresh();
         },
-        takeOpened: (loanId) => {
-          if (opened.current !== loanId) return false;
+        takeOpened: (id) => {
+          if (opened.current !== id) return false;
           opened.current = null;
           return true;
         },
@@ -195,12 +226,16 @@ export function InboxProvider({
           opened.current = id;
           onOpenLoan(id);
         }}
+        onOpenTrade={(id) => {
+          opened.current = id;
+          onOpenTrade(id);
+        }}
       />
     </InboxContext.Provider>
   );
 }
 
-/** "Inbox", or "Inbox, 2 waiting" when Loans wait on the collector. */
+/** "Inbox", or "Inbox, 2 waiting" when Loans or Trades wait on the collector. */
 function inboxName(waiting: number): string {
   return waiting ? `Inbox, ${waiting} waiting` : "Inbox";
 }
@@ -209,6 +244,12 @@ function inboxName(waiting: number): string {
 export function loansTabName(waiting: number): string | undefined {
   if (!waiting) return undefined;
   return `Loans, ${waiting} ${waiting === 1 ? "needs" : "need"} you`;
+}
+
+/** "Trades, 1 needs you", "Trades, 2 need you"; undefined when nothing does, so the tab's name is its label. */
+export function tradesTabName(waiting: number): string | undefined {
+  if (!waiting) return undefined;
+  return `Trades, ${waiting} ${waiting === 1 ? "needs" : "need"} you`;
 }
 
 /** A count drawn over a header button or a tab's icon; hidden from assistive technology, which reads the name. */
@@ -233,7 +274,7 @@ export function InboxButton({ phone = false }: { phone?: boolean }) {
     <button
       ref={ref}
       type="button"
-      aria-label={inboxName(inbox.waiting)}
+      aria-label={inboxName(inbox.waiting + inbox.tradesWaiting)}
       aria-haspopup="dialog"
       aria-expanded={inbox.isOpen}
       onClick={() => inbox.open(ref)}
@@ -242,13 +283,60 @@ export function InboxButton({ phone = false }: { phone?: boolean }) {
       }`}
     >
       <Icon icon={Bell} size={20} />
-      <Badge count={inbox.waiting} />
+      <Badge count={inbox.waiting + inbox.tradesWaiting} />
     </button>
   );
 }
 
 const LINE =
   "flex min-h-tap flex-col justify-center rounded-control px-2 py-2 text-text no-underline hover:bg-surface-raised";
+
+/** One update under Earlier, a Loan's or a Trade's, as the drawer draws it. */
+type EarlierLine = {
+  id: string;
+  text: string;
+  at: string;
+  read: boolean;
+  href: string;
+  open: () => void;
+};
+
+/**
+ * The Loan updates and the Trade updates as one list, newest first. Each list is newest first already, and a Loan
+ * update goes first at the same time, so with no Trade updates the list is the Loan updates as they came.
+ */
+function earlierLines(
+  view: InboxView,
+  onOpenLoan: (id: string) => void,
+  onOpenTrade: (id: string) => void
+): EarlierLine[] {
+  const loans: EarlierLine[] = view.updates.map((update) => ({
+    id: update.id,
+    text: updateText(update),
+    at: update.at,
+    read: update.read,
+    href: loanPath(update.loan_id),
+    open: () => onOpenLoan(update.loan_id),
+  }));
+  const trades: EarlierLine[] = view.trade_updates.map((update) => ({
+    id: update.id,
+    text: tradeUpdateText(update),
+    at: update.at,
+    read: update.read,
+    href: tradePath(update.trade_id),
+    open: () => onOpenTrade(update.trade_id),
+  }));
+  const merged: EarlierLine[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < loans.length || j < trades.length) {
+    const takeLoan =
+      j >= trades.length ||
+      (i < loans.length && Date.parse(loans[i].at) >= Date.parse(trades[j].at));
+    merged.push(takeLoan ? loans[i++] : trades[j++]);
+  }
+  return merged;
+}
 
 function InboxDialog({
   open,
@@ -257,6 +345,7 @@ function InboxDialog({
   onClose,
   onCleared,
   onOpenLoan,
+  onOpenTrade,
 }: {
   open: boolean;
   load: Load;
@@ -264,6 +353,7 @@ function InboxDialog({
   onClose: () => void;
   onCleared: (body: unknown) => void;
   onOpenLoan: (id: string) => void;
+  onOpenTrade: (id: string) => void;
 }) {
   const base = useId();
   const earlier = useRef<HTMLHeadingElement>(null);
@@ -276,12 +366,24 @@ function InboxDialog({
   const view = load.kind === "ready" ? load.view : null;
   // "3 hours ago" is as of this drawing; nothing redraws it while the drawer stays open.
   const now = Date.now();
-  const toMark =
-    open && view
-      ? view.updates
-          .filter((update) => !update.read && !fresh.has(update.id))
-          .map((update) => update.id)
-      : [];
+  const earlierList = view
+    ? earlierLines(
+        view,
+        (id) => {
+          close();
+          onOpenLoan(id);
+        },
+        (id) => {
+          close();
+          onOpenTrade(id);
+        }
+      )
+    : [];
+  const toMark = open
+    ? earlierList
+        .filter((update) => !update.read && !fresh.has(update.id))
+        .map((update) => update.id)
+    : [];
   useEffect(() => {
     if (toMark.length === 0) return;
     setFresh((current) => new Set([...current, ...toMark]));
@@ -295,21 +397,33 @@ function InboxDialog({
     onClose();
   }
 
-  function openLoan(event: MouseEvent, id: string) {
+  /** A plain click opens the line here and closes the drawer; a modified click is the browser's. */
+  function follow(event: MouseEvent, open: () => void) {
     if (event.metaKey || event.ctrlKey || event.shiftKey) return;
     event.preventDefault();
-    close();
-    onOpenLoan(id);
+    open();
+  }
+  function openLoan(event: MouseEvent, id: string) {
+    follow(event, () => {
+      close();
+      onOpenLoan(id);
+    });
+  }
+  function openTrade(event: MouseEvent, id: string) {
+    follow(event, () => {
+      close();
+      onOpenTrade(id);
+    });
   }
 
   async function clear() {
-    if (!view || busy || view.updates.length === 0) return;
+    if (!view || busy || earlierList.length === 0) return;
     setBusy(true);
     setStatus("");
     setProblem("");
     try {
       onCleared(
-        await clearInbox({ ids: view.updates.map((update) => update.id) })
+        await clearInbox({ ids: earlierList.map((update) => update.id) })
       );
       setStatus("Cleared.");
       earlier.current?.focus();
@@ -350,12 +464,35 @@ function InboxDialog({
               >
                 Waiting on you
               </h3>
-              {view.waiting.length === 0 ? (
+              {view.waiting.length + view.trade_waiting.length === 0 ? (
                 <p className="m-0 py-1 text-meta text-text-muted">
                   Nothing is waiting on you.
                 </p>
               ) : (
                 <ul className="m-0 flex list-none flex-col p-0">
+                  {view.trade_waiting.map((trade) => (
+                    <li key={trade.id}>
+                      <a
+                        href={tradePath(trade.id)}
+                        onClick={(event) => openTrade(event, trade.id)}
+                        className={LINE}
+                      >
+                        <span className="text-body font-semibold wrap-anywhere">
+                          {trade.other.display_name} ·{" "}
+                          {tradeWaitingLabel(trade)}
+                        </span>
+                        <span className="text-meta text-text-muted wrap-anywhere">
+                          {tradeSubline(trade)}
+                        </span>{" "}
+                        <time
+                          dateTime={trade.since}
+                          className="text-meta font-normal text-text-muted"
+                        >
+                          {inboxTime(trade.since, now)}
+                        </time>
+                      </a>
+                    </li>
+                  ))}
                   {view.waiting.map((loan) => (
                     <li key={loan.id}>
                       <a
@@ -396,7 +533,7 @@ function InboxDialog({
                 >
                   Earlier
                 </h3>
-                {view.updates.length > 0 && (
+                {earlierList.length > 0 && (
                   <Button
                     aria-disabled={busy || undefined}
                     onClick={() => void clear()}
@@ -405,24 +542,24 @@ function InboxDialog({
                   </Button>
                 )}
               </div>
-              {view.updates.length === 0 ? (
+              {earlierList.length === 0 ? (
                 <p className="m-0 py-1 text-meta text-text-muted">
                   No updates.
                 </p>
               ) : (
                 <ul className="m-0 flex list-none flex-col p-0">
-                  {view.updates.map((update) => {
+                  {earlierList.map((update) => {
                     const isNew = !update.read || fresh.has(update.id);
                     return (
                       <li key={update.id}>
                         <a
-                          href={loanPath(update.loan_id)}
-                          onClick={(event) => openLoan(event, update.loan_id)}
+                          href={update.href}
+                          onClick={(event) => follow(event, update.open)}
                           className={`${LINE} ${isNew ? "font-semibold" : ""}`}
                         >
                           <span className="text-body wrap-anywhere">
                             {isNew && <span className="sr-only">New: </span>}
-                            {updateText(update)}
+                            {update.text}
                           </span>{" "}
                           <time
                             dateTime={update.at}

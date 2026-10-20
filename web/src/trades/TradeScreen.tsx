@@ -9,6 +9,7 @@ import {
 } from "react";
 import { ChevronLeft, Ellipsis, TriangleAlert } from "lucide-react";
 import { getLocationTree, type TreeLocation } from "../location_generated";
+import { useInboxRefresh, useOpenedFromInbox } from "../inbox/Inbox";
 import { lineEdition } from "../loans/loanText";
 import { PageHeader } from "../shell/PageHeader";
 import { CardImage } from "../social/FriendCollectionPage";
@@ -121,6 +122,9 @@ const DONE: Record<Asking | "accept" | "use_suggested", string> = {
  * get nothing) and "The swap can't be undone." The cards the reader gives show where their picks take them from, and
  * an out-of-date pick says what the suggestion takes instead. Those are the reader's own Locations, from their own side
  * read (`GET /api/trades/{id}/side`); the other side's never reach this screen.
+ *
+ * The inbox (Trading #273): the bell and the Trades tab's badge are read again after each step and after a refusal that
+ * reads the Trade again, and a Trade opened from the drawer takes focus on its heading once it is drawn, as a Loan does.
  */
 export function TradeScreen({
   tradeId,
@@ -131,6 +135,9 @@ export function TradeScreen({
   onAllTrades: () => void;
 }) {
   const toast = useToast();
+  const refreshInbox = useInboxRefresh();
+  // Opened from the inbox's drawer: the heading takes focus once the Trade is drawn, as the bell may be hidden.
+  const openedFromInbox = useOpenedFromInbox();
   const [load, setLoad] = useState<Load>(
     tradeId === null ? { kind: "missing" } : { kind: "loading" }
   );
@@ -170,6 +177,7 @@ export function TradeScreen({
           setAsking(null);
           setConfirming(false);
         }
+        if (openedFromInbox(tradeId)) focusNext.current = "heading";
         setLoad({ kind: "ready", trade, side });
       },
       (cause) => {
@@ -302,6 +310,7 @@ export function TradeScreen({
       setConfirming(false);
       setLoad({ kind: "ready", trade: next, side: nextSide });
       toast.show({ message: done(next) });
+      refreshInbox();
     } catch (cause) {
       if (!tradeOutcomeUnknown(cause)) keys.current.delete(action);
       const code =
@@ -313,6 +322,7 @@ export function TradeScreen({
         setMessage(text);
         reloading.current = true;
         setAttempt((n) => n + 1);
+        refreshInbox();
       } else if (action === "confirm") {
         setDialogMessage(text);
         if (code === "LOCATION_NOT_FOUND") {

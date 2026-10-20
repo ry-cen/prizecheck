@@ -28,14 +28,18 @@ decline the proposer's, cancel each side's. A side that gives nothing has nothin
 **Updates** (``record_trade_update``): a withdraw stores a 'cancelled' update for the recipient, which the inbox reads
 as withdrawn from the Trade's ``closed_reason``; a decline stores a 'declined' update for the proposer; a cancel stores
 a 'cancelled' update for the other side, never saying why. The recipient's accept (Trading #271) reserves their own
-copies, so it is inventory code in ``app.trade_inventory`` and stores an 'accepted' update for the proposer there. The
-inbox lists Trade updates from Trading #273.
-
+copies, so it is inventory code in ``app.trade_inventory`` and stores an 'accepted' update for the proposer there.
 A confirmed swap stores a 'swapped' update for the side that confirmed first, once the second side confirms
 (Trading #272, in ``app.trade_inventory``).
 
-Later tickets add the inbox lines and the 'fix_picks' waiting step (#273), ending a friendship's Trades (#274), cash and
-the Open to cash offers setting (#277) and Counter (#278).
+**Waiting on you** (``waiting_trade_step``, Trading #273) is the one definition the Trades list, its tab badge and the
+inbox's bell read, worked out on every read and never stored: a proposal to answer, an accepted Trade whose picks a
+Move or a Removal left out of date (``TradeFacts.stale_picks``, from ``trade_picks.stale_pick_trades`` over the
+reader's own Holdings), or a swap the other side confirmed. ``trade_waiting_since`` says since when. The inbox
+(``social.inbox``) lists the waiting Trades and the stored Trade updates.
+
+Later tickets add ending a friendship's Trades (#274), cash and the Open to cash offers setting (#277) and Counter
+(#278).
 """
 import json
 from collections.abc import Mapping
@@ -51,6 +55,7 @@ from pydantic import BaseModel, Field
 
 from ..location_tree import error, replay
 from ..main import connect, verified_user
+from ..trade_picks import stale_pick_trades
 from .friend_reads import card_facts
 from .loans import NOW, advance_revision
 from .owners import ensure_owner, lock_owners
@@ -130,14 +135,20 @@ class TradeStep(BaseModel):
 
 @dataclass(frozen=True)
 class TradeFacts:
-    """What a Trade's view and steps depend on beyond its row. ``stale_picks``: the reader's own reserved picks of this
-    Trade are out of date; Trading #273 reads it (``trade_picks.stale_pick_trades``), until then it is always False."""
+    """What a Trade's view and steps depend on beyond its row. ``stale_picks``: the Trade is accepted, the reader hasn't
+    confirmed the swap, and a pick of the reader's own is out of date (Trading #273)."""
     stale_picks: bool = False
 
 
 def trade_facts(conn, user_id: str, rows) -> dict[UUID, TradeFacts]:
-    """The facts of these Trade rows for the reader, by Trade id: one read whatever the number of Trades."""
-    return {row['id']: TradeFacts() for row in rows}
+    """The facts of these Trade rows for the reader, by Trade id, in one ``trade_picks.stale_pick_trades`` read whatever
+    the number of Trades. Only accepted Trades the reader hasn't confirmed are asked about, the only ones whose stale
+    picks wait on them (``waiting_trade_step``); a proposer's stale pick on a waiting proposal shows on the Trade screen
+    only. Reads no inventory but the reader's own Holdings and picks, and takes no lock."""
+    rows = list(rows)
+    stale = stale_pick_trades(conn, user_id, [row['id'] for row in rows
+                                              if row['state'] == 'accepted' and not confirmed(user_id, row)[0]])
+    return {row['id']: TradeFacts(stale_picks=row['id'] in stale) for row in rows}
 
 
 def role_of(user_id: str, row) -> str:
@@ -155,15 +166,32 @@ def confirmed(user_id: str, row) -> tuple[bool, bool]:
 
 
 def waiting_trade_step(user_id: str, row, facts: TradeFacts | None = None) -> str | None:
-    """What the Trade waits on the reader for, or None: 'answer' when they received a proposal nobody has answered;
-    'confirm_swap' once accepted, when the other side confirmed the swap and the reader has not. An accepted Trade
-    nobody has confirmed waits on neither side. Trading #273 adds 'fix_picks'."""
+    """What the Trade waits on the reader for, or None, the first that applies: 'answer' when they received a proposal
+    nobody has answered (a Counter is the same step, #278); 'fix_picks' once accepted, when the reader hasn't confirmed
+    the swap and a pick of theirs is out of date (``facts.stale_picks``; without facts, never); 'confirm_swap' once
+    accepted, when the other side confirmed the swap and the reader has not. An accepted Trade nobody has confirmed,
+    with the reader's picks up to date, waits on neither side. One Trade is one step, whatever else it needs."""
     mine, theirs = confirmed(user_id, row)
     if row['state'] == 'proposed':
         return 'answer' if role_of(user_id, row) == 'recipient' else None
-    if row['state'] == 'accepted' and not mine and theirs:
-        return 'confirm_swap'
+    if row['state'] == 'accepted' and not mine:
+        if facts is not None and facts.stale_picks:
+            return 'fix_picks'
+        if theirs:
+            return 'confirm_swap'
     return None
+
+
+def trade_waiting_since(user_id: str, row, step: str) -> datetime:
+    """When the Trade began to wait on the reader for ``step`` (``waiting_trade_step``), from times the row holds: a
+    proposal to answer, its ``created_at``; a swap the other side confirmed, that confirmation. Out-of-date picks have
+    no moment of their own (a Move or a Removal made them so, and nothing records when) and use ``accepted_at``, as the
+    Loans' do (``inbox.waiting_since``)."""
+    if step == 'answer':
+        return row['created_at']
+    if step == 'confirm_swap':
+        return row[f'{other_side(role_of(user_id, row))}_swap_at']
+    return row['accepted_at'] or row['created_at']
 
 
 def needs_you(user_id: str, row, facts: TradeFacts | None = None) -> bool:

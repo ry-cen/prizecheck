@@ -17,7 +17,17 @@ Each waiting line says how long it has waited (``since``), when the Loan reached
 2026-10-16). A withdraw is stored as a 'cancelled' update, as any cancel; the inbox reads it as 'withdrawn' from the
 Loan's ``closed_reason``, which only a withdraw sets, so the drawer says "withdrew their request" (or offer).
 
-Every route reads only the reader's own Loans and updates, takes no lock, writes no Loan row and moves no revision.
+**Trades** (Trading #273) sit beside the Loans in two lists of their own, so the Loan fields stay exactly as they were:
+``trade_waiting`` has one line per Trade waiting on the reader, through ``trades.waiting_trade_step`` (the Trades list's
+and its tab badge's one definition), each with ``since`` (``trades.trade_waiting_since``); ``trade_updates`` has the
+updates the Trade steps stored for the reader (accepted, declined, cancelled, read as withdrawn from the Trade's
+``closed_reason``, and swapped), newest first. A Trade update is an ``inbox_update`` row naming a Trade instead of a
+Loan (migration 144), so the read and clear routes and the pruning treat it as any event update, and the Loan updates'
+join on ``loan`` never sees it. There are no time-based Trade updates. The bell counts ``waiting`` and
+``trade_waiting``.
+
+Every route reads only the reader's own Loans, Trades and updates, takes no lock, writes no Loan or Trade row and moves
+no revision.
 """
 from datetime import date, datetime, timedelta
 from typing import Annotated, Literal
@@ -28,6 +38,7 @@ from pydantic import BaseModel, Field
 
 from ..main import connect, verified_user
 from .loans import LOANS, NUDGE_DAYS, LoanView, loan_facts, loan_views, role_of
+from .trades import TRADES, TradeView, trade_facts, trade_views, trade_waiting_since, waiting_trade_step
 
 router = APIRouter(prefix='/api/social/inbox', tags=['social'])
 
@@ -40,6 +51,9 @@ UpdateKind = Literal['accepted', 'partly_accepted', 'declined', 'cancelled', 'wi
                      'overdue', 'nudge_answer', 'nudge_handover']
 # The time-based kinds, as the Loan screen's notices (``loans.Notice``, migration 126).
 NOTICES = ('overdue', 'nudge_answer', 'nudge_handover')
+# What a Trade step tells the other side (``trades.record_trade_update``); 'withdrawn' is a 'cancelled' update on a
+# Trade Proposal its proposer withdrew.
+TradeUpdateKind = Literal['accepted', 'declined', 'cancelled', 'withdrawn', 'swapped']
 
 
 class InboxUpdate(BaseModel):
@@ -68,11 +82,34 @@ class InboxWaiting(LoanView):
     since: datetime
 
 
+class InboxTradeWaiting(TradeView):
+    """A Trade waiting on the reader, with its ``waiting`` step. ``since``: when it began to wait on them
+    (``trades.trade_waiting_since``)."""
+    since: datetime
+
+
+class InboxTradeUpdate(BaseModel):
+    """One Trade update under **Earlier**. ``id`` names it to the read and clear routes, as a Loan update's does.
+    ``other_name``: the collector who took the step, as the Trade names them. ``trade_state`` and ``role`` (the
+    reader's side) let the screen word it; ``read``: the reader was shown it; ``at``: when the step stored it."""
+    id: str
+    kind: TradeUpdateKind
+    trade_id: UUID
+    trade_state: Literal['proposed', 'accepted', 'closed']
+    role: Literal['proposer', 'recipient']
+    other_name: str
+    read: bool
+    at: datetime
+
+
 class InboxView(BaseModel):
     """The bell's drawer: the Loans waiting on the reader (each with its ``waiting`` step and ``since``), newest first,
-    then the updates not cleared, time-based ones first, then event updates newest first."""
+    then the updates not cleared, time-based ones first, then event updates newest first; then the Trades waiting on
+    the reader, the longest waiting last, and the Trade updates not cleared, newest first, at most ``UPDATES``."""
     waiting: list[InboxWaiting]
     updates: list[InboxUpdate]
+    trade_waiting: list[InboxTradeWaiting]
+    trade_updates: list[InboxTradeUpdate]
 
 
 class InboxIds(BaseModel):
@@ -147,7 +184,41 @@ def inbox_view(conn, user_id: str) -> InboxView:
     updates.sort(key=lambda update: update.at, reverse=True)
     waiting = [InboxWaiting(**dict(view), since=waiting_since(user_id, row, facts[row['id']], view.waiting))
                for row, view in zip(rows, views) if view.waiting is not None]
-    return InboxView(waiting=waiting, updates=updates)
+    return InboxView(waiting=waiting, updates=updates, trade_waiting=trade_waiting(conn, user_id),
+                     trade_updates=trade_updates(conn, user_id))
+
+
+def trade_waiting(conn, user_id: str) -> list[InboxTradeWaiting]:
+    """The reader's open Trades that wait on them, one line each, newest ``since`` first (then by id)."""
+    rows = conn.execute(TRADES + " AND t.state <> 'closed' ORDER BY t.created_at DESC, t.id",
+                        {'me': user_id}).fetchall()
+    if not rows:
+        return []
+    facts = trade_facts(conn, user_id, rows)
+    rows = [row for row in rows if waiting_trade_step(user_id, row, facts[row['id']]) is not None]
+    lines = [InboxTradeWaiting(**dict(view), since=trade_waiting_since(user_id, row, view.waiting))
+             for row, view in zip(rows, trade_views(conn, user_id, rows, facts))]
+    return sorted(lines, key=lambda line: (line.since, str(line.id)), reverse=True)
+
+
+# The Trade updates stored for the reader on Trades they are a side of, newest first.
+TRADE_UPDATES = """SELECT u.id, u.kind, u.trade_id, u.other_name, u.read_at, u.created_at, t.state AS trade_state,
+    t.closed_reason, t.proposer_id
+  FROM inbox_update u JOIN trade t ON t.id = u.trade_id
+  WHERE u.recipient_id = %(me)s AND u.dismissed_at IS NULL AND (t.proposer_id = %(me)s OR t.recipient_id = %(me)s)
+  ORDER BY u.created_at DESC, u.id LIMIT %(limit)s"""
+
+
+def trade_updates(conn, user_id: str) -> list[InboxTradeUpdate]:
+    """The Trade updates not cleared, as the drawer words them: a 'cancelled' update on a withdrawn proposal reads as
+    'withdrawn'."""
+    return [InboxTradeUpdate(
+        id=str(event['id']),
+        kind='withdrawn' if event['kind'] == 'cancelled' and event['closed_reason'] == 'withdrawn' else event['kind'],
+        trade_id=event['trade_id'], trade_state=event['trade_state'],
+        role='proposer' if event['proposer_id'] == user_id else 'recipient', other_name=event['other_name'],
+        read=event['read_at'] is not None, at=event['created_at'])
+        for event in conn.execute(TRADE_UPDATES, {'me': user_id, 'limit': UPDATES})]
 
 
 def _split(ids: list[str]) -> tuple[list[UUID], dict[UUID, set[str]]]:

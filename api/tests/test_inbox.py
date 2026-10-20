@@ -6,17 +6,31 @@ request or offer accepted, partly accepted or declined, a Loan cancelled, the re
 it and never why. Overdue and the 14-day nudge are worked out on read and listed until cleared. The inbox marks what it
 showed read, Clear dismisses it, and updates read more than 90 days ago are deleted lazily. Each update says when it
 happened, and a request or offer withdrawn reads as withdrawn, not cancelled (owner's decisions, 2026-10-16).
+
+Trades (Trading #273) have two lists of their own beside the Loans': ``trade_waiting``, one line per Trade waiting on
+the reader (a proposal to answer, an accepted Trade with an out-of-date pick, a swap the other side confirmed), and
+``trade_updates``, what Trade steps told them, read and cleared through the same routes and pruned the same way. With
+no Trades the inbox answers today's bytes, checked against ``inbox_fixtures/loan_inbox.json``, which was recorded from
+the inbox before Trading #273.
 """
+import json
 import os
+import re
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from uuid import uuid4
 
 import psycopg
+import pytest
 
 from app.main import connect  # noqa: F401  (main first: it includes every router while loading)
+from app.social import trades
+from app.social.trades import TradeFacts, TradeView
 from test_catalog_targets import isolated_rules  # noqa: F401  (an autouse fixture)
 from test_deck_cost import launches, store  # noqa: F401  (autouse fixtures)
+from test_deck_counting import hold
+from test_for_trade_locations import mark as mark_for_trade
 from test_friend_copies import collector, node, ok, place
 from test_handover import handover, use_suggested
 from test_holdings import call
@@ -26,6 +40,9 @@ from test_loans import accept, sent, step, view
 from test_moves import commit, selected, stage, start
 from test_return_by import answer, ask, backdate, change, day, requested, seen
 from test_returns import confirm_return, leave, lent_loan, start_return
+from test_trade_migrations import PREVIOUS_INBOX_EVENTS
+from test_trade_swap import confirm, use_suggested as use_suggested_picks
+from test_trades import accept_trade, move_one, proposed, read, row_of, trade_step, trading
 from test_write_off import choose, write_off
 
 
@@ -309,3 +326,313 @@ def test_a_write_off_choice_waits_from_the_write_off_and_a_gone_collectors_loan_
     assert since(ash, loan) == started['created_at']
     ok(confirm_return(ash, loan))
     assert since(ash, loan) == stored(loan, 'borrower_handover_at')[0]
+
+
+# Trades (Trading #273).
+
+FIXTURE = Path(__file__).resolve().parent / 'inbox_fixtures' / 'loan_inbox.json'
+UUID_TEXT = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}')
+TIME_TEXT = re.compile(r'"\d{4}-\d{2}-\d{2}T[^"]+"')
+DAY_TEXT = re.compile(r'"\d{4}-\d{2}-\d{2}"')
+HANDLE_TEXT = re.compile(r'"handle":"[^"]+"')
+
+
+def loan_story():
+    """A Loan-only inbox on both sides, as ``FIXTURE`` recorded it: Misty accepted Ash's request and confirmed the
+    handover (it waits on Ash to confirm he has the cards, and is overdue for both), declined another, Ash withdrew a
+    third and a fourth waits on Misty's answer; Ash was shown his oldest update. Returns (Iono, Ash, Misty)."""
+    iono, ash, misty, loan, more = requested(day(10), held=6)
+    ok(accept(misty, view(misty, loan), [(iono, 1)]))
+    ok(handover(misty, loan))
+    ok(step(misty, view(misty, more()), 'decline'))
+    ok(step(ash, more(), 'withdraw'))
+    more()
+    backdate(loan, return_by=day(-1))
+    mark(ash, 'read', [ids(ash)[-1]])
+    return iono, ash, misty
+
+
+def snapshot(*bodies: bytes) -> list[str]:
+    """Raw inbox bodies with what differs from run to run replaced, so two runs of ``loan_story`` give the same text:
+    each id by its order of first appearance across all the bodies (``<id 3>``), each Handle, time and date."""
+    numbered: dict[str, str] = {}
+
+    def number(found) -> str:
+        return numbered.setdefault(found.group(0), f'<id {len(numbered) + 1}>')
+
+    texts = []
+    for body in bodies:
+        text = UUID_TEXT.sub(number, HANDLE_TEXT.sub('"handle":"<handle>"', body.decode()))
+        texts.append(DAY_TEXT.sub('"<day>"', TIME_TEXT.sub('"<time>"', text)))
+    return texts
+
+
+def raw_inboxes(*users) -> list[bytes]:
+    return [call('GET', '/api/social/inbox', user).content for user in users]
+
+
+def loan_part(body: bytes) -> bytes:
+    """The body up to the Trade lists, closed as today's body was: the Loan fields, byte for byte."""
+    return body[:body.index(b',"trade_waiting":')] + b'}'
+
+
+def trade_lines(user):
+    """The inbox's Trade lines as (Trade id, step). The Trades list's ``needs_you`` always counts the same Trades."""
+    lines = [(line['id'], line['waiting']) for line in inbox(user)['trade_waiting']]
+    assert ok(call('GET', '/api/social/trades', user))['needs_you'] == len(lines)
+    return lines
+
+
+def trade_told(user):
+    """The reader's Trade updates as (kind, Trade id, other_name, role, trade_state, read), newest first."""
+    return [(update['kind'], update['trade_id'], update['other_name'], update['role'], update['trade_state'],
+             update['read']) for update in inbox(user)['trade_updates']]
+
+
+def trade_since(user, trade):
+    (found,) = [line for line in inbox(user)['trade_waiting'] if line['id'] == trade['id']]
+    return datetime.fromisoformat(found['since'])
+
+
+def test_with_no_trades_the_inbox_answers_todays_bytes_and_trades_never_change_the_loan_fields(store):
+    iono, ash, misty = loan_story()
+    recorded = json.loads(FIXTURE.read_text(encoding='utf-8'))
+    today_ = [recorded['ash'], recorded['misty']]
+    assert snapshot(*raw_inboxes(ash, misty)) == [
+        text[:-1] + ',"trade_waiting":[],"trade_updates":[]}' for text in today_]
+    # Trades between the same two collectors: one waits on Ash's answer, and Ash declined another, which tells Misty.
+    binder = place(misty, 'Trade Binder')
+    hold(misty, binder, iono, 2)
+    ok(mark_for_trade(misty, binder))
+    waiting_ = proposed(misty, ash, give=[(iono, 1)])
+    ok(trade_step(ash, proposed(misty, ash, give=[(iono, 1)]), 'decline'))
+    bodies = raw_inboxes(ash, misty)
+    assert snapshot(*[loan_part(body) for body in bodies]) == today_
+    seen_by_ash, seen_by_misty = (json.loads(body) for body in bodies)
+    assert [line['id'] for line in seen_by_ash['trade_waiting']] == [waiting_['id']]
+    assert [update['kind'] for update in seen_by_misty['trade_updates']] == ['declined']
+    # The bell counts both: one Loan and one Trade wait on Ash.
+    assert (len(seen_by_ash['waiting']), len(seen_by_ash['trade_waiting'])) == (1, 1)
+
+
+def test_trades_wait_on_the_side_whose_step_it_is_one_line_each(store):
+    ids, ash, misty, binder, box = trading()
+    iono, arven = ids['PAL 185'], ids['SVI 166']
+    trade = proposed(misty, ash, give=[(iono, 3)], get=[(arven, 1)])
+    # A proposal waits on its recipient's answer, never on the proposer.
+    assert trade_lines(ash) == [(trade['id'], 'answer')] and trade_lines(misty) == []
+    ok(accept_trade(ash, trade))
+    # Accepted, nobody confirmed and every pick up to date: it waits on neither side.
+    assert trade_lines(ash) == [] and trade_lines(misty) == []
+    # Misty moves a picked Iono out of the Trade Binder: her pick is out of date, which waits on her until she fixes
+    # it, on the Trades list too.
+    shelf = place(misty, 'Shelf')
+    move_one(misty, binder, iono, shelf)
+    assert trade_lines(misty) == [(trade['id'], 'fix_picks')] and trade_lines(ash) == []
+    seen = ok(read(misty, trade))
+    assert (seen['waiting'], seen['needs_you'], seen['section']) == ('fix_picks', True, 'needs_you')
+    assert ok(read(ash, trade))['section'] == 'to_swap'
+    # Ash confirms. Misty's Trade now needs two things and is still one line, the out-of-date pick first.
+    ok(confirm(ash, trade))
+    assert trade_lines(misty) == [(trade['id'], 'fix_picks')] and trade_lines(ash) == []
+    # Use suggested picks fixes it: the swap Ash confirmed waits on her.
+    ok(use_suggested_picks(misty, trade))
+    assert trade_lines(misty) == [(trade['id'], 'confirm_swap')]
+    ok(confirm(misty, trade))
+    assert trade_lines(misty) == [] and trade_lines(ash) == []
+    # A proposer's out-of-date pick while the proposal waits shows on the Trade screen only: the proposal waits on the
+    # recipient's answer, not on the proposer.
+    hold(misty, binder, iono, 2)
+    waiting_ = proposed(misty, ash, give=[(iono, 2)])
+    move_one(misty, binder, iono, shelf)
+    assert trade_lines(misty) == [] and trade_lines(ash) == [(waiting_['id'], 'answer')]
+
+
+def test_each_trade_line_says_since_when_the_trade_reached_the_step_that_waits_on_the_reader(store):
+    ids, ash, misty, binder, box = trading()
+    iono, arven = ids['PAL 185'], ids['SVI 166']
+    trade = proposed(misty, ash, give=[(iono, 3)], get=[(arven, 1)])
+    newer = proposed(misty, ash, get=[(arven, 1)])
+    # A proposal waits from when it was sent; the newest waiting line comes first.
+    assert [line['id'] for line in inbox(ash)['trade_waiting']] == [newer['id'], trade['id']]
+    assert trade_since(ash, trade) == row_of(trade)['created_at']
+    ok(accept_trade(ash, trade))
+    # An out-of-date pick has no moment of its own: it waits from the acceptance.
+    move_one(misty, binder, iono, place(misty, 'Shelf'))
+    row = row_of(trade)
+    assert trade_since(misty, trade) == row['accepted_at'] != row['created_at']
+    # A swap the other side confirmed waits from that confirmation.
+    ok(use_suggested_picks(misty, trade))
+    ok(confirm(ash, trade))
+    assert trade_since(misty, trade) == row_of(trade)['recipient_swap_at'] is not None
+
+
+def test_trade_steps_tell_the_other_side_who_took_them_and_a_withdraw_reads_as_withdrawn(store):
+    ids, ash, misty, binder, box = trading()
+    iono = ids['PAL 185']
+    swapped = proposed(misty, ash, give=[(iono, 1)])
+    ok(accept_trade(ash, swapped))
+    declined = proposed(misty, ash, give=[(iono, 1)])
+    ok(trade_step(ash, declined, 'decline'))
+    withdrawn = proposed(misty, ash, give=[(iono, 1)])
+    ok(trade_step(misty, withdrawn, 'withdraw'))
+    cancelled = ok(accept_trade(ash, proposed(misty, ash, give=[(iono, 1)])))
+    ok(trade_step(misty, ok(read(misty, cancelled)), 'cancel'))
+    # Ash confirms first, then Misty: the swap tells Ash, the side that confirmed first.
+    ok(confirm(ash, swapped))
+    ok(confirm(misty, swapped))
+    assert trade_told(misty) == [
+        ('accepted', cancelled['id'], 'Ash K.', 'proposer', 'closed', False),
+        ('declined', declined['id'], 'Ash K.', 'proposer', 'closed', False),
+        ('accepted', swapped['id'], 'Ash K.', 'proposer', 'closed', False)]
+    assert trade_told(ash) == [
+        ('swapped', swapped['id'], 'Misty W.', 'recipient', 'closed', False),
+        ('cancelled', cancelled['id'], 'Misty W.', 'recipient', 'closed', False),
+        ('withdrawn', withdrawn['id'], 'Misty W.', 'recipient', 'closed', False)]
+    # Each says when its step stored it; none is a Loan update, and no update is time-based.
+    with connect() as conn:
+        stored_at = {str(row['id']): row['created_at'] for row in conn.execute(
+            'SELECT id, created_at FROM inbox_update WHERE recipient_id = ANY(%s)', ([ash, misty],))}
+    for user in (ash, misty):
+        body = inbox(user)
+        assert body['updates'] == [] and body['waiting'] == []
+        assert {update['id']: datetime.fromisoformat(update['at']) for update in body['trade_updates']} == {
+            update['id']: stored_at[update['id']] for update in body['trade_updates']}
+    # An update shows the Trade's state now: an accepted proposal not yet swapped reads as accepted.
+    ok(accept_trade(ash, proposed(misty, ash, give=[(iono, 1)])))
+    assert trade_told(misty)[0][0::4] == ('accepted', 'accepted')
+
+
+def test_trade_updates_are_read_cleared_and_pruned_by_the_loan_routes_and_an_older_build_never_reads_one(store):
+    ids, ash, misty, binder, box = trading()
+    iono = ids['PAL 185']
+    for _ in range(3):
+        ok(trade_step(ash, proposed(misty, ash, give=[(iono, 1)]), 'decline'))
+    before = inbox(misty)['trade_updates']
+    shown = [update['id'] for update in before]
+    assert len(shown) == 3 and not any(update['read'] for update in before)
+    assert mark(misty, 'read', shown)['trade_updates'] == [{**update, 'read': True} for update in before]
+    # A Loan update and a Trade update that arrive after the drawer showed the others are neither marked nor cleared
+    # with them; then one Clear names both kinds.
+    loan = sent(ash, misty, [(iono, 1)])
+    ok(step(ash, loan, 'withdraw'))
+    ok(trade_step(ash, proposed(misty, ash, give=[(iono, 1)]), 'decline'))
+    cleared = mark(misty, 'clear', shown)
+    assert [(update['kind'], update['read']) for update in cleared['trade_updates']] == [('declined', False)]
+    assert [(update['kind'], update['read']) for update in cleared['updates']] == [('withdrawn', False)]
+    # The older build's inbox join on loan reads only the Loan update.
+    with connect() as conn:
+        assert [str(row['loan_id']) for row in conn.execute(PREVIOUS_INBOX_EVENTS, (misty, 50))] == [loan['id']]
+    # Nobody else's ids, the other side's included, touch Misty's updates.
+    (gary, _) = collector()
+    newest = [update['id'] for update in cleared['trade_updates'] + cleared['updates']]
+    for user in (gary, ash):
+        mark(user, 'read', newest)
+        mark(user, 'clear', newest)
+    assert [update['read'] for update in inbox(misty)['trade_updates'] + inbox(misty)['updates']] == [False, False]
+    assert mark(misty, 'clear', newest)['trade_updates'] == [] and inbox(misty)['updates'] == []
+    # Read Trade updates go 90 days after they were read, when the collector next marks or clears updates.
+    with connect() as conn:
+        rows = conn.execute('SELECT id FROM inbox_update WHERE recipient_id=%s AND trade_id IS NOT NULL '
+                            'ORDER BY created_at', (misty,)).fetchall()
+        assert len(rows) == 4
+        conn.execute("UPDATE inbox_update SET read_at = now() - interval '91 days' WHERE id=%s", (rows[0]['id'],))
+        conn.execute("UPDATE inbox_update SET read_at = now() - interval '89 days' WHERE id=%s", (rows[1]['id'],))
+        conn.execute("UPDATE inbox_update SET read_at = NULL, created_at = now() - interval '200 days' WHERE id=%s",
+                     (rows[2]['id'],))
+    mark(misty, 'read', [str(rows[3]['id'])])
+    with connect() as conn:
+        left = {row['id'] for row in conn.execute(
+            'SELECT id FROM inbox_update WHERE recipient_id=%s AND trade_id IS NOT NULL', (misty,))}
+    assert left == {rows[1]['id'], rows[2]['id'], rows[3]['id']}
+
+
+def test_only_the_two_sides_see_a_trades_lines_and_updates_and_none_names_a_location(store):
+    ids, ash, misty, binder, box = trading()
+    iono, arven = ids['PAL 185'], ids['SVI 166']
+    (gary, _) = collector('Gary O.')
+    trade = proposed(misty, ash, give=[(iono, 3)], get=[(arven, 1)])
+    ok(accept_trade(ash, trade))
+    shelf = place(misty, 'Shelf')
+    move_one(misty, binder, iono, shelf)
+    ok(confirm(ash, trade))
+    # Misty's line waits on her out-of-date pick and her update says Ash accepted; Ash's has nothing waiting.
+    bodies = dict(zip(('ash', 'misty', 'gary'), (call('GET', '/api/social/inbox', user) for user in (ash, misty, gary))))
+    assert [line['waiting'] for line in bodies['misty'].json()['trade_waiting']] == ['fix_picks']
+    assert [update['kind'] for update in bodies['misty'].json()['trade_updates']] == ['accepted']
+    # Neither side's Locations, by name or id, reach either inbox, the reader's own included.
+    for response in bodies.values():
+        for secret in ('Trade Binder', 'Box', 'Shelf', binder, box, shelf):
+            assert secret not in response.text
+    # The shapes: a Trade line is the Trade view both sides read plus since, and an update has no more than it says.
+    (line,) = bodies['misty'].json()['trade_waiting']
+    assert set(line) == set(TradeView.model_fields) | {'since'}
+    (update,) = bodies['misty'].json()['trade_updates']
+    assert set(update) == {'id', 'kind', 'trade_id', 'trade_state', 'role', 'other_name', 'read', 'at'}
+    # A stranger sees none of it, even an update row naming the Trade that was stored for them.
+    assert bodies['gary'].json() == {'waiting': [], 'updates': [], 'trade_waiting': [], 'trade_updates': []}
+    with connect() as conn:
+        conn.execute("""INSERT INTO inbox_update(id, recipient_id, kind, trade_id, other_name)
+          VALUES (%s, %s, 'accepted', %s, 'Misty W.')""", (uuid4(), gary, trade['id']))
+    assert inbox(gary)['trade_updates'] == []
+
+
+def test_the_inbox_reads_trades_without_waiting_on_a_lock_and_a_trade_step_never_waits_on_the_other_side(store):
+    ids, ash, misty, binder, box = trading()
+    iono = ids['PAL 185']
+    trade = proposed(misty, ash, give=[(iono, 2)])
+    ok(accept_trade(ash, trade))
+    withdrawn = proposed(misty, ash, give=[(iono, 1)])
+    shelf = place(misty, 'Shelf')
+    move_one(misty, binder, iono, shelf)
+    move_one(misty, binder, iono, shelf)
+    # Misty's owner row, her Holdings and the Trade row are held as her inventory commands and Trade steps hold them;
+    # her inbox still reads the out-of-date pick, and marks and clears.
+    with psycopg.connect(os.environ['DATABASE_URL']) as holder, ThreadPoolExecutor(max_workers=1) as executor:
+        holder.execute('SELECT 1 FROM inventory_owner WHERE user_id=%s FOR UPDATE', (misty,))
+        holder.execute('SELECT 1 FROM holding WHERE owner_id=%s FOR UPDATE', (misty,))
+        holder.execute('SELECT 1 FROM trade WHERE id=%s FOR UPDATE', (trade['id'],))
+        seen = executor.submit(call, 'GET', '/api/social/inbox', misty).result(timeout=20)
+        assert [line['waiting'] for line in seen.json()['trade_waiting']] == ['fix_picks']
+        names = [update['id'] for update in seen.json()['trade_updates']]
+        assert executor.submit(mark, misty, 'clear', names).result(timeout=20)['trade_updates'] == []
+        holder.rollback()
+    # Ash's owner row is held FOR UPDATE, as his own inventory commands hold it: Misty's steps that lock only her own
+    # row still run, and the withdraw's update names him with no key check on his row.
+    with psycopg.connect(os.environ['DATABASE_URL']) as holder, ThreadPoolExecutor(max_workers=1) as executor:
+        holder.execute('SELECT 1 FROM inventory_owner WHERE user_id=%s FOR UPDATE', (ash,))
+        assert executor.submit(trade_step, misty, withdrawn, 'withdraw').result(timeout=20).status_code == 200
+        assert executor.submit(use_suggested_picks, misty, trade).result(timeout=20).status_code == 200
+        assert executor.submit(confirm, misty, trade).result(timeout=20).status_code == 200
+        holder.rollback()
+    assert [update['kind'] for update in inbox(ash)['trade_updates']] == ['withdrawn']
+
+
+@pytest.mark.parametrize('state, reader, swaps, stale, waiting, section', [
+    ('proposed', 'recipient', (None, None), True, 'answer', 'needs_you'),
+    ('proposed', 'proposer', (None, None), True, None, 'pending'),
+    ('accepted', 'proposer', (None, None), True, 'fix_picks', 'needs_you'),
+    ('accepted', 'proposer', (None, None), False, None, 'to_swap'),
+    ('accepted', 'proposer', (None, 'now'), True, 'fix_picks', 'needs_you'),
+    ('accepted', 'proposer', (None, 'now'), False, 'confirm_swap', 'needs_you'),
+    ('accepted', 'proposer', ('now', None), True, None, 'pending'),
+    ('closed', 'recipient', (None, None), True, None, 'history'),
+])
+def test_an_out_of_date_pick_waits_first_on_an_accepted_trade_the_reader_has_not_confirmed(
+        state, reader, swaps, stale, waiting, section):
+    row = {'state': state, 'proposer_id': 'misty', 'recipient_id': 'ash', 'proposer_swap_at': swaps[0],
+           'recipient_swap_at': swaps[1]}
+    user = 'misty' if reader == 'proposer' else 'ash'
+    facts = TradeFacts(stale_picks=stale)
+    assert (trades.waiting_trade_step(user, row, facts), trades.section(user, row, facts)) == (waiting, section)
+
+
+def test_since_is_read_from_the_time_the_trade_reached_its_step():
+    created = datetime(2026, 10, 1, tzinfo=timezone.utc)
+    accepted_, swapped_ = created + timedelta(days=1), created + timedelta(days=2)
+    row = {'proposer_id': 'misty', 'recipient_id': 'ash', 'created_at': created, 'accepted_at': accepted_,
+           'proposer_swap_at': None, 'recipient_swap_at': swapped_}
+    assert trades.trade_waiting_since('ash', row, 'answer') == created
+    assert trades.trade_waiting_since('misty', row, 'fix_picks') == accepted_
+    assert trades.trade_waiting_since('misty', row, 'confirm_swap') == swapped_
+    assert trades.trade_waiting_since('misty', {**row, 'accepted_at': None}, 'fix_picks') == created

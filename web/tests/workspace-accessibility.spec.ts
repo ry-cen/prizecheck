@@ -826,9 +826,10 @@ test("theme colours meet AA text contrast and 3:1 for outlines", async ({
   expect(failures).toEqual([]);
 });
 
-// Six tabs and a two-digit Loans badge still fit the desktop header at its narrowest width (Trading #269 added Trades).
+// Six tabs with two-digit Loans and Trades badges still fit the desktop header at its narrowest width (Trading #269
+// added Trades, #273 its badge).
 collectorTest(
-  "the header with a two-digit Loans badge fits at 761 px",
+  "the header with two-digit Loans and Trades badges fits at 761 px",
   async ({ page, collectors }) => {
     collectorTest.slow();
     const ids = seedCatalog();
@@ -848,12 +849,44 @@ collectorTest(
         deck_id: null,
         idempotency_key: randomUUID(),
       });
+    // Twelve Trade Proposals that ask for Misty's For trade copy: asking reserves nothing, so each fits.
+    const shelf = (
+      await loansApi(lender.page, "POST", "/api/location-tree", {
+        name: "Trade Shelf",
+        parent_id: null,
+        parent_version: null,
+        idempotency_key: randomUUID(),
+      })
+    ).location as { id: string; version: number };
+    await loansApi(
+      lender.page,
+      "PUT",
+      `/api/location-tree/${shelf.id}/for-trade`,
+      {
+        for_trade: true,
+        version: shelf.version,
+        idempotency_key: randomUUID(),
+      }
+    );
+    await hold(lender.page, shelf.id, ids["PAL 185"], 1);
+    for (let i = 0; i < 12; i++)
+      await loansApi(page, "POST", "/api/trades", {
+        recipient_id: lenderId,
+        you_give: [],
+        you_get: [{ edition_id: ids["PAL 185"], quantity: "1" }],
+        idempotency_key: randomUUID(),
+      });
 
     await lender.page.goto(`${LOANS_ORIGIN}/collection`);
     const tab = lender.page
       .getByRole("navigation", { name: "Main views" })
       .getByRole("button", { name: /^Loans/ });
     await expect(tab).toHaveAccessibleName("Loans, 12 need you");
+    await expect(
+      lender.page
+        .getByRole("navigation", { name: "Main views" })
+        .getByRole("button", { name: /^Trades/ })
+    ).toHaveAccessibleName("Trades, 12 need you");
     const measure = () =>
       lender.page.evaluate(() => {
         const header = document.querySelector("header")!;
@@ -875,7 +908,9 @@ collectorTest(
       })
       .toBe(true);
     const widths = await measure();
-    console.log(`761px header with Loans 12: ${JSON.stringify(widths)}`);
+    console.log(
+      `761px header with Loans 12 and Trades 12: ${JSON.stringify(widths)}`
+    );
     const banner = lender.page.getByRole("banner");
     expect(await banner.evaluate((h) => h.scrollWidth <= h.clientWidth)).toBe(
       true
