@@ -4,7 +4,6 @@ import { getTradeList, type OwnTradeList } from "../trades_generated";
 import { Button } from "../ui/Button";
 import { variantLabel } from "../ui/variantLabel";
 import { HIDDEN_ON_TRADE_LIST } from "../workspace/locationTree";
-import { DraftControl, useTradeDraft } from "./TradeDraft";
 import { tradeListPanels, type TradeListPanel } from "./tradeListModel";
 
 type Load =
@@ -16,8 +15,7 @@ type Load =
  * My Trade List (Trading #269, prototype verdict variant A): every card in the collector's For trade Locations that
  * they offer now, in one panel per Location in tree order, so they know where to look when a Trade is agreed. A
  * Location hidden from Friends says its cards are still on the Trade List. Copies promised to a Trade or Loan are not
- * shown. Friends see the same cards and counts, never a Location. While there is a Trade Proposal draft (#270), each
- * card has **Add**, which puts it on the draft's You give side, then a stepper up to the copies on offer.
+ * shown. Friends see the same cards and counts, never a Location.
  *
  * The Open to cash offers switch joins the top of this view in a later ticket.
  */
@@ -66,19 +64,6 @@ export function MyTradeList({
     );
 
   const panels = tradeListPanels(load.list);
-  // An Edition held in several For trade Locations is in several panels: only its first row takes the draft control,
-  // capped at the Edition's total copies.
-  const seen = new Set<string>();
-  const controls = panels.map(
-    (panel) =>
-      new Set(
-        panel.cards.flatMap(({ card }) => {
-          if (seen.has(card.edition_id)) return [];
-          seen.add(card.edition_id);
-          return [card.edition_id];
-        })
-      )
-  );
   return (
     <>
       <p className="m-0 text-body text-text-muted">
@@ -94,12 +79,8 @@ export function MyTradeList({
         </div>
       ) : (
         <>
-          {panels.map((panel, index) => (
-            <LocationPanel
-              key={panel.location.id}
-              panel={panel}
-              controls={controls[index]}
-            />
+          {panels.map((panel) => (
+            <LocationPanel key={panel.location.id} panel={panel} />
           ))}
           <p className="m-0 text-meta text-text-subtle">
             Cards promised to a Trade or Loan leave this list until they're
@@ -112,17 +93,8 @@ export function MyTradeList({
 }
 
 /** One For trade Location: its path, the hidden mark when Friends can't see it, and its cards with their copies. */
-function LocationPanel({
-  panel,
-  controls,
-}: {
-  panel: TradeListPanel;
-  /** The Editions whose draft control is in this panel; the rest are first in another panel. */
-  controls: ReadonlySet<string>;
-}) {
+function LocationPanel({ panel }: { panel: TradeListPanel }) {
   const headingId = useId();
-  const drafts = useTradeDraft();
-  const draft = drafts?.draft ?? null;
   return (
     <section aria-labelledby={headingId} className="flex flex-col gap-2">
       <div className="flex min-w-0 flex-col gap-1">
@@ -145,7 +117,7 @@ function LocationPanel({
         {panel.cards.map(({ card, copies }) => (
           <li
             key={card.edition_id}
-            className={`grid ${draft ? "grid-cols-[2.5rem_minmax(0,1fr)_auto_auto]" : "grid-cols-[2.5rem_minmax(0,1fr)_auto]"} items-center gap-3 border-b border-border px-4 py-3 last:border-b-0`}
+            className="grid grid-cols-[2.5rem_minmax(0,1fr)_auto] items-center gap-3 border-b border-border px-4 py-3 last:border-b-0"
           >
             <CardImage url={card.image_url} />
             <span className="flex min-w-0 flex-col">
@@ -160,45 +132,6 @@ function LocationPanel({
             <span className="text-body font-semibold tabular-nums">
               ×{copies}
             </span>
-            {drafts && draft && !controls.has(card.edition_id) && (
-              <span className="text-meta text-text-muted">
-                {drafts.quantity(
-                  draft.friend.collector_id,
-                  "give",
-                  card.edition_id
-                ) > 0
-                  ? "In your draft"
-                  : ""}
-              </span>
-            )}
-            {drafts && draft && controls.has(card.edition_id) && (
-              <DraftControl
-                card={card}
-                friend={draft.friend}
-                side="give"
-                inDraft={drafts.quantity(
-                  draft.friend.collector_id,
-                  "give",
-                  card.edition_id
-                )}
-                onOtherSide={
-                  drafts.quantity(
-                    draft.friend.collector_id,
-                    "get",
-                    card.edition_id
-                  ) > 0
-                }
-                onSet={(quantity) =>
-                  drafts.set(
-                    draft.friend,
-                    "give",
-                    card,
-                    quantity,
-                    Number(card.copies)
-                  )
-                }
-              />
-            )}
           </li>
         ))}
       </ul>

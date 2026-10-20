@@ -23,6 +23,9 @@ export type PageDef = {
   /** Sub-addresses under `path` that open this page on one of its sections, for example /owner/rules for
    * Owner controls' Rules tab. The page reads its section with sectionAt. */
   sections?: readonly string[];
+  /** Sections that take exactly one further segment, for example `/trades/new/<Friend's Handle>` for the proposal
+   * builder (Trading #284). The page reads `"<section>/<item>"` with sectionAt. */
+  sectionItems?: readonly string[];
   /** Any one further segment opens this page on that item, for example /decks/<Deck id> for a Deck in the deck
    * builder (#176). The page reads the item with sectionAt. */
   param?: boolean;
@@ -64,13 +67,14 @@ export const PAGES: readonly PageDef[] = [
   },
   {
     // The Trades tab (Trading #269, #270 and #276, prototype verdict variant A): /trades is the Trades list,
-    // /trades/find Find trades, /trades/list My Trade List, /trades/draft the Trade Proposal draft and /trades/<Trade
-    // id> one Trade. A section name is never a Trade id: Trade ids are UUIDs.
+    // /trades/find Find trades, /trades/list My Trade List, /trades/new/<Handle> the proposal builder for that Friend
+    // (#284) and /trades/<Trade id> one Trade. A section name is never a Trade id: Trade ids are UUIDs.
     id: "trades",
     path: "/trades",
     label: "Trades",
     keepMounted: false,
-    sections: ["find", "list", "draft"],
+    sections: ["find", "list"],
+    sectionItems: ["new"],
     param: true,
   },
   {
@@ -138,6 +142,11 @@ export function pageAt(path: string): PageDef | undefined {
       (page.sections ?? []).some(
         (section) => path === `${page.path}/${section}`
       ) ||
+      (page.sectionItems ?? []).some((section) => {
+        const prefix = `${page.path}/${section}/`;
+        const item = path.slice(prefix.length);
+        return path.startsWith(prefix) && item !== "" && !item.includes("/");
+      }) ||
       (page.param === true &&
         path.startsWith(`${page.path}/`) &&
         isItemPath(page, path.slice(page.path.length + 1)))

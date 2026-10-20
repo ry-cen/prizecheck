@@ -1,5 +1,12 @@
 import { ChevronDown, ChevronUp } from "lucide-react";
-import { useEffect, useId, useRef, useState, type MouseEvent } from "react";
+import {
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type MouseEvent,
+  type Ref,
+} from "react";
 import { lineEdition } from "../loans/loanText";
 import { CardImage } from "../social/FriendCollectionPage";
 import { useOpenFriends } from "../social/FriendsDrawer";
@@ -13,8 +20,7 @@ import {
 import { Button } from "../ui/Button";
 import { Icon } from "../ui/Icon";
 import { Pill } from "../ui/Pill";
-import { useTradeDraft, type TradeDraftFriend } from "./TradeDraft";
-import { friendTradeListPath, TRADE_DRAFT_PATH } from "./tradeListModel";
+import { friendTradeListPath, proposalPath } from "./tradeListModel";
 import {
   acceptsText,
   matchHeadline,
@@ -37,9 +43,10 @@ const LINK =
  * is a button that opens both sides, showing only the matched cards: **You get** (each marked Exact, Any finish or
  * Same name) and **You give**, each with the copies offered and how many are wanted ("6 wanted (2 for Decks)") and
  * whether the want is for Decks, for Trade Wants or both. A side past 20 cards has **Show N more**, which reads that
- * Friend's whole row. **Propose trade** opens the Trade Proposal draft to that Friend empty (owner's verdict,
- * 2026-10-19: the draft page suggests the matched cards), asking to discard a draft to another Friend first. Nothing
- * shows a price, a Location or a Deck. It reads again each time it opens.
+ * Friend's whole row, moves focus to that side's heading when it arrives, and from then on the row's header and
+ * counts come from that read. **Propose trade** opens the proposal builder to that Friend empty (Trading #284), where
+ * the matched cards are listed first. Nothing shows a price, a Location or a Deck. It reads again each time it
+ * opens.
  */
 export function FindTrades({
   onNavigate,
@@ -163,19 +170,22 @@ function MatchRow({
 }) {
   const buttonId = useId();
   const panelId = useId();
-  const drafts = useTradeDraft();
   const [full, setFull] = useState<Full>({ kind: "idle" });
   const reading = useRef<AbortController | null>(null);
   useEffect(() => () => reading.current?.abort(), []);
 
   const name = row.display_name;
-  const tag = matchTag(row);
   const shown = full.kind === "ready" ? full.row : row;
-  const friend: TradeDraftFriend = {
-    collector_id: row.collector_id,
-    display_name: row.display_name,
-    handle: row.handle,
-  };
+  const tag = matchTag(shown);
+  const getHeading = useRef<HTMLHeadingElement>(null);
+  const giveHeading = useRef<HTMLHeadingElement>(null);
+  // The side whose Show N more was pressed: its button leaves with the load, so focus goes to its heading.
+  const asked = useRef<"get" | "give" | null>(null);
+  useEffect(() => {
+    if (full.kind === "ready" && asked.current)
+      (asked.current === "get" ? getHeading : giveHeading).current?.focus();
+    if (full.kind === "ready" || full.kind === "failed") asked.current = null;
+  }, [full]);
   const list = friendTradeListPath(row.handle);
 
   async function showAll() {
@@ -218,10 +228,10 @@ function MatchRow({
                 @{row.handle}
               </span>
               {tag && <Pill tone="ok">{tag}</Pill>}
-              {row.open_to_cash_offers && <Pill>Open to cash offers</Pill>}
+              {shown.open_to_cash_offers && <Pill>Open to cash offers</Pill>}
             </span>
             <span className="text-meta text-text-muted">
-              {matchHeadline(row)}
+              {matchHeadline(shown)}
             </span>
           </span>
           <Icon
@@ -245,7 +255,11 @@ function MatchRow({
               cards={shown.you_get}
               more={shown.more_you_get}
               busy={full.kind === "loading"}
-              onShowMore={() => void showAll()}
+              headingRef={getHeading}
+              onShowMore={() => {
+                asked.current = "get";
+                void showAll();
+              }}
             />
             <MatchSide
               title="You give"
@@ -253,7 +267,11 @@ function MatchRow({
               cards={shown.you_give}
               more={shown.more_you_give}
               busy={full.kind === "loading"}
-              onShowMore={() => void showAll()}
+              headingRef={giveHeading}
+              onShowMore={() => {
+                asked.current = "give";
+                void showAll();
+              }}
             />
           </div>
           {full.kind === "failed" && (
@@ -262,17 +280,13 @@ function MatchRow({
             </p>
           )}
           <div className="flex flex-wrap items-center gap-3">
-            {drafts && (
-              <Button
-                variant="primary"
-                aria-label={`Propose trade to ${name}`}
-                onClick={() =>
-                  drafts.start(friend, () => onNavigate(TRADE_DRAFT_PATH))
-                }
-              >
-                Propose trade
-              </Button>
-            )}
+            <Button
+              variant="primary"
+              aria-label={`Propose trade to ${name}`}
+              onClick={() => onNavigate(proposalPath(row.handle))}
+            >
+              Propose trade
+            </Button>
             <a href={list} onClick={go} className={LINK}>
               See all of {name}'s Trade List
             </a>
@@ -290,6 +304,7 @@ function MatchSide({
   cards,
   more,
   busy,
+  headingRef,
   onShowMore,
 }: {
   title: string;
@@ -297,6 +312,7 @@ function MatchSide({
   cards: TradeMatchCard[];
   more: number;
   busy: boolean;
+  headingRef: Ref<HTMLHeadingElement>;
   onShowMore: () => void;
 }) {
   const headingId = useId();
@@ -306,7 +322,12 @@ function MatchSide({
       aria-labelledby={headingId}
       className="flex min-w-0 flex-col gap-2"
     >
-      <h3 id={headingId} className="m-0 text-body font-semibold">
+      <h3
+        ref={headingRef}
+        id={headingId}
+        tabIndex={-1}
+        className="m-0 text-body font-semibold"
+      >
         {title}
       </h3>
       <ul
