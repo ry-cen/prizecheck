@@ -3,8 +3,9 @@
 // starting a draft to Brock asks first and Keep it keeps hers. She adds her own Iono from My Trade List, sends the swap
 // after a refusal that names the card and the count and a send whose outcome was unknown, then sends Ash a gift from
 // an empty draft. Her Iono leaves both Trade Lists at once and a removal is refused because a Trade promised it. Ash
-// sees both proposals from his side, never one of her Locations. Misty withdraws both and the cards come back. At
-// desktop width and at 375 px. The catalog is the Swap catalog (api/tests/want_list_swap_fixtures.py). The other
+// sees both proposals from his side, never one of her Locations. Misty withdraws both, answering the question each
+// withdraw asks first (#271), and the cards come back. At desktop
+// width and at 375 px. The catalog is the Swap catalog (api/tests/want_list_swap_fixtures.py). The other
 // collectors sign in first, so the test's own page signs in afterwards as a new account.
 import { execFileSync } from "node:child_process";
 import { randomInt, randomUUID } from "node:crypto";
@@ -439,6 +440,12 @@ async function story(
     await page.goto(trade);
     await page.getByRole("button", { name: "More for this Trade" }).click();
     await page.getByRole("menuitem", { name: "Withdraw" }).click();
+    // Withdrawing asks first (#271); the question names the Friend.
+    const asking = page.getByRole("group", { name: "Withdraw" });
+    await expect(asking).toContainText(
+      "Withdraw your Trade Proposal to Ash K?"
+    );
+    await asking.getByRole("button", { name: "Withdraw" }).click();
     await expect(heading(page)).toHaveText("You withdrew this Trade Proposal");
     await expect(toast(page)).toContainText("Withdrawn");
   }

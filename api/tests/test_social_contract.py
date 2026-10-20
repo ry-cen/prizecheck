@@ -292,9 +292,11 @@ def test_every_social_route_answers_success_with_a_schema_the_walk_reads():
     # A Friend's Trade List (trading #269): cards and their copies, read by the walk like every other route.
     trade_list = {field for _, field, _ in routes['GET /api/social/trade-lists/{handle}']}
     assert {'copies', 'descriptor', 'next_page'} <= trade_list, trade_list
-    # Trades (trading #270): both sides' cards and the other side, read by the walk on the list, one Trade and a step.
+    # Trades (trading #270): both sides' cards and the other side, read by the walk on the list, one Trade and each
+    # step under /api/social (withdraw, #270; decline and cancel, #271).
     for route in ('GET /api/social/trades', 'GET /api/social/trades/{trade_id}',
-                  'POST /api/social/trades/{trade_id}/withdraw'):
+                  'POST /api/social/trades/{trade_id}/withdraw', 'POST /api/social/trades/{trade_id}/decline',
+                  'POST /api/social/trades/{trade_id}/cancel'):
         trade = {field for _, field, _ in routes[route]}
         assert {'you_give', 'you_get', 'other', 'copies', 'descriptor', 'open_to_cash_offers'} <= trade, (route, trade)
 
