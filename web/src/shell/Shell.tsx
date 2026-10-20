@@ -9,6 +9,7 @@ import {
   ArrowLeftRight,
   BookOpen,
   Flag,
+  Handshake,
   Layers,
   LayoutGrid,
   LogOut,
@@ -44,6 +45,7 @@ const ICONS: Record<PageId, LucideIcon> = {
   decks: Layers,
   catalog: BookOpen,
   loans: ArrowLeftRight,
+  trades: Handshake,
   reports: Flag,
   settings: Settings,
   owner: ShieldCheck,
@@ -241,8 +243,9 @@ function ShellFrame({
           Skip to main content
         </a>
 
-        {/* Desktop header: sticky, so the tabs are in reach wherever the page is scrolled. */}
-        <header className="sticky top-0 z-(--layer-sticky) box-border flex h-header items-center gap-6 border-b border-border bg-bg px-7 compact:px-5 phone:hidden">
+        {/* Desktop header: sticky, so the tabs are in reach wherever the page is scrolled. At compact widths the gaps and
+          the tabs' padding tighten so six tabs and the header actions fit down to 761 px (Trading #269 added Trades). */}
+        <header className="sticky top-0 z-(--layer-sticky) box-border flex h-header items-center gap-6 border-b border-border bg-bg px-7 compact:gap-4 compact:px-5 phone:hidden">
           <Wordmark />
           <nav aria-label="Main views" className="flex items-center gap-1">
             {DESKTOP_TABS.map((id) => (
@@ -252,7 +255,7 @@ function ShellFrame({
                 aria-current={showing === id ? "page" : undefined}
                 aria-label={id === "loans" ? loansTabName(waiting) : undefined}
                 onClick={() => go(id)}
-                className="inline-flex h-control cursor-pointer items-center gap-2 whitespace-nowrap rounded-control border-0 bg-transparent px-3 text-control font-medium text-text-muted hover:text-text aria-[current=page]:bg-surface-selected aria-[current=page]:text-accent-strong"
+                className="inline-flex h-control cursor-pointer items-center gap-2 whitespace-nowrap rounded-control border-0 bg-transparent px-3 text-control font-medium text-text-muted hover:text-text compact:px-2 aria-[current=page]:bg-surface-selected aria-[current=page]:text-accent-strong"
               >
                 {pageDef(id).label}
                 {id === "loans" && waiting > 0 && (

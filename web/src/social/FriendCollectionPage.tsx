@@ -19,6 +19,7 @@ import { Pill } from "../ui/Pill";
 import { SearchField } from "../ui/SearchField";
 import { variantLabel } from "../ui/variantLabel";
 import { AskControl, copyCap } from "../loans/BorrowDrafts";
+import { friendTradeListPath } from "../trades/tradeListModel";
 import { lendableText, readPrintings } from "./friendCards";
 
 type Show = FriendCollection["show"];
@@ -36,6 +37,9 @@ type Load =
       q: string;
     };
 
+const LINK =
+  "inline-flex h-control items-center gap-1 rounded-control px-2 text-control font-medium text-accent-strong no-underline hover:bg-surface-raised phone:h-control-phone";
+
 // How long the search waits after the last keystroke before it reads again.
 const SEARCH_DELAY_MS = 300;
 
@@ -49,9 +53,15 @@ const SEARCH_DELAY_MS = 300;
  * same whatever the reason.
  *
  * Each card has **Ask to borrow** (#252), which adds a copy to the Friend's Borrow Request draft and then turns into a
- * stepper.
+ * stepper. The header links to the Friend's Trade List (Trading #269).
  */
-export function FriendCollectionPage({ handle }: { handle: string }) {
+export function FriendCollectionPage({
+  handle,
+  onNavigate,
+}: {
+  handle: string;
+  onNavigate: (to: string) => void;
+}) {
   const printings = useMemo(readPrintings, []);
   const [show, setShow] = useState<Show>("wanted");
   const [typed, setTyped] = useState("");
@@ -126,9 +136,9 @@ export function FriendCollectionPage({ handle }: { handle: string }) {
     }
   }
 
-  const frame = (title: string, children: ReactNode) => (
+  const frame = (title: string, children: ReactNode, actions?: ReactNode) => (
     <main className="mx-auto box-border flex max-w-7xl flex-col gap-4 px-7 py-7 phone:px-4 phone:py-5">
-      <PageHeader title={title} />
+      <PageHeader title={title} actions={actions} />
       {children}
     </main>
   );
@@ -162,6 +172,7 @@ export function FriendCollectionPage({ handle }: { handle: string }) {
   const name = page.display_name;
   // The answer on screen can be the previous filter's for a moment after a chip is pressed or a search is typed.
   const current = page.show === show && load.q === q;
+  const tradeList = friendTradeListPath(page.handle);
   const empty = load.q
     ? `No cards match “${load.q}”.`
     : page.show === "wanted"
@@ -240,7 +251,18 @@ export function FriendCollectionPage({ handle }: { handle: string }) {
           )}
         </div>
       )}
-    </>
+    </>,
+    <a
+      href={tradeList}
+      onClick={(event) => {
+        if (event.metaKey || event.ctrlKey || event.shiftKey) return;
+        event.preventDefault();
+        onNavigate(tradeList);
+      }}
+      className={LINK}
+    >
+      See {name}'s Trade List
+    </a>
   );
 }
 

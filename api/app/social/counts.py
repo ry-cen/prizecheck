@@ -74,7 +74,8 @@ def reserved_picks(conn, owner_id: str, edition_ids: Iterable[UUID]) -> dict[UUI
     summed over the picks of every reserving Loan and Trade side (``reserving_picks``, migration 142). A pick whose
     source was deleted is under None (its copies went to Unsorted). The picks of one Edition sum to its
     ``reserved_counts``; a pick may be out of date, so callers treat these as where to look first, never as a count. The
-    caller holds the owner row lock. Call it through the module."""
+    caller holds the owner row lock, or reads one snapshot without it (the Trade List, ``app.trade_list``). Call it
+    through the module."""
     editions = sorted(set(edition_ids))
     if not editions:
         return {}

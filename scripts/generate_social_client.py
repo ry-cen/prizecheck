@@ -1,6 +1,6 @@
 """Generate the social client module (Friends and Friend Requests, social network #247, Blocks, #248, Friends' cards,
-#250 and #251, Loans, #252 and #253, Borrowed Copies, #254, Returns, #255, Write-off, #257, and the inbox, #259) from
-the API OpenAPI schema."""
+#250 and #251, Loans, #252 and #253, Borrowed Copies, #254, Returns, #255, Write-off, #257, the inbox, #259, and a
+Friend's Trade List, trading #269) from the API OpenAPI schema."""
 import sys
 from pathlib import Path
 
@@ -33,7 +33,8 @@ for name in ("Collector", "CollectorLookup", "InviteCollector", "FriendsView", "
              "PromiseLimit", "LoanPickPlace", "LoanDeck", "LoanSide", "LentCard", "LentOut", "BorrowedCard",
              "BorrowedCopies", "MoveBorrowed", "ReturnedLine", "StartReturn", "WriteOffLine", "WriteOff", "ChosenPlace",
              "WrittenOffChoice", "ChangeReturnBy", "AskForMoreTime", "SeenNotices", "OfferedCopies", "SendLendOffer",
-             "AcceptLendOffer", "InboxUpdate", "InboxWaiting", "InboxView", "InboxIds"):
+             "AcceptLendOffer", "InboxUpdate", "InboxWaiting", "InboxView", "InboxIds", "FriendTradeCard",
+             "FriendTradeList"):
     definition = schema[name]
     fields = [f"{field}{'' if field in definition.get('required', []) else '?'}: {ts_type(value)}"
               for field, value in definition["properties"].items()]
@@ -98,6 +99,10 @@ export const getWantListMatches = (params: { deck?: string | null; printings?: P
 export const getCardMatches = (printingId: string, params: { printings?: Printings }, signal?: AbortSignal) =>
   request<CardMatches>(`/api/social/card-matches${query({ printing_id: printingId, ...params })}`, 'GET', undefined,
     signal);
+// A Friend's Trade List (trading #269): one page of the cards they offer to trade now, found by their Handle among your
+// Friends.
+export const getFriendTradeList = (handle: string, params: { q?: string; page?: number }, signal?: AbortSignal) =>
+  request<FriendTradeList>(`/api/social/trade-lists/${at(handle)}${query(params)}`, 'GET', undefined, signal);
 // Loans (#252): the Loans tab and one Loan, as both sides read them.
 export const getLoans = (signal?: AbortSignal) => request<LoansView>('/api/social/loans', 'GET', undefined, signal);
 export const getLoan = (id: string, signal?: AbortSignal) =>
