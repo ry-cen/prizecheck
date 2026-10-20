@@ -11,6 +11,11 @@ export function compareLocationNames(a: TreeNode, b: TreeNode): number {
   return collator.compare(a.name, b.name) || a.id.localeCompare(b.id);
 }
 
+/** Two Location names in the trees' sibling order, for lists that have names but no tree nodes (My Trade List). */
+export function compareNames(a: string, b: string): number {
+  return collator.compare(a, b);
+}
+
 /** A folder is an Organizational Location. Storage Leaves and Decks are leaves and can be opened. */
 export function isFolder(node: TreeNode): boolean {
   return node.kind === "organization";
@@ -107,10 +112,16 @@ export function forTradeLabel(forTrade: ForTrade): string {
   return "";
 }
 
-/** The line a Location that is both hidden from Friends and For trade shows, so the collector knows its cards are
- * still offered. Empty otherwise. */
+/** What a Location that is both hidden from Friends and For trade says on My Trade List
+ * (Trading #269, the prototype's wording), so the collector knows its cards are still offered. */
+export const HIDDEN_AND_FOR_TRADE =
+  "Hidden from Friends · still on your Trade List";
+
+/** The line a Location that is both hidden from Friends and For trade shows in Manage locations, where its caption
+ * already says it is hidden (owner, 2026-10-20). Empty otherwise. */
+export const STILL_ON_TRADE_LIST = "Still on your Trade List";
 export function stillOfferedLine(hiding: Hiding, forTrade: ForTrade): string {
   return hiding.kind !== "visible" && forTrade.kind !== "none"
-    ? "Its cards are still offered for trade."
+    ? STILL_ON_TRADE_LIST
     : "";
 }

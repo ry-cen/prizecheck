@@ -6,6 +6,7 @@ export type PageId =
   | "decks"
   | "catalog"
   | "loans"
+  | "trades"
   | "reports"
   | "settings"
   | "owner";
@@ -62,6 +63,16 @@ export const PAGES: readonly PageDef[] = [
     param: true,
   },
   {
+    // The Trades tab (Trading #269, prototype verdict variant A): /trades/list is My Trade List. The Trades list
+    // (/trades) and Find trades (/trades/find) arrive in later tickets, and one Trade at /trades/<id>; until the Trades
+    // list exists, /trades opens My Trade List.
+    id: "trades",
+    path: "/trades",
+    label: "Trades",
+    keepMounted: false,
+    sections: ["list"],
+  },
+  {
     id: "reports",
     path: "/reports",
     label: "Missing cards",
@@ -88,14 +99,17 @@ export const DESKTOP_TABS: readonly PageId[] = [
   "decks",
   "catalog",
   "loans",
+  "trades",
   "reports",
 ];
-/** Phone bottom tab bar (#252: Loans took the More slot; Missing cards moved to the account sheet). */
+/** Phone bottom tab bar (#252: Loans took the More slot; Missing cards moved to the account sheet; Trading #269:
+ * Trades is the fifth). */
 export const PHONE_TABS: readonly PageId[] = [
   "collection",
   "decks",
   "catalog",
   "loans",
+  "trades",
 ];
 /** The desktop avatar menu's pages (Owner controls for the owner only), before Sign out. */
 export const ACCOUNT_PAGES: readonly PageId[] = ["settings", "owner"];

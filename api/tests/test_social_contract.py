@@ -32,19 +32,31 @@ INVENTORY_TABLE = re.compile(
     r'(?:\bFROM|\bJOIN|,)\s+(?:ONLY\s+)?(?:"?\w+"?\s*\.\s*)?"?'
     r'(?:holding|deck_list_line|deck_list|location|borrowed_holding|trade_want|trade_accept)"?\b',
     re.IGNORECASE)
-# The collector's own Locations, and the rule friend_copies' statement calls: matched against the whole source text.
-HIDDEN_CALL = re.compile(r'\bhidden_location(?:s|_ids)\s*\(')
+# The rules over a collector's own Locations that the choke point's statements call: hidden Locations (migration 101),
+# For trade Locations (140) and the listable rule (142, trading #269). Matched against the whole source text, docstrings
+# and comments too, so a social module's prose must never write one of these names followed by an open parenthesis.
+HIDDEN_CALL = re.compile(r'\b(?:hidden_location(?:s|_ids)|for_trade_locations|trade_listable)\s*\(')
 # In the social area only friend_copies (the choke point) and hidden_locations (the rule it calls) may read inventory.
 READERS = {'social/friend_copies.py', 'social/hidden_locations.py'}
-# Calls of migration 142's placement rule and listable rule (trading #268, ADR 0015), matched against string constants
-# only (SQL text and f-string pieces, never docstrings), as inventory_reads matches: no error message or other string
-# may write either call form. Only these modules may call them: counts for one owner, and the choke point for Friends;
-# the Trade List and the choke point for the listable rule. A module named here that doesn't call it yet (the choke
-# point's Trade reads, trade_list.py) is allowed to be absent until its ticket lands.
+# Calls of migration 142's placement rule and listable rule (trading #268, ADR 0015) and of migration 140's For trade
+# rule, matched against string constants only (SQL text and f-string pieces, never docstrings), as inventory_reads
+# matches: no error message or other string may write a call form. Only these modules may call them: counts for one
+# owner, and the choke point for Friends, for the placement rule; the Trade List and the choke point for the listable
+# rule (trading #269); the Trade List alone for the For trade rule. The choke point doesn't call the placement rule yet
+# (its Friend wants read, trading #276, will), so that guard still allows it to be absent.
 RESERVING_PICKS_CALL = re.compile(r'\breserving_picks\s*\(')
 LISTABLE_CALL = re.compile(r'\btrade_listable\s*\(')
+FOR_TRADE_CALL = re.compile(r'\bfor_trade_locations\s*\(')
 RESERVING_PICKS_CALLERS = {'social/counts.py', 'social/friend_copies.py'}
 LISTABLE_CALLERS = {'trade_list.py', 'social/friend_copies.py'}
+FOR_TRADE_CALLERS = {'trade_list.py'}
+# A read of several collectors' inventory in one statement (ADR 0015): a string constant that reads an inventory table
+# and filters on a list of owners or borrowers. Only the choke point may write one. Owner and admin aggregate reads in
+# another form are exempt by the ADR, and review catches the forms this misses (IN lists, joins, split constants).
+SEVERAL_OWNERS_TABLE = re.compile(
+    r'(?:\bFROM|\bJOIN|,)\s+(?:ONLY\s+)?(?:"?\w+"?\s*\.\s*)?"?(?:holding|deck_list_line|location|borrowed_holding)"?\b',
+    re.IGNORECASE)
+SEVERAL_OWNERS_FILTER = re.compile(r'\b(?:owner_id|borrower_id)\s*=\s*ANY\s*\(', re.IGNORECASE)
 # What each social module may import from inside the app, as (module as written, relative to this package, name). A new
 # import of the Want List, copy allocation, the Location readers, hidden_locations or friend_copies.READ fails here
 # until someone justifies it by adding it.
@@ -60,6 +72,12 @@ ALLOWED_IMPORTS = {
         # Only the error helper of the Location readers; the Want List's capture and card order drive the wanted cards.
         ('..location_tree', 'error'), ('..want_list', 'capture_want_list'), ('..want_list', 'number_order'),
         ('.friend_copies', 'friend_copies')},
+    # A Friend's Trade List (trading #269): the Friend by Handle and the card facts as a Friend's Collection reads them,
+    # and their listable copies from the choke point. Discovery's imports (trading #276) are added with discovery.
+    'social/trade_matches.py': {
+        ('.', 'name_rules'), ('..main', 'connect'), ('..main', 'verified_user'), ('..location_tree', 'error'),
+        ('.friend_copies', 'friend_trade_copies'), ('.friend_reads', 'FRIEND_BY_HANDLE'),
+        ('.friend_reads', 'PAGE_IDENTITIES'), ('.friend_reads', 'card_facts'), ('.friend_reads', 'search_key')},
     'social/friends.py': {
         ('.', 'name_rules'), ('..main', 'connect'), ('..main', 'verified_user'), ('..publications', 'TOKEN'),
         ('..location_tree', 'error'), ('..location_tree', 'replay'), ('.owners', 'ensure_owner'),
@@ -105,7 +123,7 @@ ALLOWED = {'in_deck': {'type': 'string'}}
 # ``ValidationError.ctx`` is FastAPI's own 422 body (the error's context, as the framework builds it): no social code
 # fills it with a Location or a Deck.
 OPAQUE = {('FriendCard', 'descriptor'), ('FriendCopy', 'descriptor'), ('LoanCard', 'descriptor'),
-          ('ValidationError', 'ctx')}
+          ('FriendTradeCard', 'descriptor'), ('ValidationError', 'ctx')}
 
 
 def words(name: str) -> set[str]:
@@ -188,11 +206,19 @@ def string_constants(source: str) -> list[str]:
 
 
 def inventory_reads(source: str) -> bool:
-    """Whether a module's source reads an inventory table or calls the hidden-Locations rule: a table after FROM, JOIN or
-    a comma in any string constant (docstrings left out) or f-string piece, or a ``hidden_locations(`` call anywhere."""
+    """Whether a module's source reads an inventory table or calls a rule over a collector's Locations: a table after
+    FROM, JOIN or a comma in any string constant (docstrings left out) or f-string piece, or a call of the hidden, For
+    trade or listable rule anywhere in the source."""
     if HIDDEN_CALL.search(source):
         return True
     return any(INVENTORY_TABLE.search(text) for text in string_constants(source))
+
+
+def several_owners_reads(source: str) -> bool:
+    """Whether a module has a string constant (docstrings left out) or f-string piece that reads an inventory table and
+    filters on a list of owners or borrowers (``owner_id = ANY(``)."""
+    return any(SEVERAL_OWNERS_TABLE.search(text) and SEVERAL_OWNERS_FILTER.search(text)
+               for text in string_constants(source))
 
 
 def callers(pattern: re.Pattern) -> set[str]:
@@ -253,6 +279,9 @@ def test_every_social_route_answers_success_with_a_schema_the_walk_reads():
     for route in ('GET /api/social/collections/{handle}', 'GET /api/social/want-list-matches',
                   'GET /api/social/card-matches'):
         assert any(field == 'in_deck' for _, field, _ in routes[route]), route
+    # A Friend's Trade List (trading #269): cards and their copies, read by the walk like every other route.
+    trade_list = {field for _, field, _ in routes['GET /api/social/trade-lists/{handle}']}
+    assert {'copies', 'descriptor', 'next_page'} <= trade_list, trade_list
 
 
 def test_the_walk_finds_a_location_or_deck_field_at_any_depth():
@@ -320,6 +349,9 @@ def test_the_inventory_guard_catches_every_way_to_read_an_inventory_table():
     assert inventory_reads("sql = f'SELECT 1 FROM friend f, {extra} JOIN holding h ON true'")
     assert inventory_reads("sql = 'SELECT 1 ' 'FROM holding'")
     assert inventory_reads('rows = hidden_locations(conn, owners)') and inventory_reads('ids = hidden_location_ids(x)')
+    # The For trade and listable rules count too, in a string or in prose (trading #269).
+    assert inventory_reads("SQL = 'SELECT 1 FROM for_trade_locations(ARRAY[%s]::text[]) f'\n")
+    assert inventory_reads('"""Calls trade_listable (owners)."""\n') and inventory_reads('# for_trade_locations(x)\n')
     # Not a read: other tables and columns, the Friends rule, and prose in a docstring.
     for sql in ('SELECT location_id FROM friends_of(ARRAY[%s]::text[]) f', 'SELECT 1 FROM collector_profile p',
                 'SELECT holding_id, deck_list_id FROM friendship', 'UPDATE x SET location = 1'):
@@ -364,6 +396,32 @@ def test_the_choke_points_statement_never_reads_borrowed_holdings():
     assert 'borrowed_holding' not in friend_copies.READ
 
 
+def test_the_trade_statement_never_reads_borrowed_holdings():
+    from app.social import friend_copies
+    assert 'borrowed_holding' not in friend_copies.TRADE_READ
+
+
+def test_only_the_choke_point_reads_several_owners_inventory():
+    found = {str(path.relative_to(APP)) for path in APP.rglob('*.py')
+             if several_owners_reads(path.read_text(encoding='utf-8'))}
+    assert found <= {'social/friend_copies.py'}, found
+
+
+def test_the_several_owners_guard_catches_a_filter_on_a_list_of_owners():
+    for sql in ('SELECT 1 FROM holding h WHERE h.owner_id = ANY(%s)',
+                'SELECT 1 FROM public.location l WHERE owner_id=any (%s)',
+                'SELECT 1 FROM friend f JOIN deck_list_line l ON true WHERE l.owner_id = ANY(%s::text[])',
+                'SELECT 1 FROM borrowed_holding b WHERE b.borrower_id = ANY(%s)'):
+        assert several_owners_reads(f'SQL = {sql!r}\n'), sql
+    assert several_owners_reads("sql = f'SELECT 1 FROM holding h WHERE h.owner_id = ANY({owners})'\n")
+    # One owner, a filter on something else, a table that isn't inventory, or prose in a docstring: not a read of
+    # several collectors' inventory.
+    for sql in ('SELECT 1 FROM holding h WHERE h.owner_id = %s', 'SELECT 1 FROM holding h WHERE h.edition_id = ANY(%s)',
+                'SELECT 1 FROM reserved_copies(%s::text[], NULL) r WHERE r.owner_id = ANY(%s)'):
+        assert not several_owners_reads(f'SQL = {sql!r}\n'), sql
+    assert not several_owners_reads('def f():\n    """FROM holding WHERE owner_id = ANY(%s)"""\n    return 1\n')
+
+
 def test_only_counts_and_the_choke_point_call_reserving_picks():
     found = callers(RESERVING_PICKS_CALL)
     assert 'social/counts.py' in found and found <= RESERVING_PICKS_CALLERS, found
@@ -374,17 +432,20 @@ def test_only_counts_and_the_choke_point_call_reserving_picks():
 
 
 def test_only_the_trade_list_and_the_choke_point_call_the_listable_rule():
-    found = callers(LISTABLE_CALL)
-    assert found <= LISTABLE_CALLERS, found
+    assert callers(LISTABLE_CALL) == LISTABLE_CALLERS
+    assert callers(FOR_TRADE_CALL) == FOR_TRADE_CALLERS
 
 
 def test_the_call_guards_match_string_constants_and_never_docstrings():
-    called = "SQL = 'SELECT 1 FROM reserving_picks (ARRAY[%s]::text[], %s::uuid[])'\nLISTED = f'FROM trade_listable({x})'\n"
+    called = ("SQL = 'SELECT 1 FROM reserving_picks (ARRAY[%s]::text[], %s::uuid[])'\nLISTED = f'FROM trade_listable({x})'\n"
+              "MARKED = 'SELECT 1 FROM for_trade_locations(ARRAY[%s]::text[]) f'\n")
     found = string_constants(called)
     assert any(RESERVING_PICKS_CALL.search(text) for text in found)
     assert any(LISTABLE_CALL.search(text) for text in found)
-    described = 'def f():\n    """Reads reserving_picks(owners) and trade_listable(owners)."""\n    return 1\n'
-    assert not any(RESERVING_PICKS_CALL.search(text) or LISTABLE_CALL.search(text)
+    assert any(FOR_TRADE_CALL.search(text) for text in found)
+    described = ('def f():\n    """Reads reserving_picks(owners), trade_listable(owners) and for_trade_locations(owners)."""\n'
+                 '    return 1\n')
+    assert not any(RESERVING_PICKS_CALL.search(text) or LISTABLE_CALL.search(text) or FOR_TRADE_CALL.search(text)
                    for text in string_constants(described))
     # A name without the call form is not a call.
     assert not any(RESERVING_PICKS_CALL.search(text) for text in string_constants("NOTE = 'reserving_picks'\n"))

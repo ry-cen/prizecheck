@@ -51,6 +51,8 @@ export type InboxUpdate = { id: string; kind: "accepted" | "partly_accepted" | "
 export type InboxWaiting = { id: string; kind: "borrow_request" | "lend_offer"; state: "requested" | "offered" | "accepted" | "handed_over" | "closed"; closed_reason: "declined" | "withdrawn" | "cancelled" | "returned" | "written_off" | null; closed_by: "you" | "them" | null; role: "lender" | "borrower"; other: LoanParty; return_by: string | null; you_confirmed_handover: boolean; they_confirmed_handover: boolean; lines: LoanCard[]; needs_you: boolean; section: "needs_you" | "out_now" | "pending" | "history"; actions: ("accept" | "decline" | "confirm_handover" | "start_return" | "confirm_return" | "choose_written_off" | "withdraw" | "take_back" | "cancel" | "write_off" | "change_return_by" | "ask_for_more_time" | "approve_extension" | "decline_extension" | "edit_and_resend")[]; revision: number; pending_return?: PendingReturn | null; awaiting_choice?: string; extension_to?: string | null; overdue_since?: string | null; notices?: ("overdue" | "nudge_answer" | "nudge_handover")[]; waiting?: "answer" | "fix_picks" | "choose" | "confirm_return" | "finish_return" | "hand_over" | "receive" | "return" | "more_time" | null; since: string };
 export type InboxView = { waiting: InboxWaiting[]; updates: InboxUpdate[] };
 export type InboxIds = { ids: string[] };
+export type FriendTradeCard = { edition_id: string; name: string; set_code: string; set_name: string; collector_number: string; descriptor: Record<string, unknown>; image_url: string | null; copies: string };
+export type FriendTradeList = { collector_id: string; handle: string; display_name: string; cards: FriendTradeCard[]; next_page: number | null };
 
 /** A refused social request: the API's code, and for TOO_MANY_LOOKUPS the detail that says when to try again. */
 export class SocialError extends Error {
@@ -111,6 +113,10 @@ export const getWantListMatches = (params: { deck?: string | null; printings?: P
 export const getCardMatches = (printingId: string, params: { printings?: Printings }, signal?: AbortSignal) =>
   request<CardMatches>(`/api/social/card-matches${query({ printing_id: printingId, ...params })}`, 'GET', undefined,
     signal);
+// A Friend's Trade List (trading #269): one page of the cards they offer to trade now, found by their Handle among your
+// Friends.
+export const getFriendTradeList = (handle: string, params: { q?: string; page?: number }, signal?: AbortSignal) =>
+  request<FriendTradeList>(`/api/social/trade-lists/${at(handle)}${query(params)}`, 'GET', undefined, signal);
 // Loans (#252): the Loans tab and one Loan, as both sides read them.
 export const getLoans = (signal?: AbortSignal) => request<LoansView>('/api/social/loans', 'GET', undefined, signal);
 export const getLoan = (id: string, signal?: AbortSignal) =>

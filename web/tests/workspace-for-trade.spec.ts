@@ -80,7 +80,7 @@ const row = (panel: Locator, path: string) =>
 const button = (scope: Locator, name: string) =>
   scope.getByRole("button", { name, exact: true });
 
-const STILL_OFFERED = "Its cards are still offered for trade.";
+const STILL_OFFERED = "Still on your Trade List";
 
 /** The whole story, at whichever width the describe block sets. `openPanel` opens Manage locations. */
 async function markAndCheck(page: Page, openPanel: () => Promise<void>) {

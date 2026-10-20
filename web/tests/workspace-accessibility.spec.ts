@@ -5,6 +5,17 @@ import { signInAsOwner } from "./support/sign-in";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
+import { test as collectorTest } from "./support/collectors";
+import {
+  ORIGIN as LOANS_ORIGIN,
+  accountId,
+  api as loansApi,
+  befriend,
+  hold,
+  nameCollector,
+  seedCatalog,
+  unsorted,
+} from "./support/loans";
 import { animationsFinished } from "./support/motion";
 import { startAsNewOwner } from "./support/owner";
 import { expectPageChecks } from "./support/page-check";
@@ -814,3 +825,65 @@ test("theme colours meet AA text contrast and 3:1 for outlines", async ({
     for (const surface of surfaces) check(outline, surface, 3);
   expect(failures).toEqual([]);
 });
+
+// Six tabs and a two-digit Loans badge still fit the desktop header at its narrowest width (Trading #269 added Trades).
+collectorTest(
+  "the header with a two-digit Loans badge fits at 761 px",
+  async ({ page, collectors }) => {
+    collectorTest.slow();
+    const ids = seedCatalog();
+    const lender = await collectors.signIn({
+      contextOptions: { viewport: { width: 761, height: 800 } },
+    });
+    await nameCollector(lender.page, "Misty W");
+    await hold(lender.page, await unsorted(lender.page), ids["PAL 185"], 12);
+    await signInAsOwner(page, "/loans");
+    await nameCollector(page, "Ash K");
+    await befriend(page, lender.page);
+    const lenderId = await accountId(lender.page);
+    for (let i = 0; i < 12; i++)
+      await loansApi(page, "POST", "/api/loans", {
+        lender_id: lenderId,
+        lines: [{ edition_id: ids["PAL 185"], quantity: "1" }],
+        deck_id: null,
+        idempotency_key: randomUUID(),
+      });
+
+    await lender.page.goto(`${LOANS_ORIGIN}/collection`);
+    const tab = lender.page
+      .getByRole("navigation", { name: "Main views" })
+      .getByRole("button", { name: /^Loans/ });
+    await expect(tab).toHaveAccessibleName("Loans, 12 need you");
+    const measure = () =>
+      lender.page.evaluate(() => {
+        const header = document.querySelector("header")!;
+        const avatar = document
+          .querySelector('header button[aria-label="Account"]')!
+          .getBoundingClientRect();
+        return {
+          scrollWidth: header.scrollWidth,
+          clientWidth: header.clientWidth,
+          avatarLeft: avatar.left,
+          avatarRight: avatar.right,
+          innerWidth: window.innerWidth,
+        };
+      });
+    await expect
+      .poll(async () => {
+        const m = await measure();
+        return m.scrollWidth <= m.clientWidth && m.avatarRight <= m.innerWidth;
+      })
+      .toBe(true);
+    const widths = await measure();
+    console.log(`761px header with Loans 12: ${JSON.stringify(widths)}`);
+    const banner = lender.page.getByRole("banner");
+    expect(await banner.evaluate((h) => h.scrollWidth <= h.clientWidth)).toBe(
+      true
+    );
+    const avatar = await lender.page
+      .getByRole("button", { name: "Account", exact: true })
+      .boundingBox();
+    expect(avatar!.x).toBeGreaterThanOrEqual(0);
+    expect(avatar!.x + avatar!.width).toBeLessThanOrEqual(widths.innerWidth);
+  }
+);

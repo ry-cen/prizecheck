@@ -247,12 +247,16 @@ from .social.friends import router as friends_router  # noqa: E402
 app.include_router(friends_router)
 from .social.friend_reads import router as friend_reads_router  # noqa: E402
 app.include_router(friend_reads_router)
+from .social.trade_matches import router as trade_matches_router  # noqa: E402
+app.include_router(trade_matches_router)
 from .social.loans import router as loans_router  # noqa: E402
 app.include_router(loans_router)
 from .social.inbox import router as inbox_router  # noqa: E402
 app.include_router(inbox_router)
 from .loan_inventory import router as loan_inventory_router  # noqa: E402
 app.include_router(loan_inventory_router)
+from .trade_list import router as trade_list_router  # noqa: E402
+app.include_router(trade_list_router)
 
 
 from .price_budget import is_budgeted  # noqa: E402
