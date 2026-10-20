@@ -53,7 +53,7 @@ Trading lives in the `social` area and follows the Loan split exactly. The socia
 | `api/app/trade_inventory.py` | `/api/trades` | send, counter, accept, confirm swap, use suggested picks, own side view (`GET /api/trades/{id}/side`, which also returns the reader's Deck switch candidates as `deck_switches`) |
 | `api/app/trade_list.py` | `/api/trades` | own Trade List (`GET /api/trades/list`, with the collector's own Location names) and `own_trade_copies(conn, user_id, edition_ids=None) -> dict[edition, listable]`, which `trade_inventory` (send, Counter and Accept caps) and `social/trade_matches` import |
 | `api/app/trade_picks.py` | none | `trade_pick_shortfalls`, `stale_pick_trades`, `suggest_trade_picks` (own Holdings only) |
-| `api/app/trade_wants.py` | `/api/trade-wants` | own Trade Wants and Will accept: `GET /api/trade-wants`, `PUT /api/trade-wants/{edition_id}`, `PUT /api/trade-wants/will-accept/{edition_id}`, plus `own_wants(conn, user_id)` for `trade_matches` |
+| `api/app/trade_wants.py` | `/api/trade-wants` | own Trade Wants and Will accept: `GET /api/trade-wants`, `PUT /api/trade-wants/{edition_id}`, `PUT /api/trade-wants/will-accept/{edition_id}`, plus `own_wants(conn, user_id)` and `own_rules(conn, user_id)` (the collector's widened Will accept choices, Trading #276) for `trade_matches` |
 | `api/app/trade_value.py` | `/api/trades` | `POST /api/trades/value` (budgeted) |
 | `api/app/location_tree.py` (extended) | `/api/location-tree` | `PUT /{location_id}/for-trade`, and `for_trade` / `for_trade_by` on tree nodes |
 
@@ -482,12 +482,14 @@ All cross-collector Trade reads are in `social/friend_copies.py`, the module the
 
   ```sql
   WITH friend AS (
-    SELECT f.friend_id FROM friends_of(ARRAY[%(viewer)s]::text[]) f
-    WHERE %(friends)s::text[] IS NULL OR f.friend_id = ANY(%(friends)s::text[]))
+    SELECT f.friend_id FROM friends_of(ARRAY[%(viewer)s]::text[]) f WHERE f.friend_id = ANY(%(friends)s::text[]))
   SELECT t.owner_id AS friend_id, t.edition_id, t.listable
-  FROM trade_listable(ARRAY(SELECT friend_id FROM friend), %(editions)s::uuid[]) t
+  FROM trade_listable(%(friends)s::text[], %(editions)s::uuid[]) t
+  JOIN friend ON friend.friend_id = t.owner_id
   ORDER BY t.owner_id, t.edition_id
   ```
+
+  **Changed in Trading #276.** The Friends' ids are passed to `trade_listable` as a bound array and the result is joined to `friends_of`, instead of `trade_listable(ARRAY(SELECT friend_id FROM friend), ...)`: PostgreSQL does not inline a set-returning SQL function whose argument holds a subquery, and the uninlined call took about 0.7 s for 200 Friends against about 0.08 s inlined. With `friend_ids=None` (every Friend), `friend_trade_copies` first reads the viewer's Friends with `TRADE_FRIENDS` (the same `friends_of` filter) and answers nothing when there are none: asking about every Friend takes two statements, never one per Friend, and the Friend filter is still `friends_of`, Blocks either way excluded, in the same statement that reads the Trade List.
 
   - only Friends (`friends_of`), with no Block either way;
   - For trade membership comes from `for_trade_locations` inside `trade_listable`, with no hidden filter (map: a hidden For trade Location stays on the Trade List);
@@ -528,14 +530,15 @@ All cross-collector Trade reads are in `social/friend_copies.py`, the module the
     - `want_list_need` is the sum of `want_list_need` over that side's wants W whose `accepts(W, rule)` contains X;
     - `need` is `want_list_need` plus that side's `trade_wants_quantity` for X itself;
     - `origin` is `both` when both parts are above 0, else the part that is;
-    - `accepts_as` is set on `you_get` cards only. It is the narrowest match: `exact` when X is itself one of the viewer's wants, else `any_finish` when a `printing` rule reaches it, else `same_name`. It is None on `you_give` cards.
+    - `accepts_as` is set on `you_get` cards only. It is the narrowest match: `exact` when X is itself one of the viewer's wants, else `any_finish` when X shares its Card Printing with a want whose rule reaches it, else `same_name`. It is None on `you_give` cards. **Refined in Trading #276:** the word says how the card relates to the want, not which rule reached it, so another finish of a wanted card's own Printing reads `any_finish` under the `identity` rule too (it is the narrower description of the same card).
 
     The screen shows `need` with the Deck part, for example "6 wanted (2 for Decks)".
   - `more_you_get`, `more_you_give` as counts.
 
   Rows are sorted two-way first, then has-what-you-want, then wants-what-you-have, then by Display Name and Handle. Each row carries at most 20 cards per side, and `GET /api/social/trade-matches/{collector_id}` returns the full lists for one Friend. There are no values in discovery (map). Add `TradeMatchCard.descriptor` to `OPAQUE`.
 - **`GET /api/social/trade-lists/{handle}`** is a Friend's whole Trade List, for the composer to add cards beyond the matches. It mirrors `friend_collection` (`friend_reads.py:171`): the same `FRIEND_BY_HANDLE` 404 `FRIEND_NOT_FOUND` rule, paging by Card Identity, and `q`.
-- **`GET /api/social/trade-card-matches?printing_id=`** backs the card popup's Ask to trade: Friends with listable copies of the Printing's Editions.
+- **`GET /api/social/trade-card-matches?printing_id=`** backs the card popup's Ask to trade: Friends with listable copies of the Printing's Editions. **Shape (Trading #276):** `TradeCardMatches {has_friends, offers: [TradeCardOffer {collector_id, handle, display_name, edition_id, name, set_code, set_name, collector_number, descriptor, image_url, copies: str}]}`, one offer per Friend and Edition with `copies > 0`, sorted by Display Name, then Handle (case ignored), then card order. It reads `friend_trade_copies` for every Friend and the Printing's Editions in one read-only repeatable-read transaction; an unknown Printing has no offers. `TradeCardOffer.descriptor` is in `OPAQUE`.
+- **The per-Friend read (Trading #276).** `GET /api/social/trade-matches/{collector_id}` answers one `TradeMatchRow` with every card on both sides and `more_*` 0, and a null `match` with empty sides when nothing matches now (the draft page's suggestions and Find trades' Show more read it). Anyone who isn't a Friend, the viewer included, answers 404 `FRIEND_NOT_FOUND`, byte-identical to an unknown id, checked through `friends.friend_ids` before the Want List is read.
 - **Privacy guard changes** (`api/tests/test_social_contract.py`):
   - add `trade_want|trade_accept` to `INVENTORY_TABLE`, so in the social area only `friend_copies.py` reads them (`READERS` unchanged);
   - add `test_only_the_choke_point_reads_several_owners_inventory`: it scans every string constant (and f-string piece, never a docstring, as `inventory_reads` does) of every `api/app/**/*.py` outside `social/friend_copies.py`, and fails on one that both reads `holding`, `deck_list_line`, `location` or `borrowed_holding` (the `INVENTORY_TABLE` form) and filters with `owner_id = ANY(` or `borrower_id = ANY(`. A scan of today's code finds no hit, so it needs no allowlist. `counts.reserved_by_owner` reads only `reserved_copies`. It does not see `IN (...)` lists, joins through `friends_of`, unfiltered scans or SQL split across concatenated constants; review covers those (ADR 0015). Owner and admin aggregate reads such as `catalog_reconciliation.py:270-272` are exempt by the ADR;
@@ -545,7 +548,7 @@ All cross-collector Trade reads are in `social/friend_copies.py`, the module the
   - add `('..copy_allocation', 'allocate_rows')` and `('..copy_allocation', 'AllocationRows')` to `ALLOWED_IMPORTS['social/friend_copies.py']`, beside the existing `('..', 'copy_allocation')`;
   - widen `HIDDEN_CALL` to `re.compile(r'\b(?:hidden_location(?:s|_ids)|for_trade_locations|trade_listable)\s*\(')`, so in the social area only `READERS` may call the For trade or listable rule, as for `hidden_locations`;
   - add `ALLOWED_IMPORTS['social/trades.py']` = `('..trade_picks','stale_pick_trades')`, `('..main','connect')`, `('..main','verified_user')`, `('..location_tree','error')`, `('..location_tree','replay')`, `('.friend_reads','card_facts')`, `('.owners','ensure_owner')`, `('.owners','lock_owners')`, `('.loans','advance_revision')`, `('.loans','NOW')` and `('.friends','friend_ids')`. Trades do not reuse `count_loan_command`; `social/trades.py` defines its own `count_trade_command` under kind `'trade_command'`. Because `social/friends.py` imports `end_trades_between` from `social/trades.py`, `trades.py` imports `friend_ids` inside the function that needs it, as `loans.loan_views` does (`loans.py:444`);
-  - add `ALLOWED_IMPORTS['social/trade_matches.py']`, with `('..trade_list','own_trade_copies')`, `('..trade_wants','own_wants')`, `('..want_list','capture_want_list')`, `('.friend_copies','friend_trade_copies')`, `('.friend_copies','friend_wants')`, `('.friend_reads','card_facts')`, `('..card_accepts','accepts')`, `('.friend_reads','FRIEND_BY_HANDLE')`, `('.friend_reads','search_key')`, `('.friend_reads','PAGE_IDENTITIES')`, `('.','name_rules')`, `('.friends','friend_ids')`, `('..main','connect')`, `('..main','verified_user')` and `('..location_tree','error')`;
+  - add `ALLOWED_IMPORTS['social/trade_matches.py']`, with `('..trade_list','own_trade_copies')`, `('..trade_wants','own_wants')`, `('..trade_wants','own_rules')` (Trading #276: the viewer's widened Will accept choices, read in the same snapshot as their Trade Wants), `('..want_list','capture_want_list')`, `('.friend_copies','friend_trade_copies')`, `('.friend_copies','friend_wants')`, `('.friend_reads','card_facts')`, `('..card_accepts','accepts')`, `('.friend_reads','FRIEND_BY_HANDLE')`, `('.friend_reads','search_key')`, `('.friend_reads','PAGE_IDENTITIES')`, `('.','name_rules')`, `('.friends','friend_ids')`, `('..main','connect')`, `('..main','verified_user')` and `('..location_tree','error')`;
   - add to `ALLOWED_IMPORTS['social/inbox.py']` (beside its Loan entries, `test_social_contract.py:76-79`): `('.trades','TRADES')`, `('.trades','TradeView')`, `('.trades','trade_facts')`, `('.trades','trade_views')`, `('.trades','waiting_trade_step')` and `('.trades','trade_waiting_since')`;
   - leave `FRIENDS_OF_READERS` unchanged: `trade_matches` gets the viewer's Friends through `('.friends','friend_ids')` (add that import entry) and reads `collector_profile` for those ids only, so it never calls `friends_of` itself;
   - add `OPAQUE` entries for `TradeCard.descriptor` and `TradeMatchCard.descriptor`;

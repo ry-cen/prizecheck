@@ -13,6 +13,7 @@ import { Select } from "../ui/Select";
 import { AskControl, copyCap, copyCard } from "../loans/BorrowDrafts";
 import { lendableText } from "../social/friendCards";
 import { FriendsWhoHaveThis } from "../social/FriendsWhoHaveThis";
+import { AskToTrade } from "../trades/AskToTrade";
 import { Stepper } from "../ui/Stepper";
 import { variantLabel } from "../ui/variantLabel";
 import { TILE_PRICE } from "../workspace/Gallery";
@@ -106,8 +107,9 @@ type CardState = {
  * art and its note; set name, code and number; regulation mark; the Card Identity when it differs from the name; the
  * owner-reviewed note on a manual record; a legality Pill per Format with the reason for an unknown one; the Editions as a picker, each with its
  * Variant, copies owned and price, and Owner reviewed and Unavailable badges; where the picked Edition's copies are;
- * "Friends who have this" (#251, FriendsWhoHaveThis); the Add row (Collection | Location | − N + | Add N); and a quiet
- * footer that opens today's report flows.
+ * "Friends who have this" (#251, FriendsWhoHaveThis); "Friends with this on their Trade List" with Ask to trade
+ * (Trading #276, AskToTrade); the Add row (Collection | Location | − N + | Add N); and a quiet footer that opens today's
+ * report flows.
  */
 export function CatalogCardPopup({
   request,
@@ -370,6 +372,7 @@ export function CatalogCardPopup({
               />
             )}
           />
+          <AskToTrade printingId={ready.printing.id} />
           {selected && (
             <AddRows
               key={`${cardKey}:${selected.id}`}

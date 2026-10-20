@@ -1,7 +1,8 @@
 """Generate the social client module (Friends and Friend Requests, social network #247, Blocks, #248, Friends' cards,
 #250 and #251, Loans, #252 and #253, Borrowed Copies, #254, Returns, #255, Write-off, #257, the inbox, #259, and a
 Friend's Trade List, trading #269, Trades as both sides read them, trading #270, declining and cancelling one,
-trading #271, and the inbox's Trade lines, trading #273) from the API OpenAPI schema."""
+trading #271, the inbox's Trade lines, trading #273, and Find trades and Ask to trade, trading #276) from the API OpenAPI
+schema."""
 import sys
 from pathlib import Path
 
@@ -36,7 +37,8 @@ for name in ("Collector", "CollectorLookup", "InviteCollector", "FriendsView", "
              "WrittenOffChoice", "ChangeReturnBy", "AskForMoreTime", "SeenNotices", "OfferedCopies", "SendLendOffer",
              "AcceptLendOffer", "InboxUpdate", "InboxWaiting", "InboxView", "InboxIds", "FriendTradeCard",
              "FriendTradeList", "TradeParty", "TradeCard", "TradeCash", "TradeView", "TradesView", "TradeStep",
-             "InboxTradeWaiting", "InboxTradeUpdate"):
+             "InboxTradeWaiting", "InboxTradeUpdate", "TradeMatchCard", "TradeMatchRow", "TradeMatches",
+             "TradeCardOffer", "TradeCardMatches"):
     definition = schema[name]
     fields = [f"{field}{'' if field in definition.get('required', []) else '?'}: {ts_type(value)}"
               for field, value in definition["properties"].items()]
@@ -178,6 +180,16 @@ export const declineTrade = (id: string, body: TradeStep) =>
   request<TradeView>(`/api/social/trades/${at(id)}/decline`, 'POST', body);
 export const cancelTrade = (id: string, body: TradeStep) =>
   request<TradeView>(`/api/social/trades/${at(id)}/cancel`, 'POST', body);
+// Find trades (trading #276): every Friend who matches, with at most 20 cards a side, and one Friend's row with every
+// card (a null match when nothing matches now).
+export const getTradeMatches = (signal?: AbortSignal) =>
+  request<TradeMatches>('/api/social/trade-matches', 'GET', undefined, signal);
+export const getTradeMatch = (collectorId: string, signal?: AbortSignal) =>
+  request<TradeMatchRow>(`/api/social/trade-matches/${at(collectorId)}`, 'GET', undefined, signal);
+// Ask to trade (trading #276): Friends' Trade List copies of one Card Printing, for the card popup.
+export const getTradeCardMatches = (printingId: string, signal?: AbortSignal) =>
+  request<TradeCardMatches>(`/api/social/trade-card-matches${query({ printing_id: printingId })}`, 'GET', undefined,
+    signal);
 """)
 content = "\n".join(lines)
 target = root / "web/src/social_generated.ts"

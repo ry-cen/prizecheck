@@ -393,7 +393,7 @@ function TradeDraftBar({
 
 /** A Trade List row's draft control (Trading #270): Add, or once the card is on this side of the draft a stepper
  * setting how many, up to the copies listed (0 takes it out). A card on the draft's other side can't be on both
- * sides, so its Add is off. */
+ * sides, so its Add is off. With `ask` (the card popup's Ask to trade, #276) the button reads **Ask to trade**. */
 export function DraftControl({
   card,
   friend,
@@ -401,6 +401,7 @@ export function DraftControl({
   onOtherSide,
   onSet,
   side = "get",
+  ask = false,
 }: {
   card: {
     name: string;
@@ -414,6 +415,7 @@ export function DraftControl({
   onOtherSide: boolean;
   onSet: (quantity: number) => void;
   side?: "give" | "get";
+  ask?: boolean;
 }) {
   const label = tradeCardName(card);
   if (inDraft > 0)
@@ -428,11 +430,15 @@ export function DraftControl({
     );
   return (
     <Button
-      aria-label={`Add ${label} to your Trade Proposal to ${friend.display_name}`}
+      aria-label={
+        ask
+          ? `Ask ${friend.display_name} to trade ${label}`
+          : `Add ${label} to your Trade Proposal to ${friend.display_name}`
+      }
       disabled={onOtherSide}
       onClick={() => onSet(1)}
     >
-      Add
+      {ask ? "Ask to trade" : "Add"}
     </Button>
   );
 }
