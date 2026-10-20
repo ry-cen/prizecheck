@@ -7,6 +7,7 @@ export type OwnTradeList = { locations: TradeListLocation[]; cards: TradeListCar
 export type TradeLineRequest = { edition_id: string; quantity: string };
 export type TradeCashRequest = { cents: string; payer: "you" | "them" };
 export type SendTradeProposal = { recipient_id: string; you_give?: TradeLineRequest[]; you_get?: TradeLineRequest[]; cash?: TradeCashRequest | null; idempotency_key: string };
+export type CounterTrade = { revision: number; idempotency_key: string; you_give?: TradeLineRequest[]; you_get?: TradeLineRequest[]; cash?: TradeCashRequest | null };
 export type TradePickPlace = { edition_id: string; location_id: string | null; name: string; copies: string; short: string };
 export type OwnTradeSide = { trade_id: string; picks: TradePickPlace[]; suggested: TradePickPlace[] };
 export type ConfirmSwap = { revision: number; idempotency_key: string; destination_id?: string | null };
@@ -43,6 +44,10 @@ export const sendTradeProposal = (body: SendTradeProposal) => request<TradeView>
 // Accept a Trade Proposal sent to you, whole (#271), idempotent: it reserves the cards you give and answers the Trade.
 export const acceptTrade = (id: string, body: TradeStep) =>
   request<TradeView>(`/api/trades/${encodeURIComponent(id)}/accept`, 'POST', body);
+// Counter a Trade Proposal sent to you (#278), idempotent: it closes that proposal, frees the cards its sender gave,
+// and sends them this proposal instead, reserving the cards you give. Answers the new Trade as you read it.
+export const counterTrade = (id: string, body: CounterTrade) =>
+  request<TradeView>(`/api/trades/${encodeURIComponent(id)}/counter`, 'POST', body);
 // Your own side of a Trade (#272): where your picks take the cards you give from, which are out of date, and the
 // suggested picks.
 export const getTradeSide = (id: string, signal?: AbortSignal) =>

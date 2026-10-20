@@ -283,7 +283,7 @@ async function story(
   await ash.page.goto(`${ORIGIN}/trades/${askBoth}`);
   await ashMain.getByRole("button", { name: "Accept" }).click();
   await expect(ashMain.getByRole("alert")).toHaveText(
-    "You can trade only 1 Arven (SVI 166) now, so you can't accept this. Decline it instead."
+    "You can trade only 1 Arven (SVI 166) now, so you can't accept this. Send a Counter or decline it instead."
   );
   await expect(heading(ash.page)).toHaveText(
     "Misty W sent you a Trade Proposal"

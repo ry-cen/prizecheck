@@ -1,6 +1,7 @@
 import { useId } from "react";
 import { PageHeader } from "../shell/PageHeader";
 import { Segmented, segmentId } from "../ui/Segmented";
+import { CounterPage } from "./CounterPage";
 import { FindTrades } from "./FindTrades";
 import { MyTradeList } from "./MyTradeList";
 import { ProposalBuilderPage } from "./ProposalBuilderPage";
@@ -15,7 +16,7 @@ import {
 } from "./tradeListModel";
 
 type Props = {
-  /** The section the address names (``sectionAt``): null for /trades, "find", "list", "new/<Handle>", or a Trade id. */
+  /** The section the address names (``sectionAt``): null for /trades, "find", "list", "new/<Handle>", "<id>/counter", or a Trade id. */
   section: string | null;
   /** Goes to another address in the app. */
   onNavigate: (to: string) => void;
@@ -25,8 +26,8 @@ type Props = {
  * The Trades tab (Trading #269, #270 and #276, prototype verdict variant A): the page header and the switch over the
  * tab's views, `Trades · Find trades · My Trade List`: the Trades list (/trades), Find trades (/trades/find) and My
  * Trade List (/trades/list). The switch stays mounted across the views' addresses, as the Decks page's does.
- * A Friend's proposal builder (/trades/new/<Handle>, #284) and one Trade (/trades/<id>) are pages of their own under
- * the tab.
+ * A Friend's proposal builder (/trades/new/<Handle>, #284), the Counter builder for a proposal sent to you
+ * (/trades/<id>/counter, #278) and one Trade (/trades/<id>) are pages of their own under the tab.
  */
 export function TradesPage({ section, onNavigate }: Props) {
   const idBase = useId();
@@ -40,12 +41,21 @@ export function TradesPage({ section, onNavigate }: Props) {
         onNavigate={onNavigate}
       />
     );
+  if (route.kind === "counter")
+    return (
+      <CounterPage
+        key={`counter-${route.id}`}
+        tradeId={route.id}
+        onNavigate={onNavigate}
+      />
+    );
   if (route.kind === "trade" || route.kind === "missing")
     return (
       <TradeScreen
         key={route.kind === "trade" ? route.id : "missing"}
         tradeId={route.kind === "trade" ? route.id : null}
         onAllTrades={() => onNavigate(TRADES_PATH)}
+        onNavigate={onNavigate}
       />
     );
   const view = route.view;

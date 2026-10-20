@@ -189,15 +189,15 @@ export function swapDoneMessage(
 
 /**
  * What a Trade waits on the reader for, as the inbox's line says it after the name (prototype inbox drawer, Trading
- * #273): "Answer", "Fix picks" or "Confirm swap"; null when it waits on nobody. A Counter is answered the same way;
- * #278 labels it.
+ * #273): "Answer", "Fix picks" or "Confirm swap"; null when it waits on nobody. A Counter is answered the same way
+ * and reads "Answer Counter" (#278).
  */
 export function tradeWaitingLabel(
-  trade: Pick<TradeView, "waiting">
+  trade: Pick<TradeView, "waiting" | "countered_from">
 ): string | null {
   switch (trade.waiting) {
     case "answer":
-      return "Answer";
+      return trade.countered_from ? "Answer Counter" : "Answer";
     case "fix_picks":
       return "Fix picks";
     case "confirm_swap":
@@ -265,17 +265,21 @@ type NamedLine = {
 };
 
 /**
- * What a Trade Proposal that couldn't be sent says (prototype "Proposed wording" where it has one). `friend` is the
- * Friend's Display Name; `give` and `get` are the proposal's lines, to name the card a refusal is about.
+ * What a Trade Proposal or Counter that couldn't be sent says (prototype "Proposed wording" where it has one). `friend`
+ * is the Friend's Display Name; `give` and `get` are the lines, named from the sender's or counterer's view, to name
+ * the card a refusal is about. `what` says whether it was a proposal or a Counter (#278).
  */
 export function sendTradeMessage(
   cause: unknown,
   friend: string,
   give: readonly NamedLine[],
-  get: readonly NamedLine[]
+  get: readonly NamedLine[],
+  what: "proposal" | "counter" = "proposal"
 ): string {
   if (tradeOutcomeUnknown(cause))
-    return "The Trade Proposal may not have been sent. Check your connection and try again.";
+    return what === "counter"
+      ? "The Counter may not have been sent. Check your connection and try again."
+      : "The Trade Proposal may not have been sent. Check your connection and try again.";
   const error = cause as TradesError;
   const named = (id: string) => {
     const line = [...give, ...get].find((item) => item.edition_id === id);
@@ -314,9 +318,19 @@ export function sendTradeMessage(
     case "TOO_MANY_CHANGES":
       return `Too many changes. Try again in ${minutes(error.detail)}.`;
     default:
-      return "The Trade Proposal couldn't be sent. Check it and try again.";
+      return what === "counter"
+        ? "The Counter couldn't be sent. Check it and try again."
+        : "The Trade Proposal couldn't be sent. Check it and try again.";
   }
 }
+
+/** A Counter refused because the proposal changed, but it still waits for the reader's answer (Trading #278). */
+export const COUNTER_CHANGED_TEXT =
+  "This Trade Proposal changed. Check your Counter, then send it again.";
+
+/** A Counter refused because the proposal no longer waits for the reader's answer (Trading #278). */
+export const COUNTER_GONE_TEXT =
+  "This Trade Proposal isn't waiting for your answer anymore, so your Counter can't be sent.";
 
 /**
  * What a Trade step that failed says (prototype "Proposed wording" where it has one). `trade` is the Trade the step
@@ -328,15 +342,18 @@ export function tradeStepMessage(cause: unknown, trade: TradeView): string {
   const error = cause as SocialError | TradesError;
   switch (error.code) {
     case "NOT_TRADEABLE": {
-      // Only an accept refuses this way, for a card the reader gives. Counter (#278) adds "or send a Counter".
+      // Only an accept refuses this way, for a card the reader gives.
+      const instead = trade.actions.includes("counter")
+        ? "Send a Counter or decline it instead."
+        : "Decline it instead.";
       const n = String(error.detail.available ?? "0");
       const line = trade.you_give.find(
         (card) => card.edition_id === String(error.detail.edition_id ?? "")
       );
       const card = line ? tradeCardName(line) : "A card";
       return n === "0"
-        ? `${card} isn't on your Trade List now, so you can't accept this. Decline it instead.`
-        : `You can trade only ${n} ${card} now, so you can't accept this. Decline it instead.`;
+        ? `${card} isn't on your Trade List now, so you can't accept this. ${instead}`
+        : `You can trade only ${n} ${card} now, so you can't accept this. ${instead}`;
     }
     case "NOT_FRIENDS":
       return `${trade.other.display_name} isn't one of your Friends anymore.`;
