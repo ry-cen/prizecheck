@@ -1,14 +1,37 @@
-import React, { Suspense, useEffect, useState, type ReactNode } from "react";
+import React, {
+  Suspense,
+  createContext,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useState,
+  type ReactNode,
+} from "react";
 import { Button } from "../ui/Button";
 import { PageHeader } from "./PageHeader";
 
 /** How long a loading page shows nothing before its card-shaped placeholders appear. */
 const PAGE_PLACEHOLDER_DELAY_MS = 300;
 
-class PageBoundary extends React.Component<
-  { resetKey: string; children: ReactNode },
-  { failed: boolean; resetKey: string }
-> {
+export type PageStandIn = "loading" | "failed";
+
+/**
+ * The shell provides this around each page, to hear when the page area shows a stand-in (its code still loading,
+ * past the placeholder delay, or failed to load) instead of the page. Collection draws its own phone header, so the
+ * shell draws its own while Collection shows a stand-in. Outside the shell (the public layout, the `other` slot),
+ * the value is `null` and nothing is reported.
+ */
+export const PageStandInContext = createContext<
+  ((standIn: PageStandIn, shown: boolean) => void) | null
+>(null);
+
+type BoundaryProps = { resetKey: string; children: ReactNode };
+type BoundaryState = { failed: boolean; resetKey: string };
+
+class PageBoundary extends React.Component<BoundaryProps, BoundaryState> {
+  static contextType = PageStandInContext;
+  declare context: React.ContextType<typeof PageStandInContext>;
+
   state = { failed: false, resetKey: this.props.resetKey };
 
   static getDerivedStateFromProps(
@@ -22,6 +45,19 @@ class PageBoundary extends React.Component<
 
   static getDerivedStateFromError() {
     return { failed: true };
+  }
+
+  // Reports state only and logs nothing, because React already logs caught errors.
+  componentDidCatch() {
+    this.context?.("failed", true);
+  }
+
+  componentDidUpdate(_props: BoundaryProps, previous: BoundaryState) {
+    if (previous.failed && !this.state.failed) this.context?.("failed", false);
+  }
+
+  componentWillUnmount() {
+    if (this.state.failed) this.context?.("failed", false);
   }
 
   render() {
@@ -48,9 +84,11 @@ function PageLoadFailed() {
 /**
  * Card-shaped tiles while a page's code loads. They appear only after a delay, so a quick load shows nothing and
  * nothing flashes, as in LoadingScreen. They carry no role, label or text: a screen reader hears the page itself
- * once it arrives.
+ * once it arrives. Once late, it tells the shell, so Collection's loading view sits under the shell's phone header
+ * like every other page.
  */
 function PagePlaceholder() {
+  const report = useContext(PageStandInContext);
   const [late, setLate] = useState(false);
   useEffect(() => {
     const timer = window.setTimeout(
@@ -59,6 +97,12 @@ function PagePlaceholder() {
     );
     return () => window.clearTimeout(timer);
   }, []);
+  // A layout effect: the shell's header and the page arrive in the same paint, so two headers never show at once.
+  useLayoutEffect(() => {
+    if (!late || !report) return;
+    report("loading", true);
+    return () => report("loading", false);
+  }, [late, report]);
   return (
     <div
       aria-hidden="true"
