@@ -102,7 +102,19 @@ promote({'card-1': 'Pikachu'})`,
       await pool.end();
     }
   };
-  return { tree, node, create, deck, stock };
+  /** Renames a Location through the API, as another session would. */
+  const rename = async (id: string, name: string) => {
+    const response = await page.request.patch(url(`/api/location-tree/${id}`), {
+      headers: headers(),
+      data: {
+        name,
+        version: (await node(id))!.version,
+        idempotency_key: randomUUID(),
+      },
+    });
+    expect(response.status()).toBe(200);
+  };
+  return { tree, node, create, deck, stock, rename };
 }
 
 type Fixture = {
@@ -257,7 +269,7 @@ const rowPaths = (panel: Locator) =>
 test.describe("desktop", () => {
   test.use({ viewport: { width: 1280, height: 900 } });
 
-  test("the gear opens Manage locations with the whole tree in natural order and each row's actions", async ({
+  test("the gear opens Manage locations with the whole tree in natural order and each row's arranging controls", async ({
     page,
   }) => {
     await signIn(page);
@@ -312,24 +324,31 @@ test.describe("desktop", () => {
     await expect(row(panel, `${f.shelf} / Binder 10`)).toContainText("Folder");
     await expect(row(panel, f.deck)).toContainText("Deck · 0 copies");
 
-    // Every row has a handle, Rename, Add child (not on Decks) and Delete.
+    // A row keeps only its arranging controls: the handle and Add child (not on Decks).
     const binder1 = `${f.shelf} / Binder 1`;
     await expect(handle(panel, binder1)).toBeEnabled();
-    await expect(button(panel, `Rename ${binder1}`)).toBeEnabled();
     await expect(
       button(panel, `Add child location to ${binder1}`)
     ).toBeEnabled();
-    await expect(button(panel, `Delete ${binder1}`)).toBeEnabled();
-    // Decks can be renamed and moved; Deck deletion is not offered.
-    await expect(handle(panel, f.deck)).toBeEnabled();
-    await expect(button(panel, `Rename ${f.deck}`)).toBeEnabled();
-    await expect(button(panel, `Delete ${f.deck}`)).toBeDisabled();
+    expect(
+      await row(panel, binder1)
+        .getByRole("button")
+        .evaluateAll((elements) =>
+          elements.map((element) => element.getAttribute("aria-label"))
+        )
+    ).toEqual([`Move ${binder1}`, `Add child location to ${binder1}`]);
+    // A Deck can be moved but has no Add child.
+    expect(
+      await row(panel, f.deck)
+        .getByRole("button")
+        .evaluateAll((elements) =>
+          elements.map((element) => element.getAttribute("aria-label"))
+        )
+    ).toEqual([`Move ${f.deck}`]);
+    // Rename, Delete, Hide and For trade are in each Location's settings.
     await expect(
-      row(panel, f.deck).getByRole("button", { name: /^Add child/ })
+      panel.getByRole("button", { name: /^(Rename|Delete|Hide|Show|Mark) / })
     ).toHaveCount(0);
-    // Delete only for empty Locations without children.
-    for (const path of [`${f.shelf} / Box`, `${f.shelf} / Binder 10`, f.shelf])
-      await expect(button(panel, `Delete ${path}`)).toBeDisabled();
 
     // Escape closes the panel and returns focus to the gear.
     await page.keyboard.press("Escape");
@@ -561,41 +580,7 @@ test.describe("desktop", () => {
     ).toHaveCount(3);
   });
 
-  test("Rename rejects a duplicate sibling name ignoring case, then renames", async ({
-    page,
-  }) => {
-    await signIn(page);
-    const client = api(page);
-    const f = await seed(page);
-    await page.reload();
-    const panel = await openFromSidebar(page, f.shelf);
-    const binder1 = `${f.shelf} / Binder 1`;
-    await button(panel, `Rename ${binder1}`).click();
-    const form = panel.getByRole("form", { name: `Rename ${binder1}` });
-    const field = form.getByLabel("New name");
-    await expect(field).toBeFocused();
-    await expect(field).toHaveValue("Binder 1");
-
-    for (const duplicate of ["BOX", "  BINDER 2 "]) {
-      await field.fill(duplicate);
-      await button(form, "Save name").click();
-      await expect(panel.getByRole("alert")).toHaveText(
-        "A sibling already has that name."
-      );
-      await expect(form).toBeVisible();
-    }
-    expect((await client.node(f.ids.binder1))!.name).toBe("Binder 1");
-
-    await field.fill("Binder 1a");
-    await button(form, "Save name").click();
-    await expect(row(panel, `${f.shelf} / Binder 1a`)).toBeVisible();
-    await expect(panel.getByRole("status")).toHaveText(
-      "Renamed Binder 1 to Binder 1a."
-    );
-    expect((await client.node(f.ids.binder1))!.name).toBe("Binder 1a");
-  });
-
-  test("a Deck is renamed, moved into a folder by drag and back to Top level by the picker, and stays a Deck", async ({
+  test("a Deck is moved into a folder by drag and back to Top level by the picker, and stays a Deck", async ({
     page,
   }) => {
     await signIn(page);
@@ -606,33 +591,10 @@ test.describe("desktop", () => {
     await page.reload();
     const panel = await openFromSidebar(page, f.shelf);
 
-    // Rename refuses a sibling's name in another case, then renames.
-    await button(panel, `Rename ${f.deck}`).click();
-    const form = panel.getByRole("form", { name: `Rename ${f.deck}` });
-    const field = form.getByLabel("New name");
-    await expect(field).toHaveValue(f.deck);
-    await field.fill(otherDeck.toUpperCase());
-    await button(form, "Save name").click();
-    await expect(panel.getByRole("alert")).toHaveText(
-      "A sibling already has that name."
-    );
-    const renamed = `${f.shelf} Battle Deck`;
-    await field.fill(renamed);
-    await button(form, "Save name").click();
-    await expect(row(panel, renamed)).toBeVisible();
-    await expect(panel.getByRole("status")).toHaveText(
-      `Renamed ${f.deck} to ${renamed}.`
-    );
-    expect(await client.node(f.ids.deck)).toMatchObject({
-      name: renamed,
-      kind: "deck",
-      parent_id: null,
-    });
-
     // A handle drag nests it in a folder after confirmation. Decks, itself included, refuse it.
     await reveal(panel, f.shelf);
-    await lift(page, handle(panel, renamed));
-    await expect(row(panel, renamed)).toHaveCSS("opacity", "0.4");
+    await lift(page, handle(panel, f.deck));
+    await expect(row(panel, f.deck)).toHaveCSS("opacity", "0.4");
     await expect(row(panel, otherDeck)).toHaveCSS("opacity", "0.4");
     await hover(page, row(panel, `${f.shelf} / Binder 1`));
     await expect(row(panel, `${f.shelf} / Binder 1`)).toHaveCSS(
@@ -641,20 +603,19 @@ test.describe("desktop", () => {
     );
     await page.mouse.up();
     await expect(panel.getByText("New path:")).toHaveText(
-      `New path: ${f.shelf} / Binder 1 / ${renamed}`
+      `New path: ${f.shelf} / Binder 1 / ${f.deck}`
     );
     expect((await client.node(f.ids.deck))!.parent_id).toBeNull();
     await button(panel, "Move here").click();
-    const nested = `${f.shelf} / Binder 1 / ${renamed}`;
+    const nested = `${f.shelf} / Binder 1 / ${f.deck}`;
     await expect(row(panel, nested)).toBeVisible();
     await expect(panel.getByRole("status")).toHaveText(
-      `Moved ${renamed} to ${f.shelf} / Binder 1.`
+      `Moved ${f.deck} to ${f.shelf} / Binder 1.`
     );
     await expect(row(panel, nested)).toContainText("Deck · 0 copies");
     await expect(
       row(panel, nested).getByRole("button", { name: /^Add child/ })
     ).toHaveCount(0);
-    await expect(button(panel, `Delete ${nested}`)).toBeDisabled();
     expect(await client.node(f.ids.deck)).toMatchObject({
       kind: "deck",
       parent_id: f.ids.binder1,
@@ -672,41 +633,15 @@ test.describe("desktop", () => {
     expect(options).not.toContain(`${f.shelf} / Binder 1`);
     await button(picker, "Top level").click();
     await expect(panel.getByText("New path:")).toHaveText(
-      `New path: ${renamed}`
+      `New path: ${f.deck}`
     );
     await button(panel, "Move here").click();
-    await expect(row(panel, renamed)).toBeVisible();
+    await expect(row(panel, f.deck)).toBeVisible();
     await expect(row(panel, nested)).toHaveCount(0);
     expect((await client.node(f.ids.deck))!.parent_id).toBeNull();
     // Binder 1 lost its only child and is an empty Storage Leaf again.
     expect((await client.node(f.ids.binder1))!.kind).toBe("storage_leaf");
     expect((await client.node(otherDeckId))!.name).toBe(otherDeck);
-  });
-
-  test("Delete needs an empty Location without children and its typed name", async ({
-    page,
-  }) => {
-    await signIn(page);
-    const client = api(page);
-    const f = await seed(page);
-    await page.reload();
-    const panel = await openFromSidebar(page, f.shelf);
-    const binder1 = `${f.shelf} / Binder 1`;
-    await expect(button(panel, `Delete ${f.shelf} / Box`)).toBeDisabled();
-    await expect(button(panel, `Delete ${f.shelf} / Binder 10`)).toBeDisabled();
-
-    await button(panel, `Delete ${binder1}`).click();
-    const form = panel.getByRole("form", { name: `Delete ${binder1}` });
-    const confirm = button(form, "Delete location");
-    const typed = form.getByLabel("Type Binder 1 to confirm");
-    await expect(confirm).toBeDisabled();
-    await typed.fill("binder 1");
-    await expect(confirm).toBeDisabled();
-    await typed.fill("Binder 1");
-    await confirm.click();
-    await expect(row(panel, binder1)).toHaveCount(0);
-    await expect(panel.getByRole("status")).toHaveText(`Deleted ${binder1}.`);
-    expect(await client.node(f.ids.binder1)).toBeUndefined();
   });
 
   test("Add child opens the create form with the row preselected and returns to the panel", async ({
@@ -738,7 +673,7 @@ test.describe("desktop", () => {
     await expect(panel).toBeVisible();
   });
 
-  test("a stale edit from a second tab fails without changes and reloads the tree", async ({
+  test("a stale move fails without changes and reloads the tree", async ({
     page,
   }) => {
     await signIn(page);
@@ -749,30 +684,21 @@ test.describe("desktop", () => {
     const binder1 = `${f.shelf} / Binder 1`;
     await expect(row(panel, binder1)).toBeVisible();
 
-    // A second tab of the same session renames Binder 1 first.
-    const other = await page.context().newPage();
-    await other.setViewportSize({ width: 1280, height: 900 });
-    await other.goto(page.url());
-    await expect(other.getByRole("heading", { level: 1 })).toHaveText(
-      "All owned"
-    );
-    const otherPanel = await openFromSidebar(other, f.shelf);
-    await button(otherPanel, `Rename ${binder1}`).click();
-    await otherPanel.getByLabel("New name").fill("Binder 1 elsewhere");
-    await button(otherPanel, "Save name").click();
-    await expect(
-      row(otherPanel, `${f.shelf} / Binder 1 elsewhere`)
-    ).toBeVisible();
-    await other.close();
+    // Another session renames Binder 1 first, so this panel still shows the old version.
+    await client.rename(f.ids.binder1, "Binder 1 elsewhere");
 
-    // This tab still shows the old version; its rename is refused and the tree reloads.
-    await button(panel, `Rename ${binder1}`).click();
-    await panel.getByLabel("New name").fill("Binder 1 mine");
-    await button(panel, "Save name").click();
+    // Its move is refused and the tree reloads.
+    await handle(panel, binder1).click();
+    await button(
+      panel.getByRole("list", { name: "New parent", exact: true }),
+      f.spare
+    ).click();
+    await button(panel, "Move here").click();
     await expect(panel.getByRole("alert")).toContainText("nothing was changed");
     await expect(row(panel, `${f.shelf} / Binder 1 elsewhere`)).toBeVisible();
     await expect(row(panel, binder1)).toHaveCount(0);
     expect((await client.node(f.ids.binder1))!.name).toBe("Binder 1 elsewhere");
+    expect((await client.node(f.ids.binder1))!.parent_id).toBe(f.ids.shelf);
   });
 });
 
@@ -814,12 +740,11 @@ test.describe("mobile", () => {
 
     const binder1 = `${f.shelf} / Binder 1`;
     await expectTouchTarget(handle(panel, binder1));
-    for (const name of [
-      `Rename ${binder1}`,
-      `Add child location to ${binder1}`,
-      `Delete ${binder1}`,
-    ])
+    for (const name of [`Add child location to ${binder1}`])
       await expectTouchTarget(button(panel, name), ["height"]);
+    await expect(
+      row(panel, binder1).getByRole("button", { name: /^(Rename|Delete) / })
+    ).toHaveCount(0);
 
     // A tap on the handle opens the picker.
     await handle(panel, binder1).tap();

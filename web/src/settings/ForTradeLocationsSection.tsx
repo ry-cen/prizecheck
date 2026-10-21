@@ -7,8 +7,8 @@ type Load =
 
 /**
  * Settings › Privacy's summary of For trade Locations (Trading #283): the Locations the collector marked, by full
- * path, topmost marks only. Everything inside each one, apart from Decks, is offered too. Marking happens in
- * Collection's Manage locations; this only lists them. Rendered inside the Privacy section beside Hidden Locations.
+ * path, topmost marks only. Everything inside each one, apart from Decks, is offered too. Marking happens in each
+ * Location's settings in Collection (#292); this only lists them. Rendered inside the Privacy section beside Hidden Locations.
  */
 export function ForTradeLocationsSection() {
   const [load, setLoad] = useState<Load>({ kind: "loading" });
@@ -55,16 +55,16 @@ export function ForTradeLocationsSection() {
       )}
       {load.kind === "ready" && load.paths.length === 0 && (
         <p className="m-0 text-meta text-text-muted">
-          Nothing is offered for trade. To offer a Location's cards, choose For
-          trade in Collection › Manage locations.
+          Nothing is offered for trade. To offer a Location's cards, open its
+          settings from the gear beside it in Collection and choose For trade.
         </p>
       )}
       {load.kind === "ready" && load.paths.length > 0 && (
         <>
           <p className="m-0 text-meta text-text-muted">
             Friends can trade for the cards in these Locations and everything
-            inside them, apart from Decks. Change this in Collection › Manage
-            locations.
+            inside them, apart from Decks. Change this in each Location's
+            settings in Collection.
           </p>
           <ul
             aria-labelledby={headingId}

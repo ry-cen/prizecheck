@@ -217,6 +217,10 @@ test.describe("desktop", () => {
     const shelfRow = row(nav, shelf);
     const shelfList = nav.getByRole("list", { name: shelf, exact: true });
     const addShelf = addChild(nav, shelf);
+    const gearShelf = nav.getByRole("button", {
+      name: `Settings for ${shelf}`,
+      exact: true,
+    });
 
     // Decks have no Add child control.
     await expect(row(nav, deck)).toBeVisible();
@@ -232,13 +236,18 @@ test.describe("desktop", () => {
       // The row and its Add child share one entry: the row's parent element.
       .locator("xpath=..")
       .boundingBox())!;
-    // Inset 2 px from the row's top, bottom and end, so the open row's border and a drop ring stay visible.
-    expect(Math.abs(addBox.width - 26)).toBeLessThanOrEqual(1);
-    expect(Math.abs(addBox.height - (rowBox.height - 4))).toBeLessThanOrEqual(
-      1
-    );
+    // Both tools are 30 px square and sit at the row's end: the gear 2 px inside it, the + immediately left of
+    // the gear with a 2 px gap, so the open row's border stays visible.
+    const gearBox = (await gearShelf.boundingBox())!;
+    expect(Math.abs(addBox.width - 30)).toBeLessThanOrEqual(1);
+    expect(Math.abs(addBox.height - 30)).toBeLessThanOrEqual(1);
+    expect(Math.abs(gearBox.width - 30)).toBeLessThanOrEqual(1);
+    expect(Math.abs(gearBox.height - 30)).toBeLessThanOrEqual(1);
     expect(
-      Math.abs(addBox.x + addBox.width - (rowBox.x + rowBox.width - 2))
+      Math.abs(gearBox.x + gearBox.width - (rowBox.x + rowBox.width - 2))
+    ).toBeLessThanOrEqual(1);
+    expect(
+      Math.abs(addBox.x + addBox.width - (gearBox.x - 2))
     ).toBeLessThanOrEqual(1);
     expect(Math.abs(entryBox.width - rowBox.width)).toBeLessThanOrEqual(1);
     await page.mouse.move(1500, 850);
@@ -430,6 +439,66 @@ test.describe("desktop", () => {
     expect((await client.holdings(boxId)).map((h) => h.quantity)).toEqual([
       "1",
     ]);
+  });
+
+  test("the gear and + hide while a tile is dragged over the sidebar, so the drop ring shows", async ({
+    page,
+  }) => {
+    await signIn(page);
+    const client = api(page);
+    const s = suffix();
+    const source = await client.create(`0 Source ${s}`, null);
+    await client.create(`0 Dest ${s}`, null);
+    await client.create(`0 Other ${s}`, null);
+    await client.stock(source, "1");
+    await page.reload();
+    const nav = page
+      .getByRole("complementary", { name: "Sidebar" })
+      .getByRole("navigation", { name: "Locations" });
+    const tile = page
+      .getByRole("region", { name: "Cards" })
+      .getByRole("button")
+      .first();
+    // A hidden control leaves the accessibility tree, so the tools are found by their label.
+    const tool = (label: string) => nav.locator(`[aria-label="${label}"]`);
+    const dest = row(nav, `0 Dest ${s}`);
+    const other = row(nav, `0 Other ${s}`);
+    await expect(tile).toBeVisible();
+    await expect(dest).toBeVisible();
+    // Hovering a row reveals its tools when no drag is going.
+    await dest.hover();
+    await expect(addChild(nav, `0 Dest ${s}`)).toHaveCSS(
+      "visibility",
+      "visible"
+    );
+
+    const center = async (locator: Locator) => {
+      const found = await locator.boundingBox();
+      expect(found).not.toBeNull();
+      return {
+        x: found!.x + found!.width / 2,
+        y: found!.y + found!.height / 2,
+      };
+    };
+    const from = await center(tile);
+    const to = await center(dest);
+    await page.mouse.move(from.x, from.y);
+    await page.mouse.down();
+    await page.mouse.move(to.x, to.y, { steps: 12 });
+    await expect(dest).toHaveCSS("outline-style", "solid");
+    await expect(other).toHaveCSS("outline-style", "dashed");
+    for (const name of [`0 Dest ${s}`, `0 Other ${s}`]) {
+      await expect(tool(`Add child location to ${name}`)).toHaveCSS(
+        "visibility",
+        "hidden"
+      );
+      await expect(tool(`Settings for ${name}`)).toHaveCSS(
+        "visibility",
+        "hidden"
+      );
+    }
+    await page.mouse.up();
+    await expect(dest).toHaveCSS("outline-style", "none");
   });
 
   test("the depth limit shows inline", async ({ page }) => {

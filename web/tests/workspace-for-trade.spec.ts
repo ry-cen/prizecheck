@@ -1,5 +1,5 @@
-// Ticket #267: For trade Locations (Trading spec "For trade Locations and the Trade List"). For trade in Manage
-// locations covers everything inside the Location apart from Decks; the rows inside say "For trade because <parent>
+// Ticket #267: For trade Locations (Trading spec "For trade Locations and the Trade List"). For trade, in a
+// Location's settings (#292), covers everything inside the Location apart from Decks; the rows inside say "For trade because <parent>
 // is." and can't be un-marked on their own; a Deck is refused in plain words; and a Location that is both
 // hidden and For trade says its cards are still offered. At desktop width and at 375 px.
 import { test, expect, type Locator, type Page } from "@playwright/test";
@@ -79,11 +79,22 @@ const row = (panel: Locator, path: string) =>
   panel.getByRole("group", { name: path, exact: true });
 const button = (scope: Locator, name: string) =>
   scope.getByRole("button", { name, exact: true });
+const gear = (scope: Locator, path: string) =>
+  scope.getByRole("button", { name: `Settings for ${path}`, exact: true });
+const settingsOf = (page: Page, path: string) =>
+  page.getByRole("dialog", { name: path, exact: true });
 
 const STILL_OFFERED = "Still on your Trade List";
 
-/** The whole story, at whichever width the describe block sets. `openPanel` opens Manage locations. */
-async function markAndCheck(page: Page, openPanel: () => Promise<void>) {
+type Ui = {
+  /** The Locations tree's scope: the sidebar, or the open drawer. */
+  tree: () => Promise<Locator>;
+  /** Opens Manage locations and returns its panel. */
+  manage: () => Promise<Locator>;
+};
+
+/** The whole story, at whichever width the describe block sets. */
+async function markAndCheck(page: Page, ui: Ui) {
   await signIn(page);
   const storage = await create(page, "Storage");
   const binder = await create(page, "Binder 1", storage);
@@ -92,16 +103,27 @@ async function markAndCheck(page: Page, openPanel: () => Promise<void>) {
   await page.reload();
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("All owned");
 
-  await openPanel();
-  const panel = panelOf(page);
-  await expect(row(panel, "Storage")).toBeVisible();
+  let tree = await ui.tree();
+  await button(tree, "Storage").click();
+  await expect(gear(tree, "Storage / Binder 1")).toBeVisible();
 
   // Mark the box: everything inside it is For trade, apart from the Deck.
-  await button(panel, "Mark Storage For trade").click();
-  await expect(panel.getByRole("status")).toHaveText(
+  const storageSettings = settingsOf(page, "Storage");
+  await gear(tree, "Storage").click();
+  await button(storageSettings, "Mark Storage For trade").click();
+  await expect(storageSettings.getByRole("status")).toHaveText(
     "Storage and everything in it, apart from Decks, are For trade."
   );
-  await expect(row(panel, "Storage")).toContainText("Folder · For trade");
+  await expect(storageSettings).toContainText("Folder · For trade");
+  // Focus stays on the control that was used.
+  await expect(
+    button(storageSettings, "Mark Storage Not for trade")
+  ).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(storageSettings).toBeHidden();
+
+  let panel = await ui.manage();
+  await expect(row(panel, "Storage")).toBeVisible();
   await expect(row(panel, "Storage / Binder 1")).toContainText(
     "For trade because Storage is."
   );
@@ -109,17 +131,33 @@ async function markAndCheck(page: Page, openPanel: () => Promise<void>) {
     "For trade because"
   );
   await expect(row(panel, "Shelf")).not.toContainText("For trade because");
-  await expect(button(panel, "Mark Shelf For trade")).toBeEnabled();
-  // Focus stays on the control that was used.
-  await expect(button(panel, "Mark Storage Not for trade")).toBeFocused();
+  await button(panel, "Close manage locations").click();
+  await expect(panel).toBeHidden();
+
+  tree = await ui.tree();
+  const shelfSettings = settingsOf(page, "Shelf");
+  await gear(tree, "Shelf").click();
+  await expect(button(shelfSettings, "Mark Shelf For trade")).toBeEnabled();
+  await page.keyboard.press("Escape");
+  await expect(shelfSettings).toBeHidden();
 
   // A Location inside the marked one can't be un-marked on its own: the control is off and says why.
-  const inherited = button(panel, "Mark Storage / Binder 1 Not for trade");
+  const binderSettings = settingsOf(page, "Storage / Binder 1");
+  await gear(tree, "Storage / Binder 1").click();
+  const inherited = button(
+    binderSettings,
+    "Mark Storage / Binder 1 Not for trade"
+  );
   await expect(inherited).toBeDisabled();
+  await expect(inherited).toHaveAccessibleDescription(
+    "For trade because Storage is."
+  );
   await expect(inherited).toHaveAttribute(
     "title",
     "For trade because Storage is."
   );
+  await page.keyboard.press("Escape");
+  await expect(binderSettings).toBeHidden();
   // The server refuses it too, naming the marked Location.
   const refused = await page.request.put(
     `${ORIGIN}/api/location-tree/${binder}/for-trade`,
@@ -137,53 +175,105 @@ async function markAndCheck(page: Page, openPanel: () => Promise<void>) {
     detail: { code: "LOCATION_FOR_TRADE_BY_PARENT", for_trade_by: storage },
   });
 
-  // A Deck can't be marked, and the panel says so plainly.
-  await button(panel, "Mark Storage / Lugia Deck For trade").click();
-  await expect(panel.getByRole("alert")).toHaveText(
-    "A Deck can't be marked For trade."
-  );
-  await expect(row(panel, "Storage / Lugia Deck")).not.toContainText(
-    "For trade because"
-  );
+  // A Deck can't be marked: its settings have no For trade button.
+  const deckSettings = settingsOf(page, "Storage / Lugia Deck");
+  await gear(tree, "Storage / Lugia Deck").click();
+  await expect(
+    deckSettings.getByRole("button", { name: /^Mark / })
+  ).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(deckSettings).toBeHidden();
 
   // A page added later is For trade too.
-  await button(panel, "Close manage locations").click();
-  await expect(panel).toBeHidden();
   await create(page, "Binder 2", storage);
-  await openPanel();
+  // Adding a page changes Storage, so the tree is read again before Storage's own settings change it.
+  await page.reload();
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("All owned");
+  panel = await ui.manage();
   await expect(row(panel, "Storage / Binder 2")).toContainText(
     "For trade because Storage is."
   );
 
   // Hidden and For trade: the screen says its cards are still offered.
   await expect(panel).not.toContainText(STILL_OFFERED);
-  await button(panel, "Hide Storage from Friends").click();
-  await expect(panel.getByRole("status")).toHaveText(
+  await button(panel, "Close manage locations").click();
+  await expect(panel).toBeHidden();
+  tree = await ui.tree();
+  await button(tree, "Storage").click();
+  await gear(tree, "Storage").click();
+  await button(storageSettings, "Hide Storage from Friends").click();
+  await expect(storageSettings.getByRole("status")).toHaveText(
     "Storage and everything in it are hidden from Friends."
   );
-  await expect(row(panel, "Storage")).toContainText(
+  await expect(storageSettings).toContainText(
     "Folder · Hidden from Friends · For trade"
   );
+  await expect(storageSettings).toContainText(STILL_OFFERED);
+  await page.keyboard.press("Escape");
+  await expect(storageSettings).toBeHidden();
+  panel = await ui.manage();
   await expect(row(panel, "Storage")).toContainText(STILL_OFFERED);
   await expect(row(panel, "Storage / Binder 1")).toContainText(STILL_OFFERED);
   await expect(row(panel, "Storage / Lugia Deck")).not.toContainText(
     STILL_OFFERED
   );
   await expect(row(panel, "Shelf")).not.toContainText(STILL_OFFERED);
+  await button(panel, "Close manage locations").click();
+  await expect(panel).toBeHidden();
 
   // Un-marking the box leaves it hidden, and the line goes.
-  await button(panel, "Mark Storage Not for trade").click();
-  await expect(panel.getByRole("status")).toHaveText(
+  tree = await ui.tree();
+  await gear(tree, "Storage").click();
+  await button(storageSettings, "Mark Storage Not for trade").click();
+  await expect(storageSettings.getByRole("status")).toHaveText(
     "Storage is no longer For trade."
   );
-  await expect(row(panel, "Storage")).toContainText(
-    "Folder · Hidden from Friends"
-  );
-  await expect(panel).not.toContainText(STILL_OFFERED);
+  await expect(storageSettings).toContainText("Folder · Hidden from Friends");
+  await expect(storageSettings).not.toContainText(STILL_OFFERED);
+  await page.keyboard.press("Escape");
+  await expect(storageSettings).toBeHidden();
+  await gear(tree, "Storage / Binder 1").click();
   await expect(
-    button(panel, "Mark Storage / Binder 1 For trade")
+    button(binderSettings, "Mark Storage / Binder 1 For trade")
   ).toBeEnabled();
+  await page.keyboard.press("Escape");
+  await expect(binderSettings).toBeHidden();
 }
+
+const desktopUi = (page: Page): Ui => ({
+  tree: async () =>
+    page
+      .getByRole("complementary", { name: "Sidebar" })
+      .getByRole("navigation", { name: "Locations" }),
+  manage: async () => {
+    await button(
+      page.getByRole("complementary", { name: "Sidebar" }),
+      "Manage locations"
+    ).click();
+    return panelOf(page);
+  },
+});
+
+/** The drawer opens only when it is shut: a Location's settings leave it open behind them. */
+const mobileUi = (page: Page): Ui => {
+  const drawer = page.getByRole("dialog", { name: "Locations", exact: true });
+  const tree = async () => {
+    if (await drawer.isHidden()) {
+      await button(page.getByRole("banner"), "Open locations").click();
+    }
+    await expect(drawer).toBeVisible();
+    return drawer;
+  };
+  return {
+    tree,
+    manage: async () => {
+      await tree();
+      await button(drawer, "Manage locations").click();
+      await expect(drawer).toBeHidden();
+      return panelOf(page);
+    },
+  };
+};
 
 test.describe("desktop", () => {
   test.use({ viewport: { width: 1280, height: 900 } });
@@ -191,12 +281,7 @@ test.describe("desktop", () => {
   test("marking a box For trade covers what is inside it but its Deck, and a hidden For trade box says its cards are still offered", async ({
     page,
   }) => {
-    await markAndCheck(page, async () => {
-      await button(
-        page.getByRole("complementary", { name: "Sidebar" }),
-        "Manage locations"
-      ).click();
-    });
+    await markAndCheck(page, desktopUi(page));
   });
 });
 
@@ -210,17 +295,12 @@ test.describe("mobile", () => {
   test("the same at 375 px, with touch-sized For trade buttons", async ({
     page,
   }) => {
-    await markAndCheck(page, async () => {
-      await button(page.getByRole("banner"), "Open locations").click();
-      const drawer = page.getByRole("dialog", {
-        name: "Locations",
-        exact: true,
-      });
-      await button(drawer, "Manage locations").click();
-      await expect(drawer).toBeHidden();
-    });
-    const panel = panelOf(page);
-    await expectTouchTarget(button(panel, "Mark Storage For trade"), [
+    const ui = mobileUi(page);
+    await markAndCheck(page, ui);
+    const tree = await ui.tree();
+    await gear(tree, "Storage").click();
+    const settings = settingsOf(page, "Storage");
+    await expectTouchTarget(button(settings, "Mark Storage For trade"), [
       "height",
     ]);
     expect(
@@ -254,7 +334,7 @@ async function setFlag(
 async function sidebarMarks(
   page: Page,
   openTree: () => Promise<Locator>,
-  openManage: () => Promise<void>
+  openSettings: (path: string) => Promise<Locator>
 ) {
   await signIn(page);
   const storage = await create(page, "Storage");
@@ -303,25 +383,26 @@ async function sidebarMarks(
   );
   await expect(rowOf("Shelf")).not.toHaveAttribute("aria-describedby");
 
-  // Un-marking in Manage locations clears the marks without a reload.
-  await openManage();
-  const panel = panelOf(page);
-  await button(panel, "Mark Storage Not for trade").click();
-  await expect(panel.getByRole("status")).toHaveText(
+  // Un-marking in the Location's settings clears the marks without a reload.
+  let settings = await openSettings("Storage");
+  await button(settings, "Mark Storage Not for trade").click();
+  await expect(settings.getByRole("status")).toHaveText(
     "Storage is no longer For trade."
   );
-  await button(panel, "Close manage locations").click();
+  await button(settings, "Close settings").click();
+  await expect(settings).toBeHidden();
   tree = await openTree();
   await expect(tree.getByTestId("for-trade-mark")).toHaveCount(0);
   await expect(button(tree, "Storage")).toHaveAccessibleDescription(
     "Hidden from Friends"
   );
 
-  // Marking again in Manage locations brings the marks back without a reload.
-  await openManage();
-  await button(panelOf(page), "Mark Storage For trade").click();
-  await expect(panelOf(page).getByRole("status")).toContainText("For trade");
-  await button(panelOf(page), "Close manage locations").click();
+  // Marking again in the Location's settings brings the marks back without a reload.
+  settings = await openSettings("Storage");
+  await button(settings, "Mark Storage For trade").click();
+  await expect(settings.getByRole("status")).toContainText("For trade");
+  await button(settings, "Close settings").click();
+  await expect(settings).toBeHidden();
   tree = await openTree();
   await expect(tree.getByTestId("for-trade-mark")).toHaveCount(2);
 }
@@ -336,8 +417,9 @@ test.describe("sidebar marks, desktop", () => {
     await sidebarMarks(
       page,
       async () => sidebar,
-      async () => {
-        await button(sidebar, "Manage locations").click();
+      async (path) => {
+        await gear(sidebar, path).click();
+        return settingsOf(page, path);
       }
     );
   });
@@ -354,14 +436,18 @@ test.describe("sidebar marks, mobile", () => {
     page,
   }) => {
     const drawer = page.getByRole("dialog", { name: "Locations", exact: true });
+    // A Location's settings stack over the drawer and leave it open, so it opens only when it is shut.
     const openDrawer = async () => {
-      await button(page.getByRole("banner"), "Open locations").click();
+      if (await drawer.isHidden()) {
+        await button(page.getByRole("banner"), "Open locations").click();
+      }
       await expect(drawer).toBeVisible();
       return drawer;
     };
-    await sidebarMarks(page, openDrawer, async () => {
-      await button(drawer, "Manage locations").click();
-      await expect(drawer).toBeHidden();
+    await sidebarMarks(page, openDrawer, async (path) => {
+      await openDrawer();
+      await gear(drawer, path).click();
+      return settingsOf(page, path);
     });
     // Both marks on a long-named row still fit inside the drawer.
     const long = await create(

@@ -113,13 +113,13 @@ const confirmDialog = (page: Page, other: string) =>
   page.getByRole("dialog", { name: `Confirm swap with ${other}?` });
 const NOTICE = "only records the cash amount you agree on";
 
-/** Opens the Manage locations panel from the sidebar, or on a phone from the Locations drawer. */
-async function openManageLocations(on: Page) {
+/** Opens a Location's settings from its gear in the sidebar, or on a phone in the Locations drawer. The drawer
+ * stays open behind the settings. */
+async function openLocationSettings(on: Page, path: string) {
+  const gearIn = (scope: Locator) =>
+    scope.getByRole("button", { name: `Settings for ${path}`, exact: true });
   if (!isPhone(on)) {
-    await on
-      .getByRole("complementary", { name: "Sidebar" })
-      .getByRole("button", { name: "Manage locations", exact: true })
-      .click();
+    await gearIn(on.getByRole("complementary", { name: "Sidebar" })).click();
     return;
   }
   await on
@@ -127,10 +127,7 @@ async function openManageLocations(on: Page) {
     .getByRole("button", { name: "Open locations", exact: true })
     .click();
   const locations = on.getByRole("dialog", { name: "Locations", exact: true });
-  await locations
-    .getByRole("button", { name: "Manage locations", exact: true })
-    .click();
-  await expect(locations).toBeHidden();
+  await gearIn(locations).click();
 }
 
 // The UI copy rule (AGENTS.md): no data-source or provenance name, no fetch, check or refresh wording, no record id,
@@ -221,34 +218,34 @@ async function story(
   await expect(
     ashMain.getByText("3 copies · 1 edition", { exact: true })
   ).toBeVisible();
-  await openManageLocations(ash.page);
-  const panel = ash.page.getByRole("dialog", {
-    name: "Manage locations",
+  await openLocationSettings(ash.page, `${ashPlace} Binder`);
+  const settings = ash.page.getByRole("dialog", {
+    name: `${ashPlace} Binder`,
     exact: true,
   });
-  await panel
+  await settings
     .getByRole("button", {
       name: `Mark ${ashPlace} Binder For trade`,
       exact: true,
     })
     .click();
-  await expect(panel.getByRole("status")).toHaveText(
+  await expect(settings.getByRole("status")).toHaveText(
     `${ashPlace} Binder and everything in it, apart from Decks, are For trade.`
   );
   await expect(
-    panel.getByRole("button", {
+    settings.getByRole("button", {
       name: `Mark ${ashPlace} Binder Not for trade`,
       exact: true,
     })
   ).toBeFocused();
   await expectPageChecks(
     ash.page,
-    `Manage locations with a binder marked For trade at ${width}`
+    `Location settings with a binder marked For trade at ${width}`
   );
-  await panel
-    .getByRole("button", { name: "Close manage locations", exact: true })
+  await settings
+    .getByRole("button", { name: "Close settings", exact: true })
     .click();
-  await expect(panel).toBeHidden();
+  await expect(settings).toBeHidden();
   await ash.page.goto(`${ORIGIN}/trades/list`);
   await expect(
     ashMain

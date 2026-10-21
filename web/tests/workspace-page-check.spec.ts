@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Locator, type Page } from "@playwright/test";
 import { signInAsOwner } from "./support/sign-in";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -7,7 +7,7 @@ import { expectPageChecks } from "./support/page-check";
 import { startAsNewOwner } from "./support/owner";
 
 // #166: Collection's sidebar and Location tree, toolbar, filters and display settings, the stale banner, the
-// Reviewed Edition corrections, the Deck heading, Add cards and Manage locations are on the kit. Each state
+// Reviewed Edition corrections, the Deck heading, Add cards, Manage locations and a Location's settings are on the kit. Each state
 // passes the shared page check at 1280×800 and 375×812, with its dialogs, drawers and menus open as well as
 // closed. Helpers follow workspace-accessibility.spec.ts.
 
@@ -222,7 +222,7 @@ async function checkAddCards(page: Page, path: string, width: string) {
   await expect(add).toHaveCount(0);
 }
 
-/** Checks Manage locations on its list, its Rename step and its Move picker, then closes it with Escape. */
+/** Checks Manage locations on its list and its Move picker, then closes it with Escape. */
 async function checkManage(page: Page, world: World, width: string) {
   const panel = manage(page);
   await expect(panel).toBeVisible();
@@ -230,12 +230,6 @@ async function checkManage(page: Page, world: World, width: string) {
     panel.getByRole("group", { name: world.binder, exact: true })
   ).toBeVisible();
   await expectPageChecks(page, `Manage locations (${width})`);
-  await panel
-    .getByRole("button", { name: `Rename ${world.binder}`, exact: true })
-    .click();
-  await expect(panel.getByLabel("New name")).toBeFocused();
-  await expectPageChecks(page, `Manage locations Rename (${width})`);
-  await panel.getByRole("button", { name: "Cancel", exact: true }).click();
   await panel
     .getByRole("button", { name: `Move ${world.binder}`, exact: true })
     .click();
@@ -245,6 +239,35 @@ async function checkManage(page: Page, world: World, width: string) {
   await expectPageChecks(page, `Manage locations Move picker (${width})`);
   await page.keyboard.press("Escape");
   await expect(panel).toHaveCount(0);
+}
+
+/** Checks a Location's settings dialog on its list and its Rename step, then closes it with Escape. */
+async function checkSettings(
+  page: Page,
+  scope: Locator,
+  world: World,
+  width: string
+) {
+  const gear = scope.getByRole("button", {
+    name: `Settings for ${world.binder}`,
+    exact: true,
+  });
+  await gear.click();
+  const settings = page.getByRole("dialog", {
+    name: world.binder,
+    exact: true,
+  });
+  await expect(settings).toBeVisible();
+  await expectPageChecks(page, `Location settings (${width})`);
+  await settings
+    .getByRole("button", { name: `Rename ${world.binder}`, exact: true })
+    .click();
+  await expect(settings.getByLabel("New name")).toBeFocused();
+  await expectPageChecks(page, `Location settings Rename (${width})`);
+  await settings.getByRole("button", { name: "Cancel", exact: true }).click();
+  await page.keyboard.press("Escape");
+  await expect(settings).toHaveCount(0);
+  await expect(gear).toBeFocused();
 }
 
 /** Another session adds a copy; focusing the window shows the stale banner, which is checked. */
@@ -260,7 +283,7 @@ async function checkStaleBanner(page: Page, world: World, width: string) {
 test.describe("at 1280×800", () => {
   test.use({ viewport: { width: 1280, height: 800 } });
 
-  test("the sidebar, toolbar, filters, corrections, Deck heading, Add cards, Manage locations and the stale banner pass the page check", async ({
+  test("the sidebar, toolbar, filters, corrections, Deck heading, Add cards, Manage locations, a Location's settings and the stale banner pass the page check", async ({
     page,
   }) => {
     const world = await seed(page);
@@ -289,11 +312,14 @@ test.describe("at 1280×800", () => {
     await expect(heading(page)).toHaveText("Binder");
     await checkAddCards(page, world.binder, "1280");
 
-    // Manage locations from the sidebar gear: its list, Rename and the Move picker.
+    // Manage locations from the sidebar gear: its list and the Move picker.
     await sidebar
       .getByRole("button", { name: "Manage locations", exact: true })
       .click();
     await checkManage(page, world, "1280");
+
+    // The Binder's own settings, from its gear: its list and its Rename step.
+    await checkSettings(page, nav, world, "1280");
 
     // The Deck heading, its Export menu and an export panel.
     await nav.getByRole("button", { name: world.deck, exact: true }).click();
@@ -311,7 +337,7 @@ test.describe("at 375×812", () => {
     hasTouch: true,
   });
 
-  test("the phone header, the Locations drawer, Filters & display, Manage locations, the Deck heading, Add cards and the stale banner pass the page check", async ({
+  test("the phone header, the Locations drawer, Filters & display, Manage locations, a Location's settings, the Deck heading, Add cards and the stale banner pass the page check", async ({
     page,
   }) => {
     const world = await seed(page);
@@ -340,6 +366,13 @@ test.describe("at 375×812", () => {
       .click();
     await checkManage(page, world, "375");
     await expect(opener).toBeFocused();
+
+    // The Binder's own settings, stacked over the drawer.
+    await opener.click();
+    await expect(drawer).toBeVisible();
+    await checkSettings(page, nav, world, "375");
+    await page.keyboard.press("Escape");
+    await expect(drawer).toBeHidden();
 
     // Filters & display along the right edge.
     await page.getByRole("button", { name: /^Filters & display/ }).click();

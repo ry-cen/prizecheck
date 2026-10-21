@@ -275,7 +275,7 @@ async function forTradeSettings(page: Page) {
   const section = page.getByRole("region", { name: "For trade" });
   await expect(section).toContainText("Nothing is offered for trade.");
   await expect(section).toHaveText(
-    "For tradeNothing is offered for trade. To offer a Location's cards, choose For trade in Collection › Manage locations."
+    "For tradeNothing is offered for trade. To offer a Location's cards, open its settings from the gear beside it in Collection and choose For trade."
   );
   const storage = await location(page, "Storage");
   const binder = await location(page, "Binder", storage);
@@ -288,7 +288,7 @@ async function forTradeSettings(page: Page) {
   await flag(page, shelf, "hidden");
   await page.reload();
   await expect(section).toContainText(
-    "Friends can trade for the cards in these Locations and everything inside them, apart from Decks. Change this in Collection › Manage locations."
+    "Friends can trade for the cards in these Locations and everything inside them, apart from Decks. Change this in each Location's settings in Collection."
   );
   await expect(section.getByRole("listitem")).toHaveText(["Shelf", "Storage"]);
   // The hidden and For trade Location is listed in both sections.
