@@ -1,0 +1,602 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-21T04:04:45+00:00",
+  "title": "Design System: PrizeCheck",
+  "extensions": {
+    "colorMeta": {
+      "bg": {
+        "role": "neutral",
+        "displayName": "Deck Box Black",
+        "canonical": "#121110",
+        "oklch": "oklch(17.8% 0.003 67.7)",
+        "tonalRamp": [
+          "#0c0b0a",
+          "#262524",
+          "#434240",
+          "#626160",
+          "#838281",
+          "#a6a5a3",
+          "#cac9c7",
+          "#efeeed"
+        ]
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "Felt",
+        "canonical": "#1a1816",
+        "oklch": "oklch(21.1% 0.005 67.6)",
+        "tonalRamp": [
+          "#0c0b0a",
+          "#272522",
+          "#44413f",
+          "#63615e",
+          "#84827f",
+          "#a7a4a2",
+          "#cbc8c6",
+          "#f0eeec"
+        ]
+      },
+      "surface-raised": {
+        "role": "neutral",
+        "displayName": "Raised Felt",
+        "canonical": "#23201c",
+        "oklch": "oklch(24.5% 0.009 75.2)",
+        "tonalRamp": [
+          "#0c0b09",
+          "#282520",
+          "#45413d",
+          "#64615c",
+          "#85827d",
+          "#a8a49f",
+          "#ccc8c3",
+          "#f0eeeb"
+        ]
+      },
+      "surface-selected": {
+        "role": "neutral",
+        "displayName": "Selected Umber",
+        "canonical": "#352c1c",
+        "oklch": "oklch(29.8% 0.030 81.5)",
+        "tonalRamp": [
+          "#0f0a04",
+          "#2c2414",
+          "#4a4130",
+          "#6a604e",
+          "#8b816f",
+          "#afa490",
+          "#d3c8b4",
+          "#f5eee1"
+        ]
+      },
+      "border": {
+        "role": "neutral",
+        "displayName": "Seam",
+        "canonical": "#38322a",
+        "oklch": "oklch(32.1% 0.016 75.0)",
+        "tonalRamp": [
+          "#0e0b07",
+          "#2a241c",
+          "#474139",
+          "#676057",
+          "#888178",
+          "#aba49a",
+          "#cfc8be",
+          "#f2eee7"
+        ]
+      },
+      "border-strong": {
+        "role": "neutral",
+        "displayName": "Stitch",
+        "canonical": "#56493a",
+        "oklch": "oklch(41.4% 0.030 70.9)",
+        "tonalRamp": [
+          "#100a04",
+          "#2e2315",
+          "#4c4031",
+          "#6c5f4f",
+          "#8e806f",
+          "#b1a291",
+          "#d6c6b5",
+          "#f6ede2"
+        ]
+      },
+      "control-outline": {
+        "role": "neutral",
+        "displayName": "Control Outline",
+        "canonical": "#847766",
+        "oklch": "oklch(57.6% 0.030 74.5)",
+        "tonalRamp": [
+          "#100a04",
+          "#2e2314",
+          "#4c4030",
+          "#6c5f4f",
+          "#8d806f",
+          "#b0a391",
+          "#d5c7b4",
+          "#f6ede2"
+        ]
+      },
+      "text": {
+        "role": "neutral",
+        "displayName": "Bone",
+        "canonical": "#efebe4",
+        "oklch": "oklch(94.1% 0.010 81.8)",
+        "tonalRamp": [
+          "#0c0b08",
+          "#28251f",
+          "#45423c",
+          "#64615b",
+          "#85827c",
+          "#a8a49e",
+          "#ccc9c2",
+          "#f0eeea"
+        ]
+      },
+      "text-muted": {
+        "role": "neutral",
+        "displayName": "Parchment",
+        "canonical": "#b9b0a3",
+        "oklch": "oklch(76.1% 0.021 77.3)",
+        "tonalRamp": [
+          "#0e0b06",
+          "#2b241a",
+          "#484136",
+          "#686054",
+          "#8a8175",
+          "#ada497",
+          "#d1c8ba",
+          "#f3eee5"
+        ]
+      },
+      "text-subtle": {
+        "role": "neutral",
+        "displayName": "Faded Parchment",
+        "canonical": "#9e9588",
+        "oklch": "oklch(67.4% 0.022 77.2)",
+        "tonalRamp": [
+          "#0e0a06",
+          "#2b2419",
+          "#494135",
+          "#686054",
+          "#8a8174",
+          "#ada496",
+          "#d1c8ba",
+          "#f3eee5"
+        ]
+      },
+      "accent": {
+        "role": "primary",
+        "displayName": "Prize Gold",
+        "canonical": "#e6bd57",
+        "oklch": "oklch(81.5% 0.128 87.3)",
+        "tonalRamp": [
+          "#180600",
+          "#3f1b00",
+          "#5f3a00",
+          "#805a00",
+          "#a37c00",
+          "#c79f35",
+          "#edc45e",
+          "#ffecb3"
+        ]
+      },
+      "accent-strong": {
+        "role": "primary",
+        "displayName": "Pale Gold",
+        "canonical": "#f5dc94",
+        "oklch": "oklch(89.9% 0.095 91.1)",
+        "tonalRamp": [
+          "#140900",
+          "#362100",
+          "#553f00",
+          "#755f10",
+          "#978039",
+          "#bba35c",
+          "#e0c780",
+          "#fdeec4"
+        ]
+      },
+      "accent-border": {
+        "role": "primary",
+        "displayName": "Antique Brass",
+        "canonical": "#b8913a",
+        "oklch": "oklch(67.7% 0.114 84.4)",
+        "tonalRamp": [
+          "#180600",
+          "#3e1b00",
+          "#5e3a00",
+          "#7f5a00",
+          "#a27c20",
+          "#c69f49",
+          "#ecc36e",
+          "#ffecbb"
+        ]
+      },
+      "accent-outline": {
+        "role": "primary",
+        "displayName": "Tarnished Brass",
+        "canonical": "#93732f",
+        "oklch": "oklch(57.3% 0.094 83.5)",
+        "tonalRamp": [
+          "#160700",
+          "#3a1e00",
+          "#5a3c00",
+          "#7b5c12",
+          "#9d7d3a",
+          "#c1a05d",
+          "#e7c481",
+          "#ffecc4"
+        ]
+      },
+      "accent-fill": {
+        "role": "primary",
+        "displayName": "Deep Ochre",
+        "canonical": "#5a4519",
+        "oklch": "oklch(40.3% 0.067 83.1)",
+        "tonalRamp": [
+          "#130900",
+          "#342100",
+          "#533e11",
+          "#745e33",
+          "#967f53",
+          "#b9a275",
+          "#dec698",
+          "#fcedd1"
+        ]
+      },
+      "on-accent": {
+        "role": "primary",
+        "displayName": "Ink on Gold",
+        "canonical": "#211803",
+        "oklch": "oklch(21.5% 0.038 87.0)",
+        "tonalRamp": [
+          "#0f0a02",
+          "#2d240d",
+          "#4b412a",
+          "#6b6048",
+          "#8c8168",
+          "#afa48a",
+          "#d4c8ad",
+          "#f5eedd"
+        ]
+      },
+      "warning": {
+        "role": "status",
+        "displayName": "Amber",
+        "canonical": "#f0c987",
+        "oklch": "oklch(85.5% 0.095 80.1)",
+        "tonalRamp": [
+          "#170700",
+          "#3c1c00",
+          "#5c3b00",
+          "#7d5a13",
+          "#a07c3a",
+          "#c49f5d",
+          "#eac381",
+          "#ffebc4"
+        ]
+      },
+      "danger": {
+        "role": "status",
+        "displayName": "Rose",
+        "canonical": "#eba79f",
+        "oklch": "oklch(79.1% 0.082 26.6)",
+        "tonalRamp": [
+          "#1c0202",
+          "#45100e",
+          "#672f2a",
+          "#8a4e48",
+          "#ae6f68",
+          "#d4918a",
+          "#fab5ad",
+          "#ffe3dd"
+        ]
+      },
+      "danger-border": {
+        "role": "status",
+        "displayName": "Rosewood",
+        "canonical": "#b0625a",
+        "oklch": "oklch(58.4% 0.102 26.8)",
+        "tonalRamp": [
+          "#1f0001",
+          "#4b0305",
+          "#6e2723",
+          "#934841",
+          "#b86961",
+          "#de8c82",
+          "#ffafa5",
+          "#ffe0d9"
+        ]
+      },
+      "danger-fill": {
+        "role": "status",
+        "displayName": "Oxblood",
+        "canonical": "#6f3a35",
+        "oklch": "oklch(41.4% 0.076 26.5)",
+        "tonalRamp": [
+          "#1b0303",
+          "#431210",
+          "#64302c",
+          "#87504a",
+          "#ab716a",
+          "#d0938c",
+          "#f7b7af",
+          "#ffe4df"
+        ]
+      },
+      "art-start": {
+        "role": "neutral",
+        "displayName": "Sleeve Brown (light)",
+        "canonical": "#3a3122",
+        "oklch": "oklch(31.8% 0.028 80.2)",
+        "tonalRamp": [
+          "#0f0a04",
+          "#2c2415",
+          "#4a4131",
+          "#6a604f",
+          "#8b8170",
+          "#aea492",
+          "#d3c8b5",
+          "#f4eee2"
+        ]
+      },
+      "art-end": {
+        "role": "neutral",
+        "displayName": "Sleeve Brown (dark)",
+        "canonical": "#221e19",
+        "oklch": "oklch(23.8% 0.011 73.4)",
+        "tonalRamp": [
+          "#0d0b08",
+          "#28241f",
+          "#46413c",
+          "#65605a",
+          "#86817b",
+          "#a9a49e",
+          "#cec8c1",
+          "#f1eeea"
+        ]
+      },
+      "accent-wash": {
+        "role": "primary",
+        "displayName": "Gold Wash",
+        "canonical": "#e6bd5726"
+      },
+      "scrim": {
+        "role": "neutral",
+        "displayName": "Scrim",
+        "canonical": "#00000099"
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "Page titles, the open Location name, headline totals."
+      },
+      "heading": {
+        "displayName": "Heading",
+        "purpose": "Dialog titles and in-page section headings."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Running text and list rows."
+      },
+      "control": {
+        "displayName": "Control",
+        "purpose": "Buttons, inputs, selects, navigation."
+      },
+      "meta": {
+        "displayName": "Meta",
+        "purpose": "Secondary details, chips, field labels."
+      },
+      "caption": {
+        "displayName": "Caption",
+        "purpose": "Tile names, Pills, phone tab labels."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Uppercase section labels and count badges."
+      },
+      "numeric": {
+        "displayName": "Tabular numerals",
+        "purpose": "Every count, price, collector number and quantity."
+      }
+    },
+    "shadows": [
+      {
+        "name": "badge-lift",
+        "value": "0 1px 4px #00000088",
+        "purpose": "Count and check badges on card art."
+      },
+      {
+        "name": "card-lift",
+        "value": "0 4px 12px #00000044",
+        "purpose": "Under card art in tiles and the inspector."
+      },
+      {
+        "name": "selected-ring",
+        "value": "0 0 0 3px var(--color-bg), 0 0 0 6px var(--color-accent)",
+        "purpose": "Dark gap then gold ring outside a selected tile."
+      }
+    ],
+    "motion": [
+      {
+        "name": "motion-duration",
+        "value": "120ms",
+        "purpose": "Every transition; 0ms under prefers-reduced-motion; never above 150ms."
+      },
+      {
+        "name": "motion-ease",
+        "value": "cubic-bezier(0.2, 0, 0, 1)",
+        "purpose": "Default easing for state transitions."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "phone",
+        "value": "max-width: 760px"
+      },
+      {
+        "name": "compact",
+        "value": "max-width: 1100px"
+      },
+      {
+        "name": "wide",
+        "value": "min-width: 1550px"
+      },
+      {
+        "name": "extra-wide",
+        "value": "min-width: 2200px"
+      }
+    ],
+    "focus": {
+      "value": "2px solid var(--color-focus) with 2px offset",
+      "purpose": "The one focus ring, on every interactive element."
+    },
+    "targets": {
+      "desktop": "24px minimum",
+      "phone": "44px minimum",
+      "control": "30px desktop / 44px phone",
+      "chip": "24px drawn, 44px tap box on a phone"
+    }
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The one action that moves the current task forward.",
+      "html": "<button class=\"ds-btn ds-btn-primary\">Add to Deck</button>",
+      "css": ".ds-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:30px;padding:0 12px;border:1px solid;border-radius:var(--radius-control,7px);font:500 13px/1 system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;cursor:pointer;transition:background-color var(--motion-duration,120ms) var(--motion-ease,ease),border-color var(--motion-duration,120ms) var(--motion-ease,ease)}.ds-btn:focus-visible{outline:2px solid var(--color-focus,#e6bd57);outline-offset:2px}.ds-btn-primary{background:var(--color-accent,#e6bd57);border-color:var(--color-accent,#e6bd57);color:var(--color-on-accent,#211803);font-weight:600}.ds-btn-primary:hover{background:var(--color-accent-strong,#f5dc94);border-color:var(--color-accent-strong,#f5dc94)}"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "The default button; shows the selected look when pressed or when its menu is open.",
+      "html": "<button class=\"ds-btn ds-btn-secondary\">Move</button> <button class=\"ds-btn ds-btn-secondary\" aria-pressed=\"true\">Names</button>",
+      "css": ".ds-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:30px;padding:0 12px;border:1px solid;border-radius:var(--radius-control,7px);font:500 13px/1 system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;cursor:pointer;transition:background-color var(--motion-duration,120ms) var(--motion-ease,ease),border-color var(--motion-duration,120ms) var(--motion-ease,ease)}.ds-btn:focus-visible{outline:2px solid var(--color-focus,#e6bd57);outline-offset:2px}.ds-btn-secondary{background:var(--color-surface-raised,#23201c);border-color:var(--color-border-strong,#56493a);color:var(--color-text,#efebe4)}.ds-btn-secondary:hover{border-color:var(--color-control-outline,#847766)}.ds-btn-secondary[aria-pressed=true]{background:var(--color-surface-selected,#352c1c);border-color:var(--color-accent-border,#b8913a);color:var(--color-accent-strong,#f5dc94)}"
+    },
+    {
+      "name": "Quiet Button",
+      "kind": "button",
+      "refersTo": "button-quiet",
+      "description": "Low-emphasis actions in toolbars and headers.",
+      "html": "<button class=\"ds-btn ds-btn-quiet\">Cancel</button>",
+      "css": ".ds-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:30px;padding:0 12px;border:1px solid;border-radius:var(--radius-control,7px);font:500 13px/1 system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;cursor:pointer;transition:background-color var(--motion-duration,120ms) var(--motion-ease,ease),border-color var(--motion-duration,120ms) var(--motion-ease,ease)}.ds-btn:focus-visible{outline:2px solid var(--color-focus,#e6bd57);outline-offset:2px}.ds-btn-quiet{background:transparent;border-color:transparent;color:var(--color-text-muted,#b9b0a3)}.ds-btn-quiet:hover{background:var(--color-surface-raised,#23201c);color:var(--color-text,#efebe4)}"
+    },
+    {
+      "name": "Danger Button",
+      "kind": "button",
+      "refersTo": "button-danger",
+      "description": "Destructive actions such as removing copies or deleting a Location.",
+      "html": "<button class=\"ds-btn ds-btn-danger\">Remove copies</button>",
+      "css": ".ds-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:30px;padding:0 12px;border:1px solid;border-radius:var(--radius-control,7px);font:500 13px/1 system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;cursor:pointer;transition:background-color var(--motion-duration,120ms) var(--motion-ease,ease),border-color var(--motion-duration,120ms) var(--motion-ease,ease)}.ds-btn:focus-visible{outline:2px solid var(--color-focus,#e6bd57);outline-offset:2px}.ds-btn-danger{background:var(--color-danger-fill,#6f3a35);border-color:var(--color-danger-border,#b0625a);color:var(--color-text,#efebe4)}.ds-btn-danger:hover{border-color:var(--color-danger,#eba79f)}"
+    },
+    {
+      "name": "Text Field",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "A labelled one-line control; the label wraps the input.",
+      "html": "<label class=\"ds-field\">Location name<input class=\"ds-input\" placeholder=\"Binder 3\"></label>",
+      "css": ".ds-field{display:flex;flex-direction:column;gap:4px;font:500 12px system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;color:var(--color-text-muted,#b9b0a3)}.ds-input{box-sizing:border-box;height:30px;padding:0 8px;border:1px solid var(--color-border-strong,#56493a);border-radius:var(--radius-control,7px);background:var(--color-bg,#121110);color:var(--color-text,#efebe4);font:400 13px system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif}.ds-input::placeholder{color:var(--color-text-subtle,#9e9588)}.ds-input:focus-visible{outline:2px solid var(--color-focus,#e6bd57);outline-offset:2px}"
+    },
+    {
+      "name": "Filter Chip",
+      "kind": "chip",
+      "refersTo": "chip",
+      "description": "A toggleable filter; gold wash when on.",
+      "html": "<button class=\"ds-chip\" aria-pressed=\"false\">Holo</button> <button class=\"ds-chip\" aria-pressed=\"true\">Reverse Holo</button>",
+      "css": ".ds-chip{display:inline-flex;align-items:center;height:24px;padding:0 10px;border:1px solid var(--color-border-strong,#56493a);border-radius:999px;background:transparent;color:var(--color-text-muted,#b9b0a3);font:400 12px system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;cursor:pointer}.ds-chip:hover{border-color:var(--color-control-outline,#847766)}.ds-chip[aria-pressed=true]{background:var(--color-accent-wash,#e6bd5726);border-color:var(--color-accent-border,#b8913a);color:var(--color-accent-strong,#f5dc94)}.ds-chip:focus-visible{outline:2px solid var(--color-focus,#e6bd57);outline-offset:2px}"
+    },
+    {
+      "name": "Status Pill",
+      "kind": "chip",
+      "refersTo": "pill",
+      "description": "A non-pressable status badge whose text states the status.",
+      "html": "<span class=\"ds-pill ds-pill-ok\">Legal</span> <span class=\"ds-pill ds-pill-warn\">Out of date</span> <span class=\"ds-pill ds-pill-bad\">Not legal</span> <span class=\"ds-pill ds-pill-unverified\">Unverified</span>",
+      "css": ".ds-pill{display:inline-flex;align-items:center;height:24px;padding:0 8px;border:1px solid;border-radius:999px;font:500 11px/1 system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;white-space:nowrap}.ds-pill-ok{border-color:var(--color-accent-border,#b8913a);color:var(--color-accent-strong,#f5dc94)}.ds-pill-warn{border-color:var(--color-warning,#f0c987);color:var(--color-warning,#f0c987)}.ds-pill-bad{border-color:var(--color-danger-border,#b0625a);color:var(--color-danger,#eba79f)}.ds-pill-unverified{border-style:dashed;border-color:var(--color-control-outline,#847766);color:var(--color-text-muted,#b9b0a3)}"
+    },
+    {
+      "name": "Header Navigation",
+      "kind": "nav",
+      "refersTo": "nav-item",
+      "description": "Desktop main views with the wordmark; the current view uses Selected Umber and Pale Gold.",
+      "html": "<nav class=\"ds-nav\"><span class=\"ds-wordmark\"><span aria-hidden=\"true\">✦</span> PrizeCheck</span><a class=\"ds-nav-item\" aria-current=\"page\" href=\"#\">Collection</a><a class=\"ds-nav-item\" href=\"#\">Decks</a><a class=\"ds-nav-item\" href=\"#\">Trades <span class=\"ds-count\">3</span></a></nav>",
+      "css": ".ds-nav{display:flex;align-items:center;gap:4px;height:64px;padding:0 28px;background:var(--color-bg,#121110);border-bottom:1px solid var(--color-border,#38322a);font-family:system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif}.ds-wordmark{margin-right:20px;font:700 12px system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;letter-spacing:2px;text-transform:uppercase;color:var(--color-text,#efebe4)}.ds-wordmark span{color:var(--color-accent,#e6bd57);margin-right:4px}.ds-nav-item{display:inline-flex;align-items:center;gap:8px;height:30px;padding:0 12px;border-radius:var(--radius-control,7px);color:var(--color-text-muted,#b9b0a3);font:500 13px system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;text-decoration:none}.ds-nav-item:hover{color:var(--color-text,#efebe4)}.ds-nav-item[aria-current=page]{background:var(--color-surface-selected,#352c1c);color:var(--color-accent-strong,#f5dc94)}.ds-nav-item:focus-visible{outline:2px solid var(--color-focus,#e6bd57);outline-offset:2px}.ds-count{display:inline-block;min-width:18px;height:18px;padding:0 4px;box-sizing:border-box;border-radius:999px;background:var(--color-accent,#e6bd57);color:var(--color-on-accent,#211803);font:700 10px/18px system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;text-align:center;font-variant-numeric:tabular-nums}"
+    },
+    {
+      "name": "Card Tile",
+      "kind": "custom",
+      "description": "One copy of a Card Edition: art with lift, count and selected badges, gold ring when selected, and fixed-height name lines.",
+      "html": "<div class=\"ds-tiles\"><button class=\"ds-tile\"><span class=\"ds-art\">Pikachu</span><span class=\"ds-badge ds-badge-count\">4</span><span class=\"ds-name\">Pikachu</span><span class=\"ds-meta\">PAL 185</span></button><button class=\"ds-tile\" aria-pressed=\"true\"><span class=\"ds-art\">Charizard ex</span><span class=\"ds-badge ds-badge-count\">1</span><span class=\"ds-badge ds-badge-check\"><svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"3\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M20 6 9 17l-5-5\"/></svg></span><span class=\"ds-name\">Charizard ex</span><span class=\"ds-meta\">OBF 125</span></button></div>",
+      "css": ".ds-tiles{display:flex;gap:12px;padding:12px;background:var(--color-bg,#121110)}.ds-tile{position:relative;display:flex;flex-direction:column;width:145px;padding:0;border:0;background:none;color:var(--color-text,#efebe4);font-family:system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;text-align:left;cursor:pointer}.ds-art{display:flex;align-items:center;justify-content:center;aspect-ratio:245/342;border-radius:var(--radius-card,7px);background:linear-gradient(135deg,var(--color-art-start,#3a3122),var(--color-art-end,#221e19));box-shadow:0 4px 12px var(--color-shadow,#00000044);color:var(--color-text-muted,#b9b0a3);font:600 11px system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif}.ds-tile[aria-pressed=true] .ds-art{box-shadow:0 0 0 3px var(--color-bg,#121110),0 0 0 6px var(--color-accent,#e6bd57)}.ds-tile:focus-visible{outline:2px solid var(--color-focus,#e6bd57);outline-offset:8px}.ds-badge{position:absolute;top:4px;display:flex;align-items:center;justify-content:center;width:24px;height:24px;border:2px solid var(--color-bg,#121110);border-radius:999px;box-shadow:0 1px 4px var(--color-shadow-strong,#00000088);font:700 11px system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;font-variant-numeric:tabular-nums}.ds-badge-count{left:4px;background:var(--color-surface-raised,#23201c);color:var(--color-text,#efebe4)}.ds-badge-check{right:4px;background:var(--color-accent,#e6bd57);color:var(--color-on-accent,#211803)}.ds-name{display:block;padding-top:4px;font:400 11px/16px system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.ds-meta{display:block;font:400 10px/14px system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;color:var(--color-text-subtle,#9e9588);font-variant-numeric:tabular-nums}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Deck Box",
+    "overview": "**Creative North Star: \"The Deck Box\"**\n\nPrizeCheck is a sturdy, compact container built to be used at the table. Like a good deck box, it is dark, plain and well made, and it exists to hold the cards. Card art is the only full colour in the app. Everything around it is a warm near-black stack of surfaces, so the cards are always the brightest thing on screen and the interface recedes behind them.\n\nThe system is dense and tactile rather than airy. Controls are small and exact on a desktop (30 px), where collectors spend long sessions sorting and building, and grow to full thumb size on a phone (44 px), where they check a list or confirm a swap at league. Nothing is ornamental: there is no decorative imagery, no gradient except the empty-art placeholder, no motion beyond short state transitions, and no shadow except under the cards and their badges. One accent, Prize Gold, marks what is selected, current or primary, and its scarcity is what makes it legible.\n\nPrecision is the brand. Counts, prices, collector numbers and quantities line up in tabular numerals. States such as selected, stale, unavailable and error are always spelled out in words or icons, never by colour alone. The theme layer is built to swap: every colour is a role, so future energy-type themes (Grass, Fire, Water and the rest) change values without touching a component.",
+    "keyCharacteristics": [
+      "Dark only, warm near-black surfaces layered by tone, not by shadow.",
+      "One accent (Prize Gold) for selection, the current view and the primary action.",
+      "Card art is the only saturated colour; the chrome stays neutral around it.",
+      "System font throughout; tabular numerals for every count, price and number.",
+      "Compact desktop controls (30 px) that become 44 px tap targets on a phone.",
+      "Small, consistent corners: 7 px on controls and cards, 10 px on panels, 14 px on dialogs."
+    ],
+    "rules": [
+      {
+        "name": "The Card Is the Colour Rule",
+        "body": "Saturated colour belongs to the card art. The chrome stays in the neutral stack and Prize Gold; never add a second accent hue to the interface.",
+        "section": "colors"
+      },
+      {
+        "name": "The Gold Means Chosen Rule",
+        "body": "Prize Gold appears only on what is selected, current, primary or counted. If gold marks something else, it stops telling collectors what they picked.",
+        "section": "colors"
+      },
+      {
+        "name": "The Role, Not the Hex Rule",
+        "body": "Components use colour roles, never literal values; a guardrail rejects arbitrary colour values in class names. A new theme is one new set of role values and touches no component.",
+        "section": "colors"
+      },
+      {
+        "name": "The Tabular Numbers Rule",
+        "body": "Every count, price, collector number and quantity uses tabular numerals so columns and totals line up.",
+        "section": "typography"
+      },
+      {
+        "name": "The Weight Carries Hierarchy Rule",
+        "body": "Hierarchy comes from semibold (600) against regular, plus the colour step from Bone to Parchment to Faded Parchment, not from large size jumps. The largest size in the app is 24 px.",
+        "section": "typography"
+      },
+      {
+        "name": "The Two Densities Rule",
+        "body": "Desktop is dense (30 px controls, 24 px chips) because collectors sort and build there for long sessions; a phone gets 44 px targets because it is used one-handed at an event. Never ship a phone control under 44 px of tap area, even when the drawn shape is smaller.",
+        "section": "layout"
+      },
+      {
+        "name": "The Flat Felt Rule",
+        "body": "Containers are flat; only cards and their badges cast a shadow. If a container needs to stand out, raise its surface a tone or give it a Stitch border; don't add a drop shadow.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "**Do** use colour roles (`--color-*` and their Tailwind names) for every colour; Prize Gold is the default and only shipped theme.",
+      "**Do** keep Prize Gold for what is selected, current, primary or counted.",
+      "**Do** use tabular numerals for counts, prices, collector numbers and quantities.",
+      "**Do** give every phone control at least 44 px of tap area and every desktop target at least 24 px.",
+      "**Do** show selected, stale, unavailable and error states with words or icons as well as colour.",
+      "**Do** keep text at 4.5:1 and identifying outlines at 3:1 against bg, surface, raised and selected surfaces.",
+      "**Do** keep transitions at 150 ms or less (`--motion-duration`, 120 ms with `cubic-bezier(0.2, 0, 0, 1)`), and none under reduced motion.",
+      "**Do** use card-shaped placeholder tiles for loading, not spinners."
+    ],
+    "donts": [
+      "**Don't** hardcode a colour, or add a second accent hue to the chrome.",
+      "**Don't** add drop shadows to panels, toasts, menus or dialogs; layer by tone.",
+      "**Don't** use Tailwind's default palette, type scale, radii or breakpoints; they are reset and generate nothing.",
+      "**Don't** decorate: no ornamental imagery, gradients (outside the art placeholder) or motion for its own sake.",
+      "**Don't** use dashed borders or outlines decoratively; they mean drop target, stored elsewhere or unverified.",
+      "**Don't** let collectors pick custom colours: themes (including any future light theme) are preset, contrast-checked role sets."
+    ]
+  }
+}
