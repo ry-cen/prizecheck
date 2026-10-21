@@ -121,6 +121,11 @@ class VerifyArgumentsTest(unittest.TestCase):
         self.assertIn('api:*|browser:?*) ;;', gate)
         self.assertIn('VERIFY_SHARD needs the api or browser suite', gate)
 
+    def test_ci_sh_checks_the_bundle_boundary_after_the_build(self):
+        gate = (SCRIPTS / 'ci.sh').read_text()
+        self.assertIn('npm run guardrails; npm run build; .venv/bin/python scripts/check_bundle_boundary.py '
+                      '--report "$TEST_LOG_DIR/bundle-boundary.json"', gate)
+
     def test_databases_and_ports_follow_the_workers(self):
         self.assertEqual(verify.database_names('run', 2, 3), ['run', 'run_gw0', 'run_gw1', 'run_s1', 'run_s2'])
         self.assertEqual(verify.database_names('run', 1, 1), ['run'])
@@ -469,6 +474,33 @@ class VerifyReportTest(unittest.TestCase):
             self.assertIsNone(totals['playwright'])
             self.assertIsNone(totals['vitest'])
             self.assertIn('api.tests.test_a::test_x | parallel | 3.5', (run / 'verification.log').read_text())
+
+    def test_the_bundle_boundary_reaches_the_summary_and_result(self):
+        with tempfile.TemporaryDirectory() as directory:
+            run = Path(directory)
+            route = {'route': 'entry', 'chunks': 1, 'bytes': 10, 'leaks': []}
+            (run / 'bundle-boundary.json').write_text(json.dumps({'ok': True, 'routes': [route] * 4, 'problems': []}))
+            (run / 'verification.log').write_text('')
+            totals = verify_report.summarize(run)
+            self.assertIn('bundle boundary: ok (the entry and 3 public pages)', (run / 'verification.log').read_text())
+            self.assertIs(totals['bundle_boundary']['ok'], True)
+
+    def test_a_failed_bundle_boundary_lists_its_first_problems(self):
+        with tempfile.TemporaryDirectory() as directory:
+            run = Path(directory)
+            (run / 'bundle-boundary.json').write_text(json.dumps({'ok': False, 'routes': [], 'problems': ['a', 'b', 'c', 'd']}))
+            (run / 'verification.log').write_text('')
+            totals = verify_report.summarize(run)
+            self.assertIn('bundle boundary: failed: a; b; c and 1 more', (run / 'verification.log').read_text())
+            self.assertIs(totals['bundle_boundary']['ok'], False)
+
+    def test_without_a_bundle_boundary_report_the_summary_leaves_it_out(self):
+        with tempfile.TemporaryDirectory() as directory:
+            run = Path(directory)
+            (run / 'verification.log').write_text('')
+            totals = verify_report.summarize(run)
+            self.assertIsNone(totals['bundle_boundary'])
+            self.assertNotIn('bundle boundary', (run / 'verification.log').read_text())
 
     def test_failed_tests_are_named_with_their_pass_and_worker(self):
         with tempfile.TemporaryDirectory() as directory:
