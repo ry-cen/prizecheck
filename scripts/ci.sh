@@ -81,9 +81,11 @@ phase setup start
 .venv/bin/python scripts/backfill_public_catalog.py
 # A browser shard is one leg of the split CI gate (.github/workflows/verify.yml): its stacks serve web/ through the vite
 # dev server and never read the build output, and the auth leg runs guardrails and the build once for every leg.
+# After the build, check_bundle_boundary.py builds a second copy with a manifest and source maps, and fails the gate when
+# a private page reaches a public page's static graph, or a lazy page reaches the entry.
 case "$VERIFY_SUITE:$VERIFY_SHARD" in
   api:*|browser:?*) ;;
-  *) npm run guardrails; npm run build ;;
+  *) npm run guardrails; npm run build; .venv/bin/python scripts/check_bundle_boundary.py --report "$TEST_LOG_DIR/bundle-boundary.json" ;;
 esac
 case "$VERIFY_SUITE" in
   all) .venv/bin/python scripts/verify_resources.py prepare --pytest --stacks ;;

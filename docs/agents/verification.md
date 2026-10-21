@@ -24,7 +24,7 @@ npm run verify -- --suite browser -- web/tests/workspace-actions.spec.ts
 
 API selectors are pytest node ids, paths and options such as `-k`, `-x` or `--lf`; the runner sets `-m`, `-n`, `-p` and `--dist` itself. Browser selectors are spec files or `file:line` locations. `--fast` combines with `--suite api`, `--suite auth` and `--suite browser`. A bare `pytest <nodeid>` does not work for most API tests: they need the gate's migrated database and environment. `npm run test:fast` is unchanged: it is the guardrails-only check the pre-commit hook runs, not the fast tier.
 
-`--shard K/N` runs the K-th of N parts of `--suite api` or `--suite browser`, whole test files at a time, in both passes: every test lands in exactly one shard, and the N shards together run what the unsharded suite runs. `api/tests/conftest.py` makes pytest's split from everything collected, before `-m` and `-k` deselect anything, so both passes and every pytest-xdist worker agree; files go heaviest first to the lightest shard, weighed by their tests not marked `slow`, and the other shards' tests count as deselected, not skipped. Playwright splits with its own `--shard`, and `fullyParallel: false` in `playwright.config.ts` keeps each spec file in one shard. A shard whose serial pass matches nothing is normal, but a shard in which neither pass runs a test fails, like an unsharded run with no matching test; selectors combine with `--shard`, so narrow selectors can leave a shard empty, and path or node-id selectors change what is collected and so the split: to rerun a test that failed in a CI leg, select it without `--shard`. A shard without selectors takes a gate's share of the host, so it counts as a gate, not a narrow run. A browser shard skips `npm run guardrails` and `npm run build`: its stacks serve the web app through the vite dev server, and on CI the auth leg runs both once. An unsharded `--suite browser` still runs them.
+`--shard K/N` runs the K-th of N parts of `--suite api` or `--suite browser`, whole test files at a time, in both passes: every test lands in exactly one shard, and the N shards together run what the unsharded suite runs. `api/tests/conftest.py` makes pytest's split from everything collected, before `-m` and `-k` deselect anything, so both passes and every pytest-xdist worker agree; files go heaviest first to the lightest shard, weighed by their tests not marked `slow`, and the other shards' tests count as deselected, not skipped. Playwright splits with its own `--shard`, and `fullyParallel: false` in `playwright.config.ts` keeps each spec file in one shard. A shard whose serial pass matches nothing is normal, but a shard in which neither pass runs a test fails, like an unsharded run with no matching test; selectors combine with `--shard`, so narrow selectors can leave a shard empty, and path or node-id selectors change what is collected and so the split: to rerun a test that failed in a CI leg, select it without `--shard`. A shard without selectors takes a gate's share of the host, so it counts as a gate, not a narrow run. A browser shard skips `npm run guardrails`, `npm run build` and the bundle-boundary check: its stacks serve the web app through the vite dev server, and on CI the auth leg runs them once. An unsharded `--suite browser` still runs them.
 
 `--repeat N` runs each selected Playwright test N times (`--repeat-each`), or with `--suite auth` the whole vitest run N times, one after another; vitest has no per-file repeat that also re-runs a file's `beforeAll`, where its server startups live.
 
@@ -54,6 +54,19 @@ Vitest (`auth/tests`) runs its files in parallel, as before; each file's tests r
 
 Timing tests use real time only where they say why. The hard-stop and SIGSTOP runner scenarios scale the runner's contract constants through the test sitecustomize (see `docs/price-refresh.md`); the cold-start measurement and the idle-exit checks keep real time.
 
+## Bundle boundary
+
+`scripts/check_bundle_boundary.py` guards the split that `web/src/shell/lazyPages.ts` makes, so a phone that opens a Published Deck link downloads only the shell, the sign-in screens and that one page. It fails when:
+
+- a lazy page from `lazyPages.ts` is in the entry's static graph;
+- a private page, or an `EXTRA_PRIVATE_MODULES` entry, is in a public page's static graph (the entry's plus the page's own); public means the `lazyPages` exports that `web/src/public/PublicPageView.tsx` imports, and every other lazy page is private;
+- a lazy page has no chunk of its own;
+- Vite reports an ineffective dynamic import.
+
+It makes a second build into a temporary directory with a manifest and source maps (about 2 seconds), so `dist/web`, the release artifact, never carries either. It reads the manifest for each chunk's static imports (dynamic imports are not followed) and the source maps for the modules in each chunk. It runs in every `scripts/ci.sh` run that builds, right after `npm run build`: the full gate, the CI auth leg, unsharded browser runs, burn-in, operations and the release gate. It does not run in the api suite, in browser shards or in the pre-commit hook; `npm run check:bundle` runs it alone. Its `== bundle boundary:` lines go to `verification.log`, with a one-line verdict in the summary.
+
+A `FAILED:` line names the module, the chunk and the route it reached. Fix it by removing the static import that pulls the module in, not by editing the lists. Adding a page to `lazyPages.ts` needs no change to the check; a new inner private module worth guarding, such as a sub-screen of a private page, goes in `EXTRA_PRIVATE_MODULES`. Examples of passing and failing builds are in `tests/tooling/test_bundle_boundary.py`.
+
 ## Artifacts
 
 Each run prints its `.scratch/verification/<run>/` directory. It holds:
@@ -62,6 +75,7 @@ Each run prints its `.scratch/verification/<run>/` directory. It holds:
 - service logs: `api.log`, `auth.log` and `web.log` for the first stack, `stack-<n>/` for the others;
 - `browser/parallel/` and `browser/serial/` (Playwright output), `playwright-parallel.json`, `playwright-serial.json`;
 - `pytest-parallel.xml`, `pytest-serial.xml`, `vitest.xml` (per-test times), `phases.tsv`, `timings.md`, `timings.json`;
+- `bundle-boundary.json`: the bundle-boundary check's report, also summarised as one line in the summary and recorded in `result.json` under `timings.bundle_boundary`;
 - `result.json`: exit code, suite, selectors, `fast`, `shard`, worker counts, databases, timings.
 
 The runner prints `Verification run: <id>` before anything else, so a run that is stopped early still names its directory. Remove a run with `.venv/bin/python scripts/verify_discard.py <id>`, which refuses anything but one existing run directory; never `rm -rf` a path built from a captured id, because an empty id removes every run's evidence.

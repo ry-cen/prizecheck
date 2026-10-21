@@ -2,7 +2,7 @@
 
 Reads phases.tsv (scripts/ci.sh), pytest-parallel.xml and pytest-serial.xml (scripts/run_pytest.py), vitest.xml or,
 when vitest ran more than once, vitest-1.xml ... vitest-N.xml (scripts/ci.sh), and playwright-parallel.json and
-playwright-serial.json (scripts/run_playwright.py). scripts/verify.py calls summarize()
+playwright-serial.json (scripts/run_playwright.py), and bundle-boundary.json (scripts/check_bundle_boundary.py). scripts/verify.py calls summarize()
 after every run: it writes timings.json and timings.md and appends the same summary to verification.log.
 ``python scripts/verify_report.py <run-dir>`` prints the summary of an earlier run.
 """
@@ -56,6 +56,17 @@ def phases(directory):
         elif mark == 'end' and name in starts:
             durations[name] = int(stamp) - starts[name]
     return durations
+
+
+def bundle_boundary(directory):
+    """The bundle-boundary check's report (scripts/check_bundle_boundary.py), or None when the run did not build."""
+    path = Path(directory) / 'bundle-boundary.json'
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text())
+    except (OSError, ValueError):
+        return {'ok': False, 'routes': [], 'problems': ['bundle-boundary.json is unreadable']}
 
 
 def pytest_results(directory):
@@ -160,6 +171,14 @@ def markdown(summary):
         lines += ['Failed tests:', *(f'- {name}' for name in summary['failed']), '']
     lines += ['| Phase | Seconds |', '| --- | ---: |']
     lines += [f'| {name} | {seconds} |' for name, seconds in summary['phases'].items()]
+    boundary = summary['bundle_boundary']
+    if boundary is not None:
+        problems = boundary.get('problems', [])
+        if boundary.get('ok'):
+            verdict = f"ok (the entry and {len(boundary.get('routes', [])) - 1} public pages)"
+        else:
+            verdict = 'failed: ' + '; '.join(problems[:3]) + (f' and {len(problems) - 3} more' if len(problems) > 3 else '')
+        lines += ['', f'bundle boundary: {verdict}']
     for suite in ('pytest', 'vitest', 'playwright'):
         counts = summary[suite]['counts']
         if counts is None:
@@ -179,7 +198,8 @@ def collect(directory):
     return {'phases': phases(directory), 'failed': failed_tests(directory),
             'pytest': {'counts': pytest_counts, 'slowest': pytest_cases[:30]},
             'vitest': {'counts': vitest_counts, 'slowest': vitest_cases[:20], 'runs': len(vitest_reports(directory))},
-            'playwright': {'counts': playwright_counts, 'slowest': playwright_cases[:20]}}
+            'playwright': {'counts': playwright_counts, 'slowest': playwright_cases[:20]},
+            'bundle_boundary': bundle_boundary(directory)}
 
 
 def summarize(directory):
@@ -192,7 +212,8 @@ def summarize(directory):
     with (directory / 'verification.log').open('a') as log:
         log.write('\n== verification summary\n' + text)
     return {'phases': summary['phases'], 'failed': summary['failed'], 'pytest': summary['pytest']['counts'],
-            'vitest': summary['vitest']['counts'], 'playwright': summary['playwright']['counts']}
+            'vitest': summary['vitest']['counts'], 'playwright': summary['playwright']['counts'],
+            'bundle_boundary': summary['bundle_boundary']}
 
 
 if __name__ == '__main__':
