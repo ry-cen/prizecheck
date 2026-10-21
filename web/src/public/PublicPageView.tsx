@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
-import { DiscoverPage } from "../discover/DiscoverPage";
+import {
+  DiscoverPage,
+  InvitePage,
+  PublishedDeckPage,
+} from "../shell/lazyPages";
 import { DeadEnd } from "./DeadEnd";
-import { InvitePage } from "./InvitePage";
-import { PublishedDeckPage } from "./PublishedDeckPage";
 import type { PublicPage } from "./publicRoutes";
 
 type Props = {
