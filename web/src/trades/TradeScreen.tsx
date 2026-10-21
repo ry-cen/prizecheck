@@ -29,6 +29,8 @@ import {
   getTradeSide,
   TradesError,
   useSuggestedTradePicks,
+  type ConfirmedSwap,
+  type DeckSwitchOffer,
   type OwnTradeSide,
 } from "../trades_generated";
 import { Button } from "../ui/Button";
@@ -38,11 +40,14 @@ import { Menu, type MenuItem } from "../ui/Menu";
 import { Select } from "../ui/Select";
 import { useToast } from "../ui/Toast";
 import { indexLocations } from "../workspace/locationTree";
+import { DeckSwitchOffers, useDeckSwitchOffers } from "./DeckSwitchOffers";
+import { offerSwitchUndo } from "./deckSwitchUndo";
 import { LiabilityNotice } from "./LiabilityNotice";
 import { valueLines } from "./proposalModel";
 import { counterPath, TRADES_PATH, tradePath } from "./tradeListModel";
 import {
   swapDoneMessage,
+  switchDoneText,
   tradeCardName,
   tradeHeadline,
   tradeNote,
@@ -127,6 +132,11 @@ const DONE: Record<Asking | "accept" | "use_suggested", string> = {
  * an out-of-date pick says what the suggestion takes instead. Those are the reader's own Locations, from their own side
  * read (`GET /api/trades/{id}/side`); the other side's never reach this screen.
  *
+ * Deck switches (#279): when a card the reader gets came only through a widened Will accept choice for a Deck's want,
+ * the dialog lists each Deck that could use it, ticked, under the place picker (their own side read, for the chosen
+ * place). The ticked ones are sent with Confirm swap, and the toast offers **Undo switch**, which sends each Deck's own
+ * Deck List batch back. A Deck that changed since the offer was shown refuses the whole confirm.
+ *
  * Counter (#278) sits between Accept and Decline on a proposal sent to you and opens the Counter builder; a Counter
  * shows one line linking the proposal it answers.
  *
@@ -160,8 +170,24 @@ export function TradeScreen({
   const [destination, setDestination] = useState("");
   const [dialogMessage, setDialogMessage] = useState("");
   const places = useSwapPlaces(confirming);
+  // The Deck switches Confirm swap offers for the place chosen; read only while the dialog is open and they get cards.
+  const switches = useDeckSwitchOffers(
+    load.kind === "ready" ? load.trade.id : "",
+    load.kind === "ready" && confirming && load.trade.you_get.length > 0,
+    destination
+  );
   // One key per step until it settles, so a step whose outcome is unknown is retried safely.
   const keys = useRef(new Map<string, string>());
+  // The Deck switches the held confirm key was minted with (the offers shown and the ones sent), kept as long as the key
+  // is, so a retry after an unknown outcome sends and shows the same choice even after the dialog was reopened.
+  const held = useRef<{
+    offers: DeckSwitchOffer[];
+    sent: DeckSwitchOffer[];
+  } | null>(null);
+  const forgetConfirm = () => {
+    keys.current.delete("confirm");
+    held.current = null;
+  };
   const heading = useRef<HTMLHeadingElement>(null);
   const menuAnchor = useRef<HTMLDivElement>(null);
   const askButton = useRef<HTMLButtonElement>(null);
@@ -309,6 +335,10 @@ export function TradeScreen({
   const name = trade.other.display_name;
   const stale = side.picks.some((place) => place.short !== "0");
   const gets = trade.you_get.length > 0;
+  const sameSwitch = (a: DeckSwitchOffer, b: DeckSwitchOffer) =>
+    a.deck_id === b.deck_id &&
+    a.from_edition_id === b.from_edition_id &&
+    a.to_edition_id === b.to_edition_id;
 
   /** Asks before a step that ends the Trade, with focus on the confirmation's button. */
   function ask(step: Asking) {
@@ -325,7 +355,8 @@ export function TradeScreen({
   async function step(
     action: StepName,
     call: (body: TradeStep) => Promise<TradeView>,
-    done: (next: TradeView) => string
+    done: (next: TradeView) => string,
+    announce?: (next: TradeView, message: string) => void
   ) {
     if (busy) return;
     setBusy(true);
@@ -339,15 +370,20 @@ export function TradeScreen({
         idempotency_key: key,
       });
       keys.current.delete(action);
+      if (action === "confirm") held.current = null;
       const nextSide = await getTradeSide(trade.id).catch(() => side);
       focusNext.current = "heading";
       setAsking(null);
       setConfirming(false);
       setLoad({ kind: "ready", trade: next, side: nextSide });
-      toast.show({ message: done(next) });
+      if (announce) announce(next, done(next));
+      else toast.show({ message: done(next) });
       refreshInbox();
     } catch (cause) {
-      if (!tradeOutcomeUnknown(cause)) keys.current.delete(action);
+      if (!tradeOutcomeUnknown(cause)) {
+        keys.current.delete(action);
+        if (action === "confirm") held.current = null;
+      }
       const code =
         cause instanceof SocialError || cause instanceof TradesError
           ? cause.code
@@ -364,6 +400,7 @@ export function TradeScreen({
           setDestination("");
           places.reload();
         }
+        if (code === "DECK_SWITCH_CHANGED") switches.reload();
       } else setMessage(text);
     } finally {
       setBusy(false);
@@ -396,15 +433,50 @@ export function TradeScreen({
     setDialogMessage("");
     setConfirming(true);
   }
+  // While a confirm key is held its snapshot stands in for the live offers; a reload never replaces it.
+  const snapshot = keys.current.has("confirm") ? held.current : null;
+  const shownOffers = snapshot ? snapshot.offers : switches.offers;
+  const shownTicked = (offer: DeckSwitchOffer) =>
+    snapshot
+      ? snapshot.sent.some((item) => sameSwitch(item, offer))
+      : switches.ticked(offer);
   function runConfirm() {
+    if (busy) return;
+    if (!snapshot && gets && switches.state !== "ready") return;
+    if (!snapshot)
+      held.current = {
+        offers: switches.offers,
+        sent: switches.offers.filter(switches.ticked),
+      };
+    const sent = (snapshot ?? held.current)?.sent ?? [];
+    const answered: { current: ConfirmedSwap | null } = { current: null };
     void step(
       "confirm",
       (body) =>
         confirmSwap(trade.id, {
           ...body,
           destination_id: gets && destination !== "" ? destination : null,
-        }),
-      () => swapDoneMessage(trade, gets ? (chosen?.path ?? "Unsorted") : null)
+          deck_switches: sent.map((offer) => ({
+            deck_id: offer.deck_id,
+            from_edition_id: offer.from_edition_id,
+            to_edition_id: offer.to_edition_id,
+            count: offer.count,
+          })),
+        }).then((answer) => (answered.current = answer)),
+      () =>
+        [
+          swapDoneMessage(trade, gets ? (chosen?.path ?? "Unsorted") : null),
+          switchDoneText(sent),
+        ]
+          .filter(Boolean)
+          .join(" "),
+      (_, message) =>
+        offerSwitchUndo(
+          toast,
+          message,
+          sent,
+          answered.current?.switched_decks ?? []
+        )
     );
   }
 
@@ -634,7 +706,7 @@ export function TradeScreen({
               disabled={busy || keys.current.has("confirm")}
               onChange={(event) => {
                 // Another place is another command: a retry with the old key would be refused.
-                keys.current.delete("confirm");
+                forgetConfirm();
                 setDialogMessage("");
                 setDestination(event.target.value);
               }}
@@ -656,6 +728,30 @@ export function TradeScreen({
             )}
           </div>
         )}
+        {gets &&
+          (snapshot
+            ? shownOffers.length > 0
+            : switches.state === "ready" && shownOffers.length > 0) && (
+            <DeckSwitchOffers
+              offers={shownOffers}
+              ticked={shownTicked}
+              disabled={busy || keys.current.has("confirm")}
+              onToggle={(offer) => {
+                // Another set of switches is another command: a retry with the old key would be refused.
+                forgetConfirm();
+                setDialogMessage("");
+                switches.toggle(offer);
+              }}
+            />
+          )}
+        {gets && !snapshot && switches.state === "failed" && (
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="m-0 text-meta text-text-muted">
+              Deck switches couldn't be loaded.
+            </p>
+            <Button onClick={switches.reload}>Retry</Button>
+          </div>
+        )}
         <p className="m-0 text-meta text-text-muted">
           The swap can't be undone.
         </p>
@@ -673,7 +769,11 @@ export function TradeScreen({
           </Button>
           <Button
             variant="primary"
-            aria-disabled={busy || undefined}
+            aria-disabled={
+              busy ||
+              (!snapshot && gets && switches.state !== "ready") ||
+              undefined
+            }
             onClick={runConfirm}
           >
             Confirm swap

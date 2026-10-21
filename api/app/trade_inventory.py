@@ -45,10 +45,12 @@ other:
   arrive as new Holdings through ``moves.add_in`` in the Storage Leaf or Deck they chose, or Unsorted (made when
   missing), read from the Trade's own lines only, so it works after the other account is gone; arriving in a Deck they
   raise its lines as an Add does. The confirmer's revision moves exactly once. The second confirmation closes the Trade
-  as swapped and tells the side that confirmed first. Nothing is undoable, and cash changes nothing (the app never
-  handles money). The copies they get fill their Decks' needs for each exact Edition first, read before anything is
-  written (``want_list.edition_needs``), and only the rest lower their Trade Wants line for it
-  (``trade_wants.lower_trade_wants``, Trading #275). Trading #279 adds the Deck switches.
+  as swapped and tells the side that confirmed first. The swap itself is not undoable, and cash changes nothing (the
+  app never handles money). The copies they get fill their Decks' needs for each exact Edition first, read before
+  anything is written (``want_list.edition_needs``), and only the rest lower their Trade Wants line for it
+  (``trade_wants.lower_trade_wants``, Trading #275). The Deck switches the collector left ticked (Trading #279) apply
+  in the same transaction as Deck List changes, and the answer (``ConfirmedSwap``) names each switched Deck's new
+  revision and the Deck List changes batch that undoes its switch, stored with the replay.
 
 **Locks**: the stepping collector's own owner row only (``owners.lock_owners``), except that a Counter locks both
 sides (the sender, whose copies it releases, and the counterer, whose copies it reserves) in ascending order. So a
@@ -63,6 +65,7 @@ row and runs the same checks in its own flow (``counter_trade``); both lock the 
 once.
 """
 import re
+from collections.abc import Iterable, Mapping
 from typing import Literal
 from uuid import UUID, uuid4
 
@@ -71,10 +74,12 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from .deck_deletion import unsorted_leaf
+from .decks import advance_deck_list, write_deck_list
 from .loan_inventory import refuse
 from .location_tree import error
 from .main import connect, verified_user
-from .moves import add_in, leaf, quantity, take_out
+from .moves import add_in, is_deck, leaf, quantity, take_out
+from .social.friend_reads import card_facts
 from .social.friend_copies import friend_trade_copies
 from .social.friends import friend_ids
 from .social.loans import NOW, advance_revision
@@ -85,7 +90,7 @@ from .trade_list import own_trade_copies
 from .trade_picks import (insert_trade_picks, make_trade_picks, replacement_trade_picks, stale_pick_trades,
                           trade_pick_shortfalls)
 from .trade_wants import lower_trade_wants
-from .want_list import edition_needs
+from .want_list import DeckSwitch, deck_switch_candidates, edition_needs
 
 router = APIRouter(prefix='/api/trades', tags=['trades'])
 
@@ -93,6 +98,8 @@ router = APIRouter(prefix='/api/trades', tags=['trades'])
 MAX_TRADE_LINES = 50
 # Copies one Trade line may name.
 MAX_TRADE_COPIES = 9999
+# Deck switches one Confirm swap may choose (Trading #279).
+MAX_DECK_SWITCHES = 50
 
 
 class TradeLineRequest(BaseModel):
@@ -113,10 +120,19 @@ class SendTradeProposal(BaseModel):
     idempotency_key: UUID
 
 
+class DeckSwitchRequest(BaseModel):
+    deck_id: UUID
+    from_edition_id: UUID
+    to_edition_id: UUID
+    count: str              # "1".."9999"
+
+
 class ConfirmSwap(TradeStep):
     """Confirm swap. ``destination_id``: one of the confirmer's own Storage Leaves or Decks for the cards they get, or
-    None for Unsorted; ignored when they get none. Trading #279 adds the Deck switches the collector left ticked."""
+    None for Unsorted; ignored when they get none. ``deck_switches``: the switches the collector left ticked, each as
+    the side read offered it, with at most its count."""
     destination_id: UUID | None = None
+    deck_switches: list[DeckSwitchRequest] = []
 
 
 class CounterTrade(TradeStep):
@@ -138,14 +154,55 @@ class TradePickPlace(BaseModel):
     short: str
 
 
+class SwitchCard(BaseModel):
+    edition_id: UUID
+    name: str
+    set_code: str
+    set_name: str
+    collector_number: str
+    descriptor: dict
+    image_url: str | None
+
+
+class DeckSwitchOffer(BaseModel):
+    deck_id: UUID
+    deck_name: str
+    from_edition_id: UUID
+    to_edition_id: UUID
+    count: str
+    from_card: SwitchCard
+    to_card: SwitchCard
+
+
 class OwnTradeSide(BaseModel):
     """The reader's own side of a Trade. ``picks``: their Trade Pick List while their copies are promised (empty when
     they give nothing, once they confirmed the swap, and once the Trade closed). ``suggested``: the Pick List **Use
-    suggested picks** makes, when a pick is out of date, else empty. Trading #279 adds the Deck switches Confirm swap
-    offers."""
+    suggested picks** makes, when a pick is out of date, else empty. ``deck_switches``: the Deck switches Confirm swap
+    offers for the cards they get (Trading #279); non-empty only while the Trade is accepted, they haven't confirmed
+    the swap and they get cards."""
     trade_id: UUID
     picks: list[TradePickPlace]
     suggested: list[TradePickPlace]
+    deck_switches: list[DeckSwitchOffer]
+
+
+class SwitchedLine(BaseModel):
+    edition_id: UUID
+    quantity: str
+
+
+class SwitchedDeck(BaseModel):
+    """A Deck one Confirm swap switched: the Deck List revision the switch produced, and the totals the Deck List
+    changes batch sets to undo it (``STALE_DECK_LIST`` once the list moves)."""
+    deck_id: UUID
+    revision: int
+    undo: list[SwitchedLine]
+
+
+class ConfirmedSwap(TradeView):
+    """The confirmer's own answer to Confirm swap: the Trade as they read it, plus the Decks their chosen switches
+    changed. Only ever answered to the confirmer under ``/api/trades``; ``TradeView`` itself never names a Deck."""
+    switched_decks: list[SwitchedDeck] = []
 
 
 def trade_quantity(raw: str) -> int:
@@ -366,14 +423,17 @@ def counter_trade(trade_id: UUID, command: CounterTrade, user_id: str = Depends(
 
 
 @router.get('/{trade_id}/side', response_model=OwnTradeSide)
-def trade_side(trade_id: UUID, user_id: str = Depends(verified_user)):
+def trade_side(trade_id: UUID, destination_id: UUID | None = None, user_id: str = Depends(verified_user)):
     """The reader's own Trade Pick List with their own Location names, which picks are out of date and what Use
     suggested picks would make. One snapshot, no lock, no write. 404 TRADE_NOT_FOUND for anyone who isn't one of the
-    Trade's two sides, as for a Trade that doesn't exist."""
+    Trade's two sides, as for a Trade that doesn't exist. ``deck_switches`` (Trading #279) are what Confirm swap would
+    offer now, only while the Trade is accepted, the reader hasn't confirmed and they get cards; ``destination_id``: the
+    Deck the cards would arrive in, offering that Deck only (anything else reads as no Deck destination)."""
     with connect() as conn, conn.transaction():
         conn.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY')
         row = conn.execute(
-            'SELECT id, proposer_id FROM trade WHERE id = %s AND (proposer_id = %s OR recipient_id = %s)',
+            'SELECT id, proposer_id, state, proposer_swap_at, recipient_swap_at FROM trade '
+            'WHERE id = %s AND (proposer_id = %s OR recipient_id = %s)',
             (trade_id, user_id, user_id)).fetchone()
         if row is None:
             error(404, 'TRADE_NOT_FOUND')
@@ -390,6 +450,16 @@ def trade_side(trade_id: UUID, user_id: str = Depends(verified_user)):
         replaced = replacement_trade_picks(conn, user_id, trade_id) if any(shortfall.values()) else None
         names = {location['id']: location['name'] for location in conn.execute(
             'SELECT id, name FROM location WHERE owner_id = %s', (user_id,))}
+        other = other_side(side)
+        received = [(line['edition_id'], int(line['quantity'])) for line in conn.execute(
+            'SELECT edition_id, quantity FROM trade_line WHERE trade_id = %s AND side = %s ORDER BY position',
+            (trade_id, other))]
+        offers: list[DeckSwitch] = []
+        if row['state'] == 'accepted' and row[f'{side}_swap_at'] is None and received:
+            deck = destination_id if destination_id is not None and is_deck(conn, user_id, destination_id) else None
+            offers = deck_switch_candidates(conn, user_id, received, deck_destination=deck)
+        facts = card_facts(conn, [edition for offer in offers
+                                  for edition in (offer.from_edition_id, offer.to_edition_id)])
 
     def places(found: dict, missing: dict) -> list[TradePickPlace]:
         ordered = sorted(found.items(), key=lambda item: (position.get(item[0][0], len(position)), -item[1],
@@ -399,8 +469,19 @@ def trade_side(trade_id: UUID, user_id: str = Depends(verified_user)):
                                copies=str(copies), short=str(missing.get((edition, location), 0)))
                 for (edition, location), copies in ordered]
 
+    def card(edition: UUID) -> SwitchCard:
+        found = facts[edition]
+        return SwitchCard(edition_id=edition, name=found.name, set_code=found.set_code, set_name=found.set_name,
+                          collector_number=found.collector_number, descriptor=found.descriptor,
+                          image_url=found.image_url)
+
     return OwnTradeSide(trade_id=trade_id, picks=places(mine, shortfall),
-                        suggested=places(replaced, {}) if replaced else [])
+                        suggested=places(replaced, {}) if replaced else [],
+                        deck_switches=[DeckSwitchOffer(deck_id=offer.deck_id, deck_name=names[offer.deck_id],
+                                                       from_edition_id=offer.from_edition_id,
+                                                       to_edition_id=offer.to_edition_id, count=str(offer.count),
+                                                       from_card=card(offer.from_edition_id),
+                                                       to_card=card(offer.to_edition_id)) for offer in offers])
 
 
 @router.post('/{trade_id}/picks/use-suggested', response_model=TradeView)
@@ -435,16 +516,99 @@ def _destination(conn, user_id: str, destination_id: UUID | None) -> UUID:
     return unsorted_leaf(conn, user_id, rows, None)
 
 
-@router.post('/{trade_id}/confirm-swap', response_model=TradeView)
+def requested_switches(command: ConfirmSwap) -> list[tuple[UUID, UUID, UUID, int]]:
+    """The Deck switches a Confirm swap asks for, as ``(deck, from, to, copies)`` in request order. The shape checks, in
+    order, before any read: 422 INVALID_QUANTITY, 422 DUPLICATE_EDITION (one Deck, from and to twice), 422
+    TOO_MANY_LINES (Trading #279)."""
+    items = [(item.deck_id, item.from_edition_id, item.to_edition_id, trade_quantity(item.count))
+             for item in command.deck_switches]
+    if len({item[:3] for item in items}) != len(items):
+        error(422, 'DUPLICATE_EDITION')
+    if len(items) > MAX_DECK_SWITCHES:
+        error(422, 'TOO_MANY_LINES')
+    return items
+
+
+def _line_totals(conn, user_id: str, switches: Iterable[DeckSwitch]) -> dict[tuple[UUID, UUID], int]:
+    """The Deck List line totals ``(deck, edition)`` the switches name, one plain read; a line that isn't listed is
+    absent (0)."""
+    switches = list(switches)
+    if not switches:
+        return {}
+    wanted = {(s.deck_id, edition) for s in switches for edition in (s.from_edition_id, s.to_edition_id)}
+    return {(row['deck_id'], row['edition_id']): int(row['quantity']) for row in conn.execute(
+        """SELECT deck_id, edition_id, quantity FROM deck_list_line
+        WHERE owner_id = %s AND deck_id = ANY(%s) AND edition_id = ANY(%s)""",
+        (user_id, list({deck for deck, _ in wanted}), list({edition for _, edition in wanted})))
+        if (row['deck_id'], row['edition_id']) in wanted}
+
+
+def _chosen_switches(conn, user_id: str, received, destination: UUID | None, requested) -> list[DeckSwitch]:
+    """The requested Deck switches, each matched against what is offered now by ``(deck, from, to)`` with at most its
+    count, else 409 DECK_SWITCH_CHANGED. Nothing is read when none is requested."""
+    if not requested:
+        return []
+    deck_destination = destination if destination is not None and is_deck(conn, user_id, destination) else None
+    offered = {(s.deck_id, s.from_edition_id, s.to_edition_id): s.count for s in deck_switch_candidates(
+        conn, user_id, received, deck_destination=deck_destination)}
+    for deck, from_edition, to_edition, count in requested:
+        key = (deck, from_edition, to_edition)
+        if key not in offered or count > offered[key]:
+            error(409, 'DECK_SWITCH_CHANGED')
+    return [DeckSwitch(*item) for item in requested]
+
+
+def _switch_decks(conn, user_id: str, chosen: list[DeckSwitch],
+                  before: Mapping[tuple[UUID, UUID], int]) -> list[SwitchedDeck]:
+    """Applies the chosen Deck switches after the received copies arrived (Trading #279), one Deck List write and one
+    revision advance for each Deck they change. The received card's line rises to at least its total before the swap
+    plus the copies switched; copies that arrived in this Deck already raised it, so they are not counted twice. The
+    undo puts each changed line back to its total just before the switch, after the arrival."""
+    current = _line_totals(conn, user_id, chosen)
+    switched: list[SwitchedDeck] = []
+    for deck in dict.fromkeys(item.deck_id for item in chosen):
+        lowered: dict[UUID, int] = {}
+        raised: dict[UUID, int] = {}
+        for item in chosen:
+            if item.deck_id == deck:
+                lowered[item.from_edition_id] = lowered.get(item.from_edition_id, 0) + item.count
+                raised[item.to_edition_id] = raised.get(item.to_edition_id, 0) + item.count
+        targets: dict[UUID, int] = {}
+        for edition in lowered.keys() | raised.keys():
+            now = current.get((deck, edition), 0)
+            if raised.get(edition):
+                now = max(now, before.get((deck, edition), 0) + raised[edition])
+            targets[edition] = now - lowered.get(edition, 0)
+        if any(target < 0 for target in targets.values()):
+            raise RuntimeError('Deck switch below zero')
+        changed = {edition: target for edition, target in targets.items() if target != current.get((deck, edition), 0)}
+        if not changed:
+            continue
+        write_deck_list(conn, user_id, deck, changed)
+        result = advance_deck_list(conn, user_id, deck)
+        switched.append(SwitchedDeck(deck_id=deck, revision=result['deck_list'].revision, undo=[
+            SwitchedLine(edition_id=edition, quantity=str(current.get((deck, edition), 0)))
+            for edition in sorted(changed, key=str)]))
+    return switched
+
+
+@router.post('/{trade_id}/confirm-swap', response_model=ConfirmedSwap)
 def confirm_swap(trade_id: UUID, command: ConfirmSwap, user_id: str = Depends(verified_user)):
     """One side confirms the in-person swap for their own inventory, under their own lock only. After
     ``run_trade_step``'s checks (404 TRADE_NOT_FOUND, 409 TRADE_CHANGED, 409 STEP_NOT_ALLOWED, so a side confirms once),
     and before any write: 409 PICKS_OUT_OF_DATE while a pick of theirs is out of date; for a side that gets cards, 404
-    LOCATION_NOT_FOUND or 409 UNSORTED_UNAVAILABLE for where they go. Then the copies they give leave, the copies they
-    get arrive, their revision moves once, the copies they get beyond their Decks' needs lower their Trade Wants, and
-    their swap time is set; when the other side already confirmed, the Trade closes as swapped and the other side gets
-    a 'swapped' update. Nothing changes on a refusal, and nothing undoes it.
+    LOCATION_NOT_FOUND or 409 UNSORTED_UNAVAILABLE for where they go; then 409 DECK_SWITCH_CHANGED when a Deck switch
+    they chose is not offered now (``want_list.deck_switch_candidates``, with at most the offered copies). Their
+    ``deck_switches`` are shape-checked before the transaction: 422 INVALID_QUANTITY, 422 DUPLICATE_EDITION, 422
+    TOO_MANY_LINES. Then the copies they give leave, the copies they get arrive, their revision moves once, the Deck
+    switches apply as Deck List changes (each switched Deck's Deck List revision advances once for the switch; the
+    answer's ``switched_decks`` names it and the batch that undoes it), the copies they get beyond their Decks' needs lower their
+    Trade Wants, and their swap time is set; when the other side already confirmed, the Trade closes as swapped and the
+    other side gets a 'swapped' update. Nothing changes on a refusal, and nothing undoes the swap.
     """
+    requested = requested_switches(command)
+    switched: list[SwitchedDeck] = []
+
     def apply(conn, row):
         side = role_of(user_id, row)
         other = other_side(side)
@@ -462,6 +626,8 @@ def confirm_swap(trade_id: UUID, command: ConfirmSwap, user_id: str = Depends(ve
         # and only the rest lower their Trade Wants (#275). Plain reads under the lock this step took.
         needs = edition_needs(conn, user_id, [edition for edition, _ in received]) if received else {}
         destination = _destination(conn, user_id, command.destination_id) if received else None
+        chosen = _chosen_switches(conn, user_id, received, destination, requested)
+        before = _line_totals(conn, user_id, chosen)
         new_revision = revision + 1
         if gives:
             items = [(pick['source_location_id'], pick['edition_id'], int(pick['copies'])) for pick in conn.execute(
@@ -474,7 +640,7 @@ def confirm_swap(trade_id: UUID, command: ConfirmSwap, user_id: str = Depends(ve
             conn.execute('DELETE FROM trade_pick WHERE trade_id = %s AND side = %s', (row['id'], side))
         if received:
             add_in(conn, user_id, destination, received, new_revision)
-            # Trading #279 applies the chosen Deck switches here, after the received copies and before Trade Wants.
+            switched.extend(_switch_decks(conn, user_id, chosen, before))     # after the arrival, before Trade Wants
             lower_trade_wants(conn, user_id, received, needs)
         changes = {f'{side}_swap_at': NOW}
         if row[f'{other}_swap_at'] is not None:
@@ -482,5 +648,9 @@ def confirm_swap(trade_id: UUID, command: ConfirmSwap, user_id: str = Depends(ve
             changes.update(close_trade(conn, row, user_id, 'swapped'))
         return changes
 
-    return run_trade_step(user_id, trade_id, command, 'confirm_swap', apply, lambda role, row: [user_id],
-                          {'destination_id': None if command.destination_id is None else str(command.destination_id)})
+    extra = {'destination_id': None if command.destination_id is None else str(command.destination_id)}
+    if requested:
+        extra['deck_switches'] = sorted([str(deck), str(from_edition), str(to_edition), str(count)]
+                                        for deck, from_edition, to_edition, count in requested)
+    return run_trade_step(user_id, trade_id, command, 'confirm_swap', apply, lambda role, row: [user_id], extra,
+                          lambda: {'switched_decks': [item.model_dump(mode='json') for item in switched]})

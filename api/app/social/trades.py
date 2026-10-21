@@ -52,7 +52,7 @@ Open to cash offers setting is changed through ``/api/social/trade-settings`` (`
 answer.
 """
 import json
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal
@@ -359,20 +359,23 @@ def begin_trade_command(conn, user_id: str, key: UUID, payload: dict):
     return digest, stored
 
 
-def store_trade(conn, user_id: str, key: UUID, digest: str, trade_id: UUID) -> dict:
-    """The Trade as the caller now sees it, recorded as the command's response."""
-    stored = trade_view(conn, user_id, trade_id).model_dump(mode='json')
+def store_trade(conn, user_id: str, key: UUID, digest: str, trade_id: UUID,
+                more: Mapping[str, object] | None = None) -> dict:
+    """The Trade as the caller now sees it, recorded as the command's response. ``more``: JSON fields the calling step
+    adds to its own answer, outside the Trade view; stored with it, so a replay answers them too."""
+    stored = {**trade_view(conn, user_id, trade_id).model_dump(mode='json'), **(more or {})}
     conn.execute('INSERT INTO location_command(owner_id,request_key,request_digest,response) VALUES (%s,%s,%s,%s)',
                  (user_id, key, digest, json.dumps(stored)))
     return stored
 
 
 def run_trade_step(user_id: str, trade_id: UUID, step: TradeStep, action: str, apply, locks,
-                   extra: dict | None = None) -> dict:
+                   extra: dict | None = None, answer: Callable[[], Mapping[str, object]] | None = None) -> dict:
     """Runs one step on an existing Trade: ``begin_trade_command``, the owners ``locks(role, row)`` names locked in
     ascending order, then the Trade row, its revision and ``allowed`` checked, then ``apply(conn, row)``, then the Trade
     row written once (``write_trade``), and the caller's view stored and returned. ``extra``: the step's own fields,
-    part of its digest.
+    part of its digest. ``answer``: called after ``apply``, it names JSON fields the step adds to its own answer (stored
+    with it through ``store_trade``'s ``more``).
 
     ``apply`` writes everything but the ``trade`` row and returns the Trade columns the step sets (column name to value,
     empty or None for none; ``NOW`` for the transaction's time). The Trade row is locked ``FOR NO KEY UPDATE``, like
@@ -394,7 +397,7 @@ def run_trade_step(user_id: str, trade_id: UUID, step: TradeStep, action: str, a
             if action not in allowed(user_id, row, side_gives(conn, trade_id, role_of(user_id, row))):
                 error(409, 'STEP_NOT_ALLOWED')
             write_trade(conn, trade_id, apply(conn, row) or {})
-            return store_trade(conn, user_id, step.idempotency_key, digest, trade_id)
+            return store_trade(conn, user_id, step.idempotency_key, digest, trade_id, answer() if answer else None)
     except psycopg.errors.DeadlockDetected:
         error(503, 'INVENTORY_TEMPORARILY_UNAVAILABLE')
 
