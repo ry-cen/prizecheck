@@ -1,6 +1,7 @@
 """Generate the Trades client module (trading #269: the collector's own Trade List; #270: sending a Trade Proposal;
 #271: accepting one; #272: each side's own view, Use suggested picks and Confirm swap; #275: ``/api/trade-wants``, the
-collector's own Trade Wants and Will accept choices; #277: cash on a send, and the value route; #278: Counter; later
+collector's own Trade Wants and Will accept choices; #277: cash on a send, and the value route; #278: Counter; #279: Deck
+switches at Confirm swap; later
 Trading tickets add the rest of ``/api/trades``) from the API
 OpenAPI schema. Shared Trade facts under ``/api/social`` stay in the social client (scripts/generate_social_client.py),
 which this module imports its ``TradeStep`` and ``TradeView`` from."""
@@ -30,14 +31,21 @@ schema = app.openapi()["components"]["schemas"]
 lines = ["// Generated from FastAPI OpenAPI by scripts/generate_trades_client.py. Do not edit.",
          'import type { TradeStep, TradeView } from "./social_generated";']
 for name in ("TradeListPlace", "TradeListLocation", "TradeListCard", "OwnTradeList", "TradeLineRequest",
-             "TradeCashRequest", "SendTradeProposal", "CounterTrade", "TradePickPlace", "OwnTradeSide", "ConfirmSwap",
-             "TradeWantLine", "WillAcceptChoice",
+             "TradeCashRequest", "SendTradeProposal", "CounterTrade", "TradePickPlace", "SwitchCard", "DeckSwitchOffer",
+             "OwnTradeSide", "DeckSwitchRequest", "ConfirmSwap", "SwitchedLine", "SwitchedDeck", "TradeWantLine",
+             "WillAcceptChoice",
              "TradeWants", "SetTradeWant", "SetWillAccept",
              "TradeValueLine", "TradeValueRequest", "SideValue", "TradeValue"):
     definition = schema[name]
     fields = [f"{field}{'' if field in definition.get('required', []) else '?'}: {ts_type(value)}"
               for field, value in definition["properties"].items()]
     lines.append(f"export type {name} = {{ {'; '.join(fields)} }};")
+    if name == "SwitchedDeck":
+        # ConfirmedSwap is TradeView plus the fields only it has (#279).
+        confirmed = schema["ConfirmedSwap"]
+        extra = [f"{field}{'' if field in confirmed.get('required', []) else '?'}: {ts_type(value)}"
+                 for field, value in confirmed["properties"].items() if field not in schema["TradeView"]["properties"]]
+        lines.append(f"export type ConfirmedSwap = TradeView & {{ {'; '.join(extra)} }};")
 lines.append("""
 /** A refused Trades request: the API's code, and its detail. */
 export class TradesError extends Error {
@@ -67,16 +75,17 @@ export const acceptTrade = (id: string, body: TradeStep) =>
 export const counterTrade = (id: string, body: CounterTrade) =>
   request<TradeView>(`/api/trades/${encodeURIComponent(id)}/counter`, 'POST', body);
 // Your own side of a Trade (#272): where your picks take the cards you give from, which are out of date, and the
-// suggested picks.
-export const getTradeSide = (id: string, signal?: AbortSignal) =>
-  request<OwnTradeSide>(`/api/trades/${encodeURIComponent(id)}/side`, 'GET', undefined, signal);
+// suggested picks; and the Deck switches Confirm swap offers for the cards you get in destinationId (#279).
+export const getTradeSide = (id: string, signal?: AbortSignal, destinationId?: string | null) =>
+  request<OwnTradeSide>(`/api/trades/${encodeURIComponent(id)}/side${destinationId ? `?destination_id=${encodeURIComponent(destinationId)}` : ''}`, 'GET', undefined, signal);
 // Replace your out-of-date picks with the suggested ones (#272), idempotent.
 export const useSuggestedTradePicks = (id: string, body: TradeStep) =>
   request<TradeView>(`/api/trades/${encodeURIComponent(id)}/picks/use-suggested`, 'POST', body);
 // Confirm the swap for your own Collection (#272), idempotent: the cards you give leave it, the cards you get arrive in
-// destination_id (null: Unsorted), and the second confirmation closes the Trade.
+// destination_id (null: Unsorted), the Deck switches you left ticked apply (#279), and the second confirmation closes
+// the Trade. Answers the Trade, with each switched Deck's new revision and the batch that undoes its switch.
 export const confirmSwap = (id: string, body: ConfirmSwap) =>
-  request<TradeView>(`/api/trades/${encodeURIComponent(id)}/confirm-swap`, 'POST', body);
+  request<ConfirmedSwap>(`/api/trades/${encodeURIComponent(id)}/confirm-swap`, 'POST', body);
 // Your own Trade Wants and Will accept choices (#275).
 export const getTradeWants = (signal?: AbortSignal) =>
   request<TradeWants>('/api/trade-wants', 'GET', undefined, signal);

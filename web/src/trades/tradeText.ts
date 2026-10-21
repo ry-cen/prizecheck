@@ -4,7 +4,11 @@ import {
   type InboxTradeUpdate,
   type TradeView,
 } from "../social_generated";
-import { TradesError, type TradePickPlace } from "../trades_generated";
+import {
+  TradesError,
+  type DeckSwitchOffer,
+  type TradePickPlace,
+} from "../trades_generated";
 import { variantLabel } from "../ui/variantLabel";
 
 /** A card as the Trade messages name it (prototype "Proposed wording"): "Iono (PAL 185)". A finish other than Normal
@@ -187,6 +191,50 @@ export function swapDoneMessage(
   return `Swapped. ${n} ${n === 1 ? "card is" : "cards are"} in ${destination}.`;
 }
 
+/** The Confirm swap dialog's checkbox text for one Deck switch offer (Trading #279). */
+export function switchOfferText(offer: DeckSwitchOffer): string {
+  return `Use for ${offer.deck_name} instead of ${tradeCardName(offer.from_card)}?`;
+}
+
+/** The line under an offer's checkbox. */
+export function switchHelpText(offer: DeckSwitchOffer): string {
+  return `The Deck's list changes to the card you get: ${tradeCardName(offer.to_card)} ×${offer.count}.`;
+}
+
+function switchedDecks(sent: readonly DeckSwitchOffer[]): number {
+  return new Set(sent.map((offer) => offer.deck_id)).size;
+}
+
+/** The toast sentence after the switches that were sent (no leading space), or "" for none. */
+export function switchDoneText(sent: readonly DeckSwitchOffer[]): string {
+  const [only] = sent;
+  if (!only) return "";
+  if (sent.length === 1)
+    return `${only.deck_name} now uses ${tradeCardName(only.to_card)}.`;
+  const decks = switchedDecks(sent);
+  return decks === 1
+    ? `${only.deck_name} now uses the cards you got.`
+    : `${decks} Decks now use the cards you got.`;
+}
+
+/** The toast text once every switch was undone. */
+export function switchUndoneText(sent: readonly DeckSwitchOffer[]): string {
+  const [only] = sent;
+  if (!only) return "";
+  if (sent.length === 1)
+    return `${only.deck_name} uses ${tradeCardName(only.from_card)} again.`;
+  return switchedDecks(sent) === 1
+    ? `${only.deck_name} uses its cards again.`
+    : "Your Decks use their cards again.";
+}
+
+/** The toast action's label. */
+export function switchUndoLabel(
+  sent: readonly DeckSwitchOffer[]
+): "Undo switch" | "Undo switches" {
+  return sent.length > 1 ? "Undo switches" : "Undo switch";
+}
+
 /**
  * What a Trade waits on the reader for, as the inbox's line says it after the name (prototype inbox drawer, Trading
  * #273): "Answer", "Fix picks" or "Confirm swap"; null when it waits on nobody. A Counter is answered the same way
@@ -367,6 +415,8 @@ export function tradeStepMessage(cause: unknown, trade: TradeView): string {
       return "A pick is out of date. Use the suggested picks first.";
     case "PICKS_UP_TO_DATE":
       return "Your picks are already up to date.";
+    case "DECK_SWITCH_CHANGED":
+      return "Your Decks changed since you opened this, so nothing was swapped. Check the Deck switches and confirm again.";
     case "UNSORTED_UNAVAILABLE":
       return "Your top-level Unsorted can't hold cards. Choose another place for the cards you get, or make Unsorted a Storage Leaf in Collection.";
     case "LOCATION_NOT_FOUND":

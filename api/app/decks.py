@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import json
 import os
+from collections.abc import Mapping
 from uuid import UUID, uuid4
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
@@ -430,6 +431,23 @@ def line_exists(conn, user_id: str, deck_id: UUID, edition_id: UUID) -> bool:
                              (user_id, deck_id, edition_id)).fetchone())
 
 
+def write_deck_list(conn, user_id: str, deck_id: UUID, totals: Mapping[UUID, int]) -> None:
+    """The Deck List changes batch's write part (Trading #279): each Edition's new line total, 0 removing the line. It
+    runs no lock, replay, revision or availability check; the caller holds the owner lock and has done the checks it
+    needs. It touches no Holding, the inventory revision or the inventory Undo records, and advances no revision
+    (``advance_deck_list`` does)."""
+    removed = [edition for edition, quantity in totals.items() if quantity == 0]
+    if removed:
+        conn.execute('DELETE FROM deck_list_line WHERE owner_id=%s AND deck_id=%s AND edition_id=ANY(%s)',
+                     (user_id, deck_id, removed))
+    kept = [(edition, quantity) for edition, quantity in totals.items() if quantity > 0]
+    if kept:
+        conn.execute("""INSERT INTO deck_list_line(owner_id,deck_id,edition_id,quantity)
+          SELECT %s,%s,edition_id,quantity FROM unnest(%s::uuid[],%s::bigint[]) AS change(edition_id,quantity)
+          ON CONFLICT (owner_id,deck_id,edition_id) DO UPDATE SET quantity=EXCLUDED.quantity""",
+                     (user_id, deck_id, [edition for edition, _ in kept], [quantity for _, quantity in kept]))
+
+
 def advance_deck_list(conn, user_id: str, deck_id: UUID) -> dict:
     """Advance the Deck List revision and return the fields every Deck List command response carries: the Deck List,
     its Target Format and that Format's result, which is saved with the Deck. The inventory revision does not move: a
@@ -598,16 +616,7 @@ def change_deck_list(deck_id: UUID, command: ChangeDeckList, user_id: str = Depe
                                      (state['active_generation'], new)).fetchone()['n']
             if available != len(new):
                 error(422, 'EDITION_UNAVAILABLE')
-        removed = [edition for edition, quantity in totals.items() if quantity == 0]
-        if removed:
-            conn.execute('DELETE FROM deck_list_line WHERE owner_id=%s AND deck_id=%s AND edition_id=ANY(%s)',
-                         (user_id, deck_id, removed))
-        kept = [(edition, quantity) for edition, quantity in totals.items() if quantity > 0]
-        if kept:
-            conn.execute("""INSERT INTO deck_list_line(owner_id,deck_id,edition_id,quantity)
-              SELECT %s,%s,edition_id,quantity FROM unnest(%s::uuid[],%s::bigint[]) AS change(edition_id,quantity)
-              ON CONFLICT (owner_id,deck_id,edition_id) DO UPDATE SET quantity=EXCLUDED.quantity""",
-                         (user_id, deck_id, [edition for edition, _ in kept], [quantity for _, quantity in kept]))
+        write_deck_list(conn, user_id, deck_id, totals)
         return store_deck_list_result(conn, user_id, deck_id, command.idempotency_key, digest)
 
 
