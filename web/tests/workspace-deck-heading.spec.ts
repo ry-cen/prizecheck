@@ -298,7 +298,7 @@ test("Mass Entry from the deck builder's Export falls back to complete labelled 
   await region
     .getByRole("button", { name: "Prepare TCGplayer export" })
     .click();
-  await expect(region).toContainText("No TCGplayer link is offered");
+  await expect(region).toContainText("so there's no link");
   await expect(region).toContainText("Less specific: 3 of 3 rows");
   await expect(region).toContainText("Basic deck checks only");
   await expect(region).toContainText("6 cards, not 60");
@@ -331,7 +331,7 @@ test("an all-mapped Deck offers the TCGplayer link only after the explanation, a
   await region
     .getByRole("button", { name: "Prepare TCGplayer export" })
     .click();
-  await expect(region).toContainText("Every card has a verified TCGplayer");
+  await expect(region).toContainText("Ready to open in TCGplayer:");
   await region.getByRole("button", { name: "Open in TCGplayer" }).click();
   const confirmation = page.getByRole("dialog", {
     name: "Before you open TCGplayer",

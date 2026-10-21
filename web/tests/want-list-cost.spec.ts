@@ -285,7 +285,7 @@ test.describe("on a desktop", () => {
       /^(5 Furret\n1 Furret|1 Furret\n5 Furret)$/
     );
     await expect(mass).toContainText(
-      "No TCGplayer link is offered because at least one card has no verified TCGplayer product."
+      "Some cards can't be opened in TCGplayer from here, so there's no link."
     );
     await expect(mass).toContainText(
       "Less specific: 2 of 2 rows give only a card name."
@@ -316,7 +316,7 @@ test.describe("on a desktop", () => {
       exact: true,
     });
     await expect(mass).toContainText(
-      "Every card has a verified TCGplayer product (1 Printings, 2 copies)."
+      "Ready to open in TCGplayer: 1 Printing, 2 copies."
     );
     await expect(
       mass.getByRole("button", { name: "Open in TCGplayer" })
