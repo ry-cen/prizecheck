@@ -24,7 +24,7 @@ import { MOBILE_QUERY } from "./media";
 const INLINE_FIELD =
   "inline-flex items-center gap-2 text-meta font-medium text-text-muted";
 const INLINE_SELECT =
-  "box-border m-0 h-control min-w-0 cursor-pointer appearance-none rounded-control border border-border-strong bg-bg pl-2 pr-7 font-sans text-control text-text phone:h-control-phone";
+  "box-border m-0 h-control min-w-0 cursor-pointer appearance-none rounded-control border border-control-outline bg-bg pl-2 pr-7 font-sans text-control text-text phone:h-control-phone";
 
 /** The visible active-filter count. The control's accessible name carries it too ("Filters, 2 active"),
  * set through aria-label because the badge's box would otherwise add a space ("Filters , 2 active"). */

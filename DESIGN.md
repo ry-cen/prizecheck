@@ -210,8 +210,8 @@ A warm, low-chroma brown-black neutral stack with one gold accent and a muted ro
 - **Raised Felt** (surface-raised): secondary buttons, toasts, menus, tile badges and hover fills.
 - **Selected Umber** (surface-selected): the background of the current view, a pressed toggle and an open menu trigger.
 - **Seam** (border): dividers and the borders of panels that don't identify a control.
-- **Stitch** (border-strong): borders of controls, dialogs and raised containers.
-- **Control Outline** (control-outline): a control's outline on hover; guaranteed at least 3:1 against every surface.
+- **Stitch** (border-strong): borders of buttons, chips, dialogs and raised containers.
+- **Control Outline** (control-outline): the border of inputs and selects, whose outline is the only thing that shows where an empty field is, and a button's or chip's outline on hover; guaranteed at least 3:1 against every surface.
 - **Bone** (text): primary text.
 - **Parchment** (text-muted): secondary text, field labels, idle navigation and quiet buttons.
 - **Faded Parchment** (text-subtle): set and collector-number lines, uppercase section labels, placeholders.
@@ -309,7 +309,7 @@ Compact, flat and plainly labelled, with an optional leading icon.
 
 ### Inputs / Fields
 
-- **Style:** Deck Box Black inside a Stitch border, 7 px corners, 30 px tall (44 px on a phone), Control text, Faded Parchment placeholders. Selects hide the platform arrow and draw their own chevron.
+- **Style:** Deck Box Black inside a Control Outline border (3:1 or better on every surface, as WCAG 1.4.11 asks of a field's boundary), 7 px corners, 30 px tall (44 px on a phone), Control text, Faded Parchment placeholders. Selects hide the platform arrow and draw their own chevron.
 - **Label:** a visible Meta label (500, Parchment) above the control, wrapping it.
 - **Focus:** the global Prize Gold focus ring.
 - **Disabled:** 45% opacity.

@@ -27,7 +27,7 @@ export const FIELD_LABEL =
 
 /** A one-line field. */
 export const FIELD =
-  "box-border m-0 h-control w-full min-w-0 rounded-control border border-border-strong bg-bg px-2 font-sans text-control text-text phone:h-control-phone";
+  "box-border m-0 h-control w-full min-w-0 rounded-control border border-control-outline bg-bg px-2 font-sans text-control text-text phone:h-control-phone";
 
 /** The centred page area under the public header (and inside the shell for a signed-in dead end). */
 export const CENTRED_MAIN =
