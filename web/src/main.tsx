@@ -1,18 +1,26 @@
 import React, { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { getOwnerCatalogStatus, type OwnerCatalogStatus } from "./generated";
-import { DeckBuilderPage } from "./decks/DeckBuilderPage";
-import { DecksPage } from "./decks/DecksPage";
-import { ImportPage } from "./decks/import/ImportPage";
-import { ReplaceListPage } from "./decks/import/ReplaceListPage";
 import { replacedDeckAt, replacePath } from "./decks/import/replaceList";
 import { WANT_LIST_SEGMENT } from "./decks/wantListModel";
-import { CatalogPage } from "./catalog/CatalogPage";
-import { OwnerControlsPage } from "./owner/OwnerControlsPage";
 import { ownerSection, ownerSectionPath } from "./owner/sections";
-import { Workspace } from "./workspace/Workspace";
-import { MissingCardsPage } from "./reports/MissingCardsPage";
 import { SettingsPage } from "./settings/SettingsPage";
+import {
+  CatalogPage,
+  CollectionImportPage,
+  DeckBuilderPage,
+  DecksPage,
+  FriendTradeListPage,
+  ImportPage,
+  LoansPage,
+  MissingCardsPage,
+  OwnerControlsPage,
+  preloadInitialPage,
+  ReplaceListPage,
+  TradesPage,
+  Workspace,
+} from "./shell/lazyPages";
+import { PageFrame } from "./shell/PageFrame";
 import { Shell } from "./shell/Shell";
 import {
   canonicalPath,
@@ -34,17 +42,13 @@ import {
 } from "./public/publicRoutes";
 import { EmailCodeForms, SignInScreen } from "./public/SignIn";
 import { clearFailureFromAddress, failureInAddress } from "./signInMessages";
-import { CollectionImportPage } from "./collectionImport/CollectionImportPage";
 import { COLLECTION_IMPORT_PATH } from "./collectionImport/route";
 import { forgetBorrowDrafts } from "./loans/BorrowDrafts";
 import { OpenProposalProvider } from "./trades/openProposal";
-import { LoansPage } from "./loans/LoansPage";
 import { loanPath } from "./loans/loanText";
 import { FriendCollectionPage } from "./social/FriendCollectionPage";
 import { friendCollectionPath, friendHandleAt } from "./social/friendCards";
-import { FriendTradeListPage } from "./trades/FriendTradeListPage";
 import { friendTradeListHandleAt, tradePath } from "./trades/tradeListModel";
-import { TradesPage } from "./trades/TradesPage";
 import { workspaceHref } from "./workspace/workspaceLink";
 import "./tokens.css";
 import "./tailwind.css";
@@ -233,7 +237,13 @@ function App() {
           current={publicPage.kind === "discover" ? "discover" : undefined}
           onNavigate={go}
         >
-          <PublicPageView page={publicPage} signedIn={false} onNavigate={go} />
+          <PageFrame resetKey={path}>
+            <PublicPageView
+              page={publicPage}
+              signedIn={false}
+              onNavigate={go}
+            />
+          </PageFrame>
         </PublicLayout>
       );
     if (
@@ -275,6 +285,13 @@ function App() {
   const userId = session?.userId ?? "";
   const accountEmail = session?.email ?? null;
   function renderPage(id: PageId, active: boolean) {
+    return (
+      <PageFrame resetKey={active ? path : id}>
+        {pageContent(id, active)}
+      </PageFrame>
+    );
+  }
+  function pageContent(id: PageId, active: boolean) {
     switch (id) {
       case "collection":
         // Collection Import (#226) shows in Collection's place; saving lands on its Storage Leaf in a new Workspace.
@@ -403,7 +420,13 @@ function App() {
                 key: path,
                 label: publicPageLabel(publicPage),
                 content: (
-                  <PublicPageView page={publicPage} signedIn onNavigate={go} />
+                  <PageFrame resetKey={path}>
+                    <PublicPageView
+                      page={publicPage}
+                      signedIn
+                      onNavigate={go}
+                    />
+                  </PageFrame>
                 ),
               }
             : friendHandle !== null
@@ -411,11 +434,13 @@ function App() {
                   key: path,
                   label: "Friend's Collection",
                   content: (
-                    <FriendCollectionPage
-                      key={friendHandle}
-                      handle={friendHandle}
-                      onNavigate={go}
-                    />
+                    <PageFrame resetKey={path}>
+                      <FriendCollectionPage
+                        key={friendHandle}
+                        handle={friendHandle}
+                        onNavigate={go}
+                      />
+                    </PageFrame>
                   ),
                 }
               : friendTradeHandle !== null
@@ -423,11 +448,13 @@ function App() {
                     key: path,
                     label: "Friend's Trade List",
                     content: (
-                      <FriendTradeListPage
-                        key={friendTradeHandle}
-                        handle={friendTradeHandle}
-                        onNavigate={go}
-                      />
+                      <PageFrame resetKey={path}>
+                        <FriendTradeListPage
+                          key={friendTradeHandle}
+                          handle={friendTradeHandle}
+                          onNavigate={go}
+                        />
+                      </PageFrame>
                     ),
                   }
                 : null
@@ -446,5 +473,8 @@ if (canonicalPath(location.pathname) !== location.pathname)
     "",
     `${canonicalPath(location.pathname)}${location.search}${location.hash}`
   );
+
+// Starts the first page's code alongside the session read.
+preloadInitialPage(location.pathname);
 
 createRoot(document.getElementById("root")!).render(<App />);
