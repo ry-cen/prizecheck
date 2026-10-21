@@ -2,28 +2,38 @@
 
 **Map:** [Card scanner decision map](../../map.md)
 
-**Status:** not started. Waiting on the owner's test photos.
+**Status:** not started. Synthetic work can start now; the final check waits on about 30 of the owner's photos.
 
 ## Question
 
 Can a browser, on a phone, recognize English Pokémon cards well enough to meet the owner's accuracy bar, without sending any image off the device? If so, which method is enough: OCR of the collector number, image matching against reference fingerprints, or both combined?
 
-**The bar** (owner, 2026-10-21): across the test set, the right card is among the top 3 candidates for at least 90% of cards, and is the first candidate for at least 70%. The right card means the right Card Printing (the right TCGdex card); finish is not scored, because the tray never guesses it.
+**The bar** (owner, 2026-10-21): across the real set, the right card is among the top 3 candidates for at least 90% of cards, and is the first candidate for at least 70%. The right card means the right Card Printing (the right TCGdex card); finish is not scored, because the tray never guesses it.
 
 ## Where it lives
 
 A separate throwaway repository, not this one. It may use Python, ML tooling and large reference files that do not belong in the app. Only a findings note comes back, saved as `docs/planning/card-scanner/wayfinder/research/recognition-spike-findings.md`. The test photos never leave the owner's machine and are never committed anywhere.
 
-## Test set
+## Test sets
 
-About 100 photos of the owner's own cards, taken with a phone camera in ordinary conditions:
+Two sets (owner, 2026-10-21): synthetic images to build and tune the pipeline, and a small set of real photos that alone decides whether the bar is met.
+
+### Synthetic set, for development
+
+Generated from TCGdex reference images: perspective warps, busy backgrounds, blur, noise, JPEG compression, colour casts, glare overlays and downscaling to phone-camera resolution. Use it to tune card finding, the number-strip crop, OCR settings and frame voting, and to cover every set evenly.
+
+Its scores are never reported against the bar. Image matching against fingerprints built from the same reference images is circular, reference images are often digital renders rather than printed cards, and synthetic glare does not reproduce holo foil or sleeves. Do not bulk-download TCGplayer photos to work around this (see [card image sources](../../../../tcg-collection-tracker/wayfinder/research/card-image-sources.md)).
+
+### Real set, for the bar
+
+About 30 photos of the owner's own cards, taken with a phone camera in ordinary conditions and weighted toward the hard cases:
 
 - current sets and older sets, holo and reverse holo, full art, promos;
 - basic energies and trainer-kit cards, which have no reference artwork in TCGdex;
 - some in penny sleeves and some in top-loaders, some with glare, some at an angle, some on a busy background;
 - a few reprints that share artwork with another Printing.
 
-Each photo is labelled by hand in one CSV next to the photos, with the set code and collector number as printed on the card (for example `SVI 025/198`). The spike maps those labels to TCGdex card IDs.
+The spike's author labels each photo with the set code and collector number as printed on the card (for example `SVI 025/198`), in one CSV next to the photos, and the owner checks the list. The spike maps those labels to TCGdex card IDs. With about 30 photos, report per-group results as counts, not percentages.
 
 The spike gets the English catalog and the reference artwork from the public TCGdex API (`api.tcgdex.net/v2/en`), which is what PrizeCheck's catalog is built from. It does not need PrizeCheck's database.
 
