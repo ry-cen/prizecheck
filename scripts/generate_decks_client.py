@@ -25,9 +25,9 @@ def ts_type(value):
 
 
 schema = app.openapi()["components"]["schemas"]
-names = ("TreeNode", "LocationCommandResult", "CreateDeck", "EditDeck", "DeckIndexEntry", "DeckIndex", "IdentityCheck", "DeckChecks", "LoanLabel", "DeckLoanLine", "DeckDetail", "DeckEditionQuantity", "DeckContents",
+names = ("TreeNode", "LocationCommandResult", "CreateDeck", "EditDeck", "DeckIndexCover", "DeckIndexEntry", "DeckIndex", "IdentityCheck", "DeckChecks", "LoanLabel", "DeckLoanLine", "DeckDetail", "DeckEditionQuantity", "DeckContents",
          "DeckListLine", "DeckList", "AddDeckListLine", "ChangeDeckListLine", "RemoveDeckListLine", "SetTargetFormat",
-         "DeckListCommandResult",
+         "DeckListCommandResult", "SetDeckCover", "DeckCoverResult",
          "ElsewhereLocation", "LineOwnership", "SurplusHolding", "CompetingDeck", "CompetitionWarning",
          "AddDeckListPrinting", "DeckListPrintingResult",
          "PickWarning", "PickSource", "PickRow", "PutAwayHolding", "PickList", "PickItem", "ConfirmPicks",
@@ -79,6 +79,9 @@ export const removeDeckListLine = (deckId: string, editionId: string, body: Remo
 // Changes the Deck List's Target Format (app redesign #178); answers the new Format's result.
 export const setTargetFormat = (deckId: string, body: SetTargetFormat) =>
   request<DeckListCommandResult>(`/api/decks/${encodeURIComponent(deckId)}/deck-list/target-format`, 'PUT', body);
+// Sets or clears the Deck's cover card (#291): checked against the pick the page last read, never the Deck List's revision.
+export const setDeckCover = (deckId: string, body: SetDeckCover) =>
+  request<DeckCoverResult>(`/api/decks/${encodeURIComponent(deckId)}/cover`, 'PUT', body);
 // Sets several Deck List lines in one batch (app redesign #177): each change is a line's new total, 0 removing it.
 export const changeDeckList = (deckId: string, body: ChangeDeckList) =>
   request<DeckListCommandResult>(`/api/decks/${encodeURIComponent(deckId)}/deck-list/changes`, 'POST', body);

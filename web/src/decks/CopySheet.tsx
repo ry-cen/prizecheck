@@ -35,13 +35,20 @@ type Props = {
     /** Feedback with this id or lower came before the sheet opened. */
     since: number;
   };
+  /** Set as cover (#291), offered while editing. */
+  cover?: {
+    isCover: boolean;
+    busy: boolean;
+    message: string;
+    onToggle: () => void;
+  };
 };
 
 /**
  * What a copy is and where it is (#176): the card, its Edition and kind, and how its line's copies split
  * between this Deck, other Locations and not owned, with Gather (#179) while copies are owned elsewhere. Editing
  * (#177) adds −1 / N on Deck List / +1, the last edit's words with its Undo, and Swap this copy for another Edition
- * of the same Card Identity.
+ * of the same Card Identity, and Set as cover (#291) makes the line the Deck's cover on My Decks.
  */
 export function CopySheet({
   line,
@@ -50,6 +57,7 @@ export function CopySheet({
   returnFocus,
   onGather,
   editing,
+  cover,
 }: Props) {
   const copy =
     line && ordinal !== null && line.copies
@@ -157,6 +165,25 @@ export function CopySheet({
             >
               Gather
             </Button>
+          )}
+          {cover && (
+            <div className="flex flex-col gap-1">
+              {cover.isCover && (
+                <p className="m-0 text-meta text-text-muted">
+                  This is the Deck's cover on My Decks.
+                </p>
+              )}
+              <Button
+                className="self-start"
+                aria-disabled={cover.busy || undefined}
+                onClick={cover.onToggle}
+              >
+                {cover.isCover ? "Remove as cover" : "Set as cover"}
+              </Button>
+              <p role="status" className="m-0 text-meta text-text-muted">
+                {cover.message}
+              </p>
+            </div>
           )}
           {editing && (
             <SwapList
