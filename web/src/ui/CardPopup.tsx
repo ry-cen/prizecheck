@@ -9,6 +9,7 @@ import {
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "./Button";
 import { Dialog } from "./Dialog";
+import { useLargeArt } from "./largeArt";
 
 type Props = {
   /** Shown while true. The parent owns this state and sets it false in onClose. */
@@ -184,11 +185,10 @@ export function CardPopup({
   );
 }
 
-/** The card's artwork at full width of its column, or "Artwork unavailable" when there is none or it fails. */
+/** The card's large artwork at full width of its column, or "Artwork unavailable" when there is none or it fails. */
 export function CardArt({ url, name }: { url: string | null; name: string }) {
-  const [failed, setFailed] = useState(false);
-  useEffect(() => setFailed(false), [url]);
-  if (!url || failed)
+  const art = useLargeArt(url);
+  if (!art.src)
     return (
       <div
         role="img"
@@ -200,9 +200,10 @@ export function CardArt({ url, name }: { url: string | null; name: string }) {
     );
   return (
     <img
-      src={url}
+      key={art.src}
+      src={art.src}
       alt={`${name} card art`}
-      onError={() => setFailed(true)}
+      onError={art.onError}
       className="block aspect-(--tile-aspect) w-full rounded-card object-contain"
     />
   );

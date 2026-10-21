@@ -8,6 +8,7 @@ import { EditionPrice } from "../EditionPrice";
 import type { HoldingView } from "../holdings_generated";
 import { metadataReportHref } from "../metadataReportLink";
 import { Dialog } from "../ui/Dialog";
+import { useLargeArt } from "../ui/largeArt";
 import { variantLabel } from "../ui/variantLabel";
 import { CATEGORY_LABELS, TRAINER_TYPE_LABELS, plural } from "./galleryModel";
 import type { Inspected } from "./useSelection";
@@ -246,20 +247,20 @@ function DetailsArt({
   holding: HoldingView;
   narrow: boolean;
 }) {
-  const [failed, setFailed] = useState(false);
-  useEffect(() => setFailed(false), [holding.image_url]);
+  const art = useLargeArt(holding.image_url);
   return (
     <span
       className={`block aspect-(--tile-aspect) overflow-hidden rounded-card bg-[linear-gradient(135deg,var(--color-art-start),var(--color-art-end))] shadow-[0_var(--space-1)_var(--space-3)_var(--color-shadow)] ${narrow ? "mx-auto w-1/2" : "w-full"}`}
       aria-hidden="true"
     >
-      {holding.image_url && !failed ? (
+      {art.src ? (
         <img
-          src={holding.image_url}
+          key={art.src}
+          src={art.src}
           alt=""
           decoding="async"
           draggable={false}
-          onError={() => setFailed(true)}
+          onError={art.onError}
           className="block size-full object-cover"
         />
       ) : (
