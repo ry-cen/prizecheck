@@ -515,26 +515,27 @@ export function Workspace({
                   ` · ${gallery.totals.lent} lent out`}
               </p>
             )}
-            <Button
-              ref={addOpener}
-              className="ml-auto self-center"
-              aria-haspopup="dialog"
-              onClick={() => setAdding({ fixed: current?.id ?? null })}
-            >
-              Add cards
-            </Button>
-            <Button className="self-center" onClick={onImport}>
-              Import…
-            </Button>
-            {/* Mobile Select mode's toggle, on a phone only. */}
-            <span className="hidden self-center phone:flex">
+            {/* The actions wrap as one group, and on a phone they always take their own row, so the totals
+                arriving after each listing loads never move a button under a finger. */}
+            <div className="ml-auto flex items-center gap-4 self-center phone:basis-full phone:justify-end">
               <Button
-                aria-pressed={selection.selectMode}
-                onClick={() => selection.setSelectMode(!selection.selectMode)}
+                ref={addOpener}
+                aria-haspopup="dialog"
+                onClick={() => setAdding({ fixed: current?.id ?? null })}
               >
-                Select
+                Add cards
               </Button>
-            </span>
+              <Button onClick={onImport}>Import…</Button>
+              {/* Mobile Select mode's toggle, on a phone only. */}
+              <span className="hidden phone:flex">
+                <Button
+                  aria-pressed={selection.selectMode}
+                  onClick={() => selection.setSelectMode(!selection.selectMode)}
+                >
+                  Select
+                </Button>
+              </span>
+            </div>
           </div>
           {current?.kind === "deck" && (
             <DeckHeading
