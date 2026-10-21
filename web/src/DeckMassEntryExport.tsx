@@ -12,11 +12,11 @@ import {
 
 const REASONS: Record<NonNullable<MassEntryView["fallback_reason"]>, string> = {
   missing_mapping:
-    "No TCGplayer link is offered because at least one card has no verified TCGplayer product. The complete text below lists every card.",
+    "Some cards can't be opened in TCGplayer from here, so there's no link. Copy or download the text below; it lists every card.",
   encoded_length:
-    "No TCGplayer link is offered because it would be longer than 2,000 characters, which this app treats as too long to open reliably. The complete text below lists every card.",
+    "This list is too long to open as a TCGplayer link. Copy or download the text below; it lists every card.",
   quantity_unsupported:
-    "No TCGplayer link is offered because one product needs more than 999 copies, more than this app puts in a link. The complete text below keeps every quantity.",
+    "A TCGplayer link can carry at most 999 copies of one card. Copy or download the text below; it keeps every quantity.",
 };
 
 /** What the Mass Entry panel renders; the private view and the Published Deck view both carry these fields. */
@@ -102,8 +102,7 @@ export function MassEntryPanel({
       {view?.status === "link" && view.url && (
         <div>
           <p>
-            Every card has a verified TCGplayer product ({view.line_count}{" "}
-            Printings, {view.total_copies} copies).
+            {`Ready to open in TCGplayer: ${view.line_count} ${view.line_count === 1 ? "Printing" : "Printings"}, ${view.total_copies} ${view.total_copies === "1" ? "copy" : "copies"}.`}
           </p>
           <button type="button" onClick={() => setConfirming(true)}>
             Open in TCGplayer

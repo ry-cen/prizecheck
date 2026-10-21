@@ -168,7 +168,7 @@ test("an anonymous visitor opens an all-mapped Published Deck in TCGplayer only 
     .getByRole("button", { name: "Prepare TCGplayer export" })
     .click();
   await expect(region).toContainText(
-    "Every card has a verified TCGplayer product (1 Printings, 5 copies)."
+    "Ready to open in TCGplayer: 1 Printing, 5 copies."
   );
   await region.getByRole("button", { name: "Open in TCGplayer" }).click();
   const dialog = visitor.getByRole("dialog", {
@@ -189,7 +189,7 @@ test("an anonymous visitor opens an all-mapped Published Deck in TCGplayer only 
     .getByRole("button", { name: "Prepare TCGplayer export" })
     .click();
   await expect(region).toContainText(
-    "No TCGplayer link is offered because at least one card has no verified TCGplayer product."
+    "Some cards can't be opened in TCGplayer from here, so there's no link."
   );
   await expect(region).toContainText("Less specific: 1 of 1 rows");
   await expect(region).toContainText("This Deck has 5 cards, not 60");

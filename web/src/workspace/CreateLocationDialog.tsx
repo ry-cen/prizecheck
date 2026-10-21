@@ -34,9 +34,9 @@ const MESSAGES: Record<string, string> = {
   LOCATION_DEPTH_LIMIT: "Locations can be nested at most 12 levels deep.",
   DECK_CANNOT_HAVE_CHILDREN: "A Deck cannot contain Locations.",
   STALE_LOCATION:
-    "This Location changed. The tree has been refreshed; review it and try again.",
+    "This Location just changed. Review the updated Locations and try again.",
   LOCATION_NOT_FOUND:
-    "That parent Location no longer exists. The tree has been refreshed; choose another parent.",
+    "That parent Location no longer exists. Choose another parent.",
 };
 const UNSORTED_COLLISION =
   "The separate Unsorted child needs a unique name. Use another name for the new Location, or move the cards into it.";
