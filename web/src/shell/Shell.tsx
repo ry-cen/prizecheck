@@ -1,4 +1,5 @@
 import React, {
+  useCallback,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -33,6 +34,7 @@ import {
 } from "../inbox/Inbox";
 import { AccountSheetProvider, Avatar } from "./AccountSheet";
 import { PhoneHeaderActions } from "./HeaderActions";
+import { PageStandInContext, type PageStandIn } from "./PageFrame";
 import {
   ACCOUNT_PAGES,
   DESKTOP_TABS,
@@ -154,6 +156,22 @@ function ShellFrame({
   const otherKey = other?.key ?? null;
   // Sign-ins in the account sheet opens Settings at its Sign-ins section (#246): the section's id, until it is shown.
   const [anchor, setAnchor] = useState<string | null>(null);
+  // What Collection's page area shows instead of Collection (PageFrame): its code loading late, or failed to load.
+  const [collectionStandIns, setCollectionStandIns] = useState<
+    ReadonlySet<PageStandIn>
+  >(() => new Set());
+  const reportCollectionStandIn = useCallback(
+    (standIn: PageStandIn, shown: boolean) => {
+      setCollectionStandIns((current) => {
+        if (current.has(standIn) === shown) return current;
+        const next = new Set(current);
+        if (shown) next.add(standIn);
+        else next.delete(standIn);
+        return next;
+      });
+    },
+    []
+  );
 
   // The shell restores scroll positions itself; the browser's own restoration would fight it.
   useEffect(() => {
@@ -313,10 +331,12 @@ function ShellFrame({
         </header>
 
         {/* Phone header for pages that don't draw their own (Collection draws its own: ☰, title, Search,
-          Filters & display and the same header actions): the wordmark, then the header actions (the account avatar,
+          Filters & display and the same header actions, except while its page area shows a stand-in, its code loading
+          past the placeholder delay or failed to load; then the shell draws this one so the wordmark, bell and account
+          stay in reach): the wordmark, then the header actions (the account avatar,
           #246, and the bell, #259). The page's own heading sits right under it and the tab bar marks the section, so a title here would
           only repeat them. */}
-        {showing !== "collection" && (
+        {(showing !== "collection" || collectionStandIns.size > 0) && (
           <header className="box-border hidden h-header items-center gap-3 border-b border-border px-3 phone:flex">
             <Wordmark />
             <div className="ml-auto">
@@ -336,7 +356,11 @@ function ShellFrame({
               else containers.current.delete(def.id);
             }}
           >
-            {renderPage(def.id, def.id === showing)}
+            <PageStandInContext.Provider
+              value={def.id === "collection" ? reportCollectionStandIn : null}
+            >
+              {renderPage(def.id, def.id === showing)}
+            </PageStandInContext.Provider>
           </div>
         ))}
         {other && (
