@@ -104,10 +104,11 @@ def test_each_side_reads_only_its_own_picks_with_its_own_location_names_and_a_st
     trade = proposed(misty, ash, give=[(iono, 2)], get=[(arven, 1)])
     # While the proposal waits only Misty's copies are promised; Ash's side has no picks yet.
     mine = ok(side(misty, trade))
-    assert set(mine) == {'trade_id', 'picks', 'suggested'} and mine['trade_id'] == trade['id']
+    assert set(mine) == {'trade_id', 'picks', 'suggested', 'deck_switches'} and mine['trade_id'] == trade['id']
     assert [(pick['edition_id'], pick['location_id'], pick['name'], pick['copies'], pick['short'])
             for pick in mine['picks']] == [(iono, binder, 'Trade Binder', '2', '0')]
-    assert mine['suggested'] == [] and ok(side(ash, trade)) == {'trade_id': trade['id'], 'picks': [], 'suggested': []}
+    assert mine['suggested'] == [] and ok(side(ash, trade)) == {'trade_id': trade['id'], 'picks': [], 'suggested': [],
+                                                 'deck_switches': []}
     ok(accept_trade(ash, trade))
     assert picks(ash, trade) == [('Box', '1', '0')] and picks(misty, trade) == [('Trade Binder', '2', '0')]
     # Neither side's read names the other's Locations.

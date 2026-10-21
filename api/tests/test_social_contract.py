@@ -16,6 +16,7 @@ never which Deck. It must stay a string count. Anything else that needs one of t
 the privacy rule and needs the owner's say, not an entry here.
 """
 import ast
+import json
 import re
 from pathlib import Path
 
@@ -508,3 +509,20 @@ def test_the_call_guards_match_string_constants_and_never_docstrings():
                    for text in string_constants(described))
     # A name without the call form is not a call.
     assert not any(RESERVING_PICKS_CALL.search(text) for text in string_constants("NOTE = 'reserving_picks'\n"))
+
+
+def test_deck_switches_stay_in_the_confirmers_own_trade_reads():
+    """Trading #279: the Deck switches Confirm swap offers and applies are the confirmer's own, under ``/api/trades``: the
+    side read offers them, the Confirm swap answer (``ConfirmedSwap``) names the Decks they changed, and no
+    ``/api/social`` route or ``TradeView`` carries either."""
+    spec = app.openapi()
+    schemas, paths = spec['components']['schemas'], spec['paths']
+    assert 'deck_switches' in schemas['OwnTradeSide']['properties']
+    answered = paths['/api/trades/{trade_id}/confirm-swap']['post']['responses']['200']['content']['application/json']
+    assert answered['schema']['$ref'].endswith('/ConfirmedSwap')
+    assert not {'deck_switches', 'switched_decks'} & set(schemas['TradeView']['properties'])
+    for route, methods in paths.items():
+        if route.startswith('/api/social'):
+            for operation in methods.values():
+                refs = re.findall(r'"\$ref": "[^"]*/(\w+)"', json.dumps(operation['responses']))
+                assert not {'ConfirmedSwap', 'DeckSwitchOffer', 'SwitchedDeck'} & set(refs), route

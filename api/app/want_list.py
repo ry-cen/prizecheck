@@ -31,21 +31,31 @@ pin reads them. None of the three pins the cost and the Mass Entry export are pa
 ``edition_needs`` (Trading #275) is the combined need of some Card Editions over every Deck, hidden ones included, as
 the combined total counts it, for Confirm swap: received copies fill the Decks' needs first and only the rest lowers
 the collector's Trade Wants. It runs under the shared owner lock the Trade step took and takes no ``FOR UPDATE`` lock.
+
+``deck_switch_candidates`` (Trading #279) is what Confirm swap and the side read offer to switch: for each Deck line of
+a wanted Edition that one of the received Editions satisfies through the collector's Will accept rule, the copies of the
+received Edition that no Deck's exact need and no Trade Wants line claims. It reads every ``trade_accept`` row with
+plain SQL (``trade_wants`` imports this module, so it can't be imported here), runs one ``allocate`` and takes no lock.
+One pool of switchable copies per received Edition is drawn down across all Decks, oldest first, under both counting
+settings; received copies of a wanted Edition fill its own lines first; a target that can't start a new line is offered
+only to a Deck that lists it; and with a Deck destination only that Deck is offered.
 """
 import hashlib
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
+from .card_accepts import accepts
 from .copy_allocation import Allocation, LineCount, allocate, deck_order
 from .deck_list_display import read_line_display
 from .location_tree import error, owner_and_rows
 from .main import connect, verified_user
 from .settings import WantListCounting, read_settings
-from .swap_hints import GroupEdition, SwapCapture, SwapHint, capture_swaps, has_rules, hints, swap_hint
+from .swap_hints import FACTS, GroupEdition, SwapCapture, SwapHint, capture_swaps, has_rules, hints, swap_hint
 
 router = APIRouter(prefix='/api/want-list', tags=['want-list'])
 
@@ -228,6 +238,77 @@ def edition_needs(conn, user_id: str, edition_ids) -> dict[UUID, int]:
             lines.setdefault(edition, []).append(line.need)
     pick = sum if counting == 'all_at_once' else max
     return {edition: pick(needs) for edition, needs in lines.items()}
+
+
+# Every Will accept choice of the owner for an Edition some Deck lists (the others offer nothing), and the owner's
+# Trade Wants copies of some Editions (Trading #279). Plain SQL: ``trade_wants`` imports this module.
+ALL_RULES = '''SELECT t.edition_id, t.rule FROM trade_accept t WHERE t.owner_id = %s AND EXISTS (
+  SELECT 1 FROM deck_list_line l WHERE l.owner_id = t.owner_id AND l.edition_id = t.edition_id)'''
+TRADE_WANT_COPIES = 'SELECT edition_id, quantity FROM trade_want WHERE owner_id = %s AND edition_id = ANY(%s)'
+
+
+@dataclass(frozen=True)
+class DeckSwitch:
+    """One Deck line switch Confirm swap may offer: the Deck's line of ``from_edition_id`` lowered by ``count`` and its
+    line of ``to_edition_id`` raised by as many."""
+    deck_id: UUID
+    from_edition_id: UUID
+    to_edition_id: UUID
+    count: int
+
+
+def deck_switch_candidates(conn, user_id: str, received: Sequence[tuple[UUID, int]], *,
+                           deck_destination: UUID | None = None) -> list[DeckSwitch]:
+    """The Deck switches Confirm swap offers for the cards ``received`` (Trading #279), oldest Deck first, then the
+    received Editions in trade-line order, then the wanted Editions by id. A Deck line of a wanted Edition F is offered
+    a received Edition when the collector's Will accept rule for F accepts it and it isn't F. Only copies no Deck's
+    exact need and no Trade Wants line claims are switchable, one pool per received Edition across all Decks under both
+    counting settings; received copies of F fill F's own lines first. A target that can't start a new line (inactive or
+    tombstoned) is offered only to a Deck that lists it. With ``deck_destination`` only that Deck is offered. Plain
+    reads only, under the shared owner lock the caller holds."""
+    copies: dict[UUID, int] = {}
+    for edition, n in received:
+        copies[edition] = copies.get(edition, 0) + n
+    rules = {row['edition_id']: row['rule'] for row in conn.execute(ALL_RULES, (user_id,))} if copies else {}
+    wants = {want: (found & copies.keys()) - {want} for want, found in accepts(conn, rules).items()} if rules else {}
+    wants = {want: takes for want, takes in wants.items() if takes}        # F -> received Editions F's rule takes
+    if not wants:
+        return []
+    counting = read_settings(conn, user_id).want_list_counting
+    allocation = allocate(conn, user_id, set(copies) | set(wants), counting)
+    needs: dict[UUID, list[int]] = {}
+    for (_, edition), line in allocation.lines.items():
+        if edition in copies and line.need > 0:
+            needs.setdefault(edition, []).append(line.need)
+    exact = {e: (sum(n) if counting == 'all_at_once' else max(n)) for e, n in needs.items()}   # == edition_needs
+    wanted_copies = {row['edition_id']: int(row['quantity'])
+                     for row in conn.execute(TRADE_WANT_COPIES, (user_id, list(copies)))}
+    pool = {e: max(0, n - exact.get(e, 0) - wanted_copies.get(e, 0)) for e, n in copies.items()}
+    rem = {(deck, want): line.need for (deck, want), line in allocation.lines.items()
+           if want in wants and line.need > 0}
+    for want in sorted(wants.keys() & copies.keys(), key=str):           # received copies of F fill F's own lines first
+        left = copies[want]
+        for deck in allocation.order:
+            if (deck, want) in rem:
+                took = min(rem[(deck, want)], left)
+                rem[(deck, want)] -= took
+                if counting == 'all_at_once':
+                    left -= took                                  # one at a time: every Deck counts the same copies
+    starts = {row['edition_id'] for row in conn.execute(FACTS, (list(copies),)) if row['available']}
+    found = []
+    for deck in allocation.order:
+        if deck_destination is not None and deck != deck_destination:
+            continue
+        for to in copies:                                         # trade line order (dicts keep insertion order)
+            if pool[to] == 0 or ((deck, to) not in allocation.lines and to not in starts):
+                continue
+            for want in sorted((w for w, takes in wants.items() if to in takes), key=str):
+                n = min(rem.get((deck, want), 0), pool[to])
+                if n:
+                    found.append(DeckSwitch(deck, want, to, n))
+                    pool[to] -= n
+                    rem[(deck, want)] -= n
+    return found
 
 
 NUMBER_PARTS = re.compile(r'^([a-z]*)(\d*)(.*)$', re.DOTALL)

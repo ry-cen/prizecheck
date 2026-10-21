@@ -9,8 +9,14 @@ export type TradeCashRequest = { cents: string; payer: "you" | "them" };
 export type SendTradeProposal = { recipient_id: string; you_give?: TradeLineRequest[]; you_get?: TradeLineRequest[]; cash?: TradeCashRequest | null; idempotency_key: string };
 export type CounterTrade = { revision: number; idempotency_key: string; you_give?: TradeLineRequest[]; you_get?: TradeLineRequest[]; cash?: TradeCashRequest | null };
 export type TradePickPlace = { edition_id: string; location_id: string | null; name: string; copies: string; short: string };
-export type OwnTradeSide = { trade_id: string; picks: TradePickPlace[]; suggested: TradePickPlace[] };
-export type ConfirmSwap = { revision: number; idempotency_key: string; destination_id?: string | null };
+export type SwitchCard = { edition_id: string; name: string; set_code: string; set_name: string; collector_number: string; descriptor: Record<string, unknown>; image_url: string | null };
+export type DeckSwitchOffer = { deck_id: string; deck_name: string; from_edition_id: string; to_edition_id: string; count: string; from_card: SwitchCard; to_card: SwitchCard };
+export type OwnTradeSide = { trade_id: string; picks: TradePickPlace[]; suggested: TradePickPlace[]; deck_switches: DeckSwitchOffer[] };
+export type DeckSwitchRequest = { deck_id: string; from_edition_id: string; to_edition_id: string; count: string };
+export type ConfirmSwap = { revision: number; idempotency_key: string; destination_id?: string | null; deck_switches?: DeckSwitchRequest[] };
+export type SwitchedLine = { edition_id: string; quantity: string };
+export type SwitchedDeck = { deck_id: string; revision: number; undo: SwitchedLine[] };
+export type ConfirmedSwap = TradeView & { switched_decks?: SwitchedDeck[] };
 export type TradeWantLine = { edition_id: string; name: string; set_id: string; set_name: string; collector_number: string; descriptor: Record<string, unknown>; image_url: string | null; quantity: string };
 export type WillAcceptChoice = { edition_id: string; rule: "edition" | "printing" | "identity" };
 export type TradeWants = { lines: TradeWantLine[]; will_accept: WillAcceptChoice[] };
@@ -49,16 +55,17 @@ export const acceptTrade = (id: string, body: TradeStep) =>
 export const counterTrade = (id: string, body: CounterTrade) =>
   request<TradeView>(`/api/trades/${encodeURIComponent(id)}/counter`, 'POST', body);
 // Your own side of a Trade (#272): where your picks take the cards you give from, which are out of date, and the
-// suggested picks.
-export const getTradeSide = (id: string, signal?: AbortSignal) =>
-  request<OwnTradeSide>(`/api/trades/${encodeURIComponent(id)}/side`, 'GET', undefined, signal);
+// suggested picks; and the Deck switches Confirm swap offers for the cards you get in destinationId (#279).
+export const getTradeSide = (id: string, signal?: AbortSignal, destinationId?: string | null) =>
+  request<OwnTradeSide>(`/api/trades/${encodeURIComponent(id)}/side${destinationId ? `?destination_id=${encodeURIComponent(destinationId)}` : ''}`, 'GET', undefined, signal);
 // Replace your out-of-date picks with the suggested ones (#272), idempotent.
 export const useSuggestedTradePicks = (id: string, body: TradeStep) =>
   request<TradeView>(`/api/trades/${encodeURIComponent(id)}/picks/use-suggested`, 'POST', body);
 // Confirm the swap for your own Collection (#272), idempotent: the cards you give leave it, the cards you get arrive in
-// destination_id (null: Unsorted), and the second confirmation closes the Trade.
+// destination_id (null: Unsorted), the Deck switches you left ticked apply (#279), and the second confirmation closes
+// the Trade. Answers the Trade, with each switched Deck's new revision and the batch that undoes its switch.
 export const confirmSwap = (id: string, body: ConfirmSwap) =>
-  request<TradeView>(`/api/trades/${encodeURIComponent(id)}/confirm-swap`, 'POST', body);
+  request<ConfirmedSwap>(`/api/trades/${encodeURIComponent(id)}/confirm-swap`, 'POST', body);
 // Your own Trade Wants and Will accept choices (#275).
 export const getTradeWants = (signal?: AbortSignal) =>
   request<TradeWants>('/api/trade-wants', 'GET', undefined, signal);
