@@ -13,6 +13,7 @@ import type { BrowserContextOptions, Page } from "@playwright/test";
 import { expect, test } from "./support/collectors";
 import { expectPageChecks } from "./support/page-check";
 import { signInAsOwner } from "./support/sign-in";
+import { bodyOf } from "./support/trades";
 
 const ORIGIN = process.env.TEST_ORIGIN || "http://localhost:5173";
 
@@ -217,14 +218,14 @@ async function story(
   await hold(page, binder, ids["PAL 185"], 3);
   await befriend(page, ash.page);
   // Everything about Trades that reaches either browser, to check it never names the other side's Location.
-  const answers: { body: Promise<string>; secretOf: string[] }[] = [];
+  const answers: { body: Promise<string | null>; secretOf: string[] }[] = [];
   for (const [who, theirs] of [
     [ash.page, [`${secret} Binder`, binder]],
     [page, [`${secret} Shelf`, shelf]],
   ] as const)
     who.on("response", (response) => {
       if (/\/api\/(social\/)?trade/.test(response.url()))
-        answers.push({ body: response.text(), secretOf: [...theirs] });
+        answers.push({ body: bodyOf(response), secretOf: [...theirs] });
     });
 
   const ashId = await accountId(ash.page);
@@ -409,11 +410,14 @@ async function story(
   await expectFriendCopies(ash.page, mistyHandle, "Iono", "3");
 
   // Nothing about these Trades that reached either side names the other side's Location, by name or by id.
-  expect(answers.length).toBeGreaterThan(0);
+  const readBy = new Set<string>();
   for (const { body, secretOf } of answers) {
     const text = await body;
+    if (text === null) continue;
+    readBy.add(secretOf[0]);
     for (const item of secretOf) expect(text).not.toContain(item);
   }
+  expect(readBy.size).toBe(2);
 }
 
 test.describe("desktop", () => {

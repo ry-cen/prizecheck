@@ -21,6 +21,7 @@ import {
 } from "./support/loans";
 import { expectPageChecks } from "./support/page-check";
 import { signInAsOwner } from "./support/sign-in";
+import { bodyOf } from "./support/trades";
 
 /** A top-level Storage Leaf, marked For trade when `forTrade`; returns its id. */
 async function leaf(page: Page, name: string, forTrade: boolean) {
@@ -143,14 +144,14 @@ async function story(
   const deck = await createDeck(page, `${secret} Deck`);
   await befriend(page, ash.page);
   // Everything about Trades that reaches either browser, to check it never names the other side's Locations.
-  const answers: { body: Promise<string>; secretOf: string[] }[] = [];
+  const answers: { body: Promise<string | null>; secretOf: string[] }[] = [];
   for (const [who, theirs] of [
     [ash.page, [`${secret} Shelf`, shelf, `${secret} Deck`, deck]],
     [page, [`${secret} Binder`, ashBinder, `${secret} Box`, ashBox]],
   ] as const)
     who.on("response", (response) => {
       if (/\/api\/(social\/)?trade/.test(response.url()))
-        answers.push({ body: response.text(), secretOf: [...theirs] });
+        answers.push({ body: bodyOf(response), secretOf: [...theirs] });
     });
 
   const ashId = await accountId(ash.page);
@@ -284,11 +285,14 @@ async function story(
   expect(await held(page, shelf)).toEqual({ [iono]: "1" });
 
   // Nothing about these Trades that reached either side names the other side's Locations, by name or by id.
-  expect(answers.length).toBeGreaterThan(0);
+  const readBy = new Set<string>();
   for (const { body, secretOf } of answers) {
     const text = await body;
+    if (text === null) continue;
+    readBy.add(secretOf[0]);
     for (const item of secretOf) expect(text).not.toContain(item);
   }
+  expect(readBy.size).toBe(2);
 }
 
 test.describe("desktop", () => {

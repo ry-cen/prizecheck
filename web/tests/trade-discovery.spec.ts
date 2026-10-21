@@ -16,6 +16,7 @@ import type { BrowserContextOptions, Locator, Page } from "@playwright/test";
 import { expect, test } from "./support/collectors";
 import { expectPageChecks } from "./support/page-check";
 import { signInAsOwner } from "./support/sign-in";
+import { bodyOf } from "./support/trades";
 
 const ORIGIN = process.env.TEST_ORIGIN || "http://localhost:5173";
 
@@ -230,10 +231,10 @@ async function story(
   await befriend(page, ash.page);
   await befriend(page, brock.page);
   // Everything about Trades that reaches Misty's browser, to check it never names a Location or a Deck.
-  const answers: Promise<string>[] = [];
+  const answers: Promise<string | null>[] = [];
   page.on("response", (response) => {
     if (/\/api\/social\/trade/.test(response.url()))
-      answers.push(response.text());
+      answers.push(bodyOf(response));
   });
 
   // A: Find trades, from the Trades tab's switch. Ash's two-way row comes first; Brock's one-way row has no tag.
@@ -439,7 +440,9 @@ async function story(
   await popup.getByRole("button", { name: /^Close/ }).click();
 
   // Nothing about Trades that reached Misty's browser names a Location or a Deck, by name or by id.
-  const bodies = await Promise.all(answers);
+  const bodies = (await Promise.all(answers)).filter(
+    (body): body is string => body !== null
+  );
   expect(bodies.length).toBeGreaterThan(0);
   for (const body of bodies)
     for (const word of [secret, shelf, ashDeck, brockBinder, binder, mistyDeck])
