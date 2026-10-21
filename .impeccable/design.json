@@ -498,7 +498,7 @@
       "refersTo": "input",
       "description": "A labelled one-line control; the label wraps the input.",
       "html": "<label class=\"ds-field\">Location name<input class=\"ds-input\" placeholder=\"Binder 3\"></label>",
-      "css": ".ds-field{display:flex;flex-direction:column;gap:4px;font:500 12px system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;color:var(--color-text-muted,#b9b0a3)}.ds-input{box-sizing:border-box;height:30px;padding:0 8px;border:1px solid var(--color-border-strong,#56493a);border-radius:var(--radius-control,7px);background:var(--color-bg,#121110);color:var(--color-text,#efebe4);font:400 13px system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif}.ds-input::placeholder{color:var(--color-text-subtle,#9e9588)}.ds-input:focus-visible{outline:2px solid var(--color-focus,#e6bd57);outline-offset:2px}"
+      "css": ".ds-field{display:flex;flex-direction:column;gap:4px;font:500 12px system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;color:var(--color-text-muted,#b9b0a3)}.ds-input{box-sizing:border-box;height:30px;padding:0 8px;border:1px solid var(--color-control-outline,#847766);border-radius:var(--radius-control,7px);background:var(--color-bg,#121110);color:var(--color-text,#efebe4);font:400 13px system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif}.ds-input::placeholder{color:var(--color-text-subtle,#9e9588)}.ds-input:focus-visible{outline:2px solid var(--color-focus,#e6bd57);outline-offset:2px}"
     },
     {
       "name": "Filter Chip",

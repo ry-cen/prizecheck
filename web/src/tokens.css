@@ -81,9 +81,7 @@
   /* Targets and controls */
   --target-touch: 44px;
   --target-pointer: 24px;
-  --control-height: 36px;
-  /* The kit's control sizes (app redesign, ADR 0012), read by Tailwind's theme in tailwind.css.
-     They replace --control-height once the workspace moves onto the kit. */
+  /* The kit's control sizes (app redesign, ADR 0012), read by Tailwind's theme in tailwind.css. */
   --size-control: 30px;
   --size-control-phone: 44px;
   --size-chip: 24px;

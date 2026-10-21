@@ -7,7 +7,7 @@
 
 /** The box every control shares, without its horizontal padding. */
 const BOX =
-  "box-border m-0 w-full min-w-0 rounded-control border border-border-strong bg-bg font-sans text-control font-normal text-text placeholder:text-text-subtle disabled:opacity-45";
+  "box-border m-0 w-full min-w-0 rounded-control border border-control-outline bg-bg font-sans text-control font-normal text-text placeholder:text-text-subtle disabled:opacity-45";
 
 /** Everything but the height: inputs, selects and text areas. */
 export const CONTROL_BOX = `${BOX} px-2`;
