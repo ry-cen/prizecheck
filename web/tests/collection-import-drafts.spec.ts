@@ -294,6 +294,28 @@ test.describe("desktop", () => {
 test.describe("phone", () => {
   test.use({ viewport: { width: 375, height: 812 }, hasTouch: true });
 
+  test("on a phone, Import… stays where it is when Collection's totals arrive", async ({
+    page,
+  }) => {
+    // The first listing waits until Import… has been measured, so the header is drawn without its totals first.
+    let release!: () => void;
+    const listing = new Promise<void>((resolve) => (release = resolve));
+    await page.route("**/api/collection/holdings?**", async (route) => {
+      await listing;
+      await route.continue();
+    });
+    await signIn(page);
+    const totals = page.getByText("0 copies · 0 editions", { exact: true });
+    await expect(totals).toHaveCount(0);
+    const importButton = page.getByRole("button", { name: "Import…" });
+    await expect(importButton).toBeVisible();
+    const before = await importButton.boundingBox();
+    release();
+    await expect(totals).toBeVisible();
+    // flake-exempt one-shot-read (invariant): once the totals are drawn, Import… must be where it was before them.
+    expect(await importButton.boundingBox()).toEqual(before);
+  });
+
   test("on a phone, Unfinished import and the replace question fit the screen with 44 px controls", async ({
     page,
   }) => {
