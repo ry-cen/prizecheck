@@ -157,12 +157,20 @@ def network_warnings(tests):
             'loads failed), the failure is not evidence: rerun it.' for test in tests]
 
 
+def git_environment():
+    """The environment without GIT_* variables, so git finds the repository from its working directory. A git hook
+    exports GIT_DIR and GIT_INDEX_FILE; inherited, they point every git command at the hook's repository instead, and in
+    a linked worktree a `git init` there set the shared repository to bare (#281)."""
+    return {key: value for key, value in os.environ.items() if not key.startswith('GIT_')}
+
+
 def changed_files(base, root=ROOT):
     """(merge base, {path}) of the files added or changed since the merge base of HEAD and `base`, as the working tree
     has them: committed, staged, unstaged and untracked. Deleted files are left out."""
-    merge_base = subprocess.check_output(['git', 'merge-base', 'HEAD', base], cwd=root, text=True).strip()
-    changed = subprocess.check_output(['git', 'diff', '--name-only', '--diff-filter=d', '-z', merge_base], cwd=root, text=True)
-    untracked = subprocess.check_output(['git', 'ls-files', '--others', '--exclude-standard', '-z'], cwd=root, text=True)
+    git = lambda *args: subprocess.check_output(['git', *args], cwd=root, env=git_environment(), text=True)
+    merge_base = git('merge-base', 'HEAD', base).strip()
+    changed = git('diff', '--name-only', '--diff-filter=d', '-z', merge_base)
+    untracked = git('ls-files', '--others', '--exclude-standard', '-z')
     return merge_base, {path for path in (changed + untracked).split('\0') if path}
 
 

@@ -194,10 +194,31 @@ class BurnInTest(unittest.TestCase):
         self.assertEqual(verify.listed_tests({'suites': []}), 0)
 
     def test_changed_files_are_the_working_tree_against_the_merge_base(self):
+        self.assert_changed_files_in_a_new_repository()
+
+    def test_git_variables_a_hook_exports_reach_neither_the_test_repository_nor_the_hooks_own(self):
+        # A pre-commit hook in a linked worktree exports GIT_DIR and GIT_INDEX_FILE; the test's `git init` once followed
+        # them and set the shared repository to bare (#281).
+        with tempfile.TemporaryDirectory() as directory:
+            hooked = Path(directory)
+            subprocess.run(['git', 'init', '-q', '-b', 'main'], cwd=hooked, env=verify.git_environment(),
+                           check=True, capture_output=True)
+            exported = {'GIT_DIR': str(hooked / '.git'), 'GIT_INDEX_FILE': str(hooked / '.git' / 'index'),
+                        'GIT_WORK_TREE': str(hooked)}
+            with mock.patch.dict(os.environ, exported):
+                self.assert_changed_files_in_a_new_repository()
+            bare = subprocess.run(['git', 'config', 'core.bare'], cwd=hooked, env=verify.git_environment(),
+                                  capture_output=True, text=True).stdout.strip()
+            self.assertEqual(bare, 'false')
+            commits = subprocess.run(['git', 'rev-list', '--all'], cwd=hooked, env=verify.git_environment(),
+                                     capture_output=True, text=True).stdout
+            self.assertEqual(commits, '')
+
+    def assert_changed_files_in_a_new_repository(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             git = lambda *args: subprocess.run(['git', '-c', 'user.name=t', '-c', 'user.email=t@example.test', *args],
-                                               cwd=root, check=True, capture_output=True)
+                                               cwd=root, env=verify.git_environment(), check=True, capture_output=True)
             git('init', '-q', '-b', 'dev')
             for name in ('kept.ts', 'edited.ts', 'deleted.ts'):
                 (root / name).write_text('base\n')
