@@ -24,7 +24,12 @@ import {
 } from "./support/loans";
 import { expectPageChecks } from "./support/page-check";
 import { signInAsOwner } from "./support/sign-in";
-import { DESKTOP_SIZE, forTradeLeaf, PHONE_SIZE } from "./support/trades";
+import {
+  bodyOf,
+  DESKTOP_SIZE,
+  forTradeLeaf,
+  PHONE_SIZE,
+} from "./support/trades";
 
 /** Gives the signed-in collector this Display Name and a new Handle, and returns the Handle. */
 async function nameCollector(page: Page, name: string): Promise<string> {
@@ -196,10 +201,7 @@ async function story(
     const listener = (response: Response) => {
       if (/\/api\/(social\/)?trade/.test(response.url()))
         answers.push({
-          body: response.text().catch((error: Error) => {
-            if (/navigated away from/.test(error.message)) return null;
-            throw error;
-          }),
+          body: bodyOf(response),
           secretOf: [...theirs],
           against: theirs[0],
           url: response.url(),

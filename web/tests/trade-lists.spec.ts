@@ -12,6 +12,7 @@ import type { BrowserContextOptions, Page } from "@playwright/test";
 import { expect, test } from "./support/collectors";
 import { expectPageChecks } from "./support/page-check";
 import { signInAsOwner } from "./support/sign-in";
+import { bodyOf } from "./support/trades";
 
 const ORIGIN = process.env.TEST_ORIGIN || "http://localhost:5173";
 const HIDDEN_MARK = "Hidden from Friends";
@@ -232,10 +233,10 @@ async function story(
   await signInAsOwner(page, "/collection");
   const ashHandle = await nameCollector(page, "Ash K");
   await befriend(page, misty.page);
-  const pending: Promise<string>[] = [];
+  const pending: Promise<string | null>[] = [];
   page.on("response", (response) => {
     if (response.url().includes("/api/social/trade-lists/"))
-      pending.push(response.text());
+      pending.push(bodyOf(response));
   });
   await page.goto(`${ORIGIN}/friends/${mistyHandle}`);
   await page
@@ -272,7 +273,9 @@ async function story(
     "No cards match that name."
   );
   // What reached Ash's browser names no Location of Misty's, by name or by id.
-  const answers = await Promise.all(pending);
+  const answers = (await Promise.all(pending)).filter(
+    (answer): answer is string => answer !== null
+  );
   expect(answers.length).toBeGreaterThan(0);
   for (const answer of answers) {
     expect(answer).not.toContain(secret);
