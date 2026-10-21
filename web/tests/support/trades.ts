@@ -2,7 +2,7 @@
 // Storage Leaf, a Trade Proposal, and a Trade step at the Trade's current revision. The specs drive in the browser only
 // the steps they cover. The Trade specs of #270 to #273 keep their own copies.
 import { randomUUID } from "node:crypto";
-import type { BrowserContextOptions, Page } from "@playwright/test";
+import type { BrowserContextOptions, Page, Response } from "@playwright/test";
 import { api } from "./loans";
 
 /** The sizes the Trade stories run at: desktop, and 375 px with touch. */
@@ -14,6 +14,15 @@ export const PHONE_SIZE: BrowserContextOptions = {
   isMobile: true,
   hasTouch: true,
 };
+
+/** A response's body, read at once; null only when Chromium no longer holds it, which happens to a read the app
+ * aborted itself (a reload of Deck switch offers, a page that moved on). Any other error still fails the test. */
+export function bodyOf(response: Response): Promise<string | null> {
+  return response.text().catch((error: Error) => {
+    if (/navigated away from/.test(error.message)) return null;
+    throw error;
+  });
+}
 
 /** A top-level Storage Leaf marked For trade; returns its id. */
 export async function forTradeLeaf(page: Page, name: string): Promise<string> {

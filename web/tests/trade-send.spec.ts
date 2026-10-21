@@ -13,6 +13,7 @@ import type { BrowserContextOptions, Locator, Page } from "@playwright/test";
 import { expect, test } from "./support/collectors";
 import { expectPageChecks } from "./support/page-check";
 import { signInAsOwner } from "./support/sign-in";
+import { bodyOf } from "./support/trades";
 
 const ORIGIN = process.env.TEST_ORIGIN || "http://localhost:5173";
 
@@ -196,10 +197,10 @@ async function story(
   await befriend(page, ash.page);
   await befriend(page, brock.page);
   // Everything about Trades that reaches Ash's browser, to check it never names one of Misty's Locations.
-  const answers: Promise<string>[] = [];
+  const answers: Promise<string | null>[] = [];
   ash.page.on("response", (response) => {
     if (/\/api\/(social\/)?trade/.test(response.url()))
-      answers.push(response.text());
+      answers.push(bodyOf(response));
   });
 
   // A: Misty opens the builder from Ash's Trade List (no Add there), adds his Arven from his list and her Iono from hers.
@@ -449,7 +450,9 @@ async function story(
   );
 
   // Nothing about these Trades that reached Ash names one of Misty's Locations, by name or by id.
-  const bodies = await Promise.all(answers);
+  const bodies = (await Promise.all(answers)).filter(
+    (body): body is string => body !== null
+  );
   expect(bodies.length).toBeGreaterThan(0);
   for (const body of bodies) {
     expect(body).not.toContain(secret);
