@@ -34,16 +34,26 @@ class EditDeck(EditLocation):
     """Rename a Deck, move it to another parent, or both. The fields and rules are the Location edit's."""
 
 
+class DeckIndexCover(BaseModel):
+    """The card a Deck's tile is led by (#291): the collector's pick, or else the line with the most copies (ties: a
+    Pokémon, then the first name). Display data only; never priced or evaluated."""
+    edition_id: UUID
+    name: str
+    image_url: str | None     # The small artwork (read_line_display), or None.
+
+
 class DeckIndexEntry(TreeNode):
     """One Deck on the Decks index (app redesign #181): its place in the Location tree plus what its row shows.
 
     ``deck_list_total`` is the copies on its Deck List, ``in_deck`` how many of those this Deck holds (per line, the
     lesser of the line and the Deck's Holding), and ``target_format`` its Deck List's Target Format. The result in that
     Format and the cost to complete come from the Deck's own format-checks and cost reads, which the page asks for row
-    by row, so this read never evaluates a Deck or prices anything while it holds the owner lock."""
+    by row, so this read never evaluates a Deck or prices anything while it holds the owner lock. The cover comes from the Deck's
+    cover pick and Deck List lines plus catalog display data, so the read still never evaluates or prices."""
     deck_list_total: str
     in_deck: str
     target_format: TargetFormat
+    cover: DeckIndexCover | None
 
 
 class DeckIndex(BaseModel):
@@ -123,6 +133,17 @@ class ChangeDeckListLine(BaseModel):
 class RemoveDeckListLine(BaseModel):
     revision: int = Field(ge=1)
     idempotency_key: UUID
+
+
+class SetDeckCover(BaseModel):
+    edition_id: UUID | None           # None clears the pick.
+    expected_edition_id: UUID | None  # The pick the client last read; a different current pick is STALE_DECK_COVER.
+    idempotency_key: UUID
+
+
+class DeckCoverResult(BaseModel):
+    deck_id: UUID
+    cover_edition_id: UUID | None
 
 
 class SetTargetFormat(BaseModel):
@@ -228,6 +249,8 @@ class DeckDetail(BaseModel):
     # Social network #252 and #253: the Deck's copies that Loans take, for its lines' "reserved for Kim" and "lent to
     # Sam" (``read_deck_loans``).
     loans: list[DeckLoanLine]
+    # #291: the collector's picked cover card (always a line on the Deck List), or None while the cover is automatic.
+    cover_edition_id: UUID | None
 
 
 @router.post('', response_model=LocationCommandResult, status_code=201)
@@ -306,10 +329,11 @@ def deck_index(cursor: str | None = None, user_id: str = Depends(verified_user))
 
 
 def index_summaries(conn, user_id: str, deck_ids: list[UUID]) -> dict[UUID, dict]:
-    """Each Deck's Deck List total, the copies of it the Deck holds, and its Target Format, for one index page.
+    """Each Deck's Deck List total, the copies of it the Deck holds, its Target Format and its cover, for one index page.
 
     The page's Deck List lines and Holdings are two range reads paired here, never a join (see
-    ``deck_ownership.read_ownership``)."""
+    ``deck_ownership.read_ownership``). The cover reads only the picks, the lines and the display data of the cards that
+    can lead a tile (``cover_candidates``); it never evaluates or prices a Deck."""
     if not deck_ids:
         return {}
     formats = {row['deck_id']: row['target_format'] for row in conn.execute(
@@ -320,16 +344,40 @@ def index_summaries(conn, user_id: str, deck_ids: list[UUID]) -> dict[UUID, dict
     # A Deck's Borrowed Copies are in it too (#254).
     for key, copies in borrowed_in(conn, user_id, deck_ids).items():
         held[key] = held.get(key, 0) + copies
+    picks = {row['deck_id']: row['edition_id'] for row in conn.execute(
+        'SELECT deck_id,edition_id FROM deck_cover WHERE owner_id=%s AND deck_id=ANY(%s)', (user_id, deck_ids))}
     totals = {deck_id: [0, 0] for deck_id in deck_ids}
+    lines = {deck_id: [] for deck_id in deck_ids}
     for row in conn.execute('SELECT deck_id,edition_id,quantity FROM deck_list_line WHERE owner_id=%s AND deck_id=ANY(%s)',
                             (user_id, deck_ids)):
+        lines[row['deck_id']].append((row['edition_id'], row['quantity']))
         total = totals[row['deck_id']]
         total[0] += row['quantity']
         total[1] += held_for_line(row['quantity'], held.get((row['deck_id'], row['edition_id']), 0))
     # Migration 029 and its location trigger give every Deck a Deck List; a missing one reads as Standard and empty.
+    candidates = {deck_id: cover_candidates(lines[deck_id], picks.get(deck_id)) for deck_id in deck_ids}
+    display = read_line_display(conn, {edition for found in candidates.values() for edition in found})
+    covers = {}
+    for deck_id, found in candidates.items():
+        covers[deck_id] = None
+        if found:
+            best = min(found, key=lambda e: (display[e]['card_kind'] != 'pokemon', display[e]['name'].casefold(), str(e)))
+            covers[deck_id] = DeckIndexCover(edition_id=best, name=display[best]['name'],
+                                             image_url=display[best]['image_url'])
     return {deck_id: {'deck_list_total': str(total), 'in_deck': str(in_deck),
-                      'target_format': formats.get(deck_id, 'standard')}
+                      'target_format': formats.get(deck_id, 'standard'), 'cover': covers[deck_id]}
             for deck_id, (total, in_deck) in totals.items()}
+
+
+def cover_candidates(lines: list[tuple[UUID, int]], picked: UUID | None) -> list[UUID]:
+    """The Editions that can lead a Deck's tile: none for an empty Deck List, the collector's pick when there is one
+    (the database keeps it on the list), else every Edition tied for the most copies."""
+    if not lines:
+        return []
+    if picked is not None:
+        return [picked]
+    most = max(quantity for _, quantity in lines)
+    return [edition for edition, quantity in lines if quantity == most]
 
 
 # Basic checks read one quantity source: the Deck's physical copies (``checks``: its Holdings and its Borrowed Copies,
@@ -409,7 +457,13 @@ def deck_detail(deck_id: UUID, user_id: str = Depends(verified_user)):
                           ownership=ownership.lines, surplus=ownership.surplus, competition=ownership.competition,
                           to_get=str(sum(line.need for line in counted.values())),
                           want_list_counting=settings.want_list_counting, settings_revision=settings.revision,
-                          loans=read_deck_loans(conn, user_id, deck_id, held_in(conn, user_id, deck_id)))
+                          loans=read_deck_loans(conn, user_id, deck_id, held_in(conn, user_id, deck_id)),
+                          cover_edition_id=read_cover(conn, user_id, deck_id))
+
+
+def read_cover(conn, user_id: str, deck_id: UUID) -> UUID | None:
+    row = conn.execute('SELECT edition_id FROM deck_cover WHERE owner_id=%s AND deck_id=%s', (user_id, deck_id)).fetchone()
+    return row['edition_id'] if row else None
 
 
 def read_target_format(conn, user_id: str, deck_id: UUID) -> str:
@@ -570,6 +624,33 @@ def set_target_format(deck_id: UUID, command: SetTargetFormat, user_id: str = De
         conn.execute('UPDATE deck_list SET target_format=%s WHERE owner_id=%s AND deck_id=%s',
                      (command.target_format, user_id, deck_id))
         return store_deck_list_result(conn, user_id, deck_id, command.idempotency_key, digest)
+
+
+@router.put('/{deck_id}/cover', response_model=DeckCoverResult)
+def set_deck_cover(deck_id: UUID, command: SetDeckCover, user_id: str = Depends(verified_user)):
+    """Set or clear the Deck's cover card (#291). Idempotent and checked against the pick the client last read, not the
+    Deck List revision, so Deck List edits and Rename are never made stale by it, and nothing is re-evaluated."""
+    payload = {'action': 'set_deck_cover', 'deck_id': str(deck_id),
+               'edition_id': str(command.edition_id) if command.edition_id else None,
+               'expected_edition_id': str(command.expected_edition_id) if command.expected_edition_id else None}
+    with connect() as conn, conn.transaction():
+        _, rows = owner_and_rows(conn, user_id)
+        digest, previous = replay(conn, user_id, command.idempotency_key, payload)
+        if previous:
+            return previous
+        require_deck(rows, deck_id)
+        if read_cover(conn, user_id, deck_id) != command.expected_edition_id:
+            error(409, 'STALE_DECK_COVER')
+        if command.edition_id is None:
+            conn.execute('DELETE FROM deck_cover WHERE owner_id=%s AND deck_id=%s', (user_id, deck_id))
+        else:
+            if not line_exists(conn, user_id, deck_id, command.edition_id):
+                error(409, 'COVER_NOT_ON_DECK_LIST')
+            conn.execute("""INSERT INTO deck_cover(owner_id,deck_id,edition_id) VALUES (%s,%s,%s)
+              ON CONFLICT (owner_id,deck_id) DO UPDATE SET edition_id=EXCLUDED.edition_id""",
+                         (user_id, deck_id, command.edition_id))
+        return keep_response(conn, user_id, command.idempotency_key, digest,
+                             DeckCoverResult(deck_id=deck_id, cover_edition_id=command.edition_id))
 
 
 def change_quantity(raw: str) -> int:

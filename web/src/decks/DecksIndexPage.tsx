@@ -24,6 +24,7 @@ import {
   type OwnedPublication,
 } from "../publications_generated";
 import { Button } from "../ui/Button";
+import { CopyArt } from "../ui/CopyTile";
 import { Pill } from "../ui/Pill";
 import { TextField } from "../ui/TextField";
 import { getWantList } from "../want_list_generated";
@@ -43,13 +44,13 @@ type Props = {
   onWantList: (id: string) => void;
 };
 
-/** What a row reads on its own: the Target Format result and the cost to complete. */
+/** What a tile reads on its own: the Target Format result and the cost to complete. */
 type Facts = {
   result?: FormatCheck | "unavailable";
   toComplete?: DeckCostFigures | "unavailable";
 };
 
-// The cost route is a price access with an interactive cap of two per caller (docs/price-refresh.md), so rows read
+// The cost route is a price access with an interactive cap of two per caller (docs/price-refresh.md), so tiles read
 // their facts two at a time, top first.
 const AT_ONCE = 2;
 const COST_TIMEOUT_MS = 3_500;
@@ -60,11 +61,12 @@ const LINK =
 
 /**
  * The Decks index, the My Decks view of the Decks page (/decks, DecksPage) on the kit (#181): create a Deck, and every
- * Deck with how many of its Deck List's copies it holds ("41/60 in Deck"), its cost to complete and one Target Format
- * Pill. Each row reads its result and its cost on its own (the Deck's format-checks and cost routes), two rows at a
- * time. Each row also has "Want List: N cards", which opens the Want List scoped to that Deck, or "Nothing to get"; N
- * comes from one Want List read for the whole page (#209), the same allocation as the cost to complete, and a row
- * shows neither until that read answers. Below, **Published Decks** lists every publication, those whose Deck was
+ * Deck as a tile led by its cover card (the collector's pick in the deck builder, or else the line with the most
+ * copies) with how many of its Deck List's copies it holds ("41/60 in Deck"), its cost to complete and one Target
+ * Format Pill. Each tile reads its result and its cost on its own (the Deck's format-checks and cost routes), two
+ * tiles at a time. Each tile also has "Want List: N cards", which opens the Want List scoped to that Deck, or "Nothing
+ * to get"; N comes from one Want List read for the whole page (#209), the same allocation as the cost to complete, and
+ * a tile shows neither until that read answers. Below, **Published Decks** lists every publication, those whose Deck was
  * deleted included, with Make Listed or Unlisted and Revoke. Import a list, beside Create Deck, opens /decks/import
  * (#212). Opening a Deck shows the deck builder at /decks/<id> (#176).
  */
@@ -108,7 +110,7 @@ export function DecksIndexPage({ onOpenDeck, onNavigate, onWantList }: Props) {
           )
         )
       )
-      // Without it the rows still show; only the Want List buttons are missing.
+      // Without it the tiles still show; only the Want List buttons are missing.
       .catch(() => {});
     return () => controller.abort();
   }, []);
@@ -247,9 +249,9 @@ export function DecksIndexPage({ onOpenDeck, onNavigate, onWantList }: Props) {
           </p>
         ) : (
           <nav aria-label="Deck index">
-            <ul className="m-0 flex list-none flex-col p-0">
+            <ul className="m-0 grid list-none grid-cols-[repeat(auto-fill,minmax(12.5rem,1fr))] gap-4 p-0 phone:grid-cols-2">
               {decks.map((deck) => (
-                <DeckRow
+                <DeckTile
                   key={deck.id}
                   deck={deck}
                   facts={facts[deck.id] ?? {}}
@@ -277,7 +279,7 @@ export function DecksIndexPage({ onOpenDeck, onNavigate, onWantList }: Props) {
   );
 }
 
-function DeckRow({
+function DeckTile({
   deck,
   facts,
   need,
@@ -292,11 +294,13 @@ function DeckRow({
   onWantList: () => void;
 }) {
   const format = formatLabel(deck.target_format);
+  const cover = deck.cover ?? null;
   const result = facts.result;
   const status =
     result && result !== "unavailable" ? statusOf(result.status) : null;
   return (
-    <li className="relative flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-border py-3 last:border-b-0">
+    <li className="relative flex min-w-0 flex-col gap-2 rounded-card border border-border bg-surface p-3 hover:border-control-outline phone:p-2">
+      <CopyArt name={cover?.name ?? ""} imageUrl={cover?.image_url ?? null} />
       <a
         href={`/decks/${encodeURIComponent(deck.id)}`}
         onClick={(event) => {
@@ -304,25 +308,29 @@ function DeckRow({
           event.preventDefault();
           onOpen();
         }}
-        // The whole row is the link's tap area; its accessible name stays the Deck's name.
-        className="inline-flex min-h-control min-w-0 items-center text-body font-semibold text-text no-underline wrap-anywhere after:absolute after:inset-0 hover:text-accent-strong phone:min-h-tap"
+        // The whole tile is the link's tap area, the cover included (decorative); its accessible name stays the Deck's name.
+        className="inline-flex min-h-control min-w-0 items-center text-body font-semibold text-text no-underline wrap-anywhere after:absolute after:inset-0 after:rounded-card hover:text-accent-strong phone:min-h-tap"
       >
         {deck.name}
       </a>
-      <span className="text-meta tabular-nums text-text-muted">
-        {deck.deck_list_total === "0"
-          ? "Empty: plan a list"
-          : `${deck.in_deck}/${deck.deck_list_total} in Deck`}
+      <span className="flex flex-wrap gap-x-2 gap-y-0.5 text-meta tabular-nums text-text-muted">
+        <span>
+          {deck.deck_list_total === "0"
+            ? "Empty: plan a list"
+            : `${deck.in_deck}/${deck.deck_list_total} in Deck`}
+        </span>
+        <span>
+          {facts.toComplete === undefined
+            ? "Checking prices…"
+            : figureText(
+                facts.toComplete === "unavailable"
+                  ? undefined
+                  : facts.toComplete,
+                "to complete"
+              )}
+        </span>
       </span>
-      <span className="text-meta tabular-nums text-text-muted">
-        {facts.toComplete === undefined
-          ? "Checking prices…"
-          : figureText(
-              facts.toComplete === "unavailable" ? undefined : facts.toComplete,
-              "to complete"
-            )}
-      </span>
-      <span className="ml-auto">
+      <span className="flex min-w-0">
         <Pill tone={status ? status.tone : "neutral"}>
           {status ? (
             <>
@@ -341,12 +349,15 @@ function DeckRow({
           <span aria-hidden="true">✓ </span>Nothing to get
         </span>
       ) : need !== undefined ? (
-        // Above the row link's full-row tap area.
+        // Above the tile link's full-tile tap area.
         <Button
-          className="relative h-auto min-h-control whitespace-normal text-left phone:min-h-tap"
+          className="relative h-auto min-h-control max-w-full self-start phone:min-h-tap"
           onClick={onWantList}
         >
-          {`Want List: ${cards(need)}${wantListCost(facts.toComplete, need)}`}
+          {/* The kit's button never wraps; a tile is narrow, so its label does (the name stays the same). */}
+          <span className="min-w-0 whitespace-normal text-left leading-tight">
+            {`Want List: ${cards(need)}${wantListCost(facts.toComplete, need)}`}
+          </span>
         </Button>
       ) : null}
     </li>
@@ -354,7 +365,7 @@ function DeckRow({
 }
 
 /**
- * " · $X" for a Deck card's Want List button (#210): the row's own cost to complete, which is the Deck's Want List section
+ * " · $X" for a Deck card's Want List button (#210): the tile's own cost to complete, which is the Deck's Want List section
  * under the same counting (one allocation), so the index reads no other price. Shown only when it counts the same copies
  * as the button and has a price; an unpriced copy reads " + N unpriced", never $0.
  */

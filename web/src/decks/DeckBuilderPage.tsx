@@ -24,6 +24,8 @@ import { CompetitionNotice, SurplusGroup } from "./Surplus";
 import { usePutAway } from "./usePutAway";
 import { CopySheet } from "./CopySheet";
 import { DeckCostLine } from "./DeckCostLine";
+import { useDeckCover } from "./useDeckCover";
+import { useDeckRename } from "./DeckRename";
 import { DeckListBody, type OpenSheet } from "./DeckListViews";
 import { deckListModel, type DeckView } from "./deckListModel";
 import { GatherDialog } from "./GatherDialog";
@@ -78,6 +80,9 @@ const VIEWS = [
  * Header row 2 holds the Target Format control (#178): its menu changes the Deck's Target Format through its Deck List
  * command, and the result opens the results dialog. A card-level issue in that result highlights its lines.
  *
+ * The title has Rename (#291), which swaps it for a field. A copy's sheet has Set as cover (#291): the Deck's cover
+ * on My Decks, which stays automatic until one is picked.
+ *
  * The page header holds Replace list… (#215), Export, Publish and Delete, and row 1 Buy missing after Gather N (#181,
  * useDeckActions). A Replace's Undo runs from a toast outside the builder and announces the change; the builder reads
  * again (deckListChanged).
@@ -109,6 +114,7 @@ export function DeckBuilderPage({ deckId, onAllDecks, onReplaceList }: Props) {
   } | null>(null);
   const resultButton = useRef<HTMLButtonElement | null>(null);
   const reads = useRef(0);
+  const readsInFlight = useRef(0);
   // The newest Deck List revision shown, from a read or an edit's answer (#177): a read that left before an edit
   // landed is behind it and is dropped (the edit queue reads again once it drains).
   const shownRevision = useRef(0);
@@ -125,6 +131,7 @@ export function DeckBuilderPage({ deckId, onAllDecks, onReplaceList }: Props) {
   /** Reads the Deck and shows it, unless a newer read or a newer edit's answer came first; gives what it showed. */
   async function readDeck(): Promise<DeckDetail | null> {
     const ticket = ++reads.current;
+    readsInFlight.current++;
     try {
       const detail = await getDeck(deckId);
       if (ticket !== reads.current) return null;
@@ -149,7 +156,19 @@ export function DeckBuilderPage({ deckId, onAllDecks, onReplaceList }: Props) {
         );
       }
       return null;
+    } finally {
+      readsInFlight.current--;
     }
+  }
+
+  /** Before a cover or rename command: drop Deck reads already on their way (they'd show the old name or cover), and
+   * give back the call that re-reads once the command has landed if one was dropped. */
+  function beginCommand(): () => void {
+    const dropped = readsInFlight.current > 0;
+    reads.current++;
+    return () => {
+      if (dropped) void read();
+    };
   }
 
   /** An edit's answer (#177): its Deck List, Target Format and result show at once; the read that follows once the
@@ -170,6 +189,13 @@ export function DeckBuilderPage({ deckId, onAllDecks, onReplaceList }: Props) {
               target_format: result.target_format,
               format_checks:
                 result.format_checks ?? previous.detail.format_checks,
+              // A cover whose line left the Deck List is cleared with it, as the server does.
+              cover_edition_id: result.deck_list.lines.some(
+                (line) =>
+                  line.edition_id === (previous.detail.cover_edition_id ?? null)
+              )
+                ? (previous.detail.cover_edition_id ?? null)
+                : null,
             },
           }
         : previous
@@ -246,6 +272,36 @@ export function DeckBuilderPage({ deckId, onAllDecks, onReplaceList }: Props) {
     onResult: applyResult,
     onSettled: () => void read(),
     reread: async () => (await readDeck())?.deck_list ?? null,
+    onMissing: () => setLoad({ kind: "missing" }),
+  });
+  const coverId = detail?.cover_edition_id ?? null;
+  const cover = useDeckCover({
+    deckId,
+    coverId,
+    beginCommand,
+    onCover: (id) =>
+      setLoad((previous) =>
+        previous.kind === "ready"
+          ? {
+              kind: "ready",
+              detail: { ...previous.detail, cover_edition_id: id },
+            }
+          : previous
+      ),
+    reread: readDeck,
+    onMissing: () => setLoad({ kind: "missing" }),
+  });
+  const rename = useDeckRename({
+    deckId,
+    deck: detail?.deck ?? null,
+    beginCommand,
+    onRenamed: (deck) =>
+      setLoad((previous) =>
+        previous.kind === "ready"
+          ? { kind: "ready", detail: { ...previous.detail, deck } }
+          : previous
+      ),
+    reread: readDeck,
     onMissing: () => setLoad({ kind: "missing" }),
   });
   /** One Edition, `delta` copies on or off the Deck List, as one edit. */
@@ -338,6 +394,7 @@ export function DeckBuilderPage({ deckId, onAllDecks, onReplaceList }: Props) {
   });
   const open: OpenSheet = (line, ordinal, element) => {
     opener.current = element;
+    cover.reset();
     setSheet({ editionId: line.line.edition_id, ordinal });
   };
   const sheetLine =
@@ -508,7 +565,13 @@ export function DeckBuilderPage({ deckId, onAllDecks, onReplaceList }: Props) {
   return (
     <main className="mx-auto box-border flex max-w-7xl flex-col gap-4 px-7 py-6 phone:px-4 phone:py-4">
       {back}
-      <PageHeader title={detail.deck.name} actions={deckActions.actions} />
+      <PageHeader
+        title={detail.deck.name}
+        actions={deckActions.actions}
+        titleAction={rename.action}
+        titleEditor={rename.editor}
+      />
+      {rename.status}
       {notice && (
         <p role="status" className="m-0 text-body text-warning">
           {notice}
@@ -572,6 +635,16 @@ export function DeckBuilderPage({ deckId, onAllDecks, onReplaceList }: Props) {
                 onSwap: (row) => swap(sheetLine, row),
                 feedback: edits.feedback,
                 since: sheetSince,
+              }
+            : undefined
+        }
+        cover={
+          sheetLine
+            ? {
+                isCover: sheetLine.line.edition_id === coverId,
+                busy: cover.busy,
+                message: cover.messageFor(sheetLine.line.edition_id),
+                onToggle: () => void cover.toggle(sheetLine.line.edition_id),
               }
             : undefined
         }

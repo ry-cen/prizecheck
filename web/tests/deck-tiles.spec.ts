@@ -1,0 +1,269 @@
+import { test, expect, type Page } from "@playwright/test";
+import { signInAsOwner } from "./support/sign-in";
+import { randomUUID } from "node:crypto";
+import { Pool } from "pg";
+import { buildLegalDeck, promoteLegalCatalog } from "./support/legal-deck";
+import { expectPageChecks } from "./support/page-check";
+import { expectTouchTarget } from "./support/touch-target";
+import { startAsNewOwner } from "./support/owner";
+
+// My Decks as card tiles led by a cover card (#291). The cards come through the real catalog import
+// (support/legal-deck.ts); its fixtures have no artwork, so a tile shows the cover card's name on the placeholder.
+
+const ORIGIN = process.env.TEST_ORIGIN || "http://localhost:5173";
+const IMAGE_OK = "https://assets.tcgdex.net/en/test/ok/low.webp";
+const IMAGE_FAIL = "https://assets.tcgdex.net/en/test/fail/low.webp";
+// A 1×1 PNG stands in for card artwork, so no test reaches the network.
+const PIXEL = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
+  "base64"
+);
+
+async function signIn(page: Page) {
+  // Card artwork never reaches the network.
+  await page.route(/^https:\/\/assets\.tcgdex\.net\//, (route) =>
+    route.abort()
+  );
+  const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+  try {
+    await pool.query("DELETE FROM auth_send_event");
+    await startAsNewOwner(pool);
+  } finally {
+    await pool.end();
+  }
+  await signInAsOwner(page, "/collection");
+  await expect(
+    page.getByRole("navigation", { name: "Main views" })
+  ).toBeVisible();
+}
+
+/** Fixed cost answers, so nothing waits on the price cache: every Deck costs $12.34 to complete, 57 of 57 priced. */
+async function stubCost(page: Page) {
+  const figure = (amount: string | null, copies: string) => ({
+    status: amount === null ? "empty" : "priced",
+    reason: null,
+    total_copies: copies,
+    priced_copies: copies,
+    stale_copies: "0",
+    unknown_age_copies: "0",
+    fallback_copies: "0",
+    amount,
+    display_amount: amount === null ? "$0.00" : `$${amount}`,
+    currency: "USD",
+  });
+  await page.route("**/api/decks/*/cost", (route) => {
+    const deckId = new URL(route.request().url()).pathname.split("/")[3];
+    return route.fulfill({
+      json: {
+        deck_id: deckId,
+        ...figure("15.00", "60"),
+        owner_revision: null,
+        deck_list_revision: null,
+        deck_list_cost: figure("15.00", "60"),
+        cost_to_complete: figure("12.34", "57"),
+      },
+    });
+  });
+}
+
+const deckIndex = (page: Page) =>
+  page.getByRole("navigation", { name: "Deck index" });
+const tile = (page: Page, name: string) =>
+  deckIndex(page)
+    .getByRole("listitem")
+    .filter({ has: page.getByRole("link", { name, exact: true }) });
+
+async function emptyDeck(page: Page): Promise<string> {
+  const name = `Empty ${randomUUID().slice(0, 6)}`;
+  const created = await page.request.post(`${ORIGIN}/api/decks`, {
+    headers: { origin: ORIGIN },
+    data: { name, idempotency_key: randomUUID() },
+  });
+  expect(created.status()).toBe(201);
+  return name;
+}
+
+async function setCover(
+  page: Page,
+  deckId: string,
+  edition: string | null,
+  expected: string | null
+) {
+  const response = await page.request.put(
+    `${ORIGIN}/api/decks/${deckId}/cover`,
+    {
+      headers: { origin: ORIGIN },
+      data: {
+        edition_id: edition,
+        expected_edition_id: expected,
+        idempotency_key: randomUUID(),
+      },
+    }
+  );
+  expect(response.status()).toBe(200);
+}
+
+test.describe("on a desktop", () => {
+  test.use({ viewport: { width: 1280, height: 800 } });
+
+  test("My Decks shows each Deck as a tile led by its cover with every fact a row had, and the whole tile opens the Deck", async ({
+    page,
+  }) => {
+    promoteLegalCatalog();
+    await signIn(page);
+    await stubCost(page);
+    const a = await buildLegalDeck(page, "Tiles");
+    const b = await buildLegalDeck(page, "Second");
+    const emptyName = await emptyDeck(page);
+
+    await page.goto(`${ORIGIN}/decks`);
+    const tileA = tile(page, a.deckName);
+    const tileB = tile(page, b.deckName);
+    const empty = tile(page, emptyName);
+    await expect(tileA).toContainText("0/60 in Deck");
+    await expect(tileA).toContainText("$12.34 to complete (57/57 priced)");
+    await expect(tileA).toContainText("Standard · ✓ Legal");
+    // The automatic cover is the line with the most copies; with no artwork its placeholder names the card.
+    await expect(tileA).toContainText("Basic Grass Energy");
+    await expect(
+      tileA.getByRole("button", { name: /^Want List: \d+ cards/ })
+    ).toBeVisible();
+    await expect(empty).toContainText("Empty: plan a list");
+    await expect(empty.locator("img")).toHaveCount(0);
+
+    // The three tiles share one row.
+    await expect
+      .poll(async () => {
+        const boxes = await Promise.all(
+          [tileA, tileB, empty].map((t) => t.boundingBox())
+        );
+        return new Set(boxes.map((box) => Math.round(box!.y))).size;
+      })
+      .toBe(1);
+    await expectPageChecks(page, "Decks index tiles");
+
+    // A click on the cover opens the Deck.
+    await tileA.click({ position: { x: 24, y: 24 } });
+    await expect(page).toHaveURL(`${ORIGIN}/decks/${a.deckId}`);
+    await page.getByRole("link", { name: "All Decks" }).click();
+
+    // The Want List button works on its own.
+    await tile(page, a.deckName)
+      .getByRole("button", { name: /^Want List: \d+ cards/ })
+      .click();
+    await expect(page).toHaveURL(`${ORIGIN}/decks/want-list?deck=${a.deckId}`);
+  });
+
+  test("A tile shows the picked cover, never a broken image, and falls back when the card leaves the Deck List", async ({
+    page,
+  }) => {
+    promoteLegalCatalog();
+    await signIn(page);
+    await stubCost(page);
+    const built = await buildLegalDeck(page, "Tiles");
+    await setCover(page, built.deckId, built.editions.switch, null);
+
+    await page.goto(`${ORIGIN}/decks`);
+    const mine = tile(page, built.deckName);
+    await expect(mine).toContainText("Switch");
+    await expect(mine).not.toContainText("Basic Grass Energy");
+
+    // Registered after signIn's abort route, so these take precedence.
+    let imageUrl = IMAGE_OK;
+    await page.route(/\/api\/decks(\?.*)?$/, async (route) => {
+      const response = await route.fetch();
+      const json = await response.json();
+      for (const deck of json.decks)
+        if (deck.id === built.deckId && deck.cover)
+          deck.cover.image_url = imageUrl;
+      await route.fulfill({ response, json });
+    });
+    await page.route(IMAGE_OK, (route) =>
+      route.fulfill({ contentType: "image/png", body: PIXEL })
+    );
+
+    await page.reload();
+    await expect(tile(page, built.deckName).locator("img")).toHaveAttribute(
+      "src",
+      IMAGE_OK
+    );
+    await expect(tile(page, built.deckName).locator("img")).toBeVisible();
+
+    // A failed image is replaced by the card's name, never a broken image.
+    imageUrl = IMAGE_FAIL;
+    await page.reload();
+    await expect(tile(page, built.deckName)).toContainText("Switch");
+    await expect(tile(page, built.deckName).locator("img")).toHaveCount(0);
+
+    // The picked card leaves the Deck List: the automatic cover shows again.
+    const read = await page.request.get(`${ORIGIN}/api/decks/${built.deckId}`);
+    const revision = (await read.json()).deck_list.revision;
+    const removed = await page.request.delete(
+      `${ORIGIN}/api/decks/${built.deckId}/deck-list/lines/${built.editions.switch}`,
+      {
+        headers: { origin: ORIGIN },
+        data: { revision, idempotency_key: randomUUID() },
+      }
+    );
+    expect(removed.status()).toBe(200);
+    await page.unroute(/\/api\/decks(\?.*)?$/);
+    await page.reload();
+    await expect(tile(page, built.deckName)).toContainText(
+      "Basic Grass Energy"
+    );
+  });
+});
+
+test.describe("on a phone", () => {
+  test.use({ viewport: { width: 375, height: 812 }, hasTouch: true });
+
+  test("On a phone the tiles sit two to a row with a 16 px gutter and no sideways scroll", async ({
+    page,
+  }) => {
+    promoteLegalCatalog();
+    await signIn(page);
+    await stubCost(page);
+    const built = await buildLegalDeck(page, "Tiles");
+    await emptyDeck(page);
+    await emptyDeck(page);
+    // The longest Target Format Pill ("Gym Leader Challenge · ✕ Not legal") truncates inside its tile.
+    const read = await page.request.get(`${ORIGIN}/api/decks/${built.deckId}`);
+    const target = await page.request.put(
+      `${ORIGIN}/api/decks/${built.deckId}/deck-list/target-format`,
+      {
+        headers: { origin: ORIGIN },
+        data: {
+          target_format: "glc",
+          revision: (await read.json()).deck_list.revision,
+          idempotency_key: randomUUID(),
+        },
+      }
+    );
+    expect(target.status()).toBe(200);
+
+    await page.goto(`${ORIGIN}/decks`);
+    const tiles = deckIndex(page).getByRole("listitem");
+    await expect(tiles).toHaveCount(3);
+    await expect
+      .poll(async () => {
+        const [a, b, c] = await Promise.all(
+          [0, 1, 2].map((n) => tiles.nth(n).boundingBox())
+        );
+        return {
+          sameRow: Math.round(a!.y) === Math.round(b!.y),
+          gutter: Math.round(b!.x - (a!.x + a!.width)),
+          wrapped: c!.y >= a!.y + a!.height,
+        };
+      })
+      .toEqual({ sameRow: true, gutter: 16, wrapped: true });
+
+    const mine = tile(page, built.deckName);
+    await expectTouchTarget(
+      mine.getByRole("link", { name: built.deckName, exact: true })
+    );
+    await expectTouchTarget(
+      mine.getByRole("button", { name: /^Want List: \d+ cards/ })
+    );
+    await expectPageChecks(page, "Decks index tiles, phone");
+  });
+});
