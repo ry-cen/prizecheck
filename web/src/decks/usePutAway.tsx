@@ -201,7 +201,7 @@ export function usePutAway({ deckId, deckName, surplus, onChanged }: Options) {
           } else if (code === "REPLAY_OUTCOME_UNAVAILABLE") {
             show({
               message:
-                "Undo may already have finished. The Deck has been refreshed.",
+                "Undo may already have finished. The Deck now shows where your cards are.",
               focus: true,
             });
             live.current.onChanged();

@@ -111,7 +111,7 @@ export function DeckHeading({ deckId, inventoryRevision, onOpenDeck }: Props) {
         >
           <p className="m-0">
             {detail
-              ? "This Deck couldn't be refreshed."
+              ? "This Deck's details couldn't load."
               : "Deck cost is temporarily unavailable."}
           </p>
           <Button onClick={() => void load()}>Retry</Button>

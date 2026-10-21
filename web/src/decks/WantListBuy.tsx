@@ -159,7 +159,7 @@ function WantListMassEntry({
         shortage: "0",
         excess: "0",
         disclaimer:
-          "Estimated costs on the Want List use cached TCGplayer market prices (USD) and exclude shipping and taxes.",
+          "Estimated costs on the Want List are market prices in USD and exclude shipping and taxes.",
       }}
       subject="these cards"
       deckWording={scoped ? "Deck" : "Decks"}

@@ -137,7 +137,7 @@ test("an all-mapped Deck opens TCGplayer only after the explanation, in a new ta
   await region
     .getByRole("button", { name: "Prepare TCGplayer export" })
     .click();
-  await expect(region).toContainText("Every card has a verified TCGplayer");
+  await expect(region).toContainText("Ready to open in TCGplayer:");
   expect(requested).toEqual([]); // preparing never navigates
   await region.getByRole("button", { name: "Open in TCGplayer" }).click();
   const dialog = page.getByRole("dialog", {
@@ -196,7 +196,7 @@ test("a missing or quarantined mapping gives complete labelled text, copy report
   await region
     .getByRole("button", { name: "Prepare TCGplayer export" })
     .click();
-  await expect(region).toContainText("No TCGplayer link is offered");
+  await expect(region).toContainText("so there's no link");
   await expect(region).toContainText("Less specific: 3 of 3 rows");
   await expect(region).toContainText("different Printing");
   await expect(region).toContainText("Basic deck checks only"); // existing disclaimer
@@ -300,7 +300,7 @@ test(
     await region
       .getByRole("button", { name: "Prepare TCGplayer export" })
       .click();
-    await expect(region).toContainText("longer than 2,000 characters");
+    await expect(region).toContainText("too long to open as a TCGplayer link");
     await expect(
       region.getByRole("button", { name: "Open in TCGplayer" })
     ).toHaveCount(0);
