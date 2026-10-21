@@ -351,6 +351,15 @@ test.describe("desktop", () => {
     await page.keyboard.press("Escape");
 
     await sidebar(page)
+      .getByRole("button", { name: `Settings for 0 Deck ${s}`, exact: true })
+      .click();
+    await expect(
+      page.getByRole("dialog", { name: `0 Deck ${s}`, exact: true })
+    ).toBeVisible();
+    await expectAccessible(page, "Location settings");
+    await page.keyboard.press("Escape");
+
+    await sidebar(page)
       .getByRole("button", { name: `0 Deck ${s}`, exact: true })
       .click();
     await expect(
@@ -422,6 +431,7 @@ test.describe("desktop", () => {
       "Manage locations",
       "All owned",
       `0 Keys ${s}`,
+      `Settings for 0 Keys ${s}`,
       "Add cards",
       "Search cards",
       "Sort",

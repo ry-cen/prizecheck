@@ -6,34 +6,17 @@ import React, {
   useState,
 } from "react";
 import { Menu as Handle, Settings } from "lucide-react";
-import { DeckError, editDeck } from "../decks_generated";
-import {
-  deleteLocation,
-  editLocation,
-  getLocationTree,
-  LocationError,
-  setLocationForTrade,
-  setLocationHidden,
-  type EditLocation,
-  type TreeLocation,
-} from "../location_generated";
+import { getLocationTree, type TreeLocation } from "../location_generated";
 import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
 import { focusableIn } from "../ui/focusable";
 import { Icon } from "../ui/Icon";
-import { TextField } from "../ui/TextField";
 import { CreateLocationDialog } from "./CreateLocationDialog";
+import { MoveStep, targetKey, useLocationRun } from "./locationSteps";
 import { forTradeLabel, hidingLabel, stillOfferedLine } from "./locationTree";
 import {
   buildManageModel,
-  cleanLocationName,
-  copiesLabel,
   isDeck,
-  isStockedLeaf,
-  locationErrorMessage,
-  plural,
-  STALE_CODES,
-  STALE_MESSAGE,
   type ParentTarget,
 } from "./manageLocationsModel";
 
@@ -44,21 +27,9 @@ const SCROLL_EDGE = 48;
 const SCROLL_STEP_MAX = 16;
 
 type Step =
-  | { kind: "list" }
-  | { kind: "rename"; id: string }
-  | { kind: "move"; id: string; target?: ParentTarget }
-  | { kind: "delete"; id: string };
-
-type Notice = { tone: "status" | "alert"; text: string };
+  { kind: "list" } | { kind: "move"; id: string; target?: ParentTarget };
 
 type DragState = { id: string; x: number; y: number; hover: string | null };
-
-/** "top" stands for Top level wherever a target needs a string key. */
-const targetKey = (target: ParentTarget) => target ?? "top";
-
-/** Rename or move: Decks use the Deck command, every other Location the Location edit. */
-const editNode = (node: TreeLocation, body: EditLocation) =>
-  isDeck(node) ? editDeck(node.id, body) : editLocation(node.id, body);
 
 type Props = {
   onClose: () => void;
@@ -82,12 +53,6 @@ export function ManageLocationsButton({ onClick }: { onClick: () => void }) {
 }
 
 const LIST = "m-0 flex list-none flex-col gap-1 p-0";
-const STEP = "m-0 flex flex-col gap-3";
-const STEP_ACTIONS = "flex flex-wrap gap-2";
-/** Each step button fills its own line on a phone. */
-const STEP_BUTTON = "phone:flex-[1_1_100%]";
-const TARGET =
-  "box-border m-0 flex min-h-control w-full cursor-pointer items-center rounded-control border border-solid border-border bg-surface px-3 text-left font-sans text-control text-text hover:border-control-outline hover:bg-surface-raised phone:min-h-tap";
 
 type DropState = "lifted" | "hover" | "valid" | "invalid" | undefined;
 
@@ -112,16 +77,13 @@ const topDrop = (state: DropState) =>
         : "border-dashed border-border-strong text-text-muted";
 
 /** Manage locations: a modal panel (a full-screen sheet on mobile) listing the whole tree, with
- * handle drag and a Move picker for reparenting, and Rename, Add child and Delete per row.
- * Every change uses the existing Location commands. There is no Location Undo. */
+ * handle drag and a Move picker for reparenting, and Add child per row. Each Location's own settings
+ * (Rename, Hide from Friends, For trade, Delete) are in its settings dialog, from the gear on its
+ * sidebar row (#292). Every change uses the existing Location commands. There is no Location Undo. */
 export function ManageLocations({ onClose, onChanged }: Props) {
   const [nodes, setNodes] = useState<TreeLocation[]>([]);
   const [load, setLoad] = useState<"loading" | "ready" | "error">("loading");
   const [step, setStep] = useState<Step>({ kind: "list" });
-  const [text, setText] = useState("");
-  const [error, setError] = useState("");
-  const [notice, setNotice] = useState<Notice | null>(null);
-  const [busy, setBusy] = useState(false);
   const [drag, setDrag] = useState<DragState | null>(null);
   /** The Add location dialog's preselected parent: undefined while closed, null for Top level. */
   const [addingTo, setAddingTo] = useState<string | null | undefined>(
@@ -161,9 +123,19 @@ export function ManageLocations({ onClose, onChanged }: Props) {
     void reload();
   }, [reload]);
 
+  // The list shows again once the tree is read again, so it never flashes the old tree and focus returns
+  // to the control that started the step in its new place.
+  const { busy, error, setError, notice, setNotice, run } = useLocationRun({
+    reload,
+    settled: () => {
+      setStep({ kind: "list" });
+      onChanged();
+    },
+  });
+
   // When the list shows again, focus the control that started the step (or Close).
   useEffect(() => {
-    if (step.kind !== "list" || load !== "ready") return;
+    if (step.kind !== "list" || load !== "ready" || busy) return;
     const key = restoreFocus.current;
     if (!key) return;
     restoreFocus.current = null;
@@ -174,61 +146,18 @@ export function ManageLocations({ onClose, onChanged }: Props) {
         `[data-manage-focus="${CSS.escape(key)}"]:not(:disabled)`
       ) ?? (dialog ? focusableIn(dialog)[0] : undefined); // the Dialog's close button
     target?.focus();
-  }, [step, load, nodes]);
+  }, [step, load, nodes, busy]);
 
   function begin(next: Step, focusKey: string | null) {
     restoreFocus.current = focusKey;
     setNotice(null);
     setError("");
-    setText(next.kind === "rename" ? (model.get(next.id)?.name ?? "") : "");
     setStep(next);
   }
   function backToList() {
     setError("");
     setStep({ kind: "list" });
   }
-  // Reload first, then show the list, so the list never flashes the old tree and focus returns
-  // to the control that started the step in its new place.
-  async function finish(message: string) {
-    await reload();
-    setError("");
-    setNotice({ tone: "status", text: message });
-    setBusy(false);
-    setStep({ kind: "list" });
-    onChanged();
-  }
-  async function stale() {
-    await reload();
-    setError("");
-    setNotice({ tone: "alert", text: STALE_MESSAGE });
-    setBusy(false);
-    setStep({ kind: "list" });
-    onChanged();
-  }
-  async function run(
-    action: "rename" | "move" | "delete" | "hide" | "for_trade",
-    request: () => Promise<unknown>,
-    message: string,
-    context: { name?: string; where?: string } = {}
-  ) {
-    if (busy) return;
-    setBusy(true);
-    setError("");
-    try {
-      await request();
-      await finish(message);
-    } catch (cause) {
-      const code =
-        cause instanceof LocationError || cause instanceof DeckError
-          ? cause.code
-          : "";
-      if (STALE_CODES.has(code)) await stale();
-      else setError(locationErrorMessage(code, { action, ...context }));
-    } finally {
-      setBusy(false);
-    }
-  }
-
   // ---- Handle drag (pointer events, so mouse and touch share one path) ----
 
   const targetAt = (x: number, y: number): ParentTarget | undefined => {
@@ -387,7 +316,6 @@ export function ManageLocations({ onClose, onChanged }: Props) {
     model.index.children(parentId).map((child) => {
       const node = model.get(child.id)!;
       const path = model.index.path(node.id);
-      const deletable = model.deletable(node);
       const children = model.index.children(node.id);
       const hiding = model.index.hiding(node.id);
       const hidden = hidingLabel(hiding);
@@ -397,7 +325,7 @@ export function ManageLocations({ onClose, onChanged }: Props) {
       return (
         <li key={node.id}>
           <div
-            className={`box-border flex min-h-11 items-center gap-2 rounded-control py-1 pr-2 pl-[calc(var(--space-1)+var(--manage-level)*var(--space-4))] phone:flex-wrap phone:pl-[calc(var(--manage-level)*var(--space-2))] ${rowDrop(dropState(node.id))}`}
+            className={`box-border flex min-h-11 items-center gap-2 rounded-control py-1 pr-2 pl-[calc(var(--space-1)+var(--manage-level)*var(--space-4))] phone:pl-[calc(var(--manage-level)*var(--space-2))] ${rowDrop(dropState(node.id))}`}
             role="group"
             aria-label={path}
             data-manage-target={node.id}
@@ -430,139 +358,31 @@ export function ManageLocations({ onClose, onChanged }: Props) {
                 </small>
               )}
             </span>
-            <span className="flex flex-none gap-1 phone:flex-[1_1_100%]">
-              <Button
-                className="phone:flex-1"
-                aria-label={`Rename ${path}`}
-                disabled={busy}
-                data-manage-focus={`rename:${node.id}`}
-                onClick={() =>
-                  begin({ kind: "rename", id: node.id }, `rename:${node.id}`)
-                }
+            {isDeck(node) ? (
+              // Decks can't have children; the spacer keeps the rows aligned.
+              <span
+                className="invisible box-border inline-flex h-control items-center border border-solid border-transparent px-3 font-sans text-control font-medium whitespace-nowrap phone:h-control-phone phone:px-4"
+                aria-hidden="true"
               >
-                Rename
-              </Button>
-              {isDeck(node) ? (
-                // Decks can't have children; the spacer keeps the action columns aligned.
-                <span
-                  className="invisible box-border inline-flex h-control items-center border border-solid border-transparent px-3 font-sans text-control font-medium whitespace-nowrap phone:h-control-phone phone:flex-1 phone:px-4"
-                  aria-hidden="true"
-                >
-                  Add child
-                </span>
-              ) : (
-                <Button
-                  className="phone:flex-1"
-                  aria-label={`Add child location to ${path}`}
-                  title={
-                    model.canAddChild(node)
-                      ? undefined
-                      : "Locations can be nested at most 12 levels deep"
-                  }
-                  disabled={!model.canAddChild(node) || busy}
-                  onClick={() => {
-                    setNotice(null);
-                    setAddingTo(node.id);
-                  }}
-                >
-                  Add child
-                </Button>
-              )}
+                Add child
+              </span>
+            ) : (
               <Button
-                className="phone:flex-1"
-                aria-label={`Delete ${path}`}
+                aria-label={`Add child location to ${path}`}
                 title={
-                  deletable
+                  model.canAddChild(node)
                     ? undefined
-                    : isDeck(node)
-                      ? "Decks can't be deleted here"
-                      : "Only an empty location with no children can be deleted"
+                    : "Locations can be nested at most 12 levels deep"
                 }
-                disabled={!deletable || busy}
-                data-manage-focus={`delete:${node.id}`}
-                onClick={() =>
-                  begin({ kind: "delete", id: node.id }, `delete:${node.id}`)
-                }
-              >
-                Delete
-              </Button>
-            </span>
-            {/* Hide from Friends (social network #249), on its own line on a phone. A Location inside a hidden one
-                can't be shown on its own, so its button is off and says why. */}
-            <span className="flex flex-none gap-1 phone:flex-[1_1_100%]">
-              <Button
-                className="phone:flex-1"
-                aria-label={
-                  node.hidden
-                    ? `Show ${path} to Friends`
-                    : `Hide ${path} from Friends`
-                }
-                title={hiding.kind === "parent" ? hidden : undefined}
-                disabled={hiding.kind === "parent" || busy}
-                data-manage-focus={`hide:${node.id}`}
+                disabled={!model.canAddChild(node) || busy}
                 onClick={() => {
-                  restoreFocus.current = `hide:${node.id}`;
                   setNotice(null);
-                  void run(
-                    "hide",
-                    () =>
-                      setLocationHidden(node.id, {
-                        hidden: !node.hidden,
-                        version: node.version,
-                        idempotency_key: crypto.randomUUID(),
-                      }),
-                    node.hidden
-                      ? `${path} is shown to Friends again.`
-                      : `${path} and everything in it are hidden from Friends.`,
-                    {
-                      where:
-                        hiding.kind === "parent" ? hiding.by.name : undefined,
-                    }
-                  );
+                  setAddingTo(node.id);
                 }}
               >
-                {node.hidden ? "Show to Friends" : "Hide from Friends"}
+                Add child
               </Button>
-              {/* For trade (Trading #267), beside Hide from Friends. A Location inside a marked one can't be
-                  un-marked on its own, so its button is off and says why. A Deck keeps the button: the server
-                  refuses it (DECK_NOT_FOR_TRADE) and the panel says why in plain words. */}
-              <Button
-                className="phone:flex-1"
-                aria-label={
-                  node.for_trade
-                    ? `Mark ${path} Not for trade`
-                    : `Mark ${path} For trade`
-                }
-                title={forTrade.kind === "parent" ? trading : undefined}
-                disabled={forTrade.kind === "parent" || busy}
-                data-manage-focus={`trade:${node.id}`}
-                onClick={() => {
-                  restoreFocus.current = `trade:${node.id}`;
-                  setNotice(null);
-                  void run(
-                    "for_trade",
-                    () =>
-                      setLocationForTrade(node.id, {
-                        for_trade: !node.for_trade,
-                        version: node.version,
-                        idempotency_key: crypto.randomUUID(),
-                      }),
-                    node.for_trade
-                      ? `${path} is no longer For trade.`
-                      : `${path} and everything in it, apart from Decks, are For trade.`,
-                    {
-                      name: path,
-                      where:
-                        forTrade.kind === "parent"
-                          ? forTrade.by.name
-                          : undefined,
-                    }
-                  );
-                }}
-              >
-                {node.for_trade ? "Not for trade" : "For trade"}
-              </Button>
-            </span>
+            )}
           </div>
           {children.length > 0 && (
             <ul aria-label={node.name} className={`${LIST} mt-1`}>
@@ -579,222 +399,6 @@ export function ManageLocations({ onClose, onChanged }: Props) {
   // A step whose Location vanished (reloaded tree) falls back to the list.
   const activeStep: Step =
     step.kind !== "list" && !current ? { kind: "list" } : step;
-
-  function renameStep(node: TreeLocation) {
-    const path = model.index.path(node.id);
-    const submit = (event: React.FormEvent) => {
-      event.preventDefault();
-      const cleaned = cleanLocationName(text);
-      if (!cleaned) {
-        setError(
-          locationErrorMessage("INVALID_LOCATION_NAME", { action: "rename" })
-        );
-        return;
-      }
-      if (cleaned === node.name) {
-        backToList();
-        return;
-      }
-      if (model.siblingNameTaken(cleaned, node.parent_id, node.id)) {
-        setError(
-          locationErrorMessage("LOCATION_NAME_CONFLICT", { action: "rename" })
-        );
-        return;
-      }
-      void run(
-        "rename",
-        () =>
-          editNode(node, {
-            name: cleaned,
-            version: node.version,
-            idempotency_key: crypto.randomUUID(),
-          }),
-        `Renamed ${node.name} to ${cleaned}.`
-      );
-    };
-    return (
-      <form className={STEP} aria-label={`Rename ${path}`} onSubmit={submit}>
-        <p className="m-0">
-          Rename <strong className="wrap-anywhere">{path}</strong>
-        </p>
-        <TextField
-          label="New name"
-          autoFocus
-          autoComplete="off"
-          value={text}
-          onChange={(event) => setText(event.target.value)}
-        />
-        <div className={STEP_ACTIONS}>
-          <Button
-            type="submit"
-            variant="primary"
-            className={STEP_BUTTON}
-            disabled={busy}
-          >
-            Save name
-          </Button>
-          <Button className={STEP_BUTTON} onClick={backToList}>
-            Cancel
-          </Button>
-        </div>
-      </form>
-    );
-  }
-
-  function moveStep(node: TreeLocation, target: ParentTarget | undefined) {
-    const path = model.index.path(node.id);
-    const nested = model.subtree(node.id).length - 1;
-    const parent = target ? model.get(target) : undefined;
-    const where = target ? model.index.path(target) : "Top level";
-    const confirm = () => {
-      if (target === undefined) return;
-      const stocked = parent ? isStockedLeaf(parent) : false;
-      void run(
-        "move",
-        () =>
-          editNode(node, {
-            parent_id: target,
-            parent_version: parent?.version ?? null,
-            version: node.version,
-            ...(stocked ? { conversion: "create_unsorted_child" } : {}),
-            idempotency_key: crypto.randomUUID(),
-          }),
-        `Moved ${node.name} to ${where}.`,
-        { name: node.name, where }
-      );
-    };
-    const parents = model.validParents(node.id);
-    return (
-      <section className={STEP} aria-label={`Move ${path}`}>
-        <p className="m-0">
-          Move <strong className="wrap-anywhere">{path}</strong>
-          {nested > 0 &&
-            ` and its ${plural(nested, "nested location", "nested locations")}`}
-        </p>
-        {target === undefined ? (
-          <>
-            {parents.length ? (
-              <ul className={LIST} aria-label="New parent">
-                {parents.map((option, position) => (
-                  <li key={targetKey(option)}>
-                    <button
-                      type="button"
-                      className={TARGET}
-                      autoFocus={position === 0}
-                      onClick={() => {
-                        setError("");
-                        setStep({ kind: "move", id: node.id, target: option });
-                      }}
-                    >
-                      {option ? model.index.path(option) : "Top level"}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="m-0">There is nowhere else this location can go.</p>
-            )}
-            <div className={STEP_ACTIONS}>
-              <Button className={STEP_BUTTON} onClick={backToList}>
-                Cancel
-              </Button>
-            </div>
-          </>
-        ) : (
-          <div className="flex flex-col gap-3">
-            <p className="m-0">
-              New path:{" "}
-              <strong className="wrap-anywhere">
-                {model.newPath(node.id, target)}
-              </strong>
-            </p>
-            {parent && isStockedLeaf(parent) && (
-              <p className="m-0 rounded-panel border border-accent-border bg-accent-wash p-3 text-warning">
-                {parent.name} holds {copiesLabel(parent.copy_count)}. They move
-                into a new Unsorted child inside it, so every card stays in a
-                storage location.
-              </p>
-            )}
-            <div className={STEP_ACTIONS}>
-              <Button
-                variant="primary"
-                className={STEP_BUTTON}
-                autoFocus
-                disabled={busy}
-                onClick={confirm}
-              >
-                Move here
-              </Button>
-              <Button
-                className={STEP_BUTTON}
-                disabled={busy}
-                onClick={() => {
-                  setError("");
-                  setStep({ kind: "move", id: node.id });
-                }}
-              >
-                Choose another
-              </Button>
-              <Button
-                className={STEP_BUTTON}
-                disabled={busy}
-                onClick={backToList}
-              >
-                Cancel
-              </Button>
-            </div>
-          </div>
-        )}
-      </section>
-    );
-  }
-
-  function deleteStep(node: TreeLocation) {
-    const path = model.index.path(node.id);
-    const submit = (event: React.FormEvent) => {
-      event.preventDefault();
-      if (text !== node.name) return;
-      void run(
-        "delete",
-        () =>
-          deleteLocation(node.id, {
-            name: text,
-            version: node.version,
-            idempotency_key: crypto.randomUUID(),
-          }),
-        `Deleted ${path}.`,
-        { name: node.name }
-      );
-    };
-    return (
-      <form className={STEP} aria-label={`Delete ${path}`} onSubmit={submit}>
-        <p className="m-0">
-          Delete <strong className="wrap-anywhere">{path}</strong>? It is empty
-          and has no child locations.
-        </p>
-        <TextField
-          label={`Type ${node.name} to confirm`}
-          autoFocus
-          autoComplete="off"
-          value={text}
-          onChange={(event) => setText(event.target.value)}
-        />
-        <div className={STEP_ACTIONS}>
-          <Button
-            type="submit"
-            variant="danger"
-            className={STEP_BUTTON}
-            disabled={busy || text !== node.name}
-          >
-            Delete location
-          </Button>
-          <Button className={STEP_BUTTON} onClick={backToList}>
-            Cancel
-          </Button>
-        </div>
-      </form>
-    );
-  }
 
   let body: React.ReactNode;
   if (load === "error" && !nodes.length) {
@@ -813,19 +417,27 @@ export function ManageLocations({ onClose, onChanged }: Props) {
         Loading locations…
       </p>
     );
-  } else if (activeStep.kind === "rename" && current) {
-    body = renameStep(current);
   } else if (activeStep.kind === "move" && current) {
-    body = moveStep(current, activeStep.target);
-  } else if (activeStep.kind === "delete" && current) {
-    body = deleteStep(current);
+    body = (
+      <MoveStep
+        node={current}
+        model={model}
+        busy={busy}
+        run={run}
+        setError={setError}
+        target={activeStep.target}
+        onTarget={(target) => setStep({ kind: "move", id: current.id, target })}
+        onCancel={backToList}
+      />
+    );
   } else {
     body = (
       <>
         <p className="m-0 text-meta text-text-muted">
           Drag a location by its ☰ handle onto another location to nest it, or
           onto Top level. Tap the handle, or press Enter on it, to choose from a
-          list instead. Every move asks you to confirm.
+          list instead. Every move asks you to confirm. To rename, hide, mark
+          For trade or delete a location, use the gear beside it in Locations.
         </p>
         <div
           className={`sticky top-0 z-1 box-border rounded-panel border bg-surface p-3 text-center text-meta ${topDrop(dropState(null))}`}

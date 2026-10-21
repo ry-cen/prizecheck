@@ -52,15 +52,15 @@ export function HiddenLocationsSection() {
       )}
       {load.kind === "ready" && load.paths.length === 0 && (
         <p className="m-0 text-meta text-text-muted">
-          Friends can see every Location. To hide one, choose Hide from Friends
-          in Collection › Manage locations.
+          Friends can see every Location. To hide one, open its settings from
+          the gear beside it in Collection and choose Hide from Friends.
         </p>
       )}
       {load.kind === "ready" && load.paths.length > 0 && (
         <>
           <p className="m-0 text-meta text-text-muted">
             Friends can't see these Locations or anything inside them. Change
-            this in Collection › Manage locations.
+            this in each Location's settings in Collection.
           </p>
           <ul
             aria-labelledby={headingId}

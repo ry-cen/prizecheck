@@ -8,7 +8,11 @@ import React, {
 } from "react";
 import { Menu as MenuIcon, Plus } from "lucide-react";
 import type { AddedCards } from "../catalog/useAddToast";
-import { getLocationTree, type TreeNode } from "../location_generated";
+import {
+  getLocationTree,
+  type TreeLocation,
+  type TreeNode,
+} from "../location_generated";
 import { BorrowedDialog } from "../loans/BorrowedDialog";
 import { LendOfferDialog } from "../loans/LendOfferDialog";
 import { LentOutDialog } from "../loans/LentOutDialog";
@@ -46,6 +50,7 @@ import {
   type DropTargets,
   type WorkspaceView,
 } from "./LocationNav";
+import { LocationSettings } from "./LocationSettings";
 import { ManageLocations, ManageLocationsButton } from "./ManageLocations";
 import { indexLocations, isFolder } from "./locationTree";
 import { MOBILE_QUERY, useMediaQuery } from "./media";
@@ -89,7 +94,7 @@ export function Workspace({
   onImport,
   onOpenLoan,
 }: Props) {
-  const [nodes, setNodes] = useState<TreeNode[]>([]);
+  const [nodes, setNodes] = useState<TreeLocation[]>([]);
   // Copies lent to Friends (#253): the tree's Lent out entry. A mocked tree may leave it out.
   const [lentCopies, setLentCopies] = useState("0");
   const [lentOpen, setLentOpen] = useState(false);
@@ -124,6 +129,29 @@ export function Workspace({
   const filtersOpener = useRef<HTMLButtonElement>(null);
   const closeFiltersDrawer = useCallback(() => setFiltersDrawerOpen(false), []);
   const [manageOpen, setManageOpen] = useState(false);
+  // A Location's settings (#292), opened from its gear in the sidebar or the drawer. On a phone it stacks over the
+  // open drawer, so closing it can give focus back to the gear inside the drawer.
+  const [settingsFor, setSettingsFor] = useState<{
+    id: string;
+    idPrefix: string;
+    path: string;
+    parentId: string | null;
+  } | null>(null);
+  const settingsOpener = useRef<HTMLElement | null>(null);
+  // Where focus goes once the settings close or the Location is deleted, and where Collection goes after a delete.
+  const [afterDelete, setAfterDelete] = useState<{
+    id: string;
+    parentId: string | null;
+    idPrefix: string;
+  } | null>(null);
+  const [focusAfter, setFocusAfter] = useState<{
+    id: string;
+    parentId: string | null;
+    idPrefix: string;
+  } | null>(null);
+  const [announcement, setAnnouncement] = useState("");
+  // The same line inside the phone drawer: the page behind a modal drawer is inert, so a delete made there is read here.
+  const [drawerAnnouncement, setDrawerAnnouncement] = useState("");
   // Add cards (#175): open, and the Location it adds to (null: its picker chooses).
   const [adding, setAdding] = useState<{ fixed: string | null } | null>(null);
   const addOpener = useRef<HTMLButtonElement>(null);
@@ -202,6 +230,7 @@ export function Workspace({
     closeDetails();
     setCreateFor(undefined);
     setManageOpen(false);
+    setSettingsFor(null);
     setAdding(null);
     setLentOpen(false);
     setBorrowedOpen(false);
@@ -353,11 +382,99 @@ export function Workspace({
     if (!drawerOpen) return;
     const media = window.matchMedia(MOBILE_QUERY);
     const onChange = () => {
-      if (!media.matches) setDrawerOpen(false);
+      if (!media.matches) {
+        setDrawerOpen(false);
+        // Settings opened over the drawer close in the same commit, so the scroll lock is restored in order.
+        setSettingsFor((open) => (open?.idPrefix === "drawer" ? null : open));
+      }
     };
     media.addEventListener("change", onChange);
     return () => media.removeEventListener("change", onChange);
   }, [drawerOpen]);
+
+  // A Location's settings (#292). The drawer stays open behind them on a phone.
+  function openSettings(id: string, opener: HTMLElement, idPrefix: string) {
+    settingsOpener.current = opener;
+    setAnnouncement("");
+    setDrawerAnnouncement("");
+    setSettingsFor({
+      id,
+      idPrefix,
+      path: index.path(id),
+      parentId: index.byId.get(id)?.parent_id ?? null,
+    });
+  }
+  function closeSettings() {
+    if (settingsFor)
+      setFocusAfter({
+        id: settingsFor.id,
+        parentId: settingsFor.parentId,
+        idPrefix: settingsFor.idPrefix,
+      });
+    setSettingsFor(null);
+  }
+  function settingsDeleted(deleted: {
+    id: string;
+    parentId: string | null;
+    path: string;
+  }) {
+    const idPrefix = settingsFor?.idPrefix ?? "sidebar";
+    const text = `Deleted ${deleted.path}.`;
+    setAnnouncement(idPrefix === "drawer" ? "" : text);
+    setDrawerAnnouncement(idPrefix === "drawer" ? text : "");
+    setAfterDelete({
+      id: deleted.id,
+      parentId: deleted.parentId,
+      idPrefix,
+    });
+    setSettingsFor(null);
+  }
+  // While the settings are open, the Location's row stays revealed, even after a Move into a collapsed folder.
+  useEffect(() => {
+    if (!settingsFor || !index.byId.has(settingsFor.id)) return;
+    const ancestors = index.ancestors(settingsFor.id);
+    setExpanded((previous) =>
+      ancestors.every((id) => previous.has(id))
+        ? previous
+        : new Set([...previous, ...ancestors])
+    );
+  }, [settingsFor, index]);
+  // After a delete (the tree is already read again): the open Location's parent opens, unless it is a folder,
+  // and then Collection shows All owned. The parent's ancestors stay expanded so its row shows.
+  useEffect(() => {
+    if (!afterDelete) return;
+    const { id, parentId, idPrefix } = afterDelete;
+    setAfterDelete(null);
+    const parent = parentId ? index.byId.get(parentId) : undefined;
+    if (view === id) setView(parent && !isFolder(parent) ? parent.id : "all");
+    if (parent) {
+      const ancestors = index.ancestors(parent.id);
+      setExpanded((previous) => new Set([...previous, ...ancestors]));
+    }
+    setFocusAfter({ id, parentId, idPrefix });
+  }, [afterDelete, index, view]);
+  // Focus after the settings close: the Location's gear, or when it is gone the nearest shown ancestor row, or
+  // else the tree's All owned row. Lookups are by the tree they were opened from; the other tree is hidden.
+  useEffect(() => {
+    if (!focusAfter) return;
+    const { id, idPrefix } = focusAfter;
+    setFocusAfter(null);
+    const shown = (elementId: string) => {
+      const element = document.getElementById(elementId);
+      return element && element.getClientRects().length > 0 ? element : null;
+    };
+    const parentId = index.byId.get(id)?.parent_id ?? focusAfter.parentId;
+    const rows =
+      parentId && index.byId.has(parentId)
+        ? [parentId, ...index.ancestors(parentId)]
+        : [];
+    (
+      shown(`${idPrefix}-settings-${id}`) ??
+      rows.map((row) => shown(`${idPrefix}-row-${row}`)).find(Boolean) ??
+      shown(`${idPrefix}-all`) ??
+      shown(`${idPrefix === "drawer" ? "sidebar" : "drawer"}-all`)
+    )?.focus();
+  }, [focusAfter, index]);
 
   const search = (
     <SearchField
@@ -405,6 +522,7 @@ export function Workspace({
         onChoose={choose}
         idPrefix={idPrefix}
         onAddChild={openCreate}
+        onOpenSettings={(id, opener) => openSettings(id, opener, idPrefix)}
         drop={drop}
         touch={idPrefix === "drawer"}
         lent={{
@@ -456,6 +574,9 @@ export function Workspace({
       data-collection-page=""
       className="box-border min-h-[calc(100dvh-var(--layout-header-height))] bg-bg font-sans text-body leading-(--line-height) text-text scheme-dark [&_*]:box-border"
     >
+      <p className="sr-only" role="status" data-testid="location-announcement">
+        {announcement}
+      </p>
       {/* The phone header (the shell draws the desktop one, and the skip link): ☰ for the Location
           drawer, the page title (for screen readers only: the tab bar marks the section, and Search needs the room
           once the bell joins the header actions, #259), then Search, Filters & display and the shell's phone header
@@ -664,6 +785,28 @@ export function Workspace({
           barRef={dockRef}
         />
       )}
+      {/* A Location's settings, before the drawer so that when both close in one commit this one unmounts first and
+          the body's scroll lock is restored in order. It is a sibling of the drawer, never inside it. */}
+      {active && settingsFor && (
+        <LocationSettings
+          key={settingsFor.id}
+          nodes={nodes}
+          id={settingsFor.id}
+          openedPath={settingsFor.path}
+          returnFocus={settingsOpener}
+          onClose={closeSettings}
+          onChanged={async () => {
+            gallery.reload();
+            await loadTree();
+          }}
+          onDeleted={settingsDeleted}
+          onOpenDeck={(deckId) => {
+            setSettingsFor(null);
+            setDrawerOpen(false);
+            onOpenDeck(deckId);
+          }}
+        />
+      )}
       {/* The phone Location drawer: the kit Dialog along the left edge. Its close button is the first
           focus stop; focus returns to ☰ when it closes. */}
       <Dialog
@@ -675,6 +818,13 @@ export function Workspace({
         side="left"
       >
         <div className="flex flex-col gap-4">
+          <p
+            className="sr-only"
+            role="status"
+            data-testid="drawer-location-announcement"
+          >
+            {drawerAnnouncement}
+          </p>
           <div className="flex items-center justify-end gap-1">
             {locationTools}
           </div>
