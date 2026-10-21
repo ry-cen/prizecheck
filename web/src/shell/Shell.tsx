@@ -263,9 +263,12 @@ function ShellFrame({
         {/* Desktop header: sticky, so the tabs are in reach wherever the page is scrolled. At compact widths the gaps and
           the tabs' padding tighten so six tabs, two-digit Loans and Trades badges and the header actions fit down to 761 px
           (Trading #269 added Trades, #273 its badge). */}
-        <header className="sticky top-0 z-(--layer-sticky) box-border flex h-header items-center gap-6 border-b border-border bg-bg px-7 compact:gap-3 compact:px-5 phone:hidden">
+        <header className="sticky top-0 z-(--layer-sticky) box-border flex h-header items-center gap-6 border-b border-border bg-bg px-7 compact:gap-3 compact:px-4 phone:hidden">
           <Wordmark />
-          <nav aria-label="Main views" className="flex items-center gap-1">
+          <nav
+            aria-label="Main views"
+            className="flex items-center gap-1 compact:gap-0.5"
+          >
             {DESKTOP_TABS.map((id) => (
               <button
                 key={id}
@@ -287,7 +290,7 @@ function ShellFrame({
               </button>
             ))}
           </nav>
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ml-auto flex items-center gap-2 compact:gap-1.5">
             <InboxButton />
             <FriendsButton />
             <Menu
