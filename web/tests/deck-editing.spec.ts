@@ -432,6 +432,10 @@ test.describe("on a desktop", () => {
     await pikachu.click();
 
     const popup = page.getByRole("dialog", { name: "Pikachu" });
+    // The library sends the small artwork; the popup shows the large one.
+    await expect(
+      popup.getByRole("img", { name: "Pikachu card art" })
+    ).toHaveAttribute("src", /\/high\.webp$/);
     await expect(popup).toContainText("Alpha Set (set-a) · #25 · Normal");
     await expect(popup).toContainText("Not owned");
     await expect(popup).toContainText("Standard legality unknown");

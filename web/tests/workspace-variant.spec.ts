@@ -321,6 +321,55 @@ test.describe("desktop", () => {
     await expect(panel).toContainText("1 copy here");
     await expect(leaves(panel)).toHaveCount(3);
   });
+
+  test("the inspector shows a card's large artwork, and its small artwork when the large one fails", async ({
+    page,
+  }) => {
+    promoteCatalog({ "card-1": "Art Abra", "card-2": "Art Pikachu" });
+    await signIn(page);
+    const s = randomUUID().slice(0, 8);
+    const leaf = await createLocation(page, `Art ${s}`, null);
+    const ids = await editions();
+    await hold([
+      { location: leaf, edition: ids.normal, quantity: 1 },
+      { location: leaf, edition: ids.unspecified, quantity: 1 },
+    ]);
+    await page.reload();
+    const art = inspector(page).locator("img");
+
+    await tile(
+      page,
+      `Art Abra, Fixture Set 1, Normal, copy 1, Art ${s}`
+    ).click();
+    await expect(art).toHaveAttribute(
+      "src",
+      "https://assets.tcgdex.net/en/fixture/card-1/high.webp"
+    );
+
+    // Registered last, so it answers before signIn's artwork route.
+    await page.route(/\/high\.webp$/, (route) =>
+      route.fulfill({ status: 404 })
+    );
+    await tile(
+      page,
+      `Art Pikachu, Fixture Set 2, Unspecified Variant, copy 1, Art ${s}`
+    ).click();
+    await expect(art).toHaveAttribute(
+      "src",
+      "https://assets.tcgdex.net/en/fixture/card-2/low.webp"
+    );
+
+    // Another card starts again from its large artwork.
+    await page.unroute(/\/high\.webp$/);
+    await tile(
+      page,
+      `Art Abra, Fixture Set 1, Normal, copy 1, Art ${s}`
+    ).click();
+    await expect(art).toHaveAttribute(
+      "src",
+      "https://assets.tcgdex.net/en/fixture/card-1/high.webp"
+    );
+  });
 });
 
 test.describe("phone", () => {
