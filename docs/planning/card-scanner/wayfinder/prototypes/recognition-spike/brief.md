@@ -2,7 +2,7 @@
 
 **Map:** [Card scanner decision map](../../map.md)
 
-**Status:** not started. Synthetic work can start now; the final check waits on about 30 of the owner's photos.
+**Status:** closed 2026-10-22 by the owner, short of the bar. See the [findings](../../research/recognition-spike-findings.md).
 
 ## Question
 
