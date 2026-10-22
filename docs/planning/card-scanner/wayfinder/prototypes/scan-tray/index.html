@@ -1,0 +1,707 @@
+<!doctype html>
+<!--
+  PROTOTYPE, throw me away. Scan tray for card scanner map ticket 3. Simulated camera; no artwork; nothing saved. Icons: Lucide (ISC).
+  Colours and spacing come from web/src/tokens.css. Phone rules use the container query on .app, because the viewport query does not fire inside the desktop phone frame.
+-->
+<html lang="en" data-theme="prize-gold">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Scan tray prototype</title>
+<link rel="stylesheet" href="../../../../../../web/src/tokens.css">
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body { background: var(--color-bg); color: var(--color-text); font: var(--font-size-md)/var(--line-height) var(--font-sans); -webkit-text-size-adjust: 100%; }
+  button, input, textarea, select { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  button:disabled { cursor: not-allowed; }
+  .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+  .num { font-variant-numeric: var(--numeric); }
+  .muted { color: var(--color-text-muted); }
+  .subtle { color: var(--color-text-subtle); }
+  .ic { flex: none; }
+  :focus-visible { outline: var(--focus-width) solid var(--color-focus); outline-offset: var(--focus-offset); }
+  h1 { font-size: var(--font-size-xl); margin: 0; } h2 { font-size: var(--font-size-lg); margin: 0; } h3 { font-size: var(--font-size-md); margin: 0; }
+  p { margin: 0; }
+
+  /* Stage and phone frame */
+  #stage { min-height: 100vh; }
+  #stage.framed { display: flex; justify-content: center; align-items: flex-start; padding: 24px 0 96px; background: #0a0909; }
+  #stage.framed .app { width: 440px; height: 956px; flex: none; border: 1px solid var(--color-border-strong); border-radius: 24px; overflow: hidden; transform: translateZ(0); }
+  .app { container: app / inline-size; position: relative; background: var(--color-bg); }
+  .app.pg:not(.desk) { display: flex; flex-direction: column; }
+  .app.pg.desk { min-height: 100vh; }
+  .app.scanner.desk { max-width: 480px; margin: 0 auto; height: calc(100dvh - 56px); overflow: hidden; border-inline: 1px solid var(--color-border); }
+  html.vp-phone #stage { min-height: 0; }
+  html.vp-phone .app { height: calc(100dvh - 44px); overflow: hidden; }
+  html.vp-phone.nobar .app { height: 100dvh; }
+
+  /* Prototype chrome */
+  #bar { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 900; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: center; max-width: calc(100vw - 24px); padding: 6px 10px; border-radius: 18px; background: #5b2bd6; color: #fff; box-shadow: 0 6px 20px rgba(0,0,0,.45); font-size: 12px; }
+  #bar button, #bar select { height: 28px; max-width: 220px; padding: 0 10px; border-radius: 999px; border: 1px solid rgba(255,255,255,.35); background: #4a20b0; color: #fff; font-size: 12px; }
+  #bar button { background: transparent; }
+  #bar button[aria-pressed="true"] { background: #fff; color: #5b2bd6; font-weight: 700; }
+  #bar .t { opacity: .8; padding: 0 4px; } #bar label { display: inline-flex; gap: 4px; align-items: center; }
+  html.vp-phone #bar { position: static; transform: none; width: 100%; max-width: none; height: 44px; border-radius: 0; flex-wrap: nowrap; justify-content: flex-start; overflow-x: auto; box-shadow: none; padding: 0 10px; font-size: 16px; }
+  html.vp-phone #bar > *, html.vp-phone #bar label > * { flex: none; }
+  html.vp-phone #bar button, html.vp-phone #bar select { height: 32px; font-size: 16px; }
+  html.nobar #bar { display: none; }
+  #ptab { display: none; position: fixed; z-index: 900; top: calc(env(safe-area-inset-top) + 4px); left: 50%; transform: translateX(-50%); width: 28px; height: 28px; border-radius: 999px; border: 0; background: #5b2bd6; color: #fff; font-weight: 700; font-size: 14px; padding: 0; }
+  html.nobar #ptab { display: block; }
+  #pnote { position: fixed; z-index: 950; left: 50%; top: 52px; transform: translateX(-50%); max-width: 92vw; padding: 4px 10px; border-radius: 8px; background: #5b2bd6; color: #fff; font-size: 12px; pointer-events: none; text-align: center; }
+  #pnote[hidden] { display: none; }
+  .proto-note { display: inline-block; margin: 6px 0 0; padding: 0 6px; border: 1px dashed var(--color-control-outline); border-radius: 4px; font-size: var(--font-size-2xs); color: var(--color-text-subtle); vertical-align: middle; }
+
+  /* Controls */
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: var(--size-control); padding: 0 12px; border-radius: var(--radius-control); border: 1px solid var(--color-control-outline); background: var(--color-surface-raised); font-size: var(--font-size-control); white-space: nowrap; }
+  .btn:hover:not(:disabled) { border-color: var(--color-accent-border); }
+  .btn.primary { background: var(--color-accent); border-color: var(--color-accent); color: var(--color-on-accent); font-weight: 600; }
+  .btn.primary[aria-disabled="true"] { opacity: .45; cursor: not-allowed; }
+  .btn.quiet { background: transparent; border-color: transparent; color: var(--color-text-muted); }
+  .btn.danger { background: var(--color-danger-fill); border-color: var(--color-danger-border); color: var(--color-danger); }
+  .btn:disabled { opacity: .45; }
+  .btn.wide { width: 100%; }
+  .pill { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: var(--radius-round); border: 1px solid var(--color-border-strong); font-size: var(--font-size-xs); color: var(--color-text-muted); white-space: nowrap; vertical-align: middle; }
+  .pill.warn { border-color: var(--color-warning); color: var(--color-warning); }
+  .input, select.input { height: var(--size-control); width: 100%; padding: 0 10px; border-radius: var(--radius-control); border: 1px solid var(--color-control-outline); background: var(--color-surface); font-size: var(--font-size-control); min-width: 0; }
+  .ib { width: 44px; height: 44px; display: inline-grid; place-items: center; padding: 0; border: 0; border-radius: var(--radius-round); background: transparent; color: var(--color-text); }
+  .ib.av > span { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 50%; background: var(--color-surface-selected); color: var(--color-accent-strong); font-weight: 700; font-size: var(--font-size-sm); }
+  .lbl { font-size: var(--font-size-xs); color: var(--color-text-subtle); text-transform: uppercase; letter-spacing: 1px; }
+  .meta { font-size: var(--font-size-sm); color: var(--color-text-muted); }
+  .panel { border: 1px solid var(--color-border); border-radius: var(--radius-panel); background: var(--color-surface); }
+  .pad { padding: 12px 14px; } .stack { display: grid; gap: 10px; } .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .note { padding: 10px 12px; border: 1px solid var(--color-warning); border-radius: var(--radius-panel); font-size: var(--font-size-control); display: grid; gap: 6px; justify-items: start; }
+  .art { width: 36px; aspect-ratio: var(--tile-aspect); border-radius: 4px; border: 1px solid var(--color-border); flex: none; background: linear-gradient(160deg, var(--color-art-start), var(--color-art-end)); }
+
+  /* Chips: 44 px tap box, 30 px face */
+  .chips { display: flex; flex-wrap: wrap; gap: 0 6px; }
+  .chip { display: inline-flex; align-items: center; min-width: 44px; min-height: 44px; max-width: 100%; padding: 7px 0; border: 0; background: transparent; }
+  .chip .face { display: inline-flex; align-items: center; justify-content: center; min-height: 30px; padding: 0 12px; border-radius: var(--radius-round); border: 1px solid var(--color-border-strong); font-size: var(--font-size-sm); color: var(--color-text-muted); line-height: 1.2; text-align: center; transition: background var(--motion-duration); }
+  .chip[aria-pressed="true"] .face { border-color: var(--color-accent-border); background: var(--color-accent-fill); color: var(--color-accent-strong); }
+  .chip:disabled .face { opacity: .55; }
+
+  /* Page chrome (Collection, Import, Can't start) */
+  .hdr { position: sticky; top: 0; z-index: 10; height: var(--layout-header-height); display: flex; align-items: center; gap: 24px; padding: 0 24px; border-bottom: 1px solid var(--color-border); background: var(--color-bg); }
+  .word { font-size: var(--font-size-sm); font-weight: 700; letter-spacing: 2px; text-transform: uppercase; white-space: nowrap; } .word b { color: var(--color-accent); margin-right: 8px; }
+  .tabs { display: flex; gap: 4px; } .tab { height: 32px; padding: 0 12px; display: inline-grid; place-items: center; border-radius: var(--radius-control); color: var(--color-text-muted); font-size: var(--font-size-control); }
+  .tab[aria-current="page"] { background: var(--color-surface-selected); color: var(--color-accent-strong); font-weight: 600; }
+  .phdr { flex: none; display: flex; align-items: center; justify-content: space-between; height: calc(56px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 6px 0 var(--layout-gutter); border-bottom: 1px solid var(--color-border); }
+  .hacts { display: flex; }
+  .tabbar { flex: none; display: flex; height: calc(var(--layout-tabbar-height) + env(safe-area-inset-bottom)); padding-bottom: env(safe-area-inset-bottom); border-top: 1px solid var(--color-border); background: var(--color-bg); }
+  .tabbar button { flex: 1; min-height: 44px; min-width: 0; border: 0; background: transparent; color: var(--color-text-muted); font-size: var(--font-size-sm); }
+  .tabbar button[aria-current="page"] { color: var(--color-accent-strong); font-weight: 600; }
+  .page { max-width: 1240px; margin: 0 auto; padding: 24px var(--layout-gutter) 140px; }
+  .pgm { flex: 1; min-height: 0; overflow-y: auto; padding: 16px var(--layout-gutter) 24px; }
+  .pagehead { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; } .pagehead .grow { flex: 1; min-width: 200px; }
+  .lede { margin-top: 4px; color: var(--color-text-muted); font-size: var(--font-size-control); }
+  .actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin: 12px 0; }
+  .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--tile-small), 1fr)); gap: var(--tile-gap-row) var(--tile-gap-column); }
+  .tile { aspect-ratio: var(--tile-aspect); border-radius: var(--radius-card); background: linear-gradient(160deg, var(--color-art-start), var(--color-art-end)); border: 1px solid var(--color-border); position: relative; }
+  .tile span { position: absolute; right: 6px; bottom: 6px; font-size: var(--font-size-xs); background: var(--color-bg); border-radius: var(--radius-round); padding: 0 6px; }
+  .ws { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 20px; margin-top: 16px; align-items: start; }
+  .side-loc { display: grid; gap: 2px; font-size: var(--font-size-control); } .side-loc div { padding: 6px 10px; border-radius: var(--radius-control); color: var(--color-text-muted); }
+  .side-loc div.on { background: var(--color-surface-selected); color: var(--color-accent-strong); font-weight: 600; } .side-loc div.kid { padding-left: 24px; }
+  .imp-grid { margin-top: 20px; display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 20px; align-items: start; }
+  .imp-grid.one { grid-template-columns: minmax(0, 560px); }
+  .seg { display: inline-flex; max-width: 100%; border: 1px solid var(--color-control-outline); border-radius: var(--radius-control); overflow: hidden; }
+  .seg button { height: calc(var(--size-control) - 2px); padding: 0 12px; border: 0; background: transparent; font-size: var(--font-size-control); color: var(--color-text-muted); }
+  .seg button[aria-pressed="true"] { background: var(--color-surface-selected); color: var(--color-accent-strong); font-weight: 600; }
+  .blk { max-width: 560px; margin: 16px 0; display: grid; gap: 12px; justify-items: start; padding: 16px; }
+  details > summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; color: var(--color-text-muted); font-size: var(--font-size-control); }
+  details p { margin: 0 0 8px; font-size: var(--font-size-control); color: var(--color-text-muted); }
+  .toast { position: absolute; left: 50%; bottom: calc(var(--layout-tabbar-height) + env(safe-area-inset-bottom) + 12px); transform: translateX(-50%); max-width: 92%; display: flex; gap: 14px; align-items: center; padding: 10px 14px; border-radius: var(--radius-panel); background: var(--color-surface-raised); border: 1px solid var(--color-border-strong); box-shadow: 0 8px 24px var(--color-shadow-strong); font-size: var(--font-size-control); z-index: 30; }
+  .app.desk .toast { position: fixed; bottom: 76px; }
+
+  /* Scanner */
+  .scn { position: absolute; inset: 0; overflow: hidden; background: #26231f; }
+  .stop { position: absolute; z-index: 8; left: 0; right: 0; top: 0; height: calc(56px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 6px 0; display: flex; align-items: center; justify-content: space-between; pointer-events: none; }
+  .stop .ib { pointer-events: auto; background: color-mix(in srgb, #000 45%, transparent); }
+  .camarea { position: absolute; left: 0; right: 0; top: calc(56px + env(safe-area-inset-top)); bottom: calc(232px + env(safe-area-inset-bottom)); display: flex; align-items: center; justify-content: center; }
+  .hintp { position: absolute; z-index: 2; top: 8px; left: 50%; transform: translateX(-50%); width: max-content; max-width: 92%; padding: 6px 12px; border-radius: var(--radius-round); background: color-mix(in srgb, var(--color-bg) 82%, transparent); border: 1px solid var(--color-border-strong); font-size: var(--font-size-control); text-align: center; }
+  .guide { position: relative; height: min(80%, calc(86cqw * 88 / 63)); aspect-ratio: 63 / 88; border: 2px solid color-mix(in srgb, var(--color-text) 80%, transparent); border-radius: 10px; transition: border-color var(--motion-duration) var(--motion-ease); }
+  .guide::after { content: ""; position: absolute; z-index: 2; inset: 0; border-radius: 8px; background: var(--color-accent-wash); opacity: 0; transition: opacity var(--motion-duration) var(--motion-ease); pointer-events: none; }
+  .guide.flash { border-color: var(--color-accent); } .guide.flash::after { opacity: 1; }
+  .pcard { position: absolute; z-index: 1; left: 4%; top: 4%; width: 92%; height: 92%; border-radius: 6px; transform: rotate(-2deg); overflow: hidden; }
+  .pcard i { position: absolute; left: 0; right: 0; bottom: 0; height: 33%; background: rgba(255,255,255,.2); }
+  .pcard small { position: absolute; right: 6px; bottom: 5px; font-size: 10px; color: #1a1816; }
+  .pcard b { position: absolute; left: 8px; right: 8px; top: 10px; font-size: var(--font-size-sm); }
+  .shrow { position: absolute; z-index: 4; left: 0; right: 0; bottom: calc(136px + env(safe-area-inset-bottom)); height: 96px; display: grid; place-items: center; }
+  .shutter { width: 72px; height: 72px; padding: 0; position: relative; border-radius: 50%; border: 4px solid var(--color-text); background: transparent; }
+  .shutter::after { content: ""; position: absolute; inset: 4px; border-radius: 50%; background: var(--color-text); }
+  .rdy { display: grid; gap: 14px; justify-items: center; text-align: center; }
+  .rdy .guide { height: min(46%, calc(60cqw * 88 / 63)); }
+  .camarea.rd { flex-direction: column; gap: 18px; }
+  .pbar { width: min(240px, 70cqw); height: 6px; border-radius: 99px; background: var(--color-surface-raised); } .pbar > i { display: block; height: 100%; border-radius: inherit; background: var(--color-accent); }
+  .strip { position: absolute; z-index: 6; left: 0; right: 0; top: 0; bottom: 85%; border: 0; border-radius: 0; padding: calc(56px + env(safe-area-inset-top)) 0 0; display: grid; place-items: center; background: var(--color-scrim); color: var(--color-text); font-size: var(--font-size-control); }
+
+  .sheet { position: absolute; z-index: 10; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column; background: var(--color-surface); border-top: 1px solid var(--color-border-strong); border-radius: var(--radius-dialog) var(--radius-dialog) 0 0; box-shadow: 0 -8px 24px var(--color-shadow-strong); padding-bottom: env(safe-area-inset-bottom); }
+  .sheet.peek { height: calc(136px + env(safe-area-inset-bottom)); }
+  .sheet.open { height: 85%; animation: up var(--motion-duration) var(--motion-ease); }
+  @keyframes up { from { transform: translateY(24px); } to { transform: none; } }
+  .grab { flex: none; width: 36px; height: 4px; margin: 8px auto 4px; border-radius: 4px; background: var(--color-border-strong); }
+  .sh-h { flex: none; display: flex; align-items: center; gap: 10px; padding: 0 12px; min-height: 48px; touch-action: none; }
+  .sh-h h2 { font-size: var(--font-size-lg); } .sh-h .tot { color: var(--color-text-muted); font-size: var(--font-size-control); margin-right: auto; }
+  .crow { margin: 0 12px; min-height: 56px; display: flex; align-items: center; gap: 10px; padding: 6px 8px; text-align: left; border: 1px solid var(--color-border); border-radius: var(--radius-control); background: var(--color-surface-raised); }
+  .crow .art { width: 28px; } .crow .tx { flex: 1; min-width: 0; } .crow .tx > * { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .crow.rise { animation: rise var(--motion-duration) var(--motion-ease); }
+  @keyframes rise { from { transform: translateY(16px); opacity: 0; } to { transform: none; opacity: 1; } }
+  .emptyl { padding: 8px 14px; color: var(--color-text-muted); font-size: var(--font-size-control); }
+  .destbtn { flex: none; margin: 0 12px 4px; min-height: 44px; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 12px; border-radius: var(--radius-control); border: 1px solid var(--color-control-outline); background: var(--color-surface-raised); font-size: var(--font-size-control); }
+  .destbtn .v { display: inline-flex; align-items: center; gap: 4px; font-weight: 600; min-width: 0; text-align: right; }
+  .sh-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 0 12px 8px; display: grid; gap: 10px; align-content: start; }
+  .sh-f { flex: none; padding: 10px 12px 12px; border-top: 1px solid var(--color-border); display: grid; gap: 6px; background: var(--color-surface); }
+  .fl { font-size: var(--font-size-control); color: var(--color-text-muted); } .fl.warn { color: var(--color-warning); }
+  .grp-h { display: flex; align-items: center; gap: 8px; padding-top: 6px; font-size: var(--font-size-md); font-weight: 600; } .grp-h .num { color: var(--color-warning); }
+  .sep { border-top: 1px solid var(--color-border-strong); margin: 4px 0; }
+  .trow { display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; gap: 8px 10px; padding: 10px 0; border-bottom: 1px solid var(--color-border); align-items: start; }
+  .trow.needs { background: color-mix(in srgb, var(--color-warning) 6%, transparent); }
+  .trow .mid { min-width: 0; display: grid; gap: 2px; justify-items: start; } .trow .nm { font-weight: 700; overflow-wrap: anywhere; } .trow .mid > * { max-width: 100%; }
+  .step { display: flex; align-items: center; } .step .num { min-width: 28px; text-align: center; font-weight: 700; }
+  .sbtn { width: 44px; height: 44px; display: grid; place-items: center; padding: 0; border-radius: var(--radius-control); border: 1px solid var(--color-control-outline); background: var(--color-surface-raised); }
+  .sbtn:disabled { opacity: .4; }
+  .resolver { width: 100%; margin-top: 4px; padding: 10px; display: grid; gap: 8px; border-radius: var(--radius-control); border: 1px solid var(--color-accent-outline); background: var(--color-surface-raised); }
+  .cand { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 8px; align-items: center; width: 100%; min-height: 44px; padding: 6px 8px; text-align: left; border: 1px solid var(--color-border); border-radius: var(--radius-control); background: var(--color-surface); font-size: var(--font-size-control); }
+  .cand .art { width: 24px; } .cand[aria-pressed="true"] { border-color: var(--color-accent-border); background: var(--color-surface-selected); }
+  .pickf { padding: 0 8px; } .warnt { color: var(--color-warning); }
+
+  .scrim { position: absolute; inset: 0; z-index: 20; background: var(--color-scrim); }
+  .dlg { position: absolute; z-index: 30; left: 0; right: 0; bottom: 0; max-height: 85%; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding: 16px 14px calc(16px + env(safe-area-inset-bottom)); background: var(--color-surface); border-top: 1px solid var(--color-border-strong); border-radius: var(--radius-dialog) var(--radius-dialog) 0 0; }
+  .dlg.tall { height: 85%; } .dlg .btns { display: grid; gap: 8px; }
+  .app.desk .dlg { left: 50%; right: auto; top: 50%; bottom: auto; width: min(480px, 92%); transform: translate(-50%, -50%); border: 1px solid var(--color-border-strong); border-radius: var(--radius-dialog); }
+  .radio { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 48px; padding: 0 12px; text-align: left; border: 1px solid var(--color-border); border-radius: var(--radius-control); background: var(--color-surface-raised); }
+  .radio::before { content: ""; flex: none; width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--color-control-outline); }
+  .radio[aria-checked="true"] { border-color: var(--color-accent-border); background: var(--color-surface-selected); }
+  .radio[aria-checked="true"]::before { border-color: var(--color-accent); background: radial-gradient(var(--color-accent) 0 45%, transparent 50%); }
+  .radios { display: grid; gap: 8px; }
+
+  @container app (max-width: 760px) {
+    .btn { height: var(--size-control-phone); }
+    .input, select.input { height: var(--size-control-phone); font-size: 16px; }
+    .seg button { height: 44px; }
+    .imp-grid { grid-template-columns: 1fr; } .ws { grid-template-columns: 1fr; }
+  }
+  @media (prefers-reduced-motion: reduce) { .sheet.open, .crow.rise { animation: none; } }
+</style>
+</head>
+<body>
+<div id="bar" data-proto></div>
+<button id="ptab" data-proto data-a="showbar" aria-label="Show prototype bar">P</button>
+<div id="pnote" data-proto hidden></div>
+<div id="stage"><div class="app" id="app"></div></div>
+<div id="live" class="sr-only" aria-live="polite"></div>
+<script>
+// ---------- Icons (Lucide, ISC) ----------
+const ICONS = {"camera":"<path d=\"M13.997 4a2 2 0 0 1 1.76 1.05l.486.9A2 2 0 0 0 18.003 7H20a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h1.997a2 2 0 0 0 1.759-1.048l.489-.904A2 2 0 0 1 10.004 4z\"/><circle cx=\"12\" cy=\"13\" r=\"3\"/>","camera-off":"<path d=\"M14.564 14.558a3 3 0 1 1-4.122-4.121\"/><path d=\"m2 2 20 20\"/><path d=\"M20 20H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h1.997a2 2 0 0 0 .819-.175\"/><path d=\"M9.695 4.024A2 2 0 0 1 10.004 4h3.993a2 2 0 0 1 1.76 1.05l.486.9A2 2 0 0 0 18.003 7H20a2 2 0 0 1 2 2v7.344\"/>","x":"<path d=\"M18 6 6 18\"/><path d=\"m6 6 12 12\"/>","volume-x":"<path d=\"M11 4.702a.7.7 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.7.7 0 0 0 11 19.298z\"/><path d=\"m16.5 14.5 5-5\"/><path d=\"m16.5 9.5 5 5\"/>","volume-2":"<path d=\"M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298z\"/><path d=\"M16 9a5 5 0 0 1 0 6\"/><path d=\"M19.364 18.364a9 9 0 0 0 0-12.728\"/>","chevron-down":"<path d=\"m6 9 6 6 6-6\"/>","minus":"<path d=\"M5 12h14\"/>","plus":"<path d=\"M5 12h14\"/><path d=\"M12 5v14\"/>","trash":"<path d=\"M10 11v6\"/><path d=\"M14 11v6\"/><path d=\"M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6\"/><path d=\"M3 6h18\"/><path d=\"M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2\"/>","search":"<path d=\"m21 21-4.34-4.34\"/><circle cx=\"11\" cy=\"11\" r=\"8\"/>","bell":"<path d=\"M10.268 21a2 2 0 0 0 3.464 0\"/><path d=\"M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326\"/>","users":"<path d=\"M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2\"/><path d=\"M16 3.128a4 4 0 0 1 0 7.744\"/><path d=\"M22 21v-2a4 4 0 0 0-3-3.87\"/><circle cx=\"9\" cy=\"7\" r=\"4\"/>","wifi-off":"<path d=\"M12 20h.01\"/><path d=\"M8.5 16.429a5 5 0 0 1 7 0\"/><path d=\"M5 12.859a10 10 0 0 1 5.17-2.69\"/><path d=\"M19 12.859a10 10 0 0 0-2.007-1.523\"/><path d=\"M2 8.82a15 15 0 0 1 4.177-2.643\"/><path d=\"M22 8.82a15 15 0 0 0-11.288-3.764\"/><path d=\"m2 2 20 20\"/>"}
+;
+const ic = (n, s = 20) => `<svg class="ic" width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[n]}</svg>`;
+const $ = s => document.querySelector(s);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const plural = (n, one, many) => n === 1 ? one : many;   // as manageLocationsModel.ts
+const cnt = n => `${n} ${plural(n, 'card', 'cards')}`;
+const mq = q => matchMedia(q).matches;
+
+// ---------- Mock catalog ----------
+const FILLN = ['Iono', 'Snorlax', 'Ralts', 'Charizard ex', 'Rare Candy', 'Basic Lightning Energy'];
+const E = (key, labels, off = []) => labels.map(l => ({ id: `${key}/${l}`, label: l, active: !off.includes(l) }));
+function mkFixtures() {
+  const F = (key, name, set, code, num, art, labels, o = {}) => ({ key, name, set, code, num, art, editions: E(key, labels, o.off), cands: o.cands || [key], missing: !!o.missing });
+  const RHP = 'Reverse Holo, Poké Ball', RHM = 'Reverse Holo, Master Ball';
+  return {
+    iono: F('iono', 'Iono', 'Paldea Evolved', 'PAL', '185', '#b07cc0', ['Holo']),
+    snorlax: F('snorlax', 'Snorlax', 'Lost Origin', 'LOR', '143', '#5f7f9a', ['Holo', 'Normal', 'Unspecified Variant'], { cands: ['snorlax', 'arven'] }),
+    ralts: F('ralts', 'Ralts', 'Scarlet & Violet', 'SVI', '084', '#7fb3a0', ['Normal', 'Reverse Holo']),
+    charizard: F('charizard', 'Charizard ex', 'Obsidian Flames', 'OBF', '125', '#c8693a', ['Holo', 'Reverse Holo']),
+    candySVI: F('candySVI', 'Rare Candy', 'Scarlet & Violet', 'SVI', '191', '#9aa7b8', ['Normal', 'Reverse Holo'], { cands: ['candySVI', 'candyPAL'] }),
+    candyPAL: F('candyPAL', 'Rare Candy', 'Paldea Evolved', 'PAL', '189', '#9aa7b8', ['Normal', 'Reverse Holo'], { cands: ['candyPAL', 'candySVI'] }),
+    lucario: F('lucario', 'Lucario', 'Surging Sparks', 'SSP', '114', '#5d7fb8', ['Normal', 'Reverse Holo', RHP]),
+    energy: F('energy', 'Basic Lightning Energy', 'Scarlet & Violet Energies', 'SVE', '004', null, ['Normal']),
+    dreepy: F('dreepy', 'Dreepy', 'Twilight Masquerade', 'TWM', '128', '#6f8f7a', ['Normal', 'Reverse Holo', RHP, RHM], { off: ['Reverse Holo'] }),
+    zeraora: F('zeraora', 'Zeraora', 'Stellar Crown', 'SCR', '051', '#8c6fb0', ['Holo'], { missing: true }),
+    mew: F('mew', 'Mew', 'Black Star Promos', 'PR', 'SV053', '#c98fa6', ['Holo'], { off: ['Holo'] }),
+    arven: F('arven', 'Arven', 'Obsidian Flames', 'OBF', '186', '#a07a5a', ['Normal', 'Reverse Holo', 'Unspecified Variant'])
+  };
+}
+const FIXTURES = {}; const FILL = {};
+function seedFixtures() { Object.keys(FIXTURES).forEach(k => delete FIXTURES[k]); Object.assign(FIXTURES, mkFixtures()); }
+const P = k => FIXTURES[k] || (/^fill-\d+$/.test(k) ? (FILL[k] = FILL[k] || mkFill(k)) : null);
+function mkFill(k) { const n = +k.slice(5); return { key: k, name: FILLN[(n - 1) % 6], set: 'Practice Set', code: 'PS', num: String(n).padStart(3, '0'), art: '#6b6259', editions: E(k, ['Normal']), cands: [k], missing: false }; }
+const activeEds = p => p.editions.filter(e => e.active);
+const edOf = (p, id) => p.editions.find(e => e.id === id);
+const cardText = p => `${p.name} · ${p.set} ${p.num}`;
+const artOf = p => p && p.art ? `background:${p.art}` : '';
+
+/* The finish rule (owner decision, amended 2026-10-22). Over the Printing's ACTIVE Editions, in the catalog's
+   descriptor_key order (the array order here, by fiat), pick the first that applies:
+   1. no active Edition: null (the Printing cannot be added);
+   2. exactly one active Edition: that one;
+   3. an active "Unspecified Variant": that one;
+   4. an active "Normal": that one (the first, when several match);
+   5. otherwise the first active Edition. */
+function defaultEdition(editions) {
+  const a = editions.filter(e => e.active);
+  if (!a.length) return null;
+  if (a.length === 1) return a[0];
+  return a.find(e => e.label === 'Unspecified Variant') || a.find(e => e.label === 'Normal') || a[0];
+}
+
+// ---------- Copy ----------
+const H_UNRES = "Couldn't add this card. Tap the shutter to search.";
+const H_OFF = "Can't reach PrizeCheck. Check your connection and scan again.";
+const H_MAX = "That's the most copies of one card in a tray.";
+const H_DEF = ''; // owner (P3): no standing guide note
+const GATE = { soft: 'Hold steady', dark: 'More light', glare: 'Tilt to avoid glare' };
+const LEAVES = ['Unsorted', 'Binders / Binder 1', 'Binders / Binder 2', 'Trade box'];
+
+// ---------- States and params ----------
+const DEF = { screen: 'collection', why: 'denied', tray: 'some', sheet: 'peek', gate: 'ok', hint: 'none', net: 'on', stale: '0', staleview: 'a', save: 'none', dialog: 'none', search: '0', sound: '0', lockdemo: '0', hold: '0', frame: '', bar: '1' };
+const STATES = [
+  ['Entry', 'Collection: Scan cards', 'screen=collection'],
+  ['Entry', 'Collection Import: Camera', 'screen=import'],
+  ['Entry', 'Phone header shortcut', 'screen=collection&frame=phone'],
+  ['Start', "Can't start: camera blocked", 'screen=blocked&why=denied'],
+  ['Start', "Can't start: no camera", 'screen=blocked&why=nocamera'],
+  ['Start', "Can't start: scanner not ready", 'screen=blocked&why=noindex'],
+  ['Start', 'Getting ready (held)', 'screen=ready&hold=1&tray=empty'],
+  ['Start', 'Getting ready (animated)', 'screen=ready&tray=empty'],
+  ['Camera', 'Camera, empty tray', 'screen=scan&tray=empty'],
+  ['Camera', 'Hold steady', 'screen=scan&gate=soft'],
+  ['Camera', 'More light', 'screen=scan&gate=dark'],
+  ['Camera', 'Glare', 'screen=scan&gate=glare'],
+  ['Camera', 'Lock cue', 'screen=scan&lockdemo=1'],
+  ['Camera', 'Lock sound on', 'screen=scan&sound=1'],
+  ['Tray', 'Tray open', 'screen=scan&sheet=open'],
+  ['Tray', 'Miss: search', 'screen=scan&search=1'],
+  ['Tray', "Couldn't add this card", 'screen=scan&hint=unresolved'],
+  ['Tray', 'Destination picker', 'screen=scan&sheet=open&dialog=dest'],
+  ['Tray', 'Full tray', 'screen=scan&tray=full&dialog=full'],
+  ['Tray', 'Clear tray', 'screen=scan&sheet=open&dialog=clear'],
+  ['Problems', 'Offline tray', 'screen=scan&sheet=open&net=off'],
+  ['Problems', 'Offline lock', 'screen=scan&net=off&hint=offline'],
+  ['Problems', 'Stale rows, in place (A)', 'screen=scan&sheet=open&stale=1&staleview=a'],
+  ['Problems', 'Stale rows, grouped (B)', 'screen=scan&sheet=open&stale=1&staleview=b'],
+  ['Problems', 'Finishes changed at save', 'screen=scan&sheet=open&save=editions'],
+  ['Problems', 'Location changed at save', 'screen=scan&sheet=open&save=destination'],
+  ['Save', 'Saving (frozen)', 'screen=scan&sheet=open&save=pending'],
+  ['Save', "Save didn't finish", 'screen=scan&sheet=open&save=retry'],
+  ['Save', '29-day note', 'screen=scan&sheet=open&save=old'],
+  ['Save', 'After Confirm', 'screen=done']
+];
+const norm = q => Object.assign({}, DEF, Object.fromEntries(new URLSearchParams(q)));
+const matchIdx = p => STATES.findIndex(s => { const n = norm(s[2]); return Object.keys(DEF).filter(k => k !== 'frame' && k !== 'bar').every(k => n[k] === p[k]); });
+
+// ---------- State ----------
+const S = {}; let T = {}; let AC = null;
+const clearTimers = () => { Object.values(T).forEach(t => { clearTimeout(t); clearInterval(t); }); T = {}; };
+const total = () => S.rows.reduce((n, r) => n + r.count, 0);
+const distinct = () => new Set(S.rows.map(r => r.eid));
+const needsN = () => S.rows.filter(r => r.needs).length;
+const frozen = () => S.save === 'pending' || S.save === 'retry';
+const paused = () => S.sheet === 'open' || !!S.search || S.dialog !== 'none';
+const lastSeg = p => p.split(' / ').pop();
+const rowCands = pid => P(pid).cands.filter(k => P(k) && !P(k).missing && defaultEdition(P(k).editions)).slice(0, 3);
+const mkRow = (id, pid, label, count, needs = false) => ({ id, pid, eid: `${pid}/${label}`, count, cands: rowCands(pid), needs });
+
+function buildTray(p) {
+  if (p.tray === 'empty') return [];
+  const R = mkRow;
+  const rows = [R('r1', 'ralts', 'Normal', 3), R('r2', 'candySVI', 'Normal', 4), R('r3', 'snorlax', 'Unspecified Variant', 1), R('r4', 'ralts', 'Reverse Holo', 1), R('r5', 'iono', 'Holo', 1), R('r6', 'charizard', 'Holo', 1), R('r7', 'energy', 'Normal', 10)];
+  if (p.stale === '1') { rows.splice(5, 0, R('s2', 'zeraora', 'Holo', 1, true)); rows.splice(2, 0, R('s1', 'dreepy', 'Reverse Holo', 2, true)); }
+  if (p.tray === 'full') for (let n = 1; n <= 193; n++) rows.push(R(`f${n}`, `fill-${n}`, 'Normal', 1));
+  return rows;
+}
+function catalogChange() {   // the server's EDITIONS_CHANGED answer, as the client sees it
+  const p = FIXTURES.ralts;
+  if (edOf(p, 'ralts/Reverse Holo').active) {
+    edOf(p, 'ralts/Reverse Holo').active = false;
+    p.editions.push({ id: 'ralts/Reverse Holo, Poké Ball', label: 'Reverse Holo, Poké Ball', active: true }, { id: 'ralts/Reverse Holo, Master Ball', label: 'Reverse Holo, Master Ball', active: true });
+  }
+  S.rows.forEach(r => { if (!edOf(P(r.pid), r.eid).active) r.needs = true; });
+  S.msg = 'editions'; S.group = new Set(S.rows.filter(r => r.needs).map(r => r.id));
+}
+
+function init(p, idx) {
+  clearTimers(); const dl = !!S.downloaded;
+  if (!['phone', 'off'].includes(p.frame)) p.frame = '';
+  Object.keys(S).forEach(k => delete S[k]);
+  seedFixtures(); $('#pnote').hidden = true;
+  Object.assign(S, { p, screen: p.screen, rows: buildTray(p), sheet: p.sheet === 'open' ? 'open' : 'peek', net: p.net, staleview: p.staleview, save: ['pending', 'retry', 'old'].includes(p.save) ? p.save : 'none', msg: null, dialog: p.dialog, search: p.search === '1' ? { q: '', pick: null } : null, sound: p.sound === '1', dest: 'Unsorted', leaves: [...LEAVES], cam: { placed: null, locked: false, gate: p.gate }, hint: p.hint === 'unresolved' ? { text: H_UNRES, sticky: true } : p.hint === 'offline' ? { text: H_OFF, sticky: true } : null, res: null, nextSave: 'ok', simCard: 'ralts', downloaded: dl, seq: 100, lastId: null, group: new Set(), src: 'camera', toast: null, lastCount: 21, progress: 0, opener: null, refocus: null, rise: false, hasStale: p.stale === '1' || p.save === 'editions' });
+  S.lastId = S.rows[0] ? S.rows[0].id : null;
+  if (p.save === 'editions') catalogChange();
+  if (p.dialog === 'dest') S.opener = 'dest'; if (p.dialog === 'clear') S.opener = 'clearbtn';
+  if (p.save === 'destination') { S.leaves = LEAVES.filter(l => l !== 'Binders / Binder 2'); S.dialog = 'dest'; S.msg = 'destination'; }
+  S.group = new Set(S.rows.filter(r => r.needs).map(r => r.id));
+  const z = S.rows.find(r => r.needs && P(r.pid).missing); if (z) S.res = { id: z.id, q: '', pick: null };
+  if (p.screen === 'done') S.toast = 'Added 21 cards to Unsorted.';
+  S.stateIdx = idx !== undefined ? idx : matchIdx(p);
+  if (p.screen === 'ready') startReady();
+  if (p.lockdemo === '1' && p.screen === 'scan') { S.cam.placed = 'ralts'; T.ld = setTimeout(() => lock('ralts', 'auto'), 400); }
+  render();
+}
+function load(q, idx) { const p = norm(q), q0 = new URLSearchParams(q); if (!q0.has('frame')) p.frame = (S.p && S.p.frame) || ''; if (!q0.has('bar')) p.bar = (S.p && S.p.bar) || '1'; init(p, idx); }
+function setURL() {
+  const u = new URLSearchParams(), put = (k, v) => { if (v !== undefined && v !== DEF[k]) u.set(k, v); };
+  u.set('screen', S.screen);
+  if (S.screen === 'blocked') put('why', S.p.why);
+  put('tray', S.p.tray); put('sheet', S.sheet); put('gate', S.cam.gate);
+  put('hint', S.hint && S.hint.sticky ? (S.hint.text === H_OFF ? 'offline' : 'unresolved') : 'none');
+  put('net', S.net); put('stale', S.p.stale); put('staleview', S.staleview);
+  put('save', S.save !== 'none' ? S.save : (S.msg || 'none'));
+  put('dialog', S.dialog); put('search', S.search ? '1' : '0'); put('sound', S.sound ? '1' : '0');
+  put('lockdemo', S.p.lockdemo); put('hold', S.p.hold); put('frame', S.p.frame); put('bar', S.p.bar);
+  history.replaceState(null, '', '?' + u);
+}
+function layout() { const vp = mq('(max-width: 760px)'); const want = S.p.frame || (mq('(min-width: 761px)') ? 'phone' : 'off'); const framed = want === 'phone' && !vp; return { vp, framed, phone: framed || vp }; }
+
+// ---------- Prototype helpers ----------
+function note(t) { const n = $('#pnote'); n.textContent = t; n.hidden = false; clearTimeout(T.note); T.note = setTimeout(() => { n.hidden = true; }, 2000); }
+function unlock() { try { AC = AC || new (window.AudioContext || window.webkitAudioContext)(); if (AC.state === 'suspended') AC.resume(); } catch (e) { AC = null; } }
+function beep() { if (!AC) return; const o = AC.createOscillator(), g = AC.createGain(); o.type = 'sine'; o.frequency.value = 880; g.gain.value = 0.15; o.connect(g); g.connect(AC.destination); o.start(); o.stop(AC.currentTime + 0.06); }
+function hint(text, ms) { S.hint = { text, sticky: false }; clearTimeout(T.hint); T.hint = setTimeout(() => { S.hint = null; render(); }, ms); }
+function announce(t) { const l = $('#live'); l.textContent = ''; setTimeout(() => { l.textContent = t; }, 30); }
+function startReady() {
+  clearInterval(T.rdy); S.progress = S.p.hold === '1' ? 40 : 0; if (S.p.hold === '1') return;
+  T.rdy = setInterval(() => {
+    S.progress += 100 / 30;
+    if (S.progress >= 100) { clearInterval(T.rdy); S.downloaded = true; S.screen = 'scan'; render(); return; }
+    const b = $('#pb'); if (b) { b.setAttribute('aria-valuenow', Math.round(S.progress)); b.firstElementChild.style.width = S.progress + '%'; }
+  }, 100);
+}
+function startScan() { S.sheet = 'peek'; if (S.downloaded) S.screen = 'scan'; else { S.screen = 'ready'; startReady(); } }
+
+// ---------- Lock logic ----------
+function cue(row, via, text) {
+  S.lastId = row.id; S.rise = true; clearTimeout(T.rise); T.rise = setTimeout(() => { S.rise = false; }, 300);
+  announce(text);
+  if (via !== 'search') { if (navigator.vibrate && navigator.userActivation && navigator.userActivation.hasBeenActive) navigator.vibrate(30); if (S.sound) beep(); }
+  render(); flash();
+}
+function flash() { const g = $('.guide'); if (!g) return; g.classList.add('flash'); clearTimeout(T.flash); T.flash = setTimeout(() => { const x = $('.guide'); if (x) x.classList.remove('flash'); }, 470); }
+function lock(key, via) {
+  if (frozen() || paused()) return;
+  if (S.net === 'off') { hint(H_OFF, 4000); render(); return; }
+  const p0 = P(key);
+  if (!p0) { if (via === 'auto') note('Not recognized, so no lock'); else openSearch(); return; }
+  const cand = p0.cands.map(P).find(c => c && !c.missing && defaultEdition(c.editions));
+  if (!cand) { if (via === 'auto') { hint(H_UNRES, 4000); render(); } else openSearch(); return; }
+  const same = S.rows.find(r => r.pid === cand.key);   // rows are newest first, so this is the newest row of the Printing
+  if (same) {
+    if (same.count >= 999) { hint(H_MAX, 4000); render(); return; }
+    same.count++; S.cam.locked = true;
+    cue(same, via, `${cand.name}: ${S.rows.filter(r => r.pid === cand.key).reduce((n, r) => n + r.count, 0)} in the tray.`); return;
+  }
+  if (distinct().size >= 200) { S.cam.locked = true; S.dialog = 'full'; render(); return; }
+  const ed = defaultEdition(cand.editions);
+  const row = { id: 'r' + (++S.seq), pid: cand.key, eid: ed.id, count: 1, cands: [cand.key, ...rowCands(key).filter(k => k !== cand.key)].slice(0, 3), needs: false };
+  S.rows.unshift(row); S.cam.locked = true;
+  cue(row, via, `Added ${cardText(cand)}, ${ed.label}.`);
+}
+function openSearch() { S.search = { q: '', pick: null }; render(); }
+function addFromSearch(p, ed) {
+  if (!distinct().has(ed.id) && distinct().size >= 200) { S.search = null; S.dialog = 'full'; render(); return; }
+  const row = { id: 'r' + (++S.seq), pid: p.key, eid: ed.id, count: 1, cands: rowCands(p.key), needs: false };
+  S.rows.unshift(row); S.search = null; S.refocus = 'shutter';
+  cue(row, 'search', `Added ${cardText(p)}, ${ed.label}.`);
+}
+function setEdition(id, eid) {
+  const r = S.rows.find(x => x.id === id); if (!r || (r.eid === eid && !r.needs)) return;
+  const others = new Set(S.rows.filter(x => x !== r).map(x => x.eid));
+  if (!others.has(eid) && others.size >= 200) { S.dialog = 'full'; render(); return; }
+  r.eid = eid; r.needs = false; render();
+}
+function applyPrinting(id, p, ed) {
+  const r = S.rows.find(x => x.id === id); if (!r) return;
+  const others = new Set(S.rows.filter(x => x !== r).map(x => x.eid));
+  if (!others.has(ed.id) && others.size >= 200) { S.dialog = 'full'; render(); return; }
+  r.pid = p.key; r.eid = ed.id; r.needs = false; S.res = null; render();
+}
+
+// ---------- Save ----------
+function runSave() {
+  const m = S.nextSave; S.save = 'pending'; S.msg = null; render();
+  const later = (fn, ms) => { T.save = setTimeout(() => { fn(); render(); }, ms); };
+  if (m === 'ok') later(() => { S.lastCount = total(); S.toast = `Added ${cnt(S.lastCount)} to ${S.dest}.`; S.rows = []; S.save = 'none'; S.screen = 'done'; S.sheet = 'peek'; S.res = null; }, 600);
+  else if (m === 'editions') later(() => { S.save = 'none'; S.nextSave = 'ok'; catalogChange(); }, 600);
+  else if (m === 'location') later(() => { S.save = 'none'; S.nextSave = 'ok'; if (S.dest !== 'Unsorted') S.leaves = S.leaves.filter(l => l !== S.dest); S.dest = 'Unsorted'; S.msg = 'destination'; S.dialog = 'dest'; S.opener = null; }, 600);
+  else if (m === 'none') later(() => { S.save = 'retry'; }, 1500);
+}
+
+// ---------- Views ----------
+const chipsHTML = (eds, pressedId, act, prefix, dis) => `<div class="chips">${eds.map(e => `<button class="chip" aria-pressed="${e.id === pressedId}" data-a="${act}" data-v="${esc(prefix + e.id)}" ${dis ? 'disabled' : ''}><span class="face">${esc(e.label)}</span></button>`).join('')}</div>`;
+const tabbar = () => `<nav class="tabbar" aria-label="Main">${['Collection', 'Decks', 'Catalog', 'Loans', 'Trades'].map((t, i) => `<button data-a="np" ${i === 0 ? 'aria-current="page"' : ''}>${t}</button>`).join('')}</nav>`;
+const phoneHeader = () => `<header class="phdr"><div class="word"><b aria-hidden="true">✦</b>PrizeCheck</div><div class="hacts"><button class="ib" data-a="scan" aria-label="Scan cards">${ic('camera')}</button><button class="ib" data-a="np" aria-label="Notifications">${ic('bell')}</button><button class="ib" data-a="np" aria-label="Friends">${ic('users')}</button><button class="ib av" data-a="np" aria-label="Account"><span>R</span></button></div></header>`;
+const deskHeader = () => `<header class="hdr"><div class="word"><b aria-hidden="true">✦</b>PrizeCheck</div><nav class="tabs" aria-label="Main">${['Collection', 'Decks', 'Catalog', 'Loans', 'Trades'].map((t, i) => `<span class="tab" ${i === 0 ? 'aria-current="page"' : ''}>${t}</span>`).join('')}</nav></header>`;
+
+function pageView(L, body) {
+  const toast = S.screen === 'done' && S.toast ? `<div class="toast" role="status">${esc(S.toast)}</div>` : '';
+  return L.phone ? `${phoneHeader()}<main class="pgm">${body}</main>${tabbar()}${toast}` : `${deskHeader()}<main class="page">${body}</main>${toast}`;
+}
+function collBody(L) {
+  const done = S.screen === 'done', title = done ? lastSeg(S.dest) : 'Unsorted';
+  const copies = 212 + (done ? S.lastCount : 0), eds = 140 + (done ? 7 : 0);
+  const head = `<div class="pagehead"><div class="grow"><h1>${esc(title)}</h1><p class="lede num">${copies} ${plural(copies, 'copy', 'copies')} · ${eds} ${plural(eds, 'edition', 'editions')}</p></div></div>`;
+  const acts = `<div class="actions"><button class="btn" data-a="np">Add cards</button><button class="btn" data-a="scan">Scan cards</button><button class="btn" data-a="goimport">Import…</button>${L.phone ? '<button class="btn" data-a="np">Select</button>' : ''}</div>`;
+  const gal = `<div class="gallery">${Array.from({ length: 12 }, (_, k) => `<div class="tile"><span class="num">×${1 + k % 3}</span></div>`).join('')}</div>`;
+  if (L.phone) return head + acts + gal;
+  const side = `<aside class="side-loc panel pad"><div class="${title === 'Unsorted' ? 'on' : ''}">Unsorted</div><div>Binders</div><div class="kid ${title === 'Binder 1' ? 'on' : ''}">Binder 1</div><div class="kid ${title === 'Binder 2' ? 'on' : ''}">Binder 2</div><div class="${title === 'Trade box' ? 'on' : ''}">Trade box</div></aside>`;
+  return head.replace('</div></div>', `</div>${acts}</div>`) + `<div class="ws">${side}<div>${gal}</div></div>`;
+}
+function importBody(L) {
+  const cam = S.src === 'camera';
+  const seg = `<div class="seg" role="group" aria-label="Upload a file, paste a list or use your camera">${[['file', 'Upload a file'], ['paste', 'Paste'], ['camera', 'Camera']].map(([k, l]) => `<button aria-pressed="${S.src === k}" data-a="src" data-v="${k}">${l}</button>`).join('')}</div>`;
+  const panel = cam ? `<div class="panel pad stack"><p>Scan cards with your phone's camera. Each card waits in a tray until you add it to your Collection.</p><div><button class="btn primary" data-a="scan">Start scanning</button></div></div>`
+    : `<div class="panel pad"><span class="proto-note" data-proto>${S.src === 'file' ? 'Upload step is not part of this prototype' : 'Paste step is not part of this prototype'}</span></div>`;
+  const side = cam ? '' : `<div class="panel pad stack"><div class="lbl">Put cards in</div><select class="input" aria-label="Put cards in">${LEAVES.map(l => `<option>${l}</option>`).join('')}</select><p class="meta">Everything goes here. You can sort cards into other Locations afterwards.</p><button class="btn primary" data-a="np">Review import</button></div>`;
+  return `<div class="pagehead"><div class="grow"><h1>Import your collection</h1><p class="lede">Bring cards over from another tracker. Nothing is added until you've reviewed it.</p></div><button class="btn quiet" data-a="tocoll">Cancel</button></div>
+    <div class="imp-grid ${cam ? 'one' : ''}"><div class="stack"><h2>Your cards</h2>${seg}${panel}</div>${side}</div>`;
+}
+function blockedBody() {
+  const why = { denied: 'camera blocked', nocamera: 'no camera', noindex: 'scanner not ready' }[S.p.why] || 'camera blocked';
+  const n = total();
+  return `<h1>Scan cards</h1><span class="proto-note" data-proto>Simulating: ${why}</span>
+    <div class="panel blk">${ic('camera-off', 28)}<h2>The scanner can't start on this device</h2><p class="muted">You can still add cards by searching for them or importing them from another tracker.</p>
+    <details><summary>How to allow the camera</summary><p>On iPhone: open Settings, then Apps, then Safari, then Camera, and choose Ask or Allow. Then come back and tap Try again.</p><p>On Android: in Chrome, tap the icon to the left of the web address, then Permissions, and turn on Camera.</p></details>
+    <div class="row"><button class="btn primary" data-a="np">Search for cards</button><button class="btn" data-a="goimportfile">Import from another tracker</button><button class="btn quiet" data-a="tryagain">Try again</button></div>
+    ${n ? `<div class="row"><p class="muted num">Your tray still has ${cnt(n)}.</p><button class="btn" data-a="reviewtray">Review tray</button></div>` : ''}</div>`;
+}
+
+// ----- Scanner -----
+function pcard(k) {
+  const p = P(k), unk = k === 'unknown';
+  const bg = unk ? '#77736d' : p.art || 'linear-gradient(160deg,var(--color-art-start),var(--color-art-end))';
+  return `<div class="pcard" style="background:${bg}"><i></i>${unk ? '' : `<small>${p.code} ${p.num}</small>`}${!unk && !p.art ? `<b>${esc(p.name)}</b>` : ''}</div>`;
+}
+function hintText() { if (paused()) return 'Scanning paused'; if (S.hint) return S.hint.text; if (S.cam.gate !== 'ok') return GATE[S.cam.gate]; return H_DEF; }
+function rowFinish(r) {
+  const p = P(r.pid), ed = edOf(p, r.eid);
+  if (r.needs) return 'Pick a finish';
+  return S.net === 'off' ? '' : ed.label;
+}
+function peekHTML() {
+  const n = total(), r = S.rows.find(x => x.id === S.lastId) || S.rows[0];
+  let body = `<p class="emptyl">Cards you scan wait here until you add them.</p>`;
+  if (r) {
+    const p = P(r.pid), off = S.net === 'off', fin = rowFinish(r);
+    body = `<button class="crow ${S.rise ? 'rise' : ''}" data-a="opensheet" data-fid="peekrow"><span class="art" style="${artOf(p)}"></span><span class="tx"><b>${esc(p.name)}</b><span class="meta">${esc(off ? p.code : p.set)} ${p.num}${fin ? ' · ' + esc(fin) : ''}</span></span><b class="num">×${r.count}</b></button>`;
+  }
+  return `<section class="sheet peek" aria-label="Tray" data-swipe="up"><div class="grab" aria-hidden="true"></div><div class="sh-h"><h2>Tray</h2><span class="tot num">${n ? cnt(n) : 'Empty'}</span><button class="btn" data-a="opensheet" data-fid="review">Review</button></div>${body}</section>`;
+}
+function rowHTML(r) {
+  const p = P(r.pid), ed = edOf(p, r.eid), eds = activeEds(p), off = S.net === 'off', fz = frozen();
+  const multi = eds.length > 1 && !p.missing, single = eds.length === 1 && !p.missing;
+  const meta = off ? `${p.code} ${p.num}` : `${p.set} ${p.num}${single && !r.needs ? ' · ' + ed.label : ''}`;
+  let stale = '';
+  if (r.needs) stale = p.missing ? "This card isn't in the catalog anymore. Search for it or remove it." : `${ed.label} isn't listed for this card anymore. Pick its finish again.`;
+  const sum = S.rows.filter(x => x.eid === r.eid).reduce((n, x) => n + x.count, 0);
+  const minus = r.count === 1 ? `<button class="sbtn" data-a="dec" data-v="${r.id}" aria-label="Remove ${esc(p.name)} from the tray" ${fz ? 'disabled' : ''}>${ic('trash')}</button>` : `<button class="sbtn" data-a="dec" data-v="${r.id}" aria-label="One fewer ${esc(p.name)}" ${fz ? 'disabled' : ''}>${ic('minus')}</button>`;
+  const open = S.res && S.res.id === r.id;
+  return `<div class="trow ${r.needs ? 'needs' : ''}" data-row="${r.id}" tabindex="-1"><span class="art" style="${artOf(p)}"></span>
+    <div class="mid"><div class="nm">${esc(p.name)} ${r.needs ? '<span class="pill warn">Pick a finish</span>' : ''}</div><div class="meta">${esc(meta)}</div>${stale ? `<div class="meta warnt">${esc(stale)}</div>` : ''}
+    ${!off && multi ? chipsHTML(eds, r.needs ? null : r.eid, 'chip', r.id + '|', fz) : ''}
+    <button class="btn small" data-a="change" data-v="${r.id}" data-fid="chg-${r.id}" aria-expanded="${!!open}" ${fz || off ? 'disabled' : ''}>Change card</button>
+    ${open && !off && !fz ? resolverHTML(r) : ''}</div>
+    <div class="step">${minus}<span class="num" aria-label="${r.count} copies">${r.count}</span><button class="sbtn" data-a="inc" data-v="${r.id}" aria-label="One more ${esc(p.name)}" ${fz || r.count >= 999 || sum >= 9999 ? 'disabled' : ''}>${ic('plus')}</button></div></div>`;
+}
+function resolverHTML(r) {
+  const cands = r.cands.map(P).filter(Boolean);
+  return `<div class="resolver" data-resolver>
+    ${cands.length > 1 ? `<div class="meta">Cards this could be:</div>${cands.map(p => `<button class="cand" aria-pressed="${p.key === r.pid}" data-a="cand" data-v="${r.id}|${p.key}"><span class="art" style="${artOf(p)}"></span><span>${esc(cardText(p))}</span></button>`).join('')}` : ''}
+    <input id="rq" class="input" type="search" aria-label="Search the catalog" placeholder="Name, or set code and number" value="${esc(S.res.q)}" autocomplete="off">
+    <div id="rres" class="stack">${resultsHTML(S.res, 'r')}</div>
+    <button class="btn quiet" data-a="removerow" data-v="${r.id}">Remove from tray</button></div>`;
+}
+function matches(p, q) { return p.name.toLowerCase().includes(q) || `${p.code} ${p.num}`.toLowerCase().includes(q) || p.num.toLowerCase().includes(q); }
+function resultsHTML(st, k) {   // k: 'm' (miss sheet) or 'r' (row resolver)
+  const q = st.q.trim().toLowerCase(); if (!q) return '';
+  if (S.net === 'off') return `<p class="muted">Search isn't available right now.</p>`;
+  const hits = Object.values(FIXTURES).filter(p => !p.missing && defaultEdition(p.editions) && matches(p, q)).slice(0, 8);
+  if (!hits.length) return `<p class="muted">No matches.</p>`;
+  return hits.map(p => `<button class="cand" data-a="${k}pick" data-v="${p.key}" aria-expanded="${st.pick === p.key}"><span class="art" style="${artOf(p)}"></span><span>${esc(cardText(p))}</span></button>${st.pick === p.key ? `<div class="pickf"><div class="meta">Pick a finish</div>${chipsHTML(activeEds(p), null, k + 'chip', p.key + '|')}</div>` : ''}`).join('');
+}
+function footerHTML() {
+  const n = total(), nn = needsN(), off = S.net === 'off', fz = frozen();
+  let lines = '';
+  if (S.save === 'pending') lines += `<p class="fl">The tray is locked until this finishes.</p>`;
+  if (S.save === 'retry') lines += `<p class="fl warn">The save didn't finish. Try again; your cards won't be added twice.</p>`;
+  if (!fz && off) lines += `<p class="fl">You're offline. Reconnect to add these cards.</p>`;
+  if (!fz && nn) lines += `<p class="fl warn">${nn} ${plural(nn, 'row needs', 'rows need')} a finish.</p>`;
+  const can = n > 0 && !nn && !off && !fz;
+  let btn;
+  if (S.save === 'pending') btn = `<button id="confirm" class="btn primary wide" data-a="doConfirm" aria-disabled="true" aria-busy="true">Adding ${cnt(n)}…</button>`;
+  else if (S.save === 'retry') btn = `<button id="confirm" class="btn primary wide" data-a="doConfirm">Try again</button>`;
+  else btn = `<button id="confirm" class="btn primary wide" data-a="doConfirm" ${can ? '' : 'aria-disabled="true"'}>${n ? `Add ${cnt(n)} to ${esc(S.dest)}` : `Add cards to ${esc(S.dest)}`}</button>`;
+  return `<footer class="sh-f">${lines}${btn}</footer>`;
+}
+function sheetHTML() {
+  const n = total(), nn = needsN(), fz = frozen();
+  let top = '';
+  if (S.save === 'old') top += `<div class="note"><span>This tray may already be in your Collection. Check before confirming again.</span><button class="btn quiet" data-a="oldopen">Open ${esc(S.dest)}</button></div>`;
+  if (S.msg === 'editions' && nn) top += `<div class="note"><span>Nothing was added yet. Pick a finish for the marked cards, then add them.</span></div>`;
+  if (S.staleview === 'a' && nn) top += `<div class="note"><span>${nn} ${plural(nn, 'row needs', 'rows need')} a finish before you can add ${plural(nn, 'it', 'them')}.</span><button class="btn" data-a="showneed">Show</button></div>`;
+  let list;
+  if (!S.rows.length) list = `<p class="emptyl">The tray is empty. Cards you scan wait here until you add them.</p>`;
+  else if (S.staleview === 'b' && S.group.size) {
+    const g = S.rows.filter(r => S.group.has(r.id)), rest = S.rows.filter(r => !S.group.has(r.id));
+    list = `<h3 class="grp-h">Needs you <span class="num">${nn}</span></h3>${g.map(rowHTML).join('')}${rest.length ? '<div class="sep"></div>' : ''}${rest.map(rowHTML).join('')}`;
+  } else list = S.rows.map(rowHTML).join('');
+  return `<section class="sheet open" aria-label="Tray"><div class="grab" aria-hidden="true"></div><div class="sh-h" data-swipe="down"><h2>Tray</h2><span class="tot num">${n ? cnt(n) : 'Empty'}</span><button class="btn quiet" data-a="closesheet" data-fid="keep">Keep scanning</button></div>
+    <button class="destbtn" data-a="dest" data-fid="dest" aria-haspopup="dialog" ${fz ? 'disabled' : ''}><span class="muted">Put cards in</span><span class="v"><span>${esc(S.dest)}</span>${ic('chevron-down', 16)}</span></button>
+    <div class="sh-scroll">${top}${list}${S.rows.length ? `<div><button class="btn quiet" data-a="clearopen" data-fid="clearbtn" ${fz ? 'disabled' : ''}>Clear tray</button></div>` : ''}</div>${footerHTML()}</section>`;
+}
+function dlgHTML() {
+  const wrap = (t, body, cls = '') => `<div class="scrim" data-a="dlgclose"></div><div class="dlg ${cls}" role="dialog" aria-modal="true" aria-labelledby="dt"><h2 id="dt">${t}</h2>${body}</div>`;
+  if (S.search) return wrap('Find this card', `<p class="muted">This card wasn't recognized. Search for it to add it to the tray.</p><input id="q" data-af class="input" type="search" aria-label="Search the catalog" placeholder="Name, or set code and number" value="${esc(S.search.q)}" autocomplete="off"><div id="results" class="stack">${resultsHTML(S.search, 'm')}</div><button class="btn quiet" data-a="searchclose">Back to scanning</button>`, 'tall');
+  if (S.dialog === 'dest') return wrap('Put cards in', `${S.msg === 'destination' ? '<p class="muted">Choose where to put these cards. Nothing was added yet.</p>' : ''}<div class="radios" role="radiogroup" aria-labelledby="dt">${S.leaves.map(l => `<button class="radio" role="radio" aria-checked="${l === S.dest}" data-a="setdest" data-v="${esc(l)}">${esc(l)}</button>`).join('')}</div><p class="meta">Everything goes here. You can sort cards into other Locations afterwards.</p>`);
+  if (S.dialog === 'full') return wrap('The tray is full', `<p class="muted">A tray holds up to 200 different cards. Add these to your Collection, then keep scanning.</p><div class="btns"><button class="btn primary" data-a="fullreview" data-af>Review tray</button><button class="btn quiet" data-a="dlgclose">Not now</button></div>`);
+  if (S.dialog === 'clear') return wrap('Clear the tray?', `<p class="muted">This removes ${cnt(total())} from the tray. Nothing in your Collection changes.</p><div class="btns"><button class="btn danger" data-a="clearyes">Clear tray</button><button class="btn" data-a="dlgclose" data-af>Keep cards</button></div>`);
+  return '';
+}
+function scanView(mode) {
+  const open = S.sheet === 'open', rd = mode === 'ready';
+  const sound = `<button class="ib" data-a="sound" aria-label="Lock sound" aria-pressed="${S.sound}">${ic(S.sound ? 'volume-2' : 'volume-x')}</button>`;
+  let area;
+  if (rd) area = `<div class="camarea rd"><div class="guide" aria-hidden="true"></div><div class="rdy"><h2>Getting the scanner ready</h2><div id="pb" class="pbar" role="progressbar" aria-label="Getting the scanner ready" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(S.progress)}"><i style="width:${S.progress}%"></i></div><button class="btn quiet" data-a="tocoll">Cancel</button></div></div>`;
+  else area = `<div class="camarea">${open ? '' : `<div class="hintp" role="status"${hintText() ? '' : ' hidden'}>${esc(hintText())}</div>`}<div class="guide">${S.cam.placed ? pcard(S.cam.placed) : ''}</div></div>`;
+  const shutter = !rd && !open ? `<div class="shrow"><button id="shutter" class="shutter" data-a="shutter" data-fid="shutter" aria-label="Scan this card"></button></div>` : '';
+  const strip = open ? `<button class="strip" data-a="closesheet"><span>${rd ? '' : 'Scanning paused'}</span></button>` : '';
+  const showSheet = !rd || S.rows.length;
+  return `<div class="scn"><header class="stop"><button class="ib" data-a="close" aria-label="Close scanner" data-fid="close">${ic('x')}</button><h1 class="sr-only">Scan cards</h1>${rd ? '<span></span>' : sound}</header>
+    ${area}${strip}${shutter}${showSheet ? (open ? sheetHTML() : peekHTML()) : ''}${dlgHTML()}</div>`;
+}
+
+// ---------- Prototype bar ----------
+function barHTML(L) {
+  const sc = S.screen === 'scan', tray = sc || S.screen === 'ready';
+  let g = '', opts = S.stateIdx < 0 ? '<option value="-1" selected>Custom</option>' : '';
+  STATES.forEach((s, i) => { if (s[0] !== g) { if (g) opts += '</optgroup>'; g = s[0]; opts += `<optgroup label="${g}">`; } opts += `<option value="${i}" ${i === S.stateIdx ? 'selected' : ''}>${esc(s[1])}</option>`; });
+  opts += '</optgroup>';
+  const cards = Object.values(FIXTURES).filter(p => p.key !== 'zeraora').map(p => `<option value="${p.key}" ${p.key === S.simCard ? 'selected' : ''}>${esc(p.name)}${p.key.startsWith('candy') ? ' ' + p.code : ''}</option>`).join('') + `<option value="unknown" ${S.simCard === 'unknown' ? 'selected' : ''}>Unknown card</option>`;
+  const sel = (id, label, c, items, cur) => `<select id="${id}" aria-label="${label}" data-c="${c}">${items.map(([v, l]) => `<option value="${v}" ${v === cur ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
+  return `<span class="t">Prototype</span><select id="sel-state" aria-label="Prototype state" data-c="state">${opts}</select>
+    ${sc ? `<select id="sim-card" aria-label="Card" data-c="card">${cards}</select><button id="sim-place" data-a="place">Place</button><button id="sim-lock" data-a="simlock">Lock</button><button id="sim-leave" data-a="leave">Leaves frame</button>${sel('sim-gate', 'Camera gate', 'gate', [['ok', 'OK'], ['soft', 'Blurry'], ['dark', 'Dark'], ['glare', 'Glare']], S.cam.gate)}<button id="sim-offline" data-a="offline" aria-pressed="${S.net === 'off'}">Offline</button>` : ''}
+    ${tray ? `<label>Next save ${sel('next-save', 'Next save', 'nextsave', [['ok', 'Adds the cards'], ['editions', 'Finishes changed'], ['location', 'Location changed'], ['none', 'No answer'], ['hold', 'Hold']], S.nextSave)}</label>` : ''}
+    ${S.hasStale ? `<button id="stale-view" data-a="staleview" aria-pressed="${S.staleview === 'b'}">Stale view ${S.staleview === 'b' ? 'B' : 'A'}</button>` : ''}
+    ${!L.vp ? `<button id="frame-toggle" data-a="frame" aria-pressed="${L.framed}">Phone frame</button>` : ''}<button id="reset" data-a="reset">Reset</button><button id="hide" data-a="hide">Hide</button>`;
+}
+let lastBar = '';
+function renderBar(L) { const h = barHTML(L); if (h !== lastBar) { lastBar = h; $('#bar').innerHTML = h; } }
+
+// ---------- Render ----------
+function render() {
+  const L = layout(), ae = document.activeElement;
+  const prev = ae && ae !== document.body && $('#app').contains(ae) ? { id: ae.id, fid: ae.dataset.fid, inDlg: !!ae.closest('.dlg'), s: ae.selectionStart, e: ae.selectionEnd } : null;
+  const html = document.documentElement;
+  html.classList.toggle('vp-phone', L.vp); html.classList.toggle('nobar', S.p.bar === '0');
+  if (S.screen !== 'ready') clearInterval(T.rdy);
+  const scanner = S.screen === 'scan' || S.screen === 'ready';
+  $('#stage').className = L.framed ? 'framed' : '';
+  const app = $('#app'); app.className = 'app ' + (scanner ? 'scanner' : 'pg') + (L.phone ? '' : ' desk');
+  const sc = app.querySelector('.sh-scroll'), st = sc ? sc.scrollTop : 0;
+  app.innerHTML = S.screen === 'scan' ? scanView('scan') : S.screen === 'ready' ? scanView('ready')
+    : pageView(L, S.screen === 'blocked' ? blockedBody() : S.screen === 'import' ? importBody(L) : collBody(L));
+  const sc2 = app.querySelector('.sh-scroll'); if (sc2) sc2.scrollTop = st;
+  renderBar(L); setURL();
+  // focus
+  let t = null;
+  if (S.refocus) { t = app.querySelector(`[data-fid="${S.refocus}"]`); S.refocus = null; }
+  const d = app.querySelector('[role=dialog]');
+  if (!t && d && !(prev && prev.inDlg)) t = d.querySelector('[data-af]') || d.querySelector('button,input');
+  if (!t && prev) t = (prev.id && document.getElementById(prev.id)) || (prev.fid && app.querySelector(`[data-fid="${prev.fid}"]`));
+  if (t) { t.focus({ preventScroll: true }); if (prev && t.id === prev.id && prev.s != null) { try { t.setSelectionRange(prev.s, prev.e); } catch (e) { /* not a text input */ } } }
+}
+
+// ---------- Actions ----------
+function openSheet() { S.sheet = 'open'; S.group = new Set(S.rows.filter(r => r.needs).map(r => r.id)); render(); }
+function closeSheet() { S.sheet = 'peek'; S.res = null; S.group = new Set(); S.refocus = 'review'; render(); }
+function closeDlg() { S.dialog = 'none'; if (S.msg === 'destination') S.msg = null; S.refocus = S.opener; render(); }
+const rowOf = id => S.rows.find(r => r.id === id);
+const A = {
+  np: () => note('Not part of this prototype'),
+  showbar: () => { S.p.bar = '1'; render(); },
+  hide: () => { S.p.bar = '0'; render(); },
+  reset: () => init(Object.assign({}, S.p)),
+  frame: () => { S.p.frame = layout().framed ? 'off' : 'phone'; render(); },
+  staleview: () => { S.staleview = S.staleview === 'b' ? 'a' : 'b'; render(); },
+  place: () => { S.cam.placed = S.simCard; S.cam.locked = false; S.cam.gate = 'ok'; render(); },
+  leave: () => { S.cam.placed = null; S.cam.locked = false; render(); },
+  offline: () => { S.net = S.net === 'off' ? 'on' : 'off'; render(); },
+  simlock: () => {
+    if (!S.cam.placed) note('Place a card first');
+    else if (S.cam.gate !== 'ok') note("Gate isn't passing, so no lock");
+    else if (S.cam.locked) note('Same placement: no new lock until the card leaves the frame');
+    else lock(S.cam.placed, 'auto');
+  },
+  shutter: () => { if (frozen() || paused()) return; if (!S.cam.placed || S.cam.placed === 'unknown') openSearch(); else lock(S.cam.placed, 'shutter'); },
+  sound: () => { S.sound = !S.sound; hint(S.sound ? 'Lock sound on' : 'Lock sound off', 2000); render(); },
+  close: () => { S.screen = 'collection'; S.sheet = 'peek'; render(); },
+  tocoll: () => { S.screen = 'collection'; render(); },
+  scan: () => { startScan(); render(); },
+  goimport: () => { S.screen = 'import'; S.src = 'camera'; render(); },
+  goimportfile: () => { S.screen = 'import'; S.src = 'file'; render(); },
+  src: v => { S.src = v; render(); },
+  tryagain: () => { S.screen = 'scan'; S.sheet = 'peek'; render(); },
+  reviewtray: () => { S.screen = 'scan'; openSheet(); },
+  opensheet: () => openSheet(),
+  closesheet: () => closeSheet(),
+  dest: () => { S.dialog = 'dest'; render(); },
+  setdest: v => { S.dest = v; S.dialog = 'none'; S.msg = S.msg === 'destination' ? null : S.msg; S.refocus = S.opener; render(); },
+  dlgclose: () => { if (S.dialog !== 'none') closeDlg(); else if (S.search) { S.search = null; S.refocus = 'shutter'; render(); } },
+  searchclose: () => { S.search = null; S.refocus = 'shutter'; render(); },
+  fullreview: () => { S.dialog = 'none'; openSheet(); },
+  clearopen: () => { S.dialog = 'clear'; render(); },
+  clearyes: () => { S.rows = []; S.dialog = 'none'; S.res = null; S.lastId = null; S.group = new Set(); S.refocus = 'keep'; render(); },
+  doConfirm: () => {
+    if (S.save !== 'retry' && (!S.rows.length || needsN() || S.net === 'off' || frozen())) return;
+    runSave();
+  },
+  oldopen: () => { S.screen = 'done'; S.toast = null; S.sheet = 'peek'; render(); },
+  chip: v => { const [id, eid] = v.split('|'); setEdition(id, eid); },
+  dec: v => { const r = rowOf(v); if (!r) return; if (r.count > 1) r.count--; else { S.rows = S.rows.filter(x => x !== r); if (S.res && S.res.id === v) S.res = null; } render(); },
+  inc: v => { const r = rowOf(v); if (r && r.count < 999) { r.count++; render(); } },
+  removerow: v => { S.rows = S.rows.filter(x => x.id !== v); S.res = null; render(); },
+  change: v => { S.res = S.res && S.res.id === v ? null : { id: v, q: '', pick: null }; S.refocus = 'chg-' + v; render(); },
+  cand: v => { const [id, k] = v.split('|'); const p = P(k); applyPrinting(id, p, defaultEdition(p.editions)); },
+  rpick: v => { const p = P(v), eds = activeEds(p); if (eds.length === 1) applyPrinting(S.res.id, p, eds[0]); else { S.res.pick = S.res.pick === v ? null : v; render(); } },
+  rchip: v => { const [k, eid] = v.split('|'); const p = P(k); applyPrinting(S.res.id, p, edOf(p, eid)); },
+  mpick: v => { const p = P(v), eds = activeEds(p); if (eds.length === 1) addFromSearch(p, eds[0]); else { S.search.pick = S.search.pick === v ? null : v; render(); } },
+  mchip: v => { const [k, eid] = v.split('|'); const p = P(k); addFromSearch(p, edOf(p, eid)); },
+  showneed: () => { const el = $('.trow.needs'); if (el) { el.scrollIntoView({ block: 'center' }); el.focus({ preventScroll: true }); } }
+};
+document.addEventListener('click', e => {
+  unlock();
+  const el = e.target.closest('[data-a]');
+  if (!el || el.disabled || el.getAttribute('aria-disabled') === 'true') return;
+  if (S.hint && S.hint.sticky) S.hint = null;
+  if (el.dataset.fid) S.opener = el.dataset.fid;
+  if (A[el.dataset.a]) A[el.dataset.a](el.dataset.v, el);
+});
+document.addEventListener('change', e => {
+  const el = e.target.closest('[data-c]'); if (!el) return;
+  const v = el.value;
+  if (el.dataset.c === 'state') { if (+v >= 0) load(STATES[+v][2], +v); }
+  else if (el.dataset.c === 'card') S.simCard = v;
+  else if (el.dataset.c === 'gate') { S.cam.gate = v; render(); }
+  else if (el.dataset.c === 'nextsave') S.nextSave = v;
+});
+document.addEventListener('input', e => {
+  if (e.target.id === 'q' && S.search) { S.search.q = e.target.value; S.search.pick = null; $('#results').innerHTML = resultsHTML(S.search, 'm'); }
+  if (e.target.id === 'rq' && S.res) { S.res.q = e.target.value; S.res.pick = null; $('#rres').innerHTML = resultsHTML(S.res, 'r'); }
+});
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  if (S.dialog !== 'none') closeDlg(); else if (S.search) { S.search = null; S.refocus = 'shutter'; render(); } else if (S.sheet === 'open') closeSheet();
+});
+let sy = null, sdir = null;
+document.addEventListener('pointerdown', e => { const s = e.target.closest('[data-swipe]'); if (s) { sy = e.clientY; sdir = s.dataset.swipe; } else sy = null; });
+document.addEventListener('pointerup', e => {
+  if (sy === null) return; const dy = e.clientY - sy, d = sdir; sy = null;
+  if (d === 'up' && dy < -30 && S.sheet === 'peek') openSheet(); else if (d === 'down' && dy > 30 && S.sheet === 'open') closeSheet();
+});
+['(max-width: 760px)', '(min-width: 761px)'].forEach(q => matchMedia(q).addEventListener('change', () => render()));
+
+// ---------- Boot ----------
+window.__proto = { FIXTURES, defaultEdition, S, distinct: () => distinct().size };
+init(norm(location.search));
+</script>
+</body>
+</html>
