@@ -2,7 +2,7 @@
 
 **Label:** wayfinder:map
 
-**Status:** charting since 2026-10-21. No tickets opened yet.
+**Status:** charting since 2026-10-21. No tickets opened yet. The recognition spike closed on 2026-10-22; its [findings](research/recognition-spike-findings.md) recommend image matching plus number OCR. Next: decide scanner plumbing.
 
 ## Destination
 
@@ -28,12 +28,14 @@ A handoff-ready spec at `docs/planning/card-scanner/spec.md` for adding cards to
 - Accuracy bar (owner, 2026-10-21, before tickets): across a mixed stack of the owner's real cards, the right card is among the tray's top 3 candidates at least 9 times in 10 and is the first candidate at least 7 times in 10. Measured on phones and tablets. Synthetic images made from reference artwork are used only for development; about 30 real photos of the owner's cards, weighted toward hard cases, decide whether the bar is met (owner, 2026-10-21).
 - English only (owner, 2026-10-21, before tickets): the catalog is English-only, so the scanner recognizes English cards and the tray has no language choice.
 - Capture (owner, 2026-10-21, before tickets): automatic. A card locks in when consecutive frames agree, with a vibration or sound, and a shutter button is the fallback. The same card staying in frame is captured once; taking it out and putting it back counts as a second copy. Each tray row has a count the collector can adjust.
+- Guide outline (owner, 2026-10-21, after the first synthetic run): the camera view shows a card-shaped outline and the collector lines the card up inside it. The scanner may expect a reasonably sharp, well-lit image and wait for one, rather than coping with any frame.
 - Finish (owner, 2026-10-21, before tickets): if the matched Card Printing has one active Card Edition, the tray picks it. Otherwise the row defaults to the Unspecified Variant, with one-tap chips for the other Editions. Confirming never requires a finish, and the scanner never guesses one from the image.
 - Destination (owner, 2026-10-21, before tickets): one Storage Leaf per scan session, chosen in the tray and defaulting to Unsorted. The scanner only adds Holdings and never changes or removes existing ones.
 - Unfinished tray (owner, 2026-10-21, before tickets): the tray is kept on that device until the collector confirms or clears it, surviving reloads and closing the app. It holds Editions and counts only. One tray at a time; it does not sync between devices.
 - Entry points (owner, 2026-10-21, before tickets): Scan cards beside Collection's other add actions, a Camera source in Collection Import, and a scan shortcut in the phone header, all opening the same scanner. Built for phones and tablets; laptop webcams work but are not tuned for or counted in the accuracy bar. Without a camera, or with permission denied, the scanner explains how to allow the camera and offers search and Collection Import instead.
 - No prices (owner, 2026-10-21, before tickets): the tray shows no per-card prices and no total. Values stay in Collection.
 - Misses (owner, 2026-10-21, before tickets): every tray row offers catalog search beside its top 3 candidates. A shutter press on a card the scanner cannot recognize opens search at once, and the collector picks an Edition (the Unspecified Variant counts) before the card enters the tray. Every tray row always has an Edition; there are no unmatched placeholder rows.
+- Recognition spike result (owner, 2026-10-22, after the second real-photo run): the owner stopped the spike and accepted the result. Combined image and number matching came close to the bar without meeting it (20/30 first, 25/30 in the top 3), measured on 30 eBay seller photos in Python on a Mac, not the owner's photos on phones. The reprint and Celebrations cases are too niche to matter, and the review tray with catalog search on every row covers the misses. [Findings](research/recognition-spike-findings.md).
 
 ## Plumbing defaults (delegated, recorded 2026-10-21, to be confirmed by the spike and a plumbing resolution)
 
@@ -43,7 +45,7 @@ A handoff-ready spec at `docs/planning/card-scanner/spec.md` for adding cards to
 
 ## Candidate tickets
 
-1. **Recognition spike** (prototype, in a separate throwaway repository): [brief](prototypes/recognition-spike/brief.md). Compare OCR alone, image matching alone and both combined against the accuracy bar, and report download size and speed on real phones. Blocks everything else.
+1. **Recognition spike** (done 2026-10-22, [findings](research/recognition-spike-findings.md); prototype, in a separate throwaway repository): [brief](prototypes/recognition-spike/brief.md). Compare OCR alone, image matching alone and both combined against the accuracy bar, and report download size and speed on real phones.
 2. **Decide scanner plumbing** (resolution): pipeline and libraries from the spike, the fingerprint index build and publishing, device caching and the save route and its refusals.
 3. **Prototype the scan tray** (prototype): the camera view, lock feedback, the tray rows with candidates, count, finish chips and search, and the destination picker, on a phone.
 4. **Define scanner terms** (domain-modeling): scan session, scan tray, and how they relate to Collection Import in `CONTEXT.md`.
