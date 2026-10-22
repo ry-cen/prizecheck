@@ -2,7 +2,7 @@
 
 **Label:** wayfinder:map
 
-**Status:** charting since 2026-10-21. No tickets opened yet. The recognition spike closed on 2026-10-22; its [findings](research/recognition-spike-findings.md) recommend image matching plus number OCR. Next: decide scanner plumbing.
+**Status:** charting since 2026-10-21. No tickets opened yet. The recognition spike closed on 2026-10-22; its [findings](research/recognition-spike-findings.md) recommend image matching plus number OCR. Scanner plumbing resolved on 2026-10-22 ([resolution](resolutions/decide-scanner-plumbing.md)). Next: prototype the scan tray (ticket 3), which now carries the phone measurement gate.
 
 ## Destination
 
@@ -27,17 +27,31 @@ A handoff-ready spec at `docs/planning/card-scanner/spec.md` for adding cards to
 - On-device only (owner, 2026-10-21, before tickets): recognition runs on the collector's device. No card photo is uploaded or stored, ever, not even a thumbnail. "Accurate enough" is acceptable because the tray catches mistakes.
 - Accuracy bar (owner, 2026-10-21, before tickets): across a mixed stack of the owner's real cards, the right card is among the tray's top 3 candidates at least 9 times in 10 and is the first candidate at least 7 times in 10. Measured on phones and tablets. Synthetic images made from reference artwork are used only for development; about 30 real photos of the owner's cards, weighted toward hard cases, decide whether the bar is met (owner, 2026-10-21).
 - English only (owner, 2026-10-21, before tickets): the catalog is English-only, so the scanner recognizes English cards and the tray has no language choice.
-- Capture (owner, 2026-10-21, before tickets): automatic. A card locks in when consecutive frames agree, with a vibration or sound, and a shutter button is the fallback. The same card staying in frame is captured once; taking it out and putting it back counts as a second copy. Each tray row has a count the collector can adjust.
+- Capture (owner, 2026-10-21, before tickets): automatic. A card locks in when consecutive frames agree, with a vibration or sound, and a shutter button is the fallback. The same card staying in frame is captured once; taking it out and putting it back counts as a second copy. Each tray row has a count the collector can adjust. (Feedback refined 2026-10-22: see Lock feedback below and the [plumbing resolution](resolutions/decide-scanner-plumbing.md).)
 - Guide outline (owner, 2026-10-21, after the first synthetic run): the camera view shows a card-shaped outline and the collector lines the card up inside it. The scanner may expect a reasonably sharp, well-lit image and wait for one, rather than coping with any frame.
-- Finish (owner, 2026-10-21, before tickets): if the matched Card Printing has one active Card Edition, the tray picks it. Otherwise the row defaults to the Unspecified Variant, with one-tap chips for the other Editions. Confirming never requires a finish, and the scanner never guesses one from the image.
-- Destination (owner, 2026-10-21, before tickets): one Storage Leaf per scan session, chosen in the tray and defaulting to Unsorted. The scanner only adds Holdings and never changes or removes existing ones.
-- Unfinished tray (owner, 2026-10-21, before tickets): the tray is kept on that device until the collector confirms or clears it, surviving reloads and closing the app. It holds Editions and counts only. One tray at a time; it does not sync between devices.
+- Finish (owner, 2026-10-21, before tickets): if the matched Card Printing has one active Card Edition, the tray picks it. Otherwise the row defaults to the Unspecified Variant, with one-tap chips for the other Editions. Confirming never requires a finish, and the scanner never guesses one from the image. (Amended 2026-10-22 for Printings without an Unspecified Variant: see Finish default below and the [plumbing resolution](resolutions/decide-scanner-plumbing.md).)
+- Destination (owner, 2026-10-21, before tickets): one Storage Leaf per scan session, chosen in the tray and defaulting to Unsorted. The scanner only adds Holdings and never changes or removes existing ones. (Narrowed 2026-10-22 by the Deck line below: a Deck is a Storage Leaf but is not a scan destination; see the [plumbing resolution](resolutions/decide-scanner-plumbing.md).)
+- Unfinished tray (owner, 2026-10-21, before tickets): the tray is kept on that device until the collector confirms or clears it, surviving reloads and closing the app. It holds Editions and counts only. One tray at a time; it does not sync between devices. (Amended 2026-10-22: iOS Safari may delete it, per the iOS eviction line, and it is kept per account, per the tray-per-account line; see the [plumbing resolution](resolutions/decide-scanner-plumbing.md).)
 - Entry points (owner, 2026-10-21, before tickets): Scan cards beside Collection's other add actions, a Camera source in Collection Import, and a scan shortcut in the phone header, all opening the same scanner. Built for phones and tablets; laptop webcams work but are not tuned for or counted in the accuracy bar. Without a camera, or with permission denied, the scanner explains how to allow the camera and offers search and Collection Import instead.
 - No prices (owner, 2026-10-21, before tickets): the tray shows no per-card prices and no total. Values stay in Collection.
 - Misses (owner, 2026-10-21, before tickets): every tray row offers catalog search beside its top 3 candidates. A shutter press on a card the scanner cannot recognize opens search at once, and the collector picks an Edition (the Unspecified Variant counts) before the card enters the tray. Every tray row always has an Edition; there are no unmatched placeholder rows.
 - Recognition spike result (owner, 2026-10-22, after the second real-photo run): the owner stopped the spike and accepted the result. Combined image and number matching came close to the bar without meeting it (20/30 first, 25/30 in the top 3), measured on 30 eBay seller photos in Python on a Mac, not the owner's photos on phones. The reprint and Celebrations cases are too niche to matter, and the review tray with catalog search on every row covers the misses. [Findings](research/recognition-spike-findings.md).
+- Scanner plumbing (delegated, resolved 2026-10-22): the browser runtime, the model and index delivery, device storage, the save route and its refusals, and the phone measurement gate that ticket 3 carries. [Resolution](resolutions/decide-scanner-plumbing.md).
+- Finish default (owner, 2026-10-22, amends the Finish line above): when a Printing has several Editions and no Unspecified Variant, the row defaults to Normal, else the first active Edition, shown selected and one tap to change. Every row still has an Edition and Confirm never waits on a finish; it is a default, never inferred from the photo. [Resolution](resolutions/decide-scanner-plumbing.md#d8-candidates-resolve-to-editions-live-through-one-batch-route).
+- Lock feedback (owner, 2026-10-22): a visual cue everywhere, vibration where the phone supports it, and a short sound that is off by default behind one setting; an iPhone is silent and still unless the sound is on. This settles the lock-sound open item.
+- Adding a row needs a connection; recognition does not (plumbing, 2026-10-22): see [a lock whose Edition cannot be resolved](resolutions/decide-scanner-plumbing.md#d8-candidates-resolve-to-editions-live-through-one-batch-route).
+- Repeat lock (owner, 2026-10-22): a second lock of the same Printing adds its copy to the newest row of that Printing; the collector moves it with counts and chips.
+- Deck not a destination (owner, 2026-10-22): the scan destination is a Storage Leaf that is not a Deck.
+- No undo (owner, 2026-10-22): after Confirm there is no undo, as in Collection Import.
+- Tray per account (owner, 2026-10-22): the tray is kept per account, hidden from other accounts on the device, and restored when that account signs in again.
+- Tray cap (owner, 2026-10-22): 200 distinct Editions per tray and 999 copies per row; a full tray asks the collector to confirm before adding more.
+- iOS eviction accepted (owner, 2026-10-22): Safari may delete the tray after 7 days without opening PrizeCheck or under storage pressure; no note in the UI.
+- First download (owner, 2026-10-22): the first open starts the roughly 40 MB download at once with a progress bar ("Getting the scanner ready"), with no prompt and no cellular warning.
+- Stale save note (owner, 2026-10-22): a save with no answer that is older than 29 days (the save receipt lasts 30) unfreezes the tray with "This tray may already be in your Collection. Check before confirming again."
+- No index built (owner, 2026-10-22): the scanner shows the same screen as "no camera", offering search and Collection Import.
+- Fingerprint rights (owner, 2026-10-22): the scanner is used only on the private, sign-in-only deployment, never stores images and never publishes the index; a public launch waits for a written rights check. It stays a ship blocker: [blockers](resolutions/decide-scanner-plumbing.md#ship-blockers).
 
-## Plumbing defaults (delegated, recorded 2026-10-21, to be confirmed by the spike and a plumbing resolution)
+## Plumbing defaults (superseded 2026-10-22 by the [plumbing resolution](resolutions/decide-scanner-plumbing.md); kept as history)
 
 - **Pipeline.** Find the card's four corners and straighten it; read the collector-number strip with OCR; embed the straightened card and look up the nearest reference fingerprints; combine the two (the number narrows the candidates and the image orders them, or the image alone when OCR fails); vote across several frames before locking.
 - **Where it runs.** All of it in the browser, loaded only when the scanner opens. The reference fingerprints are computed on the server from reference artwork, published as a static, versioned, content-hashed index and cached on the device. The spike measures whether image matching earns its download; if OCR alone meets the bar, the first version may ship without it.
@@ -46,20 +60,19 @@ A handoff-ready spec at `docs/planning/card-scanner/spec.md` for adding cards to
 ## Candidate tickets
 
 1. **Recognition spike** (done 2026-10-22, [findings](research/recognition-spike-findings.md); prototype, in a separate throwaway repository): [brief](prototypes/recognition-spike/brief.md). Compare OCR alone, image matching alone and both combined against the accuracy bar, and report download size and speed on real phones.
-2. **Decide scanner plumbing** (resolution): pipeline and libraries from the spike, the fingerprint index build and publishing, device caching and the save route and its refusals.
-3. **Prototype the scan tray** (prototype): the camera view, lock feedback, the tray rows with candidates, count, finish chips and search, and the destination picker, on a phone.
+2. **Decide scanner plumbing** (resolution; done 2026-10-22, [resolution](resolutions/decide-scanner-plumbing.md)): pipeline and libraries from the spike, the fingerprint index build and publishing, device caching and the save route and its refusals.
+3. **Prototype the scan tray** (prototype): the camera view, lock feedback, the tray rows with candidates, count, finish chips and search, and the destination picker, on a phone. It also carries the [phone measurement gate](resolutions/decide-scanner-plumbing.md#measurement-gate-map-ticket-3): the runtime and model choices are provisional until it passes. It also decides how a stale row presents (see Not yet specified).
 4. **Define scanner terms** (domain-modeling): scan session, scan tray, and how they relate to Collection Import in `CONTEXT.md`.
 5. **Write the spec** from the decisions above.
+6. **Write the ADR** "On-device recognition assets and the scanner index job" (ADR), recording the model delivery, the index job and storage, and device storage decisions (D3, D4 and D9 of the [plumbing resolution](resolutions/decide-scanner-plumbing.md)). No ADR covers static assets or caching today.
 
 ## Not yet specified
 
-- After Confirm: whether there is any undo. Collection Import has none, because the review is the safety net; the default is the same for the scanner.
-- Lock feedback: whether the sound can be turned off separately from vibration, and the default.
-- Tray size: a cap on rows or copies per tray (Collection Import caps 10,000 source rows; the other add paths batch at 200 items).
-- What happens to a saved-on-device tray when the collector signs out or another account signs in on the same device.
-- Whether a Deck can be the destination Storage Leaf, and whether scanning into a Deck says anything about its Deck List.
-- Staleness: the on-device tray never expires, unlike an import draft's 24 hours, so an Edition or the destination can change while a tray waits. The save route needs a refusal like `REVIEW_CHANGED` that sends those rows back for a new pick.
-- Fingerprint rights: [card image sources](../../tcg-collection-tracker/wayfinder/research/card-image-sources.md) covers re-hosting artwork, not deriving and publishing an embedding index from it. Whether that is acceptable needs its own check before the index ships.
+<!-- Undo, lock feedback, tray size, sign-out, Deck destination and staleness were settled on 2026-10-22; see Decisions so far and the plumbing resolution. -->
+
+- How a stale row presents: the plumbing keeps a stale row's Edition, marks it as needing a pick and disables Save until a chip or search result is chosen ([D11](resolutions/decide-scanner-plumbing.md#d11-stale-editions-cannot-hurt-the-collector)). What the row looks like, and what the chips show, is for the scan tray prototype (ticket 3).
+
+- Fingerprint rights: still a ship blocker. [Card image sources](../../tcg-collection-tracker/wayfinder/research/card-image-sources.md) covers re-hosting artwork, not deriving and publishing an embedding index from it. The owner limited use to the private, sign-in-only deployment; a public launch needs a written rights check first ([blockers](resolutions/decide-scanner-plumbing.md#ship-blockers)).
 
 ## Out of scope
 
