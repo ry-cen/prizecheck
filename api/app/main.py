@@ -256,6 +256,8 @@ app.include_router(inbox_router)
 from .social.trades import router as trades_router, settings_router as trade_settings_router  # noqa: E402
 app.include_router(trades_router)
 app.include_router(trade_settings_router)
+from .social.discovery import router as open_discovery_router  # noqa: E402
+app.include_router(open_discovery_router)
 from .loan_inventory import router as loan_inventory_router  # noqa: E402
 app.include_router(loan_inventory_router)
 from .trade_list import router as trade_list_router  # noqa: E402

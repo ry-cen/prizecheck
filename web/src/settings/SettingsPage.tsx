@@ -3,13 +3,15 @@ import { SignInsSection } from "../shell/SignInsSection";
 import { BlockedSection } from "./BlockedSection";
 import { ForTradeLocationsSection } from "./ForTradeLocationsSection";
 import { HiddenLocationsSection } from "./HiddenLocationsSection";
+import { OpenDiscoverySection } from "./OpenDiscoverySection";
 import { PrivacySection } from "./PrivacySection";
 import { WantListCountingSection } from "./WantListCountingSection";
 
 /**
  * The Settings page (/settings, #207), opened from the desktop avatar menu and the phone account sheet. It replaced
  * the Sign-ins page, whose old address redirects here (routes.ts canonicalPath): a Decks section with the Want List
- * counting setting, a Privacy section with the collector's names and Invite Link (#246), then a Sign-ins section with
+ * counting setting, a Privacy section with the collector's names and Invite Link (#246), an Open discovery section with
+ * the switch and the collector's own zip code (Trading #297), then a Sign-ins section with
  * the Sign-ins page's content (the account sheet's Sign-ins opens it at #sign-ins).
  */
 export function SettingsPage({ email }: { email: string | null }) {
@@ -21,6 +23,7 @@ export function SettingsPage({ email }: { email: string | null }) {
         <HiddenLocationsSection />
         <ForTradeLocationsSection />
       </PrivacySection>
+      <OpenDiscoverySection />
       <SignInsSection email={email} />
     </main>
   );
