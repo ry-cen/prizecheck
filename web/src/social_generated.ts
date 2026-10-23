@@ -68,6 +68,8 @@ export type TradeCardOffer = { collector_id: string; handle: string; display_nam
 export type TradeCardMatches = { has_friends: boolean; offers: TradeCardOffer[] };
 export type TradeSettings = { open_to_cash_offers: boolean };
 export type SetTradeSettings = { open_to_cash_offers: boolean };
+export type DiscoverySettings = { status: "off" | "on" | "removed" | "suspended"; zip: string | null; radius_mi: 5 | 10 | 25 | 50; zip_changes_left: number; visible_beyond_friends: boolean };
+export type SetDiscovery = { enabled?: boolean | null; zip?: string | null; radius_mi?: 5 | 10 | 25 | 50 | null };
 
 /** A refused social request: the API's code, and for TOO_MANY_LOOKUPS the detail that says when to try again. */
 export class SocialError extends Error {
@@ -220,3 +222,7 @@ export const getTradeSettings = (signal?: AbortSignal) =>
   request<TradeSettings>('/api/social/trade-settings', 'GET', undefined, signal);
 export const setTradeSettings = (body: SetTradeSettings) =>
   request<TradeSettings>('/api/social/trade-settings', 'PUT', body);
+// Open discovery (trading #297): the caller's own setting, the one response that carries a zip.
+export const getDiscovery = (signal?: AbortSignal) =>
+  request<DiscoverySettings>('/api/social/discovery', 'GET', undefined, signal);
+export const setDiscovery = (body: SetDiscovery) => request<DiscoverySettings>('/api/social/discovery', 'PUT', body);

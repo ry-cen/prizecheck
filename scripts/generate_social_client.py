@@ -2,7 +2,8 @@
 #250 and #251, Loans, #252 and #253, Borrowed Copies, #254, Returns, #255, Write-off, #257, the inbox, #259, and a
 Friend's Trade List, trading #269, Trades as both sides read them, trading #270, declining and cancelling one,
 trading #271, the inbox's Trade lines, trading #273, and Find trades and Ask to trade, trading #276, and Open to cash
-offers, trading #277) from the API OpenAPI schema."""
+offers, trading #277, and Open discovery, trading #297) from the API OpenAPI schema."""
+import json
 import sys
 from pathlib import Path
 
@@ -17,7 +18,7 @@ def ts_type(value):
     if "anyOf" in value:
         return " | ".join(ts_type(part) for part in value["anyOf"])
     if "enum" in value:
-        return " | ".join(f'"{item}"' for item in value["enum"])
+        return " | ".join(json.dumps(item) for item in value["enum"])
     if value.get("type") == "array":
         inner = ts_type(value["items"])
         return f"({inner})[]" if " | " in inner else f"{inner}[]"
@@ -38,7 +39,8 @@ for name in ("Collector", "CollectorLookup", "InviteCollector", "FriendsView", "
              "AcceptLendOffer", "InboxUpdate", "InboxWaiting", "InboxView", "InboxIds", "FriendTradeCard",
              "FriendTradeList", "TradeParty", "TradeCard", "TradeCash", "TradeView", "TradesView", "TradeStep",
              "InboxTradeWaiting", "InboxTradeUpdate", "TradeMatchCard", "TradeMatchRow", "TradeMatches",
-             "TradeCardOffer", "TradeCardMatches", "TradeSettings", "SetTradeSettings"):
+             "TradeCardOffer", "TradeCardMatches", "TradeSettings", "SetTradeSettings", "DiscoverySettings",
+             "SetDiscovery"):
     definition = schema[name]
     fields = [f"{field}{'' if field in definition.get('required', []) else '?'}: {ts_type(value)}"
               for field, value in definition["properties"].items()]
@@ -195,6 +197,10 @@ export const getTradeSettings = (signal?: AbortSignal) =>
   request<TradeSettings>('/api/social/trade-settings', 'GET', undefined, signal);
 export const setTradeSettings = (body: SetTradeSettings) =>
   request<TradeSettings>('/api/social/trade-settings', 'PUT', body);
+// Open discovery (trading #297): the caller's own setting, the one response that carries a zip.
+export const getDiscovery = (signal?: AbortSignal) =>
+  request<DiscoverySettings>('/api/social/discovery', 'GET', undefined, signal);
+export const setDiscovery = (body: SetDiscovery) => request<DiscoverySettings>('/api/social/discovery', 'PUT', body);
 """)
 content = "\n".join(lines)
 target = root / "web/src/social_generated.ts"

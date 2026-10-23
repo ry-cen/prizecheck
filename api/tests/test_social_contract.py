@@ -46,6 +46,12 @@ READERS = {'social/friend_copies.py', 'social/hidden_locations.py'}
 # rule (trading #269); the Trade List alone for the For trade rule. The choke point calls the placement rule for its
 # Friend wants read (trading #276).
 RESERVING_PICKS_CALL = re.compile(r'\breserving_picks\s*\(')
+# Open discovery (trading #297): only social/discovery.py may name the setting, the zip centroids or the open view in
+# SQL. Matched against string constants, never docstrings.
+DISCOVERY_TABLE = re.compile(
+    r'(?:\bFROM|\bJOIN|\bUPDATE|\bINTO|\bUSING|\bTRUNCATE(?:\s+TABLE)?|\bLATERAL|,|\()\s*(?:ONLY\s+)?(?:"?\w+"?\s*\.\s*)?"?'
+    r'(?:discovery_setting|zip_centroid|open_discovery)"?\b', re.IGNORECASE)
+DISCOVERY_CALLERS = {'social/discovery.py'}
 LISTABLE_CALL = re.compile(r'\btrade_listable\s*\(')
 FOR_TRADE_CALL = re.compile(r'\bfor_trade_locations\s*\(')
 RESERVING_PICKS_CALLERS = {'social/counts.py', 'social/friend_copies.py'}
@@ -133,6 +139,9 @@ ALLOWED_IMPORTS = {
         ('..location_tree', 'error'), ('..location_tree', 'replay'), ('.friend_reads', 'card_facts'),
         ('.owners', 'ensure_owner'), ('.owners', 'lock_owners'), ('.loans', 'advance_revision'), ('.loans', 'NOW'),
         ('.friends', 'friend_ids')},
+    'social/discovery.py': {
+        ('..main', 'connect'), ('..main', 'verified_user'), ('..location_tree', 'error'),
+        ('.owners', 'ensure_owner'), ('.owners', 'lock_owners')},
     'social/profile.py': {
         ('.', 'name_rules'), ('..main', 'connect'), ('..main', 'verified_user'),
         ('..location_tree', 'error'), ('..location_tree', 'owner_and_rows'), ('..location_tree', 'replay'),
@@ -326,6 +335,10 @@ def test_every_social_route_answers_success_with_a_schema_the_walk_reads():
     # Open to cash offers (trading #277): one setting, read and set by value.
     for route in ('GET /api/social/trade-settings', 'PUT /api/social/trade-settings'):
         assert {field for _, field, _ in routes[route]} == {'open_to_cash_offers'}, route
+    # Open discovery (trading #297): the caller's own setting, the one response that carries a zip.
+    for route in ('GET /api/social/discovery', 'PUT /api/social/discovery'):
+        assert {field for _, field, _ in routes[route]} == {
+            'status', 'zip', 'radius_mi', 'zip_changes_left', 'visible_beyond_friends'}, route
 
 
 def test_each_sides_own_trade_reads_and_inventory_steps_stay_outside_the_social_area():
@@ -494,6 +507,22 @@ def test_only_counts_and_the_choke_point_call_reserving_picks():
 def test_only_the_trade_list_and_the_choke_point_call_the_listable_rule():
     assert callers(LISTABLE_CALL) == LISTABLE_CALLERS
     assert callers(FOR_TRADE_CALL) == FOR_TRADE_CALLERS
+
+
+def test_only_the_discovery_module_names_the_discovery_tables():
+    assert callers(DISCOVERY_TABLE) == DISCOVERY_CALLERS
+
+
+def test_the_discovery_guard_matches_sql_and_never_docstrings():
+    for sql in ('SELECT 1 FROM discovery_setting d', 'JOIN public.zip_centroid z ON true',
+                'UPDATE "discovery_setting" SET enabled = false', 'INSERT INTO discovery_setting (user_id)',
+                'DELETE FROM open_discovery', 'SELECT 1 FROM holding h, open_discovery o',
+                'DELETE FROM holding h USING discovery_setting d', 'TRUNCATE discovery_setting',
+                'TRUNCATE TABLE zip_centroid', 'SELECT 1 FROM (discovery_setting)'):
+        assert any(DISCOVERY_TABLE.search(text) for text in string_constants(f'SQL = {sql!r}\n')), sql
+    described = 'def f():\n    """Reads FROM discovery_setting and JOIN zip_centroid."""\n    return 1\n'
+    assert not any(DISCOVERY_TABLE.search(text) for text in string_constants(described))
+    assert not any(DISCOVERY_TABLE.search(text) for text in string_constants("NOTE = 'discovery_setting'\n"))
 
 
 def test_the_call_guards_match_string_constants_and_never_docstrings():
