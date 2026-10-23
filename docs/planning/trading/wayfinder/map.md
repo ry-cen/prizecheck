@@ -11,7 +11,7 @@ A handoff-ready spec at `docs/planning/trading/spec.md` for trading cards, built
 ## Notes
 
 - Owner request on 2026-10-17: a trading feature that builds on Loans, with a discovery page where a collector names the cards they want and a configurable set of cards they will trade (a Location or a list, still to be decided), and can search for collectors near their zip code who would trade.
-- This effort reverses the "Trading and giving cards" exclusion in the [social network map](../../social-network/wayfinder/map.md). Stage 2 also reverses the rule that a Handle is not a public profile, and the exclusion of reporting and moderation, as far as open discovery needs them.
+- This effort reverses the "Trading and giving cards" exclusion in the [social network map](../../social-network/wayfinder/map.md). Stage 2 opens Trade Lists to opted-in strangers and introduces reporting and moderation. Handles stay private; discovery does not make a Handle a public profile.
 - **Stages (owner, 2026-10-17).** Stage 1 is trading between Friends: trade lists, wants, matching among Friends and a Trade that transfers ownership on both sides. Stage 2 opens discovery to collectors who are not Friends, found by distance from a zip code. Stage 2 must bring its own answers on what a non-Friend sees, how two strangers arrange a handover, and the safety pieces (reporting, blocking non-Friends, minors). Stage 1 must not depend on any of them.
 - A Loan never transfers ownership. A Trade does: one side's copies leave their Collection and arrive in the other's. That write goes through the existing Move and `holding` writers so Undo and the triggers stay consistent, and two-owner steps lock owners in `user_id` order ([ADR 0014](../../../adr/0014-friend-reads-and-two-owner-loans.md)).
 - `CONTEXT.md` lists "Trade" under the Loan entry's _Avoid_. New terms (Trade, and whatever names the trade list and wants) are defined through domain-modeling as they are resolved.
@@ -56,6 +56,52 @@ A handoff-ready spec at `docs/planning/trading/spec.md` for trading cards, built
 - Ending a friendship with a confirmed Trade (owner, 2026-10-20, #274): the Remove Friend and Block questions keep the sentence that names Trades one side has confirmed, which stay open so they can finish.
 - Inbox order (plumbing, 2026-10-20, #273): the drawer shows Trade lines before Loan lines, as in the prototype, rather than merging the two by time as the [plumbing resolution](resolutions/decide-trading-plumbing.md) first said: Loan lines are ordered by when they were made, not by when they started waiting, so a merge by time is not well defined. Earlier updates still merge by time.
 
+### Stage 2 owner decisions — 2026-10-22
+
+These record the owner's answers from the Stage 2 discussion, including approval of all seven defaults. They are turned into the [Stage 2 spec](../stage-2-spec.md).
+
+- **Open discovery:** one collector-wide switch, off by default, requiring a zip code. Turning it off removes the collector from discovery immediately. Browsing and starting contact with strangers require the viewer's own switch to be on too.
+- **Age:** no age rule or age confirmation. Sales between strangers and to minors are not restricted by an age rule. Record this choice for the existing liability-notice review before launch.
+- **Identity:** strangers see Display Name, distance band, matched cards and wants, never the Handle. **Add as Friend** is offered on a Trade only after both sides confirm it; discovery itself offers no Friend Request button.
+- **Find trades:** Friends first, then **Near you**, with a Friend appearing only under Friends. Near you sorts by match (two-way, has-what-you-want, wants-what-you-have), then distance. While open discovery is off, a prompt to turn it on replaces Near you.
+- **Distance:** zip-centroid distances shown only as bands: Under 5 mi, 5–10 mi, 10–25 mi, 25–50 mi. Radius choices are 5, 10, 25 or 50 mi, defaulting to 25; nobody beyond 50 mi appears. Never show the zip itself.
+- **Card search:** search by card name across Printings, optionally narrow by set or Printing. Show one row per holder, with Printings and available counts, Friends first and then Near you sorted by distance band (owner, 2026-10-23, mirroring Find trades), leading to Message or Propose trade. Reverse search for who wants a card is deferred.
+- **Trade List access:** a stranger's full Trade List and the wants that match the viewer's Trade List (owner, 2026-10-23: "wants" means these matching wants, not their whole Want List) are reachable from their discovery row, search result or conversation, with a distance band. The rest of the Collection, Location names, promised copies and Borrowed Copies stay private or excluded under the existing Trade List rules.
+- **Conversations:** one per pair of collectors, including Friends, with messaging available before any proposal from a discovery row or a card on the Trade List. Proposals, Counters and Trades appear inside that conversation. Discord is not required.
+- **Messages:** plain text only, up to 1,000 characters; links remain plain text and are not clickable. No photos, read receipts or typing indicators.
+- **Trades tab:** becomes the conversation list, showing the other collector, last message and open proposals or Trades. Its badge counts unread conversations as well as proposals waiting on the collector. Opening a conversation shows messages and proposal/Trade cards inline.
+- **Meetups:** arranged in chat, with no separate structured meetup step. An accepted stranger Trade shows a short tip to meet in public, such as a local game store, and check the cards before swapping.
+- **Notifications:** in-app only for now. An email nudge is a later option, not part of the approved current scope.
+- **Cash:** the existing Open to cash offers switch covers Friends and strangers alike; no separate stranger setting.
+- **Turning discovery off:** existing conversations, proposals and Trades continue normally, including messages and proposals within those conversations. It stops discovery and starting new stranger conversations, rather than ending existing relationships.
+- **Block:** extend the existing Block to strangers, available from a conversation or discovery row. Neither collector sees the other in discovery; the conversation is read-only for both; no new messages or proposals; open proposals close. Apply the existing Trade rule: cancel unconfirmed Trades, but keep Trades either side has confirmed open so the other side can finish. Do not notify the blocked collector or reveal the Block.
+- **Report:** available from a conversation, discovery row or Trade, with reasons scam or no-show, harassment, inappropriate content, or other, and an optional note. Reporting also Blocks. An owner review queue retains a snapshot of the full conversation and related Trades, even after account deletion. Owner actions are dismiss, remove from open discovery, or suspend the account; reports cause no automatic account penalty beyond the reporter's Block.
+- **Track record:** rows, Trade Lists and conversations show a completed-trade count, counting each Trade both sides confirmed, including Friend Trades. Zero reads **New to trading**. No ratings, stars or reviews.
+
+The seven defaults approved together:
+
+1. **Zip changes:** enter a zip when enabling discovery and change it in Settings, at most three times a day. Refuse a fourth change with “You've changed your zip code 3 times in the last 24 hours. Try again in N hours.” (or “Try again later.”). The owner approved this rolling-window copy on 2026-10-23, replacing the original “You can change your zip code again tomorrow.”
+2. **Hidden For trade Locations:** remain on the Trade List for strangers too. While discovery is on, the Location screen says it is visible to Friends and collectors near you.
+3. **Message presence:** no read receipts or typing indicators.
+4. **Archive:** a collector can archive a conversation, hiding it until a new message arrives. Neither participant can delete a conversation.
+5. **Spam limit:** at most ten new stranger conversations per day. A conversation with someone the collector has traded with before does not count.
+6. **Suspended or deleted collectors:** leave discovery immediately. Their conversations become read-only for the other side and show “This collector is no longer available”. Trades either side has confirmed stay open, following the Block rule.
+7. **Completed-trade count:** includes Friend Trades, as above.
+
+#### Owner answers to the plumbing questions — 2026-10-23
+
+The seven questions in the [plumbing resolution](resolutions/decide-stage-2-plumbing.md) were answered on 2026-10-23:
+
+1. **Suspension:** sign-in, own Collection, Decks, Want List and existing Loans continue; discovery, messages, Trade Proposals, Counters, accepts, Friend Requests, Borrow Requests and Lend Offers stop (differs from the recommendation, which allowed Lend Offers).
+2. **Remove Friend:** the conversation stays open; only Block stops contact.
+3. **Unrecognised zip:** refused, with “We couldn't find that zip code. Try the zip code where you'd meet.”
+4. **A stranger's wants:** only the wants that match the viewer's Trade List.
+5. **In-band order:** by Display Name, not exact distance.
+6. **Band on a stranger's Trade List:** only while both collectors have discovery on.
+7. **Card search:** Friends first, then Near you.
+
+The copy table in the resolution (“Approved copy”) was approved on the same day.
+
 ## Candidate tickets
 
 Stage 1:
@@ -66,11 +112,9 @@ Stage 1:
 
 Stage 2:
 
-- Research free US zip-code centroid data (US only, matching the US-dollar cash rule).
-- Decide what location data is stored and what others see (a distance band, never the zip).
-- Decide what a non-Friend sees and how a collector opts in to open discovery.
-- Decide how strangers arrange a handover (messaging, a meetup step, or neither).
-- Decide safety: reporting, blocking non-Friends, minors.
+- Research free US zip-code centroid data: done 2026-10-22, see [research](research/zip-centroid-data.md).
+- Decide location storage and other technical plumbing: done 2026-10-22, see the [Stage 2 plumbing resolution](resolutions/decide-stage-2-plumbing.md).
+- Owner questions and copy approved 2026-10-23; split the [Stage 2 spec](../stage-2-spec.md) into tickets.
 
 ## Not yet specified
 
