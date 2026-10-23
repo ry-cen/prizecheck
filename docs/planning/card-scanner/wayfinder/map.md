@@ -2,7 +2,7 @@
 
 **Label:** wayfinder:map
 
-**Status:** charting since 2026-10-21. No tickets opened yet. The recognition spike closed on 2026-10-22; its [findings](research/recognition-spike-findings.md) recommend image matching plus number OCR. Scanner plumbing resolved on 2026-10-22 ([resolution](resolutions/decide-scanner-plumbing.md)). Next: prototype the scan tray (ticket 3), which now carries the phone measurement gate.
+**Status:** charting since 2026-10-21. No tickets opened yet. The recognition spike closed on 2026-10-22; its [findings](research/recognition-spike-findings.md) recommend image matching plus number OCR. Scanner plumbing resolved on 2026-10-22 ([resolution](resolutions/decide-scanner-plumbing.md)). The phone measurement gate session (ticket 3) ran on 2026-10-23 and did not pass; the owner accepted building on the current runtime ([results](research/phone-gate-results.md)). Next: the rest of the scan tray prototype (ticket 3).
 
 ## Destination
 
@@ -49,6 +49,7 @@ A handoff-ready spec at `docs/planning/card-scanner/spec.md` for adding cards to
 - First download (owner, 2026-10-22): the first open starts the roughly 40 MB download at once with a progress bar ("Getting the scanner ready"), with no prompt and no cellular warning.
 - Stale save note (owner, 2026-10-22): a save with no answer that is older than 29 days (the save receipt lasts 30) unfreezes the tray with "This tray may already be in your Collection. Check before confirming again."
 - No index built (owner, 2026-10-22): the scanner shows the same screen as "no camera", offering search and Collection Import.
+- Phone gate outcome (owner, 2026-10-23): the gate session on an iPhone 17 Pro Max ended after Lock. Speed (G2), the cheap gate (G3) and time to lock (G4) missed their bars; G7 (memory) and G9 (voting) were not run, and slower phones and Android stay unmeasured. The owner accepted building on the current runtime anyway (WASM, 4 threads under COOP/COEP, int8 embedder, Paddle OCR) and improving it later. Recognition sits behind a narrow module interface so a faster port, a retuned gate, WebGPU or a native plugin can replace it without changing the tray or the save path. [Results](research/phone-gate-results.md).
 - Fingerprint rights (owner, 2026-10-22): the scanner is used only on the private, sign-in-only deployment, never stores images and never publishes the index; a public launch waits for a written rights check. It stays a ship blocker: [blockers](resolutions/decide-scanner-plumbing.md#ship-blockers).
 
 ## Plumbing defaults (superseded 2026-10-22 by the [plumbing resolution](resolutions/decide-scanner-plumbing.md); kept as history)
@@ -61,7 +62,7 @@ A handoff-ready spec at `docs/planning/card-scanner/spec.md` for adding cards to
 
 1. **Recognition spike** (done 2026-10-22, [findings](research/recognition-spike-findings.md); prototype, in a separate throwaway repository): [brief](prototypes/recognition-spike/brief.md). Compare OCR alone, image matching alone and both combined against the accuracy bar, and report download size and speed on real phones.
 2. **Decide scanner plumbing** (resolution; done 2026-10-22, [resolution](resolutions/decide-scanner-plumbing.md)): pipeline and libraries from the spike, the fingerprint index build and publishing, device caching and the save route and its refusals.
-3. **Prototype the scan tray** (prototype): the camera view, lock feedback, the tray rows with candidates, count, finish chips and search, and the destination picker, on a phone. It also carries the [phone measurement gate](resolutions/decide-scanner-plumbing.md#measurement-gate-map-ticket-3): the runtime and model choices are provisional until it passes. It also decides how a stale row presents (see Not yet specified).
+3. **Prototype the scan tray** (prototype): the camera view, lock feedback, the tray rows with candidates, count, finish chips and search, and the destination picker, on a phone. It also carries the [phone measurement gate](resolutions/decide-scanner-plumbing.md#measurement-gate-map-ticket-3): its first session ran on 2026-10-23 and did not pass G2, G3 or G4; the owner accepted the current runtime and model choices anyway, with G7, G9, slower phones and Android unmeasured ([results](research/phone-gate-results.md)). It also decides how a stale row presents (see Not yet specified).
 4. **Define scanner terms** (domain-modeling): scan session, scan tray, and how they relate to Collection Import in `CONTEXT.md`.
 5. **Write the spec** from the decisions above.
 6. **Write the ADR** "On-device recognition assets and the scanner index job" (ADR), recording the model delivery, the index job and storage, and device storage decisions (D3, D4 and D9 of the [plumbing resolution](resolutions/decide-scanner-plumbing.md)). No ADR covers static assets or caching today.
@@ -72,6 +73,8 @@ A handoff-ready spec at `docs/planning/card-scanner/spec.md` for adding cards to
 
 - How a stale row presents: the plumbing keeps a stale row's Edition, marks it as needing a pick and disables Save until a chip or search result is chosen ([D11](resolutions/decide-scanner-plumbing.md#d11-stale-editions-cannot-hurt-the-collector)). What the row looks like, and what the chips show, is for the scan tray prototype (ticket 3).
 
+- Phantom locks: before release, the scanner must not lock on an empty scene. With the gate bypassed, the gate session saw 16 locks with no card placed, 9 on one Printing. The sharpness gate also needs retuning on real camera frames, and the speed pass remains ([results](research/phone-gate-results.md#findings-and-follow-ups)).
+
 - Fingerprint rights: still a ship blocker. [Card image sources](../../tcg-collection-tracker/wayfinder/research/card-image-sources.md) covers re-hosting artwork, not deriving and publishing an embedding index from it. The owner limited use to the private, sign-in-only deployment; a public launch needs a written rights check first ([blockers](resolutions/decide-scanner-plumbing.md#ship-blockers)).
 
 ## Out of scope
@@ -81,4 +84,4 @@ A handoff-ready spec at `docs/planning/card-scanner/spec.md` for adding cards to
 - Prices or values while scanning.
 - Recognizing a finish, condition, grade or stamp from the image.
 - Sealed product, graded slabs and other games.
-- A native app wrapper; the scanner is part of the web app.
+- A native app wrapper; the scanner is part of the web app. Deferred until after the web product is deployed, not ruled out: the owner plans an App Store release eventually, likely a wrapper where only the scanner is a native plugin ([results](research/phone-gate-results.md#decision)).
