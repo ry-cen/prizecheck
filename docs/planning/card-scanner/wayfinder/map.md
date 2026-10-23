@@ -73,7 +73,7 @@ A handoff-ready spec at `docs/planning/card-scanner/spec.md` for adding cards to
 
 - How a stale row presents: the plumbing keeps a stale row's Edition, marks it as needing a pick and disables Save until a chip or search result is chosen ([D11](resolutions/decide-scanner-plumbing.md#d11-stale-editions-cannot-hurt-the-collector)). What the row looks like, and what the chips show, is for the scan tray prototype (ticket 3).
 
-- Phantom locks: before release, the scanner must not lock on an empty scene. With the gate bypassed, the gate session saw 16 locks with no card placed, 9 on one Printing. The sharpness gate also needs retuning on real camera frames, and the speed pass remains ([results](research/phone-gate-results.md#findings-and-follow-ups)).
+- Phantom locks: before release, the scanner must not lock on an empty scene. With the gate bypassed, the gate session saw 16 locks with no card placed, 9 on Vermilion City Gym: a blank dark surface with no corners found falls back to the guide crop and always lands on the same Printing. The fix starts with letting only frames with found corners (or an OCR number match) count toward an automatic lock. The sharpness gate also needs retuning on real camera frames, and the speed pass remains ([results](research/phone-gate-results.md#findings-and-follow-ups)).
 
 - Fingerprint rights: still a ship blocker. [Card image sources](../../tcg-collection-tracker/wayfinder/research/card-image-sources.md) covers re-hosting artwork, not deriving and publishing an embedding index from it. The owner limited use to the private, sign-in-only deployment; a public launch needs a written rights check first ([blockers](resolutions/decide-scanner-plumbing.md#ship-blockers)).
 
