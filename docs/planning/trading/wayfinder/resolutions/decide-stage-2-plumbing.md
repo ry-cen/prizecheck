@@ -785,9 +785,9 @@ The owner approved all of this copy on 2026-10-23, including the replacement for
 
 Tickets 4, 5, 6 and 8 run in parallel after 3.
 
-## ADR worth writing
+## ADR
 
-**ADR 0016: Trading beyond Friends goes through one reach rule, and strangers are addressed by trader ids.**
+Recorded in [ADR 0016](../../../../adr/0016-trading-beyond-friends-uses-one-reach-rule-and-trader-ids.md): **Trading beyond Friends uses one reach rule, and strangers are addressed by trader ids.**
 
 - **One reach rule.** Every cross-collector Trade read and every contact step asks one SQL function, `trade_reach`, whether two collectors may trade or talk now. The answer is yes for Friends, for a pair with a conversation, or for two open-discovery collectors within 50 mi of each other's zip centroids. It is never yes across a Block or a suspension.
 - **In the choke point.** `social.friend_copies` filters its Trade List and wants statements through it, beside `friends_of`, as ADR 0015 promised. Collection reads stay Friends-only.
@@ -834,7 +834,7 @@ Tickets 4, 5, 6 and 8 run in parallel after 3.
 - Out of scope: the email nudge. Deferred: reverse card search.
 - The account-deletion spec gains the requirements above.
 - The migrations note gains 145 to 149.
-- ADR 0016 is to be written.
+- ADR 0016 is written (see ADR above).
 - **Glossary (`CONTEXT.md`):**
   - Add: Conversation, Message, Open discovery, Near you, Distance band, Report, Completed trade.
   - Add **Suspension**: "The owner's action that removes a collector from open discovery and stops them messaging, proposing, countering, accepting, and sending Friend Requests, Borrow Requests or Lend Offers. Their own Collection, Decks and existing Loans continue."
