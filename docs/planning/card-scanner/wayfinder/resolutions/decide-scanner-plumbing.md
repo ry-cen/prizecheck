@@ -7,7 +7,7 @@
 - Collection Import's [import contract](../../../collection-import/wayfinder/resolutions/decide-collection-import-contract.md), whose destination rule (a Storage Leaf, no Deck) and review components the scanner takes. Its save transaction copies batch add's shape (`api/app/holdings.py:170-239`), keyed by the tray's items rather than a draft id;
 - [card image sources](../../../tcg-collection-tracker/wayfinder/research/card-image-sources.md).
 
-**Status of the runtime and model choices.** D1 to D3 and the 224-pixel int8 embedder are provisional. They hold only if the phone measurement gate passes (see "Measurement gate"). The gate is carried by map ticket 3. Everything else here is settled.
+**Status of the runtime and model choices.** D1 to D3 and the 224-pixel int8 embedder are provisional. They were to hold only if the phone measurement gate passed (see "Measurement gate"). The gate, carried by map ticket 3, ran on 2026-10-23 and missed G2, G3 and G4; the owner accepted these choices anyway and they are improved later behind the recognition module ([results](../research/phone-gate-results.md)). Everything else here is settled.
 
 **Paths.** Repo paths are relative to the repository root. Paths starting `scanspike/` or `data/tuning/` are in the spike repository (`~/dev/prizecheck-scan-spike`), which is unpublished; they are cited for provenance and are not linked.
 
