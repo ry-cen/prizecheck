@@ -114,7 +114,7 @@ Stage 2:
 
 - Research free US zip-code centroid data: done 2026-10-22, see [research](research/zip-centroid-data.md).
 - Decide location storage and other technical plumbing: done 2026-10-22, see the [Stage 2 plumbing resolution](resolutions/decide-stage-2-plumbing.md).
-- Owner questions and copy approved 2026-10-23; split the [Stage 2 spec](../stage-2-spec.md) into tickets.
+- Owner questions and copy approved 2026-10-23. The [Stage 2 spec](../stage-2-spec.md) is [#296](https://github.com/ry-cen/prizecheck/issues/296); its tickets are [#297](https://github.com/ry-cen/prizecheck/issues/297)–[#305](https://github.com/ry-cen/prizecheck/issues/305), and the liability-notice and privacy review is [#306](https://github.com/ry-cen/prizecheck/issues/306), all filed 2026-10-23 with their dependencies linked.
 
 ## Not yet specified
 
