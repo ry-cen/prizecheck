@@ -564,7 +564,7 @@ Migrations 145 to 149 keep an older API build working (see Migrations). Deploy m
 
 ### Suggested ticket breakdown
 
-Tickets follow the resolution's vertical slices; each lists what blocks it.
+Tickets follow the resolution's vertical slices; each lists what blocks it. Filed 2026-10-23 as #297–#305 in this order under [#296](https://github.com/ry-cen/prizecheck/issues/296), with the liability-notice and privacy review as #306.
 
 1. **Open discovery settings and zip data** (migrations 145, 146): the build script, the Settings section and the credit line. Blocked by nothing.
 2. **Conversations** (147): Friends-only messaging, the conversation list, inline Trades, read and archive, pulse polling, the badge, and the completed-trade count. Blocked by 1 (`trader_id`).
