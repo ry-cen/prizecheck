@@ -228,11 +228,20 @@ test("a Borrow Request drafted on the Want List is sent for a Deck, accepted in 
 
   // On a phone the tray is one bar above the tab bar.
   await page.setViewportSize(PHONE);
-  const bar = (await tray(page).boundingBox())!;
-  const tabs = (await page
-    .getByRole("navigation", { name: "Main views" })
-    .boundingBox())!;
-  expect(bar.y + bar.height).toBeLessThanOrEqual(tabs.y);
+  // The resize reflows the page after setViewportSize returns, so a box read at once can still be the desktop layout's
+  // (a loaded host measured the tray's bottom at 820 px with the tab bar at 788); poll until the layout has settled.
+  await expect
+    .poll(
+      async () => {
+        const [bar, tabs] = await Promise.all([
+          tray(page).boundingBox(),
+          page.getByRole("navigation", { name: "Main views" }).boundingBox(),
+        ]);
+        return bar && tabs ? tabs.y - (bar.y + bar.height) : -Infinity;
+      },
+      { message: "the drafts tray sits wholly above the tab bar" }
+    )
+    .toBeGreaterThanOrEqual(0);
   await expectPageChecks(page, "the drafts tray on a phone");
   await page.setViewportSize(DESKTOP);
 
