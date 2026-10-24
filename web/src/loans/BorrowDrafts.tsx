@@ -23,6 +23,7 @@ import {
 import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
 import { Select } from "../ui/Select";
+import { endSentence } from "../social/sentenceEnd";
 import { Stepper } from "../ui/Stepper";
 import { TextField } from "../ui/TextField";
 import { useLift, useToast } from "../ui/Toast";
@@ -602,7 +603,7 @@ function BorrowComposer({
       onChange(() => null);
       onClose();
       toast.show({
-        message: `Borrow Request sent to ${name}.`,
+        message: `Borrow Request sent to ${endSentence(name)}`,
         action: { label: "View", onAction: () => onOpenLoan(loan.id) },
         focus: true,
       });

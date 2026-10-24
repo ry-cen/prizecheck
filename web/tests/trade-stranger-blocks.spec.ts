@@ -142,9 +142,9 @@ async function blockStory(
 
   // 3. Confirming blocks: Ash's conversation is read-only.
   await confirm.click();
-  await expect(page.getByRole("status")).toHaveText(
-    "Blocked Misty W. They aren't told."
-  );
+  await expect(
+    page.getByRole("status").filter({ hasText: "Blocked Misty W." })
+  ).toHaveText("Blocked Misty W. They aren't told.");
   await expect(
     page.getByRole("link", { name: "You blocked Misty W." })
   ).toBeVisible();
@@ -152,8 +152,11 @@ async function blockStory(
   await expect(
     page.getByRole("button", { name: "Propose trade to Misty W" })
   ).toHaveCount(0);
-  // #303 adds Report to this menu, so the ⋯ menu will stay in this state: flip this assertion then.
-  await expect(page.getByRole("button", { name: MORE })).toHaveCount(0);
+  // The ⋯ menu stays, offering Report (#303) alone.
+  await expect(page.getByRole("button", { name: MORE })).toBeVisible();
+  await page.getByRole("button", { name: MORE }).click();
+  await expect(page.getByRole("menuitem")).toHaveText(["Report"]);
+  await page.keyboard.press("Escape");
   if (phone) return;
 
   // 4. Misty's open page turns read-only on the pulse, with no reload and no word about a Block.
@@ -225,9 +228,9 @@ test.describe("desktop, Block for strangers", () => {
     await page.getByRole("button", { name: MORE }).click();
     await page.getByRole("menuitem", { name: "Block" }).click();
     await confirm.click();
-    await expect(page.getByRole("status")).toHaveText(
-      "Blocked Misty W. They aren't told."
-    );
+    await expect(
+      page.getByRole("status").filter({ hasText: "Blocked Misty W." })
+    ).toHaveText("Blocked Misty W. They aren't told.");
     await expect
       .poll(async () => (await read()).closed_reason)
       .toBe("cancelled");

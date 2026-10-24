@@ -50,8 +50,8 @@ stored time of the item the cursor names, never from the cursor's own time.
 **Pulse** (``GET .../pulse``): the unread count and a watermark, from two statements over the caller's member rows and
 their inbox updates. The watermark is a hash of counts and sums, so a change committed late still moves it; it is
 opaque and compared for equality only. It moves on a message, a Trade step, an inbox update, a Block or Unblock
-between the pair (``pair_changed``), and the caller's own read, archive and unarchive, and not on a rename. It writes
-nothing.
+between the pair (``pair_changed``), a suspension of either member or its lift (``account_changed``), and the caller's
+own read, archive and unarchive, and not on a rename. It writes nothing.
 """
 import base64
 import hashlib
@@ -160,9 +160,11 @@ class ConversationSummary(BaseModel):
 
 
 class ConversationsView(BaseModel):
-    """One page of the list, newest activity first. ``next_before``: the cursor of the next page."""
+    """One page of the list, newest activity first. ``next_before``: the cursor of the next page. ``suspended``: the
+    reader is suspended (the Trades tab says so)."""
     conversations: list[ConversationSummary]
     next_before: str | None
+    suspended: bool
 
 
 class ConversationPulse(BaseModel):
@@ -191,14 +193,17 @@ class Standing:
     can_report: bool
 
 
-def normalize_text(text: str, limit: int = MESSAGE_LENGTH) -> str:
+def normalize_text(text: str, limit: int = MESSAGE_LENGTH, *, empty_ok: bool = False) -> str:
     """A message body as stored, rule by rule in this order: CRLF and CR become LF; Unicode NFC; each control character
     (category Cc) but LF and TAB, and each bidirectional formatting character, is dropped; trimmed. Empty is 422
-    EMPTY_MESSAGE and more than ``limit`` code points is 422 MESSAGE_TOO_LONG. Plain text: no link detection."""
+    EMPTY_MESSAGE and more than ``limit`` code points is 422 MESSAGE_TOO_LONG. Plain text: no link detection. With
+    ``empty_ok`` an empty result is returned as ``''`` (the Report note, Trading #303)."""
     text = unicodedata.normalize('NFC', text.replace('\r\n', '\n').replace('\r', '\n'))
     text = ''.join(char for char in text
                    if char not in BIDI and (char in '\n\t' or unicodedata.category(char) != 'Cc')).strip()
     if not text:
+        if empty_ok:
+            return ''
         error(422, 'EMPTY_MESSAGE')
     if len(text) > limit:
         error(422, 'MESSAGE_TOO_LONG')
@@ -489,7 +494,9 @@ def list_conversations(archived: bool = False, before: str | None = Query(None, 
     cursor = decode_cursor(before, ('conversation',)) if before else None
     with connect() as conn, conn.transaction():
         found, more = summaries(conn, user_id, archived=archived, before=cursor, only=None)
-    return ConversationsView(conversations=found, next_before=more)
+        profile = conn.execute('SELECT suspended_at IS NOT NULL AS suspended FROM collector_profile WHERE user_id = %s',
+                               (user_id,)).fetchone()
+    return ConversationsView(conversations=found, next_before=more, suspended=bool(profile and profile['suspended']))
 
 
 PULSE_CONVERSATIONS = """SELECT count(*) AS conversations, coalesce(sum(extract(epoch FROM c.changed_at)), 0) AS changed,
@@ -508,8 +515,9 @@ PULSE_UPDATES = """SELECT count(*) AS updates, coalesce(sum(extract(epoch FROM c
 def read_pulse(user_id: str = Depends(verified_user)):
     """How many visible conversations are unread, and the watermark of everything the shell shows: counts and sums
     over the reader's conversations and inbox updates (``Decimal`` sums are hashed as text). It moves on a message, a
-    Trade step, an inbox update, a Block or Unblock between the pair (``pair_changed``) and the reader's own read,
-    archive and unarchive, and not on a rename. Writes nothing and makes no owner row."""
+    Trade step, an inbox update, a Block or Unblock between the pair (``pair_changed``), a suspension of either member
+    or its lift (``account_changed``), and the reader's own read, archive and unarchive, and not on a rename. Writes
+    nothing and makes no owner row."""
     with connect() as conn, conn.transaction():
         talk = conn.execute(PULSE_CONVERSATIONS, (user_id,)).fetchone()
         news = conn.execute(PULSE_UPDATES, (user_id,)).fetchone()
@@ -538,6 +546,27 @@ def pair_changed(conn, user_id: str, other_id: str) -> None:
     (``friends.place_block``, ``friends._lift_block``). The caller holds both owners; the row is taken last (owners,
     ``loan``, ``trade``, ``conversation``). A pair with no conversation updates nothing."""
     conn.execute(PAIR_CHANGED, tuple(sorted((user_id, other_id))))
+
+
+ACCOUNT_CONVERSATIONS = """SELECT id FROM conversation
+  WHERE (user_low = %(a)s OR user_high = %(a)s) AND NOT (id = ANY(%(skip)s::uuid[]))
+  ORDER BY id FOR NO KEY UPDATE"""
+ACCOUNT_CHANGED = """UPDATE conversation
+  SET changed_at = greatest(changed_at + interval '1 microsecond', clock_timestamp())
+  WHERE id = ANY(%(ids)s::uuid[])"""
+
+
+def account_changed(conn, user_id: str, skip: list[UUID]) -> None:
+    """Moves the watermark of every conversation the account is a member of, except ``skip``, the rows this transaction
+    already wrote. Suspension and its lift call it, so a Block can't be told from a suspension on the pulse. The caller
+    holds the account's owner row. It is the transaction's first write of each row, so no foreign-key re-check
+    key-shares the other members' rows, and the rows are taken in id order (the SELECT locks them, the UPDATE writes
+    rows already held). Invariant: every conversation row this transaction already wrote must be in ``skip`` or have
+    both its owners locked; any later change to the suspension path that writes a conversation row must keep that
+    true."""
+    ids = [row['id'] for row in conn.execute(ACCOUNT_CONVERSATIONS, {'a': user_id, 'skip': list(skip)})]
+    if ids:
+        conn.execute(ACCOUNT_CHANGED, {'ids': ids})
 
 
 @router.get('/with/{trader_id}', response_model=ConversationView)

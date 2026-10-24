@@ -28,6 +28,7 @@ import {
   RETRY,
   SHOW_ARCHIVED,
   SHOW_MORE,
+  SUSPENDED_NOTE,
   UNARCHIVE,
   UNREAD,
 } from "./conversationMessages";
@@ -40,6 +41,7 @@ type Load =
       kind: "ready";
       rows: ConversationSummary[];
       nextBefore: string | null;
+      suspended: boolean;
     };
 
 type More = "idle" | "loading" | "failed";
@@ -76,6 +78,7 @@ export function ConversationList({
           kind: "ready",
           rows: view.conversations,
           nextBefore: view.next_before,
+          suspended: view.suspended,
         });
       },
       () => {
@@ -141,6 +144,7 @@ export function ConversationList({
                 ),
               ],
               nextBefore: view.next_before,
+              suspended: view.suspended,
             }
           : current
       );
@@ -166,6 +170,9 @@ export function ConversationList({
 
   return (
     <>
+      {load.suspended && (
+        <p className="m-0 text-body text-text-muted">{SUSPENDED_NOTE}</p>
+      )}
       {rows.length === 0 ? (
         <p className="m-0 text-body text-text-muted">
           {archived ? LIST_ARCHIVED_EMPTY : LIST_EMPTY}

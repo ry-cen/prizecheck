@@ -125,7 +125,8 @@ export function NearYou({
     } catch (cause) {
       if (
         cause instanceof SocialError &&
-        cause.code === "DISCOVERY_UNAVAILABLE"
+        (cause.code === "DISCOVERY_UNAVAILABLE" ||
+          cause.code === "ACCOUNT_SUSPENDED")
       )
         reload();
       else {

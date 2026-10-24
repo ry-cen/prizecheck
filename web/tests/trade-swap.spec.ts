@@ -108,6 +108,12 @@ const toast = (page: Page) =>
   page.getByRole("region", { name: "Notifications" });
 const more = (page: Page) =>
   page.getByRole("button", { name: "More for this Trade" });
+/** The ⋯ menu offers Report (Trading #303) and nothing else: no Withdraw or Cancel Trade is left. */
+const expectOnlyReport = async (page: Page) => {
+  await more(page).click();
+  await expect(page.getByRole("menuitem")).toHaveText(["Report"]);
+  await page.keyboard.press("Escape");
+};
 const confirmDialog = (page: Page, other: string) =>
   page.getByRole("dialog", { name: `Confirm swap with ${other}?` });
 const noArtwork = (page: Page) =>
@@ -225,7 +231,7 @@ async function story(
   await expect(
     ashMain.getByRole("button", { name: "Confirm swap" })
   ).toHaveCount(0);
-  await expect(more(ash.page)).toHaveCount(0);
+  await expectOnlyReport(ash.page);
   expect(await held(ash.page, ashBox)).toEqual({ [arven]: "1", [iono]: "1" });
 
   // D: Misty sees Ash confirmed; nothing of hers moved, and nobody can cancel now.
@@ -235,7 +241,7 @@ async function story(
   await expect(main).toContainText(
     "Ash K confirmed the swap. Confirm yours once you have the cards."
   );
-  await expect(more(page)).toHaveCount(0);
+  await expectOnlyReport(page);
   expect(await held(page, shelf)).toEqual({ [iono]: "3" });
   await expectPageChecks(page, `a half-confirmed Trade at ${width}`);
 

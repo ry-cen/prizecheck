@@ -78,6 +78,7 @@ from .moves import first_non_leaf, put_back, quantity, record_undo, take_out, un
 from .social import counts
 from .social.friend_copies import friend_copies
 from .social.friend_reads import card_facts
+from .social.discovery import require_not_suspended
 from .social.friends import friend_ids
 from .social.loans import (NOW, LoanStep, LoanView, begin_command, advance_revision, close, record_update,
                            return_by_columns, run_step, store, today, write_loan)
@@ -379,6 +380,7 @@ def send_borrow_request(command: SendBorrowRequest, user_id: str = Depends(verif
             error(422, 'INVALID_RETURN_BY')
         # The borrower's own Deck is read under their lock; nothing of the lender's is locked, as nothing is reserved.
         lock_owners(conn, user_id)
+        require_not_suspended(conn, user_id)  # 403 ACCOUNT_SUSPENDED for a suspended sender, after their lock
         if command.lender_id not in friend_ids(conn, user_id):
             error(409, 'NOT_FRIENDS')
         if command.deck_id is not None and conn.execute(
@@ -461,7 +463,8 @@ def send_lend_offer(command: SendLendOffer, user_id: str = Depends(verified_user
     """The lender offers a Friend copies from their Collection (**Lend to a Friend…**, #258), reserving them at once
     under the lender's own lock: 409 NOT_ENOUGH_COPIES (with ``edition_id`` and ``available``) when a Location has
     fewer free copies than selected, or the lender fewer copies of an Edition than all open Loans and this offer
-    need. Each line is offered and promised in full until the borrower answers."""
+    need. Each line is offered and promised in full until the borrower answers. 403 ACCOUNT_SUSPENDED for a suspended
+    sender, after their lock."""
     if command.borrower_id == user_id:
         error(409, 'OWN_ACCOUNT')
     places: dict[tuple[UUID, UUID], int] = {}
@@ -482,6 +485,7 @@ def send_lend_offer(command: SendLendOffer, user_id: str = Depends(verified_user
             error(422, 'INVALID_RETURN_BY')
         # Only the lender's own rows are read and written; the borrower's are not locked.
         lock_owners(conn, user_id)
+        require_not_suspended(conn, user_id)  # 403 ACCOUNT_SUSPENDED for a suspended sender, after their lock
         if command.borrower_id not in friend_ids(conn, user_id):
             error(409, 'NOT_FRIENDS')
         editions = sorted(lines, key=str)

@@ -1,12 +1,12 @@
 import type { ConversationParty } from "../social_generated";
 import { trackRecord } from "./conversationMessages";
 
-// Collector-facing text new with trader addresses (Trading #299). The ones marked DRAFT wait for the owner's sign-off.
+// Collector-facing text new with trader addresses (Trading #299), approved by the owner.
 
-/** DRAFT: a send, Counter or accept refused with COLLECTOR_UNAVAILABLE. */
+/** A send, Counter or accept refused with COLLECTOR_UNAVAILABLE. */
 export const SEND_UNAVAILABLE = "This collector is no longer available.";
 
-/** DRAFT: the page title while a stranger's Trade List loads, fails or can't be shown, and the builder's back-link
+/** The page title while a stranger's Trade List loads, fails or can't be shown, and the builder's back-link
  * label before the name is known. */
 export const TRADER_LIST_TITLE = "Trade List";
 

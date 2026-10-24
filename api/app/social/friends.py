@@ -25,7 +25,8 @@ before it reads the pair and is idempotent through ``location_command``; only Lo
 revision. ``friendship_ended`` runs inside Remove Friend and Block, after both locks and before the row goes: Ending a
 friendship with open Loans (#260) cancels the pair's Loans nobody has confirmed a handover for there, which moves each
 of those lenders' revisions, and then (Trading #274) the pair's Trade Proposals and Trades nobody has confirmed the
-swap for, which moves the revision of each side whose copies they reserved.
+swap for, which moves the revision of each side whose copies they reserved. A suspended collector's Friend Request is
+403 ACCOUNT_SUSPENDED (Trading #303).
 
 Blocks (#248, migration 103): a Block deletes the pair's friendship row. While it stands, the blocked collector's
 lookup of the blocker's Handle, their read of the blocker's Invite Link and their Friend Request to the blocker each
@@ -279,16 +280,22 @@ def _count_command(conn, user_id: str) -> None:
     conn.execute("INSERT INTO handle_lookup_event(user_id,kind) VALUES (%s,'friend_command')", (user_id,))
 
 
+def command_payload(action: str, other: str, extra: dict | None = None) -> dict:
+    """The replay payload of a Friend command: its action and collector, plus the command's own fields."""
+    return {'action': action, 'collector_id': other, **(extra or {})}
+
+
 def _command(user_id: str, other: str, key: UUID, action: str, apply, *,
-             blocked_you_ok: bool = False) -> FriendCommandResult:
+             blocked_you_ok: bool = False, extra: dict | None = None, answer=None) -> dict:
     """Runs one Friend command: replayed by its idempotency key, else counted against the hourly limit, both owners
     locked, the other collector checked, then ``apply(conn, row)`` with the pair's row from ``find_collector``, which
     returns the new relation (or a ``Refusal``). A collector who blocked the caller is 404 COLLECTOR_NOT_FOUND, as an
     unknown one is, unless ``blocked_you_ok``: then they count as a collector the caller has no friendship with, so the
-    answer is the one an unfriend would give."""
+    answer is the one an unfriend would give. ``extra`` joins the replay payload; ``answer(outcome)`` builds the stored
+    answer (default ``FriendCommandResult(relation=outcome)``)."""
     if other == user_id:
         error(409, 'OWN_ACCOUNT')
-    payload = {'action': action, 'collector_id': other}
+    payload = command_payload(action, other, extra)
     missing, refusal = False, None
     with connect() as conn, conn.transaction():
         ensure_owner(conn, user_id)
@@ -308,7 +315,8 @@ def _command(user_id: str, other: str, key: UUID, action: str, apply, *,
             elif isinstance(outcome := apply(conn, row), Refusal):
                 refusal = outcome
             else:
-                stored = FriendCommandResult(relation=outcome).model_dump(mode='json')
+                result = answer(outcome) if answer is not None else FriendCommandResult(relation=outcome)
+                stored = result.model_dump(mode='json')
                 conn.execute('INSERT INTO location_command(owner_id,request_key,request_digest,response) '
                              'VALUES (%s,%s,%s,%s)', (user_id, key, digest, json.dumps(stored)))
     if missing:
@@ -327,10 +335,12 @@ def _pair(a: str, b: str) -> tuple[str, str]:
 def send_friend_request(command: SendFriendRequest, user_id: str = Depends(verified_user)):
     """Send a Friend Request. Within a week of the other collector declining one, it is 409 TRY_LATER. When the two
     are already Friends, a request is pending either way or the caller blocked the other collector, nothing changes and
-    the answer says so. A collector who blocked the caller is 404 COLLECTOR_NOT_FOUND, as an unknown one is."""
+    the answer says so. A collector who blocked the caller is 404 COLLECTOR_NOT_FOUND, as an unknown one is. A suspended
+    sender is 403 ACCOUNT_SUSPENDED (after both owner locks, not counted)."""
     other = command.collector_id
 
     def apply(conn, row):
+        require_not_suspended(conn, user_id)
         current = relation(user_id, row)
         if current == 'none':
             if conn.execute("""SELECT 1 FROM friend_request_declined WHERE sender_id=%s AND recipient_id=%s

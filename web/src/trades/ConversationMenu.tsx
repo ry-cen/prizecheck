@@ -8,7 +8,7 @@ const TRIGGER =
   "inline-flex size-control shrink-0 cursor-pointer items-center justify-center rounded-control border-0 bg-transparent p-0 text-text-muted hover:bg-surface-raised hover:text-text phone:size-tap";
 
 /**
- * The conversation header's ⋯ menu (Trading #302); #303 adds Report, which shows in every state. With no items it
+ * The conversation header's ⋯ menu (Trading #302); Report (#303) shows in every state. With no items it
  * renders nothing.
  */
 export function ConversationMenu({

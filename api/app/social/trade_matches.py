@@ -167,7 +167,8 @@ def trade_list_page(conn, viewer: str, owner: str, q: str, page: int,
 def friend_trade_list(handle: str, q: str = Query('', max_length=100), page: int = Query(0, ge=0, le=100_000),
                       user_id: str = Depends(verified_user)):
     """One page of a Friend's Trade List: the cards they offer to trade now. 404 FRIEND_NOT_FOUND unless ``handle``
-    is one of the viewer's Friends."""
+    is one of the viewer's Friends. A suspended Friend reads as no Friend here (404 FRIEND_NOT_FOUND); their Collection
+    stays readable."""
     handle = handle.strip()
     if not name_rules.HANDLE.fullmatch(handle):
         error(404, 'FRIEND_NOT_FOUND')
@@ -175,10 +176,13 @@ def friend_trade_list(handle: str, q: str = Query('', max_length=100), page: int
         friend = conn.execute(FRIEND_BY_HANDLE, {'viewer': user_id, 'key': handle.lower()}).fetchone()
         if friend is None:
             error(404, 'FRIEND_NOT_FOUND')
+        profile = conn.execute('SELECT trader_id, suspended_at IS NOT NULL AS suspended FROM collector_profile '
+                               'WHERE user_id = %s', (friend['collector_id'],)).fetchone()
+        if profile['suspended']:
+            error(404, 'FRIEND_NOT_FOUND')
+        trader_id = profile['trader_id']
         cards, next_page = trade_list_page(conn, user_id, friend['collector_id'], q, page, 'friends')
         done = completed_trades(conn, [friend['collector_id']]).get(friend['collector_id'], 0)
-        trader_id = conn.execute('SELECT trader_id FROM collector_profile WHERE user_id = %s',
-                                 (friend['collector_id'],)).fetchone()['trader_id']
     return FriendTradeList(
         collector_id=friend['collector_id'], trader_id=trader_id, handle=friend['handle'],
         display_name=friend['display_name'], completed_trades=done, cards=cards, next_page=next_page)
@@ -230,8 +234,9 @@ class TradeMatchRow(BaseModel):
 
 class TraderView(BaseModel):
     """One collector in reach, by trader id (Trading #299). Never carries a user id or a Handle. ``band`` is null unless
-    both are in open discovery, and when they are unavailable; ``completed_trades`` and ``band`` are null and
-    ``open_to_cash_offers`` false unless ``status`` is 'open'. ``add_friend`` (Trading #304) is the Friend code's
+    both are in open discovery, and when they are unavailable; ``completed_trades`` is null only when ``status`` is
+    'unavailable' (it is the real count for 'open' and 'you_blocked'); ``open_to_cash_offers`` is false unless
+    ``status`` is 'open'. ``add_friend`` (Trading #304) is the Friend code's
     ``add_friend_state``: null unless the two have a Trade both confirmed, are not Friends and are in reach, and null
     while the viewer's own pending request was sent by Handle (a Trade cannot withdraw it), and null
     whenever ``status`` is not 'open'."""

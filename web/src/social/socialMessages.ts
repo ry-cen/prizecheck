@@ -1,4 +1,5 @@
 import { SocialError } from "../social_generated";
+import { ADD_FRIEND_SUSPENDED } from "./suspendedMessages";
 
 /** What a refused Handle lookup says (social network #247). A miss reads the same whatever the reason. */
 export function lookupMessage(cause: unknown): string {
@@ -23,6 +24,7 @@ export function commandMessage(cause: unknown): string {
   const code = cause instanceof SocialError ? cause.code : "";
   if (code === "COLLECTOR_NOT_FOUND")
     return "That collector can't be found anymore.";
+  if (code === "ACCOUNT_SUSPENDED") return ADD_FRIEND_SUSPENDED;
   if (code === "TRY_LATER") return "You can send another request later.";
   if (code === "TOO_MANY_CHANGES") {
     const detail = cause instanceof SocialError ? cause.detail : {};
