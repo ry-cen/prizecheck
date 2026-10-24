@@ -27,6 +27,7 @@ from app.main import connect  # noqa: F401  (main first: it includes every route
 from test_catalog_targets import isolated_rules  # noqa: F401  (an autouse fixture)
 from test_deck_cost import launches, store  # noqa: F401  (autouse fixtures)
 from test_deck_counting import hold
+from stranger_fixtures import trader_of
 from test_blocks import unblock
 from test_for_trade_locations import mark
 from test_friend_copies import befriend, block, collector, copies, ok, place
@@ -353,14 +354,16 @@ def test_a_block_by_either_side_cancels_them_too_and_the_remaining_side_finishes
     assert [entry for entry in trade_cancels(other) if entry[0] == 'cancelled'] == sorted(
         ('cancelled', trades[name]['id'], actor_name) for name in ENDED)
     # Misty's half-confirmed Trade, its line and her steps read exactly as before the Block, and nothing says Block.
-    assert ok(read(misty, trades['half'])) == seen
+    assert _by_name(ok(read(misty, trades['half']))) == _by_name(seen)
+    assert ok(read(misty, trades['half']))['other'] == _unavailable_other(ash, 'Ash K.')
     # Ash's proposal to Misty was cancelled, so her one line left is the half-confirmed Trade, as it was.
-    assert inbox(misty)['trade_waiting'] == [line]
+    assert [_by_name(waiting) for waiting in inbox(misty)['trade_waiting']] == [_by_name(line)]
     for body in (seen, line, inbox(misty), ok(call('GET', '/api/social/trades', misty))):
         _no_block(body)
     if blocker == 'remaining':
         # Ash, the blocked side, sees his half-confirmed Trade unchanged, and nothing he reads says Block.
-        assert ok(read(ash, trades['half'])) == ash_half
+        assert _by_name(ok(read(ash, trades['half']))) == _by_name(ash_half)
+        assert ok(read(ash, trades['half']))['other'] == _unavailable_other(misty, 'Misty W.')
         for key in ('trade_waiting', 'trade_updates'):
             assert [line for line in inbox(ash)[key] if line.get('id', line.get('trade_id')) == trades['half']['id']] \
                 == [line for line in ash_inbox[key] if line.get('id', line.get('trade_id')) == trades['half']['id']], key
@@ -391,10 +394,23 @@ def _normal_entry(user, trade):
     return {key: value for key, value in entry.items() if key not in ('id', 'trade_id', 'at')}
 
 
+def _unavailable_other(user, name):
+    """What a Trade view shows of the other side once a Block stands between them: no ids, no count (trading #299)."""
+    return {'collector_id': None, 'handle': None, 'trader_id': trader_of(user), 'display_name': name,
+            'open_to_cash_offers': False, 'friend': False, 'available': False, 'completed_trades': None}
+
+
+def _by_name(found):
+    """A Trade view with the other side reduced to its name: after a Block the other reads as unavailable (no ids, no
+    count), and that is the only part of the view the Block changes (trading #299)."""
+    return {**found, 'other': found['other']['display_name']}
+
+
 def _normal_view(user, trade):
     found = ok(read(user, trade))
-    assert found['other']['collector_id'] is not None and 'handle' in found['other']
-    found['other'] = {key: value for key, value in found['other'].items() if key not in ('collector_id', 'handle')}
+    # Whether the other side is still a Friend or in reach differs between an unfriend, a Block and a cancel (#299); the
+    # name is what every world shows alike.
+    found['other'] = {'display_name': found['other']['display_name']}
     # Each world has a pair of its own, so its conversation (Trading #298) is another id.
     return {key: value for key, value in found.items() if key not in ('id', 'created_at', 'conversation_id')}
 
@@ -470,7 +486,7 @@ def trades_counted(user, other):
     """The Remove Friend and Block questions' counts, by the web's rule (``tradesEnding``) over the Trades list:
     (Trade Proposals, Trades nobody has confirmed, Trades one side has confirmed), and the ids of the first two."""
     rows = [trade for trade in ok(call('GET', '/api/social/trades', user))['trades']
-            if trade['other']['collector_id'] == other]
+            if trade['other']['trader_id'] == trader_of(other)]
     proposals = [trade['id'] for trade in rows if trade['state'] == 'proposed']
     unswapped = [trade['id'] for trade in rows if trade['state'] == 'accepted'
                  and not trade['you_confirmed_swap'] and not trade['they_confirmed_swap']]
@@ -506,6 +522,7 @@ def test_a_deleted_account_leaves_its_name_and_the_remaining_side_confirms_alone
     assert trade_picks(trades['half']['id']) == [('proposer', misty, binder, 1)]
     half = ok(read(misty, trades['half']))
     assert half['other'] == {'collector_id': None, 'display_name': 'Ash K.', 'handle': None,
+                             'trader_id': None, 'friend': False, 'available': False,
                              'open_to_cash_offers': False, 'completed_trades': None}
     assert half['actions'] == ['confirm_swap', 'use_suggested_picks']
     done = ok(confirm(misty, trades['half']))
@@ -596,7 +613,7 @@ def test_ending_a_friendship_and_a_trade_step_of_the_pair_run_one_after_the_othe
     else:
         if step_name == 'send':
             # No Trade is sent once the friendship is gone.
-            assert detail(stepped) == (409, {'code': 'NOT_FRIENDS'}) and rows == []
+            assert detail(stepped) == (409, {'code': 'COLLECTOR_UNAVAILABLE'}) and rows == []
             assert revision_of(giver) == before[giver] and reserved(giver, iono) == (0, 0)
         else:
             # The step read the Trade before the unfriend or Block cancelled it: its revision moved on. Read again,

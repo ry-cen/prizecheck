@@ -44,7 +44,6 @@ import {
   SHOW_EARLIER,
   SUSPENDED_NOTE,
   TIMELINE_LABEL,
-  trackRecord,
   UNAVAILABLE_NOTE,
   youBlocked,
 } from "./conversationMessages";
@@ -54,7 +53,9 @@ import {
   proposalPath,
   TRADES_PATH,
   tradePath,
+  traderTradeListPath,
 } from "./tradeListModel";
+import { traderMeta } from "./traderMessages";
 
 /** Which conversation to show: the one with a collector (by trader id), or one by its id. */
 export type ConversationTarget =
@@ -295,8 +296,15 @@ export function ConversationPage({
   const { view, items } = load;
   const other = view.other;
   const name = other.display_name;
-  const record = trackRecord(other.completed_trades);
-  const showFriend = other.friend && other.handle !== null;
+  const record = traderMeta(other.band, other.completed_trades);
+  // Where the other side's Trade List is: a Friend's page by Handle, anyone else's by trader id. Nowhere once the
+  // conversation is not open or the other side has no trader id.
+  const listTo =
+    other.trader_id === null || view.status !== "open"
+      ? null
+      : other.friend && other.handle
+        ? friendTradeListPath(other.handle)
+        : traderTradeListPath(other.trader_id);
 
   const send = async (event: FormEvent) => {
     event.preventDefault();
@@ -334,22 +342,18 @@ export function ConversationPage({
       {record !== null && (
         <p className="m-0 text-meta text-text-muted">{record}</p>
       )}
-      {showFriend && (
+      {listTo !== null && (
         <div className="flex flex-wrap items-center gap-3">
-          {view.can_propose && (
+          {view.can_propose && other.trader_id !== null && (
             <Button
               variant="primary"
               aria-label={`Propose trade to ${name}`}
-              onClick={() => onNavigate(proposalPath(other.handle!))}
+              onClick={() => onNavigate(proposalPath(other.trader_id!))}
             >
               Propose trade
             </Button>
           )}
-          <a
-            href={friendTradeListPath(other.handle!)}
-            onClick={go(friendTradeListPath(other.handle!))}
-            className={LINK}
-          >
+          <a href={listTo} onClick={go(listTo)} className={LINK}>
             See all of {name}'s Trade List
           </a>
         </div>

@@ -14,6 +14,7 @@ import { execFileSync } from "node:child_process";
 import { randomInt, randomUUID } from "node:crypto";
 import type { BrowserContextOptions, Locator, Page } from "@playwright/test";
 import { expect, test } from "./support/collectors";
+import { traderIdOf } from "./support/conversations";
 import { expectPageChecks } from "./support/page-check";
 import { signInAsOwner } from "./support/sign-in";
 import { bodyOf } from "./support/trades";
@@ -204,6 +205,7 @@ async function story(
   const secret = `Secret ${randomUUID().slice(0, 6)}`;
   const ash = await collectors.signIn({ contextOptions });
   const ashHandle = await nameCollector(ash.page, "Ash K");
+  const ashTrader = await traderIdOf(ash.page);
   const shelf = await forTradeBinder(ash.page, `${secret} Shelf`);
   await hold(ash.page, shelf, ids["SVI 166"], 2);
   await hold(ash.page, shelf, ids["PAL 172 Reverse Holo"], 1);
@@ -212,6 +214,7 @@ async function story(
   ]);
   const brock = await collectors.signIn({ contextOptions });
   const brockHandle = await nameCollector(brock.page, "Brock T");
+  const brockTrader = await traderIdOf(brock.page);
   const brockBinder = await forTradeBinder(brock.page, `${secret} Case`);
   await hold(brock.page, brockBinder, ids["PAF 80"], 1);
   await hold(brock.page, brockBinder, ids["PAL 254"], 1);
@@ -317,7 +320,7 @@ async function story(
 
   // B: Propose trade opens an empty proposal builder with the matched cards first in Ash's Trade List.
   await page.getByRole("button", { name: "Propose trade to Ash K" }).click();
-  await expect(page).toHaveURL(`${ORIGIN}/trades/new/${ashHandle}`);
+  await expect(page).toHaveURL(`${ORIGIN}/trades/new/${ashTrader}`);
   await expect(heading(page)).toHaveText("Trade Proposal to Ash K");
   await expect(
     page
@@ -382,7 +385,7 @@ async function story(
     await popup
       .getByRole("button", { name: /^Ask Brock T to trade Iono \(PAF 0?80\)$/ })
       .click();
-    await expect(page).toHaveURL(`${ORIGIN}/trades/new/${brockHandle}`);
+    await expect(page).toHaveURL(`${ORIGIN}/trades/new/${brockTrader}`);
     await show(page, "Cards");
     await expect(
       page.getByRole("radio", { name: "Their Trade List" })

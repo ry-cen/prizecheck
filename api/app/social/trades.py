@@ -51,6 +51,10 @@ Open to cash offers setting is changed through ``/api/social/trade-settings`` (`
 (#278) is inventory code in ``app.trade_inventory``; it stores no update, because the reply is the other side's waiting
 answer.
 
+**The other side** (``TradeParty``, Trading #299): the Display Name always (the Trade's own copy), the Handle and user
+id only for a Friend, the trader id while the account exists, and whether the other is in the reader's reach now
+(``discovery.reach``); the Open to cash offers setting and the completed-trade count only while they are.
+
 **Conversations and the completed-trade count** (Trading #298): every Trade row belongs to its pair's conversation when
 the pair has one (``TradeView.conversation_id``, set by migration 147's triggers and by ``conversations.open_conversation``;
 None for a Trade of a pair that never opened one). Conversations themselves are ``app.social.conversations``; nothing in
@@ -73,6 +77,7 @@ from pydantic import BaseModel, Field
 from ..location_tree import error, replay
 from ..main import connect, verified_user
 from ..trade_picks import stale_pick_trades
+from .discovery import reach
 from .friend_reads import card_facts
 from .loans import NOW, advance_revision
 from .owners import ensure_owner, lock_owners
@@ -90,15 +95,25 @@ ACTION_ORDER = ('accept', 'decline', 'counter', 'confirm_swap', 'use_suggested_p
 
 
 class TradeParty(BaseModel):
-    """The other side of the Trade: ``collector_id`` and ``handle`` are None once that account is deleted; the name is
-    kept. ``open_to_cash_offers``: their own setting, changed through
-    ``/api/social/trade-settings`` (this module's ``settings_router``, Trading #277). ``completed_trades``: how many
-    Trades they have completed (``completed_trades``), None once that account is deleted. It defaults to None so a
-    stored replay from before it existed still validates."""
+    """The other side of the Trade, as the reader may see them (Trading #299, spec "Identity").
+
+    ``friend``: the other has a profile and is the reader's Friend now (an accepted friendship, no Block). Only then are
+    ``collector_id`` and ``handle`` set; for anyone else they are None, so ``collector_id is None`` no longer means the
+    account is deleted. ``trader_id``: the other's address on the trader routes and in the builder, None once that
+    account is deleted; never shown. ``available``: the other is in the reader's reach now (a Friend, a shared
+    conversation or nearby in open discovery, with no Block and no suspension on either side). The name is kept. Not
+    available reads the same for a Block, a suspension and a deletion, apart from ``trader_id`` and the name.
+    ``open_to_cash_offers``: their own setting (``/api/social/trade-settings``, Trading #277), False when not available.
+    ``completed_trades``: how many Trades they have completed (``completed_trades``), None when not available.
+    ``trader_id``, ``friend``, ``available`` and ``completed_trades`` have defaults so a stored replay from before they
+    existed still validates."""
     collector_id: str | None
-    display_name: str
     handle: str | None
+    trader_id: UUID | None = None
+    display_name: str
     open_to_cash_offers: bool
+    friend: bool = False
+    available: bool = False
     completed_trades: int | None = None
 
 
@@ -301,10 +316,13 @@ def trade_views(conn, user_id: str, rows, facts: dict[UUID, TradeFacts] | None =
     facts = facts if facts is not None else trade_facts(conn, user_id, rows)
     others = {row['recipient_id'] if role_of(user_id, row) == 'proposer' else row['proposer_id']
               for row in rows} - {None}
+    from .friends import friend_ids  # Imported here: friends.py imports this module.
     profiles = {profile['user_id']: profile for profile in conn.execute(
-        'SELECT user_id, handle, open_to_cash_offers FROM collector_profile WHERE user_id = ANY(%s)',
+        'SELECT user_id, trader_id, handle, open_to_cash_offers FROM collector_profile WHERE user_id = ANY(%s)',
         (sorted(others),))} if others else {}
-    counts = completed_trades(conn, others)
+    reachable = reach(conn, user_id, others)
+    friends = friend_ids(conn, user_id) if others else set()
+    counts = completed_trades(conn, [other for other in others if other in reachable])
 
     def side_cards(trade_id: UUID, side_name: str) -> list[TradeCard]:
         found = []
@@ -322,6 +340,8 @@ def trade_views(conn, user_id: str, rows, facts: dict[UUID, TradeFacts] | None =
         other = other_side(role)
         other_id = row[f'{other}_id']
         profile = profiles.get(other_id)
+        is_friend = bool(profile and other_id in friends)
+        available = other_id in reachable
         mine, theirs = confirmed(user_id, row)
         known = facts[row['id']]
         closed_by = None if row['closed_by'] is None else 'you' if row['closed_by'] == user_id else 'them'
@@ -329,10 +349,12 @@ def trade_views(conn, user_id: str, rows, facts: dict[UUID, TradeFacts] | None =
             cents=str(row['cash_cents']), payer='you' if row['cash_payer'] == role else 'them')
         views.append(TradeView(
             id=row['id'], state=row['state'], closed_reason=row['closed_reason'], closed_by=closed_by, role=role,
-            other=TradeParty(collector_id=other_id if profile else None, display_name=row[f'{other}_name'],
-                             handle=profile['handle'] if profile else None,
-                             open_to_cash_offers=bool(profile and profile['open_to_cash_offers']),
-                             completed_trades=counts.get(other_id, 0) if profile else None),
+            other=TradeParty(collector_id=other_id if is_friend else None, display_name=row[f'{other}_name'],
+                             handle=profile['handle'] if is_friend else None,
+                             trader_id=profile['trader_id'] if profile else None, friend=is_friend,
+                             available=available,
+                             open_to_cash_offers=bool(available and profile['open_to_cash_offers']),
+                             completed_trades=counts.get(other_id, 0) if available else None),
             countered_from=row['countered_from'], you_give=side_cards(row['id'], role),
             you_get=side_cards(row['id'], other), cash=cash, you_confirmed_swap=mine, they_confirmed_swap=theirs,
             needs_you=needs_you(user_id, row, known), waiting=waiting_trade_step(user_id, row, known),

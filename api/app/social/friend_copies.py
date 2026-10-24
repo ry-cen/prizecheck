@@ -28,6 +28,12 @@ query or an allocation per Friend. It takes no lock: a Friend read never waits o
 reads one snapshot of their Holdings and Deck Lists. Callers run it outside any transaction that holds the viewer's
 owner lock.
 
+**Who is asked about.** The Trade List and wants statements filter through migration 148's reach rule
+(``trade_reach``): a Friend, a pair with a conversation, or nearby collectors in open discovery, never across a Block or
+with a suspended collector on either side. ``among='friends'`` keeps the friend branch only (so a suspended Friend drops
+out); ``among='reach'`` keeps every branch and needs the ids asked about. ``READ`` (a Friend's Collection) stays on the
+Friends rule.
+
 **A Friend's Trade List** (``friend_trade_copies``, ``TRADE_READ``) is one statement too (two when asked about every
 Friend: ``TRADE_FRIENDS`` names them first): the same Friends only, joined to migration 142's one listable rule, which
 the collector's own Trade List (``app.trade_list``) also calls, so the two can never disagree. For trade membership
@@ -54,11 +60,16 @@ snapshot and never waits on a Friend's writes.
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from .. import copy_allocation
 from ..copy_allocation import AllocationRows, allocate_rows
 from . import counts
+
+# Whom a Trade List or wants read asks about: ``'friends'`` keeps only the reach rule's friend branch, ``'reach'`` keeps
+# every branch (a Friend, a pair with a conversation, nearby collectors in open discovery).
+Among = Literal['friends', 'reach']
 
 
 @dataclass(frozen=True)
@@ -131,9 +142,18 @@ TRADE_FRIENDS = """SELECT f.friend_id FROM friends_of(ARRAY[%(viewer)s]::text[])
 # The Trade List statement, for the collectors in %(friends)s (never NULL) that are the viewer's Friends; %(editions)s is
 # NULL for every Edition. The listable rule is given the ids as a value, never a sub-select, so PostgreSQL plans it for
 # the collectors and Editions it is asked about (trading #276: with a sub-select it can't, and 200 Friends took ten
-# times as long); the join keeps only Friends.
+# times as long); the join keeps only the collectors in reach. The filter is the reach rule: with among = 'reach' every
+# branch is kept. With among = 'friends' the friend branch alone is kept, and it is written as the Friends rule plus
+# both suspension checks, which is the same answer: calling trade_reach for 200 Friends doubled the matches read's
+# time (about 2.4 s against 1.2 s at 200 Friends), and the constant among lets PostgreSQL skip the branch it doesn't use.
 TRADE_READ = """WITH friend AS (
-    SELECT f.friend_id FROM friends_of(ARRAY[%(viewer)s]::text[]) f WHERE f.friend_id = ANY(%(friends)s::text[])
+    SELECT r.other_id AS friend_id FROM trade_reach(%(viewer)s, %(friends)s::text[]) r
+    WHERE %(among)s::text = 'reach'
+  UNION ALL
+    SELECT f.friend_id FROM friends_of(ARRAY[%(viewer)s]::text[]) f
+    JOIN collector_profile p ON p.user_id = f.friend_id AND p.suspended_at IS NULL
+    JOIN collector_profile me ON me.user_id = %(viewer)s AND me.suspended_at IS NULL
+    WHERE %(among)s::text = 'friends' AND f.friend_id = ANY(%(friends)s::text[])
   )
   SELECT t.owner_id AS friend_id, t.edition_id, t.listable
   FROM trade_listable(%(friends)s::text[], %(editions)s::uuid[]) t
@@ -142,10 +162,13 @@ TRADE_READ = """WITH friend AS (
 
 
 def friend_trade_copies(conn, viewer_id: str, friend_ids: Iterable[str] | None = None,
-                        edition_ids: Iterable[UUID] | None = None) -> list[TradeCopies]:
-    """What the viewer's Friends among ``friend_ids`` (None: every Friend) list on their Trade Lists now, of
-    ``edition_ids`` (None: every Edition), by Friend id then Edition id. Anyone who isn't the viewer's Friend is absent,
-    as is every Edition a Friend lists none of. Runs on the caller's connection and transaction."""
+                        edition_ids: Iterable[UUID] | None = None, among: Among = 'friends') -> list[TradeCopies]:
+    """What the viewer's Friends among ``friend_ids`` (None: every Friend; ``among='friends'`` only) list on their
+    Trade Lists now, of ``edition_ids`` (None: every Edition), by Friend id then Edition id. With ``among='reach'`` it is
+    the collectors in reach among ``friend_ids``, which is then required. Anyone not in the asked set is absent, as is
+    every Edition a collector lists none of. Runs on the caller's connection and transaction."""
+    if among == 'reach' and friend_ids is None:
+        raise ValueError('among="reach" needs the collectors asked about')
     friends = None if friend_ids is None else sorted(set(friend_ids))
     editions = None if edition_ids is None else sorted(set(edition_ids))
     if friends == [] or editions == []:
@@ -156,7 +179,8 @@ def friend_trade_copies(conn, viewer_id: str, friend_ids: Iterable[str] | None =
         if not friends:
             return []
     return [TradeCopies(friend_id=row['friend_id'], edition_id=row['edition_id'], listable=int(row['listable']))
-            for row in conn.execute(TRADE_READ, {'viewer': viewer_id, 'friends': friends, 'editions': editions})]
+            for row in conn.execute(TRADE_READ, {'viewer': viewer_id, 'friends': friends, 'editions': editions,
+                                                 'among': among})]
 
 
 @dataclass(frozen=True)
@@ -172,11 +196,16 @@ class FriendWant:
     rule: str
 
 
-# The Friends among %(friends)s (NULL: every Friend) whose Deck Lists name one of %(editions)s (NULL: every Edition),
-# and whether their Trade Wants do. Only the Friends with either go further.
+# The collectors among %(friends)s (never NULL) in reach whose Deck Lists name one of %(editions)s (NULL: every
+# Edition), and whether their Trade Wants do. Only the Friends with either go further.
 WANTS_FRIENDS = """WITH friend AS (
+    SELECT r.other_id AS friend_id FROM trade_reach(%(viewer)s, %(friends)s::text[]) r
+    WHERE %(among)s::text = 'reach'
+  UNION ALL
     SELECT f.friend_id FROM friends_of(ARRAY[%(viewer)s]::text[]) f
-    WHERE %(friends)s::text[] IS NULL OR f.friend_id = ANY(%(friends)s::text[])
+    JOIN collector_profile p ON p.user_id = f.friend_id AND p.suspended_at IS NULL
+    JOIN collector_profile me ON me.user_id = %(viewer)s AND me.suspended_at IS NULL
+    WHERE %(among)s::text = 'friends' AND f.friend_id = ANY(%(friends)s::text[])
   )
   SELECT friend.friend_id,
     EXISTS (SELECT 1 FROM deck_list_line l WHERE l.owner_id = friend.friend_id
@@ -219,16 +248,25 @@ WANTS_RULES = f"""SELECT owner_id, edition_id, rule FROM trade_accept
 
 
 def friend_wants(conn, viewer_id: str, friend_ids: Iterable[str] | None = None,
-                 edition_ids: Iterable[UUID] | None = None) -> list[FriendWant]:
-    """What the viewer's Friends among ``friend_ids`` (None: every Friend) want of ``edition_ids`` (None: every
-    Edition), by Friend id then Edition id; see the module docstring. Anyone who isn't the viewer's Friend is absent, as
-    is every Edition a Friend wants none of. A fixed number of statements for any number of Friends, and no lock: the
-    caller runs it in one read-only repeatable-read transaction."""
+                 edition_ids: Iterable[UUID] | None = None, among: Among = 'friends') -> list[FriendWant]:
+    """What the viewer's Friends among ``friend_ids`` (None: every Friend; ``among='friends'`` only) want of
+    ``edition_ids`` (None: every Edition), by Friend id then Edition id; see the module docstring. With ``among='reach'``
+    it is the collectors in reach among ``friend_ids``, which is then required. Anyone not in the asked set is absent, as
+    is every Edition a collector wants none of. A fixed number of statements for any number of collectors, and no lock:
+    the caller runs it in one read-only repeatable-read transaction."""
+    if among == 'reach' and friend_ids is None:
+        raise ValueError('among="reach" needs the collectors asked about')
     friends = None if friend_ids is None else sorted(set(friend_ids))
     editions = None if edition_ids is None else sorted(set(edition_ids))
     if friends == [] or editions == []:
         return []
-    rows = conn.execute(WANTS_FRIENDS, {'viewer': viewer_id, 'friends': friends, 'editions': editions}).fetchall()
+    if friends is None:
+        friends = sorted(row['friend_id'] for row in conn.execute(
+            TRADE_FRIENDS, {'viewer': viewer_id, 'friends': None}))
+        if not friends:
+            return []
+    rows = conn.execute(WANTS_FRIENDS, {'viewer': viewer_id, 'friends': friends, 'editions': editions,
+                                        'among': among}).fetchall()
     listing = sorted(row['friend_id'] for row in rows if row['lists'])
     wanting = sorted(row['friend_id'] for row in rows if row['wants'])
     needs = _want_list_needs(conn, listing, editions) if listing else {}

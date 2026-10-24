@@ -3,7 +3,7 @@
 import type { Page } from "@playwright/test";
 import { Pool } from "pg";
 import { expect } from "./collectors";
-import { accountId } from "./loans";
+import { accountId, api } from "./loans";
 
 const ORIGIN = process.env.TEST_ORIGIN || "http://localhost:5173";
 
@@ -41,6 +41,27 @@ export async function traderIdOf(page: Page): Promise<string> {
     await pool.end();
   }
 }
+
+/** Seeds the zip codes the discovery specs use: 00010 (40.0, -100.0), 00011 (0.1 degrees north, about 6.9 mi) and 00012.
+ * Upserts, so no spec depends on the generated zip data. Unlike `open-discovery.spec.ts` it leaves 00009 alone. */
+export async function seedZips() {
+  const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+  try {
+    await pool.query(
+      `INSERT INTO zip_centroid (zip, lat, lon, source) VALUES
+         ('00010', 40.0, -100.0, 'census'),
+         ('00011', 40.1, -100.0, 'census'),
+         ('00012', 40.2, -100.0, 'census')
+       ON CONFLICT (zip) DO UPDATE SET lat = EXCLUDED.lat, lon = EXCLUDED.lon, source = EXCLUDED.source`
+    );
+  } finally {
+    await pool.end();
+  }
+}
+
+/** Switches the page's collector into open discovery at `zip` (a seeded one), through the API. */
+export const discoverable = (page: Page, zip: string) =>
+  api(page, "PUT", "/api/social/discovery", { enabled: true, zip });
 
 /** Counts `count` messages the page's collector sent `minutesAgo` minutes ago against the hourly message limit. */
 export async function seedMessages(

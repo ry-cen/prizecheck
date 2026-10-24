@@ -289,7 +289,7 @@ function MatchRow({
             <Button
               variant="primary"
               aria-label={`Propose trade to ${name}`}
-              onClick={() => onNavigate(proposalPath(row.handle))}
+              onClick={() => onNavigate(proposalPath(row.trader_id))}
             >
               Propose trade
             </Button>
@@ -304,7 +304,8 @@ function MatchRow({
 }
 
 /** One side of an open row: the matched cards in card order, "Nothing" when there are none, and Show N more. */
-function MatchSide({
+export function MatchSide({
+  level = 3,
   title,
   label,
   cards,
@@ -313,6 +314,8 @@ function MatchSide({
   headingRef,
   onShowMore,
 }: {
+  /** The heading element's level: 3 under a row's h2, 2 on a page of its own. */
+  level?: 2 | 3;
   title: string;
   label: string;
   cards: TradeMatchCard[];
@@ -323,19 +326,20 @@ function MatchSide({
 }) {
   const headingId = useId();
   const listId = useId();
+  const Heading = level === 2 ? "h2" : "h3";
   return (
     <section
       aria-labelledby={headingId}
       className="flex min-w-0 flex-col gap-2"
     >
-      <h3
+      <Heading
         ref={headingRef}
         id={headingId}
         tabIndex={-1}
         className="m-0 text-body font-semibold"
       >
         {title}
-      </h3>
+      </Heading>
       <ul
         id={listId}
         aria-label={label}

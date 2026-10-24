@@ -587,7 +587,7 @@ export function TradeScreen({
     <>
       <p className="m-0 text-body">
         <span className="font-semibold">Trade with {name}</span>
-        {trade.other.handle && (
+        {trade.other.friend && trade.other.handle && (
           <span className="text-text-muted"> @{trade.other.handle}</span>
         )}
       </p>

@@ -22,6 +22,7 @@ import pytest
 from app.main import connect  # noqa: F401  (main first: it includes every router while loading)
 from app.social import friend_copies
 from app.social.friend_copies import FriendWant, friend_wants
+from stranger_fixtures import far_zip, strangers, trader_of
 from test_catalog_targets import isolated_rules  # noqa: F401  (an autouse fixture)
 from test_deck_cost import launches, store  # noqa: F401  (autouse fixtures)
 from test_deck_counting import counting, deck, hold, line
@@ -31,12 +32,13 @@ from test_handover import handover
 from test_holdings import call
 from test_lend_offers import offer, take
 from test_loans import accept, sent
+from test_open_discovery import discoverable
 from test_trade_promises import close, seed_trade
 from test_trade_wants import set_rule, set_want
 from want_list_swap_fixtures import seed_swap_catalog
 
 UNKNOWN = b'{"detail":{"code":"FRIEND_NOT_FOUND"}}'
-ROW_FIELDS = {'collector_id', 'handle', 'display_name', 'completed_trades', 'open_to_cash_offers', 'match',
+ROW_FIELDS = {'collector_id', 'trader_id', 'handle', 'display_name', 'completed_trades', 'open_to_cash_offers', 'match',
               'you_get', 'you_give', 'more_you_get', 'more_you_give'}
 CARD_FIELDS = {'edition_id', 'name', 'set_code', 'set_name', 'collector_number', 'descriptor', 'image_url', 'copies',
                'need', 'want_list_need', 'origin', 'accepts_as'}
@@ -452,8 +454,8 @@ def test_a_friend_who_matches_nothing_has_no_row_and_their_read_says_so(store):
     befriend(viewer, friend)
     assert matches(viewer) == {'has_friends': True, 'rows': []}
     assert ok(one(viewer, friend)) == {
-        'collector_id': friend, 'handle': handle, 'display_name': 'Ash K.', 'completed_trades': 0,
-        'open_to_cash_offers': False, 'match': None, 'you_get': [], 'you_give': [], 'more_you_get': 0, 'more_you_give': 0}
+        'collector_id': friend, 'trader_id': trader_of(friend), 'handle': handle, 'display_name': 'Ash K.',
+        'completed_trades': 0, 'open_to_cash_offers': False, 'match': None, 'you_get': [], 'you_give': [], 'more_you_get': 0, 'more_you_give': 0}
     # Discovery reads the current Trade List and wants on every open.
     ok(set_want(viewer, ids['PAL 185'], 1))
     shelf = binder(friend)
@@ -659,7 +661,9 @@ def test_friend_wants_reads_as_many_statements_for_one_friend_as_for_many(store)
         alone, together = Counted(conn), Counted(conn)
         first = friend_wants(alone, viewer, friends[:1], editions)
         every = friend_wants(together, viewer, None, editions)
-    assert alone.statements == together.statements
+    # Asking about every Friend lists them first (``TRADE_FRIENDS``, one statement), so the count is constant whatever the
+    # number of Friends: one more than asking about one Friend by id.
+    assert together.statements == alone.statements + 1
     assert first == sorted([FriendWant(friends[0], UUID(ids['PAL 185']), 2, 0, 'printing'),
                             FriendWant(friends[0], UUID(ids['SVI 166']), 0, 1, 'edition')],
                            key=lambda item: item.edition_id)
@@ -676,3 +680,80 @@ def test_the_friend_wants_statements_never_name_a_location_or_deck_in_what_they_
     assert set(FriendWant.__dataclass_fields__) == {'friend_id', 'edition_id', 'want_list_need', 'trade_wants_quantity',
                                                     'rule'}
     assert 'borrowed_holding' not in friend_copies.TRADE_READ and 'borrowed_holding' not in friend_copies.READ
+
+
+# Trader reads (Trading #299): the match row of a collector in reach, by trader id.
+
+TRADER_FIELDS = {'trader_id', 'display_name', 'band', 'completed_trades', 'open_to_cash_offers', 'match', 'you_get',
+                 'you_give', 'more_you_get', 'more_you_give'}
+COLLECTOR_UNKNOWN = b'{"detail":{"code":"COLLECTOR_NOT_FOUND"}}'
+
+
+def trader_row(viewer, trader):
+    return call('GET', f'/api/social/traders/{trader}/matches', viewer)
+
+
+def suspend_user(user, value=True):
+    with connect() as conn:
+        conn.execute('UPDATE collector_profile SET suspended_at = CASE WHEN %s THEN now() END WHERE user_id = %s',
+                     (value, user))
+
+
+def test_a_traders_row_answers_a_nearby_stranger_with_every_card(store):
+    ids, ash, misty, binder_, box = strangers()
+    iono, arven = ids['PAL 185'], ids['SVI 166']
+    ok(set_want(ash, iono, 2))
+    ok(set_want(misty, arven, 1))
+    row = ok(trader_row(ash, trader_of(misty)))
+    assert set(row) == TRADER_FIELDS
+    assert (row['match'], row['more_you_get'], row['more_you_give'], row['band']) == ('two_way', 0, 0, '5_to_10')
+    assert (row['trader_id'], row['display_name'], row['completed_trades']) == (trader_of(misty), 'Misty W.', 0)
+    assert [card['edition_id'] for card in row['you_get']] == [iono]
+    assert [card['edition_id'] for card in row['you_give']] == [arven]
+    with connect() as conn:
+        misty_handle = conn.execute('SELECT handle FROM collector_profile WHERE user_id = %s', (misty,)).fetchone()['handle']
+    text = json.dumps(row)
+    assert misty not in text and misty_handle.lower() not in text.lower()
+    # Strangers are in no Friend discovery, though the trader route sees them.
+    assert matches(ash) == {'has_friends': False, 'rows': []}
+
+
+def test_a_strangers_hidden_deck_wants_stay_out_of_their_row(store):
+    ids, ash, misty, binder_, box = strangers()
+    arven = ids['SVI 166']
+    hidden = deck(misty, 'Hidden Deck', 0)
+    line(misty, hidden, arven, 2)
+    row = ok(trader_row(ash, trader_of(misty)))
+    assert row['match'] == 'wants_what_you_have' and [card['edition_id'] for card in row['you_give']] == [arven]
+    hide(misty, hidden)
+    row = ok(trader_row(ash, trader_of(misty)))
+    assert (row['match'], row['you_give'], row['you_get']) == (None, [], [])
+
+
+def test_the_trader_row_needs_reach_and_a_suspended_friend_has_no_row(store):
+    ids, ash, misty, binder_, box = strangers()
+    ok(set_want(ash, ids['PAL 185'], 1))
+    far, _ = collector('Far W.')
+    discoverable(far, far_zip())
+    blocker, _ = collector('Blocker')
+    blocked, _ = collector('Blocked')
+    discoverable(blocker, '00010')
+    discoverable(blocked, '00010')
+    block(blocker, ash)
+    block(ash, blocked)
+    for other in (str(uuid4()), trader_of(ash), trader_of(far), trader_of(blocker), trader_of(blocked)):
+        response = trader_row(ash, other)
+        assert (response.status_code, response.content) == (404, COLLECTOR_UNKNOWN), other
+    # A Friend answers through the trader route, with no band.
+    friend, _ = collector('Gary')
+    befriend(ash, friend)
+    hold(friend, binder(friend), ids['PAL 185'], 1)
+    row = ok(trader_row(ash, trader_of(friend)))
+    assert (row['band'], row['match']) == (None, 'has_what_you_want')
+    assert [item['collector_id'] for item in matches(ash)['rows']] == [friend]
+    # A suspended Friend has no row anywhere.
+    suspend_user(friend)
+    response = one(ash, friend)
+    assert (response.status_code, response.content) == (404, UNKNOWN)
+    assert matches(ash)['rows'] == []
+    assert trader_row(ash, trader_of(friend)).status_code == 404
