@@ -1,0 +1,87 @@
+# Card scanner — decision map
+
+**Label:** wayfinder:map
+
+**Status:** charting since 2026-10-21. No tickets opened yet. The recognition spike closed on 2026-10-22; its [findings](research/recognition-spike-findings.md) recommend image matching plus number OCR. Scanner plumbing resolved on 2026-10-22 ([resolution](resolutions/decide-scanner-plumbing.md)). The phone measurement gate session (ticket 3) ran on 2026-10-23 and did not pass; the owner accepted building on the current runtime ([results](research/phone-gate-results.md)). Next: the rest of the scan tray prototype (ticket 3).
+
+## Destination
+
+A handoff-ready spec at `docs/planning/card-scanner/spec.md` for adding cards to a Collection with a phone camera: the collector scans a stack of English cards, reviews the matches in a tray, and saves them into one Storage Leaf. The spec must settle the domain terms, the on-device recognition pipeline, the tray, the save contract and the tests. A recognition spike must first show that on-device recognition meets the accuracy bar.
+
+## Notes
+
+- Owner request on 2026-10-21: a card scanner through the camera, chosen ahead of Trading Stage 2. Stage 1 trading had just merged to `dev`, Stage 2 still needs its safety decisions, and faster entry fills trade binders.
+- The scanner is Collection Import with a camera as its source. Collection Import's review is "the safety net"; the scanner keeps the same promise: it only adds Holdings, all into one chosen Storage Leaf, and nothing is saved until the collector confirms.
+- A scan only suggests a Card Edition, and the collector confirms it. This follows the physical-Edition identity in [ADR 0007](../../../adr/0007-edition-marketplace-metadata-boundary.md): neither OCR of a set number nor an image match can decide a finish.
+- Reference artwork and its gaps (missing energies and trainer kits in TCGdex) are covered in [card image sources](../../tcg-collection-tracker/wayfinder/research/card-image-sources.md). Cards without reference artwork can only be recognized by their collector number.
+- What comparable apps do (read 2026-10-21, mostly vendor and review-blog claims): dedicated scanner apps advertise on-device recognition that works offline; several combine image recognition with OCR; confirming set, number and finish after the scan is common; reprints that share artwork, vintage cards and Japanese cards are the usual weak spots. Nearly all are native apps, so a browser scanner is less proven.
+- New terms (working names: scan tray, scan session) are defined through domain-modeling as they are resolved. `CONTEXT.md` is not changed by this map.
+- The owner delegates technical plumbing (recognition pipeline, models, index format, caching, API contracts): decide and record it, and grill the owner only on collector-facing effects, one question per message.
+- Follow AGENTS.md's UI copy rule: the scanner shows no recognition scores, model or source names, or index versions. Consult Laya before delegation. Ask before creating a `feature: card scanner` label or any GitHub issue. Commit and push only with owner approval; stage explicit paths.
+
+## Decisions so far
+
+<!-- One line per closed ticket: link plus a one-line gist. -->
+
+- Review tray (owner, 2026-10-21, before tickets): each scan goes to a tray. Nothing reaches the Collection until the collector confirms the tray.
+- On-device only (owner, 2026-10-21, before tickets): recognition runs on the collector's device. No card photo is uploaded or stored, ever, not even a thumbnail. "Accurate enough" is acceptable because the tray catches mistakes.
+- Accuracy bar (owner, 2026-10-21, before tickets): across a mixed stack of the owner's real cards, the right card is among the tray's top 3 candidates at least 9 times in 10 and is the first candidate at least 7 times in 10. Measured on phones and tablets. Synthetic images made from reference artwork are used only for development; about 30 real photos of the owner's cards, weighted toward hard cases, decide whether the bar is met (owner, 2026-10-21).
+- English only (owner, 2026-10-21, before tickets): the catalog is English-only, so the scanner recognizes English cards and the tray has no language choice.
+- Capture (owner, 2026-10-21, before tickets): automatic. A card locks in when consecutive frames agree, with a vibration or sound, and a shutter button is the fallback. The same card staying in frame is captured once; taking it out and putting it back counts as a second copy. Each tray row has a count the collector can adjust. (Feedback refined 2026-10-22: see Lock feedback below and the [plumbing resolution](resolutions/decide-scanner-plumbing.md).)
+- Guide outline (owner, 2026-10-21, after the first synthetic run): the camera view shows a card-shaped outline and the collector lines the card up inside it. The scanner may expect a reasonably sharp, well-lit image and wait for one, rather than coping with any frame.
+- Finish (owner, 2026-10-21, before tickets): if the matched Card Printing has one active Card Edition, the tray picks it. Otherwise the row defaults to the Unspecified Variant, with one-tap chips for the other Editions. Confirming never requires a finish, and the scanner never guesses one from the image. (Amended 2026-10-22 for Printings without an Unspecified Variant: see Finish default below and the [plumbing resolution](resolutions/decide-scanner-plumbing.md).)
+- Destination (owner, 2026-10-21, before tickets): one Storage Leaf per scan session, chosen in the tray and defaulting to Unsorted. The scanner only adds Holdings and never changes or removes existing ones. (Narrowed 2026-10-22 by the Deck line below: a Deck is a Storage Leaf but is not a scan destination; see the [plumbing resolution](resolutions/decide-scanner-plumbing.md).)
+- Unfinished tray (owner, 2026-10-21, before tickets): the tray is kept on that device until the collector confirms or clears it, surviving reloads and closing the app. It holds Editions and counts only. One tray at a time; it does not sync between devices. (Amended 2026-10-22: iOS Safari may delete it, per the iOS eviction line, and it is kept per account, per the tray-per-account line; see the [plumbing resolution](resolutions/decide-scanner-plumbing.md).)
+- Entry points (owner, 2026-10-21, before tickets): Scan cards beside Collection's other add actions, a Camera source in Collection Import, and a scan shortcut in the phone header, all opening the same scanner. Built for phones and tablets; laptop webcams work but are not tuned for or counted in the accuracy bar. Without a camera, or with permission denied, the scanner explains how to allow the camera and offers search and Collection Import instead.
+- No prices (owner, 2026-10-21, before tickets): the tray shows no per-card prices and no total. Values stay in Collection.
+- Misses (owner, 2026-10-21, before tickets): every tray row offers catalog search beside its top 3 candidates. A shutter press on a card the scanner cannot recognize opens search at once, and the collector picks an Edition (the Unspecified Variant counts) before the card enters the tray. Every tray row always has an Edition; there are no unmatched placeholder rows.
+- Recognition spike result (owner, 2026-10-22, after the second real-photo run): the owner stopped the spike and accepted the result. Combined image and number matching came close to the bar without meeting it (20/30 first, 25/30 in the top 3), measured on 30 eBay seller photos in Python on a Mac, not the owner's photos on phones. The reprint and Celebrations cases are too niche to matter, and the review tray with catalog search on every row covers the misses. [Findings](research/recognition-spike-findings.md).
+- Scanner plumbing (delegated, resolved 2026-10-22): the browser runtime, the model and index delivery, device storage, the save route and its refusals, and the phone measurement gate that ticket 3 carries. [Resolution](resolutions/decide-scanner-plumbing.md).
+- Finish default (owner, 2026-10-22, amends the Finish line above): when a Printing has several Editions and no Unspecified Variant, the row defaults to Normal, else the first active Edition, shown selected and one tap to change. Every row still has an Edition and Confirm never waits on a finish; it is a default, never inferred from the photo. [Resolution](resolutions/decide-scanner-plumbing.md#d8-candidates-resolve-to-editions-live-through-one-batch-route).
+- Lock feedback (owner, 2026-10-22): a visual cue everywhere, vibration where the phone supports it, and a short sound that is off by default behind one setting; an iPhone is silent and still unless the sound is on. This settles the lock-sound open item.
+- Adding a row needs a connection; recognition does not (plumbing, 2026-10-22): see [a lock whose Edition cannot be resolved](resolutions/decide-scanner-plumbing.md#d8-candidates-resolve-to-editions-live-through-one-batch-route).
+- Repeat lock (owner, 2026-10-22): a second lock of the same Printing adds its copy to the newest row of that Printing; the collector moves it with counts and chips.
+- Deck not a destination (owner, 2026-10-22): the scan destination is a Storage Leaf that is not a Deck.
+- No undo (owner, 2026-10-22): after Confirm there is no undo, as in Collection Import.
+- Tray per account (owner, 2026-10-22): the tray is kept per account, hidden from other accounts on the device, and restored when that account signs in again.
+- Tray cap (owner, 2026-10-22): 200 distinct Editions per tray and 999 copies per row; a full tray asks the collector to confirm before adding more.
+- iOS eviction accepted (owner, 2026-10-22): Safari may delete the tray after 7 days without opening PrizeCheck or under storage pressure; no note in the UI.
+- First download (owner, 2026-10-22): the first open starts the roughly 40 MB download at once with a progress bar ("Getting the scanner ready"), with no prompt and no cellular warning.
+- Stale save note (owner, 2026-10-22): a save with no answer that is older than 29 days (the save receipt lasts 30) unfreezes the tray with "This tray may already be in your Collection. Check before confirming again."
+- No index built (owner, 2026-10-22): the scanner shows the same screen as "no camera", offering search and Collection Import.
+- Phone gate outcome (owner, 2026-10-23): the gate session on an iPhone 17 Pro Max ended after Lock. Speed (G2), the cheap gate (G3) and time to lock (G4) missed their bars; G7 (memory) and G9 (voting) were not run, and slower phones and Android stay unmeasured. The owner accepted building on the current runtime anyway (WASM, 4 threads under COOP/COEP, int8 embedder, Paddle OCR) and improving it later. Recognition sits behind a narrow module interface so a faster port, a retuned gate, WebGPU or a native plugin can replace it without changing the tray or the save path. [Results](research/phone-gate-results.md).
+- Fingerprint rights (owner, 2026-10-22): the scanner is used only on the private, sign-in-only deployment, never stores images and never publishes the index; a public launch waits for a written rights check. It stays a ship blocker: [blockers](resolutions/decide-scanner-plumbing.md#ship-blockers).
+
+## Plumbing defaults (superseded 2026-10-22 by the [plumbing resolution](resolutions/decide-scanner-plumbing.md); kept as history)
+
+- **Pipeline.** Find the card's four corners and straighten it; read the collector-number strip with OCR; embed the straightened card and look up the nearest reference fingerprints; combine the two (the number narrows the candidates and the image orders them, or the image alone when OCR fails); vote across several frames before locking.
+- **Where it runs.** All of it in the browser, loaded only when the scanner opens. The reference fingerprints are computed on the server from reference artwork, published as a static, versioned, content-hashed index and cached on the device. The spike measures whether image matching earns its download; if OCR alone meets the bar, the first version may ship without it.
+- **Shared save, separate draft.** Collection Import's draft is server-side, one per collector, and starting another replaces it. The scan tray is on-device, so it must not create or replace an import draft. The scanner reuses the import's save transaction (one Holding increment per resolved Card Edition into the landing Storage Leaf, one owner-revision advance, an idempotency key for replays) through its own route, and reuses the review's row, candidate, finish-chip and search components in the web app. The Camera source in Collection Import opens the scanner rather than starting a draft.
+
+## Candidate tickets
+
+1. **Recognition spike** (done 2026-10-22, [findings](research/recognition-spike-findings.md); prototype, in a separate throwaway repository): [brief](prototypes/recognition-spike/brief.md). Compare OCR alone, image matching alone and both combined against the accuracy bar, and report download size and speed on real phones.
+2. **Decide scanner plumbing** (resolution; done 2026-10-22, [resolution](resolutions/decide-scanner-plumbing.md)): pipeline and libraries from the spike, the fingerprint index build and publishing, device caching and the save route and its refusals.
+3. **Prototype the scan tray** (prototype): the camera view, lock feedback, the tray rows with candidates, count, finish chips and search, and the destination picker, on a phone. It also carries the [phone measurement gate](resolutions/decide-scanner-plumbing.md#measurement-gate-map-ticket-3): its first session ran on 2026-10-23 and did not pass G2, G3 or G4; the owner accepted the current runtime and model choices anyway, with G7, G9, slower phones and Android unmeasured ([results](research/phone-gate-results.md)). It also decides how a stale row presents (see Not yet specified).
+4. **Define scanner terms** (domain-modeling): scan session, scan tray, and how they relate to Collection Import in `CONTEXT.md`.
+5. **Write the spec** from the decisions above.
+6. **Write the ADR** "On-device recognition assets and the scanner index job" (ADR), recording the model delivery, the index job and storage, and device storage decisions (D3, D4 and D9 of the [plumbing resolution](resolutions/decide-scanner-plumbing.md)). No ADR covers static assets or caching today.
+
+## Not yet specified
+
+<!-- Undo, lock feedback, tray size, sign-out, Deck destination and staleness were settled on 2026-10-22; see Decisions so far and the plumbing resolution. -->
+
+- How a stale row presents: the plumbing keeps a stale row's Edition, marks it as needing a pick and disables Save until a chip or search result is chosen ([D11](resolutions/decide-scanner-plumbing.md#d11-stale-editions-cannot-hurt-the-collector)). What the row looks like, and what the chips show, is for the scan tray prototype (ticket 3).
+
+- Phantom locks: before release, the scanner must not lock on an empty scene. With the gate bypassed, the gate session saw 16 locks with no card placed, 9 on Vermilion City Gym: a blank dark surface with no corners found falls back to the guide crop and always lands on the same Printing. The fix starts with letting only frames with found corners (or an OCR number match) count toward an automatic lock. The sharpness gate also needs retuning on real camera frames, and the speed pass remains ([results](research/phone-gate-results.md#findings-and-follow-ups)).
+
+- Fingerprint rights: still a ship blocker. [Card image sources](../../tcg-collection-tracker/wayfinder/research/card-image-sources.md) covers re-hosting artwork, not deriving and publishing an embedding index from it. The owner limited use to the private, sign-in-only deployment; a public launch needs a written rights check first ([blockers](resolutions/decide-scanner-plumbing.md#ship-blockers)).
+
+## Out of scope
+
+- Uploading or storing card photos, server-side recognition, and syncing the tray across devices.
+- Non-English cards; they follow the catalog.
+- Prices or values while scanning.
+- Recognizing a finish, condition, grade or stamp from the image.
+- Sealed product, graded slabs and other games.
+- A native app wrapper; the scanner is part of the web app. Deferred until after the web product is deployed, not ruled out: the owner plans an App Store release eventually, likely a wrapper where only the scanner is a native plugin ([results](research/phone-gate-results.md#decision)).
