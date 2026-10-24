@@ -209,7 +209,7 @@ Three facts drive this section:
   - This is the collector's own zip, the one place a zip leaves the API.
   - `visible_beyond_friends` is `status == 'on'` or `reach` over `conversations.partners(conn, user)` has a `conversation` branch that is not a Friend. In other words, some non-Friend can read the collector's Trade List now (Hidden For trade Locations).
 - **`PUT /api/social/discovery {enabled: bool|None, zip: str|None, radius_mi: 5|10|25|50|None}`** is idempotent by value and needs no key. It runs under `pg_advisory_xact_lock('prizecheck.discovery:'||user)`, then `lock_owners(user)`. Checks, in order:
-  1. 409 `DISCOVERY_UNAVAILABLE` when suspended or removed and `enabled` is true.
+  1. When `enabled` is true: 403 `ACCOUNT_SUSPENDED` when suspended, then 409 `DISCOVERY_UNAVAILABLE` when removed (decided in #303).
   2. The zip is stripped and must match `^\d{5}(-\d{4})?$`, keeping the first 5 digits; otherwise 422 `INVALID_ZIP`.
   3. 422 `UNKNOWN_ZIP` when the zip is not in `zip_centroid`.
   4. A counted change: 429 `ZIP_CHANGE_LIMIT`.
@@ -419,15 +419,14 @@ A refused step rolls back its count.
 
 **Collector route.** `POST /api/social/reports {trader_id, reason, note?, source, trade_id?, idempotency_key}` answers 201 `{reported: true}`.
 
-1. **Before `_command`**, the route settles the allowance:
+1. **Before `_command`**, under the reporter's `friend_command` lock, the route resolves the `trader_id` and replays a stored answer for the key (as built in #303: a retried Report would otherwise fail the allowance its own Block ended). Then it settles the allowance:
    - An unknown `trader_id` answers 404 `COLLECTOR_NOT_FOUND`.
    - Otherwise the Report is allowed when `reach_one` holds, or the two share a conversation, or `source = 'trade'` and `trade_id` is a Trade between them.
    - A `trade_id` that is not theirs answers 404 `TRADE_NOT_FOUND`. With none of these, the answer is 404 `COLLECTOR_NOT_FOUND`.
    - A conversation or Trade never disappears, so the allowance cannot be lost between this check and the command.
 2. **Then** `_command(user, other, key, 'report', apply, blocked_you_ok=True, answer=lambda _: ReportResult(reported=True))`. `_command` gains an `answer` parameter whose default is today's `FriendCommandResult(relation=...)`. It runs with the `friend_command` count, both owners locked, and the `location_command` replay. `apply` does three things:
-   - runs the Block `apply` (`via = 'trader'`, `handle_shown`);
-   - inserts the report;
-   - copies the snapshot.
+   - inserts the report and copies the snapshot, so each Trade is recorded as the reporter saw it (a Trade the Block then cancels is flagged `ended_by_report`);
+   - runs the Block `apply` (`via = 'trader'`, `handle_shown`).
 3. **Same answer whatever the state.** Reporting a collector who already blocked the reporter, one who is suspended, or one who is open answers the same 201 body. Report stays offered in `unavailable` and `you_blocked` conversations.
 4. **The reported collector is never told.** Nothing is stored or answered for them beyond the Block's existing effects.
 
@@ -555,7 +554,7 @@ A message in an existing conversation can land just after the recipient's suspen
 | `RECIPIENT_REQUIRED` | 422 | A send with neither or both recipient fields |
 | `INVALID_ZIP` / `UNKNOWN_ZIP` / `ZIP_REQUIRED` | 422 | Discovery `PUT` |
 | `ZIP_CHANGE_LIMIT` | 429 | The fourth counted zip change in a rolling 24 h; `retry_after_minutes` |
-| `DISCOVERY_UNAVAILABLE` | 409 | Switching on while removed or suspended |
+| `DISCOVERY_UNAVAILABLE` | 409 | Switching on while removed by the owner (a suspended collector gets `ACCOUNT_SUSPENDED`) |
 | `EMPTY_MESSAGE` / `MESSAGE_TOO_LONG` | 422 | Message or note after `normalize_text` |
 | `MESSAGE_RATE_LIMITED` | 429 | Over 120 messages in an hour; `retry_after_minutes` |
 | `TOO_MANY_NEW_CONVERSATIONS` | 429 | The 11th counted new conversation in a rolling 24 h; `retry_after_minutes` |

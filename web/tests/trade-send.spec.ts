@@ -420,9 +420,10 @@ async function story(
   await expect(ashMain.getByRole("list", { name: "You get" })).toContainText(
     "Iono"
   );
-  await expect(
-    ashMain.getByRole("button", { name: "More for this Trade" })
-  ).toHaveCount(0);
+  // The recipient's ⋯ holds only Report (#303); Withdraw is the proposer's.
+  await ashMain.getByRole("button", { name: "More for this Trade" }).click();
+  await expect(ash.page.getByRole("menuitem")).toHaveText(["Report"]);
+  await ash.page.keyboard.press("Escape");
   await expect(ashMain).not.toContainText(secret);
   await expectPageChecks(ash.page, `a received Trade Proposal at ${width}`);
 
