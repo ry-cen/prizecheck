@@ -27,6 +27,7 @@ import {
 import { Button } from "../ui/Button";
 import { Icon } from "../ui/Icon";
 import { TextArea } from "../ui/TextField";
+import { AddAsFriend, newestAddFriendTrade } from "./AddAsFriend";
 import {
   COMPOSER_LABEL,
   COMPOSER_SEND,
@@ -317,6 +318,7 @@ export function ConversationPage({
   const { view, items } = load;
   const other = view.other;
   const name = other.display_name;
+  const addFriendTrade = newestAddFriendTrade(items);
   const record = traderMeta(other.band, other.completed_trades);
   // Where the other side's Trade List is: a Friend's page by Handle, anyone else's by trader id. Nowhere once the
   // conversation is not open or the other side has no trader id.
@@ -438,6 +440,14 @@ export function ConversationPage({
                   trade={item.trade}
                   onOpenTrade={(id) => onNavigate(tradePath(id))}
                 />
+                {item.trade.id === addFriendTrade && (
+                  <AddAsFriend
+                    tradeId={item.trade.id}
+                    traderId={item.trade.other.trader_id!}
+                    name={name}
+                    className="border-t border-border px-4 py-3"
+                  />
+                )}
               </li>
             ) : item.message ? (
               <li

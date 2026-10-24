@@ -115,7 +115,9 @@ ALLOWED_IMPORTS = {
         # status, band and count from the conversations' one definition (``standings``) and the pair's conversation
         # (``pair_row``).
         ('.conversations', 'pair_row'), ('.conversations', 'standings'), ('.discovery', 'Band'),
-        ('.discovery', 'reach_one'), ('.discovery', 'trader_user')},
+        ('.discovery', 'reach_one'), ('.discovery', 'trader_user'),
+        # The trader header's add_friend (trading #304) comes from the Friend code's one definition.
+        ('.friends', 'add_friend_state')},
     'social/friends.py': {
         ('.', 'name_rules'), ('..main', 'connect'), ('..main', 'verified_user'), ('..publications', 'TOKEN'),
         ('..location_tree', 'error'), ('..location_tree', 'replay'), ('.owners', 'ensure_owner'),
@@ -126,7 +128,10 @@ ALLOWED_IMPORTS = {
         ('.loans', 'end_loans_between'), ('.trades', 'end_trades_between'),
         # Block for strangers (trading #302): the trader routes resolve a trader id, and a Block or Unblock moves the
         # pair's conversation watermark.
-        ('.conversations', 'pair_changed'), ('.discovery', 'trader_user')},
+        ('.conversations', 'pair_changed'), ('.discovery', 'trader_user'),
+        # Add as Friend (trading #304): the Trade by id through the Trades' own statement, the one suspension check and
+        # the reach rule, checked before the Friend command and again under its locks.
+        ('.discovery', 'reach_one'), ('.discovery', 'require_not_suspended'), ('.trades', 'TRADES')},
     # The Loans both sides read and the steps that change no inventory (#252). Card facts are catalog facts; the owner
     # lock and the command plumbing are the Friend commands'. Steps that touch a collector's own inventory are in
     # app.loan_inventory, outside this area.
@@ -746,3 +751,13 @@ def test_the_property_walk_follows_every_way_a_schema_can_nest():
         'C': {'properties': {'c': {'additionalProperties': {'allOf': [{'$ref': '#/components/schemas/A'}]}},
                              'd': {'oneOf': [{'properties': {'deep': {}}}]}}}}
     assert reachable_properties(components, 'A') == {'a', 'b', 'c', 'd', 'deep'}
+
+
+def test_add_as_friend_answers_only_the_relation():
+    components = app.openapi()['components']['schemas']
+    routes = {}
+    for route, status, schema in social_responses():
+        if status.startswith('2'):
+            routes[route] = {field for _, field, _ in fields(schema, components)}
+    for route in ('POST /api/social/trades/{trade_id}/add-friend', 'POST /api/social/trades/{trade_id}/add-friend/withdraw'):
+        assert routes[route] == {'relation'}, route

@@ -52,11 +52,11 @@ from ..main import connect, verified_user
 from ..publications import TOKEN
 from . import name_rules
 from .conversations import pair_changed
-from .discovery import trader_user
+from .discovery import reach_one, require_not_suspended, trader_user
 from .loans import end_loans_between
 from .owners import ensure_owner, lock_owners
 from .profile import token_hash
-from .trades import end_trades_between
+from .trades import TRADES, end_trades_between
 
 router = APIRouter(prefix='/api/social', tags=['social'])
 
@@ -192,7 +192,7 @@ def friendship_ended(conn, user_id: str, other_id: str) -> None:
 def friends(user_id: str = Depends(verified_user)):
     with connect() as conn:
         rows = conn.execute("""SELECT p.user_id AS collector_id, p.handle, p.handle_key, p.display_name, f.state,
-            f.requested_by, f.created_at
+            f.requested_by, f.created_at, f.via_trade
           FROM friendship f
           JOIN collector_profile p ON p.user_id = CASE WHEN f.user_low = %(viewer)s THEN f.user_high ELSE f.user_low END
           WHERE f.user_low = %(viewer)s OR f.user_high = %(viewer)s""", {'viewer': user_id}).fetchall()
@@ -204,11 +204,12 @@ def friends(user_id: str = Depends(verified_user)):
         return row['created_at'], row['handle_key']
 
     pending = [row for row in rows if row['state'] == 'pending']
+    # An Add-as-Friend request (via_trade, trading #304) is followed on its Trade, never in the sender's list: listing it would show its recipient's Handle and user id before they accept.
     return FriendsView(
         received=[person(row) for row in sorted((r for r in pending if r['requested_by'] != user_id), key=oldest)],
         friends=[person(row) for row in sorted((r for r in rows if r['state'] == 'accepted'),
                                                key=lambda r: (r['display_name'].casefold(), r['handle_key']))],
-        sent=[person(row) for row in sorted((r for r in pending if r['requested_by'] == user_id), key=oldest)])
+        sent=[person(row) for row in sorted((r for r in pending if r['requested_by'] == user_id and not r['via_trade']), key=oldest)])
 
 
 @router.post('/lookup', response_model=CollectorLookup)
@@ -383,6 +384,134 @@ def decline_friend_request(collector_id: str, command: FriendCommand, user_id: s
 def withdraw_friend_request(collector_id: str, command: FriendCommand, user_id: str = Depends(verified_user)):
     """Withdraw a Friend Request sent to this collector: it is deleted."""
     return _delete_pending(user_id, collector_id, command.idempotency_key, 'withdraw_friend_request', 'request_sent')
+
+
+# Add as Friend (trading #304). These routes address the other collector only through a Trade both sides confirmed, by
+# the Trade's id: the other's user id is read on the server and never leaves it. The requester follows the request
+# through TraderView.add_friend (``add_friend_state``), not GET /friends. The checks made before the Friend command are
+# repeated under its owner locks, so a Block that lands in between wins.
+SWAPPED_PAIR = """SELECT EXISTS (
+    SELECT 1 FROM trade WHERE proposer_id = %(me)s AND recipient_id = %(other)s
+      AND proposer_swap_at IS NOT NULL AND recipient_swap_at IS NOT NULL
+    UNION ALL
+    SELECT 1 FROM trade WHERE proposer_id = %(other)s AND recipient_id = %(me)s
+      AND proposer_swap_at IS NOT NULL AND recipient_swap_at IS NOT NULL) AS swapped"""
+
+
+def add_friend_state(conn, viewer: str, other: str | None) -> Literal['offer', 'sent', 'received'] | None:
+    """What the viewer can do about Add as Friend with this collector. Reads only; takes no lock. In order: None
+    unless ``other`` is a collector in the viewer's reach (a Block either way, a suspension and a deletion all end
+    it); None unless the two have a Trade both confirmed; then by the friendship row: none is 'offer', accepted is
+    None, pending is 'sent' when the viewer sent it through a Trade (a Withdraw deletes only those), None when the viewer
+    sent it by Handle (the control would do nothing), and 'received' when the other sent it (Accept works for both)."""
+    if other is None or other == viewer or reach_one(conn, viewer, other) is None:
+        return None
+    if not conn.execute(SWAPPED_PAIR, {'me': viewer, 'other': other}).fetchone()['swapped']:
+        return None
+    row = conn.execute('SELECT state, requested_by, via_trade FROM friendship WHERE user_low=%s AND user_high=%s',
+                       _pair(viewer, other)).fetchone()
+    if row is None:
+        return 'offer'
+    if row['state'] == 'accepted':
+        return None
+    if row['requested_by'] != viewer:
+        return 'received'
+    return 'sent' if row['via_trade'] else None
+
+
+def _other_in_reach(conn, user_id: str, other: str | None, *, adding: bool) -> bool:
+    """Whether ``other`` is in the caller's reach. A suspended caller has none (trade_reach gives a suspended viewer no
+    rows), yet may still withdraw, so for a withdraw the other side alone is judged: a collector who exists, is not
+    suspended and has no Block either way with the caller."""
+    if other is None:
+        return False
+    if reach_one(conn, user_id, other) is not None:
+        return True
+    if adding:
+        return False
+    return conn.execute("""SELECT EXISTS (SELECT 1 FROM collector_profile me WHERE me.user_id = %(me)s
+          AND me.suspended_at IS NOT NULL)
+        AND EXISTS (SELECT 1 FROM collector_profile o WHERE o.user_id = %(other)s AND o.suspended_at IS NULL)
+        AND NOT EXISTS (SELECT 1 FROM block b WHERE (b.blocker_id = %(me)s AND b.blocked_id = %(other)s)
+          OR (b.blocker_id = %(other)s AND b.blocked_id = %(me)s)) AS reachable""",
+                        {'me': user_id, 'other': other}).fetchone()['reachable']
+
+
+def _trade_partner(user_id: str, trade_id: UUID, *, adding: bool) -> str:
+    """The other side of this Trade, for the caller. The checks before the Friend command, in order: 403
+    ACCOUNT_SUSPENDED for a suspended caller (adding only: a suspended requester can still withdraw); 404
+    TRADE_NOT_FOUND for an unknown Trade or one the caller is not a side of; 409 TRADE_NOT_SWAPPED unless both sides
+    confirmed the swap; 409 COLLECTOR_UNAVAILABLE unless the other is in reach (a deleted account included). Adding and
+    withdrawing run the same checks, so a withdraw cannot link a Handle request to a stranger. Takes no lock; none of
+    these refusals is counted."""
+    with connect() as conn:
+        if adding:
+            require_not_suspended(conn, user_id)
+        row = conn.execute(TRADES + ' AND t.id = %(id)s', {'me': user_id, 'id': trade_id}).fetchone()
+        if row is None:
+            error(404, 'TRADE_NOT_FOUND')
+        other = row['recipient_id'] if row['proposer_id'] == user_id else row['proposer_id']
+        if row['proposer_swap_at'] is None or row['recipient_swap_at'] is None:
+            error(409, 'TRADE_NOT_SWAPPED')
+        if not _other_in_reach(conn, user_id, other, adding=adding):
+            error(409, 'COLLECTOR_UNAVAILABLE')
+    return other
+
+
+@router.post('/trades/{trade_id}/add-friend', response_model=FriendCommandResult)
+def add_friend_from_trade(trade_id: UUID, command: FriendCommand, user_id: str = Depends(verified_user)):
+    """Offer to become Friends with the other side of a Trade both sides confirmed. Refused in order: 403
+    ACCOUNT_SUSPENDED, 404 TRADE_NOT_FOUND, 409 TRADE_NOT_SWAPPED, 409 COLLECTOR_UNAVAILABLE (a deleted, blocked or
+    suspended other, all the same body). Then under both owner locks: the other's pending request is accepted
+    ('friends'); with no friendship a pending request is sent ('request_sent', 409 TRY_LATER within the decline
+    cool-off); in any other state nothing changes and the relation is answered."""
+    other = _trade_partner(user_id, trade_id, adding=True)
+
+    def apply(conn, row):
+        if reach_one(conn, user_id, other) is None:
+            return Refusal(409, 'COLLECTOR_UNAVAILABLE')
+        current = relation(user_id, row)
+        if current == 'request_received':
+            conn.execute("UPDATE friendship SET state='accepted' WHERE user_low=%s AND user_high=%s AND state='pending'",
+                         _pair(user_id, other))
+            return 'friends'
+        if current == 'none':
+            if conn.execute("""SELECT 1 FROM friend_request_declined WHERE sender_id=%s AND recipient_id=%s
+                  AND declined_at > now() - make_interval(days => %s)""",
+                            (user_id, other, DECLINE_COOL_OFF_DAYS)).fetchone():
+                return Refusal(409, 'TRY_LATER')
+            conn.execute("""DELETE FROM friend_request_declined
+              WHERE (sender_id=%s AND recipient_id=%s) OR (sender_id=%s AND recipient_id=%s)""",
+                         (other, user_id, user_id, other))
+            low, high = _pair(user_id, other)
+            conn.execute("""INSERT INTO friendship(user_low,user_high,state,requested_by,via_trade)
+              VALUES (%s,%s,'pending',%s,true)""", (low, high, user_id))
+            return 'request_sent'
+        return current
+    return _command(user_id, other, command.idempotency_key, 'add_friend', apply, blocked_you_ok=True)
+
+
+@router.post('/trades/{trade_id}/add-friend/withdraw', response_model=FriendCommandResult)
+def withdraw_add_friend(trade_id: UUID, command: FriendCommand, user_id: str = Depends(verified_user)):
+    """Withdraw the Add as Friend request the caller sent to the other side of this Trade. Refused like adding, except
+    for suspension: 404 TRADE_NOT_FOUND, 409 TRADE_NOT_SWAPPED, 409 COLLECTOR_UNAVAILABLE. Under the owner locks only
+    the caller's own pending request that came from a Trade (via_trade) is deleted; a Handle request or any other
+    state is left as it is, and the current relation is answered."""
+    other = _trade_partner(user_id, trade_id, adding=False)
+
+    def apply(conn, row):
+        if not _other_in_reach(conn, user_id, other, adding=False):
+            return Refusal(409, 'COLLECTOR_UNAVAILABLE')
+        current = relation(user_id, row)
+        if current != 'request_sent':
+            return current
+        if not conn.execute('SELECT via_trade FROM friendship WHERE user_low=%s AND user_high=%s',
+                            _pair(user_id, other)).fetchone()['via_trade']:
+            return current
+        conn.execute("DELETE FROM friendship WHERE user_low=%s AND user_high=%s AND state='pending'",
+                     _pair(user_id, other))
+        return 'none'
+    return _command(user_id, other, command.idempotency_key, 'withdraw_add_friend', apply, blocked_you_ok=True)
 
 
 @router.post('/friends/{collector_id}/remove', response_model=FriendCommandResult)

@@ -15,7 +15,7 @@ from app.main import connect  # noqa: F401  (main first: it includes every route
 from stranger_fixtures import far_zip, propose_to, strangers, trader_of
 from test_blocks import unblock
 from test_catalog_targets import isolated_rules  # noqa: F401  (an autouse fixture)
-from test_conversations import detail, start, view
+from test_conversations import detail, start, swapped, view
 from test_deck_cost import launches, store  # noqa: F401  (autouse fixtures)
 from test_friend_copies import block, collector, ok
 from test_holdings import call
@@ -123,6 +123,32 @@ def test_a_handle_lookup_never_leads_to_a_trader_id(store):
         assert conn.execute('SELECT count(*) AS n FROM trade WHERE proposer_id IN (%s, %s)', (ash, misty)).fetchone()['n'] == 0
         assert conn.execute('SELECT count(*) AS n FROM conversation WHERE user_low = %s AND user_high = %s',
                             (low, high)).fetchone()['n'] == 0
+    # Add as Friend from a both-confirmed Trade (trading #304): nothing Ash reads holds Misty's Handle or user id.
+    with connect() as conn:
+        trade = swapped(conn, misty, ash)
+    sent = call('POST', f'/api/social/trades/{trade}/add-friend', ash, {'idempotency_key': str(uuid4())})
+    assert sent.status_code == 200 and sent.json() == {'relation': 'request_sent'}, sent.text
+    assert handle_of(misty).lower() not in sent.text.lower() and misty not in sent.text
+    reads = ['/api/social/friends', f'/api/social/traders/{trader_of(misty)}', f'/api/social/trades/{trade}',
+             '/api/social/conversations']
+
+    def holds_neither():
+        for path in reads:
+            response = call('GET', path, ash)
+            assert response.status_code == 200, (path, response.text)
+            assert handle_of(misty).lower() not in response.text.lower() and misty not in response.text, path
+
+    holds_neither()
+    ok(call('POST', '/api/social/blocks', ash, {'collector_id': misty, 'idempotency_key': str(uuid4())}))
+    for path in ('/api/social/friends', f'/api/social/traders/{trader_of(misty)}'):
+        response = call('GET', path, ash)
+        assert response.status_code == 200, (path, response.text)
+        assert handle_of(misty).lower() not in response.text.lower() and misty not in response.text, path
+    with connect() as conn:
+        low, high = sorted((ash, misty))
+        assert conn.execute('SELECT count(*) AS n FROM friendship WHERE user_low = %s AND user_high = %s',
+                            (low, high)).fetchone()['n'] == 0
+    # After #302: the Blocked list shows no Handle for a Block made while a via_trade request was pending (integration step I-1 adds that assertion here).
 
 
 def test_unknown_and_unreachable_trader_ids_answer_byte_identical_404s(store):
@@ -288,3 +314,40 @@ def test_the_blocked_list_and_friends_carry_no_zip_handle_or_user_id_after_a_tra
                           f'/api/social/traders/{trader_of(misty)}'])
     [row] = ok(call('GET', '/api/social/blocks', ash))['blocked']
     assert row['trader_id'] == trader_of(misty) and row['handle'] is None
+
+
+def test_add_as_friend_shows_the_requester_no_handle_or_user_id_before_acceptance(store):
+    ids, ash, misty, conversation, _ = nearby_pair()
+    with connect() as conn:
+        trade = swapped(conn, misty, ash)
+    handle = handle_of(misty).lower()
+
+    def command(path):
+        response = call('POST', f'/api/social/trades/{trade}/{path}', ash, {'idempotency_key': str(uuid4())})
+        assert response.status_code == 200, (path, response.text)
+        return response
+
+    def holds_neither(label, response):
+        for where, _, leaf in walk(response.json()):
+            if isinstance(leaf, str):
+                assert misty not in leaf and handle not in leaf.lower(), (label, where)
+
+    assert command('add-friend').json() == {'relation': 'request_sent'}
+    assert command('add-friend/withdraw').json() == {'relation': 'none'}
+    answers = [command('add-friend')]
+    assert answers[0].json() == {'relation': 'request_sent'}
+    for answer in answers:
+        holds_neither('add-friend', answer)
+    paths = ['/api/social/discovery', f'/api/social/traders/{trader_of(misty)}',
+             f'/api/social/traders/{trader_of(misty)}/trade-list', f'/api/social/traders/{trader_of(misty)}/matches',
+             '/api/social/conversations', f'/api/social/conversations/{conversation}',
+             f'/api/social/conversations/with/{trader_of(misty)}', '/api/social/conversations/pulse',
+             '/api/social/trades', f'/api/social/trades/{trade}', '/api/social/inbox', '/api/social/blocks',
+             '/api/social/friends']
+    for path in paths:
+        response = call('GET', path, ash)
+        assert response.status_code == 200, (path, response.text)
+        holds_neither(path, response)
+    accepted = call('POST', f'/api/social/friend-requests/{ash}/accept', misty, {'idempotency_key': str(uuid4())})
+    assert ok(accepted) == {'relation': 'friends'}
+    assert handle in call('GET', '/api/social/friends', ash).text.lower()

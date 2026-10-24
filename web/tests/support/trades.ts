@@ -74,3 +74,23 @@ export async function tradeStep(
     ...(step === "confirm-swap" ? { destination_id: null } : {}),
   });
 }
+
+/** The page's collector sends the collector with this trader id a Trade Proposal (Stage 2: strangers are addressed by trader id only); returns its id. */
+export async function proposeToTrader(
+  page: Page,
+  traderId: string,
+  give: [edition: string, copies: number][],
+  get: [edition: string, copies: number][]
+): Promise<string> {
+  const line = ([edition_id, n]: [string, number]) => ({
+    edition_id,
+    quantity: String(n),
+  });
+  const trade = await api(page, "POST", "/api/trades", {
+    recipient_trader_id: traderId,
+    you_give: give.map(line),
+    you_get: get.map(line),
+    idempotency_key: randomUUID(),
+  });
+  return trade.id as string;
+}
