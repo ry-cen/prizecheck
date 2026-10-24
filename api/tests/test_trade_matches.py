@@ -13,6 +13,7 @@ Printings) and starts new collectors. Loans go through their routes; Trades are 
 (``test_trade_promises.seed_trade``) released with ``test_trade_promises.close``. Open to cash offers is set through its
 route (#277).
 """
+import hashlib
 import json
 import threading
 from uuid import UUID, uuid4
@@ -20,7 +21,7 @@ from uuid import UUID, uuid4
 import pytest
 
 from app.main import connect  # noqa: F401  (main first: it includes every router while loading)
-from app.social import friend_copies
+from app.social import friend_copies, trade_matches
 from app.social.friend_copies import FriendWant, friend_wants
 from stranger_fixtures import far_zip, strangers, trader_of
 from test_catalog_targets import isolated_rules  # noqa: F401  (an autouse fixture)
@@ -32,7 +33,7 @@ from test_handover import handover
 from test_holdings import call
 from test_lend_offers import offer, take
 from test_loans import accept, sent
-from test_open_discovery import discoverable
+from test_open_discovery import discoverable, put
 from test_trade_promises import close, seed_trade
 from test_trade_wants import set_rule, set_want
 from want_list_swap_fixtures import seed_swap_catalog
@@ -757,3 +758,317 @@ def test_the_trader_row_needs_reach_and_a_suspended_friend_has_no_row(store):
     assert (response.status_code, response.content) == (404, UNKNOWN)
     assert matches(ash)['rows'] == []
     assert trader_row(ash, trader_of(friend)).status_code == 404
+
+
+# Near you and card search (Trading #300).
+
+HOLDER_FIELDS = {'trader_id', 'display_name', 'friend', 'band', 'completed_trades', 'open_to_cash_offers', 'cards',
+                 'more_cards'}
+NEAR_FIELDS = TRADER_FIELDS
+
+
+def near(viewer):
+    return ok(call('GET', '/api/social/trade-matches/near', viewer))
+
+
+def search(viewer, printing, scope='name'):
+    return ok(call('GET', f'/api/social/trade-card-search?printing_id={printing}&scope={scope}', viewer))
+
+
+def names(rows):
+    return [row['display_name'] for row in rows]
+
+
+def neighbour(name, zip, holds=(), wants=()):
+    """A discoverable collector at ``zip`` holding each ``(Edition, count)`` of ``holds`` in a For trade Location and
+    wanting each ``(Edition, count)`` of ``wants``; returns the user id."""
+    user, _ = collector(name)
+    discoverable(user, zip)
+    if holds:
+        shelf = binder(user)
+        for edition, count in holds:
+            hold(user, shelf, edition, count)
+    for edition, count in wants:
+        ok(set_want(user, edition, count))
+    return user
+
+
+def the_viewer(ids, zip='00010', name='Viewer'):
+    """A discoverable viewer with 1 Arven for trade who wants 1 Iono PAL 185."""
+    viewer, _ = collector(name)
+    discoverable(viewer, zip)
+    hold(viewer, binder(viewer), ids['SVI 166'], 1)
+    ok(set_want(viewer, ids['PAL 185'], 1))
+    return viewer
+
+
+def remove_discovery(user):
+    with connect() as conn:
+        conn.execute('UPDATE discovery_setting SET removed_at = now(), enabled = false WHERE user_id = %s', (user,))
+
+
+def test_near_you_orders_by_kind_then_band_then_name(store):
+    ids = seed_swap_catalog()
+    iono, arven = ids['PAL 185'], ids['SVI 166']
+    viewer = the_viewer(ids)
+    neighbour('Zed', '00010', holds=[(iono, 1)], wants=[(arven, 1)])
+    neighbour('Amy', '00011', holds=[(iono, 1)], wants=[(arven, 1)])
+    neighbour('Bea', '00010', holds=[(iono, 1)])
+    neighbour('Abe', '00010', holds=[(iono, 1)])
+    neighbour('Cal', '00010', wants=[(arven, 1)])
+    neighbour('Dee', '00010', holds=[(iono, 1)])
+    neighbour('Dee', '00010', holds=[(iono, 1)])
+    neighbour('Ned', '00010')
+    gus = neighbour('Gus', '00010', holds=[(iono, 1)])
+    befriend(viewer, gus)
+    bly = neighbour('Bly', '00010', holds=[(iono, 1)])
+    blo = neighbour('Blo', '00010', holds=[(iono, 1)])
+    block(viewer, bly)
+    block(blo, viewer)
+    sus = neighbour('Sus', '00010', holds=[(iono, 1)])
+    suspend_user(sus)
+    rem = neighbour('Rem', '00010', holds=[(iono, 1)])
+    remove_discovery(rem)
+    body = near(viewer)
+    assert (body['status'], body['radius_mi']) == ('on', 25)
+    assert names(body['rows']) == ['Zed', 'Amy', 'Abe', 'Bea', 'Dee', 'Dee', 'Cal']
+    dees = [row['trader_id'] for row in body['rows'] if row['display_name'] == 'Dee']
+    assert dees == sorted(dees)
+    for row in body['rows']:
+        assert set(row) == NEAR_FIELDS and row['completed_trades'] == 0
+        assert row['band'] == ('5_to_10' if row['display_name'] == 'Amy' else 'under_5')
+    assert [row['match'] for row in body['rows']] == ['two_way'] * 2 + ['has_what_you_want'] * 4 + [
+        'wants_what_you_have']
+    # A Friend is in the Friends read and never in Near you.
+    assert names(matches(viewer)['rows']) == ['Gus']
+    assert trader_of(gus) not in json.dumps(body)
+
+
+def test_the_radius_filters_near_you_by_band_and_nobody_beyond_50_mi_appears(store):
+    ids = seed_swap_catalog()
+    iono = ids['PAL 185']
+    viewer = the_viewer(ids)
+    for name, zip in (('One', '00010'), ('Two', '00011'), ('Three', '00012'), ('Four', '00014')):
+        neighbour(name, zip, holds=[(iono, 1)])
+    neighbour('Far', far_zip(), holds=[(iono, 1)])
+    talk = neighbour('Talk', '00014', holds=[(iono, 1)])
+    with connect() as conn:
+        conn.execute("SELECT pair_conversation(%s, %s, 'A', 'B')", (talk, viewer))
+    for radius, expected in ((5, ['One']), (10, ['One', 'Two']), (25, ['One', 'Three', 'Two']),
+                             (50, ['Four', 'One', 'Talk', 'Three', 'Two'])):
+        ok(put(viewer, {'radius_mi': radius}))
+        body = near(viewer)
+        # A conversation reaches the Trade List but does not widen Near you: Talk (band 4) is in only at 50 mi.
+        assert sorted(names(body['rows'])) == [name for name in expected if name != 'Talk' or radius == 50], radius
+        assert body['radius_mi'] == radius and 'Far' not in names(body['rows'])
+
+
+def test_near_you_is_empty_while_discovery_is_off_removed_or_suspended(store):
+    ids = seed_swap_catalog()
+    neighbour('Misty', '00010', holds=[(ids['PAL 185'], 1)])
+    viewer = the_viewer(ids)
+    assert len(near(viewer)['rows']) == 1
+    ok(put(viewer, {'enabled': False}))
+    assert near(viewer) == {'status': 'off', 'radius_mi': 25, 'rows': []}
+    ok(put(viewer, {'enabled': True}))
+    remove_discovery(viewer)
+    assert near(viewer) == {'status': 'removed', 'radius_mi': 25, 'rows': []}
+    other = the_viewer(ids, name='Other')
+    assert len(near(other)['rows']) == 1
+    suspend_user(other)
+    assert near(other) == {'status': 'suspended', 'radius_mi': 25, 'rows': []}
+    never, _ = collector('Never')
+    assert near(never) == {'status': 'off', 'radius_mi': 25, 'rows': []}
+
+
+def test_near_you_caps_rows_and_cards_a_side(store, monkeypatch):
+    ids = seed_swap_catalog()
+    viewer = the_viewer(ids)
+    assert (trade_matches.NEAR_CANDIDATES, trade_matches.NEAR_ROWS, trade_matches.CARDS_PER_SIDE) == (500, 100, 20)
+    for name in ('A1', 'A2', 'A3'):
+        neighbour(name, '00010', holds=[(ids['PAL 185'], 1)])
+    monkeypatch.setattr(trade_matches, 'NEAR_ROWS', 2)
+    assert names(near(viewer)['rows']) == ['A1', 'A2']
+    monkeypatch.undo()
+    big = neighbour('Big', '00010')
+    extra = extra_editions(23)
+    want(viewer, extra)
+    fill(big, binder(big), extra)
+    [row] = [row for row in near(viewer)['rows'] if row['display_name'] == 'Big']
+    assert (len(row['you_get']), row['more_you_get'], row['you_give'], row['more_you_give']) == (20, 3, [], 0)
+
+
+def test_in_band_order_is_by_name_and_the_cap_is_per_viewer(store, monkeypatch):
+    ids = seed_swap_catalog()
+    iono = ids['PAL 185']
+    # The cut is over everyone in open discovery in this database, so earlier tests' collectors are switched off first.
+    with connect() as conn:
+        conn.execute('UPDATE discovery_setting SET enabled = false')
+    first = the_viewer(ids)
+    neighbours = {neighbour(name, '00010', holds=[(iono, 1)]): name for name in ('Cara', 'Bo', 'Al')}
+
+    def expected(viewer):
+        ranked = sorted(neighbours, key=lambda user: hashlib.md5((viewer + trader_of(user)).encode()).hexdigest())
+        return {neighbours[user] for user in ranked[:2]}
+
+    # Viewers are candidates for each other, so only the one being read is in open discovery.
+    ok(put(first, {'enabled': False}))
+    second = None
+    for n in range(20):
+        candidate = the_viewer(ids, name=f'Viewer {n}')
+        ok(put(candidate, {'enabled': False}))
+        if expected(candidate) != expected(first):
+            second = candidate
+            break
+    assert second is not None, 'no second viewer with a different cut in 20 tries'
+    monkeypatch.setattr(trade_matches, 'NEAR_CANDIDATES', 2)
+    for viewer in (first, second):
+        ok(put(viewer, {'enabled': True}))
+        seen = names(near(viewer)['rows'])
+        assert seen == sorted(expected(viewer)) and names(near(viewer)['rows']) == seen
+        ok(put(viewer, {'enabled': False}))
+    assert expected(first) != expected(second)
+
+
+def holders(body, key):
+    """A card search list as [(Display Name, [Edition names as 'set number'])] with the cards in the answer's order."""
+    return [(holder['display_name'], [(card['set_code'], card['collector_number']) for card in holder['cards']])
+            for holder in body[key]]
+
+
+def test_card_search_scopes_name_set_and_printing_with_friends_before_near(store):
+    ids = seed_swap_catalog()
+    viewer = the_viewer(ids)
+    gary = neighbour('Gary', '00010', holds=[(ids['PAL 185'], 1), (ids['PAF 80'], 1)])
+    befriend(viewer, gary)
+    neighbour('Misty', '00011', holds=[(ids['PAL 185'], 1), (ids['PAL 254'], 1), (ids['PAL 172'], 1)])
+    neighbour('Ned', '00010', holds=[(ids['PAF 80'], 1)])
+    printing = printing_of(ids['PAL 185'])
+    # Cards come in Card.order(): name, then set name ("Paldea Evolved" before "Paldean Fates"), then number.
+    pal185, pal254, paf80 = ('PAL', '185'), ('PAL', '254'), ('PAF', '080')
+    expected = {
+        'name': ([('Gary', [pal185, paf80])], [('Ned', [paf80]), ('Misty', [pal185, pal254])]),
+        'set': ([('Gary', [pal185])], [('Misty', [pal185, pal254])]),
+        'printing': ([('Gary', [pal185])], [('Misty', [pal185])]),
+    }
+    for scope, (friends, nearby) in expected.items():
+        body = search(viewer, printing, scope)
+        assert list(body) == ['status', 'friends', 'near'] and body['status'] == 'on', scope
+        assert (holders(body, 'friends'), holders(body, 'near')) == (friends, nearby), scope
+        for holder in body['friends'] + body['near']:
+            assert set(holder) == HOLDER_FIELDS and holder['more_cards'] == 0
+            assert all(isinstance(card['copies'], str) for card in holder['cards'])
+        [gary_holder] = body['friends']
+        assert (gary_holder['friend'], gary_holder['band']) == (True, None)
+        assert all(holder['friend'] is False for holder in body['near'])
+        assert 'Gary' not in names(body['near'])
+    assert [holder['band'] for holder in search(viewer, printing)['near']] == ['under_5', '5_to_10']
+
+
+def test_card_search_answers_friends_whatever_the_discovery_status(store):
+    ids = seed_swap_catalog()
+    viewer = the_viewer(ids)
+    gary, _ = collector('Gary')
+    befriend(viewer, gary)
+    hold(gary, binder(gary), ids['PAL 185'], 1)
+    neighbour('Misty', '00011', holds=[(ids['PAL 185'], 1)])
+    printing = printing_of(ids['PAL 185'])
+    ok(put(viewer, {'enabled': False}))
+    body = search(viewer, printing)
+    assert (body['status'], names(body['friends']), body['near']) == ('off', ['Gary'], [])
+    ok(put(viewer, {'enabled': True}))
+    remove_discovery(viewer)
+    body = search(viewer, printing)
+    assert (body['status'], names(body['friends']), body['near']) == ('removed', ['Gary'], [])
+    # The choke point gives a suspended viewer no copies, so they have no Friends' cards either.
+    suspend_user(viewer)
+    assert search(viewer, printing) == {'status': 'suspended', 'friends': [], 'near': []}
+    suspend_user(viewer, False)
+    with connect() as conn:
+        conn.execute('UPDATE discovery_setting SET removed_at = NULL WHERE user_id = %s', (viewer,))
+    ok(put(viewer, {'enabled': True}))
+    body = search(viewer, printing)
+    assert (body['status'], names(body['friends']), names(body['near'])) == ('on', ['Gary'], ['Misty'])
+
+
+def test_card_search_of_an_unknown_printing_answers_empty(store):
+    ids = seed_swap_catalog()
+    viewer = the_viewer(ids)
+    for scope in ('name', 'set', 'printing'):
+        assert search(viewer, uuid4(), scope) == {'status': 'on', 'friends': [], 'near': []}
+    assert call('GET', f'/api/social/trade-card-search?printing_id={uuid4()}&scope=other', viewer).status_code == 422
+
+
+def test_card_search_caps_holders_and_cards(store, monkeypatch):
+    ids = seed_swap_catalog()
+    viewer = the_viewer(ids)
+    assert (trade_matches.CARD_SEARCH_CANDIDATES, trade_matches.HOLDERS_PER_LIST,
+            trade_matches.CARDS_PER_HOLDER) == (1000, 50, 20)
+    iono = ids['PAL 185']
+    for name in ('F1', 'F2', 'F3'):
+        friend = neighbour(name, '00010', holds=[(iono, 1)])
+        befriend(viewer, friend)
+    for name in ('N1', 'N2', 'N3'):
+        neighbour(name, '00010', holds=[(iono, 1)])
+    monkeypatch.setattr(trade_matches, 'HOLDERS_PER_LIST', 2)
+    body = search(viewer, printing_of(iono))
+    assert (names(body['friends']), names(body['near'])) == (['F1', 'F2'], ['N1', 'N2'])
+    monkeypatch.undo()
+    big = neighbour('Big', '00010')
+    fill(big, binder(big), extra_editions(23))
+    body = search(viewer, printing_of(ids['SVI 166']), 'printing')
+    [holder] = body['near']
+    assert (holder['display_name'], len(holder['cards']), holder['more_cards']) == ('Big', 20, 3)
+
+
+def test_card_search_never_lists_promised_or_borrowed_copies(store):
+    ids = seed_swap_catalog()
+    viewer = the_viewer(ids)
+    paf, iono = ids['PAF 80'], ids['PAL 185']
+    paf_printing = printing_of(paf)
+    friend, _ = collector('Ash K.')
+    other, _ = collector('Other')
+    befriend(viewer, friend)
+    befriend(friend, other)
+    discoverable(friend, '00010')
+    shelf = binder(friend)
+    hold(friend, shelf, paf, 1)
+    assert names(search(viewer, paf_printing, 'printing')['friends']) == ['Ash K.']
+    trade = seed_trade(friend, other, gives=[(paf, 1)], picks=[('proposer', friend, shelf, paf, 1)])
+    assert search(viewer, paf_printing, 'printing')['friends'] == []
+    close(trade, 'withdrawn')
+    assert names(search(viewer, paf_printing, 'printing')['friends']) == ['Ash K.']
+    # A nearby stranger's only copy, promised to someone else.
+    stranger = neighbour('Stranger', '00010')
+    befriend(stranger, other)
+    their_shelf = binder(stranger)
+    hold(stranger, their_shelf, paf, 1)
+    assert 'Stranger' in names(search(viewer, paf_printing, 'printing')['near'])
+    trade = seed_trade(stranger, other, gives=[(paf, 1)], picks=[('proposer', stranger, their_shelf, paf, 1)])
+    assert 'Stranger' not in names(search(viewer, paf_printing, 'printing')['near'])
+    close(trade, 'withdrawn')
+    assert 'Stranger' in names(search(viewer, paf_printing, 'printing')['near'])
+    # A Borrowed Copy sits in the borrower's Deck, which is no For trade Location, so the borrower is absent.
+    borrower, _ = collector('Borrower')
+    befriend(viewer, borrower)
+    lender, _ = collector('Lender')
+    befriend(borrower, lender)
+    hold(lender, node(lender, 'Unsorted')['id'], iono, 1)
+    gardevoir = deck(borrower, 'Gardevoir', 0)
+    borrow = ok(accept(lender, sent(borrower, lender, [(iono, 1)], deck_id=gardevoir), [(iono, 1)]))
+    ok(handover(lender, borrow))
+    ok(handover(borrower, borrow))
+    assert 'Borrower' not in names(search(viewer, printing_of(iono), 'printing')['friends'])
+
+
+def test_near_you_and_the_friends_read_stay_separate(store):
+    ids = seed_swap_catalog()
+    iono = ids['PAL 185']
+    viewer = the_viewer(ids)
+    friend = neighbour('Friend', '00010', holds=[(iono, 1)])
+    befriend(viewer, friend)
+    neighbour('Nearby', '00011', holds=[(iono, 1)])
+    assert names(matches(viewer)['rows']) == ['Friend']
+    assert names(near(viewer)['rows']) == ['Nearby']
+    assert ok(one(viewer, friend))['display_name'] == 'Friend'
+    assert call('GET', '/api/social/trade-matches/near', viewer).status_code == 200

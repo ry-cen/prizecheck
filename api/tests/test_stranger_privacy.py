@@ -7,6 +7,7 @@ trader id; unknown and unreachable trader ids answer byte-identical 404s; a Bloc
 blocked side; and the band shows only while both are in open discovery. The Near you, card search, Report and
 Add-as-Friend parts arrive with #300, #303 and #304, which extend these tests.
 """
+import json
 from datetime import datetime
 from uuid import uuid4
 
@@ -19,6 +20,7 @@ from test_deck_cost import launches, store  # noqa: F401  (autouse fixtures)
 from test_friend_copies import block, collector, ok
 from test_holdings import call
 from test_open_discovery import discoverable, put
+from test_trade_wants import set_want
 
 COLLECTOR_UNKNOWN = b'{"detail":{"code":"COLLECTOR_NOT_FOUND"}}'
 FORBIDDEN_KEYS = {'miles', 'distance', 'lat', 'lon', 'latitude', 'longitude', 'zip'}
@@ -164,3 +166,35 @@ def test_no_band_while_either_side_has_discovery_off(store):
     assert bands() == ('5_to_10',) * 3
     ok(put(ash, {'enabled': False}))
     assert bands() == (None, None, None)
+
+
+def test_near_you_and_card_search_carry_no_zip_coordinate_distance_handle_or_user_id(store):
+    ids, ash, misty, _, _ = strangers()
+    ok(set_want(ash, ids['PAL 185'], 1))
+    handle = handle_of(misty).lower()
+    printing = trade_printing(ids['PAL 185'])
+    paths = ['/api/social/trade-matches/near'] + [
+        f'/api/social/trade-card-search?printing_id={printing}&scope={scope}' for scope in ('name', 'set', 'printing')]
+    for path in paths:
+        body = call('GET', path, ash)
+        assert body.status_code == 200, (path, body.text)
+        body = body.json()
+        assert trader_of(misty) in json.dumps(body), path
+        for where, key, leaf in walk(body):
+            if key is not None:
+                assert key not in FORBIDDEN_KEYS, (path, where)
+            if key == 'radius_mi':
+                continue
+            if isinstance(leaf, str):
+                assert misty not in leaf and handle not in leaf.lower(), (path, where)
+                if not is_timestamp(leaf):
+                    assert not any(part in leaf for part in ('00010', '40.00', '40.10', '-100.00')), (path, where)
+            if isinstance(leaf, float):
+                assert round(leaf, 2) not in (40.0, 40.1, -100.0), (path, where)
+        radii = [leaf for where, key, leaf in walk(body) if key is None and where.endswith('.radius_mi')]
+        assert all(radius in (5, 10, 25, 50) for radius in radii), path
+
+
+def trade_printing(edition):
+    with connect() as conn:
+        return str(conn.execute('SELECT printing_id FROM catalog_edition WHERE id = %s', (edition,)).fetchone()['printing_id'])

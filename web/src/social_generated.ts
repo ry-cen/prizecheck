@@ -75,6 +75,10 @@ export type Message = { id: string; from: "you" | "them"; body: string; at: stri
 export type TimelineItem = { kind: "message" | "trade"; at: string; cursor: string; message: Message | null; trade: TradeView | null };
 export type ConversationView = { id: string | null; other: ConversationParty; status: "open" | "you_blocked" | "unavailable"; can_message: boolean; can_propose: boolean; can_report: boolean; items: TimelineItem[]; next_before: string | null };
 export type LastMessage = { from: "you" | "them"; preview: string; at: string };
+export type NearbyMatchRow = { trader_id: string; display_name: string; band: "under_5" | "5_to_10" | "10_to_25" | "25_to_50"; completed_trades: number; open_to_cash_offers: boolean; match: "two_way" | "has_what_you_want" | "wants_what_you_have"; you_get: TradeMatchCard[]; you_give: TradeMatchCard[]; more_you_get: number; more_you_give: number };
+export type NearbyMatches = { status: "off" | "on" | "removed" | "suspended"; radius_mi: 5 | 10 | 25 | 50; rows: NearbyMatchRow[] };
+export type CardHolder = { trader_id: string; display_name: string; friend: boolean; band: "under_5" | "5_to_10" | "10_to_25" | "25_to_50" | null; completed_trades: number; open_to_cash_offers: boolean; cards: FriendTradeCard[]; more_cards: number };
+export type TradeCardSearch = { status: "off" | "on" | "removed" | "suspended"; friends: CardHolder[]; near: CardHolder[] };
 export type ConversationSummary = { id: string; other: ConversationParty; status: "open" | "you_blocked" | "unavailable"; last_message: LastMessage | null; open_trades: number; waiting_on_you: number; unread: boolean; archived: boolean; last_activity_at: string };
 export type ConversationsView = { conversations: ConversationSummary[]; next_before: string | null };
 export type ConversationPulse = { unread_conversations: number; watermark: string };
@@ -230,6 +234,12 @@ export const getTradeMatch = (collectorId: string, signal?: AbortSignal) =>
 export const getTradeCardMatches = (printingId: string, signal?: AbortSignal) =>
   request<TradeCardMatches>(`/api/social/trade-card-matches${query({ printing_id: printingId })}`, 'GET', undefined,
     signal);
+// Near you and card search (trading #300): nearby collectors who match, and who has one card for trade.
+export const getNearbyMatches = (signal?: AbortSignal) =>
+  request<NearbyMatches>('/api/social/trade-matches/near', 'GET', undefined, signal);
+export const getTradeCardSearch = (printingId: string, scope: 'name' | 'set' | 'printing', signal?: AbortSignal) =>
+  request<TradeCardSearch>(`/api/social/trade-card-search${query({ printing_id: printingId, scope })}`, 'GET',
+    undefined, signal);
 // Your own Open to cash offers setting (trading #277): off until you turn it on; set by value, idempotent.
 export const getTradeSettings = (signal?: AbortSignal) =>
   request<TradeSettings>('/api/social/trade-settings', 'GET', undefined, signal);

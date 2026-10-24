@@ -310,7 +310,7 @@ async function story(
   ).toHaveCount(1);
   await page.getByRole("button", { name: "Show 1 more" }).click();
   await expect(
-    page.getByRole("heading", { name: "You get", level: 3 })
+    page.getByRole("heading", { name: "You get", level: 4 })
   ).toBeFocused();
   await expect(
     page.getByRole("list", { name: "You get from Ash K" }).getByRole("listitem")

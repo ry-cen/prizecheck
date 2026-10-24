@@ -6,6 +6,8 @@ import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
 import { focusableIn } from "../ui/focusable";
 import { Icon } from "../ui/Icon";
+import { useVisibleBeyondFriends } from "../settings/useVisibleBeyondFriends";
+import { hiddenStillOffered } from "../trades/nearYouMessages";
 import {
   DeleteStep,
   MoveStep,
@@ -60,6 +62,7 @@ export function LocationSettings({
   onDeleted,
   onOpenDeck,
 }: Props) {
+  const beyond = useVisibleBeyondFriends();
   const model = useMemo(() => buildManageModel(nodes), [nodes]);
   const node = model.get(id);
   const [lastPath, setLastPath] = useState(openedPath);
@@ -161,7 +164,11 @@ export function LocationSettings({
             {hidden && ` · ${hidden}`}
             {trading && ` · ${trading}`}
           </p>
-          {stillOffered && <p className={REASON}>{stillOffered}</p>}
+          {stillOffered && (
+            <p className={REASON}>
+              {beyond ? hiddenStillOffered(path) : stillOffered}
+            </p>
+          )}
         </div>
         <div className={ITEM}>
           <Button

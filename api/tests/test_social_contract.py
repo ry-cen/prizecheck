@@ -107,6 +107,10 @@ ALLOWED_IMPORTS = {
         ('.friends', 'friend_ids'),
         # Each Friend's completed-Trade count on their row and Trade List (trading #298), one read for all of them.
         ('.trades', 'completed_trades'),
+        # Near you and card search (trading #300): the nearby candidates and the viewer's status and radius from the
+        # discovery module's one definition, and the band order.
+        ('.discovery', 'BANDS'), ('.discovery', 'DiscoveryStatus'), ('.discovery', 'Radius'),
+        ('.discovery', 'nearby'), ('.discovery', 'search_setting'),
         # The trader reads (trading #299) ask the reach rule after resolving the trader id, and take the header's
         # status, band and count from the conversations' one definition (``standings``) and the pair's conversation
         # (``pair_row``).
@@ -405,6 +409,24 @@ def test_every_social_route_answers_success_with_a_schema_the_walk_reads():
         assert route in routes, route
 
 
+def test_near_you_and_card_search_answer_exactly_these_fields():
+    components = app.openapi()['components']['schemas']
+    routes = {}
+    for route, status, schema in social_responses():
+        if status.startswith('2'):
+            routes[route] = {field for _, field, _ in fields(schema, components)}
+    assert set(components['NearbyMatchRow']['properties']) == {
+        'trader_id', 'display_name', 'band', 'completed_trades', 'open_to_cash_offers', 'match', 'you_get', 'you_give',
+        'more_you_get', 'more_you_give'}
+    assert set(components['NearbyMatches']['properties']) == {'status', 'radius_mi', 'rows'}
+    assert set(components['CardHolder']['properties']) == {
+        'trader_id', 'display_name', 'friend', 'band', 'completed_trades', 'open_to_cash_offers', 'cards',
+        'more_cards'}
+    assert set(components['TradeCardSearch']['properties']) == {'status', 'friends', 'near'}
+    assert {'you_get', 'copies', 'band', 'more_you_get'} <= routes['GET /api/social/trade-matches/near']
+    assert {'cards', 'more_cards', 'friend', 'band'} <= routes['GET /api/social/trade-card-search']
+
+
 def test_each_sides_own_trade_reads_and_inventory_steps_stay_outside_the_social_area():
     # Trading #272: a side's own picks name its own Locations, so its side read, Use suggested picks and Confirm swap
     # live under /api/trades (app.trade_inventory), never under /api/social, and the Trade both sides read never grows
@@ -699,6 +721,9 @@ def reachable_properties(components: dict, name: str) -> set[str]:
 
     walk({'$ref': f'#/components/schemas/{name}'})
     return found
+
+
+NOT_YET -= {'NearbyMatchRow', 'CardHolder'}  # Near you and card search (#300) are built, so they are walked.
 
 
 def test_the_identity_table_holds_in_the_openapi_schema():

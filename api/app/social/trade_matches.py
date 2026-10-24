@@ -50,11 +50,31 @@ discovery. An unknown trader id, the viewer's own and a collector out of reach a
 COLLECTOR_NOT_FOUND, through one call, so the bodies are byte-identical. Nothing here answers a user id or a Handle to a
 non-Friend, and the band shows only while both are in open discovery.
 
+**Near you and card search** (Trading #300; spec "Find trades", resolution "discover over a party set").
+``GET /api/social/trade-matches/near`` answers the matching collectors near the viewer who are not Friends. The viewer's
+status and radius come from ``discovery.search_setting``; when the status is not ``on`` the answer has no rows and no
+Want List is read. Otherwise ``discover`` runs over ``nearby_parties``: inside its one read-only snapshot, the candidates
+(``discovery.nearby``: at most ``NEAR_CANDIDATES``, by band and then a per-viewer hash, so the cut never ranks by
+distance and is the same on every read) and their Trade List copies and wants through the choke point (``among='reach'``)
+are read together. A Friend is never a candidate, nor anyone blocked either way. Rows are two-way first, then collectors
+who have what the viewer wants, then who want what the viewer has, then by band, Display Name (case ignored) and trader
+id, at most ``NEAR_ROWS``, with ``CARDS_PER_SIDE`` cards a side and the counts of the rest. The radius picks the bands
+(5 mi: band 1 ... 50 mi: bands 1 to 4); nobody beyond 50 mi appears. ``GET /api/social/trade-card-search?printing_id=&scope=``
+answers who has one card for trade, as ``CardHolder`` lists: ``friends`` (answered whatever the status; a suspended viewer
+has no copies through the choke point, so gets none) and ``near`` (only while the status is ``on``; up to
+``CARD_SEARCH_CANDIDATES`` candidates at the viewer's radius, so both nearby lists agree). Scope ``printing`` is the
+Editions of the picked Card Printing, ``name`` every Edition of every Printing sharing its Card Identity, and ``set`` the
+``name`` Editions narrowed to the picked Printing's set (not every card in the set). An unknown Printing answers empty
+lists. Each list has at most ``HOLDERS_PER_LIST`` holders (Friends by Display Name; nearby by band then Display Name) with
+``CARDS_PER_HOLDER`` cards each in card order and ``more_cards``. Promised and borrowed copies never appear (the choke
+point). Neither route answers a user id, a Handle, a zip, a coordinate or a distance, only the band.
+
 Every answer here is Edition facts, counts, Friends' names and their Open to cash offers setting: never a Location or a
 Deck, by name or by id.
 """
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
@@ -68,7 +88,7 @@ from ..trade_wants import own_rules, own_wants
 from ..want_list import capture_want_list
 from . import name_rules
 from .conversations import pair_row, standings
-from .discovery import Band, reach_one, trader_user
+from .discovery import BANDS, Band, DiscoveryStatus, Radius, nearby, reach_one, search_setting, trader_user
 from .friend_copies import friend_trade_copies, friend_wants
 from .friend_reads import FRIEND_BY_HANDLE, PAGE_IDENTITIES, card_facts, search_key
 from .friends import friend_ids
@@ -78,6 +98,17 @@ router = APIRouter(prefix='/api/social', tags=['social'])
 
 # How many cards a discovery row carries per side; the per-Friend read carries every card.
 CARDS_PER_SIDE = 20
+# Near you looks at this many nearby candidates, shows this many rows and, per the band, never ranks by distance.
+NEAR_CANDIDATES = 500
+NEAR_ROWS = 100
+# Card search looks at this many nearby candidates, and shows this many holders per list and cards per holder.
+CARD_SEARCH_CANDIDATES = 1_000
+HOLDERS_PER_LIST = 50
+CARDS_PER_HOLDER = 20
+# The nearest band sorts first.
+BAND_ORDER: dict[Band, int] = {band: n for n, band in BANDS.items()}
+# How wide a card search reads: one Printing, every Printing of its Card Identity, or those within the picked set.
+Scope = Literal['name', 'set', 'printing']
 
 
 class FriendTradeCard(BaseModel):
@@ -105,6 +136,13 @@ class FriendTradeList(BaseModel):
     next_page: int | None   # The next page's number, or null on the last page.
 
 
+def trade_card(facts, copies: int) -> FriendTradeCard:
+    """One Card Edition (its ``card_facts``) with ``copies`` offered now."""
+    return FriendTradeCard(edition_id=facts.edition_id, name=facts.name, set_code=facts.set_code,
+                           set_name=facts.set_name, collector_number=facts.collector_number,
+                           descriptor=facts.descriptor, image_url=facts.image_url, copies=str(copies))
+
+
 def trade_list_page(conn, viewer: str, owner: str, q: str, page: int,
                     among: Literal['friends', 'reach']) -> tuple[list[FriendTradeCard], int | None]:
     """One page of ``owner``'s Trade List as ``viewer`` may read it (through the choke point, under ``among``), and the
@@ -120,13 +158,8 @@ def trade_list_page(conn, viewer: str, owner: str, q: str, page: int,
     identities = list(dict.fromkeys(cards[copy.edition_id].identity_id for copy in shown))
     on_page = set(identities[page * PAGE_IDENTITIES:(page + 1) * PAGE_IDENTITIES])
 
-    def card(copy) -> FriendTradeCard:
-        facts = cards[copy.edition_id]
-        return FriendTradeCard(edition_id=facts.edition_id, name=facts.name, set_code=facts.set_code,
-                               set_name=facts.set_name, collector_number=facts.collector_number,
-                               descriptor=facts.descriptor, image_url=facts.image_url, copies=str(copy.listable))
-
-    return ([card(copy) for copy in shown if cards[copy.edition_id].identity_id in on_page],
+    return ([trade_card(cards[copy.edition_id], copy.listable) for copy in shown
+             if cards[copy.edition_id].identity_id in on_page],
             page + 1 if len(identities) > (page + 1) * PAGE_IDENTITIES else None)
 
 
@@ -268,12 +301,71 @@ class TradeCardMatches(BaseModel):
     offers: list[TradeCardOffer]
 
 
+class NearbyMatchRow(BaseModel):
+    """One nearby collector's discovery row (Trading #300). Never carries a user id or a Handle, and the band is the
+    only sign of distance. ``more_you_get`` and ``more_you_give``: the cards past the ones carried, on each side."""
+    trader_id: UUID
+    display_name: str
+    band: Band
+    completed_trades: int
+    open_to_cash_offers: bool
+    match: MatchKind
+    you_get: list[TradeMatchCard]
+    you_give: list[TradeMatchCard]
+    more_you_get: int
+    more_you_give: int
+
+
+class NearbyMatches(BaseModel):
+    """Near you: ``status`` is the viewer's own discovery status and ``radius_mi`` their own search radius; ``rows`` is
+    empty unless ``status`` is ``on``. Never carries a user id or a Handle."""
+    status: DiscoveryStatus
+    radius_mi: Radius
+    rows: list[NearbyMatchRow]
+
+
+class CardHolder(BaseModel):
+    """A collector with one card for trade (card search). Never carries a user id or a Handle. ``band`` is null for a
+    Friend. ``cards``: up to ``CARDS_PER_HOLDER`` of their matching Editions, ``more_cards`` the rest."""
+    trader_id: UUID
+    display_name: str
+    friend: bool
+    band: Band | None
+    completed_trades: int
+    open_to_cash_offers: bool
+    cards: list[FriendTradeCard]
+    more_cards: int
+
+
+class TradeCardSearch(BaseModel):
+    """Card search: the viewer's Friends who have the card, then collectors near them. ``status`` is the viewer's own
+    discovery status; ``near`` is empty unless it is ``on``. Never carries a user id or a Handle."""
+    status: DiscoveryStatus
+    friends: list[CardHolder]
+    near: list[CardHolder]
+
+
 # The viewer's Friends' names and Open to cash offers setting. The ids come from friends.friend_ids.
 # A suspended Friend has no row, so is neither on the per-Friend route nor in Ask to trade.
 FRIEND_PROFILES = """SELECT user_id AS collector_id, trader_id, handle, display_name, open_to_cash_offers
   FROM collector_profile WHERE user_id = ANY(%s) AND suspended_at IS NULL"""
 # Every Edition of one Card Printing.
 PRINTING_EDITIONS = 'SELECT id FROM catalog_edition WHERE printing_id = %s'
+# The Editions a card search reads from the picked Printing (%(printing)s), by scope; ``set`` is the Printing's Card
+# Identity within its set, not the whole set.
+SEARCH_EDITIONS = {
+    'printing': 'SELECT e.id FROM catalog_edition e WHERE e.printing_id = %(printing)s',
+    'name': """SELECT e.id FROM catalog_printing picked
+      JOIN catalog_printing p ON p.identity_id = picked.identity_id
+      JOIN catalog_edition e ON e.printing_id = p.id
+      WHERE picked.id = %(printing)s""",
+    'set': """SELECT e.id FROM catalog_printing picked
+      JOIN catalog_printing_display mine ON mine.printing_id = picked.id
+      JOIN catalog_printing p ON p.identity_id = picked.identity_id
+      JOIN catalog_printing_display pd ON pd.printing_id = p.id AND pd.set_id = mine.set_id
+      JOIN catalog_edition e ON e.printing_id = p.id
+      WHERE picked.id = %(printing)s""",
+}
 READ_ONLY = 'SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY'
 
 
@@ -378,14 +470,36 @@ class PartyMatch:
     more_you_give: int
 
 
-def discover(user_id: str, only: str | None = None,
-             among: Literal['friends', 'reach'] = 'friends') -> tuple[bool, list[PartyMatch]]:
-    """Whether the viewer has anyone to match with, and every matching party; with ``only``, that one party's match
-    whatever it matches, with every card. ``among='friends'`` matches the viewer's Friends (``only`` narrows them);
-    ``among='reach'`` needs ``only`` and matches that one collector when the reach rule holds. See the module
-    docstring."""
-    if among == 'reach' and only is None:
-        raise ValueError('among="reach" reads one trader at a time')
+# Who discover matches with: called once inside its read-only snapshot, it answers each party's user id and band.
+Parties = Callable[[Any], dict[str, Band | None]]
+
+
+def friend_parties(user_id: str, only: str | None = None) -> Parties:
+    """The viewer's Friends (or ``only``, when that one is a Friend), with no band."""
+    def parties(conn):
+        found = friend_ids(conn, user_id)
+        return dict.fromkeys(sorted(found & {only} if only is not None else found))
+    return parties
+
+
+def trader_parties(user_id: str, other: str) -> Parties:
+    """``other`` alone, with their band, when the reach rule holds."""
+    def parties(conn):
+        found = reach_one(conn, user_id, other)
+        return {other: found.band} if found else {}
+    return parties
+
+
+def nearby_parties(user_id: str, radius: Radius, limit: int) -> Parties:
+    """The nearby candidates (never Friends) within ``radius``, at most ``limit``, with their bands."""
+    return lambda conn: dict(nearby(conn, user_id, radius, limit))
+
+
+def discover(user_id: str, parties: Parties, among: Literal['friends', 'reach'] = 'friends',
+             whole: bool = False) -> tuple[bool, list[PartyMatch]]:
+    """Whether the viewer has anyone to match with, and every matching party. ``parties`` names who is matched, read
+    inside the second snapshot; ``among`` is the choke point's rule for their copies and wants. ``whole=True`` keeps each
+    party whatever it matches and carries every card. See the module docstring."""
     deck_needs = viewer_needs(user_id)
     with connect() as conn, conn.transaction():
         conn.execute(READ_ONLY)
@@ -401,18 +515,10 @@ def discover(user_id: str, only: str | None = None,
     my_reach = reaching(mine, accepted)
     with connect() as conn, conn.transaction():
         conn.execute(READ_ONLY)
-        bands: dict[str, Band | None] = {}
-        if among == 'friends':
-            parties = friend_ids(conn, user_id)
-            if only is not None:
-                parties &= {only}
-        else:
-            found = reach_one(conn, user_id, only)
-            parties = {only} if found else set()
-            bands = {only: found.band} if found else {}
-        if not parties:
+        bands = parties(conn)
+        if not bands:
             return False, []
-        scope = sorted(parties)
+        scope = list(bands)
         profiles = {row['collector_id']: row for row in conn.execute(FRIEND_PROFILES, (scope,))}
         counts = completed_trades(conn, scope)
         wanted = set().union(*accepted.values())
@@ -437,13 +543,13 @@ def discover(user_id: str, only: str | None = None,
                 for edition, want in found.items()})
             gets = pair(mine, my_reach, offered.get(friend, {}))
             gives = pair(found, their_reach, listable) if found else []
-            if gets or gives or only is not None:
+            if gets or gives or whole:
                 matched[friend] = (gets, gives)
         shown = {item.edition_id for gets, gives in matched.values() for item in gets + gives}
         # The wanted cards' Printings too, to say which cards are another finish of one of them.
         cards = card_facts(conn, shown | {edition for edition in mine if mine[edition].rule != 'edition'})
     printing_of = {edition: card.printing_id for edition, card in cards.items()}
-    limit = None if only is not None else CARDS_PER_SIDE
+    limit = None if whole else CARDS_PER_SIDE
     rows = []
     for friend, (gets, gives) in matched.items():
         profile = profiles.get(friend)
@@ -476,11 +582,36 @@ def friend_row(row: PartyMatch) -> TradeMatchRow:
 def trade_matches(user_id: str = Depends(verified_user)):
     """Discovery: one row per Friend who has cards the viewer wants or wants cards the viewer has, with at most
     ``CARDS_PER_SIDE`` cards per side. No prices or values."""
-    has_friends, found = discover(user_id)
+    has_friends, found = discover(user_id, friend_parties(user_id))
     rows = [friend_row(row) for row in found]
     rows.sort(key=lambda row: (KIND_ORDER.get(row.match or '', 3), row.display_name.casefold(), row.handle.casefold(),
                                row.collector_id))
     return TradeMatches(has_friends=has_friends, rows=rows)
+
+
+def nearby_row(row: PartyMatch) -> NearbyMatchRow:
+    return NearbyMatchRow(
+        trader_id=row.profile['trader_id'], display_name=row.profile['display_name'], band=row.band,
+        completed_trades=row.completed_trades, open_to_cash_offers=bool(row.profile['open_to_cash_offers']),
+        match=row.match, you_get=row.you_get, you_give=row.you_give, more_you_get=row.more_you_get,
+        more_you_give=row.more_you_give)
+
+
+@router.get('/trade-matches/near', response_model=NearbyMatches)
+def nearby_matches(user_id: str = Depends(verified_user)):
+    """Near you: the matching collectors near the viewer who are not Friends, within the radius stored in their
+    discovery setting. The candidates (at most ``NEAR_CANDIDATES``) are read inside ``discover``'s snapshot; rows are
+    sorted by kind, band, Display Name and trader id and cut to ``NEAR_ROWS``. Rows are empty, and no Want List is read,
+    unless the status is ``on``. A Friend never appears. Declared before the per-Friend route so ``near`` is no id."""
+    with connect() as conn:
+        setting = search_setting(conn, user_id)
+    if setting.status != 'on':
+        return NearbyMatches(status=setting.status, radius_mi=setting.radius_mi, rows=[])
+    _, found = discover(user_id, nearby_parties(user_id, setting.radius_mi, NEAR_CANDIDATES), among='reach')
+    rows = [nearby_row(row) for row in found]
+    rows.sort(key=lambda row: (KIND_ORDER[row.match], BAND_ORDER[row.band], row.display_name.casefold(),
+                               str(row.trader_id)))
+    return NearbyMatches(status=setting.status, radius_mi=setting.radius_mi, rows=rows[:NEAR_ROWS])
 
 
 @router.get('/trade-matches/{collector_id}', response_model=TradeMatchRow)
@@ -492,7 +623,7 @@ def friend_trade_match(collector_id: str, user_id: str = Depends(verified_user))
         known = collector_id in friend_ids(conn, user_id)
     if not known:
         error(404, 'FRIEND_NOT_FOUND')
-    _, rows = discover(user_id, collector_id)
+    _, rows = discover(user_id, friend_parties(user_id, collector_id), whole=True)
     if not rows:
         error(404, 'FRIEND_NOT_FOUND')
     return friend_row(rows[0])
@@ -553,7 +684,7 @@ def trader_match(trader_id: UUID, user_id: str = Depends(verified_user)):
         other = trader_other(conn, user_id, trader_id)
         if reach_one(conn, user_id, other) is None:
             error(404, 'COLLECTOR_NOT_FOUND')
-    _, rows = discover(user_id, only=other, among='reach')
+    _, rows = discover(user_id, trader_parties(user_id, other), among='reach', whole=True)
     if not rows:
         error(404, 'COLLECTOR_NOT_FOUND')
     row = rows[0]
@@ -589,3 +720,51 @@ def trade_card_matches(printing_id: UUID, user_id: str = Depends(verified_user))
         set_name=cards[copy.edition_id].set_name, collector_number=cards[copy.edition_id].collector_number,
         descriptor=cards[copy.edition_id].descriptor, image_url=cards[copy.edition_id].image_url,
         copies=str(copy.listable)) for copy in found])
+
+
+def holder_list(copies, profiles, counts, cards, bands, friend: bool) -> list[CardHolder]:
+    """The holders of ``copies`` as ``CardHolder``s, skipping any without a profile row. Friends sort by Display Name
+    and trader id; nearby holders by band first. At most ``HOLDERS_PER_LIST``, each with ``CARDS_PER_HOLDER`` cards."""
+    held: dict[str, list] = {}
+    for copy in copies:
+        if copy.friend_id in profiles:
+            held.setdefault(copy.friend_id, []).append(copy)
+    holders = []
+    for holder, mine in held.items():
+        profile = profiles[holder]
+        mine.sort(key=lambda copy: cards[copy.edition_id].order())
+        shown = mine[:CARDS_PER_HOLDER]
+        holders.append(CardHolder(
+            trader_id=profile['trader_id'], display_name=profile['display_name'], friend=friend,
+            band=None if friend else bands[holder], completed_trades=counts.get(holder, 0),
+            open_to_cash_offers=bool(profile['open_to_cash_offers']),
+            cards=[trade_card(cards[copy.edition_id], copy.listable) for copy in shown],
+            more_cards=len(mine) - len(shown)))
+    holders.sort(key=lambda holder: ((0 if friend else BAND_ORDER[holder.band]), holder.display_name.casefold(),
+                                     str(holder.trader_id)))
+    return holders[:HOLDERS_PER_LIST]
+
+
+@router.get('/trade-card-search', response_model=TradeCardSearch)
+def trade_card_search(printing_id: UUID, scope: Scope = 'name', user_id: str = Depends(verified_user)):
+    """Who has one card for trade: ``friends`` (answered whatever the status) and ``near`` (only while the status is
+    ``on``; the candidates are the viewer's radius, up to ``CARD_SEARCH_CANDIDATES``). ``scope`` is ``printing`` (that
+    Printing's Editions), ``name`` (every Printing of its Card Identity) or ``set`` (the ``name`` Editions within the
+    picked Printing's set, not every card in the set). An unknown Printing answers empty lists. A suspended viewer has no
+    copies through the choke point, so gets no Friends. Promised and borrowed copies never appear. No Handle or user id."""
+    with connect() as conn, conn.transaction():
+        conn.execute(READ_ONLY)
+        setting = search_setting(conn, user_id)
+        editions = [row['id'] for row in conn.execute(SEARCH_EDITIONS[scope], {'printing': printing_id})]
+        if not editions:
+            return TradeCardSearch(status=setting.status, friends=[], near=[])
+        friends = sorted(friend_ids(conn, user_id))
+        bands = nearby(conn, user_id, setting.radius_mi, CARD_SEARCH_CANDIDATES) if setting.status == 'on' else {}
+        mine = friend_trade_copies(conn, user_id, friends, editions) if friends else []
+        theirs = friend_trade_copies(conn, user_id, list(bands), editions, among='reach') if bands else []
+        holders = sorted({copy.friend_id for copy in mine + theirs})
+        profiles = {row['collector_id']: row for row in conn.execute(FRIEND_PROFILES, (holders,))} if holders else {}
+        counts = completed_trades(conn, holders) if holders else {}
+        cards = card_facts(conn, [copy.edition_id for copy in mine + theirs])
+    return TradeCardSearch(status=setting.status, friends=holder_list(mine, profiles, counts, cards, {}, True),
+                           near=holder_list(theirs, profiles, counts, cards, bands, False))

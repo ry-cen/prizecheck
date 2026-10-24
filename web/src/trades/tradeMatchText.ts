@@ -1,11 +1,12 @@
 import type {
+  NearbyMatchRow,
   TradeMatchCard,
   TradeMatchRow,
   TraderMatchRow,
 } from "../social_generated";
 
 /** A match row for a Friend or for any collector in reach; the fields read here are on both. */
-type AnyMatchRow = TradeMatchRow | TraderMatchRow;
+type AnyMatchRow = TradeMatchRow | TraderMatchRow | NearbyMatchRow;
 
 /** The match kind's tag (prototype verdict variant A). A one-way row reads as a possible sale or purchase only while
  * that Friend is Open to cash offers (owner, 2026-10-19); otherwise it has no tag and the headline says it. */
