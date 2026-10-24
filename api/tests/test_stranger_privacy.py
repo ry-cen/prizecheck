@@ -61,6 +61,22 @@ def walk(value, path=''):
         yield (path, None, value)
 
 
+def no_leaks(user, other, paths):
+    """Every path answers 200 for ``user`` and carries no zip, coordinate, distance, ``other``'s Handle or user id."""
+    handle = handle_of(other).lower()
+    for path in paths:
+        response = call('GET', path, user)
+        assert response.status_code == 200, (path, response.text)
+        for where, key, leaf in walk(response.json()):
+            assert key not in FORBIDDEN_KEYS, (path, where)
+            if isinstance(leaf, str):
+                assert other not in leaf and handle not in leaf.lower(), (path, where)
+                if not is_timestamp(leaf):
+                    assert not any(part in leaf for part in ('00010', '40.00', '40.10', '-100.00')), (path, where)
+            if isinstance(leaf, float):
+                assert round(leaf, 2) not in (40.0, 40.1, -100.0), (path, where)
+
+
 def test_no_stranger_response_carries_a_zip_coordinate_distance_handle_or_user_id(store):
     ids, ash, misty, conversation, trade = nearby_pair()
     handle = handle_of(misty).lower()
@@ -93,6 +109,9 @@ def test_a_handle_lookup_never_leads_to_a_trader_id(store):
     ok(call('POST', '/api/social/blocks', ash, {'collector_id': misty, 'idempotency_key': str(uuid4())}))
     blocks = call('GET', '/api/social/blocks', ash)
     assert blocks.status_code == 200 and trader_of(misty) not in blocks.text
+    assert [{k: v for k, v in row.items() if k != 'block_id'} for row in blocks.json()['blocked']] == [
+        {'display_name': 'Misty W.', 'handle': None, 'trader_id': None}]
+    assert misty not in blocks.text
     ok(unblock(ash, misty))
     assert call('POST', '/api/social/lookup', ash, {'handle': handle_of(misty)}).status_code == 200
     # The near branch holds, but a send by user id needs a Friend.
@@ -214,3 +233,58 @@ def test_a_refused_first_contact_names_only_its_code_and_wait(store):
     assert response.json()['detail']['code'] == 'TOO_MANY_NEW_CONVERSATIONS'
     for where, key, leaf in walk(response.json()):
         assert key not in FORBIDDEN_KEYS | {'handle', 'user_id', 'collector_id'}, where
+
+
+def test_identity_routes_never_tie_a_user_id_to_a_trader_id_through_a_block(store):
+    from test_blocks import same
+    from test_stranger_blocks import block_row
+    ids, ash, misty, _, _ = strangers()
+    brock, _ = collector('Brock')
+    ok(call('POST', f'/api/social/traders/{trader_of(misty)}/block', ash, {'idempotency_key': str(uuid4())}))
+    first = block_row(ash, misty)
+    same(unblock(ash, misty), unblock(ash, brock))
+    same(call('POST', '/api/social/blocks', ash, {'collector_id': misty, 'idempotency_key': str(uuid4())}),
+         call('POST', '/api/social/blocks', ash, {'collector_id': brock, 'idempotency_key': str(uuid4())}))
+    assert dict(block_row(ash, misty)) == dict(first)
+    [row] = [row for row in ok(call('GET', '/api/social/blocks', ash))['blocked'] if row['block_id'] == str(first['id'])]
+    assert row['trader_id'] == trader_of(misty)
+
+
+def test_a_trader_block_reads_like_a_suspension_to_the_blocked_side(store):
+    from test_stranger_blocks import block_trader
+
+    def conversing(name):
+        viewer, _ = collector(f'{name} Viewer')
+        other, _ = collector(f'{name} Other')
+        discoverable(viewer, '00010')
+        discoverable(other, '00011')
+        return viewer, other, start(viewer, other)
+
+    viewer_a, other_a, conversation_a = conversing('Blocked')
+    viewer_b, other_b, conversation_b = conversing('Suspended')
+    ok(block_trader(other_a, trader_of(viewer_a)))
+    with connect() as conn:
+        conn.execute('UPDATE collector_profile SET suspended_at = now() WHERE user_id = %s', (other_b,))
+
+    def alike(seen):
+        return {**{key: value for key, value in seen.items()
+                   if key not in ('id', 'items', 'trader_id', 'display_name', 'conversation_id')},
+                'other': {key: value for key, value in seen.get('other', {}).items()
+                          if key not in ('display_name', 'trader_id')}}
+
+    header_a = ok(call('GET', f'/api/social/traders/{trader_of(other_a)}', viewer_a))
+    header_b = ok(call('GET', f'/api/social/traders/{trader_of(other_b)}', viewer_b))
+    assert header_a['status'] == 'unavailable' and alike(header_a) == alike(header_b)
+    assert alike(ok(view(viewer_a, conversation_a))) == alike(ok(view(viewer_b, conversation_b)))
+
+
+def test_the_blocked_list_and_friends_carry_no_zip_handle_or_user_id_after_a_trader_block(store):
+    from test_stranger_blocks import block_trader
+    ids, ash, misty, conversation, trade = nearby_pair()
+    ok(block_trader(ash, trader_of(misty)))
+    no_leaks(ash, misty, ['/api/social/blocks', '/api/social/friends', '/api/social/conversations',
+                          f'/api/social/conversations/{conversation}',
+                          f'/api/social/conversations/with/{trader_of(misty)}',
+                          f'/api/social/traders/{trader_of(misty)}'])
+    [row] = ok(call('GET', '/api/social/blocks', ash))['blocked']
+    assert row['trader_id'] == trader_of(misty) and row['handle'] is None

@@ -32,9 +32,13 @@ def unblock(owner, other):
 
 
 def blocked(owner):
+    """The user ids behind ``owner``'s Blocked list, in its order (the list itself carries none)."""
     response = call('GET', '/api/social/blocks', owner)
     assert response.status_code == 200, response.text
-    return [person['collector_id'] for person in response.json()['blocked']]
+    with connect() as conn:
+        behind = {str(row['id']): row['blocked_id'] for row in
+                  conn.execute('SELECT id, blocked_id FROM block WHERE blocker_id = %s', (owner,)).fetchall()}
+    return [behind[person['block_id']] for person in response.json()['blocked']]
 
 
 def befriend(a, b):
