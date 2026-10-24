@@ -2,7 +2,7 @@
 #250 and #251, Loans, #252 and #253, Borrowed Copies, #254, Returns, #255, Write-off, #257, the inbox, #259, and a
 Friend's Trade List, trading #269, Trades as both sides read them, trading #270, declining and cancelling one,
 trading #271, the inbox's Trade lines, trading #273, and Find trades and Ask to trade, trading #276, and Open to cash
-offers, trading #277, Open discovery, trading #297, and Conversations, trading #298) from the API OpenAPI schema."""
+offers, trading #277, Open discovery, trading #297, and Conversations, trading #298, and the trader reads, trading #299) from the API OpenAPI schema."""
 import json
 import sys
 from pathlib import Path
@@ -41,7 +41,8 @@ for name in ("Collector", "CollectorLookup", "InviteCollector", "FriendsView", "
              "InboxTradeWaiting", "InboxTradeUpdate", "TradeMatchCard", "TradeMatchRow", "TradeMatches",
              "TradeCardOffer", "TradeCardMatches", "TradeSettings", "SetTradeSettings", "DiscoverySettings",
              "SetDiscovery", "ConversationParty", "Message", "TimelineItem", "ConversationView", "LastMessage",
-             "ConversationSummary", "ConversationsView", "ConversationPulse", "SendMessage", "ReadThrough"):
+             "ConversationSummary", "ConversationsView", "ConversationPulse", "SendMessage", "ReadThrough",
+             "TraderView", "TraderTradeList", "TraderMatchRow"):
     definition = schema[name]
     fields = [f"{field}{'' if field in definition.get('required', []) else '?'}: {ts_type(value)}"
               for field, value in definition["properties"].items()]
@@ -224,6 +225,13 @@ export const archiveConversation = (id: string) =>
   request<ConversationSummary>(`/api/social/conversations/${at(id)}/archive`, 'POST');
 export const unarchiveConversation = (id: string) =>
   request<ConversationSummary>(`/api/social/conversations/${at(id)}/unarchive`, 'POST');
+// Trader reads (trading #299): one collector by trader id, their Trade List and their match row, through the reach rule.
+export const getTrader = (traderId: string, signal?: AbortSignal) =>
+  request<TraderView>(`/api/social/traders/${at(traderId)}`, 'GET', undefined, signal);
+export const getTraderTradeList = (traderId: string, params: { q?: string; page?: number }, signal?: AbortSignal) =>
+  request<TraderTradeList>(`/api/social/traders/${at(traderId)}/trade-list${query(params)}`, 'GET', undefined, signal);
+export const getTraderMatch = (traderId: string, signal?: AbortSignal) =>
+  request<TraderMatchRow>(`/api/social/traders/${at(traderId)}/matches`, 'GET', undefined, signal);
 """)
 content = "\n".join(lines)
 target = root / "web/src/social_generated.ts"

@@ -42,6 +42,14 @@ does. Nothing in discovery carries a price or a value.
 **Ask to trade** (``GET /api/social/trade-card-matches?printing_id=``) answers, for the catalog card popup, each
 Friend's Trade List copies of each Edition of one Card Printing: counts and card facts only.
 
+**Trader reads** (Trading #299; spec "The reach rule" and "Identity"): ``GET /api/social/traders/{trader_id}`` answers
+one collector's header (their Display Name, whether they are a Friend, the distance band, their completed Trades, the
+status and the pair's conversation), ``.../trade-list`` their Trade List and ``.../matches`` their match row with every
+card, for any collector in reach: a Friend, a pair with a conversation, or a nearby collector while both are in open
+discovery. An unknown trader id, the viewer's own and a collector out of reach all get the same 404
+COLLECTOR_NOT_FOUND, through one call, so the bodies are byte-identical. Nothing here answers a user id or a Handle to a
+non-Friend, and the band shows only while both are in open discovery.
+
 Every answer here is Edition facts, counts, Friends' names and their Open to cash offers setting: never a Location or a
 Deck, by name or by id.
 """
@@ -59,6 +67,8 @@ from ..trade_list import own_trade_copies
 from ..trade_wants import own_rules, own_wants
 from ..want_list import capture_want_list
 from . import name_rules
+from .conversations import pair_row, standings
+from .discovery import Band, reach_one, trader_user
 from .friend_copies import friend_trade_copies, friend_wants
 from .friend_reads import FRIEND_BY_HANDLE, PAGE_IDENTITIES, card_facts, search_key
 from .friends import friend_ids
@@ -84,8 +94,10 @@ class FriendTradeCard(BaseModel):
 
 class FriendTradeList(BaseModel):
     """One page of a Friend's Trade List. ``collector_id`` addresses the Friend in commands and is never shown.
+    ``trader_id`` is the Friend's address on the trader routes and in the builder; never shown.
     ``completed_trades``: the Friend's completed Trades (Trading #298), always a number for a Friend."""
     collector_id: str
+    trader_id: UUID
     handle: str
     display_name: str
     completed_trades: int | None
@@ -93,22 +105,13 @@ class FriendTradeList(BaseModel):
     next_page: int | None   # The next page's number, or null on the last page.
 
 
-@router.get('/trade-lists/{handle}', response_model=FriendTradeList)
-def friend_trade_list(handle: str, q: str = Query('', max_length=100), page: int = Query(0, ge=0, le=100_000),
-                      user_id: str = Depends(verified_user)):
-    """One page of a Friend's Trade List: the cards they offer to trade now. 404 FRIEND_NOT_FOUND unless ``handle``
-    is one of the viewer's Friends."""
-    handle = handle.strip()
-    if not name_rules.HANDLE.fullmatch(handle):
-        error(404, 'FRIEND_NOT_FOUND')
-    with connect() as conn:
-        friend = conn.execute(FRIEND_BY_HANDLE, {'viewer': user_id, 'key': handle.lower()}).fetchone()
-        if friend is None:
-            error(404, 'FRIEND_NOT_FOUND')
-        copies = friend_trade_copies(conn, user_id, [friend['collector_id']])
-        cards = card_facts(conn, [copy.edition_id for copy in copies])
-        key = search_key(conn, q) if q.strip() else ''
-        done = completed_trades(conn, [friend['collector_id']]).get(friend['collector_id'], 0)
+def trade_list_page(conn, viewer: str, owner: str, q: str, page: int,
+                    among: Literal['friends', 'reach']) -> tuple[list[FriendTradeCard], int | None]:
+    """One page of ``owner``'s Trade List as ``viewer`` may read it (through the choke point, under ``among``), and the
+    next page's number or None on the last page. Runs on the caller's connection."""
+    copies = friend_trade_copies(conn, viewer, [owner], among=among)
+    cards = card_facts(conn, [copy.edition_id for copy in copies])
+    key = search_key(conn, q) if q.strip() else ''
     # A query of only punctuation has no letters or digits to match: it finds no card, not every card.
     no_match = bool(q.strip()) and key == ''
     shown = [] if no_match else sorted(
@@ -123,10 +126,29 @@ def friend_trade_list(handle: str, q: str = Query('', max_length=100), page: int
                                set_name=facts.set_name, collector_number=facts.collector_number,
                                descriptor=facts.descriptor, image_url=facts.image_url, copies=str(copy.listable))
 
+    return ([card(copy) for copy in shown if cards[copy.edition_id].identity_id in on_page],
+            page + 1 if len(identities) > (page + 1) * PAGE_IDENTITIES else None)
+
+
+@router.get('/trade-lists/{handle}', response_model=FriendTradeList)
+def friend_trade_list(handle: str, q: str = Query('', max_length=100), page: int = Query(0, ge=0, le=100_000),
+                      user_id: str = Depends(verified_user)):
+    """One page of a Friend's Trade List: the cards they offer to trade now. 404 FRIEND_NOT_FOUND unless ``handle``
+    is one of the viewer's Friends."""
+    handle = handle.strip()
+    if not name_rules.HANDLE.fullmatch(handle):
+        error(404, 'FRIEND_NOT_FOUND')
+    with connect() as conn:
+        friend = conn.execute(FRIEND_BY_HANDLE, {'viewer': user_id, 'key': handle.lower()}).fetchone()
+        if friend is None:
+            error(404, 'FRIEND_NOT_FOUND')
+        cards, next_page = trade_list_page(conn, user_id, friend['collector_id'], q, page, 'friends')
+        done = completed_trades(conn, [friend['collector_id']]).get(friend['collector_id'], 0)
+        trader_id = conn.execute('SELECT trader_id FROM collector_profile WHERE user_id = %s',
+                                 (friend['collector_id'],)).fetchone()['trader_id']
     return FriendTradeList(
-        collector_id=friend['collector_id'], handle=friend['handle'], display_name=friend['display_name'],
-        completed_trades=done, cards=[card(copy) for copy in shown if cards[copy.edition_id].identity_id in on_page],
-        next_page=page + 1 if len(identities) > (page + 1) * PAGE_IDENTITIES else None)
+        collector_id=friend['collector_id'], trader_id=trader_id, handle=friend['handle'],
+        display_name=friend['display_name'], completed_trades=done, cards=cards, next_page=next_page)
 
 
 MatchKind = Literal['two_way', 'has_what_you_want', 'wants_what_you_have']
@@ -155,13 +177,58 @@ class TradeMatchCard(BaseModel):
 
 
 class TradeMatchRow(BaseModel):
-    """One Friend's discovery row. ``collector_id`` addresses the Friend in commands and is never shown. ``match`` is
+    """One Friend's discovery row. ``collector_id`` addresses the Friend in commands and is never shown, and
+    ``trader_id`` is the Friend's address on the trader routes and in the builder; never shown. ``match`` is
     null only on the per-Friend read, when nothing matches now. ``more_you_get`` and ``more_you_give``: the cards past
     the ones carried, on each side (always 0 on the per-Friend read). ``completed_trades``: the Friend's completed Trades
     (Trading #298), always a number for a Friend."""
     collector_id: str
+    trader_id: UUID
     handle: str
     display_name: str
+    completed_trades: int | None
+    open_to_cash_offers: bool
+    match: MatchKind | None
+    you_get: list[TradeMatchCard]
+    you_give: list[TradeMatchCard]
+    more_you_get: int
+    more_you_give: int
+
+
+class TraderView(BaseModel):
+    """One collector in reach, by trader id (Trading #299). Never carries a user id or a Handle. ``band`` is null unless
+    both are in open discovery, and when they are unavailable; ``completed_trades`` and ``band`` are null and
+    ``open_to_cash_offers`` false when ``status`` is 'unavailable'. ``add_friend`` is always null until Add as Friend
+    arrives (#304)."""
+    trader_id: UUID
+    display_name: str
+    friend: bool
+    band: Band | None
+    completed_trades: int | None
+    open_to_cash_offers: bool
+    status: Literal['open', 'unavailable', 'you_blocked']
+    conversation_id: UUID | None
+    add_friend: Literal['offer', 'sent', 'received'] | None
+
+
+class TraderTradeList(BaseModel):
+    """One page of the Trade List of a collector in reach. Never carries a user id or a Handle. ``band`` is null unless
+    both are in open discovery."""
+    trader_id: UUID
+    display_name: str
+    band: Band | None
+    completed_trades: int | None
+    cards: list[FriendTradeCard]
+    next_page: int | None   # The next page's number, or null on the last page.
+
+
+class TraderMatchRow(BaseModel):
+    """The discovery row of one collector in reach, with every card (Trading #299). Never carries a user id or a Handle.
+    ``match`` is null when nothing matches now; ``band`` is null unless both are in open discovery. The proposal builder
+    reads it for Friends and strangers alike."""
+    trader_id: UUID
+    display_name: str
+    band: Band | None
     completed_trades: int | None
     open_to_cash_offers: bool
     match: MatchKind | None
@@ -202,8 +269,9 @@ class TradeCardMatches(BaseModel):
 
 
 # The viewer's Friends' names and Open to cash offers setting. The ids come from friends.friend_ids.
-FRIEND_PROFILES = """SELECT user_id AS collector_id, handle, display_name, open_to_cash_offers
-  FROM collector_profile WHERE user_id = ANY(%s)"""
+# A suspended Friend has no row, so is neither on the per-Friend route nor in Ask to trade.
+FRIEND_PROFILES = """SELECT user_id AS collector_id, trader_id, handle, display_name, open_to_cash_offers
+  FROM collector_profile WHERE user_id = ANY(%s) AND suspended_at IS NULL"""
 # Every Edition of one Card Printing.
 PRINTING_EDITIONS = 'SELECT id FROM catalog_edition WHERE printing_id = %s'
 READ_ONLY = 'SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY'
@@ -295,9 +363,29 @@ def match_card(card, matched: Matched, accepted_as: AcceptsAs | None) -> TradeMa
                           want_list_need=str(matched.want_list_need), origin=origin, accepts_as=accepted_as)
 
 
-def discover(user_id: str, only: str | None = None) -> tuple[bool, list[TradeMatchRow]]:
-    """Whether the viewer has Friends, and every matching Friend's row; with ``only``, that one Friend's row whatever it
-    matches, with every card. See the module docstring."""
+@dataclass(frozen=True)
+class PartyMatch:
+    """One other collector's match as ``discover`` finds it: the profile row, the completed-Trade count, the distance
+    band (always None among Friends), the kind, and the cards on each side with the counts of the rest."""
+    party_id: str
+    profile: dict
+    completed_trades: int
+    band: Band | None
+    match: MatchKind | None
+    you_get: list[TradeMatchCard]
+    you_give: list[TradeMatchCard]
+    more_you_get: int
+    more_you_give: int
+
+
+def discover(user_id: str, only: str | None = None,
+             among: Literal['friends', 'reach'] = 'friends') -> tuple[bool, list[PartyMatch]]:
+    """Whether the viewer has anyone to match with, and every matching party; with ``only``, that one party's match
+    whatever it matches, with every card. ``among='friends'`` matches the viewer's Friends (``only`` narrows them);
+    ``among='reach'`` needs ``only`` and matches that one collector when the reach rule holds. See the module
+    docstring."""
+    if among == 'reach' and only is None:
+        raise ValueError('among="reach" reads one trader at a time')
     deck_needs = viewer_needs(user_id)
     with connect() as conn, conn.transaction():
         conn.execute(READ_ONLY)
@@ -313,20 +401,26 @@ def discover(user_id: str, only: str | None = None) -> tuple[bool, list[TradeMat
     my_reach = reaching(mine, accepted)
     with connect() as conn, conn.transaction():
         conn.execute(READ_ONLY)
-        friends = friend_ids(conn, user_id)
-        if only is not None:
-            friends &= {only}
-        if not friends:
+        bands: dict[str, Band | None] = {}
+        if among == 'friends':
+            parties = friend_ids(conn, user_id)
+            if only is not None:
+                parties &= {only}
+        else:
+            found = reach_one(conn, user_id, only)
+            parties = {only} if found else set()
+            bands = {only: found.band} if found else {}
+        if not parties:
             return False, []
-        scope = sorted(friends)
+        scope = sorted(parties)
         profiles = {row['collector_id']: row for row in conn.execute(FRIEND_PROFILES, (scope,))}
         counts = completed_trades(conn, scope)
         wanted = set().union(*accepted.values())
         offered: dict[str, dict[UUID, int]] = {}
-        for copy in friend_trade_copies(conn, user_id, scope, wanted) if wanted else ():
+        for copy in friend_trade_copies(conn, user_id, scope, wanted, among=among) if wanted else ():
             offered.setdefault(copy.friend_id, {})[copy.edition_id] = copy.listable
         theirs: dict[str, dict[UUID, Want]] = {}
-        for want in friend_wants(conn, user_id, scope, candidates) if candidates else ():
+        for want in friend_wants(conn, user_id, scope, candidates, among=among) if candidates else ():
             theirs.setdefault(want.friend_id, {})[want.edition_id] = Want(
                 want_list_need=want.want_list_need, trade_wants_quantity=want.trade_wants_quantity, rule=want.rule)
         # Every Friend's widened wants expanded at once, one read per rule, never one per Friend.
@@ -359,24 +453,33 @@ def discover(user_id: str, only: str | None = None) -> tuple[bool, list[TradeMat
         gives.sort(key=lambda item: cards[item.edition_id].order())
         kind = ('two_way' if gets and gives else 'has_what_you_want' if gets
                 else 'wants_what_you_have' if gives else None)
-        rows.append(TradeMatchRow(
-            collector_id=friend, handle=profile['handle'], display_name=profile['display_name'],
-            open_to_cash_offers=bool(profile['open_to_cash_offers']), completed_trades=counts.get(friend, 0),
+        rows.append(PartyMatch(
+            party_id=friend, profile=profile, completed_trades=counts.get(friend, 0), band=bands.get(friend),
             match=kind,
             you_get=[match_card(cards[item.edition_id], item,
                                 accepts_as(item.edition_id, mine, my_reach, printing_of)) for item in gets[:limit]],
             you_give=[match_card(cards[item.edition_id], item, None) for item in gives[:limit]],
             more_you_get=len(gets) - len(gets[:limit]), more_you_give=len(gives) - len(gives[:limit])))
-    rows.sort(key=lambda row: (KIND_ORDER.get(row.match or '', 3), row.display_name.casefold(), row.handle.casefold(),
-                               row.collector_id))
     return True, rows
+
+
+def friend_row(row: PartyMatch) -> TradeMatchRow:
+    profile = row.profile
+    return TradeMatchRow(
+        collector_id=row.party_id, trader_id=profile['trader_id'], handle=profile['handle'],
+        display_name=profile['display_name'], completed_trades=row.completed_trades,
+        open_to_cash_offers=bool(profile['open_to_cash_offers']), match=row.match, you_get=row.you_get,
+        you_give=row.you_give, more_you_get=row.more_you_get, more_you_give=row.more_you_give)
 
 
 @router.get('/trade-matches', response_model=TradeMatches)
 def trade_matches(user_id: str = Depends(verified_user)):
     """Discovery: one row per Friend who has cards the viewer wants or wants cards the viewer has, with at most
     ``CARDS_PER_SIDE`` cards per side. No prices or values."""
-    has_friends, rows = discover(user_id)
+    has_friends, found = discover(user_id)
+    rows = [friend_row(row) for row in found]
+    rows.sort(key=lambda row: (KIND_ORDER.get(row.match or '', 3), row.display_name.casefold(), row.handle.casefold(),
+                               row.collector_id))
     return TradeMatches(has_friends=has_friends, rows=rows)
 
 
@@ -392,7 +495,73 @@ def friend_trade_match(collector_id: str, user_id: str = Depends(verified_user))
     _, rows = discover(user_id, collector_id)
     if not rows:
         error(404, 'FRIEND_NOT_FOUND')
-    return rows[0]
+    return friend_row(rows[0])
+
+
+def trader_other(conn, user_id: str, trader_id: UUID) -> str:
+    """The account behind ``trader_id``, or 404 COLLECTOR_NOT_FOUND for an unknown trader id and the viewer's own. Every
+    refusal on the trader routes goes through this one answer, so the bodies are byte-identical."""
+    other = trader_user(conn, trader_id)
+    if other is None or other == user_id:
+        error(404, 'COLLECTOR_NOT_FOUND')
+    return other
+
+
+@router.get('/traders/{trader_id}', response_model=TraderView)
+def trader_view(trader_id: UUID, user_id: str = Depends(verified_user)):
+    """One collector's header by trader id: a pair with a conversation, or anyone the reach rule holds for. 404
+    COLLECTOR_NOT_FOUND for an unknown trader id, the viewer's own, and a collector out of reach. Writes nothing."""
+    with connect() as conn, conn.transaction():
+        other = trader_other(conn, user_id, trader_id)
+        row = pair_row(conn, user_id, other)
+        if row is None and reach_one(conn, user_id, other) is None:
+            error(404, 'COLLECTOR_NOT_FOUND')
+        profile = conn.execute('SELECT display_name, open_to_cash_offers FROM collector_profile WHERE user_id = %s',
+                               (other,)).fetchone()
+        standing = standings(conn, user_id, {0: (other, profile['display_name'])})[0]
+    return TraderView(
+        trader_id=trader_id, display_name=standing.party.display_name, friend=standing.party.friend,
+        band=standing.party.band, completed_trades=standing.party.completed_trades,
+        open_to_cash_offers=standing.status != 'unavailable' and bool(profile['open_to_cash_offers']),
+        status=standing.status, conversation_id=row['id'] if row else None, add_friend=None)
+
+
+@router.get('/traders/{trader_id}/trade-list', response_model=TraderTradeList)
+def trader_trade_list(trader_id: UUID, q: str = Query('', max_length=100), page: int = Query(0, ge=0, le=100_000),
+                      user_id: str = Depends(verified_user)):
+    """One page of the Trade List of a collector in reach: the cards they offer to trade now. 404 COLLECTOR_NOT_FOUND
+    unless the reach rule holds."""
+    with connect() as conn:
+        other = trader_other(conn, user_id, trader_id)
+        found = reach_one(conn, user_id, other)
+        if found is None:
+            error(404, 'COLLECTOR_NOT_FOUND')
+        cards, next_page = trade_list_page(conn, user_id, other, q, page, 'reach')
+        name = conn.execute('SELECT display_name FROM collector_profile WHERE user_id = %s',
+                            (other,)).fetchone()['display_name']
+        done = completed_trades(conn, [other]).get(other, 0)
+    return TraderTradeList(trader_id=trader_id, display_name=name, band=found.band, completed_trades=done,
+                           cards=cards, next_page=next_page)
+
+
+@router.get('/traders/{trader_id}/matches', response_model=TraderMatchRow)
+def trader_match(trader_id: UUID, user_id: str = Depends(verified_user)):
+    """The discovery row of a collector in reach, with every card on both sides and a null ``match`` when nothing
+    matches now. 404 COLLECTOR_NOT_FOUND unless the reach rule holds."""
+    # Resolve before anything costs: a refusal pays for no Want List read.
+    with connect() as conn:
+        other = trader_other(conn, user_id, trader_id)
+        if reach_one(conn, user_id, other) is None:
+            error(404, 'COLLECTOR_NOT_FOUND')
+    _, rows = discover(user_id, only=other, among='reach')
+    if not rows:
+        error(404, 'COLLECTOR_NOT_FOUND')
+    row = rows[0]
+    return TraderMatchRow(
+        trader_id=trader_id, display_name=row.profile['display_name'], band=row.band,
+        completed_trades=row.completed_trades, open_to_cash_offers=bool(row.profile['open_to_cash_offers']),
+        match=row.match, you_get=row.you_get, you_give=row.you_give, more_you_get=row.more_you_get,
+        more_you_give=row.more_you_give)
 
 
 @router.get('/trade-card-matches', response_model=TradeCardMatches)

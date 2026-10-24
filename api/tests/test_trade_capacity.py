@@ -12,6 +12,7 @@ about a tenth of them: every Friend matches both ways, with more cards than a ro
 that could match the viewer's Trade List (about 90 each) are allocated for all 200 Friends.
 """
 import math
+import statistics
 import time
 from uuid import uuid4
 
@@ -128,4 +129,5 @@ def test_trade_matches_answers_200_friends_within_the_design_target():
         assert len(read()['rows']) == FRIENDS
         samples.append(time.perf_counter() - started)
     p95 = sorted(samples)[math.ceil(len(samples) * 0.95) - 1]
+    print(f'trade-matches p95 {p95:.3f}s median {statistics.median(samples):.3f}s', sorted(round(s, 3) for s in samples))
     assert p95 <= P95_SECONDS, (p95, sorted(samples))

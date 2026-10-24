@@ -52,8 +52,8 @@ export type InboxWaiting = { id: string; kind: "borrow_request" | "lend_offer"; 
 export type InboxView = { waiting: InboxWaiting[]; updates: InboxUpdate[]; trade_waiting: InboxTradeWaiting[]; trade_updates: InboxTradeUpdate[] };
 export type InboxIds = { ids: string[] };
 export type FriendTradeCard = { edition_id: string; name: string; set_code: string; set_name: string; collector_number: string; descriptor: Record<string, unknown>; image_url: string | null; copies: string };
-export type FriendTradeList = { collector_id: string; handle: string; display_name: string; completed_trades: number | null; cards: FriendTradeCard[]; next_page: number | null };
-export type TradeParty = { collector_id: string | null; display_name: string; handle: string | null; open_to_cash_offers: boolean; completed_trades?: number | null };
+export type FriendTradeList = { collector_id: string; trader_id: string; handle: string; display_name: string; completed_trades: number | null; cards: FriendTradeCard[]; next_page: number | null };
+export type TradeParty = { collector_id: string | null; handle: string | null; trader_id?: string | null; display_name: string; open_to_cash_offers: boolean; friend?: boolean; available?: boolean; completed_trades?: number | null };
 export type TradeCard = { edition_id: string; name: string; set_code: string; set_name: string; collector_number: string; descriptor: Record<string, unknown>; image_url: string | null; copies: string };
 export type TradeCash = { cents: string; payer: "you" | "them" };
 export type TradeView = { id: string; state: "proposed" | "accepted" | "closed"; closed_reason: "declined" | "withdrawn" | "countered" | "cancelled" | "swapped" | null; closed_by: "you" | "them" | null; role: "proposer" | "recipient"; other: TradeParty; countered_from: string | null; you_give: TradeCard[]; you_get: TradeCard[]; cash: TradeCash | null; you_confirmed_swap: boolean; they_confirmed_swap: boolean; needs_you: boolean; waiting: "answer" | "fix_picks" | "confirm_swap" | null; section: "needs_you" | "to_swap" | "pending" | "history"; actions: ("accept" | "decline" | "counter" | "confirm_swap" | "use_suggested_picks" | "withdraw" | "cancel")[]; revision: number; created_at: string; conversation_id?: string | null };
@@ -62,7 +62,7 @@ export type TradeStep = { revision: number; idempotency_key: string };
 export type InboxTradeWaiting = { id: string; state: "proposed" | "accepted" | "closed"; closed_reason: "declined" | "withdrawn" | "countered" | "cancelled" | "swapped" | null; closed_by: "you" | "them" | null; role: "proposer" | "recipient"; other: TradeParty; countered_from: string | null; you_give: TradeCard[]; you_get: TradeCard[]; cash: TradeCash | null; you_confirmed_swap: boolean; they_confirmed_swap: boolean; needs_you: boolean; waiting: "answer" | "fix_picks" | "confirm_swap" | null; section: "needs_you" | "to_swap" | "pending" | "history"; actions: ("accept" | "decline" | "counter" | "confirm_swap" | "use_suggested_picks" | "withdraw" | "cancel")[]; revision: number; created_at: string; conversation_id?: string | null; since: string };
 export type InboxTradeUpdate = { id: string; kind: "accepted" | "declined" | "cancelled" | "withdrawn" | "swapped"; trade_id: string; trade_state: "proposed" | "accepted" | "closed"; role: "proposer" | "recipient"; other_name: string; read: boolean; at: string };
 export type TradeMatchCard = { edition_id: string; name: string; set_code: string; set_name: string; collector_number: string; descriptor: Record<string, unknown>; image_url: string | null; copies: string; need: string; want_list_need: string; origin: "want_list" | "trade_wants" | "both"; accepts_as: "exact" | "any_finish" | "same_name" | null };
-export type TradeMatchRow = { collector_id: string; handle: string; display_name: string; completed_trades: number | null; open_to_cash_offers: boolean; match: "two_way" | "has_what_you_want" | "wants_what_you_have" | null; you_get: TradeMatchCard[]; you_give: TradeMatchCard[]; more_you_get: number; more_you_give: number };
+export type TradeMatchRow = { collector_id: string; trader_id: string; handle: string; display_name: string; completed_trades: number | null; open_to_cash_offers: boolean; match: "two_way" | "has_what_you_want" | "wants_what_you_have" | null; you_get: TradeMatchCard[]; you_give: TradeMatchCard[]; more_you_get: number; more_you_give: number };
 export type TradeMatches = { has_friends: boolean; rows: TradeMatchRow[] };
 export type TradeCardOffer = { collector_id: string; handle: string; display_name: string; edition_id: string; name: string; set_code: string; set_name: string; collector_number: string; descriptor: Record<string, unknown>; image_url: string | null; copies: string };
 export type TradeCardMatches = { has_friends: boolean; offers: TradeCardOffer[] };
@@ -80,6 +80,9 @@ export type ConversationsView = { conversations: ConversationSummary[]; next_bef
 export type ConversationPulse = { unread_conversations: number; watermark: string };
 export type SendMessage = { body: string; idempotency_key: string };
 export type ReadThrough = { through: string };
+export type TraderView = { trader_id: string; display_name: string; friend: boolean; band: "under_5" | "5_to_10" | "10_to_25" | "25_to_50" | null; completed_trades: number | null; open_to_cash_offers: boolean; status: "open" | "unavailable" | "you_blocked"; conversation_id: string | null; add_friend: "offer" | "sent" | "received" | null };
+export type TraderTradeList = { trader_id: string; display_name: string; band: "under_5" | "5_to_10" | "10_to_25" | "25_to_50" | null; completed_trades: number | null; cards: FriendTradeCard[]; next_page: number | null };
+export type TraderMatchRow = { trader_id: string; display_name: string; band: "under_5" | "5_to_10" | "10_to_25" | "25_to_50" | null; completed_trades: number | null; open_to_cash_offers: boolean; match: "two_way" | "has_what_you_want" | "wants_what_you_have" | null; you_get: TradeMatchCard[]; you_give: TradeMatchCard[]; more_you_get: number; more_you_give: number };
 
 /** A refused social request: the API's code, and for TOO_MANY_LOOKUPS the detail that says when to try again. */
 export class SocialError extends Error {
@@ -258,3 +261,10 @@ export const archiveConversation = (id: string) =>
   request<ConversationSummary>(`/api/social/conversations/${at(id)}/archive`, 'POST');
 export const unarchiveConversation = (id: string) =>
   request<ConversationSummary>(`/api/social/conversations/${at(id)}/unarchive`, 'POST');
+// Trader reads (trading #299): one collector by trader id, their Trade List and their match row, through the reach rule.
+export const getTrader = (traderId: string, signal?: AbortSignal) =>
+  request<TraderView>(`/api/social/traders/${at(traderId)}`, 'GET', undefined, signal);
+export const getTraderTradeList = (traderId: string, params: { q?: string; page?: number }, signal?: AbortSignal) =>
+  request<TraderTradeList>(`/api/social/traders/${at(traderId)}/trade-list${query(params)}`, 'GET', undefined, signal);
+export const getTraderMatch = (traderId: string, signal?: AbortSignal) =>
+  request<TraderMatchRow>(`/api/social/traders/${at(traderId)}/matches`, 'GET', undefined, signal);

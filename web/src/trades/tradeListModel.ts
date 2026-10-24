@@ -30,6 +30,9 @@ export const TRADE_LIST_PATH = "/trades/list";
 /** The section name before a Friend's Handle in a proposal builder's address. */
 export const TRADE_NEW_SEGMENT = "new";
 
+/** The section name before a trader id in a stranger's Trade List address (Trading #299). */
+export const TRADE_TRADER_SEGMENT = "trader";
+
 /** The section name before a trader id in a conversation's address (Trading #298). */
 export const TRADE_WITH_SEGMENT = "with";
 
@@ -79,16 +82,25 @@ export function counterPath(id: string): string {
   return `${tradePath(id)}/${TRADE_COUNTER_SEGMENT}`;
 }
 
-/** A Friend's proposal builder (Trading #284): /trades/new/<Handle>. */
-export function proposalPath(handle: string): string {
-  return `${TRADES_PATH}/${TRADE_NEW_SEGMENT}/${encodeURIComponent(handle)}`;
+/** The proposal builder at /trades/new/<trader id> (Trading #284, #299); given a Handle it is the address that
+ * redirects to it (#299). */
+export function proposalPath(key: string): string {
+  return `${TRADES_PATH}/${TRADE_NEW_SEGMENT}/${encodeURIComponent(key)}`;
 }
 
-/** What the Trades tab shows for its address's section (``sectionAt``): a view, a Friend's proposal builder, a
- * conversation by trader id or by its id (#298), the Counter builder for one Trade (#278), or one Trade by id. */
+/** A collector's Trade List by trader id (Trading #299): /trades/trader/<trader id>. */
+export function traderTradeListPath(traderId: string): string {
+  return `${TRADES_PATH}/${TRADE_TRADER_SEGMENT}/${encodeURIComponent(traderId)}`;
+}
+
+/** What the Trades tab shows for its address's section (``sectionAt``): a view, a proposal builder by trader id, the
+ * redirect from a Handle address to it (#299), a stranger's Trade List by trader id (#299), a conversation by trader
+ * id or by its id (#298), the Counter builder for one Trade (#278), or one Trade by id. */
 export type TradesRoute =
   | { kind: "view"; view: TradesTabView }
-  | { kind: "new"; handle: string }
+  | { kind: "new"; traderId: string }
+  | { kind: "newHandle"; handle: string }
+  | { kind: "trader"; traderId: string }
   | { kind: "with"; traderId: string }
   | { kind: "conversation"; id: string }
   | { kind: "counter"; id: string }
@@ -103,21 +115,30 @@ export function tradesRoute(section: string | null): TradesRoute {
   if (section === "list") return { kind: "view", view: "list" };
   if (section.startsWith(`${TRADE_NEW_SEGMENT}/`)) {
     try {
-      return {
-        kind: "new",
-        handle: decodeURIComponent(section.slice(TRADE_NEW_SEGMENT.length + 1)),
-      };
+      const value = decodeURIComponent(
+        section.slice(TRADE_NEW_SEGMENT.length + 1)
+      );
+      // A Handle is never UUID-shaped.
+      return UUID.test(value)
+        ? { kind: "new", traderId: value.toLowerCase() }
+        : { kind: "newHandle", handle: value };
     } catch {
       return { kind: "missing" };
     }
   }
-  for (const segment of [TRADE_WITH_SEGMENT, TRADE_CONVERSATION_SEGMENT]) {
+  for (const segment of [
+    TRADE_WITH_SEGMENT,
+    TRADE_CONVERSATION_SEGMENT,
+    TRADE_TRADER_SEGMENT,
+  ]) {
     if (!section.startsWith(`${segment}/`)) continue;
     try {
       const value = decodeURIComponent(section.slice(segment.length + 1));
       if (!UUID.test(value)) return { kind: "missing" };
-      return segment === TRADE_WITH_SEGMENT
-        ? { kind: "with", traderId: value }
+      if (segment === TRADE_WITH_SEGMENT)
+        return { kind: "with", traderId: value };
+      return segment === TRADE_TRADER_SEGMENT
+        ? { kind: "trader", traderId: value.toLowerCase() }
         : { kind: "conversation", id: value };
     } catch {
       return { kind: "missing" };

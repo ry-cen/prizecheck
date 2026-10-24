@@ -10,6 +10,8 @@ import {
   type TradePickPlace,
 } from "../trades_generated";
 import { variantLabel } from "../ui/variantLabel";
+import { SUSPENDED_NOTE } from "./conversationMessages";
+import { SEND_UNAVAILABLE } from "./traderMessages";
 
 /** A card as the Trade messages name it (prototype "Proposed wording"): "Iono (PAL 185)". A finish other than Normal
  * follows the number, so two Editions of one card never share a name: "Arven (SVI 166, Reverse Holo)". */
@@ -361,8 +363,10 @@ export function sendTradeMessage(
       return error.detail.side === "you_get"
         ? `${friend} isn't open to cash offers, so ${friend} can't give only cash. Add a card from ${friend}'s Trade List, or remove the cash.`
         : `${friend} isn't open to cash offers, so you can't give only cash. Add a card from your Trade List, or remove the cash.`;
-    case "NOT_FRIENDS":
-      return `${friend} isn't one of your Friends anymore.`;
+    case "COLLECTOR_UNAVAILABLE":
+      return SEND_UNAVAILABLE;
+    case "ACCOUNT_SUSPENDED":
+      return SUSPENDED_NOTE;
     case "TOO_MANY_CHANGES":
       return `Too many changes. Try again in ${minutes(error.detail)}.`;
     default:
@@ -403,8 +407,10 @@ export function tradeStepMessage(cause: unknown, trade: TradeView): string {
         ? `${card} isn't on your Trade List now, so you can't accept this. ${instead}`
         : `You can trade only ${n} ${card} now, so you can't accept this. ${instead}`;
     }
-    case "NOT_FRIENDS":
-      return `${trade.other.display_name} isn't one of your Friends anymore.`;
+    case "COLLECTOR_UNAVAILABLE":
+      return SEND_UNAVAILABLE;
+    case "ACCOUNT_SUSPENDED":
+      return SUSPENDED_NOTE;
     case "TRADE_CHANGED":
     case "STEP_NOT_ALLOWED":
       return "This Trade has changed. Check it and try again.";

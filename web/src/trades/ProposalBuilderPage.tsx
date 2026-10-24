@@ -14,9 +14,9 @@ import { PageHeader } from "../shell/PageHeader";
 import { useLeaveGuard, type LeaveGuard } from "../shell/useRoute";
 import { CardImage } from "../social/FriendCollectionPage";
 import {
-  getFriendTradeList,
   getTrade,
-  getTradeMatch,
+  getTraderMatch,
+  getTraderTradeList,
   SocialError,
   type TradeView,
 } from "../social_generated";
@@ -66,13 +66,8 @@ import {
   type MineLoad,
   type TheirsLoad,
 } from "./ProposalLibrary";
-import { conversationLinkText } from "./conversationMessages";
-import {
-  conversationPath,
-  friendTradeListPath,
-  TRADE_FIND_PATH,
-  tradePath,
-} from "./tradeListModel";
+import { conversationLinkText, UNAVAILABLE_NOTE } from "./conversationMessages";
+import { conversationPath, TRADE_FIND_PATH, tradePath } from "./tradeListModel";
 import {
   COUNTER_CHANGED_TEXT,
   COUNTER_GONE_TEXT,
@@ -81,9 +76,10 @@ import {
   tradeCardName,
   tradeOutcomeUnknown,
 } from "./tradeText";
+import { TRADER_LIST_TITLE } from "./traderMessages";
 import { sideValueText, useTradeValue } from "./useTradeValue";
 
-type Friend = { collector_id: string; handle: string; display_name: string };
+type Party = { trader_id: string; display_name: string };
 
 type Theirs =
   | { kind: "loading" }
@@ -104,7 +100,7 @@ const BACK =
   "inline-flex h-control items-center gap-1 self-start rounded-control px-2 text-control font-medium text-text-muted no-underline hover:bg-surface-raised hover:text-text phone:h-control-phone";
 
 /**
- * A Friend's proposal builder (Trading #284), at /trades/new/<Handle>, laid out like the Deck builder. The proposal is
+ * A proposal builder (Trading #284, #299), at /trades/new/<trader id> for a Friend or any collector in reach, laid out like the Deck builder. The proposal is
  * the wide left column: **You get** and **You give**, each line with a stepper up to the copies the library offered,
  * and **Send Trade Proposal**. The card library (ProposalLibrary) is the narrow right column. On a phone a Proposal
  * and Cards switch shows one pane at a time, Cards first; both stay mounted.
@@ -113,9 +109,9 @@ const BACK =
  * page: nothing is kept, so leaving ends it. Once the collector has changed it, leaving through the shell, a link,
  * the back link or the browser's Back and Forward asks "Discard this proposal to <name>?" (the router's leave guard),
  * and a reload or close shows the browser's own warning. Nothing is asked for a proposal that holds no cards, for one
- * left as it opened, when the Friend didn't load, or after a successful send. A card can't be on both sides; a
+ * left as it opened, when the collector didn't load, or after a successful send. A card can't be on both sides; a
  * refused send keeps the proposal and says which card and how many are on the Trade List now. The back link returns
- * to the Friend's Trade List when the builder was opened from it, and to Find trades otherwise.
+ * to the Trade List page the builder was opened from, and to Find trades otherwise.
  *
  * Cash (Trading #277): a **Cash** section under You give takes an amount in US dollars and who pays it, recorded
  * only; the app never handles money. Each side shows its estimated total under its list, and nothing suggests an
@@ -130,11 +126,11 @@ const BACK =
  * proposal no longer waits for the answer disables Send, and the leave guard stops.
  */
 export function ProposalBuilderPage({
-  handle,
+  traderId,
   onNavigate,
   counter,
 }: {
-  handle: string;
+  traderId: string;
   onNavigate: (to: string) => void;
   /** The Trade being countered, as the reader sees it: set in counter mode. */
   counter?: TradeView;
@@ -145,13 +141,13 @@ export function ProposalBuilderPage({
   const phone = useMediaQuery(MOBILE_QUERY);
   const [proposal, setProposal] = useState<Proposal>(() => {
     if (counter) return counterProposal(counter);
-    const card = takeProposalSeed(handle);
+    const card = takeProposalSeed(traderId);
     return card ? seededProposal(card) : EMPTY_PROPOSAL;
   });
-  const [fromTradeList] = useState(() =>
-    counter ? false : takeFromTradeList(handle)
+  const [listBack] = useState(() =>
+    counter ? null : takeFromTradeList(traderId)
   );
-  const [friend, setFriend] = useState<Friend | null>(null);
+  const [party, setParty] = useState<Party | null>(null);
   const [theirs, setTheirs] = useState<Theirs>({ kind: "loading" });
   const [match, setMatch] = useState<MatchLoad>({ kind: "loading" });
   const [mine, setMine] = useState<MineLoad>({ kind: "loading" });
@@ -196,9 +192,9 @@ export function ProposalBuilderPage({
   const edited = useRef(false);
   const latest = useRef(proposal);
   latest.current = proposal;
-  // The guard reads these: it is made once. A Friend who is gone (a 404 after load) can't be sent to, so nothing asks.
+  // The guard reads these: it is made once. A collector who is gone (a 404 after load) can't be sent to, so nothing asks.
   const reachable = useRef(false);
-  reachable.current = friend !== null && theirs.kind !== "missing";
+  reachable.current = party !== null && theirs.kind !== "missing";
   const sending = useRef(false);
   const mounted = useRef(true);
   useEffect(() => {
@@ -217,21 +213,20 @@ export function ProposalBuilderPage({
   // Bumped each time the main read starts, so a Show more read begun under an earlier search is dropped on arrival.
   const generation = useRef(0);
 
-  // The Friend's Trade List, searched on the server; the first answer names the Friend.
+  // The other side's Trade List, searched on the server; the first answer names them.
   useEffect(() => {
     const controller = new AbortController();
     generation.current++;
     setTheirs((current) =>
       current.kind === "ready" ? current : { kind: "loading" }
     );
-    getFriendTradeList(handle, { q: theirQ }, controller.signal)
+    getTraderTradeList(traderId, { q: theirQ }, controller.signal)
       .then((page) => {
         if (controller.signal.aborted) return;
-        setFriend(
+        setParty(
           (current) =>
             current ?? {
-              collector_id: page.collector_id,
-              handle: page.handle,
+              trader_id: page.trader_id,
               display_name: page.display_name,
             }
         );
@@ -252,15 +247,13 @@ export function ProposalBuilderPage({
         );
       });
     return () => controller.abort();
-  }, [handle, theirQ, attempt]);
+  }, [traderId, theirQ, attempt]);
 
-  // The matches with this Friend, listed first in the library.
-  const friendId = friend?.collector_id ?? null;
+  // The matches with this collector, listed first in the library.
   useEffect(() => {
-    if (!friendId) return;
     const controller = new AbortController();
     setMatch({ kind: "loading" });
-    getTradeMatch(friendId, controller.signal).then(
+    getTraderMatch(traderId, controller.signal).then(
       (row) => {
         if (!controller.signal.aborted) setMatch({ kind: "ready", row });
       },
@@ -269,7 +262,7 @@ export function ProposalBuilderPage({
       }
     );
     return () => controller.abort();
-  }, [friendId, matchAttempt]);
+  }, [traderId, matchAttempt]);
 
   // The collector's own Trade List, one row per Edition (not per Location).
   useEffect(() => {
@@ -340,7 +333,7 @@ export function ProposalBuilderPage({
     const at = generation.current;
     setTheirs({ ...current, more: "loading" });
     try {
-      const page = await getFriendTradeList(handle, {
+      const page = await getTraderTradeList(traderId, {
         q: current.q,
         page: current.nextPage!,
       });
@@ -469,9 +462,9 @@ export function ProposalBuilderPage({
   }
 
   async function send() {
-    if (busy || !friend) return;
+    if (busy || !party) return;
     const current = proposal;
-    const name = friend.display_name;
+    const name = party.display_name;
     let cashBody: { cents: string; payer: "you" | "them" } | null = null;
     if (cash.payer !== "none") {
       const cents = parseCents(cash.amount);
@@ -496,7 +489,7 @@ export function ProposalBuilderPage({
     try {
       key.current ??= crypto.randomUUID();
       const trade = await sendTradeProposal({
-        recipient_id: friend.collector_id,
+        recipient_trader_id: party.trader_id,
         you_give: requestLines(current.give),
         you_get: requestLines(current.get),
         cash: cashBody,
@@ -566,16 +559,16 @@ export function ProposalBuilderPage({
   };
   const backTo = counter
     ? tradePath(counter.id)
-    : fromTradeList
-      ? friendTradeListPath(handle)
-      : TRADE_FIND_PATH;
+    : (listBack ?? TRADE_FIND_PATH);
   const backLink = (
     <a href={backTo} onClick={go(backTo)} className={BACK}>
       <Icon icon={ChevronLeft} />
       {counter
         ? `${counter.other.display_name}'s Trade Proposal`
-        : fromTradeList
-          ? `${friend?.display_name ?? "Friend"}'s Trade List`
+        : listBack
+          ? party
+            ? `${party.display_name}'s Trade List`
+            : TRADER_LIST_TITLE
           : "Find trades"}
     </a>
   );
@@ -607,11 +600,9 @@ export function ProposalBuilderPage({
   if (theirs.kind === "missing")
     return frame(
       frameTitle,
-      <p className="m-0 text-body text-text-muted">
-        This collector isn't one of your Friends.
-      </p>
+      <p className="m-0 text-body text-text-muted">{UNAVAILABLE_NOTE}</p>
     );
-  if (theirs.kind === "failed" && !friend)
+  if (theirs.kind === "failed" && !party)
     return frame(
       frameTitle,
       <div className="flex flex-wrap items-center gap-3">
@@ -621,7 +612,7 @@ export function ProposalBuilderPage({
         <Button onClick={() => setAttempt((n) => n + 1)}>Retry</Button>
       </div>
     );
-  if (!friend)
+  if (!party)
     return frame(
       frameTitle,
       <p role="status" className="m-0 text-body text-text-muted">
@@ -629,7 +620,7 @@ export function ProposalBuilderPage({
       </p>
     );
 
-  const name = friend.display_name;
+  const name = party.display_name;
   const copies = proposalCopies(proposal);
   const empty = copies === 0;
   const reasonId = `${idBase}-reason`;

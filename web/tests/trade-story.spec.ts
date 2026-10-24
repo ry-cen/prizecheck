@@ -22,6 +22,7 @@ import {
   seedCatalog,
   setLine,
 } from "./support/loans";
+import { traderIdOf } from "./support/conversations";
 import { expectPageChecks } from "./support/page-check";
 import { signInAsOwner } from "./support/sign-in";
 import {
@@ -163,6 +164,7 @@ async function story(
   const mistyPlace = `Cerulean ${randomUUID().slice(0, 6)}`;
   const ash = await collectors.signIn({ contextOptions });
   const ashHandle = await nameCollector(ash.page, "Ash K");
+  const ashTrader = await traderIdOf(ash.page);
   const binder = await storageLeaf(ash.page, `${ashPlace} Binder`);
   const box = await storageLeaf(ash.page, `${ashPlace} Box`);
   await hold(ash.page, binder, arven, 3);
@@ -284,7 +286,7 @@ async function story(
   await popup
     .getByRole("button", { name: /^Ask Ash K to trade Arven \(SVI 166\)$/ })
     .click();
-  await expect(page).toHaveURL(`${ORIGIN}/trades/new/${ashHandle}`);
+  await expect(page).toHaveURL(`${ORIGIN}/trades/new/${ashTrader}`);
   await show(page, "Cards");
   await expect(
     page.getByRole("radio", { name: "Their Trade List" })
@@ -332,7 +334,7 @@ async function story(
 
   // S5. Propose from the row: cash only, refused.
   await page.getByRole("button", { name: "Propose trade to Ash K" }).click();
-  await expect(page).toHaveURL(`${ORIGIN}/trades/new/${ashHandle}`);
+  await expect(page).toHaveURL(`${ORIGIN}/trades/new/${ashTrader}`);
   await expect(heading(page)).toHaveText("Trade Proposal to Ash K");
   await show(page, "Proposal");
   await expect(

@@ -3,13 +3,13 @@
 
 **One conversation per pair of collectors** (migration 147): a row in ``conversation`` with a ``conversation_member``
 row for each side (the read and archive markers) and the pair's plain-text ``message`` rows. The pair's Trade rounds
-are shown in it as cards (``trade.conversation_id``, ``TradeView.conversation_id``). Opening is Friends-only in this
-slice: a message opens the pair's conversation when none exists and the other collector is a Friend, and a pair that
-already has one keeps using it after Remove Friend. Trading #299 replaces the two Friend checks with the reach rule
-(a member of a conversation always, otherwise ``reach_one``) and keeps both routes and their answers. #301 adds the
-count of new conversations inside ``open_conversation``; the caller's ``new_conversation`` advisory lock is already
-taken here, in the right place. Only this module (and the future reports module) names the ``message`` and
-``conversation_member`` tables (``test_social_contract``).
+are shown in it as cards (``trade.conversation_id``, ``TradeView.conversation_id``). Opening follows the reach rule
+(Trading #299, ``discovery.reach_one``): a member of a conversation always reads it, and a message opens the pair's
+conversation when none exists and the other collector is in reach (a Friend, or nearby in open discovery); a pair that
+already has one keeps using it after Remove Friend. The band shown is the reach rule's, while both are in open
+discovery. #301 adds the count of new conversations inside ``open_conversation``; the caller's ``new_conversation``
+advisory lock is already taken here, in the right place. Only this module (and the future reports module) names the
+``message`` and ``conversation_member`` tables (``test_social_contract``).
 
 **Routes.** ``GET /api/social/conversations`` (the list, ``archived`` and ``before``), ``GET .../pulse``, ``GET
 .../with/{trader_id}`` and ``GET .../{id}`` (a conversation and its newest page of items), ``POST .../{id}/messages``,
@@ -36,7 +36,7 @@ that attaches a pair's earlier Trades, under both owner locks; the BEFORE INSERT
 404 CONVERSATION_NOT_FOUND (conversation route: unknown or not a member) or 409 COLLECTOR_UNAVAILABLE (trader route:
 unknown or own trader id); a replay answers 201 with the stored message (the key is ``(conversation, side, client
 key)``); 403 ACCOUNT_SUSPENDED (the sender is suspended); 409 COLLECTOR_UNAVAILABLE (the conversation is not open, or
-there is none and the other is not a Friend); 429 MESSAGE_RATE_LIMITED.
+there is none and the other is not in reach); 429 MESSAGE_RATE_LIMITED.
 
 **Cursors** are unpadded URL-safe base64 of ``<iso time>|<kind>|<id>``: kind 'message' or 'trade' for the timeline
 and ``read``, 'conversation' for the list. A malformed one is 422 INVALID_CURSOR. ``read`` takes its boundary from the
@@ -62,6 +62,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from ..location_tree import error
 from ..main import connect, verified_user
+from .discovery import Band, reach, reach_one, require_not_suspended
 from .owners import ensure_owner, lock_owners
 from .trades import (TRADES, TradeView, completed_trades, trade_facts, trade_views, waiting_trade_step)
 
@@ -74,7 +75,6 @@ MESSAGE_LENGTH = 1000
 PREVIEW = 140
 CURSOR_LENGTH = 200
 
-Band = Literal['under_5', '5_to_10', '10_to_25', '25_to_50']
 Status = Literal['open', 'you_blocked', 'unavailable']
 
 # Bidirectional formatting characters: U+202A to U+202E and U+2066 to U+2069.
@@ -84,8 +84,9 @@ CURSOR_TEXT = re.compile(r'[A-Za-z0-9_-]*')
 
 class ConversationParty(BaseModel):
     """The other collector as the reader sees them in a conversation. ``trader_id`` is their address for messages
-    (None once their account is deleted); ``handle`` is set for Friends only; ``band`` is the distance band (None in
-    this slice); ``completed_trades`` is None when they are unavailable. Never their collector id."""
+    (None once their account is deleted); ``handle`` is set for Friends only; ``band`` is the distance band (None
+    unless both are in open discovery, and None when they are unavailable); ``completed_trades`` is None when they
+    are unavailable. Never their collector id."""
     trader_id: UUID | None
     display_name: str
     friend: bool
@@ -219,11 +220,11 @@ def decode_cursor(value: str, kinds: tuple[str, ...]) -> tuple[datetime, str, UU
 
 def standings(conn, user_id: str, others: dict) -> dict:
     """The reader's ``Standing`` for each other collector, by the caller's key. ``others`` maps a key to (the other's
-    account id or None, the name stored for them). Four reads whatever the number: profiles (the others and the
-    reader), Blocks either way, the reader's Friends and the others' completed Trades. Precedence: no account or no
-    profile is 'unavailable'; the reader blocked them is 'you_blocked'; they blocked the reader or are suspended is
-    'unavailable'; otherwise 'open'. An unavailable collector shows as no Friend, with no Handle, band or count; their
-    ``trader_id`` stays unless the account is deleted."""
+    account id or None, the name stored for them). Five reads whatever the number: profiles (the others and the
+    reader), Blocks either way, the reader's Friends, the reach rule's bands and the others' completed Trades.
+    Precedence: no account or no profile is 'unavailable'; the reader blocked them is 'you_blocked'; they blocked the
+    reader or are suspended is 'unavailable'; otherwise 'open'. An unavailable collector shows as no Friend, with no
+    Handle, band or count; their ``trader_id`` stays unless the account is deleted."""
     from .friends import friend_ids
     ids = sorted({other for other, _ in others.values() if other is not None})
     profiles = {row['user_id']: row for row in conn.execute(
@@ -237,6 +238,7 @@ def standings(conn, user_id: str, others: dict) -> dict:
             (blocked_by_me if row['blocker_id'] == user_id else blocked_me).add(
                 row['blocked_id'] if row['blocker_id'] == user_id else row['blocker_id'])
     friends = friend_ids(conn, user_id) if ids else set()
+    reachable = reach(conn, user_id, ids)
     viewer = profiles.get(user_id)
     suspended = bool(viewer and viewer['suspended'])
 
@@ -260,7 +262,8 @@ def standings(conn, user_id: str, others: dict) -> dict:
         found[key] = Standing(
             party=ConversationParty(
                 trader_id=profile['trader_id'] if profile else None, display_name=name, friend=friend,
-                handle=profile['handle'] if friend else None, band=None,
+                handle=profile['handle'] if friend else None,
+                band=reachable[other_id].band if usable and other_id in reachable else None,
                 completed_trades=counts.get(other_id, 0) if usable else None),
             status=status, can_message=status == 'open' and not suspended,
             can_propose=status == 'open' and not suspended, can_report=profile is not None)
@@ -286,8 +289,8 @@ def open_conversation(conn, user_id: str, other_id: str, how: str) -> UUID:
     """Finds or creates the pair's conversation with both member rows (``pair_conversation``, migration 147), attaches
     the pair's earlier Trades that have none, and returns its id. The caller holds the ``message`` and
     ``new_conversation`` advisory locks and both owner locks: attaching Trades is safe only under them. ``how`` is the
-    reach branch that allowed contact, always 'friend' in #298; #301 counts a new conversation unless ``how`` is
-    'friend' or the pair has a Trade both confirmed."""
+    reach branch that allowed contact ('friend', 'conversation' or 'near'); #301 counts a new conversation unless
+    ``how`` is 'friend' or the pair has a Trade both confirmed."""
     names = {row['user_id']: row['display_name'] for row in conn.execute(
         'SELECT user_id, display_name FROM collector_profile WHERE user_id = ANY(%s)', ([user_id, other_id],))}
     pair = conn.execute('SELECT pair_conversation(%s, %s, %s, %s) AS id',
@@ -492,8 +495,8 @@ def pair_row(conn, user_id: str, other_id: str):
 def read_with_trader(trader_id: UUID, before: str | None = Query(None, max_length=4000),
                      user_id: str = Depends(verified_user)):
     """The reader's conversation with the collector who has this trader id. A pair with a conversation answers it. A
-    Friend with none answers an empty one (``id`` null, no items) for the composer. Anyone else, an unknown trader id
-    and the reader's own are 404 CONVERSATION_NOT_FOUND. Writes nothing."""
+    collector in reach with none answers an empty one (``id`` null, no items) for the composer. Anyone else, an unknown
+    trader id and the reader's own are 404 CONVERSATION_NOT_FOUND. Writes nothing."""
     if before:
         decode_cursor(before, ('message', 'trade'))
     with connect() as conn, conn.transaction():
@@ -503,9 +506,9 @@ def read_with_trader(trader_id: UUID, before: str | None = Query(None, max_lengt
         row = pair_row(conn, user_id, other['user_id'])
         if row is not None:
             return conversation_view(conn, user_id, row, before)
-        standing = standings(conn, user_id, {0: (other['user_id'], other['display_name'])})[0]
-        if not standing.party.friend:
+        if reach_one(conn, user_id, other['user_id']) is None:
             error(404, 'CONVERSATION_NOT_FOUND')
+        standing = standings(conn, user_id, {0: (other['user_id'], other['display_name'])})[0]
         return ConversationView(
             id=None, other=standing.party, status=standing.status, can_message=standing.can_message,
             can_propose=standing.can_propose, can_report=standing.can_report, items=[], next_before=None)
@@ -522,10 +525,16 @@ def read_conversation(conversation_id: UUID, before: str | None = Query(None, ma
         return conversation_view(conn, user_id, member_conversation(conn, user_id, conversation_id), before)
 
 
+def new_conversation_lock(conn, user_id: str) -> None:
+    """The advisory lock every step that may create a conversation takes for its caller (a message to a trader, a Trade
+    Proposal), before any row lock; #301 counts new conversations under it."""
+    conn.execute("SELECT pg_advisory_xact_lock(hashtext('prizecheck.new_conversation:' || %s))", (user_id,))
+
+
 def message_locks(conn, user_id: str, both: bool) -> None:
     conn.execute("SELECT pg_advisory_xact_lock(hashtext('prizecheck.message:' || %s))", (user_id,))
     if both:
-        conn.execute("SELECT pg_advisory_xact_lock(hashtext('prizecheck.new_conversation:' || %s))", (user_id,))
+        new_conversation_lock(conn, user_id)
 
 
 @router.post('/{conversation_id}/messages', response_model=Message, status_code=201)
@@ -553,10 +562,7 @@ def send_message(conversation_id: UUID, command: SendMessage, user_id: str = Dep
 def refuse_send(conn, user_id: str, standing: Standing, allowed: bool) -> None:
     """The refusals after a replay, in order: the sender is suspended (403 ACCOUNT_SUSPENDED); the conversation is not
     open or ``allowed`` is false (409 COLLECTOR_UNAVAILABLE); the hourly limit (429 MESSAGE_RATE_LIMITED)."""
-    suspended = conn.execute('SELECT suspended_at IS NOT NULL AS suspended FROM collector_profile WHERE user_id = %s',
-                             (user_id,)).fetchone()
-    if suspended and suspended['suspended']:
-        error(403, 'ACCOUNT_SUSPENDED')
+    require_not_suspended(conn, user_id)
     if standing.status != 'open' or not allowed:
         error(409, 'COLLECTOR_UNAVAILABLE')
     count_message(conn, user_id)
@@ -565,8 +571,9 @@ def refuse_send(conn, user_id: str, standing: Standing, allowed: bool) -> None:
 @traders_router.post('/{trader_id}/messages', response_model=Message, status_code=201)
 def send_trader_message(trader_id: UUID, command: SendMessage, user_id: str = Depends(verified_user)):
     """Sends a message to the collector who has this trader id, in the pair's conversation, which it opens when there
-    is none (the other must then be a Friend in #298). An unknown trader id, the reader's own, a conversation that is
-    not open, and a stranger with no conversation are all 409 COLLECTOR_UNAVAILABLE. Locks both owners."""
+    is none (the other must then be in reach). An unknown trader id, the reader's own, a conversation that is
+    not open, and a collector outside reach with no conversation are all 409 COLLECTOR_UNAVAILABLE. Locks both
+    owners."""
     body = normalize_text(command.body)
     try:
         with connect() as conn, conn.transaction():
@@ -584,9 +591,10 @@ def send_trader_message(trader_id: UUID, command: SendMessage, user_id: str = De
                 if stored is not None:
                     return message_of(stored, low)
             standing = standings(conn, user_id, {0: (other_id, other['display_name'])})[0]
-            refuse_send(conn, user_id, standing, row is not None or standing.party.friend)
+            found = reach_one(conn, user_id, other_id)
+            refuse_send(conn, user_id, standing, row is not None or found is not None)
             # Under both owner locks, also for an existing conversation: it attaches Trades the pair has left out.
-            conversation = open_conversation(conn, user_id, other_id, 'friend')
+            conversation = open_conversation(conn, user_id, other_id, found.how if found else 'conversation')
             return message_of(write_message(conn, conversation, low, command.idempotency_key, body), low)
     except psycopg.errors.DeadlockDetected:
         error(503, 'INVENTORY_TEMPORARILY_UNAVAILABLE')

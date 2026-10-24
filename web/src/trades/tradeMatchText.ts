@@ -1,8 +1,15 @@
-import type { TradeMatchCard, TradeMatchRow } from "../social_generated";
+import type {
+  TradeMatchCard,
+  TradeMatchRow,
+  TraderMatchRow,
+} from "../social_generated";
+
+/** A match row for a Friend or for any collector in reach; the fields read here are on both. */
+type AnyMatchRow = TradeMatchRow | TraderMatchRow;
 
 /** The match kind's tag (prototype verdict variant A). A one-way row reads as a possible sale or purchase only while
  * that Friend is Open to cash offers (owner, 2026-10-19); otherwise it has no tag and the headline says it. */
-export function matchTag(row: TradeMatchRow): string | null {
+export function matchTag(row: AnyMatchRow): string | null {
   switch (row.match) {
     case "two_way":
       return "Two-way match";
@@ -18,7 +25,7 @@ export function matchTag(row: TradeMatchRow): string | null {
 const cards = (n: number) => (n === 1 ? "1 card" : `${n} cards`);
 
 /** How many cards a side carries in all, the ones past the first 20 included. */
-export function sideCount(row: TradeMatchRow, side: "get" | "give"): number {
+export function sideCount(row: AnyMatchRow, side: "get" | "give"): number {
   return side === "get"
     ? row.you_get.length + row.more_you_get
     : row.you_give.length + row.more_you_give;
@@ -26,7 +33,7 @@ export function sideCount(row: TradeMatchRow, side: "get" | "give"): number {
 
 /** The row's headline (prototype "matchHeadline"): "Ash K. has 3 cards you want and wants 2 of yours", "Ash K. has 1
  * card you want", "Ash K. wants 2 of your cards". Counts are cards (Card Editions), not copies. */
-export function matchHeadline(row: TradeMatchRow): string {
+export function matchHeadline(row: AnyMatchRow): string {
   const name = row.display_name;
   const get = sideCount(row, "get");
   const give = sideCount(row, "give");

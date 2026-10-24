@@ -52,6 +52,12 @@ DISCOVERY_TABLE = re.compile(
     r'(?:\bFROM|\bJOIN|\bUPDATE|\bINTO|\bUSING|\bTRUNCATE(?:\s+TABLE)?|\bLATERAL|,|\()\s*(?:ONLY\s+)?(?:"?\w+"?\s*\.\s*)?"?'
     r'(?:discovery_setting|zip_centroid|open_discovery)"?\b', re.IGNORECASE)
 DISCOVERY_CALLERS = {'social/discovery.py'}
+# (The exact-set test below already fails a future reports.py that names a discovery table.)
+# The reach rule (trading #299, migration 148): only the choke point (the Trade List and wants statements) and
+# social/discovery.py (``reach``, and #300's nearby search) may call ``trade_reach`` or ``nearby_collectors``. Matched
+# against string constants only, so no message or other string may write a call form.
+REACH_CALL = re.compile(r'\b(?:trade_reach|nearby_collectors)\s*\(')
+REACH_CALLERS = {'social/friend_copies.py', 'social/discovery.py'}
 # Conversations (trading #298): only social/conversations.py (and the future reports module) may name the message and
 # member tables in SQL. Matched against string constants, never docstrings.
 MESSAGE_TABLE = re.compile(
@@ -100,7 +106,12 @@ ALLOWED_IMPORTS = {
         ('..want_list', 'capture_want_list'), ('.friend_copies', 'friend_wants'), ('..card_accepts', 'accepts'),
         ('.friends', 'friend_ids'),
         # Each Friend's completed-Trade count on their row and Trade List (trading #298), one read for all of them.
-        ('.trades', 'completed_trades')},
+        ('.trades', 'completed_trades'),
+        # The trader reads (trading #299) ask the reach rule after resolving the trader id, and take the header's
+        # status, band and count from the conversations' one definition (``standings``) and the pair's conversation
+        # (``pair_row``).
+        ('.conversations', 'pair_row'), ('.conversations', 'standings'), ('.discovery', 'Band'),
+        ('.discovery', 'reach_one'), ('.discovery', 'trader_user')},
     'social/friends.py': {
         ('.', 'name_rules'), ('..main', 'connect'), ('..main', 'verified_user'), ('..publications', 'TOKEN'),
         ('..location_tree', 'error'), ('..location_tree', 'replay'), ('.owners', 'ensure_owner'),
@@ -146,7 +157,10 @@ ALLOWED_IMPORTS = {
         ('..trade_picks', 'stale_pick_trades'), ('..main', 'connect'), ('..main', 'verified_user'),
         ('..location_tree', 'error'), ('..location_tree', 'replay'), ('.friend_reads', 'card_facts'),
         ('.owners', 'ensure_owner'), ('.owners', 'lock_owners'), ('.loans', 'advance_revision'), ('.loans', 'NOW'),
-        ('.friends', 'friend_ids')},
+        ('.friends', 'friend_ids'),
+        # The other side's availability on a Trade (``TradeParty``, trading #299): one call to the reach rule for all the
+        # rows' other sides, never a query of its own.
+        ('.discovery', 'reach')},
     # Conversations and messages (trading #298): the pair's Trades as cards through the Trades' own views and their one
     # definition of what waits on the reader, the Friends set (imported inside the functions that use it, because
     # app.social.friends imports app.social.trades), and the completed-Trade count. Nothing of another collector's
@@ -155,7 +169,11 @@ ALLOWED_IMPORTS = {
         ('..main', 'connect'), ('..main', 'verified_user'), ('..location_tree', 'error'),
         ('.owners', 'ensure_owner'), ('.owners', 'lock_owners'), ('.friends', 'friend_ids'),
         ('.trades', 'TRADES'), ('.trades', 'TradeView'), ('.trades', 'trade_facts'), ('.trades', 'trade_views'),
-        ('.trades', 'waiting_trade_step'), ('.trades', 'completed_trades')},
+        ('.trades', 'waiting_trade_step'), ('.trades', 'completed_trades'),
+        # The reach rule (trading #299): the party's band and the open-or-not check of a conversation come from its one
+        # definition, and the one suspension check is ``require_not_suspended``.
+        ('.discovery', 'Band'), ('.discovery', 'reach'), ('.discovery', 'reach_one'),
+        ('.discovery', 'require_not_suspended')},
     'social/discovery.py': {
         ('..main', 'connect'), ('..main', 'verified_user'), ('..location_tree', 'error'),
         ('.owners', 'ensure_owner'), ('.owners', 'lock_owners')},
@@ -371,6 +389,20 @@ def test_every_social_route_answers_success_with_a_schema_the_walk_reads():
     assert set(schemas['Message']['properties']) == {'id', 'from', 'body', 'at'}
     reached = {field for _, field, _ in routes['GET /api/social/conversations/{conversation_id}']}
     assert {'items', 'trade', 'message', 'you_give', 'descriptor', 'completed_trades'} <= reached, reached
+    # The trader reads (trading #299): a stranger's header, Trade List and match row, with exactly these fields.
+    assert set(schemas['TraderView']['properties']) == {
+        'trader_id', 'display_name', 'friend', 'band', 'completed_trades', 'open_to_cash_offers', 'status',
+        'conversation_id', 'add_friend'}
+    assert set(schemas['TraderTradeList']['properties']) == {
+        'trader_id', 'display_name', 'band', 'completed_trades', 'cards', 'next_page'}
+    assert set(schemas['TraderMatchRow']['properties']) == {
+        'trader_id', 'display_name', 'band', 'completed_trades', 'open_to_cash_offers', 'match', 'you_get',
+        'you_give', 'more_you_get', 'more_you_give'}
+    assert 'trader_id' in schemas['TradeMatchRow']['properties']
+    assert 'trader_id' in schemas['FriendTradeList']['properties']
+    for route in ('GET /api/social/traders/{trader_id}', 'GET /api/social/traders/{trader_id}/trade-list',
+                  'GET /api/social/traders/{trader_id}/matches'):
+        assert route in routes, route
 
 
 def test_each_sides_own_trade_reads_and_inventory_steps_stay_outside_the_social_area():
@@ -541,6 +573,22 @@ def test_only_the_trade_list_and_the_choke_point_call_the_listable_rule():
     assert callers(FOR_TRADE_CALL) == FOR_TRADE_CALLERS
 
 
+def test_only_the_choke_point_and_discovery_call_the_reach_rule():
+    assert callers(REACH_CALL) == REACH_CALLERS
+
+
+def test_the_trade_list_and_wants_statements_ask_the_reach_rule_and_the_collection_read_does_not():
+    from app.social import friend_copies
+    assert 'trade_reach(' in friend_copies.TRADE_READ
+    assert 'trade_reach(' in friend_copies.WANTS_FRIENDS
+    assert 'trade_reach' not in friend_copies.READ
+
+
+def test_the_trade_steps_no_longer_ask_the_friends_set():
+    imported = app_imports((APP / 'trade_inventory.py').read_text(encoding='utf-8'))
+    assert not any(name == 'friend_ids' for _, name in imported)
+
+
 def test_only_the_discovery_module_names_the_discovery_tables():
     assert callers(DISCOVERY_TABLE) == DISCOVERY_CALLERS
 
@@ -614,3 +662,59 @@ def test_deck_switches_stay_in_the_confirmers_own_trade_reads():
             for operation in methods.values():
                 refs = re.findall(r'"\$ref": "[^"]*/(\w+)"', json.dumps(operation['responses']))
                 assert not {'ConfirmedSwap', 'DeckSwitchOffer', 'SwitchedDeck'} & set(refs), route
+
+
+# The Identity table (Stage 2 spec "Identity"): which models never carry a user id (a stranger is addressed by trader id
+# only), and which never carry a trader id (the Friend models address by user id). #300 and #302 remove a name from
+# ``NOT_YET`` when they add the model, so it is walked from then on.
+NO_USER_ID = {'NearbyMatchRow', 'CardHolder', 'TraderView', 'TraderTradeList', 'TraderMatchRow', 'ConversationParty',
+              'BlockedCollector'}
+NO_TRADER_ID = {'Collector', 'CollectorLookup', 'InviteCollector', 'FriendsView'}
+NOT_YET = {'NearbyMatchRow', 'CardHolder', 'BlockedCollector'}
+
+
+def reachable_properties(components: dict, name: str) -> set[str]:
+    """Every property name reachable from component ``name``, following ``$ref``, ``items``, ``anyOf``, ``oneOf``,
+    ``allOf``, ``additionalProperties`` and the properties' own schemas."""
+    found, seen = set(), set()
+
+    def walk(schema) -> None:
+        if not isinstance(schema, dict):
+            return
+        if '$ref' in schema:
+            target = schema['$ref'].split('/')[-1]
+            if target in seen:
+                return
+            seen.add(target)
+            walk(components[target])
+            return
+        for key in ('anyOf', 'oneOf', 'allOf'):
+            for part in schema.get(key, ()):
+                walk(part)
+        walk(schema.get('items'))
+        walk(schema.get('additionalProperties'))
+        for field, value in schema.get('properties', {}).items():
+            found.add(field)
+            walk(value)
+
+    walk({'$ref': f'#/components/schemas/{name}'})
+    return found
+
+
+def test_the_identity_table_holds_in_the_openapi_schema():
+    components = app.openapi()['components']['schemas']
+    assert {name for name in NO_USER_ID | NO_TRADER_ID if name not in NOT_YET} <= set(components)
+    assert not NOT_YET & set(components), 'a ticket that adds one of these models must move it out of NOT_YET'
+    for name in sorted((NO_USER_ID - NOT_YET) & set(components)):
+        assert 'collector_id' not in reachable_properties(components, name), name
+    for name in sorted(NO_TRADER_ID):
+        assert 'trader_id' not in reachable_properties(components, name), name
+
+
+def test_the_property_walk_follows_every_way_a_schema_can_nest():
+    components = {
+        'A': {'properties': {'a': {'items': {'$ref': '#/components/schemas/B'}}}},
+        'B': {'properties': {'b': {'anyOf': [{'$ref': '#/components/schemas/C'}, {'type': 'null'}]}}},
+        'C': {'properties': {'c': {'additionalProperties': {'allOf': [{'$ref': '#/components/schemas/A'}]}},
+                             'd': {'oneOf': [{'properties': {'deep': {}}}]}}}}
+    assert reachable_properties(components, 'A') == {'a', 'b', 'c', 'd', 'deep'}

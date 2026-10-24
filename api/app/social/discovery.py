@@ -11,8 +11,14 @@ any status, is stored and is never counted. A zip cannot be cleared. A body that
 Switching off keeps the zip, the centroid and the rolling limit.
 
 Status is ``suspended`` before ``removed`` before ``on``, and ``off`` otherwise (a collector with no profile row or no
-setting row is ``off``). ``visible_beyond_friends`` is true exactly when the status is ``on``; the conversation clause of
-the reach rule belongs to a later ticket.
+setting row is ``off``). ``visible_beyond_friends`` is true when the status is ``on``, and also when a collector who is
+not their Friend, and shares a conversation with them, is in their reach (that collector can read their Trade List
+through the conversation, whatever the switch says).
+
+This module also holds the Python side of the reach rule (``reach``, ``reach_one``: one call to the SQL function
+``trade_reach``, migration 148), the helpers that go with it (``trader_user``, ``require_not_suspended``) and the
+distance bands. Callers call ``reach`` or ``reach_one`` after their own locks; none of these takes a lock or writes. This
+module and ``friend_copies`` (the choke point) are the only ones whose SQL calls the reach function.
 
 Limit: a counted zip change is a change from one stored zip to a different one (a first zip is free), and a collector
 may make 3 of them in a rolling 24 hours. Counted changes are ``handle_lookup_event`` rows of kind ``zip_change``,
@@ -31,7 +37,10 @@ This is the only module under ``app`` whose SQL names ``discovery_setting``, ``z
 (``test_social_contract.py`` enforces it).
 """
 import re
+from collections.abc import Iterable
+from dataclasses import dataclass
 from typing import Literal
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -46,6 +55,55 @@ ZIP_CHANGES_PER_DAY = 3
 ZIP_FORMAT = re.compile(r'[0-9]{5}(?:-[0-9]{4})?')
 DiscoveryStatus = Literal['off', 'on', 'removed', 'suspended']
 Radius = Literal[5, 10, 25, 50]
+# The distance bands collectors see, never a distance (spec "Bands"); the SQL side answers the band number.
+Band = Literal['under_5', '5_to_10', '10_to_25', '25_to_50']
+BANDS: dict[int, Band] = {1: 'under_5', 2: '5_to_10', 3: '10_to_25', 4: '25_to_50'}
+REACH = 'SELECT other_id, how, band FROM trade_reach(%(viewer)s, %(others)s::text[])'
+# The collectors this collector shares a conversation with, as user ids (a deleted collector's side is NULL).
+PARTNERS = """SELECT CASE WHEN user_low = %(me)s THEN user_high ELSE user_low END AS other FROM conversation
+  WHERE (user_low = %(me)s OR user_high = %(me)s) AND user_low IS NOT NULL AND user_high IS NOT NULL"""
+
+
+@dataclass(frozen=True)
+class Reach:
+    """Why one collector is in another's reach: ``how`` is ``'friend'``, ``'conversation'`` (they share a conversation)
+    or ``'near'`` (both in open discovery within 50 miles), in that order of precedence. ``band`` is the distance band
+    while both are in open discovery, else None."""
+    how: Literal['friend', 'conversation', 'near']
+    band: Band | None
+
+
+def reach(conn, viewer: str, others: Iterable[str | None]) -> dict[str, Reach]:
+    """The reach rule for ``viewer`` over ``others``: one statement, no lock. Collectors not in reach (and the viewer,
+    unknown ids and None) are absent. Call it after the step's own locks."""
+    ids = sorted({other for other in others if other is not None})
+    if not ids:
+        return {}
+    rows = conn.execute(REACH, {'viewer': viewer, 'others': ids}).fetchall()
+    return {row['other_id']: Reach(how=row['how'], band=None if row['band'] is None else BANDS[row['band']])
+            for row in rows}
+
+
+def reach_one(conn, viewer: str, other: str | None) -> Reach | None:
+    """``reach`` for one collector: None when ``other`` is None or not in reach."""
+    if other is None:
+        return None
+    return reach(conn, viewer, [other]).get(other)
+
+
+def trader_user(conn, trader_id: UUID) -> str | None:
+    """The user id behind a trader id, or None. A lookup only: it says nothing about reach."""
+    row = conn.execute('SELECT user_id FROM collector_profile WHERE trader_id = %s', (trader_id,)).fetchone()
+    return row['user_id'] if row else None
+
+
+def require_not_suspended(conn, user_id: str) -> None:
+    """Refuses with 403 ``ACCOUNT_SUSPENDED`` when the collector is suspended: the one definition every contact step
+    shares. A collector with no profile is not suspended. Takes no lock and writes nothing."""
+    row = conn.execute('SELECT suspended_at IS NOT NULL AS suspended FROM collector_profile WHERE user_id = %s',
+                       (user_id,)).fetchone()
+    if row and row['suspended']:
+        error(403, 'ACCOUNT_SUSPENDED')
 
 
 class DiscoverySettings(BaseModel):
@@ -83,7 +141,15 @@ def read_discovery(conn, user_id: str) -> DiscoverySettings:
         status = 'off'
     return DiscoverySettings(
         status=status, zip=row['zip'] if row else None, radius_mi=row['radius_mi'] if row and row['radius_mi'] else 25,
-        zip_changes_left=max(0, ZIP_CHANGES_PER_DAY - used['used']), visible_beyond_friends=status == 'on')
+        zip_changes_left=max(0, ZIP_CHANGES_PER_DAY - used['used']),
+        visible_beyond_friends=status == 'on' or conversation_in_reach(conn, user_id))
+
+
+def conversation_in_reach(conn, user_id: str) -> bool:
+    """Whether a collector the caller shares a conversation with is in the caller's reach by that conversation. Reach is
+    symmetric, so that collector can read the caller's Trade List through it."""
+    partners = [row['other'] for row in conn.execute(PARTNERS, {'me': user_id})]
+    return any(found.how == 'conversation' for found in reach(conn, user_id, partners).values())
 
 
 def count_zip_change(conn, user_id: str) -> None:

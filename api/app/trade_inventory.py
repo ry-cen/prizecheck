@@ -6,20 +6,21 @@ The shared Trade facts and the steps that change no inventory of the reader's ar
 collector's own Locations and Holdings is here, under ``/api/trades``, and never answers one side's Locations to the
 other:
 
-- **Send a Trade Proposal** (``POST /api/trades``). The sender names a Friend, the Card Editions they give
-  (``you_give``) and the ones they ask for (``you_get``); either side may be empty, so a gift either way is a
-  proposal too, but not both. Cash is an amount and a payer together (Trading #277); the app records it and never
-  handles money. Each line the sender gives is capped at their own listable copies
-  (``trade_list.own_trade_copies``), and each line they ask for at the Friend's (``friend_copies.friend_trade_copies``),
-  both through migration 142's one listable rule on this step's own connection. Sending reserves the copies the sender
-  gives at once (``trade_picks.make_trade_picks``), so they leave both Trade Lists, stop counting as Spare Copies and
-  stop being lendable until the proposal closes. Nothing of the Friend's is reserved or locked.
+- **Send a Trade Proposal** (``POST /api/trades``). The sender names the recipient (a Friend by user id, or any
+  collector in reach by trader id, Trading #299), the Card Editions they give (``you_give``) and the ones they ask for
+  (``you_get``); either side may be empty, so a gift either way is a proposal too, but not both. Cash is an amount and
+  a payer together (Trading #277); the app records it and never handles money. Each line the sender gives is capped at
+  their own listable copies (``trade_list.own_trade_copies``), and each line they ask for at the recipient's
+  (``friend_copies.friend_trade_copies``), both through migration 142's one listable rule on this step's own
+  connection. Sending reserves the copies the sender gives at once (``trade_picks.make_trade_picks``), so they leave
+  both Trade Lists, stop counting as Spare Copies and stop being lendable until the proposal closes. Nothing of the
+  recipient's is reserved. The send opens the pair's conversation, which attaches their earlier Trades.
 
-- **Accept a Trade Proposal** (``POST /api/trades/{id}/accept``, Trading #271). The recipient takes it whole: the
-  body names only the revision they read and an idempotency key. Under the recipient's lock it checks the friendship
-  (as the Loan accept does), caps each line they give at their own listable copies, reserves those copies at once
-  (``make_trade_picks``) and turns the proposal into a Trade. The proposer's copies were reserved by the send and stay
-  so. A recipient who gives nothing (a gift to them) accepts with no cap and no pick.
+- **Accept a Trade Proposal** (``POST /api/trades/{id}/accept``, Trading #271). The recipient takes it whole: the body
+  names only the revision they read and an idempotency key. Under the recipient's lock it checks the proposer is still
+  in their reach (``discovery.reach_one``), caps each line they give at their own listable copies, reserves those
+  copies at once (``make_trade_picks``) and turns the proposal into a Trade. The proposer's copies were reserved by the
+  send and stay so. A recipient who gives nothing (a gift to them) accepts with no cap and no pick.
 
 - **Counter a Trade Proposal** (``POST /api/trades/{id}/counter``, Trading #278). The recipient answers a waiting
   proposal with a reply of their own: the body names the revision they read, a key and the reply's lines and cash, as a
@@ -53,7 +54,9 @@ other:
   revision and the Deck List changes batch that undoes its switch, stored with the replay.
 
 **Locks**: the stepping collector's own owner row only (``owners.lock_owners``), except that a Counter locks both
-sides (the sender, whose copies it releases, and the counterer, whose copies it reserves) in ascending order. So a
+sides (the sender, whose copies it releases, and the counterer, whose copies it reserves) in ascending order, and a send
+locks both too (after the advisory locks ``trade_command`` and ``new_conversation``), because it may create the pair's
+conversation and attaches their earlier Trades. An accept never creates one: a proposal always has its pair's. So a
 send, an accept, a Confirm swap or a Use suggested picks and a Loan step or inventory command over the same copies
 run one after the other and the second sees the first's writes; migration 142's deferred triggers are the backstop. No
 step takes the inventory lock (``moves.lock_owner``) or reads the Location tree with
@@ -79,9 +82,10 @@ from .loan_inventory import refuse
 from .location_tree import error
 from .main import connect, verified_user
 from .moves import add_in, is_deck, leaf, quantity, take_out
+from .social.conversations import new_conversation_lock, open_conversation
+from .social.discovery import reach_one, require_not_suspended, trader_user
 from .social.friend_reads import card_facts
 from .social.friend_copies import friend_trade_copies
-from .social.friends import friend_ids
 from .social.loans import NOW, advance_revision
 from .social.owners import lock_owners
 from .social.trades import (TRADES, TradeStep, TradeView, allowed, begin_trade_command, close_trade, other_side,
@@ -113,7 +117,10 @@ class TradeCashRequest(BaseModel):
 
 
 class SendTradeProposal(BaseModel):
-    recipient_id: str = Field(min_length=1, max_length=200)
+    """A Trade Proposal. Exactly one of ``recipient_id`` (a Friend's user id, as before) and ``recipient_trader_id``
+    (any collector in reach) names the recipient; neither or both is 422 RECIPIENT_REQUIRED."""
+    recipient_id: str | None = Field(default=None, min_length=1, max_length=200)
+    recipient_trader_id: UUID | None = None
     you_give: list[TradeLineRequest] = []
     you_get: list[TradeLineRequest] = []
     cash: TradeCashRequest | None = None
@@ -254,33 +261,34 @@ def proposal_shape(you_give, you_get, cash_request):
     return give, get, trade_cash(cash_request)
 
 
-def check_trade_caps(conn, user_id: str, friend_id: str, give, get) -> None:
+def check_trade_caps(conn, user_id: str, other_id: str, give, get) -> None:
     """409 NOT_TRADEABLE (``edition_id``, ``available``, ``side``) for the first line that asks for more copies than are
-    on that side's Trade List now: the caller's own lines first ('you_give'), then the Friend's ('you_get'). Read on
-    the caller's connection, after whatever the step released."""
+    on that side's Trade List now: the caller's own lines first ('you_give'), then the other side's ('you_get'), read
+    through the reach rule (``among='reach'``). Read on the caller's connection, after whatever the step released."""
     mine = own_trade_copies(conn, user_id, [edition for edition, _ in give])
     for edition, copies in give:
         if copies > mine.get(edition, 0):
             refuse(409, 'NOT_TRADEABLE', edition_id=edition, available=mine.get(edition, 0), side='you_give')
     theirs = {item.edition_id: item.listable for item in friend_trade_copies(
-        conn, user_id, [friend_id], [edition for edition, _ in get])}
+        conn, user_id, [other_id], [edition for edition, _ in get], among='reach')}
     for edition, copies in get:
         if copies > theirs.get(edition, 0):
             refuse(409, 'NOT_TRADEABLE', edition_id=edition, available=theirs.get(edition, 0), side='you_get')
 
 
 def insert_proposal(conn, proposer_id: str, recipient_id: str, names: dict, give, get, cash,
-                    countered_from: UUID | None = None) -> UUID:
+                    countered_from: UUID | None = None, conversation_id: UUID | None = None) -> UUID:
     """Inserts a ``proposed`` Trade with its lines in the given order and, when the proposer gives cards, their picks.
-    ``names``: ``collector_profile`` rows by user id. ``countered_from``: the proposal a Counter answers. Returns the
+    ``names``: ``collector_profile`` rows by user id. ``countered_from``: the proposal a Counter answers.
+    ``conversation_id``: the pair's conversation; when None the BEFORE INSERT trigger gives the pair's. Returns the
     new id; the caller advances revisions and stores the view."""
     trade_id = uuid4()
     conn.execute("""INSERT INTO trade(id, state, proposer_id, recipient_id, proposer_name, recipient_name,
-                          cash_cents, cash_payer, countered_from)
-        VALUES (%s, 'proposed', %s, %s, %s, %s, %s, %s, %s)""",
+                          cash_cents, cash_payer, countered_from, conversation_id)
+        VALUES (%s, 'proposed', %s, %s, %s, %s, %s, %s, %s, %s)""",
                  (trade_id, proposer_id, recipient_id, names[proposer_id]['display_name'],
                   names[recipient_id]['display_name'], cash[0] if cash else 0,
-                  ('proposer' if cash[1] == 'you' else 'recipient') if cash else None, countered_from))
+                  ('proposer' if cash[1] == 'you' else 'recipient') if cash else None, countered_from, conversation_id))
     for side, lines in (('proposer', give), ('recipient', get)):
         for position, (edition, copies) in enumerate(lines):
             conn.execute('INSERT INTO trade_line(trade_id, side, edition_id, position, quantity) '
@@ -292,17 +300,27 @@ def insert_proposal(conn, proposer_id: str, recipient_id: str, names: dict, give
 
 @router.post('', response_model=TradeView, status_code=201)
 def send_trade_proposal(command: SendTradeProposal, user_id: str = Depends(verified_user)):
-    """Sends a Friend a Trade Proposal and reserves the copies the sender gives. Refused before anything is read, in
-    this order: 409 OWN_ACCOUNT, 422 INVALID_QUANTITY, 422 DUPLICATE_EDITION (one Edition twice on one side), 422
-    SAME_CARD_BOTH_SIDES, 422 TOO_MANY_LINES, 422 TRADE_HAS_NO_CARDS, 422 INVALID_CASH. Then, under the sender's lock:
-    409 NOT_FRIENDS, 409 CASH_ONLY_NOT_OPEN (``side``: the sender's side that gives no cards and pays, when the
-    recipient isn't Open to cash offers), and 409 NOT_TRADEABLE (``edition_id``, ``available`` and ``side``, 'you_give'
-    or 'you_get') for the first line, the sender's lines first, that asks for more copies than are on that side's Trade
-    List now."""
+    """Sends a Trade Proposal to a Friend (by ``recipient_id``) or to any collector in reach (by
+    ``recipient_trader_id``) and reserves the copies the sender gives. Refused before anything is read, in this order: 422 RECIPIENT_REQUIRED
+    (neither or both recipient fields), 409 OWN_ACCOUNT (the user id is the sender's), 422 INVALID_QUANTITY, 422
+    DUPLICATE_EDITION (one Edition twice on one side), 422 SAME_CARD_BOTH_SIDES, 422 TOO_MANY_LINES, 422
+    TRADE_HAS_NO_CARDS, 422 INVALID_CASH. Then, after the command begins (a replay answers here): 403 ACCOUNT_SUSPENDED
+    (the sender), 409 COLLECTOR_UNAVAILABLE (an unknown trader id, the sender's own, or a recipient outside reach; by
+    user id the recipient must be a Friend), checked once before the locks and again under them, 409 CASH_ONLY_NOT_OPEN
+    (``side``: the sender's side that gives no cards and pays, when the recipient isn't Open to cash offers), and 409
+    NOT_TRADEABLE (``edition_id``, ``available`` and ``side``, 'you_give' or 'you_get') for the first line, the
+    sender's lines first, that asks for more copies than are on that side's Trade List now. Locks both owners and
+    opens the pair's conversation (attaching their earlier Trades), so the Trade carries it."""
+    if (command.recipient_id is None) == (command.recipient_trader_id is None):
+        error(422, 'RECIPIENT_REQUIRED')
     if command.recipient_id == user_id:
         error(409, 'OWN_ACCOUNT')
     give, get, cash = proposal_shape(command.you_give, command.you_get, command.cash)
     payload = {'action': 'trade_send', **command.model_dump(mode='json', exclude={'idempotency_key'})}
+    if command.recipient_trader_id is None:
+        payload.pop('recipient_trader_id')      # a send by user id keeps the digest it had, so replays survive the deploy
+    if command.recipient_id is None:
+        payload.pop('recipient_id')
     if command.cash is None:
         payload.pop('cash')     # a cash-free send keeps the digest it had before cash, so replays survive the deploy
     try:
@@ -310,18 +328,31 @@ def send_trade_proposal(command: SendTradeProposal, user_id: str = Depends(verif
             digest, stored = begin_trade_command(conn, user_id, command.idempotency_key, payload)
             if stored is not None:
                 return stored
-            # Only the sender's own rows are reserved; the Friend's are read, never locked.
-            lock_owners(conn, user_id)
-            if command.recipient_id not in friend_ids(conn, user_id):
-                error(409, 'NOT_FRIENDS')
+            require_not_suspended(conn, user_id)
+            if command.recipient_trader_id is not None:
+                recipient = trader_user(conn, command.recipient_trader_id)
+                if recipient is None or recipient == user_id:
+                    error(409, 'COLLECTOR_UNAVAILABLE')
+            else:
+                recipient = command.recipient_id
+                early = reach_one(conn, user_id, recipient)
+                if early is None or early.how != 'friend':
+                    error(409, 'COLLECTOR_UNAVAILABLE')
+            # Both owners are locked (a conversation may be created for the pair), after the advisory locks.
+            new_conversation_lock(conn, user_id)
+            lock_owners(conn, user_id, recipient)
+            found = reach_one(conn, user_id, recipient)
+            if found is None or (command.recipient_id is not None and found.how != 'friend'):
+                error(409, 'COLLECTOR_UNAVAILABLE')
+            conversation = open_conversation(conn, user_id, recipient, found.how)
             profiles = {row['user_id']: row for row in conn.execute(
                 'SELECT user_id, display_name, open_to_cash_offers FROM collector_profile WHERE user_id = ANY(%s)',
-                ([user_id, command.recipient_id],))}
+                ([user_id, recipient],))}
             cash_side = cash_only_side(give, get, cash)
-            if cash_side and not (profiles.get(command.recipient_id) or {}).get('open_to_cash_offers'):
+            if cash_side and not (profiles.get(recipient) or {}).get('open_to_cash_offers'):
                 refuse(409, 'CASH_ONLY_NOT_OPEN', side=cash_side)
-            check_trade_caps(conn, user_id, command.recipient_id, give, get)
-            trade_id = insert_proposal(conn, user_id, command.recipient_id, profiles, give, get, cash)
+            check_trade_caps(conn, user_id, recipient, give, get)
+            trade_id = insert_proposal(conn, user_id, recipient, profiles, give, get, cash, conversation_id=conversation)
             if give:
                 advance_revision(conn, user_id)
             return store_trade(conn, user_id, command.idempotency_key, digest, trade_id)
@@ -332,13 +363,15 @@ def send_trade_proposal(command: SendTradeProposal, user_id: str = Depends(verif
 @router.post('/{trade_id}/accept', response_model=TradeView)
 def accept_trade(trade_id: UUID, step: TradeStep, user_id: str = Depends(verified_user)):
     """The recipient accepts a Trade Proposal whole, and it becomes a Trade. After ``run_trade_step``'s checks (404
-    TRADE_NOT_FOUND, 409 TRADE_CHANGED, 409 STEP_NOT_ALLOWED), under the recipient's own lock: 409 NOT_FRIENDS once the
-    proposer isn't their Friend, then 409 NOT_TRADEABLE (``edition_id``, ``available``, ``side`` 'you_give') for the
-    first line they give, in the order listed, that asks for more copies than are on their Trade List now. Nothing
-    changes on a refusal. The proposer gets an 'accepted' update."""
+    TRADE_NOT_FOUND, 409 TRADE_CHANGED, 409 STEP_NOT_ALLOWED), under the recipient's own lock: 403 ACCOUNT_SUSPENDED
+    (the recipient), 409 COLLECTOR_UNAVAILABLE once the proposer isn't in their reach (a deleted proposer included),
+    then 409 NOT_TRADEABLE (``edition_id``, ``available``, ``side`` 'you_give') for the first line they give, in the
+    order listed, that asks for more copies than are on their Trade List now. Nothing changes on a refusal. The
+    proposer gets an 'accepted' update."""
     def apply(conn, row):
-        if row['proposer_id'] not in friend_ids(conn, user_id):
-            error(409, 'NOT_FRIENDS')
+        require_not_suspended(conn, user_id)
+        if reach_one(conn, user_id, row['proposer_id']) is None:
+            error(409, 'COLLECTOR_UNAVAILABLE')
         give = [(line['edition_id'], int(line['quantity'])) for line in conn.execute(
             "SELECT edition_id, quantity FROM trade_line WHERE trade_id=%s AND side='recipient' ORDER BY position",
             (row['id'],))]
@@ -374,7 +407,8 @@ def counter_trade(trade_id: UUID, command: CounterTrade, user_id: str = Depends(
     INVALID_QUANTITY, DUPLICATE_EDITION, SAME_CARD_BOTH_SIDES, TOO_MANY_LINES, TRADE_HAS_NO_CARDS, INVALID_CASH. Then,
     after the command begins (a replay answers the stored view): 404 TRADE_NOT_FOUND for anyone but its two sides; both
     owners are locked (ascending) when the caller is the recipient, then the row; 409 TRADE_CHANGED; 409
-    STEP_NOT_ALLOWED unless 'counter' is allowed; 409 NOT_FRIENDS; 409 CASH_ONLY_NOT_OPEN (``side``) for a Counter with
+    STEP_NOT_ALLOWED unless 'counter' is allowed; 403 ACCOUNT_SUSPENDED (the counterer); 409 COLLECTOR_UNAVAILABLE (the
+    sender isn't in the counterer's reach); 409 CASH_ONLY_NOT_OPEN (``side``) for a Counter with
     a cash-only side to a sender who isn't Open to cash offers, unless the countered proposal had a cash-only side
     itself. The old row closes and its picks go in that close; only then are the caps read (409 NOT_TRADEABLE, the
     counterer's lines first), so a Counter may ask for every copy the sender had listed. A refusal rolls everything
@@ -399,22 +433,23 @@ def counter_trade(trade_id: UUID, command: CounterTrade, user_id: str = Depends(
                 error(409, 'TRADE_CHANGED')
             if 'counter' not in allowed(user_id, old, side_gives(conn, trade_id, role_of(user_id, old))):
                 error(409, 'STEP_NOT_ALLOWED')
-            friend = old['proposer_id']
-            if friend not in friend_ids(conn, user_id):
-                error(409, 'NOT_FRIENDS')
+            require_not_suspended(conn, user_id)
+            other = old['proposer_id']
+            if reach_one(conn, user_id, other) is None:
+                error(409, 'COLLECTOR_UNAVAILABLE')
             profiles = {row['user_id']: row for row in conn.execute(
                 'SELECT user_id, display_name, open_to_cash_offers FROM collector_profile WHERE user_id = ANY(%s)',
-                ([user_id, friend],))}
+                ([user_id, other],))}
             cash_side = cash_only_side(give, get, cash)
-            if (cash_side and not (profiles.get(friend) or {}).get('open_to_cash_offers')
+            if (cash_side and not (profiles.get(other) or {}).get('open_to_cash_offers')
                     and not had_cash_only_side(conn, old)):
                 refuse(409, 'CASH_ONLY_NOT_OPEN', side=cash_side)
             released = side_gives(conn, trade_id, 'proposer')
             write_trade(conn, trade_id, close_trade(conn, old, user_id, 'countered'))
-            check_trade_caps(conn, user_id, friend, give, get)     # after the close: the sender's copies are free again
-            new_id = insert_proposal(conn, user_id, friend, profiles, give, get, cash, countered_from=trade_id)
+            check_trade_caps(conn, user_id, other, give, get)     # after the close: the sender's copies are free again
+            new_id = insert_proposal(conn, user_id, other, profiles, give, get, cash, countered_from=trade_id)
             if released:
-                advance_revision(conn, friend)
+                advance_revision(conn, other)
             if give:
                 advance_revision(conn, user_id)
             return store_trade(conn, user_id, command.idempotency_key, digest, new_id)
