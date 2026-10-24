@@ -1,6 +1,11 @@
 import { useEffect, useId, useState } from "react";
 import { getLocationTree, type TreeLocation } from "../location_generated";
 import { indexLocations } from "../workspace/locationTree";
+import {
+  FOR_TRADE_BEYOND_FRIENDS,
+  FOR_TRADE_CHANGE_HINT,
+} from "../trades/nearYouMessages";
+import { useVisibleBeyondFriends } from "./useVisibleBeyondFriends";
 
 type Load =
   { kind: "loading" } | { kind: "ready"; paths: string[] } | { kind: "failed" };
@@ -13,6 +18,7 @@ type Load =
 export function ForTradeLocationsSection() {
   const [load, setLoad] = useState<Load>({ kind: "loading" });
   const headingId = `${useId()}-heading`;
+  const beyond = useVisibleBeyondFriends();
   useEffect(() => {
     let live = true;
     getLocationTree()
@@ -62,9 +68,9 @@ export function ForTradeLocationsSection() {
       {load.kind === "ready" && load.paths.length > 0 && (
         <>
           <p className="m-0 text-meta text-text-muted">
-            Friends can trade for the cards in these Locations and everything
-            inside them, apart from Decks. Change this in each Location's
-            settings in Collection.
+            {beyond
+              ? `${FOR_TRADE_BEYOND_FRIENDS} ${FOR_TRADE_CHANGE_HINT}`
+              : "Friends can trade for the cards in these Locations and everything inside them, apart from Decks. Change this in each Location's settings in Collection."}
           </p>
           <ul
             aria-labelledby={headingId}

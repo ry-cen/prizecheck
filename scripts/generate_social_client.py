@@ -41,6 +41,7 @@ for name in ("Collector", "CollectorLookup", "InviteCollector", "FriendsView", "
              "InboxTradeWaiting", "InboxTradeUpdate", "TradeMatchCard", "TradeMatchRow", "TradeMatches",
              "TradeCardOffer", "TradeCardMatches", "TradeSettings", "SetTradeSettings", "DiscoverySettings",
              "SetDiscovery", "ConversationParty", "Message", "TimelineItem", "ConversationView", "LastMessage",
+             "NearbyMatchRow", "NearbyMatches", "CardHolder", "TradeCardSearch",
              "ConversationSummary", "ConversationsView", "ConversationPulse", "SendMessage", "ReadThrough",
              "TraderView", "TraderTradeList", "TraderMatchRow"):
     definition = schema[name]
@@ -194,6 +195,12 @@ export const getTradeMatch = (collectorId: string, signal?: AbortSignal) =>
 export const getTradeCardMatches = (printingId: string, signal?: AbortSignal) =>
   request<TradeCardMatches>(`/api/social/trade-card-matches${query({ printing_id: printingId })}`, 'GET', undefined,
     signal);
+// Near you and card search (trading #300): nearby collectors who match, and who has one card for trade.
+export const getNearbyMatches = (signal?: AbortSignal) =>
+  request<NearbyMatches>('/api/social/trade-matches/near', 'GET', undefined, signal);
+export const getTradeCardSearch = (printingId: string, scope: 'name' | 'set' | 'printing', signal?: AbortSignal) =>
+  request<TradeCardSearch>(`/api/social/trade-card-search${query({ printing_id: printingId, scope })}`, 'GET',
+    undefined, signal);
 // Your own Open to cash offers setting (trading #277): off until you turn it on; set by value, idempotent.
 export const getTradeSettings = (signal?: AbortSignal) =>
   request<TradeSettings>('/api/social/trade-settings', 'GET', undefined, signal);
