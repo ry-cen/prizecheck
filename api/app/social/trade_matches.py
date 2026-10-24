@@ -91,7 +91,7 @@ from .conversations import pair_row, standings
 from .discovery import BANDS, Band, DiscoveryStatus, Radius, nearby, reach_one, search_setting, trader_user
 from .friend_copies import friend_trade_copies, friend_wants
 from .friend_reads import FRIEND_BY_HANDLE, PAGE_IDENTITIES, card_facts, search_key
-from .friends import friend_ids
+from .friends import add_friend_state, friend_ids
 from .trades import completed_trades
 
 router = APIRouter(prefix='/api/social', tags=['social'])
@@ -231,8 +231,10 @@ class TradeMatchRow(BaseModel):
 class TraderView(BaseModel):
     """One collector in reach, by trader id (Trading #299). Never carries a user id or a Handle. ``band`` is null unless
     both are in open discovery, and when they are unavailable; ``completed_trades`` and ``band`` are null and
-    ``open_to_cash_offers`` false when ``status`` is 'unavailable'. ``add_friend`` is always null until Add as Friend
-    arrives (#304)."""
+    ``open_to_cash_offers`` false when ``status`` is 'unavailable'. ``add_friend`` (Trading #304) is the Friend code's
+    ``add_friend_state``: null unless the two have a Trade both confirmed, are not Friends and are in reach, and null
+    while the viewer's own pending request was sent by Handle (a Trade cannot withdraw it), and null
+    whenever ``status`` is not 'open'."""
     trader_id: UUID
     display_name: str
     friend: bool
@@ -650,11 +652,13 @@ def trader_view(trader_id: UUID, user_id: str = Depends(verified_user)):
         profile = conn.execute('SELECT display_name, open_to_cash_offers FROM collector_profile WHERE user_id = %s',
                                (other,)).fetchone()
         standing = standings(conn, user_id, {0: (other, profile['display_name'])})[0]
+        add_friend = (add_friend_state(conn, user_id, other)
+                      if standing.status == 'open' and not standing.party.friend else None)
     return TraderView(
         trader_id=trader_id, display_name=standing.party.display_name, friend=standing.party.friend,
         band=standing.party.band, completed_trades=standing.party.completed_trades,
         open_to_cash_offers=standing.status == 'open' and bool(profile['open_to_cash_offers']),
-        status=standing.status, conversation_id=row['id'] if row else None, add_friend=None)
+        status=standing.status, conversation_id=row['id'] if row else None, add_friend=add_friend)
 
 
 @router.get('/traders/{trader_id}/trade-list', response_model=TraderTradeList)
