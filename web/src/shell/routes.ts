@@ -66,7 +66,8 @@ export const PAGES: readonly PageDef[] = [
     param: true,
   },
   {
-    // The Trades tab (Trading #269, #270 and #276, prototype verdict variant A): /trades is the Trades list,
+    // The Trades tab (Trading #269, #270, #276 and #298, prototype verdict variant A): /trades is the conversation
+    // list, /trades/with/<trader id> and /trades/conversation/<conversation id> one conversation,
     // /trades/find Find trades, /trades/list My Trade List, /trades/new/<Handle> the proposal builder for that Friend
     // (#284), /trades/<Trade id> one Trade and /trades/<Trade id>/counter a Counter to it (#278). A section name is
     // never a Trade id: Trade ids are UUIDs.
@@ -75,7 +76,7 @@ export const PAGES: readonly PageDef[] = [
     label: "Trades",
     keepMounted: false,
     sections: ["find", "list"],
-    sectionItems: ["new"],
+    sectionItems: ["new", "with", "conversation"],
     param: true,
     itemSections: ["counter"],
   },

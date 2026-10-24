@@ -30,6 +30,7 @@ import {
   loansTabName,
   tradesTabName,
   useInboxTradesWaiting,
+  useUnreadConversations,
   useInboxWaiting,
 } from "../inbox/Inbox";
 import { AccountSheetProvider, Avatar } from "./AccountSheet";
@@ -134,13 +135,15 @@ function ShellFrame({
   // Loans waiting on the collector: the Loans tab's badge (#259); Trades waiting on them: the Trades tab's (#273).
   const waiting = useInboxWaiting();
   const tradesWaiting = useInboxTradesWaiting();
+  // The Trades tab's badge adds the conversations with unread messages (Trading #298); the bell keeps Trades waiting.
+  const unread = useUnreadConversations();
   const tabCount = (id: PageId) =>
-    id === "loans" ? waiting : id === "trades" ? tradesWaiting : 0;
+    id === "loans" ? waiting : id === "trades" ? tradesWaiting + unread : 0;
   const tabName = (id: PageId) =>
     id === "loans"
       ? loansTabName(waiting)
       : id === "trades"
-        ? tradesTabName(tradesWaiting)
+        ? tradesTabName(tradesWaiting, unread)
         : undefined;
   // Pages shown so far; a kept-mounted one stays mounted from its first visit.
   const [visited, setVisited] = useState<ReadonlySet<PageId>>(

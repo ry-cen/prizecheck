@@ -44,7 +44,13 @@ import { DeckSwitchOffers, useDeckSwitchOffers } from "./DeckSwitchOffers";
 import { offerSwitchUndo } from "./deckSwitchUndo";
 import { LiabilityNotice } from "./LiabilityNotice";
 import { valueLines } from "./proposalModel";
-import { counterPath, TRADES_PATH, tradePath } from "./tradeListModel";
+import { conversationLinkText } from "./conversationMessages";
+import {
+  conversationPath,
+  counterPath,
+  TRADES_PATH,
+  tradePath,
+} from "./tradeListModel";
 import {
   swapDoneMessage,
   switchDoneText,
@@ -271,7 +277,7 @@ export function TradeScreen({
     )
   );
 
-  const back = (
+  const allTrades = (
     <a
       href={TRADES_PATH}
       onClick={(event) => {
@@ -284,6 +290,27 @@ export function TradeScreen({
       <Icon icon={ChevronLeft} />
       All Trades
     </a>
+  );
+  // A Trade of a pair with a conversation links to it (Trading #298).
+  const conversationId =
+    load.kind === "ready" ? load.trade.conversation_id : null;
+  const back = (
+    <div className="flex flex-wrap items-center gap-2">
+      {allTrades}
+      {conversationId && load.kind === "ready" && (
+        <a
+          href={conversationPath(conversationId)}
+          onClick={(event) => {
+            if (event.metaKey || event.ctrlKey || event.shiftKey) return;
+            event.preventDefault();
+            onNavigate(conversationPath(conversationId));
+          }}
+          className="inline-flex h-control items-center gap-1 self-start rounded-control px-2 text-control font-medium text-text-muted no-underline hover:bg-surface-raised hover:text-text phone:h-control-phone"
+        >
+          {conversationLinkText(load.trade.other.display_name)}
+        </a>
+      )}
+    </div>
   );
   const frame = (
     title: string,

@@ -6,7 +6,7 @@
 // the card back. (Owner's decisions, 2026-10-16.)
 // Ticket #274 (Trading spec "Unfriend, Block and half-confirmed Trades"): with a Trade Proposal, a Trade nobody has
 // confirmed and a Trade only Misty confirmed open too, the question counts them in the prototype's Proposed wording;
-// Remove cancels the proposal and the unconfirmed Trade, which move to Ash's History while his Trades list is open,
+// Remove cancels the proposal and the unconfirmed Trade, which show as cancelled in Ash's conversation with Misty while it is open,
 // and the half-confirmed one stays for him to finish. Misty is told only that Ash cancelled each. At desktop width and
 // at 375 px.
 // The catalog is the Swap catalog (api/tests/want_list_swap_fixtures.py).
@@ -27,6 +27,7 @@ import {
   seedCatalog,
   unsorted,
 } from "./support/loans";
+import { openConversation, timelineTrades } from "./support/conversations";
 import { expectPageChecks } from "./support/page-check";
 import { signInAsOwner } from "./support/sign-in";
 import {
@@ -244,13 +245,13 @@ async function tradeStory(
     lines: [{ edition_id: iono, promised: "1" }],
   });
 
-  // Ash's Trades list: the half-confirmed Trade needs him, the proposal too, and one Trade is to swap.
-  await page.goto(`${ORIGIN}/trades`);
-  const needsYou = page.getByRole("list", { name: "Needs you" });
-  await expect(needsYou.getByRole("link")).toHaveCount(2);
-  await expect(
-    page.getByRole("list", { name: "To swap" }).getByRole("link")
-  ).toHaveText([/Ready to swap with Misty W/]);
+  // Ash's conversation with Misty: her three Trades are cards in it, oldest first, and two of them need him.
+  await openConversation(page, "Misty W");
+  await expect(timelineTrades(page)).toHaveText([
+    /sent you a Trade Proposal/,
+    /Ready to swap with Misty W/,
+    /Misty W confirmed the swap/,
+  ]);
   await expect(tradesTab(page)).toHaveAccessibleName("Trades, 2 need you");
 
   // He removes Misty. The question counts what it cancels, in the prototype's Proposed wording, and what stays.
@@ -271,19 +272,20 @@ async function tradeStory(
   );
   await friends(page).getByRole("button", { name: "Close Friends" }).click();
 
-  // The list underneath was read again: only the half-confirmed Trade is open, and the two he cancelled are history.
-  await expect(needsYou.getByRole("link")).toHaveText([
+  // The conversation underneath was read again: only the half-confirmed Trade is open, the two he cancelled are
+  // cancelled, and ex-Friends keep the conversation and its composer.
+  await expect(timelineTrades(page)).toHaveText([
+    /You cancelled this Trade/,
+    /You cancelled this Trade/,
     /Misty W confirmed the swap/,
   ]);
-  await expect(page.getByRole("list", { name: "To swap" })).toHaveCount(0);
-  await page.locator("summary", { hasText: "History · 2" }).click();
-  await expect(
-    page.getByRole("list", { name: "History" }).getByRole("link")
-  ).toHaveText([/You cancelled this Trade/, /You cancelled this Trade/]);
+  await expect(page.getByRole("textbox", { name: "Message" })).toBeVisible();
   await expect(tradesTab(page)).toHaveAccessibleName("Trades, 1 needs you");
 
   // Ash finishes the half-confirmed Trade alone: Misty's Iono goes to his Unsorted.
-  await needsYou.getByRole("link").click();
+  await timelineTrades(page)
+    .filter({ hasText: /Misty W confirmed the swap/ })
+    .click();
   await expect(page).toHaveURL(`${ORIGIN}/trades/${half}`);
   const main = page.getByRole("main");
   await expect(main.getByRole("heading", { level: 1 })).toHaveText(

@@ -10,6 +10,7 @@ import {
 import { Button } from "../ui/Button";
 import { SearchField } from "../ui/SearchField";
 import { variantLabel } from "../ui/variantLabel";
+import { trackRecord } from "./conversationMessages";
 import { proposeFromTradeList } from "./openProposal";
 import { groupByName, proposalPath } from "./tradeListModel";
 
@@ -163,6 +164,11 @@ export function FriendTradeListPage({
     `${name}'s Trade List`,
     <>
       <p className="m-0 text-meta text-text-muted">@{page.handle}</p>
+      {trackRecord(page.completed_trades) !== null && (
+        <p className="m-0 text-meta text-text-muted">
+          {trackRecord(page.completed_trades)}
+        </p>
+      )}
       <SearchField
         label="Search by card name"
         placeholder="Search by card name"
