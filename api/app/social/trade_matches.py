@@ -231,7 +231,7 @@ class TradeMatchRow(BaseModel):
 class TraderView(BaseModel):
     """One collector in reach, by trader id (Trading #299). Never carries a user id or a Handle. ``band`` is null unless
     both are in open discovery, and when they are unavailable; ``completed_trades`` and ``band`` are null and
-    ``open_to_cash_offers`` false when ``status`` is 'unavailable'. ``add_friend`` (Trading #304) is the Friend code's
+    ``open_to_cash_offers`` false unless ``status`` is 'open'. ``add_friend`` (Trading #304) is the Friend code's
     ``add_friend_state``: null unless the two have a Trade both confirmed, are not Friends and are in reach, and null
     while the viewer's own pending request was sent by Handle (a Trade cannot withdraw it), and null
     whenever ``status`` is not 'open'."""
