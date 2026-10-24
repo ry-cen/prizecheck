@@ -132,6 +132,20 @@ ALLOWED_IMPORTS = {
         # Add as Friend (trading #304): the Trade by id through the Trades' own statement, the one suspension check and
         # the reach rule, checked before the Friend command and again under its locks.
         ('.discovery', 'reach_one'), ('.discovery', 'require_not_suspended'), ('.trades', 'TRADES')},
+    # Reports and the owner queue (trading #303): the Friend command and its Block, the reach rule, trader ids and the
+    # discovery helpers from their one definitions, the conversation lookup, cursors and text rule, the Trades' end and
+    # counterparties, and card facts for the snapshot.
+    'social/reports.py': {
+        ('..main', 'connect'), ('..main', 'verified_user'), ('..main', 'require_owner'),
+        ('..location_tree', 'error'), ('..location_tree', 'replay'), ('.owners', 'lock_owners'),
+        ('.friends', '_command'), ('.friends', 'command_payload'), ('.friends', 'place_block'),
+        ('.discovery', 'reach_one'), ('.discovery', 'trader_user'), ('.discovery', 'lock_discovery'),
+        ('.discovery', 'switch_off'), ('.discovery', 'remove_from_discovery'), ('.discovery', 'restore_discovery'),
+        ('.discovery', 'account_state'),
+        ('.conversations', 'normalize_text'), ('.conversations', 'pair_row'), ('.conversations', 'account_changed'),
+        ('.conversations', 'encode_cursor'), ('.conversations', 'decode_cursor'),
+        ('.trades', 'end_trades_between'), ('.trades', 'unconfirmed_partners'),
+        ('.friend_reads', 'card_facts')},
     # The Loans both sides read and the steps that change no inventory (#252). Card facts are catalog facts; the owner
     # lock and the command plumbing are the Friend commands'. Steps that touch a collector's own inventory are in
     # app.loan_inventory, outside this area.
@@ -395,6 +409,8 @@ def test_every_social_route_answers_success_with_a_schema_the_walk_reads():
         'trader_id', 'display_name', 'friend', 'handle', 'band', 'completed_trades'}
     assert set(schemas['ConversationView']['properties']) == {
         'id', 'other', 'status', 'can_message', 'can_propose', 'can_report', 'items', 'next_before'}
+    assert set(schemas['ConversationsView']['properties']) == {'conversations', 'next_before', 'suspended'}
+    assert set(schemas['ReportResult']['properties']) == {'reported'}
     assert set(schemas['ConversationSummary']['properties']) == {
         'id', 'other', 'status', 'last_message', 'open_trades', 'waiting_on_you', 'unread', 'archived',
         'last_activity_at'}

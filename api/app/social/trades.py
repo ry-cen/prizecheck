@@ -511,7 +511,8 @@ def end_trades_between(conn, user_id: str, other_id: str) -> None:
     and the other side told it was cancelled (``record_trade_update``), as for any cancel and never why. A Trade either
     side confirmed stays open for the other side to finish. The copies a cancelled Trade's sides gave stop being
     reserved, so the revision of each side that gave cards in one moves, once: a proposal's proposer, and both sides
-    of an accepted Trade (a recipient reserves nothing before accepting)."""
+    of an accepted Trade (a recipient reserves nothing before accepting). Suspension (``reports``) runs it for each of
+    the account's counterparties with the account as ``user_id``."""
     rows = conn.execute("""SELECT * FROM trade
       WHERE ((proposer_id = %(a)s AND recipient_id = %(b)s) OR (proposer_id = %(b)s AND recipient_id = %(a)s))
         AND state IN ('proposed', 'accepted')
@@ -526,6 +527,22 @@ def end_trades_between(conn, user_id: str, other_id: str) -> None:
         write_trade(conn, row['id'], close_trade(conn, row, user_id, 'cancelled'))
     for owner in sorted(released):
         advance_revision(conn, owner)
+
+
+UNCONFIRMED_WITH = """SELECT CASE WHEN proposer_id = %(a)s THEN recipient_id ELSE proposer_id END AS other,
+    conversation_id
+  FROM trade WHERE (proposer_id = %(a)s OR recipient_id = %(a)s)
+    AND proposer_id IS NOT NULL AND recipient_id IS NOT NULL
+    AND state IN ('proposed', 'accepted') AND proposer_swap_at IS NULL AND recipient_swap_at IS NULL"""
+
+
+def unconfirmed_partners(conn, user_id: str) -> tuple[list[str], list[UUID]]:
+    """The collectors with whom ``user_id`` has a Trade nobody confirmed the swap for (``end_trades_between``'s rule,
+    either way round), sorted, and those Trades' conversations. No lock; suspension reads it before and after its
+    owner locks."""
+    rows = conn.execute(UNCONFIRMED_WITH, {'a': user_id}).fetchall()
+    return (sorted({row['other'] for row in rows}),
+            sorted({row['conversation_id'] for row in rows if row['conversation_id'] is not None}, key=str))
 
 
 @router.post('/{trade_id}/withdraw', response_model=TradeView)

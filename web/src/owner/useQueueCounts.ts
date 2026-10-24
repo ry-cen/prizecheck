@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { getOwnerMissingCardReports } from "../generated";
+import { getOwnerTradeReports } from "../social_generated";
 import {
   getAttributeQueue,
   getCardIdentityQueue,
@@ -15,7 +16,7 @@ const paged = (page: { items: unknown[]; next_cursor: string | null }) =>
   `${page.items.length}${page.next_cursor ? "+" : ""}`;
 
 /**
- * How many items wait in the Metadata, Attributes, Reprints and Missing cards queues. The Catalog count
+ * How many items wait in the Metadata, Attributes, Reprints, Missing cards and Trade reports queues. The Catalog count
  * comes from the operational status (its pending catalog reviews), which the page already reads. Counts
  * are read again whenever `section` changes, so a decision made inside a queue shows in its count once the
  * owner switches tab, without the queue components knowing about the counts.
@@ -54,6 +55,11 @@ export function useQueueCounts(section: OwnerSection) {
                 report.status === "pending" || report.status === "needs_info"
             ).length
           )
+        )
+      ),
+      read("trade-reports", () =>
+        getOwnerTradeReports({ status: "open" }).then((list) =>
+          String(list.open_count)
         )
       ),
     ]);

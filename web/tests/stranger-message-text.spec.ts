@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { endSentence } from "../src/social/sentenceEnd";
 import type { TradeView } from "../src/social_generated";
 import {
   prefilledMessagePath,
@@ -63,4 +64,9 @@ test("the meetup tip shows only on accepted Trades with someone available who is
       }
     }
   }
+});
+
+test("a name ending a sentence gets no second period", () => {
+  expect(endSentence("Misty W.")).toBe("Misty W.");
+  expect(endSentence("Misty")).toBe("Misty.");
 });

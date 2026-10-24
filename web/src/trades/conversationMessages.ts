@@ -1,5 +1,6 @@
 import { SocialError } from "../social_generated";
 import { newConversationLimit } from "./strangerMessages";
+import { endSentence } from "../social/sentenceEnd";
 
 // Conversations' collector-facing copy (Trading #298, Stage 2 spec "Conversations and messages"). Every string is the
 // owner's approved wording, kept here so a change touches this file and the specs alone.
@@ -55,7 +56,7 @@ export function trackRecord(n: number | null | undefined): string | null {
 
 /** "You blocked <name>." (the whole sentence links to Settings). */
 export function youBlocked(name: string): string {
-  return `You blocked ${name}.`;
+  return `You blocked ${endSentence(name)}`;
 }
 
 /** "1 open Trade", "N open Trades"; "" for none. */

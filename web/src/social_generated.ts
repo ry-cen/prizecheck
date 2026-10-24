@@ -80,7 +80,7 @@ export type NearbyMatches = { status: "off" | "on" | "removed" | "suspended"; ra
 export type CardHolder = { trader_id: string; display_name: string; friend: boolean; band: "under_5" | "5_to_10" | "10_to_25" | "25_to_50" | null; completed_trades: number; open_to_cash_offers: boolean; cards: FriendTradeCard[]; more_cards: number };
 export type TradeCardSearch = { status: "off" | "on" | "removed" | "suspended"; friends: CardHolder[]; near: CardHolder[] };
 export type ConversationSummary = { id: string; other: ConversationParty; status: "open" | "you_blocked" | "unavailable"; last_message: LastMessage | null; open_trades: number; waiting_on_you: number; unread: boolean; archived: boolean; last_activity_at: string };
-export type ConversationsView = { conversations: ConversationSummary[]; next_before: string | null };
+export type ConversationsView = { conversations: ConversationSummary[]; next_before: string | null; suspended: boolean };
 export type ConversationPulse = { unread_conversations: number; watermark: string };
 export type SendMessage = { body: string; idempotency_key: string };
 export type ReadThrough = { through: string };
@@ -88,6 +88,21 @@ export type TraderView = { trader_id: string; display_name: string; friend: bool
 export type TraderTradeList = { trader_id: string; display_name: string; band: "under_5" | "5_to_10" | "10_to_25" | "25_to_50" | null; completed_trades: number | null; cards: FriendTradeCard[]; next_page: number | null };
 export type TraderMatchRow = { trader_id: string; display_name: string; band: "under_5" | "5_to_10" | "10_to_25" | "25_to_50" | null; completed_trades: number | null; open_to_cash_offers: boolean; match: "two_way" | "has_what_you_want" | "wants_what_you_have" | null; you_get: TradeMatchCard[]; you_give: TradeMatchCard[]; more_you_get: number; more_you_give: number };
 export type BlockedCollector = { block_id: string; display_name: string; handle: string | null; trader_id: string | null };
+export type ReportCollector = { trader_id: string; reason: "scam_or_no_show" | "harassment" | "inappropriate_content" | "other"; note?: string | null; source: "conversation" | "discovery" | "trade"; trade_id?: string | null; idempotency_key: string };
+export type ReportResult = { reported: boolean };
+export type ReportParty = { user_id: string | null; display_name: string; handle: string };
+export type TradeReportRow = { id: string; created_at: string; status: "open" | "dismissed" | "actioned"; decision: "dismiss" | "remove_from_discovery" | "suspend" | null; reason: "scam_or_no_show" | "harassment" | "inappropriate_content" | "other"; source: "conversation" | "discovery" | "trade"; reporter: ReportParty; reported: ReportParty; reported_count: number };
+export type TradeReportList = { reports: TradeReportRow[]; next_before: string | null; open_count: number };
+export type SnapshotMessage = { message_id: string; sender: "reporter" | "reported"; body: string; at: string };
+export type SnapshotCard = { name: string; set_code: string; number: string; quantity: number };
+export type SnapshotTrade = { trade_id: string; state: "proposed" | "accepted" | "closed"; closed_reason: "declined" | "withdrawn" | "countered" | "cancelled" | "swapped" | null; closed_by: "reporter" | "reported" | null; proposed_by: "reporter" | "reported"; reporter_gives: SnapshotCard[]; reported_gives: SnapshotCard[]; cash_cents: number | null; cash_paid_by: "reporter" | "reported" | null; proposed_at: string; accepted_at: string | null; reporter_confirmed_at: string | null; reported_confirmed_at: string | null; closed_at: string | null; countered_from: string | null; ended_by_report: boolean };
+export type ModerationEventView = { id: string; action: "dismiss" | "remove_from_discovery" | "suspend" | "restore_discovery" | "lift_suspension"; report_id: string | null; owner_id: string; note: string | null; created_at: string };
+export type ReportedAccount = { exists: boolean; suspended: boolean; removed: boolean };
+export type TradeReportDetail = { report: TradeReportRow; note: string | null; conversation_id: string | null; trade_id: string | null; decided_at: string | null; decided_by: string | null; messages: SnapshotMessage[]; trades: SnapshotTrade[]; account: ReportedAccount; other_reports: TradeReportRow[]; events: ModerationEventView[] };
+export type ReportDecision = { action: "dismiss" | "remove_from_discovery" | "suspend"; note?: string | null };
+export type ReportDecided = { status: "dismissed" | "actioned"; decision: "dismiss" | "remove_from_discovery" | "suspend" };
+export type RestoreCollector = { what: "discovery" | "suspension"; note?: string | null };
+export type CollectorRestored = { restored: "discovery" | "suspension" };
 
 /** A refused social request: the API's code, and for TOO_MANY_LOOKUPS the detail that says when to try again. */
 export class SocialError extends Error {
@@ -144,6 +159,8 @@ export const unblockTrader = (traderId: string, body: FriendCommand) =>
   request<FriendCommandResult>(`/api/social/traders/${at(traderId)}/unblock`, 'POST', body);
 export const unblockById = (blockId: string, body: FriendCommand) =>
   request<FriendCommandResult>(`/api/social/blocked/${at(blockId)}/unblock`, 'POST', body);
+// Report (trading #303): Report by trader id, which also Blocks.
+export const reportCollector = (body: ReportCollector) => request<ReportResult>('/api/social/reports', 'POST', body);
 // A Friend's Collection (#250): one page of the cards they could lend now, found by their Handle among your Friends.
 export const getFriendCollection = (handle: string,
   params: { show?: 'wanted' | 'all'; q?: string; printings?: Printings; page?: number }, signal?: AbortSignal) =>
@@ -292,3 +309,13 @@ export const addFriendFromTrade = (tradeId: string, body: FriendCommand) =>
   request<FriendCommandResult>(`/api/social/trades/${at(tradeId)}/add-friend`, 'POST', body);
 export const withdrawAddFriend = (tradeId: string, body: FriendCommand) =>
   request<FriendCommandResult>(`/api/social/trades/${at(tradeId)}/add-friend/withdraw`, 'POST', body);
+// Owner: Trade reports (trading #303). Owner screens only.
+export const getOwnerTradeReports = (params: { status?: TradeReportRow['status']; before?: string | null },
+  signal?: AbortSignal) =>
+  request<TradeReportList>(`/api/admin/trade-reports${query(params)}`, 'GET', undefined, signal);
+export const getOwnerTradeReport = (reportId: string, signal?: AbortSignal) =>
+  request<TradeReportDetail>(`/api/admin/trade-reports/${at(reportId)}`, 'GET', undefined, signal);
+export const decideTradeReport = (reportId: string, body: ReportDecision) =>
+  request<ReportDecided>(`/api/admin/trade-reports/${at(reportId)}/decision`, 'POST', body);
+export const restoreCollector = (collectorId: string, body: RestoreCollector) =>
+  request<CollectorRestored>(`/api/admin/collectors/${at(collectorId)}/restore`, 'POST', body);

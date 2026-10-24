@@ -108,13 +108,17 @@ def test_switching_on_copies_the_centroid_and_keeps_five_digits():
 
 def test_the_put_refusals_come_in_order():
     seed_zips()
-    for mark in ('UPDATE discovery_setting SET enabled=false, removed_at=now() WHERE user_id=%s',
-                 'UPDATE collector_profile SET suspended_at=now() WHERE user_id=%s'):
+    removed = 'UPDATE discovery_setting SET enabled=false, removed_at=now() WHERE user_id=%s'
+    suspended = 'UPDATE collector_profile SET suspended_at=now() WHERE user_id=%s'
+    for marks, expected in (((removed,), (409, {'code': 'DISCOVERY_UNAVAILABLE'})),
+                            ((suspended,), (403, {'code': 'ACCOUNT_SUSPENDED'})),
+                            ((removed, suspended), (403, {'code': 'ACCOUNT_SUSPENDED'}))):
         user = new_user()
         discoverable(user)
         with connect() as conn:
-            conn.execute(mark, (user,))
-        assert refusal(put(user, {'enabled': True, 'zip': 'nope'})) == (409, {'code': 'DISCOVERY_UNAVAILABLE'})
+            for mark in marks:
+                conn.execute(mark, (user,))
+        assert refusal(put(user, {'enabled': True, 'zip': 'nope'})) == expected
     user = new_user()
     for bad in ('1234', '12345-12', '١٢٣٤٥'):
         assert refusal(put(user, {'enabled': True, 'zip': bad})) == (422, {'code': 'INVALID_ZIP'})

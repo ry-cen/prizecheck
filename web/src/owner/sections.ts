@@ -7,6 +7,7 @@ export type OwnerSection =
   | "attributes"
   | "reprints"
   | "missing"
+  | "trade-reports"
   | "rules";
 
 export const OWNER_SECTIONS: readonly {
@@ -21,6 +22,7 @@ export const OWNER_SECTIONS: readonly {
   { id: "attributes", label: "Attributes", queue: true },
   { id: "reprints", label: "Reprints", queue: true },
   { id: "missing", label: "Missing cards", queue: true },
+  { id: "trade-reports", label: "Trade reports", queue: true },
   { id: "rules", label: "Rules", queue: false },
 ];
 

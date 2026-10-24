@@ -357,3 +357,12 @@ def test_add_as_friend_shows_the_requester_no_handle_or_user_id_before_acceptanc
     accepted = call('POST', f'/api/social/friend-requests/{ash}/accept', misty, {'idempotency_key': str(uuid4())})
     assert ok(accepted) == {'relation': 'friends'}
     assert handle in call('GET', '/api/social/friends', ash).text.lower()
+
+
+def test_a_report_answers_only_that_it_was_reported(store):
+    ids, ash, misty, conversation, _ = nearby_pair()
+    response = call('POST', '/api/social/reports', ash, {
+        'trader_id': trader_of(misty), 'reason': 'other', 'source': 'discovery', 'idempotency_key': str(uuid4())})
+    assert response.status_code == 201 and response.json() == {'reported': True}
+    for secret in (misty, trader_of(misty), handle_of(misty)):
+        assert secret not in response.text

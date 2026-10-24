@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { getPublicInvite, ProfileError } from "../profile_generated";
 import { useFriendsRefresh } from "../social/FriendsDrawer";
+import { endSentence } from "../social/sentenceEnd";
 import { commandMessage } from "../social/socialMessages";
 import {
   acceptFriendRequest,
@@ -162,7 +163,7 @@ function InviteActions({
     friends: `You and ${name} are Friends.`,
     request_sent: `You've sent ${name} a Friend Request.`,
     request_received: `${name} has sent you a Friend Request.`,
-    blocked: `You blocked ${name}.`,
+    blocked: `You blocked ${endSentence(name)}`,
   }[collector.relation];
   return (
     <div ref={actions} className="contents">

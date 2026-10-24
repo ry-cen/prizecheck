@@ -11,6 +11,7 @@ import {
   SocialError,
   type Collector,
 } from "../social_generated";
+import { SUSPENDED_NOTE } from "../trades/conversationMessages";
 import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
 import { Select } from "../ui/Select";
@@ -44,6 +45,8 @@ function offerMessage(
     }
     case "NOT_FRIENDS":
       return `${friend} isn't one of your Friends anymore.`;
+    case "ACCOUNT_SUSPENDED":
+      return SUSPENDED_NOTE;
     case "INVALID_RETURN_BY":
       return "Choose a return-by date from today on.";
     case "TOO_MANY_CHANGES":

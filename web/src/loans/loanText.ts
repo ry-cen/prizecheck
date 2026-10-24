@@ -3,6 +3,7 @@ import {
   type InboxUpdate,
   type LoanView,
 } from "../social_generated";
+import { SUSPENDED_NOTE } from "../trades/conversationMessages";
 import { variantLabel } from "../ui/variantLabel";
 
 /** The Loans tab (social network #252): /loans, and one Loan at /loans/<id>. */
@@ -398,6 +399,8 @@ export function sendMessage(
     }
     case "NOT_FRIENDS":
       return `${friend} isn't one of your Friends anymore.`;
+    case "ACCOUNT_SUSPENDED":
+      return SUSPENDED_NOTE;
     case "DECK_NOT_FOUND":
       return "That Deck is gone. Choose another, or none.";
     case "INVALID_RETURN_BY":
