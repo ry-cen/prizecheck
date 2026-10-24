@@ -123,6 +123,18 @@ def seed_near_world(candidates: int, deck_holders: int, every_holds_first: bool)
     return viewer, others
 
 
+@pytest.fixture(autouse=True)
+def leave_no_collectors_behind():
+    """Takes the seeded collectors out again. The serial pass shares its database with the browser stack the gate runs
+    afterwards, and 1,500 leftover collectors in open discovery at zip 00010 fill the 500 Near you and 1,000 card search
+    candidates, so a Near you spec's two or three collectors fall outside the cut (``trade-near-you.spec.ts``). Deleting
+    the owners cascades to their profiles, discovery settings, Locations and Holdings."""
+    yield
+    with connect() as conn:
+        conn.execute("DELETE FROM inventory_owner WHERE user_id LIKE 'nearcap-%'")
+        assert conn.execute("SELECT count(*) AS n FROM discovery_setting WHERE user_id LIKE 'nearcap-%'").fetchone()['n'] == 0
+
+
 def timed(read, check):
     """One warm-up read is the caller's; this runs ``SAMPLES`` timed reads, each checked, and returns the seconds."""
     samples = []
