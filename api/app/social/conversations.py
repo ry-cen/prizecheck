@@ -49,8 +49,9 @@ stored time of the item the cursor names, never from the cursor's own time.
 
 **Pulse** (``GET .../pulse``): the unread count and a watermark, from two statements over the caller's member rows and
 their inbox updates. The watermark is a hash of counts and sums, so a change committed late still moves it; it is
-opaque and compared for equality only. It moves on a message, a Trade step, an inbox update, and the caller's own
-read, archive and unarchive, and not on a rename. It writes nothing.
+opaque and compared for equality only. It moves on a message, a Trade step, an inbox update, a Block or Unblock
+between the pair (``pair_changed``), and the caller's own read, archive and unarchive, and not on a rename. It writes
+nothing.
 """
 import base64
 import hashlib
@@ -507,8 +508,8 @@ PULSE_UPDATES = """SELECT count(*) AS updates, coalesce(sum(extract(epoch FROM c
 def read_pulse(user_id: str = Depends(verified_user)):
     """How many visible conversations are unread, and the watermark of everything the shell shows: counts and sums
     over the reader's conversations and inbox updates (``Decimal`` sums are hashed as text). It moves on a message, a
-    Trade step, an inbox update and the reader's own read, archive and unarchive, and not on a rename. Writes nothing
-    and makes no owner row."""
+    Trade step, an inbox update, a Block or Unblock between the pair (``pair_changed``) and the reader's own read,
+    archive and unarchive, and not on a rename. Writes nothing and makes no owner row."""
     with connect() as conn, conn.transaction():
         talk = conn.execute(PULSE_CONVERSATIONS, (user_id,)).fetchone()
         news = conn.execute(PULSE_UPDATES, (user_id,)).fetchone()
@@ -526,6 +527,17 @@ def trader_profile(conn, trader_id: UUID):
 def pair_row(conn, user_id: str, other_id: str):
     low, high = sorted((user_id, other_id))
     return conn.execute('SELECT * FROM conversation WHERE user_low = %s AND user_high = %s', (low, high)).fetchone()
+
+
+PAIR_CHANGED = """UPDATE conversation SET changed_at = greatest(changed_at + interval '1 microsecond', clock_timestamp())
+  WHERE user_low = %s AND user_high = %s"""
+
+
+def pair_changed(conn, user_id: str, other_id: str) -> None:
+    """Moves the pair's conversation watermark with no new activity. A Block and an Unblock call it
+    (``friends.place_block``, ``friends._lift_block``). The caller holds both owners; the row is taken last (owners,
+    ``loan``, ``trade``, ``conversation``). A pair with no conversation updates nothing."""
+    conn.execute(PAIR_CHANGED, tuple(sorted((user_id, other_id))))
 
 
 @router.get('/with/{trader_id}', response_model=ConversationView)

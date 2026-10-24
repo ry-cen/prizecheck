@@ -653,7 +653,7 @@ def trader_view(trader_id: UUID, user_id: str = Depends(verified_user)):
     return TraderView(
         trader_id=trader_id, display_name=standing.party.display_name, friend=standing.party.friend,
         band=standing.party.band, completed_trades=standing.party.completed_trades,
-        open_to_cash_offers=standing.status != 'unavailable' and bool(profile['open_to_cash_offers']),
+        open_to_cash_offers=standing.status == 'open' and bool(profile['open_to_cash_offers']),
         status=standing.status, conversation_id=row['id'] if row else None, add_friend=None)
 
 

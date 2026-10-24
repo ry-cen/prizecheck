@@ -8,7 +8,7 @@ export type SendFriendRequest = { collector_id: string; idempotency_key: string 
 export type FriendCommand = { idempotency_key: string };
 export type FriendCommandResult = { relation: "self" | "none" | "friends" | "request_sent" | "request_received" | "blocked" };
 export type BlockCollector = { collector_id: string; idempotency_key: string };
-export type BlockedList = { blocked: Collector[] };
+export type BlockedList = { blocked: BlockedCollector[] };
 export type FriendCard = { edition_id: string; name: string; set_code: string; set_name: string; collector_number: string; descriptor: Record<string, unknown>; image_url: string | null; spare: string; in_deck: string; wanted: boolean };
 export type FriendCollection = { collector_id: string; handle: string; display_name: string; show: "wanted" | "all"; cards: FriendCard[]; next_page: number | null };
 export type FriendCopy = { collector_id: string; handle: string; display_name: string; edition_id: string; name: string; set_code: string; collector_number: string; descriptor: Record<string, unknown>; other_printing: boolean; spare: string; in_deck: string };
@@ -87,6 +87,7 @@ export type ReadThrough = { through: string };
 export type TraderView = { trader_id: string; display_name: string; friend: boolean; band: "under_5" | "5_to_10" | "10_to_25" | "25_to_50" | null; completed_trades: number | null; open_to_cash_offers: boolean; status: "open" | "unavailable" | "you_blocked"; conversation_id: string | null; add_friend: "offer" | "sent" | "received" | null };
 export type TraderTradeList = { trader_id: string; display_name: string; band: "under_5" | "5_to_10" | "10_to_25" | "25_to_50" | null; completed_trades: number | null; cards: FriendTradeCard[]; next_page: number | null };
 export type TraderMatchRow = { trader_id: string; display_name: string; band: "under_5" | "5_to_10" | "10_to_25" | "25_to_50" | null; completed_trades: number | null; open_to_cash_offers: boolean; match: "two_way" | "has_what_you_want" | "wants_what_you_have" | null; you_get: TradeMatchCard[]; you_give: TradeMatchCard[]; more_you_get: number; more_you_give: number };
+export type BlockedCollector = { block_id: string; display_name: string; handle: string | null; trader_id: string | null };
 
 /** A refused social request: the API's code, and for TOO_MANY_LOOKUPS the detail that says when to try again. */
 export class SocialError extends Error {
@@ -136,6 +137,13 @@ export const getBlocked = () => request<BlockedList>('/api/social/blocks', 'GET'
 export const blockCollector = (body: BlockCollector) => request<FriendCommandResult>('/api/social/blocks', 'POST', body);
 export const unblockCollector = (id: string, body: FriendCommand) =>
   request<FriendCommandResult>(`/api/social/blocks/${at(id)}/unblock`, 'POST', body);
+// Block for strangers (trading #302): Block and Unblock by trader id, and Unblock from Settings › Privacy by block id.
+export const blockTrader = (traderId: string, body: FriendCommand) =>
+  request<FriendCommandResult>(`/api/social/traders/${at(traderId)}/block`, 'POST', body);
+export const unblockTrader = (traderId: string, body: FriendCommand) =>
+  request<FriendCommandResult>(`/api/social/traders/${at(traderId)}/unblock`, 'POST', body);
+export const unblockById = (blockId: string, body: FriendCommand) =>
+  request<FriendCommandResult>(`/api/social/blocked/${at(blockId)}/unblock`, 'POST', body);
 // A Friend's Collection (#250): one page of the cards they could lend now, found by their Handle among your Friends.
 export const getFriendCollection = (handle: string,
   params: { show?: 'wanted' | 'all'; q?: string; printings?: Printings; page?: number }, signal?: AbortSignal) =>
