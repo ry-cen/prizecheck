@@ -1,26 +1,55 @@
+import { useRef } from "react";
 import { Ellipsis } from "lucide-react";
 import type { NearbyMatchRow } from "../social_generated";
 import { Icon } from "../ui/Icon";
 import { Menu, type MenuItem } from "../ui/Menu";
+import { focusMenuTrigger } from "./ConversationMenu";
 import { rowMenuLabel } from "./nearYouMessages";
+import { useTraderBlock } from "./TraderBlock";
 
 /**
- * The ⋯ menu of a Near you row. Block and Report arrive with Trading #302 and #303; with no item it renders nothing,
- * so no empty menu reaches the page.
+ * The ⋯ menu of a Near you row: Block (Trading #302); Report arrives with #303. With no item it renders nothing, so
+ * no empty menu reaches the page. The Block question and failure show under the row's buttons. A Block removes the
+ * row, so its status goes to `onBlocked` (Near you keeps it) and `onChanged` reloads the list.
  */
 export function NearRowMenu(props: {
   row: NearbyMatchRow;
   onChanged: () => void;
+  onBlocked: (status: string) => void;
 }) {
+  const anchor = useRef<HTMLDivElement>(null);
+  const block = useTraderBlock(
+    {
+      traderId: props.row.trader_id,
+      name: props.row.display_name,
+      handle: null,
+    },
+    {
+      statusElsewhere: true,
+      onBlocked: (status) => {
+        props.onBlocked(status);
+        props.onChanged();
+      },
+      returnFocus: () => focusMenuTrigger(anchor),
+    }
+  );
   const items: MenuItem[] = [];
-  // #302 appends Block here and #303 Report; onChanged reloads Near you after one of them.
+  if (block.item) items.push(block.item);
+  // #303 appends Report here.
   if (items.length === 0) return null;
   return (
-    <Menu
-      label={rowMenuLabel(props.row.display_name)}
-      triggerClassName="inline-flex size-control shrink-0 cursor-pointer items-center justify-center rounded-control border-0 bg-transparent p-0 text-text-muted hover:bg-surface-raised hover:text-text phone:size-tap"
-      trigger={<Icon icon={Ellipsis} />}
-      items={items}
-    />
+    <>
+      <div ref={anchor}>
+        <Menu
+          label={rowMenuLabel(props.row.display_name)}
+          triggerClassName="inline-flex size-control shrink-0 cursor-pointer items-center justify-center rounded-control border-0 bg-transparent p-0 text-text-muted hover:bg-surface-raised hover:text-text phone:size-tap"
+          trigger={<Icon icon={Ellipsis} />}
+          items={items}
+        />
+      </div>
+      <div className="flex basis-full flex-col gap-2 empty:hidden">
+        {block.panel}
+      </div>
+    </>
   );
 }

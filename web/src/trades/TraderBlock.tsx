@@ -27,15 +27,17 @@ type State =
   | { kind: "failed"; text: string };
 
 /**
- * Block by trader id (Trading #302), for any screen that shows another collector by trader id (a conversation now, a
- * Near you row at integration). `item` is the menu item; choosing it asks the Block question with
+ * Block by trader id (Trading #302), for any screen that shows another collector by trader id (a conversation, a Near
+ * you row). `item` is the menu item; choosing it asks the Block question with
  * what the Block cancels, and Block then blocks. The page shows `panel` under the control. A caller whose control
- * vanishes on success (a row) shows the status through `onBlocked`.
+ * vanishes on success (a row) shows the status through `onBlocked` and sets `statusElsewhere`.
  */
 export function useTraderBlock(
   target: BlockTarget | null,
   options: {
     onBlocked?: (status: string) => void;
+    /** The caller shows `onBlocked`'s status itself, so `panel` shows none. */
+    statusElsewhere?: boolean;
     returnFocus?: () => void;
   } = {}
 ): { item: MenuItem | null; panel: ReactNode } {
@@ -89,7 +91,10 @@ export function useTraderBlock(
         idempotency_key: current.key,
       });
       const text = blockedStatus(current.target.name);
-      setState({ kind: "done", text });
+      // A caller that shows the status itself (a row that vanishes) gets no second announcement here.
+      setState(
+        options.statusElsewhere ? { kind: "idle" } : { kind: "done", text }
+      );
       noteLoansChanged();
       pollPulse();
       options.onBlocked?.(text);
@@ -133,14 +138,16 @@ export function useTraderBlock(
           <Button onClick={cancel}>{CANCEL}</Button>
         </div>
       )}
-      <p
-        role="status"
-        className={
-          state.kind === "done" ? "m-0 text-meta text-text-muted" : "sr-only"
-        }
-      >
-        {state.kind === "done" ? state.text : ""}
-      </p>
+      {!options.statusElsewhere && (
+        <p
+          role="status"
+          className={
+            state.kind === "done" ? "m-0 text-meta text-text-muted" : "sr-only"
+          }
+        >
+          {state.kind === "done" ? state.text : ""}
+        </p>
+      )}
       {state.kind === "failed" && (
         <p role="alert" className="m-0 text-meta text-danger">
           {state.text}

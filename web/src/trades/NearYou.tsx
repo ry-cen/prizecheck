@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import {
   SocialError,
   getNearbyMatches,
@@ -64,6 +64,9 @@ export function NearYou({
   const [pending, setPending] = useState(false);
   const [notice, setNotice] = useState("");
   const [needsZip, setNeedsZip] = useState(false);
+  // A Block removes its row, so its status lives here, where it stays mounted, and focus goes to the heading.
+  const [blocked, setBlocked] = useState("");
+  const heading = useRef<HTMLHeadingElement>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -226,7 +229,16 @@ export function NearYou({
                 band={row.band}
                 tradeListPath={traderTradeListPath(row.trader_id)}
                 loadAll={(signal) => getTraderMatch(row.trader_id, signal)}
-                menu={<NearRowMenu row={row} onChanged={reload} />}
+                menu={
+                  <NearRowMenu
+                    row={row}
+                    onChanged={reload}
+                    onBlocked={(status) => {
+                      setBlocked(status);
+                      heading.current?.focus();
+                    }}
+                  />
+                }
                 open={open.has(row.trader_id)}
                 onToggle={() => toggle(row.trader_id)}
                 onNavigate={onNavigate}
@@ -240,9 +252,20 @@ export function NearYou({
 
   return (
     <section aria-labelledby={headingId} className="flex flex-col gap-3">
-      <h2 id={headingId} className="m-0 text-heading font-semibold">
+      <h2
+        ref={heading}
+        id={headingId}
+        tabIndex={-1}
+        className="m-0 text-heading font-semibold"
+      >
         {NEAR_HEADING}
       </h2>
+      <p
+        role="status"
+        className={blocked ? "m-0 text-meta text-text-muted" : "sr-only"}
+      >
+        {blocked}
+      </p>
       {body()}
     </section>
   );
