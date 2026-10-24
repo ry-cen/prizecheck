@@ -18,7 +18,7 @@ import pytest
 
 from app.main import connect  # noqa: F401  (main first: it includes every router while loading)
 from app import trade_inventory
-from app.social import trades
+from app.social import conversations, trades
 from stranger_fixtures import far_zip, propose_to, strangers, trader_of
 from test_catalog_targets import isolated_rules  # noqa: F401  (an autouse fixture)
 from test_deck_cost import launches, store  # noqa: F401  (autouse fixtures)
@@ -636,6 +636,8 @@ def test_two_sends_of_the_same_copies_run_one_after_the_other(store, monkeypatch
         monkeypatch.setattr(trade_inventory, 'begin_trade_command', _without_command_lock)
         # The send's new-conversation advisory lock would also serialise the two; only the owner row is left to test.
         monkeypatch.setattr(trade_inventory, 'new_conversation_lock', lambda conn, user_id: None)
+        # ...and open_conversation's check of it.
+        monkeypatch.setattr(conversations, 'new_conversation_lock_held', lambda conn, user_id: True)
     ids, ash, misty, binder, box = trading()
     iono = ids['PAL 185']
     (brock, _) = collector('Brock S.')

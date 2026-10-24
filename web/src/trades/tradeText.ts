@@ -11,6 +11,7 @@ import {
 } from "../trades_generated";
 import { variantLabel } from "../ui/variantLabel";
 import { SUSPENDED_NOTE } from "./conversationMessages";
+import { newConversationLimit } from "./strangerMessages";
 import { SEND_UNAVAILABLE } from "./traderMessages";
 
 /** A card as the Trade messages name it (prototype "Proposed wording"): "Iono (PAL 185)". A finish other than Normal
@@ -369,6 +370,8 @@ export function sendTradeMessage(
       return SUSPENDED_NOTE;
     case "TOO_MANY_CHANGES":
       return `Too many changes. Try again in ${minutes(error.detail)}.`;
+    case "TOO_MANY_NEW_CONVERSATIONS":
+      return newConversationLimit(error.detail);
     default:
       return what === "counter"
         ? "The Counter couldn't be sent. Check it and try again."
