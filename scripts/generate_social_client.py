@@ -2,7 +2,7 @@
 #250 and #251, Loans, #252 and #253, Borrowed Copies, #254, Returns, #255, Write-off, #257, the inbox, #259, and a
 Friend's Trade List, trading #269, Trades as both sides read them, trading #270, declining and cancelling one,
 trading #271, the inbox's Trade lines, trading #273, and Find trades and Ask to trade, trading #276, and Open to cash
-offers, trading #277, Open discovery, trading #297, and Conversations, trading #298, and the trader reads, trading #299) from the API OpenAPI schema."""
+offers, trading #277, Open discovery, trading #297, and Conversations, trading #298, and the trader reads, trading #299, and Reports and the owner queue, trading #303) from the API OpenAPI schema."""
 import json
 import sys
 from pathlib import Path
@@ -44,7 +44,9 @@ for name in ("Collector", "CollectorLookup", "InviteCollector", "FriendsView", "
              "NearbyMatchRow", "NearbyMatches", "CardHolder", "TradeCardSearch",
              "ConversationSummary", "ConversationsView", "ConversationPulse", "SendMessage", "ReadThrough",
              "TraderView", "TraderTradeList", "TraderMatchRow",
-             "BlockedCollector"):
+             "BlockedCollector", "ReportCollector", "ReportResult", "ReportParty", "TradeReportRow", "TradeReportList",
+             "SnapshotMessage", "SnapshotCard", "SnapshotTrade", "ModerationEventView", "ReportedAccount",
+             "TradeReportDetail", "ReportDecision", "ReportDecided", "RestoreCollector", "CollectorRestored"):
     definition = schema[name]
     fields = [f"{field}{'' if field in definition.get('required', []) else '?'}: {ts_type(value)}"
               for field, value in definition["properties"].items()]
@@ -105,6 +107,8 @@ export const unblockTrader = (traderId: string, body: FriendCommand) =>
   request<FriendCommandResult>(`/api/social/traders/${at(traderId)}/unblock`, 'POST', body);
 export const unblockById = (blockId: string, body: FriendCommand) =>
   request<FriendCommandResult>(`/api/social/blocked/${at(blockId)}/unblock`, 'POST', body);
+// Report (trading #303): Report by trader id, which also Blocks.
+export const reportCollector = (body: ReportCollector) => request<ReportResult>('/api/social/reports', 'POST', body);
 // A Friend's Collection (#250): one page of the cards they could lend now, found by their Handle among your Friends.
 export const getFriendCollection = (handle: string,
   params: { show?: 'wanted' | 'all'; q?: string; printings?: Printings; page?: number }, signal?: AbortSignal) =>
@@ -253,6 +257,16 @@ export const addFriendFromTrade = (tradeId: string, body: FriendCommand) =>
   request<FriendCommandResult>(`/api/social/trades/${at(tradeId)}/add-friend`, 'POST', body);
 export const withdrawAddFriend = (tradeId: string, body: FriendCommand) =>
   request<FriendCommandResult>(`/api/social/trades/${at(tradeId)}/add-friend/withdraw`, 'POST', body);
+// Owner: Trade reports (trading #303). Owner screens only.
+export const getOwnerTradeReports = (params: { status?: TradeReportRow['status']; before?: string | null },
+  signal?: AbortSignal) =>
+  request<TradeReportList>(`/api/admin/trade-reports${query(params)}`, 'GET', undefined, signal);
+export const getOwnerTradeReport = (reportId: string, signal?: AbortSignal) =>
+  request<TradeReportDetail>(`/api/admin/trade-reports/${at(reportId)}`, 'GET', undefined, signal);
+export const decideTradeReport = (reportId: string, body: ReportDecision) =>
+  request<ReportDecided>(`/api/admin/trade-reports/${at(reportId)}/decision`, 'POST', body);
+export const restoreCollector = (collectorId: string, body: RestoreCollector) =>
+  request<CollectorRestored>(`/api/admin/collectors/${at(collectorId)}/restore`, 'POST', body);
 """)
 content = "\n".join(lines)
 target = root / "web/src/social_generated.ts"

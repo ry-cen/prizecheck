@@ -26,6 +26,7 @@ import {
 } from "../social_generated";
 import { Button } from "../ui/Button";
 import { Icon } from "../ui/Icon";
+import type { MenuItem } from "../ui/Menu";
 import { TextArea } from "../ui/TextField";
 import { AddAsFriend, newestAddFriendTrade } from "./AddAsFriend";
 import {
@@ -60,6 +61,7 @@ import {
 } from "./tradeListModel";
 import { traderMeta } from "./traderMessages";
 import { useTraderBlock } from "./TraderBlock";
+import { useTraderReport } from "./TraderReport";
 
 /** Which conversation to show: the one with a collector (by trader id), or one by its id. */
 export type ConversationTarget =
@@ -98,7 +100,8 @@ function itemKey(item: TimelineItem): string {
  * message opens it. Messages are plain text. The newest page is read again when the pulse's watermark moves, after a
  * send, and after a Friend command that may have cancelled Trades; it is marked read through its newest item while the
  * page is visible. **Show earlier** adds the next older page. The page asks the shell for the fast pulse while mounted.
- * The header's ⋯ menu offers Block (Trading #302) unless the reader already blocked them.
+ * The header's ⋯ menu offers Block (Trading #302) unless the reader already blocked them, and Report (#303) in every
+ * state where the other can be reported.
  */
 export function ConversationPage({
   target,
@@ -135,6 +138,20 @@ export function ConversationPage({
       : null,
     {
       onBlocked: () => heading.current?.focus(),
+      returnFocus: () => focusMenuTrigger(menuAnchor),
+    }
+  );
+  const report = useTraderReport(
+    shown && shown.can_report && shown.other.trader_id
+      ? {
+          traderId: shown.other.trader_id,
+          name: shown.other.display_name,
+          handle: shown.other.friend ? shown.other.handle : null,
+        }
+      : null,
+    {
+      source: "conversation",
+      onReported: () => heading.current?.focus(),
       returnFocus: () => focusMenuTrigger(menuAnchor),
     }
   );
@@ -358,7 +375,9 @@ export function ConversationPage({
     }
   };
 
-  const menuItems = block.item ? [block.item] : [];
+  const menuItems = [block.item, report.item].filter(
+    (item): item is MenuItem => item !== null
+  );
 
   return (
     <main className={FRAME}>
@@ -377,6 +396,7 @@ export function ConversationPage({
         }
       />
       {block.panel}
+      {report.panel}
       {record !== null && (
         <p className="m-0 text-meta text-text-muted">{record}</p>
       )}

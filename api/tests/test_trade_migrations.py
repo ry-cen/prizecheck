@@ -94,7 +94,9 @@ def test_migrations_141_to_143_add_the_trade_schema_and_run_again(scratch):
         run_again(scratch, name)
     with psycopg.connect(scratch, row_factory=dict_row) as conn:
         tables = {row['tablename'] for row in conn.execute(
-            "SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename LIKE 'trade%%'")}
+            "SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename LIKE 'trade%%'"
+            # Stage 2's report tables (migration 149) are Report's, not the Trade schema's.
+            " AND tablename NOT LIKE 'trade\\_report%%'")}
         assert tables == {'trade', 'trade_line', 'trade_pick', 'trade_want', 'trade_accept'}
         triggers = {row['tgname']: row['tgrelid'] for row in conn.execute(
             """SELECT tgname, tgrelid::regclass::text AS tgrelid FROM pg_trigger

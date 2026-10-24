@@ -245,6 +245,9 @@ async function nearYouStory(
   ).toHaveAttribute("href", `/trades/trader/${w.mistyTrader}`);
   const more = row.getByRole("button", { name: "More for Misty W" });
   await expect(more).toHaveCount(1);
+  await more.click();
+  await expect(page.getByRole("menuitem")).toHaveText(["Block", "Report"]);
+  await page.keyboard.press("Escape");
   const propose = row.getByRole("button", { name: "Propose trade to Misty W" });
   await expectPageChecks(page, `Find trades with Near you rows, ${width}`);
   await expectNoLeaks(page, w);

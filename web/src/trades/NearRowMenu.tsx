@@ -6,11 +6,12 @@ import { Menu, type MenuItem } from "../ui/Menu";
 import { focusMenuTrigger } from "./ConversationMenu";
 import { rowMenuLabel } from "./nearYouMessages";
 import { useTraderBlock } from "./TraderBlock";
+import { useTraderReport } from "./TraderReport";
 
 /**
- * The ⋯ menu of a Near you row: Block (Trading #302); Report arrives with #303. With no item it renders nothing, so
- * no empty menu reaches the page. The Block question and failure show under the row's buttons. A Block removes the
- * row, so its status goes to `onBlocked` (Near you keeps it) and `onChanged` reloads the list.
+ * The ⋯ menu of a Near you row: Block (Trading #302) and Report (#303). With no item it renders nothing, so no empty
+ * menu reaches the page. The Block question and failure, and the Report form, show under the row's buttons. A Block
+ * or Report removes the row, so its status goes to `onBlocked` (Near you keeps it) and `onChanged` reloads the list.
  */
 export function NearRowMenu(props: {
   row: NearbyMatchRow;
@@ -33,9 +34,25 @@ export function NearRowMenu(props: {
       returnFocus: () => focusMenuTrigger(anchor),
     }
   );
+  const report = useTraderReport(
+    {
+      traderId: props.row.trader_id,
+      name: props.row.display_name,
+      handle: null,
+    },
+    {
+      source: "discovery",
+      statusElsewhere: true,
+      onReported: (status) => {
+        props.onBlocked(status);
+        props.onChanged();
+      },
+      returnFocus: () => focusMenuTrigger(anchor),
+    }
+  );
   const items: MenuItem[] = [];
   if (block.item) items.push(block.item);
-  // #303 appends Report here.
+  if (report.item) items.push(report.item);
   if (items.length === 0) return null;
   return (
     <>
@@ -49,6 +66,7 @@ export function NearRowMenu(props: {
       </div>
       <div className="flex basis-full flex-col gap-2 empty:hidden">
         {block.panel}
+        {report.panel}
       </div>
     </>
   );

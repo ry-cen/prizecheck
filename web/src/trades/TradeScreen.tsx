@@ -43,6 +43,7 @@ import { indexLocations } from "../workspace/locationTree";
 import { DeckSwitchOffers, useDeckSwitchOffers } from "./DeckSwitchOffers";
 import { offerSwitchUndo } from "./deckSwitchUndo";
 import { AddAsFriend, showsAddFriend } from "./AddAsFriend";
+import { useTraderReport } from "./TraderReport";
 import { LiabilityNotice } from "./LiabilityNotice";
 import { MeetInPublicTip } from "./MeetInPublicTip";
 import { valueLines } from "./proposalModel";
@@ -183,6 +184,25 @@ export function TradeScreen({
     load.kind === "ready" ? load.trade.id : "",
     load.kind === "ready" && confirming && load.trade.you_get.length > 0,
     destination
+  );
+  const report = useTraderReport(
+    load.kind === "ready" && load.trade.other.trader_id
+      ? {
+          traderId: load.trade.other.trader_id,
+          name: load.trade.other.display_name,
+          handle: load.trade.other.friend ? load.trade.other.handle : null,
+          tradeId: load.trade.id,
+        }
+      : null,
+    {
+      source: "trade",
+      onReported: () => {
+        reloading.current = true;
+        setAttempt((n) => n + 1);
+      },
+      returnFocus: () =>
+        menuAnchor.current?.querySelector<HTMLElement>("button")?.focus(),
+    }
   );
   // One key per step until it settles, so a step whose outcome is unknown is retried safely.
   const keys = useRef(new Map<string, string>());
@@ -520,6 +540,7 @@ export function TradeScreen({
     ...(trade.actions.includes("cancel")
       ? [{ label: "Cancel Trade", onSelect: () => ask("cancel") }]
       : []),
+    ...(report.item ? [report.item] : []),
   ];
   const fixing = stale && trade.actions.includes("use_suggested_picks");
   const answers = answering ? (
@@ -692,6 +713,7 @@ export function TradeScreen({
       <p role="alert" className="m-0 text-meta text-danger empty:hidden">
         {message}
       </p>
+      {report.panel}
     </>,
     menu.length > 0 && (
       <div ref={menuAnchor}>

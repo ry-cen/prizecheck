@@ -44,6 +44,8 @@ type Props = {
   before?: ReactNode;
   /** Below the table, for example Load more. */
   after?: ReactNode;
+  /** Headers for the first four columns; the default is the card queues' Card, Set · number, Kind, Reports. */
+  columns?: readonly [string, string, string, string];
 };
 
 const COLUMNS = ["Card", "Set · number", "Kind", "Reports", "Opened", "Age"];
@@ -80,6 +82,7 @@ export function ReviewQueue({
   status,
   before,
   after,
+  columns,
 }: Props) {
   const headingId = useId();
   const cardId = useId();
@@ -87,6 +90,7 @@ export function ReviewQueue({
   const buttons = useRef(new Map<string, HTMLButtonElement>());
   const shown = useRef<string[]>([]);
   const lastOpen = useRef<string | null>(null);
+  const headers = [...(columns ?? COLUMNS.slice(0, 4)), "Opened", "Age"];
 
   useEffect(() => {
     if (open) lastOpen.current = open;
@@ -139,7 +143,7 @@ export function ReviewQueue({
         <ScrollTable label={tableLabel}>
           <thead>
             <tr>
-              {COLUMNS.map((column) => (
+              {headers.map((column) => (
                 <th key={column} scope="col">
                   {column}
                 </th>
@@ -185,7 +189,7 @@ export function ReviewQueue({
                   {isOpen && (
                     <tr>
                       {/* p-0 wins over the table's zero-specificity cell padding (ScrollTable). */}
-                      <td colSpan={COLUMNS.length + 1} className="p-0">
+                      <td colSpan={headers.length + 1} className="p-0">
                         <div
                           id={cardId}
                           className="sticky left-0 box-border w-[100cqw] whitespace-normal p-4 text-body phone:p-3"

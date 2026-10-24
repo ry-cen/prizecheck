@@ -1,6 +1,8 @@
 import { SocialError } from "../social_generated";
 import { commandMessage } from "../social/socialMessages";
 import { SEND_UNAVAILABLE } from "./traderMessages";
+import { endSentence } from "../social/sentenceEnd";
+import { ADD_FRIEND_SUSPENDED } from "../social/suspendedMessages";
 
 // Collector-facing text for Add as Friend (Trading #304). The ones marked "Approved" were signed off by the owner.
 
@@ -13,7 +15,7 @@ export const addFriendSentNote = (name: string) =>
 
 /** The status after Add as Friend is tapped. */
 export const addFriendSentStatus = (name: string) =>
-  `Friend Request sent to ${name}.`;
+  `Friend Request sent to ${endSentence(name)}`;
 
 /** The Withdraw button's text. */
 export const WITHDRAW_ADD_FRIEND = "Withdraw";
@@ -35,9 +37,7 @@ export const ACCEPT_ADD_FRIEND = "Accept Friend Request";
 /** The status after an accept, or when both asked at once. */
 export const friendsNow = (name: string) => `You and ${name} are now Friends.`;
 
-/** Approved by the owner (#304): a suspended account tried to send a Friend Request. */
-export const ADD_FRIEND_SUSPENDED =
-  "Your account can't send Friend Requests right now.";
+export { ADD_FRIEND_SUSPENDED };
 
 /** What a refused Add as Friend or its Withdraw says. */
 export function addFriendError(cause: unknown): string {

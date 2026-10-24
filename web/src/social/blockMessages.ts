@@ -1,7 +1,7 @@
 /**
- * Block's collector-facing copy (Trading #302). Stage 1's approved wording unless marked DRAFT; DRAFT strings wait for
- * the owner's sign-off.
+ * Block's collector-facing copy (Trading #302): Stage 1's approved wording, and #302's approved by the owner.
  */
+import { endSentence } from "./sentenceEnd";
 
 export const BLOCK = "Block";
 export const CANCEL = "Cancel";
@@ -15,10 +15,11 @@ export const blockQuestion = (name: string) =>
   `Block ${name}? They won't be told.`;
 
 export const blockedStatus = (name: string) =>
-  `Blocked ${name}. They aren't told.`;
+  `Blocked ${endSentence(name)} They aren't told.`;
 
 export const unblockLabel = (name: string) => `Unblock ${name}`;
-export const unblockedStatus = (name: string) => `Unblocked ${name}.`;
+export const unblockedStatus = (name: string) =>
+  `Unblocked ${endSentence(name)}`;
 
 export const BLOCKED_HEADING = "Blocked collectors";
 export const BLOCKED_LOADING = "Loading…";

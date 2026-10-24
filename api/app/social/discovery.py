@@ -16,8 +16,10 @@ not their Friend, and shares a conversation with them, is in their reach (that c
 through the conversation, whatever the switch says).
 
 This module also holds the Python side of the reach rule (``reach``, ``reach_one``: one call to the SQL function
-``trade_reach``, migration 148), the helpers that go with it (``trader_user``, ``require_not_suspended``) and the
-distance bands. Callers call ``reach`` or ``reach_one`` after their own locks; none of these takes a lock or writes. This
+``trade_reach``, migration 148), the helpers that go with it (``trader_user``, ``require_not_suspended``,
+``lock_discovery``, ``account_state``, ``switch_off``, ``remove_from_discovery``, ``restore_discovery``) and the
+distance bands. Callers call ``reach`` or ``reach_one`` after their own locks; the reach helpers take no lock and write
+nothing, and the discovery writers say which locks they expect. This
 module and ``friend_copies`` (the choke point) are the only ones whose SQL calls the reach function. ``nearby`` (Near you
 and card search, #300) is the one Python call of the nearby-candidates function, and ``search_setting`` is the status and
 radius those reads need.
@@ -29,11 +31,13 @@ pruned by ``PUT`` only. ``GET`` counts and never prunes or writes.
 Locks: ``PUT`` runs ``ensure_owner``, then the advisory lock ``prizecheck.discovery:<user>`` (so one collector's
 count-then-insert cannot race), then ``lock_owners``. Every later writer of ``discovery_setting`` for a collector (owner
 removal, restore, suspension's switch off) must take the same advisory key before any ``inventory_owner`` row lock, or
-it builds a deadlock cycle with a concurrent ``PUT``.
+it builds a deadlock cycle with a concurrent ``PUT``. ``lock_discovery`` is that key; the owner's removal, restore and
+suspension (``reports``) call it, then ``remove_from_discovery``, ``restore_discovery`` or ``switch_off``.
 
-Refusals, in the order they are checked after the body parses (a malformed body is FastAPI's own 422 first): 409
-``DISCOVERY_UNAVAILABLE`` (switching on while removed or suspended), 422 ``INVALID_ZIP``, 422 ``UNKNOWN_ZIP``, 429
-``ZIP_CHANGE_LIMIT`` with ``retry_after_minutes``, 422 ``ZIP_REQUIRED`` (switching on with no zip, given or stored).
+Refusals, in the order they are checked after the body parses (a malformed body is FastAPI's own 422 first): 403
+``ACCOUNT_SUSPENDED`` (switching on while suspended), 409 ``DISCOVERY_UNAVAILABLE`` (switching on while removed), 422
+``INVALID_ZIP``, 422 ``UNKNOWN_ZIP``, 429 ``ZIP_CHANGE_LIMIT`` with ``retry_after_minutes``, 422 ``ZIP_REQUIRED`` (switching
+on with no zip, given or stored).
 
 This is the only module under ``app`` whose SQL names ``discovery_setting``, ``zip_centroid`` or ``open_discovery``
 (``test_social_contract.py`` enforces it).
@@ -106,6 +110,51 @@ def require_not_suspended(conn, user_id: str) -> None:
                        (user_id,)).fetchone()
     if row and row['suspended']:
         error(403, 'ACCOUNT_SUSPENDED')
+
+
+def lock_discovery(conn, user_id: str) -> None:
+    """Takes the advisory lock ``prizecheck.discovery:<user>``, the key every writer of ``discovery_setting`` takes
+    before any ``inventory_owner`` row lock. It is the first lock of the step, then the collector's owner row. Writes
+    nothing."""
+    conn.execute("SELECT pg_advisory_xact_lock(hashtext('prizecheck.discovery:' || %s))", (user_id,))
+
+
+@dataclass(frozen=True)
+class AccountState:
+    """Whether a collector is suspended and whether they were removed from open discovery."""
+    suspended: bool
+    removed: bool
+
+
+def account_state(conn, user_id: str) -> AccountState | None:
+    """The collector's suspension and removal flags, or None when there is no profile. Takes no lock and writes
+    nothing."""
+    row = conn.execute(SETTING, (user_id,)).fetchone()
+    return None if row is None else AccountState(suspended=bool(row['suspended']), removed=bool(row['removed']))
+
+
+def switch_off(conn, user_id: str) -> None:
+    """Switches the collector's open discovery off, keeping the zip and radius. Does nothing with no setting row. The
+    caller holds ``lock_discovery`` and then the collector's owner row. Writes nothing else."""
+    conn.execute('UPDATE discovery_setting SET enabled = false, updated_at = now() WHERE user_id = %s AND enabled',
+                 (user_id,))
+
+
+def remove_from_discovery(conn, user_id: str) -> None:
+    """Removes the collector from open discovery: ``removed_at`` set (the first time stays) and discovery off. The
+    caller holds ``lock_discovery`` and then the collector's owner row, and has checked that the profile exists. Writes
+    nothing else."""
+    conn.execute("""INSERT INTO discovery_setting (user_id, enabled, removed_at, updated_at)
+      VALUES (%s, false, now(), now())
+      ON CONFLICT (user_id) DO UPDATE SET enabled = false,
+        removed_at = coalesce(discovery_setting.removed_at, now()), updated_at = now()""", (user_id,))
+
+
+def restore_discovery(conn, user_id: str) -> bool:
+    """Clears ``removed_at`` and leaves ``enabled`` alone. True when a removal was cleared. The caller holds
+    ``lock_discovery`` and then the collector's owner row. Writes nothing else."""
+    return conn.execute("""UPDATE discovery_setting SET removed_at = NULL, updated_at = now()
+      WHERE user_id = %s AND removed_at IS NOT NULL RETURNING 1""", (user_id,)).fetchone() is not None
 
 
 # The radius filters by band edges (spec "Radius"), so 25 keeps bands 1 to 3 and nobody beyond 50 mi is ever a candidate.
@@ -213,7 +262,7 @@ def set_discovery(command: SetDiscovery, user_id: str = Depends(verified_user)):
     changes nothing writes nothing. See the module docstring for the order of the refusals."""
     with connect() as conn, conn.transaction():
         ensure_owner(conn, user_id)
-        conn.execute("SELECT pg_advisory_xact_lock(hashtext('prizecheck.discovery:' || %s))", (user_id,))
+        lock_discovery(conn, user_id)
         lock_owners(conn, user_id)
         conn.execute('SELECT create_collector_profile(%s)', (user_id,))
         stored = conn.execute("""SELECT p.suspended_at IS NOT NULL AS suspended, d.enabled, d.zip, d.lat, d.lon,
@@ -221,7 +270,9 @@ def set_discovery(command: SetDiscovery, user_id: str = Depends(verified_user)):
           FROM collector_profile p LEFT JOIN discovery_setting d ON d.user_id = p.user_id
           WHERE p.user_id = %s""", (user_id,)).fetchone()
         was = (bool(stored['enabled']), stored['zip'], stored['lat'], stored['lon'], stored['radius_mi'] or 25)
-        if command.enabled is True and (stored['suspended'] or stored['removed']):
+        if command.enabled is True and stored['suspended']:
+            error(403, 'ACCOUNT_SUSPENDED')
+        if command.enabled is True and stored['removed']:
             error(409, 'DISCOVERY_UNAVAILABLE')
         zip5 = centroid = None
         if command.zip is not None:

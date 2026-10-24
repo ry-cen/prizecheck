@@ -132,6 +132,12 @@ const toast = (page: Page) =>
   page.getByRole("region", { name: "Notifications" });
 const more = (page: Page) =>
   page.getByRole("button", { name: "More for this Trade" });
+/** The ⋯ menu offers Report (Trading #303) and nothing else: no Withdraw or Cancel Trade is left. */
+const expectOnlyReport = async (page: Page) => {
+  await more(page).click();
+  await expect(page.getByRole("menuitem")).toHaveText(["Report"]);
+  await page.keyboard.press("Escape");
+};
 const noArtwork = (page: Page) =>
   page.route(/^https:\/\/assets\.tcgdex\.net\//, (route) => route.abort());
 
@@ -244,7 +250,7 @@ async function story(
   );
   const ashMain = ash.page.getByRole("main");
   await expect(ashMain.getByRole("button", { name: "Accept" })).toBeVisible();
-  await expect(more(ash.page)).toHaveCount(0);
+  await expectOnlyReport(ash.page);
   await expectPageChecks(ash.page, `a received Trade Proposal at ${width}`);
   await ashMain.getByRole("button", { name: "Decline" }).click();
   const declining = ashMain.getByRole("group", { name: "Decline" });
@@ -303,12 +309,12 @@ async function story(
   expect((await tradeState(ash.page, declined)).actions).toEqual([]);
   await expect(ashMain.getByRole("button", { name: "Accept" })).toHaveCount(0);
   await expect(ashMain.getByRole("button", { name: "Decline" })).toHaveCount(0);
-  await expect(more(ash.page)).toHaveCount(0);
+  await expectOnlyReport(ash.page);
   await expectOwnCopies(page, "Iono", "1");
   await expectFriendCopies(ash.page, mistyHandle, "Iono", "1");
   await page.goto(`${ORIGIN}/trades/${declined}`);
   await expect(heading(page)).toHaveText("Ash K declined");
-  await expect(more(page)).toHaveCount(0);
+  await expectOnlyReport(page);
 
   // C: Ash has the other gift open while Misty withdraws it. Withdraw asks first, and Keep it leaves it waiting.
   await ash.page.goto(`${ORIGIN}/trades/${withdrawn}`);
@@ -386,7 +392,7 @@ async function story(
   await cancelling.getByRole("button", { name: "Cancel Trade" }).click();
   await expect(heading(mine)).toHaveText("You cancelled this Trade");
   await expect(toast(mine)).toContainText("Trade cancelled");
-  await expect(more(mine)).toHaveCount(0);
+  await expectOnlyReport(mine);
   // The other side cancels from the screen it already had open: the Trade has changed, and the screen reads it again.
   const otherMain = other.getByRole("main");
   await more(other).click();
@@ -400,7 +406,7 @@ async function story(
   );
   await expect(heading(other)).toHaveText(`${mineName} cancelled this Trade`);
   await expect(heading(other)).toBeFocused();
-  await expect(more(other)).toHaveCount(0);
+  await expectOnlyReport(other);
   expect((await tradeState(other, swap)).state).toBe("closed");
 
   // Both Trade Lists are whole again, on both sides.

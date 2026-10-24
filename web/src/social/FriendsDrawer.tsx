@@ -40,6 +40,7 @@ import {
   friendshipEnding,
   type FriendshipEnding,
 } from "./friendshipEnding";
+import { endSentence } from "./sentenceEnd";
 import { commandMessage, lookupMessage } from "./socialMessages";
 
 /**
@@ -864,7 +865,7 @@ function LookupResult({
                     collector_id: collector.collector_id,
                     idempotency_key: key,
                   }),
-                `Friend Request sent to ${name}.`
+                `Friend Request sent to ${endSentence(name)}`
               )
             }
           >
@@ -881,7 +882,7 @@ function LookupResult({
                   unblockCollector(collector.collector_id, {
                     idempotency_key: key,
                   }),
-                `Unblocked ${name}.`
+                `Unblocked ${endSentence(name)}`
               )
             }
           >
@@ -908,7 +909,8 @@ function LookupResult({
         )}
       </div>
       {collector.relation === "self" && line("That's your own Handle.")}
-      {collector.relation === "blocked" && line(`You blocked ${name}.`)}
+      {collector.relation === "blocked" &&
+        line(`You blocked ${endSentence(name)}`)}
       {collector.relation === "friends" && line(`You and ${name} are Friends.`)}
       {collector.relation === "request_sent" &&
         line(`You've sent ${name} a Friend Request.`)}

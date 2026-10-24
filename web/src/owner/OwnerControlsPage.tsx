@@ -23,6 +23,7 @@ import { AttributesQueue } from "./AttributesQueue";
 import { healthChecks, problems } from "./health";
 import { ReprintsQueue } from "./ReprintsQueue";
 import { RulesPanel } from "./RulesPanel";
+import { TradeReportsQueue } from "./TradeReportsQueue";
 import { OWNER_SECTIONS, type OwnerSection } from "./sections";
 import { StatusPanel } from "./StatusPanel";
 import { useQueueCounts } from "./useQueueCounts";
@@ -161,6 +162,9 @@ function OwnerControls({
       break;
     case "missing":
       content = <MissingQueue onChanged={recount} />;
+      break;
+    case "trade-reports":
+      content = <TradeReportsQueue onChanged={recount} />;
       break;
     case "rules":
       content = <RulesPanel />;

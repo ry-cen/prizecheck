@@ -144,9 +144,9 @@ test.describe("desktop", () => {
         .toBe(true);
       await expect(problems).not.toContainText("Requests:");
 
-      // Seven sub-tabs in order; Status is selected at /owner and only it is in the Tab order.
+      // Eight sub-tabs in order; Status is selected at /owner and only it is in the Tab order.
       const tabs = sections(page).getByRole("tab");
-      await expect(tabs).toHaveCount(7);
+      await expect(tabs).toHaveCount(8);
       const names = [
         "Status",
         "Catalog",
@@ -154,6 +154,7 @@ test.describe("desktop", () => {
         "Attributes",
         "Reprints",
         "Missing cards",
+        "Trade reports",
         "Rules",
       ];
       for (const [index, name] of names.entries())
@@ -181,7 +182,12 @@ test.describe("desktop", () => {
       await expect(sectionTab(page, /^Missing cards/)).toHaveAccessibleName(
         `Missing cards ${missing.n}`
       );
-      for (const name of ["Metadata", "Attributes", "Reprints"])
+      for (const name of [
+        "Metadata",
+        "Attributes",
+        "Reprints",
+        "Trade reports",
+      ])
         await expect(
           sectionTab(page, new RegExp(`^${name}`))
         ).toHaveAccessibleName(new RegExp(`^${name} \\d+\\+?$`));
