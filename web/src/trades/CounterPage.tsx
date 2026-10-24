@@ -55,11 +55,12 @@ export function CounterPage({
   if (
     load.kind === "ready" &&
     load.trade.actions.includes("counter") &&
-    load.trade.other.handle
+    load.trade.other.trader_id &&
+    load.trade.other.available
   )
     return (
       <ProposalBuilderPage
-        handle={load.trade.other.handle}
+        traderId={load.trade.other.trader_id}
         onNavigate={onNavigate}
         counter={load.trade}
       />

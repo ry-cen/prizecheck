@@ -14,6 +14,7 @@ from app.main import connect  # noqa: F401  (main first: it includes every route
 from app.social import trade_matches
 from app.social.friend_copies import TradeCopies, friend_trade_copies
 from app.trade_list import own_trade_copies
+from stranger_fixtures import far_zip, strangers, trader_of
 from test_catalog_targets import isolated_rules  # noqa: F401  (an autouse fixture)
 from test_deck_cost import launches, store  # noqa: F401  (autouse fixtures)
 from test_deck_counting import hold, line
@@ -24,6 +25,7 @@ from test_holdings import call
 from test_lend_offers import offer
 from test_loans import accept, revision_of, sent, step, view
 from test_location_tree import tree
+from test_open_discovery import discoverable
 from test_trade_promises import close, move, seed_trade
 from want_list_swap_fixtures import seed_swap_catalog
 
@@ -302,6 +304,7 @@ def test_a_friends_trade_list_searches_and_pages_by_card_identity(store, monkeyp
     body = ok(friend_list(ash, misty_handle))
     assert (body['collector_id'], body['handle'], body['display_name'], body['next_page']) == (
         misty, misty_handle, 'Misty W.', None)
+    assert body['trader_id'] == trader_of(misty)
     assert [(card['name'], card['set_code'], card['copies']) for card in body['cards']] == [
         ('Arven', 'SVI', '1'), ('Arven', 'SVI', '1'), ('Basic Psychic Energy', 'sve', '1'),
         ("Boss's Orders", 'PAL', '1'), ('Iono', 'PAL', '1'), ('Iono', 'PAF', '1')]
@@ -364,3 +367,107 @@ def test_a_new_collector_has_an_empty_trade_list_and_reading_it_writes_nothing(s
     assert own(newcomer) == {'locations': [], 'cards': []}
     with connect() as conn:
         assert conn.execute('SELECT 1 FROM inventory_owner WHERE user_id=%s', (newcomer,)).fetchone() is None
+
+
+# Trader reads (Trading #299): a collector in reach, by trader id.
+
+COLLECTOR_UNKNOWN = b'{"detail":{"code":"COLLECTOR_NOT_FOUND"}}'
+TRADER_LIST_FIELDS = {'trader_id', 'display_name', 'band', 'completed_trades', 'cards', 'next_page'}
+
+
+def message_to(user, trader, body='hello'):
+    """A message to a collector by trader id (test_conversations.say_to, which this module cannot import)."""
+    return call('POST', f'/api/social/traders/{trader}/messages', user, {'body': body, 'idempotency_key': str(uuid4())})
+
+
+def trader_list(viewer, trader, **params):
+    query = '&'.join(f'{name}={value}' for name, value in params.items())
+    return call('GET', f'/api/social/traders/{trader}/trade-list' + (f'?{query}' if query else ''), viewer)
+
+
+def trader_header(viewer, trader):
+    return call('GET', f'/api/social/traders/{trader}', viewer)
+
+
+def test_a_nearby_strangers_trade_list_shows_only_listable_copies_with_a_band(store, monkeypatch):
+    ids, ash, misty, binder, box = strangers()
+    iono, arven, boss = ids['PAL 185'], ids['SVI 166'], ids['PAL 172']
+    secret = f'Secret {uuid4().hex[:8]}'
+    hidden_box = place(misty, f'{secret} Box')
+    hold(misty, hidden_box, boss, 1)
+    ok(mark(misty, hidden_box))
+    hide(misty, hidden_box)
+    seed_trade(misty, ash, gives=[(iono, 1)], picks=[('proposer', misty, binder, iono, 1)])
+    with connect() as conn:
+        handle = conn.execute('SELECT handle FROM collector_profile WHERE user_id = %s', (misty,)).fetchone()['handle']
+    response = trader_list(ash, trader_of(misty))
+    body = ok(response)
+    assert set(body) == TRADER_LIST_FIELDS and body['band'] == '5_to_10'
+    assert (body['trader_id'], body['display_name'], body['completed_trades']) == (trader_of(misty), 'Misty W.', 0)
+    # The promised copy is left out; the hidden For trade Location's copy is listed.
+    assert {card['edition_id']: card['copies'] for card in body['cards']} == {iono: '2', boss: '1'}
+    assert misty not in response.text and handle.lower() not in response.text.lower() and secret not in response.text
+    # Search and paging behave as on the Friend route.
+    assert [card['edition_id'] for card in ok(trader_list(ash, trader_of(misty), q='BOSS%27S'))['cards']] == [boss]
+    assert ok(trader_list(ash, trader_of(misty), q='zzz'))['cards'] == []
+    monkeypatch.setattr(trade_matches, 'PAGE_IDENTITIES', 1)
+    first = ok(trader_list(ash, trader_of(misty)))
+    assert [card['edition_id'] for card in first['cards']] == [boss] and first['next_page'] == 1
+    second = ok(trader_list(ash, trader_of(misty), page=1))
+    assert [card['edition_id'] for card in second['cards']] == [iono] and second['next_page'] is None
+    # The other direction lists Ash's own copies.
+    assert [card['edition_id'] for card in ok(trader_list(misty, trader_of(ash)))['cards']] == [arven]
+
+
+def test_the_trader_trade_list_needs_reach(store):
+    ids, ash, misty, binder, box = strangers()
+    far, _ = collector('Far W.')
+    discoverable(far, far_zip())
+    hold(far, place(far, 'Far Box'), ids['PAL 172'], 1)
+    blocker, _ = collector('Blocker')
+    blocked, _ = collector('Blocked')
+    suspended, _ = collector('Suspended')
+    for other in (blocker, blocked, suspended):
+        discoverable(other, '00010')
+    block(blocker, ash)
+    block(ash, blocked)
+    with connect() as conn:
+        conn.execute('UPDATE collector_profile SET suspended_at = now() WHERE user_id = %s', (suspended,))
+    for other in (str(uuid4()), trader_of(ash), trader_of(far), trader_of(blocker), trader_of(blocked),
+                  trader_of(suspended)):
+        response = trader_list(ash, other)
+        assert (response.status_code, response.content) == (404, COLLECTOR_UNKNOWN), other
+    # Ex-Friends who share a conversation keep reading each other's Trade List, with no band.
+    friend, _ = collector('Gary')
+    befriend(ash, friend)
+    ok(message_to(ash, trader_of(friend)), 201)
+    ok(call('POST', f'/api/social/friends/{friend}/remove', ash, {'idempotency_key': str(uuid4())}))
+    response = trader_list(ash, trader_of(friend))
+    assert response.status_code == 200 and response.json()['band'] is None
+
+
+def test_a_traders_header_answers_status_band_and_conversation(store):
+    ids, ash, misty, binder, box = strangers()
+    header = ok(trader_header(ash, trader_of(misty)))
+    assert header == {'trader_id': trader_of(misty), 'display_name': 'Misty W.', 'friend': False, 'band': '5_to_10',
+                      'completed_trades': 0, 'open_to_cash_offers': False, 'status': 'open', 'conversation_id': None,
+                      'add_friend': None}
+    ok(message_to(ash, trader_of(misty)), 201)
+    assert ok(trader_header(ash, trader_of(misty)))['conversation_id'] is not None
+    block(misty, ash)
+    gone = ok(trader_header(ash, trader_of(misty)))
+    assert (gone['status'], gone['band'], gone['completed_trades'], gone['add_friend'], gone['open_to_cash_offers']) == (
+        'unavailable', None, None, None, False)
+    with connect() as conn:
+        conn.execute('DELETE FROM block')
+    block(ash, misty)
+    assert ok(trader_header(ash, trader_of(misty)))['status'] == 'you_blocked'
+    # A far stranger with no conversation is unknown; a Friend is a Friend with no band.
+    far, _ = collector('Far W.')
+    discoverable(far, far_zip())
+    response = trader_header(ash, trader_of(far))
+    assert (response.status_code, response.content) == (404, COLLECTOR_UNKNOWN)
+    friend, _ = collector('Gary')
+    befriend(ash, friend)
+    mate = ok(trader_header(ash, trader_of(friend)))
+    assert (mate['friend'], mate['band'], mate['status']) == (True, None, 'open')

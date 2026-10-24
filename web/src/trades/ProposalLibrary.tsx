@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { lineEdition } from "../loans/loanText";
-import type { FriendTradeCard, TradeMatchRow } from "../social_generated";
+import type { FriendTradeCard, TraderMatchRow } from "../social_generated";
 import type { TradeListCard } from "../trades_generated";
 import { Button } from "../ui/Button";
 import { CardArt, CardPopup } from "../ui/CardPopup";
@@ -41,7 +41,7 @@ export type MineLoad =
 export type MatchLoad =
   | { kind: "loading" }
   | { kind: "failed" }
-  | { kind: "ready"; row: TradeMatchRow };
+  | { kind: "ready"; row: TraderMatchRow };
 
 type Choice = "theirs" | "mine";
 

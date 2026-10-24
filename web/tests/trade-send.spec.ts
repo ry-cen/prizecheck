@@ -15,6 +15,7 @@ import {
   openConversation,
   timeline,
   timelineTrades,
+  traderIdOf,
 } from "./support/conversations";
 import { expectPageChecks } from "./support/page-check";
 import { signInAsOwner } from "./support/sign-in";
@@ -179,6 +180,7 @@ async function story(
   const secret = `Secret ${randomUUID().slice(0, 6)}`;
   const ash = await collectors.signIn({ contextOptions });
   const ashHandle = await nameCollector(ash.page, "Ash K");
+  const ashTrader = await traderIdOf(ash.page);
   const shelf = await forTradeBinder(ash.page, `${secret} Shelf`);
   await hold(ash.page, shelf, ids["SVI 166"], 2);
   // A second finish of the same card: its Add must not share a name with the Normal one's.
@@ -197,6 +199,7 @@ async function story(
   await noArtwork(page);
   await signInAsOwner(page, "/collection");
   const mistyHandle = await nameCollector(page, "Misty W");
+  const mistyTrader = await traderIdOf(page);
   const binder = await forTradeBinder(page, `${secret} Binder`);
   await hold(page, binder, ids["PAL 185"], 3);
   await befriend(page, ash.page);
@@ -216,7 +219,7 @@ async function story(
     0
   );
   await page.getByRole("button", { name: "Propose trade to Ash K" }).click();
-  await expect(page).toHaveURL(`${ORIGIN}/trades/new/${ashHandle}`);
+  await expect(page).toHaveURL(`${ORIGIN}/trades/new/${ashTrader}`);
   await expect(heading(page)).toHaveText("Trade Proposal to Ash K");
   const proposal = page.getByRole("main");
   const theirList = page.getByRole("list", { name: "Ash K's Trade List" });
@@ -292,7 +295,7 @@ async function story(
   // B: a gift, from an empty builder: Send waits for a card.
   await page.goto(`${ORIGIN}/friends/${ashHandle}/trade-list`);
   await page.getByRole("button", { name: "Propose trade to Ash K" }).click();
-  await expect(page).toHaveURL(`${ORIGIN}/trades/new/${ashHandle}`);
+  await expect(page).toHaveURL(`${ORIGIN}/trades/new/${ashTrader}`);
   await show(page, "Proposal");
   await expect(
     page.getByRole("button", { name: "Send Trade Proposal" })
@@ -370,12 +373,12 @@ async function story(
   await brock.page
     .getByRole("button", { name: "Propose trade to Misty W" })
     .click();
-  await expect(brock.page).toHaveURL(`${ORIGIN}/trades/new/${mistyHandle}`);
+  await expect(brock.page).toHaveURL(`${ORIGIN}/trades/new/${mistyTrader}`);
   await brock.page.goto(`${ORIGIN}/friends/${ashHandle}/trade-list`);
   await brock.page
     .getByRole("button", { name: "Propose trade to Ash K" })
     .click();
-  await expect(brock.page).toHaveURL(`${ORIGIN}/trades/new/${ashHandle}`);
+  await expect(brock.page).toHaveURL(`${ORIGIN}/trades/new/${ashTrader}`);
   await expect(heading(brock.page)).toHaveText("Trade Proposal to Ash K");
   await expect(brock.page.getByRole("dialog")).toHaveCount(0);
   await show(brock.page, "Cards");

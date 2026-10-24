@@ -12,7 +12,11 @@ import { SearchField } from "../ui/SearchField";
 import { variantLabel } from "../ui/variantLabel";
 import { trackRecord } from "./conversationMessages";
 import { proposeFromTradeList } from "./openProposal";
-import { groupByName, proposalPath } from "./tradeListModel";
+import {
+  friendTradeListPath,
+  groupByName,
+  proposalPath,
+} from "./tradeListModel";
 
 type Load =
   | { kind: "loading" }
@@ -224,8 +228,11 @@ export function FriendTradeListPage({
       <Button
         aria-label={`Propose trade to ${name}`}
         onClick={() => {
-          proposeFromTradeList(page.handle);
-          onNavigate(proposalPath(page.handle));
+          proposeFromTradeList(
+            page.trader_id,
+            friendTradeListPath(page.handle)
+          );
+          onNavigate(proposalPath(page.trader_id));
         }}
       >
         Propose trade
@@ -235,7 +242,7 @@ export function FriendTradeListPage({
 }
 
 /** One card name on a Friend's Trade List, with each of its Editions and how many copies they offer. */
-function NameGroup({
+export function NameGroup({
   name,
   cards,
 }: {

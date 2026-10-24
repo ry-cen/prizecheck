@@ -17,6 +17,7 @@ import type {
   Page,
 } from "@playwright/test";
 import { expect, test } from "./support/collectors";
+import { traderIdOf } from "./support/conversations";
 import { expectPageChecks } from "./support/page-check";
 import { signInAsOwner } from "./support/sign-in";
 import { expectTouchTarget } from "./support/touch-target";
@@ -223,7 +224,7 @@ async function story(
   await tradeWant(page, ids["PAL 185"], 1);
   await befriend(page, ash.page);
 
-  const builder = `${ORIGIN}/trades/new/${ashHandle}`;
+  const builder = `${ORIGIN}/trades/new/${await traderIdOf(ash.page)}`;
   const main = page.getByRole("main");
   const findLink = main.getByRole("link", { name: "Find trades", exact: true });
   const listLink = main.getByRole("link", {

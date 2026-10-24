@@ -5,6 +5,8 @@ The migration section runs on disposable databases and on the test database. Pai
 the ids used here start with ``B-`` and ``a-``, which a locale collation sorts the other way round.
 """
 import base64
+import os
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
@@ -20,10 +22,13 @@ from app.social.conversations import normalize_text
 from test_catalog_references import migrate
 from test_catalog_targets import isolated_rules  # noqa: F401  (an autouse fixture)
 from test_deck_cost import launches, store  # noqa: F401  (autouse fixtures)
+from stranger_fixtures import far_zip, propose_to, strangers
 from test_ending_friendship import remove
 from test_friend_copies import block, collector, ok
 from test_holdings import call
+from test_loan_promises import _waiting_on_a_row
 from test_loans import pair
+from test_open_discovery import discoverable
 from test_trade_migrations import collector as owner_row, run_again, scratch  # noqa: F401
 from test_trades import accept_trade, countered, handle_of, proposed, propose, read, trade_step, trading
 
@@ -771,3 +776,78 @@ def test_first_contact_from_both_sides_at_once_makes_one_conversation(store):
                 'SELECT conversation_id FROM trade WHERE proposer_id = %s OR recipient_id = %s', (ash, ash))} == {str(row['id'])}
             assert conn.execute('SELECT conversation_id FROM message WHERE id = %s',
                                 (answers[2].json()['id'],)).fetchone() == {'conversation_id': row['id']}
+
+
+def test_a_send_attaches_the_pairs_earlier_trades(store):
+    ids, ash, misty, binder, box = trading()
+    proposal = proposed(misty, ash, give=[(ids['PAL 185'], 1)])
+    conversation = proposal['conversation_id']
+    with connect() as conn:
+        old, _ = old_trade(conn, ash, misty, age_days=30)
+        conn.execute('UPDATE trade SET conversation_id = NULL WHERE id = %s', (old,))
+    sent = ok(propose_to(ash, trader_of(misty), get=[(ids['PAL 185'], 1)]), 201)
+    assert sent['conversation_id'] == conversation
+    with connect() as conn:
+        assert str(conn.execute('SELECT conversation_id FROM trade WHERE id = %s', (old,)).fetchone()['conversation_id']) \
+            == conversation
+    shown = [item['trade']['id'] for item in ok(view(ash, conversation))['items'] if item['kind'] == 'trade']
+    assert str(old) in shown and proposal['id'] in shown and sent['id'] in shown
+
+
+def test_a_left_out_pair_who_propose_again_get_one_conversation_with_their_closed_trades(store):
+    ids, ash, misty, binder, box = trading()
+    with connect() as conn:
+        old, _ = old_trade(conn, ash, misty, age_days=30)
+        conn.execute('DELETE FROM conversation WHERE user_low = least(%s COLLATE "C", %s COLLATE "C") '
+                     'AND user_high = greatest(%s COLLATE "C", %s COLLATE "C")', (ash, misty, ash, misty))
+        conn.execute('UPDATE trade SET conversation_id = NULL WHERE id = %s', (old,))
+    sent = ok(propose_to(misty, trader_of(ash), give=[(ids['PAL 185'], 1)]), 201)
+    with connect() as conn:
+        rows = conn.execute('SELECT id FROM conversation WHERE user_low = least(%s COLLATE "C", %s COLLATE "C") '
+                            'AND user_high = greatest(%s COLLATE "C", %s COLLATE "C")',
+                            (ash, misty, ash, misty)).fetchall()
+        assert len(rows) == 1
+        assert str(conn.execute('SELECT conversation_id FROM trade WHERE id = %s', (old,)).fetchone()['conversation_id']) \
+            == str(rows[0]['id']) == sent['conversation_id']
+
+
+def test_a_send_and_a_trader_message_to_a_new_pair_make_one_conversation(store):
+    ids, ash, misty, binder, box = strangers()
+    with psycopg.connect(os.environ['DATABASE_URL']) as holder, \
+            psycopg.connect(os.environ['DATABASE_URL'], autocommit=True) as watch, \
+            ThreadPoolExecutor(max_workers=2) as executor:
+        holder.execute('SELECT 1 FROM inventory_owner WHERE user_id = %s FOR UPDATE', (ash,))
+        sending = executor.submit(propose_to, misty, trader_of(ash), [(ids['PAL 185'], 1)])
+        _waiting_on_a_row(watch, [sending])
+        messaging = executor.submit(say_to, ash, trader_of(misty), 'Hi')
+        deadline = time.monotonic() + 10
+        while watch.execute("""SELECT count(*) AS n FROM pg_stat_activity WHERE datname=current_database()
+            AND wait_event_type='Lock' AND wait_event IN ('transactionid','tuple')""").fetchone()[0] < 2:
+            assert time.monotonic() < deadline and not sending.done() and not messaging.done()
+            time.sleep(0.01)
+        holder.commit()
+        answers = sending.result(timeout=10), messaging.result(timeout=10)
+    assert [answer.status_code for answer in answers] == [201, 201], [answer.text for answer in answers]
+    with connect() as conn:
+        rows = conn.execute('SELECT id FROM conversation WHERE user_low = least(%s COLLATE "C", %s COLLATE "C") '
+                            'AND user_high = greatest(%s COLLATE "C", %s COLLATE "C")',
+                            (ash, misty, ash, misty)).fetchall()
+    assert len(rows) == 1 and answers[0].json()['conversation_id'] == str(rows[0]['id'])
+
+
+def test_a_nearby_stranger_opens_a_conversation_and_sees_a_band(store):
+    ids, ash, misty, binder, box = strangers()
+    empty = ok(view_with(misty, trader_of(ash)))
+    assert empty['id'] is None
+    assert empty['other'] == {'trader_id': trader_of(ash), 'display_name': 'Ash K.', 'friend': False, 'handle': None,
+                              'band': '5_to_10', 'completed_trades': 0}
+    ok(say_to(misty, trader_of(ash), 'Hello'), 201)
+    ok(call('PUT', '/api/social/discovery', ash, {'enabled': False}))
+    after = ok(view_with(misty, trader_of(ash)))
+    assert after['other']['band'] is None and after['status'] == 'open'
+    ok(say_to(misty, trader_of(ash), 'Still there?'), 201)
+    (far, _) = collector('Far F.')
+    far_zip()
+    discoverable(far, '00019')
+    assert view_with(misty, trader_of(far)).status_code == 404
+    assert say_to(misty, trader_of(far), 'Hello').status_code == 409

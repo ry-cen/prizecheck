@@ -19,6 +19,7 @@ import pytest
 from app.main import connect  # noqa: F401  (main first: it includes every router while loading)
 from app import trade_inventory
 from app.social import trades
+from stranger_fixtures import far_zip, propose_to, strangers, trader_of
 from test_catalog_targets import isolated_rules  # noqa: F401  (an autouse fixture)
 from test_deck_cost import launches, store  # noqa: F401  (autouse fixtures)
 from test_deck_counting import hold
@@ -30,6 +31,7 @@ from test_lend_offers import offer
 from test_loan_promises import _hold_pick_insert, _waiting_on_a_row
 from test_loans import accept, pair, revision_of, sent, view
 from test_moves import commit, selected, stage, start
+from test_open_discovery import discoverable
 from test_trade_lists import friend_cards, own_cards
 from test_trade_promises import reserved, trade_picks
 from want_list_swap_fixtures import seed_swap_catalog
@@ -178,12 +180,12 @@ def test_send_refuses_each_shape_rule_in_order_before_anything_is_read_or_counte
     assert commands(misty) == 0
 
 
-def test_only_a_friend_can_be_sent_a_proposal(store):
+def test_a_send_by_user_id_is_refused_unless_the_two_are_friends(store):
     ids, ash, misty, binder, box = trading()
     (gary, _) = collector('Gary O.')
-    assert detail(propose(misty, gary, give=[(ids['PAL 185'], 1)])) == (409, {'code': 'NOT_FRIENDS'})
+    assert detail(propose(misty, gary, give=[(ids['PAL 185'], 1)])) == (409, {'code': 'COLLECTOR_UNAVAILABLE'})
     block(ash, misty)
-    assert detail(propose(misty, ash, give=[(ids['PAL 185'], 1)])) == (409, {'code': 'NOT_FRIENDS'})
+    assert detail(propose(misty, ash, give=[(ids['PAL 185'], 1)])) == (409, {'code': 'COLLECTOR_UNAVAILABLE'})
     with connect() as conn:
         assert conn.execute('SELECT count(*) AS n FROM trade WHERE proposer_id=%s', (misty,)).fetchone()['n'] == 0
 
@@ -363,6 +365,7 @@ def test_the_friend_sees_the_proposal_from_their_side_and_a_stranger_gets_not_fo
         'recipient', 'proposed', 'answer', True, 'needs_you', ['accept', 'decline', 'counter'])
     assert sides(seen) == ([(arven, '1')], [(iono, '2')])
     assert seen['other'] == {'collector_id': misty, 'display_name': 'Misty W.', 'handle': handle_of(misty),
+                             'trader_id': trader_of(misty), 'friend': True, 'available': True,
                              'open_to_cash_offers': False, 'completed_trades': 0}
     listed = ok(call('GET', '/api/social/trades', ash))
     assert [item['id'] for item in listed['trades']] == [trade['id'], older['id']] and listed['needs_you'] == 2
@@ -454,6 +457,7 @@ def test_a_deleted_counterparty_keeps_their_name_with_no_id_or_handle(store):
     with connect() as conn:
         conn.execute('DELETE FROM inventory_owner WHERE user_id=%s', (ash,))
     assert ok(read(misty, trade))['other'] == {'collector_id': None, 'display_name': 'Ash K.', 'handle': None,
+                                               'trader_id': None, 'friend': False, 'available': False,
                                                'open_to_cash_offers': False, 'completed_trades': None}
     # Withdrawing still releases the copies; nobody is left to tell.
     ok(trade_step(misty, trade, 'withdraw'))
@@ -526,12 +530,12 @@ def test_cash_alongside_cards_and_a_gift_plus_cash_need_no_open_to_cash_offers(s
         assert proposed(misty, ash, cash=cash, **cards)['cash'] == cash
 
 
-def test_a_stranger_is_refused_as_not_friends_even_when_open_and_sent_only_cash(store):
+def test_a_stranger_sent_only_cash_by_user_id_is_refused_as_unavailable(store):
     ids, ash, misty, binder, box = trading()
     (gary, _) = collector('Gary O.')
     trade_settings(gary, True)
     response = propose(misty, gary, get=[(ids['SVI 166'], 1)], cash={'cents': '500', 'payer': 'you'})
-    assert detail(response) == (409, {'code': 'NOT_FRIENDS'})
+    assert detail(response) == (409, {'code': 'COLLECTOR_UNAVAILABLE'})
 
 
 def test_cash_is_kept_through_withdraw_and_confirm_swap_moves_only_the_cards(store):
@@ -630,6 +634,8 @@ def _without_command_lock(conn, user_id, key, payload):
 def test_two_sends_of_the_same_copies_run_one_after_the_other(store, monkeypatch, command_lock):
     if not command_lock:
         monkeypatch.setattr(trade_inventory, 'begin_trade_command', _without_command_lock)
+        # The send's new-conversation advisory lock would also serialise the two; only the owner row is left to test.
+        monkeypatch.setattr(trade_inventory, 'new_conversation_lock', lambda conn, user_id: None)
     ids, ash, misty, binder, box = trading()
     iono = ids['PAL 185']
     (brock, _) = collector('Brock S.')
@@ -848,15 +854,17 @@ def test_only_the_recipient_answers_and_only_an_accepted_trade_nobody_confirmed_
     assert detail(accept_trade(ash, closed)) == refused
 
 
-def test_accept_is_refused_once_the_friendship_is_gone_and_changes_nothing(store):
+def test_accept_is_refused_across_a_block_and_changes_nothing(store):
     ids, ash, misty, binder, box = trading()
     iono, arven = ids['PAL 185'], ids['SVI 166']
     trade = proposed(misty, ash, give=[(iono, 1)], get=[(arven, 1)])
     before = revision_of(ash)
-    # Unfriending will close the pair's Trades first (#274), so the friendship goes by SQL to reach the check.
+    # Unfriending or an API Block would close the pair's Trades first (#274), so both go by SQL to reach the check; the
+    # pair's conversation keeps the reach rule true until the Block.
     with connect() as conn:
         conn.execute('DELETE FROM friendship WHERE user_low=%s AND user_high=%s', tuple(sorted([ash, misty])))
-    assert detail(accept_trade(ash, trade)) == (409, {'code': 'NOT_FRIENDS'})
+        conn.execute('INSERT INTO block (blocker_id, blocked_id) VALUES (%s, %s)', (misty, ash))
+    assert detail(accept_trade(ash, trade)) == (409, {'code': 'COLLECTOR_UNAVAILABLE'})
     assert row_of(trade)['state'] == 'proposed' and trade_picks(trade['id']) == [('proposer', misty, binder, 1)]
     assert reserved(ash, arven) == (0, 0) and revision_of(ash) == before and updates(trade) == []
     assert commands(ash) == 0
@@ -1174,7 +1182,8 @@ def test_a_counter_is_the_recipients_on_the_revision_they_read_and_only_while_pr
     last = proposed(misty, ash, give=[(iono, 1)], get=[(arven, 1)])
     with connect() as conn:
         conn.execute('DELETE FROM friendship WHERE user_low=%s AND user_high=%s', tuple(sorted([ash, misty])))
-    assert detail(counter(ash, last, **asked)) == (409, {'code': 'NOT_FRIENDS'})
+        conn.execute('INSERT INTO block (blocker_id, blocked_id) VALUES (%s, %s)', (misty, ash))
+    assert detail(counter(ash, last, **asked)) == (409, {'code': 'COLLECTOR_UNAVAILABLE'})
     assert row_of(last)['state'] == 'proposed' and trade_picks(last['id']) == [('proposer', misty, binder, 1)]
 
 
@@ -1248,3 +1257,167 @@ def test_a_counter_and_a_withdraw_of_one_proposal_run_one_after_the_other(store,
         assert row_of(original)['closed_reason'] == 'withdrawn' and counters_of(original) == []
         assert reserved(misty, iono) == (0, 0) and reserved(ash, arven) == (0, 0)
         assert (revision_of(misty), revision_of(ash)) == (before[0] + 1, before[1])
+
+
+# Strangers in reach (Trading #299): collectors who are not Friends but are both in open discovery nearby, or share a
+# conversation. They are addressed by trader id; a send by user id still needs a Friend.
+
+
+def the_pair_has_nothing(a, b):
+    """No Trade of either and no conversation between the two."""
+    with connect() as conn:
+        low, high = sorted((a, b))
+        return (conn.execute('SELECT count(*) AS n FROM trade WHERE (proposer_id=%s AND recipient_id=%s) '
+                             'OR (proposer_id=%s AND recipient_id=%s)', (a, b, b, a)).fetchone()['n'] == 0
+                and conn.execute('SELECT count(*) AS n FROM conversation WHERE user_low=%s AND user_high=%s',
+                                 (low, high)).fetchone()['n'] == 0)
+
+
+def suspended(user, value=True):
+    with connect() as conn:
+        conn.execute('UPDATE collector_profile SET suspended_at = CASE WHEN %s THEN now() END WHERE user_id = %s',
+                     (value, user))
+
+
+def test_nearby_strangers_send_counter_and_accept_with_caps_on_the_strangers_list(store):
+    ids, ash, misty, binder, box = strangers()
+    iono, arven = ids['PAL 185'], ids['SVI 166']
+    assert detail(propose_to(misty, trader_of(ash), get=[(arven, 3)])) == (
+        409, {'code': 'NOT_TRADEABLE', 'edition_id': arven, 'available': '2', 'side': 'you_get'})
+    trade = ok(propose_to(misty, trader_of(ash), give=[(iono, 1)], get=[(arven, 1)]), 201)
+    assert trade['other'] == {'collector_id': None, 'handle': None, 'trader_id': trader_of(ash),
+                              'display_name': 'Ash K.', 'open_to_cash_offers': False, 'friend': False,
+                              'available': True, 'completed_trades': 0}
+    assert trade['conversation_id'] is not None
+    seen = ok(read(ash, trade))
+    assert detail(counter(ash, seen, give=[(arven, 1)], get=[(iono, 4)])) == (
+        409, {'code': 'NOT_TRADEABLE', 'edition_id': iono, 'available': '3', 'side': 'you_get'})
+    answer = countered(ash, seen, give=[(arven, 1)], get=[(iono, 2)])
+    assert answer['other']['friend'] is False and answer['other']['collector_id'] is None
+    mine = ok(read(misty, answer))
+    assert ok(accept_trade(misty, mine))['state'] == 'accepted'
+
+
+def test_contact_steps_outside_reach_are_collector_unavailable(store):
+    ids, ash, misty, binder, box = strangers()
+    iono, arven = ids['PAL 185'], ids['SVI 166']
+    give = [(iono, 1)]
+    both = {'recipient_id': ash, 'recipient_trader_id': trader_of(ash), 'you_give': lines(give), 'you_get': [],
+            'idempotency_key': str(uuid4())}
+    neither = {'you_give': lines(give), 'you_get': [], 'idempotency_key': str(uuid4())}
+    for body in (both, neither):
+        assert detail(call('POST', '/api/trades', misty, body)) == (422, {'code': 'RECIPIENT_REQUIRED'})
+    assert commands(misty) == 0
+
+    def other(name):
+        (user, _) = collector(name)
+        return user
+
+    off = other('Off O.')
+    discoverable(off, '00011')
+    ok(call('PUT', '/api/social/discovery', off, {'enabled': False}))
+    far = other('Far F.')
+    far_zip()
+    discoverable(far, '00019')
+    blocked_me, i_blocked, gone = other('Blocker B.'), other('Blocked B.'), other('Gone G.')
+    for user in (blocked_me, i_blocked, gone):
+        discoverable(user, '00011')
+    block(blocked_me, misty)
+    block(misty, i_blocked)
+    suspended(gone)
+    for user in (off, far, blocked_me, i_blocked, gone):
+        assert detail(propose_to(misty, trader_of(user), give=give)) == (409, {'code': 'COLLECTOR_UNAVAILABLE'}), user
+        assert the_pair_has_nothing(misty, user), user
+    for trader in (str(uuid4()), trader_of(misty)):
+        assert detail(propose_to(misty, trader, give=give)) == (409, {'code': 'COLLECTOR_UNAVAILABLE'}), trader
+    assert commands(misty) == 0
+    suspended(misty)
+    assert detail(propose_to(misty, str(uuid4()), give=give)) == (403, {'code': 'ACCOUNT_SUSPENDED'})
+    assert detail(propose_to(misty, trader_of(ash), give=give)) == (403, {'code': 'ACCOUNT_SUSPENDED'})
+    suspended(misty, False)
+    # Accept and Counter on a stranger's proposal.
+    trade = ok(propose_to(misty, trader_of(ash), give=give, get=[(arven, 1)]), 201)
+    asked = dict(give=[(arven, 1)], get=[(iono, 1)])
+    before = row_of(trade)
+    suspended(ash)
+    assert detail(accept_trade(ash, trade)) == (403, {'code': 'ACCOUNT_SUSPENDED'})
+    assert detail(counter(ash, trade, **asked)) == (403, {'code': 'ACCOUNT_SUSPENDED'})
+    suspended(ash, False)
+    suspended(misty)
+    assert detail(accept_trade(ash, trade)) == (409, {'code': 'COLLECTOR_UNAVAILABLE'})
+    assert detail(counter(ash, trade, **asked)) == (409, {'code': 'COLLECTOR_UNAVAILABLE'})
+    assert row_of(trade) == before
+
+
+def test_counter_and_accept_still_work_after_discovery_is_switched_off(store):
+    ids, ash, misty, binder, box = strangers()
+    iono, arven = ids['PAL 185'], ids['SVI 166']
+    trade = ok(propose_to(misty, trader_of(ash), give=[(iono, 1)], get=[(arven, 1)]), 201)
+    ok(call('PUT', '/api/social/discovery', misty, {'enabled': False}))
+    answer = countered(ash, ok(read(ash, trade)), give=[(arven, 1)], get=[(iono, 2)])
+    ok(call('PUT', '/api/social/discovery', ash, {'enabled': False}))
+    accepted = ok(accept_trade(misty, ok(read(misty, answer))))
+    assert accepted['state'] == 'accepted' and accepted['other']['available'] is True
+
+
+def test_cash_only_not_open_applies_to_strangers(store):
+    ids, ash, misty, binder, box = strangers()
+    cash = {'cents': '500', 'payer': 'you'}
+    assert detail(propose_to(misty, trader_of(ash), get=[(ids['SVI 166'], 1)], cash=cash)) == (
+        409, {'code': 'CASH_ONLY_NOT_OPEN', 'side': 'you_give'})
+    trade_settings(ash, True)
+    ok(propose_to(misty, trader_of(ash), get=[(ids['SVI 166'], 1)], cash=cash), 201)
+
+
+def test_a_send_by_user_id_is_refused_when_the_friendship_ends_between_resolution_and_the_locks(store):
+    ids, ash, misty, binder, box = trading()
+    iono = ids['PAL 185']
+    first = proposed(misty, ash, give=[(iono, 1)])
+    ok(trade_step(misty, first, 'withdraw'))
+    with psycopg.connect(os.environ['DATABASE_URL']) as holder, \
+            psycopg.connect(os.environ['DATABASE_URL'], autocommit=True) as watch, \
+            ThreadPoolExecutor(max_workers=1) as executor:
+        holder.execute('SELECT 1 FROM inventory_owner WHERE user_id = %s FOR UPDATE', (ash,))
+        sending = executor.submit(propose, misty, ash, [(iono, 1)])
+        _waiting_on_a_row(watch, [sending])
+        holder.execute('DELETE FROM friendship WHERE user_low = %s AND user_high = %s', tuple(sorted([ash, misty])))
+        holder.commit()
+        refused = sending.result()
+    assert detail(refused) == (409, {'code': 'COLLECTOR_UNAVAILABLE'})
+    with connect() as conn:
+        assert conn.execute('SELECT count(*) AS n FROM trade WHERE proposer_id=%s', (misty,)).fetchone()['n'] == 1
+    # The pair's conversation still lets a send by trader id through.
+    assert ok(propose_to(misty, trader_of(ash), give=[(iono, 1)]), 201)['other']['available'] is True
+
+
+def test_ex_friends_with_a_conversation_still_send_and_accept(store):
+    ids, ash, misty, binder, box = trading()
+    iono = ids['PAL 185']
+    proposed(misty, ash, give=[(iono, 1)])
+    ok(call('POST', f'/api/social/friends/{misty}/remove', ash, {'idempotency_key': str(uuid4())}))
+    assert detail(propose(misty, ash, give=[(iono, 1)])) == (409, {'code': 'COLLECTOR_UNAVAILABLE'})
+    trade = ok(propose_to(misty, trader_of(ash), give=[(iono, 1)]), 201)
+    assert (trade['other']['friend'], trade['other']['collector_id'], trade['other']['available']) == (False, None, True)
+    assert ok(accept_trade(ash, ok(read(ash, trade))))['state'] == 'accepted'
+
+
+def test_a_closed_trade_whose_pair_has_no_conversation_still_opens(store):
+    ids, ash, misty, binder, box = trading()
+    trade = proposed(misty, ash, give=[(ids['PAL 185'], 1)])
+    ok(trade_step(misty, trade, 'withdraw'))
+    with connect() as conn:
+        conn.execute('DELETE FROM conversation WHERE id = %s', (trade['conversation_id'],))
+    assert ok(read(misty, trade))['conversation_id'] is None
+    assert trade['id'] in [item['id'] for item in ok(call('GET', '/api/social/trades', misty))['trades']]
+
+
+def test_a_stored_send_from_before_the_party_fields_replays(store):
+    ids, ash, misty, binder, box = trading()
+    key = uuid4()
+    first = ok(propose_to(misty, trader_of(ash), give=[(ids['PAL 185'], 1)], key=key), 201)
+    with connect() as conn:
+        conn.execute("UPDATE location_command SET response = response #- '{other,trader_id}' #- '{other,friend}' "
+                     "#- '{other,available}' WHERE owner_id = %s AND request_key = %s", (misty, key))
+    again = ok(propose_to(misty, trader_of(ash), give=[(ids['PAL 185'], 1)], key=key), 201)
+    assert again['id'] == first['id']
+    assert (again['other']['trader_id'], again['other']['friend'], again['other']['available']) == (None, False, False)
