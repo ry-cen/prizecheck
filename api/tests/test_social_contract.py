@@ -123,7 +123,10 @@ ALLOWED_IMPORTS = {
         # Ending a friendship cancels the pair's Loans nobody has confirmed a handover for (#260), then their Trades
         # nobody has confirmed the swap for (trading #274), inside the command that already locked both owners; the
         # Loan and Trade rows are written in app.social.loans and app.social.trades, never here.
-        ('.loans', 'end_loans_between'), ('.trades', 'end_trades_between')},
+        ('.loans', 'end_loans_between'), ('.trades', 'end_trades_between'),
+        # Block for strangers (trading #302): the trader routes resolve a trader id, and a Block or Unblock moves the
+        # pair's conversation watermark.
+        ('.conversations', 'pair_changed'), ('.discovery', 'trader_user')},
     # The Loans both sides read and the steps that change no inventory (#252). Card facts are catalog facts; the owner
     # lock and the command plumbing are the Friend commands'. Steps that touch a collector's own inventory are in
     # app.loan_inventory, outside this area.
@@ -692,7 +695,7 @@ def test_deck_switches_stay_in_the_confirmers_own_trade_reads():
 NO_USER_ID = {'NearbyMatchRow', 'CardHolder', 'TraderView', 'TraderTradeList', 'TraderMatchRow', 'ConversationParty',
               'BlockedCollector'}
 NO_TRADER_ID = {'Collector', 'CollectorLookup', 'InviteCollector', 'FriendsView'}
-NOT_YET = {'NearbyMatchRow', 'CardHolder', 'BlockedCollector'}
+NOT_YET = {'NearbyMatchRow', 'CardHolder'}
 
 
 def reachable_properties(components: dict, name: str) -> set[str]:

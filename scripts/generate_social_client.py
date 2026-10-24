@@ -43,7 +43,8 @@ for name in ("Collector", "CollectorLookup", "InviteCollector", "FriendsView", "
              "SetDiscovery", "ConversationParty", "Message", "TimelineItem", "ConversationView", "LastMessage",
              "NearbyMatchRow", "NearbyMatches", "CardHolder", "TradeCardSearch",
              "ConversationSummary", "ConversationsView", "ConversationPulse", "SendMessage", "ReadThrough",
-             "TraderView", "TraderTradeList", "TraderMatchRow"):
+             "TraderView", "TraderTradeList", "TraderMatchRow",
+             "BlockedCollector"):
     definition = schema[name]
     fields = [f"{field}{'' if field in definition.get('required', []) else '?'}: {ts_type(value)}"
               for field, value in definition["properties"].items()]
@@ -97,6 +98,13 @@ export const getBlocked = () => request<BlockedList>('/api/social/blocks', 'GET'
 export const blockCollector = (body: BlockCollector) => request<FriendCommandResult>('/api/social/blocks', 'POST', body);
 export const unblockCollector = (id: string, body: FriendCommand) =>
   request<FriendCommandResult>(`/api/social/blocks/${at(id)}/unblock`, 'POST', body);
+// Block for strangers (trading #302): Block and Unblock by trader id, and Unblock from Settings › Privacy by block id.
+export const blockTrader = (traderId: string, body: FriendCommand) =>
+  request<FriendCommandResult>(`/api/social/traders/${at(traderId)}/block`, 'POST', body);
+export const unblockTrader = (traderId: string, body: FriendCommand) =>
+  request<FriendCommandResult>(`/api/social/traders/${at(traderId)}/unblock`, 'POST', body);
+export const unblockById = (blockId: string, body: FriendCommand) =>
+  request<FriendCommandResult>(`/api/social/blocked/${at(blockId)}/unblock`, 'POST', body);
 // A Friend's Collection (#250): one page of the cards they could lend now, found by their Handle among your Friends.
 export const getFriendCollection = (handle: string,
   params: { show?: 'wanted' | 'all'; q?: string; printings?: Printings; page?: number }, signal?: AbortSignal) =>

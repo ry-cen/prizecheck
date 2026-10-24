@@ -32,6 +32,13 @@ lookup of the blocker's Handle, their read of the blocker's Invite Link and thei
 find nobody, through the same statement and the same answer as for a collector who doesn't exist, so a Block can't be
 told from an unknown Handle. The blocker sees the collector they blocked, with Unblock. Unblocking is in Settings ›
 Privacy (``GET /api/social/blocks``) and on a lookup. When both have blocked each other, each finds nobody.
+
+Block for strangers (Trading #302): every Block row has a ``block_id``, a ``via`` (``collector`` from the user-id
+route, ``trader`` from the trader routes and Report) and a ``handle_shown`` (whether the blocker already knew the
+Handle). The Blocked list shows the Handle only when it was shown and the trader id only for a trader Block. The
+user-id and trader unblock routes each lift only their own kind and otherwise answer as if no Block stood, so neither
+ties a user id to a trader id. The ``block_id`` route lifts either kind. A Block or Unblock moves the pair's
+conversation watermark.
 """
 import json
 from typing import Literal
@@ -44,6 +51,8 @@ from ..location_tree import error, replay
 from ..main import connect, verified_user
 from ..publications import TOKEN
 from . import name_rules
+from .conversations import pair_changed
+from .discovery import trader_user
 from .loans import end_loans_between
 from .owners import ensure_owner, lock_owners
 from .profile import token_hash
@@ -105,9 +114,18 @@ class BlockCollector(BaseModel):
     idempotency_key: UUID
 
 
+class BlockedCollector(BaseModel):
+    """One Block in Settings › Privacy: ``block_id`` addresses Unblock. ``handle`` is set only when the blocker already
+    knew it (``block.handle_shown``), ``trader_id`` only for a Block made by trader id. No user id."""
+    block_id: UUID
+    display_name: str
+    handle: str | None
+    trader_id: UUID | None
+
+
 class BlockedList(BaseModel):
-    """Settings › Privacy: the collectors the signed-in collector blocked, by name."""
-    blocked: list[Collector]
+    """Settings › Privacy: the signed-in collector's Blocks, by name; no user id."""
+    blocked: list[BlockedCollector]
 
 
 class FriendCommandResult(BaseModel):
@@ -382,12 +400,13 @@ def remove_friend(collector_id: str, command: FriendCommand, user_id: str = Depe
 @router.get('/blocks', response_model=BlockedList)
 def blocks(user_id: str = Depends(verified_user)):
     with connect() as conn:
-        rows = conn.execute("""SELECT p.user_id AS collector_id, p.handle, p.handle_key, p.display_name
-          FROM block b JOIN collector_profile p ON p.user_id = b.blocked_id WHERE b.blocker_id=%s""",
+        rows = conn.execute("""SELECT b.id AS block_id, b.via, b.handle_shown, p.handle, p.display_name, p.trader_id
+          FROM block b JOIN collector_profile p ON p.user_id = b.blocked_id WHERE b.blocker_id = %s""",
                             (user_id,)).fetchall()
-    rows.sort(key=lambda r: (r['display_name'].casefold(), r['handle_key']))
-    return BlockedList(blocked=[Collector(collector_id=r['collector_id'], handle=r['handle'],
-                                          display_name=r['display_name']) for r in rows])
+    rows.sort(key=lambda r: (r['display_name'].casefold(), str(r['block_id'])))
+    return BlockedList(blocked=[BlockedCollector(
+        block_id=r['block_id'], display_name=r['display_name'], handle=r['handle'] if r['handle_shown'] else None,
+        trader_id=r['trader_id'] if r['via'] == 'trader' else None) for r in rows])
 
 
 @router.post('/blocks', response_model=FriendCommandResult)
@@ -397,22 +416,138 @@ def block(command: BlockCollector, user_id: str = Depends(verified_user)):
     other = command.collector_id
 
     def apply(conn, row):
-        friendship_ended(conn, user_id, other)
-        conn.execute('DELETE FROM friendship WHERE user_low=%s AND user_high=%s', _pair(user_id, other))
-        conn.execute('INSERT INTO block(blocker_id,blocked_id) VALUES (%s,%s) ON CONFLICT DO NOTHING', (user_id, other))
+        place_block(conn, user_id, other, 'collector')
         return 'blocked'
     return _command(user_id, other, command.idempotency_key, 'block', apply, blocked_you_ok=True)
 
 
 @router.post('/blocks/{collector_id}/unblock', response_model=FriendCommandResult)
 def unblock(collector_id: str, command: FriendCommand, user_id: str = Depends(verified_user)):
-    """Unblock a collector the caller blocked. Nothing else comes back: they are not Friends again."""
+    """Unblock a collector the caller blocked. Nothing else comes back: they are not Friends again. It lifts only a
+    Block made by user id; asked about one made by trader id it changes nothing and answers as if there were none."""
     def apply(conn, row):
-        lifted = conn.execute('DELETE FROM block WHERE blocker_id=%s AND blocked_id=%s RETURNING 1',
-                              (user_id, collector_id)).fetchone()
-        if lifted:  # the decliner lifting a Block ends the wait they set; nothing else does
-            conn.execute('DELETE FROM friend_request_declined WHERE sender_id=%s AND recipient_id=%s',
-                         (collector_id, user_id))
-        after = find_collector(conn, user_id, 'collector', collector_id)
-        return 'none' if after is None else relation(user_id, after)
+        _lift_block(conn, user_id, collector_id, via='collector')
+        return _unblock_answer(conn, user_id, collector_id)
     return _command(user_id, collector_id, command.idempotency_key, 'unblock', apply, blocked_you_ok=True)
+
+
+def _handle_known(conn, blocker: str, other: str) -> bool:
+    """Whether the blocker already knew the other's Handle: Friends, a request they received, or a request they sent
+    that was not made from a Trade. Read before the Block deletes the friendship, with both owners locked."""
+    row = conn.execute('SELECT state, requested_by, via_trade FROM friendship WHERE user_low=%s AND user_high=%s',
+                       _pair(blocker, other)).fetchone()
+    if row is None:
+        return False
+    if row['state'] == 'accepted' or row['requested_by'] != blocker:
+        return True
+    return not row['via_trade']
+
+
+def place_block(conn, user_id: str, other: str, via: Literal['collector', 'trader']) -> None:
+    """The one Block apply for every path (the user-id route, the trader routes and Report), run with both owners
+    locked: Stage 1's effects first, then the row. A repeat leaves the first Block standing (its id, kind and
+    ``handle_shown`` unchanged) and moves nothing."""
+    shown = _handle_known(conn, user_id, other)
+    friendship_ended(conn, user_id, other)
+    conn.execute('DELETE FROM friendship WHERE user_low=%s AND user_high=%s', _pair(user_id, other))
+    placed = conn.execute(
+        'INSERT INTO block(blocker_id,blocked_id,via,handle_shown) VALUES (%s,%s,%s,%s) '
+        'ON CONFLICT (blocker_id, blocked_id) DO NOTHING RETURNING id', (user_id, other, via, shown)).fetchone()
+    if placed:
+        pair_changed(conn, user_id, other)
+
+
+def _lift_block(conn, user_id: str, other: str, *, via: str | None = None, block_id: UUID | None = None) -> bool:
+    """Lifts the caller's Block of ``other``, of kind ``via`` or with id ``block_id`` (exactly one is given). A lift
+    ends the wait the caller set as decliner and moves the pair's watermark. Returns whether a row was deleted."""
+    if block_id is None:
+        lifted = conn.execute('DELETE FROM block WHERE blocker_id=%s AND blocked_id=%s AND via=%s RETURNING 1',
+                              (user_id, other, via)).fetchone()
+    else:
+        lifted = conn.execute('DELETE FROM block WHERE blocker_id=%s AND blocked_id=%s AND id=%s RETURNING 1',
+                              (user_id, other, block_id)).fetchone()
+    if lifted:  # the decliner lifting a Block ends the wait they set; nothing else does
+        conn.execute('DELETE FROM friend_request_declined WHERE sender_id=%s AND recipient_id=%s', (other, user_id))
+        pair_changed(conn, user_id, other)
+    return lifted is not None
+
+
+def _unblock_answer(conn, user_id: str, other: str) -> str:
+    """How the pair stands after an Unblock route lifted (or failed to lift) its own kind. A Block of the other kind
+    that still stands answers as if there were none, so no route confirms that a user id and a trader id are the
+    same collector."""
+    after = find_collector(conn, user_id, 'collector', other)
+    return 'none' if after is None else relation(user_id, {**after, 'blocked': False})
+
+
+def _trader_answer(conn, user_id: str, other: str) -> str:
+    """``_unblock_answer`` for the trader route: a pending Friend Request is answered as none, since it is tied to a
+    Handle the caller knows and would let them test Near you rows."""
+    answer = _unblock_answer(conn, user_id, other)
+    return 'none' if answer in ('request_sent', 'request_received') else answer
+
+
+def _trader(trader_id: UUID) -> str:
+    with connect() as conn:
+        other = trader_user(conn, trader_id)
+    if other is None:
+        error(404, 'COLLECTOR_NOT_FOUND')
+    return other
+
+
+@router.post('/traders/{trader_id}/block', response_model=FriendCommandResult)
+def block_trader(trader_id: UUID, command: FriendCommand, user_id: str = Depends(verified_user)):
+    """Block the collector with this trader id, whatever the reach. An unknown trader id is 404 COLLECTOR_NOT_FOUND,
+    the caller's own is 409 OWN_ACCOUNT. The blocked collector isn't told."""
+    other = _trader(trader_id)
+
+    def apply(conn, row):
+        place_block(conn, user_id, other, 'trader')
+        return 'blocked'
+    return _command(user_id, other, command.idempotency_key, 'block_trader', apply, blocked_you_ok=True)
+
+
+@router.post('/traders/{trader_id}/unblock', response_model=FriendCommandResult)
+def unblock_trader(trader_id: UUID, command: FriendCommand, user_id: str = Depends(verified_user)):
+    """Unblock the collector with this trader id. It lifts only a Block made by trader id; asked about one made by
+    user id it changes nothing and answers as if there were none. A pending Friend Request is answered as none."""
+    other = _trader(trader_id)
+
+    def apply(conn, row):
+        _lift_block(conn, user_id, other, via='trader')
+        return _trader_answer(conn, user_id, other)
+    return _command(user_id, other, command.idempotency_key, 'unblock_trader', apply, blocked_you_ok=True)
+
+
+def _unblock_by_id(user_id: str, block_id: UUID, key: UUID) -> FriendCommandResult:
+    """``_command``'s skeleton with the replay before the resolve: the Block row is gone after a success, and a retry
+    must replay rather than 404."""
+    payload = {'action': 'unblock_block', 'block_id': str(block_id)}
+    missing = False
+    with connect() as conn, conn.transaction():
+        ensure_owner(conn, user_id)
+        conn.execute("SELECT pg_advisory_xact_lock(hashtext('prizecheck.friend_command:' || %s))", (user_id,))
+        digest, stored = replay(conn, user_id, key, payload)
+        if stored is None:
+            _count_command(conn, user_id)
+            found = conn.execute('SELECT blocked_id FROM block WHERE id=%s AND blocker_id=%s',
+                                 (block_id, user_id)).fetchone()
+            if found is not None:
+                lock_owners(conn, user_id, found['blocked_id'])
+            if found is None or not _lift_block(conn, user_id, found['blocked_id'], block_id=block_id):
+                missing = True  # answered after the commit, so the command stays counted
+            else:
+                stored = FriendCommandResult(
+                    relation=_unblock_answer(conn, user_id, found['blocked_id'])).model_dump(mode='json')
+                conn.execute('INSERT INTO location_command(owner_id,request_key,request_digest,response) '
+                             'VALUES (%s,%s,%s,%s)', (user_id, key, digest, json.dumps(stored)))
+    if missing:
+        error(404, 'BLOCK_NOT_FOUND')
+    return stored
+
+
+@router.post('/blocked/{block_id}/unblock', response_model=FriendCommandResult)
+def unblock_by_id(block_id: UUID, command: FriendCommand, user_id: str = Depends(verified_user)):
+    """Unblock from Settings › Privacy: lifts any Block the caller placed, of either kind. An unknown id, or someone
+    else's, is 404 BLOCK_NOT_FOUND. A retry with the same key replays."""
+    return _unblock_by_id(user_id, block_id, command.idempotency_key)

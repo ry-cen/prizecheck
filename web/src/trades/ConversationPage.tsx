@@ -47,6 +47,7 @@ import {
   UNAVAILABLE_NOTE,
   youBlocked,
 } from "./conversationMessages";
+import { ConversationMenu, focusMenuTrigger } from "./ConversationMenu";
 import { useMessagePrefill } from "./messagePrefill";
 import { TradeCardLink } from "./TradeCardLink";
 import {
@@ -57,6 +58,7 @@ import {
   traderTradeListPath,
 } from "./tradeListModel";
 import { traderMeta } from "./traderMessages";
+import { useTraderBlock } from "./TraderBlock";
 
 /** Which conversation to show: the one with a collector (by trader id), or one by its id. */
 export type ConversationTarget =
@@ -95,6 +97,7 @@ function itemKey(item: TimelineItem): string {
  * message opens it. Messages are plain text. The newest page is read again when the pulse's watermark moves, after a
  * send, and after a Friend command that may have cancelled Trades; it is marked read through its newest item while the
  * page is visible. **Show earlier** adds the next older page. The page asks the shell for the fast pulse while mounted.
+ * The header's ⋯ menu offers Block (Trading #302) unless the reader already blocked them.
  */
 export function ConversationPage({
   target,
@@ -118,6 +121,22 @@ export function ConversationPage({
   const key = useRef(crypto.randomUUID());
   const lastRead = useRef<string | null>(null);
   const area = useRef<HTMLTextAreaElement>(null);
+  const heading = useRef<HTMLHeadingElement>(null);
+  const menuAnchor = useRef<HTMLDivElement>(null);
+  const shown = load.kind === "ready" ? load.view : null;
+  const block = useTraderBlock(
+    shown && shown.status !== "you_blocked" && shown.other.trader_id
+      ? {
+          traderId: shown.other.trader_id,
+          name: shown.other.display_name,
+          handle: shown.other.friend ? shown.other.handle : null,
+        }
+      : null,
+    {
+      onBlocked: () => heading.current?.focus(),
+      returnFocus: () => focusMenuTrigger(menuAnchor),
+    }
+  );
   const traderId = "traderId" in target ? target.traderId : null;
   const conversationId =
     "conversationId" in target ? target.conversationId : "";
@@ -337,10 +356,25 @@ export function ConversationPage({
     }
   };
 
+  const menuItems = block.item ? [block.item] : [];
+
   return (
     <main className={FRAME}>
       {back}
-      <PageHeader title={name} />
+      <PageHeader
+        title={name}
+        headingRef={heading}
+        actions={
+          menuItems.length > 0 ? (
+            <ConversationMenu
+              name={name}
+              items={menuItems}
+              anchor={menuAnchor}
+            />
+          ) : undefined
+        }
+      />
+      {block.panel}
       {record !== null && (
         <p className="m-0 text-meta text-text-muted">{record}</p>
       )}

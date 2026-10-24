@@ -22,9 +22,14 @@ export function tradesEnding(
   trades: readonly TradeView[],
   collectorId: string
 ): Omit<FriendshipEnding, "loans"> {
-  const theirs = trades.filter(
-    (trade) => trade.other.collector_id === collectorId
+  return countEnding(
+    trades.filter((trade) => trade.other.collector_id === collectorId)
   );
+}
+
+function countEnding(
+  theirs: readonly TradeView[]
+): Omit<FriendshipEnding, "loans"> {
   const accepted = theirs.filter((trade) => trade.state === "accepted");
   return {
     proposals: theirs.filter((trade) => trade.state === "proposed").length,
@@ -34,6 +39,31 @@ export function tradesEnding(
     staying: accepted.filter(
       (trade) => trade.you_confirmed_swap !== trade.they_confirmed_swap
     ).length,
+  };
+}
+
+/**
+ * What a Block would end with one collector known by trader id, for a Block outside the Friends drawer (a
+ * conversation, a Near you row). Trades are matched by trader id. Loans exist only between Friends, so they count only
+ * when `handle` (a Friend's) is given, matched to the Loans list by Handle, ignoring case.
+ */
+export function traderEnding(
+  loans: readonly LoanView[] | null,
+  trades: readonly TradeView[],
+  traderId: string,
+  handle: string | null
+): FriendshipEnding {
+  const wanted = handle?.toLowerCase() ?? null;
+  const loan =
+    loans && wanted !== null
+      ? loans.find((item) => item.other.handle?.toLowerCase() === wanted)
+      : undefined;
+  const collectorId = loan?.other.collector_id ?? null;
+  return {
+    loans: collectorId === null ? 0 : loansEnding(loans ?? [], collectorId),
+    ...countEnding(
+      trades.filter((trade) => trade.other.trader_id === traderId)
+    ),
   };
 }
 
