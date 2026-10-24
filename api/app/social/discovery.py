@@ -18,7 +18,9 @@ through the conversation, whatever the switch says).
 This module also holds the Python side of the reach rule (``reach``, ``reach_one``: one call to the SQL function
 ``trade_reach``, migration 148), the helpers that go with it (``trader_user``, ``require_not_suspended``) and the
 distance bands. Callers call ``reach`` or ``reach_one`` after their own locks; none of these takes a lock or writes. This
-module and ``friend_copies`` (the choke point) are the only ones whose SQL calls the reach function.
+module and ``friend_copies`` (the choke point) are the only ones whose SQL calls the reach function. ``nearby`` (Near you
+and card search, #300) is the one Python call of the nearby-candidates function, and ``search_setting`` is the status and
+radius those reads need.
 
 Limit: a counted zip change is a change from one stored zip to a different one (a first zip is free), and a collector
 may make 3 of them in a rolling 24 hours. Counted changes are ``handle_lookup_event`` rows of kind ``zip_change``,
@@ -106,6 +108,48 @@ def require_not_suspended(conn, user_id: str) -> None:
         error(403, 'ACCOUNT_SUSPENDED')
 
 
+# The radius filters by band edges (spec "Radius"), so 25 keeps bands 1 to 3 and nobody beyond 50 mi is ever a candidate.
+MAX_BAND: dict[int, int] = {5: 1, 10: 2, 25: 3, 50: 4}
+NEARBY = 'SELECT other_id, band FROM nearby_collectors(%(viewer)s, %(max_band)s::smallint, %(rows)s)'
+SETTING = """SELECT p.suspended_at IS NOT NULL AS suspended, d.enabled, d.zip, d.radius_mi,
+    d.removed_at IS NOT NULL AS removed
+  FROM collector_profile p LEFT JOIN discovery_setting d ON d.user_id = p.user_id
+  WHERE p.user_id = %s"""
+
+
+@dataclass(frozen=True)
+class SearchSetting:
+    """The status and radius a Near you or card search read needs: the caller's own setting, nothing about anyone else."""
+    status: DiscoveryStatus
+    radius_mi: Radius
+
+
+def status_of(row) -> DiscoveryStatus:
+    """The status ladder: suspended before removed before on, else off (no row, no profile, no setting is off)."""
+    if row and row['suspended']:
+        return 'suspended'
+    if row and row['removed']:
+        return 'removed'
+    if row and row['enabled']:
+        return 'on'
+    return 'off'
+
+
+def search_setting(conn, user_id: str) -> SearchSetting:
+    """The caller's status and radius (25 with no setting row). Takes no lock, writes nothing, and skips the zip-change
+    count and ``visible_beyond_friends``."""
+    row = conn.execute(SETTING, (user_id,)).fetchone()
+    return SearchSetting(status=status_of(row), radius_mi=row['radius_mi'] if row and row['radius_mi'] else 25)
+
+
+def nearby(conn, viewer: str, radius: Radius, limit: int) -> dict[str, Band]:
+    """The collectors in open discovery within ``radius`` (by band), never Friends or anyone blocked either way, at most
+    ``limit``, as ``{user id: band}`` in the SQL's order (band, then the per-viewer hash). The cut inside a band is that
+    hash, so it never ranks by distance. Empty when the viewer is not in open discovery. One statement, no lock."""
+    rows = conn.execute(NEARBY, {'viewer': viewer, 'max_band': MAX_BAND[radius], 'rows': limit}).fetchall()
+    return {row['other_id']: BANDS[row['band']] for row in rows}
+
+
 class DiscoverySettings(BaseModel):
     """The caller's own Open discovery setting: its status, their zip code, the radius they search, the zip changes they
     have left in the last 24 hours and whether collectors who are not their Friends can see them."""
@@ -125,20 +169,10 @@ class SetDiscovery(BaseModel):
 
 def read_discovery(conn, user_id: str) -> DiscoverySettings:
     """The caller's setting as ``DiscoverySettings``. Writes nothing."""
-    row = conn.execute("""SELECT p.suspended_at IS NOT NULL AS suspended, d.enabled, d.zip, d.radius_mi,
-        d.removed_at IS NOT NULL AS removed
-      FROM collector_profile p LEFT JOIN discovery_setting d ON d.user_id = p.user_id
-      WHERE p.user_id = %s""", (user_id,)).fetchone()
+    row = conn.execute(SETTING, (user_id,)).fetchone()
     used = conn.execute("""SELECT count(*) AS used FROM handle_lookup_event
       WHERE user_id=%s AND kind='zip_change' AND created_at >= now() - interval '24 hours'""", (user_id,)).fetchone()
-    if row and row['suspended']:
-        status = 'suspended'
-    elif row and row['removed']:
-        status = 'removed'
-    elif row and row['enabled']:
-        status = 'on'
-    else:
-        status = 'off'
+    status = status_of(row)
     return DiscoverySettings(
         status=status, zip=row['zip'] if row else None, radius_mi=row['radius_mi'] if row and row['radius_mi'] else 25,
         zip_changes_left=max(0, ZIP_CHANGES_PER_DAY - used['used']),
