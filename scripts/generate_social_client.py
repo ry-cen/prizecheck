@@ -2,7 +2,7 @@
 #250 and #251, Loans, #252 and #253, Borrowed Copies, #254, Returns, #255, Write-off, #257, the inbox, #259, and a
 Friend's Trade List, trading #269, Trades as both sides read them, trading #270, declining and cancelling one,
 trading #271, the inbox's Trade lines, trading #273, and Find trades and Ask to trade, trading #276, and Open to cash
-offers, trading #277, and Open discovery, trading #297) from the API OpenAPI schema."""
+offers, trading #277, Open discovery, trading #297, and Conversations, trading #298) from the API OpenAPI schema."""
 import json
 import sys
 from pathlib import Path
@@ -40,7 +40,8 @@ for name in ("Collector", "CollectorLookup", "InviteCollector", "FriendsView", "
              "FriendTradeList", "TradeParty", "TradeCard", "TradeCash", "TradeView", "TradesView", "TradeStep",
              "InboxTradeWaiting", "InboxTradeUpdate", "TradeMatchCard", "TradeMatchRow", "TradeMatches",
              "TradeCardOffer", "TradeCardMatches", "TradeSettings", "SetTradeSettings", "DiscoverySettings",
-             "SetDiscovery"):
+             "SetDiscovery", "ConversationParty", "Message", "TimelineItem", "ConversationView", "LastMessage",
+             "ConversationSummary", "ConversationsView", "ConversationPulse", "SendMessage", "ReadThrough"):
     definition = schema[name]
     fields = [f"{field}{'' if field in definition.get('required', []) else '?'}: {ts_type(value)}"
               for field, value in definition["properties"].items()]
@@ -201,6 +202,28 @@ export const setTradeSettings = (body: SetTradeSettings) =>
 export const getDiscovery = (signal?: AbortSignal) =>
   request<DiscoverySettings>('/api/social/discovery', 'GET', undefined, signal);
 export const setDiscovery = (body: SetDiscovery) => request<DiscoverySettings>('/api/social/discovery', 'PUT', body);
+// Conversations (trading #298): the list, one conversation by id or by the other's trader id, messages, the read marker,
+// archive, and the pulse the shell polls.
+export const getConversations = (params: { archived?: boolean; before?: string | null }, signal?: AbortSignal) =>
+  request<ConversationsView>(
+    `/api/social/conversations${query({ archived: params.archived ? 'true' : undefined, before: params.before })}`,
+    'GET', undefined, signal);
+export const getConversationPulse = (signal?: AbortSignal) =>
+  request<ConversationPulse>('/api/social/conversations/pulse', 'GET', undefined, signal);
+export const getConversation = (id: string, params: { before?: string | null }, signal?: AbortSignal) =>
+  request<ConversationView>(`/api/social/conversations/${at(id)}${query(params)}`, 'GET', undefined, signal);
+export const getTraderConversation = (traderId: string, params: { before?: string | null }, signal?: AbortSignal) =>
+  request<ConversationView>(`/api/social/conversations/with/${at(traderId)}${query(params)}`, 'GET', undefined, signal);
+export const sendMessage = (id: string, body: SendMessage) =>
+  request<Message>(`/api/social/conversations/${at(id)}/messages`, 'POST', body);
+export const sendTraderMessage = (traderId: string, body: SendMessage) =>
+  request<Message>(`/api/social/traders/${at(traderId)}/messages`, 'POST', body);
+export const readConversation = (id: string, body: ReadThrough) =>
+  request<ConversationSummary>(`/api/social/conversations/${at(id)}/read`, 'POST', body);
+export const archiveConversation = (id: string) =>
+  request<ConversationSummary>(`/api/social/conversations/${at(id)}/archive`, 'POST');
+export const unarchiveConversation = (id: string) =>
+  request<ConversationSummary>(`/api/social/conversations/${at(id)}/unarchive`, 'POST');
 """)
 content = "\n".join(lines)
 target = root / "web/src/social_generated.ts"

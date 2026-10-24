@@ -1,4 +1,4 @@
-import type { FriendTradeCard } from "../social_generated";
+import type { ConversationSummary, FriendTradeCard } from "../social_generated";
 import type {
   OwnTradeList,
   TradeListCard,
@@ -18,7 +18,7 @@ export const TRADES_VIEWS: readonly SegmentedOption<TradesTabView>[] = [
   { value: "list", label: "My Trade List" },
 ];
 
-/** The Trades list's address: the Trades tab itself. */
+/** The Trades list's address: the Trades tab itself, which shows the conversation list (Trading #298). */
 export const TRADES_PATH = "/trades";
 
 /** Find trades' address (#276): Friends who have cards you want, or want cards you have. */
@@ -29,6 +29,30 @@ export const TRADE_LIST_PATH = "/trades/list";
 
 /** The section name before a Friend's Handle in a proposal builder's address. */
 export const TRADE_NEW_SEGMENT = "new";
+
+/** The section name before a trader id in a conversation's address (Trading #298). */
+export const TRADE_WITH_SEGMENT = "with";
+
+/** The section name before a conversation id in a conversation's address. */
+export const TRADE_CONVERSATION_SEGMENT = "conversation";
+
+/** The conversation with one collector, by trader id (Trading #298): /trades/with/<trader id>. */
+export function traderConversationPath(traderId: string): string {
+  return `${TRADES_PATH}/${TRADE_WITH_SEGMENT}/${encodeURIComponent(traderId)}`;
+}
+
+/** One conversation by its id: /trades/conversation/<conversation id>. It exists because a conversation whose other
+ * side is deleted has no trader id, and because a Trade knows only the conversation's id. */
+export function conversationPath(id: string): string {
+  return `${TRADES_PATH}/${TRADE_CONVERSATION_SEGMENT}/${encodeURIComponent(id)}`;
+}
+
+/** Where a conversation list row goes: by trader id when the other side has one, else by conversation id. */
+export function conversationHref(summary: ConversationSummary): string {
+  return summary.other.trader_id
+    ? traderConversationPath(summary.other.trader_id)
+    : conversationPath(summary.id);
+}
 
 /** The address of one of the Trades tab's views. */
 export function tradesViewPath(view: TradesTabView): string {
@@ -60,11 +84,13 @@ export function proposalPath(handle: string): string {
   return `${TRADES_PATH}/${TRADE_NEW_SEGMENT}/${encodeURIComponent(handle)}`;
 }
 
-/** What the Trades tab shows for its address's section (``sectionAt``): a view, a Friend's proposal builder, the
- * Counter builder for one Trade (#278), or one Trade by id. */
+/** What the Trades tab shows for its address's section (``sectionAt``): a view, a Friend's proposal builder, a
+ * conversation by trader id or by its id (#298), the Counter builder for one Trade (#278), or one Trade by id. */
 export type TradesRoute =
   | { kind: "view"; view: TradesTabView }
   | { kind: "new"; handle: string }
+  | { kind: "with"; traderId: string }
+  | { kind: "conversation"; id: string }
   | { kind: "counter"; id: string }
   | { kind: "trade"; id: string }
   | { kind: "missing" };
@@ -81,6 +107,18 @@ export function tradesRoute(section: string | null): TradesRoute {
         kind: "new",
         handle: decodeURIComponent(section.slice(TRADE_NEW_SEGMENT.length + 1)),
       };
+    } catch {
+      return { kind: "missing" };
+    }
+  }
+  for (const segment of [TRADE_WITH_SEGMENT, TRADE_CONVERSATION_SEGMENT]) {
+    if (!section.startsWith(`${segment}/`)) continue;
+    try {
+      const value = decodeURIComponent(section.slice(segment.length + 1));
+      if (!UUID.test(value)) return { kind: "missing" };
+      return segment === TRADE_WITH_SEGMENT
+        ? { kind: "with", traderId: value }
+        : { kind: "conversation", id: value };
     } catch {
       return { kind: "missing" };
     }

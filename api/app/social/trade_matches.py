@@ -62,6 +62,7 @@ from . import name_rules
 from .friend_copies import friend_trade_copies, friend_wants
 from .friend_reads import FRIEND_BY_HANDLE, PAGE_IDENTITIES, card_facts, search_key
 from .friends import friend_ids
+from .trades import completed_trades
 
 router = APIRouter(prefix='/api/social', tags=['social'])
 
@@ -82,10 +83,12 @@ class FriendTradeCard(BaseModel):
 
 
 class FriendTradeList(BaseModel):
-    """One page of a Friend's Trade List. ``collector_id`` addresses the Friend in commands and is never shown."""
+    """One page of a Friend's Trade List. ``collector_id`` addresses the Friend in commands and is never shown.
+    ``completed_trades``: the Friend's completed Trades (Trading #298), always a number for a Friend."""
     collector_id: str
     handle: str
     display_name: str
+    completed_trades: int | None
     cards: list[FriendTradeCard]
     next_page: int | None   # The next page's number, or null on the last page.
 
@@ -105,6 +108,7 @@ def friend_trade_list(handle: str, q: str = Query('', max_length=100), page: int
         copies = friend_trade_copies(conn, user_id, [friend['collector_id']])
         cards = card_facts(conn, [copy.edition_id for copy in copies])
         key = search_key(conn, q) if q.strip() else ''
+        done = completed_trades(conn, [friend['collector_id']]).get(friend['collector_id'], 0)
     # A query of only punctuation has no letters or digits to match: it finds no card, not every card.
     no_match = bool(q.strip()) and key == ''
     shown = [] if no_match else sorted(
@@ -121,7 +125,7 @@ def friend_trade_list(handle: str, q: str = Query('', max_length=100), page: int
 
     return FriendTradeList(
         collector_id=friend['collector_id'], handle=friend['handle'], display_name=friend['display_name'],
-        cards=[card(copy) for copy in shown if cards[copy.edition_id].identity_id in on_page],
+        completed_trades=done, cards=[card(copy) for copy in shown if cards[copy.edition_id].identity_id in on_page],
         next_page=page + 1 if len(identities) > (page + 1) * PAGE_IDENTITIES else None)
 
 
@@ -153,10 +157,12 @@ class TradeMatchCard(BaseModel):
 class TradeMatchRow(BaseModel):
     """One Friend's discovery row. ``collector_id`` addresses the Friend in commands and is never shown. ``match`` is
     null only on the per-Friend read, when nothing matches now. ``more_you_get`` and ``more_you_give``: the cards past
-    the ones carried, on each side (always 0 on the per-Friend read)."""
+    the ones carried, on each side (always 0 on the per-Friend read). ``completed_trades``: the Friend's completed Trades
+    (Trading #298), always a number for a Friend."""
     collector_id: str
     handle: str
     display_name: str
+    completed_trades: int | None
     open_to_cash_offers: bool
     match: MatchKind | None
     you_get: list[TradeMatchCard]
@@ -314,6 +320,7 @@ def discover(user_id: str, only: str | None = None) -> tuple[bool, list[TradeMat
             return False, []
         scope = sorted(friends)
         profiles = {row['collector_id']: row for row in conn.execute(FRIEND_PROFILES, (scope,))}
+        counts = completed_trades(conn, scope)
         wanted = set().union(*accepted.values())
         offered: dict[str, dict[UUID, int]] = {}
         for copy in friend_trade_copies(conn, user_id, scope, wanted) if wanted else ():
@@ -354,7 +361,8 @@ def discover(user_id: str, only: str | None = None) -> tuple[bool, list[TradeMat
                 else 'wants_what_you_have' if gives else None)
         rows.append(TradeMatchRow(
             collector_id=friend, handle=profile['handle'], display_name=profile['display_name'],
-            open_to_cash_offers=bool(profile['open_to_cash_offers']), match=kind,
+            open_to_cash_offers=bool(profile['open_to_cash_offers']), completed_trades=counts.get(friend, 0),
+            match=kind,
             you_get=[match_card(cards[item.edition_id], item,
                                 accepts_as(item.edition_id, mine, my_reach, printing_of)) for item in gets[:limit]],
             you_give=[match_card(cards[item.edition_id], item, None) for item in gives[:limit]],

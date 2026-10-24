@@ -20,6 +20,7 @@ import {
 import { Button } from "../ui/Button";
 import { Icon } from "../ui/Icon";
 import { Pill } from "../ui/Pill";
+import { trackRecord } from "./conversationMessages";
 import { friendTradeListPath, proposalPath } from "./tradeListModel";
 import {
   acceptsText,
@@ -229,6 +230,11 @@ function MatchRow({
               </span>
               {tag && <Pill tone="ok">{tag}</Pill>}
               {shown.open_to_cash_offers && <Pill>Open to cash offers</Pill>}
+              {trackRecord(shown.completed_trades) !== null && (
+                <span className="text-meta text-text-muted">
+                  {trackRecord(shown.completed_trades)}
+                </span>
+              )}
             </span>
             <span className="text-meta text-text-muted">
               {matchHeadline(shown)}

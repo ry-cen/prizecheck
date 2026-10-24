@@ -298,7 +298,10 @@ async function story(
   // Ash's own Trade List is empty and says how to fill it.
   await tradesTab(page).click();
   await expect(page).toHaveURL(`${ORIGIN}/trades`);
-  await expect(page.getByRole("main")).toContainText("No Trades yet.");
+  await expect(page.getByRole("main")).toContainText("No conversations yet.");
+  await expect(
+    page.getByRole("button", { name: "Archived conversations" })
+  ).toBeVisible();
   await page.getByRole("tab", { name: "My Trade List", exact: true }).click();
   await expect(page).toHaveURL(`${ORIGIN}/trades/list`);
   await expect(page.getByRole("main")).toContainText(

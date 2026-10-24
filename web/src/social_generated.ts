@@ -52,17 +52,17 @@ export type InboxWaiting = { id: string; kind: "borrow_request" | "lend_offer"; 
 export type InboxView = { waiting: InboxWaiting[]; updates: InboxUpdate[]; trade_waiting: InboxTradeWaiting[]; trade_updates: InboxTradeUpdate[] };
 export type InboxIds = { ids: string[] };
 export type FriendTradeCard = { edition_id: string; name: string; set_code: string; set_name: string; collector_number: string; descriptor: Record<string, unknown>; image_url: string | null; copies: string };
-export type FriendTradeList = { collector_id: string; handle: string; display_name: string; cards: FriendTradeCard[]; next_page: number | null };
-export type TradeParty = { collector_id: string | null; display_name: string; handle: string | null; open_to_cash_offers: boolean };
+export type FriendTradeList = { collector_id: string; handle: string; display_name: string; completed_trades: number | null; cards: FriendTradeCard[]; next_page: number | null };
+export type TradeParty = { collector_id: string | null; display_name: string; handle: string | null; open_to_cash_offers: boolean; completed_trades?: number | null };
 export type TradeCard = { edition_id: string; name: string; set_code: string; set_name: string; collector_number: string; descriptor: Record<string, unknown>; image_url: string | null; copies: string };
 export type TradeCash = { cents: string; payer: "you" | "them" };
-export type TradeView = { id: string; state: "proposed" | "accepted" | "closed"; closed_reason: "declined" | "withdrawn" | "countered" | "cancelled" | "swapped" | null; closed_by: "you" | "them" | null; role: "proposer" | "recipient"; other: TradeParty; countered_from: string | null; you_give: TradeCard[]; you_get: TradeCard[]; cash: TradeCash | null; you_confirmed_swap: boolean; they_confirmed_swap: boolean; needs_you: boolean; waiting: "answer" | "fix_picks" | "confirm_swap" | null; section: "needs_you" | "to_swap" | "pending" | "history"; actions: ("accept" | "decline" | "counter" | "confirm_swap" | "use_suggested_picks" | "withdraw" | "cancel")[]; revision: number; created_at: string };
+export type TradeView = { id: string; state: "proposed" | "accepted" | "closed"; closed_reason: "declined" | "withdrawn" | "countered" | "cancelled" | "swapped" | null; closed_by: "you" | "them" | null; role: "proposer" | "recipient"; other: TradeParty; countered_from: string | null; you_give: TradeCard[]; you_get: TradeCard[]; cash: TradeCash | null; you_confirmed_swap: boolean; they_confirmed_swap: boolean; needs_you: boolean; waiting: "answer" | "fix_picks" | "confirm_swap" | null; section: "needs_you" | "to_swap" | "pending" | "history"; actions: ("accept" | "decline" | "counter" | "confirm_swap" | "use_suggested_picks" | "withdraw" | "cancel")[]; revision: number; created_at: string; conversation_id?: string | null };
 export type TradesView = { trades: TradeView[]; needs_you: number };
 export type TradeStep = { revision: number; idempotency_key: string };
-export type InboxTradeWaiting = { id: string; state: "proposed" | "accepted" | "closed"; closed_reason: "declined" | "withdrawn" | "countered" | "cancelled" | "swapped" | null; closed_by: "you" | "them" | null; role: "proposer" | "recipient"; other: TradeParty; countered_from: string | null; you_give: TradeCard[]; you_get: TradeCard[]; cash: TradeCash | null; you_confirmed_swap: boolean; they_confirmed_swap: boolean; needs_you: boolean; waiting: "answer" | "fix_picks" | "confirm_swap" | null; section: "needs_you" | "to_swap" | "pending" | "history"; actions: ("accept" | "decline" | "counter" | "confirm_swap" | "use_suggested_picks" | "withdraw" | "cancel")[]; revision: number; created_at: string; since: string };
+export type InboxTradeWaiting = { id: string; state: "proposed" | "accepted" | "closed"; closed_reason: "declined" | "withdrawn" | "countered" | "cancelled" | "swapped" | null; closed_by: "you" | "them" | null; role: "proposer" | "recipient"; other: TradeParty; countered_from: string | null; you_give: TradeCard[]; you_get: TradeCard[]; cash: TradeCash | null; you_confirmed_swap: boolean; they_confirmed_swap: boolean; needs_you: boolean; waiting: "answer" | "fix_picks" | "confirm_swap" | null; section: "needs_you" | "to_swap" | "pending" | "history"; actions: ("accept" | "decline" | "counter" | "confirm_swap" | "use_suggested_picks" | "withdraw" | "cancel")[]; revision: number; created_at: string; conversation_id?: string | null; since: string };
 export type InboxTradeUpdate = { id: string; kind: "accepted" | "declined" | "cancelled" | "withdrawn" | "swapped"; trade_id: string; trade_state: "proposed" | "accepted" | "closed"; role: "proposer" | "recipient"; other_name: string; read: boolean; at: string };
 export type TradeMatchCard = { edition_id: string; name: string; set_code: string; set_name: string; collector_number: string; descriptor: Record<string, unknown>; image_url: string | null; copies: string; need: string; want_list_need: string; origin: "want_list" | "trade_wants" | "both"; accepts_as: "exact" | "any_finish" | "same_name" | null };
-export type TradeMatchRow = { collector_id: string; handle: string; display_name: string; open_to_cash_offers: boolean; match: "two_way" | "has_what_you_want" | "wants_what_you_have" | null; you_get: TradeMatchCard[]; you_give: TradeMatchCard[]; more_you_get: number; more_you_give: number };
+export type TradeMatchRow = { collector_id: string; handle: string; display_name: string; completed_trades: number | null; open_to_cash_offers: boolean; match: "two_way" | "has_what_you_want" | "wants_what_you_have" | null; you_get: TradeMatchCard[]; you_give: TradeMatchCard[]; more_you_get: number; more_you_give: number };
 export type TradeMatches = { has_friends: boolean; rows: TradeMatchRow[] };
 export type TradeCardOffer = { collector_id: string; handle: string; display_name: string; edition_id: string; name: string; set_code: string; set_name: string; collector_number: string; descriptor: Record<string, unknown>; image_url: string | null; copies: string };
 export type TradeCardMatches = { has_friends: boolean; offers: TradeCardOffer[] };
@@ -70,6 +70,16 @@ export type TradeSettings = { open_to_cash_offers: boolean };
 export type SetTradeSettings = { open_to_cash_offers: boolean };
 export type DiscoverySettings = { status: "off" | "on" | "removed" | "suspended"; zip: string | null; radius_mi: 5 | 10 | 25 | 50; zip_changes_left: number; visible_beyond_friends: boolean };
 export type SetDiscovery = { enabled?: boolean | null; zip?: string | null; radius_mi?: 5 | 10 | 25 | 50 | null };
+export type ConversationParty = { trader_id: string | null; display_name: string; friend: boolean; handle: string | null; band: "under_5" | "5_to_10" | "10_to_25" | "25_to_50" | null; completed_trades: number | null };
+export type Message = { id: string; from: "you" | "them"; body: string; at: string };
+export type TimelineItem = { kind: "message" | "trade"; at: string; cursor: string; message: Message | null; trade: TradeView | null };
+export type ConversationView = { id: string | null; other: ConversationParty; status: "open" | "you_blocked" | "unavailable"; can_message: boolean; can_propose: boolean; can_report: boolean; items: TimelineItem[]; next_before: string | null };
+export type LastMessage = { from: "you" | "them"; preview: string; at: string };
+export type ConversationSummary = { id: string; other: ConversationParty; status: "open" | "you_blocked" | "unavailable"; last_message: LastMessage | null; open_trades: number; waiting_on_you: number; unread: boolean; archived: boolean; last_activity_at: string };
+export type ConversationsView = { conversations: ConversationSummary[]; next_before: string | null };
+export type ConversationPulse = { unread_conversations: number; watermark: string };
+export type SendMessage = { body: string; idempotency_key: string };
+export type ReadThrough = { through: string };
 
 /** A refused social request: the API's code, and for TOO_MANY_LOOKUPS the detail that says when to try again. */
 export class SocialError extends Error {
@@ -226,3 +236,25 @@ export const setTradeSettings = (body: SetTradeSettings) =>
 export const getDiscovery = (signal?: AbortSignal) =>
   request<DiscoverySettings>('/api/social/discovery', 'GET', undefined, signal);
 export const setDiscovery = (body: SetDiscovery) => request<DiscoverySettings>('/api/social/discovery', 'PUT', body);
+// Conversations (trading #298): the list, one conversation by id or by the other's trader id, messages, the read marker,
+// archive, and the pulse the shell polls.
+export const getConversations = (params: { archived?: boolean; before?: string | null }, signal?: AbortSignal) =>
+  request<ConversationsView>(
+    `/api/social/conversations${query({ archived: params.archived ? 'true' : undefined, before: params.before })}`,
+    'GET', undefined, signal);
+export const getConversationPulse = (signal?: AbortSignal) =>
+  request<ConversationPulse>('/api/social/conversations/pulse', 'GET', undefined, signal);
+export const getConversation = (id: string, params: { before?: string | null }, signal?: AbortSignal) =>
+  request<ConversationView>(`/api/social/conversations/${at(id)}${query(params)}`, 'GET', undefined, signal);
+export const getTraderConversation = (traderId: string, params: { before?: string | null }, signal?: AbortSignal) =>
+  request<ConversationView>(`/api/social/conversations/with/${at(traderId)}${query(params)}`, 'GET', undefined, signal);
+export const sendMessage = (id: string, body: SendMessage) =>
+  request<Message>(`/api/social/conversations/${at(id)}/messages`, 'POST', body);
+export const sendTraderMessage = (traderId: string, body: SendMessage) =>
+  request<Message>(`/api/social/traders/${at(traderId)}/messages`, 'POST', body);
+export const readConversation = (id: string, body: ReadThrough) =>
+  request<ConversationSummary>(`/api/social/conversations/${at(id)}/read`, 'POST', body);
+export const archiveConversation = (id: string) =>
+  request<ConversationSummary>(`/api/social/conversations/${at(id)}/archive`, 'POST');
+export const unarchiveConversation = (id: string) =>
+  request<ConversationSummary>(`/api/social/conversations/${at(id)}/unarchive`, 'POST');

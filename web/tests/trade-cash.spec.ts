@@ -9,6 +9,7 @@ import { execFileSync } from "node:child_process";
 import { randomInt, randomUUID } from "node:crypto";
 import type { BrowserContextOptions, Locator, Page } from "@playwright/test";
 import { expect, test } from "./support/collectors";
+import { openConversation, timeline } from "./support/conversations";
 import { expectPageChecks } from "./support/page-check";
 import { signInAsOwner } from "./support/sign-in";
 
@@ -278,9 +279,8 @@ async function story(
   await expectPageChecks(page, `the Trade screen with cash at ${width}`);
 
   // 7: Ash sees a cash purchase from his side.
-  await ash.page.goto(`${ORIGIN}/trades`);
-  const row = ash.page
-    .getByRole("list", { name: "Needs you" })
+  await openConversation(ash.page, "Misty W");
+  const row = timeline(ash.page)
     .getByRole("listitem")
     .filter({ hasText: "Misty W would pay $15.00 for 2 cards" });
   await expect(row).toHaveCount(1);

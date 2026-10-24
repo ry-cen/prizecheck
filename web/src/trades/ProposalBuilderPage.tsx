@@ -66,7 +66,9 @@ import {
   type MineLoad,
   type TheirsLoad,
 } from "./ProposalLibrary";
+import { conversationLinkText } from "./conversationMessages";
 import {
+  conversationPath,
   friendTradeListPath,
   TRADE_FIND_PATH,
   tradePath,
@@ -567,7 +569,7 @@ export function ProposalBuilderPage({
     : fromTradeList
       ? friendTradeListPath(handle)
       : TRADE_FIND_PATH;
-  const back = (
+  const backLink = (
     <a href={backTo} onClick={go(backTo)} className={BACK}>
       <Icon icon={ChevronLeft} />
       {counter
@@ -576,6 +578,22 @@ export function ProposalBuilderPage({
           ? `${friend?.display_name ?? "Friend"}'s Trade List`
           : "Find trades"}
     </a>
+  );
+  // In counter mode, a Trade of a pair with a conversation links to it (Trading #298).
+  const conversationTo = counter?.conversation_id
+    ? conversationPath(counter.conversation_id)
+    : null;
+  const back = counter ? (
+    <div className="flex flex-wrap items-center gap-2">
+      {backLink}
+      {conversationTo && (
+        <a href={conversationTo} onClick={go(conversationTo)} className={BACK}>
+          {conversationLinkText(counter.other.display_name)}
+        </a>
+      )}
+    </div>
+  ) : (
+    backLink
   );
   const frameTitle = counter ? "Counter" : "Trade Proposal";
   const frame = (title: string, children: ReactNode) => (
