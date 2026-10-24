@@ -125,14 +125,15 @@ def seed_near_world(candidates: int, deck_holders: int, every_holds_first: bool)
 
 @pytest.fixture(autouse=True)
 def leave_no_collectors_behind():
-    """Takes the seeded collectors out again. The serial pass shares its database with the browser stack the gate runs
-    afterwards, and 1,500 leftover collectors in open discovery at zip 00010 fill the 500 Near you and 1,000 card search
-    candidates, so a Near you spec's two or three collectors fall outside the cut (``trade-near-you.spec.ts``). Deleting
-    the owners cascades to their profiles, discovery settings, Locations and Holdings."""
+    """Takes the seeded collectors out of open discovery again. The serial pass shares its database with the browser
+    stack the gate runs afterwards, and 1,500 leftover collectors in open discovery at zip 00010 fill the 500 Near you
+    and 1,000 card search candidates, so a Near you spec's two or three collectors fall outside the cut
+    (``trade-near-you.spec.ts``). Switching discovery off is one cheap update; deleting the owners cascaded through
+    every Holding and kept the database busy into the next serial test's timing window (``test_price_runner``)."""
     yield
     with connect() as conn:
-        conn.execute("DELETE FROM inventory_owner WHERE user_id LIKE 'nearcap-%'")
-        assert conn.execute("SELECT count(*) AS n FROM discovery_setting WHERE user_id LIKE 'nearcap-%'").fetchone()['n'] == 0
+        conn.execute("UPDATE discovery_setting SET enabled = false WHERE user_id LIKE 'nearcap-%' AND enabled")
+        assert conn.execute("SELECT count(*) AS n FROM open_discovery WHERE user_id LIKE 'nearcap-%'").fetchone()['n'] == 0
 
 
 def timed(read, check):
