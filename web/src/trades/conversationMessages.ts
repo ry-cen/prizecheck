@@ -1,4 +1,5 @@
 import { SocialError } from "../social_generated";
+import { newConversationLimit } from "./strangerMessages";
 
 // Conversations' collector-facing copy (Trading #298, Stage 2 spec "Conversations and messages"). Every string is the
 // owner's approved wording, kept here so a change touches this file and the specs alone.
@@ -100,6 +101,10 @@ export function messageError(cause: unknown): string | "reread" {
     case "COLLECTOR_UNAVAILABLE":
     case "CONVERSATION_NOT_FOUND":
       return "reread";
+    case "TOO_MANY_NEW_CONVERSATIONS":
+      return newConversationLimit(
+        cause instanceof SocialError ? cause.detail : {}
+      );
     default:
       return MESSAGE_FAILED;
   }

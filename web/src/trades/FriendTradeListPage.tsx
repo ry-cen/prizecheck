@@ -245,9 +245,11 @@ export function FriendTradeListPage({
 export function NameGroup({
   name,
   cards,
+  action,
 }: {
   name: string;
   cards: FriendTradeCard[];
+  action?: (card: FriendTradeCard) => ReactNode;
 }) {
   const headingId = useId();
   return (
@@ -265,7 +267,11 @@ export function NameGroup({
         {cards.map((card) => (
           <li
             key={card.edition_id}
-            className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-border px-4 py-3 last:border-b-0"
+            className={
+              action
+                ? "grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-3 border-b border-border px-4 py-3 last:border-b-0"
+                : "grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-b border-border px-4 py-3 last:border-b-0"
+            }
           >
             <span className="flex min-w-0 flex-col">
               <span className="text-body wrap-anywhere">{card.set_name}</span>
@@ -277,6 +283,7 @@ export function NameGroup({
             <span className="text-body font-semibold tabular-nums">
               ×{card.copies}
             </span>
+            {action?.(card)}
           </li>
         ))}
       </ul>

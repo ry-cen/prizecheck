@@ -10,6 +10,7 @@ import {
 } from "../social_generated";
 import { Button } from "../ui/Button";
 import { SearchField } from "../ui/SearchField";
+import { CardMessageButton } from "./CardMessageButton";
 import { UNAVAILABLE_NOTE } from "./conversationMessages";
 import { MatchSide } from "./FindTrades";
 import { NameGroup } from "./FriendTradeListPage";
@@ -42,7 +43,8 @@ const SEARCH_DELAY_MS = 300;
  * addressed by trader id. It shows what a Friend's Trade List page shows (the cards grouped by card name, search,
  * **Show more cards**) under a meta line of their band and track record, then the "You give" side of their match row:
  * the cards from the reader's own Trade List that they want. It never names a Handle, a Collection or a zip code, and
- * has no Message button (that is #301). A trader id that is unknown, the reader's own, or out of reach gets one plain
+ * each card has **Message**, which opens the conversation with this collector with a question about that card in the
+ * composer (Trading #301). A trader id that is unknown, the reader's own, or out of reach gets one plain
  * sentence, whatever the reason.
  *
  * **Propose trade** opens the proposal builder to this collector; its back link returns here.
@@ -201,7 +203,19 @@ export function TraderTradeListPage({
           className="flex min-w-0 flex-col gap-4"
         >
           {groupByName(cards).map((group) => (
-            <NameGroup key={group.name} name={group.name} cards={group.cards} />
+            <NameGroup
+              key={group.name}
+              name={group.name}
+              cards={group.cards}
+              action={(card) => (
+                <CardMessageButton
+                  traderId={traderId}
+                  name={name}
+                  card={card}
+                  onNavigate={onNavigate}
+                />
+              )}
+            />
           ))}
         </div>
       )}

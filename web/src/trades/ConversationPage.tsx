@@ -47,6 +47,7 @@ import {
   UNAVAILABLE_NOTE,
   youBlocked,
 } from "./conversationMessages";
+import { useMessagePrefill } from "./messagePrefill";
 import { TradeCardLink } from "./TradeCardLink";
 import {
   friendTradeListPath,
@@ -109,7 +110,8 @@ export function ConversationPage({
   const [load, setLoad] = useState<Load>({ kind: "loading" });
   const [attempt, setAttempt] = useState(0);
   const [earlier, setEarlier] = useState<"idle" | "loading" | "failed">("idle");
-  const [draft, setDraft] = useState("");
+  const prefill = useMessagePrefill();
+  const [draft, setDraft] = useState(prefill);
   const [sending, setSending] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [seen, setSeen] = useState(0);

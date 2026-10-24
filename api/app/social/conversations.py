@@ -7,9 +7,11 @@ are shown in it as cards (``trade.conversation_id``, ``TradeView.conversation_id
 (Trading #299, ``discovery.reach_one``): a member of a conversation always reads it, and a message opens the pair's
 conversation when none exists and the other collector is in reach (a Friend, or nearby in open discovery); a pair that
 already has one keeps using it after Remove Friend. The band shown is the reach rule's, while both are in open
-discovery. #301 adds the count of new conversations inside ``open_conversation``; the caller's ``new_conversation``
-advisory lock is already taken here, in the right place. Only this module (and the future reports module) names the
-``message`` and ``conversation_member`` tables (``test_social_contract``).
+discovery. ``open_conversation`` counts each conversation it creates (kind 'new_conversation', 10 per rolling 24
+hours), unless the other is a Friend or the pair has traded before. It checks in ``pg_locks`` that the caller holds
+``prizecheck.new_conversation:<user>``, which every step that may create a conversation takes before its owner locks.
+Only this module (and the future reports module) names the ``message`` and ``conversation_member`` tables
+(``test_social_contract``).
 
 **Routes.** ``GET /api/social/conversations`` (the list, ``archived`` and ``before``), ``GET .../pulse``, ``GET
 .../with/{trader_id}`` and ``GET .../{id}`` (a conversation and its newest page of items), ``POST .../{id}/messages``,
@@ -30,13 +32,16 @@ INVENTORY_TEMPORARILY_UNAVAILABLE, which the client retries with the same key. `
 that attaches a pair's earlier Trades, under both owner locks; the BEFORE INSERT trigger on ``trade`` never does.
 
 **Limits.** 120 messages an hour per account under kind 'message' (``count_message``), 429 MESSAGE_RATE_LIMITED with
-``retry_after_minutes``. A message is 1 to ``MESSAGE_LENGTH`` code points after ``normalize_text``.
+``retry_after_minutes``. 10 new conversations per rolling 24 hours per account under kind 'new_conversation'
+(``count_new_conversation``), 429 TOO_MANY_NEW_CONVERSATIONS with ``retry_after_minutes``. A message is 1 to
+``MESSAGE_LENGTH`` code points after ``normalize_text``.
 
 **Refusals**, after the body is normalised (422 EMPTY_MESSAGE, MESSAGE_TOO_LONG), in this order, on both send routes:
 404 CONVERSATION_NOT_FOUND (conversation route: unknown or not a member) or 409 COLLECTOR_UNAVAILABLE (trader route:
 unknown or own trader id); a replay answers 201 with the stored message (the key is ``(conversation, side, client
 key)``); 403 ACCOUNT_SUSPENDED (the sender is suspended); 409 COLLECTOR_UNAVAILABLE (the conversation is not open, or
-there is none and the other is not in reach); 429 MESSAGE_RATE_LIMITED.
+there is none and the other is not in reach); 429 MESSAGE_RATE_LIMITED; on the trader route, when the message opens
+the pair's conversation, 429 TOO_MANY_NEW_CONVERSATIONS.
 
 **Cursors** are unpadded URL-safe base64 of ``<iso time>|<kind>|<id>``: kind 'message' or 'trade' for the timeline
 and ``read``, 'conversation' for the list. A malformed one is 422 INVALID_CURSOR. ``read`` takes its boundary from the
@@ -70,6 +75,7 @@ router = APIRouter(prefix='/api/social/conversations', tags=['social'])
 traders_router = APIRouter(prefix='/api/social/traders', tags=['social'])
 
 MESSAGES_PER_HOUR = 120
+NEW_CONVERSATIONS_PER_DAY = 10
 PAGE = 50
 MESSAGE_LENGTH = 1000
 PREVIEW = 140
@@ -285,12 +291,43 @@ def count_message(conn, user_id: str) -> None:
     conn.execute("INSERT INTO handle_lookup_event(user_id,kind) VALUES (%s,'message')", (user_id,))
 
 
+def traded_before(conn, one: str, two: str) -> bool:
+    """The pair has a Trade both sides confirmed (both swap times set, whoever proposed it): 'traded with before'. One
+    confirmation does not count."""
+    return conn.execute("""SELECT EXISTS (SELECT 1 FROM trade WHERE proposer_swap_at IS NOT NULL
+      AND recipient_swap_at IS NOT NULL
+      AND ((proposer_id = %(a)s AND recipient_id = %(b)s) OR (proposer_id = %(b)s AND recipient_id = %(a)s))) AS found""",
+                        {'a': one, 'b': two}).fetchone()['found']
+
+
+def count_new_conversation(conn, user_id: str) -> None:
+    """Counts one new conversation against the daily limit: rows older than 24 hours pruned, and 429
+    TOO_MANY_NEW_CONVERSATIONS with ``retry_after_minutes`` at the limit. The caller holds the caller's
+    ``new_conversation`` lock (``open_conversation`` checks it). A refused step rolls back with its count."""
+    conn.execute("""DELETE FROM handle_lookup_event
+      WHERE user_id=%s AND kind='new_conversation' AND created_at < now() - interval '24 hours'""", (user_id,))
+    recent = conn.execute("""SELECT count(*) AS started, min(created_at) AS oldest FROM handle_lookup_event
+      WHERE user_id=%s AND kind='new_conversation'""", (user_id,)).fetchone()
+    if recent['started'] >= NEW_CONVERSATIONS_PER_DAY:
+        wait = conn.execute("SELECT ceil(extract(epoch FROM %s + interval '24 hours' - now()) / 60) AS wait",
+                            (recent['oldest'],)).fetchone()['wait']
+        raise HTTPException(429, {'code': 'TOO_MANY_NEW_CONVERSATIONS', 'retry_after_minutes': max(1, int(wait))})
+    conn.execute("INSERT INTO handle_lookup_event(user_id,kind) VALUES (%s,'new_conversation')", (user_id,))
+
+
 def open_conversation(conn, user_id: str, other_id: str, how: str) -> UUID:
     """Finds or creates the pair's conversation with both member rows (``pair_conversation``, migration 147), attaches
-    the pair's earlier Trades that have none, and returns its id. The caller holds the ``message`` and
-    ``new_conversation`` advisory locks and both owner locks: attaching Trades is safe only under them. ``how`` is the
-    reach branch that allowed contact ('friend', 'conversation' or 'near'); #301 counts a new conversation unless
-    ``how`` is 'friend' or the pair has a Trade both confirmed."""
+    the pair's earlier Trades that have none, and returns its id. The caller holds the ``message`` lock (trader route),
+    always the ``new_conversation`` advisory lock, then both owner locks: attaching Trades is safe only under them.
+    It raises ``RuntimeError`` when ``new_conversation`` is not held, and never takes it. ``how`` is the reach branch
+    that allowed contact ('friend', 'conversation' or 'near'). When it creates the row it counts one new conversation
+    (429 TOO_MANY_NEW_CONVERSATIONS at the limit), unless ``how`` is 'friend' or the pair has a Trade both confirmed.
+    "Creates" is read before ``pair_conversation``, which is exact under both owner locks: every inserter of the
+    pair's row holds one of them first, and no conversation row is ever deleted."""
+    if not new_conversation_lock_held(conn, user_id):
+        raise RuntimeError("open_conversation needs the caller's new_conversation lock")
+    if pair_row(conn, user_id, other_id) is None and how != 'friend' and not traded_before(conn, user_id, other_id):
+        count_new_conversation(conn, user_id)
     names = {row['user_id']: row['display_name'] for row in conn.execute(
         'SELECT user_id, display_name FROM collector_profile WHERE user_id = ANY(%s)', ([user_id, other_id],))}
     pair = conn.execute('SELECT pair_conversation(%s, %s, %s, %s) AS id',
@@ -531,6 +568,18 @@ def new_conversation_lock(conn, user_id: str) -> None:
     conn.execute("SELECT pg_advisory_xact_lock(hashtext('prizecheck.new_conversation:' || %s))", (user_id,))
 
 
+def new_conversation_lock_held(conn, user_id: str) -> bool:
+    """Whether this session holds the granted advisory lock on ``hashtext('prizecheck.new_conversation:' || user)``,
+    read from ``pg_locks``. The key is a sign-extended int4, so ``classid`` is the high half and ``objid`` the low half,
+    with ``objsubid`` 1. Takes no lock."""
+    return conn.execute("""WITH k AS (SELECT hashtext('prizecheck.new_conversation:' || %s)::bigint AS key)
+      SELECT EXISTS (SELECT 1 FROM pg_locks, k
+        WHERE pg_locks.locktype = 'advisory' AND pg_locks.pid = pg_backend_pid() AND pg_locks.granted
+          AND pg_locks.objsubid = 1 AND pg_locks.mode = 'ExclusiveLock'
+          AND pg_locks.classid = ((k.key >> 32) & 4294967295)::oid
+          AND pg_locks.objid = (k.key & 4294967295)::oid) AS held""", (user_id,)).fetchone()['held']
+
+
 def message_locks(conn, user_id: str, both: bool) -> None:
     conn.execute("SELECT pg_advisory_xact_lock(hashtext('prizecheck.message:' || %s))", (user_id,))
     if both:
@@ -572,8 +621,9 @@ def refuse_send(conn, user_id: str, standing: Standing, allowed: bool) -> None:
 def send_trader_message(trader_id: UUID, command: SendMessage, user_id: str = Depends(verified_user)):
     """Sends a message to the collector who has this trader id, in the pair's conversation, which it opens when there
     is none (the other must then be in reach). An unknown trader id, the reader's own, a conversation that is
-    not open, and a collector outside reach with no conversation are all 409 COLLECTOR_UNAVAILABLE. Locks both
-    owners."""
+    not open, and a collector outside reach with no conversation are all 409 COLLECTOR_UNAVAILABLE. After the hourly
+    limit (429 MESSAGE_RATE_LIMITED), a message that opens the conversation with a collector who is not a Friend is
+    counted: 429 TOO_MANY_NEW_CONVERSATIONS at 10 in 24 hours. Locks both owners."""
     body = normalize_text(command.body)
     try:
         with connect() as conn, conn.transaction():
