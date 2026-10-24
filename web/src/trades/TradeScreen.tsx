@@ -42,6 +42,7 @@ import { useToast } from "../ui/Toast";
 import { indexLocations } from "../workspace/locationTree";
 import { DeckSwitchOffers, useDeckSwitchOffers } from "./DeckSwitchOffers";
 import { offerSwitchUndo } from "./deckSwitchUndo";
+import { AddAsFriend, showsAddFriend } from "./AddAsFriend";
 import { LiabilityNotice } from "./LiabilityNotice";
 import { MeetInPublicTip } from "./MeetInPublicTip";
 import { valueLines } from "./proposalModel";
@@ -680,6 +681,13 @@ export function TradeScreen({
         </div>
       ) : (
         answers
+      )}
+      {showsAddFriend(trade) && (
+        <AddAsFriend
+          tradeId={trade.id}
+          traderId={trade.other.trader_id!}
+          name={name}
+        />
       )}
       <p role="alert" className="m-0 text-meta text-danger empty:hidden">
         {message}

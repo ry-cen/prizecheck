@@ -247,6 +247,12 @@ export const getTraderTradeList = (traderId: string, params: { q?: string; page?
   request<TraderTradeList>(`/api/social/traders/${at(traderId)}/trade-list${query(params)}`, 'GET', undefined, signal);
 export const getTraderMatch = (traderId: string, signal?: AbortSignal) =>
   request<TraderMatchRow>(`/api/social/traders/${at(traderId)}/matches`, 'GET', undefined, signal);
+// Add as Friend (trading #304): from a Trade both sides confirmed, by the Trade's id, so the other's user id never
+// reaches the web. Withdraw takes back the caller's own pending request to the Trade's other side.
+export const addFriendFromTrade = (tradeId: string, body: FriendCommand) =>
+  request<FriendCommandResult>(`/api/social/trades/${at(tradeId)}/add-friend`, 'POST', body);
+export const withdrawAddFriend = (tradeId: string, body: FriendCommand) =>
+  request<FriendCommandResult>(`/api/social/trades/${at(tradeId)}/add-friend/withdraw`, 'POST', body);
 """)
 content = "\n".join(lines)
 target = root / "web/src/social_generated.ts"
