@@ -43,6 +43,7 @@ import { indexLocations } from "../workspace/locationTree";
 import { DeckSwitchOffers, useDeckSwitchOffers } from "./DeckSwitchOffers";
 import { offerSwitchUndo } from "./deckSwitchUndo";
 import { LiabilityNotice } from "./LiabilityNotice";
+import { MeetInPublicTip } from "./MeetInPublicTip";
 import { valueLines } from "./proposalModel";
 import { conversationLinkText } from "./conversationMessages";
 import {
@@ -613,6 +614,7 @@ export function TradeScreen({
         </p>
       )}
       {note && <p className="m-0 text-body text-text-muted">{note}</p>}
+      <MeetInPublicTip trade={trade} />
       <div className="grid grid-cols-2 items-start gap-4 phone:grid-cols-1">
         <TradeSide
           title="You give"

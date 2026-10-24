@@ -301,12 +301,14 @@ def insert_proposal(conn, proposer_id: str, recipient_id: str, names: dict, give
 @router.post('', response_model=TradeView, status_code=201)
 def send_trade_proposal(command: SendTradeProposal, user_id: str = Depends(verified_user)):
     """Sends a Trade Proposal to a Friend (by ``recipient_id``) or to any collector in reach (by
-    ``recipient_trader_id``) and reserves the copies the sender gives. Refused before anything is read, in this order: 422 RECIPIENT_REQUIRED
-    (neither or both recipient fields), 409 OWN_ACCOUNT (the user id is the sender's), 422 INVALID_QUANTITY, 422
-    DUPLICATE_EDITION (one Edition twice on one side), 422 SAME_CARD_BOTH_SIDES, 422 TOO_MANY_LINES, 422
-    TRADE_HAS_NO_CARDS, 422 INVALID_CASH. Then, after the command begins (a replay answers here): 403 ACCOUNT_SUSPENDED
-    (the sender), 409 COLLECTOR_UNAVAILABLE (an unknown trader id, the sender's own, or a recipient outside reach; by
-    user id the recipient must be a Friend), checked once before the locks and again under them, 409 CASH_ONLY_NOT_OPEN
+    ``recipient_trader_id``) and reserves the copies the sender gives. Refused before anything is read, in this order:
+    422 RECIPIENT_REQUIRED (neither or both recipient fields), 409 OWN_ACCOUNT (the user id is the sender's), 422
+    INVALID_QUANTITY, 422 DUPLICATE_EDITION (one Edition twice on one side), 422 SAME_CARD_BOTH_SIDES, 422
+    TOO_MANY_LINES, 422 TRADE_HAS_NO_CARDS, 422 INVALID_CASH. Then, after the command begins (a replay answers here):
+    403 ACCOUNT_SUSPENDED (the sender), 409 COLLECTOR_UNAVAILABLE (an unknown trader id, the sender's own, or a
+    recipient outside reach; by user id the recipient must be a Friend), checked once before the locks and again under
+    them, 429 TOO_MANY_NEW_CONVERSATIONS (``retry_after_minutes``) when the send opens a conversation with a collector
+    who is not a Friend and the sender has started 10 in the last 24 hours, 409 CASH_ONLY_NOT_OPEN
     (``side``: the sender's side that gives no cards and pays, when the recipient isn't Open to cash offers), and 409
     NOT_TRADEABLE (``edition_id``, ``available`` and ``side``, 'you_give' or 'you_get') for the first line, the
     sender's lines first, that asks for more copies than are on that side's Trade List now. Locks both owners and

@@ -198,3 +198,19 @@ def test_near_you_and_card_search_carry_no_zip_coordinate_distance_handle_or_use
 def trade_printing(edition):
     with connect() as conn:
         return str(conn.execute('SELECT printing_id FROM catalog_edition WHERE id = %s', (edition,)).fetchone()['printing_id'])
+
+
+def test_a_refused_first_contact_names_only_its_code_and_wait(store):
+    ids, ash, misty, _, _ = strangers()
+    other, _ = collector('Brock S.')
+    discoverable(other, '00011')
+    with connect() as conn:
+        conn.execute("""INSERT INTO handle_lookup_event(user_id, kind, created_at)
+          SELECT %s, 'new_conversation', now() - interval '1 hour' FROM generate_series(1, 10)""", (ash,))
+    response = call('POST', f'/api/social/traders/{trader_of(other)}/messages', ash,
+                    {'body': 'Hi', 'idempotency_key': str(uuid4())})
+    assert response.status_code == 429, response.text
+    assert set(response.json()['detail']) == {'code', 'retry_after_minutes'}
+    assert response.json()['detail']['code'] == 'TOO_MANY_NEW_CONVERSATIONS'
+    for where, key, leaf in walk(response.json()):
+        assert key not in FORBIDDEN_KEYS | {'handle', 'user_id', 'collector_id'}, where

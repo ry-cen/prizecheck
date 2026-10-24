@@ -17,8 +17,9 @@ from fastapi import HTTPException
 from psycopg.rows import dict_row
 
 from app.main import connect  # noqa: F401  (main first: it includes every router while loading)
-from app.social import trades
+from app.social import conversations, trades
 from app.social.conversations import normalize_text
+from app.social.owners import lock_owners
 from test_catalog_references import migrate
 from test_catalog_targets import isolated_rules  # noqa: F401  (an autouse fixture)
 from test_deck_cost import launches, store  # noqa: F401  (autouse fixtures)
@@ -851,3 +852,389 @@ def test_a_nearby_stranger_opens_a_conversation_and_sees_a_band(store):
     discoverable(far, '00019')
     assert view_with(misty, trader_of(far)).status_code == 404
     assert say_to(misty, trader_of(far), 'Hello').status_code == 409
+
+
+# Counting new conversations (Trading #301)
+
+
+def new_counted(user, n, hours_ago=1):
+    """``n`` rows of kind 'new_conversation' for ``user``, made ``hours_ago`` hours ago."""
+    with connect() as conn:
+        conn.execute("""INSERT INTO handle_lookup_event(user_id, kind, created_at)
+          SELECT %s, 'new_conversation', now() - make_interval(hours => %s) FROM generate_series(1, %s)""",
+                     (user, hours_ago, n))
+
+
+def kind_count(user, kind):
+    with connect() as conn:
+        return conn.execute('SELECT count(*) AS n FROM handle_lookup_event WHERE user_id = %s AND kind = %s',
+                            (user, kind)).fetchone()['n']
+
+
+def new_conversations(user):
+    return kind_count(user, 'new_conversation')
+
+
+def pair_conversations(one, two):
+    with connect() as conn:
+        return conn.execute('SELECT count(*) AS n FROM conversation WHERE user_low = least(%s COLLATE "C", %s COLLATE "C") '
+                            'AND user_high = greatest(%s COLLATE "C", %s COLLATE "C")', (one, two, one, two)
+                            ).fetchone()['n']
+
+
+def messages_in(user):
+    """Messages in any conversation ``user`` is a side of."""
+    with connect() as conn:
+        return conn.execute("""SELECT count(*) AS n FROM message m JOIN conversation c ON c.id = m.conversation_id
+          WHERE c.user_low = %s OR c.user_high = %s""", (user, user)).fetchone()['n']
+
+
+def trades_of(user):
+    with connect() as conn:
+        return conn.execute('SELECT count(*) AS n FROM trade WHERE proposer_id = %s OR recipient_id = %s',
+                            (user, user)).fetchone()['n']
+
+
+def nearby(name):
+    """A third collector in reach of Ash and Misty (``strangers()`` has already seeded the zips)."""
+    (user, _) = collector(name)
+    discoverable(user, '00011')
+    return user
+
+
+def drop_conversation(one, two):
+    with connect() as conn:
+        conn.execute('UPDATE trade SET conversation_id = NULL WHERE (proposer_id = %s AND recipient_id = %s) '
+                     'OR (proposer_id = %s AND recipient_id = %s)', (one, two, two, one))
+        conn.execute('DELETE FROM conversation WHERE user_low = least(%s COLLATE "C", %s COLLATE "C") '
+                     'AND user_high = greatest(%s COLLATE "C", %s COLLATE "C")', (one, two, one, two))
+
+
+def waiters(watch, holder_pid):
+    """Sessions of this database (not ``watch`` and not the holder) that wait on a lock, as {pid: blocking pids}."""
+    rows = watch.execute("""SELECT pid, pg_blocking_pids(pid) AS by FROM pg_stat_activity
+      WHERE datname = current_database() AND pid NOT IN (pg_backend_pid(), %s)
+        AND cardinality(pg_blocking_pids(pid)) > 0""", (holder_pid,)).fetchall()
+    return {pid: by for pid, by in rows}
+
+
+def wait_until(watch, holder, submitted, enough):
+    """Polls ``waiters`` until ``enough(found)``; fails after 10 seconds or when a submitted call finished first."""
+    deadline = time.monotonic() + 10
+    while True:
+        found = waiters(watch, holder.info.backend_pid)
+        if enough(found):
+            return found
+        assert time.monotonic() < deadline and not any(call_.done() for call_ in submitted), \
+            f'the calls did not wait as expected: {found}'
+        time.sleep(0.01)
+
+
+def blocked_by_holder(holder):
+    return lambda found: any(holder.info.backend_pid in by for by in found.values())
+
+
+def two_waiters(holder):
+    return lambda found: blocked_by_holder(holder)(found) and len(found) >= 2
+
+
+def test_the_lock_check_reads_the_hashtext_key_whatever_its_sign(store):
+    key = "hashtext('prizecheck.new_conversation:' || %s)"
+    signs = {}
+    with connect() as conn:
+        for n in range(1000):
+            name = f'lock-{n}'
+            signs.setdefault(conn.execute(f'SELECT {key} < 0 AS negative', (name,)).fetchone()['negative'], name)
+            if len(signs) == 2:
+                break
+    assert set(signs) == {True, False}
+    for name in signs.values():
+        other = name + '-other'
+        with connect() as conn:
+            assert conversations.new_conversation_lock_held(conn, name) is False
+            conversations.message_locks(conn, name, both=False)
+            assert conversations.new_conversation_lock_held(conn, name) is False
+            conversations.new_conversation_lock(conn, name)
+            assert conversations.new_conversation_lock_held(conn, name) is True
+            assert conversations.new_conversation_lock_held(conn, other) is False
+            with psycopg.connect(os.environ['DATABASE_URL'], row_factory=dict_row) as second:
+                assert conversations.new_conversation_lock_held(second, name) is False
+        with connect() as conn:
+            conn.execute(f'SELECT pg_advisory_xact_lock_shared({key})', (name,))
+            assert conversations.new_conversation_lock_held(conn, name) is False
+
+
+def test_open_conversation_needs_the_callers_new_conversation_lock_and_never_takes_it(store):
+    ids, ash, misty, binder, box = strangers()
+    with psycopg.connect(os.environ['DATABASE_URL']) as holder:
+        holder.execute("SELECT pg_advisory_xact_lock(hashtext('prizecheck.new_conversation:' || %s))", (ash,))
+        with pytest.raises(RuntimeError), connect() as conn:
+            conn.execute("SET LOCAL lock_timeout = '2s'")
+            lock_owners(conn, ash, misty)
+            conversations.open_conversation(conn, ash, misty, 'near')
+        holder.commit()
+    with connect() as conn:
+        conversations.new_conversation_lock(conn, ash)
+        lock_owners(conn, ash, misty)
+        assert isinstance(conversations.open_conversation(conn, ash, misty, 'near'), UUID)
+    assert pair_conversations(ash, misty) == 1 and new_conversations(ash) == 1
+
+
+def test_the_eleventh_new_stranger_conversation_in_a_day_is_refused(store):
+    ids, ash, misty, binder, box = strangers()
+    brock = nearby('Brock S.')
+    new_counted(ash, 9, hours_ago=23)
+    ok(say_to(ash, trader_of(misty), 'Hi'), 201)
+    assert new_conversations(ash) == 10
+    messages, key = kind_count(ash, 'message'), uuid4()
+    status, body = detail(say_to(ash, trader_of(brock), 'Hi', key=key))
+    assert status == 429 and body['code'] == 'TOO_MANY_NEW_CONVERSATIONS' and set(body) == {'code', 'retry_after_minutes'}
+    assert 55 <= body['retry_after_minutes'] <= 60
+    assert pair_conversations(ash, brock) == 0 and messages_in(brock) == 0
+    assert kind_count(ash, 'message') == messages and new_conversations(ash) == 10
+    with connect() as conn:
+        conn.execute("""UPDATE handle_lookup_event SET created_at = now() - interval '25 hours'
+          WHERE user_id = %s AND kind = 'new_conversation'""", (ash,))
+    ok(say_to(ash, trader_of(brock), 'Hi', key=key), 201)
+    assert new_conversations(ash) == 1 and pair_conversations(ash, brock) == 1
+
+
+def test_a_first_contact_by_proposal_counts_and_a_refused_one_rolls_back(store):
+    ids, ash, misty, binder, box = strangers()
+    brock = nearby('Brock S.')
+    ok(propose_to(ash, trader_of(misty), give=[(ids['SVI 166'], 1)]), 201)
+    assert new_conversations(ash) == 1
+    new_counted(ash, 9)
+    commands, made = kind_count(ash, 'trade_command'), trades_of(ash)
+    status, body = detail(propose_to(ash, trader_of(brock), give=[(ids['SVI 166'], 1)]))
+    assert status == 429 and body['code'] == 'TOO_MANY_NEW_CONVERSATIONS'
+    assert pair_conversations(ash, brock) == 0
+    assert trades_of(ash) == made and kind_count(ash, 'trade_command') == commands and new_conversations(ash) == 10
+
+
+def test_only_the_step_that_opens_a_conversation_counts(store):
+    ids, ash, misty, binder, box = strangers()
+    conversation = start(ash, misty)
+    assert (new_conversations(ash), new_conversations(misty)) == (1, 0)
+    ok(say_to(misty, trader_of(ash), 'Reply'), 201)
+    ok(say(misty, conversation, 'Reply again'), 201)
+    ok(propose_to(misty, trader_of(ash), give=[(ids['PAL 185'], 1)]), 201)
+    ok(say_to(ash, trader_of(misty), 'Hello again'), 201)
+    assert (new_conversations(ash), new_conversations(misty)) == (1, 0)
+
+
+def test_friends_are_never_counted_even_at_the_limit(store):
+    ids, ash, misty, binder, box = trading()
+    new_counted(ash, 10)
+    new_counted(misty, 10)
+    # Misty proposes first, with no conversation open yet: her proposal opens it, uncounted.
+    ok(propose(misty, ash, [(ids['PAL 185'], 1)]), 201)
+    assert pair_conversations(ash, misty) == 1
+    ok(say_to(ash, trader_of(misty), 'Hi'), 201)
+    assert (new_conversations(ash), new_conversations(misty)) == (10, 10)
+
+
+def test_ex_friends_who_traded_open_a_conversation_uncounted_with_their_old_trades(store):
+    ash, misty = pair()
+    with connect() as conn:
+        done = swapped(conn, misty, ash)
+        half = swapped(conn, misty, ash, both=False)
+    ok(remove(ash, misty))
+    drop_conversation(ash, misty)
+    status, body = detail(say_to(ash, trader_of(misty), 'Hi'))
+    assert (status, body) == (409, {'code': 'COLLECTOR_UNAVAILABLE'})
+    assert new_conversations(ash) == 0 and pair_conversations(ash, misty) == 0
+    discoverable(ash, '00011')
+    discoverable(misty, '00010')
+    new_counted(ash, 10)
+    ok(say_to(ash, trader_of(misty), 'Hi'), 201)
+    assert new_conversations(ash) == 10
+    with connect() as conn:
+        [row] = conn.execute('SELECT id FROM conversation WHERE user_low = %s OR user_high = %s', (ash, ash)).fetchall()
+        for trade in (done, half):
+            assert conn.execute('SELECT conversation_id FROM trade WHERE id = %s', (trade,)).fetchone() \
+                == {'conversation_id': row['id']}
+
+
+def test_a_trade_with_one_confirmation_does_not_exempt_a_pair(store):
+    ids, ash, misty, binder, box = strangers()
+    with connect() as conn:
+        trade = swapped(conn, ash, misty, both=False)
+    drop_conversation(ash, misty)
+    new_counted(ash, 10)
+    for refused in (say_to(ash, trader_of(misty), 'Hi'),
+                    propose_to(ash, trader_of(misty), give=[(ids['SVI 166'], 1)])):
+        assert detail(refused)[0] == 429 and detail(refused)[1]['code'] == 'TOO_MANY_NEW_CONVERSATIONS'
+    with connect() as conn:
+        conn.execute('UPDATE trade SET recipient_swap_at = now() WHERE id = %s', (trade,))
+    ok(say_to(ash, trader_of(misty), 'Hi'), 201)
+    assert new_conversations(ash) == 10
+
+
+def test_a_sender_over_both_limits_on_the_trader_route_is_told_the_message_limit(store):
+    ids, ash, misty, binder, box = strangers()
+    new_counted(ash, 10)
+    with connect() as conn:
+        conn.execute("""INSERT INTO handle_lookup_event(user_id, kind, created_at)
+          SELECT %s, 'message', now() - interval '30 minutes' FROM generate_series(1, 120)""",
+                     (ash,))
+    status, body = detail(say_to(ash, trader_of(misty), 'Hi'))
+    assert status == 429 and body['code'] == 'MESSAGE_RATE_LIMITED'
+    assert pair_conversations(ash, misty) == 0 and new_conversations(ash) == 10
+
+
+def test_a_first_message_outside_reach_or_from_a_suspended_sender_counts_nothing(store):
+    ids, ash, misty, binder, box = strangers()
+    (far, _) = collector('Far F.')
+    far_zip()
+    discoverable(far, '00019')
+    assert detail(say_to(misty, trader_of(far), 'Hi')) == (409, {'code': 'COLLECTOR_UNAVAILABLE'})
+    assert new_conversations(misty) == 0 and kind_count(misty, 'message') == 0
+    with connect() as conn:
+        conn.execute('UPDATE collector_profile SET suspended_at = now() WHERE user_id = %s', (ash,))
+    assert detail(say_to(ash, trader_of(misty), 'Hi')) == (403, {'code': 'ACCOUNT_SUSPENDED'})
+    assert new_conversations(ash) == 0 and kind_count(ash, 'message') == 0
+
+
+def test_a_message_in_an_existing_conversation_locks_the_sender_only_and_lands_beside_a_suspension(store):
+    ids, ash, misty, binder, box = strangers()
+    conversation = start(ash, misty)
+    with psycopg.connect(os.environ['DATABASE_URL']) as holder, ThreadPoolExecutor(max_workers=1) as executor:
+        holder.execute('SELECT 1 FROM inventory_owner WHERE user_id = %s FOR UPDATE', (misty,))
+        holder.execute('UPDATE collector_profile SET suspended_at = now() WHERE user_id = %s', (misty,))
+        ok(executor.submit(say, ash, conversation, 'Still there?').result(timeout=10), 201)
+        holder.commit()
+    assert detail(say(ash, conversation, 'Hello?')) == (409, {'code': 'COLLECTOR_UNAVAILABLE'})
+
+
+def test_a_stranger_message_proposal_or_counter_brings_an_archived_conversation_back(store):
+    ids, ash, misty, binder, box = strangers()
+    conversation = start(ash, misty)
+
+    def back():
+        assert conversation in [str(row['id']) for row in listed(misty)['conversations']]
+        assert listed(misty, archived=True)['conversations'] == []
+
+    def proposal_and_counter():
+        sent = ok(propose_to(ash, trader_of(misty), give=[(ids['SVI 166'], 1)]), 201)
+        ok(archive(misty, conversation))
+        countered(misty, sent, give=[(ids['PAL 185'], 1)], get=[(ids['SVI 166'], 1)])
+
+    steps = (lambda: ok(say(ash, conversation, 'From Ash'), 201),
+             lambda: ok(say(misty, conversation, 'From Misty'), 201),
+             lambda: ok(propose_to(ash, trader_of(misty), give=[(ids['SVI 166'], 1)]), 201),
+             proposal_and_counter)
+    for step in steps:
+        ok(archive(misty, conversation))
+        assert listed(misty)['conversations'] == []
+        assert [str(row['id']) for row in listed(misty, archived=True)['conversations']] == [conversation]
+        step()
+        back()
+
+
+@pytest.mark.parametrize('first', ['contact', 'switch'])
+@pytest.mark.parametrize('switcher', ['sender', 'recipient'])
+@pytest.mark.parametrize('contact', ['message', 'proposal'])
+def test_a_switch_off_racing_a_first_contact_lets_the_first_to_lock_win(store, contact, switcher, first):
+    ids, ash, misty, binder, box = strangers()
+    switching = ash if switcher == 'sender' else misty
+
+    def make_contact():
+        if contact == 'message':
+            return say_to(ash, trader_of(misty), 'Hi')
+        return propose_to(ash, trader_of(misty), give=[(ids['SVI 166'], 1)])
+
+    def make_switch():
+        return call('PUT', '/api/social/discovery', switching, {'enabled': False})
+
+    makers = {'contact': make_contact, 'switch': make_switch}
+    later = 'switch' if first == 'contact' else 'contact'
+    with psycopg.connect(os.environ['DATABASE_URL']) as holder, \
+            psycopg.connect(os.environ['DATABASE_URL'], autocommit=True) as watch, \
+            ThreadPoolExecutor(max_workers=2) as executor:
+        holder.execute('SELECT 1 FROM inventory_owner WHERE user_id = %s FOR UPDATE', (switching,))
+        submitted = {first: executor.submit(makers[first])}
+        wait_until(watch, holder, list(submitted.values()), blocked_by_holder(holder))
+        submitted[later] = executor.submit(makers[later])
+        wait_until(watch, holder, list(submitted.values()), two_waiters(holder))
+        holder.commit()
+        answers = {name: future.result(timeout=10) for name, future in submitted.items()}
+    assert all(answer.status_code < 500 for answer in answers.values()), [a.text for a in answers.values()]
+    assert answers['switch'].status_code == 200, answers['switch'].text
+    won = answers['contact'].status_code == 201
+    if not (contact == 'proposal' and switcher == 'sender'):
+        # With a proposal from the switching sender, Send counts a trade command first, and that insert's foreign key
+        # waits FOR KEY SHARE on Ash's owner row. FOR KEY SHARE does not conflict with the switch-off's FOR NO KEY
+        # UPDATE, so both are granted together at the commit and either may win; only self-consistency is asserted.
+        assert won == (first == 'contact')
+    if won:
+        assert pair_conversations(ash, misty) == 1 and new_conversations(ash) == 1
+        ok(say_to(ash, trader_of(misty), 'Still here'), 201)
+    else:
+        assert detail(answers['contact']) == (409, {'code': 'COLLECTOR_UNAVAILABLE'})
+        assert pair_conversations(ash, misty) == 0 and new_conversations(ash) == 0
+
+
+def test_first_messages_both_ways_at_once_make_one_conversation_counted_once(store):
+    ids, ash, misty, binder, box = strangers()
+    low = sorted((ash, misty))[0]
+    with psycopg.connect(os.environ['DATABASE_URL']) as holder, \
+            psycopg.connect(os.environ['DATABASE_URL'], autocommit=True) as watch, \
+            ThreadPoolExecutor(max_workers=2) as executor:
+        holder.execute('SELECT 1 FROM inventory_owner WHERE user_id = %s FOR UPDATE', (low,))
+        from_ash = executor.submit(say_to, ash, trader_of(misty), 'Hi Misty')
+        wait_until(watch, holder, [from_ash], blocked_by_holder(holder))
+        from_misty = executor.submit(say_to, misty, trader_of(ash), 'Hi Ash')
+        wait_until(watch, holder, [from_ash, from_misty], two_waiters(holder))
+        holder.commit()
+        answers = from_ash.result(timeout=10), from_misty.result(timeout=10)
+    assert [answer.status_code for answer in answers] == [201, 201], [answer.text for answer in answers]
+    assert pair_conversations(ash, misty) == 1
+    with connect() as conn:
+        [row] = conn.execute('SELECT id FROM conversation WHERE user_low = %s OR user_high = %s', (ash, ash)).fetchall()
+        assert conn.execute('SELECT count(*) AS n FROM conversation_member WHERE conversation_id = %s',
+                            (row['id'],)).fetchone() == {'n': 2}
+        assert conn.execute('SELECT count(*) AS n FROM message WHERE conversation_id = %s',
+                            (row['id'],)).fetchone() == {'n': 2}
+    assert (new_conversations(ash), new_conversations(misty)) == (1, 0)
+
+
+def test_first_messages_both_ways_unordered_never_deadlock(store):
+    for _ in range(3):
+        ids, ash, misty, binder, box = strangers()
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            from_ash = executor.submit(say_to, ash, trader_of(misty), 'Hi Misty')
+            from_misty = executor.submit(say_to, misty, trader_of(ash), 'Hi Ash')
+            answers = from_ash.result(), from_misty.result()
+        assert [answer.status_code for answer in answers] == [201, 201], [answer.text for answer in answers]
+        assert pair_conversations(ash, misty) == 1
+        assert new_conversations(ash) + new_conversations(misty) == 1
+
+
+@pytest.mark.parametrize('kinds', [('message', 'proposal'), ('message', 'message')])
+def test_two_first_contacts_at_nine_leave_one_refused(store, kinds):
+    ids, ash, misty, binder, box = strangers()
+    brock = nearby('Brock S.')
+    new_counted(ash, 9)
+
+    def contact(kind, other):
+        if kind == 'message':
+            return say_to(ash, trader_of(other), 'Hi')
+        return propose_to(ash, trader_of(other), give=[(ids['SVI 166'], 1)])
+
+    with psycopg.connect(os.environ['DATABASE_URL']) as holder, \
+            psycopg.connect(os.environ['DATABASE_URL'], autocommit=True) as watch, \
+            ThreadPoolExecutor(max_workers=2) as executor:
+        holder.execute("SELECT pg_advisory_xact_lock(hashtext('prizecheck.new_conversation:' || %s))", (ash,))
+        first = executor.submit(contact, kinds[0], misty)
+        wait_until(watch, holder, [first], blocked_by_holder(holder))
+        second = executor.submit(contact, kinds[1], brock)
+        wait_until(watch, holder, [first, second], two_waiters(holder))
+        holder.commit()
+        answers = {'misty': first.result(timeout=10), 'brock': second.result(timeout=10)}
+    assert sorted(answer.status_code for answer in answers.values()) == [201, 429], [a.text for a in answers.values()]
+    [refused] = [answer for answer in answers.values() if answer.status_code == 429]
+    assert refused.json()['detail']['code'] == 'TOO_MANY_NEW_CONVERSATIONS'
+    assert new_conversations(ash) == 10
+    for name, other in (('misty', misty), ('brock', brock)):
+        assert pair_conversations(ash, other) == (1 if answers[name].status_code == 201 else 0)
