@@ -71,7 +71,10 @@ RETURNS TABLE(other_id text, how text, band smallint) LANGUAGE sql STABLE AS $$
   JOIN collector_profile p ON p.user_id = o.id AND p.suspended_at IS NULL
   JOIN collector_profile me ON me.user_id = viewer AND me.suspended_at IS NULL
   LEFT JOIN friends_of(ARRAY[viewer]) f ON f.friend_id = o.id
-  LEFT JOIN conversation c ON c.user_low = least(viewer, o.id) AND c.user_high = greatest(viewer, o.id)
+  -- Pair order is byte order (COLLATE "C"), inside a CASE so the conversation_pair index stays usable.
+  LEFT JOIN conversation c
+    ON c.user_low = CASE WHEN (viewer COLLATE "C") < (o.id COLLATE "C") THEN viewer ELSE o.id END
+   AND c.user_high = CASE WHEN (viewer COLLATE "C") < (o.id COLLATE "C") THEN o.id ELSE viewer END
   LEFT JOIN open_discovery dv ON dv.user_id = viewer
   LEFT JOIN open_discovery d ON d.user_id = o.id
   WHERE o.id <> viewer

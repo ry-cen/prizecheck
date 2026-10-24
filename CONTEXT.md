@@ -133,11 +133,11 @@ A proposed or verified correspondence between a Card Edition and a marketplace p
 _Avoid_: Card Edition ID, physical equivalence
 
 **Friend**:
-Another collector with whom a collector has a mutual, accepted friendship. Friends can see each other's Collection, apart from Hidden Locations, and each other's Trade Lists, and can lend and trade each other cards. Either side can end the friendship at any time.
+Another collector with whom a collector has a mutual, accepted friendship. Friends can see each other's Collection, apart from Hidden Locations, and each other's Trade Lists, and can lend each other cards. Friends can trade, as can any two collectors who can reach each other, but only Friends see each other's Collection and Handle. Either side can end the friendship at any time, which does not by itself end a Conversation.
 _Avoid_: Follower, contact, connection
 
 **Friend Request**:
-One collector's invitation to another to become Friends. The friendship starts only when the other collector accepts.
+One collector's invitation to another to become Friends. The friendship starts only when the other collector accepts. Besides a Handle or an Invite Link, two collectors who both confirmed a Trade can send each other one from it (Add as Friend); the sender does not see the other's Handle until it is accepted.
 _Avoid_: Follow, add
 
 **Handle**:
@@ -145,7 +145,7 @@ The unique name another collector types, exactly, to send a Friend Request. Ever
 _Avoid_: Username, profile
 
 **Display Name**:
-The free-text name a collector's Friends, and anyone they send a Friend Request or Invite Link to, see for them. It need not be unique and does not appear on Published Decks.
+The free-text name a collector's Friends, nearby collectors while both have Open discovery on, anyone they share a Conversation with, and anyone they send a Friend Request or Invite Link to, see for them. It need not be unique and does not appear on Published Decks.
 _Avoid_: Handle, nickname, profile name
 
 **Invite Link**:
@@ -153,8 +153,8 @@ A collector's one reusable personal link, shared outside the app, through which 
 _Avoid_: Referral link, share link
 
 **Block**:
-A collector's choice to end any friendship with another collector and stop that collector from finding them by Handle, using their Invite Link or sending them Friend Requests.
-_Avoid_: Mute, report
+A collector's choice to end any friendship with another collector, Friend or not, and stop that collector from finding them by Handle, using their Invite Link or sending them Friend Requests. Neither then sees the other in Near you, card search or Trade Lists, the Conversation becomes read-only for both, new Messages and Trade Proposals are refused and open Trade Proposals close. Unconfirmed Trades are cancelled; a Trade either side confirmed stays open so the other side can finish. The Blocked collector is never told, and sees what they would see if the blocker were suspended. Unblocking reopens the Conversation. The Blocked list in Settings shows a Block's Display Name and shows a Handle only where the blocker already knew it, which for a Block placed from a Conversation, a Near you row or a Trade means only a former Friend; a Block cannot be used to learn a Handle.
+_Avoid_: Mute, Suspension
 
 **Hidden Location**:
 A Location whose Holdings a collector's Friends cannot see, together with every Location inside it. A hidden For trade Location's copies still appear on its owner's Trade List, though never its name. Friends never see Location or Deck names, hidden or not, and never see reserved, lent or Borrowed Copies.
@@ -181,11 +181,11 @@ The lender closing a handed-over Loan as not coming back. The lent copies leave 
 _Avoid_: Lost card, gift
 
 **Trade**:
-An agreement between two Friends to swap copies in person, and optionally an agreed cash amount paid by one side, that transfers ownership both ways. It is a Trade Proposal one side accepted; from then both sides' copies are promised until each side's Confirm swap. Copies a collector gives leave their Collection, and copies they get become their own. The app records an agreed cash amount but never handles, holds or verifies money. A Trade with cards on one side and only cash, or nothing, on the other is still a Trade; one with nothing on one side is a gift. A Trade always has at least one card.
+An agreement between two collectors who can reach each other (Friends, collectors who share a Conversation, or nearby collectors with Open discovery on) to swap copies in person, and optionally an agreed cash amount paid by one side, that transfers ownership both ways. It is a Trade Proposal one side accepted; from then both sides' copies are promised until each side's Confirm swap. Copies a collector gives leave their Collection, and copies they get become their own. The app records an agreed cash amount but never handles, holds or verifies money. A Trade with cards on one side and only cash, or nothing, on the other is still a Trade; one with nothing on one side is a gift. A Trade always has at least one card.
 _Avoid_: Loan, sale, deal, exchange
 
 **Trade Proposal**:
-One collector's offer of a Trade to a Friend: the cards each side would give and any cash. The other side accepts or declines it whole, or counters, which closes it and sends back a new Trade Proposal prefilled with the same cards. Sending a Trade Proposal promises the sender's copies; accepting promises the other side's and makes it a Trade.
+One collector's offer of a Trade to another collector who can reach them: the cards each side would give and any cash. The other side accepts or declines it whole, or counters, which closes it and sends back a new Trade Proposal prefilled with the same cards. Sending a Trade Proposal promises the sender's copies; accepting promises the other side's and makes it a Trade.
 _Avoid_: Offer, trade request, bid, Lend Offer
 
 **For trade Location**:
@@ -193,7 +193,7 @@ A Location the collector marks as holding cards they will trade, together with e
 _Avoid_: Trade binder, trade folder, Hidden Location
 
 **Trade List**:
-The copies a collector offers to trade: their owned copies in For trade Locations that no Loan or Trade promises. It always matches what is in those Locations and is never edited directly. Borrowed Copies are never on it.
+The copies a collector offers to trade: their owned copies in For trade Locations that no Loan or Trade promises. It always matches what is in those Locations and is never edited directly. Borrowed Copies are never on it. Anyone who can reach the collector can read it, Friend or not, except that Friends cannot read a suspended collector's.
 _Avoid_: Haves, trade binder, Collection
 
 **Trade Wants**:
@@ -210,8 +210,40 @@ _Avoid_: Loan Pick List, Deck Pick List, pull list
 
 **Confirm swap**:
 One side's confirmation that the in-person swap happened, which changes only their own inventory: the copies they give leave their Collection and the copies they get arrive as new Holdings. It is not an Inventory Removal, and it can't be undone. Nobody can cancel a Trade once either side has confirmed, and it is complete once both have.
-_Avoid_: Handover, complete trade, accept
+_Avoid_: Handover, accept
 
 **Open to cash offers**:
-A collector's setting that lets Friends send them Trade Proposals in which one side gives only cash. It is off until the collector turns it on; cash alongside cards is always allowed, and a collector who sends a cash-only proposal can be countered with cash whatever their setting.
+A collector's setting that lets anyone who can send them a Trade Proposal, Friend or not, send one in which one side gives only cash. It is off until the collector turns it on; one setting covers everyone. Cash alongside cards is always allowed, and a collector who sends a cash-only proposal can be countered with cash whatever their setting.
 _Avoid_: For sale, selling, cash mode
+
+**Conversation**:
+The one thread between two collectors, Friends or not, holding their Messages and, as cards, their Trade Proposals, counters and Trades. It is created by the first Message or Trade Proposal. Each side can archive it from their own list, where it returns on newer activity; it is never deleted, and it stays after a Friend is removed, Open discovery is turned off or either collector moves. A Block, a Suspension or a deleted account makes it read-only.
+_Avoid_: Chat, inbox thread, DM
+
+**Message**:
+One plain-text note in a Conversation, up to 1,000 characters.
+_Avoid_: DM, post
+
+**Open discovery**:
+A collector's switch, off by default and needing a zip, that lets collectors who also have it on find each other when they are within the searcher's chosen radius, up to 50 mi. A collector can be removed from Open discovery by the owner, after which they cannot switch it on again until restored; a suspended collector cannot switch it on either.
+_Avoid_: Public profile, nearby mode
+
+**Near you**:
+The Find trades section listing nearby collectors who are not Friends, ordered by match kind, then Distance band, then Display Name.
+_Avoid_: Nearby, strangers
+
+**Distance band**:
+One of Under 5 mi, 5–10 mi, 10–25 mi or 25–50 mi, the only form in which distance is ever shown.
+_Avoid_: Distance, miles away
+
+**Report**:
+A collector's account of a problem with another collector, made from a Conversation, a Near you row or a Trade, with one reason and an optional note. It also Blocks the reported collector, who is never told, and goes to the owner's review queue with a snapshot of the pair's Messages and Trades. The owner can dismiss it, remove the collector from Open discovery or suspend them, and can later reverse a removal or Suspension. Nothing else happens to the reported collector automatically.
+_Avoid_: Flag, complaint
+
+**Suspension**:
+The owner's action that removes a collector from Open discovery and stops them messaging, proposing, countering, accepting, switching Open discovery on and sending Friend Requests, Borrow Requests or Lend Offers. Their unconfirmed Trades are cancelled, as for a Block; a Trade either side confirmed stays open. Their other Friends cannot see their Trade List. Their own Collection, Decks, friendships and existing Loans continue, and the owner can lift it. Lifting it does not switch Open discovery back on.
+_Avoid_: Ban
+
+**Completed trade**:
+A Trade both sides have confirmed. The count of a collector's Completed trades, Friend Trades included, is shown on rows, Trade Lists and Conversations, and reads as new to trading at zero. There are no ratings or reviews.
+_Avoid_: Deal, sale
