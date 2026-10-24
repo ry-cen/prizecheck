@@ -35,9 +35,12 @@ Privacy (``GET /api/social/blocks``) and on a lookup. When both have blocked eac
 
 Block for strangers (Trading #302): every Block row has a ``block_id``, a ``via`` (``collector`` from the user-id
 route, ``trader`` from the trader routes and Report) and a ``handle_shown`` (whether the blocker already knew the
-Handle). The Blocked list shows the Handle only when it was shown and the trader id only for a trader Block. The
-user-id and trader unblock routes each lift only their own kind and otherwise answer as if no Block stood, so neither
-ties a user id to a trader id. The ``block_id`` route lifts either kind. A Block or Unblock moves the pair's
+Handle: Friends before the Block, or, on the user-id route, also a request they received, or one they sent that was
+not made from a Trade). A trader Block shows the Handle only for former Friends, since a request is tied to a Handle only the other kind of route may know.
+The Blocked list shows the Handle only when it was shown and the trader id only for a trader Block. The trader unblock
+route lifts only a trader Block; the user-id one lifts a user-id Block and a trader Block of a former Friend (the
+blocker already sees that Handle), and otherwise both answer as if no Block stood, so neither ties a user id to a
+trader id. The ``block_id`` route lifts either kind. A Block or Unblock moves the pair's
 conversation watermark.
 """
 import json
@@ -552,22 +555,29 @@ def block(command: BlockCollector, user_id: str = Depends(verified_user)):
 
 @router.post('/blocks/{collector_id}/unblock', response_model=FriendCommandResult)
 def unblock(collector_id: str, command: FriendCommand, user_id: str = Depends(verified_user)):
-    """Unblock a collector the caller blocked. Nothing else comes back: they are not Friends again. It lifts only a
-    Block made by user id; asked about one made by trader id it changes nothing and answers as if there were none."""
+    """Unblock a collector the caller blocked. Nothing else comes back: they are not Friends again. It lifts a Block
+    made by user id and a trader Block of a former Friend (their Handle is already on the Blocked row); asked about
+    any other trader Block it changes nothing and answers as if there were none."""
     def apply(conn, row):
-        _lift_block(conn, user_id, collector_id, via='collector')
+        _lift_block(conn, user_id, collector_id, via='collector', former_friend=True)
         return _unblock_answer(conn, user_id, collector_id)
     return _command(user_id, collector_id, command.idempotency_key, 'unblock', apply, blocked_you_ok=True)
 
 
-def _handle_known(conn, blocker: str, other: str) -> bool:
-    """Whether the blocker already knew the other's Handle: Friends, a request they received, or a request they sent
-    that was not made from a Trade. Read before the Block deletes the friendship, with both owners locked."""
+def _handle_known(conn, blocker: str, other: str, via: str) -> bool:
+    """Whether the blocker already knew the other's Handle and the Blocked list may show it: Friends always. Otherwise,
+    on the user-id route, a request they received or a request they sent that was not made from a Trade; on a trader
+    route never, since a request says nothing the blocker may tie to this trader id. Read before the Block deletes
+    the friendship, with both owners locked."""
     row = conn.execute('SELECT state, requested_by, via_trade FROM friendship WHERE user_low=%s AND user_high=%s',
                        _pair(blocker, other)).fetchone()
     if row is None:
         return False
-    if row['state'] == 'accepted' or row['requested_by'] != blocker:
+    if row['state'] == 'accepted':
+        return True
+    if via == 'trader':
+        return False
+    if row['requested_by'] != blocker:
         return True
     return not row['via_trade']
 
@@ -576,7 +586,7 @@ def place_block(conn, user_id: str, other: str, via: Literal['collector', 'trade
     """The one Block apply for every path (the user-id route, the trader routes and Report), run with both owners
     locked: Stage 1's effects first, then the row. A repeat leaves the first Block standing (its id, kind and
     ``handle_shown`` unchanged) and moves nothing."""
-    shown = _handle_known(conn, user_id, other)
+    shown = _handle_known(conn, user_id, other, via)
     friendship_ended(conn, user_id, other)
     conn.execute('DELETE FROM friendship WHERE user_low=%s AND user_high=%s', _pair(user_id, other))
     placed = conn.execute(
@@ -586,12 +596,15 @@ def place_block(conn, user_id: str, other: str, via: Literal['collector', 'trade
         pair_changed(conn, user_id, other)
 
 
-def _lift_block(conn, user_id: str, other: str, *, via: str | None = None, block_id: UUID | None = None) -> bool:
-    """Lifts the caller's Block of ``other``, of kind ``via`` or with id ``block_id`` (exactly one is given). A lift
+def _lift_block(conn, user_id: str, other: str, *, via: str | None = None, block_id: UUID | None = None,
+                former_friend: bool = False) -> bool:
+    """Lifts the caller's Block of ``other``, of kind ``via`` or with id ``block_id`` (exactly one is given). With
+    ``former_friend`` a trader Block whose Handle was shown (they were Friends) is lifted too. A lift
     ends the wait the caller set as decliner and moves the pair's watermark. Returns whether a row was deleted."""
     if block_id is None:
-        lifted = conn.execute('DELETE FROM block WHERE blocker_id=%s AND blocked_id=%s AND via=%s RETURNING 1',
-                              (user_id, other, via)).fetchone()
+        lifted = conn.execute("DELETE FROM block WHERE blocker_id=%s AND blocked_id=%s "
+                              "AND (via=%s OR (%s AND via='trader' AND handle_shown)) RETURNING 1",
+                              (user_id, other, via, former_friend)).fetchone()
     else:
         lifted = conn.execute('DELETE FROM block WHERE blocker_id=%s AND blocked_id=%s AND id=%s RETURNING 1',
                               (user_id, other, block_id)).fetchone()

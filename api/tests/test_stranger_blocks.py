@@ -230,6 +230,8 @@ def test_handle_shown_is_true_only_where_the_blocker_already_knew_the_handle(sto
     else:
         assert ok(block_trader(blocker, trader_of(other))) == {'relation': 'blocked'}
     row = block_row(blocker, other)
+    # A trader Block tells the blocker's Blocked list nothing a request taught them; only former Friends keep a Handle.
+    shown = shown if route == 'collector' or case == 'friends' else False
     assert (row['via'], row['handle_shown']) == (route, shown)
     [entry] = listed(blocker)
     assert set(entry) == {'block_id', 'display_name', 'handle', 'trader_id'}
@@ -324,6 +326,34 @@ def test_each_identity_unblock_lifts_only_its_own_kind_and_answers_as_if_no_bloc
     for other, row in ((misty, first), (gary, second)):
         assert ok(unblock_by_id(ash, row['id'])) == {'relation': 'none'}
         assert block_row(ash, other) is None
+
+
+def test_the_user_id_unblock_lifts_a_former_friends_trader_block(store):
+    ash, _ = collector('Ash K.')
+    misty, _ = collector('Misty W.')
+    befriend(ash, misty)
+    ok(block_trader(ash, trader_of(misty)))
+    assert block_row(ash, misty)['handle_shown'] is True
+    assert ok(unblock(ash, misty)) == {'relation': 'none'}
+    assert block_row(ash, misty) is None
+    assert listed(ash) == []
+
+
+def test_the_user_id_unblock_leaves_a_trader_block_of_a_non_friend_whose_handle_came_from_a_request(store):
+    # The other half of the former-Friend exception above: with no friendship and no Handle shown, only the trader route lifts it.
+    ash, misty = pair('Asked')
+    brock, _ = collector('Brock')
+    start(ash, misty)
+    _was_asked_by_a_friend(ash, misty)
+    ok(block_trader(ash, trader_of(misty)))
+    first = block_row(ash, misty)
+    assert first['handle_shown'] is False
+    moved = conversation_changed_at(ash, misty)
+    same(unblock(ash, misty), unblock(ash, brock))
+    assert ok(unblock(ash, misty)) == {'relation': 'none'}
+    assert dict(block_row(ash, misty)) == dict(first)
+    assert conversation_changed_at(ash, misty) == moved
+    assert len(listed(ash)) == 1
 
 
 def test_a_key_used_on_one_route_is_refused_byte_identically_on_the_others(store):

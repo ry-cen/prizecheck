@@ -8,7 +8,12 @@
 // two For trade sentences. Tests 1 and 3 also run at 375 px. No screen shows a Handle, a zip code or a data source.
 // The catalog is the Swap catalog (api/tests/want_list_swap_fixtures.py).
 import { randomUUID } from "node:crypto";
-import type { BrowserContextOptions, Locator, Page } from "@playwright/test";
+import type {
+  BrowserContextOptions,
+  Locator,
+  Page,
+  Route,
+} from "@playwright/test";
 import type { Pool } from "pg";
 import { expect, test } from "./support/collectors";
 import { discoverable, seedZips, traderIdOf } from "./support/conversations";
@@ -227,7 +232,7 @@ async function nearYouStory(
   await radio(page, "25 mi").click();
   await expect(nearRows(page)).toHaveCount(1);
 
-  // 5. Misty's open row: Message, her Trade List by trader id, Propose trade, and no menu yet.
+  // 5. Misty's open row: Message, her Trade List by trader id, Propose trade and its ⋯ menu.
   const row = nearRows(page).first();
   await row.getByRole("button", { name: /Misty W/ }).click();
   const message = row.getByRole("link", { name: "Message Misty W" });
@@ -238,16 +243,108 @@ async function nearYouStory(
   await expect(
     row.getByRole("link", { name: "See all of Misty W's Trade List" })
   ).toHaveAttribute("href", `/trades/trader/${w.mistyTrader}`);
-  await expect(row.getByRole("button", { name: /^More for/ })).toHaveCount(0);
+  const more = row.getByRole("button", { name: "More for Misty W" });
+  await expect(more).toHaveCount(1);
   const propose = row.getByRole("button", { name: "Propose trade to Misty W" });
   await expectPageChecks(page, `Find trades with Near you rows, ${width}`);
   await expectNoLeaks(page, w);
   if (phone) {
     await expectTouchTarget(propose);
     await expectTouchTarget(message);
+    await expectTouchTarget(more);
   }
   await propose.click();
   await expect(page).toHaveURL(`${ORIGIN}/trades/new/${w.mistyTrader}`);
+}
+
+/** Ash blocks Misty from her Near you row: Cancel keeps the row and returns focus to the ⋯; Block removes the row, says so
+ * in Near you, and Settings > Privacy lists her. */
+async function blockFromRowStory(
+  page: Page,
+  collectors: Collectors,
+  contextOptions: BrowserContextOptions,
+  width: string
+) {
+  const w = await world(page, collectors, contextOptions);
+  const phone = isPhone(page);
+  await api(page, "PUT", "/api/social/discovery", { enabled: true });
+  await page.goto(`${ORIGIN}/trades/find`);
+  const near = region(page, "Near you");
+  await expect(nearRows(page)).toHaveCount(1);
+  const row = nearRows(page).first();
+  await row.getByRole("button", { name: /Misty W/ }).click();
+  const more = row.getByRole("button", { name: "More for Misty W" });
+  const ask = async () => {
+    await more.click();
+    await page.getByRole("menuitem", { name: "Block" }).click();
+  };
+  const question = row.getByText("Block Misty W? They won't be told.", {
+    exact: true,
+  });
+  const confirm = row.getByRole("button", { name: "Block", exact: true });
+
+  // 1. Choosing Block asks first; Cancel changes nothing and focus returns to the ⋯.
+  await ask();
+  await expect(question).toBeVisible();
+  await expect(confirm).toBeFocused();
+  if (phone) await expectTouchTarget(confirm);
+  await expectPageChecks(page, `Near you with the Block question, ${width}`);
+  await row.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(question).toHaveCount(0);
+  await expect(more).toBeFocused();
+  await expect(nearRows(page)).toHaveCount(1);
+
+  // 2. A failed Block says so on the row, keeps the row and returns focus to the ⋯.
+  const refuse = (route: Route) =>
+    route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({ detail: "Server error" }),
+    });
+  await page.route("**/api/social/traders/*/block", refuse);
+  await ask();
+  await confirm.click();
+  await expect(row.getByRole("alert")).toBeVisible();
+  await expect(more).toBeFocused();
+  await expect(nearRows(page)).toHaveCount(1);
+  await page.unroute("**/api/social/traders/*/block", refuse);
+
+  // 3. Confirming blocks: the row leaves, Near you says so once and focus moves to its heading. The reload is held so
+  // the row is still on screen while the status is counted.
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  const hold = async (route: Route) => {
+    await held;
+    await route.continue();
+  };
+  await page.route("**/api/social/trade-matches/near", hold);
+  await ask();
+  await confirm.click();
+  const announced = page
+    .getByRole("status")
+    .filter({ hasText: "Blocked Misty W." });
+  await expect(announced).toHaveCount(1);
+  await expect(nearRows(page)).toHaveCount(1);
+  release();
+  await expect(nearRows(page)).toHaveCount(0);
+  await page.unroute("**/api/social/trade-matches/near", hold);
+  await expect(announced).toHaveCount(1);
+  await expect(
+    near.getByRole("status").filter({ hasText: "Blocked Misty W." })
+  ).toHaveText("Blocked Misty W. They aren't told.");
+  await expect(
+    near.getByRole("heading", { name: "Near you", level: 2 })
+  ).toBeFocused();
+  await expectNoLeaks(page, w);
+
+  // 4. Settings > Privacy lists her by name alone.
+  await page.goto(`${ORIGIN}/settings`);
+  const blocked = page.getByRole("region", { name: "Blocked collectors" });
+  const listed = blocked.getByRole("listitem").filter({ hasText: "Misty W" });
+  await expect(listed).toHaveCount(1);
+  await expect(listed).not.toContainText("@");
+  await page.goto(`${ORIGIN}/trades/find`);
+  await expect(near).toContainText(EMPTY_SENTENCE);
 }
 
 async function cardSearchStory(
@@ -454,6 +551,18 @@ test.describe("desktop, Near you and card search", () => {
   });
 });
 
+test.describe("desktop, Block from a Near you row", () => {
+  test.use(DESKTOP_SIZE);
+
+  test("Block from a Near you row removes it, and Settings lists it", async ({
+    page,
+    collectors,
+  }) => {
+    test.slow();
+    await blockFromRowStory(page, collectors, DESKTOP_SIZE, "desktop width");
+  });
+});
+
 test.describe("phone, Near you and card search", () => {
   test.use(PHONE_SIZE);
 
@@ -463,6 +572,11 @@ test.describe("phone, Near you and card search", () => {
   }) => {
     test.slow();
     await nearYouStory(page, collectors, PHONE_SIZE, "375 px");
+  });
+
+  test("Block from a Near you row at 375 px", async ({ page, collectors }) => {
+    test.slow();
+    await blockFromRowStory(page, collectors, PHONE_SIZE, "375 px");
   });
 
   test("card search at 375 px, with touch-sized controls", async ({

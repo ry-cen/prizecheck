@@ -148,7 +148,13 @@ def test_a_handle_lookup_never_leads_to_a_trader_id(store):
         low, high = sorted((ash, misty))
         assert conn.execute('SELECT count(*) AS n FROM friendship WHERE user_low = %s AND user_high = %s',
                             (low, high)).fetchone()['n'] == 0
-    # After #302: the Blocked list shows no Handle for a Block made while a via_trade request was pending (integration step I-1 adds that assertion here).
+    # The Block was made while Ash's via_trade request was pending: the Blocked list holds no Handle or user id.
+    blocks = call('GET', '/api/social/blocks', ash)
+    assert blocks.status_code == 200, blocks.text
+    assert [{k: v for k, v in row.items() if k != 'block_id'} for row in blocks.json()['blocked']] == [
+        {'display_name': 'Misty W.', 'handle': None, 'trader_id': None}]
+    assert handle_of(misty).lower() not in blocks.text.lower()
+    assert trader_of(misty) not in blocks.text and misty not in blocks.text
 
 
 def test_unknown_and_unreachable_trader_ids_answer_byte_identical_404s(store):
