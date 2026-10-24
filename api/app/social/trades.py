@@ -50,6 +50,13 @@ the friendship once a Trade is accepted, nothing they see changes.
 Open to cash offers setting is changed through ``/api/social/trade-settings`` (``settings_router`` below). A Counter
 (#278) is inventory code in ``app.trade_inventory``; it stores no update, because the reply is the other side's waiting
 answer.
+
+**Conversations and the completed-trade count** (Trading #298): every Trade row belongs to its pair's conversation when
+the pair has one (``TradeView.conversation_id``, set by migration 147's triggers and by ``conversations.open_conversation``;
+None for a Trade of a pair that never opened one). Conversations themselves are ``app.social.conversations``; nothing in
+this module reads or writes them. ``completed_trades`` counts the Trades a collector took part in that both sides
+confirmed the swap for, in one statement over two partial indexes: Friend Trades included, still counted for the remaining
+side after the other account is deleted, and never stored in a counter column.
 """
 import json
 from collections.abc import Callable, Mapping
@@ -85,11 +92,14 @@ ACTION_ORDER = ('accept', 'decline', 'counter', 'confirm_swap', 'use_suggested_p
 class TradeParty(BaseModel):
     """The other side of the Trade: ``collector_id`` and ``handle`` are None once that account is deleted; the name is
     kept. ``open_to_cash_offers``: their own setting, changed through
-    ``/api/social/trade-settings`` (this module's ``settings_router``, Trading #277)."""
+    ``/api/social/trade-settings`` (this module's ``settings_router``, Trading #277). ``completed_trades``: how many
+    Trades they have completed (``completed_trades``), None once that account is deleted. It defaults to None so a
+    stored replay from before it existed still validates."""
     collector_id: str | None
     display_name: str
     handle: str | None
     open_to_cash_offers: bool
+    completed_trades: int | None = None
 
 
 class TradeCard(BaseModel):
@@ -112,7 +122,9 @@ class TradeCash(BaseModel):
 
 class TradeView(BaseModel):
     """One Trade Proposal or Trade as the reader sees it. ``you_give`` and ``you_get`` are the reader's side and the
-    other side, in the order they were listed. Never a pick, a destination, a Location or a Deck."""
+    other side, in the order they were listed. Never a pick, a destination, a Location or a Deck. ``conversation_id``:
+    the pair's conversation (Trading #298), None for a Trade of a pair that has none; it defaults to None so a stored
+    replay from before it existed still validates."""
     id: UUID
     state: Literal['proposed', 'accepted', 'closed']
     closed_reason: Literal['declined', 'withdrawn', 'countered', 'cancelled', 'swapped'] | None
@@ -131,6 +143,7 @@ class TradeView(BaseModel):
     actions: list[TradeAction]
     revision: int
     created_at: datetime
+    conversation_id: UUID | None = None
 
 
 class TradesView(BaseModel):
@@ -254,6 +267,25 @@ def allowed(user_id: str, row, gives: bool) -> list[str]:
 TRADES = """SELECT t.* FROM trade t WHERE (t.proposer_id = %(me)s OR t.recipient_id = %(me)s)"""
 
 
+def completed_trades(conn, user_ids) -> dict[str, int]:
+    """How many Trades each of these collectors has completed, by id, 0 for one with none. A Trade is completed when both
+    sides confirmed the swap (both swap times set), whoever proposed it and Friend Trades included. A collector whose
+    Trade partner deleted their account keeps the count, because their own id stays on the row. One statement over the
+    two partial indexes ``trade_completed_proposer`` and ``trade_completed_recipient``; no counter column."""
+    ids = sorted({user_id for user_id in user_ids if user_id is not None})
+    if not ids:
+        return {}
+    found = {row['user_id']: row['n'] for row in conn.execute(
+        """SELECT user_id, count(*) AS n FROM (
+             SELECT proposer_id AS user_id FROM trade
+               WHERE proposer_id = ANY(%(ids)s) AND proposer_swap_at IS NOT NULL AND recipient_swap_at IS NOT NULL
+             UNION ALL
+             SELECT recipient_id FROM trade
+               WHERE recipient_id = ANY(%(ids)s) AND proposer_swap_at IS NOT NULL AND recipient_swap_at IS NOT NULL
+           ) done GROUP BY user_id""", {'ids': ids})}
+    return {user_id: found.get(user_id, 0) for user_id in ids}
+
+
 def trade_views(conn, user_id: str, rows, facts: dict[UUID, TradeFacts] | None = None) -> list[TradeView]:
     """The reader's views of these Trade rows, in their order: one read of their lines, one of card facts and one of
     the other sides' profiles, whatever the number of Trades."""
@@ -272,6 +304,7 @@ def trade_views(conn, user_id: str, rows, facts: dict[UUID, TradeFacts] | None =
     profiles = {profile['user_id']: profile for profile in conn.execute(
         'SELECT user_id, handle, open_to_cash_offers FROM collector_profile WHERE user_id = ANY(%s)',
         (sorted(others),))} if others else {}
+    counts = completed_trades(conn, others)
 
     def side_cards(trade_id: UUID, side_name: str) -> list[TradeCard]:
         found = []
@@ -298,12 +331,13 @@ def trade_views(conn, user_id: str, rows, facts: dict[UUID, TradeFacts] | None =
             id=row['id'], state=row['state'], closed_reason=row['closed_reason'], closed_by=closed_by, role=role,
             other=TradeParty(collector_id=other_id if profile else None, display_name=row[f'{other}_name'],
                              handle=profile['handle'] if profile else None,
-                             open_to_cash_offers=bool(profile and profile['open_to_cash_offers'])),
+                             open_to_cash_offers=bool(profile and profile['open_to_cash_offers']),
+                             completed_trades=counts.get(other_id, 0) if profile else None),
             countered_from=row['countered_from'], you_give=side_cards(row['id'], role),
             you_get=side_cards(row['id'], other), cash=cash, you_confirmed_swap=mine, they_confirmed_swap=theirs,
             needs_you=needs_you(user_id, row, known), waiting=waiting_trade_step(user_id, row, known),
             section=section(user_id, row, known), actions=allowed(user_id, row, bool(lines.get((row['id'], role)))),
-            revision=row['revision'], created_at=row['created_at']))
+            revision=row['revision'], created_at=row['created_at'], conversation_id=row['conversation_id']))
     return views
 
 

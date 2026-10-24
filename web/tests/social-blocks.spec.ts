@@ -5,6 +5,7 @@
 // Ticket #274 (Trading spec "Unfriend, Block and half-confirmed Trades"): Ash blocks Misty with his Trade Proposal, a
 // Trade nobody has confirmed and a Trade only he confirmed open. The question counts them; the Block cancels the first
 // two, and Misty, Blocked, finishes the third alone, while nothing she sees says Block. At desktop width and 375 px.
+// Since #298 each side reads those Trades as cards in the conversation with the other, not in a Trades list.
 import { randomInt, randomUUID } from "node:crypto";
 import type { BrowserContextOptions, Page, Route } from "@playwright/test";
 import { expect, test } from "./support/collectors";
@@ -17,6 +18,7 @@ import {
   nameCollector as named,
   seedCatalog,
 } from "./support/loans";
+import { openConversation, timelineTrades } from "./support/conversations";
 import { expectPageChecks } from "./support/page-check";
 import { signInAsOwner } from "./support/sign-in";
 import {
@@ -322,25 +324,29 @@ async function tradeStory(
     "Blocked Misty W. They aren't told."
   );
   await drawer(page).getByRole("button", { name: "Close Friends" }).click();
-  // His list, read again: the Trade he confirmed waits for Misty; the other two are history.
+  // His conversation, read again: the Trade he confirmed waits for Misty; the other two are cancelled. He can't message
+  // her.
+  await openConversation(page, "Misty W");
   await expect(
-    page.getByRole("list", { name: "Pending" }).getByRole("link")
-  ).toHaveText([/Waiting for Misty W to confirm the swap/]);
-  await page.locator("summary", { hasText: "History · 2" }).click();
-  await expect(
-    page.getByRole("list", { name: "History" }).getByRole("link")
-  ).toHaveText([/You cancelled this Trade/, /You cancelled this Trade/]);
+    page.getByRole("link", { name: "You blocked Misty W." })
+  ).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Message" })).toHaveCount(0);
+  await expect(timelineTrades(page)).toHaveText([
+    /You cancelled this Trade/,
+    /You cancelled this Trade/,
+    /Waiting for Misty W to confirm the swap/,
+  ]);
 
   // Misty, Blocked: Ash cancelled two Trades, and the one he confirmed is hers to finish. Nothing says Block.
-  await misty.goto(`${ORIGIN}/trades`);
-  const needsYou = misty.getByRole("list", { name: "Needs you" });
-  await expect(needsYou.getByRole("link")).toHaveText([
+  await openConversation(misty, "Ash K");
+  await expect(misty.getByRole("main")).toContainText(
+    "This collector is no longer available"
+  );
+  await expect(timelineTrades(misty)).toHaveText([
+    /Ash K cancelled this Trade/,
+    /Ash K cancelled this Trade/,
     /Ash K confirmed the swap/,
   ]);
-  await misty.locator("summary", { hasText: "History · 2" }).click();
-  await expect(
-    misty.getByRole("list", { name: "History" }).getByRole("link")
-  ).toHaveText([/Ash K cancelled this Trade/, /Ash K cancelled this Trade/]);
   await expect(misty.locator("body")).not.toContainText(/block/i);
   await misty.getByRole("button", { name: /^Inbox/ }).click();
   const inbox = misty.getByRole("dialog", { name: "Inbox" });
@@ -359,7 +365,9 @@ async function tradeStory(
   await inbox.getByRole("button", { name: "Close Inbox" }).click();
 
   // She confirms alone: Ash's Arven goes to her Unsorted, and the Trade is swapped.
-  await needsYou.getByRole("link").click();
+  await timelineTrades(misty)
+    .filter({ hasText: /Ash K confirmed the swap/ })
+    .click();
   await expect(misty).toHaveURL(`${ORIGIN}/trades/${half}`);
   const main = misty.getByRole("main");
   await expect(main.getByRole("heading", { level: 1 })).toHaveText(

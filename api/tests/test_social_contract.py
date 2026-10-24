@@ -52,6 +52,12 @@ DISCOVERY_TABLE = re.compile(
     r'(?:\bFROM|\bJOIN|\bUPDATE|\bINTO|\bUSING|\bTRUNCATE(?:\s+TABLE)?|\bLATERAL|,|\()\s*(?:ONLY\s+)?(?:"?\w+"?\s*\.\s*)?"?'
     r'(?:discovery_setting|zip_centroid|open_discovery)"?\b', re.IGNORECASE)
 DISCOVERY_CALLERS = {'social/discovery.py'}
+# Conversations (trading #298): only social/conversations.py (and the future reports module) may name the message and
+# member tables in SQL. Matched against string constants, never docstrings.
+MESSAGE_TABLE = re.compile(
+    r'(?:\bFROM|\bJOIN|\bUPDATE|\bINTO|\bUSING|\bTRUNCATE(?:\s+TABLE)?|\bLATERAL|,|\()\s*(?:ONLY\s+)?(?:"?\w+"?\s*\.\s*)?"?'
+    r'(?:message|conversation_member)"?\b', re.IGNORECASE)
+MESSAGE_CALLERS = {'social/conversations.py', 'social/reports.py'}
 LISTABLE_CALL = re.compile(r'\btrade_listable\s*\(')
 FOR_TRADE_CALL = re.compile(r'\bfor_trade_locations\s*\(')
 RESERVING_PICKS_CALLERS = {'social/counts.py', 'social/friend_copies.py'}
@@ -92,7 +98,9 @@ ALLOWED_IMPORTS = {
         ('.friend_reads', 'PAGE_IDENTITIES'), ('.friend_reads', 'card_facts'), ('.friend_reads', 'search_key'),
         ('..trade_list', 'own_trade_copies'), ('..trade_wants', 'own_wants'), ('..trade_wants', 'own_rules'),
         ('..want_list', 'capture_want_list'), ('.friend_copies', 'friend_wants'), ('..card_accepts', 'accepts'),
-        ('.friends', 'friend_ids')},
+        ('.friends', 'friend_ids'),
+        # Each Friend's completed-Trade count on their row and Trade List (trading #298), one read for all of them.
+        ('.trades', 'completed_trades')},
     'social/friends.py': {
         ('.', 'name_rules'), ('..main', 'connect'), ('..main', 'verified_user'), ('..publications', 'TOKEN'),
         ('..location_tree', 'error'), ('..location_tree', 'replay'), ('.owners', 'ensure_owner'),
@@ -139,6 +147,15 @@ ALLOWED_IMPORTS = {
         ('..location_tree', 'error'), ('..location_tree', 'replay'), ('.friend_reads', 'card_facts'),
         ('.owners', 'ensure_owner'), ('.owners', 'lock_owners'), ('.loans', 'advance_revision'), ('.loans', 'NOW'),
         ('.friends', 'friend_ids')},
+    # Conversations and messages (trading #298): the pair's Trades as cards through the Trades' own views and their one
+    # definition of what waits on the reader, the Friends set (imported inside the functions that use it, because
+    # app.social.friends imports app.social.trades), and the completed-Trade count. Nothing of another collector's
+    # inventory.
+    'social/conversations.py': {
+        ('..main', 'connect'), ('..main', 'verified_user'), ('..location_tree', 'error'),
+        ('.owners', 'ensure_owner'), ('.owners', 'lock_owners'), ('.friends', 'friend_ids'),
+        ('.trades', 'TRADES'), ('.trades', 'TradeView'), ('.trades', 'trade_facts'), ('.trades', 'trade_views'),
+        ('.trades', 'waiting_trade_step'), ('.trades', 'completed_trades')},
     'social/discovery.py': {
         ('..main', 'connect'), ('..main', 'verified_user'), ('..location_tree', 'error'),
         ('.owners', 'ensure_owner'), ('.owners', 'lock_owners')},
@@ -339,6 +356,21 @@ def test_every_social_route_answers_success_with_a_schema_the_walk_reads():
     for route in ('GET /api/social/discovery', 'PUT /api/social/discovery'):
         assert {field for _, field, _ in routes[route]} == {
             'status', 'zip', 'radius_mi', 'zip_changes_left', 'visible_beyond_friends'}, route
+    # Conversations (trading #298): the pulse is two fields; the party never carries a collector id; a conversation
+    # reaches the Trade cards and the completed-Trade count.
+    assert {field for _, field, _ in routes['GET /api/social/conversations/pulse']} == {
+        'unread_conversations', 'watermark'}
+    schemas = components
+    assert set(schemas['ConversationParty']['properties']) == {
+        'trader_id', 'display_name', 'friend', 'handle', 'band', 'completed_trades'}
+    assert set(schemas['ConversationView']['properties']) == {
+        'id', 'other', 'status', 'can_message', 'can_propose', 'can_report', 'items', 'next_before'}
+    assert set(schemas['ConversationSummary']['properties']) == {
+        'id', 'other', 'status', 'last_message', 'open_trades', 'waiting_on_you', 'unread', 'archived',
+        'last_activity_at'}
+    assert set(schemas['Message']['properties']) == {'id', 'from', 'body', 'at'}
+    reached = {field for _, field, _ in routes['GET /api/social/conversations/{conversation_id}']}
+    assert {'items', 'trade', 'message', 'you_give', 'descriptor', 'completed_trades'} <= reached, reached
 
 
 def test_each_sides_own_trade_reads_and_inventory_steps_stay_outside_the_social_area():
@@ -523,6 +555,33 @@ def test_the_discovery_guard_matches_sql_and_never_docstrings():
     described = 'def f():\n    """Reads FROM discovery_setting and JOIN zip_centroid."""\n    return 1\n'
     assert not any(DISCOVERY_TABLE.search(text) for text in string_constants(described))
     assert not any(DISCOVERY_TABLE.search(text) for text in string_constants("NOTE = 'discovery_setting'\n"))
+
+
+def test_only_the_conversation_module_names_the_message_tables():
+    found = callers(MESSAGE_TABLE)
+    assert 'social/conversations.py' in found and found <= MESSAGE_CALLERS, found
+
+
+def test_the_message_guard_matches_sql_and_never_docstrings():
+    for sql in ('SELECT 1 FROM message m', 'INSERT INTO message (id) VALUES (1)', 'UPDATE conversation_member SET read_at = now()',
+                'SELECT 1 FROM conversation c JOIN conversation_member m ON true', 'DELETE FROM public.message',
+                'SELECT 1 FROM (message)'):
+        assert any(MESSAGE_TABLE.search(text) for text in string_constants(f'SQL = {sql!r}\n')), sql
+    described = 'def f():\n    """Reads FROM message and JOIN conversation_member."""\n    return 1\n'
+    assert not any(MESSAGE_TABLE.search(text) for text in string_constants(described))
+    for text in ("NOTE = 'message'\n", 'BODY = {"code": "X", "message": "y"}\n', "SQL = 'SELECT 1 FROM message_log'\n"):
+        assert not any(MESSAGE_TABLE.search(found) for found in string_constants(text)), text
+
+
+def test_the_names_triggers_fire_loan_then_trade_then_conversation():
+    from app.main import connect
+    with connect() as conn:
+        names = [row['tgname'] for row in conn.execute(
+            """SELECT tgname FROM pg_trigger WHERE tgrelid = 'collector_profile'::regclass AND NOT tgisinternal
+              ORDER BY tgname COLLATE "C"
+            """)]
+    ours = ['collector_profile_loan_names', 'trade_names_follow_profile', 'trade_names_follow_profile_conversations']
+    assert [name for name in names if name in ours] == ours
 
 
 def test_the_call_guards_match_string_constants_and_never_docstrings():

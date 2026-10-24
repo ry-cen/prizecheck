@@ -27,6 +27,7 @@ import {
   seedCatalog,
   unsorted,
 } from "./support/loans";
+import { openConversation, timelineTrades } from "./support/conversations";
 import { expectPageChecks } from "./support/page-check";
 import { signInAsOwner } from "./support/sign-in";
 
@@ -340,9 +341,8 @@ async function tradeStory(
   await expect(bell(page)).toHaveAccessibleName("Inbox, 1 waiting");
   await expect(tradesTab(page)).toHaveAccessibleName("Trades, 1 needs you");
   await tradesTab(page).click();
-  await expect(
-    page.getByRole("region", { name: "Needs you" }).getByRole("link")
-  ).toContainText("· Fix picks");
+  await openConversation(page, "Ash K");
+  await expect(timelineTrades(page)).toContainText(["· Fix picks"]);
   await bell(page).click();
   await expect(waitingOn(page)).toHaveText([/^Ash K · Fix picks/]);
   await waitingOn(page).click();

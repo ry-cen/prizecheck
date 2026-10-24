@@ -363,7 +363,7 @@ def test_the_friend_sees_the_proposal_from_their_side_and_a_stranger_gets_not_fo
         'recipient', 'proposed', 'answer', True, 'needs_you', ['accept', 'decline', 'counter'])
     assert sides(seen) == ([(arven, '1')], [(iono, '2')])
     assert seen['other'] == {'collector_id': misty, 'display_name': 'Misty W.', 'handle': handle_of(misty),
-                             'open_to_cash_offers': False}
+                             'open_to_cash_offers': False, 'completed_trades': 0}
     listed = ok(call('GET', '/api/social/trades', ash))
     assert [item['id'] for item in listed['trades']] == [trade['id'], older['id']] and listed['needs_you'] == 2
     assert ok(call('GET', '/api/social/trades', misty))['needs_you'] == 0
@@ -454,7 +454,7 @@ def test_a_deleted_counterparty_keeps_their_name_with_no_id_or_handle(store):
     with connect() as conn:
         conn.execute('DELETE FROM inventory_owner WHERE user_id=%s', (ash,))
     assert ok(read(misty, trade))['other'] == {'collector_id': None, 'display_name': 'Ash K.', 'handle': None,
-                                               'open_to_cash_offers': False}
+                                               'open_to_cash_offers': False, 'completed_trades': None}
     # Withdrawing still releases the copies; nobody is left to tell.
     ok(trade_step(misty, trade, 'withdraw'))
     assert reserved(misty, ids['PAL 185']) == (0, 0)

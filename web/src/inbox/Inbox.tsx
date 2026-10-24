@@ -33,6 +33,7 @@ import {
   waitingLabel,
 } from "../loans/loanText";
 import { inboxTime } from "./inboxTime";
+import { usePulse } from "./usePulse";
 
 /**
  * The inbox (social network #259, spec "Inbox derivation", variant E): the bell in the header, with a badge counting
@@ -49,7 +50,10 @@ import { inboxTime } from "./inboxTime";
  *
  * The shell provides it; the desktop header and the phone headers (the shell's and Collection's own) draw the bell.
  * It is read when the shell starts, when the drawer opens and closes, when the window regains focus and after a change
- * elsewhere (`useInboxRefresh`: a Loan step, a Friend command); nothing polls. Opening the drawer marks the updates it
+ * elsewhere (`useInboxRefresh`: a Loan step, a Friend command). The conversation pulse (Trading #298, `usePulse`) is read
+ * when the shell starts, on focus and on becoming visible, every 60 s while the page is visible, and every 15 s while a
+ * conversation page is open; never while hidden. A new watermark reads the inbox again and tells the conversation list
+ * and the open conversation to read again; its unread count joins the Trades tab's badge. Opening the drawer marks the updates it
  * shows read; they are still drawn as new until it closes. Clear dismisses the updates it showed, and an update
  * that arrived since stays.
  *
@@ -73,6 +77,14 @@ type InboxApi = {
   noteLoansChanged: () => void;
   /** Whether the drawer just opened this Loan or Trade; true once, for its screen to focus its heading. */
   takeOpened: (id: string) => boolean;
+  /** Conversations with unread messages (Trading #298), from the pulse; 0 until the first read. */
+  unreadConversations: number;
+  /** How many times the pulse's watermark moved, for the conversation list and the open conversation to read again. */
+  pulseChanged: number;
+  /** Reads the pulse now (after the collector read or sent something). */
+  pollPulse: () => void;
+  /** Registers an open conversation page, which makes the pulse fast; returns the release. */
+  openConversation: () => () => void;
 };
 
 const InboxContext = createContext<InboxApi | null>(null);
@@ -97,6 +109,28 @@ export function useLoansChanged(): number {
 /** The same count, for the Trades list to read again (Trading #274); 0 outside the shell. */
 export function useTradesChanged(): number {
   return useContext(InboxContext)?.loansChanged ?? 0;
+}
+
+/** Conversations with unread messages, for the Trades tab's badge (Trading #298); 0 outside the shell. */
+export function useUnreadConversations(): number {
+  return useContext(InboxContext)?.unreadConversations ?? 0;
+}
+
+/** A count that moves when the pulse's watermark does, for the conversation list and an open conversation to read
+ * again; 0 outside the shell. */
+export function usePulseChanged(): number {
+  return useContext(InboxContext)?.pulseChanged ?? 0;
+}
+
+/** Reads the pulse now; nothing outside the shell. */
+export function usePollPulse(): () => void {
+  return useContext(InboxContext)?.pollPulse ?? (() => {});
+}
+
+/** Called by a mounted conversation page: the pulse is read every 15 s while it is. */
+export function useConversationOpen(): void {
+  const register = useContext(InboxContext)?.openConversation;
+  useEffect(() => (register ? register() : undefined), [register]);
 }
 
 /** Whether the inbox's drawer just opened this Loan or Trade, true once; false outside the shell. */
@@ -146,6 +180,8 @@ export function InboxProvider({
   const opener = useRef<HTMLElement | null>(null);
   const reads = useRef(0);
   const [loansChanged, setLoansChanged] = useState(0);
+  const [openCount, setOpenCount] = useState(0);
+  const [pulseChanged, setPulseChanged] = useState(0);
   // The Loan or Trade the drawer last opened, until its screen takes it.
   const opened = useRef<string | null>(null);
 
@@ -188,6 +224,15 @@ export function InboxProvider({
     };
   }, [refresh]);
 
+  const pulse = usePulse(openCount > 0, () => {
+    refresh();
+    setPulseChanged((n) => n + 1);
+  });
+  const openConversation = useCallback(() => {
+    setOpenCount((n) => n + 1);
+    return () => setOpenCount((n) => n - 1);
+  }, []);
+
   const waiting = load.kind === "ready" ? load.view.waiting.length : 0;
   const tradesWaiting =
     load.kind === "ready" ? load.view.trade_waiting.length : 0;
@@ -213,6 +258,10 @@ export function InboxProvider({
           opened.current = null;
           return true;
         },
+        unreadConversations: pulse.unread,
+        pulseChanged,
+        pollPulse: pulse.poll,
+        openConversation,
       }}
     >
       {children}
@@ -253,10 +302,17 @@ export function loansTabName(waiting: number): string | undefined {
   return `Loans, ${waiting} ${waiting === 1 ? "needs" : "need"} you`;
 }
 
-/** "Trades, 1 needs you", "Trades, 2 need you"; undefined when nothing does, so the tab's name is its label. */
-export function tradesTabName(waiting: number): string | undefined {
-  if (!waiting) return undefined;
-  return `Trades, ${waiting} ${waiting === 1 ? "needs" : "need"} you`;
+/** "Trades, 1 needs you", "Trades, 2 need you", "Trades, 1 unread conversation", or both parts ("Trades, 1 needs you,
+ * 2 unread conversations"); undefined when neither is above zero, so the tab's name is its label. */
+export function tradesTabName(waiting: number, unread = 0): string | undefined {
+  const parts: string[] = [];
+  if (waiting > 0)
+    parts.push(`${waiting} ${waiting === 1 ? "needs" : "need"} you`);
+  if (unread > 0)
+    parts.push(
+      `${unread} unread ${unread === 1 ? "conversation" : "conversations"}`
+    );
+  return parts.length ? `Trades, ${parts.join(", ")}` : undefined;
 }
 
 /** A count drawn over a header button or a tab's icon; hidden from assistive technology, which reads the name. */

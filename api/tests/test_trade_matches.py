@@ -36,8 +36,8 @@ from test_trade_wants import set_rule, set_want
 from want_list_swap_fixtures import seed_swap_catalog
 
 UNKNOWN = b'{"detail":{"code":"FRIEND_NOT_FOUND"}}'
-ROW_FIELDS = {'collector_id', 'handle', 'display_name', 'open_to_cash_offers', 'match', 'you_get', 'you_give',
-              'more_you_get', 'more_you_give'}
+ROW_FIELDS = {'collector_id', 'handle', 'display_name', 'completed_trades', 'open_to_cash_offers', 'match',
+              'you_get', 'you_give', 'more_you_get', 'more_you_give'}
 CARD_FIELDS = {'edition_id', 'name', 'set_code', 'set_name', 'collector_number', 'descriptor', 'image_url', 'copies',
                'need', 'want_list_need', 'origin', 'accepts_as'}
 
@@ -452,8 +452,8 @@ def test_a_friend_who_matches_nothing_has_no_row_and_their_read_says_so(store):
     befriend(viewer, friend)
     assert matches(viewer) == {'has_friends': True, 'rows': []}
     assert ok(one(viewer, friend)) == {
-        'collector_id': friend, 'handle': handle, 'display_name': 'Ash K.', 'open_to_cash_offers': False,
-        'match': None, 'you_get': [], 'you_give': [], 'more_you_get': 0, 'more_you_give': 0}
+        'collector_id': friend, 'handle': handle, 'display_name': 'Ash K.', 'completed_trades': 0,
+        'open_to_cash_offers': False, 'match': None, 'you_get': [], 'you_give': [], 'more_you_get': 0, 'more_you_give': 0}
     # Discovery reads the current Trade List and wants on every open.
     ok(set_want(viewer, ids['PAL 185'], 1))
     shelf = binder(friend)

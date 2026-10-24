@@ -395,7 +395,8 @@ def _normal_view(user, trade):
     found = ok(read(user, trade))
     assert found['other']['collector_id'] is not None and 'handle' in found['other']
     found['other'] = {key: value for key, value in found['other'].items() if key not in ('collector_id', 'handle')}
-    return {key: value for key, value in found.items() if key not in ('id', 'created_at')}
+    # Each world has a pair of its own, so its conversation (Trading #298) is another id.
+    return {key: value for key, value in found.items() if key not in ('id', 'created_at', 'conversation_id')}
 
 
 def _ended_world(ids, action):
@@ -505,7 +506,7 @@ def test_a_deleted_account_leaves_its_name_and_the_remaining_side_confirms_alone
     assert trade_picks(trades['half']['id']) == [('proposer', misty, binder, 1)]
     half = ok(read(misty, trades['half']))
     assert half['other'] == {'collector_id': None, 'display_name': 'Ash K.', 'handle': None,
-                             'open_to_cash_offers': False}
+                             'open_to_cash_offers': False, 'completed_trades': None}
     assert half['actions'] == ['confirm_swap', 'use_suggested_picks']
     done = ok(confirm(misty, trades['half']))
     assert (done['closed_reason'], done['other']['collector_id']) == ('swapped', None)

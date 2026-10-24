@@ -11,6 +11,11 @@ import { execFileSync } from "node:child_process";
 import { randomInt, randomUUID } from "node:crypto";
 import type { BrowserContextOptions, Locator, Page } from "@playwright/test";
 import { expect, test } from "./support/collectors";
+import {
+  openConversation,
+  timeline,
+  timelineTrades,
+} from "./support/conversations";
 import { expectPageChecks } from "./support/page-check";
 import { signInAsOwner } from "./support/sign-in";
 import { bodyOf } from "./support/trades";
@@ -130,7 +135,7 @@ async function forTradeBinder(page: Page, name: string): Promise<string> {
 const tradesTab = (page: Page) =>
   page
     .getByRole("navigation", { name: "Main views" })
-    .getByRole("button", { name: "Trades", exact: true });
+    .getByRole("button", { name: /^Trades/ });
 const heading = (page: Page) => page.getByRole("heading", { level: 1 });
 const toast = (page: Page) =>
   page.getByRole("region", { name: "Notifications" });
@@ -387,18 +392,19 @@ async function story(
   await expect(group(brock.page, /^Iono .* you give$/)).toHaveCount(1);
 
   // C: Ash sees both proposals from his side.
-  await ash.page.goto(`${ORIGIN}/trades`);
-  const needsYou = ash.page.getByRole("list", { name: "Needs you" });
-  await expect(needsYou.getByRole("listitem")).toHaveCount(2);
-  await expect(needsYou).toContainText("Misty W sent you a Trade Proposal");
-  await expect(needsYou).toContainText("Misty W wants to give you 2 cards");
-  await expect(needsYou).toContainText("You give 1 card · You get 1 card");
-  await expect(ash.page.getByRole("list", { name: "Pending" })).toContainText(
-    "Waiting for Misty W to answer"
-  );
-  await expectPageChecks(ash.page, `the Trades list at ${width}`);
-  await needsYou
-    .getByRole("link", { name: /Misty W sent you a Trade Proposal/ })
+  await openConversation(ash.page, "Misty W");
+  const cards = timeline(ash.page);
+  // The two proposals that wait on Ash are in the Trades tab's name; no one has messaged him.
+  await expect(tradesTab(ash.page)).toHaveAccessibleName("Trades, 2 need you");
+  await expect(timelineTrades(ash.page)).toHaveCount(3);
+  await expect(cards).toContainText("Misty W sent you a Trade Proposal");
+  await expect(cards).toContainText("Misty W wants to give you 2 cards");
+  await expect(cards).toContainText("You give 1 card · You get 1 card");
+  await expect(cards).toContainText("Waiting for Misty W to answer");
+  await expectPageChecks(ash.page, `the conversation at ${width}`);
+  await timelineTrades(ash.page)
+    .filter({ hasText: /Misty W sent you a Trade Proposal/ })
+    .first()
     .click();
   await expect(heading(ash.page)).toHaveText(
     "Misty W sent you a Trade Proposal"
@@ -442,8 +448,12 @@ async function story(
   await expect(
     ash.page.getByRole("main").getByRole("list", { name: "Iono", exact: true })
   ).toContainText("×3");
-  await ash.page.goto(`${ORIGIN}/trades`);
-  await expect(ash.page.getByRole("main")).toContainText("History · 2");
+  await openConversation(ash.page, "Misty W");
+  await expect(
+    timelineTrades(ash.page).filter({
+      hasText: /Misty W withdrew this Trade Proposal/,
+    })
+  ).toHaveCount(2);
   await ash.page.goto(swap);
   await expect(heading(ash.page)).toHaveText(
     "Misty W withdrew this Trade Proposal"
