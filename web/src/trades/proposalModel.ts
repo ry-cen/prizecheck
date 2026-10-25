@@ -106,6 +106,27 @@ export function counterProposal(trade: {
   return { get: trade.you_get.map(line), give: trade.you_give.map(line) };
 }
 
+/** A Counter's lines start capped at the copies the countered proposal held. Once a library lists an Edition at more
+ * copies, its line on `side` takes that cap, so the stepper can go above the countered quantity. A cap never drops,
+ * and the same proposal comes back when nothing rose. */
+export function withLibraryCaps(
+  proposal: Proposal,
+  side: ProposalSide,
+  cards: readonly { edition_id: string; copies: string }[]
+): Proposal {
+  const offered = new Map(
+    cards.map((card) => [card.edition_id, Number(card.copies)])
+  );
+  let rose = false;
+  const lines = proposal[side].map((line) => {
+    const copies = offered.get(line.edition_id);
+    if (copies === undefined || copies <= Number(line.copies)) return line;
+    rose = true;
+    return { ...line, copies: String(copies) };
+  });
+  return rose ? { ...proposal, [side]: lines } : proposal;
+}
+
 /** On a Counter, the copies the countered proposal's sender gave are reserved by it, so they are missing from their
  * Trade List until the Counter frees them. This gives each card whose Edition is in `released` those copies back, so
  * the library offers them and a tap never caps below them. The same array comes back when nothing was released. */
