@@ -116,6 +116,18 @@ _Avoid_: Private Deck, secret Deck
 Adding copies to the Collection from another tracker's export file or a pasted list, through a review in which every row is matched to a Card Edition or skipped before anything is saved. It only adds Holdings, all into one chosen Storage Leaf, and never changes or removes existing ones.
 _Avoid_: Catalog import, Decklist Import, sync, restore
 
+**Card Scan**:
+Adding copies to the Collection by showing cards to the device's camera, one at a time, through a Scan Tray that the collector confirms before anything is saved. Like Collection Import, it only adds Holdings, all into one chosen Storage Leaf that is not a Deck; it is a sibling of Collection Import, not a kind of it.
+_Avoid_: Camera import, photo upload, scan session
+
+**Scan Tray**:
+The Card Editions and counts a Card Scan has gathered and the collector has not yet confirmed, kept on one device for one account until it is confirmed or cleared. It holds no photos, and it is not an import draft: starting a Card Scan never replaces one.
+_Avoid_: Scan session, import draft, cart
+
+**Scan Suggestion**:
+A card the scanner matched by its artwork alone, offered as three candidates; it enters the Scan Tray only when the collector picks one or finds the card by search. A card whose printed number agrees enters the Scan Tray without asking.
+_Avoid_: Guess, unconfirmed lock
+
 **Inventory Removal**:
 An explicit decrease that takes selected copies out of the tracked Collection without moving them to another Location.
 _Avoid_: Move, delete card
