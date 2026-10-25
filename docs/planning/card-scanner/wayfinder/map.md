@@ -2,7 +2,7 @@
 
 **Label:** wayfinder:map
 
-**Status:** charting since 2026-10-21. No tickets opened yet. The recognition spike closed on 2026-10-22; its [findings](research/recognition-spike-findings.md) recommend image matching plus number OCR. Scanner plumbing resolved on 2026-10-22 ([resolution](resolutions/decide-scanner-plumbing.md)). The phone measurement gate session (ticket 3) ran on 2026-10-23 and did not pass; the owner accepted building on the current runtime ([results](research/phone-gate-results.md)). Ticket 3 closed on 2026-10-24: the owner chose to ship the scanner into the app now and improve recognition afterwards. Next: scanner terms, the spec and the ADR (tickets 4 to 6).
+**Status:** charting since 2026-10-21. No tickets opened yet. The recognition spike closed on 2026-10-22; its [findings](research/recognition-spike-findings.md) recommend image matching plus number OCR. Scanner plumbing resolved on 2026-10-22 ([resolution](resolutions/decide-scanner-plumbing.md)). The phone measurement gate session (ticket 3) ran on 2026-10-23 and did not pass; the owner accepted building on the current runtime ([results](research/phone-gate-results.md)). Ticket 3 closed on 2026-10-24: the owner chose to ship the scanner into the app now and improve recognition afterwards. Scanner terms (ticket 4) were added to `CONTEXT.md` on 2026-10-25. Next: the spec and the ADR (tickets 5 and 6).
 
 ## Destination
 
@@ -15,7 +15,7 @@ A handoff-ready spec at `docs/planning/card-scanner/spec.md` for adding cards to
 - A scan only suggests a Card Edition, and the collector confirms it. This follows the physical-Edition identity in [ADR 0007](../../../adr/0007-edition-marketplace-metadata-boundary.md): neither OCR of a set number nor an image match can decide a finish.
 - Reference artwork and its gaps (missing energies and trainer kits in TCGdex) are covered in [card image sources](../../tcg-collection-tracker/wayfinder/research/card-image-sources.md). Cards without reference artwork can only be recognized by their collector number.
 - What comparable apps do (read 2026-10-21, mostly vendor and review-blog claims): dedicated scanner apps advertise on-device recognition that works offline; several combine image recognition with OCR; confirming set, number and finish after the scan is common; reprints that share artwork, vintage cards and Japanese cards are the usual weak spots. Nearly all are native apps, so a browser scanner is less proven.
-- New terms (working names: scan tray, scan session) are defined through domain-modeling as they are resolved. `CONTEXT.md` is not changed by this map.
+- New terms are defined through domain-modeling in ticket 4, which is the only change this map makes to `CONTEXT.md`.
 - The owner delegates technical plumbing (recognition pipeline, models, index format, caching, API contracts): decide and record it, and grill the owner only on collector-facing effects, one question per message.
 - Follow AGENTS.md's UI copy rule: the scanner shows no recognition scores, model or source names, or index versions. Consult Laya before delegation. Ask before creating a `feature: card scanner` label or any GitHub issue. Commit and push only with owner approval; stage explicit paths.
 
@@ -65,7 +65,7 @@ A handoff-ready spec at `docs/planning/card-scanner/spec.md` for adding cards to
 1. **Recognition spike** (done 2026-10-22, [findings](research/recognition-spike-findings.md); prototype, in a separate throwaway repository): [brief](prototypes/recognition-spike/brief.md). Compare OCR alone, image matching alone and both combined against the accuracy bar, and report download size and speed on real phones.
 2. **Decide scanner plumbing** (resolution; done 2026-10-22, [resolution](resolutions/decide-scanner-plumbing.md)): pipeline and libraries from the spike, the fingerprint index build and publishing, device caching and the save route and its refusals.
 3. **Prototype the scan tray** (prototype; done 2026-10-24, the owner closed it to ship first): the camera view, lock feedback, the tray rows with candidates, count, finish chips and search, and the destination picker, on a phone. It also carries the [phone measurement gate](resolutions/decide-scanner-plumbing.md#measurement-gate-map-ticket-3): its first session ran on 2026-10-23 and did not pass G2, G3 or G4; the owner accepted the current runtime and model choices anyway, with G7, G9, slower phones and Android unmeasured ([results](research/phone-gate-results.md)). It also decides how a stale row presents (see Not yet specified).
-4. **Define scanner terms** (domain-modeling): scan session, scan tray, and how they relate to Collection Import in `CONTEXT.md`.
+4. **Define scanner terms** (domain-modeling; done 2026-10-25: Card Scan, Scan Tray and Scan Suggestion in `CONTEXT.md`; "scan session" dropped as another name for the Scan Tray): scan session, scan tray, and how they relate to Collection Import in `CONTEXT.md`.
 5. **Write the spec** from the decisions above.
 6. **Write the ADR** "On-device recognition assets and the scanner index job" (ADR), recording the model delivery, the index job and storage, and device storage decisions (D3, D4 and D9 of the [plumbing resolution](resolutions/decide-scanner-plumbing.md)). No ADR covers static assets or caching today.
 
