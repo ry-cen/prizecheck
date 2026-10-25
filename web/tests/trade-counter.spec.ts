@@ -297,8 +297,8 @@ async function story(
   await expect(discard).toHaveCount(0);
   await expectPageChecks(ash.page, `a refused cash-only Counter at ${width}`);
 
-  // 6: Ash gives his Arven again, takes a second Iono (Misty lists 3, one reserved by her proposal and released by the
-  // Counter), sets $5 and sends.
+  // 6: Ash gives his Arven again, takes a second Iono with the line's stepper (Misty lists 3, one reserved by her
+  // proposal and released by the Counter), sets $5 and sends.
   // Misty lists exactly one Reverse Holo Arven and the proposal holds it: Ash takes that line out, finds its tile
   // again in Their Trade List, adds it back, and takes it out for good.
   const holoLine = (verb: "Decrease" | "Increase") =>
@@ -335,7 +335,13 @@ async function story(
     "Iono, PAL 185, .+?, Normal"
   );
   await expect(iono).toHaveAccessibleName(/1 of 3 in You get/);
-  await iono.click();
+  // The Iono line came in capped at the one copy proposed; the library lists 3, so its stepper goes up to 3.
+  await show(ash.page, "Proposal");
+  await expect(region(ash.page, "You get")).toContainText("Up to 3");
+  await ash.page
+    .getByRole("button", { name: "Increase Iono (PAL 185) you get" })
+    .click();
+  await show(ash.page, "Cards");
   await expect(iono).toHaveAccessibleName(/2 of 3 in You get/);
   await show(ash.page, "Proposal");
   await amount.fill("5");

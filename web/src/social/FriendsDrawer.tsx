@@ -423,7 +423,7 @@ function FriendsDialog({
           collector_id: person.collector_id,
           idempotency_key: key,
         }),
-      () => `Blocked ${person.display_name}. They aren't told.`,
+      () => `Blocked ${endSentence(person.display_name)} They aren't told.`,
       { rowGoes: true, row: person.collector_id }
     );
   }

@@ -51,6 +51,7 @@ import {
   setQuantity,
   toProposalCard,
   valueLines,
+  withLibraryCaps,
   withReleased,
   type CashDraft,
   type CashPayer,
@@ -320,6 +321,24 @@ export function ProposalBuilderPage({
         : match,
     [match, released]
   );
+
+  // A Counter's lines start at the countered copies as their cap; each library that lists more raises it. Only the caps
+  // change, never the terms, so this is not an edit.
+  useEffect(() => {
+    if (!counter) return;
+    setProposal((p) => {
+      let next = p;
+      if (libraryTheirs.kind === "ready")
+        next = withLibraryCaps(next, "get", libraryTheirs.cards);
+      if (libraryMatch.kind === "ready") {
+        next = withLibraryCaps(next, "get", libraryMatch.row.you_get);
+        next = withLibraryCaps(next, "give", libraryMatch.row.you_give);
+      }
+      if (mine.kind === "ready")
+        next = withLibraryCaps(next, "give", mine.cards);
+      return next;
+    });
+  }, [counter, libraryTheirs, libraryMatch, mine]);
 
   async function showMore() {
     if (
