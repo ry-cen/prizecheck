@@ -1,4 +1,4 @@
-import { useEffect, useState, type Ref } from "react";
+import { useLayoutEffect, useRef, type Ref } from "react";
 import { Button } from "../../ui/Button";
 import { CardArt } from "./CardArt";
 import { cardsText, EMPTY_PEEK, REVIEW, TRAY } from "./copy";
@@ -30,20 +30,33 @@ export function swipeHandlers(onUp?: () => void, onDown?: () => void) {
   };
 }
 
-/** The row slides in from below the first moment it is drawn (a transition, so reduced motion ends it at once). */
+/**
+ * The row slides in from below the moment it mounts. The animation starts in a layout effect, before the first paint, so
+ * anything waiting on document.getAnimations() sees it running; a transition started a frame later left a gap where the
+ * row was drawn at opacity 0 with no animation to wait for. --motion-duration is 0 ms under reduced motion.
+ */
 function RiseIn({ children }: { children: React.ReactNode }) {
-  const [shown, setShown] = useState(false);
-  useEffect(() => {
-    const frame = requestAnimationFrame(() => setShown(true));
-    return () => cancelAnimationFrame(frame);
+  const box = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (!el || typeof el.animate !== "function") return;
+    const style = getComputedStyle(el);
+    const duration =
+      parseFloat(style.getPropertyValue("--motion-duration")) || 0;
+    if (duration <= 0) return;
+    const animation = el.animate(
+      [
+        { transform: "translateY(0.75rem)", opacity: 0 },
+        { transform: "none", opacity: 1 },
+      ],
+      {
+        duration,
+        easing: style.getPropertyValue("--motion-ease").trim() || "ease-out",
+      }
+    );
+    return () => animation.cancel();
   }, []);
-  return (
-    <div
-      className={`transition-[transform,opacity] duration-(--motion-duration) ease-(--motion-ease) ${shown ? "translate-y-0 opacity-100" : "translate-y-3 opacity-0"}`}
-    >
-      {children}
-    </div>
-  );
+  return <div ref={box}>{children}</div>;
 }
 
 /** The tray closed: handle, "Tray", the total, Review and the last-touched row. There is no confirm here. */
