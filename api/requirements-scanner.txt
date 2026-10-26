@@ -1,0 +1,8 @@
+# The scanner index job image (deploy/docker/scanner-index.Dockerfile): scripts/scanner_index_job.py. The API image and
+# the API test venv do not install these; the job is the only place that needs OpenCV and ONNX Runtime. The three ML pins
+# are the spike's versions (the phone's vectors are matched against vectors made with them).
+numpy==2.2.6  # opencv-python-headless 4.12.0.88 needs numpy<2.3; 2.2.6 is the newest with a cp313 wheel (the image is Python 3.13)
+opencv-python-headless==4.12.0.88
+onnxruntime==1.31.0
+httpx>=0.28,<1
+psycopg[binary]>=3.2,<4

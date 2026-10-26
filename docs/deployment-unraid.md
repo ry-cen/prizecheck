@@ -24,13 +24,14 @@ push to dev
 
 Containers (`compose.deploy.yml`, Compose project `prizecheck-dev`):
 
-| Service | Image                                     | Role                                                                                    | Network reach                                     |
-| ------- | ----------------------------------------- | --------------------------------------------------------------------------------------- | ------------------------------------------------- |
-| `web`   | `ghcr.io/ry-cen/prizecheck-web:<commit>`  | nginx (non-root) serving the Vite build; proxies `/auth/*` and `/api/*` to `auth`       | The only published port: `127.0.0.1:8088`         |
-| `auth`  | `ghcr.io/ry-cen/prizecheck-auth:<commit>` | The unchanged Better Auth gateway (`auth/src`, compiled to JS), signs requests to `api` | Internal; outbound allowed for an HTTP mail relay |
-| `api`   | `ghcr.io/ry-cen/prizecheck-api:<commit>`  | FastAPI under uvicorn: one process, no reload, no access log                            | Internal; outbound allowed for TCGdex imports     |
-| `db`    | `postgres:16-alpine`                      | PostgreSQL                                                                              | Internal-only network, never published            |
-| `tools` | the `api` image                           | One-off runs: migrations, store initialization, `bind_owner.py`                         | Started only by the deploy script or operator     |
+| Service         | Image                                              | Role                                                                                                        | Network reach                                     |
+| --------------- | -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| `web`           | `ghcr.io/ry-cen/prizecheck-web:<commit>`           | nginx (non-root) serving the Vite build; proxies `/auth/*` and `/api/*` to `auth`                           | The only published port: `127.0.0.1:8088`         |
+| `auth`          | `ghcr.io/ry-cen/prizecheck-auth:<commit>`          | The unchanged Better Auth gateway (`auth/src`, compiled to JS), signs requests to `api`                     | Internal; outbound allowed for an HTTP mail relay |
+| `api`           | `ghcr.io/ry-cen/prizecheck-api:<commit>`           | FastAPI under uvicorn: one process, no reload, no access log                                                | Internal; outbound allowed for TCGdex imports     |
+| `db`            | `postgres:16-alpine`                               | PostgreSQL                                                                                                  | Internal-only network, never published            |
+| `tools`         | the `api` image                                    | One-off runs: migrations, store initialization, `bind_owner.py`                                             | Started only by the deploy script or operator     |
+| `scanner-index` | `ghcr.io/ry-cen/prizecheck-scanner-index:<commit>` | The card scanner's fingerprint index job (`scripts/scanner_index_job.py`), run by hand after a catalog pull | Database, and `assets.tcgdex.net` for artwork     |
 
 Containers find each other by service name (`db`, `api`, `auth`). The browser talks to one origin, as it does in local development. The session, request-signing and public-read paths are the existing code, unchanged.
 
@@ -116,7 +117,7 @@ The script finds its home as the parent of its `bin/` directory, so keep that la
 
 The workflow needs no stored registry credential on Unraid. Each deploy pipes the job's short-lived `GITHUB_TOKEN` (`packages: read` and `contents: read`) over SSH. The host logs in to a temporary Docker config, pulls, and deletes the config.
 
-The packages `prizecheck-api`, `prizecheck-auth` and `prizecheck-web` are created private and linked to the repository by the first `images` run. If a deploy fails with `Image pull failed`, open each package on GitHub, go to **Package settings → Manage Actions access**, and give `ry-cen/prizecheck` **Read**.
+The packages `prizecheck-api`, `prizecheck-auth`, `prizecheck-web` and `prizecheck-scanner-index` are created private and linked to the repository by the first `images` run. If a deploy fails with `Image pull failed`, open each package on GitHub, go to **Package settings → Manage Actions access**, and give `ry-cen/prizecheck` **Read**. A deploy also pulls the `scanner-index` image, so the card scanner's index job is ready to run; start it by hand with `prizecheck-deploy.sh compose run --rm scanner-index`.
 
 Optionally, for manual pulls (deploying a specific older commit by hand), store a persistent read-only login. Use a classic personal access token with only the `read:packages` scope:
 

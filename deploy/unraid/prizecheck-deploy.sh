@@ -19,6 +19,9 @@ BACKUP_DIR="$PRIZECHECK_HOME/backups"
 # Persistent registry login for manual operator pulls; CI uses a throwaway one per deploy.
 PERSISTENT_DOCKER_CONFIG="$PRIZECHECK_HOME/docker-config"
 APP_SERVICES=(api auth web)
+# Images a deploy pulls: the services above, plus the scanner index job, which is only run by hand (`compose run`) but must
+# be pulled while the deploy holds its registry login.
+PULL_SERVICES=(api auth web scanner-index)
 API_UID=10001
 AUTH_UID=1000
 KEEP_BACKUPS=10
@@ -158,9 +161,9 @@ link_cli_plugins() {
 pull_images() {
   if [[ -n "$PULL_DOCKER_CONFIG" ]]; then
     DOCKER_CONFIG="$PULL_DOCKER_CONFIG" "${COMPOSE[@]}" --project-directory "$PRIZECHECK_HOME" -f "$COMPOSE_FILE" \
-      --env-file "$ENV_FILE" pull --quiet "${APP_SERVICES[@]}"
+      --env-file "$ENV_FILE" pull --quiet "${PULL_SERVICES[@]}"
   else
-    compose pull --quiet "${APP_SERVICES[@]}"
+    compose pull --quiet "${PULL_SERVICES[@]}"
   fi
 }
 

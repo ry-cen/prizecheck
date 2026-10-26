@@ -176,6 +176,29 @@ services:
     cap_drop:
       - ALL
 
+  # The card scanner's fingerprint index job (#312): run by hand after a catalog pull, never started by `up`:
+  # `compose run --rm scanner-index` (add `--full` to refetch every image). It shares only the database with the API and
+  # fetches reference art from assets.tcgdex.net, so it gets the egress network but none of the API's secrets. The
+  # User-Agent carries the contact below (SCANNER_INDEX_CONTACT in the env file, else the owner's email).
+  scanner-index:
+    image: ${PRIZECHECK_REGISTRY:-ghcr.io/ry-cen}/prizecheck-scanner-index:${PRIZECHECK_IMAGE_TAG}
+    profiles: [tools]
+    init: true
+    read_only: true
+    tmpfs: [/tmp]
+    environment:
+      DATABASE_URL: postgresql://prizecheck:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@db:5432/prizecheck
+      SCANNER_INDEX_CONTACT: ${SCANNER_INDEX_CONTACT:-${OWNER_EMAIL}}
+    networks: [backend, egress]
+    depends_on:
+      db:
+        condition: service_healthy
+    logging: *logging
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
 networks:
   # PostgreSQL and the API's private listener: no route outside the host.
   backend:
