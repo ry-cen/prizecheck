@@ -10,6 +10,23 @@ The gateway verifies the session and signs the method, path, body hash, account 
 
 Anonymous snapshot, discovery and sitemap GETs bypass session lookup and read the sanitized public projection, avoiding private database wakeups. The current filesystem adapter needs a shared writable local filesystem with locks and atomic replacement, outside the static root. It is not a remote object-storage adapter. A chosen provider must preserve atomic publication, discovery, visibility and permanent revocation semantics. See [public projections](public-projections.md).
 
+## Card scanner delivery
+
+The scanner ([spec](planning/card-scanner/spec.md), [ADR 0017](adr/0017-on-device-recognition-assets-and-the-scanner-index-job.md)) is its own page, `web/scan.html`, served at `/collection/scan` by its own nginx location (`deploy/docker/nginx.conf`). That page alone sends `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp`, which the threaded WASM runtime needs; no other HTML document does. `/assets/` and its nested `.mjs` location send `Cross-Origin-Embedder-Policy: require-corp` too, because the recognizer worker script and the runtime's glue are loaded by the isolated page and carry their own embedder policy. The `.mjs` location also answers `text/javascript`, since nginx's `mime.types` has no `mjs`. The reverse proxy in front of nginx must pass these headers through and add no `Cross-Origin-*` header of its own.
+
+The pinned models are fetched at image build (`scripts/fetch-scanner-models.mjs` from `web/scanner-models.lock.json`, checked by size and sha256) and served under `/scanner/m/<sha256 prefix>/` with immutable caching and gzip. The build needs to reach `huggingface.co`.
+
+If a Content-Security-Policy is ever added, the scanner needs:
+
+- `script-src 'self' 'wasm-unsafe-eval'`
+- `worker-src 'self'`
+- `connect-src 'self'`
+- `img-src 'self' https://assets.tcgdex.net data: blob:` (every scanner `<img>` carries `crossorigin="anonymous"`; TCGdex sends `Access-Control-Allow-Origin: *`)
+
+The deployment sets no `Permissions-Policy` today. If one is added it must keep `camera=(self)`; `getUserMedia` also needs HTTPS (Tailscale Serve on Unraid).
+
+The fingerprint index job fetches `{image_url}/low.webp` from `assets.tcgdex.net` and `*.tcgdex.net` only, at most 5 requests a second with 4 workers, and identifies itself with `User-Agent: PrizeCheck-scanner-index/1 (+owner contact)`. The index is behind sign-in and never public; a public launch waits for the written rights check (spec "Ship blockers").
+
 ## Jobs and recovery
 
 The runtime must support detached Python imports surviving API restart, or supply an equivalent on-demand launcher whose exact-run and PostgreSQL ownership semantics are validated. A service manager must not terminate an import merely because it restarts the HTTP service. The import exits after one run; no permanently polling catalog worker is required. See ADR 0003.

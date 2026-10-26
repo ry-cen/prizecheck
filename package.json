@@ -5,7 +5,7 @@
     "dev": "concurrently -k \"npm:dev:auth\" \"npm:dev:web\"",
     "dev:auth": "GOOGLE_CLIENT_ID=fake-google-client GOOGLE_CLIENT_SECRET=fake-google-secret DISCORD_CLIENT_ID=fake-discord-client DISCORD_CLIENT_SECRET=fake-discord-secret tsx watch --import ./auth/testing/oauth-fake/preload.ts auth/src/server.ts",
     "dev:web": "vite --config web/vite.config.ts",
-    "check": "tsc -p auth/tsconfig.json --noEmit && tsc -p web/tsconfig.json --noEmit && npm run check:client",
+    "check": "tsc -p auth/tsconfig.json --noEmit && tsc -p web/tsconfig.json --noEmit && node scripts/fetch-scanner-models.mjs --check && npm run check:client",
     "check:client": ".venv/bin/python scripts/generate_client.py --check && .venv/bin/python scripts/generate_location_client.py --check && .venv/bin/python scripts/generate_holdings_client.py --check && .venv/bin/python scripts/generate_moves_client.py --check && .venv/bin/python scripts/generate_decks_client.py --check && .venv/bin/python scripts/generate_collection_client.py --check && .venv/bin/python scripts/generate_publications_client.py --check && .venv/bin/python scripts/generate_reconciliation_client.py --check && .venv/bin/python scripts/generate_discovery_client.py --check && .venv/bin/python scripts/generate_metadata_client.py --check && .venv/bin/python scripts/generate_prices_client.py --check && .venv/bin/python scripts/generate_live_export_client.py --check && .venv/bin/python scripts/generate_mass_entry_client.py --check && .venv/bin/python scripts/generate_format_checks_client.py --check && .venv/bin/python scripts/generate_catalog_browse_client.py --check && .venv/bin/python scripts/generate_settings_client.py --check && .venv/bin/python scripts/generate_want_list_client.py --check && .venv/bin/python scripts/generate_want_list_cost_client.py --check && .venv/bin/python scripts/generate_collection_import_client.py --check && .venv/bin/python scripts/generate_profile_client.py --check && .venv/bin/python scripts/generate_social_client.py --check && .venv/bin/python scripts/generate_trades_client.py --check",
     "check:bundle": ".venv/bin/python scripts/check_bundle_boundary.py",
     "build": "npm run check && vite build --config web/vite.config.ts",
@@ -15,7 +15,8 @@
     "typecheck": "npm run check",
     "guardrails": ".venv/bin/python scripts/check_guardrails.py && .venv/bin/python -m unittest discover -s tests/tooling -v",
     "verify": ".venv/bin/python scripts/verify.py",
-    "test:fast": "npm run guardrails"
+    "test:fast": "npm run guardrails",
+    "test:scanner-models": "vitest run web/src/scanner/recognize/pipeline.models.test.ts web/src/scanner/recognize/numbers.local.test.ts web/src/scanner/vision/vision.local.test.ts"
   },
   "dependencies": {
     "better-auth": "^1.7.6",
@@ -35,6 +36,7 @@
     "concurrently": "^9.0.0",
     "husky": "^9.1.7",
     "lint-staged": "^17.6.0",
+    "onnxruntime-web": "1.30.0",
     "prettier": "^3.9.9",
     "tailwindcss": "4.3.3",
     "tsx": "^4.19.0",

@@ -1,0 +1,27 @@
+{
+  "family": "dinov2s-int8",
+  "preprocessing": 1,
+  "files": [
+    {
+      "role": "embedder",
+      "name": "dinov2-small-model_quantized.onnx",
+      "url": "https://huggingface.co/onnx-community/dinov2-small/resolve/8b1f705a3a7f6f062f6bdd21986c1583d3ef105d/onnx/model_quantized.onnx",
+      "bytes": 24446700,
+      "sha256": "c179f8f7f592449c4c1bca4cd124a7538021428c5ffb89afde9503935b197efb"
+    },
+    {
+      "role": "ocr-recognizer",
+      "name": "paddleocr-english-rec.onnx",
+      "url": "https://huggingface.co/monkt/paddleocr-onnx/resolve/7b02d0a30a07ba2b92ad1ff5a8941ae2c633de65/languages/english/rec.onnx",
+      "bytes": 7830888,
+      "sha256": "4e16deb22c4da6468bdca539b2cd3c8687825538b67109177c47d359ab994cd7"
+    },
+    {
+      "role": "ocr-dictionary",
+      "name": "paddleocr-english-dict.txt",
+      "url": "https://huggingface.co/monkt/paddleocr-onnx/resolve/7b02d0a30a07ba2b92ad1ff5a8941ae2c633de65/languages/english/dict.txt",
+      "bytes": 1416,
+      "sha256": "e025a66d31f327ba0c232e03f407ae8d105e1e709e7ccb3f408aa778c24e70d6"
+    }
+  ]
+}

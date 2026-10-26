@@ -208,6 +208,26 @@ def oauth_fake_import_violations(source):
     return found
 
 
+# The ONNX runtime enters the web build through one module, so the bundle-boundary check has one place to guard
+# (ADR 0017, resolution D13). Subpath imports ("onnxruntime-web/wasm") and dynamic imports count.
+ORT_MODULE = 'web/src/scanner/worker/ort.ts'
+ORT_IMPORT = re.compile(r"""(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+|\brequire\s*\(\s*)["']onnxruntime-web(?:/[^"']*)?["']""")
+
+
+def onnxruntime_import_violations(source, filename):
+    """`onnxruntime-web` is imported only in web/src/scanner/worker/ort.ts."""
+    if filename == ORT_MODULE:
+        return []
+    return [(number, f'Import onnxruntime-web only in {ORT_MODULE}')
+            for number, line in enumerate(source.splitlines(), 1)
+            if ORT_IMPORT.search(line) and not line.lstrip().startswith(('//', '*', '/*'))]
+
+
+def web_source_files():
+    for suffix in ('*.ts', '*.tsx'):
+        yield from sorted((ROOT/'web/src').rglob(suffix))
+
+
 def dockerignore_violations(text):
     """The OAuth test fake never enters an image build context."""
     lines = {line.strip() for line in text.splitlines()}
@@ -298,6 +318,11 @@ def main():
     for path in sorted((ROOT/'auth/src').rglob('*.ts')):
         relative = path.relative_to(ROOT).as_posix()
         for line, reason in oauth_fake_import_violations(path.read_text()):
+            print(f'{relative}:{line}: {reason}')
+            failed = True
+    for path in web_source_files():
+        relative = path.relative_to(ROOT).as_posix()
+        for line, reason in onnxruntime_import_violations(path.read_text(), relative):
             print(f'{relative}:{line}: {reason}')
             failed = True
     for line, reason in dockerignore_violations((ROOT/'.dockerignore').read_text()):

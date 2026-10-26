@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en" data-theme="prize-gold">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#121110" />
+    <title>PrizeCheck</title>
+    <!-- The scanner's own page (spec "Web and delivery"): nginx and the Vite dev server serve it at /collection/scan
+      with COOP and COEP; no other document gets them. The first paint copies index.html's dark background. -->
+    <style>
+      @layer theme, base, components, utilities;
+      @layer base {
+        html {
+          background: #121110;
+          color-scheme: dark;
+        }
+        body {
+          margin: 0;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/scanner/entry/main.tsx"></script>
+  </body>
+</html>
