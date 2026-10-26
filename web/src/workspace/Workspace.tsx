@@ -6,7 +6,7 @@ import React, {
   useRef,
   useState,
 } from "react";
-import { Menu as MenuIcon, Plus } from "lucide-react";
+import { Camera as CameraIcon, Menu as MenuIcon, Plus } from "lucide-react";
 import type { AddedCards } from "../catalog/useAddToast";
 import {
   getLocationTree,
@@ -20,6 +20,7 @@ import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
 import { SearchField } from "../ui/SearchField";
 import { PhoneHeaderActions } from "../shell/HeaderActions";
+import { openScanner } from "../shell/openScanner";
 import { AddCardsGallery } from "./AddCardsGallery";
 import { CorrectionsNotice } from "./CorrectionsNotice";
 import { CreateLocationDialog } from "./CreateLocationDialog";
@@ -600,7 +601,16 @@ export function Workspace({
           open={filtersDrawerOpen}
           onOpen={() => setFiltersDrawerOpen(true)}
         />
-        <PhoneHeaderActions />
+        {/* The camera button sits with the header actions (one gap, 4 px, not two): Search needs 44 px at 375. */}
+        <div className="flex shrink-0 items-center gap-1">
+          <Button
+            variant="quiet"
+            icon={CameraIcon}
+            label="Scan cards"
+            onClick={openScanner}
+          />
+          <PhoneHeaderActions />
+        </div>
       </header>
       <div className="grid min-h-[calc(100dvh-var(--layout-header-height))] grid-cols-[var(--layout-sidebar-width)_minmax(0,1fr)] phone:block">
         <aside
@@ -638,7 +648,7 @@ export function Workspace({
             )}
             {/* The actions wrap as one group, and on a phone they always take their own row, so the totals
                 arriving after each listing loads never move a button under a finger. */}
-            <div className="ml-auto flex items-center gap-4 self-center phone:basis-full phone:justify-end">
+            <div className="ml-auto flex items-center gap-4 self-center phone:basis-full phone:flex-wrap phone:justify-start phone:gap-2">
               <Button
                 ref={addOpener}
                 aria-haspopup="dialog"
@@ -646,6 +656,7 @@ export function Workspace({
               >
                 Add cards
               </Button>
+              <Button onClick={openScanner}>Scan cards</Button>
               <Button onClick={onImport}>Import…</Button>
               {/* Mobile Select mode's toggle, on a phone only. */}
               <span className="hidden phone:flex">
