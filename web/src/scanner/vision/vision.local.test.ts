@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { LOCAL, hasLocal, readJson, readPng } from "../fixtures/read";
 import type { Quad, Rect } from "../types";
 import { findCardGuided } from "./corners";
-import { GATE, decideGate, measureGate } from "./gate";
+import { TUNED_GATE, decideGate, measureGate } from "./gate";
 
 type Item = {
   id: string;
@@ -42,8 +42,10 @@ describe.skipIf(!hasLocal())("40 local photos", () => {
       if (rel > 0.01 || dl > 0.5 || dc > 0.002)
         misses.push(`${it.id}: gate rel ${rel} luma ${dl} clip ${dc}`);
       const near =
-        Math.abs(it.gate.sharpness - GATE.sharpMin) / GATE.sharpMin <= 0.01;
-      if (!near && decideGate(m).ok !== it.gate.ok)
+        Math.abs(it.gate.sharpness - TUNED_GATE.sharpMin) /
+          TUNED_GATE.sharpMin <=
+        0.01;
+      if (!near && decideGate(m, TUNED_GATE).ok !== it.gate.ok)
         misses.push(`${it.id}: gate decision differs`);
 
       const q = findCardGuided(img, it.guide);
