@@ -159,11 +159,41 @@ jobs:
           path: .scratch/verification/
           retention-days: 7
           include-hidden-files: true
+  # The scanner index job's image (deploy/docker/scanner-index.Dockerfile): builds it with the pinned embedder, then runs
+  # the real-model test inside it. That test needs ONNX Runtime, which the API venv does not have, so no other leg runs it.
+  # Always runs, in full-gate runs too. deploy-dev.yml pushes the same image once this workflow has passed.
+  scanner-index-image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build the test stage
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: deploy/docker/scanner-index.Dockerfile
+          target: test
+          load: true
+          tags: prizecheck-scanner-index-test
+          cache-from: type=gha,scope=prizecheck-scanner-index-test
+          cache-to: type=gha,mode=max,scope=prizecheck-scanner-index-test
+      - name: Real-model test
+        run: docker run --rm prizecheck-scanner-index-test
+      - name: Build the job image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: deploy/docker/scanner-index.Dockerfile
+          push: false
+          cache-from: type=gha,scope=prizecheck-scanner-index
   # The one check that stands for the whole run: pull requests and deploy-dev.yml's images job wait on "verify".
   # always() makes it run and fail after a failed or cancelled leg instead of being skipped with it, because a skipped
   # check counts as passing.
   verify:
-    needs: [legs, full]
+    needs: [legs, full, scanner-index-image]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -173,7 +203,9 @@ jobs:
           FULL: ${{ inputs.full && 'true' || 'false' }}
           LEGS_RESULT: ${{ needs.legs.result }}
           FULL_RESULT: ${{ needs.full.result }}
+          SCANNER_INDEX_RESULT: ${{ needs.scanner-index-image.result }}
         # The mode this run chose must report success: a job skipped by a wrong condition fails here instead of passing.
         run: |
-          echo "full gate requested: $FULL; legs: $LEGS_RESULT; full gate: $FULL_RESULT"
+          echo "full gate requested: $FULL; legs: $LEGS_RESULT; full gate: $FULL_RESULT; scanner index image: $SCANNER_INDEX_RESULT"
+          test "$SCANNER_INDEX_RESULT" = success
           if [ "$FULL" = true ]; then test "$FULL_RESULT" = success; else test "$LEGS_RESULT" = success; fi

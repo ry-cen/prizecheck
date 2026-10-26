@@ -2,12 +2,14 @@
 
 The implementation selects no provider. A scheduler invokes independent commands in the application working directory, with secrets injected as environment variables. The backup and watchdog commands do not invoke one another. Install these schedules through the scheduler adapter chosen at deployment:
 
-| Job | UTC schedule | Command |
-| --- | --- | --- |
-| Daily logical backup | Daily, 03:00 | `.venv/bin/python scripts/operations_job.py backup` |
-| Independent backup watchdog | Hourly, minute15 | `.venv/bin/python scripts/operations_job.py watchdog` |
-| Disposable recovery drill | Monthly, first day04:00 | `.venv/bin/python scripts/operations_job.py restore --target tcg_recovery_monthly_YYYYMM` |
-| Format Standing rule dates | Daily, 00:05 UTC | `.venv/bin/python scripts/format_standing_job.py` |
+| Job                         | UTC schedule            | Command                                                                                   |
+| --------------------------- | ----------------------- | ----------------------------------------------------------------------------------------- |
+| Daily logical backup        | Daily, 03:00            | `.venv/bin/python scripts/operations_job.py backup`                                       |
+| Independent backup watchdog | Hourly, minute15        | `.venv/bin/python scripts/operations_job.py watchdog`                                     |
+| Disposable recovery drill   | Monthly, first day04:00 | `.venv/bin/python scripts/operations_job.py restore --target tcg_recovery_monthly_YYYYMM` |
+| Format Standing rule dates  | Daily, 00:05 UTC        | `.venv/bin/python scripts/format_standing_job.py`                                         |
+
+The scanner index job is a portable job that no scheduler runs (ADR 0002): the operator runs it by hand after a catalog pull, in its own image, with `prizecheck-deploy.sh compose run --rm scanner-index` (add `--full` after a preprocessing change or to refresh the artwork). Inside the image the command is `python scripts/scanner_index_job.py [--full]`. It fetches each active printing's `low.webp` from `assets.tcgdex.net`, embeds it, and publishes the fingerprint file the scanner downloads. It exits 0 when the index was published or nothing was due, 1 when the database is unreachable, 2 when more than 2% of the printings failed (nothing is published; rerun later) or the embedder is unusable, and 3 when another run holds advisory lock 914711. A deploy pulls its image with the other services, so it is ready to run on the deployed commit.
 
 The monthly target must be new; existing databases are never overwritten. Remove only that disposable target after recording the drill. Source connection is `DATABASE_URL`; restore administration uses `RESTORE_ADMIN_DATABASE_URL`. Scheduler installation, actual daily execution and remote durability need deployment evidence, rather than a code-level assertion.
 
