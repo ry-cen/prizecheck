@@ -27,6 +27,7 @@ from . import quote_contract
 from .price_seed import seed_from_import
 from .public_catalog import publish_catalog_best_effort
 from .reprint_groups import refresh_reprint_groups
+from .set_counts import insert_set_counts, set_counts
 from .tcgdex_record import distinct_variants, priced_variant, source_descriptor
 
 BASE_URL = "https://api.tcgdex.net/v2/en/cards"
@@ -574,6 +575,8 @@ def execute_run(conn, run_id: UUID, source=None, before_promotion=None):
                 conn.execute("""INSERT INTO catalog_generation_set(generation_id,set_id,release_date)
                   SELECT %s,t.set_id,t.released FROM unnest(%s::text[],%s::date[]) AS t(set_id,released)""",
                              (run_id, list(release_dates), list(release_dates.values())))
+            # Each set's printed card count (migration 150), from the records just fetched.
+            insert_set_counts(conn, run_id, set_counts(records.values()))
             if before_promotion:
                 before_promotion()
             old = {}
