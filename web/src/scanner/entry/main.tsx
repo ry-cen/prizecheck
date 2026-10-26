@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { LoadingScreen } from "../../public/LoadingScreen";
 import { leaveForSignIn, startScanner, type ScannerStart } from "./bootstrap";
-import { ScannerPageStub } from "./ScannerPageStub";
+import { ScannerPage } from "../ui/ScannerPage";
 import "../../tokens.css";
 import "../../tailwind.css";
 
@@ -21,7 +21,7 @@ function ScannerEntry() {
       current = false;
     };
   }, []);
-  if (start?.kind === "ready") return <ScannerPageStub userId={start.userId} />;
+  if (start?.kind === "ready") return <ScannerPage userId={start.userId} />;
   return (
     <LoadingScreen
       message={

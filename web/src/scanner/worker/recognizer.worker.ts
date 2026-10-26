@@ -205,7 +205,11 @@ self.onmessage = (ev: MessageEvent<ToWorker>): void => {
       paused = false;
       break;
     case "swap":
-      swapPending = { cards: m.cards, fingerprints: m.fingerprints };
+      // A second swap before the first is applied adds to it: it never drops the first one's keys.
+      swapPending = {
+        cards: m.cards ?? swapPending?.cards,
+        fingerprints: m.fingerprints ?? swapPending?.fingerprints,
+      };
       break;
   }
 };
