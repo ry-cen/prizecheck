@@ -125,7 +125,7 @@ The Card Editions and counts a Card Scan has gathered and the collector has not 
 _Avoid_: Scan session, import draft, cart
 
 **Scan Suggestion**:
-A card the scanner matched by its artwork alone, offered as three candidates; it enters the Scan Tray only when the collector picks one or finds the card by search. A card whose printed number agrees enters the Scan Tray without asking.
+A card the scanner matched by its artwork alone, offered as up to three candidates; it enters the Scan Tray only when the collector picks one or finds the card by search. A card whose printed number agrees enters the Scan Tray without asking.
 _Avoid_: Guess, unconfirmed lock
 
 **Inventory Removal**:
