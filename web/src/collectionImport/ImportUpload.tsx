@@ -8,6 +8,7 @@ import {
   startCollectionImportPaste,
   type CollectionImportSummary,
 } from "../collection_import_generated";
+import { openScanner } from "../shell/openScanner";
 import { PageHeader } from "../shell/PageHeader";
 import { Button } from "../ui/Button";
 import { Segmented, segmentId } from "../ui/Segmented";
@@ -23,12 +24,13 @@ import {
 } from "./importText";
 import { ReplaceImportDialog, UnfinishedImport } from "./ImportUnfinished";
 
-/** Upload a file, or Paste a list (#234). */
-export type ImportMode = "file" | "paste";
+/** Upload a file, Paste a list (#234), or the Camera (the scanner, which has its own destination and review). */
+export type ImportMode = "file" | "paste" | "camera";
 
 const MODES = [
   { value: "file", label: "Upload a file" },
   { value: "paste", label: "Paste" },
+  { value: "camera", label: "Camera" },
 ] as const;
 
 type Props = {
@@ -90,6 +92,7 @@ export function ImportUpload({
     ? locationId
     : (fallback?.id ?? null);
   const pasting = mode === "paste";
+  const camera = mode === "camera";
   const ready = pasting ? text.trim() !== "" : file !== null;
 
   useEffect(() => {
@@ -138,7 +141,7 @@ export function ImportUpload({
         );
       else onReviewed(await startCollectionImport(chosen, file!), file!.name);
     } catch (failure) {
-      setError(startErrorText(failure, mode));
+      setError(startErrorText(failure, pasting ? "paste" : "file"));
       if (
         !pasting &&
         failure instanceof CollectionImportError &&
@@ -191,7 +194,7 @@ export function ImportUpload({
           Condition, prices paid and notes aren&apos;t imported.
         </p>
         <Segmented
-          label="Upload a file or paste a list"
+          label="Upload a file, paste a list or use the camera"
           idBase="import-source"
           panelId="import-source-panel"
           options={MODES}
@@ -207,7 +210,21 @@ export function ImportUpload({
           aria-labelledby={segmentId("import-source", mode)}
           className="flex min-w-0 flex-col gap-3"
         >
-          {pasting ? (
+          {camera ? (
+            <>
+              <p className="m-0 text-body text-text-muted">
+                Point your camera at each card. You choose where the cards go
+                before anything is added.
+              </p>
+              <Button
+                className="self-start"
+                variant="primary"
+                onClick={openScanner}
+              >
+                Start scanning
+              </Button>
+            </>
+          ) : pasting ? (
             <>
               <TextArea
                 label="Your list"
@@ -261,57 +278,61 @@ export function ImportUpload({
           )}
         </div>
       </section>
-      <section className="flex flex-col gap-2">
-        <div className="w-80 max-w-full">
-          <Select
-            label="Put cards in"
-            value={chosen ?? ""}
-            disabled={places.state !== "ready" || places.leaves.length === 0}
-            aria-describedby="import-place-help"
-            onChange={(event) => onLocation(event.target.value)}
+      {!camera && (
+        <section className="flex flex-col gap-2">
+          <div className="w-80 max-w-full">
+            <Select
+              label="Put cards in"
+              value={chosen ?? ""}
+              disabled={places.state !== "ready" || places.leaves.length === 0}
+              aria-describedby="import-place-help"
+              onChange={(event) => onLocation(event.target.value)}
+            >
+              {places.leaves.map((leaf) => (
+                <option key={leaf.id} value={leaf.id}>
+                  {leaf.label}
+                </option>
+              ))}
+            </Select>
+          </div>
+          <p id="import-place-help" className="m-0 text-meta text-text-muted">
+            {places.state === "failed"
+              ? "Your Locations didn't load."
+              : places.state === "ready" && places.leaves.length === 0
+                ? "Make a Location in your Collection first."
+                : "Everything goes here. You can sort cards into other Locations afterwards."}
+          </p>
+          {places.state === "failed" && (
+            <Button className="self-start" onClick={places.reload}>
+              Try again
+            </Button>
+          )}
+        </section>
+      )}
+      {!camera && (
+        <div className="flex flex-wrap items-center gap-3">
+          <Button
+            ref={reviewButton}
+            variant="primary"
+            disabled={!ready || !chosen || busy !== null || checking}
+            onClick={() => void review()}
           >
-            {places.leaves.map((leaf) => (
-              <option key={leaf.id} value={leaf.id}>
-                {leaf.label}
-              </option>
-            ))}
-          </Select>
-        </div>
-        <p id="import-place-help" className="m-0 text-meta text-text-muted">
-          {places.state === "failed"
-            ? "Your Locations didn't load."
-            : places.state === "ready" && places.leaves.length === 0
-              ? "Make a Location in your Collection first."
-              : "Everything goes here. You can sort cards into other Locations afterwards."}
-        </p>
-        {places.state === "failed" && (
-          <Button className="self-start" onClick={places.reload}>
-            Try again
+            Review import
           </Button>
-        )}
-      </section>
-      <div className="flex flex-wrap items-center gap-3">
-        <Button
-          ref={reviewButton}
-          variant="primary"
-          disabled={!ready || !chosen || busy !== null || checking}
-          onClick={() => void review()}
-        >
-          Review import
-        </Button>
-        <p
-          role="status"
-          className={`m-0 min-w-0 text-body ${error ? "text-warning" : "text-text-muted"}`}
-        >
-          {busy === "reading"
-            ? pasting
-              ? "Reading your list…"
-              : "Reading your file…"
-            : busy === "opening"
-              ? "Opening your import…"
-              : (error ?? "")}
-        </p>
-      </div>
+          <p
+            role="status"
+            className={`m-0 min-w-0 text-body ${error ? "text-warning" : "text-text-muted"}`}
+          >
+            {busy === "reading"
+              ? pasting
+                ? "Reading your list…"
+                : "Reading your file…"
+              : busy === "opening"
+                ? "Opening your import…"
+                : (error ?? "")}
+          </p>
+        </div>
+      )}
       <ReplaceImportDialog
         open={confirming}
         onKeep={() => setConfirming(false)}

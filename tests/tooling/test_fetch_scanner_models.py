@@ -111,8 +111,8 @@ class FetchScannerModelsTest(unittest.TestCase):
         self.assertIn('unknown role extra', result.stderr)
 
     def test_the_output_directory_is_gitignored_and_kept_out_of_the_docker_context(self):
-        ignored = subprocess.run(['git', 'check-ignore', '-q', 'web/public/scanner/m/c179f8f7f592449c/model.onnx'], cwd=ROOT)
-        self.assertEqual(ignored.returncode, 0)
+        # Read the file rather than ask git: the verify harness runs this in a copied workspace with no checkout.
+        self.assertIn('web/public/scanner/m/', (ROOT / '.gitignore').read_text().splitlines())
         self.assertIn('web/public/scanner/m/', (ROOT / '.dockerignore').read_text().splitlines())
 
     def test_unpinned_revisions_and_unsafe_names_are_rejected(self):
