@@ -47,3 +47,7 @@ playwright/.cache/
 .vscode/
 *.swp
 *~
+
+# Scanner real-art fixtures and models: local only, never committed (fixture rule)
+web/src/scanner/__local__/
+.local/scanner-models/
