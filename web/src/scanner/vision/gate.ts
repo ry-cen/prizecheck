@@ -11,13 +11,19 @@ export type GateConfig = {
   lumaMax: number;
   clipMax: number;
 };
-/** The tuned config of data/tuning/gate.json (config.sharp_min 5333.3134765625, luma_min 40, luma_max 215, clip_max 0.25). */
-export const GATE: GateConfig = {
+/** The tuned config of data/tuning/gate.json (config.sharp_min 5333.3134765625, luma_min 40, luma_max 215, clip_max 0.25); the parity tests decide with it. */
+export const TUNED_GATE: GateConfig = {
   sharpMin: 5333.3134765625,
   lumaMin: 40,
   lumaMax: 215,
   clipMax: 0.25,
 };
+/**
+ * The config the recognizer ships with: the tuned config with the sharpness check off (spec, "Recognition decided by the
+ * primary", 2026-10-25). The 5333 threshold came from synthetic images and rejected 85 to 96 percent of real frames; the
+ * dark, bright and clipped checks stay. Restore `sharpMin: TUNED_GATE.sharpMin` (or a retuned value) when the retune lands.
+ */
+export const GATE: GateConfig = { ...TUNED_GATE, sharpMin: 0 };
 export type GateMeasure = {
   sharpness: number;
   meanLuma: number;
