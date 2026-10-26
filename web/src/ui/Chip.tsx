@@ -71,3 +71,41 @@ export function PickerChip({
     </button>
   );
 }
+
+export type ChoiceOption = { value: string; label: string };
+
+/**
+ * A single-choice row of chips (the Scan Tray's finishes, #318), built on Chip's look: exactly one option is
+ * selected, or none while `value` is null (a row that needs its finish picked again). A tap on the selected chip
+ * does nothing. The group is named by `label`; each chip is a pressed or not-pressed button.
+ */
+export function ChoiceChips({
+  label,
+  options,
+  value,
+  onChange,
+  disabled,
+}: {
+  label: string;
+  options: readonly ChoiceOption[];
+  value: string | null;
+  onChange: (value: string) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div role="group" aria-label={label} className="flex flex-wrap gap-x-1">
+      {options.map((option) => (
+        <Chip
+          key={option.value}
+          selected={option.value === value}
+          disabled={disabled}
+          onChange={() => {
+            if (option.value !== value) onChange(option.value);
+          }}
+        >
+          {option.label}
+        </Chip>
+      ))}
+    </div>
+  );
+}
