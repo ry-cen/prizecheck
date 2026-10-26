@@ -19,7 +19,7 @@ The pinned models are fetched at image build (`scripts/fetch-scanner-models.mjs`
 If a Content-Security-Policy is ever added, the scanner needs:
 
 - `script-src 'self' 'wasm-unsafe-eval'`
-- `worker-src 'self'`
+- `worker-src 'self' blob:` (the capability check probes module workers with a throwaway blob worker)
 - `connect-src 'self'`
 - `img-src 'self' https://assets.tcgdex.net data: blob:` (every scanner `<img>` carries `crossorigin="anonymous"`; TCGdex sends `Access-Control-Allow-Origin: *`)
 
