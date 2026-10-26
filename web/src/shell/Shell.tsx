@@ -21,6 +21,7 @@ import {
 import { BorrowDraftsProvider } from "../loans/BorrowDrafts";
 import { Icon } from "../ui/Icon";
 import { Menu, type MenuItem } from "../ui/Menu";
+import { takeLandingToast } from "../scanner/ui/landing";
 import { ToastProvider, useToast } from "../ui/Toast";
 import { FriendsButton, FriendsProvider } from "../social/FriendsDrawer";
 import {
@@ -175,6 +176,12 @@ function ShellFrame({
     },
     []
   );
+
+  // A confirmed Scan Tray leaves its toast for the page it lands on (the scanner is its own page, #318).
+  useEffect(() => {
+    const landed = takeLandingToast();
+    if (landed) toast.show({ message: landed });
+  }, [toast]);
 
   // The shell restores scroll positions itself; the browser's own restoration would fight it.
   useEffect(() => {

@@ -12,6 +12,14 @@ export type Frame = {
   t: number;
 };
 
+/** Where the scanner's frames come from: the camera, or in a browser test a scripted source. `next()` is null while
+ * there is no frame to take now; the caller tries again on its next tick. */
+export interface FrameSource {
+  start(): Promise<void>;
+  next(): Promise<Frame | null>;
+  stop(): void;
+}
+
 export async function listCameras(): Promise<
   { deviceId: string; label: string }[]
 > {
@@ -23,8 +31,10 @@ export async function listCameras(): Promise<
 
 export type CameraOpts = { deviceId?: string; width?: number; height?: number };
 
-export class CameraFrameSource {
+/** The back camera at an ideal 1920x1080, cropped to the guide as the worker contract says (`Frame.crop`). */
+export class CameraFrameSource implements FrameSource {
   private stream: MediaStream | null = null;
+  private stopped = false;
   private label = "";
   private settings: MediaTrackSettings = {};
 
@@ -44,6 +54,11 @@ export class CameraFrameSource {
       audio: false,
       video,
     });
+    if (this.stopped) {
+      // Stopped while the browser was asking: the stream that arrives late must not keep the camera on.
+      stream.getTracks().forEach((t) => t.stop());
+      return;
+    }
     this.stream = stream;
     const v = this.video;
     v.muted = true;
@@ -87,6 +102,7 @@ export class CameraFrameSource {
   }
 
   stop(): void {
+    this.stopped = true;
     this.stream?.getTracks().forEach((t) => t.stop());
     this.stream = null;
     this.video.srcObject = null;
