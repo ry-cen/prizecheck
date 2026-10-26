@@ -71,6 +71,7 @@ def test_the_display_table_is_not_the_live_export_table():
     # its alias rules (import_aliases); display and matching, not export. The Want List's Swap hint (#211) shows
     # the owned Edition's code ("PAL 254"). Copy to my Decks (#216) shows a Published Deck row's printed code on its
     # review line (import_publication). The collection import (#228, #234) reads it to match a Dragon Shield or Sorted
-    # set code and a pasted decklist-style line (collection_import_matcher).
+    # set code and a pasted decklist-style line (collection_import_matcher). The scanner's number table (#310) carries
+    # each set's printed code so the phone can match an OCR'd "PAL 254" (scanner).
     assert importers == ["catalog_browse.py", "collection_import_matcher.py", "deck_import.py", "import_aliases.py",
-                         "import_matching.py", "import_publication.py", "swap_hints.py"]
+                         "import_matching.py", "import_publication.py", "scanner.py", "swap_hints.py"]
