@@ -2,7 +2,7 @@
 // in Collection's actions row, the camera button in the phone header and the Camera choice in Collection Import each
 // open the scanner (SCANNER_PATH) by a full document load, never the client router, and never call
 // POST /api/collection-imports. Camera hides Put cards in and Review import and offers Start scanning. Checked at
-// 1280×800 and 375×812. The scanner page itself is #318; its cross-origin isolation is checked in #321.
+// 1280×800 and 375×812. The scanner page itself is #318; its cross-origin isolation is scanner-isolation.spec.ts (#321).
 import { test, expect, type Page } from "@playwright/test";
 import { Pool } from "pg";
 import { SCANNER_PATH } from "../src/scanner/route";
