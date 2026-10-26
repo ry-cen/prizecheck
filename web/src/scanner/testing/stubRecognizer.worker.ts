@@ -10,4 +10,14 @@ const stub = new StubRecognizer(
   (m: FromWorker) => (self as unknown as Worker).postMessage(m),
   canvasReader()
 );
-self.onmessage = (ev: MessageEvent<ToWorker>): void => stub.handle(ev.data);
+self.onmessage = (ev: MessageEvent<ToWorker>): void => {
+  // Test seam, outside the worker contract: the page asks whether this worker is cross-origin isolated.
+  if ((ev.data as { t: string }).t === "test:isolated?") {
+    (self as unknown as Worker).postMessage({
+      t: "test:isolated",
+      value: self.crossOriginIsolated,
+    });
+    return;
+  }
+  stub.handle(ev.data);
+};

@@ -4,7 +4,7 @@ import { expect, type Locator, type Page } from "@playwright/test";
 import { Pool } from "pg";
 import { SCANNER_PATH } from "../../src/scanner/route";
 import type {
-  ScannedTestFrame,
+  ScriptedFrame,
   ScannerTestScript,
 } from "../../src/scanner/ui/testHooks";
 import { startAsNewOwner } from "./owner";
@@ -13,6 +13,17 @@ import { signInAsOwner } from "./sign-in";
 // Browser tests of the scanner screen (#318). The page is the real scanner entry on the dev server; the stub recognizer
 // (web/src/scanner/testing/stubRecognizer.ts) answers from a script the test installs before the page loads, and a
 // scripted source hands it frames. The manifest, printings and save routes run against the test stack.
+
+/** A scripted frame as the specs write it: `url` (a fixture under web/tests/fixtures/scanner/, served by the dev server)
+ * is filled in by `installScript` when left out: the card picture for a frame that recognizes something, the empty table
+ * for one that does not. */
+export type ScannedTestFrame = Omit<ScriptedFrame, "url"> & { url?: string };
+export type ScriptInput = Omit<ScannerTestScript, "frames"> & {
+  frames: ScannedTestFrame[];
+};
+export const FIXTURE_URL = "/tests/fixtures/scanner";
+export const TABLE = `${FIXTURE_URL}/table.png`;
+export const CARD = `${FIXTURE_URL}/card-a.png`;
 
 export const ORIGIN = process.env.TEST_ORIGIN || "http://localhost:5173";
 const PIXEL = Buffer.from(
@@ -103,9 +114,18 @@ export const placements = (...ids: string[]): ScannedTestFrame[] =>
  */
 export async function installScript(
   page: Page,
-  script: ScannerTestScript,
-  afterReload: ScannerTestScript = { frames: [{}] }
+  input: ScriptInput,
+  afterInput: ScriptInput = { frames: [{}] }
 ) {
+  const withPictures = (s: ScriptInput): ScannerTestScript => ({
+    ...s,
+    frames: (s.frames.length ? s.frames : [{}]).map((f) => ({
+      ...f,
+      url: f.url ?? (f.top?.length ? CARD : TABLE),
+    })),
+  });
+  const script = withPictures(input);
+  const afterReload = withPictures(afterInput);
   await page.addInitScript(
     ([first, later]) => {
       const key = "scanner-test-played";

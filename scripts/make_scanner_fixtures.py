@@ -13,6 +13,13 @@ synthetic and carries no Pokemon card artwork. The scene cards are drawn from fl
 Hershey font; the art region (card fractions x 0.08 to 0.92, y 0.10 to 0.55) is one flat colour. Output is
 deterministic (fixed seed, lossless PNG and raw little-endian blobs) and the script fails if it exceeds 2 MB.
 Real-art fixtures are never written here; they live in the gitignored web/src/scanner/__local__/.
+
+The browser fixtures (web/tests/fixtures/scanner/) are written by `--browser`, which needs only cv2 and numpy (no spike):
+
+  /Users/raian/dev/prizecheck-scan-spike/.venv/bin/python scripts/make_scanner_fixtures.py --browser
+
+They are the frames of the Playwright specs' scripted source (640x480 PNGs: an empty table and two flat-colour,
+card-shaped rectangles with a drawn number) and the fake-camera clip `synthetic-card.mjpeg` (320x240, 20 frames).
 """
 from __future__ import annotations
 
@@ -32,6 +39,9 @@ import numpy as np
 REPO = Path(__file__).resolve().parent.parent
 FIX = REPO / "web" / "src" / "scanner" / "fixtures" / "parity"
 SEED = 20261022
+BROWSER_FIX = REPO / "web" / "tests" / "fixtures" / "scanner"
+BROWSER_W, BROWSER_H = 640, 480
+CLIP_W, CLIP_H, CLIP_FRAMES, CLIP_CAP = 320, 240, 20, 200_000
 SPAN_SEEDS = 8
 TOTAL_CAP = 2_000_000
 BLOB_SCENES = 3  # scenes that also carry the rectified card, OCR crops and the 224 embed image
@@ -421,12 +431,67 @@ def make_scenes(out: Out, uctx, rows, params, blob_scenes: int) -> list:
     return entries
 
 
+# ------------------------------------------------------------------ fixtures: browser
+def browser_frame(w: int, h: int, card_bgr, label: str | None, shift: int = 0) -> np.ndarray:
+    """A table (flat, dark) with a card-shaped rectangle on the guide (flat colour, light border, a drawn number).
+
+    The rectangle is the guide's 63:88 shape at 80% of the height, as web/src/scanner/guide.ts places it, so a
+    frame's 32x32 guide thumbnail differs a lot between a card and the bare table (the voter's absence rule)."""
+    img = np.empty((h, w, 3), np.uint8)
+    img[:] = (38, 36, 34)
+    if label is None:
+        return img
+    gh = 0.8 * h
+    gw = gh * 63 / 88
+    x0, y0 = int(round((w - gw) / 2)) + shift, int(round((h - gh) / 2))
+    x1, y1 = x0 + int(round(gw)), y0 + int(round(gh))
+    cv2.rectangle(img, (x0, y0), (x1, y1), (215, 225, 230), -1)
+    pad = max(2, int(gw * 0.04))
+    cv2.rectangle(img, (x0 + pad, y0 + pad), (x1 - pad, y1 - pad), card_bgr, -1)
+    scale = max(0.3, w / 640 * 0.8)
+    cv2.putText(img, label, (x0 + pad, y1 - pad - 4), cv2.FONT_HERSHEY_SIMPLEX, scale, (0, 0, 0), 1, cv2.LINE_AA)
+    return img
+
+
+def make_browser(root: Path) -> int:
+    """Writes the Playwright fixtures and returns their total size in bytes."""
+    if root.exists():
+        shutil.rmtree(root)
+    for name, colour, label in (("table", None, None), ("card-a", (160, 120, 70), "025/198"),
+                                ("card-b", (70, 140, 100), "061/191")):
+        write_png(root / f"{name}.png", browser_frame(BROWSER_W, BROWSER_H, colour or (0, 0, 0), label)[..., ::-1])
+    # The fake camera's clip: concatenated JPEG frames (Chromium reads .mjpeg as a motion-JPEG stream). The card slides a
+    # little each frame so the frames differ.
+    frames = []
+    for i in range(CLIP_FRAMES):
+        f = browser_frame(CLIP_W, CLIP_H, (160, 120, 70), "025/198", shift=(i % 5) * 2 - 4)
+        ok, jpg = cv2.imencode(".jpg", f, [cv2.IMWRITE_JPEG_QUALITY, 70])
+        assert ok
+        frames.append(jpg.tobytes())
+    clip = b"".join(frames)
+    if len(clip) > CLIP_CAP:
+        raise SystemExit(f"FAIL: synthetic-card.mjpeg is {len(clip)} bytes, over the {CLIP_CAP} byte cap")
+    atomic_write_bytes(root / "synthetic-card.mjpeg", clip)
+    return measure_groups(root)
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--spike", type=Path, required=True, help="spike checkout (prizecheck-scan-spike at commit 4e3d827)")
+    ap.add_argument("--browser", action="store_true",
+                    help="write only the Playwright fixtures (web/tests/fixtures/scanner/); needs no spike")
+    ap.add_argument("--spike", type=Path, help="spike checkout (prizecheck-scan-spike at commit 4e3d827)")
     ap.add_argument("--out", type=Path, default=FIX)
     ap.add_argument("--dry-run", action="store_true", help="generate into a temp dir, print the size, delete it")
     a = ap.parse_args(argv)
+    if a.browser:
+        total = make_browser(BROWSER_FIX if a.out == FIX else a.out)
+        print(f"scanner browser fixtures: {total} bytes in {BROWSER_FIX if a.out == FIX else a.out}")
+        if total > TOTAL_CAP:
+            print(f"FAIL: fixtures are {total} bytes, over the {TOTAL_CAP} byte cap", file=sys.stderr)
+            return 1
+        return 0
+    if a.spike is None:
+        ap.error("--spike is required unless --browser is given")
     sys.path.insert(0, str(a.spike.resolve()))
     from scanspike import gate, ocr
 

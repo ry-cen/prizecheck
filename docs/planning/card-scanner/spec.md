@@ -396,6 +396,8 @@ From the [resolution](wayfinder/resolutions/decide-scanner-plumbing.md#ship-bloc
 7. An HTTPS origin for every phone.
 8. The index job's request rate and User-Agent are recorded in `docs/deployment-boundaries.md`.
 
+The [launch checklist](launch-checklist.md) records the status of each blocker and the checks that need the deployed site and a phone.
+
 G0 (the int8 index and `set_codes.tsv` rerun of the 30-photo set) passed on 2026-10-22: top-1 21 of 30 and top-3 25 of 30 against bars of 19 and 24 (spike `reports/g0-int8-parity.md`).
 
 Resolution blocker 2 (the gate passing or ending in a recorded fallback) is replaced by the owner's decision above: G2, G3 and G4 missed, were accepted, and are follow-ups.
