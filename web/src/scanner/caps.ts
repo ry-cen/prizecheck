@@ -4,6 +4,40 @@ const SIMD = new Uint8Array([
   0, 65, 0, 253, 15, 253, 98, 11,
 ]);
 
+/** A module worker: the constructor must read the `type` option (older engines ignore it and run a classic worker). */
+function supportsModuleWorker(): boolean {
+  if (typeof Worker !== "function") return false;
+  let read = false;
+  try {
+    const url =
+      typeof Blob === "function" && typeof URL.createObjectURL === "function"
+        ? URL.createObjectURL(new Blob([""], { type: "text/javascript" }))
+        : "";
+    const options = {
+      get type() {
+        read = true;
+        return "module" as const;
+      },
+    };
+    const w = new Worker(url, options);
+    w.terminate();
+    if (url) URL.revokeObjectURL(url);
+  } catch {
+    return false;
+  }
+  return read;
+}
+
+/** OffscreenCanvas with a 2d context (the worker draws crops on one). */
+function supportsOffscreen2d(): boolean {
+  if (typeof OffscreenCanvas === "undefined") return false;
+  try {
+    return new OffscreenCanvas(1, 1).getContext("2d") !== null;
+  } catch {
+    return false;
+  }
+}
+
 export type Caps = { ok: boolean; missing: string[]; simd: boolean };
 
 /** `threads` > 1 additionally requires cross-origin isolation (ORT silently drops to one thread without it). */
@@ -16,8 +50,8 @@ export function checkCaps(threads = 1): Caps {
     simd = false;
   }
   if (!simd) missing.push("wasm-simd");
-  if (typeof Worker !== "function") missing.push("Worker");
-  if (typeof OffscreenCanvas === "undefined") missing.push("OffscreenCanvas");
+  if (!supportsModuleWorker()) missing.push("module-Worker");
+  if (!supportsOffscreen2d()) missing.push("OffscreenCanvas");
   if (typeof createImageBitmap !== "function")
     missing.push("createImageBitmap");
   if (!(
