@@ -412,12 +412,12 @@ Work goes on `feature/card-scanner`, cut from `dev`. Tickets close on the releas
 
 ### Proposed slices
 
-These are proposed, not filed. Each is a thin, testable vertical piece; dependencies are listed. They follow the resolution's six work packages and add the pieces the later decisions created.
+Filed on 2026-10-26 under [#308](https://github.com/ry-cen/prizecheck/issues/308) as #309 to #321, in this order. Each is a thin, testable vertical piece; dependencies are listed. They follow the resolution's six work packages and add the pieces the later decisions created.
 
 1. **Catalog data: set counts and index tables.** Migration for the set-counts table, the fingerprint, index and failure tables; fill at catalog promotion; the backfill script. Tests: majority rule, idempotent backfill.
 2. **Scanner API.** `api/app/scanner.py` with the manifest, cards, fingerprints and printings routes, `default_edition`, the generated client, and the gateway's binary pass-through test. Depends on 1.
 3. **Scanner save route.** `POST /api/scanner/save` with its refusals, 30-day receipt and replay tests. Depends on 2's module.
-4. **Index job.** The job script, its image and compose service, CI and deploy workflow changes, with stubbed embedder and fetcher tests. Depends on 1. Can run beside 2 and 3.
+4. **Index job.** The job script, its image and compose service, CI and deploy workflow changes, with stubbed embedder and fetcher tests. Depends on 1, and on 5 for the model lock file it reads. Can run beside 2 and 3.
 5. **Delivery: models, nginx, the scanner entry and tooling.** The model lock file and fetch script, Dockerfile step, `/scanner/m/` and `.mjs` nginx rules, gzip, the scanner's own Vite HTML entry with its nginx location and COOP and COEP headers, COEP on `/assets/` and the nested `.mjs` location, the Vite dev server middleware or plugin that serves the entry at `/collection/scan` with the same header scope, the entry's bootstrap (`/auth/session`, `location.assign("/collection")` when signed out, user id), bundle-boundary checks over both entries and the guardrail, `docs/deployment-boundaries.md`. Can run beside 2 to 4.
 6. **Vision port.** The hand-written image primitives under `web/src/scanner/vision/` and their parity fixtures, from the spike at `4e3d827`. Can run beside 2 to 5.
 7. **Recognition module and worker.** The pipeline, number table and fingerprint readers, OCR decode, combiner, voting with the eligibility and suggestion rule, the worker, `ort.ts` and the message contract with the `suggest`, `dismissed` and `absent` amendments, the gate with sharpness off and the worker-chosen thread count, behind the module interface. Depends on 6. A stub recognizer for the browser tests is part of this slice.
