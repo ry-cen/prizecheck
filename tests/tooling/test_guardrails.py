@@ -203,6 +203,27 @@ class FlakeGuardrailTest(unittest.TestCase):
                   '// the gateway has no fake extension point\n')
         self.assertFalse(guardrails.oauth_fake_import_violations(source))
 
+    def test_onnxruntime_imports_only_in_ort_ts(self):
+        ort = 'web/src/scanner/worker/ort.ts'
+        other = 'web/src/scanner/worker/recognizer.worker.ts'
+        for source in ('import * as ort from "onnxruntime-web";', "import { InferenceSession } from 'onnxruntime-web'",
+                       'import type { Tensor } from "onnxruntime-web/wasm";', 'const ort = await import("onnxruntime-web");',
+                       'export * from "onnxruntime-web"', 'import "onnxruntime-web";',
+                       'import wasm from "onnxruntime-web/ort-wasm-simd-threaded.wasm?url";'):
+            self.assertTrue(guardrails.onnxruntime_import_violations(source, other), source)
+            self.assertFalse(guardrails.onnxruntime_import_violations(source, ort), source)
+
+    def test_other_imports_and_mentions_of_onnxruntime_are_allowed(self):
+        other = 'web/src/scanner/worker/recognizer.worker.ts'
+        for source in ('import { createSession } from "./ort";', '// loads onnxruntime-web through ort.ts',
+                       ' * from "onnxruntime-web" is only allowed in ort.ts', 'const name = "onnxruntime-web";'):
+            self.assertFalse(guardrails.onnxruntime_import_violations(source, other), source)
+
+    def test_the_web_sources_import_onnxruntime_only_in_ort_ts(self):
+        for path in guardrails.web_source_files():
+            relative = path.relative_to(guardrails.ROOT).as_posix()
+            self.assertFalse(guardrails.onnxruntime_import_violations(path.read_text(), relative), relative)
+
     def test_dockerignore_must_exclude_the_oauth_fake(self):
         self.assertTrue(guardrails.dockerignore_violations('**/.env\n.git/\n'))
         self.assertFalse(guardrails.dockerignore_violations('**/.env\nauth/testing/\n.git/\n'))

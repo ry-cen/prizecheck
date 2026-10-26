@@ -1,4 +1,5 @@
-"""Route-isolation check for the web build: no private page in a public page's static graph, no lazy page in the entry.
+"""Route-isolation check for the web build: no private page in a public page's static graph, no lazy page in the entry,
+and the scanner's runtime in no graph but its own entry's.
 
 web/src/shell/lazyPages.ts loads every page on its first visit, so a phone that opens a Published Deck link downloads
 only the shell, the sign-in screens and that one page. One stray static import undoes that quietly: the bundler folds
@@ -7,6 +8,9 @@ It checks that
 - no lazy page's module is in the entry's static chunk graph, and every lazy page has a chunk of its own;
 - no private lazy page, nor any module in EXTRA_PRIVATE_MODULES, is in the static graph of a public page (the lazyPages
   exports that web/src/public/PublicPageView.tsx imports) together with the entry's;
+- the build has two HTML entries, the app's (index.html) and the scanner's (scan.html, served at /collection/scan); the
+  scanner entry is the only one whose static graph may reach the recognition runtime, worker/recognizer.worker.ts,
+  worker/ort.ts or onnxruntime-web (the main entry and every public page's graph must not), and it holds no lazy page;
 - Vite reports no ineffective dynamic import.
 
 scripts/ci.sh runs it right after ``npm run build``. It builds its own copy into a temporary directory with a manifest
@@ -29,6 +33,8 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 LAZY_PAGES = 'src/shell/lazyPages.ts'  # relative to web/
+MAIN_ENTRY = 'index.html'
+SCANNER_ENTRY = 'scan.html'
 PUBLIC_VIEW = 'src/public/PublicPageView.tsx'
 # Inner modules of private pages that are not lazy pages themselves but must stay out of public graphs: the Trades
 # sub-screens, and the owner review screens.
@@ -37,7 +43,12 @@ EXTRA_PRIVATE_MODULES = (
     'src/trades/TradeScreen.tsx',
     'src/CatalogReview.tsx',
     'src/MetadataReview.tsx',
+    # The scanner's recognition runtime: only the scanner entry's graph may reach these (spec "Web and delivery").
+    'src/scanner/worker/recognizer.worker.ts',
+    'src/scanner/worker/ort.ts',
 )
+# Real paths containing this are the ONNX runtime package, which only the scanner entry may bundle.
+RUNTIME_PACKAGE = '/node_modules/onnxruntime-web/'
 INEFFECTIVE = 'dynamic import will not move module into another chunk'
 
 
@@ -143,22 +154,24 @@ def check(out, web_root, public, private, extra, build_output=''):
         problems.append(f'no Vite manifest in {out}')
         return report()
     manifest = json.loads(path.read_text())
-    entries = [key for key, record in manifest.items() if record.get('isEntry')]
-    if len(entries) != 1:
-        problems.append(f'expected one entry in the manifest, found {len(entries)}')
+    entries = sorted(key for key, record in manifest.items() if record.get('isEntry'))
+    if entries != sorted([MAIN_ENTRY, SCANNER_ENTRY]):
+        problems.append(f'expected the entries {MAIN_ENTRY} and {SCANNER_ENTRY} in the manifest, found {", ".join(entries) or "none"}')
         return report()
-    entry = entries[0]
     for page in public + private:
         if not manifest.get(page, {}).get('isDynamicEntry'):
             problems.append(f'{page} has no chunk of its own; something imports it statically')
-    entry_keys = closure(manifest, entry, problems)
-    routes = [('entry', entry_keys, public + private + extra)]
+    entry_keys = closure(manifest, MAIN_ENTRY, problems)
+    scanner_keys = closure(manifest, SCANNER_ENTRY, problems)
+    # (route, chunk keys, forbidden modules, whether the ONNX runtime package is forbidden)
+    routes = [('entry', entry_keys, public + private + extra, True)]
     for page in public:
         if page in manifest:
             routes.append((page, entry_keys + [key for key in closure(manifest, page, problems) if key not in entry_keys],
-                           private + extra))
+                           private + extra, True))
+    routes.append(('scanner', scanner_keys, public + private, False))
     sources, results = {}, []
-    for route, keys, forbidden in routes:
+    for route, keys, forbidden, no_runtime in routes:
         files = [manifest[key]['file'] for key in keys]
         leaks = []
         for file in files:
@@ -171,6 +184,9 @@ def check(out, web_root, public, private, extra, build_output=''):
                 if os.path.realpath(web_root / module) in sources[file]:
                     leaks.append({'module': module, 'chunk': file})
                     problems.append(f'{module} is in {file} on the {route} route')
+            if no_runtime and any(RUNTIME_PACKAGE in source for source in sources[file]):
+                leaks.append({'module': 'onnxruntime-web', 'chunk': file})
+                problems.append(f'onnxruntime-web is in {file} on the {route} route')
         results.append({'route': route, 'chunks': len(files), 'leaks': leaks,
                         'bytes': sum((out / file).stat().st_size for file in files if (out / file).exists())})
     for line in build_output.splitlines():

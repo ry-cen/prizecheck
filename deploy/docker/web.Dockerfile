@@ -4,6 +4,12 @@ FROM node:22-bookworm-slim AS build
 WORKDIR /src
 COPY package.json package-lock.json ./
 RUN HUSKY=0 npm ci --ignore-scripts
+# The scanner's pinned models (web/scanner-models.lock.json), checked by size and sha256, into web/public/scanner/m/ so
+# vite build copies them into the image. Before the web sources, so an ordinary web change reuses the download. CI's
+# build skips this; tests use stubs.
+COPY scripts/fetch-scanner-models.mjs ./scripts/fetch-scanner-models.mjs
+COPY web/scanner-models.lock.json ./web/scanner-models.lock.json
+RUN node scripts/fetch-scanner-models.mjs
 COPY web ./web
 # `npm run build` also runs the generated-client checks, which need the Python venv; CI runs them in the verify job.
 RUN npx vite build --config web/vite.config.ts
