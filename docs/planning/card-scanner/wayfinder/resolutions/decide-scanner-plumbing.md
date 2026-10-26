@@ -172,6 +172,7 @@ Rejected:
 - The device reads `GET /api/scanner/manifest?model=<id>` each time the scanner opens, and uses its cache offline.
 - A newer artifact or key downloads in the background while the cached one keeps scanning. The device verifies (sha256 for fingerprints; length plus parse for cards), writes the new entry, swaps in memory, deletes the old, and never mixes versions inside a frame.
 - A printing in the card table but not the index is matched by number only, with the combiner's `no_art_sim`. A printing in the index but not the card table (tombstoned since) is dropped from every candidate list. Edition validity is always checked live (D8, D11), so a stale index cannot put a bad Edition in the Collection.
+- With no active catalog generation the manifest answers 404 `CATALOG_UNAVAILABLE` (there is no card table to name); the device shows the generic cannot-start screen.
 - `fingerprints: null` in the manifest means no artifact for the app's model. The device uses no cached index from another model and shows the no-camera screen (Q12), not a number-only scanner: number OCR alone scored 5 of 30 first. **Deploy order for a model change:** build the new model's artifact first, then deploy the web image.
 - About 1.6k printings have no art (Celebrations Classic Collection, 161 energies) and are matched by number or by search. Nothing else changes.
 
@@ -241,7 +242,7 @@ Rejected: clearing the tray at sign-out (the Q8 alternative; the owner chose kee
 Validation runs twice.
 
 1. **On tray open,** the printings route marks a row `needs_pick` when its printing is in `missing` or its `edition_id` is no longer an active Edition of that printing. **Reconciliation with the owner's Q2:** the row keeps its old `edition_id`, so every row still has an Edition in the stored data. The row shows no selected chip, and Save stays disabled while any row is `needs_pick`. This is a staleness refusal, not a finish wait: the collector's one tap on a chip (or a search, if the Printing is gone) clears it. The finish default does not re-run silently, because that would replace a choice the collector made. How ticket 3 presents it is open.
-2. **At save,** the server refuses with 409 `EDITIONS_CHANGED`, listing **every** affected `{edition_id, printing_id}`. The client marks exactly those rows `needs_pick`. `catalog_edition.printing_id` survives inactivation, so the server can always name the printing.
+2. **At save,** the server refuses with 409 `EDITIONS_CHANGED`, listing **every** affected `{edition_id, printing_id}`. The client marks exactly those rows `needs_pick`. `catalog_edition.printing_id` survives inactivation, so the server can always name the printing of an Edition it once had. An Edition id the catalog never had comes back with `printing_id: null`, and the client sends that row to search.
 
 The Collection changes only when every Edition is active at commit, under `catalog_state ... FOR SHARE`, as batch add does (`api/app/holdings.py:201-209`).
 
@@ -287,7 +288,7 @@ The scanner never shows similarity or OCR scores, tiers, model, runtime or sourc
 
 | Method and path | Request | 200 answer | Notes |
 |---|---|---|---|
-| `GET /api/scanner/manifest?model=<id>` | `model`, at most 64 chars | `ScannerManifest` | JSON, `no-store` from the gateway |
+| `GET /api/scanner/manifest?model=<id>` | `model`, at most 64 chars | `ScannerManifest` | JSON, `no-store` from the gateway; 404 `CATALOG_UNAVAILABLE` with no active generation |
 | `GET /api/scanner/cards/{key}` | | gzip bytes, attachment | `application/octet-stream`, no `Content-Encoding`; 404 `CARDS_NOT_CURRENT` |
 | `GET /api/scanner/fingerprints/{sha256}` | 64 hex characters | raw bytes, attachment | 404 `FINGERPRINTS_NOT_FOUND` (pruned) |
 | `POST /api/scanner/printings` | `{printing_ids}`, 1 to 100 | `{catalog_revision, printings: ScannerPrinting[], missing}` | `ScannerPrinting` is `PrintingView` plus `default_edition_id: UUID or null` |
@@ -324,7 +325,7 @@ Checks run in this order. `refuse` is `moves.fail` (`api/app/moves.py:66`). Refu
 | 4 | 409 | `REPLAY_OUTCOME_UNAVAILABLE` | | key exists, no `move_response` row | treat as saved-unknown, like the 29-day rule (Q11) |
 | - | 200 | replay | | same key and digest, receipt present | success; clear the tray |
 | 5 | 409 | `DESTINATION_CHANGED` | `location_id` | location missing, not this owner's, not a `storage_leaf`, or has children (a Deck is refused, Q6) | rows kept; destination picker reopens, default Unsorted |
-| 6 | 409 | `EDITIONS_CHANGED` | `editions: [{edition_id, printing_id}]`, all of them, sorted by `edition_id` | an Edition is not active, or its printing is tombstoned, in the active generation (the SQL of `holdings.py:204-209` without `LIMIT 1`, joined to `catalog_edition`) | exactly those rows become `needs_pick`; the rest are untouched |
+| 6 | 409 | `EDITIONS_CHANGED` | `editions: [{edition_id, printing_id}]`, all of them, sorted by `edition_id`; `printing_id` is null for an Edition id the catalog never had | an Edition is not active, or its printing is tombstoned, in the active generation (the SQL of `holdings.py:204-209` without `LIMIT 1`, joined to `catalog_edition`) | exactly those rows become `needs_pick`; the rest are untouched |
 | 7 | 422 | `QUANTITY_OVERFLOW` | `edition_id` (lowest) | an existing Holding plus the amount exceeds `MAX_QUANTITY` (`holdings.py:212-218`) | not reachable at 9999 an item; show the generic save error |
 | 8 | 503 | `INVENTORY_TEMPORARILY_UNAVAILABLE` | | `psycopg.Error` | tray stays frozen; Retry with the same key |
 | - | 401 / 503 | (gateway) | | signed out; or a body over 16 KiB on a route outside `IMPORT_ROUTES`, where the default reader's `readBody` throws a plain Error (`auth/src/server.ts:116-123`) and only `PayloadTooLarge` maps to 413 (`:841-843`), so the answer is a 503, not a 413 | sign-in screen; the oversized body is impossible at the cap |
