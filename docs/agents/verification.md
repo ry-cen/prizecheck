@@ -61,6 +61,8 @@ Timing tests use real time only where they say why. The hard-stop and SIGSTOP ru
 - a lazy page from `lazyPages.ts` is in the entry's static graph;
 - a private page, or an `EXTRA_PRIVATE_MODULES` entry, is in a public page's static graph (the entry's plus the page's own); public means the `lazyPages` exports that `web/src/public/PublicPageView.tsx` imports, and every other lazy page is private;
 - a lazy page has no chunk of its own;
+- the build lacks either HTML entry (`index.html`, and `scan.html` for the scanner, served at `/collection/scan`);
+- the main entry's or a public page's static graph reaches the scanner runtime (`src/scanner/worker/recognizer.worker.ts`, `src/scanner/worker/ort.ts`, both in `EXTRA_PRIVATE_MODULES`) or the `onnxruntime-web` package; only the scanner entry may. The scanner entry may hold no lazy page;
 - Vite reports an ineffective dynamic import.
 
 It makes a second build into a temporary directory with a manifest and source maps (about 2 seconds), so `dist/web`, the release artifact, never carries either. It reads the manifest for each chunk's static imports (dynamic imports are not followed) and the source maps for the modules in each chunk. It runs in every `scripts/ci.sh` run that builds, right after `npm run build`: the full gate, the CI auth leg, unsharded browser runs, burn-in, operations and the release gate. It does not run in the api suite, in browser shards or in the pre-commit hook; `npm run check:bundle` runs it alone. Its `== bundle boundary:` lines go to `verification.log`, with a one-line verdict in the summary.

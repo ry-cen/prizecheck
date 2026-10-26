@@ -102,9 +102,11 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self,*args):
         pass  # URLs may contain public tokens and private routes.
 
-    def reply(self,status,body,content_type='application/json'):
+    def reply(self,status,body,content_type='application/json',headers=()):
         self.send_response(status)
         self.send_header('Content-Type',content_type)
+        for name,value in headers:
+            self.send_header(name,value)
         self.send_header('Content-Length',str(len(body)))
         self.send_header('Cache-Control','no-store')
         self.end_headers()
@@ -168,12 +170,23 @@ class Handler(BaseHTTPRequestHandler):
             if self.command != 'GET':
                 self.reply(405,b'{}')
                 return
-            path = (bundle['assets']/self.path.split('?')[0].lstrip('/')).resolve()
-            if bundle['assets'].resolve() not in path.parents:
+            request_path = self.path.split('?')[0]
+            # Mirrors deploy/docker/nginx.conf: the scanner's own page is the one cross-origin isolated document,
+            # reachable only at its path; /assets/ responses carry COEP; no other document gets either header.
+            if request_path == '/scan.html':
+                self.reply(404,b'{}')
+                return
+            headers = ()
+            if request_path == '/collection/scan' and (bundle['assets']/'scan.html').is_file():
+                request_path = '/scan.html'
+                headers = (('Cross-Origin-Opener-Policy','same-origin'),('Cross-Origin-Embedder-Policy','require-corp'))
+            elif request_path.startswith('/assets/'):
+                headers = (('Cross-Origin-Embedder-Policy','require-corp'),)
+            path = (bundle['assets']/request_path.lstrip('/')).resolve()
+            if bundle['assets'].resolve() not in path.parents or not path.is_file():
                 path = bundle['assets']/'index.html'
-            elif not path.is_file():
-                path = bundle['assets']/'index.html'
-            self.reply(200,path.read_bytes(),mimetypes.guess_type(path.name)[0] or 'application/octet-stream')
+                headers = ()
+            self.reply(200,path.read_bytes(),mimetypes.guess_type(path.name)[0] or 'application/octet-stream',headers)
 
     do_GET = handle_request
     do_POST = handle_request

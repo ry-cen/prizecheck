@@ -15,6 +15,9 @@ spec.loader.exec_module(boundary)
 
 PUBLISHED = 'src/public/PublishedDeckPage.tsx'
 WORKSPACE = 'src/workspace/Workspace.tsx'
+RUNTIME = 'src/scanner/worker/ort.ts'
+WORKER = 'src/scanner/worker/recognizer.worker.ts'
+ORT_PACKAGE = '/node_modules/onnxruntime-web/dist/ort.mjs'
 
 
 def write_build(directory, records):
@@ -37,6 +40,8 @@ def clean(**changes):
     records = {
         'index.html': {'file': 'assets/index.js', 'isEntry': True, 'imports': ['_shared.js'],
                        'dynamicImports': [PUBLISHED, WORKSPACE], 'sources': ['src/main.tsx', 'src/shell/Shell.tsx']},
+        'scan.html': {'file': 'assets/scan.js', 'isEntry': True, 'imports': ['_shared.js'],
+                      'sources': ['src/scanner/entry/main.tsx']},
         '_shared.js': {'file': 'assets/_shared.js', 'sources': ['src/ui/Button.tsx']},
         PUBLISHED: {'file': 'assets/published.js', 'isDynamicEntry': True, 'imports': ['_shared.js'],
                     'sources': [PUBLISHED]},
@@ -58,8 +63,62 @@ class BundleBoundaryTest(unittest.TestCase):
             result = run_check(directory, clean())
             self.assertTrue(result['ok'])
             self.assertEqual(result['problems'], [])
-            self.assertEqual([route['route'] for route in result['routes']], ['entry', PUBLISHED])
+            self.assertEqual([route['route'] for route in result['routes']], ['entry', PUBLISHED, 'scanner'])
             self.assertEqual(result['routes'][1]['chunks'], 3)
+
+    def test_the_scanner_entry_may_reach_the_runtime(self):
+        records = clean(**{'scan.html': {'imports': ['_shared.js', '_runtime.js']}})
+        records['_runtime.js'] = {'file': 'assets/_runtime.js', 'sources': [RUNTIME, WORKER, ORT_PACKAGE]}
+        with tempfile.TemporaryDirectory() as directory:
+            result = run_check(directory, records, extra=[RUNTIME, WORKER])
+            self.assertTrue(result['ok'], result['problems'])
+            self.assertEqual(result['routes'][-1]['route'], 'scanner')
+
+    def test_the_runtime_in_the_main_entry_fails(self):
+        for source in (RUNTIME, WORKER):
+            records = clean(**{'index.html': {'sources': ['src/main.tsx', source]}})
+            with tempfile.TemporaryDirectory() as directory:
+                result = run_check(directory, records, extra=[RUNTIME, WORKER])
+                self.assertFalse(result['ok'])
+                self.assertIn(f'{source} is in assets/index.js on the entry route', result['problems'])
+
+    def test_the_runtime_in_a_public_pages_graph_fails(self):
+        records = clean(**{PUBLISHED: {'imports': ['_shared.js', '_runtime.js']}})
+        records['_runtime.js'] = {'file': 'assets/_runtime.js', 'sources': [RUNTIME]}
+        with tempfile.TemporaryDirectory() as directory:
+            result = run_check(directory, records, extra=[RUNTIME])
+            self.assertIn(f'{RUNTIME} is in assets/_runtime.js on the {PUBLISHED} route', result['problems'])
+
+    def test_the_onnx_package_is_only_allowed_in_the_scanner_entry(self):
+        records = clean(**{'index.html': {'sources': ['src/main.tsx', ORT_PACKAGE]}})
+        with tempfile.TemporaryDirectory() as directory:
+            out, web = write_build(directory, records)
+            result = boundary.check(out, web, [PUBLISHED], [WORKSPACE], [])
+            self.assertIn('onnxruntime-web is in assets/index.js on the entry route', result['problems'])
+        records = clean(**{PUBLISHED: {'sources': [PUBLISHED, ORT_PACKAGE]}})
+        with tempfile.TemporaryDirectory() as directory:
+            self.assertFalse(run_check(directory, records)['ok'])
+
+    def test_a_lazy_page_in_the_scanner_entry_fails(self):
+        records = clean(**{'scan.html': {'sources': ['src/scanner/entry/main.tsx', WORKSPACE]}})
+        with tempfile.TemporaryDirectory() as directory:
+            result = run_check(directory, records)
+            self.assertIn(f'{WORKSPACE} is in assets/scan.js on the scanner route', result['problems'])
+
+    def test_both_entries_are_required(self):
+        for missing in ('index.html', 'scan.html'):
+            records = {key: record for key, record in clean().items() if key != missing}
+            with tempfile.TemporaryDirectory() as directory:
+                result = run_check(directory, records)
+                self.assertFalse(result['ok'])
+                self.assertIn('expected the entries', result['problems'][0])
+        records = clean()
+        records['extra.html'] = {'file': 'assets/extra.js', 'isEntry': True, 'sources': []}
+        with tempfile.TemporaryDirectory() as directory:
+            self.assertFalse(run_check(directory, records)['ok'])
+
+    def test_the_scanner_runtime_modules_are_extra_private_modules(self):
+        self.assertTrue({RUNTIME, WORKER} <= set(boundary.EXTRA_PRIVATE_MODULES))
 
     def test_a_private_page_in_a_public_pages_graph_fails(self):
         records = clean(**{PUBLISHED: {'imports': ['_shared.js', '_leak.js']}})
@@ -155,7 +214,7 @@ export function preload(path: string): void {
                          'src/decks/import/ReplaceListPage.tsx', 'src/catalog/CatalogPage.tsx', 'src/loans/LoansPage.tsx',
                          'src/trades/TradesPage.tsx', 'src/reports/MissingCardsPage.tsx',
                          'src/owner/OwnerControlsPage.tsx', 'src/trades/FriendTradeListPage.tsx'} <= set(private))
-        self.assertEqual(len(extra), 4)
+        self.assertEqual(len(extra), 6)
 
     def test_main_writes_the_report_before_failing(self):
         records = clean(**{PUBLISHED: {'imports': ['_shared.js', '_leak.js']}})

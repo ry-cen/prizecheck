@@ -24,3 +24,6 @@ playwright-report/
 
 # Test-only OAuth fake (auth/testing/): never in an image.
 auth/testing/
+
+# The scanner models are fetched inside the web image build (scripts/fetch-scanner-models.mjs), never copied in.
+web/public/scanner/m/
