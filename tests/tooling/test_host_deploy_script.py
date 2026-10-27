@@ -76,6 +76,12 @@ class HostDeployScriptTest(unittest.TestCase):
         self.assertIn('Configuration OK (prod)', output)
         self.assertIn(WARNING, output)
 
+    def test_the_no_relay_warning_goes_to_stderr(self):
+        result = self.run_script(self.make_home(PROD))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(WARNING, result.stderr)
+        self.assertNotIn(WARNING, result.stdout)
+
     def test_production_refuses_file_or_console_mail(self):
         for mode in ('file', 'console'):
             self.assertRefused([*without(PROD, 'MAIL_MODE'), f'MAIL_MODE={mode}'], 'MAIL_MODE')
@@ -134,6 +140,25 @@ class HostDeployScriptTest(unittest.TestCase):
             code, output = self.check(lines)
             self.assertNotEqual(code, 0, opening)
             self.assertIn('quoted value that does not close', output)
+        # Compose skips spaces after the `=` and lets a backslash escape the closing quote: each of these makes it read
+        # MAIL_MODE=file where the checks read MAIL_MODE=http.
+        mail = without(PROD, 'MAIL_MODE')
+        for hidden in (['MAIL_MODE=file', 'X= "', 'MAIL_MODE=http', 'Y=a"'],
+                       ['MAIL_MODE=file', 'X="a\\"', 'MAIL_MODE=http', 'Y=" # c"'],
+                       ['MAIL_MODE=file', "X='a\\'", 'MAIL_MODE=http', "Y=' # c'"],
+                       ["MAIL_MODE=file", "X= '", 'MAIL_MODE=http', "Y=a'"]):
+            code, output = self.check([*mail, *hidden])
+            self.assertNotEqual(code, 0, hidden)
+            self.assertRegex(output, r'line \d+ has (a space|a backslash|a quoted value)')
+        for opening in ('K="a\\"b"', "K='a\\'b'"):
+            code, output = self.check([*PROD, opening])
+            self.assertNotEqual(code, 0, opening)
+            self.assertIn('backslash inside a quoted value', output)
+        # An empty quoted value with trailing space is an empty value, as in Compose.
+        code, output = self.check([*without(PROD, 'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET'), 'DISCORD_CLIENT_ID="" ',
+                                   'DISCORD_CLIENT_SECRET=""', 'GOOGLE_CLIENT_ID=g', 'GOOGLE_CLIENT_SECRET=s'])
+        self.assertEqual(code, 0, output)
+        self.assertNotIn('must be set together', output)
         code, output = self.check([*PROD, 'X="a b" # note', "Y='c'"])
         self.assertEqual(code, 0, output)
         code, output = self.check(['# a comment', '', '   # an indented comment', *PROD])

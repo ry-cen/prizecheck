@@ -64,7 +64,7 @@ Nothing in this guide has been run against an Oracle instance yet. Commands and 
 - **A Discord account** whose verified email address becomes `OWNER_EMAIL`.
 - **An SSH key** for your first login to the instance, and a Tailscale tailnet.
 
-Mail relay and approval codes: there's no mail relay in this setup, so the deploy script prints `WARNING: no mail relay; owner catalog approval codes cannot be delivered until MAIL_RELAY_URL, MAIL_RELAY_TOKEN and MAIL_FROM are set`. Emailed approval codes are being removed in a separate change; until then, treat that warning as expected. `MARKETPLACE_MATCHING` stays unset in production, so activating a marketplace matching rule remains an owner approval. Don't set it to `automatic`.
+Mail relay and approval codes: there's no mail relay in this setup, so the deploy script prints `WARNING: no mail relay; owner catalog approval codes cannot be delivered until MAIL_RELAY_URL, MAIL_RELAY_TOKEN and MAIL_FROM are set`. Emailed approval codes are being removed in a separate change; until then, treat that warning as expected. `MARKETPLACE_MATCHING` stays unset in production, so activating a marketplace matching rule needs an owner approval, and with no relay that approval's code can't be delivered. Removing emailed approval codes is a separate change; once it lands, activating a rule is a single owner click, and setting `MARKETPLACE_MATCHING=automatic` becomes optional.
 
 ### Launch blockers that remain open
 
@@ -122,13 +122,15 @@ On the instance, install Tailscale with its official script:
 curl -fsSL https://tailscale.com/install.sh | sh
 ```
 
-Start it without Tailscale SSH (do not pass `--ssh`):
+This host is public, so it joins the tailnet as a tagged device, `tag:prizecheck-prod`. Without a tag, an untagged member device inherits your user's access (the default `autogroup:member` grant reaches everything), so a compromised public host could reach your other devices. Before running the next command, merge the `tagOwners` entry and the `autogroup:member` grant shown in [step 10](#10-configure-tailscale-for-ci) into your policy; Tailscale refuses a tag that no `tagOwners` entry covers, and your own SSH test below needs the grant.
+
+Start it without Tailscale SSH (do not enable it) and with the tag:
 
 ```bash
-sudo tailscale up
+sudo tailscale up --ssh=false --advertise-tags=tag:prizecheck-prod
 ```
 
-Open the printed login URL and approve the node. In the [Tailscale admin console](https://login.tailscale.com/admin) **Machines** page, open the node's menu and choose **Disable key expiry**: an expired key would lock CI out. Note the node's tailnet address:
+Open the printed login URL and approve the node. Tagged devices have key expiry off by default; in the [Tailscale admin console](https://login.tailscale.com/admin) **Machines** page, confirm the node shows no expiry, because an expired key would lock CI out. Note the node's tailnet address:
 
 ```bash
 tailscale ip -4
@@ -185,7 +187,7 @@ Leave Docker's default settings alone. In particular, don't add `userland-proxy:
 
 ## 4. Open ports 80 and 443 on the host
 
-Oracle's Ubuntu images ship iptables rules that reject everything except SSH (port 22) and a few basics, on top of the VCN security list. Without a host rule, Caddy can't get a certificate and nobody can reach the site. This is how those images behave according to the project's setup notes; this guide couldn't confirm it against Oracle's documentation, so look at the file before you edit it.
+Oracle's image documentation says platform images "have a default set of firewall rules that allow only SSH access", on top of the VCN security list. Without a host rule, Caddy can't get a certificate and nobody can reach the site. Look at the file before you edit it, since the exact rules can differ between image builds.
 
 ```bash
 sudo cat /etc/iptables/rules.v4
@@ -317,7 +319,7 @@ Edit `prizecheck.env` (`sudo nano prizecheck.env`):
 | `DAILY_SEND_CAP`, `DAILY_SIGNUP_CAP`         | Whole numbers; the example's `100` is fine                                                    |
 | `MARKETPLACE_MATCHING`                       | Leave it commented out, so rule activation stays owner-approved                               |
 
-The file may contain only `KEY=value` lines, comments and blank lines. The script refuses `export KEY=...`, indented keys and `KEY: value`, and names the offending line number. Values stay in this file only: they aren't in the repository or GitHub, and the script reads individual keys without printing them.
+The file may contain only `KEY=value` lines, comments and blank lines. The script refuses `export KEY=...`, indented keys, `KEY: value`, a space between `=` and the value, a quoted value that doesn't close on its own line, and a backslash inside a quoted value (escaped quotes are not supported), because Docker Compose would read those lines differently from the script's own checks. It names the offending line number. Values stay in this file only: they aren't in the repository or GitHub, and the script reads individual keys without printing them.
 
 Create the data directories with the ownership the non-root containers need:
 
@@ -325,7 +327,7 @@ Create the data directories with the ownership the non-root containers need:
 sudo bash /opt/prizecheck-prod/bin/prizecheck-deploy.sh setup
 ```
 
-Then validate the file without touching containers:
+Then validate the file (no containers are touched; if Docker Compose is installed, it also checks that the rendered configuration publishes the web port on `127.0.0.1` only):
 
 ```bash
 sudo bash /opt/prizecheck-prod/bin/prizecheck-deploy.sh check-config
@@ -400,24 +402,32 @@ Delete the private key file from your workstation after storing it in GitHub (st
 
 In the [Tailscale admin console](https://login.tailscale.com/admin):
 
-1. **Access controls**: make `tag:ci-prod` a tag that may reach only SSH on this instance. Merge this into your policy, keeping the `tag:ci` entries you already have for dev. Use the instance's tailnet IP from step 2.
+1. **Access controls**: the instance is `tag:prizecheck-prod`, and CI is `tag:ci-prod`. Merge this into your policy, keeping the `tag:ci` entries you already have for dev. (Step 2 needed the `tagOwners` entry and the member grant already.)
 
    ```jsonc
    {
      "tagOwners": {
+       "tag:prizecheck-prod": ["autogroup:admin"],
        "tag:ci-prod": ["autogroup:admin"],
-     },
-     "hosts": {
-       "oracle": "100.x.y.z",
      },
      "grants": [
        // CI runners for production: SSH to the Oracle instance only.
-       { "src": ["tag:ci-prod"], "dst": ["oracle"], "ip": ["tcp:22"] },
+       {
+         "src": ["tag:ci-prod"],
+         "dst": ["tag:prizecheck-prod"],
+         "ip": ["tcp:22"],
+       },
+       // You: SSH to the Oracle instance from your own devices.
+       {
+         "src": ["autogroup:member"],
+         "dst": ["tag:prizecheck-prod"],
+         "ip": ["tcp:22"],
+       },
      ],
    }
    ```
 
-   Don't keep or add a rule with `"src": ["*"]` or an allow-all rule: it would give `tag:ci-prod` (and every tagged device) access to everything. Tailscale's policy preview lets you check that `tag:ci-prod` reaches only `oracle:22`. A separate tag means a run on the dev branch, which holds `tag:ci`, can't reach production.
+   The Oracle instance gets no grant at all as a source: nothing lets `tag:prizecheck-prod` open a connection into your tailnet, so a compromised host can't reach Unraid or your other devices. Don't keep or add a rule with `"src": ["*"]` or an allow-all rule. Tailscale's policy preview lets you check that `tag:ci-prod` reaches only `tag:prizecheck-prod` port 22. A separate tag means a run on the dev branch, which holds `tag:ci`, can't reach production.
 
 2. **Trust credentials** (Settings → OAuth clients): create an OAuth client with the **Auth Keys → Write** scope, limited to the tag `tag:ci-prod`. Copy the client ID and secret into GitHub (step 11). The action mints a short-lived, ephemeral node for each run.
 
@@ -457,7 +467,7 @@ Don't set `PROD_DEPLOY_ENABLED` yet: DNS and Caddy come first, because the workf
 
 Create an **A record** for your domain pointing at the instance's public (reserved) IP. Use DNS-only: no CDN proxy in front. There's no AAAA record because the instance has no IPv6.
 
-Install Caddy from its official apt repository. These are the commands from [caddyserver.com/docs/install](https://caddyserver.com/docs/install) (Debian, Ubuntu, Raspbian, stable releases). The first `curl` line is shown there cut off in this guide's source check; the keyring file name below is taken from the following `chmod` line. Compare with the page before you run them:
+Install Caddy from its official apt repository. These are the commands from [caddyserver.com/docs/install](https://caddyserver.com/docs/install) (Debian, Ubuntu, Raspbian, stable releases). Run them in order:
 
 ```bash
 sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https curl
@@ -656,7 +666,7 @@ The request should print `502`. Now search Caddy's journal for the marker:
 journalctl -u caddy --since '10 minutes ago' --no-pager | grep -c forced-502-marker
 ```
 
-The count must be `0`. Caddy may well log that the upstream refused the connection, but the line must not contain the request path or the client address. If the marker appears, the Caddyfile's `log default { exclude ... }` block isn't doing its job on this Caddy version: don't announce the site, since published-deck URLs are capability links, and fix the Caddyfile first. Run `status` afterwards to confirm `web` is healthy again.
+The count must be `0`. Caddy may well log that the upstream refused the connection, but the line must not contain the request path or the client address. If the marker appears, the Caddyfile's `log default { exclude ... }` block isn't doing its job on this Caddy version: don't announce the site, since published-deck URLs are capability links, and fix the Caddyfile first. Run `status` afterwards to confirm `web` is healthy again. This check can't cover everything: Caddy's `http.stdlib` logger can still record client IP addresses when a TLS handshake fails. Those lines carry no request path, but they are not excluded.
 
 ## Updating the host files
 
@@ -684,30 +694,35 @@ The application logs fixed operational messages, not request URLs, codes or cred
 
 ## Troubleshooting
 
-| Symptom                                                                | Cause and fix                                                                                                                                                           |
-| ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Every Deploy prod job skipped                                          | `PROD_DEPLOY_ENABLED` isn't the repository variable `true`, or (for `deploy`) the `images` job was skipped                                                              |
-| `No linux/arm64 image for ... at <commit>`                             | `main` is at a commit dev didn't build, or built before multi-arch images. Move `main` to a dev commit whose Deploy dev `images` and `manifests` jobs succeeded         |
-| Tailscale step fails                                                   | OAuth client lacks **Auth Keys: Write** or isn't allowed `tag:ci-prod`; `tag:ci-prod` missing from `tagOwners`                                                          |
-| `tailscale ping` or SSH times out                                      | The policy doesn't grant `tag:ci-prod` → `oracle:22`, `PROD_SSH_HOST` is wrong, or key expiry took the node off the tailnet                                             |
-| `Host key verification failed`                                         | `PROD_SSH_KNOWN_HOSTS` doesn't match the address in `PROD_SSH_HOST`; rescan the same address (step 9). Never disable checking                                           |
-| `Permission denied (publickey)`                                        | A typo in the `authorized_keys` line, or a `from=` that doesn't include the tailnet range; the secret must hold the whole private key, including the BEGIN/END lines    |
-| `Refused`                                                              | Something other than `deploy`, `rollback` or `status` was sent through the forced command                                                                               |
-| `Host deployment files differ`                                         | See [Updating the host files](#updating-the-host-files)                                                                                                                 |
-| `Image pull failed`                                                    | A package doesn't grant the repository Read access (step 8)                                                                                                             |
-| `PRIZECHECK_WEB_BIND must be 127.0.0.1 in production`                  | Fix `PRIZECHECK_WEB_BIND`: Caddy on the host is the only public entry                                                                                                   |
-| `... line N must be KEY=value, a comment or blank`                     | A line in `prizecheck.env` uses `export`, indentation or `KEY: value`. Rewrite line N                                                                                   |
-| `No sign-in method: set GOOGLE_* or DISCORD_* ...`                     | The Discord pair is empty and `EMAIL_SIGN_IN` is `off`                                                                                                                  |
-| `DISCORD_CLIENT_ID and DISCORD_CLIENT_SECRET must be set together`     | Set both values of the pair or neither                                                                                                                                  |
-| `PUBLIC_ORIGIN must be https://host[:port] with no path in production` | Remove the path, or use https                                                                                                                                           |
-| `Production delivers codes by mail relay, not to a file`               | `sign-in-code` isn't available in production. Sign in with Discord                                                                                                      |
-| `Data directory ... is missing`                                        | `PRIZECHECK_DATA_DIR` is wrong or `setup` wasn't run. The deploy refuses to create data in the wrong place                                                              |
-| `Public projection store ... missing`                                  | See [Dev deployment on Unraid](deployment-unraid.md#troubleshooting) and [public projections](public-projections.md); the commands are the same with this guide's paths |
-| `Migration failed`                                                     | `scripts/migrate.py` runs all pending migrations in one transaction, so nothing was committed and the previous release was restarted. Fix forward with a new commit     |
-| `Services did not become healthy` / `Smoke: ...`                       | The log shows the last 50 lines of each service and the previous release is restored. Typical causes: a wrong `PUBLIC_ORIGIN`, an invalid `prizecheck.env` value        |
-| The public check fails after a successful deploy                       | DNS doesn't resolve to the instance, port 80 or 443 is blocked (security list or host iptables), or Caddy has no certificate yet: `journalctl -u caddy`                 |
-| Browser gets `403 Origin required`                                     | `PUBLIC_ORIGIN` doesn't exactly match the URL in the address bar (scheme and host)                                                                                      |
-| Sign-in with Discord is refused                                        | The redirect URL isn't registered exactly, or the Discord email isn't verified, or isn't `OWNER_EMAIL` (public signup is `owner-only`)                                  |
+| Symptom                                                                | Cause and fix                                                                                                                                                                            |
+| ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Every Deploy prod job skipped                                          | `PROD_DEPLOY_ENABLED` isn't the repository variable `true`, or (for `deploy`) the `images` job was skipped                                                                               |
+| `No linux/arm64 image for ... at <commit>`                             | `main` is at a commit dev didn't build, or built before multi-arch images. Move `main` to a dev commit whose Deploy dev `images` and `manifests` jobs succeeded                          |
+| Tailscale step fails                                                   | OAuth client lacks **Auth Keys: Write** or isn't allowed `tag:ci-prod`; `tag:ci-prod` missing from `tagOwners`                                                                           |
+| `tailscale ping` or SSH times out                                      | The policy doesn't grant `tag:ci-prod` → `tag:prizecheck-prod:22`, the host isn't tagged, `PROD_SSH_HOST` is wrong, or key expiry took the node off the tailnet                          |
+| `Host key verification failed`                                         | `PROD_SSH_KNOWN_HOSTS` doesn't match the address in `PROD_SSH_HOST`; rescan the same address (step 9). Never disable checking                                                            |
+| `Permission denied (publickey)`                                        | A typo in the `authorized_keys` line, or a `from=` that doesn't include the tailnet range; the secret must hold the whole private key, including the BEGIN/END lines                     |
+| `Refused`                                                              | Something other than `deploy`, `rollback` or `status` was sent through the forced command                                                                                                |
+| `Host deployment files differ`                                         | See [Updating the host files](#updating-the-host-files)                                                                                                                                  |
+| `Image pull failed`                                                    | A package doesn't grant the repository Read access (step 8)                                                                                                                              |
+| `PRIZECHECK_WEB_BIND must be 127.0.0.1 in production`                  | Fix `PRIZECHECK_WEB_BIND`: Caddy on the host is the only public entry                                                                                                                    |
+| `... line N must be KEY=value, a comment or blank`                     | A line in `prizecheck.env` uses `export`, indentation or `KEY: value`. Rewrite line N                                                                                                    |
+| `... line N has a quoted value that does not close on the same line`   | A quote opens on line N and doesn't close there. Close it on the same line, or remove it                                                                                                 |
+| `... line N has a backslash inside a quoted value`                     | Escaped quotes are refused, because Compose and the script would disagree about where the value ends. Remove the backslash or the quotes                                                 |
+| `... line N has a space between = and the value`                       | Write `KEY=value` with no space after the `=`                                                                                                                                            |
+| `Docker Compose cannot render the configuration`                       | Compose rejected `prizecheck.env` or the compose files; run `sudo bash /opt/prizecheck-prod/bin/prizecheck-deploy.sh compose config` to see why (a required key is missing, for example) |
+| `The web port must be published on 127.0.0.1 only`                     | The rendered configuration publishes the web port on another address, or a published port has none. Fix `PRIZECHECK_WEB_BIND` and any other port entries                                 |
+| `No sign-in method: set GOOGLE_* or DISCORD_* ...`                     | The Discord pair is empty and `EMAIL_SIGN_IN` is `off`                                                                                                                                   |
+| `DISCORD_CLIENT_ID and DISCORD_CLIENT_SECRET must be set together`     | Set both values of the pair or neither                                                                                                                                                   |
+| `PUBLIC_ORIGIN must be https://host[:port] with no path in production` | Remove the path, or use https                                                                                                                                                            |
+| `Production delivers codes by mail relay, not to a file`               | `sign-in-code` isn't available in production. Sign in with Discord                                                                                                                       |
+| `Data directory ... is missing`                                        | `PRIZECHECK_DATA_DIR` is wrong or `setup` wasn't run. The deploy refuses to create data in the wrong place                                                                               |
+| `Public projection store ... missing`                                  | See [Dev deployment on Unraid](deployment-unraid.md#troubleshooting) and [public projections](public-projections.md); the commands are the same with this guide's paths                  |
+| `Migration failed`                                                     | `scripts/migrate.py` runs all pending migrations in one transaction, so nothing was committed and the previous release was restarted. Fix forward with a new commit                      |
+| `Services did not become healthy` / `Smoke: ...`                       | The log shows the last 50 lines of each service and the previous release is restored. Typical causes: a wrong `PUBLIC_ORIGIN`, an invalid `prizecheck.env` value                         |
+| The public check fails after a successful deploy                       | DNS doesn't resolve to the instance, port 80 or 443 is blocked (security list or host iptables), or Caddy has no certificate yet: `journalctl -u caddy`                                  |
+| Browser gets `403 Origin required`                                     | `PUBLIC_ORIGIN` doesn't exactly match the URL in the address bar (scheme and host)                                                                                                       |
+| Sign-in with Discord is refused                                        | The redirect URL isn't registered exactly, or the Discord email isn't verified, or isn't `OWNER_EMAIL` (public signup is `owner-only`)                                                   |
 
 ## Rolling back
 
