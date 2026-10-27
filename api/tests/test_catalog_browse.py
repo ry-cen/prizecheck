@@ -21,7 +21,7 @@ from app import format_evaluator as evaluator
 from app import format_standing
 from app.catalog import TCGdexSource
 from app.main import app, connect
-from test_attribute_corrections import decide, grant, seed
+from test_attribute_corrections import decide, seed
 from test_card_attributes import BULBASAUR_ME, ENERGY_SV, EX_BW, SUPPORTER, SWITCH_ME, card, edition_of
 from test_card_identity import JUNIPER, LETTER, MAGNOLIA, PLAIN
 from test_catalog import reset_catalog
@@ -455,7 +455,6 @@ def test_one_reviewed_trainer_type_correction_moves_the_kind_filter_collections_
     cursor = browse(user)["next_cursor"]  # a walk of the whole catalog, begun before the decision
     assert cursor
 
-    grant(switch)
     response = decide(switch, correction={"trainer_type": "item", "regulation_mark": "G"})
     assert response.status_code == 200, response.text
     assert response.json()["effective"]["trainer_type"] == "item"

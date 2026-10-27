@@ -14,7 +14,7 @@ from uuid import uuid4
 import pytest
 
 from app.main import connect
-from test_attribute_corrections import decide, grant, seed
+from test_attribute_corrections import decide, seed
 from test_card_attributes import BULBASAUR_ME, ENERGY_SV, STAGE_ONE, SUPPORTER, SWITCH_ME, TOOL, edition_of
 from test_deck_lists import add_line, change_line, detail, remove_line
 from test_decks import create
@@ -118,7 +118,6 @@ def test_a_reviewed_trainer_type_correction_shows_on_the_next_read():
     switch = edition_of('me01-130')
     assert add_line(owner, deck, switch, '4', 1).status_code == 200
     assert by_edition(detail(owner, deck)['deck_list'])[switch]['trainer_type'] is None
-    grant(found['me01-130'])
     response = decide(found['me01-130'], correction={'trainer_type': 'item'})
     assert response.status_code == 200, response.text
     line = by_edition(detail(owner, deck)['deck_list'])[switch]

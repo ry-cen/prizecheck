@@ -171,13 +171,12 @@ def test_results_follow_a_rotation_without_republishing(store, monkeypatch):
 
 
 def test_a_reviewed_attribute_correction_changes_published_results_without_republishing(store):
-    from test_attribute_corrections import decide, grant, seed
+    from test_attribute_corrections import decide, seed
     ids = seed(RARE_CANDY_ME, ENERGY_SV, BULBASAUR_ME)
     _, token = published((("me01-001", 1), ("me01-125", 4), ("sv02-278", 55)))
     digest = body_of(public_get(path_of(token, 1, ON)))["digest"]
     assert standard(token)["status"] == "legal"
     printing = ids["me01-125"]
-    grant(printing)
     corrected = decide(printing, correction={"regulation_mark": "G"})
     assert corrected.status_code == 200, corrected.text
     assert corrected.json()["public_delivery"] == "delivered"
@@ -185,7 +184,6 @@ def test_a_reviewed_attribute_correction_changes_published_results_without_repub
     assert (result["status"], issues(result)) == ("not_legal", [
         ("not_in_card_pool", "regulation mark G rotated out of Standard on 2026-04-10", "card", "not_legal",
          [ref_of("me01-125")])])
-    grant(printing)
     removed = decide(printing, decision="remove")
     assert removed.status_code == 200, removed.text
     assert removed.json()["public_delivery"] == "delivered"

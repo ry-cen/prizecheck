@@ -14,7 +14,7 @@ import pytest
 
 from app.main import app, connect  # noqa: F401  (main first: it includes every router while loading)
 from app import deck_format_checks, format_evaluator
-from test_attribute_corrections import decide, grant, seed
+from test_attribute_corrections import decide, seed
 from test_card_attributes import edition_of
 from test_catalog import reset_catalog
 from test_catalog_metadata import Records
@@ -142,7 +142,6 @@ def test_a_reviewed_attribute_correction_makes_the_next_read_recompute():
     assert codes(standard(before)) == {"regulation_mark_not_in_rules"}
     assert format_checks(owner, deck) == before
     future = printings["fixture-me05-901"]
-    grant(future)
     response = decide(future, correction={"regulation_mark": "I"})
     assert response.status_code == 200, response.text
     body = format_checks(owner, deck)

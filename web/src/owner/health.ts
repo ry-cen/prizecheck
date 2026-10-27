@@ -103,13 +103,6 @@ export function healthChecks(status: OperationsStatus): HealthCheck[] {
       detail: "",
     },
     {
-      area: "Private API, 24 hours",
-      check: "Gateway denials",
-      value: String(status.gateway_authorization_denials),
-      tone: "ok",
-      detail: "Recorded by the gateway",
-    },
-    {
       area: "Catalog",
       check: "Failed catalog pulls",
       value: String(status.catalog_failures),

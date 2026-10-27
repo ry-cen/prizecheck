@@ -9,7 +9,7 @@ from test_card_attributes import edition_of
 from test_deck_format_checks import format_checks, standard
 from test_holdings import call
 from test_published_cost import launches, store  # noqa: F401  (autouse: a records store, no price launches)
-from test_reprint_group_reviews import ADMIN, CANDIES, OWNER, correct_attributes, deck_of, decide, error, grant, \
+from test_reprint_group_reviews import ADMIN, CANDIES, OWNER, correct_attributes, deck_of, decide, error, \
     groups, identity_of, ok, revision, seed, seed_manual_printing
 
 FORMATS = ["standard", "expanded", "glc"]
@@ -75,7 +75,6 @@ def test_a_regulation_mark_correction_changes_the_evidence_a_decision_binds_to()
     correct_attributes(manual, {"regulation_mark": "H"})
     after = evidence(identity)
     assert marks(after)[manual] == "H" and after["evidence_digest"] != shown["evidence_digest"]
-    grant(identity)
     me = groups(after)[ids["me01-125"]]
     stale = decide(identity, "join", target=me, printings=[manual], digest=shown["evidence_digest"])
     assert error(stale) == (409, "IDENTITY_EVIDENCE_CHANGED")
@@ -90,7 +89,6 @@ def test_a_group_merge_from_the_card_moves_the_legality_and_the_deck_format_resu
     shown = evidence(identity, "2026-10-11")
     me, sm = groups(shown)[ids["me01-125"]], groups(shown)[ids["sm1-129"]]
     before = revision()
-    grant(identity)
     body = ok(decide(identity, "merge", group=sm, target=me))
     assert body["attribute_revision"] == before + 1
     after = evidence(identity, "2026-10-11")
