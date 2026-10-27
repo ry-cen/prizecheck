@@ -214,10 +214,6 @@ check_production_env() {
   elif [[ "$providers" -eq 0 ]]; then
     die "No sign-in method: set GOOGLE_* or DISCORD_* client credentials, or EMAIL_SIGN_IN=on with a mail relay"
   fi
-  if [[ -z "$relay_url" || -z "$relay_token" || -z "$mail_from" ]]; then
-    # To stderr, so `compose ps -q web` and other captured output of this script stay clean.
-    log "WARNING: no mail relay; owner catalog approval codes cannot be delivered until MAIL_RELAY_URL, MAIL_RELAY_TOKEN and MAIL_FROM are set" >&2
-  fi
 }
 
 # Every check on the env file and the host's files. The only docker use is the published-port check, which is skipped
@@ -645,7 +641,7 @@ Usage: $SCRIPT_PATH <command>
   setup                            Create data directories with container ownership (once)
   backup                           Dump PostgreSQL and archive the public store into $BACKUP_DIR
   init-store <commit>              First install only: initialize the public store after a failed initialization
-  sign-in-code [n]                 Show the newest n delivered sign-in/approval codes (MAIL_MODE=file)
+  sign-in-code [n]                 Show the newest n delivered sign-in codes (MAIL_MODE=file)
   tool <script> [args]             Run a Python script in the current API image, e.g. tool /app/scripts/bind_owner.py <id>
   compose <args>                   Run docker compose for this stack, e.g. compose logs -f api
   check-config                     Validate the env file and host files (no containers are touched)
