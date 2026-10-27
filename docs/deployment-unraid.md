@@ -2,7 +2,7 @@
 
 Every push to `dev` that passes the verification gate deploys PrizeCheck to an Unraid server. The app is reachable only on your Tailscale tailnet, at an HTTPS address such as `https://unraid.<tailnet>.ts.net`. There's no port forwarding, Funnel, or public reverse proxy.
 
-This guide covers the dev environment. A future production environment reuses the same images, `compose.deploy.yml` and deploy script, but with its own project name, data directory, port, secrets, GitHub environment and SSH key (see [Adding production later](#adding-production-later)).
+This guide covers the dev environment. Production runs on Oracle Cloud and reuses the same images and deploy script, with its own project name, data directory, secrets, GitHub environment and SSH key (see [Adding production later](#adding-production-later)).
 
 ## How it works
 
@@ -10,7 +10,8 @@ This guide covers the dev environment. A future production environment reuses th
 push to dev
   └─ GitHub Actions: Deploy dev (.github/workflows/deploy-dev.yml)
        ├─ verify   the fast tier of the gate, split over parallel jobs (.github/workflows/verify.yml)
-       ├─ images   build api, auth and web; push to GHCR as :<commit> (plus a moving :dev pointer)
+       ├─ images   build api, auth, web and scanner-index natively for amd64 and arm64; push per-architecture tags to GHCR
+       ├─ manifests join them into one :<commit> index per image (plus a moving :dev pointer)
        └─ deploy   join the tailnet as tag:ci (ephemeral) → SSH to Unraid with a forced command
                      └─ prizecheck-deploy.sh deploy <commit> <host-file digest>
                           ├─ pull the three :<commit> images (one-time GHCR login, deleted afterwards)
@@ -371,10 +372,12 @@ From a device that is **not** on the tailnet, the URL must not resolve or connec
 `compose.deploy.yml` and `prizecheck-deploy.sh` run on Unraid as root, so CI never ships them. A stolen deploy key can only deploy images from GHCR with the files you installed. CI sends the digest of the commit's copies, and the host refuses to deploy if its own files differ:
 
 ```text
-ERROR: Host deployment files differ from commit ...; reinstall compose.deploy.yml and prizecheck-deploy.sh
+ERROR: Host deployment files differ from commit ...; reinstall compose.deploy.yml and prizecheck-deploy.sh (docs/deployment-unraid.md, 'Updating the host files')
 ```
 
-When a commit changes either file, repeat the two `scp` commands in step 3 from that commit, then re-run the failed workflow run.
+When a commit changes either file, repeat the two `scp` commands in step 3 from that commit, then re-run the failed workflow run. To check the env file and host files without touching Docker, run `prizecheck-deploy.sh check-config` on Unraid.
+
+**Reinstall once after the commit that introduced production.** That commit moved the script from `deploy/unraid/` to `deploy/host/` and changed both `compose.deploy.yml` and `prizecheck-deploy.sh`. Until you repeat the two `scp` commands in step 3 from a `dev` commit that includes it, the next dev deploy fails with the error above. The script now also refuses an env file with an `export KEY=...`, indented or `KEY: value` line, and names the line number. Your existing `prizecheck.env` needs no other change.
 
 ## Viewing logs
 
@@ -469,11 +472,6 @@ Don't run `backup` while a deploy is migrating; the deploy lock prevents this wh
 
 ## Adding production later
 
-Copy this setup with separate values everywhere:
-
-- a second `PRIZECHECK_HOME` (e.g. `/mnt/cache/appdata/prizecheck-prod`)
-- `PRIZECHECK_PROJECT=prizecheck-prod`, another data directory and port, and new secrets
-- `NODE_ENV=production` with `MAIL_MODE=http` (`PRIZECHECK_NODE_ENV=production` in its env file)
-- a `prod` GitHub environment restricted to `main`, with required reviewers, a second deploy key whose forced command points at the prod script, and a `deploy-prod.yml` that deploys an already-built commit image rather than rebuilding
+Production runs on Oracle Cloud and is described in [Production deployment on Oracle Cloud](deployment-oracle.md). It reuses these images, `compose.deploy.yml` plus `compose.prod.yml`, and the same deploy script with `PRIZECHECK_ENVIRONMENT=prod` in its env file. A push to `main` deploys the images that dev already built for that commit.
 
 The release gate and launch checks in [release](operations/release.md) and [deployment boundaries](deployment-boundaries.md) still apply to production.
