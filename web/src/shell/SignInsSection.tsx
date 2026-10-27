@@ -177,7 +177,7 @@ export function SignInsSection({ email }: { email: string | null }) {
                   key={provider.id}
                   className="box-content flex min-h-tap items-center gap-3 border-b border-border px-4 py-3 last:border-b-0"
                 >
-                  <ProviderMark name={provider.name} />
+                  <ProviderMark provider={provider} />
                   <span className="flex min-w-0 flex-1 flex-col">
                     <span className="font-semibold">{provider.name}</span>
                     <span className="text-meta text-text-muted">
