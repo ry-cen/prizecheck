@@ -93,7 +93,7 @@ PostgreSQL work runs in a worker thread that the request waits on with its own c
 
 ## Operational counters
 
-`bounded_operational_counts` in `api/app/main.py` skips budgeted routes. Its post-handler write is a synchronous PostgreSQL connect on the event loop before the response is sent, which would spend the three seconds and make a read route write. The cost is that price requests are not counted in `operations_hour`. A later ticket can count them from the gateway or after the response.
+`bounded_operational_counts` in `api/app/main.py` skips budgeted routes: a count would make a read route write. Other `/api/` requests hand their count to the background writer in `api/app/operation_counts.py` and return without waiting on PostgreSQL. The cost is that price requests are not counted in `operations_hour`.
 
 ## Gateway attachment pass-through
 

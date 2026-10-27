@@ -83,13 +83,15 @@ def test_a_blocked_writer_delays_neither_the_request_nor_other_requests_on_the_w
     assert [c.authorization_denials for c in gate.written] == [1]
 
 
-def test_a_failing_writer_is_swallowed_and_never_reaches_a_request(writer):
+def test_a_failing_writer_is_swallowed_and_never_reaches_a_request(writer, caplog):
     failing = Failing()
     writer(failing)
     lost = operation_counter.lost
+    operation_counter._last_warning = float('-inf')  # the warning is rate-limited
     assert counted_request()[0] == 401
     assert operation_counter.flush()
     assert failing.calls == 1 and operation_counter.lost == lost + 1
+    assert "Operational counts not written (RuntimeError)" in caplog.text
 
 
 @pytest.mark.serial(reason='wall-clock: asserts an upper bound on elapsed time')
@@ -165,5 +167,6 @@ def test_health_and_public_reads_are_never_handed_to_the_writer(writer):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as http:
             await http.get("/api/health")
             await http.get("/api/public/decks/" + "z" * 32)
+            await http.get("/api/public/invites/" + "z" * 32)
     asyncio.run(go())
     assert operation_counter.flush() and gate.written == []

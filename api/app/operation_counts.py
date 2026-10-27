@@ -10,15 +10,18 @@ Policy for load and outages (counts are best-effort operational telemetry, never
   database is down or slow.
 - The writer folds everything queued into one aggregate and writes it in one transaction, so a
   backlog costs one round trip, not one per request.
-- A write is bounded by ``WRITE_TIMEOUT_SECONDS`` (connect timeout and statement timeout). A write
-  that fails or times out is discarded (``lost`` counts them) and never retried: the next batch
-  tries afresh. The writer swallows every failure of its own; none reaches a request.
+- Each step of a write (the connect, then each statement) is bounded by ``WRITE_TIMEOUT_SECONDS``
+  (libpq's connect and TCP user timeouts, and ``SET LOCAL statement_timeout``), not the whole write.
+  A write that fails or times out is discarded (``lost`` counts them) and never retried: the next
+  batch tries afresh. The writer swallows every failure of its own, logging a rate-limited warning
+  with only the error class; none reaches a request.
 - The thread starts on the first count (tests that skip the app lifespan still work) and the app
   lifespan stops it, giving the queue a short, bounded time to drain.
 
 Tests replace the writer with ``set_writer`` (a delayed or failing adapter) and call ``flush`` to
 wait for the queue to empty, instead of sleeping.
 """
+import logging
 import queue
 import threading
 import time
@@ -28,6 +31,9 @@ from typing import Callable, Protocol
 QUEUE_LIMIT = 256
 WRITE_TIMEOUT_SECONDS = 2
 STOP_DRAIN_SECONDS = 2.0
+WARN_INTERVAL_SECONDS = 60
+
+log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -56,7 +62,9 @@ class DatabaseWriter:
 
     def write(self, count: Count) -> None:
         timeout_ms = WRITE_TIMEOUT_SECONDS * 1000
-        with self._connect(connect_timeout=WRITE_TIMEOUT_SECONDS, options=f'-c statement_timeout={timeout_ms}') as conn:
+        # tcp_user_timeout keeps a half-open TCP connection from holding the writer for minutes.
+        with self._connect(connect_timeout=WRITE_TIMEOUT_SECONDS, tcp_user_timeout=timeout_ms) as conn, conn.transaction():
+            conn.execute(f'SET LOCAL statement_timeout = {timeout_ms}')
             conn.execute("""INSERT INTO operations_hour(hour,requests,failures,authorization_denials,elapsed_ms)
               VALUES(date_trunc('hour',now()),%s,%s,%s,%s)
               ON CONFLICT(hour) DO UPDATE SET requests=operations_hour.requests+excluded.requests,
@@ -79,6 +87,7 @@ class OperationCounter:
         self._stopping = threading.Event()
         self.dropped = 0
         self.lost = 0
+        self._last_warning = float('-inf')
 
     def set_writer(self, writer: CountWriter | None) -> CountWriter | None:
         previous, self._writer = self._writer, writer
@@ -151,8 +160,12 @@ class OperationCounter:
                     for item in batch[1:]:
                         total = total + item
                     writer.write(total)
-            except BaseException:  # noqa: BLE001 - a failed or timed out write is discarded, never raised
+            except Exception as exc:  # a failed or timed out write is discarded, never raised
                 self.lost += len(batch)
+                now = time.monotonic()
+                if now - self._last_warning >= WARN_INTERVAL_SECONDS:
+                    self._last_warning = now
+                    log.warning("Operational counts not written (%s)", type(exc).__name__)
             finally:
                 for _ in batch:
                     self._queue.task_done()
