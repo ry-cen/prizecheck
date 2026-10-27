@@ -1,4 +1,5 @@
 import { useEffect, useId, useState } from "react";
+import { Button } from "../ui/Button";
 import { getLocationTree, type TreeLocation } from "../location_generated";
 import { indexLocations } from "../workspace/locationTree";
 import {
@@ -17,6 +18,7 @@ type Load =
  */
 export function ForTradeLocationsSection() {
   const [load, setLoad] = useState<Load>({ kind: "loading" });
+  const [attempt, setAttempt] = useState(0);
   const headingId = `${useId()}-heading`;
   const beyond = useVisibleBeyondFriends();
   useEffect(() => {
@@ -45,7 +47,7 @@ export function ForTradeLocationsSection() {
     return () => {
       live = false;
     };
-  }, []);
+  }, [attempt]);
   return (
     <section aria-labelledby={headingId} className="flex flex-col gap-2">
       <h3 id={headingId} className="m-0 text-body font-semibold">
@@ -55,14 +57,24 @@ export function ForTradeLocationsSection() {
         <p className="m-0 text-meta text-text-muted">Loading…</p>
       )}
       {load.kind === "failed" && (
-        <p role="alert" className="m-0 text-meta text-danger">
-          Your For trade Locations are temporarily unavailable. Please retry.
-        </p>
+        <div className="flex flex-wrap items-center gap-3">
+          <p role="alert" className="m-0 text-meta text-danger">
+            Your For trade Locations couldn't be loaded.
+          </p>
+          <Button
+            onClick={() => {
+              setLoad({ kind: "loading" });
+              setAttempt((n) => n + 1);
+            }}
+          >
+            Retry
+          </Button>
+        </div>
       )}
       {load.kind === "ready" && load.paths.length === 0 && (
         <p className="m-0 text-meta text-text-muted">
-          Nothing is offered for trade. To offer a Location's cards, open its
-          settings from the gear beside it in Collection and choose For trade.
+          Nothing is offered for trade. To offer a Location's cards, use its
+          gear in Collection.
         </p>
       )}
       {load.kind === "ready" && load.paths.length > 0 && (

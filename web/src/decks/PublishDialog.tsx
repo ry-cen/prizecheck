@@ -157,9 +157,9 @@ export function PublishDialog({
       bodyClassName="flex flex-col gap-3"
     >
       <p className="m-0 text-meta text-text-muted">
-        A Published Deck is a snapshot of this Deck List, including cards you
-        don't own. It never shows what you own, where your cards are, or this
-        Deck's own name. Edits here reach it only when you republish.
+        A public snapshot of this Deck List. It never shows what you own, where
+        your cards are or this Deck's name. Later edits show only after you
+        republish.
       </p>
       {publication.kind === "loading" ? (
         <p role="status" className="m-0 text-body text-text-muted">
@@ -226,7 +226,7 @@ export function PublishDialog({
             <div className="flex flex-col gap-2 border-t border-border pt-3">
               <p className="m-0 text-meta text-text-muted">
                 {status.visibility === "listed"
-                  ? "Listed: Discover shows it while it is legal in its Target Format."
+                  ? "Listed: in Discover while legal in its Target Format."
                   : "Unlisted: only people with the link can open it."}
               </p>
               <div className="flex flex-wrap items-center gap-2">
@@ -253,7 +253,7 @@ export function PublishDialog({
           )}
           {status?.projection_pending && (
             <p role="status" className="m-0 text-meta text-warning">
-              The public copy is catching up. Press the last button again to
+              The public copy is still updating. Repeat your last change to
               finish it.
             </p>
           )}

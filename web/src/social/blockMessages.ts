@@ -23,8 +23,7 @@ export const unblockedStatus = (name: string) =>
 
 export const BLOCKED_HEADING = "Blocked collectors";
 export const BLOCKED_LOADING = "Loading…";
-export const BLOCKED_FAILED =
-  "Your Blocked collectors are temporarily unavailable. Please retry.";
+export const BLOCKED_FAILED = "Your Blocked collectors couldn't be loaded.";
 
 /** Approved by the owner (#302). */
 export const BLOCKED_EMPTY =

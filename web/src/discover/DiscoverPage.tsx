@@ -21,7 +21,7 @@ import {
 
 const SEARCH_DELAY_MS = 250;
 const CHANGED = "Published decks changed. Showing the first page.";
-const UNAVAILABLE = "Discover is unavailable right now. Please retry.";
+const UNAVAILABLE = "Discover couldn't be loaded.";
 
 type Props = {
   /** Opens another address in the app without a page load (a deck card's Published Deck). */

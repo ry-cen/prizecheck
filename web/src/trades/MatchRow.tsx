@@ -185,7 +185,7 @@ export function MatchRow({
           </div>
           {full.kind === "failed" && (
             <p role="alert" className="m-0 text-meta text-danger">
-              More cards couldn't be loaded. Please retry.
+              More cards couldn't be loaded.
             </p>
           )}
           <div className="flex flex-wrap items-center gap-3">

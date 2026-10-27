@@ -136,7 +136,7 @@ export function useTradeWants(onRulesChanged: () => void): TradeWantsApi {
       kit.show({ message: willAcceptToast(rule, card) });
     } catch {
       kit.show({
-        message: "That choice couldn't be saved. Please try again.",
+        message: "That choice couldn't be saved. Try again.",
       });
     } finally {
       if (mounted.current) {

@@ -1,4 +1,5 @@
 import { useEffect, useId, useState } from "react";
+import { Button } from "../ui/Button";
 import { getLocationTree, type TreeLocation } from "../location_generated";
 import { indexLocations } from "../workspace/locationTree";
 
@@ -12,6 +13,7 @@ type Load =
  */
 export function HiddenLocationsSection() {
   const [load, setLoad] = useState<Load>({ kind: "loading" });
+  const [attempt, setAttempt] = useState(0);
   const headingId = `${useId()}-heading`;
   useEffect(() => {
     let live = true;
@@ -36,7 +38,7 @@ export function HiddenLocationsSection() {
     return () => {
       live = false;
     };
-  }, []);
+  }, [attempt]);
   return (
     <section aria-labelledby={headingId} className="flex flex-col gap-2">
       <h3 id={headingId} className="m-0 text-body font-semibold">
@@ -46,14 +48,24 @@ export function HiddenLocationsSection() {
         <p className="m-0 text-meta text-text-muted">Loading…</p>
       )}
       {load.kind === "failed" && (
-        <p role="alert" className="m-0 text-meta text-danger">
-          Your Hidden Locations are temporarily unavailable. Please retry.
-        </p>
+        <div className="flex flex-wrap items-center gap-3">
+          <p role="alert" className="m-0 text-meta text-danger">
+            Your Hidden Locations couldn't be loaded.
+          </p>
+          <Button
+            onClick={() => {
+              setLoad({ kind: "loading" });
+              setAttempt((n) => n + 1);
+            }}
+          >
+            Retry
+          </Button>
+        </div>
       )}
       {load.kind === "ready" && load.paths.length === 0 && (
         <p className="m-0 text-meta text-text-muted">
-          Friends can see every Location. To hide one, open its settings from
-          the gear beside it in Collection and choose Hide from Friends.
+          Friends can see every Location. To hide one, use its gear in
+          Collection.
         </p>
       )}
       {load.kind === "ready" && load.paths.length > 0 && (

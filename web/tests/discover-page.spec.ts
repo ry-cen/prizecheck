@@ -182,9 +182,7 @@ for (const viewport of [
       );
       await page.goto(`${ORIGIN}/discover`);
       const alert = page.getByRole("alert");
-      await expect(alert).toContainText(
-        "Discover is unavailable right now. Please retry."
-      );
+      await expect(alert).toContainText("Discover couldn't be loaded.");
       await expectPageChecks(page, "Discover unavailable");
       fail = false;
       await search(page).fill(world.prefix);

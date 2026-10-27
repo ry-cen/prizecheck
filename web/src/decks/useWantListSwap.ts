@@ -192,7 +192,7 @@ export function useWantListSwap({
               ? `${section.name} changed somewhere else, so nothing was swapped. The Want List is up to date now.`
               : cause.code === "EDITION_UNAVAILABLE"
                 ? "That card can't be added any more, so the Deck List wasn't changed."
-                : "The Deck List couldn't be changed. Please try again."
+                : "The Deck List couldn't be changed. Try again."
         );
     } finally {
       finish();

@@ -626,7 +626,7 @@ export function ProposalBuilderPage({
       frameTitle,
       <div className="flex flex-wrap items-center gap-3">
         <p role="alert" className="m-0 text-body text-danger">
-          This proposal couldn't be opened. Please retry.
+          This proposal couldn't be opened.
         </p>
         <Button onClick={() => setAttempt((n) => n + 1)}>Retry</Button>
       </div>

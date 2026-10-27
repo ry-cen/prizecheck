@@ -162,9 +162,18 @@ export function SignInsSection({ email }: { email: string | null }) {
           />
         )}
         {unavailable && (
-          <p role="alert" className="m-0 text-danger">
-            Sign-ins are temporarily unavailable. Please retry.
-          </p>
+          <div className="flex flex-wrap items-center gap-3">
+            <p role="alert" className="m-0 text-danger">
+              Your sign-ins couldn't be loaded.
+            </p>
+            <button
+              type="button"
+              className={SECONDARY}
+              onClick={() => void load()}
+            >
+              Retry
+            </button>
+          </div>
         )}
         {providers && linked && (
           <ul className="m-0 flex list-none flex-col rounded-panel border border-border bg-surface p-0">

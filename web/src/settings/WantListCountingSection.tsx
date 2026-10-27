@@ -6,6 +6,7 @@ import {
   type AccountSettings,
   type WantListCounting,
 } from "../settings_generated";
+import { Button } from "../ui/Button";
 import { COUNTING_OPTIONS, countingLabel } from "./wantListCounting";
 
 type Load =
@@ -105,9 +106,19 @@ export function WantListCountingSection() {
         <p className="m-0 text-meta text-text-muted">Loading…</p>
       )}
       {load.kind === "failed" && (
-        <p role="alert" className="m-0 text-danger">
-          Your Decks settings are temporarily unavailable. Please retry.
-        </p>
+        <div className="flex flex-wrap items-center gap-3">
+          <p role="alert" className="m-0 text-danger">
+            Your Decks settings couldn't be loaded.
+          </p>
+          <Button
+            onClick={() => {
+              setLoad({ kind: "loading" });
+              void read();
+            }}
+          >
+            Retry
+          </Button>
+        </div>
       )}
       {load.kind === "ready" && (
         <fieldset

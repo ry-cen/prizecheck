@@ -359,7 +359,9 @@ test.describe("desktop", () => {
     await expect(popup(page)).toContainText("Mega Evolution (me01) · #001");
     await expect(popup(page)).toContainText("Regulation mark unavailable");
     await expect(popup(page)).toContainText("Legality unavailable");
-    await expect(popup(page)).not.toContainText("Card details are unavailable");
+    await expect(popup(page)).not.toContainText(
+      "Card details couldn't be loaded"
+    );
     await expect(editions(page).first()).toContainText("Copies owned unknown");
     await expect(
       popup(page).getByRole("button", { name: "Report a missing Edition" })

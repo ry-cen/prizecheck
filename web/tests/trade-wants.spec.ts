@@ -335,7 +335,7 @@ test.describe("on a desktop", () => {
     );
     await energy(page).selectOption({ label: "This exact card" });
     await expect(notifications(page)).toContainText(
-      "That choice couldn't be saved. Please try again."
+      "That choice couldn't be saved. Try again."
     );
     await expect(energy(page)).toHaveValue("printing");
     expect((await tradeWants(page)).rules).toEqual({

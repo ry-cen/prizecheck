@@ -55,7 +55,8 @@ type Facts = {
 const AT_ONCE = 2;
 const COST_TIMEOUT_MS = 3_500;
 
-const UNAVAILABLE = "Decks are temporarily unavailable. Please retry.";
+const UNAVAILABLE = "Your Decks couldn't be loaded.";
+const MORE_UNAVAILABLE = "More Decks couldn't be loaded.";
 const LINK =
   "inline-flex h-control items-center gap-1 rounded-control px-2 text-control font-medium text-accent-strong no-underline hover:bg-surface-raised phone:h-control-phone";
 
@@ -125,7 +126,7 @@ export function DecksIndexPage({ onOpenDeck, onNavigate, onWantList }: Props) {
       if (cause instanceof DeckError && cause.code === "INVENTORY_CHANGED") {
         await loadIndex().catch(() => setNotice(UNAVAILABLE));
         setNotice("Decks changed. Showing the first page.");
-      } else setNotice(UNAVAILABLE);
+      } else setNotice(MORE_UNAVAILABLE);
     }
   }
 
@@ -269,9 +270,21 @@ export function DecksIndexPage({ onOpenDeck, onNavigate, onWantList }: Props) {
           </Button>
         )}
         {notice && (
-          <p role="status" className="m-0 text-body text-warning">
-            {notice}
-          </p>
+          <div className="flex flex-wrap items-center gap-3">
+            <p role="status" className="m-0 text-body text-warning">
+              {notice}
+            </p>
+            {!loaded && notice === UNAVAILABLE && (
+              <Button
+                onClick={() => {
+                  setNotice("");
+                  void loadIndex().catch(() => setNotice(UNAVAILABLE));
+                }}
+              >
+                Retry
+              </Button>
+            )}
+          </div>
         )}
       </section>
       <PublishedDecks deckNames={names} onOpenDeck={onOpenDeck} />
@@ -490,8 +503,8 @@ function PublishedDecks({
         </div>
       ) : load.publications.length === 0 ? (
         <p className="m-0 text-body text-text-muted">
-          Nothing published yet. Publish a Deck from its page once its Target
-          Format result is legal.
+          Nothing published yet. Publish a Deck from its page once it's legal in
+          its Target Format.
         </p>
       ) : (
         <ul
@@ -535,8 +548,8 @@ function PublishedDecks({
                   )}
                   {publication.projection_pending && (
                     <p className="m-0 text-meta text-warning">
-                      The public copy is catching up. Press the last button
-                      again to finish it.
+                      The public copy is still updating. Repeat your last change
+                      to finish it.
                     </p>
                   )}
                 </div>

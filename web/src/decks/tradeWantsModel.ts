@@ -52,5 +52,5 @@ export function tradeWantsRefusal(code: string | null): string {
   if (code === "TOO_MANY_LINES") return TRADE_WANTS_FULL;
   if (code === "EDITION_UNAVAILABLE")
     return "That card can't be added any more.";
-  return "Your Trade Wants couldn't be changed. Please try again.";
+  return "Your Trade Wants couldn't be changed. Try again.";
 }

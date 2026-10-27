@@ -292,7 +292,7 @@ export function useDeckListEdits({
             ? "This Deck changed somewhere else, so your last change wasn't saved. It's up to date now: try again."
             : cause.code === "EDITION_UNAVAILABLE"
               ? "That card can't be added any more, so the Deck List wasn't changed."
-              : "The Deck List couldn't be changed. Please try again.",
+              : "The Deck List couldn't be changed. Try again.",
         retry: null,
       });
     }

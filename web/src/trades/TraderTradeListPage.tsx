@@ -230,7 +230,7 @@ export function TraderTradeListPage({
           </Button>
           {more === "failed" && (
             <p role="alert" className="m-0 text-meta text-danger">
-              More cards couldn't be loaded. Please retry.
+              More cards couldn't be loaded.
             </p>
           )}
         </div>

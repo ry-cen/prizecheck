@@ -269,6 +269,7 @@ export function InboxProvider({
         open={open}
         load={load}
         opener={opener}
+        onRetry={refresh}
         onClose={() => {
           setOpen(false);
           refresh();
@@ -405,6 +406,7 @@ function InboxDialog({
   open,
   load,
   opener,
+  onRetry,
   onClose,
   onCleared,
   onOpenLoan,
@@ -413,6 +415,7 @@ function InboxDialog({
   open: boolean;
   load: Load;
   opener: RefObject<HTMLElement | null>;
+  onRetry: () => void;
   onClose: () => void;
   onCleared: (body: unknown) => void;
   onOpenLoan: (id: string) => void;
@@ -512,9 +515,12 @@ function InboxDialog({
             <p className="m-0 text-meta text-text-muted">Loading…</p>
           )}
           {load.kind === "failed" && (
-            <p role="alert" className="m-0 text-meta text-danger">
-              Your inbox is temporarily unavailable. Please retry.
-            </p>
+            <div className="flex flex-wrap items-center gap-3">
+              <p role="alert" className="m-0 text-meta text-danger">
+                Your inbox couldn't be loaded.
+              </p>
+              <Button onClick={onRetry}>Retry</Button>
+            </div>
           )}
           {view && (
             <section

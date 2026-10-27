@@ -175,6 +175,6 @@ export function locationErrorMessage(
     case "LOCATION_NAME_CONFIRMATION_MISMATCH":
       return `Type ${context.name ?? "the name"} exactly to confirm.`;
     default:
-      return "Unable to save this change. Please retry.";
+      return "This change couldn't be saved. Try again.";
   }
 }

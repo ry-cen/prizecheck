@@ -314,9 +314,7 @@ test.describe("desktop", () => {
     );
     await tileButton(page, 59).focus();
     const failure = results(page).getByRole("alert");
-    await expect(failure).toContainText(
-      "Catalog search is temporarily unavailable. Please retry."
-    );
+    await expect(failure).toContainText("Catalog search couldn't be loaded.");
     await expect(tileButton(page, 59)).toBeFocused();
     await expect(tiles(page)).toHaveCount(60);
     failing = false;

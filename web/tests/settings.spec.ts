@@ -275,7 +275,7 @@ async function forTradeSettings(page: Page) {
   const section = page.getByRole("region", { name: "For trade" });
   await expect(section).toContainText("Nothing is offered for trade.");
   await expect(section).toHaveText(
-    "For tradeNothing is offered for trade. To offer a Location's cards, open its settings from the gear beside it in Collection and choose For trade."
+    "For tradeNothing is offered for trade. To offer a Location's cards, use its gear in Collection."
   );
   const storage = await location(page, "Storage");
   const binder = await location(page, "Binder", storage);
@@ -324,7 +324,5 @@ test("Settings says the For trade Locations are unavailable when they can't be r
   await page.reload();
   await expect(
     page.getByRole("region", { name: "For trade" }).getByRole("alert")
-  ).toHaveText(
-    "Your For trade Locations are temporarily unavailable. Please retry."
-  );
+  ).toHaveText("Your For trade Locations couldn't be loaded.");
 });

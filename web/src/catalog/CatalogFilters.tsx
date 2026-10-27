@@ -11,6 +11,7 @@ import {
   type BrowseKind,
   type CatalogSet,
 } from "../catalog_browse_generated";
+import { Button } from "../ui/Button";
 import { Chip, PickerChip } from "../ui/Chip";
 import { Dialog } from "../ui/Dialog";
 import { SearchField } from "../ui/SearchField";
@@ -140,11 +141,11 @@ function SetPicker({
 }) {
   const [sets, setSets] = useState<CatalogSet[] | null>(null);
   const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   const [filter, setFilter] = useState("");
 
   useEffect(() => {
     if (!open) return;
-    setFilter("");
     if (sets) return;
     setFailed(false);
     let cancelled = false;
@@ -158,7 +159,10 @@ function SetPicker({
     return () => {
       cancelled = true;
     };
-  }, [open, sets]);
+  }, [open, sets, attempt]);
+  useEffect(() => {
+    if (open) setFilter("");
+  }, [open]);
 
   const wanted = filter.trim().toLowerCase();
   const shown = (sets ?? []).filter(
@@ -185,9 +189,12 @@ function SetPicker({
           data-autofocus=""
         />
         {failed ? (
-          <p role="alert" className="m-0 text-body text-danger">
-            Sets are unavailable. Please retry.
-          </p>
+          <div className="flex flex-wrap items-center gap-3">
+            <p role="alert" className="m-0 text-body text-danger">
+              Sets couldn't be loaded.
+            </p>
+            <Button onClick={() => setAttempt((n) => n + 1)}>Retry</Button>
+          </div>
         ) : !sets ? (
           <p role="status" className="m-0 text-body text-text-muted">
             Loading sets…

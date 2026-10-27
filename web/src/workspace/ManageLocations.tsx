@@ -434,10 +434,9 @@ export function ManageLocations({ onClose, onChanged }: Props) {
     body = (
       <>
         <p className="m-0 text-meta text-text-muted">
-          Drag a location by its ☰ handle onto another location to nest it, or
-          onto Top level. Tap the handle, or press Enter on it, to choose from a
-          list instead. Every move asks you to confirm. To rename, hide, mark
-          For trade or delete a location, use the gear beside it in Locations.
+          Drag a location by ☰ onto another location or Top level to move it,
+          or tap ☰ to pick from a list. To rename, hide, trade or delete a
+          location, use its gear in Locations.
         </p>
         <div
           className={`sticky top-0 z-1 box-border rounded-panel border bg-surface p-3 text-center text-meta ${topDrop(dropState(null))}`}

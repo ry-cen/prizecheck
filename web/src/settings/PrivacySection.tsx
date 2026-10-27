@@ -55,10 +55,13 @@ export function PrivacySection({
     setName(profile.display_name);
     setHandleText(profile.handle);
   }
-  useEffect(() => {
+  function read() {
     getProfile()
       .then(show)
       .catch(() => setLoad({ kind: "failed" }));
+  }
+  useEffect(() => {
+    read();
   }, []);
 
   /** Runs one change; `value` names what is sent, so a retry of the same value reuses its key. */
@@ -115,9 +118,19 @@ export function PrivacySection({
         <p className="m-0 text-meta text-text-muted">Loading…</p>
       )}
       {load.kind === "failed" && (
-        <p role="alert" className="m-0 text-danger">
-          Your Privacy settings are temporarily unavailable. Please retry.
-        </p>
+        <div className="flex flex-wrap items-center gap-3">
+          <p role="alert" className="m-0 text-danger">
+            Your Privacy settings couldn't be loaded.
+          </p>
+          <Button
+            onClick={() => {
+              setLoad({ kind: "loading" });
+              read();
+            }}
+          >
+            Retry
+          </Button>
+        </div>
       )}
       {blocked}
       {profile && (

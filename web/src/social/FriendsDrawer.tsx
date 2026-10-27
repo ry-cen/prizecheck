@@ -157,6 +157,7 @@ export function FriendsProvider({
         open={open}
         load={load}
         opener={opener}
+        onRetry={refresh}
         onClose={() => setOpen(false)}
         onChanged={() => {
           refresh();
@@ -312,6 +313,7 @@ function FriendsDialog({
   open,
   load,
   opener,
+  onRetry,
   onClose,
   onChanged,
   onPrivacy,
@@ -320,6 +322,7 @@ function FriendsDialog({
   open: boolean;
   load: Load;
   opener: RefObject<HTMLElement | null>;
+  onRetry: () => void;
   onClose: () => void;
   onChanged: () => void;
   onPrivacy: () => void;
@@ -456,9 +459,12 @@ function FriendsDialog({
             <p className="m-0 text-meta text-text-muted">Loading…</p>
           )}
           {load.kind === "failed" && (
-            <p role="alert" className="m-0 text-meta text-danger">
-              Your Friends are temporarily unavailable. Please retry.
-            </p>
+            <div className="flex flex-wrap items-center gap-3">
+              <p role="alert" className="m-0 text-meta text-danger">
+                Your Friends couldn't be loaded.
+              </p>
+              <Button onClick={onRetry}>Retry</Button>
+            </div>
           )}
           {view && view.received.length > 0 && (
             <section

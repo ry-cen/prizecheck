@@ -41,7 +41,7 @@ const MESSAGES: Record<string, string> = {
 const UNSORTED_COLLISION =
   "The separate Unsorted child needs a unique name. Use another name for the new Location, or move the cards into it.";
 const CHOOSE_MESSAGE = "Choose where to keep the existing cards.";
-const FALLBACK_MESSAGE = "Unable to create the Location. Please retry.";
+const FALLBACK_MESSAGE = "The Location couldn't be created. Try again.";
 
 /** Every possible parent in tree order (natural A–Z, depth first). Decks can't have children. */
 function parentOptions(index: LocationIndex): TreeNode[] {

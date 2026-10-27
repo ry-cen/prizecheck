@@ -155,8 +155,8 @@ export function OwnerBar({
         {hidden && <p className="m-0 text-meta text-warning">{hidden}</p>}
         {mine.projection_pending && (
           <p className="m-0 text-meta text-warning">
-            The public copy is catching up. Press the last button again to
-            finish it.
+            The public copy is still updating. Repeat your last change to finish
+            it.
           </p>
         )}
       </div>

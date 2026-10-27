@@ -54,8 +54,7 @@ export const COLLECTION_REFRESHED =
   "Your collection changed. Results refreshed from page one.";
 export const STANDING_BUSY =
   "Card legality is being updated. Retry in a moment.";
-export const BROWSE_FAILED =
-  "Catalog search is temporarily unavailable. Please retry.";
+export const BROWSE_FAILED = "Catalog search couldn't be loaded.";
 
 // ---------------------------------------------------------------- CardPopup (#174)
 
@@ -88,7 +87,7 @@ const ADD_ERRORS: Record<string, string> = {
 
 export function addFailed(code: string, retry: boolean): string {
   if (retry) return "Add may have completed. Press Add again to check safely.";
-  return ADD_ERRORS[code] ?? "Add failed. Please retry.";
+  return ADD_ERRORS[code] ?? "Nothing was added. Try again.";
 }
 
 // ---------------------------------------------------------------- Batch add and Add mode (#175)
@@ -137,7 +136,7 @@ export function batchFailed(
     return `That Location can't hold that many more copies of ${card ?? "one card"}. Nothing was added.`;
   if (code === "LOCATION_NOT_FOUND")
     return "That Location is gone. Choose another.";
-  return "Adding failed. Nothing was added. Please retry.";
+  return "Nothing was added. Try again.";
 }
 
 const UNDO_REFUSED: Record<string, string> = {

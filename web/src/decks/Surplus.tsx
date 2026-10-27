@@ -61,8 +61,8 @@ export function SurplusGroup({
         <Button onClick={() => onPutAway("all")}>Put away all</Button>
       </div>
       <p className="m-0 text-caption text-text-subtle">
-        In this Deck but cut from its Deck List. Put them all away, or press a
-        card to put away just that card.
+        In this Deck but not on its Deck List. Press a card to put away just
+        that one.
       </p>
       {view === "list" ? (
         <ul className="m-0 list-none p-0">

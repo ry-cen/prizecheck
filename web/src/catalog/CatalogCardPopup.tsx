@@ -289,7 +289,7 @@ export function CatalogCardPopup({
           role="alert"
           className="flex flex-wrap items-center gap-3 text-body text-danger"
         >
-          <p className="m-0">Card details are unavailable. Please retry.</p>
+          <p className="m-0">Card details couldn't be loaded.</p>
           <Button onClick={reload}>Retry</Button>
         </div>
       ) : !ready ? (

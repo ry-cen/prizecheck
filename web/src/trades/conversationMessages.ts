@@ -15,8 +15,7 @@ export const RETRY = "Retry";
 export const TIMELINE_LABEL = "Messages and Trades";
 export const SENDER_YOU = "You";
 export const SHOW_EARLIER = "Show earlier";
-export const EARLIER_FAILED =
-  "Earlier messages couldn't be loaded. Please retry.";
+export const EARLIER_FAILED = "Earlier messages couldn't be loaded.";
 
 export const COMPOSER_LABEL = "Message";
 export const COMPOSER_SEND = "Send";

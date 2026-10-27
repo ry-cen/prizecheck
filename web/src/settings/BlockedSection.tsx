@@ -109,9 +109,19 @@ export function BlockedSection() {
         <p className="m-0 text-meta text-text-muted">{BLOCKED_LOADING}</p>
       )}
       {load.kind === "failed" && (
-        <p role="alert" className="m-0 text-meta text-danger">
-          {BLOCKED_FAILED}
-        </p>
+        <div className="flex flex-wrap items-center gap-3">
+          <p role="alert" className="m-0 text-meta text-danger">
+            {BLOCKED_FAILED}
+          </p>
+          <Button
+            onClick={() => {
+              setLoad({ kind: "loading" });
+              void read();
+            }}
+          >
+            Retry
+          </Button>
+        </div>
       )}
       {load.kind === "ready" && load.blocked.length === 0 && (
         <p className="m-0 text-meta text-text-muted">{BLOCKED_EMPTY}</p>
