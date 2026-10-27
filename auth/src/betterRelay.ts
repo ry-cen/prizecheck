@@ -14,6 +14,9 @@ import { isIP } from "node:net";
  */
 export const CLIENT_IP_HEADER = "x-prizecheck-client-ip";
 
+/** Better Auth's `advanced.ipAddress` option (auth.ts): its rate limiter reads the client address from this header only. */
+export const IP_ADDRESS_OPTION = { ipAddressHeaders: [CLIENT_IP_HEADER] };
+
 export type BetterRequestOptions = {
   /** Append the incoming request's query string to `path`. */
   forwardQuery?: boolean;

@@ -62,8 +62,12 @@ jobs:
             [ "$SECONDS" -lt "$deadline" ] || break
             # Wait only while dev's own run for this commit can still publish them. A failed API call counts as
             # "still running", so a transient error does not end the wait early.
-            active="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/deploy-dev.yml/runs?head_sha=$GITHUB_SHA" \
-              --jq '[.workflow_runs[] | select(.status != "completed")] | length' 2>/dev/null || echo 1)"
+            if ! active="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/deploy-dev.yml/runs?head_sha=$GITHUB_SHA" \
+              --jq '[.workflow_runs[] | select(.status != "completed")] | length' 2>/dev/null)"; then
+              active=1
+              [ -n "${api_warned:-}" ] || echo "::warning::Could not list Deploy dev runs; treating dev's run as still active"
+              api_warned=1
+            fi
             # For the first 5 minutes dev's run may not be listed yet (dev and main pushed together).
             [ "$active" != 0 ] || [ "$SECONDS" -lt 300 ] || break
             sleep 30

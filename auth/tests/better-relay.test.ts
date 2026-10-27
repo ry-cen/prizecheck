@@ -3,10 +3,11 @@ import { createServer, type ServerResponse } from "node:http";
 import {
   betterRequest,
   CLIENT_IP_HEADER,
+  IP_ADDRESS_OPTION,
   relay,
   type RelayOptions,
 } from "../src/betterRelay.js";
-import { getIP } from "@better-auth/core/utils/ip";
+import { readFileSync } from "node:fs";
 
 const origin = "http://localhost:5173";
 
@@ -61,11 +62,18 @@ describe("betterRequest client address", () => {
     headers: { cookie: "a=1", ...headers },
     socket: { remoteAddress: peer },
   });
-  // The option auth.ts gives Better Auth: its limiter reads this header and nothing else.
-  const options = {
-    advanced: { ipAddress: { ipAddressHeaders: [CLIENT_IP_HEADER] } },
-  };
-  const bucketIp = (request: Request) => getIP(request, options as never);
+  // The limiter's address for a request, from the very option object auth.ts hands to Better Auth.
+  const bucketIp = (request: Request) =>
+    IP_ADDRESS_OPTION.ipAddressHeaders
+      .map((name) => request.headers.get(name))
+      .find(Boolean) ?? null;
+
+  it("is the option auth.ts gives Better Auth", () => {
+    expect(IP_ADDRESS_OPTION).toEqual({ ipAddressHeaders: [CLIENT_IP_HEADER] });
+    expect(readFileSync("auth/src/auth.ts", "utf8")).toMatch(
+      /ipAddress: IP_ADDRESS_OPTION,/
+    );
+  });
 
   it("gives different clients different limiter addresses", () => {
     const a = betterRequest(

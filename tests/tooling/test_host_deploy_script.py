@@ -1,5 +1,5 @@
 """The host script's configuration checks (deploy/host/prizecheck-deploy.sh): `check-config` and `bundle-digest` run
-against a scratch PRIZECHECK_HOME, with no Docker. Production refuses what the auth gateway would reject under
+against a scratch PRIZECHECK_HOME. Docker is absent or faked (the published-port check reads Compose's rendered model). Production refuses what the auth gateway would reject under
 NODE_ENV=production, or what would expose the web port; a dev file keeps passing as it did. Each case checks the exit code
 and a stable substring of the message (which names a key, never a value)."""
 import hashlib
@@ -128,15 +128,26 @@ class HostDeployScriptTest(unittest.TestCase):
             self.assertNotEqual(code, 0, line)
             self.assertIn(f'line {len(lines)} must be KEY=value', output)
             self.assertNotIn('0.0.0.0', output)
+        # A quoted value that runs on swallows the next line in Compose, which then renders the first bind address.
+        for opening in ('X="', "X='"):
+            lines = [*PROD, 'PRIZECHECK_WEB_BIND=0.0.0.0', opening, 'PRIZECHECK_WEB_BIND=127.0.0.1"']
+            code, output = self.check(lines)
+            self.assertNotEqual(code, 0, opening)
+            self.assertIn('quoted value that does not close', output)
+        code, output = self.check([*PROD, 'X="a b" # note', "Y='c'"])
+        self.assertEqual(code, 0, output)
         code, output = self.check(['# a comment', '', '   # an indented comment', *PROD])
         self.assertEqual(code, 0, output)
 
-    def fake_docker(self, host_ip):
-        """A `docker` that answers `compose version` and prints a rendered model publishing the web port on host_ip."""
+    def fake_docker(self, *host_ips):
+        """A `docker` that answers `compose version` and prints a rendered model with one published port per entry
+        (None publishes it without a host_ip)."""
         scratch = tempfile.TemporaryDirectory()
         self.addCleanup(scratch.cleanup)
         model = Path(scratch.name) / 'model.json'
-        model.write_text('{"services": {"web": {"ports": [{"host_ip": "%s", "target": 8080, "published": "8088"}]}}}\n' % host_ip)
+        ports = ', '.join(('{"host_ip": "%s", ' % ip if ip else '{') + '"target": 8080, "published": "%d"}' % (8088 + i)
+                          for i, ip in enumerate(host_ips))
+        model.write_text('{"services": {"web": {"ports": [%s]}}}\n' % ports)
         docker = Path(scratch.name) / 'docker'
         docker.write_text('#!/bin/sh\ncase " $* " in *" version "*) echo v2; exit 0;; esac\ncat "$FAKE_MODEL"\n')
         docker.chmod(docker.stat().st_mode | stat.S_IXUSR)
@@ -147,6 +158,17 @@ class HostDeployScriptTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('published on 127.0.0.1 only', result.stdout + result.stderr)
         result = self.run_script(self.make_home(PROD), **self.fake_docker('127.0.0.1'))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        # A second published port without a host_ip binds every interface.
+        result = self.run_script(self.make_home(PROD), **self.fake_docker('127.0.0.1', None))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('published on 127.0.0.1 only', result.stdout + result.stderr)
+
+    def test_dev_compares_the_rendered_port_with_the_checked_bind(self):
+        result = self.run_script(self.make_home(DEV), **self.fake_docker('0.0.0.0'))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('published on 127.0.0.1 only', result.stdout + result.stderr)
+        result = self.run_script(self.make_home(DEV), **self.fake_docker('127.0.0.1'))
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     @unittest.skipUnless(tee_keeps_writing(), 'the SSH gate logs through GNU tee -p')
