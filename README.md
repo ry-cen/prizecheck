@@ -203,6 +203,8 @@ authorized.
 - [Public projections](docs/public-projections.md): snapshot storage, privacy, and recovery.
 - [Dev deployment on Unraid](docs/deployment-unraid.md): the private, tailnet-only dev
   environment that `dev` pushes deploy to.
+- [Production on Oracle Cloud](docs/deployment-oracle.md): setting up the instance, Caddy,
+  Tailscale and the GitHub `prod` environment that `main` pushes deploy to.
 - [Local recovery](docs/operations/local-recovery.md),
   [portable operations jobs](docs/operations/portable-jobs.md), and
   [release tooling](docs/operations/release.md): backups, restores, monitoring, and releases.
