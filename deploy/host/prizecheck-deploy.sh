@@ -56,8 +56,11 @@ env_value() {
   local line
   line="$(grep -E "^$1=" "$ENV_FILE" | tail -n 1 || true)"
   line="${line#*=}"
+  # Compose skips spaces after the `=` before it looks for a quote.
+  line="${line#"${line%%[![:space:]]*}"}"
   # Quotes come off only as a matched pair, the way Compose reads them (and a trailing ` # comment` after the pair).
-  local double='^"([^"]*)"([[:space:]]+#.*)?$' single="^'([^']*)'([[:space:]]+#.*)?\$"
+  # check_env_file_syntax has already refused backslashes inside quotes.
+  local double='^"([^"\\]*)"([[:space:]]+#.*)?[[:space:]]*$' single="^'([^'\\]*)'([[:space:]]+#.*)?[[:space:]]*\$"
   if [[ "$line" =~ $double ]]; then
     line="${BASH_REMATCH[1]}"
   elif [[ "$line" =~ $single ]]; then
@@ -84,17 +87,23 @@ compose_cmd() {
 # Compose reads the env file with its own parser, which also accepts `export KEY=`, indented keys and `KEY: value`;
 # env_value reads only `KEY=`. A line in any other form could be honoured by Compose and ignored by every check here, so
 # it is refused. So is a quoted value that does not close on its own line: Compose lets it run on, swallowing the lines
-# after it, while every check here reads them as settings. Names the line number, never its content.
+# after it, while every check here reads them as settings. Compose also lets a backslash escape the closing quote, and
+# skips spaces after the `=`; a backslash inside quotes and a space before the value are refused too. Names the line
+# number, never its content.
 check_env_file_syntax() {
   local line value number=0 key_pattern='^[A-Za-z_][A-Za-z0-9_]*='
-  local double='^"[^"]*"([[:space:]]+#.*)?[[:space:]]*$' single="^'[^']*'([[:space:]]+#.*)?[[:space:]]*\$"
+  local double='^"[^"\\]*"([[:space:]]+#.*)?[[:space:]]*$' single="^'[^'\\]*'([[:space:]]+#.*)?[[:space:]]*\$"
   while IFS= read -r line || [[ -n "$line" ]]; do
     number=$((number + 1))
     [[ "$line" =~ ^[[:space:]]*$ || "$line" =~ ^[[:space:]]*# || "$line" =~ $key_pattern ]] \
       || die "$ENV_FILE line $number must be KEY=value, a comment or blank (no export, indentation or KEY: value)"
     if [[ "$line" =~ $key_pattern ]]; then
       value="${line#*=}"
+      [[ ! "$value" =~ ^[[:space:]] ]] || die "$ENV_FILE line $number has a space between = and the value"
       if [[ "$value" == \"* && ! "$value" =~ $double ]] || [[ "$value" == \'* && ! "$value" =~ $single ]]; then
+        if [[ "$value" == *\\* ]]; then
+          die "$ENV_FILE line $number has a backslash inside a quoted value (escaped quotes are not supported)"
+        fi
         die "$ENV_FILE line $number has a quoted value that does not close on the same line"
       fi
     fi
@@ -113,7 +122,8 @@ check_published_ports() {
   fi
   config="$(PRIZECHECK_IMAGE_TAG=none "${COMPOSE[@]}" "${COMPOSE_ARGS[@]}" config --format json 2>/dev/null)" \
     || die "Docker Compose cannot render the configuration; check $ENV_FILE"
-  published="$(grep -oE '"published": *' <<<"$config" | wc -l | tr -d ' ')"
+  # Port targets are numbers; volume targets are strings, so only the ports are counted.
+  published="$(grep -oE '"target": *[0-9]+' <<<"$config" | wc -l | tr -d ' ')"
   binds="$(grep -oE '"host_ip": *"[^"]*"' <<<"$config" | sed -E 's/^"host_ip": *"//; s/"$//' || true)"
   while IFS= read -r bind; do
     [[ -z "$bind" ]] && continue
@@ -205,7 +215,8 @@ check_production_env() {
     die "No sign-in method: set GOOGLE_* or DISCORD_* client credentials, or EMAIL_SIGN_IN=on with a mail relay"
   fi
   if [[ -z "$relay_url" || -z "$relay_token" || -z "$mail_from" ]]; then
-    log "WARNING: no mail relay; owner catalog approval codes cannot be delivered until MAIL_RELAY_URL, MAIL_RELAY_TOKEN and MAIL_FROM are set"
+    # To stderr, so `compose ps -q web` and other captured output of this script stay clean.
+    log "WARNING: no mail relay; owner catalog approval codes cannot be delivered until MAIL_RELAY_URL, MAIL_RELAY_TOKEN and MAIL_FROM are set" >&2
   fi
 }
 
@@ -637,7 +648,7 @@ Usage: $SCRIPT_PATH <command>
   sign-in-code [n]                 Show the newest n delivered sign-in/approval codes (MAIL_MODE=file)
   tool <script> [args]             Run a Python script in the current API image, e.g. tool /app/scripts/bind_owner.py <id>
   compose <args>                   Run docker compose for this stack, e.g. compose logs -f api
-  check-config                     Validate the env file and host files without touching Docker
+  check-config                     Validate the env file and host files (no containers are touched)
   bundle-digest                    Print the digest CI must send for the installed host files
 EOF
 }

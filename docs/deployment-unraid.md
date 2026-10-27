@@ -375,9 +375,9 @@ From a device that is **not** on the tailnet, the URL must not resolve or connec
 ERROR: Host deployment files differ from commit ...; reinstall compose.deploy.yml and prizecheck-deploy.sh (docs/deployment-unraid.md, 'Updating the host files')
 ```
 
-When a commit changes either file, repeat the two `scp` commands in step 3 from that commit, then re-run the failed workflow run. To check the env file and host files without touching Docker, run `prizecheck-deploy.sh check-config` on Unraid.
+When a commit changes either file, repeat the two `scp` commands in step 3 from that commit, then re-run the failed workflow run. To check the env file and host files (no containers are touched), run `prizecheck-deploy.sh check-config` on Unraid.
 
-**Reinstall once after the commit that introduced production.** That commit moved the script from `deploy/unraid/` to `deploy/host/` and changed both `compose.deploy.yml` and `prizecheck-deploy.sh`. Until you repeat the two `scp` commands in step 3 from a `dev` commit that includes it, the next dev deploy fails with the error above. The script now also refuses an env file with an `export KEY=...`, indented or `KEY: value` line, and names the line number. Your existing `prizecheck.env` needs no other change.
+**Reinstall once after the commit that introduced production.** That commit moved the script from `deploy/unraid/` to `deploy/host/` and changed both `compose.deploy.yml` and `prizecheck-deploy.sh`. Until you repeat the two `scp` commands in step 3 from a `dev` commit that includes it, the next dev deploy fails with the error above. The script now also refuses an env file with an `export KEY=...`, indented or `KEY: value` line, a space between `=` and the value, a quoted value that doesn't close on its own line, or a backslash inside a quoted value (Docker Compose would read those differently from the script's checks), and names the line number. Where Docker Compose is installed, `check-config` and every deploy also render the configuration and refuse it unless the web port is published on your `PRIZECHECK_WEB_BIND` address only. Your existing `prizecheck.env` needs no other change.
 
 ## Viewing logs
 

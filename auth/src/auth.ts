@@ -231,7 +231,7 @@ function authOn(database: Pool) {
     advanced: {
       // Better Auth's limiter is on in production and keys on this address; the gateway sets the header from its own
       // trusted client address (betterRelay.ts), so one visitor cannot exhaust another's allowance. Better Auth also
-      // stores this address on each new session, so the session hook below blanks it: addresses are never kept.
+      // stores this address on each new session, so the session hook above blanks it: addresses are never kept.
       ipAddress: IP_ADDRESS_OPTION,
       useSecureCookies: !new URL(origin).hostname.match(
         /^(localhost|127\.0\.0\.1)$/
