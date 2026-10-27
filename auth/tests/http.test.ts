@@ -13,7 +13,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { launch, waitForServer } from "./support/servers";
+import { launch, waitForServer, waitUntil } from "./support/servers";
 
 // The gate's stacks run with email-code sign-in off. These tests cover email codes, so they get their own gateway with
 // EMAIL_SIGN_IN=on, on the stack's database, API, mail file and public origin.
@@ -395,7 +395,8 @@ assert store.compare_and_swap({k: rows[k].version for k in keys}, {
       expect(
         (await fetch(`http://127.0.0.1:${apiPort}/api/locations`)).status
       ).toBe(401);
-      expect(wakeups).toBeGreaterThan(beforeApi);
+      // The API counts the request in the background, after the response.
+      expect(await waitUntil(() => wakeups > beforeApi)).toBe(true);
       // Control: a private route does wake the gateway database, so the counter is live.
       expect(
         (

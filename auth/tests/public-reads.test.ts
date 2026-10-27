@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Pool } from "pg";
 import { PublicReadLimiter } from "../src/publicReads.js";
-import { launch, serverReady } from "./support/servers";
+import { launch, serverReady, waitUntil } from "./support/servers";
 
 describe("public read abuse boundary", () => {
   it("limits one caller, preserves other callers, and expires the window", () => {
@@ -320,7 +320,8 @@ print(json.dumps([rows[k].value for k in keys]))`,
         expect(wakeups).toBe(baseline);
         // Control: a private route does wake the database, so the counter is live.
         await fetch(`http://127.0.0.1:${apiPort}/api/locations`);
-        expect(wakeups).toBeGreaterThan(baseline);
+        // The API counts the request in the background, after the response.
+        expect(await waitUntil(() => wakeups > baseline)).toBe(true);
       } finally {
         for (const child of children) {
           if (child.exitCode === null && child.signalCode === null) {
