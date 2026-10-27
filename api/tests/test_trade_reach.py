@@ -11,7 +11,7 @@ import psycopg
 import pytest
 from psycopg.rows import dict_row
 
-from app.main import connect  # noqa: F401  (main first: it includes every router while loading)
+from app.main import connect  # noqa: F401
 from app.social import discovery, friend_copies
 from stranger_fixtures import strangers
 from test_catalog_references import migrate

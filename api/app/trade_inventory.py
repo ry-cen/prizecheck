@@ -40,10 +40,10 @@ other:
   picks change; 409 PICKS_UP_TO_DATE when none is out of date.
 
 - **Confirm swap** (``POST /api/trades/{id}/confirm-swap``, #272). After the in-person swap, each side confirms for
-  their own inventory only. The copies they give leave their Collection through ``moves.take_out`` (Removal semantics,
+  their own inventory only. The copies they give leave their Collection through ``inventory_core.take_out`` (Removal semantics,
   no Undo record, no Deck List line lowered) and their picks go in the same transaction, so their Holdings and their
   promises fall by the same count; refused with 409 PICKS_OUT_OF_DATE while a pick is out of date. The copies they get
-  arrive as new Holdings through ``moves.add_in`` in the Storage Leaf or Deck they chose, or Unsorted (made when
+  arrive as new Holdings through ``inventory_core.add_in`` in the Storage Leaf or Deck they chose, or Unsorted (made when
   missing), read from the Trade's own lines only, so it works after the other account is gone; arriving in a Deck they
   raise its lines as an Add does. The confirmer's revision moves exactly once. The second confirmation closes the Trade
   as swapped and tells the side that confirmed first. The swap itself is not undoable, and cash changes nothing (the
@@ -59,7 +59,7 @@ locks both too (after the advisory locks ``trade_command`` and ``new_conversatio
 conversation and attaches their earlier Trades. An accept never creates one: a proposal always has its pair's. So a
 send, an accept, a Confirm swap or a Use suggested picks and a Loan step or inventory command over the same copies
 run one after the other and the second sees the first's writes; migration 142's deferred triggers are the backstop. No
-step takes the inventory lock (``moves.lock_owner``) or reads the Location tree with
+step takes the inventory lock (``inventory_core.lock_owner``) or reads the Location tree with
 ``location_tree.owner_and_rows``: their ``FOR UPDATE`` would hold off the foreign key checks the other side's steps
 take on this owner's row (``social.owners.lock_owners``). Each step moves its collector's revision when it changes what
 they hold or promise. The command lock, replay and hourly count are ``social.trades``' (``owners.begin_owner_command``);
@@ -79,8 +79,9 @@ from pydantic import BaseModel, Field
 from .deck_deletion import unsorted_leaf
 from .decks import advance_deck_list, write_deck_list
 from .location_tree import error, refuse
-from .main import connect, verified_user
-from .moves import add_in, is_deck, leaf, quantity, take_out
+from .db import connect
+from .identity import verified_user
+from .inventory_core import add_in, is_deck, leaf, quantity, take_out
 from .social.conversations import new_conversation_lock, open_conversation
 from .social.discovery import reach_one, require_not_suspended, trader_user
 from .social.friend_reads import card_facts

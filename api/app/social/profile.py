@@ -29,7 +29,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from ..location_tree import error, owner_and_rows, replay
-from ..main import connect, verified_user
+from ..db import connect
+from ..identity import verified_user
 from ..public_projection import ProjectionUnavailable
 from ..public_records import MAX_BATCH, invite_key, public_record_store
 from ..publications import PUBLIC_HEADERS, TOKEN

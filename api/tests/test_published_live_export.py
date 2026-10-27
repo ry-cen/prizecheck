@@ -11,7 +11,7 @@ from uuid import uuid4
 import psycopg
 import pytest
 
-from app.main import app, connect  # noqa: F401  (main first: it includes every router while loading)
+from app.main import app, connect  # noqa: F401
 from app import deck_live_export, public_catalog, public_deck, published_live_export
 from app.catalog_targets import LIVE, activate_rule
 from app.public_projection import ProjectionUnavailable

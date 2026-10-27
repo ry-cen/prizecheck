@@ -6,7 +6,7 @@ from uuid import uuid4
 
 import pytest
 
-from app.main import connect  # noqa: F401  (main first: it includes every router while loading)
+from app.main import connect  # noqa: F401
 from test_holdings import call
 
 ZIPS = {'00010': (40.0, -100.0), '00011': (40.1, -100.0), '00012': (40.2, -100.0), '00013': (40.3, -100.0),

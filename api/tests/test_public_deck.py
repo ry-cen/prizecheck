@@ -1,7 +1,7 @@
 """public_deck's reference-proof rule (tickets 12 to 14), without a database."""
 from dataclasses import replace
 
-from app.main import app  # noqa: F401  (main first: it includes every router while loading)
+from app.main import app  # noqa: F401
 from app.public_deck import FrozenRow, same_printing
 
 

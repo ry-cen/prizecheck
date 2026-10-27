@@ -27,7 +27,7 @@ from psycopg.rows import dict_row
 
 from .catalog_targets import edition_targets, is_unspecified
 from . import price_refresh, quote_contract
-from .main import verified_user
+from .identity import verified_user
 from .price_budget import MAX_BODY_BYTES, Budget, trusted_budget
 from .public_projection import ProjectionUnavailable
 from .public_records import QuoteState, public_record_store, quote_states

@@ -8,7 +8,7 @@ Every test seeds the Swap catalog (``want_list_swap_fixtures``): Basic Psychic E
 Identity and no Reprint Group (their set has no printed code, so a hint names it by its TCGdex set ID, ``sve``), and
 Boss's Orders PAL 172 has two finishes and no group.
 """
-from app.main import connect  # noqa: F401  (main first: it includes every router while loading)
+from app.main import connect  # noqa: F401
 from test_catalog_targets import isolated_rules  # noqa: F401  (an autouse fixture)
 from test_deck_cost import launches, store  # noqa: F401  (autouse fixtures)
 from test_deck_counting import counting, deck, detail, hold, line, new_owner

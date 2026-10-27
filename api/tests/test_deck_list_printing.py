@@ -11,7 +11,7 @@ from uuid import uuid4
 import psycopg
 import pytest
 
-from app.main import app, connect  # noqa: F401  (main first: it includes every router while loading)
+from app.main import app, connect  # noqa: F401
 from app import price_launcher, prices, quote_contract
 from app.public_projection import ProjectionUnavailable
 from app.public_records import public_record_store, result_key

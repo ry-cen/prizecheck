@@ -74,7 +74,8 @@ from psycopg import sql
 from pydantic import BaseModel, Field
 
 from ..location_tree import error, record_response
-from ..main import connect, verified_user
+from ..db import connect
+from ..identity import verified_user
 from ..trade_picks import stale_pick_trades
 from .discovery import reach
 from .friend_reads import card_facts

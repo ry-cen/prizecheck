@@ -3,7 +3,7 @@ import gzip
 import json
 from fastapi.testclient import TestClient
 
-from app.main import app, connect  # first: app.main includes the routers
+from app.main import app, connect
 from app import scanner, set_codes
 from test_catalog import headers
 from test_catalog_search import promote

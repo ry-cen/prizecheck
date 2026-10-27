@@ -11,7 +11,8 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
-from .main import connect, verified_user
+from .db import connect
+from .identity import verified_user
 
 router = APIRouter()
 

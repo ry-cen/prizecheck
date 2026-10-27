@@ -22,7 +22,7 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
-from app.main import app, connect  # noqa: F401  (main first: it includes every router while loading)
+from app.main import app, connect  # noqa: F401
 from app import trade_inventory
 from app.social import trades
 import test_holdings

@@ -11,7 +11,7 @@ from uuid import uuid4
 
 import pytest
 
-from app.main import app, connect  # noqa: F401  (main first: it includes every router while loading)
+from app.main import app, connect  # noqa: F401
 from stranger_fixtures import far_zip, propose_to, strangers, trader_of
 from test_blocks import blocked, same, unblock
 from test_catalog_targets import isolated_rules  # noqa: F401  (an autouse fixture)

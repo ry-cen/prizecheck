@@ -90,7 +90,7 @@ ALLOWED_IMPORTS = {
     'social/friend_copies.py': {('.', 'counts'), ('..', 'copy_allocation'), ('..copy_allocation', 'allocate_rows'),
                                 ('..copy_allocation', 'AllocationRows')},
     'social/friend_reads.py': {
-        ('.', 'name_rules'), ('..', 'set_codes'), ('..main', 'connect'), ('..main', 'verified_user'),
+        ('.', 'name_rules'), ('..', 'set_codes'), ('..db', 'connect'), ('..identity', 'verified_user'),
         # Only the error helper of the Location readers; the Want List's capture and card order drive the wanted cards.
         ('..location_tree', 'error'), ('..want_list', 'capture_want_list'), ('..want_list', 'number_order'),
         ('.friend_copies', 'friend_copies')},
@@ -100,7 +100,7 @@ ALLOWED_IMPORTS = {
     # modules, the Friends' copies and wants from the choke point, the catalog's Will accept expansion, and the one
     # definition of "are Friends", a set of account ids.
     'social/trade_matches.py': {
-        ('.', 'name_rules'), ('..main', 'connect'), ('..main', 'verified_user'), ('..location_tree', 'error'),
+        ('.', 'name_rules'), ('..db', 'connect'), ('..identity', 'verified_user'), ('..location_tree', 'error'),
         ('.friend_copies', 'friend_trade_copies'), ('.friend_reads', 'FRIEND_BY_HANDLE'),
         ('.friend_reads', 'PAGE_IDENTITIES'), ('.friend_reads', 'card_facts'), ('.friend_reads', 'search_key'),
         ('..trade_list', 'own_trade_copies'), ('..trade_wants', 'own_wants'), ('..trade_wants', 'own_rules'),
@@ -120,7 +120,7 @@ ALLOWED_IMPORTS = {
         # The trader header's add_friend (trading #304) comes from the Friend code's one definition.
         ('.friends', 'add_friend_state')},
     'social/friends.py': {
-        ('.', 'name_rules'), ('..main', 'connect'), ('..main', 'verified_user'), ('..publications', 'TOKEN'),
+        ('.', 'name_rules'), ('..db', 'connect'), ('..identity', 'verified_user'), ('..publications', 'TOKEN'),
         ('..location_tree', 'error'), ('..location_tree', 'replay'), ('.owners', 'ensure_owner'),
         ('.owners', 'lock_owners'), ('.profile', 'token_hash'),
         # Ending a friendship cancels the pair's Loans nobody has confirmed a handover for (#260), then their Trades
@@ -137,7 +137,7 @@ ALLOWED_IMPORTS = {
     # discovery helpers from their one definitions, the conversation lookup, cursors and text rule, the Trades' end and
     # counterparties, and card facts for the snapshot.
     'social/reports.py': {
-        ('..main', 'connect'), ('..main', 'verified_user'), ('..main', 'require_owner'),
+        ('..db', 'connect'), ('..identity', 'verified_user'), ('..identity', 'require_owner'),
         ('..location_tree', 'error'), ('..location_tree', 'replay'), ('.owners', 'lock_owners'),
         ('.friends', '_command'), ('.friends', 'command_payload'), ('.friends', 'place_block'),
         ('.discovery', 'reach_one'), ('.discovery', 'trader_user'), ('.discovery', 'lock_discovery'),
@@ -157,7 +157,7 @@ ALLOWED_IMPORTS = {
         # Which of the reader's Loans as lender have a reserved pick out of date, so Needs you and the inbox list them
         # (#259): a set of Loan ids from the lender's own Holdings, never a Location; the read stays in app.loan_picks.
         ('..loan_picks', 'stale_pick_loans'),
-        ('..main', 'connect'), ('..main', 'verified_user'), ('..location_tree', 'error'),
+        ('..db', 'connect'), ('..identity', 'verified_user'), ('..location_tree', 'error'),
         ('..location_tree', 'record_response'), ('.friend_reads', 'card_facts'), ('.owners', 'NOW'),
         ('.owners', 'advance_revision'), ('.owners', 'begin_owner_command'), ('.owners', 'lock_owners'),
         # Whether the lender is still the reader's Friend, so Edit and resend is offered only then (owner's decision,
@@ -166,7 +166,7 @@ ALLOWED_IMPORTS = {
     # The inbox (#259): the reader's own Loans through the Loans' one definition of what waits on them, and the updates
     # stored for them. Nothing of another collector's inventory.
     'social/inbox.py': {
-        ('..main', 'connect'), ('..main', 'verified_user'), ('.loans', 'LOANS'), ('.loans', 'LoanView'),
+        ('..db', 'connect'), ('..identity', 'verified_user'), ('.loans', 'LOANS'), ('.loans', 'LoanView'),
         ('.loans', 'loan_facts'), ('.loans', 'loan_views'), ('.loans', 'role_of'),
         # The nudge's 14 days, so a nudge's update says when it began to apply (owner's decision, 2026-10-16).
         ('.loans', 'NUDGE_DAYS'),
@@ -182,7 +182,7 @@ ALLOWED_IMPORTS = {
     # needs none. ``friend_ids`` must be imported inside the function that uses it, as in social/loans.py, because
     # app.social.friends imports this module (``end_trades_between``).
     'social/trades.py': {
-        ('..trade_picks', 'stale_pick_trades'), ('..main', 'connect'), ('..main', 'verified_user'),
+        ('..trade_picks', 'stale_pick_trades'), ('..db', 'connect'), ('..identity', 'verified_user'),
         ('..location_tree', 'error'), ('..location_tree', 'record_response'), ('.friend_reads', 'card_facts'),
         ('.owners', 'ensure_owner'), ('.owners', 'lock_owners'), ('.owners', 'advance_revision'), ('.owners', 'NOW'),
         ('.owners', 'begin_owner_command'),
@@ -195,7 +195,7 @@ ALLOWED_IMPORTS = {
     # app.social.friends imports app.social.trades), and the completed-Trade count. Nothing of another collector's
     # inventory.
     'social/conversations.py': {
-        ('..main', 'connect'), ('..main', 'verified_user'), ('..location_tree', 'error'),
+        ('..db', 'connect'), ('..identity', 'verified_user'), ('..location_tree', 'error'),
         ('.owners', 'ensure_owner'), ('.owners', 'lock_owners'), ('.friends', 'friend_ids'),
         ('.trades', 'TRADES'), ('.trades', 'TradeView'), ('.trades', 'trade_facts'), ('.trades', 'trade_views'),
         ('.trades', 'waiting_trade_step'), ('.trades', 'completed_trades'),
@@ -204,10 +204,10 @@ ALLOWED_IMPORTS = {
         ('.discovery', 'Band'), ('.discovery', 'reach'), ('.discovery', 'reach_one'),
         ('.discovery', 'require_not_suspended')},
     'social/discovery.py': {
-        ('..main', 'connect'), ('..main', 'verified_user'), ('..location_tree', 'error'),
+        ('..db', 'connect'), ('..identity', 'verified_user'), ('..location_tree', 'error'),
         ('.owners', 'ensure_owner'), ('.owners', 'lock_owners')},
     'social/profile.py': {
-        ('.', 'name_rules'), ('..main', 'connect'), ('..main', 'verified_user'),
+        ('.', 'name_rules'), ('..db', 'connect'), ('..identity', 'verified_user'),
         ('..location_tree', 'error'), ('..location_tree', 'owner_and_rows'), ('..location_tree', 'replay'),
         ('..public_projection', 'ProjectionUnavailable'), ('..public_records', 'MAX_BATCH'),
         ('..public_records', 'invite_key'), ('..public_records', 'public_record_store'),

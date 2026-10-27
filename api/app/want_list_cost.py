@@ -27,7 +27,7 @@ from starlette.background import BackgroundTask
 
 from . import prices
 from .deck_cost import DeckCostFigures, summarize
-from .main import verified_user
+from .identity import verified_user
 from .price_budget import Budget, trusted_budget
 from .settings import WantListCounting
 from .want_list import capture_want_list, combined

@@ -8,7 +8,8 @@ from collections.abc import Mapping
 from uuid import UUID, uuid4
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
-from .main import connect, verified_user
+from .db import connect
+from .identity import verified_user
 from .holdings import parse_quantity
 from .location_tree import (TreeNode, LocationCommandResult, EditLocation, apply_edit, cleaned_name,
                             owner_and_rows, replay, check_name, store_result, error, node_model)

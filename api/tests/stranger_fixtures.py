@@ -7,7 +7,7 @@ so a helper there would make an import cycle for the files that need it.
 """
 from uuid import uuid4
 
-from app.main import connect  # noqa: F401  (main first: it includes every router while loading)
+from app.main import connect  # noqa: F401
 from test_deck_counting import hold
 from test_for_trade_locations import mark
 from test_friend_copies import collector, ok, place

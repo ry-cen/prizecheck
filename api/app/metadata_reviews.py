@@ -25,7 +25,8 @@ from .catalog_targets import (LIVE, MATCHING, REGISTRIES, MatchingRulesV1, Match
                               automatic_matching, code_digest, ensure_matching_rule, fingerprint, is_unspecified,
                               refresh_editions, refresh_printing, verified_elsewhere)
 from .holdings import fail
-from .main import connect, require_owner, verified_user
+from .db import connect
+from .identity import require_owner, verified_user
 
 router = APIRouter()
 log = logging.getLogger(__name__)
@@ -693,7 +694,6 @@ def _apply_automatic_matching():
         public_catalog.spawn_background_drain()
 
 
-@router.on_event("startup")
 def automatic_matching_on_startup():
     # Re-evaluating every unverified Edition can take minutes, so it never holds up startup or health checks.
     if automatic_matching():

@@ -4,7 +4,7 @@ card advances the revision the format checks read, and an affected Deck List's f
 """
 from datetime import datetime
 
-from app.main import app, connect  # noqa: F401  (main first: it includes every router while loading)
+from app.main import app, connect  # noqa: F401
 from test_card_attributes import edition_of
 from test_deck_format_checks import format_checks, standard
 from test_holdings import call

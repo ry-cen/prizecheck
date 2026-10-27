@@ -44,7 +44,7 @@ def reserved_counts(conn, owner_id: str, edition_ids: Iterable[UUID]) -> dict[UU
 def trade_reserved_counts(conn, owner_id: str, edition_ids: Iterable[UUID]) -> dict[UUID, int]:
     """The part of ``reserved_counts`` that open Trades promise (trading #268): copies of each Edition the owner gives in
     a Trade Proposal or Trade whose side still reserves, through migration 142's ``trade_reserved_copies``. Editions with
-    none are absent. ``moves.check_promises`` reads it to say a Trade promises a refused copy. Call it through the
+    none are absent. ``inventory_core.check_promises`` reads it to say a Trade promises a refused copy. Call it through the
     module."""
     editions = sorted(set(edition_ids))
     if not editions:

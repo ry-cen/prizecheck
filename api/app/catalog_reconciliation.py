@@ -7,7 +7,8 @@ import hmac
 import json
 from fastapi import APIRouter,Depends,HTTPException
 from pydantic import BaseModel,Field,HttpUrl
-from .main import connect,require_owner,verified_user
+from .db import connect
+from .identity import require_owner, verified_user
 from .holdings import fail
 from . import public_catalog
 

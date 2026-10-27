@@ -18,7 +18,8 @@ from .catalog_targets import printing_live
 from .deck_list_capture import capture_deck_list
 from .live_export import LiveExport, LiveInputRow, format_live, iter_live_text
 from .location_tree import error
-from .main import connect, verified_user
+from .db import connect
+from .identity import verified_user
 
 router = APIRouter(prefix='/api/decks', tags=['deck-live-export'])
 

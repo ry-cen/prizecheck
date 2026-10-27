@@ -4,7 +4,7 @@ from decimal import Decimal
 
 import pytest
 
-from app.main import app, connect, operation_counter  # noqa: F401  (main first: it includes the prices router while loading)
+from app.main import app, connect, operation_counter  # noqa: F401
 from app.price_budget import Budget
 from app.prices import format_usd, parse_amount, validate_quote
 from app.public_records import QuoteState

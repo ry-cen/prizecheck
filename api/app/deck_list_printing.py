@@ -25,7 +25,8 @@ from .decks import (DeckListCommandResult, advance_deck_list, check_revision, ke
                     require_deck)
 from .holdings import parse_quantity
 from .location_tree import error, owner_and_rows, replay
-from .main import connect, verified_user
+from .db import connect
+from .identity import verified_user
 from .quote_contract import parse_amount
 
 router = APIRouter(prefix='/api/decks', tags=['decks'])

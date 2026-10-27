@@ -983,7 +983,7 @@ def test_follow_up_reads_after_the_hard_wait_leave_the_postgresql_reserve(env):
 
 
 def test_the_route_helper_rereads_changed_rows_inside_the_wait_window(env):
-    from app import main  # noqa: F401  (main first: it includes the prices router while loading)
+    from app import main  # noqa: F401
     from app import prices
     store = Sluggish(env.store, 0.2)
     env.seed(1, 25 * HOUR)

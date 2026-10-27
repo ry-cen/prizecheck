@@ -19,7 +19,8 @@ from pydantic import BaseModel
 from .catalog_targets import edition_targets
 from .deck_list_capture import capture_deck_list
 from .location_tree import error
-from .main import connect, verified_user
+from .db import connect
+from .identity import verified_user
 from .mass_entry_export import (MAX_LINK_QUANTITY, MAX_URL_BYTES, MassEntryExport, MassEntryInputRow,
                                 format_mass_entry, iter_mass_entry_text, mass_entry_text)
 from .settings import WantListCounting

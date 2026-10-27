@@ -12,7 +12,9 @@ import psycopg
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator, ValidationError
 
-from .main import connect, verified_user
+from .api_errors import api_error
+from .db import connect
+from .identity import verified_user
 from .construction_checks import DISCLAIMER, IdentityCount, evaluate_checks
 from .deck_format_checks import TargetFormat, held_format_checks
 from .deck_list_display import CardKind, TrainerType
@@ -133,13 +135,9 @@ class OwnedPublications(BaseModel):
     publications: list[OwnedPublication]
 
 
-def fail(status, code):
-    raise HTTPException(status, {'code': code})
-
-
 def owned_deck(conn, owner, deck_id):
     if not conn.execute("SELECT 1 FROM location WHERE id=%s AND owner_id=%s AND kind='deck'", (deck_id, owner)).fetchone():
-        fail(404, 'DECK_NOT_FOUND')
+        api_error(404, 'DECK_NOT_FOUND')
 
 
 def owned_publication(conn, owner, token):
@@ -147,7 +145,7 @@ def owned_publication(conn, owner, token):
     command on one can replay or report PUBLICATION_REVOKED."""
     if not TOKEN.fullmatch(token) or not conn.execute('SELECT 1 FROM deck_publication WHERE token=%s AND owner_id=%s',
                                                       (token, owner)).fetchone():
-        fail(404, 'PUBLICATION_NOT_FOUND')
+        api_error(404, 'PUBLICATION_NOT_FOUND')
 
 
 def require_legal(conn, owner, deck_id) -> str:
@@ -267,7 +265,7 @@ def mutate(deck_id, command, owner, action, token=None):
                                 (owner, command.idempotency_key)).fetchone()
         if previous:
             if previous['request_digest'] != digest:
-                fail(409, 'IDEMPOTENCY_KEY_REUSED')
+                api_error(409, 'IDEMPOTENCY_KEY_REUSED')
             return
         if token is None:
             owned_deck(conn, owner, deck_id)
@@ -303,18 +301,18 @@ def mutate(deck_id, command, owner, action, token=None):
                 previous = conn.execute('SELECT request_digest,result FROM publication_command WHERE owner_id=%s AND request_key=%s', (owner, command.idempotency_key)).fetchone()
                 if previous:
                     if previous['request_digest'] != digest:
-                        fail(409, 'IDEMPOTENCY_KEY_REUSED')
+                        api_error(409, 'IDEMPOTENCY_KEY_REUSED')
                     return previous['result']
                 if token is None:
                     active = conn.execute('SELECT * FROM deck_publication WHERE deck_id=%s AND NOT revoked FOR UPDATE', (deck_id,)).fetchone()
                 else:
                     active = conn.execute('SELECT * FROM deck_publication WHERE token=%s AND NOT revoked FOR UPDATE', (token,)).fetchone()
                     if not active:
-                        fail(409, 'PUBLICATION_REVOKED')
+                        api_error(409, 'PUBLICATION_REVOKED')
                 if action == 'publish' and active:
-                    fail(409, 'DECK_ALREADY_PUBLISHED')
+                    api_error(409, 'DECK_ALREADY_PUBLISHED')
                 if action != 'publish' and not active:
-                    fail(409, 'DECK_NOT_PUBLISHED')
+                    api_error(409, 'DECK_NOT_PUBLISHED')
                 # Publishing and republishing need a legal result in the Target Format (ADR 0011), checked before any
                 # row is written. A replayed command answered above, so a stored publish replays whatever the Deck is now.
                 target_format = require_legal(conn, owner, deck_id) if action in ('publish', 'republish') else None
@@ -343,7 +341,7 @@ def mutate(deck_id, command, owner, action, token=None):
             drain(conn, store)
             return result
     except (ProjectionUnavailable, psycopg.Error):
-        fail(503, 'PUBLICATION_UNAVAILABLE')
+        api_error(503, 'PUBLICATION_UNAVAILABLE')
 
 
 @router.get('/api/decks/{deck_id}/publication', response_model=PublicationStatus)
