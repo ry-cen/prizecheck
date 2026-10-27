@@ -2,6 +2,7 @@ import { betterAuth } from "better-auth";
 import { emailOTP } from "better-auth/plugins";
 import { Pool } from "pg";
 import { appendFile } from "node:fs/promises";
+import { CLIENT_IP_HEADER } from "./betterRelay.js";
 import { EMAIL_OTP_PATHS, emailSignInEnabled } from "./emailSignIn.js";
 import { contextIp } from "./ipContext.js";
 import { configuredProviders, socialProviders } from "./providers.js";
@@ -224,6 +225,9 @@ function authOn(database: Pool) {
       freshAge: FRESH_AGE_SECONDS,
     },
     advanced: {
+      // Better Auth's limiter is on in production and keys on this address; the gateway sets the header from its own
+      // trusted client address (betterRelay.ts), so one visitor cannot exhaust another's allowance.
+      ipAddress: { ipAddressHeaders: [CLIENT_IP_HEADER] },
       useSecureCookies: !new URL(origin).hostname.match(
         /^(localhost|127\.0\.0\.1)$/
       ),

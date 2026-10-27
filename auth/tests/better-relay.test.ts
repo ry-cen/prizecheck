@@ -1,6 +1,12 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createServer, type ServerResponse } from "node:http";
-import { betterRequest, relay, type RelayOptions } from "../src/betterRelay.js";
+import {
+  betterRequest,
+  CLIENT_IP_HEADER,
+  relay,
+  type RelayOptions,
+} from "../src/betterRelay.js";
+import { getIP } from "@better-auth/core/utils/ip";
 
 const origin = "http://localhost:5173";
 
@@ -45,6 +51,70 @@ describe("betterRequest", () => {
     expect(request.headers.get("origin")).toBe(origin);
     expect(request.headers.get("content-type")).toBe("application/json");
     expect(await request.text()).toBe('{"x":1}');
+  });
+});
+
+describe("betterRequest client address", () => {
+  const withPeer = (peer: string, headers: Record<string, string> = {}) => ({
+    method: "POST",
+    url: "/auth/verify-code",
+    headers: { cookie: "a=1", ...headers },
+    socket: { remoteAddress: peer },
+  });
+  // The option auth.ts gives Better Auth: its limiter reads this header and nothing else.
+  const options = {
+    advanced: { ipAddress: { ipAddressHeaders: [CLIENT_IP_HEADER] } },
+  };
+  const bucketIp = (request: Request) => getIP(request, options as never);
+
+  it("gives different clients different limiter addresses", () => {
+    const a = betterRequest(
+      origin,
+      withPeer("203.0.113.5"),
+      "/api/auth/x",
+      "{}"
+    );
+    const b = betterRequest(
+      origin,
+      withPeer("203.0.113.6"),
+      "/api/auth/x",
+      "{}"
+    );
+    expect(bucketIp(a)).toBe("203.0.113.5");
+    expect(bucketIp(b)).toBe("203.0.113.6");
+  });
+  it("uses x-real-ip only from a trusted proxy", () => {
+    const via = (peer: string) =>
+      bucketIp(
+        betterRequest(
+          origin,
+          withPeer(peer, { "x-real-ip": "198.51.100.9" }),
+          "/api/auth/x",
+          "{}"
+        )
+      );
+    const before = process.env.TRUSTED_PROXY_IPS;
+    process.env.TRUSTED_PROXY_IPS = "10.201.80.10";
+    try {
+      expect(via("10.201.80.10")).toBe("198.51.100.9");
+      expect(via("203.0.113.5")).toBe("203.0.113.5");
+    } finally {
+      if (before === undefined) delete process.env.TRUSTED_PROXY_IPS;
+      else process.env.TRUSTED_PROXY_IPS = before;
+    }
+  });
+  it("ignores a client-supplied copy of the header", () => {
+    const request = betterRequest(
+      origin,
+      withPeer("203.0.113.5", {
+        [CLIENT_IP_HEADER]: "198.51.100.77",
+        "x-forwarded-for": "198.51.100.78",
+      }),
+      "/api/auth/x",
+      "{}"
+    );
+    expect(request.headers.get(CLIENT_IP_HEADER)).toBe("203.0.113.5");
+    expect(request.headers.get("x-forwarded-for")).toBeNull();
   });
 });
 

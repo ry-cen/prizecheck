@@ -66,9 +66,13 @@ class DeployPipelineTest(unittest.TestCase):
             self.assertIn(required, PROD)
 
     def test_every_prod_job_is_gated_and_scoped_to_prod(self):
-        jobs = re.findall(r'(?m)^  [a-z-]+:$', PROD[PROD.index('\njobs:'):])
-        self.assertEqual(len(jobs), 3)
-        self.assertEqual(PROD.count("vars.PROD_DEPLOY_ENABLED == 'true'"), len(jobs))
+        jobs = PROD[PROD.index('\njobs:'):]
+        names = re.findall(r'(?m)^  ([a-z-]+):$', jobs)
+        self.assertEqual(names, ['images', 'deploy', 'rollback'])
+        bodies = re.split(r'(?m)^  [a-z-]+:$', jobs)[1:]
+        for name, body in zip(names, bodies):
+            gates = re.findall(r"(?m)^    if: .*vars\.PROD_DEPLOY_ENABLED == 'true'.*$", body)
+            self.assertEqual(len(gates), 1, f'{name} needs its own PROD_DEPLOY_ENABLED gate')
         for required in ('name: prod', 'group: deploy-prod', 'tags: tag:ci-prod', 'secrets.PROD_SSH_PRIVATE_KEY',
                          'vars.PROD_SSH_KNOWN_HOSTS'):
             self.assertIn(required, PROD)
@@ -122,14 +126,17 @@ class DeployPipelineTest(unittest.TestCase):
         self.assertEqual(compose.count('MARKETPLACE_MATCHING: ${MARKETPLACE_MATCHING:-off}'), 2)
         self.assertNotIn('automatic', compose)
 
-    def test_caddy_forwards_the_visitor_address_and_logs_nothing(self):
+    def test_caddy_forwards_the_visitor_address_and_logs_no_requests(self):
         caddy = uncommented(CADDYFILE)
         self.assertIn('reverse_proxy 127.0.0.1:8088', caddy)
         self.assertIn('header_up X-Real-IP {remote_host}', caddy)
         env = {key: value for key, value in re.findall(r'(?m)^([A-Z_]+)=(.*)$', PROD_ENV)}
         self.assertIn(f"reverse_proxy {env['PRIZECHECK_WEB_BIND']}:{env['PRIZECHECK_WEB_PORT']}", caddy)
         self.assertIn('Strict-Transport-Security', caddy)
-        self.assertIsNone(re.search(r'(?m)^\s*log\b', caddy))
+        # The only `log` allowed is the global default logger that excludes the request-carrying error loggers.
+        self.assertEqual(re.findall(r'(?m)^\s*log\b.*$', caddy), ['\tlog default {'])
+        self.assertRegex(caddy, r'(?s)\A\s*\{\s*log default \{\s*exclude http\.log\.error http\.handlers\.reverse_proxy\s*\}\s*\}')
+        self.assertNotIn('output', caddy)
         self.assertNotIn('Cross-Origin', caddy)
         self.assertNotIn('encode', caddy)
 
