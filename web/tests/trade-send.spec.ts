@@ -9,7 +9,12 @@
 // other collectors sign in first, so the test's own page signs in afterwards as a new account.
 import { execFileSync } from "node:child_process";
 import { randomInt, randomUUID } from "node:crypto";
-import type { BrowserContextOptions, Locator, Page } from "@playwright/test";
+import type {
+  BrowserContextOptions,
+  Locator,
+  Page,
+  Request,
+} from "@playwright/test";
 import { expect, test } from "./support/collectors";
 import {
   openConversation,
@@ -274,7 +279,13 @@ async function story(
   await proposal
     .getByRole("button", { name: "Decrease Arven (SVI 166) you get" })
     .click();
-  // A send whose answer never comes keeps the cards too, and is sent again safely.
+  // A send whose answer never comes keeps the cards too, and is sent again safely: the retry reuses the send's key.
+  const keys: string[] = [];
+  const record = (request: Request) => {
+    if (request.method() === "POST" && request.url() === `${ORIGIN}/api/trades`)
+      keys.push(String(request.postDataJSON().idempotency_key));
+  };
+  page.on("request", record);
   await page.route(`${ORIGIN}/api/trades`, (route) => route.abort(), {
     times: 1,
   });
@@ -284,6 +295,9 @@ async function story(
   );
   await proposal.getByRole("button", { name: "Send Trade Proposal" }).click();
   await expect(page).toHaveURL(new RegExp(`^${ORIGIN}/trades/[0-9a-f-]{36}$`));
+  page.off("request", record);
+  expect(keys).toHaveLength(2);
+  expect(keys[1]).toBe(keys[0]);
   const swap = page.url();
   await expect(heading(page)).toHaveText("Waiting for Ash K to answer");
   await expect(toast(page)).toContainText("Trade Proposal sent to Ash K");
