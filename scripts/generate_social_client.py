@@ -3,70 +3,35 @@
 Friend's Trade List, trading #269, Trades as both sides read them, trading #270, declining and cancelling one,
 trading #271, the inbox's Trade lines, trading #273, and Find trades and Ask to trade, trading #276, and Open to cash
 offers, trading #277, Open discovery, trading #297, and Conversations, trading #298, and the trader reads, trading #299, and Reports and the owner queue, trading #303) from the API OpenAPI schema."""
-import json
-import sys
-from pathlib import Path
+import client_generator as gen
 
-root = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(root / "api"))
-from app.main import app  # noqa: E402
+TARGET = "web/src/social_generated.ts"
+NAMES = ("Collector", "CollectorLookup", "InviteCollector", "FriendsView", "LookupHandle", "SendFriendRequest",
+         "FriendCommand", "FriendCommandResult", "BlockCollector", "BlockedList", "FriendCard", "FriendCollection",
+         "FriendCopy", "WantedCard", "WantListMatches", "CardMatches", "LoanParty", "LoanCard", "ReturnLine",
+         "PendingReturn", "LoanView",
+         "LoansView", "LoanStep", "LoanLineRequest", "SendBorrowRequest", "PromisedLine", "AcceptBorrowRequest",
+         "PromiseLimit", "LoanPickPlace", "LoanDeck", "LoanSide", "LentCard", "LentOut", "BorrowedCard",
+         "BorrowedCopies", "MoveBorrowed", "ReturnedLine", "StartReturn", "WriteOffLine", "WriteOff", "ChosenPlace",
+         "WrittenOffChoice", "ChangeReturnBy", "AskForMoreTime", "SeenNotices", "OfferedCopies", "SendLendOffer",
+         "AcceptLendOffer", "InboxUpdate", "InboxWaiting", "InboxView", "InboxIds", "FriendTradeCard",
+         "FriendTradeList", "TradeParty", "TradeCard", "TradeCash", "TradeView", "TradesView", "TradeStep",
+         "InboxTradeWaiting", "InboxTradeUpdate", "TradeMatchCard", "TradeMatchRow", "TradeMatches",
+         "TradeCardOffer", "TradeCardMatches", "TradeSettings", "SetTradeSettings", "DiscoverySettings",
+         "SetDiscovery", "ConversationParty", "Message", "TimelineItem", "ConversationView", "LastMessage",
+         "NearbyMatchRow", "NearbyMatches", "CardHolder", "TradeCardSearch",
+         "ConversationSummary", "ConversationsView", "ConversationPulse", "SendMessage", "ReadThrough",
+         "TraderView", "TraderTradeList", "TraderMatchRow",
+         "BlockedCollector", "ReportCollector", "ReportResult", "ReportParty", "TradeReportRow", "TradeReportList",
+         "SnapshotMessage", "SnapshotCard", "SnapshotTrade", "ModerationEventView", "ReportedAccount",
+         "TradeReportDetail", "ReportDecision", "ReportDecided", "RestoreCollector", "CollectorRestored")
+ERROR = gen.error_class(
+    "SocialError", "public detail: Record<string, unknown> = {}",
+    doc="""/** A refused social request: the API's code, and for TOO_MANY_LOOKUPS the detail that says when to try again. */""")
 
-
-def ts_type(value):
-    if "$ref" in value:
-        return value["$ref"].split("/")[-1]
-    if "anyOf" in value:
-        return " | ".join(ts_type(part) for part in value["anyOf"])
-    if "enum" in value:
-        return " | ".join(json.dumps(item) for item in value["enum"])
-    if value.get("type") == "array":
-        inner = ts_type(value["items"])
-        return f"({inner})[]" if " | " in inner else f"{inner}[]"
-    return {"string": "string", "integer": "number", "number": "number", "boolean": "boolean",
-            "null": "null", "object": "Record<string, unknown>"}[value["type"]]
-
-
-schema = app.openapi()["components"]["schemas"]
-lines = ["// Generated from FastAPI OpenAPI by scripts/generate_social_client.py. Do not edit."]
-for name in ("Collector", "CollectorLookup", "InviteCollector", "FriendsView", "LookupHandle", "SendFriendRequest",
-             "FriendCommand", "FriendCommandResult", "BlockCollector", "BlockedList", "FriendCard", "FriendCollection",
-             "FriendCopy", "WantedCard", "WantListMatches", "CardMatches", "LoanParty", "LoanCard", "ReturnLine",
-             "PendingReturn", "LoanView",
-             "LoansView", "LoanStep", "LoanLineRequest", "SendBorrowRequest", "PromisedLine", "AcceptBorrowRequest",
-             "PromiseLimit", "LoanPickPlace", "LoanDeck", "LoanSide", "LentCard", "LentOut", "BorrowedCard",
-             "BorrowedCopies", "MoveBorrowed", "ReturnedLine", "StartReturn", "WriteOffLine", "WriteOff", "ChosenPlace",
-             "WrittenOffChoice", "ChangeReturnBy", "AskForMoreTime", "SeenNotices", "OfferedCopies", "SendLendOffer",
-             "AcceptLendOffer", "InboxUpdate", "InboxWaiting", "InboxView", "InboxIds", "FriendTradeCard",
-             "FriendTradeList", "TradeParty", "TradeCard", "TradeCash", "TradeView", "TradesView", "TradeStep",
-             "InboxTradeWaiting", "InboxTradeUpdate", "TradeMatchCard", "TradeMatchRow", "TradeMatches",
-             "TradeCardOffer", "TradeCardMatches", "TradeSettings", "SetTradeSettings", "DiscoverySettings",
-             "SetDiscovery", "ConversationParty", "Message", "TimelineItem", "ConversationView", "LastMessage",
-             "NearbyMatchRow", "NearbyMatches", "CardHolder", "TradeCardSearch",
-             "ConversationSummary", "ConversationsView", "ConversationPulse", "SendMessage", "ReadThrough",
-             "TraderView", "TraderTradeList", "TraderMatchRow",
-             "BlockedCollector", "ReportCollector", "ReportResult", "ReportParty", "TradeReportRow", "TradeReportList",
-             "SnapshotMessage", "SnapshotCard", "SnapshotTrade", "ModerationEventView", "ReportedAccount",
-             "TradeReportDetail", "ReportDecision", "ReportDecided", "RestoreCollector", "CollectorRestored"):
-    definition = schema[name]
-    fields = [f"{field}{'' if field in definition.get('required', []) else '?'}: {ts_type(value)}"
-              for field, value in definition["properties"].items()]
-    lines.append(f"export type {name} = {{ {'; '.join(fields)} }};")
-lines.append("""
-/** A refused social request: the API's code, and for TOO_MANY_LOOKUPS the detail that says when to try again. */
-export class SocialError extends Error {
-  constructor(public status: number, public code: string, public detail: Record<string, unknown> = {}) { super(code); }
-}
-async function request<T>(path: string, method: string, body?: object, signal?: AbortSignal): Promise<T> {
-  const response = await fetch(path, { method, credentials: 'same-origin', signal,
-    headers: body ? { 'content-type': 'application/json' } : undefined,
-    body: body ? JSON.stringify(body) : undefined });
-  if (!response.ok) {
-    const payload = await response.json().catch(() => ({}));
-    const detail = payload?.detail && typeof payload.detail === 'object' ? payload.detail : {};
-    throw new SocialError(response.status, detail.code ?? 'SOCIAL_REQUEST_FAILED', detail);
-  }
-  return response.json() as Promise<T>;
-}
+BODY = """
+%(error)s
+%(request)s
 const at = (id: string) => encodeURIComponent(id);
 /** "?a=1&b=2" from the parameters that are set, or "" when none is. */
 const query = (params: Record<string, string | number | null | undefined>) => {
@@ -267,11 +232,15 @@ export const decideTradeReport = (reportId: string, body: ReportDecision) =>
   request<ReportDecided>(`/api/admin/trade-reports/${at(reportId)}/decision`, 'POST', body);
 export const restoreCollector = (collectorId: string, body: RestoreCollector) =>
   request<CollectorRestored>(`/api/admin/collectors/${at(collectorId)}/restore`, 'POST', body);
-""")
-content = "\n".join(lines)
-target = root / "web/src/social_generated.ts"
-if "--check" in sys.argv:
-    if not target.exists() or target.read_text() != content:
-        raise SystemExit("Generated social client is stale")
-else:
-    target.write_text(content)
+"""
+
+
+def render(openapi):
+    schemas = openapi["components"]["schemas"]
+    request = gen.json_request(gen.detail_failure_lines("SocialError", "SOCIAL_REQUEST_FAILED"), signal=True)
+    return gen.assemble([gen.header("generate_social_client"), *gen.DOUBLE.aliases(schemas, NAMES),
+                         BODY % {"error": ERROR, "request": request}])
+
+
+if __name__ == "__main__":
+    gen.main(__name__)

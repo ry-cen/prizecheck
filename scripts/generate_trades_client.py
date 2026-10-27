@@ -5,63 +5,22 @@ switches at Confirm swap; later
 Trading tickets add the rest of ``/api/trades``) from the API
 OpenAPI schema. Shared Trade facts under ``/api/social`` stay in the social client (scripts/generate_social_client.py),
 which this module imports its ``TradeStep`` and ``TradeView`` from."""
-import sys
-from pathlib import Path
+import client_generator as gen
 
-root = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(root / "api"))
-from app.main import app  # noqa: E402
+TARGET = "web/src/trades_generated.ts"
+NAMES = ("TradeListPlace", "TradeListLocation", "TradeListCard", "OwnTradeList", "TradeLineRequest",
+         "TradeCashRequest", "SendTradeProposal", "CounterTrade", "TradePickPlace", "SwitchCard", "DeckSwitchOffer",
+         "OwnTradeSide", "DeckSwitchRequest", "ConfirmSwap", "SwitchedLine", "SwitchedDeck", "TradeWantLine",
+         "WillAcceptChoice",
+         "TradeWants", "SetTradeWant", "SetWillAccept",
+         "TradeValueLine", "TradeValueRequest", "SideValue", "TradeValue")
+ERROR = gen.error_class(
+    "TradesError", "public detail: Record<string, unknown> = {}",
+    doc="""/** A refused Trades request: the API's code, and its detail. */""")
 
-
-def ts_type(value):
-    if "$ref" in value:
-        return value["$ref"].split("/")[-1]
-    if "anyOf" in value:
-        return " | ".join(ts_type(part) for part in value["anyOf"])
-    if "enum" in value:
-        return " | ".join(f'"{item}"' for item in value["enum"])
-    if value.get("type") == "array":
-        inner = ts_type(value["items"])
-        return f"({inner})[]" if " | " in inner else f"{inner}[]"
-    return {"string": "string", "integer": "number", "number": "number", "boolean": "boolean",
-            "null": "null", "object": "Record<string, unknown>"}[value["type"]]
-
-
-schema = app.openapi()["components"]["schemas"]
-lines = ["// Generated from FastAPI OpenAPI by scripts/generate_trades_client.py. Do not edit.",
-         'import type { TradeStep, TradeView } from "./social_generated";']
-for name in ("TradeListPlace", "TradeListLocation", "TradeListCard", "OwnTradeList", "TradeLineRequest",
-             "TradeCashRequest", "SendTradeProposal", "CounterTrade", "TradePickPlace", "SwitchCard", "DeckSwitchOffer",
-             "OwnTradeSide", "DeckSwitchRequest", "ConfirmSwap", "SwitchedLine", "SwitchedDeck", "TradeWantLine",
-             "WillAcceptChoice",
-             "TradeWants", "SetTradeWant", "SetWillAccept",
-             "TradeValueLine", "TradeValueRequest", "SideValue", "TradeValue"):
-    definition = schema[name]
-    fields = [f"{field}{'' if field in definition.get('required', []) else '?'}: {ts_type(value)}"
-              for field, value in definition["properties"].items()]
-    lines.append(f"export type {name} = {{ {'; '.join(fields)} }};")
-    if name == "SwitchedDeck":
-        # ConfirmedSwap is TradeView plus the fields only it has (#279).
-        confirmed = schema["ConfirmedSwap"]
-        extra = [f"{field}{'' if field in confirmed.get('required', []) else '?'}: {ts_type(value)}"
-                 for field, value in confirmed["properties"].items() if field not in schema["TradeView"]["properties"]]
-        lines.append(f"export type ConfirmedSwap = TradeView & {{ {'; '.join(extra)} }};")
-lines.append("""
-/** A refused Trades request: the API's code, and its detail. */
-export class TradesError extends Error {
-  constructor(public status: number, public code: string, public detail: Record<string, unknown> = {}) { super(code); }
-}
-async function request<T>(path: string, method: string, body?: object, signal?: AbortSignal): Promise<T> {
-  const response = await fetch(path, { method, credentials: 'same-origin', signal,
-    headers: body ? { 'content-type': 'application/json' } : undefined,
-    body: body ? JSON.stringify(body) : undefined });
-  if (!response.ok) {
-    const payload = await response.json().catch(() => ({}));
-    const detail = payload?.detail && typeof payload.detail === 'object' ? payload.detail : {};
-    throw new TradesError(response.status, detail.code ?? 'TRADES_REQUEST_FAILED', detail);
-  }
-  return response.json() as Promise<T>;
-}
+BODY = """
+%(error)s
+%(request)s
 // Your own Trade List (#269): every card you offer now, with its copies and the For trade Locations they sit in.
 export const getTradeList = (signal?: AbortSignal) => request<OwnTradeList>('/api/trades/list', 'GET', undefined, signal);
 // Send a Friend a Trade Proposal (#270), idempotent: retry a failed one with the same idempotency_key. It reserves the
@@ -99,11 +58,23 @@ export const setWillAccept = (editionId: string, body: SetWillAccept) =>
 // suggested amount. Cash is not part of it.
 export const getTradeValue = (body: TradeValueRequest, signal?: AbortSignal) =>
   request<TradeValue>('/api/trades/value', 'POST', body, signal);
-""")
-content = "\n".join(lines)
-target = root / "web/src/trades_generated.ts"
-if "--check" in sys.argv:
-    if not target.exists() or target.read_text() != content:
-        raise SystemExit("Generated Trades client is stale")
-else:
-    target.write_text(content)
+"""
+
+
+def render(openapi):
+    schemas = openapi["components"]["schemas"]
+    types = []
+    for name in NAMES:
+        types.append(gen.DOUBLE.alias(name, schemas[name]))
+        if name == "SwitchedDeck":
+            # ConfirmedSwap is TradeView plus the fields only it has (#279).
+            extra = gen.DOUBLE.fields(schemas["ConfirmedSwap"], only=lambda field: field not in schemas["TradeView"]["properties"])
+            types.append(f"export type ConfirmedSwap = TradeView & {{ {'; '.join(extra)} }};")
+    request = gen.json_request(gen.detail_failure_lines("TradesError", "TRADES_REQUEST_FAILED"), signal=True)
+    return gen.assemble([gen.header("generate_trades_client"),
+                         'import type { TradeStep, TradeView } from "./social_generated";',
+                         *types, BODY % {"error": ERROR, "request": request}])
+
+
+if __name__ == "__main__":
+    gen.main(__name__)
