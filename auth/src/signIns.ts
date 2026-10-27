@@ -7,7 +7,7 @@ export const SIGN_INS_PAGE = "/settings/sign-ins";
 
 /**
  * A session may change sign-ins for 24 hours after it was created: auth.ts sets Better Auth's session.freshAge from
- * FRESH_AGE_SECONDS, and Better Auth itself applies it to unlinking. A rolling session keeps its creation time, so an
+ * FRESH_AGE_SECONDS. The serialized removal operation rechecks this shared rule. A rolling session keeps its creation time, so an
  * active session still goes stale.
  */
 export const FRESH_AGE_SECONDS = 24 * 60 * 60;
@@ -76,9 +76,9 @@ export type UnlinkPlan =
 
 /**
  * POST /auth/unlink/:provider removes every account of that provider (a collector can hold two Google accounts at one
- * verified email), by Better Auth account row id. It is refused when no account of another configured provider would
+ * verified email). It is refused when no account of another configured provider would
  * remain: email-code sign-in doesn't count as a sign-in here, and neither does a provider that is no longer
- * configured. Better Auth's own last-account check stays as a second layer.
+ * configured. The serialized removal operation rechecks this plan before its provider-wide deletion.
  */
 export function unlinkPlan(
   accounts: AccountRow[],

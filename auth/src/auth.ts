@@ -8,6 +8,7 @@ import { configuredProviders, socialProviders } from "./providers.js";
 import { createRateLimits, dailySignupCap } from "./rateLimits.js";
 import { createSignupGate } from "./signupGate.js";
 import { signupEnabled } from "./signup.js";
+import { createSignInRemoval } from "./signInRemoval.js";
 import { FRESH_AGE_SECONDS } from "./signIns.js";
 
 export const pool = new Pool({ connectionString: process.env.DATABASE_URL });
@@ -40,6 +41,21 @@ export const SIGN_IN_PAGE = "/sign-in";
 export const emailSignIn = emailSignInEnabled();
 export const publicSignup = signupEnabled();
 export const providers = configuredProviders();
+// Direct deletion matches the installed Better Auth schema and has no delete hooks or session side effects.
+// Review this assumption whenever auth configuration, plugins or the Better Auth version change.
+const removalPool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  max: 4,
+  connectionTimeoutMillis: 5_000,
+  statement_timeout: 5_000,
+  lock_timeout: 5_000,
+  idle_in_transaction_session_timeout: 10_000,
+});
+removalPool.on("error", (error) => {
+  console.error("Sign-in removal pool failed", error.name);
+});
+export const removeSignIn = createSignInRemoval(removalPool, providers);
+
 // The account-creation and start limits (auth/src/rateLimits.ts); an invalid DAILY_SIGNUP_CAP stops the gateway here.
 export const rateLimits = createRateLimits(gatePool, dailySignupCap());
 const ownerEmail = (process.env.OWNER_EMAIL || "").trim().toLowerCase();
