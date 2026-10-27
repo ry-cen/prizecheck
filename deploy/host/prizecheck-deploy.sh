@@ -61,14 +61,46 @@ env_value() {
   printf '%s' "$line"
 }
 
-compose_cmd() {
+# Sets COMPOSE; returns 1 when no Compose is installed.
+find_compose() {
   if docker compose version >/dev/null 2>&1; then
     COMPOSE=(docker compose)
   elif command -v docker-compose >/dev/null 2>&1; then
     COMPOSE=(docker-compose)
   else
-    die "Docker Compose v2 not found; install it ($GUIDE)"
+    return 1
   fi
+}
+
+compose_cmd() {
+  find_compose || die "Docker Compose v2 not found; install it ($GUIDE)"
+}
+
+# Compose reads the env file with its own parser, which also accepts `export KEY=`, indented keys and `KEY: value`;
+# env_value reads only `KEY=`. A line in any other form could be honoured by Compose and ignored by every check here, so
+# it is refused. Names the line number, never its content.
+check_env_file_syntax() {
+  local line number=0 key_pattern='^[A-Za-z_][A-Za-z0-9_]*='
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    number=$((number + 1))
+    [[ "$line" =~ ^[[:space:]]*$ || "$line" =~ ^[[:space:]]*# || "$line" =~ $key_pattern ]] \
+      || die "$ENV_FILE line $number must be KEY=value, a comment or blank (no export, indentation or KEY: value)"
+  done < "$ENV_FILE"
+}
+
+# Production's defence in depth: whatever the env file says, the rendered Compose model may publish ports on
+# 127.0.0.1 only. Skipped, with a note, where Docker is not installed (the repository's tests, `check-config` off-host).
+check_published_ports() {
+  local config binds
+  if ! find_compose; then
+    log "Note: Docker Compose not found; published-port check skipped"
+    return 0
+  fi
+  config="$(PRIZECHECK_IMAGE_TAG=none "${COMPOSE[@]}" "${COMPOSE_ARGS[@]}" config --format json 2>/dev/null)" \
+    || die "Docker Compose cannot render the production configuration; check $ENV_FILE"
+  binds="$(grep -oE '"host_ip": *"[^"]*"' <<<"$config" || true)"
+  [[ -n "$binds" && -z "$(grep -vE '"host_ip": *"127\.0\.0\.1"' <<<"$binds" || true)" ]] \
+    || die "The web port must be published on 127.0.0.1 only in production (PRIZECHECK_WEB_BIND)"
 }
 
 # Portable between GNU and BSD stat, so the config checks also run in the repository's tests on a Mac.
@@ -162,6 +194,7 @@ validate_config() {
   if [[ "$(file_mode "$ENV_FILE")" != "600" ]]; then
     die "$ENV_FILE must be mode 600"
   fi
+  check_env_file_syntax
   read_environment
   local file
   for file in "${COMPOSE_FILES[@]}"; do
@@ -195,6 +228,7 @@ validate_config() {
   fi
   if [[ "$ENVIRONMENT" == prod ]]; then
     check_production_env
+    check_published_ports
   fi
   REGISTRY="$(env_value PRIZECHECK_REGISTRY)"; REGISTRY="${REGISTRY:-ghcr.io/ry-cen}"
   [[ -d "$DATA_DIR" ]] || die "Data directory $DATA_DIR is missing (storage not mounted?)"

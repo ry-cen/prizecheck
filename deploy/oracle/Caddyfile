@@ -2,6 +2,13 @@
 # replace prizecheck.example.com with your domain (the host of PUBLIC_ORIGIN). Caddy obtains and renews the
 # certificate itself and redirects HTTP to HTTPS.
 # No `log` directive: request URLs can carry capability tokens (/published/<token>), so Caddy keeps no access log.
+# Caddy also logs the full request (URI, client address) when a request errors, even without a `log` directive; the
+# global block below keeps those two loggers out of the default log. Check `journalctl -u caddy` after a failed request.
+{
+	log default {
+		exclude http.log.error http.handlers.reverse_proxy
+	}
+}
 # No encode and no Cross-Origin-* headers: nginx owns compression and the scanner page's isolation headers.
 prizecheck.example.com {
 	header Strict-Transport-Security "max-age=31536000"

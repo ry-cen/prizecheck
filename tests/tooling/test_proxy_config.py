@@ -150,6 +150,7 @@ class ProxyConfigTest(unittest.TestCase):
         for opening in (START, GATEWAY):
             self.assertIn(('proxy_set_header', 'X-Real-IP $remote_addr'), block(opening))
             self.assertIn(('proxy_set_header', 'X-Forwarded-For ""'), block(opening))
+            self.assertIn(('proxy_set_header', 'X-PrizeCheck-Client-IP ""'), block(opening))
         self.assertNotIn('X-Real-IP ""', CONFIG)
 
     def test_only_the_prod_edge_gateway_may_set_the_client_address(self):

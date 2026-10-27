@@ -6,6 +6,7 @@ import hashlib
 from pathlib import Path
 import os
 import subprocess
+import stat
 import tempfile
 import unittest
 
@@ -28,6 +29,14 @@ WARNING = 'no mail relay'
 RELAY = ['MAIL_RELAY_URL=https://relay.example/send', 'MAIL_RELAY_TOKEN=token', 'MAIL_FROM=sender@example.com']
 
 
+def tee_keeps_writing():
+    """The forced-command gate logs through `tee -p`, which BSD tee on a Mac lacks."""
+    try:
+        return subprocess.run(['tee', '-p', os.devnull], input='', capture_output=True, text=True, timeout=10).returncode == 0
+    except OSError:
+        return False
+
+
 def without(lines, *keys):
     return [line for line in lines if line.split('=')[0] not in keys]
 
@@ -48,9 +57,9 @@ class HostDeployScriptTest(unittest.TestCase):
         env.chmod(mode)
         return home
 
-    def run_script(self, home, command='check-config'):
+    def run_script(self, home, command='check-config', **extra):
         return subprocess.run(['bash', str(home / 'bin/prizecheck-deploy.sh'), command], capture_output=True, text=True,
-                              timeout=30, env={**os.environ, 'HOME': str(home)})
+                              timeout=30, env={**os.environ, 'HOME': str(home), **extra})
 
     def check(self, lines, mode=0o600):
         result = self.run_script(self.make_home(lines, mode))
@@ -111,6 +120,43 @@ class HostDeployScriptTest(unittest.TestCase):
 
     def test_the_env_file_must_be_private(self):
         self.assertRefused(PROD, 'must be mode 600', mode=0o644)
+
+    def test_lines_compose_reads_but_the_checks_do_not_are_refused(self):
+        for line in ('export PRIZECHECK_WEB_BIND=0.0.0.0', '  PRIZECHECK_WEB_BIND=0.0.0.0', 'PRIZECHECK_WEB_BIND: 0.0.0.0'):
+            lines = [*PROD, line]
+            code, output = self.check(lines)
+            self.assertNotEqual(code, 0, line)
+            self.assertIn(f'line {len(lines)} must be KEY=value', output)
+            self.assertNotIn('0.0.0.0', output)
+        code, output = self.check(['# a comment', '', '   # an indented comment', *PROD])
+        self.assertEqual(code, 0, output)
+
+    def fake_docker(self, host_ip):
+        """A `docker` that answers `compose version` and prints a rendered model publishing the web port on host_ip."""
+        scratch = tempfile.TemporaryDirectory()
+        self.addCleanup(scratch.cleanup)
+        model = Path(scratch.name) / 'model.json'
+        model.write_text('{"services": {"web": {"ports": [{"host_ip": "%s", "target": 8080, "published": "8088"}]}}}\n' % host_ip)
+        docker = Path(scratch.name) / 'docker'
+        docker.write_text('#!/bin/sh\ncase " $* " in *" version "*) echo v2; exit 0;; esac\ncat "$FAKE_MODEL"\n')
+        docker.chmod(docker.stat().st_mode | stat.S_IXUSR)
+        return {'PATH': f'{scratch.name}:{os.environ["PATH"]}', 'FAKE_MODEL': str(model)}
+
+    def test_production_asserts_the_rendered_web_port_is_on_loopback(self):
+        result = self.run_script(self.make_home(PROD), **self.fake_docker('0.0.0.0'))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('published on 127.0.0.1 only', result.stdout + result.stderr)
+        result = self.run_script(self.make_home(PROD), **self.fake_docker('127.0.0.1'))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    @unittest.skipUnless(tee_keeps_writing(), 'the SSH gate logs through GNU tee -p')
+    def test_the_ssh_gate_refuses_operator_commands(self):
+        for command in ('check-config', 'bundle-digest', 'setup'):
+            result = self.run_script(self.make_home(PROD), '--ssh-gate', SSH_ORIGINAL_COMMAND=command)
+            output = result.stdout + result.stderr
+            self.assertNotEqual(result.returncode, 0, command)
+            self.assertIn('Refused', output)
+            self.assertNotRegex(output, r'[0-9a-f]{64}|Configuration OK')
 
     def test_a_dev_file_without_the_environment_key_still_passes(self):
         code, output = self.check(DEV)
