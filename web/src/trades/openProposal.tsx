@@ -14,8 +14,8 @@ export const OpenProposalContext = createContext<
 // What the next builder opened for this collector starts with, and where the collector came from. The key is a trader
 // id, or a Handle between Ask to trade's click and the redirect that swaps it for the trader id. They live only in
 // memory, from the click until the builder mounts, so a reload never brings them back: that is why they are not in the
-// address or in history.state, which survives a reload. The builder's page state initializer reads them once (the app
-// has no StrictMode, which would run it twice and drop them).
+// address or in history.state, which survives a reload. The builder reads the notes without changing them while it
+// renders and clears them once it has mounted, so a render React repeats or throws away still finds them.
 let seed: { key: string; card: ProposalCard } | null = null;
 let origin: { key: string; back: string } | null = null;
 
@@ -51,23 +51,27 @@ export function rekeyProposal(from: string, to: string): void {
 
 /** Notes that the next builder for this collector is opened from a Trade List page, so its back link returns to `back`. */
 export function proposeFromTradeList(key: string, back: string): void {
+  // a Trade List opens the builder without a card
+  seed = null;
   origin = { key, back };
 }
 
-/** The card Ask to trade opened this collector's builder with, or null. Always clears the seed. */
-export function takeProposalSeed(key: string): ProposalCard | null {
-  const taken = seed;
-  seed = null;
-  return taken && taken.key.toLowerCase() === key.toLowerCase()
-    ? taken.card
+/** The card Ask to trade opened this collector's builder with, or null. Changes nothing; see `clearProposalNotes`. */
+export function peekProposalSeed(key: string): ProposalCard | null {
+  return seed && seed.key.toLowerCase() === key.toLowerCase()
+    ? seed.card
     : null;
 }
 
-/** The Trade List page this collector's builder was opened from, or null. Always clears the note. */
-export function takeFromTradeList(key: string): string | null {
-  const taken = origin;
-  origin = null;
-  return taken !== null && taken.key.toLowerCase() === key.toLowerCase()
-    ? taken.back
+/** The Trade List page this collector's builder was opened from, or null. Changes nothing; see `clearProposalNotes`. */
+export function peekFromTradeList(key: string): string | null {
+  return origin !== null && origin.key.toLowerCase() === key.toLowerCase()
+    ? origin.back
     : null;
+}
+
+/** Forgets the seed and the origin. The builder calls it once it has mounted. */
+export function clearProposalNotes(): void {
+  seed = null;
+  origin = null;
 }

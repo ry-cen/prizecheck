@@ -34,7 +34,11 @@ import { Stepper } from "../ui/Stepper";
 import { TextField } from "../ui/TextField";
 import { useToast } from "../ui/Toast";
 import { MOBILE_QUERY, useMediaQuery } from "../workspace/media";
-import { takeFromTradeList, takeProposalSeed } from "./openProposal";
+import {
+  clearProposalNotes,
+  peekFromTradeList,
+  peekProposalSeed,
+} from "./openProposal";
 import { LiabilityNotice } from "./LiabilityNotice";
 import {
   centsAmount,
@@ -142,11 +146,11 @@ export function ProposalBuilderPage({
   const phone = useMediaQuery(MOBILE_QUERY);
   const [proposal, setProposal] = useState<Proposal>(() => {
     if (counter) return counterProposal(counter);
-    const card = takeProposalSeed(traderId);
+    const card = peekProposalSeed(traderId);
     return card ? seededProposal(card) : EMPTY_PROPOSAL;
   });
   const [listBack] = useState(() =>
-    counter ? null : takeFromTradeList(traderId)
+    counter ? null : peekFromTradeList(traderId)
   );
   const [party, setParty] = useState<Party | null>(null);
   const [theirs, setTheirs] = useState<Theirs>({ kind: "loading" });
@@ -203,6 +207,10 @@ export function ProposalBuilderPage({
     return () => {
       mounted.current = false;
     };
+  }, []);
+  // The seed and the origin are read while rendering and cleared once mounted, so a repeated render keeps them.
+  useEffect(() => {
+    if (!counter) clearProposalNotes();
   }, []);
   const returnTo = useRef<HTMLElement | null>(null);
   const headingRef = useRef<HTMLHeadingElement>(null);
