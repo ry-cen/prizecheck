@@ -146,6 +146,20 @@ class ProxyConfigTest(unittest.TestCase):
         self.assertNotIn('Cross-Origin-Opener-Policy', headers(own_directives(ASSETS)))
         self.assertNotIn('Cross-Origin-Opener-Policy', headers(block(MJS)))
 
+    def test_the_gateway_gets_the_client_address_from_nginx(self):
+        for opening in (START, GATEWAY):
+            self.assertIn(('proxy_set_header', 'X-Real-IP $remote_addr'), block(opening))
+            self.assertIn(('proxy_set_header', 'X-Forwarded-For ""'), block(opening))
+        self.assertNotIn('X-Real-IP ""', CONFIG)
+
+    def test_only_the_prod_edge_gateway_may_set_the_client_address(self):
+        server = re.sub(r'location[^{]*\{(?:[^{}]|\{[^{}]*\})*\}', '', PLAIN)
+        directives = DIRECTIVE.findall(server)
+        self.assertEqual([value.strip() for name, value in directives if name == 'set_real_ip_from'], ['10.201.80.1'])
+        self.assertIn(('real_ip_header', 'X-Real-IP'), [(name, value.strip()) for name, value in directives])
+        self.assertEqual(CONFIG.count('set_real_ip_from'), 1)
+        self.assertNotIn('real_ip_recursive', CONFIG)
+
 
 if __name__ == '__main__':
     unittest.main()

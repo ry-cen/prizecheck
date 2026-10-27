@@ -1,0 +1,13 @@
+# PrizeCheck production edge on the Oracle host (docs/deployment-oracle.md). Install as /etc/caddy/Caddyfile and
+# replace prizecheck.example.com with your domain (the host of PUBLIC_ORIGIN). Caddy obtains and renews the
+# certificate itself and redirects HTTP to HTTPS.
+# No `log` directive: request URLs can carry capability tokens (/published/<token>), so Caddy keeps no access log.
+# No encode and no Cross-Origin-* headers: nginx owns compression and the scanner page's isolation headers.
+prizecheck.example.com {
+	header Strict-Transport-Security "max-age=31536000"
+	# The web container's published loopback port (PRIZECHECK_WEB_BIND:PRIZECHECK_WEB_PORT).
+	reverse_proxy 127.0.0.1:8088 {
+		# The visitor's address, overwriting any client-sent value; nginx trusts it only from this host.
+		header_up X-Real-IP {remote_host}
+	}
+}
