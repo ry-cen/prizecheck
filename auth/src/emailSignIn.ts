@@ -1,5 +1,5 @@
 // EMAIL_SIGN_IN turns email-code sign-in on or off, at the gateway and in Better Auth. It is off unless set to "on".
-// Owner approval codes and operations mail don't use the email-otp plugin, so they work either way.
+// Operations mail doesn't use the email-otp plugin, so it works either way.
 
 /** Every endpoint the email-otp plugin registers, relative to Better Auth's basePath (for `disabledPaths`). */
 export const EMAIL_OTP_PATHS = [

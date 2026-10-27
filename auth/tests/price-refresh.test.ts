@@ -2,7 +2,7 @@
 // slow (process): two gateways and two APIs; most scenarios wait out the real 2.5 s admission wait window.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { spawn, type ChildProcess } from "node:child_process";
-import { createHmac, randomBytes, randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
@@ -25,7 +25,6 @@ const admin = new Pool({ connectionString: process.env.DATABASE_URL });
 const database = "tcg_price_refresh_" + randomUUID().replaceAll("-", "");
 const directory = mkdtempSync(join(tmpdir(), "tcg-price-refresh-"));
 const origin = process.env.TEST_ORIGIN || "http://localhost:5173";
-const secret = process.env.INTERNAL_AUTH_SECRET!;
 const OWNER_EMAIL = "owner@example.test";
 const TOKEN = "conformance-secret";
 const SCHEDULER = "admission:price:scheduler";
@@ -285,7 +284,7 @@ async function api(
   });
 }
 
-/** The maintainer decision endpoint, with a fresh approval code issued the way the owner flow does. */
+/** The maintainer decision endpoint, as the owner's session calls it. */
 async function decide(
   replica: 0 | 1,
   edition: Edition,
@@ -299,15 +298,6 @@ async function decide(
       `/api/admin/catalog-metadata/editions/${edition.id}`
     )
   ).json();
-  const target = `edition:${edition.id}`;
-  const hash = createHmac("sha256", secret)
-    .update(`${user}:${target}:resolve_metadata:123456`)
-    .digest("hex");
-  await pool.query(
-    `INSERT INTO catalog_approval_code(owner_id,metadata_target,action,code_hash,expires_at)
-     VALUES ($1,$2,'resolve_metadata',$3,now()+interval '5 minutes')`,
-    [user, target, hash]
-  );
   return api(replica, "POST", "/api/admin/catalog-metadata/decisions", {
     target: "marketplace",
     printing_id: evidence.printing_id,
@@ -318,7 +308,6 @@ async function decide(
     evidence_url: "https://example.org/evidence",
     reason: "Mapping changed while a price was being refreshed",
     report_ids: [],
-    code: "123456",
     ...(reviewed ? { reviewed_value: reviewed } : {}),
   });
 }

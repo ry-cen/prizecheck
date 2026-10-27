@@ -121,7 +121,7 @@ def database_url(admin_url, name):
 
 
 SUSPEND_LIMIT_S = 5.0     # wall time beyond the monotonic clock: the host slept (both clocks stop counting together otherwise)
-SKEW_LIMIT_S = 2.0        # PostgreSQL's clock against this host's; approval-code expiry compares the two
+SKEW_LIMIT_S = 2.0        # PostgreSQL's clock against this host's; expiry checks compare the two
 
 
 def database_skew(admin_url):

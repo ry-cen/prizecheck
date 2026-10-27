@@ -1,9 +1,9 @@
 """Collector reports and maintainer decisions for reviewed Live and Marketplace targets.
 
 Reports are unapproved input: they write one report row and nothing else. Only the owner
-(the catalog maintainer) changes target state, through a decision that consumes a fresh
-approval code, binds to the evidence the maintainer was shown, takes its revision from the
-commit-ordered public clock and never touches the catalog revision, quote data or a source.
+(the catalog maintainer) changes target state, through a decision that binds to the evidence the
+maintainer was shown, takes its revision from the commit-ordered public clock and never touches
+the catalog revision, quote data or a source.
 """
 import base64
 import hashlib
@@ -26,7 +26,6 @@ from .catalog_targets import (LIVE, MATCHING, REGISTRIES, MatchingRulesV1, Match
                               refresh_editions, refresh_printing, verified_elsewhere)
 from .holdings import fail
 from .main import connect, require_owner, verified_user
-from .missing_cards import _code_hash
 
 router = APIRouter()
 log = logging.getLogger(__name__)
@@ -349,30 +348,7 @@ def target_history(kind: Literal["editions", "printings"], target_id: UUID, user
               ORDER BY d.reviewed_at DESC,d.clock_revision DESC,d.id""", (target_id,)).fetchall()]
 
 
-# ---------------------------------------------------------------- approval codes and delivery
-
-
-def consume_metadata_code(conn, owner_id: str, target: str, action: str, code: str | None, *, spend: bool = True) -> bool:
-    """Spend the newest unexpired code issued for exactly this target form and action.
-
-    The lookup never falls back to report or review codes, and the target string is part of
-    the keyed hash, so a code for one target form cannot be replayed on another. ``spend=False``
-    only verifies (a wrong guess is still counted): the routes verify before taking the catalog
-    clock, so a bad code never commits a bare clock bump, and spend inside the correction.
-    """
-    if code is None:
-        fail(422, "FRESH_CODE_REQUIRED")
-    challenge = conn.execute("""SELECT * FROM catalog_approval_code WHERE owner_id=%s AND metadata_target=%s AND action=%s
-      ORDER BY created_at DESC,id DESC LIMIT 1 FOR UPDATE""", (owner_id, target, action)).fetchone()
-    if (not challenge or challenge["consumed_at"] or challenge["attempts"] >= 3
-            or challenge["expires_at"] <= datetime.now(challenge["expires_at"].tzinfo)):
-        fail(403, "INVALID_APPROVAL_CODE")
-    if not hmac.compare_digest(challenge["code_hash"], _code_hash(owner_id, target, action, code)):
-        conn.execute("UPDATE catalog_approval_code SET attempts=attempts+1 WHERE id=%s", (challenge["id"],))
-        return False
-    if spend:
-        conn.execute("UPDATE catalog_approval_code SET consumed_at=now() WHERE id=%s", (challenge["id"],))
-    return True
+# ---------------------------------------------------------------- delivery
 
 
 def delivery_status(*, target_kind=None, target_id=None, revision=None) -> str:
@@ -401,7 +377,6 @@ class MetadataDecisionInput(BaseModel):
     evidence_url: HttpUrl
     reason: str = Field(min_length=1, max_length=2000)
     report_ids: list[UUID] = Field(default_factory=list, max_length=50)
-    code: str | None = Field(default=None, pattern=r"^\d{6}$")
 
 
 class MetadataDecisionResult(BaseModel):
@@ -533,13 +508,6 @@ def decide(command: MetadataDecisionInput, user_id: str = Depends(verified_user)
         fail(422, "EDITION_NOT_ALLOWED")
     kind = "edition" if command.target == "marketplace" else "printing"
     target_id = command.edition_id or command.printing_id
-    bad_code = False
-    # A wrong code is decided before the clock is taken, so it commits only its attempt count.
-    with connect() as conn, conn.transaction():
-        require_owner(conn, user_id)
-        known = consume_metadata_code(conn, user_id, f"{kind}:{target_id}", "resolve_metadata", command.code, spend=False)
-    if not known:
-        fail(403, "INVALID_APPROVAL_CODE")
     try:
         with connect() as conn, conn.transaction():
             require_owner(conn, user_id)
@@ -558,42 +526,37 @@ def decide(command: MetadataDecisionInput, user_id: str = Depends(verified_user)
             plan = plan_marketplace(conn, command, loaded) if kind == "edition" else plan_live(conn, command, loaded, context)
             closing = _closable_reports(conn, command)
             validating = context.matching if kind == "edition" else context.live
-            if not consume_metadata_code(conn, user_id, f"{kind}:{target_id}", "resolve_metadata", command.code):
-                bad_code = True
+            revision = conn.execute("SELECT catalog_begin_correction() AS revision").fetchone()["revision"]
+            source_fingerprint = loaded["source_fingerprint"]
+            decision_id = conn.execute("""INSERT INTO catalog_metadata_decision(target,printing_id,edition_id,decision,reviewed_value,
+              source_value,source_fingerprint,checks,basis_revision,evidence_url,reason,reviewer_id,clock_revision,rule_activation_id)
+              VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+                                       (command.target, command.printing_id, command.edition_id, command.decision,
+                                        json.dumps(plan["reviewed"]), json.dumps(loaded["source_candidate"]) if source_fingerprint else None,
+                                        source_fingerprint, json.dumps(plan["checks"]), command.basis_revision,
+                                        str(command.evidence_url), reason, user_id, revision,
+                                        validating.activation_id if validating else None)).fetchone()["id"]
+            if source_fingerprint and command.decision != "verify_source":
+                conn.execute("""INSERT INTO catalog_metadata_rejection(target,printing_id,edition_id,source_fingerprint,decision_id)
+                  VALUES (%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING""",
+                             (command.target, command.printing_id, command.edition_id, source_fingerprint, decision_id))
+            if kind == "edition":
+                candidate = loaded["source_candidate"]
+                projection = (fingerprint(MatchingRulesV1.projection(candidate.get("correspondence"), candidate.get("candidate") or {}))
+                              if source_fingerprint else None)
+                apply_marketplace(conn, context, target_id, plan, decision_id, source_fingerprint, projection)
             else:
-                revision = conn.execute("SELECT catalog_begin_correction() AS revision").fetchone()["revision"]
-                source_fingerprint = loaded["source_fingerprint"]
-                decision_id = conn.execute("""INSERT INTO catalog_metadata_decision(target,printing_id,edition_id,decision,reviewed_value,
-                  source_value,source_fingerprint,checks,basis_revision,evidence_url,reason,reviewer_id,clock_revision,rule_activation_id)
-                  VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
-                                           (command.target, command.printing_id, command.edition_id, command.decision,
-                                            json.dumps(plan["reviewed"]), json.dumps(loaded["source_candidate"]) if source_fingerprint else None,
-                                            source_fingerprint, json.dumps(plan["checks"]), command.basis_revision,
-                                            str(command.evidence_url), reason, user_id, revision,
-                                            validating.activation_id if validating else None)).fetchone()["id"]
-                if source_fingerprint and command.decision != "verify_source":
-                    conn.execute("""INSERT INTO catalog_metadata_rejection(target,printing_id,edition_id,source_fingerprint,decision_id)
-                      VALUES (%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING""",
-                                 (command.target, command.printing_id, command.edition_id, source_fingerprint, decision_id))
-                if kind == "edition":
-                    candidate = loaded["source_candidate"]
-                    projection = (fingerprint(MatchingRulesV1.projection(candidate.get("correspondence"), candidate.get("candidate") or {}))
-                                  if source_fingerprint else None)
-                    apply_marketplace(conn, context, target_id, plan, decision_id, source_fingerprint, projection)
-                else:
-                    apply_live(conn, context, target_id, plan, decision_id)
-                if closing:
-                    conn.execute("""UPDATE catalog_metadata_report SET status=%s,review_reason=%s,reviewer_id=%s,reviewed_at=now(),
-                      decision_id=%s,updated_at=now() WHERE id=ANY(%s)""",
-                                 ("approved" if command.decision in ("verify_source", "correct") else "rejected", reason, user_id,
-                                  decision_id, closing))
-                final = load_target(conn, kind, target_id)
+                apply_live(conn, context, target_id, plan, decision_id)
+            if closing:
+                conn.execute("""UPDATE catalog_metadata_report SET status=%s,review_reason=%s,reviewer_id=%s,reviewed_at=now(),
+                  decision_id=%s,updated_at=now() WHERE id=ANY(%s)""",
+                             ("approved" if command.decision in ("verify_source", "correct") else "rejected", reason, user_id,
+                              decision_id, closing))
+            final = load_target(conn, kind, target_id)
     except psycopg.errors.LockNotAvailable:
         fail(409, "CATALOG_BUSY")
     except psycopg.errors.UniqueViolation:
         fail(409, "MAPPING_CONFLICT")
-    if bad_code:
-        fail(403, "INVALID_APPROVAL_CODE")
     # The decision is committed; delivery to the public store is best effort and recoverable from the outbox.
     public_catalog.publish_catalog_best_effort(printing_ids=[command.printing_id])
     return MetadataDecisionResult(decision_id=decision_id, target=command.target, decision=command.decision, state=final["state"],
@@ -658,7 +621,6 @@ class MetadataRuleActivation(BaseModel):
     version: int | None = Field(default=None, ge=1, le=999_999)
     evidence_url: HttpUrl
     reason: str = Field(min_length=1, max_length=2000)
-    code: str | None = Field(default=None, pattern=r"^\d{6}$")
 
 
 class MetadataRuleResult(BaseModel):
@@ -694,29 +656,19 @@ def activate(kind: Literal["live_derivation", "marketplace_matching"], command: 
     reason = " ".join(command.reason.split())
     if not reason:
         fail(422, "REASON_REQUIRED")
-    bad_code = False
-    target = f"rule:{kind}:{command.version or 0}"  # Deactivation names version 0, which a real version never equals.
     with connect() as conn, conn.transaction():
         require_owner(conn, user_id)
         if command.version is not None and command.version not in REGISTRIES[kind]:
             fail(422, "UNKNOWN_RULE_VERSION")
-        known = consume_metadata_code(conn, user_id, target, "activate_rule", command.code, spend=False)
-    if not known:
-        fail(403, "INVALID_APPROVAL_CODE")  # before the clock: a wrong code commits only its attempt count
     try:
         with connect() as conn, conn.transaction():
             require_owner(conn, user_id)
             conn.execute(f"SET LOCAL lock_timeout='{LOCK_TIMEOUT}'")
             revision = conn.execute("SELECT catalog_begin_correction() AS revision").fetchone()["revision"]
             conn.execute("SELECT 1 FROM catalog_rule_state WHERE kind=%s FOR UPDATE", (kind,))
-            if not consume_metadata_code(conn, user_id, target, "activate_rule", command.code):
-                bad_code = True
-            else:
-                changed = activate_rule(conn, kind, command.version, user_id, str(command.evidence_url), reason)
+            changed = activate_rule(conn, kind, command.version, user_id, str(command.evidence_url), reason)
     except psycopg.errors.LockNotAvailable:
         fail(409, "CATALOG_BUSY")
-    if bad_code:
-        fail(403, "INVALID_APPROVAL_CODE")
     # A short drain delivers the urgent invalidations (priority 0 first). A rule can change thousands of targets, so
     # whatever remains is delivered by an unbounded drain in a detached process; until then the owner sees "pending".
     public_catalog.publish_catalog_best_effort()

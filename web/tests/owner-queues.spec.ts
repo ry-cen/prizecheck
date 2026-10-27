@@ -1,8 +1,7 @@
 // Ticket #168: Owner controls' Catalog, Metadata and Missing cards queues (spec "Missing cards and Owner
 // controls"). Each queue is a ScrollTable; Review opens the item's card in a row under it, pinned to the
-// table's visible area while the table scrolls sideways; every decision takes a reason, then (except a
-// missing-card Request information or Reject) the code step. The shared page check runs at 1280×800 and
-// 375×812 with each card open. The full decision flows with real codes are in catalog-reconciliation,
+// table's visible area while the table scrolls sideways; every decision takes a reason. The shared page check runs at 1280×800 and
+// 375×812 with each card open. The full decision flows are in catalog-reconciliation,
 // metadata-review and missing-cards.
 import { test, expect, type Locator, type Page } from "@playwright/test";
 import { signInAsOwner as fakeSignInAsOwner } from "./support/sign-in";
@@ -308,13 +307,13 @@ test.describe("desktop", () => {
     }
   });
 
-  test("decisions take a reason and the code step, except a missing-card Request information or Reject", async ({
+  test("decisions take a reason, and a Catalog or Metadata decision a review evidence URL too", async ({
     page,
   }) => {
     await signInAsOwner(page);
     const seeded = await seedQueues(page);
     try {
-      // Catalog and Metadata: Confirm decision waits for a reason, a review evidence URL and six digits.
+      // Catalog and Metadata: Confirm decision waits for a reason and a review evidence URL.
       for (const [section, address, queue, review] of [
         [
           /^Catalog/,
@@ -336,19 +335,12 @@ test.describe("desktop", () => {
           .getByRole("combobox", { name: /^Decision/ })
           .selectOption({ index: 0 });
         const confirm = card.getByRole("button", { name: "Confirm decision" });
-        await expect(
-          card.getByRole("button", { name: "Send code" })
-        ).toBeEnabled();
         await expect(confirm).toBeDisabled();
         await card.getByLabel("Review reason").fill("Checked by hand");
-        await card.getByLabel("Fresh six-digit code").fill("123456");
         await expect(confirm).toBeDisabled();
         await card
           .getByLabel("Review evidence URL")
           .fill("https://example.org/evidence");
-        await card.getByLabel("Fresh six-digit code").fill("12345");
-        await expect(confirm).toBeDisabled();
-        await card.getByLabel("Fresh six-digit code").fill("123456");
         await expect(confirm).toBeEnabled();
       }
 
@@ -371,7 +363,6 @@ test.describe("desktop", () => {
       });
       await expect(ask).toBeDisabled();
       await expect(reject).toBeDisabled();
-      await card.getByLabel("Fresh six-digit code").fill("123456");
       await expect(approve).toBeDisabled();
       await card.getByLabel("Review reason").fill("Which print run is this?");
       await expect(ask).toBeEnabled();

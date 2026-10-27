@@ -2,14 +2,13 @@ import { useEffect, useId, useState } from "react";
 import {
   activateMetadataRule,
   getMetadataRules,
-  requestMetadataCode,
   type MetadataRuleView,
 } from "../metadata_generated";
-import { codeError, errorText, when } from "../MetadataReview";
+import { errorText, when } from "../MetadataReview";
 import { Pill, type PillTone } from "../ui/Pill";
 import { Select } from "../ui/Select";
 import { TextArea, TextField } from "../ui/TextField";
-import { CodeStep } from "./CodeStep";
+import { Button } from "../ui/Button";
 
 const RULE_NAMES: Record<MetadataRuleView["kind"], string> = {
   live_derivation: "Live derivation",
@@ -73,11 +72,9 @@ function RuleCard({
   );
   const [evidence, setEvidence] = useState("");
   const [reason, setReason] = useState("");
-  const [code, setCode] = useState("");
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const target = `rule:${rule.kind}:${version === "none" ? 0 : Number(version)}`;
   const active =
     rule.active && rule.active.version !== null ? rule.active : null;
 
@@ -97,19 +94,6 @@ function RuleCard({
     summary = `Version ${active.version} active`;
   }
 
-  async function sendCode() {
-    setBusy(true);
-    setError("");
-    try {
-      await requestMetadataCode(target, "activate_rule");
-      setStatus("Fresh approval code sent to your email.");
-    } catch (failure) {
-      setStatus("");
-      setError(codeError(failure));
-    } finally {
-      setBusy(false);
-    }
-  }
   async function apply() {
     setBusy(true);
     setError("");
@@ -118,9 +102,7 @@ function RuleCard({
         version: version === "none" ? null : Number(version),
         evidence_url: evidence.trim(),
         reason: reason.trim(),
-        code,
       });
-      setCode("");
       setStatus(
         `Rule change recorded for ${result.printings} Printings and ${result.editions} Editions. Public delivery: ${result.public_delivery}.` +
           (result.public_delivery === "pending"
@@ -173,10 +155,7 @@ function RuleCard({
         <Select
           label="Rule version"
           value={version}
-          onChange={(event) => {
-            setVersion(event.target.value);
-            setCode("");
-          }}
+          onChange={(event) => setVersion(event.target.value)}
         >
           <option value="none">No rule (deactivate)</option>
           {rule.versions.map((entry) => (
@@ -198,15 +177,15 @@ function RuleCard({
         value={reason}
         onChange={(event) => setReason(event.target.value)}
       />
-      <CodeStep
-        onSend={() => void sendCode()}
-        code={code}
-        onCode={setCode}
-        confirmLabel="Confirm rule change"
-        ready={!!evidence.trim() && !!reason.trim()}
-        busy={busy}
-        onConfirm={() => void apply()}
-      />
+      <div>
+        <Button
+          variant="primary"
+          disabled={busy || !evidence.trim() || !reason.trim()}
+          onClick={() => void apply()}
+        >
+          Confirm rule change
+        </Button>
+      </div>
       <p role="status" className="m-0 text-meta">
         {status}
       </p>

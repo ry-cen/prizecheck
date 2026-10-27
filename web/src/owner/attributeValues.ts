@@ -176,9 +176,6 @@ export function age(openedAt: string, now: number): string {
 const messages: Record<string, string> = {
   ATTRIBUTE_EVIDENCE_CHANGED:
     "The evidence changed since this card opened. Close it and review it again.",
-  INVALID_APPROVAL_CODE:
-    "That code is invalid, used or expired. Send a new code.",
-  FRESH_CODE_REQUIRED: "Enter the fresh six-digit code first.",
   CATALOG_BUSY:
     "The catalog is busy with another change. Try again in a moment.",
   INCONSISTENT_ATTRIBUTES:
@@ -201,12 +198,6 @@ export function decisionError(failure: unknown): string {
     ? "Check the evidence URL and the corrections, then try again."
     : "The request failed. Please retry.";
 }
-
-export const codeError = (failure: unknown) =>
-  (failure as { status?: number })?.status === 429
-    ? "Code rate limit reached. Try again in a minute."
-    : "Unable to send the code. Please retry.";
-
 /** Reporter-supplied: only http(s) is ever a link. */
 export const safeLink = (value: string | null) =>
   value && /^https?:\/\//i.test(value) ? value : undefined;

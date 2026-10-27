@@ -33,7 +33,6 @@ export const decideMetadata=(body: MetadataDecisionInput)=>request<MetadataDecis
 export const decideMetadataReport=(reportId: string,body: MetadataReportDecision)=>request<MetadataReportView>('POST',`/api/admin/catalog-metadata/reports/${id(reportId)}/decision`,body);
 export const getMetadataRules=()=>request<MetadataRuleView[]>('GET','/api/admin/catalog-rules');
 export const activateMetadataRule=(kind: MetadataRuleView['kind'],body: MetadataRuleActivation)=>request<MetadataRuleResult>('POST',`/api/admin/catalog-rules/${kind}/activate`,body);
-export const requestMetadataCode=(metadataTarget: string,action:'resolve_metadata'|'activate_rule'|'correct_attributes'|'review_reprint_groups'|'merge_card_identities')=>request<{message:string}>('POST','/auth/approval-code',{metadataTarget,action});
 export const submitAttributeReport=(body: AttributeReportInput)=>request<AttributeReportView>('POST','/api/catalog/attribute-reports',body);
 export const getMyAttributeReports=()=>request<AttributeReportView[]>('GET','/api/catalog/attribute-reports');
 export const getMyAttributeReport=(reportId: string)=>request<AttributeReportView>('GET',`/api/catalog/attribute-reports/${id(reportId)}`);

@@ -74,19 +74,15 @@ if (
   throw new Error("Email sign-in in production requires MAIL_MODE=http");
 }
 
-export async function deliverCode(
-  email: string,
-  otp: string,
-  purpose = "sign-in"
-) {
+export async function deliverCode(email: string, otp: string) {
   if (process.env.MAIL_MODE === "console") {
-    process.stdout.write(`Local ${purpose} code for ${email}: ${otp}\n`);
+    process.stdout.write(`Local sign-in code for ${email}: ${otp}\n`);
     return;
   }
   if (process.env.MAIL_MODE === "file" && process.env.MAIL_FILE) {
     await appendFile(
       process.env.MAIL_FILE,
-      JSON.stringify({ email, otp, purpose }) + "\n",
+      JSON.stringify({ email, otp }) + "\n",
       { mode: 0o600 }
     );
     return;
@@ -121,8 +117,8 @@ export async function deliverCode(
       body: JSON.stringify({
         from,
         to: email,
-        subject: `Your ${purpose} code`,
-        text: `Your ${purpose} code is ${otp}. It expires in 5 minutes.`,
+        subject: "Your sign-in code",
+        text: `Your sign-in code is ${otp}. It expires in 5 minutes.`,
       }),
     });
     // Relay errors may include recipient or OTP payloads; never read/log their body.

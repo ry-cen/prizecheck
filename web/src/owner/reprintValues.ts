@@ -222,9 +222,6 @@ export const hasReviewedGroups = (evidence: CardIdentityEvidence) =>
 const messages: Record<string, string> = {
   IDENTITY_EVIDENCE_CHANGED:
     "The Printings or groups changed since this card opened. Close it and review it again.",
-  INVALID_APPROVAL_CODE:
-    "That code is invalid, used, expired or for another decision. Send a new code.",
-  FRESH_CODE_REQUIRED: "Enter the fresh six-digit code first.",
   CATALOG_BUSY:
     "The catalog is busy with another change. Try again in a moment.",
   NO_CHANGE: "That decision would move no Printing.",
@@ -255,8 +252,3 @@ export function decisionError(failure: unknown): string {
     ? "Check the review evidence URL and the reason, then try again."
     : "The request failed. Please retry.";
 }
-
-export const codeError = (failure: unknown) =>
-  (failure as { status?: number })?.status === 429
-    ? "Code rate limit reached. Try again in a minute."
-    : "Unable to send the code. Please retry.";

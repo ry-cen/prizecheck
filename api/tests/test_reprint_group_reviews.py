@@ -1,13 +1,10 @@
 """Maintainer-reviewed Reprint Groups and Card Identity merges (Deck Lists 14, issue #95) over signed HTTP.
 
-Only the owner's approval-coded decision merges or splits Reprint Groups, lets a Printing join one, or merges Card
+Only the owner's decision merges or splits Reprint Groups, lets a Printing join one, or merges Card
 Identities. Effects are observed through the owner's evidence routes, Standard format checks, Deck checks, Holdings,
 catalog search and anonymous Published Deck reads. The Copycat and Rare Candy records are minimal copies of real TCGdex
 records; records whose ID starts with "fixture-" are made up.
 """
-import hashlib
-import hmac
-import os
 from uuid import UUID, uuid4
 
 import psycopg
@@ -35,7 +32,6 @@ from test_reprint_groups import CANDY_ME, CANDY_SM, CANDY_SM_GUARDIANS, CANDY_SV
 OWNER, OTHER = "groups-owner", "groups-other"
 ADMIN = "/api/admin/card-identities"
 GROUPS = "/api/admin/reprint-groups/decisions"
-GROUP_ACTION, IDENTITY_ACTION = "review_reprint_groups", "merge_card_identities"
 
 # The handbook's example of a reworded but functionally identical reprint: Copycat CES 127 and TRR 83.
 COPYCAT_CES = card(id="sm7-127", name="Copycat", localId="127", category="Trainer",
@@ -71,7 +67,6 @@ def seed(*records):
     reset_catalog()
     run(Records(*records))
     with connect() as conn:
-        conn.execute("DELETE FROM catalog_approval_code")
         for user in (OWNER, OTHER):
             conn.execute("INSERT INTO inventory_owner(user_id) VALUES (%s) ON CONFLICT DO NOTHING", (user,))
         conn.execute("DELETE FROM owner_binding")
@@ -81,16 +76,6 @@ def seed(*records):
 
 def ids_of(*source_ids):
     return {source_id: str(printing_id) for source_id, printing_id in printing_ids(*source_ids).items()}
-
-
-def grant(target, action=GROUP_ACTION, code="123456", user=OWNER):
-    """An approval code as the auth service issues it; ``target`` is a Card Identity ID or a full target string."""
-    target = target if ":" in target else f"card_identity:{target}"
-    digest = hmac.new(os.environ["INTERNAL_AUTH_SECRET"].encode(), f"{user}:{target}:{action}:{code}".encode(),
-                      hashlib.sha256).hexdigest()
-    with connect() as conn:
-        conn.execute("""INSERT INTO catalog_approval_code(owner_id,metadata_target,action,code_hash,expires_at)
-          VALUES (%s,%s,%s,%s,now()+interval '5 minutes')""", (user, target, action, digest))
 
 
 def ok(response):
@@ -115,11 +100,11 @@ def groups(shown):
     return {printing["printing_id"]: printing["group_id"] for printing in shown["printings"]}
 
 
-def decide(identity, decision, *, group=None, target=None, printings=(), code="123456", digest=None, user=OWNER):
+def decide(identity, decision, *, group=None, target=None, printings=(), digest=None, user=OWNER, **extra):
     body = {"identity_id": identity, "decision": decision, "printing_ids": list(printings),
             "evidence_digest": digest or evidence(identity)["evidence_digest"],
             "evidence_url": "https://example.org/compendium", "reason": "Same effect, checked against the rulings",
-            "code": code}
+            **extra}
     if group is not None:
         body["group_id"] = group
     if target is not None:
@@ -127,12 +112,12 @@ def decide(identity, decision, *, group=None, target=None, printings=(), code="1
     return call("POST", GROUPS, user, body)
 
 
-def merge_identities(merged, survivor, *, code="123456", user=OWNER, digest=None, into_digest=None):
+def merge_identities(merged, survivor, *, user=OWNER, digest=None, into_digest=None, **extra):
     body = {"identity_id": merged, "into_identity_id": survivor,
             "evidence_digest": digest or evidence(merged)["evidence_digest"],
             "into_evidence_digest": into_digest or evidence(survivor)["evidence_digest"],
             "evidence_url": "https://example.org/compendium", "reason": "One card name printed two ways",
-            "code": code}
+            **extra}
     return call("POST", f"{ADMIN}/decisions", user, body)
 
 
@@ -195,11 +180,10 @@ def seed_manual_printing(member_source_id, name, set_id="future", number="1"):
 def correct_attributes(printing, correction):
     """Give a Printing reviewed card attributes through the attribute correction route (ticket 11)."""
     shown = ok(call("GET", f"/api/admin/card-attributes/{printing}", OWNER))
-    grant(f"printing:{printing}", "correct_attributes")
     ok(call("POST", "/api/admin/card-attributes/decisions", OWNER, {
         "printing_id": printing, "decision": "correct", "correction": correction,
         "evidence_digest": shown["evidence_digest"], "evidence_url": "https://example.org/scan",
-        "reason": "Checked the printed card", "code": "123456"}))
+        "reason": "Checked the printed card"}))
 
 
 # ------------------------------------------------------------------ merges
@@ -213,7 +197,6 @@ def test_copycat_merge_joins_reworded_printings_and_survives_reimports_and_renam
     found = groups(evidence(identity))
     assert None not in (found[ces], found[trr]) and found[ces] != found[trr]  # the wording differs
     target, before = found[ces], revision()
-    grant(identity)
     body = ok(decide(identity, "merge", group=found[trr], target=target))
     assert (body["group_id"], body["affected_printing_ids"]) == (target, [trr])
     assert body["attribute_revision"] == before + 1 == revision()
@@ -242,7 +225,6 @@ def test_merging_rare_candy_sm1_129_into_me01_125_makes_it_standard_legal_and_la
     me, sm = found[ids["me01-125"]], found[ids["sm1-129"]]
     assert me != sm and found[ids["sm2-165"]] == sm
     before = revision()
-    grant(identity)
     body = ok(decide(identity, "merge", group=sm, target=me))
     assert body["affected_printing_ids"] == sorted([ids["sm1-129"], ids["sm2-165"]])
     assert body["attribute_revision"] == before + 1
@@ -255,7 +237,6 @@ def test_merging_rare_candy_sm1_129_into_me01_125_makes_it_standard_legal_and_la
     owner, deck = deck_of((edition_of("sm7-142"), 4), (edition_of("me01-001"), 1), (edition_of("sv02-278"), 55))
     assert standard(owner, deck, "2026-10-11")["status"] == "legal"
     # Undoing the merge restores every linked member; one alone changes nothing while its sibling's link holds.
-    grant(identity)
     assert error(decide(identity, "restore", printings=[ids["sm1-129"]])) == (422, "NO_CHANGE")
     body = ok(decide(identity, "restore", printings=[ids["sm1-129"], ids["sm2-165"]]))
     assert body["affected_printing_ids"] == sorted([ids["sm1-129"], ids["sm2-165"], ces])  # sm7-142 followed the links
@@ -271,7 +252,6 @@ def test_a_reviewed_merge_reaches_published_format_results_without_a_republish()
     assert published_standard(token)["status"] == "not_legal"
     identity = identity_of(ids["me01-125"])
     found = groups(evidence(identity))
-    grant(identity)
     body = ok(decide(identity, "merge", group=found[ids["sm1-129"]], target=found[ids["me01-125"]]))
     assert body["public_delivery"] == "delivered"
     result = published_standard(token)
@@ -289,7 +269,6 @@ def test_a_split_moves_printings_into_a_new_group_that_survives_reimport_until_r
     identity = identity_of(sv)
     me = groups(evidence(identity))[ids["me01-125"]]
     before = revision()
-    grant(identity)
     body = ok(decide(identity, "split", group=me, printings=[sv]))
     split = body["group_id"]
     assert split not in (None, me) and body["affected_printing_ids"] == [sv]
@@ -301,14 +280,12 @@ def test_a_split_moves_printings_into_a_new_group_that_survives_reimport_until_r
                                "not_legal", (edition_of("sv01-191"),))}
     run(Records(*CANDIES))
     assert groups(evidence(identity))[sv] == split
-    grant(identity)
     assert error(decide(identity, "split", group=split, printings=[sv])) == (422, "SPLIT_WHOLE_GROUP")
     assert error(decide(identity, "split", group=me, printings=[sv])) == (422, "PRINTING_NOT_IN_GROUP")
-    body = ok(decide(identity, "restore", printings=[sv]))  # the refusals did not spend the code
+    body = ok(decide(identity, "restore", printings=[sv]))  # the refusals changed nothing
     assert (body["group_id"], body["affected_printing_ids"], body["attribute_revision"]) == (None, [sv], before + 2)
     assert groups(evidence(identity))[sv] == me
     assert standard(owner, deck, "2026-10-11")["status"] == "legal"
-    grant(identity)
     assert error(decide(identity, "restore", printings=[sv])) == (422, "NO_REVIEWED_GROUP")
     assert [row[0] for row in history(identity)] == ["restore", "split"]
 
@@ -337,7 +314,6 @@ def test_a_manual_printing_joins_a_group_only_through_review():
         "unknown", {"set_date_not_recorded", "regulation_mark_not_recorded"})
     me = groups(evidence(identity))[ids["me01-125"]]
     before = revision()
-    grant(identity)
     body = ok(decide(identity, "join", target=me, printings=[manual]))
     assert (body["group_id"], body["affected_printing_ids"], body["attribute_revision"]) == (me, [manual], before + 1)
     assert standard(owner, deck, "2026-10-11")["status"] == "legal"
@@ -347,7 +323,6 @@ def test_a_manual_printing_joins_a_group_only_through_review():
     with connect() as conn:
         rederive_card_attributes(conn)
     assert groups(evidence(identity))[manual] == me
-    grant(identity)
     assert error(decide(identity, "join", target=me, printings=[manual])) == (422, "ALREADY_IN_GROUP")
     assert error(decide(identity, "join", target=me, printings=[ids["sv02-278"]])) == (422, "PRINTING_NOT_IN_IDENTITY")
 
@@ -357,7 +332,6 @@ def test_a_withdrawn_printing_leaves_its_reviewed_group_in_private_and_published
     ids = seed(*CANDIES, CANDY_SWSH)
     sv, swsh = ids["sv01-191"], ids["swsh1-180"]
     identity = identity_of(sv)
-    grant(identity)
     split = ok(decide(identity, "split", group=groups(evidence(identity))[ids["me01-125"]], printings=[sv, swsh]))
     split = split["group_id"]
     deck, token = published((("sv01-191", 4), ("sv02-278", 56)))
@@ -369,7 +343,6 @@ def test_a_withdrawn_printing_leaves_its_reviewed_group_in_private_and_published
     assert (found[swsh], found[sv]) == (None, split)
     assert format_record("sv01-191")[2].value["reprint_group"]["printings"] == [refs["sv01-191"]]
     matches_private(token, deck)  # private and published Standard results agree
-    grant(identity)
     assert error(decide(identity, "join", target=split, printings=[swsh])) == (422, "PRINTING_NOT_GROUPABLE")
     # Held again by a later import, it rejoins its assigned group.
     run(Records(*CANDIES, CANDY_SWSH))
@@ -397,7 +370,6 @@ def test_an_identity_merge_keeps_holdings_and_published_decks_and_later_printing
     survivor, merged = identity_of(plain), identity_of(sada)
     assert survivor != merged
     before = revision()
-    grant(merged, IDENTITY_ACTION)
     body = ok(merge_identities(merged, survivor))
     assert (body["moved_printing_ids"], body["affected_printing_ids"]) == ([sada], [sada])
     assert body["attribute_revision"] == before + 1 == revision()
@@ -430,60 +402,44 @@ def test_identity_merges_refuse_the_same_or_a_merged_identity_and_reviewed_group
     candy_identity, research, sada = (identity_of(ids[source_id]) for source_id in
                                       ("me01-125", "sv01-189", "fixture-sv04-906"))
     copycat = identity_of(ids["sm7-127"])
-    grant(sada, IDENTITY_ACTION)
     assert error(merge_identities(sada, sada)) == (422, "SAME_IDENTITY")
     # A Card Identity with reviewed group records cannot be merged away until they are restored.
-    grant(candy_identity)
     ok(decide(candy_identity, "split", group=groups(evidence(candy_identity))[ids["me01-125"]],
               printings=[ids["sv01-191"]]))
-    grant(candy_identity, IDENTITY_ACTION)
     assert error(merge_identities(candy_identity, copycat)) == (422, "REPRINT_GROUP_OVERRIDES")
-    ok(merge_identities(sada, research))  # the earlier refusal did not spend this code
-    grant(sada, IDENTITY_ACTION)
+    ok(merge_identities(sada, research))  # the earlier refusal changed nothing
     assert error(merge_identities(sada, research)) == (422, "IDENTITY_MERGED")
-    grant(copycat, IDENTITY_ACTION)
     assert error(merge_identities(copycat, sada)) == (422, "IDENTITY_MERGED")
-    grant(sada)
     assert error(decide(sada, "restore", printings=[ids["sm7-127"]])) == (422, "IDENTITY_MERGED")
     missing = str(uuid4())
-    grant(missing, IDENTITY_ACTION)
     response = call("POST", f"{ADMIN}/decisions", OWNER, {
         "identity_id": missing, "into_identity_id": research, "evidence_digest": "0" * 64,
-        "into_evidence_digest": "0" * 64, "evidence_url": "https://example.org/x", "reason": "x", "code": "123456"})
+        "into_evidence_digest": "0" * 64, "evidence_url": "https://example.org/x", "reason": "x"})
     assert error(response) == (404, "IDENTITY_NOT_FOUND")
 
 
 # ------------------------------------------------------------------ the review pattern
 
 
-def test_identity_merges_need_a_fresh_code_for_the_merged_identity_and_bind_to_both_evidences():
+def test_identity_merges_bind_to_both_evidences_and_only_the_owner_merges():
     ids = seed(RESEARCH_SV, RESEARCH_SADA, COPYCAT_CES)
     research, sada, copycat = (identity_of(ids[source_id]) for source_id in
                                ("sv01-189", "fixture-sv04-906", "sm7-127"))
     before = (revision(), clock())
-    assert error(merge_identities(sada, research, code=None)) == (422, "FRESH_CODE_REQUIRED")
-    for target, action in ((sada, GROUP_ACTION), (research, IDENTITY_ACTION), (copycat, IDENTITY_ACTION)):
-        grant(target, action)  # a group review code, a code for the survivor, a code for another identity
-        assert error(merge_identities(sada, research)) == (403, "INVALID_APPROVAL_CODE"), (target, action)
-    grant(sada, IDENTITY_ACTION)
-    assert error(merge_identities(sada, research, code="654321")) == (403, "INVALID_APPROVAL_CODE")
-    with connect() as conn:
-        assert conn.execute("""SELECT attempts FROM catalog_approval_code WHERE owner_id=%s AND action=%s
-          AND metadata_target=%s ORDER BY created_at DESC LIMIT 1""",
-                            (OWNER, IDENTITY_ACTION, f"card_identity:{sada}")).fetchone()["attempts"] == 1
+    assert merge_identities(sada, research, user=OTHER).status_code == 403  # not the owner
     assert (revision(), clock()) == before
     # The survivor's evidence changes after the owner looked: a new printing joins it.
     shown = evidence(research)["evidence_digest"]
     run(Records(RESEARCH_SV, RESEARCH_SADA, COPYCAT_CES, RESEARCH_TWILIGHT))
     assert error(merge_identities(sada, research, into_digest=shown)) == (409, "IDENTITY_EVIDENCE_CHANGED")
-    assert ok(merge_identities(sada, research))["moved_printing_ids"] == [ids["fixture-sv04-906"]]
+    # No code is asked for; one left in the body by an older web bundle is ignored.
+    assert ok(merge_identities(sada, research, code="654321"))["moved_printing_ids"] == [ids["fixture-sv04-906"]]
 
 
 def test_decisions_are_append_only():
     ids = seed(*CANDIES)
     identity = identity_of(ids["me01-125"])
     found = groups(evidence(identity))
-    grant(identity)
     ok(decide(identity, "merge", group=found[ids["sm1-129"]], target=found[ids["me01-125"]]))
     for statement in ("UPDATE catalog_card_identity_decision SET reason='rewritten'",
                       "DELETE FROM catalog_card_identity_decision"):
@@ -493,29 +449,15 @@ def test_decisions_are_append_only():
     assert [row[0] for row in history(identity)] == ["merge"]
 
 
-def test_decisions_need_a_fresh_code_for_the_identity_and_action_and_bind_to_the_evidence():
+def test_decisions_bind_to_the_evidence_and_only_the_owner_decides():
     ids = seed(*CANDIES, COPYCAT_CES)
     identity = identity_of(ids["me01-125"])
     found = groups(evidence(identity))
     me, sm = found[ids["me01-125"]], found[ids["sm1-129"]]
     before = (revision(), clock())
-    assert error(decide(identity, "merge", group=sm, target=me, code=None)) == (422, "FRESH_CODE_REQUIRED")
-    grant(identity, IDENTITY_ACTION)  # an identity merge code for the same identity
-    assert decide(identity, "merge", group=sm, target=me).status_code == 403
-    grant(identity_of(ids["sm7-127"]))  # a code for another identity
-    assert decide(identity, "merge", group=sm, target=me).status_code == 403
-    grant(f"printing:{ids['sm1-129']}", "correct_attributes")  # an attribute code for a member
-    assert decide(identity, "merge", group=sm, target=me).status_code == 403
-    grant(identity, user=OTHER)
     assert decide(identity, "merge", group=sm, target=me, user=OTHER).status_code == 403  # not the owner
-    grant(identity)
-    assert error(decide(identity, "merge", group=sm, target=me, code="654321")) == (403, "INVALID_APPROVAL_CODE")
-    with connect() as conn:
-        assert conn.execute("""SELECT attempts FROM catalog_approval_code WHERE owner_id=%s AND action=%s
-          AND metadata_target=%s ORDER BY created_at DESC LIMIT 1""",
-                            (OWNER, GROUP_ACTION, f"card_identity:{identity}")).fetchone()["attempts"] == 1
     assert (revision(), clock()) == before and groups(evidence(identity)) == found
-    # Malformed and impossible decisions are refused without spending the code.
+    # Malformed and impossible decisions are refused without changing anything.
     for kwargs, expected in (({"group": sm}, (422, "INVALID_DECISION")),
                              ({"group": sm, "target": me, "printings": [ids["sm1-129"]]}, (422, "INVALID_DECISION")),
                              ({"group": sm, "target": sm}, (422, "SAME_GROUP")),
@@ -528,9 +470,8 @@ def test_decisions_need_a_fresh_code_for_the_identity_and_action_and_bind_to_the
     run(Records(*CANDIES, COPYCAT_CES, CANDY_CES))
     stale = decide(identity, "merge", group=sm, target=me, digest=shown)
     assert error(stale) == (409, "IDENTITY_EVIDENCE_CHANGED")
-    assert decide(identity, "merge", group=sm, target=me).status_code == 200
-    spent = decide(identity, "merge", group=me, target=sm)
-    assert error(spent) == (403, "INVALID_APPROVAL_CODE")  # a code is spent once
+    # No code is asked for; one left in the body by an older web bundle is ignored.
+    assert decide(identity, "merge", group=sm, target=me, code="654321").status_code == 200
 
 
 def test_owner_routes_refuse_everyone_else():

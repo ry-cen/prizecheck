@@ -33,13 +33,6 @@ def request(method, path, user, body=None, **params):
     return client.request(method, path, content=raw if body is not None else None, headers=headers, params=params)
 
 
-def code_for(target, action, code="123456", user=OWNER):
-    digest = hmac.new(os.environ["INTERNAL_AUTH_SECRET"].encode(), f"{user}:{target}:{action}:{code}".encode(), hashlib.sha256).hexdigest()
-    with connect() as conn:
-        conn.execute("""INSERT INTO catalog_approval_code(owner_id,metadata_target,action,code_hash,expires_at)
-          VALUES (%s,%s,%s,%s,now()+interval '5 minutes')""", (user, target, action, digest))
-
-
 @pytest.fixture(autouse=True)
 def published(monkeypatch):
     """Record post-commit publication; delivery itself is the outbox's concern, not this module's."""
@@ -59,7 +52,6 @@ def spawned(monkeypatch):
 def seed_users():
     reset_catalog()
     with connect() as conn:
-        conn.execute("DELETE FROM catalog_approval_code")
         for user in (OWNER, REPORTER, OTHER):
             conn.execute("INSERT INTO inventory_owner(user_id) VALUES (%s) ON CONFLICT DO NOTHING", (user,))
         conn.execute("DELETE FROM owner_binding")
@@ -250,24 +242,17 @@ def target_of(item):
     return f"{item['kind']}:{item['edition_id'] or item['printing_id']}"
 
 
-def decide(item, decision, reviewed_value=None, *, issue=True, user=OWNER, **over):
-    if issue:
-        code_for(target_of(item), "resolve_metadata")
+def decide(item, decision, reviewed_value=None, *, user=OWNER, **over):
     body = {"target": item["target"], "printing_id": item["printing_id"], "edition_id": item["edition_id"], "decision": decision,
             "basis_revision": item["basis_revision"], "evidence_digest": item["evidence_digest"],
             "evidence_url": "https://example.org/evidence", "reason": "Checked the physical card", "report_ids": [],
-            "code": "123456", **({"reviewed_value": reviewed_value} if reviewed_value is not None else {})}
+            **({"reviewed_value": reviewed_value} if reviewed_value is not None else {})}
     return request("POST", f"{ADMIN}/decisions", user, {**body, **over})
 
 
 def edition_row(edition_id):
     with connect() as conn:
         return conn.execute("SELECT * FROM catalog_edition_metadata WHERE edition_id=%s", (edition_id,)).fetchone()
-
-
-def code_row(target):
-    with connect() as conn:
-        return conn.execute("SELECT * FROM catalog_approval_code WHERE metadata_target=%s ORDER BY created_at DESC", (target,)).fetchone()
 
 
 def test_correction_verifies_a_quarantined_edition_with_provenance_and_without_catalog_side_effects(quarantined, published):
@@ -299,7 +284,6 @@ def test_correction_verifies_a_quarantined_edition_with_provenance_and_without_c
     assert [(o["target_kind"], str(o["target_id"])) for o in outbox] == [("edition", quarantined["normal"])]
     assert targets.product_id == 999 and targets.quote_lookup["variant"] == "normal"
     assert len(published) == 1
-    assert code_row(target_of(item))["consumed_at"] is not None
     # The rejected source value repeats: no new quarantine, no new revision.
     settled = edition_row(quarantined["normal"])
     run(Records(changed_card()))
@@ -336,21 +320,20 @@ def test_a_product_without_an_established_variant_verifies_unpriced(world):
     assert edition_row(world["reverse"])["quote_variant"] is None
 
 
-def test_invalid_decisions_are_422_and_leave_the_code_unspent(world):
+def test_invalid_decisions_are_422_and_change_nothing(world):
     item = evidence("editions", world["normal"])
-    code_for(target_of(item), "resolve_metadata")
     cases = [("correct", None, "INVALID_PRODUCT"), ("correct", {"product_id": 0, "quote_variant": None}, "INVALID_PRODUCT"),
              ("correct", {"product_id": 5, "quote_variant": "Bad Variant"}, "INVALID_PRODUCT"),
              ("correct", {"product_id": 2**31, "quote_variant": None}, "INVALID_PRODUCT"),
              ("unsupported", None, "INVALID_DECISION")]
     for decision, value, code in cases:
-        response = decide(item, decision, value, issue=False)
+        response = decide(item, decision, value)
         assert (response.status_code, response.json()["detail"]["code"]) == (422, code), (decision, value)
     value = {"product_id": 5, "quote_variant": None}
-    assert decide(item, "correct", value, issue=False, edition_id=None).status_code == 422
-    assert decide(item, "correct", value, issue=False, reason=" ").status_code == 422
-    assert code_row(target_of(item))["consumed_at"] is None and edition_row(world["normal"])["mapping_state"] == "unverified"
-    assert decide(item, "correct", value, issue=False).status_code == 200  # the same code still works
+    assert decide(item, "correct", value, edition_id=None).status_code == 422
+    assert decide(item, "correct", value, reason=" ").status_code == 422
+    assert edition_row(world["normal"])["mapping_state"] == "unverified"
+    assert decide(item, "correct", value).status_code == 200  # the same evidence still decides
 
 
 def test_an_unspecified_variant_can_never_be_verified():
@@ -423,16 +406,14 @@ def test_decision_history_is_append_only(quarantined):
 # ------------------------------------------------------------------ evidence binding, codes and locking
 
 
-def test_stale_evidence_is_a_conflict_that_keeps_the_code_usable(quarantined):
+def test_stale_evidence_is_a_conflict_that_changes_nothing(quarantined):
     shown = evidence("editions", quarantined["normal"])
-    code_for(target_of(shown), "resolve_metadata")
     run(Records(changed_card(product=777)))  # a newer source value arrives while the maintainer reads
-    stale = decide(shown, "reject_source", issue=False)
+    stale = decide(shown, "reject_source")
     assert (stale.status_code, stale.json()["detail"]["code"]) == (409, "METADATA_EVIDENCE_CHANGED")
-    assert code_row(target_of(shown))["consumed_at"] is None
     assert edition_row(quarantined["normal"])["mapping_state"] == "quarantined"
     fresh = evidence("editions", quarantined["normal"])
-    assert decide(fresh, "reject_source", issue=False).status_code == 200  # the same code, now with fresh evidence
+    assert decide(fresh, "reject_source").status_code == 200  # with fresh evidence
     replay = decide(fresh, "reject_source")
     assert replay.status_code == 409  # the first decision moved the basis
 
@@ -456,76 +437,41 @@ def test_candidate_only_changes_are_caught_by_the_digest_even_when_the_public_re
     assert (response.status_code, response.json()["detail"]["code"]) == (409, "METADATA_EVIDENCE_CHANGED")
 
 
-def test_codes_are_exact_target_action_and_single_use(world):
+def test_a_decision_takes_effect_on_the_owners_request_and_ignores_a_stale_code(world):
     item = evidence("editions", world["normal"])
-    target = target_of(item)
-    missing = decide(item, "unmap", issue=False, code=None)
-    assert (missing.status_code, missing.json()["detail"]["code"]) == (422, "FRESH_CODE_REQUIRED")
-    none_issued = decide(item, "unmap", issue=False)
-    assert (none_issued.status_code, none_issued.json()["detail"]["code"]) == (403, "INVALID_APPROVAL_CODE")
-    # A code for a report, another target form, another Edition, or another action cannot be spent here.
+    assert edition_row(world["normal"])["mapping_reason"] == "no_matching_rule"
+    # A code left in the body by an older web bundle is neither required nor checked.
+    assert decide(item, "unmap", code="000000").status_code == 200
     with connect() as conn:
-        pending = conn.execute("""INSERT INTO missing_card_report(reporter_id,kind,printing_id) VALUES (%s,'edition',%s) RETURNING id""",
-                               (REPORTER, world["printing"])).fetchone()["id"]
-        digest = hmac.new(os.environ["INTERNAL_AUTH_SECRET"].encode(), f"{OWNER}:{pending}:resolve_metadata:123456".encode(), hashlib.sha256).hexdigest()
-        conn.execute("""INSERT INTO catalog_approval_code(owner_id,report_id,action,code_hash,expires_at)
-          VALUES (%s,%s,'resolve_metadata',%s,now()+interval '5 minutes')""", (OWNER, pending, digest))
-    code_for(f"printing:{world['printing']}", "resolve_metadata")
-    code_for(f"edition:{world['reverse']}", "resolve_metadata")
-    code_for(target, "activate_rule")
-    assert decide(item, "unmap", issue=False).status_code == 403
-    # Three wrong guesses exhaust the real code.
-    code_for(target, "resolve_metadata")
-    for _ in range(3):
-        assert decide(item, "unmap", issue=False, code="000000").status_code == 403
-    assert code_row(target)["attempts"] == 3
-    assert decide(item, "unmap", issue=False).status_code == 403
-    assert edition_row(world["normal"])["mapping_state"] == "unverified" and edition_row(world["normal"])["mapping_reason"] == "no_matching_rule"
-    with connect() as conn:
-        assert conn.execute("SELECT count(*) AS n FROM catalog_metadata_decision").fetchone()["n"] == 0
-    # A fresh code works once, then is spent.
-    fresh = evidence("editions", world["normal"])
-    assert decide(fresh, "unmap").status_code == 200
-    again = evidence("editions", world["normal"])
-    assert decide(again, "unmap", issue=False).status_code == 403
-
-
-def test_an_expired_code_is_refused(world):
-    item = evidence("editions", world["normal"])
-    code_for(target_of(item), "resolve_metadata")
-    with connect() as conn:
-        conn.execute("UPDATE catalog_approval_code SET expires_at=now()-interval '1 second' WHERE metadata_target=%s", (target_of(item),))
-    assert decide(item, "unmap", issue=False).status_code == 403
+        assert conn.execute("SELECT count(*) AS n FROM catalog_metadata_decision").fetchone()["n"] == 1
+    assert decide(item, "unmap").status_code == 409  # the first decision moved the basis
 
 
 def test_only_the_owner_decides_and_a_collector_gets_nothing_from_the_admin_surface(world):
     item = evidence("editions", world["normal"])
-    code_for(target_of(item), "resolve_metadata", user=REPORTER)
     assert decide(item, "unmap", user=REPORTER).status_code == 403
     assert request("GET", f"{ADMIN}/editions/{world['normal']}", REPORTER).status_code == 403
     assert request("GET", "/api/admin/catalog-rules", REPORTER).status_code == 403
     assert request("POST", "/api/admin/catalog-rules/live_derivation/activate", REPORTER,
-                   {"version": 1, "evidence_url": "https://example.org/r", "reason": "x", "code": "123456"}).status_code == 403
+                   {"version": 1, "evidence_url": "https://example.org/r", "reason": "x"}).status_code == 403
     assert edition_row(world["normal"])["mapping_reason"] == "no_matching_rule"
 
 
 @pytest.mark.serial(reason='wall-clock: asserts an upper bound on elapsed time')
 def test_a_busy_catalog_clock_is_a_409_rather_than_a_hang(world, monkeypatch):
     item = evidence("editions", world["normal"])
-    code_for(target_of(item), "resolve_metadata")
     monkeypatch.setattr(metadata_reviews, "LOCK_TIMEOUT", "300ms")
     holder = connect()
     try:
         holder.execute("UPDATE catalog_public_clock SET revision=revision")  # an import promotion holds the clock
         started = time.monotonic()
-        response = decide(item, "unmap", issue=False)
+        response = decide(item, "unmap")
         assert (response.status_code, response.json()["detail"]["code"]) == (409, "CATALOG_BUSY")
         assert time.monotonic() - started < 3
     finally:
         holder.rollback()
         holder.close()
-    assert code_row(target_of(item))["consumed_at"] is None
-    assert decide(item, "unmap", issue=False).status_code == 200
+    assert decide(item, "unmap").status_code == 200
 
 
 def test_a_decision_closes_only_linked_open_reports_of_the_same_target(quarantined):
@@ -705,10 +651,8 @@ def test_a_marketplace_decision_records_the_matching_activation_only_when_one_is
 # ------------------------------------------------------------------ rule activation
 
 
-def activation(kind, version, *, issue=True, **over):
-    if issue:
-        code_for(f"rule:{kind}:{version or 0}", "activate_rule")
-    body = {"version": version, "evidence_url": "https://example.org/rule", "reason": "Reviewed the table", "code": "123456", **over}
+def activation(kind, version, **over):
+    body = {"version": version, "evidence_url": "https://example.org/rule", "reason": "Reviewed the table", **over}
     return request("POST", f"/api/admin/catalog-rules/{kind}/activate", OWNER, body)
 
 
@@ -751,18 +695,12 @@ def test_activating_a_matching_rule_verifies_unverified_editions_and_enqueues_th
     assert body["public_delivery"] in ("delivered", "pending")
 
 
-def test_rule_activation_codes_are_per_kind_and_version_and_deactivation_is_version_zero(world):
-    unknown = activation("live_derivation", 12345, issue=False)
+def test_rule_activation_is_per_kind_and_version_and_deactivation_is_an_ordinary_action(world):
+    unknown = activation("live_derivation", 12345)
     assert (unknown.status_code, unknown.json()["detail"]["code"]) == (422, "UNKNOWN_RULE_VERSION")
-    code_for("rule:live_derivation:1", "activate_rule")
-    assert activation("live_derivation", 99, issue=False).status_code == 403  # a code for version 1 is not for version 99
-    assert activation("marketplace_matching", 1, issue=False).status_code == 403  # nor for another kind
-    wrong_action = f"rule:live_derivation:99"
-    code_for(wrong_action, "resolve_metadata")
-    assert activation("live_derivation", 99, issue=False).status_code == 403
-    assert activation("live_derivation", 99, issue=False, code=None).status_code == 422
     assert printing_row(world["printing"])["live_state"] == "unsupported"
-    assert activation("live_derivation", 99).status_code == 200
+    # A code left in the body by an older web bundle is ignored.
+    assert activation("live_derivation", 99, code="000000").status_code == 200
     assert printing_row(world["printing"])["live_state"] == "eligible"
     off = activation("live_derivation", None)
     assert off.status_code == 200 and off.json()["version"] is None
@@ -770,7 +708,6 @@ def test_rule_activation_codes_are_per_kind_and_version_and_deactivation_is_vers
         assert conn.execute("""SELECT a.version FROM catalog_rule_state s JOIN catalog_rule_activation a ON a.id=s.activation_id
           WHERE s.kind='live_derivation'""").fetchone()["version"] is None
     assert printing_row(world["printing"])["live_state"] == "suspended"  # an eligible Printing is suspended, never silently reset
-    assert activation("live_derivation", 99, issue=False).status_code == 403  # the code was spent
 
 
 # ------------------------------------------------------------------ no refresh route, no personal overrides
@@ -803,7 +740,7 @@ def test_deck_and_holding_mutations_ignore_product_live_and_price_fields(world):
     assert not any(key in json.dumps(added.json()) for key in ("product_id", "price"))
 
 
-# ------------------------------------------------------------------ a wrong approval code costs the catalog nothing
+# ------------------------------------------------------------------ a refused decision costs the catalog nothing
 
 
 def clock_revision():
@@ -811,22 +748,21 @@ def clock_revision():
         return conn.execute("SELECT revision FROM catalog_public_clock").fetchone()["revision"]
 
 
-def test_a_wrong_approval_code_never_takes_the_catalog_clock(world):
+def test_a_refused_decision_never_takes_the_catalog_clock(world):
     item = evidence("editions", world["normal"])
-    code_for(target_of(item), "resolve_metadata")
     before = clock_revision()
-    assert decide(item, "unmap", issue=False, code="000000").status_code == 403
-    assert decide(item, "unmap", issue=False, code=None).status_code == 422
+    assert decide(item, "unmap", user=REPORTER).status_code == 403
+    assert activation_as(REPORTER, "marketplace_matching", 1).status_code == 403
     assert clock_revision() == before  # no bare clock bump, and no stamp on the target
-    assert code_row(target_of(item))["attempts"] == 1  # the guess is still counted
-    assert decide(item, "unmap", issue=False).status_code == 200
-    # A rule activation behaves the same.
-    code_for("rule:marketplace_matching:1", "activate_rule")
+    assert decide(item, "unmap").status_code == 200
     before = clock_revision()
-    assert activation("marketplace_matching", 1, issue=False, code="000000").status_code == 403
+    assert activation("marketplace_matching", 12345).status_code == 422
     assert clock_revision() == before
-    assert code_row("rule:marketplace_matching:1")["attempts"] == 1
-    assert activation("marketplace_matching", 1, issue=False).status_code == 200
+
+
+def activation_as(user, kind, version):
+    body = {"version": version, "evidence_url": "https://example.org/rule", "reason": "Reviewed the table"}
+    return request("POST", f"/api/admin/catalog-rules/{kind}/activate", user, body)
 
 
 # ------------------------------------------------------------------ a corrected price lookup must belong to the reviewed product
@@ -908,5 +844,5 @@ def test_the_maintainer_sees_report_contents_without_the_reporters_identity_and_
     answered = evidence("editions", quarantined["normal"])
     assert answered["reports"][0]["note"] == "The Furret sleeve from the 2020 box" and answered["reports"][0]["evidence_url"] == "https://example.org/box"
     assert answered["evidence_digest"] not in (waiting["evidence_digest"], shown["evidence_digest"], first["evidence_digest"])
-    stale = decide(waiting, "unmap", issue=True)
+    stale = decide(waiting, "unmap")
     assert (stale.status_code, stale.json()["detail"]["code"]) == (409, "METADATA_EVIDENCE_CHANGED")

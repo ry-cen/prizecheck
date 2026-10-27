@@ -6,7 +6,7 @@ from uuid import uuid4
 from app.catalog import fingerprint
 from app.main import connect
 from test_catalog import Source, reset_catalog
-from test_catalog_reconciliation import review_code, run
+from test_catalog_reconciliation import run
 from test_holdings import call
 
 
@@ -242,10 +242,9 @@ def test_decided_review_provenance_survives_reimport_of_the_same_discrepancy():
     reset_catalog(); run(Records(furret())); run(Records(renamed()))
     user = owner()
     [pending] = call("GET", "/api/admin/catalog-reviews", user).json()
-    review_code(user, pending["id"], "resolve_catalog")
     decided = call("POST", f"/api/admin/catalog-reviews/{pending['id']}/decision", user, {
         "decision": "keep_existing", "reason": "Physical card is Furret", "evidence_url": "https://example.org/furret",
-        "code": "123456", "evidence_digest": pending["evidence_digest"]})
+        "evidence_digest": pending["evidence_digest"]})
     assert decided.status_code == 200, decided.text
     [retained] = reviews()
     run(Records(renamed(normal=0.99, reverse=1.99, card=0.99)))

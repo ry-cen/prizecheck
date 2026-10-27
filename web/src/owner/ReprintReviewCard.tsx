@@ -4,7 +4,6 @@ import {
   decideReprintGroups,
   getCardIdentityEvidence,
   mergeCardIdentities,
-  requestMetadataCode,
   type CardIdentityEvidence,
 } from "../metadata_generated";
 import { Button } from "../ui/Button";
@@ -12,9 +11,7 @@ import { ScrollTable } from "../ui/ScrollTable";
 import { SearchField } from "../ui/SearchField";
 import { Select } from "../ui/Select";
 import { TextArea, TextField } from "../ui/TextField";
-import { CodeStep } from "./CodeStep";
 import {
-  codeError,
   decisionError,
   groupNames,
   hasReviewedGroups,
@@ -46,8 +43,7 @@ type Props = {
  * Printing of the Card Identity with its regulation mark, its Reprint Group and that group's legality in
  * each Format, and a Move to picker. The decision is one of: move the chosen Printings (to another group,
  * a new group, or back to their derived group), merge one group into another, or merge this Card Identity
- * into another, found by name. Each takes a review reason, a review evidence URL and a fresh code; group
- * decisions and identity merges use different codes, so changing the decision clears the code. The card
+ * into another, found by name. Each takes a review reason and a review evidence URL. The card
  * reads the evidence again on open and after each decision, so a decision binds to what it shows.
  */
 export function ReprintReviewCard({ row, onClose, onDone }: Props) {
@@ -65,7 +61,6 @@ export function ReprintReviewCard({ row, onClose, onDone }: Props) {
   const [survivor, setSurvivor] = useState<CardIdentityEvidence | null>(null);
   const [reason, setReason] = useState("");
   const [evidenceUrl, setEvidenceUrl] = useState("");
-  const [code, setCode] = useState("");
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -79,7 +74,6 @@ export function ReprintReviewCard({ row, onClose, onDone }: Props) {
     setSurvivor(null);
     setFound(null);
     setQuery("");
-    setCode("");
   }
 
   useEffect(() => {
@@ -116,9 +110,6 @@ export function ReprintReviewCard({ row, onClose, onDone }: Props) {
 
   function choose(next: Decision) {
     setDecision(next);
-    // Group decisions and identity merges take different codes (review_reprint_groups,
-    // merge_card_identities), so a code sent for one is no good for the other.
-    setCode("");
     setError("");
   }
 
@@ -148,26 +139,6 @@ export function ReprintReviewCard({ row, onClose, onDone }: Props) {
     }
   }
 
-  async function sendCode() {
-    if (!evidence) return;
-    setBusy(true);
-    setError("");
-    try {
-      await requestMetadataCode(
-        `card_identity:${evidence.identity_id}`,
-        decision === "merge_identity"
-          ? "merge_card_identities"
-          : "review_reprint_groups"
-      );
-      setStatus("Fresh approval code sent to your email.");
-    } catch (failure) {
-      setStatus("");
-      setError(codeError(failure));
-    } finally {
-      setBusy(false);
-    }
-  }
-
   async function confirm() {
     if (!evidence || !("body" in plan)) return;
     setBusy(true);
@@ -176,7 +147,6 @@ export function ReprintReviewCard({ row, onClose, onDone }: Props) {
       evidence_digest: evidence.evidence_digest,
       evidence_url: evidenceUrl.trim(),
       reason: reason.trim(),
-      code,
     };
     try {
       if (decision === "merge_identity" && survivor) {
@@ -186,7 +156,6 @@ export function ReprintReviewCard({ row, onClose, onDone }: Props) {
           into_identity_id: survivor.identity_id,
           into_evidence_digest: survivor.evidence_digest,
         });
-        setCode("");
         onDone(
           `Merged ${evidence.display_name} into ${survivor.display_name}.`,
           true,
@@ -199,7 +168,6 @@ export function ReprintReviewCard({ row, onClose, onDone }: Props) {
         ...plan.body,
         identity_id: evidence.identity_id,
       });
-      setCode("");
       const moved = result.affected_printing_ids.length;
       const message = `Reprint Groups updated for ${evidence.display_name}: ${moved === 1 ? "1 Printing" : `${moved} Printings`} moved.`;
       try {
@@ -427,15 +395,15 @@ export function ReprintReviewCard({ row, onClose, onDone }: Props) {
           {"body" in plan ? plan.summary : plan.problem}
         </p>
       )}
-      <CodeStep
-        onSend={() => void sendCode()}
-        code={code}
-        onCode={setCode}
-        confirmLabel="Confirm decision"
-        ready={ready}
-        busy={busy || !evidence}
-        onConfirm={() => void confirm()}
-      />
+      <div>
+        <Button
+          variant="primary"
+          disabled={busy || !evidence || !ready}
+          onClick={() => void confirm()}
+        >
+          Confirm decision
+        </Button>
+      </div>
       <p role="status" className="m-0 text-meta">
         {status}
       </p>

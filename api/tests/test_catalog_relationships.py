@@ -11,10 +11,10 @@ import pytest
 from app.main import connect
 from test_catalog import reset_catalog
 from test_catalog_metadata import Records, furret, repriced
-from test_catalog_reconciliation import review_code, run, shown
+from test_catalog_reconciliation import run, shown
 from test_decks import create
 from test_holdings import add, call, client
-from test_missing_cards import OWNER, REPORTER, approve, issue_code, report
+from test_missing_cards import OWNER, REPORTER, approve, report
 from test_moves import commit, leaf, selected, stage, start
 from test_publications import list_cards, publish_gate_fixture
 
@@ -83,11 +83,9 @@ def test_quote_and_target_metadata_imports_preserve_every_existing_relationship(
         furret_printing = conn.execute("SELECT id FROM catalog_printing WHERE source_id='meta-1'").fetchone()["id"]
     edition_report = report({"kind": "edition", "printing_id": str(furret_printing), "descriptor": {"finish": "cosmos foil"},
                              "evidence_url": "https://example.org/cosmos"}).json()["id"]
-    issue_code(edition_report, "approve_edition")
     cosmos = approve(edition_report).json()["approved_edition_id"]
     printing_report = report({"kind": "printing", "set_id": "promo", "set_name": "Promo", "collector_number": "SV01",
                               "english_name": "Furret", "evidence_url": "https://example.org/promo"}).json()["id"]
-    issue_code(printing_report)
     approved = approve(printing_report).json()
     with connect() as conn:
         manual = str(conn.execute("SELECT id FROM catalog_edition WHERE printing_id=%s", (approved["approved_printing_id"],)).fetchone()["id"])
@@ -103,10 +101,9 @@ def test_quote_and_target_metadata_imports_preserve_every_existing_relationship(
         twin_printing = conn.execute("SELECT id FROM catalog_printing WHERE source_id='meta-2'").fetchone()["id"]
         review = conn.execute("""INSERT INTO catalog_review(printing_id,source_id,kind,source_fingerprint,detail)
           VALUES (%s,'meta-2','variant_ambiguity','finish-correction','Finish correction') RETURNING id""", (twin_printing,)).fetchone()["id"]
-    review_code(OWNER, review, "resolve_catalog")
     decided = call("POST", f"/api/admin/catalog-reviews/{review}/decision", OWNER, {
         "decision": "deprecate_edition", "reason": "Physical finish corrected", "evidence_url": "https://example.org/finish",
-        "code": "123456", "edition_id": twin_normal, "replacement_edition_id": twin_reverse,
+        "edition_id": twin_normal, "replacement_edition_id": twin_reverse,
         "evidence_digest": shown(OWNER, review)})
     assert decided.status_code == 200, decided.text
 

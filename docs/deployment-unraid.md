@@ -43,7 +43,7 @@ Persistent data lives on the host under `PRIZECHECK_DATA_DIR`:
 | `postgres/`      | PostgreSQL cluster                                                      | postgres    |
 | `public/`        | Public projection and shared records store (published decks, discovery) | 10001       |
 | `price-runners/` | Price-runner lock files and host id                                     | 10001       |
-| `mail/`          | `codes.jsonl`, the sign-in and approval codes while `MAIL_MODE=file`    | 1000        |
+| `mail/`          | `codes.jsonl`, the sign-in codes while `MAIL_MODE=file`                 | 1000        |
 
 Deploy state lives under `PRIZECHECK_HOME` (`state/current`, `state/previous`, `state/history.log`, `backups/`).
 
