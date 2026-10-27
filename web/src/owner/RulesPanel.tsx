@@ -50,8 +50,7 @@ export function RulesPanel() {
 
 /**
  * One rule kind: its active version and every version with its code digest, the latest marked, then
- * Activate: the version (or No rule, which deactivates), evidence and reason, and the code step. The code is
- * bound to the chosen version, so changing the version needs a new code.
+ * Activate: the version (or No rule, which deactivates), evidence and reason.
  */
 function RuleCard({
   rule,

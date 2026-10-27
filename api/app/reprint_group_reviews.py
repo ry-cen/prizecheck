@@ -5,8 +5,8 @@ merges reworded or errata'd printings into one group (the handbook's Copycat CES
 and me01-125), splits a wrong group, lets a manually approved Printing join a group (its only way into one), and merges
 Card Identities that the subtitle rule misses. As for card attribute corrections (``app.attribute_corrections``), only
 the owner changes these: each decision binds to the evidence the maintainer was shown, takes the commit-ordered
-public clock (so it serializes with
-catalog imports), advances the attribute revision once and is recorded append-only. There are no collector reports.
+public clock (so it serializes with catalog imports), advances the attribute revision once and is recorded
+append-only. There are no collector reports.
 
 Every decision concerns one Card Identity, since Reprint Groups never span identities. Reviewed records name Printings
 (migration 037), so they survive re-imports, re-derivation and renamed derived groups:

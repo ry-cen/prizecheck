@@ -2,7 +2,8 @@
 
 Reports are unapproved input: they write one report row and nothing else. Only the owner (the catalog maintainer)
 changes a Printing's attributes, through a decision that binds to the evidence the maintainer was shown, takes the
-commit-ordered public clock (as every catalog correction does, so it serializes with imports) and advances the attribute revision once.
+commit-ordered public clock (as every catalog correction does, so it serializes with imports) and advances the
+attribute revision once.
 
 A correction is per attribute and replaces derivation for exactly the attributes it sets, until a later decision
 replaces or removes it; re-derivation on import never touches it. A decision states the Printing's whole correction:

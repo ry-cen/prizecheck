@@ -9,7 +9,6 @@ import { pipeline } from "node:stream/promises";
 import {
   auth,
   budgetedAuth,
-  deliverCode,
   emailSignIn,
   pool,
   providers,
@@ -222,9 +221,7 @@ async function allowedSend(email: string, ip: string): Promise<boolean> {
   }
 }
 
-async function authCounter(
-  name: "sign_in_delivered" | "sign_in_failed" | "authorization_denials"
-) {
+async function authCounter(name: "sign_in_delivered" | "sign_in_failed") {
   try {
     await pool.query(
       `INSERT INTO operations_counter(name,count) VALUES($1,1)

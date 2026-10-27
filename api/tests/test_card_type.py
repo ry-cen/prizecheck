@@ -18,7 +18,7 @@ from psycopg.rows import dict_row
 
 from app.catalog import rederive_card_attributes
 from app.main import connect
-from test_attribute_corrections import ADMIN, OWNER, decide, error, evidence, grant, report, revision, seed
+from test_attribute_corrections import ADMIN, OWNER, decide, error, evidence, report, revision, seed
 from test_card_attributes import (BULBASAUR_ME, ENERGY_SV, RARE_CANDY_ME, STAGE_ONE, SUPPORTER, SWITCH_ME,
                                   TECHNICAL_MACHINE, TOOL, card, edition_of, printing_ids)
 from test_catalog_reconciliation import run, seed_manual
@@ -166,7 +166,6 @@ def test_a_trainer_type_correction_moves_collection_filters_and_the_format_resul
     assert names(collector, category="Pokemon") == ["Fixture Mislabelled Item"]
     assert names(collector, trainer_type="item") == []
 
-    grant(printing)
     response = decide(printing, correction={"card_kind": "trainer", "trainer_type": "item", "types": [],
                                             "basic_pokemon": False})
     assert response.status_code == 200, response.text
@@ -194,7 +193,6 @@ def test_a_trainer_type_only_correction_recomputes_the_saved_format_result_and_m
     assert names(collector, trainer_type="item") == [] and names(collector, category="Trainer") == ["Switch"]
 
     before = revision()
-    grant(printing)
     response = decide(printing, correction={"trainer_type": "item"})
     assert response.status_code == 200, response.text
     assert response.json()["attribute_revision"] == before + 1
@@ -213,7 +211,6 @@ def test_trainer_type_belongs_to_trainers_only():
     supporter, bulbasaur = found["fixture-sv01-910"], found["me01-001"]
     collector = collector_with("fixture-sv01-910")
     # Correcting a mis-derived Trainer to a Pokémon clears its derived Trainer Type: there is no "correct to unknown".
-    grant(supporter)
     response = decide(supporter, correction={"card_kind": "pokemon", "types": ["Fire"], "basic_pokemon": True})
     assert response.status_code == 200, response.text
     assert response.json()["effective"]["trainer_type"] is None
@@ -223,11 +220,9 @@ def test_trainer_type_belongs_to_trainers_only():
         "Fixture Supporter"]
     assert rows(collector)["Fixture Supporter"]["trainer_type"] is None
     # A correction may not give a card that is not a Trainer a Trainer Type, nor one whose kind is unknown.
-    grant(bulbasaur)
     refused = decide(bulbasaur, correction={"trainer_type": "item"})
     assert (refused.status_code, error(refused)) == (422, "INCONSISTENT_ATTRIBUTES")
     manual, _ = seed_manual()
-    grant(str(manual))
     refused = decide(str(manual), correction={"trainer_type": "item"})
     assert (refused.status_code, error(refused)) == (422, "INCONSISTENT_ATTRIBUTES")
     accepted = decide(str(manual), correction={"card_kind": "trainer", "trainer_type": "item"})
@@ -240,7 +235,7 @@ def test_trainer_type_belongs_to_trainers_only():
     corrected_evolves = call("POST", f"{ADMIN}/decisions", OWNER, {
         "printing_id": supporter, "decision": "correct", "correction": {"evolves_from": "Pikachu"},
         "evidence_digest": evidence(supporter)["evidence_digest"], "evidence_url": "https://example.org/scan",
-        "reason": "Checked", "code": "123456"})
+        "reason": "Checked"})
     assert corrected_evolves.status_code == 422
 
 

@@ -31,7 +31,7 @@ from app.main import app, connect
 from app import format_evaluator as evaluator
 from app import format_standing
 from app.card_attributes import attribute_revision
-from test_attribute_corrections import decide as decide_attributes, grant as grant_attributes, seed as seed_owner
+from test_attribute_corrections import decide as decide_attributes, seed as seed_owner
 from test_card_attributes import ACE_SPEC_BW, BULBASAUR_ME, ENERGY_SEARCH, ENERGY_SV, EX_BW, SWITCH_ME, edition_of
 from test_catalog import reset_catalog
 from test_catalog_metadata import Records
@@ -196,7 +196,6 @@ def test_an_attribute_decision_rebuilds_the_standings_it_changes():
     printing = found["me01-130"]
     assert standings("me01-130")["me01-130"]["standard"] == ("legal", [])
     before = keys()
-    grant_attributes(printing)
     response = decide_attributes(printing, correction={"regulation_mark": "G"})
     assert response.status_code == 200, response.text
     # Rebuilt by the decision itself: no reader has asked yet.
@@ -213,12 +212,11 @@ def test_an_attribute_decision_rebuilds_the_standings_it_changes():
 
 
 def test_a_reprint_group_decision_rebuilds_the_standings_it_changes():
-    from test_reprint_group_reviews import (CANDIES, decide as decide_groups, evidence, grant as grant_groups, groups,
+    from test_reprint_group_reviews import (CANDIES, decide as decide_groups, evidence, groups,
                                             identity_of, seed as seed_groups)
     ids = seed_groups(*CANDIES)
     assert standings("sv01-191")["sv01-191"]["standard"] == ("legal", [])
     identity = identity_of(ids["sv01-191"])
-    grant_groups(identity)
     response = decide_groups(identity, "split", group=groups(evidence(identity))[ids["me01-125"]],
                              printings=[ids["sv01-191"]])
     assert response.status_code == 200, response.text

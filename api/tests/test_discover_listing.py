@@ -197,18 +197,16 @@ def test_a_deck_leaves_when_it_stops_being_legal_and_returns_when_legal_again(st
 
 
 def test_a_delivered_attribute_correction_and_a_rules_deploy_each_move_the_listing(store, monkeypatch):
-    from test_attribute_corrections import decide, grant, seed as seed_catalog
+    from test_attribute_corrections import decide, seed as seed_catalog
     ids = seed_catalog(*(pictured(record) for record in (RARE_CANDY_ME, ENERGY_SV, BULBASAUR_ME)))
     _, token = published((("me01-001", 1), ("me01-125", 4), ("sv02-278", 55)))
     assert tokens() == [token]
     # A reviewed correction re-stamps the Printing: once delivered, Discover reads the new fact.
     printing = ids["me01-125"]
-    grant(printing)
     corrected = decide(printing, correction={"regulation_mark": "G"})
     assert corrected.status_code == 200, corrected.text
     assert corrected.json()["public_delivery"] == "delivered"
     assert tokens() == []
-    grant(printing)
     removed = decide(printing, decision="remove")
     assert removed.status_code == 200, removed.text
     assert tokens() == [token]
