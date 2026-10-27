@@ -4,6 +4,8 @@
 
 **Execution amendment:** [ADR 0003](../../../../adr/0003-on-demand-catalog-imports.md) specifies one import process launched on demand by the owner panel, which exits after its supplied run. No permanently polling catalog worker is required. See [ticket 19](https://github.com/ry-cen/prizecheck/issues/34).
 
+**Schedule amendment:** [ADR 0018](../../../../adr/0018-scheduled-catalog-change-check.md) supersedes "There is no scheduled catalog synchronization" and "No timer or cron starts a catalog run" below. A daily host-timer check starts the same pull, through the same dispatch, when TCGdex's card ids differ from the catalog's. Manual pulls from the control panel remain.
+
 The owner confirmed the catalog and search contract below. Earlier Card Identity and hosting resolutions apply.
 
 ## Agreed product decisions

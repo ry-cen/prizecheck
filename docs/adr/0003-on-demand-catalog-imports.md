@@ -1,6 +1,6 @@
 # Launch catalog import processes on demand
 
-**Status:** accepted; implemented and locally integration-validated; production validation pending.
+**Status:** accepted; implemented and locally integration-validated; production validation pending. Superseded in part by [ADR 0018](0018-scheduled-catalog-change-check.md): a daily host-timer check now starts a pull when TCGdex's card ids differ from the catalog's. The owner's Start full English pull, the on-demand detached process and everything else here still apply.
 
 The owner retains Start full English pull in the control panel. An authenticated API request reserves one durable catalog run and launches one detached Python process for that run ID. The process saves progress and outcome, performs the existing validated atomic import, and exits. There is no continuously running catalog worker polling for jobs.
 

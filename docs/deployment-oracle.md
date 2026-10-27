@@ -594,8 +594,21 @@ Then sign in:
    sudo bash /opt/prizecheck-prod/bin/prizecheck-deploy.sh tool /app/scripts/bind_owner.py 'ID-FROM-THE-QUERY'
    ```
 
-3. Refresh, open **Owner controls**, and start the full English catalog pull.
-4. After the catalog pull, build the scanner's index by hand:
+3. Activate both catalog rules **before** the first pull. A pull seeds prices only for Editions a matching rule has already verified, so a pull run first seeds nothing. The rule activation can outrun the web request's 60-second limit on a small instance and blocks your collection changes while it runs ([#343](https://github.com/ry-cen/prizecheck/issues/343)), so run it on the host while you aren't using the app. Live v1 took 26 seconds and matching v3 18 minutes on 2 OCPUs, both against a full catalog. On an empty catalog, before the first pull, both are quick and Owner controls' **Rules** panel works as well.
+
+   ```bash
+   sudo bash /opt/prizecheck-prod/bin/prizecheck-deploy.sh compose exec -T api python -c "
+   from app.metadata_reviews import activate, MetadataRuleActivation
+   for kind, version in (('live_derivation', 1), ('marketplace_matching', 3)):
+       print(activate(kind, MetadataRuleActivation(version=version,
+           evidence_url='https://github.com/ry-cen/prizecheck/blob/main/api/app/catalog_targets.py',
+           reason='Initial activation'), user_id='ID-FROM-THE-QUERY'))"
+   ```
+
+   Use the newest version each panel lists.
+
+4. Refresh, open **Owner controls**, and start the full English catalog pull. A pull seeds prices for at most 10 minutes, so part of the catalog is priced only when someone first opens a card ([#342](https://github.com/ry-cen/prizecheck/issues/342)).
+5. After the catalog pull, build the scanner's index by hand:
 
    ```bash
    sudo bash /opt/prizecheck-prod/bin/prizecheck-deploy.sh compose run --rm scanner-index
