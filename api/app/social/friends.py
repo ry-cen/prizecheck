@@ -52,7 +52,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from ..location_tree import error, replay
-from ..main import connect, verified_user
+from ..db import connect
+from ..identity import verified_user
 from ..publications import TOKEN
 from . import name_rules
 from .conversations import pair_changed

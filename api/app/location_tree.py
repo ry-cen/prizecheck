@@ -7,7 +7,9 @@ import psycopg
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from .main import connect, verified_user
+from .api_errors import api_error
+from .db import connect
+from .identity import verified_user
 from .social import counts
 from .social.hidden_locations import hidden_by, own_hidden
 
@@ -108,12 +110,11 @@ class LocationForTradeResult(BaseModel):
     for_trade_by: UUID | None
 
 
-def error(status: int, code: str):
-    raise HTTPException(status, {"code": code})
+error = api_error  # other modules import location_tree.error
 
 
 def refuse(status: int, code: str, **detail):
-    """``error`` with detail fields beside the code (each as a string), for a refusal that tells the client more."""
+    """Like ``error``, but every detail field is sent as a string, ``None`` included, for a refusal that tells the client more."""
     raise HTTPException(status, {"code": code, **{key: str(value) for key, value in detail.items()}})
 
 

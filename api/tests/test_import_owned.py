@@ -14,7 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 import time
 from uuid import UUID, uuid4
 
-from app.main import connect  # noqa: F401  (main first: it includes every router while loading)
+from app.main import connect  # noqa: F401
 from app import quote_contract
 from app.public_records import result_key
 from test_catalog_targets import isolated_rules  # noqa: F401  (an autouse fixture)

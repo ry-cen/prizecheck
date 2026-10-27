@@ -5,7 +5,8 @@ from datetime import datetime
 from typing import Literal
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
-from .main import connect, require_owner, verified_user
+from .db import connect
+from .identity import require_owner, verified_user
 
 router = APIRouter(tags=['operations'])
 

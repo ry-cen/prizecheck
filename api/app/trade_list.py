@@ -23,7 +23,8 @@ from uuid import UUID
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
-from .main import connect, verified_user
+from .db import connect
+from .identity import verified_user
 from .social import counts
 from .social.friend_reads import card_facts
 from .social.hidden_locations import hidden_by

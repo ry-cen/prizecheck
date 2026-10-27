@@ -12,7 +12,7 @@ from uuid import UUID, uuid4
 
 import psycopg
 
-from app.main import connect  # noqa: F401  (main first: it includes every router while loading)
+from app.main import connect  # noqa: F401
 from app.social import counts
 from test_batch_add import undo_records
 from test_catalog_targets import isolated_rules  # noqa: F401  (an autouse fixture)

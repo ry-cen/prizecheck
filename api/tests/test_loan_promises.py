@@ -17,7 +17,7 @@ from uuid import uuid4
 import psycopg
 import pytest
 
-from app.main import connect  # noqa: F401  (main first: it includes every router while loading)
+from app.main import connect  # noqa: F401
 from app.social import counts, loans, owners
 from test_batch_add import batch, undo, undo_records
 from test_catalog_targets import isolated_rules  # noqa: F401  (an autouse fixture)

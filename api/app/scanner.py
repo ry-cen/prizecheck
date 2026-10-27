@@ -20,7 +20,8 @@ from pydantic import BaseModel, Field
 from . import set_codes
 from .catalog_search import EditionView, PrintingView, _state, _views
 from .collection_import_finish import NORMAL, choose, facets, fits
-from .main import connect, verified_user
+from .db import connect
+from .identity import verified_user
 
 router = APIRouter(prefix="/api/scanner")
 

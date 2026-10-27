@@ -5,7 +5,7 @@ import argparse
 from uuid import UUID
 
 from .catalog import RunnerBusy, claim_run, execute_run
-from .main import connect
+from .db import connect
 
 
 def main(argv=None):

@@ -34,7 +34,8 @@ from .card_attributes import ATTRIBUTE_COLUMNS, SOURCE_FIELDS, CardAttributes, a
     attribute_revision
 from .format_standing import rebuild_stale_best_effort
 from .holdings import fail
-from .main import connect, require_owner, verified_user
+from .db import connect
+from .identity import require_owner, verified_user
 from .metadata_reviews import delivery_status
 from .public_catalog import publish_catalog_best_effort
 

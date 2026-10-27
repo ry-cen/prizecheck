@@ -18,12 +18,13 @@ import psycopg
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from .main import connect, verified_user
-from .moves import REPLAY, leaf, lock_owner, record_undo, undo_id_for
-from .moves import fail as refuse
+from .api_errors import api_error
+from .db import connect
+from .identity import verified_user
+from .idempotency import expire
+from .inventory_core import MAX_QUANTITY, REPLAY, leaf, lock_owner, quantity, record_undo, undo_id_for
 
 router = APIRouter(prefix="/api/holdings", tags=["holdings"])
-MAX_QUANTITY = 2**63 - 1
 # The most Card Editions one batch add takes.
 MAX_BATCH_EDITIONS = 200
 
@@ -86,17 +87,8 @@ class LeafHoldings(BaseModel):
     next_cursor: str | None
 
 
-def fail(status: int, code: str):
-    raise HTTPException(status, {"code": code})
-
-
-def parse_quantity(raw: str) -> int:
-    if not raw or not raw.isascii() or not raw.isdecimal() or len(raw) > 19:
-        fail(422, "INVALID_QUANTITY")
-    quantity = int(raw)
-    if quantity < 1 or quantity > MAX_QUANTITY:
-        fail(422, "INVALID_QUANTITY")
-    return quantity
+fail = api_error  # other modules import holdings.fail
+parse_quantity = quantity  # other modules import holdings.parse_quantity
 
 
 def digest(command: AddHolding) -> str:
@@ -114,7 +106,7 @@ def add_holding(command: AddHolding, user_id: str = Depends(verified_user)):
         # The owner lock serializes all inventory commands for this collector.
         conn.execute("INSERT INTO inventory_owner(user_id) VALUES (%s) ON CONFLICT DO NOTHING", (user_id,))
         owner = conn.execute("SELECT revision FROM inventory_owner WHERE user_id=%s FOR UPDATE", (user_id,)).fetchone()
-        conn.execute("DELETE FROM mutation_request WHERE owner_id=%s AND expires_at <= now()", (user_id,))
+        expire(conn, user_id)
         previous = conn.execute("""SELECT mr.command_digest,mr.result_revision,rs.result_quantity,rs.result_version
           FROM mutation_request mr LEFT JOIN mutation_response rs
             ON rs.owner_id=mr.owner_id AND rs.request_key=mr.request_key
@@ -122,9 +114,9 @@ def add_holding(command: AddHolding, user_id: str = Depends(verified_user)):
                                 (user_id, command.idempotency_key)).fetchone()
         if previous:
             if previous["command_digest"] != request_digest:
-                fail(409, "IDEMPOTENCY_KEY_REUSED")
+                api_error(409, "IDEMPOTENCY_KEY_REUSED")
             if previous["result_quantity"] is None:
-                fail(409, "REPLAY_OUTCOME_UNAVAILABLE")
+                api_error(409, "REPLAY_OUTCOME_UNAVAILABLE")
             return AddResult(location_id=command.location_id, edition_id=command.edition_id,
                              quantity=str(previous["result_quantity"]), version=previous["result_version"],
                              owner_revision=previous["result_revision"])
@@ -133,7 +125,7 @@ def add_holding(command: AddHolding, user_id: str = Depends(verified_user)):
           AND NOT EXISTS (SELECT 1 FROM location child WHERE child.parent_id=l.id)""",
                             (command.location_id, user_id)).fetchone()
         if not leaf:
-            fail(404, "LOCATION_NOT_FOUND")
+            api_error(404, "LOCATION_NOT_FOUND")
         # Hold the promoted generation stable until this Add commits.
         catalog = conn.execute("SELECT active_generation FROM catalog_state WHERE singleton FOR SHARE").fetchone()
         edition = conn.execute("""SELECT 1 FROM catalog_generation_edition ge
@@ -141,12 +133,12 @@ def add_holding(command: AddHolding, user_id: str = Depends(verified_user)):
           WHERE ge.generation_id=%s AND ge.edition_id=%s AND ge.active AND NOT gp.tombstoned""",
                                (catalog["active_generation"], command.edition_id)).fetchone()
         if not edition:
-            fail(422, "EDITION_UNAVAILABLE")
+            api_error(422, "EDITION_UNAVAILABLE")
         current = conn.execute("""SELECT quantity FROM holding
           WHERE owner_id=%s AND location_id=%s AND edition_id=%s""",
                                (user_id, command.location_id, command.edition_id)).fetchone()
         if current and current["quantity"] > MAX_QUANTITY - quantity:
-            fail(422, "QUANTITY_OVERFLOW")
+            api_error(422, "QUANTITY_OVERFLOW")
         revision = owner["revision"] + 1
         # Migration 031's holding trigger extends a Deck's Deck List to cover copies added to it.
         result = conn.execute("""INSERT INTO holding(owner_id,location_id,edition_id,quantity,version)
@@ -174,7 +166,7 @@ def add_holdings(command: BatchAdd, user_id: str = Depends(verified_user)):
     (in any order) replay the result; other items under that key answer IDEMPOTENCY_KEY_REUSED. An item that names no
     available Card Edition, or would overflow its Holding, refuses the whole batch and names the lowest such Edition."""
     if len({item.edition_id for item in command.items}) != len(command.items):
-        refuse(422, "DUPLICATE_ADD_ITEM")
+        api_error(422, "DUPLICATE_ADD_ITEM")
     items = sorted(((item.edition_id, parse_quantity(item.quantity)) for item in command.items),
                    key=lambda item: str(item[0]))
     # A fingerprint only, like the single Add's; the replay row keeps counts, not the items.
@@ -187,18 +179,18 @@ def add_holdings(command: BatchAdd, user_id: str = Depends(verified_user)):
     try:
         with connect() as conn, conn.transaction():
             revision = lock_owner(conn, user_id)
-            conn.execute("DELETE FROM mutation_request WHERE owner_id=%s AND expires_at<=now()", (user_id,))
+            expire(conn, user_id)
             previous = conn.execute(REPLAY, (user_id, command.idempotency_key)).fetchone()
             if previous:
                 if previous["command_digest"] != request_digest:
-                    refuse(409, "IDEMPOTENCY_KEY_REUSED")
+                    api_error(409, "IDEMPOTENCY_KEY_REUSED")
                 if previous["edition_count"] is None:
-                    refuse(409, "REPLAY_OUTCOME_UNAVAILABLE")
+                    api_error(409, "REPLAY_OUTCOME_UNAVAILABLE")
                 return BatchAddResult(location_id=command.location_id, edition_count=previous["edition_count"],
                                       copy_count=str(previous["copy_count"]),
                                       owner_revision=previous["result_revision"], undo_id=undo_id)
             if not leaf(conn, user_id, command.location_id):
-                refuse(404, "LOCATION_NOT_FOUND")
+                api_error(404, "LOCATION_NOT_FOUND")
             # Hold the promoted generation stable until this batch commits.
             catalog = conn.execute("SELECT active_generation FROM catalog_state WHERE singleton FOR SHARE").fetchone()
             unavailable = conn.execute("""SELECT w.edition_id FROM jsonb_to_recordset(%s::jsonb)
@@ -208,14 +200,14 @@ def add_holdings(command: BatchAdd, user_id: str = Depends(verified_user)):
                 WHERE ge.generation_id=%s AND ge.edition_id=w.edition_id AND ge.active AND NOT gp.tombstoned)
               ORDER BY w.edition_id LIMIT 1""", (work, catalog["active_generation"])).fetchone()
             if unavailable:
-                refuse(422, "EDITION_UNAVAILABLE", edition_id=unavailable["edition_id"])
+                api_error(422, "EDITION_UNAVAILABLE", edition_id=unavailable["edition_id"])
             over = conn.execute("""SELECT w.edition_id FROM jsonb_to_recordset(%s::jsonb)
                 AS w(edition_id uuid,quantity bigint)
               JOIN holding h ON h.owner_id=%s AND h.location_id=%s AND h.edition_id=w.edition_id
               WHERE h.quantity>%s-w.quantity ORDER BY w.edition_id LIMIT 1""",
                                 (work, user_id, command.location_id, MAX_QUANTITY)).fetchone()
             if over:
-                refuse(422, "QUANTITY_OVERFLOW", edition_id=over["edition_id"])
+                api_error(422, "QUANTITY_OVERFLOW", edition_id=over["edition_id"])
             new_revision = revision + 1
             # Migration 031's holding trigger extends a Deck's Deck List to cover copies added to it.
             conn.execute("""INSERT INTO holding(owner_id,location_id,edition_id,quantity,version)
@@ -235,7 +227,7 @@ def add_holdings(command: BatchAdd, user_id: str = Depends(verified_user)):
             return BatchAddResult(location_id=command.location_id, edition_count=len(items), copy_count=str(copies),
                                   owner_revision=new_revision, undo_id=undo_id)
     except psycopg.Error:
-        refuse(503, "INVENTORY_TEMPORARILY_UNAVAILABLE")
+        api_error(503, "INVENTORY_TEMPORARILY_UNAVAILABLE")
 
 
 def cursor_encode(user_id: str, location_id: UUID, owner_revision: int, catalog_revision: int, row: dict) -> str:
@@ -256,9 +248,9 @@ def cursor_decode(token: str, user_id: str, location_id: UUID, owner_revision: i
         if payload["v"] != 1 or payload["u"] != user_id or payload["l"] != str(location_id):
             raise ValueError
         if payload["r"] != owner_revision:
-            fail(409, "INVENTORY_CHANGED")
+            api_error(409, "INVENTORY_CHANGED")
         if payload["c"] != catalog_revision:
-            fail(409, "CATALOG_CHANGED")
+            api_error(409, "CATALOG_CHANGED")
         key = payload["k"]
         if not isinstance(key, list) or len(key) != 2 or not isinstance(key[0], str):
             raise ValueError
@@ -266,7 +258,7 @@ def cursor_decode(token: str, user_id: str, location_id: UUID, owner_revision: i
     except HTTPException:
         raise
     except (ValueError, KeyError, TypeError, UnicodeDecodeError, json.JSONDecodeError):
-        fail(400, "INVALID_CURSOR")
+        api_error(400, "INVALID_CURSOR")
 
 
 @router.get("/{location_id}", response_model=LeafHoldings)
@@ -281,9 +273,9 @@ def leaf_holdings(location_id: UUID, cursor: str | None = Query(default=None, ma
         leaf = conn.execute("""SELECT id,name,kind FROM location WHERE id=%s AND owner_id=%s""",
                             (location_id, user_id)).fetchone()
         if not leaf:
-            fail(404, "LOCATION_NOT_FOUND")
+            api_error(404, "LOCATION_NOT_FOUND")
         if leaf["kind"] not in ("storage_leaf", "deck"):
-            fail(409, "NOT_STORAGE_LEAF")
+            api_error(409, "NOT_STORAGE_LEAF")
         state = conn.execute("SELECT active_generation,revision FROM catalog_state WHERE singleton").fetchone()
         revision = owner["revision"] if owner else 1
         name=name.strip().lower(); set_id=set_id.strip().lower(); collector_number=collector_number.strip().lower()
@@ -304,7 +296,7 @@ def leaf_holdings(location_id: UUID, cursor: str | None = Query(default=None, ma
             else:
                 after='AND (h.quantity<%s OR (h.quantity=%s AND h.edition_id>%s))'
                 try: amount=int(key[0])
-                except (ValueError,TypeError): fail(400,'INVALID_CURSOR')
+                except (ValueError,TypeError): api_error(400,'INVALID_CURSOR')
                 params.extend([amount,amount,UUID(key[1])])
         rows = conn.execute(f"""SELECT h.edition_id,h.quantity,h.version,h.location_id,l.name AS location_name,
           p.id AS printing_id,coalesce(pd.display_name,ci.display_name) AS printing_name,

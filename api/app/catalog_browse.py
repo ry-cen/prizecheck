@@ -63,7 +63,8 @@ from . import format_standing, name_search, set_codes
 from .collection import anchor_json, anchor_value, cursor_key, encode_cursor
 from .holdings import fail
 from .borrowed_copies import borrowed_in
-from .main import connect, verified_user
+from .db import connect
+from .identity import verified_user
 from .social import counts
 
 router = APIRouter(prefix="/api/catalog", tags=["catalog"])

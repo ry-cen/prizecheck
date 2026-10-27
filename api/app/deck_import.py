@@ -47,7 +47,8 @@ from .import_matching import Match, match_lines
 from .import_owned import capture_owned, groups
 from .import_replace import ImportReplace, replacement
 from .location_tree import TreeNode, check_name, cleaned_name, error, node_model, owner_and_rows, replay
-from .main import connect, verified_user
+from .db import connect
+from .identity import verified_user
 from .settings import WantListCounting
 
 router = APIRouter(prefix='/api/decks', tags=['decks'])

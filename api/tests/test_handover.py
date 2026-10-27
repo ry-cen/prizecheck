@@ -21,8 +21,8 @@ import psycopg
 import pytest
 from fastapi import HTTPException
 
-from app.main import connect  # noqa: F401  (main first: it includes every router while loading)
-from app import moves
+from app.main import connect  # noqa: F401
+from app import inventory_core
 from app.social import counts
 from app.social.loans import LoanStep, run_step
 from test_batch_add import undo_records
@@ -251,9 +251,9 @@ def test_take_out_refuses_a_holding_short_of_the_copies_asked_and_writes_nothing
     hold(owner, binder, ids['PAL 185'], 3)
     hold(owner, box, ids['SVI 166'], 1)
     before = ok(call('GET', '/api/location-tree', owner))['owner_revision']
-    with pytest.raises(moves.HoldingShort):
+    with pytest.raises(inventory_core.HoldingShort):
         with connect() as conn, conn.transaction():
-            moves.take_out(conn, owner, [(UUID(binder), UUID(ids['PAL 185']), 1), (UUID(box), UUID(ids['SVI 166']), 2)],
+            inventory_core.take_out(conn, owner, [(UUID(binder), UUID(ids['PAL 185']), 1), (UUID(box), UUID(ids['SVI 166']), 2)],
                            before)
     assert holding(owner, binder, ids['PAL 185'])['quantity'] == '3'
     assert holding(owner, box, ids['SVI 166'])['quantity'] == '1'

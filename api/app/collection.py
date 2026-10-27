@@ -5,7 +5,8 @@ from fastapi import APIRouter, Depends, Query, HTTPException
 from typing import Literal
 import base64, hashlib, hmac, json, os
 from pydantic import BaseModel
-from .main import connect, verified_user
+from .db import connect
+from .identity import verified_user
 from .holdings import HoldingView, fail
 from .social import counts
 

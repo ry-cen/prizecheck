@@ -11,7 +11,7 @@ Every test seeds the Swap catalog (Iono PAL 185, PAL 254 and PAF 80; Arven SVI 1
 """
 from uuid import UUID, uuid4
 
-from app.main import connect  # noqa: F401  (main first: it includes every router while loading)
+from app.main import connect  # noqa: F401
 from app.copy_allocation import allocate, available_to
 from app.deck_list_capture import capture_deck_list
 from app.import_replace import read_replaced, replacement

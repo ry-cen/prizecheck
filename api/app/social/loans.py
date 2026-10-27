@@ -76,7 +76,8 @@ from pydantic import BaseModel, Field
 from ..borrowed_copies import awaiting_choice
 from ..loan_picks import stale_pick_loans
 from ..location_tree import error, record_response
-from ..main import connect, verified_user
+from ..db import connect
+from ..identity import verified_user
 from .friend_reads import card_facts
 from .owners import NOW, advance_revision, begin_owner_command, lock_owners
 

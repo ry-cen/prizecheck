@@ -12,7 +12,7 @@ from uuid import uuid4
 
 import pytest
 
-from app.main import app, connect  # noqa: F401  (main first: it includes every router while loading)
+from app.main import app, connect  # noqa: F401
 from app import deck_format_checks, format_evaluator
 from test_attribute_corrections import decide, seed
 from test_card_attributes import edition_of

@@ -10,7 +10,7 @@
 import json
 from uuid import uuid4
 
-from app.main import app, connect  # noqa: F401  (main first: it includes every router while loading)
+from app.main import app, connect  # noqa: F401
 from test_card_attributes import BULBASAUR_ME, ENERGY_SV, card, edition_of
 from test_catalog import reset_catalog
 from test_catalog_metadata import Records

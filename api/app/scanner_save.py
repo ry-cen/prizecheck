@@ -16,10 +16,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from .collection_import import storage_leaf
-from .holdings import MAX_BATCH_EDITIONS, MAX_QUANTITY
-from .main import connect, verified_user
-from .moves import REPLAY, lock_owner
-from .moves import fail as refuse
+from .api_errors import api_error
+from .holdings import MAX_BATCH_EDITIONS
+from .db import connect
+from .identity import verified_user
+from .idempotency import expire
+from .inventory_core import MAX_QUANTITY, REPLAY, lock_owner
 
 router = APIRouter(prefix="/api/scanner")
 MAX_SCAN_SAVE_EDITIONS = MAX_BATCH_EDITIONS
@@ -50,7 +52,7 @@ def save(command: ScanSave, user_id: str = Depends(verified_user)):
     IDEMPOTENCY_KEY_REUSED. A destination that is gone or not a childless Storage Leaf answers DESTINATION_CHANGED
     before any Edition is looked at; EDITIONS_CHANGED lists every Edition that is no longer active."""
     if len({item.edition_id for item in command.items}) != len(command.items):
-        refuse(422, "DUPLICATE_ADD_ITEM")
+        api_error(422, "DUPLICATE_ADD_ITEM")
     items = sorted(((item.edition_id, int(item.quantity)) for item in command.items), key=lambda item: str(item[0]))
     fingerprint = {"action": "scan_save", "location_id": str(command.location_id),
                    "items": [[str(edition), str(amount)] for edition, amount in items]}
@@ -60,17 +62,17 @@ def save(command: ScanSave, user_id: str = Depends(verified_user)):
     try:
         with connect() as conn, conn.transaction():
             revision = lock_owner(conn, user_id)
-            conn.execute("DELETE FROM mutation_request WHERE owner_id=%s AND expires_at<=now()", (user_id,))
+            expire(conn, user_id)
             previous = conn.execute(REPLAY, (user_id, command.idempotency_key)).fetchone()
             if previous:
                 if previous["command_digest"] != request_digest:
-                    refuse(409, "IDEMPOTENCY_KEY_REUSED")
+                    api_error(409, "IDEMPOTENCY_KEY_REUSED")
                 if previous["edition_count"] is None:
-                    refuse(409, "REPLAY_OUTCOME_UNAVAILABLE")
+                    api_error(409, "REPLAY_OUTCOME_UNAVAILABLE")
                 return ScanSaveResult(location_id=command.location_id, edition_count=previous["edition_count"],
                                       copy_count=str(previous["copy_count"]), owner_revision=previous["result_revision"])
             if not storage_leaf(conn, user_id, command.location_id):
-                refuse(409, "DESTINATION_CHANGED", location_id=command.location_id)
+                api_error(409, "DESTINATION_CHANGED", location_id=command.location_id)
             # Hold the promoted generation stable until this save commits.
             catalog = conn.execute("SELECT active_generation FROM catalog_state WHERE singleton FOR SHARE").fetchone()
             # An Edition the catalog never had has no Printing to name: its printing_id is null.
@@ -92,7 +94,7 @@ def save(command: ScanSave, user_id: str = Depends(verified_user)):
               WHERE h.quantity>%s-w.quantity ORDER BY w.edition_id LIMIT 1""",
                                 (work, user_id, command.location_id, MAX_QUANTITY)).fetchone()
             if over:
-                refuse(422, "QUANTITY_OVERFLOW", edition_id=over["edition_id"])
+                api_error(422, "QUANTITY_OVERFLOW", edition_id=over["edition_id"])
             new_revision = revision + 1
             conn.execute("""INSERT INTO holding(owner_id,location_id,edition_id,quantity,version)
               SELECT %s,%s,edition_id,quantity,%s FROM jsonb_to_recordset(%s::jsonb) AS w(edition_id uuid,quantity bigint)
@@ -111,4 +113,4 @@ def save(command: ScanSave, user_id: str = Depends(verified_user)):
             return ScanSaveResult(location_id=command.location_id, edition_count=len(items), copy_count=str(copies),
                                   owner_revision=new_revision)
     except psycopg.Error:
-        refuse(503, "INVENTORY_TEMPORARILY_UNAVAILABLE")
+        api_error(503, "INVENTORY_TEMPORARILY_UNAVAILABLE")

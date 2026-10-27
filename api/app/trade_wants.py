@@ -29,7 +29,8 @@ from pydantic import BaseModel
 from .card_accepts import WillAcceptRule
 from .deck_list_display import read_line_display
 from .location_tree import error
-from .main import connect, verified_user
+from .db import connect
+from .identity import verified_user
 from .social.owners import ensure_owner, lock_owners
 from .want_list import DISPLAY_FIELDS, number_order
 

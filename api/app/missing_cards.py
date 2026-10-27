@@ -10,7 +10,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, HttpUrl
 
 from .card_identity import card_identity_key
-from .main import connect, require_owner, verified_user
+from .db import connect
+from .identity import require_owner, verified_user
 from .public_catalog import publish_catalog_best_effort
 
 router = APIRouter()

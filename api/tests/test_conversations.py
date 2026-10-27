@@ -16,7 +16,7 @@ import pytest
 from fastapi import HTTPException
 from psycopg.rows import dict_row
 
-from app.main import connect  # noqa: F401  (main first: it includes every router while loading)
+from app.main import connect  # noqa: F401
 from app.social import conversations, trades
 from app.social.conversations import normalize_text
 from app.social.owners import lock_owners

@@ -19,7 +19,7 @@ from psycopg import sql
 from psycopg.conninfo import make_conninfo
 from psycopg.rows import dict_row
 
-from app.main import app, connect  # noqa: F401  (main first: it includes every router while loading)
+from app.main import app, connect  # noqa: F401
 from app.public_projection import ProjectionUnavailable
 from app.public_records import FilePublicRecords, invite_key
 from app.social import profile as profile_module

@@ -10,7 +10,7 @@ from uuid import UUID, uuid4
 import psycopg
 import pytest
 
-from app.main import app, connect  # noqa: F401  (main first: it includes every router while loading)
+from app.main import app, connect  # noqa: F401
 import app.catalog as catalog_module
 import app.reprint_groups as reprint_groups
 from app.card_attributes import attribute_revision

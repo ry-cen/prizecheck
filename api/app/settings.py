@@ -18,7 +18,8 @@ from uuid import UUID
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
-from .main import connect, verified_user
+from .db import connect
+from .identity import verified_user
 from .location_tree import error, owner_and_rows, replay
 
 router = APIRouter(prefix='/api/settings', tags=['settings'])

@@ -36,7 +36,8 @@ from uuid import UUID
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
-from ..main import connect, verified_user
+from ..db import connect
+from ..identity import verified_user
 from .loans import LOANS, NUDGE_DAYS, LoanView, loan_facts, loan_views, role_of
 from .trades import TRADES, TradeView, trade_facts, trade_views, trade_waiting_since, waiting_trade_step
 

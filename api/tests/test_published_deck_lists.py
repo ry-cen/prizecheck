@@ -14,7 +14,7 @@ from uuid import uuid4
 
 import psycopg
 
-from app.main import app, connect  # noqa: F401  (main first: it includes every router while loading)
+from app.main import app, connect  # noqa: F401
 from test_card_identity import JUNIPER, MAGNOLIA, PLAIN, printings
 from test_catalog import reset_catalog
 from test_catalog_metadata import Records
