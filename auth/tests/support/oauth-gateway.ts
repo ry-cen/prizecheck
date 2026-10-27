@@ -71,9 +71,19 @@ export type TestGateway = {
 
 function run(command: string, args: string[], env: NodeJS.ProcessEnv) {
   return new Promise<void>((resolve, reject) => {
-    const child = spawn(command, args, { env, stdio: "ignore" });
+    // Keep stderr so a failed migration names its cause (stdout is one "Applied" line per migration).
+    const child = spawn(command, args, {
+      env,
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+    let stderr = "";
+    child.stderr?.on("data", (chunk) => (stderr += chunk));
     child.on("exit", (status) =>
-      status === 0 ? resolve() : reject(new Error(`${args[0]} failed`))
+      status === 0
+        ? resolve()
+        : reject(
+            new Error(`${args[0]} failed (exit ${status}): ${stderr.trim()}`)
+          )
     );
   });
 }
