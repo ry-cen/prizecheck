@@ -56,8 +56,13 @@ env_value() {
   local line
   line="$(grep -E "^$1=" "$ENV_FILE" | tail -n 1 || true)"
   line="${line#*=}"
-  line="${line%\"}"; line="${line#\"}"
-  line="${line%\'}"; line="${line#\'}"
+  # Quotes come off only as a matched pair, the way Compose reads them (and a trailing ` # comment` after the pair).
+  local double='^"([^"]*)"([[:space:]]+#.*)?$' single="^'([^']*)'([[:space:]]+#.*)?\$"
+  if [[ "$line" =~ $double ]]; then
+    line="${BASH_REMATCH[1]}"
+  elif [[ "$line" =~ $single ]]; then
+    line="${BASH_REMATCH[1]}"
+  fi
   printf '%s' "$line"
 }
 
@@ -78,29 +83,45 @@ compose_cmd() {
 
 # Compose reads the env file with its own parser, which also accepts `export KEY=`, indented keys and `KEY: value`;
 # env_value reads only `KEY=`. A line in any other form could be honoured by Compose and ignored by every check here, so
-# it is refused. Names the line number, never its content.
+# it is refused. So is a quoted value that does not close on its own line: Compose lets it run on, swallowing the lines
+# after it, while every check here reads them as settings. Names the line number, never its content.
 check_env_file_syntax() {
-  local line number=0 key_pattern='^[A-Za-z_][A-Za-z0-9_]*='
+  local line value number=0 key_pattern='^[A-Za-z_][A-Za-z0-9_]*='
+  local double='^"[^"]*"([[:space:]]+#.*)?[[:space:]]*$' single="^'[^']*'([[:space:]]+#.*)?[[:space:]]*\$"
   while IFS= read -r line || [[ -n "$line" ]]; do
     number=$((number + 1))
     [[ "$line" =~ ^[[:space:]]*$ || "$line" =~ ^[[:space:]]*# || "$line" =~ $key_pattern ]] \
       || die "$ENV_FILE line $number must be KEY=value, a comment or blank (no export, indentation or KEY: value)"
+    if [[ "$line" =~ $key_pattern ]]; then
+      value="${line#*=}"
+      if [[ "$value" == \"* && ! "$value" =~ $double ]] || [[ "$value" == \'* && ! "$value" =~ $single ]]; then
+        die "$ENV_FILE line $number has a quoted value that does not close on the same line"
+      fi
+    fi
   done < "$ENV_FILE"
 }
 
-# Production's defence in depth: whatever the env file says, the rendered Compose model may publish ports on
-# 127.0.0.1 only. Skipped, with a note, where Docker is not installed (the repository's tests, `check-config` off-host).
+# Defence in depth for both environments: whatever the env file says, the rendered Compose model must publish exactly
+# the web port, on $1 (the checked PRIZECHECK_WEB_BIND; always 127.0.0.1 in production). Every published port needs a
+# host_ip, because Compose binds one without it on all interfaces. Skipped, with a note, where Compose is not installed
+# (the repository's tests, `check-config` off-host).
 check_published_ports() {
-  local config binds
+  local expected="$1" config binds published bind count=0
   if ! find_compose; then
     log "Note: Docker Compose not found; published-port check skipped"
     return 0
   fi
   config="$(PRIZECHECK_IMAGE_TAG=none "${COMPOSE[@]}" "${COMPOSE_ARGS[@]}" config --format json 2>/dev/null)" \
-    || die "Docker Compose cannot render the production configuration; check $ENV_FILE"
-  binds="$(grep -oE '"host_ip": *"[^"]*"' <<<"$config" || true)"
-  [[ -n "$binds" && -z "$(grep -vE '"host_ip": *"127\.0\.0\.1"' <<<"$binds" || true)" ]] \
-    || die "The web port must be published on 127.0.0.1 only in production (PRIZECHECK_WEB_BIND)"
+    || die "Docker Compose cannot render the configuration; check $ENV_FILE"
+  published="$(grep -oE '"published": *' <<<"$config" | wc -l | tr -d ' ')"
+  binds="$(grep -oE '"host_ip": *"[^"]*"' <<<"$config" | sed -E 's/^"host_ip": *"//; s/"$//' || true)"
+  while IFS= read -r bind; do
+    [[ -z "$bind" ]] && continue
+    [[ "$bind" == "$expected" ]] || die "The web port must be published on $expected only (PRIZECHECK_WEB_BIND)"
+    count=$((count + 1))
+  done <<<"$binds"
+  [[ "$count" -ge 1 && "$count" -eq "$published" ]] \
+    || die "The web port must be published on $expected only (PRIZECHECK_WEB_BIND)"
 }
 
 # Portable between GNU and BSD stat, so the config checks also run in the repository's tests on a Mac.
@@ -188,7 +209,8 @@ check_production_env() {
   fi
 }
 
-# Every check on the env file and the host's files; makes no docker call, so `check-config` runs it anywhere.
+# Every check on the env file and the host's files. The only docker use is the published-port check, which is skipped
+# where Compose is not installed, so `check-config` runs anywhere.
 validate_config() {
   [[ -f "$ENV_FILE" ]] || die "Missing $ENV_FILE (copy deploy/host/prizecheck-<dev|prod>.env.example)"
   if [[ "$(file_mode "$ENV_FILE")" != "600" ]]; then
@@ -228,8 +250,8 @@ validate_config() {
   fi
   if [[ "$ENVIRONMENT" == prod ]]; then
     check_production_env
-    check_published_ports
   fi
+  check_published_ports "$WEB_BIND"
   REGISTRY="$(env_value PRIZECHECK_REGISTRY)"; REGISTRY="${REGISTRY:-ghcr.io/ry-cen}"
   [[ -d "$DATA_DIR" ]] || die "Data directory $DATA_DIR is missing (storage not mounted?)"
   local sub

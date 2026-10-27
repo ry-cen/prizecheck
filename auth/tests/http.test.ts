@@ -120,6 +120,13 @@ describe("live Better Auth boundary", () => {
     const users = await pool.query('SELECT id FROM "user" WHERE email = $1', [
       email,
     ]);
+    // The limiter is given the visitor's address, but no session may keep it.
+    const sessions = await pool.query(
+      'SELECT "ipAddress" FROM "session" WHERE "userId" = $1',
+      [users.rows[0].id]
+    );
+    expect(sessions.rows.length).toBeGreaterThan(0);
+    expect(sessions.rows.every((row) => row.ipAddress === "")).toBe(true);
     const onboarded = await pool.query(
       "SELECT name, kind FROM location WHERE owner_id = $1",
       [users.rows[0].id]
