@@ -62,7 +62,7 @@ run one after the other and the second sees the first's writes; migration 142's 
 step takes the inventory lock (``moves.lock_owner``) or reads the Location tree with
 ``location_tree.owner_and_rows``: their ``FOR UPDATE`` would hold off the foreign key checks the other side's steps
 take on this owner's row (``social.owners.lock_owners``). Each step moves its collector's revision when it changes what
-they hold or promise. The command lock, replay and hourly count are ``social.trades``' (``begin_trade_command``);
+they hold or promise. The command lock, replay and hourly count are ``social.trades``' (``owners.begin_owner_command``);
 every step on an existing Trade runs through ``social.trades.run_trade_step``, except the Counter, which also inserts a
 row and runs the same checks in its own flow (``counter_trade``); both lock the Trade row after the owner and write it
 once.
@@ -78,18 +78,16 @@ from pydantic import BaseModel, Field
 
 from .deck_deletion import unsorted_leaf
 from .decks import advance_deck_list, write_deck_list
-from .loan_inventory import refuse
-from .location_tree import error
+from .location_tree import error, refuse
 from .main import connect, verified_user
 from .moves import add_in, is_deck, leaf, quantity, take_out
 from .social.conversations import new_conversation_lock, open_conversation
 from .social.discovery import reach_one, require_not_suspended, trader_user
 from .social.friend_reads import card_facts
 from .social.friend_copies import friend_trade_copies
-from .social.loans import NOW, advance_revision
-from .social.owners import lock_owners
-from .social.trades import (TRADES, TradeStep, TradeView, allowed, begin_trade_command, close_trade, other_side,
-                            record_trade_update, role_of, run_trade_step, side_gives, store_trade, write_trade)
+from .social.owners import NOW, advance_revision, begin_owner_command, lock_owners
+from .social.trades import (TRADES, TradeStep, TradeView, allowed, close_trade, other_side, record_trade_update, role_of,
+                            run_trade_step, side_gives, store_trade, write_trade)
 from .trade_list import own_trade_copies
 from .trade_picks import (insert_trade_picks, make_trade_picks, replacement_trade_picks, stale_pick_trades,
                           trade_pick_shortfalls)
@@ -327,7 +325,7 @@ def send_trade_proposal(command: SendTradeProposal, user_id: str = Depends(verif
         payload.pop('cash')     # a cash-free send keeps the digest it had before cash, so replays survive the deploy
     try:
         with connect() as conn, conn.transaction():
-            digest, stored = begin_trade_command(conn, user_id, command.idempotency_key, payload)
+            digest, stored = begin_owner_command(conn, user_id, command.idempotency_key, payload, 'trade')
             if stored is not None:
                 return stored
             require_not_suspended(conn, user_id)
@@ -422,7 +420,7 @@ def counter_trade(trade_id: UUID, command: CounterTrade, user_id: str = Depends(
                **command.model_dump(mode='json', exclude={'idempotency_key'})}
     try:
         with connect() as conn, conn.transaction():
-            digest, stored = begin_trade_command(conn, user_id, command.idempotency_key, payload)
+            digest, stored = begin_owner_command(conn, user_id, command.idempotency_key, payload, 'trade')
             if stored is not None:
                 return stored
             sides = conn.execute(TRADES + ' AND t.id = %(id)s', {'me': user_id, 'id': trade_id}).fetchone()

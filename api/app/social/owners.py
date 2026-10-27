@@ -4,9 +4,19 @@ The global lock order is ``inventory_owner`` rows in ascending ``user_id``, then
 means byte order, what Python's ``sorted()`` gives for account ids and what ``COLLATE "C"`` gives in PostgreSQL;
 ``friendship.user_low`` uses the same order. Every route that touches two owners calls ``lock_owners`` before it reads
 anything about the pair: Friend Requests and Remove Friend (#247), Block and Unblock (#248), and the Loan steps from
-#252, which import it from here.
+#252, which import it from here. The owner's inventory revision (``advance_revision``) and the start every Loan and
+Trade command shares (``begin_owner_command``) are owner facts too, so they live here.
 """
-from uuid import uuid4
+from uuid import UUID, uuid4
+
+from fastapi import HTTPException
+from psycopg import sql
+
+from ..location_tree import replay
+
+COMMANDS_PER_HOUR = 120
+# A column value a step's ``apply`` returns for the transaction's time (``loans.run_step``, ``trades.run_trade_step``).
+NOW = sql.SQL('now()')
 
 
 def ensure_owner(conn, user_id: str) -> None:
@@ -32,3 +42,37 @@ def lock_owners(conn, *user_ids: str) -> None:
     their Deck deletion (#253). Keep this mode, and keep the one write."""
     for user_id in sorted(set(user_ids)):
         conn.execute('SELECT 1 FROM inventory_owner WHERE user_id=%s FOR NO KEY UPDATE', (user_id,))
+
+
+def advance_revision(conn, owner_id: str | None) -> None:
+    """Moves the owner's inventory revision on, for a step that changes what is reserved of their copies."""
+    if owner_id is not None:
+        conn.execute('UPDATE inventory_owner SET revision=revision+1 WHERE user_id=%s', (owner_id,))
+
+
+def count_owner_command(conn, user_id: str, kind: str) -> None:
+    """Counts one Loan or Trade step (``kind``: 'loan_command' or 'trade_command') against the hourly limit: rows older
+    than an hour pruned, and 429 TOO_MANY_CHANGES with ``retry_after_minutes`` at the limit. The caller holds the
+    collector's command lock and has answered a replay."""
+    conn.execute("""DELETE FROM handle_lookup_event
+      WHERE user_id=%s AND kind=%s AND created_at < now() - interval '1 hour'""", (user_id, kind))
+    recent = conn.execute("""SELECT count(*) AS commands, min(created_at) AS oldest FROM handle_lookup_event
+      WHERE user_id=%s AND kind=%s""", (user_id, kind)).fetchone()
+    if recent['commands'] >= COMMANDS_PER_HOUR:
+        wait = conn.execute("SELECT ceil(extract(epoch FROM %s + interval '1 hour' - now()) / 60) AS wait",
+                            (recent['oldest'],)).fetchone()['wait']
+        raise HTTPException(429, {'code': 'TOO_MANY_CHANGES', 'retry_after_minutes': max(1, int(wait))})
+    conn.execute("INSERT INTO handle_lookup_event(user_id,kind) VALUES (%s,%s)", (user_id, kind))
+
+
+def begin_owner_command(conn, user_id: str, key: UUID, payload: dict, kind: str):
+    """The start every Loan and Trade command shares: the caller's owner row made if new, the caller's commands of
+    this ``kind`` ('loan' or 'trade') one at a time under an advisory lock of their own, a replay answered from the
+    caller's record, else the command counted (under 'loan_command' or 'trade_command', apart from the Friend
+    commands' count). Returns (digest, stored response or None)."""
+    ensure_owner(conn, user_id)
+    conn.execute(f"SELECT pg_advisory_xact_lock(hashtext('prizecheck.{kind}_command:' || %s))", (user_id,))
+    digest, stored = replay(conn, user_id, key, payload)
+    if stored is None:
+        count_owner_command(conn, user_id, f'{kind}_command')
+    return digest, stored

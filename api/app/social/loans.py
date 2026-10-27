@@ -20,8 +20,8 @@ cancels, the lender as well. Cancelling an accepted Loan releases its reserved c
 inventory revision.
 
 **Limit.** Loan steps that reach the other collector count against ``COMMANDS_PER_HOUR`` per account under kind
-'loan_command' (``count_loan_command``), apart from the Friend commands' count. A replay isn't counted again; the count
-is taken before any other collector's row is locked; a refused step rolls back with its count.
+'loan_command' (``owners.begin_owner_command``), apart from the Friend commands' count. A replay isn't counted again;
+the count is taken before any other collector's row is locked; a refused step rolls back with its count.
 
 **Handover** (#253): each side confirms for its own inventory, with ``app.loan_inventory``'s routes; the Loan is
 ``handed_over`` once both have. Until the other side confirms, a side may take its confirmation back, and while
@@ -62,7 +62,6 @@ Loans nobody has confirmed a handover for (``end_loans_between``), inside the Fr
 owners. A Loan either side confirmed a handover for counts as handed over and stays open. Edit and resend sends a new
 request to the lender, so it is offered only while the lender is still the borrower's Friend.
 """
-import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import date, timedelta
@@ -70,22 +69,19 @@ from typing import Literal
 from uuid import UUID, uuid4
 
 import psycopg
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from psycopg import sql
 from pydantic import BaseModel, Field
 
 from ..borrowed_copies import awaiting_choice
 from ..loan_picks import stale_pick_loans
-from ..location_tree import error, replay
+from ..location_tree import error, record_response
 from ..main import connect, verified_user
 from .friend_reads import card_facts
-from .owners import ensure_owner, lock_owners
+from .owners import NOW, advance_revision, begin_owner_command, lock_owners
 
 router = APIRouter(prefix='/api/social/loans', tags=['social'])
 
-COMMANDS_PER_HOUR = 120
-# A Loan column value a step's ``apply`` returns for the transaction's time (``run_step``).
-NOW = sql.SQL('now()')
 # Closed Loans the Loans tab lists under History, newest first.
 HISTORY = 50
 # Days an unanswered Borrow Request or an accepted Loan waits before both sides are nudged once (#256).
@@ -511,47 +507,15 @@ def read_loan(loan_id: UUID, user_id: str = Depends(verified_user)):
         return loan_view(conn, user_id, loan_id)
 
 
-def count_loan_command(conn, user_id: str) -> None:
-    """Counts one Loan step against the hourly limit: rows older than an hour pruned, and 429 TOO_MANY_CHANGES with
-    ``retry_after_minutes`` at the limit. The caller holds the collector's command lock and has answered a replay."""
-    conn.execute("""DELETE FROM handle_lookup_event
-      WHERE user_id=%s AND kind='loan_command' AND created_at < now() - interval '1 hour'""", (user_id,))
-    recent = conn.execute("""SELECT count(*) AS commands, min(created_at) AS oldest FROM handle_lookup_event
-      WHERE user_id=%s AND kind='loan_command'""", (user_id,)).fetchone()
-    if recent['commands'] >= COMMANDS_PER_HOUR:
-        wait = conn.execute("SELECT ceil(extract(epoch FROM %s + interval '1 hour' - now()) / 60) AS wait",
-                            (recent['oldest'],)).fetchone()['wait']
-        raise HTTPException(429, {'code': 'TOO_MANY_CHANGES', 'retry_after_minutes': max(1, int(wait))})
-    conn.execute("INSERT INTO handle_lookup_event(user_id,kind) VALUES (%s,'loan_command')", (user_id,))
-
-
-def begin_command(conn, user_id: str, key: UUID, payload: dict):
-    """The start every Loan command shares: the caller's owner row made if new, the caller's commands one at a time, a
-    replay answered from the caller's record, else the command counted. Returns (digest, stored response or None)."""
-    ensure_owner(conn, user_id)
-    conn.execute("SELECT pg_advisory_xact_lock(hashtext('prizecheck.loan_command:' || %s))", (user_id,))
-    digest, stored = replay(conn, user_id, key, payload)
-    if stored is None:
-        count_loan_command(conn, user_id)
-    return digest, stored
-
-
 def store(conn, user_id: str, key: UUID, digest: str, loan_id: UUID) -> dict:
     """The Loan as the caller now sees it, recorded as the command's response."""
     stored = loan_view(conn, user_id, loan_id).model_dump(mode='json')
-    conn.execute('INSERT INTO location_command(owner_id,request_key,request_digest,response) VALUES (%s,%s,%s,%s)',
-                 (user_id, key, digest, json.dumps(stored)))
+    record_response(conn, user_id, key, digest, stored)
     return stored
 
 
-def advance_revision(conn, owner_id: str | None) -> None:
-    """Moves the owner's inventory revision on, for a step that changes what is reserved of their copies."""
-    if owner_id is not None:
-        conn.execute('UPDATE inventory_owner SET revision=revision+1 WHERE user_id=%s', (owner_id,))
-
-
 def run_step(user_id: str, loan_id: UUID, step: LoanStep, action: str, apply, locks, extra: dict | None = None) -> dict:
-    """Runs one step on an existing Loan: ``begin_command``, the owners ``locks(role, row)`` names locked in ascending
+    """Runs one step on an existing Loan: ``begin_owner_command``, the owners ``locks(role, row)`` names locked in ascending
     order, then the Loan row, its revision and ``allowed`` checked, then ``apply(conn, row)``, then the Loan row written
     once, and the caller's view stored and returned. ``extra``: the step's own fields, part of its digest.
 
@@ -566,7 +530,7 @@ def run_step(user_id: str, loan_id: UUID, step: LoanStep, action: str, apply, lo
     payload = {'action': f'loan_{action}', 'loan_id': str(loan_id), 'revision': step.revision, **(extra or {})}
     try:
         with connect() as conn, conn.transaction():
-            digest, stored = begin_command(conn, user_id, step.idempotency_key, payload)
+            digest, stored = begin_owner_command(conn, user_id, step.idempotency_key, payload, 'loan')
             if stored is not None:
                 return stored
             sides = conn.execute(LOANS + ' AND o.id = %(id)s', {'me': user_id, 'id': loan_id}).fetchone()

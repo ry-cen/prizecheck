@@ -112,6 +112,11 @@ def error(status: int, code: str):
     raise HTTPException(status, {"code": code})
 
 
+def refuse(status: int, code: str, **detail):
+    """``error`` with detail fields beside the code (each as a string), for a refusal that tells the client more."""
+    raise HTTPException(status, {"code": code, **{key: str(value) for key, value in detail.items()}})
+
+
 def cleaned_name(name: str) -> str:
     value = name.strip()
     if not value or len(value) > 120 or any(ord(c) < 32 for c in value):
@@ -219,6 +224,12 @@ def replay(conn, user_id, key, payload):
             error(409, "IDEMPOTENCY_KEY_REUSED")
         return digest, row["response"]
     return digest, None
+
+
+def record_response(conn, user_id, key, digest, stored) -> None:
+    """Records ``stored`` (a JSON-ready dict) as the response of the command ``replay`` answers for this key."""
+    conn.execute("INSERT INTO location_command(owner_id,request_key,request_digest,response) VALUES (%s,%s,%s,%s)",
+                 (user_id, key, digest, json.dumps(stored)))
 
 
 def store_result(conn, user_id, key, digest, row, rows):

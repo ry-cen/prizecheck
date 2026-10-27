@@ -22,8 +22,8 @@ lock both sides. A step advances a side's inventory revision when it releases co
 decline the proposer's, cancel each side's. A side that gives nothing has nothing released, so its revision stays.
 
 **Limit.** Trade steps count against ``COMMANDS_PER_HOUR`` per account under kind 'trade_command'
-(``count_trade_command``), apart from the Friend and Loan commands' counts, under a command lock of their own
-(``begin_trade_command``). A replay isn't counted again; a refused step rolls back with its count.
+(``owners.begin_owner_command``), apart from the Friend and Loan commands' counts, under a command lock of their own.
+A replay isn't counted again; a refused step rolls back with its count.
 
 **Updates** (``record_trade_update``): a withdraw stores a 'cancelled' update for the recipient, which the inbox reads
 as withdrawn from the Trade's ``closed_reason``; a decline stores a 'declined' update for the proposer; a cancel stores
@@ -62,7 +62,6 @@ this module reads or writes them. ``completed_trades`` counts the Trades a colle
 confirmed the swap for, in one statement over two partial indexes: Friend Trades included, still counted for the remaining
 side after the other account is deleted, and never stored in a counter column.
 """
-import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
@@ -70,22 +69,19 @@ from typing import Literal
 from uuid import UUID, uuid4
 
 import psycopg
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from psycopg import sql
 from pydantic import BaseModel, Field
 
-from ..location_tree import error, replay
+from ..location_tree import error, record_response
 from ..main import connect, verified_user
 from ..trade_picks import stale_pick_trades
 from .discovery import reach
 from .friend_reads import card_facts
-from .loans import NOW, advance_revision
-from .owners import ensure_owner, lock_owners
+from .owners import NOW, advance_revision, begin_owner_command, ensure_owner, lock_owners
 
 router = APIRouter(prefix='/api/social/trades', tags=['social'])
 settings_router = APIRouter(prefix='/api/social/trade-settings', tags=['social'])
-
-COMMANDS_PER_HOUR = 120
 
 # Closed Trades the Trades list shows, newest first.
 HISTORY = 50
@@ -388,46 +384,18 @@ def read_trade(trade_id: UUID, user_id: str = Depends(verified_user)):
         return trade_view(conn, user_id, trade_id)
 
 
-def count_trade_command(conn, user_id: str) -> None:
-    """Counts one Trade step against the hourly limit: rows older than an hour pruned, and 429 TOO_MANY_CHANGES with
-    ``retry_after_minutes`` at the limit. The caller holds the collector's Trade command lock and has answered a
-    replay."""
-    conn.execute("""DELETE FROM handle_lookup_event
-      WHERE user_id=%s AND kind='trade_command' AND created_at < now() - interval '1 hour'""", (user_id,))
-    recent = conn.execute("""SELECT count(*) AS commands, min(created_at) AS oldest FROM handle_lookup_event
-      WHERE user_id=%s AND kind='trade_command'""", (user_id,)).fetchone()
-    if recent['commands'] >= COMMANDS_PER_HOUR:
-        wait = conn.execute("SELECT ceil(extract(epoch FROM %s + interval '1 hour' - now()) / 60) AS wait",
-                            (recent['oldest'],)).fetchone()['wait']
-        raise HTTPException(429, {'code': 'TOO_MANY_CHANGES', 'retry_after_minutes': max(1, int(wait))})
-    conn.execute("INSERT INTO handle_lookup_event(user_id,kind) VALUES (%s,'trade_command')", (user_id,))
-
-
-def begin_trade_command(conn, user_id: str, key: UUID, payload: dict):
-    """The start every Trade command shares: the caller's owner row made if new, the caller's Trade commands one at a
-    time, a replay answered from the caller's record, else the command counted. Returns (digest, stored response or
-    None)."""
-    ensure_owner(conn, user_id)
-    conn.execute("SELECT pg_advisory_xact_lock(hashtext('prizecheck.trade_command:' || %s))", (user_id,))
-    digest, stored = replay(conn, user_id, key, payload)
-    if stored is None:
-        count_trade_command(conn, user_id)
-    return digest, stored
-
-
 def store_trade(conn, user_id: str, key: UUID, digest: str, trade_id: UUID,
                 more: Mapping[str, object] | None = None) -> dict:
     """The Trade as the caller now sees it, recorded as the command's response. ``more``: JSON fields the calling step
     adds to its own answer, outside the Trade view; stored with it, so a replay answers them too."""
     stored = {**trade_view(conn, user_id, trade_id).model_dump(mode='json'), **(more or {})}
-    conn.execute('INSERT INTO location_command(owner_id,request_key,request_digest,response) VALUES (%s,%s,%s,%s)',
-                 (user_id, key, digest, json.dumps(stored)))
+    record_response(conn, user_id, key, digest, stored)
     return stored
 
 
 def run_trade_step(user_id: str, trade_id: UUID, step: TradeStep, action: str, apply, locks,
                    extra: dict | None = None, answer: Callable[[], Mapping[str, object]] | None = None) -> dict:
-    """Runs one step on an existing Trade: ``begin_trade_command``, the owners ``locks(role, row)`` names locked in
+    """Runs one step on an existing Trade: ``begin_owner_command``, the owners ``locks(role, row)`` names locked in
     ascending order, then the Trade row, its revision and ``allowed`` checked, then ``apply(conn, row)``, then the Trade
     row written once (``write_trade``), and the caller's view stored and returned. ``extra``: the step's own fields,
     part of its digest. ``answer``: called after ``apply``, it names JSON fields the step adds to its own answer (stored
@@ -440,7 +408,7 @@ def run_trade_step(user_id: str, trade_id: UUID, step: TradeStep, action: str, a
     payload = {'action': f'trade_{action}', 'trade_id': str(trade_id), 'revision': step.revision, **(extra or {})}
     try:
         with connect() as conn, conn.transaction():
-            digest, stored = begin_trade_command(conn, user_id, step.idempotency_key, payload)
+            digest, stored = begin_owner_command(conn, user_id, step.idempotency_key, payload, 'trade')
             if stored is not None:
                 return stored
             sides = conn.execute(TRADES + ' AND t.id = %(id)s', {'me': user_id, 'id': trade_id}).fetchone()

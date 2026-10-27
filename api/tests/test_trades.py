@@ -18,7 +18,7 @@ import pytest
 
 from app.main import connect  # noqa: F401  (main first: it includes every router while loading)
 from app import trade_inventory
-from app.social import conversations, trades
+from app.social import conversations, owners, trades
 from stranger_fixtures import far_zip, propose_to, strangers, trader_of
 from test_catalog_targets import isolated_rules  # noqa: F401  (an autouse fixture)
 from test_deck_cost import launches, store  # noqa: F401  (autouse fixtures)
@@ -620,20 +620,20 @@ def _waiting_on_a_lock(watch, submitted):
         time.sleep(0.01)
 
 
-def _without_command_lock(conn, user_id, key, payload):
-    """``trades.begin_trade_command`` without the caller's command lock: the owner row is the only lock left between
+def _without_command_lock(conn, user_id, key, payload, kind):
+    """``owners.begin_owner_command`` without the caller's command lock: the owner row is the only lock left between
     two of one collector's Trade steps."""
-    trades.ensure_owner(conn, user_id)
-    digest, stored = trades.replay(conn, user_id, key, payload)
+    owners.ensure_owner(conn, user_id)
+    digest, stored = owners.replay(conn, user_id, key, payload)
     if stored is None:
-        trades.count_trade_command(conn, user_id)
+        owners.count_owner_command(conn, user_id, f'{kind}_command')
     return digest, stored
 
 
 @pytest.mark.parametrize('command_lock', [True, False])
 def test_two_sends_of_the_same_copies_run_one_after_the_other(store, monkeypatch, command_lock):
     if not command_lock:
-        monkeypatch.setattr(trade_inventory, 'begin_trade_command', _without_command_lock)
+        monkeypatch.setattr(trade_inventory, 'begin_owner_command', _without_command_lock)
         # The send's new-conversation advisory lock would also serialise the two; only the owner row is left to test.
         monkeypatch.setattr(trade_inventory, 'new_conversation_lock', lambda conn, user_id: None)
         # ...and open_conversation's check of it.
@@ -965,7 +965,7 @@ def test_an_accept_and_a_withdraw_of_one_proposal_run_one_after_the_other(store,
 @pytest.mark.parametrize('command_lock', [True, False])
 def test_two_accepts_of_one_proposal_run_one_after_the_other(store, monkeypatch, command_lock):
     if not command_lock:
-        monkeypatch.setattr(trades, 'begin_trade_command', _without_command_lock)
+        monkeypatch.setattr(trades, 'begin_owner_command', _without_command_lock)
     ids, ash, misty, binder, box = trading()
     iono, arven = ids['PAL 185'], ids['SVI 166']
     trade = proposed(misty, ash, give=[(iono, 1)], get=[(arven, 2)])
