@@ -9,6 +9,7 @@ from uuid import UUID
 
 import psycopg
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from psycopg.rows import dict_row
 
@@ -62,8 +63,8 @@ class OwnerCatalogStatus(BaseModel):
     pending_reviews: list[CatalogReview]
 
 
-def connect():
-    return psycopg.connect(os.environ["DATABASE_URL"], row_factory=dict_row)
+def connect(**options):
+    return psycopg.connect(os.environ["DATABASE_URL"], row_factory=dict_row, **options)
 
 
 async def verified_user(
@@ -90,7 +91,14 @@ async def verified_user(
     return x_internal_user
 
 
-app = FastAPI(title="PrizeCheck API", version="0.1.0")
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    yield
+    # Give counts still queued a short, bounded time to reach PostgreSQL, then stop the writer thread.
+    await run_in_threadpool(operation_counter.stop)
+
+
+app = FastAPI(title="PrizeCheck API", version="0.1.0", lifespan=lifespan)
 
 
 @app.get("/api/health", response_model=HealthResponse)
@@ -281,6 +289,9 @@ app.include_router(trade_reports_admin_router)
 
 
 from .price_budget import is_budgeted  # noqa: E402
+from .operation_counts import Count, DatabaseWriter, counter as operation_counter  # noqa: E402
+
+operation_counter.set_writer(DatabaseWriter(lambda **options: connect(**options)))
 
 
 @app.middleware('http')
@@ -288,22 +299,13 @@ async def bounded_operational_counts(request: Request,call_next):
     started = time.perf_counter()
     response = await call_next(request)
     # Anonymous projection requests must never wake the private database.
-    # Budgeted routes (prices) are exempt: this write is a synchronous PostgreSQL connect on the event loop before the
-    # response is sent, which would spend their three seconds and make a read route write.
+    # Budgeted routes (prices) are exempt: a count is a read route writing, and their three seconds are spent.
+    # The count is only handed to the background writer (app/operation_counts.py); nothing here waits on PostgreSQL.
     if request.url.path.startswith('/api/') and not request.url.path.startswith('/api/public/') and request.url.path!='/api/health' \
             and not is_budgeted(request.method, request.url.path):
-        try:
-            with connect() as conn:
-                conn.execute("""INSERT INTO operations_hour(hour,requests,failures,authorization_denials,elapsed_ms)
-                  VALUES(date_trunc('hour',now()),1,%s,%s,%s)
-                  ON CONFLICT(hour) DO UPDATE SET requests=operations_hour.requests+1,
-                  failures=operations_hour.failures+excluded.failures,
-                  authorization_denials=operations_hour.authorization_denials+excluded.authorization_denials,
-                  elapsed_ms=operations_hour.elapsed_ms+excluded.elapsed_ms""",
-                  (int(response.status_code>=500),int(response.status_code in (401,403)),int((time.perf_counter()-started)*1000)))
-                if response.status_code>=500 and '/publication' in request.url.path:
-                    conn.execute('UPDATE operations_state SET projection_failures=projection_failures+1 WHERE singleton')
-                conn.execute("DELETE FROM operations_hour WHERE hour<now()-interval '48 hours'")
-        except psycopg.Error:
-            pass
+        operation_counter.record(Count(
+            failures=int(response.status_code>=500),
+            authorization_denials=int(response.status_code in (401,403)),
+            elapsed_ms=int((time.perf_counter()-started)*1000),
+            projection_failures=int(response.status_code>=500 and '/publication' in request.url.path)))
     return response

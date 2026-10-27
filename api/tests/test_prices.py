@@ -4,7 +4,7 @@ from decimal import Decimal
 
 import pytest
 
-from app.main import app, connect  # noqa: F401  (main first: it includes the prices router while loading)
+from app.main import app, connect, operation_counter  # noqa: F401  (main first: it includes the prices router while loading)
 from app.price_budget import Budget
 from app.prices import format_usd, parse_amount, validate_quote
 from app.public_records import QuoteState
@@ -693,6 +693,7 @@ def test_an_under_one_hour_read_writes_nothing_and_contacts_nothing_but_postgres
     tables = ("catalog_edition", "catalog_edition_metadata", "catalog_printing", "catalog_public_outbox", "operations_hour")
 
     def stamps():
+        operation_counter.flush()  # counts from earlier requests are written in the background
         with connect() as conn:
             return {t: sorted(r["x"] for r in conn.execute(f"SELECT xmin::text||':'||ctid::text AS x FROM {t}")) for t in tables}
     before = stamps()
