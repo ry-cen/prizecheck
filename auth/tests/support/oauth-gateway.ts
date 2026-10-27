@@ -48,6 +48,8 @@ export async function freePort(): Promise<number> {
 }
 
 export type GatewayOptions = {
+  /** Externally owned, already migrated database; this fixture never drops it. */
+  databaseUrl?: string;
   /** Load auth/testing/oauth-fake/preload.ts before the gateway (default true). */
   preload?: boolean;
   /** Extra or overriding environment; `undefined` removes a variable. */
@@ -57,7 +59,8 @@ export type GatewayOptions = {
 export type TestGateway = {
   /** Where the test reaches the gateway; also its PUBLIC_ORIGIN. */
   base: string;
-  /** A pool on this gateway's own database. */
+  databaseUrl: string;
+  /** A pool on the same database used by the gateway process. */
   pool: Pool;
   /** Paths the gateway forwarded to the FastAPI stand-in. */
   apiPaths: string[];
@@ -78,13 +81,19 @@ function run(command: string, args: string[], env: NodeJS.ProcessEnv) {
 export async function startGateway(
   options: GatewayOptions = {}
 ): Promise<TestGateway> {
+  if (Object.hasOwn(options.env || {}, "DATABASE_URL"))
+    throw new Error(
+      "Use GatewayOptions.databaseUrl instead of env.DATABASE_URL"
+    );
   const admin = new Pool({ connectionString: process.env.DATABASE_URL });
   const database = "tcg_oauth_" + randomUUID().replaceAll("-", "");
   const directory = mkdtempSync(join(tmpdir(), "tcg-oauth-"));
   const mailFile = join(directory, "mail");
-  await admin.query(`CREATE DATABASE "${database}"`);
-  const connection = new URL(process.env.DATABASE_URL!);
-  connection.pathname = "/" + database;
+  const connection = new URL(options.databaseUrl || process.env.DATABASE_URL!);
+  if (!options.databaseUrl) {
+    await admin.query(`CREATE DATABASE "${database}"`);
+    connection.pathname = "/" + database;
+  }
   const pool = new Pool({ connectionString: connection.toString() });
   const apiPaths: string[] = [];
   const api: Server = createHttpServer((request, response) => {
@@ -125,12 +134,13 @@ export async function startGateway(
     }
     await new Promise((resolve) => api.close(resolve));
     await pool.end();
-    await dropDatabase(admin, database);
+    if (!options.databaseUrl) await dropDatabase(admin, database);
     await admin.end();
     rmSync(directory, { recursive: true, force: true });
   };
   try {
-    await run(".venv/bin/python", ["scripts/migrate.py"], env);
+    if (!options.databaseUrl)
+      await run(".venv/bin/python", ["scripts/migrate.py"], env);
     const preload =
       options.preload === false
         ? []
@@ -150,7 +160,15 @@ export async function startGateway(
     );
     if (!ready) throw new Error("Gateway did not start");
     await ready.body?.cancel();
-    return { base, pool, apiPaths, mailFile, logs: () => output, stop };
+    return {
+      base,
+      databaseUrl: connection.toString(),
+      pool,
+      apiPaths,
+      mailFile,
+      logs: () => output,
+      stop,
+    };
   } catch (error) {
     await stop();
     throw new Error(

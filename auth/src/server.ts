@@ -15,6 +15,7 @@ import {
   providers,
   publicSignup,
   rateLimits,
+  removeSignIn,
   SIGN_IN_PAGE,
 } from "./auth.js";
 import { betterRequest, relay } from "./betterRelay.js";
@@ -29,7 +30,6 @@ import {
   linkedSignIns,
   sameSiteStart,
   SIGN_INS_PAGE,
-  unlinkPlan,
   type AccountRow,
   startFailureUrl,
 } from "./signIns.js";
@@ -520,38 +520,17 @@ const server = createServer(async (request, response) => {
         return json(response, 401, { error: "Authentication required" });
       if (!isFresh(current.session.createdAt))
         return json(response, 403, { code: "recent_sign_in_required" });
-      const plan = unlinkPlan(
-        await listAccounts(request),
-        provider.id,
-        providers
-      );
-      if (plan.kind === "not-linked")
+      const result = await removeSignIn({
+        userId: current.user.id,
+        sessionId: current.session.id,
+        providerId: provider.id,
+      });
+      if (result.kind === "not-linked")
         return json(response, 404, { error: "Not found" });
-      if (plan.kind === "last")
+      if (result.kind === "last")
         return json(response, 400, { code: "FAILED_TO_UNLINK_LAST_ACCOUNT" });
-      for (const accountId of plan.accountIds) {
-        const result = await auth.handler(
-          betterRequest(
-            origin,
-            request,
-            "/api/auth/unlink-account",
-            JSON.stringify({ accountId }),
-            { originHeader: origin }
-          )
-        );
-        if (result.ok) continue;
-        // Better Auth's own checks are the second layer: the same freshness rule, and the last account.
-        const refusal = (await result.json().catch(() => null)) as {
-          code?: unknown;
-        } | null;
-        if (refusal?.code === "SESSION_NOT_FRESH")
-          return json(response, 403, { code: "recent_sign_in_required" });
-        if (refusal?.code === "FAILED_TO_UNLINK_LAST_ACCOUNT")
-          return json(response, 400, {
-            code: "FAILED_TO_UNLINK_LAST_ACCOUNT",
-          });
-        throw new Error("Unlink failed");
-      }
+      if (result.kind === "not-fresh")
+        return json(response, 403, { code: "recent_sign_in_required" });
       return json(response, 200, { unlinked: provider.id });
     }
     if (path === "/auth/approval-code" && request.method === "POST") {
