@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { launch, serverReady } from "./support/servers";
+import { launch, serverReady, waitUntil } from "./support/servers";
 
 // The signed-out Invite Link page (social network #246): the gateway serves /api/public/invites/<token> from the
 // public records store, under the public read limiter, with no session lookup, and nothing behind it wakes PostgreSQL.
@@ -147,7 +147,8 @@ assert store.compare_and_swap({key: found[key].version}, {key: {'display_name': 
         expect(wakeups).toBe(baseline);
         // Control: a private route does wake the database, so the counter is live.
         await fetch(`http://127.0.0.1:${apiPort}/api/locations`);
-        expect(wakeups).toBeGreaterThan(baseline);
+        // The API counts the request in the background, after the response.
+        expect(await waitUntil(() => wakeups > baseline)).toBe(true);
       } finally {
         for (const child of children) {
           if (child.exitCode === null && child.signalCode === null) {

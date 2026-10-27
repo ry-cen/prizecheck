@@ -61,6 +61,17 @@ export async function waitForServer(
   }
 }
 
+/** Waits until `done()` holds, polling every 50 ms up to a 10 s deadline rather than an attempt count, and returns
+ * whether it did. For effects that land after the response, such as the API's background operational count. */
+export async function waitUntil(done: () => boolean): Promise<boolean> {
+  const deadline = performance.now() + 10_000;
+  while (!done()) {
+    if (performance.now() > deadline) return false;
+    await sleep(50);
+  }
+  return true;
+}
+
 /** waitForServer for a server that must come up: fails naming `url` when it never answers as `accept` wants (by
  * default with a 2xx status), and discards the answer. */
 export async function serverReady(
