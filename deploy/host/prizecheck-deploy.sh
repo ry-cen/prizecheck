@@ -1,6 +1,8 @@
 #!/bin/bash
-# PrizeCheck deployment driver for the Unraid host. Installed at $PRIZECHECK_HOME/bin/prizecheck-deploy.sh next to
-# $PRIZECHECK_HOME/compose.deploy.yml and $PRIZECHECK_HOME/prizecheck.env. See docs/deployment-unraid.md.
+# PrizeCheck deployment driver: one script for the Unraid dev host (docs/deployment-unraid.md) and the Oracle production
+# host (docs/deployment-oracle.md). Installed at $PRIZECHECK_HOME/bin/prizecheck-deploy.sh (from deploy/host/) next to
+# $PRIZECHECK_HOME/compose.deploy.yml and $PRIZECHECK_HOME/prizecheck.env; production also installs compose.prod.yml.
+# PRIZECHECK_ENVIRONMENT in the env file selects dev (the default) or prod.
 #
 # CI reaches this script only through a forced SSH command (`--ssh-gate`), which allows exactly:
 #   deploy <40-hex commit> <64-hex bundle digest>   (stdin: one line "<user> <token>" for a read-only GHCR login)
@@ -65,16 +67,106 @@ compose_cmd() {
   elif command -v docker-compose >/dev/null 2>&1; then
     COMPOSE=(docker-compose)
   else
-    die "Docker Compose v2 not found; install it (docs/deployment-unraid.md, step 2)"
+    die "Docker Compose v2 not found; install it ($GUIDE)"
   fi
 }
 
-load_config() {
-  [[ -f "$COMPOSE_FILE" ]] || die "Missing $COMPOSE_FILE"
-  [[ -f "$ENV_FILE" ]] || die "Missing $ENV_FILE (copy deploy/unraid/prizecheck.env.example)"
-  if [[ "$(stat -c '%a' "$ENV_FILE")" != "600" ]]; then
+# Portable between GNU and BSD stat, so the config checks also run in the repository's tests on a Mac.
+file_mode() { stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1"; }
+
+# Sets ENVIRONMENT (dev unless the env file says prod), the compose files it uses, and the compose arguments.
+read_environment() {
+  ENVIRONMENT=dev
+  if [[ -f "$ENV_FILE" ]]; then
+    ENVIRONMENT="$(env_value PRIZECHECK_ENVIRONMENT)"; ENVIRONMENT="${ENVIRONMENT:-dev}"
+  fi
+  case "$ENVIRONMENT" in
+    dev)
+      COMPOSE_FILES=("$COMPOSE_FILE")
+      GUIDE="docs/deployment-unraid.md" ;;
+    prod)
+      COMPOSE_FILES=("$COMPOSE_FILE" "$PRIZECHECK_HOME/compose.prod.yml")
+      GUIDE="docs/deployment-oracle.md" ;;
+    *) die "PRIZECHECK_ENVIRONMENT must be dev or prod" ;;
+  esac
+  COMPOSE_ARGS=(--project-directory "$PRIZECHECK_HOME" --env-file "$ENV_FILE")
+  local file
+  for file in "${COMPOSE_FILES[@]}"; do
+    COMPOSE_ARGS+=(-f "$file")
+  done
+}
+
+# Same value as env_value, with surrounding whitespace trimmed the way the auth gateway reads it.
+trimmed_value() {
+  local value
+  value="$(env_value "$1")"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  printf '%s' "$value"
+}
+
+# Production refuses what the auth gateway would reject under NODE_ENV=production (auth/src/auth.ts, server.ts,
+# providers.ts) so a bad file fails here with a clear message instead of as a crash loop. Messages name keys, never values.
+check_production_env() {
+  local project origin mail_mode email_sign_in relay_url relay_token mail_from
+  # Kept in variables: bash 3.2 (the repository's tests run on a Mac) wants a quoted-free pattern.
+  local origin_pattern='^https://[A-Za-z0-9.-]+(:[0-9]+)?$'
+  local relay_pattern='^https://[^/?#@]+(/[^@]*)?$'
+  project="$(trimmed_value PRIZECHECK_PROJECT)"
+  [[ -n "$project" && "$project" =~ ^[a-z0-9][a-z0-9_-]*$ && "$project" != prizecheck-dev ]] \
+    || die "PRIZECHECK_PROJECT must be set to a project of its own (for example prizecheck-prod), not prizecheck-dev"
+  origin="$(trimmed_value PUBLIC_ORIGIN)"
+  [[ "$origin" =~ $origin_pattern ]] \
+    || die "PUBLIC_ORIGIN must be https://host[:port] with no path in production"
+  mail_mode="$(trimmed_value MAIL_MODE)"
+  [[ -z "$mail_mode" || "$mail_mode" == http ]] \
+    || die "MAIL_MODE must be http or empty in production: the gateway refuses file and console mail under NODE_ENV=production"
+  email_sign_in="$(trimmed_value EMAIL_SIGN_IN)"
+  [[ -z "$email_sign_in" || "$email_sign_in" == on || "$email_sign_in" == off ]] \
+    || die "EMAIL_SIGN_IN must be on or off"
+  local provider id secret providers=0
+  for provider in GOOGLE DISCORD; do
+    id="$(trimmed_value "${provider}_CLIENT_ID")"; secret="$(trimmed_value "${provider}_CLIENT_SECRET")"
+    if [[ -n "$id" && -n "$secret" ]]; then
+      providers=$((providers + 1))
+    elif [[ -n "$id" || -n "$secret" ]]; then
+      die "${provider}_CLIENT_ID and ${provider}_CLIENT_SECRET must be set together"
+    fi
+  done
+  relay_url="$(trimmed_value MAIL_RELAY_URL)"
+  relay_token="$(trimmed_value MAIL_RELAY_TOKEN)"
+  mail_from="$(trimmed_value MAIL_FROM)"
+  if [[ -n "$relay_url" ]]; then
+    [[ "$relay_url" =~ $relay_pattern ]] \
+      || die "MAIL_RELAY_URL must be an https URL without embedded credentials"
+  fi
+  local cap_key cap
+  for cap_key in DAILY_SIGNUP_CAP DAILY_SEND_CAP; do
+    cap="$(trimmed_value "$cap_key")"
+    [[ -z "$cap" || "$cap" =~ ^[0-9]+$ ]] || die "$cap_key must be a whole number"
+  done
+  if [[ "$email_sign_in" == on ]]; then
+    [[ -n "$relay_url" && -n "$relay_token" && -n "$mail_from" ]] \
+      || die "EMAIL_SIGN_IN=on needs MAIL_RELAY_URL, MAIL_RELAY_TOKEN and MAIL_FROM in production"
+  elif [[ "$providers" -eq 0 ]]; then
+    die "No sign-in method: set GOOGLE_* or DISCORD_* client credentials, or EMAIL_SIGN_IN=on with a mail relay"
+  fi
+  if [[ -z "$relay_url" || -z "$relay_token" || -z "$mail_from" ]]; then
+    log "WARNING: no mail relay; owner catalog approval codes cannot be delivered until MAIL_RELAY_URL, MAIL_RELAY_TOKEN and MAIL_FROM are set"
+  fi
+}
+
+# Every check on the env file and the host's files; makes no docker call, so `check-config` runs it anywhere.
+validate_config() {
+  [[ -f "$ENV_FILE" ]] || die "Missing $ENV_FILE (copy deploy/host/prizecheck-<dev|prod>.env.example)"
+  if [[ "$(file_mode "$ENV_FILE")" != "600" ]]; then
     die "$ENV_FILE must be mode 600"
   fi
+  read_environment
+  local file
+  for file in "${COMPOSE_FILES[@]}"; do
+    [[ -f "$file" ]] || die "Missing $file"
+  done
   local key
   for key in PRIZECHECK_DATA_DIR POSTGRES_PASSWORD BETTER_AUTH_SECRET INTERNAL_AUTH_SECRET OWNER_EMAIL PUBLIC_ORIGIN; do
     [[ -n "$(env_value "$key")" ]] || die "$key is not set in $ENV_FILE"
@@ -90,25 +182,36 @@ load_config() {
   DATA_DIR="$(env_value PRIZECHECK_DATA_DIR)"
   WEB_PORT="$(env_value PRIZECHECK_WEB_PORT)"; WEB_PORT="${WEB_PORT:-8088}"
   WEB_BIND="$(env_value PRIZECHECK_WEB_BIND)"; WEB_BIND="${WEB_BIND:-127.0.0.1}"
-  # The app must stay off the LAN: loopback, or docker0's own address for a containerized Tailscale.
-  if [[ "$WEB_BIND" != 127.0.0.1 ]]; then
+  if [[ "$ENVIRONMENT" == prod ]]; then
+    # Docker-published ports bypass the host firewall, so only loopback keeps the app behind Caddy.
+    [[ "$WEB_BIND" == 127.0.0.1 ]] \
+      || die "PRIZECHECK_WEB_BIND must be 127.0.0.1 in production: Caddy on this host is the only public entry"
+  elif [[ "$WEB_BIND" != 127.0.0.1 ]]; then
+    # The app must stay off the LAN: loopback, or docker0's own address for a containerized Tailscale.
     local bridge
     bridge="$(ip -4 -o addr show docker0 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n 1)"
     [[ -n "$bridge" && "$WEB_BIND" == "$bridge" ]] \
       || die "PRIZECHECK_WEB_BIND must be 127.0.0.1 or docker0's address (${bridge:-not found})"
   fi
+  if [[ "$ENVIRONMENT" == prod ]]; then
+    check_production_env
+  fi
   REGISTRY="$(env_value PRIZECHECK_REGISTRY)"; REGISTRY="${REGISTRY:-ghcr.io/ry-cen}"
-  [[ -d "$DATA_DIR" ]] || die "Data directory $DATA_DIR is missing (array or pool not mounted?)"
+  [[ -d "$DATA_DIR" ]] || die "Data directory $DATA_DIR is missing (storage not mounted?)"
   local sub
   for sub in postgres public price-runners mail; do
     [[ -d "$DATA_DIR/$sub" ]] || die "Missing $DATA_DIR/$sub; run '$SCRIPT_PATH setup'"
   done
+}
+
+load_config() {
+  validate_config
   mkdir -p "$STATE_DIR" "$BACKUP_DIR"
   compose_cmd
 }
 
 compose() {
-  "${COMPOSE[@]}" --project-directory "$PRIZECHECK_HOME" -f "$COMPOSE_FILE" --env-file "$ENV_FILE" "$@"
+  "${COMPOSE[@]}" "${COMPOSE_ARGS[@]}" "$@"
 }
 
 read_state() { [[ -f "$STATE_DIR/$1" ]] && cat "$STATE_DIR/$1" || true; }
@@ -126,7 +229,8 @@ take_lock() {
 valid_commit() { [[ "$1" =~ ^[0-9a-f]{40}$ ]]; }
 
 bundle_digest() {
-  cat "$COMPOSE_FILE" "$SCRIPT_PATH" | sha256sum | cut -d' ' -f1
+  read_environment
+  cat "${COMPOSE_FILES[@]}" "$SCRIPT_PATH" | sha256sum | cut -d' ' -f1
 }
 
 # --- Registry -----------------------------------------------------------------------------------------------------------
@@ -160,8 +264,7 @@ link_cli_plugins() {
 
 pull_images() {
   if [[ -n "$PULL_DOCKER_CONFIG" ]]; then
-    DOCKER_CONFIG="$PULL_DOCKER_CONFIG" "${COMPOSE[@]}" --project-directory "$PRIZECHECK_HOME" -f "$COMPOSE_FILE" \
-      --env-file "$ENV_FILE" pull --quiet "${PULL_SERVICES[@]}"
+    DOCKER_CONFIG="$PULL_DOCKER_CONFIG" "${COMPOSE[@]}" "${COMPOSE_ARGS[@]}" pull --quiet "${PULL_SERVICES[@]}"
   else
     compose pull --quiet "${PULL_SERVICES[@]}"
   fi
@@ -306,7 +409,7 @@ cmd_deploy() {
   [[ "$expected_bundle" =~ ^[0-9a-f]{64}$ ]] || die "deploy requires the 64-character bundle digest"
   load_config
   if [[ "$(bundle_digest)" != "$expected_bundle" ]]; then
-    die "Host deployment files differ from commit $commit; reinstall compose.deploy.yml and prizecheck-deploy.sh (docs/deployment-unraid.md, 'Updating the host files')"
+    die "Host deployment files differ from commit $commit; reinstall ${COMPOSE_FILES[*]##*/} and prizecheck-deploy.sh ($GUIDE, 'Updating the host files')"
   fi
   take_lock
   registry_login_from_stdin
@@ -398,8 +501,9 @@ cmd_status() {
 }
 
 cmd_setup() {
-  [[ -f "$ENV_FILE" ]] || die "Create $ENV_FILE first (deploy/unraid/prizecheck.env.example)"
+  [[ -f "$ENV_FILE" ]] || die "Create $ENV_FILE first (deploy/host/prizecheck-<dev|prod>.env.example)"
   chmod 600 "$ENV_FILE"
+  read_environment
   DATA_DIR="$(env_value PRIZECHECK_DATA_DIR)"
   [[ -n "$DATA_DIR" ]] || die "Set PRIZECHECK_DATA_DIR in $ENV_FILE"
   mkdir -p "$DATA_DIR"/{postgres,public,price-runners,mail} "$STATE_DIR" "$BACKUP_DIR"
@@ -440,8 +544,14 @@ cmd_init_store() {
 
 cmd_sign_in_code() {
   load_config
+  [[ "$ENVIRONMENT" != prod ]] || die "Production delivers codes by mail relay, not to a file"
   [[ -f "$DATA_DIR/mail/codes.jsonl" ]] || die "No codes delivered yet"
   tail -n "${1:-1}" "$DATA_DIR/mail/codes.jsonl"
+}
+
+cmd_check_config() {
+  validate_config
+  log "Configuration OK ($ENVIRONMENT)"
 }
 
 cmd_tool() {
@@ -471,6 +581,7 @@ Usage: $SCRIPT_PATH <command>
   sign-in-code [n]                 Show the newest n delivered sign-in/approval codes (MAIL_MODE=file)
   tool <script> [args]             Run a Python script in the current API image, e.g. tool /app/scripts/bind_owner.py <id>
   compose <args>                   Run docker compose for this stack, e.g. compose logs -f api
+  check-config                     Validate the env file and host files without touching Docker
   bundle-digest                    Print the digest CI must send for the installed host files
 EOF
 }
@@ -515,6 +626,7 @@ main() {
     init-store) cmd_init_store "$@" ;;
     tool) cmd_tool "$@" ;;
     compose) cmd_compose "$@" ;;
+    check-config) cmd_check_config ;;
     bundle-digest) bundle_digest ;;
     help|-h|--help) usage ;;
     *) usage; exit 2 ;;

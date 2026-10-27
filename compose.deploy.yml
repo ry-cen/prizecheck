@@ -1,8 +1,9 @@
-# Deployed PrizeCheck stack (Unraid dev today; a future production stack reuses this file with its own env file,
-# project name, data directory and port). Local development keeps using docker-compose.yml.
+# Deployed PrizeCheck stack. Unraid dev uses this file alone; Oracle production adds compose.prod.yml when its env file
+# says PRIZECHECK_ENVIRONMENT=prod. Each has its own env file, project name, data directory and port. Local
+# development keeps using docker-compose.yml.
 #
-# Run through deploy/unraid/prizecheck-deploy.sh, which supplies --env-file and PRIZECHECK_IMAGE_TAG.
-# See docs/deployment-unraid.md.
+# Run through deploy/host/prizecheck-deploy.sh, which supplies --env-file and PRIZECHECK_IMAGE_TAG.
+# See docs/deployment-unraid.md and docs/deployment-oracle.md.
 name: ${PRIZECHECK_PROJECT:-prizecheck-dev}
 
 x-logging: &logging
@@ -136,7 +137,8 @@ services:
     # The only published port. Loopback by default, for Tailscale Serve on the Unraid host.
     ports:
       - "${PRIZECHECK_WEB_BIND:-127.0.0.1}:${PRIZECHECK_WEB_PORT:-8088}:8080"
-    networks: [edge]
+    networks:
+      edge: {}
     depends_on:
       auth:
         condition: service_healthy

@@ -1,0 +1,32 @@
+# Production overlay for compose.deploy.yml (Oracle Cloud; docs/deployment-oracle.md). The host script adds it to
+# every compose call when the env file sets PRIZECHECK_ENVIRONMENT=prod. Keep 10.201.80.1 in step with
+# deploy/docker/nginx.conf's set_real_ip_from and 10.201.80.10 with TRUSTED_PROXY_IPS below
+# (tests/tooling/test_deploy_pipeline.py checks).
+services:
+  api:
+    environment:
+      NODE_ENV: production
+      # Activating a marketplace matching rule stays an owner approval unless the env file says automatic.
+      MARKETPLACE_MATCHING: ${MARKETPLACE_MATCHING:-off}
+  tools:
+    environment:
+      NODE_ENV: production
+      MARKETPLACE_MATCHING: ${MARKETPLACE_MATCHING:-off}
+  auth:
+    environment:
+      NODE_ENV: production
+      # The gateway refuses file and console mail under NODE_ENV=production.
+      MAIL_MODE: ${MAIL_MODE:-http}
+      # Only the web container's nginx may tell the gateway the client's address (X-Real-IP).
+      TRUSTED_PROXY_IPS: 10.201.80.10
+  web:
+    networks:
+      edge:
+        ipv4_address: 10.201.80.10
+networks:
+  edge:
+    ipam:
+      config:
+        - subnet: 10.201.80.0/24
+          ip_range: 10.201.80.128/25
+          gateway: 10.201.80.1

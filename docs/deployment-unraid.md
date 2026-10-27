@@ -52,8 +52,8 @@ Deploy state lives under `PRIZECHECK_HOME` (`state/current`, `state/previous`, `
 | -------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
 | `deploy/docker/{api,auth,web}.Dockerfile`, `deploy/docker/nginx.conf`, `.dockerignore` | Install Docker Compose on Unraid (step 2)                               |
 | `compose.deploy.yml`                                                                   | Create the directories and the env file on Unraid (steps 3 to 5)        |
-| `deploy/unraid/prizecheck-deploy.sh` (deploy, rollback, backup, operator helpers)      | Generate the deploy SSH key and install it as a forced command (step 6) |
-| `deploy/unraid/prizecheck.env.example`                                                 | Tailscale tag, policy, OAuth client and Serve (steps 7 and 9)           |
+| `deploy/host/prizecheck-deploy.sh` (deploy, rollback, backup, operator helpers)        | Generate the deploy SSH key and install it as a forced command (step 6) |
+| `deploy/host/prizecheck-dev.env.example`                                               | Tailscale tag, policy, OAuth client and Serve (steps 7 and 9)           |
 | `.github/workflows/deploy-dev.yml`; `verify.yml` made reusable                         | GitHub environment, secrets and variables (step 8)                      |
 | Health checks, smoke checks, pre-migration backups, automatic rollback                 | First deploy, owner binding, catalog import (steps 10 and 11)           |
 
@@ -108,7 +108,7 @@ scp compose.deploy.yml root@unraid:/mnt/cache/appdata/prizecheck-dev/compose.dep
 ```
 
 ```bash
-scp deploy/unraid/prizecheck-deploy.sh deploy/unraid/prizecheck.env.example root@unraid:/mnt/cache/appdata/prizecheck-dev/bin/
+scp deploy/host/prizecheck-deploy.sh deploy/host/prizecheck-dev.env.example root@unraid:/mnt/cache/appdata/prizecheck-dev/bin/
 ```
 
 The script finds its home as the parent of its `bin/` directory, so keep that layout. Steps 4 and 5 finish the setup.
@@ -132,7 +132,7 @@ The script uses this config only when CI hasn't supplied a token. Don't log in a
 On Unraid:
 
 ```bash
-cd /mnt/cache/appdata/prizecheck-dev && cp bin/prizecheck.env.example prizecheck.env && chmod 600 prizecheck.env
+cd /mnt/cache/appdata/prizecheck-dev && cp bin/prizecheck-dev.env.example prizecheck.env && chmod 600 prizecheck.env
 ```
 
 Generate three distinct secrets, one per command run:
@@ -313,7 +313,7 @@ A Tailscale container started with `--network=host` behaves like the host case. 
    On your workstation, in the same commit:
 
    ```bash
-   cat compose.deploy.yml deploy/unraid/prizecheck-deploy.sh | sha256sum
+   cat compose.deploy.yml deploy/host/prizecheck-deploy.sh | sha256sum
    ```
 
 2. Trigger the workflow by pushing to `dev`, or run it manually: **Actions → Deploy dev → Run workflow → branch `dev`, operation `deploy`**. The fast tier of the verification gate runs first, split over parallel jobs (about 5 minutes), then the images are built and the deploy runs. CI runs only the fast tier; run the full gate locally with `npm run verify`, or on CI from **Actions → Verify → Run workflow** with **full** ticked.

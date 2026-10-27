@@ -161,10 +161,20 @@ jobs:
           include-hidden-files: true
   # The scanner index job's image (deploy/docker/scanner-index.Dockerfile): builds it with the pinned embedder, then runs
   # the real-model test inside it. That test needs ONNX Runtime, which the API venv does not have, so no other leg runs it.
-  # Always runs, in full-gate runs too. deploy-dev.yml pushes the same image once this workflow has passed.
+  # It runs natively on both architectures, because production runs the arm64 image. Always runs, in full-gate runs too.
+  # deploy-dev.yml pushes the same image once this workflow has passed.
   scanner-index-image:
-    runs-on: ubuntu-latest
+    name: scanner-index-image (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            cache: ""
+          - runner: ubuntu-24.04-arm
+            cache: "-arm64"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -178,8 +188,8 @@ jobs:
           target: test
           load: true
           tags: prizecheck-scanner-index-test
-          cache-from: type=gha,scope=prizecheck-scanner-index-test
-          cache-to: type=gha,mode=max,scope=prizecheck-scanner-index-test
+          cache-from: type=gha,scope=prizecheck-scanner-index-test${{ matrix.cache }}
+          cache-to: type=gha,mode=max,scope=prizecheck-scanner-index-test${{ matrix.cache }}
       - name: Real-model test
         run: docker run --rm prizecheck-scanner-index-test
       - name: Build the job image
@@ -188,7 +198,7 @@ jobs:
           context: .
           file: deploy/docker/scanner-index.Dockerfile
           push: false
-          cache-from: type=gha,scope=prizecheck-scanner-index
+          cache-from: type=gha,scope=prizecheck-scanner-index${{ matrix.cache }}
   # The one check that stands for the whole run: pull requests and deploy-dev.yml's images job wait on "verify".
   # always() makes it run and fail after a failed or cancelled leg instead of being skipped with it, because a skipped
   # check counts as passing.

@@ -3,7 +3,8 @@
 **/.env.*
 !.env.example
 **/*.env
-deploy/unraid/
+deploy/host/
+deploy/oracle/
 
 .git/
 .github/
