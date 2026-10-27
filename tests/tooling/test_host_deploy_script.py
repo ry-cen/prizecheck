@@ -74,13 +74,8 @@ class HostDeployScriptTest(unittest.TestCase):
         code, output = self.check(PROD)
         self.assertEqual(code, 0, output)
         self.assertIn('Configuration OK (prod)', output)
-        self.assertIn(WARNING, output)
-
-    def test_the_no_relay_warning_goes_to_stderr(self):
-        result = self.run_script(self.make_home(PROD))
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn(WARNING, result.stderr)
-        self.assertNotIn(WARNING, result.stdout)
+        # With OAuth sign-in and email off, nothing is mailed, so a missing relay is not worth a warning.
+        self.assertNotIn(WARNING, output)
 
     def test_production_refuses_file_or_console_mail(self):
         for mode in ('file', 'console'):

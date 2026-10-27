@@ -64,7 +64,7 @@ Nothing in this guide has been run against an Oracle instance yet. Commands and 
 - **A Discord account** whose verified email address becomes `OWNER_EMAIL`.
 - **An SSH key** for your first login to the instance, and a Tailscale tailnet.
 
-Mail relay and approval codes: there's no mail relay in this setup, so the deploy script prints `WARNING: no mail relay; owner catalog approval codes cannot be delivered until MAIL_RELAY_URL, MAIL_RELAY_TOKEN and MAIL_FROM are set`. Emailed approval codes are being removed in a separate change; until then, treat that warning as expected. `MARKETPLACE_MATCHING` stays unset in production, so activating a marketplace matching rule needs an owner approval, and with no relay that approval's code can't be delivered. Removing emailed approval codes is a separate change; once it lands, activating a rule is a single owner click, and setting `MARKETPLACE_MATCHING=automatic` becomes optional.
+No mail relay: with OAuth sign-in and `EMAIL_SIGN_IN=off`, production sends no mail, so leave the `MAIL_RELAY_*` values out. Owner decisions (catalog reviews, missing cards, attribute and reprint decisions, marketplace rules) take effect on your click; none of them sends a code. `MARKETPLACE_MATCHING` stays unset in production, so you activate each marketplace matching rule yourself; setting `MARKETPLACE_MATCHING=automatic` is optional.
 
 ### Launch blockers that remain open
 
@@ -333,14 +333,13 @@ Then validate the file (no containers are touched; if Docker Compose is installe
 sudo bash /opt/prizecheck-prod/bin/prizecheck-deploy.sh check-config
 ```
 
-A good file ends with these lines, each prefixed with a timestamp:
+A good file ends with this line, prefixed with a timestamp:
 
 ```text
-WARNING: no mail relay; owner catalog approval codes cannot be delivered until MAIL_RELAY_URL, MAIL_RELAY_TOKEN and MAIL_FROM are set
 Configuration OK (prod)
 ```
 
-The warning is expected here (see [What you still have to supply](#what-you-still-have-to-supply)). Any `ERROR:` line names the key at fault, never its value; fix it and run the check again.
+Any `ERROR:` line names the key at fault, never its value; fix it and run the check again.
 
 ## 8. Allow the repository to pull the images
 
