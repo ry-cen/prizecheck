@@ -85,7 +85,7 @@ from uuid import uuid4  # noqa: E402
 
 import pytest  # noqa: E402
 
-from app.main import connect  # noqa: E402  (main first: it includes the export router while loading)
+from app.main import connect  # noqa: E402
 from app import deck_live_export  # noqa: E402
 from app.catalog_targets import LIVE, LIVE_RULES, LiveRulesV1, TargetContext, activate_rule, fingerprint, refresh_printing  # noqa: E402
 from app.main import connect  # noqa: E402

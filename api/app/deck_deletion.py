@@ -20,8 +20,9 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from .location_tree import cleaned_name, error, owner_and_rows, replay
-from .main import connect, verified_user
-from .moves import MAX_QUANTITY
+from .db import connect
+from .identity import verified_user
+from .inventory_core import MAX_QUANTITY
 from .social import counts
 
 router = APIRouter(prefix='/api/decks', tags=['decks'])

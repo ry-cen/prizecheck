@@ -50,7 +50,8 @@ from . import card_attributes
 from . import format_evaluator as evaluator
 from .card_attributes import attribute_revision, read_card_attributes
 from .location_tree import error
-from .main import connect, verified_user
+from .db import connect
+from .identity import verified_user
 
 router = APIRouter(prefix='/api/decks', tags=['decks'])
 

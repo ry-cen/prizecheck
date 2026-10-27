@@ -6,20 +6,23 @@ newest ``UNDO_LIMIT`` records, and only the newest can be undone.
 """
 import hashlib
 import json
-from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
+from uuid import UUID, uuid4
 
 import psycopg
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
-from .main import connect, verified_user
-from .social import counts
+from .api_errors import api_error
+from .db import connect
+from .identity import verified_user
+from .idempotency import expire
+# Moved to inventory_core; other modules and branches still import these names from here.
+from .inventory_core import (MAX_QUANTITY, REPLAY, UNDO_LIMIT, check_promises, first_non_leaf, is_deck, leaf, lock_owner,
+                             quantity, record_undo, undo_id_for)
 
 router = APIRouter(prefix="/api/moves", tags=["moves"])
-MAX_QUANTITY = 2**63 - 1
+fail = api_error  # other modules import moves.fail
 MAX_BATCH = 500
-# Inventory Undo keeps this many records per owner, newest first (the five-record limit).
-UNDO_LIMIT = 5
 
 
 class StartMove(BaseModel):
@@ -63,164 +66,14 @@ class MoveResult(BaseModel):
     undo_id: UUID | None = None
 
 
-def fail(status: int, code: str, **detail):
-    """Raise the API error. Optional detail names the affected source, Card Edition or destination."""
-    raise HTTPException(status, {"code": code, **{key: str(value) for key, value in detail.items() if value is not None}})
-
-
-def quantity(raw: str) -> int:
-    if not raw or not raw.isascii() or not raw.isdecimal() or len(raw) > 19:
-        fail(422, "INVALID_QUANTITY")
-    value = int(raw)
-    if value < 1 or value > MAX_QUANTITY:
-        fail(422, "INVALID_QUANTITY")
-    return value
-
-
-def undo_id_for(user_id: str, key: UUID) -> UUID:
-    """The id of the Undo record a Move or Removal with this idempotency key creates. It is derived, not
-    stored, so a replay reports it without a migration; the owner in the name keeps ids apart across owners."""
-    return uuid5(NAMESPACE_URL, f"prizecheck:inventory-undo:{user_id}:{key}")
-
-
-def record_undo(conn, user_id: str, undo_id: UUID, action: str, destination_id: UUID | None, sources: list,
-                payload: str, returns_as_surplus: bool = False):
-    """Writes one Inventory Undo record in the caller's transaction and keeps this owner's newest UNDO_LIMIT, after
-    dropping expired ones.
-
-    `payload` is the record's items as JSON text, with quantities as text so no JSON reader rounds them. A Move or
-    Removal names each item's source, ``{source_id, edition_id, quantity}``, and `sources` lists the distinct
-    sources: the record's source_id is set only for a single source, so readers from before migration 026 treat a
-    multi-source record as incompatible. An add (migration 046) has no sources: its items are
-    ``{edition_id, quantity}``, source_id is NULL, source_count 0, and `destination_id` is the Location the copies
-    went to. `returns_as_surplus` marks a Put away (migration 047): undoing it returns the copies to their Deck
-    without covering them on its Deck List."""
-    conn.execute("DELETE FROM inventory_undo WHERE owner_id=%s AND expires_at<=clock_timestamp()", (user_id,))
-    conn.execute("""INSERT INTO inventory_undo(id,owner_id,action,source_id,destination_id,source_count,payload,
-        returns_as_surplus) VALUES (%s,%s,%s,%s,%s,%s,%s::jsonb,%s)""",
-                 (undo_id, user_id, action, sources[0] if len(sources) == 1 else None, destination_id, len(sources),
-                  payload, returns_as_surplus))
-    conn.execute("""DELETE FROM inventory_undo WHERE owner_id=%s AND id NOT IN
-      (SELECT id FROM inventory_undo WHERE owner_id=%s ORDER BY created_at DESC,id DESC LIMIT %s)""",
-                 (user_id, user_id, UNDO_LIMIT))
-
-
-def check_promises(conn, user_id: str, losing: dict) -> None:
-    """Refuses with 409 when taking ``losing`` copies ({Edition id: copies}) out of the owner's Collection would leave
-    fewer copies of an Edition than open Loans and Trades promise (``counts.reserved_counts``; spec "Lender-side data",
-    trading #268): PROMISED_TO_TRADE when an open Trade promises some of that Edition's copies
-    (``counts.trade_reserved_counts``), otherwise PROMISED_TO_LOAN. The detail names the lowest such Edition and how
-    many copies are promised, Loans and Trades together. Inventory Removal, the Undo of an add and Edition reassignment
-    call it under the owner lock before they write; Moves don't, because where a copy is doesn't matter to a promise.
-    The deferred triggers of migrations 106 and 142 are the backstop."""
-    editions = sorted(edition for edition, copies in losing.items() if copies > 0)
-    promised = counts.reserved_counts(conn, user_id, editions) if editions else {}
-    if not promised:
-        return
-    held = {row['edition_id']: row['copies'] for row in conn.execute(
-        'SELECT edition_id,sum(quantity) AS copies FROM holding WHERE owner_id=%s AND edition_id=ANY(%s) GROUP BY edition_id',
-        (user_id, sorted(promised)))}
-    for edition in sorted(promised):
-        if held.get(edition, 0) - losing[edition] < promised[edition]:
-            traded = counts.trade_reserved_counts(conn, user_id, [edition]).get(edition, 0)
-            fail(409, 'PROMISED_TO_TRADE' if traded > 0 else 'PROMISED_TO_LOAN', edition_id=edition,
-                 promised=promised[edition])
-
-
-class HoldingShort(RuntimeError):
-    """``take_out`` found a Holding with fewer copies than its caller checked were there: a bug, never a refusal."""
-
-
-def take_out(conn, user_id: str, items: list[tuple[UUID, UUID, int]], revision: int) -> int:
-    """Takes copies out of the owner's Holdings, ``items`` as (Location id, Edition id, copies), with no destination and
-    no Inventory Undo record: a lender's handover (social network #253), whose copies then sit in no Location. The
-    writes are a Removal's. The caller holds the owner lock, read ``revision`` under it and checked every Holding holds
-    its copies; ``items`` name each (Location, Edition) once. A Holding short of its copies raises ``HoldingShort``
-    rather than leave it as it was, so the caller's transaction rolls back. Returns the owner's new revision, which the
-    changed Holdings take as their version."""
-    new_revision = revision + 1
-    for location, edition, copies in items:
-        changed = conn.execute('DELETE FROM holding WHERE owner_id=%s AND location_id=%s AND edition_id=%s '
-                               'AND quantity=%s', (user_id, location, edition, copies)).rowcount
-        if not changed:
-            changed = conn.execute('UPDATE holding SET quantity=quantity-%s,version=%s '
-                                   'WHERE owner_id=%s AND location_id=%s AND edition_id=%s AND quantity>%s',
-                                   (copies, new_revision, user_id, location, edition, copies)).rowcount
-        if changed != 1:
-            raise HoldingShort(f'Holding ({location}, {edition}) holds fewer than {copies} copies')
-    conn.execute('UPDATE inventory_owner SET revision=%s WHERE user_id=%s', (new_revision, user_id))
-    return new_revision
-
-
-def put_back(conn, user_id: str, items: list[tuple[UUID, UUID, int]], revision: int) -> int:
-    """Puts copies back into the owner's Holdings, ``items`` as (Storage Leaf id, Edition id, copies), with no Inventory
-    Undo record: taking back a lender's handover (#253), and from #255 a lender's return. Copies returning to a Deck come
-    back as surplus, as a Put away's Undo does (migration 047): no Deck List line changes. The caller holds the owner
-    lock, read ``revision`` under it and checked every Location is one of the owner's Storage Leaves. Returns the new
-    revision."""
-    new_revision = revision + 1
-    conn.execute("SELECT set_config('tcg.undo_returns_surplus','on',true)")
-    for location, edition, copies in items:
-        conn.execute('INSERT INTO holding(owner_id,location_id,edition_id,quantity,version) VALUES (%s,%s,%s,%s,%s) '
-                     'ON CONFLICT(owner_id,location_id,edition_id) DO UPDATE '
-                     'SET quantity=holding.quantity+excluded.quantity,version=excluded.version',
-                     (user_id, location, edition, copies, new_revision))
-    conn.execute("SELECT set_config('tcg.undo_returns_surplus','off',true)")
-    conn.execute('UPDATE inventory_owner SET revision=%s WHERE user_id=%s', (new_revision, user_id))
-    return new_revision
-
-
-def add_in(conn, user_id: str, location_id: UUID, items: list[tuple[UUID, int]], new_revision: int) -> None:
-    """Adds newly owned copies to one of the owner's Storage Leaves or Decks, ``items`` as (Edition id, copies), with no
-    Inventory Undo record: the cards a Trade's Confirm swap brings in (Trading #272). It is ``put_back``'s Holding
-    upsert without the surplus setting, so copies arriving in a Deck raise its Deck List lines as an Add does (migrations
-    031 and 047). The caller holds the owner lock, checked ``location_id`` is one of the owner's Storage Leaves or Decks
-    (``leaf``) and names each Edition once; ``new_revision`` is the revision the step moves to (``take_out``'s answer
-    when the same step took copies out, else the revision it read plus one), which the changed Holdings take as their
-    version, so the step advances the owner's revision exactly once."""
-    for edition, copies in items:
-        conn.execute('INSERT INTO holding(owner_id,location_id,edition_id,quantity,version) VALUES (%s,%s,%s,%s,%s) '
-                     'ON CONFLICT(owner_id,location_id,edition_id) DO UPDATE '
-                     'SET quantity=holding.quantity+excluded.quantity,version=excluded.version',
-                     (user_id, location_id, edition, copies, new_revision))
-    conn.execute('UPDATE inventory_owner SET revision=%s WHERE user_id=%s', (new_revision, user_id))
-
-
-def lock_owner(conn, user_id: str):
-    conn.execute("INSERT INTO inventory_owner(user_id) VALUES (%s) ON CONFLICT DO NOTHING", (user_id,))
-    return conn.execute("SELECT revision FROM inventory_owner WHERE user_id=%s FOR UPDATE", (user_id,)).fetchone()["revision"]
-
-
-def is_deck(conn, user_id: str, location_id: UUID) -> bool:
-    return bool(conn.execute("SELECT 1 FROM location WHERE owner_id=%s AND id=%s AND kind='deck'",
-                             (user_id, location_id)).fetchone())
-
-
-def leaf(conn, user_id: str, location_id: UUID) -> bool:
-    return bool(conn.execute("""SELECT 1 FROM location l WHERE l.owner_id=%s AND l.id=%s
-      AND l.kind IN ('storage_leaf','deck')
-      AND NOT EXISTS (SELECT 1 FROM location child WHERE child.parent_id=l.id)""",
-                             (user_id, location_id)).fetchone())
-
-
-def first_non_leaf(conn, user_id: str, location_ids: list) -> UUID | None:
-    """The lowest of these IDs that is not one of this owner's Storage Leaves, or None."""
-    row = conn.execute("""SELECT s.id FROM unnest(%s::uuid[]) AS s(id)
-      WHERE NOT EXISTS (SELECT 1 FROM location l WHERE l.owner_id=%s AND l.id=s.id
-        AND l.kind IN ('storage_leaf','deck')
-        AND NOT EXISTS (SELECT 1 FROM location child WHERE child.parent_id=l.id))
-      ORDER BY s.id LIMIT 1""", (location_ids, user_id)).fetchone()
-    return row["id"] if row else None
-
-
 def manifest(conn, user_id: str, manifest_id: UUID):
     row = conn.execute("SELECT id,source_id,expires_at FROM move_manifest WHERE owner_id=%s AND id=%s",
                        (user_id, manifest_id)).fetchone()
     if row is None:
-        fail(404, "MOVE_MANIFEST_NOT_FOUND")
+        api_error(404, "MOVE_MANIFEST_NOT_FOUND")
     if conn.execute("SELECT %s <= now() AS expired", (row["expires_at"],)).fetchone()["expired"]:
         conn.execute("DELETE FROM move_manifest WHERE owner_id=%s", (user_id,))
-        fail(410, "MOVE_MANIFEST_EXPIRED")
+        api_error(410, "MOVE_MANIFEST_EXPIRED")
     return row
 
 
@@ -231,17 +84,10 @@ def view(conn, row, user_id):
 
 def replayed(previous, undo_id=None) -> MoveResult:
     if previous["edition_count"] is None:
-        fail(409, "REPLAY_OUTCOME_UNAVAILABLE")
+        api_error(409, "REPLAY_OUTCOME_UNAVAILABLE")
     return MoveResult(edition_count=previous["edition_count"], copy_count=str(previous["copy_count"]),
                       owner_revision=previous["result_revision"], source_count=previous["source_count"],
                       already_at_destination_count=str(previous["already_at_destination_count"]), undo_id=undo_id)
-
-
-REPLAY = """SELECT mr.command_digest,mr.result_revision,r.edition_count,r.copy_count,
-    r.source_count,r.already_at_destination_count
-  FROM mutation_request mr LEFT JOIN move_response r
-    ON r.owner_id=mr.owner_id AND r.request_key=mr.request_key
-  WHERE mr.owner_id=%s AND mr.request_key=%s"""
 
 
 @router.post("/manifests", response_model=MoveManifest, status_code=201)
@@ -249,7 +95,7 @@ def start_move(command: StartMove, user_id: str = Depends(verified_user)):
     with connect() as conn, conn.transaction():
         lock_owner(conn, user_id)
         if command.source_id is not None and not leaf(conn, user_id, command.source_id):
-            fail(404, "LOCATION_NOT_FOUND", source_id=command.source_id)
+            api_error(404, "LOCATION_NOT_FOUND", source_id=command.source_id)
         # Starting a fresh selection supersedes this owner's previous staging work.
         conn.execute("DELETE FROM move_manifest WHERE owner_id=%s", (user_id,))
         row = conn.execute("""INSERT INTO move_manifest(owner_id,id,source_id)
@@ -262,7 +108,7 @@ def start_move(command: StartMove, user_id: str = Depends(verified_user)):
 def stage_items(manifest_id: UUID, command: StageItems, user_id: str = Depends(verified_user)):
     given = [(item.source_id, item.edition_id) for item in command.items]
     if len(given) != len(set(given)):
-        fail(422, "DUPLICATE_MOVE_ITEM")
+        api_error(422, "DUPLICATE_MOVE_ITEM")
     parsed = [(item.source_id, item.edition_id, quantity(item.quantity), item.expected_version) for item in command.items]
     with connect() as conn, conn.transaction():
         lock_owner(conn, user_id)
@@ -272,13 +118,13 @@ def stage_items(manifest_id: UUID, command: StageItems, user_id: str = Depends(v
             if source_id is None:
                 source_id = row["source_id"]
             if source_id is None:
-                fail(422, "SOURCE_REQUIRED", edition_id=edition_id)
+                api_error(422, "SOURCE_REQUIRED", edition_id=edition_id)
             staged.append((source_id, edition_id, amount, version))
         if len({(source_id, edition_id) for source_id, edition_id, _, _ in staged}) != len(staged):
-            fail(422, "DUPLICATE_MOVE_ITEM")
+            api_error(422, "DUPLICATE_MOVE_ITEM")
         missing = first_non_leaf(conn, user_id, sorted({source_id for source_id, _, _, _ in staged}))
         if missing is not None:
-            fail(404, "LOCATION_NOT_FOUND", source_id=missing)
+            api_error(404, "LOCATION_NOT_FOUND", source_id=missing)
         values = json.dumps([{"source_id": str(source_id), "edition_id": str(edition_id), "quantity": amount,
                               "expected_version": version} for source_id, edition_id, amount, version in staged])
         mismatch = conn.execute("""SELECT staged.source_id,staged.edition_id FROM jsonb_to_recordset(%s::jsonb)
@@ -288,7 +134,7 @@ def stage_items(manifest_id: UUID, command: StageItems, user_id: str = Depends(v
           WHERE existing.quantity<>staged.quantity OR existing.expected_version<>staged.expected_version
           ORDER BY staged.source_id,staged.edition_id LIMIT 1""", (values, user_id)).fetchone()
         if mismatch:
-            fail(409, "DUPLICATE_MOVE_ITEM", source_id=mismatch["source_id"], edition_id=mismatch["edition_id"])
+            api_error(409, "DUPLICATE_MOVE_ITEM", source_id=mismatch["source_id"], edition_id=mismatch["edition_id"])
         conn.execute("""INSERT INTO move_manifest_entry(owner_id,source_id,edition_id,quantity,expected_version)
           SELECT %s,source_id,edition_id,quantity,expected_version FROM jsonb_to_recordset(%s::jsonb)
           AS staged(source_id uuid,edition_id uuid,quantity bigint,expected_version bigint)
@@ -302,20 +148,20 @@ def cancel_move(manifest_id: UUID, user_id: str = Depends(verified_user)):
         lock_owner(conn, user_id)
         result = conn.execute("DELETE FROM move_manifest WHERE owner_id=%s AND id=%s", (user_id, manifest_id))
         if result.rowcount == 0:
-            fail(404, "MOVE_MANIFEST_NOT_FOUND")
+            api_error(404, "MOVE_MANIFEST_NOT_FOUND")
 
 
 @router.post("/manifests/{manifest_id}/commit", response_model=MoveResult)
 def commit_move(manifest_id: UUID, command: CommitMove, user_id: str = Depends(verified_user)):
     if command.destination_id is None:
-        fail(422, "DESTINATION_REQUIRED")
+        api_error(422, "DESTINATION_REQUIRED")
     return apply_selection(manifest_id, command, user_id)
 
 
 @router.post("/manifests/{manifest_id}/remove", response_model=MoveResult)
 def remove_inventory(manifest_id: UUID, command: CommitMove, user_id: str = Depends(verified_user)):
     if command.destination_id is not None:
-        fail(422, "REMOVAL_HAS_NO_DESTINATION")
+        api_error(422, "REMOVAL_HAS_NO_DESTINATION")
     return apply_selection(manifest_id, command, user_id)
 
 
@@ -333,15 +179,15 @@ def apply_selection(manifest_id, command, user_id):
     try:
         with connect() as conn, conn.transaction():
             revision = lock_owner(conn, user_id)
-            conn.execute("DELETE FROM mutation_request WHERE owner_id=%s AND expires_at<=now()", (user_id,))
+            expire(conn, user_id)
             previous = conn.execute(REPLAY, (user_id, command.idempotency_key)).fetchone()
             if previous:
                 if previous["command_digest"] != digest:
-                    fail(409, "IDEMPOTENCY_KEY_REUSED")
+                    api_error(409, "IDEMPOTENCY_KEY_REUSED")
                 return replayed(previous, undo_id_for(user_id, command.idempotency_key))
             manifest(conn, user_id, manifest_id)
             if destination is not None and not leaf(conn, user_id, destination):
-                fail(404, "LOCATION_NOT_FOUND", destination_id=destination)
+                api_error(404, "LOCATION_NOT_FOUND", destination_id=destination)
             # Materialize the staged set in the transaction. Validation and every side
             # of the transfer use this one snapshot under the owner lock.
             conn.execute("""CREATE TEMP TABLE selected_work ON COMMIT DROP AS
@@ -354,9 +200,9 @@ def apply_selection(manifest_id, command, user_id):
                 coalesce(sum(quantity) FILTER (WHERE source_id=%s),0) AS already
               FROM selected_work""", (destination, destination)).fetchone()
             if scope["items"] == 0:
-                fail(422, "EMPTY_MOVE_SELECTION")
+                api_error(422, "EMPTY_MOVE_SELECTION")
             if scope["excluded"] == scope["items"]:
-                fail(409, "SAME_LOCATION")
+                api_error(409, "SAME_LOCATION")
             if scope["excluded"]:
                 # Copies already at the destination stay put and are not counted as moved.
                 conn.execute("DELETE FROM selected_work WHERE source_id=%s", (destination,))
@@ -366,10 +212,10 @@ def apply_selection(manifest_id, command, user_id):
             if gone is not None:
                 edition = conn.execute("SELECT edition_id FROM selected_work WHERE source_id=%s ORDER BY edition_id LIMIT 1",
                                        (gone,)).fetchone()["edition_id"]
-                fail(404, "LOCATION_NOT_FOUND", source_id=gone, edition_id=edition)
+                api_error(404, "LOCATION_NOT_FOUND", source_id=gone, edition_id=edition)
             # A Put away takes copies out of one Deck to another Location; its Undo returns them to that Deck alone.
             if command.put_away and (destination is None or len(sources) != 1 or not is_deck(conn, user_id, sources[0])):
-                fail(422, "PUT_AWAY_NEEDS_ONE_DECK")
+                api_error(422, "PUT_AWAY_NEEDS_ONE_DECK")
             involved = sources + ([destination] if destination is not None else [])
             conn.execute("""CREATE TEMP TABLE current_work ON COMMIT DROP AS
               SELECT location_id,edition_id,quantity,version FROM holding
@@ -390,10 +236,10 @@ def apply_selection(manifest_id, command, user_id):
               FROM move_work""").fetchone()
             if summary["stale"]:
                 row = first_flagged(conn, "source_version IS NULL OR source_version<>expected_version")
-                fail(409, "STALE_HOLDING", source_id=row["source_id"], edition_id=row["edition_id"])
+                api_error(409, "STALE_HOLDING", source_id=row["source_id"], edition_id=row["edition_id"])
             if summary["insufficient"]:
                 row = first_flagged(conn, "source_quantity<quantity")
-                fail(409, "INSUFFICIENT_QUANTITY", source_id=row["source_id"], edition_id=row["edition_id"])
+                api_error(409, "INSUFFICIENT_QUANTITY", source_id=row["source_id"], edition_id=row["edition_id"])
             if destination is not None:
                 # One destination row per Card Edition: copies of one Edition from several
                 # sources arrive together, and overflow is checked against their sum.
@@ -407,7 +253,7 @@ def apply_selection(manifest_id, command, user_id):
                   WHERE coalesce(destination_quantity,0)+quantity>%s
                   ORDER BY first_source_id,edition_id LIMIT 1""", (MAX_QUANTITY,)).fetchone()
                 if over:
-                    fail(409, "QUANTITY_OVERFLOW", source_id=over["first_source_id"], edition_id=over["edition_id"])
+                    api_error(409, "QUANTITY_OVERFLOW", source_id=over["first_source_id"], edition_id=over["edition_id"])
             if destination is None:
                 check_promises(conn, user_id, {row["edition_id"]: row["copies"] for row in conn.execute(
                     "SELECT edition_id,sum(quantity) AS copies FROM move_work GROUP BY edition_id")})
@@ -444,7 +290,7 @@ def apply_selection(manifest_id, command, user_id):
             conn.execute("DELETE FROM move_manifest WHERE owner_id=%s", (user_id,))
             return result
     except psycopg.Error:
-        fail(503, "INVENTORY_TEMPORARILY_UNAVAILABLE")
+        api_error(503, "INVENTORY_TEMPORARILY_UNAVAILABLE")
 
 
 class UndoCommand(BaseModel):
@@ -464,7 +310,7 @@ def dismiss_undo(undo_id: UUID, user_id: str = Depends(verified_user)):
     with connect() as conn, conn.transaction():
         lock_owner(conn, user_id)
         if not conn.execute('DELETE FROM inventory_undo WHERE owner_id=%s AND id=%s', (user_id, undo_id)).rowcount:
-            fail(404, 'UNDO_NOT_FOUND')
+            api_error(404, 'UNDO_NOT_FOUND')
 
 
 @router.post('/undo/{undo_id}', response_model=MoveResult)
@@ -476,17 +322,17 @@ def undo_inventory(undo_id: UUID, command: UndoCommand, user_id: str = Depends(v
             previous = conn.execute(REPLAY + ' AND mr.expires_at>now()', (user_id, command.idempotency_key)).fetchone()
             if previous:
                 if previous['command_digest'] != digest:
-                    fail(409, 'IDEMPOTENCY_KEY_REUSED')
+                    api_error(409, 'IDEMPOTENCY_KEY_REUSED')
                 return replayed(previous)
             entry = conn.execute('''SELECT action,destination_id,returns_as_surplus,expires_at<=clock_timestamp() AS expired
               FROM inventory_undo WHERE owner_id=%s AND id=%s''', (user_id, undo_id)).fetchone()
             if not entry:
-                fail(404, 'UNDO_NOT_FOUND')
+                api_error(404, 'UNDO_NOT_FOUND')
             if entry['expired']:
-                fail(410, 'UNDO_EXPIRED')
+                api_error(410, 'UNDO_EXPIRED')
             newest = conn.execute('SELECT id FROM inventory_undo WHERE owner_id=%s AND expires_at>clock_timestamp() ORDER BY created_at DESC,id DESC LIMIT 1', (user_id,)).fetchone()
             if newest['id'] != undo_id:
-                fail(409, 'UNDO_NOT_NEWEST')
+                api_error(409, 'UNDO_NOT_NEWEST')
             destination = entry['destination_id']
             if entry['action'] == 'add':
                 return undo_add(conn, user_id, undo_id, destination, revision, command.idempotency_key, digest)
@@ -500,19 +346,19 @@ def undo_inventory(undo_id: UUID, command: UndoCommand, user_id: str = Depends(v
             conn.execute('ANALYZE undo_work')
             sources = [row['source_id'] for row in conn.execute('SELECT DISTINCT source_id FROM undo_work').fetchall()]
             if not sources or None in sources:
-                fail(409, 'UNDO_INCOMPATIBLE')
+                api_error(409, 'UNDO_INCOMPATIBLE')
             sources.sort()
             gone = first_non_leaf(conn, user_id, sources)
             if gone is not None:
-                fail(409, 'UNDO_INCOMPATIBLE', source_id=gone)
+                api_error(409, 'UNDO_INCOMPATIBLE', source_id=gone)
             if destination is not None and not leaf(conn, user_id, destination):
-                fail(409, 'UNDO_INCOMPATIBLE', destination_id=destination)
+                api_error(409, 'UNDO_INCOMPATIBLE', destination_id=destination)
             overflow = conn.execute('''SELECT w.source_id,w.edition_id FROM undo_work w
               LEFT JOIN holding h ON h.owner_id=%s AND h.location_id=w.source_id AND h.edition_id=w.edition_id
               WHERE coalesce(h.quantity,0)>%s-w.quantity ORDER BY w.source_id,w.edition_id LIMIT 1''',
                                     (user_id, MAX_QUANTITY)).fetchone()
             if overflow:
-                fail(409, 'UNDO_INCOMPATIBLE', source_id=overflow['source_id'], edition_id=overflow['edition_id'])
+                api_error(409, 'UNDO_INCOMPATIBLE', source_id=overflow['source_id'], edition_id=overflow['edition_id'])
             if destination is not None:
                 # One destination row per Card Edition: the destination must still hold
                 # every copy that arrived from all sources together.
@@ -525,7 +371,7 @@ def undo_inventory(undo_id: UUID, command: UndoCommand, user_id: str = Depends(v
                   WHERE coalesce(h.quantity,0)<d.quantity ORDER BY d.first_source_id,d.edition_id LIMIT 1''',
                                      (user_id, destination)).fetchone()
                 if short:
-                    fail(409, 'UNDO_INCOMPATIBLE', source_id=short['first_source_id'], edition_id=short['edition_id'])
+                    api_error(409, 'UNDO_INCOMPATIBLE', source_id=short['first_source_id'], edition_id=short['edition_id'])
             summary = conn.execute('SELECT count(DISTINCT edition_id) AS editions,sum(quantity) AS copies FROM undo_work').fetchone()
             new_revision = revision + 1
             if destination is not None:
@@ -547,7 +393,7 @@ def undo_inventory(undo_id: UUID, command: UndoCommand, user_id: str = Depends(v
             if entry['returns_as_surplus']:
                 conn.execute("SELECT set_config('tcg.undo_returns_surplus','off',true)")
             conn.execute('UPDATE inventory_owner SET revision=%s WHERE user_id=%s', (new_revision, user_id))
-            conn.execute('DELETE FROM mutation_request WHERE owner_id=%s AND expires_at<=now()', (user_id,))
+            expire(conn, user_id)
             conn.execute('INSERT INTO mutation_request(owner_id,request_key,command_digest,result_revision) VALUES (%s,%s,%s,%s)',
                          (user_id, command.idempotency_key, digest, new_revision))
             conn.execute('''INSERT INTO move_response(owner_id,request_key,edition_count,copy_count,source_count,
@@ -557,7 +403,7 @@ def undo_inventory(undo_id: UUID, command: UndoCommand, user_id: str = Depends(v
             return MoveResult(edition_count=summary['editions'], copy_count=str(summary['copies']), owner_revision=new_revision,
                               source_count=len(sources), already_at_destination_count='0')
     except psycopg.Error:
-        fail(503, 'INVENTORY_TEMPORARILY_UNAVAILABLE')
+        api_error(503, 'INVENTORY_TEMPORARILY_UNAVAILABLE')
 
 
 def undo_add(conn, user_id: str, undo_id: UUID, location_id: UUID, revision: int, key: UUID, digest: str) -> MoveResult:
@@ -567,7 +413,7 @@ def undo_add(conn, user_id: str, undo_id: UUID, location_id: UUID, revision: int
     moved, removed or corrected away since), nothing changes and the answer is UNDO_INCOMPATIBLE, naming the Location
     and, for a short Holding, the lowest such Card Edition."""
     if not leaf(conn, user_id, location_id):
-        fail(409, 'UNDO_INCOMPATIBLE', destination_id=location_id)
+        api_error(409, 'UNDO_INCOMPATIBLE', destination_id=location_id)
     conn.execute('''CREATE TEMP TABLE added_work ON COMMIT DROP AS
       SELECT p.edition_id,sum(p.quantity) AS quantity
       FROM inventory_undo u
@@ -575,12 +421,12 @@ def undo_add(conn, user_id: str, undo_id: UUID, location_id: UUID, revision: int
       WHERE u.owner_id=%s AND u.id=%s GROUP BY p.edition_id''', (user_id, undo_id))
     summary = conn.execute('SELECT count(*) AS editions,coalesce(sum(quantity),0) AS copies FROM added_work').fetchone()
     if not summary['editions']:
-        fail(409, 'UNDO_INCOMPATIBLE', destination_id=location_id)
+        api_error(409, 'UNDO_INCOMPATIBLE', destination_id=location_id)
     short = conn.execute('''SELECT a.edition_id FROM added_work a
       LEFT JOIN holding h ON h.owner_id=%s AND h.location_id=%s AND h.edition_id=a.edition_id
       WHERE coalesce(h.quantity,0)<a.quantity ORDER BY a.edition_id LIMIT 1''', (user_id, location_id)).fetchone()
     if short:
-        fail(409, 'UNDO_INCOMPATIBLE', destination_id=location_id, edition_id=short['edition_id'])
+        api_error(409, 'UNDO_INCOMPATIBLE', destination_id=location_id, edition_id=short['edition_id'])
     check_promises(conn, user_id, {row['edition_id']: row['quantity'] for row in conn.execute(
         'SELECT edition_id,quantity FROM added_work')})
     new_revision = revision + 1
@@ -591,7 +437,7 @@ def undo_add(conn, user_id: str, undo_id: UUID, location_id: UUID, revision: int
       WHERE h.owner_id=%s AND h.location_id=%s AND h.edition_id=a.edition_id AND h.quantity>a.quantity''',
                  (new_revision, user_id, location_id))
     conn.execute('UPDATE inventory_owner SET revision=%s WHERE user_id=%s', (new_revision, user_id))
-    conn.execute('DELETE FROM mutation_request WHERE owner_id=%s AND expires_at<=now()', (user_id,))
+    expire(conn, user_id)
     conn.execute('INSERT INTO mutation_request(owner_id,request_key,command_digest,result_revision) VALUES (%s,%s,%s,%s)',
                  (user_id, key, digest, new_revision))
     conn.execute('''INSERT INTO move_response(owner_id,request_key,edition_count,copy_count,source_count,

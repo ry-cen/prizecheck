@@ -20,7 +20,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from app.main import connect  # noqa: F401  (main first: it includes every router while loading)
+from app.main import connect  # noqa: F401
 from app.social import friend_copies, trade_matches
 from app.social.friend_copies import FriendWant, friend_wants
 from stranger_fixtures import far_zip, strangers, trader_of

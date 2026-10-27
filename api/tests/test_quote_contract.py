@@ -20,7 +20,7 @@ def test_module_is_pure_and_prices_reexports_the_amount_parser():
             "print(json.dumps([m for m in ('psycopg', 'app.main', 'app.prices') if m in sys.modules]))")
     out = subprocess.run([sys.executable, '-c', code], capture_output=True, text=True, check=True)
     assert json.loads(out.stdout) == []
-    import app.main  # noqa: F401  (main first: it includes the prices router while loading)
+    import app.main  # noqa: F401
     from app import prices
     assert prices.parse_amount is qc.parse_amount
 

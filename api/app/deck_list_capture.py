@@ -18,7 +18,7 @@ from uuid import UUID
 from .borrowed_copies import borrowed_at, physical
 from .copy_allocation import deck_lines
 from .location_tree import error, owner_and_rows
-from .main import connect
+from .db import connect
 from .settings import WantListCounting, read_settings
 
 

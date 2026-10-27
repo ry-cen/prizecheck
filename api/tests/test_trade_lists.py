@@ -10,7 +10,7 @@ routes; Trades are seeded rows (``test_trade_promises.seed_trade``) until the Tr
 """
 from uuid import UUID, uuid4
 
-from app.main import connect  # noqa: F401  (main first: it includes every router while loading)
+from app.main import connect  # noqa: F401
 from app.social import trade_matches
 from app.social.friend_copies import TradeCopies, friend_trade_copies
 from app.trade_list import own_trade_copies

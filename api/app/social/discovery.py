@@ -52,7 +52,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from ..location_tree import error
-from ..main import connect, verified_user
+from ..db import connect
+from ..identity import verified_user
 from .owners import ensure_owner, lock_owners
 
 router = APIRouter(prefix='/api/social/discovery', tags=['social'])

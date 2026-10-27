@@ -16,7 +16,7 @@ from psycopg import sql
 from psycopg.conninfo import make_conninfo
 from psycopg.rows import dict_row
 
-from app.main import app, connect  # noqa: F401  (main first: it includes every router while loading)
+from app.main import app, connect  # noqa: F401
 from app.social.hidden_locations import hidden_location_ids
 from test_catalog_references import migrate
 from test_decks import create

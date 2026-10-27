@@ -70,11 +70,11 @@ from pydantic import BaseModel, Field
 
 from .deck_deletion import unsorted_leaf
 from .copy_picks import suggest_picks
-from .holdings import MAX_QUANTITY
 from .loan_picks import pick_shortfalls
 from .location_tree import error, refuse, replay
-from .main import connect, verified_user
-from .moves import first_non_leaf, put_back, quantity, record_undo, take_out, undo_id_for
+from .db import connect
+from .identity import verified_user
+from .inventory_core import MAX_QUANTITY, first_non_leaf, put_back, quantity, record_undo, take_out, undo_id_for
 from .social import counts
 from .social.friend_copies import friend_copies
 from .social.friend_reads import card_facts

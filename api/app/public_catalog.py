@@ -34,6 +34,7 @@ from pathlib import Path
 from psycopg.pq import TransactionStatus
 
 from .card_attributes import FORMAT_FACT_COLUMNS, CardAttributeRules, CardAttributes
+from .db import connect
 from .public_projection import ProjectionUnavailable, public_record_store
 from .public_records import (catalog_edition_key, catalog_format_key, catalog_printing_key, quarantine_key, quote_states)
 
@@ -598,7 +599,6 @@ def publish_catalog_best_effort(conn=None, *, printing_ids=None, budget=None):
     """
     try:
         if conn is None:
-            from .main import connect
             with connect() as own:
                 result = drain(own, budget=REQUEST_BUDGET if budget is None else budget, printing_ids=printing_ids)
         else:
@@ -639,7 +639,6 @@ def spawn_background_drain():
 
 def backfill():
     """Idempotent full rebuild from PostgreSQL; raises when the store is unavailable."""
-    from .main import connect
     with connect() as conn:
         return rebuild(conn)
 

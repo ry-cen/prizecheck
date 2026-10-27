@@ -16,7 +16,7 @@ from pathlib import Path
 import psycopg
 import pytest
 
-from app.main import app, connect  # noqa: F401  (main first: it includes every router while loading)
+from app.main import app, connect  # noqa: F401
 from app import format_evaluator, public_catalog, public_deck, published_format_checks
 from app.public_projection import ProjectionUnavailable
 from app.public_records import catalog_format_key, public_record_store

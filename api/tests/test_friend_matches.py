@@ -9,7 +9,7 @@ Every test seeds the Swap catalog (``want_list_swap_fixtures``) and starts new c
 """
 from uuid import UUID, uuid4
 
-from app.main import connect  # noqa: F401  (main first: it includes every router while loading)
+from app.main import connect  # noqa: F401
 from app.social import friend_reads
 from test_catalog_targets import isolated_rules  # noqa: F401  (an autouse fixture)
 from test_deck_cost import launches, store  # noqa: F401  (autouse fixtures)

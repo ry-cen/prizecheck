@@ -122,7 +122,7 @@ from uuid import uuid4  # noqa: E402
 
 import pytest  # noqa: E402
 
-from app.main import connect  # noqa: E402  (the application module must load before its routers)
+from app.main import connect  # noqa: E402
 from app import deck_mass_entry, public_catalog  # noqa: E402
 from test_catalog_metadata import Records  # noqa: E402
 from test_catalog_reconciliation import run  # noqa: E402

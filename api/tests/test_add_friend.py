@@ -8,7 +8,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from uuid import uuid4
 
-from app.main import connect  # noqa: F401  (main first: it includes every router while loading)
+from app.main import connect  # noqa: F401
 from app.social import friends as friends_module
 from app.social import trades
 from stranger_fixtures import propose_to, strangers, trader_of

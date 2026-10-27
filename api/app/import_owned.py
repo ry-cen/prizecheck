@@ -28,7 +28,7 @@ from .import_energy_matching import CATALOG_NAME
 from .import_match_core import ACTIVE, NEWEST_COLUMNS, RELEASE_JOINS, newest_first, release_params
 from .import_replace import ReplacedDeck, read_replaced
 from .location_tree import error
-from .main import connect
+from .db import connect
 from .settings import WantListCounting, read_settings
 
 # A first-time caller has no owner row yet; these are the account defaults migration 049 gives a new one.

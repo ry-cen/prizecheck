@@ -53,7 +53,8 @@ from .card_accepts import accepts
 from .copy_allocation import Allocation, LineCount, allocate, deck_order
 from .deck_list_display import read_line_display
 from .location_tree import error, owner_and_rows
-from .main import connect, verified_user
+from .db import connect
+from .identity import verified_user
 from .settings import WantListCounting, read_settings
 from .swap_hints import FACTS, GroupEdition, SwapCapture, SwapHint, capture_swaps, has_rules, hints, swap_hint
 

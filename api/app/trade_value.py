@@ -20,7 +20,7 @@ from starlette.background import BackgroundTask
 from . import prices
 from .deck_cost import CostStatus, summarize
 from .location_tree import error
-from .main import verified_user
+from .identity import verified_user
 from .price_budget import Budget, trusted_budget
 from .trade_inventory import trade_quantity
 

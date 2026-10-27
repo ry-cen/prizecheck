@@ -65,6 +65,7 @@ from fastapi import APIRouter
 from . import card_attributes
 from . import format_evaluator as evaluator
 from .card_attributes import attribute_revision, read_card_attributes
+from .db import connect
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -137,11 +138,6 @@ class Standing:
 def today() -> date:
     """The day standings are computed for: today in UTC, like a Deck's format check."""
     return datetime.now(timezone.utc).date()
-
-
-def _connect():
-    from .main import connect  # Here, not at import: app.main includes this module's router while it loads.
-    return connect()
 
 
 def _names(names: Iterable[str]) -> tuple[str, ...]:
@@ -278,7 +274,7 @@ def ensure_current(names: Iterable[str] = evaluator.FORMATS, on: date | None = N
     its own connection: call it before, never inside, a read snapshot."""
     names = _names(names)
     on = on or today()
-    with _connect() as conn:
+    with connect() as conn:
         # The re-check after the lock wait must see the other rebuild's commit, whatever the server's default.
         conn.isolation_level = psycopg.IsolationLevel.READ_COMMITTED
         stale = _stale(wanted_keys(conn, names, on), stored_keys(conn, names))
@@ -299,7 +295,6 @@ def rebuild_stale_best_effort(names: Iterable[str] = evaluator.FORMATS, on: date
         return None
 
 
-@router.on_event("startup")
 def rebuild_on_startup():
     # A deploy can change a rules file or the evaluator. A rebuild takes seconds, so it never holds up startup or health
     # checks; readers that arrive first wait on its lock.

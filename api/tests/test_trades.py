@@ -16,7 +16,7 @@ from uuid import uuid4
 import psycopg
 import pytest
 
-from app.main import connect  # noqa: F401  (main first: it includes every router while loading)
+from app.main import connect  # noqa: F401
 from app import trade_inventory
 from app.social import conversations, owners, trades
 from stranger_fixtures import far_zip, propose_to, strangers, trader_of

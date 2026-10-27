@@ -20,7 +20,7 @@ from pydantic import BaseModel
 
 from .deck_mass_entry import MassEntryLineView, formatted, input_rows, text_download, view_fields
 from .location_tree import error
-from .main import verified_user
+from .identity import verified_user
 from .mass_entry_export import format_mass_entry
 from .settings import WantListCounting
 from .want_list import WantListCapture, capture_want_list, combined

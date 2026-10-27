@@ -67,7 +67,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..location_tree import error
-from ..main import connect, verified_user
+from ..db import connect
+from ..identity import verified_user
 from .discovery import Band, reach, reach_one, require_not_suspended
 from .owners import ensure_owner, lock_owners
 from .trades import (TRADES, TradeView, completed_trades, trade_facts, trade_views, waiting_trade_step)

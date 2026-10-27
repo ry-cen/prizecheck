@@ -82,7 +82,8 @@ from pydantic import BaseModel
 
 from ..card_accepts import accepts
 from ..location_tree import error
-from ..main import connect, verified_user
+from ..db import connect
+from ..identity import verified_user
 from ..trade_list import own_trade_copies
 from ..trade_wants import own_rules, own_wants
 from ..want_list import capture_want_list

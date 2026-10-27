@@ -15,7 +15,7 @@ from uuid import uuid4
 import psycopg
 import pytest
 
-from app.main import app, connect  # noqa: F401  (main first: it includes every router while loading)
+from app.main import app, connect  # noqa: F401
 from test_batch_add import batch as add_batch, undo, undo_records
 from test_deck_cost import launches, store  # noqa: F401  (autouse fixtures)
 from test_deck_counting import counting, deck, detail as deck_detail, hold, line

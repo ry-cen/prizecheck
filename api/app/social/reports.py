@@ -40,7 +40,8 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field, model_validator
 
 from ..location_tree import error, replay
-from ..main import connect, require_owner, verified_user
+from ..db import connect
+from ..identity import require_owner, verified_user
 from .conversations import account_changed, decode_cursor, encode_cursor, normalize_text, pair_row
 from .discovery import (account_state, lock_discovery, reach_one, remove_from_discovery, restore_discovery, switch_off,
                         trader_user)

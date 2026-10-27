@@ -20,7 +20,7 @@ import psycopg
 import pytest
 from psycopg.rows import dict_row
 
-from app.main import connect  # noqa: F401  (main first: it includes every router while loading)
+from app.main import connect  # noqa: F401
 from app.loan_inventory import replacement_picks
 from app.loan_picks import pick_shortfalls, stale_pick_loans
 from app.social import counts

@@ -26,15 +26,19 @@ import json
 from uuid import UUID
 
 import psycopg
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
+from .api_errors import api_error
 from .copy_allocation import spare_rule
 from .deck_ownership import CompetitionWarning, read_ownership
 from .decks import check_revision, read_deck_list, require_deck
 from .location_tree import owner_and_rows
-from .main import connect, verified_user
-from .moves import MAX_BATCH, MAX_QUANTITY, first_non_leaf, quantity, record_undo, undo_id_for
+from .db import connect
+from .identity import verified_user
+from .idempotency import expire
+from .inventory_core import MAX_QUANTITY, first_non_leaf, quantity, record_undo, undo_id_for
+from .moves import MAX_BATCH
 from .social import counts
 
 router = APIRouter(prefix='/api/decks', tags=['decks'])
@@ -116,11 +120,6 @@ class PickConfirmResult(BaseModel):
     # The confirmation's one Inventory Undo record (POST /api/moves/undo/{undo_id}). A replay names the same record,
     # which may since have been undone, dismissed, superseded or expired.
     undo_id: UUID
-
-
-def fail(status: int, code: str, **detail):
-    """Raise the API error; optional detail names the affected source Storage Leaf or Card Edition."""
-    raise HTTPException(status, {'code': code, **{key: str(value) for key, value in detail.items() if value is not None}})
 
 
 def order_key(place: dict, units: int):
@@ -239,7 +238,7 @@ def pick_list(deck_id: UUID, user_id: str = Depends(verified_user)):
 def confirm_picks(deck_id: UUID, command: ConfirmPicks, user_id: str = Depends(verified_user)):
     pairs = [(item.source_id, item.edition_id) for item in command.items]
     if len(pairs) != len(set(pairs)):
-        fail(422, 'DUPLICATE_MOVE_ITEM')
+        api_error(422, 'DUPLICATE_MOVE_ITEM')
     items = sorted(((item.source_id, item.edition_id, quantity(item.quantity), item.expected_version)
                     for item in command.items), key=lambda item: (str(item[0]), str(item[1])))
     sources = sorted({item[0] for item in items}, key=str)
@@ -249,7 +248,7 @@ def confirm_picks(deck_id: UUID, command: ConfirmPicks, user_id: str = Depends(v
     try:
         with connect() as conn, conn.transaction():
             revision, rows = owner_and_rows(conn, user_id)
-            conn.execute('DELETE FROM mutation_request WHERE owner_id=%s AND expires_at<=now()', (user_id,))
+            expire(conn, user_id)
             previous = conn.execute("""SELECT mr.command_digest,mr.result_revision,r.edition_count,r.copy_count,
                 r.source_count
               FROM mutation_request mr LEFT JOIN move_response r
@@ -257,9 +256,9 @@ def confirm_picks(deck_id: UUID, command: ConfirmPicks, user_id: str = Depends(v
               WHERE mr.owner_id=%s AND mr.request_key=%s""", (user_id, command.idempotency_key)).fetchone()
             if previous:
                 if previous['command_digest'] != digest:
-                    fail(409, 'IDEMPOTENCY_KEY_REUSED')
+                    api_error(409, 'IDEMPOTENCY_KEY_REUSED')
                 if previous['edition_count'] is None:
-                    fail(409, 'REPLAY_OUTCOME_UNAVAILABLE')
+                    api_error(409, 'REPLAY_OUTCOME_UNAVAILABLE')
                 return PickConfirmResult(edition_count=previous['edition_count'], copy_count=str(previous['copy_count']),
                                          owner_revision=previous['result_revision'],
                                          source_count=previous['source_count'],
@@ -267,16 +266,16 @@ def confirm_picks(deck_id: UUID, command: ConfirmPicks, user_id: str = Depends(v
             require_deck(rows, deck_id)
             check_revision(conn, user_id, deck_id, command.deck_list_revision)
             if deck_id in sources:
-                fail(409, 'SAME_LOCATION', source_id=deck_id)
+                api_error(409, 'SAME_LOCATION', source_id=deck_id)
             gone = first_non_leaf(conn, user_id, sources)
             if gone is not None:
-                fail(404, 'LOCATION_NOT_FOUND', source_id=gone)
+                api_error(404, 'LOCATION_NOT_FOUND', source_id=gone)
             listed = {row['edition_id'] for row in conn.execute(
                 'SELECT edition_id FROM deck_list_line WHERE owner_id=%s AND deck_id=%s AND edition_id=ANY(%s)',
                 (user_id, deck_id, sorted({item[1] for item in items}, key=str)))}
             for _, edition, _, _ in items:
                 if edition not in listed:
-                    fail(422, 'EDITION_NOT_ON_DECK_LIST', edition_id=edition)
+                    api_error(422, 'EDITION_NOT_ON_DECK_LIST', edition_id=edition)
             work = json.dumps([{'source_id': str(source), 'edition_id': str(edition), 'quantity': amount}
                                for source, edition, amount, _ in items])
             current = {(row['location_id'], row['edition_id']): row for row in conn.execute(
@@ -287,10 +286,10 @@ def confirm_picks(deck_id: UUID, command: ConfirmPicks, user_id: str = Depends(v
             for source, edition, _, version in items:
                 found = current.get((source, edition))
                 if found is None or found['version'] != version:
-                    fail(409, 'STALE_HOLDING', source_id=source, edition_id=edition)
+                    api_error(409, 'STALE_HOLDING', source_id=source, edition_id=edition)
             for source, edition, amount, _ in items:
                 if current[(source, edition)]['quantity'] < amount:
-                    fail(409, 'INSUFFICIENT_QUANTITY', source_id=source, edition_id=edition)
+                    api_error(409, 'INSUFFICIENT_QUANTITY', source_id=source, edition_id=edition)
             arriving: dict[UUID, int] = {}
             for _, edition, amount, _ in items:
                 arriving[edition] = arriving.get(edition, 0) + amount
@@ -299,7 +298,7 @@ def confirm_picks(deck_id: UUID, command: ConfirmPicks, user_id: str = Depends(v
                 (user_id, deck_id, list(arriving)))}
             for edition in sorted(arriving, key=str):
                 if in_deck.get(edition, 0) + arriving[edition] > MAX_QUANTITY:
-                    fail(409, 'QUANTITY_OVERFLOW', edition_id=edition)
+                    api_error(409, 'QUANTITY_OVERFLOW', edition_id=edition)
             new_revision = revision + 1
             conn.execute("""DELETE FROM holding h USING jsonb_to_recordset(%s::jsonb)
                 AS w(source_id uuid,edition_id uuid,quantity bigint)
@@ -332,4 +331,4 @@ def confirm_picks(deck_id: UUID, command: ConfirmPicks, user_id: str = Depends(v
             return PickConfirmResult(edition_count=len(arriving), copy_count=str(copies), owner_revision=new_revision,
                                      source_count=len(sources), undo_id=undo_id)
     except psycopg.Error:
-        fail(503, 'INVENTORY_TEMPORARILY_UNAVAILABLE')
+        api_error(503, 'INVENTORY_TEMPORARILY_UNAVAILABLE')

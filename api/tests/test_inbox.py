@@ -24,7 +24,7 @@ from uuid import uuid4
 import psycopg
 import pytest
 
-from app.main import connect  # noqa: F401  (main first: it includes every router while loading)
+from app.main import connect  # noqa: F401
 from app.social import trades
 from app.social.trades import TradeFacts, TradeView
 from test_catalog_targets import isolated_rules  # noqa: F401  (an autouse fixture)

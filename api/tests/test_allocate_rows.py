@@ -14,7 +14,7 @@ from uuid import UUID
 
 import pytest
 
-from app.main import connect  # noqa: F401  (main first: it includes every router while loading)
+from app.main import connect  # noqa: F401
 from app.copy_allocation import AllocationRows, allocate_rows
 
 E, F = UUID(int=101), UUID(int=102)                       # Card Editions

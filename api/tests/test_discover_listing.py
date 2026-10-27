@@ -23,7 +23,7 @@ from uuid import uuid4
 import psycopg
 import pytest
 
-from app.main import app, connect  # noqa: F401  (main first: it includes every router while loading)
+from app.main import app, connect  # noqa: F401
 from app import deck_format_checks, discovery, format_evaluator
 from app.public_records import catalog_edition_key, quarantine_key
 from test_card_attributes import BULBASAUR_ME, ENERGY_MEE, ENERGY_SV, RARE_CANDY_ME, card, edition_of

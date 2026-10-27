@@ -14,7 +14,7 @@ import psycopg
 import pytest
 from psycopg.rows import dict_row
 
-from app.main import app, connect  # noqa: F401  (main first: it includes every router while loading)
+from app.main import app, connect  # noqa: F401
 from app.social import conversations, reports
 from app.social.discovery import (account_state, remove_from_discovery, restore_discovery, switch_off)
 from app.social.friends import command_payload

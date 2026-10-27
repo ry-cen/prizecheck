@@ -4,6 +4,7 @@ import hmac
 import json
 import os
 import time
+from types import SimpleNamespace
 from uuid import uuid4
 
 import psycopg
@@ -846,3 +847,13 @@ def test_the_maintainer_sees_report_contents_without_the_reporters_identity_and_
     assert answered["evidence_digest"] not in (waiting["evidence_digest"], shown["evidence_digest"], first["evidence_digest"])
     stale = decide(waiting, "unmap")
     assert (stale.status_code, stale.json()["detail"]["code"]) == (409, "METADATA_EVIDENCE_CHANGED")
+
+
+def test_the_automatic_matching_startup_hook_runs_once_under_the_app_lifespan(monkeypatch):
+    applied = []
+    monkeypatch.setattr(metadata_reviews, "automatic_matching", lambda: True)
+    monkeypatch.setattr(metadata_reviews, "_apply_automatic_matching", lambda: applied.append(True))
+    monkeypatch.setattr(metadata_reviews, "Thread", lambda target, **_: SimpleNamespace(start=target))
+    with TestClient(app):
+        pass
+    assert applied == [True]

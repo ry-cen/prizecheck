@@ -13,7 +13,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from app.main import connect  # noqa: F401  (main first: it includes every router while loading)
+from app.main import connect  # noqa: F401
 from app import copy_allocation
 from app.copy_allocation import held_for_line, spare_rule
 from app.social import counts

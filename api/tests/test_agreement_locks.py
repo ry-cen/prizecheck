@@ -13,7 +13,7 @@ import pytest
 from psycopg import sql
 from psycopg.rows import dict_row
 
-from app.main import connect  # noqa: F401  (main first: it includes every router while loading)
+from app.main import connect  # noqa: F401
 from app.social import loans, trades
 from test_deck_cost import launches, store  # noqa: F401  (autouse fixtures)
 from test_deck_counting import hold

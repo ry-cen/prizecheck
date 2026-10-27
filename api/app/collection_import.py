@@ -69,7 +69,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from . import collection_import_finish as finishes
 from . import collection_import_matcher as matcher
 from . import collection_import_reader as reader
-from .main import connect, verified_user
+from .db import connect
+from .identity import verified_user
 from .moves import lock_owner
 from .moves import fail as refuse
 

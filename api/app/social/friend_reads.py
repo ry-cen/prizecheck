@@ -40,7 +40,8 @@ from pydantic import BaseModel
 
 from .. import set_codes
 from ..location_tree import error
-from ..main import connect, verified_user
+from ..db import connect
+from ..identity import verified_user
 from ..want_list import capture_want_list, number_order
 from . import name_rules
 from .friend_copies import friend_copies
