@@ -13,13 +13,14 @@ trade copies no other pick covers, so the picks always cover the promise.
 copies after the older picks there (``pick_shortfalls``), for instance after a Move. ``stale_pick_trades`` says which
 of a collector's Trades have one; ``replacement_trade_picks`` is **Use suggested picks**: the copies a side's picks
 still cover stay where they are, and the rest come from the giver's For trade copies no pick covers first, then from
-any of their Locations in the Deck Pick List's order (``loan_inventory.suggest_picks``, the Loan Pick List's), so a
+any of their Locations in the Deck Pick List's order (``copy_picks.suggest_picks``, the Loan Pick List's), so a
 Move never strands a Trade.
 
 This is the giver's own read and write, outside ``/api/social``.
 """
 from uuid import UUID
 
+from .copy_picks import suggest_picks
 from .deck_pick_list import suggest
 from .loan_picks import pick_shortfalls
 from .trade_list import for_trade_places
@@ -126,9 +127,6 @@ def replacement_trade_picks(conn, owner_id: str, trade_id: UUID) -> dict[tuple[U
         kept[(edition, location)] = kept.get((edition, location), 0) + copies
         rest[edition] -= copies
         taken.setdefault(edition, {})[location] = taken.get(edition, {}).get(location, 0) + copies
-    # Imported here, not at the top: app.loan_inventory imports app.social.friends, which imports app.social.trades
-    # once ending a friendship ends its Trades (#274), and app.social.trades imports this module (#273).
-    from .loan_inventory import suggest_picks
     for key, copies in suggest_picks(conn, owner_id, rest, taken).items():
         kept[key] = kept.get(key, 0) + copies
     return kept

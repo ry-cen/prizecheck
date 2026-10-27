@@ -84,7 +84,8 @@ ALLOWED_IMPORTS = {
     'social/counts.py': set(),
     'social/hidden_locations.py': set(),
     'social/name_rules.py': set(),
-    'social/owners.py': set(),
+    # The owner facts the Loan and Trade steps share: the inventory revision, the command start (replay, hourly count).
+    'social/owners.py': {('..location_tree', 'replay')},
     # The choke point counts each Friend's wants with the pure allocation over rows it reads itself (trading #276).
     'social/friend_copies.py': {('.', 'counts'), ('..', 'copy_allocation'), ('..copy_allocation', 'allocate_rows'),
                                 ('..copy_allocation', 'AllocationRows')},
@@ -156,8 +157,9 @@ ALLOWED_IMPORTS = {
         # Which of the reader's Loans as lender have a reserved pick out of date, so Needs you and the inbox list them
         # (#259): a set of Loan ids from the lender's own Holdings, never a Location; the read stays in app.loan_picks.
         ('..loan_picks', 'stale_pick_loans'),
-        ('..main', 'connect'), ('..main', 'verified_user'), ('..location_tree', 'error'), ('..location_tree', 'replay'),
-        ('.friend_reads', 'card_facts'), ('.owners', 'ensure_owner'), ('.owners', 'lock_owners'),
+        ('..main', 'connect'), ('..main', 'verified_user'), ('..location_tree', 'error'),
+        ('..location_tree', 'record_response'), ('.friend_reads', 'card_facts'), ('.owners', 'NOW'),
+        ('.owners', 'advance_revision'), ('.owners', 'begin_owner_command'), ('.owners', 'lock_owners'),
         # Whether the lender is still the reader's Friend, so Edit and resend is offered only then (owner's decision,
         # 2026-10-16): the one definition of "are Friends", a set of account ids, never anything of their inventory.
         ('.friends', 'friend_ids')},
@@ -181,8 +183,9 @@ ALLOWED_IMPORTS = {
     # app.social.friends imports this module (``end_trades_between``).
     'social/trades.py': {
         ('..trade_picks', 'stale_pick_trades'), ('..main', 'connect'), ('..main', 'verified_user'),
-        ('..location_tree', 'error'), ('..location_tree', 'replay'), ('.friend_reads', 'card_facts'),
-        ('.owners', 'ensure_owner'), ('.owners', 'lock_owners'), ('.loans', 'advance_revision'), ('.loans', 'NOW'),
+        ('..location_tree', 'error'), ('..location_tree', 'record_response'), ('.friend_reads', 'card_facts'),
+        ('.owners', 'ensure_owner'), ('.owners', 'lock_owners'), ('.owners', 'advance_revision'), ('.owners', 'NOW'),
+        ('.owners', 'begin_owner_command'),
         ('.friends', 'friend_ids'),
         # The other side's availability on a Trade (``TradeParty``, trading #299): one call to the reach rule for all the
         # rows' other sides, never a query of its own.

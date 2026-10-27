@@ -65,14 +65,14 @@ from datetime import date
 from typing import Literal
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from .deck_deletion import unsorted_leaf
-from .deck_pick_list import suggest
+from .copy_picks import suggest_picks
 from .holdings import MAX_QUANTITY
 from .loan_picks import pick_shortfalls
-from .location_tree import error, replay
+from .location_tree import error, refuse, replay
 from .main import connect, verified_user
 from .moves import first_non_leaf, put_back, quantity, record_undo, take_out, undo_id_for
 from .social import counts
@@ -80,9 +80,8 @@ from .social.friend_copies import friend_copies
 from .social.friend_reads import card_facts
 from .social.discovery import require_not_suspended
 from .social.friends import friend_ids
-from .social.loans import (NOW, LoanStep, LoanView, begin_command, advance_revision, close, record_update,
-                           return_by_columns, run_step, store, today, write_loan)
-from .social.owners import ensure_owner, lock_owners
+from .social.loans import LoanStep, LoanView, close, record_update, return_by_columns, run_step, store, today, write_loan
+from .social.owners import NOW, advance_revision, begin_owner_command, ensure_owner, lock_owners
 
 router = APIRouter(prefix='/api/loans', tags=['loans'])
 
@@ -271,10 +270,6 @@ def copies_count(raw: str) -> int:
     return quantity(raw)
 
 
-def refuse(status: int, code: str, **detail):
-    raise HTTPException(status, {'code': code, **{key: str(value) for key, value in detail.items()}})
-
-
 def can_promise(conn, lender_id: str, edition_ids) -> dict[UUID, int]:
     """Copies of each Edition the lender could promise now: every copy they hold, wherever it is, less the copies open
     Loans reserve. The caller holds the lender's owner row lock."""
@@ -284,48 +279,6 @@ def can_promise(conn, lender_id: str, edition_ids) -> dict[UUID, int]:
         'GROUP BY edition_id', (lender_id, editions))} if editions else {}
     reserved = counts.reserved_counts(conn, lender_id, editions)
     return {edition: max(0, held.get(edition, 0) - reserved.get(edition, 0)) for edition in editions}
-
-
-def _places(conn, lender_id: str, editions) -> dict[UUID, list[dict]]:
-    """The lender's Holdings of the Editions as places for ``deck_pick_list.suggest``: per Edition, each Location with
-    its name, kind, copies, the copies a Deck holds there for its own line (``committed``) and the rest (``spare``)."""
-    places: dict[UUID, list[dict]] = {}
-    for row in conn.execute("""SELECT h.location_id, h.edition_id, h.quantity, l.name, l.kind, d.quantity AS listed
-      FROM holding h JOIN location l ON l.owner_id = h.owner_id AND l.id = h.location_id
-      LEFT JOIN deck_list_line d ON d.owner_id = h.owner_id AND d.deck_id = h.location_id AND d.edition_id = h.edition_id
-      WHERE h.owner_id = %s AND h.edition_id = ANY(%s)""", (lender_id, sorted(set(editions)))):
-        own = min(row['listed'] or 0, row['quantity']) if row['kind'] == 'deck' else 0
-        places.setdefault(row['edition_id'], []).append({
-            'location_id': row['location_id'], 'name': row['name'], 'kind': row['kind'],
-            'available': int(row['quantity']), 'committed': int(own), 'spare': int(row['quantity'] - own)})
-    return places
-
-
-def _without(places: list[dict], taken: dict) -> list[dict]:
-    """The places less the copies other picks take there ({Location id: copies}), out of the copies beyond a Deck's
-    line first, as the Loan Pick List takes them."""
-    free = []
-    for place in places:
-        gone = min(place['available'], taken.get(place['location_id'], 0))
-        spare = max(0, place['spare'] - gone)
-        free.append({**place, 'available': place['available'] - gone, 'spare': spare,
-                     'committed': place['available'] - gone - spare})
-    return free
-
-
-def suggest_picks(conn, lender_id: str, promised: dict[UUID, int], covered: dict[UUID, dict]
-                  ) -> dict[tuple[UUID, UUID], int]:
-    """Where to take ``promised`` copies per Edition from: the copies no other pick covers (``covered``), in the Deck
-    Pick List's order. Returns copies by (Edition id, Location id). The caller holds the lender's owner row lock and
-    checked the copies are there (``can_promise``, or the invariant for picks already promised)."""
-    editions = sorted(edition for edition, copies in promised.items() if copies > 0)
-    places = _places(conn, lender_id, editions) if editions else {}
-    found: dict[tuple[UUID, UUID], int] = {}
-    for edition in editions:
-        for place, copies in suggest(promised[edition], _without(places.get(edition, []), covered.get(edition, {}))):
-            if copies > 0:
-                found[(edition, place['location_id'])] = found.get((edition, place['location_id']), 0) + copies
-    return found
 
 
 def insert_picks(conn, lender_id: str, loan_id: UUID, picks: dict[tuple[UUID, UUID | None], int]) -> None:
@@ -372,7 +325,7 @@ def send_borrow_request(command: SendBorrowRequest, user_id: str = Depends(verif
         error(422, 'DUPLICATE_EDITION')
     payload = {'action': 'loan_send', **command.model_dump(mode='json', exclude={'idempotency_key'})}
     with connect() as conn, conn.transaction():
-        digest, stored = begin_command(conn, user_id, command.idempotency_key, payload)
+        digest, stored = begin_owner_command(conn, user_id, command.idempotency_key, payload, 'loan')
         if stored is not None:
             return stored
         if command.return_by is not None and command.return_by < conn.execute(
@@ -478,7 +431,7 @@ def send_lend_offer(command: SendLendOffer, user_id: str = Depends(verified_user
         error(422, 'TOO_MANY_LINES')
     payload = {'action': 'loan_offer', **command.model_dump(mode='json', exclude={'idempotency_key'})}
     with connect() as conn, conn.transaction():
-        digest, stored = begin_command(conn, user_id, command.idempotency_key, payload)
+        digest, stored = begin_owner_command(conn, user_id, command.idempotency_key, payload, 'loan')
         if stored is not None:
             return stored
         if command.return_by is not None and command.return_by < today(conn):

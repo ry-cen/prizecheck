@@ -18,7 +18,7 @@ import psycopg
 import pytest
 
 from app.main import connect  # noqa: F401  (main first: it includes every router while loading)
-from app.social import counts, loans
+from app.social import counts, loans, owners
 from test_batch_add import batch, undo, undo_records
 from test_catalog_targets import isolated_rules  # noqa: F401  (an autouse fixture)
 from test_deck_cost import launches, store  # noqa: F401  (autouse fixtures)
@@ -155,9 +155,9 @@ def test_deck_deletion_and_leaf_conversion_move_the_picks_with_the_copies(store)
 
 
 def test_two_acceptances_for_the_same_copies_run_one_after_the_other(store, monkeypatch):
-    # Misty's two steps would already wait for each other on her command lock (begin_command). Without it, the second
+    # Misty's two steps would already wait for each other on her command lock (begin_owner_command). Without it, the second
     # acceptance still waits, on her owner row, and then sees the first's reservation.
-    monkeypatch.setattr(loans, 'begin_command', _without_command_lock)
+    monkeypatch.setattr(loans, 'begin_owner_command', _without_command_lock)
     ids = seed_swap_catalog()
     ash, misty = pair()
     (brock, _) = collector('Brock S.')
@@ -256,13 +256,13 @@ def test_both_sides_cancelling_at_once_run_one_after_the_other(store):
         assert counts.reserved_counts(conn, misty, [iono]) == {}
 
 
-def _without_command_lock(conn, user_id, key, payload):
-    """``loans.begin_command`` without the caller's command lock: the owner row is the only lock left between two of
-    one collector's steps."""
-    loans.ensure_owner(conn, user_id)
-    digest, stored = loans.replay(conn, user_id, key, payload)
+def _without_command_lock(conn, user_id, key, payload, kind):
+    """``owners.begin_owner_command`` without the caller's command lock: the owner row is the only lock left between
+    two of one collector's steps."""
+    owners.ensure_owner(conn, user_id)
+    digest, stored = owners.replay(conn, user_id, key, payload)
     if stored is None:
-        loans.count_loan_command(conn, user_id)
+        owners.count_owner_command(conn, user_id, f'{kind}_command')
     return digest, stored
 
 
