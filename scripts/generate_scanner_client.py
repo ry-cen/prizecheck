@@ -1,47 +1,16 @@
 """Generate the card scanner's request and response types and fetch helpers from the API's OpenAPI schema (#310)."""
-import json
-import sys
-from pathlib import Path
+import client_generator as gen
 
-root = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(root / "api"))
-from app.main import app  # noqa: E402
-
-
-def ts_type(value):
-    if "$ref" in value:
-        return value["$ref"].split("/")[-1]
-    if "const" in value:
-        return json.dumps(value["const"])
-    if "enum" in value:
-        return " | ".join(json.dumps(option) for option in value["enum"])
-    if "anyOf" in value:
-        return " | ".join(ts_type(part) for part in value["anyOf"])
-    if value.get("type") == "array":
-        return f"{ts_type(value['items'])}[]"
-    return {"string": "string", "integer": "number", "number": "number", "null": "null", "boolean": "boolean"}[value["type"]]
-
-
-schema = app.openapi()["components"]["schemas"]
-names = ("ScannerManifestCards", "ScannerManifestFingerprints", "ScannerManifest", "ScannerPrintingsRequest",
+TARGET = "web/src/scanner_generated.ts"
+NAMES = ("ScannerManifestCards", "ScannerManifestFingerprints", "ScannerManifest", "ScannerPrintingsRequest",
          "ScannerPrintingsResponse", "ScanSaveItem", "ScanSave", "ScanSaveResult")
-lines = ["// Generated from FastAPI OpenAPI by scripts/generate_scanner_client.py. Do not edit.",
-         "import type { PrintingView } from './generated';"]
-for name in names:
-    definition = schema[name]
-    fields = [f"{field}{'' if field in definition.get('required', []) else '?'}: {ts_type(value)}"
-              for field, value in definition["properties"].items()]
-    lines.append(f"export type {name} = {{ {'; '.join(fields)} }};")
-# ScannerPrinting is PrintingView plus the starting Edition, as the route's model subclasses it.
-extra = [f"{field}: {ts_type(value)}" for field, value in schema["ScannerPrinting"]["properties"].items()
-         if field not in schema["PrintingView"]["properties"]]
-lines.append(f"export type ScannerPrinting = PrintingView & {{ {'; '.join(extra)} }};")
-lines.append("""
-/** A failed scanner request. `code` is the API's error code (CARDS_NOT_CURRENT, FINGERPRINTS_NOT_FOUND,
- * CATALOG_UNAVAILABLE) or SCANNER_REQUEST_FAILED when the response carried none. */
-export class ScannerError extends Error {
-  constructor(public status: number, public code: string, public detail: Record<string, unknown> = {}) { super(code); }
-}
+ERROR = gen.error_class(
+    "ScannerError", "public detail: Record<string, unknown> = {}",
+    doc="""/** A failed scanner request. `code` is the API's error code (CARDS_NOT_CURRENT, FINGERPRINTS_NOT_FOUND,
+ * CATALOG_UNAVAILABLE) or SCANNER_REQUEST_FAILED when the response carried none. */""")
+
+BODY = """
+%(error)s
 /** One Edition that EDITIONS_CHANGED names; `printing_id` is null for an Edition the catalog never had. */
 export type ScanSaveChangedEdition = { edition_id: string; printing_id: string | null };
 async function request(path: string, init: RequestInit = {}): Promise<Response> {
@@ -72,11 +41,20 @@ export const resolveScannerPrintings = async (printingIds: string[]): Promise<Sc
 export const saveScannerTray = async (save: ScanSave): Promise<ScanSaveResult> =>
   (await request('/api/scanner/save', { method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify(save) })).json();
-""")
-content = "\n".join(lines)
-target = root / "web/src/scanner_generated.ts"
-if "--check" in sys.argv:
-    if not target.exists() or target.read_text() != content:
-        raise SystemExit("Generated scanner client is stale")
-else:
-    target.write_text(content)
+"""
+
+
+def render(openapi):
+    schemas = openapi["components"]["schemas"]
+    # ScannerPrinting is PrintingView plus the starting Edition, as the route's model subclasses it.
+    extra = gen.DOUBLE.fields(schemas["ScannerPrinting"], all_required=True,
+                              only=lambda field: field not in schemas["PrintingView"]["properties"])
+    return gen.assemble([gen.header("generate_scanner_client"),
+                         "import type { PrintingView } from './generated';",
+                         *gen.DOUBLE.aliases(schemas, NAMES),
+                         f"export type ScannerPrinting = PrintingView & {{ {'; '.join(extra)} }};",
+                         BODY % {"error": ERROR}])
+
+
+if __name__ == "__main__":
+    gen.main(__name__)

@@ -1,38 +1,14 @@
 """Generate the format check client module from the API OpenAPI schema."""
-import sys
-from pathlib import Path
+import client_generator as gen
 
-root = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(root / "api"))
-from app.main import app  # noqa: E402
+TARGET = "web/src/format_checks_generated.ts"
+NAMES = ("FormatIssue", "FormatCheck", "DeckFormatChecks", "PublishedFormatIssue", "PublishedFormatCheck",
+         "PublishedDeckFormatChecks")
+# The routes always serialize every field, so every field is present even where the model has a default.
+STYLE = gen.TypeStyle(optional_marks=False)
 
-
-def ts_type(value):
-    if "$ref" in value:
-        return value["$ref"].split("/")[-1]
-    if "anyOf" in value:
-        return " | ".join(ts_type(part) for part in value["anyOf"])
-    if "enum" in value:
-        return " | ".join(f"'{item}'" for item in value["enum"])
-    if "const" in value:
-        return f"'{value['const']}'"
-    if value.get("type") == "array":
-        return f"{ts_type(value['items'])}[]"
-    return {"string": "string", "integer": "number", "number": "number", "boolean": "boolean", "null": "null"}[value["type"]]
-
-
-schema = app.openapi()["components"]["schemas"]
-lines = ["// Generated from FastAPI OpenAPI by scripts/generate_format_checks_client.py. Do not edit."]
-for name in ("FormatIssue", "FormatCheck", "DeckFormatChecks", "PublishedFormatIssue", "PublishedFormatCheck",
-             "PublishedDeckFormatChecks"):
-    definition = schema[name]
-    # The route always serializes every field, so every field is present even where the model has a default.
-    fields = [f"{field}: {ts_type(value)}" for field, value in definition["properties"].items()]
-    lines.append(f"export type {name} = {{ {'; '.join(fields)} }};")
-lines.append("""
-export class FormatCheckError extends Error {
-  constructor(public status: number, public code: string) { super(code); }
-}
+BODY = """
+%(error)s
 // The advisory result of a Deck's Deck List in its Target Format (app redesign #178). ``format`` ('standard', 'expanded'
 // or 'glc') asks for another Format instead; ``asOf`` (YYYY-MM-DD) checks as of that date instead of today.
 export async function getDeckFormatChecks(deckId: string, options: { format?: string; asOf?: string } = {},
@@ -43,10 +19,7 @@ export async function getDeckFormatChecks(deckId: string, options: { format?: st
   const suffix = query.toString() ? '?' + query.toString() : '';
   const response = await fetch(`/api/decks/${encodeURIComponent(deckId)}/format-checks${suffix}`,
                                { method: 'GET', credentials: 'same-origin', signal });
-  if (!response.ok) {
-    const payload = await response.json().catch(() => ({}));
-    throw new FormatCheckError(response.status, payload?.detail?.code ?? 'FORMAT_CHECK_REQUEST_FAILED');
-  }
+%(f0)s
   return response.json() as Promise<DeckFormatChecks>;
 }
 // A Published Deck's advisory result in its Target Format (app redesign #183), recomputed from current public card
@@ -61,17 +34,19 @@ export async function getPublishedFormatChecks(token: string, version: number,
   const response = await fetch(
     `/api/public/decks/${encodeURIComponent(token)}/versions/${version}/format-checks${suffix}`,
     { method: 'GET', credentials: 'omit', signal });
-  if (!response.ok) {
-    const payload = await response.json().catch(() => ({}));
-    throw new FormatCheckError(response.status, payload?.detail?.code ?? 'FORMAT_CHECK_REQUEST_FAILED');
-  }
+%(f1)s
   return response.json() as Promise<PublishedDeckFormatChecks>;
 }
-""")
-content = "\n".join(lines)
-target = root / "web/src/format_checks_generated.ts"
-if "--check" in sys.argv:
-    if not target.exists() or target.read_text() != content:
-        raise SystemExit("Generated format check client is stale")
-else:
-    target.write_text(content)
+"""
+
+
+def render(openapi):
+    schemas = openapi["components"]["schemas"]
+    body = BODY % {"error": gen.error_class('FormatCheckError'),
+                   "f0": gen.failure_block('FormatCheckError', 'FORMAT_CHECK_REQUEST_FAILED'),
+                         "f1": gen.failure_block('FormatCheckError', 'FORMAT_CHECK_REQUEST_FAILED')}
+    return gen.assemble([gen.header("generate_format_checks_client"), *STYLE.aliases(schemas, NAMES), body])
+
+
+if __name__ == "__main__":
+    gen.main(__name__)
