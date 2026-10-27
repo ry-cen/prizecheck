@@ -8,7 +8,6 @@ import json
 from fastapi import APIRouter,Depends,HTTPException
 from pydantic import BaseModel,Field,HttpUrl
 from .main import connect,require_owner,verified_user
-from .missing_cards import _code_hash
 from .holdings import fail
 from . import public_catalog
 
@@ -41,7 +40,6 @@ class CatalogDecision(BaseModel):
     decision: Literal['keep_existing','confirm_source','deprecate_edition','deprecate_printing']
     reason: str=Field(min_length=1,max_length=2000)
     evidence_url: HttpUrl
-    code: str | None=Field(default=None,pattern=r'^\d{6}$')
     manual_printing_id: UUID | None=None
     edition_id: UUID | None=None
     replacement_edition_id: UUID | None=None
@@ -67,17 +65,6 @@ def release_price_slots(conn,edition_ids):
       WHERE edition_id=ANY(%s) AND mapping_state='verified' RETURNING edition_id""",(list(edition_ids),)).fetchone() is not None
 
 def view(row):return CatalogReviewView(**row,evidence_digest=evidence_digest(row))
-
-def consume_review_code(conn,owner_id,review_id,action,code):
-    if code is None: fail(422,'FRESH_CODE_REQUIRED')
-    row=conn.execute('''SELECT * FROM catalog_approval_code WHERE owner_id=%s AND review_id=%s AND action=%s
-      ORDER BY created_at DESC,id DESC LIMIT 1 FOR UPDATE''',(owner_id,review_id,action)).fetchone()
-    if not row or row['consumed_at'] or row['attempts']>=3 or row['expires_at']<=datetime.now(row['expires_at'].tzinfo):
-        fail(403,'INVALID_APPROVAL_CODE')
-    if not hmac.compare_digest(row['code_hash'],_code_hash(owner_id,review_id,action,code)):
-        conn.execute('UPDATE catalog_approval_code SET attempts=attempts+1 WHERE id=%s',(row['id'],))
-        conn.commit();fail(403,'INVALID_APPROVAL_CODE')
-    conn.execute('UPDATE catalog_approval_code SET consumed_at=now() WHERE id=%s',(row['id'],))
 
 @router.get('/api/admin/catalog-reviews',response_model=list[CatalogReviewView])
 def reviews(user_id: str=Depends(verified_user)):
@@ -107,7 +94,6 @@ def decide(review_id: UUID,command: CatalogDecision,user_id: str=Depends(verifie
                 fail(422,'INVALID_PHYSICAL_MATCH')
             linked=conn.execute('SELECT printing_id FROM catalog_source_reference WHERE source_id=%s',(row['source_id'],)).fetchone()
             if linked and linked['printing_id']!=command.manual_printing_id:fail(409,'SOURCE_ALREADY_LINKED')
-            consume_review_code(conn,user_id,review_id,'confirm_source',command.code)
             conn.execute('''INSERT INTO catalog_source_reference(source_id,printing_id,review_id,evidence_url)
               VALUES (%s,%s,%s,%s) ON CONFLICT(source_id) DO NOTHING''',(row['source_id'],command.manual_printing_id,review_id,str(command.evidence_url)))
             status='confirmed'
@@ -127,7 +113,6 @@ def decide(review_id: UUID,command: CatalogDecision,user_id: str=Depends(verifie
                 fail(422,'INVALID_REPLACEMENT')
             if conn.execute('SELECT 1 FROM catalog_printing_replacement WHERE printing_id=%s',(original,)).fetchone() or conn.execute('SELECT 1 FROM catalog_edition_replacement WHERE edition_id=ANY(%s)',(list(original_editions),)).fetchone():
                 fail(409,'EDITION_ALREADY_DEPRECATED')
-            consume_review_code(conn,user_id,review_id,'resolve_catalog',command.code)
             conn.execute('INSERT INTO catalog_printing_replacement VALUES (%s,%s,%s)',(original,command.replacement_printing_id,review_id))
             for item in command.edition_replacements:
                 conn.execute("""INSERT INTO catalog_edition_replacement(edition_id,replacement_edition_id,review_id,reviewer_id,evidence_url,reason)
@@ -147,14 +132,11 @@ def decide(review_id: UUID,command: CatalogDecision,user_id: str=Depends(verifie
             if not target:fail(422,'INVALID_REPLACEMENT')
             if conn.execute('SELECT 1 FROM catalog_edition_replacement WHERE edition_id=%s',(command.edition_id,)).fetchone():
                 fail(409,'EDITION_ALREADY_DEPRECATED')
-            consume_review_code(conn,user_id,review_id,'resolve_catalog',command.code)
             conn.execute('''INSERT INTO catalog_edition_replacement(edition_id,replacement_edition_id,review_id,reviewer_id,evidence_url,reason)
               VALUES (%s,%s,%s,%s,%s,%s)''',(command.edition_id,command.replacement_edition_id,review_id,user_id,str(command.evidence_url),command.reason.strip()))
             conn.execute('UPDATE catalog_generation_edition SET active=false WHERE generation_id=%s AND edition_id=%s',(state['active_generation'],command.edition_id))
             released=release_price_slots(conn,[command.edition_id])
             status='corrected'
-        else:
-            consume_review_code(conn,user_id,review_id,'resolve_catalog',command.code)
         result=conn.execute('''UPDATE catalog_review SET status=%s,reviewer_id=%s,reviewed_at=now(),evidence_url=%s,reason=%s
           WHERE id=%s RETURNING *''',(status,user_id,str(command.evidence_url),command.reason.strip(),review_id)).fetchone()
         conn.execute('UPDATE catalog_state SET revision=revision+1 WHERE singleton')

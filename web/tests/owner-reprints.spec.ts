@@ -2,28 +2,18 @@
 // lists Card Identities as a ScrollTable; Review opens the identity's card inline, pinned to the table's
 // visible area, with each Printing's regulation mark, Reprint Group, the group's legality and a Move to
 // picker. A Reprint Groups move (a group merge, then a manual Printing joining a group) takes a reason,
-// evidence and a fresh code, and changes a Deck List's format result; a Card Identity merge finds the
+// evidence, and changes a Deck List's format result; a Card Identity merge finds the
 // survivor by name. The shared page check runs at 1280×800 and 375×812 with the card open and closed.
 import { test, expect, type Locator, type Page } from "@playwright/test";
 import { signInAsOwner as fakeSignInAsOwner } from "./support/sign-in";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
 import { Pool } from "pg";
 import { listCards } from "./support/deck-list";
 import { expectPageChecks } from "./support/page-check";
 
 const ORIGIN = process.env.TEST_ORIGIN || "http://localhost:5173";
 const OWNER_EMAIL = process.env.OWNER_EMAIL || "owner@example.test";
-const MAIL = process.env.MAIL_FILE || "/tmp/tcg-ticket01-mail";
-
-function messages(): string[] {
-  try {
-    return readFileSync(MAIL, "utf8").trim().split("\n").filter(Boolean);
-  } catch {
-    return [];
-  }
-}
 
 async function query<T = Record<string, unknown>>(
   sql: string,
@@ -166,19 +156,6 @@ async function openCard(page: Page, name: string) {
   return { review, card };
 }
 
-async function freshCode(card: Locator) {
-  await query("UPDATE auth_send_event SET sent_at=now()-interval '61 seconds'");
-  const before = messages().length;
-  await card.getByRole("button", { name: "Send code" }).click();
-  await expect(card.getByRole("status")).toHaveText(
-    "Fresh approval code sent to your email."
-  );
-  await expect.poll(() => messages().length).toBeGreaterThan(before);
-  await card
-    .getByLabel("Fresh six-digit code")
-    .fill(JSON.parse(messages().at(-1)!).otp);
-}
-
 /** A new Deck whose Deck List holds 4 Rare Candy sm1-129, Bulbasaur and 55 Basic Energy: not legal in
  * Standard on its own wording, legal once its group joins me01-125's (mark I). */
 async function candyDeck(page: Page) {
@@ -233,7 +210,7 @@ async function standard(page: Page, deckId: string) {
 test.describe("desktop", () => {
   test.use({ viewport: { width: 1280, height: 800 } });
 
-  test("a Reprint Groups move: merging a group and moving a manual Printing take a reason, evidence and a fresh code, and the Deck List's format result follows", async ({
+  test("a Reprint Groups move: merging a group and moving a manual Printing take a reason and evidence, and the Deck List's format result follows", async ({
     page,
   }) => {
     seedCatalog();
@@ -317,14 +294,12 @@ test.describe("desktop", () => {
     await card
       .getByLabel("Review evidence URL")
       .fill("https://example.org/compendium");
-    await expect(confirm).toBeDisabled();
+    await expect(confirm).toBeEnabled();
     await expectPageChecks(
       page,
       "Owner controls, Reprints review card open (desktop)"
     );
 
-    await freshCode(card);
-    await expect(confirm).toBeEnabled();
     await confirm.click();
     await expect(notifications(page)).toContainText(
       "Reprint Groups updated for Rare Candy: 2 Printings moved."
@@ -346,15 +321,13 @@ test.describe("desktop", () => {
       .poll(() => standard(page, deckId))
       .toEqual({ status: "legal", revision: before.revision + 1 });
 
-    // Then the manual Printing joins Group 1 through its Move to picker, with a fresh code of its own.
-    await expect(card.getByLabel("Fresh six-digit code")).toHaveValue("");
+    // Then the manual Printing joins Group 1 through its Move to picker.
     await moveTo(card, "Rare Candy · future · 1").selectOption({
       label: "Group 1",
     });
     await expect(
       card.getByText("Moves 1 Printing into Group 1.")
     ).toBeVisible();
-    await freshCode(card);
     await confirm.click();
     await expect(notifications(page)).toContainText(
       "Reprint Groups updated for Rare Candy: 1 Printing moved."
@@ -379,7 +352,7 @@ test.describe("desktop", () => {
       .toBe(true);
   });
 
-  test("Close returns focus to Review, and a Card Identity merge finds the survivor by name and needs its own code", async ({
+  test("Close returns focus to Review, and a Card Identity merge finds the survivor by name", async ({
     page,
   }) => {
     seedCatalog();
@@ -405,12 +378,9 @@ test.describe("desktop", () => {
       "Move the chosen Printings",
       "Merge this Card Identity into another",
     ]);
-    // A code is bound to one decision, so changing the decision clears the field.
-    await card.getByLabel("Fresh six-digit code").fill("123456");
     await card
       .getByRole("combobox", { name: /^Decision/ })
       .selectOption("merge_identity");
-    await expect(card.getByLabel("Fresh six-digit code")).toHaveValue("");
     await card
       .getByRole("searchbox", { name: "Find the surviving Card Identity" })
       .fill("Professor's Research");
@@ -439,7 +409,6 @@ test.describe("desktop", () => {
       "Owner controls, Reprints identity merge open (desktop)"
     );
 
-    await freshCode(card);
     await card.getByRole("button", { name: "Confirm decision" }).click();
     await expect(notifications(page)).toContainText(
       `Merged ${sada} into Professor's Research.`

@@ -3,7 +3,7 @@ import { HoldingError } from './holdings_generated';
 export type CatalogReviewView = { id: string; printing_id: string | null; source_id: string; kind: string; status: string; detail: string; candidate: Record<string, unknown>; created_at: string; evidence_digest: string; current_name?: string | null; current_set_id?: string | null; current_set_name?: string | null; current_collector_number?: string | null };
 export type ReviewEditionView = { id: string; descriptor: Record<string, unknown>; holdings: number };
 export type EditionReplacementInput = { edition_id: string; replacement_edition_id: string };
-export type CatalogDecision = { evidence_digest: string; decision: "keep_existing" | "confirm_source" | "deprecate_edition" | "deprecate_printing"; reason: string; evidence_url: string; code?: string | null; manual_printing_id?: string | null; edition_id?: string | null; replacement_edition_id?: string | null; replacement_printing_id?: string | null; edition_replacements?: EditionReplacementInput[] };
+export type CatalogDecision = { evidence_digest: string; decision: "keep_existing" | "confirm_source" | "deprecate_edition" | "deprecate_printing"; reason: string; evidence_url: string; manual_printing_id?: string | null; edition_id?: string | null; replacement_edition_id?: string | null; replacement_printing_id?: string | null; edition_replacements?: EditionReplacementInput[] };
 export type ReassignHolding = { location_id: string; edition_id: string; replacement_edition_id: string; quantity: string; expected_version: number; idempotency_key: string };
 export type ReassignResult = { quantity: string; owner_revision: number };
 export type ReplacementView = { edition_id: string; replacement_edition_id: string; evidence_url: string; reason: string };
@@ -18,5 +18,4 @@ export const getReviewEditions=(id: string)=>request<ReviewEditionView[]>(`/api/
 export const decideCatalogReview=(id: string,body: CatalogDecision)=>request<CatalogReviewView>(`/api/admin/catalog-reviews/${encodeURIComponent(id)}/decision`,body);
 export const getEditionReplacements=()=>request<ReplacementView[]>('/api/catalog/edition-replacements');
 export const reassignHolding=(body: ReassignHolding)=>request<ReassignResult>('/api/holdings/reassign',body);
-export const requestReviewCode=(reviewId: string,action:'confirm_source'|'resolve_catalog')=>request<{message:string}>('/auth/approval-code',{reviewId,action});
 

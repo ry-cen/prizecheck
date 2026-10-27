@@ -1,18 +1,12 @@
 import { test, expect, type Locator, type Page } from "@playwright/test";
 import { signInAsOwner } from "./support/sign-in";
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
 import { Pool } from "pg";
 
 const OWNER_EMAIL = process.env.OWNER_EMAIL || "owner@example.test";
 const ORIGIN = process.env.TEST_ORIGIN || "http://localhost:5173";
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const EVIDENCE = "https://example.org/metadata-evidence";
-
-const lastOtp = () =>
-  JSON.parse(
-    readFileSync(process.env.MAIL_FILE!, "utf8").trim().split("\n").at(-1)!
-  ).otp as string;
 
 /** Furret under the shipped matching rule v1: `quarantine` leaves the normal Edition quarantined. */
 function seed(quarantine: boolean) {
@@ -76,17 +70,6 @@ const normal = async () =>
        WHERE p.source_id='meta-1' AND e.descriptor::text LIKE '%normal%'`
     )
   ).rows[0];
-
-async function sendCode(page: Page, scope: ReturnType<Page["locator"]>) {
-  await pool.query(
-    "UPDATE auth_send_event SET sent_at=now()-interval '61 seconds'"
-  );
-  await scope.getByRole("button", { name: "Send code" }).click();
-  await expect(scope.getByRole("status").first()).toContainText(
-    "Fresh approval code sent"
-  );
-  await scope.getByLabel("Fresh six-digit code").fill(lastOtp());
-}
 
 async function openOwnerReview(page: Page) {
   await page.reload();
@@ -233,7 +216,7 @@ test("collector reports an Edition mapping, nothing changes until the maintainer
     ).status()
   ).toBe(403);
 
-  // The maintainer reviews it and approves a mapping with a fresh code.
+  // The maintainer reviews it and approves a mapping.
   await setMaintainer(true);
   const review = await openOwnerReview(page);
   const item = await openItem(review, "Furret", "normal");
@@ -246,7 +229,6 @@ test("collector reports an Edition mapping, nothing changes until the maintainer
   await item.getByLabel("Quote variant", { exact: true }).fill("normal");
   await item.getByLabel("Review evidence URL").fill(EVIDENCE);
   await item.getByLabel("Review reason").fill("Product page matches the card");
-  await sendCode(page, item);
   await item.getByRole("button", { name: "Confirm decision" }).click();
   // A confirmed decision removes the row and says what happened in a toast (#168).
   await expect(notifications(page)).toContainText(
@@ -350,7 +332,6 @@ test("a stale evidence digest is refused, then succeeds after reloading the evid
   await item.getByLabel("Product ID", { exact: true }).fill("777");
   await item.getByLabel("Review evidence URL").fill(EVIDENCE);
   await item.getByLabel("Review reason").fill("Reviewed the first report");
-  await sendCode(page, item);
   await item.getByRole("button", { name: "Confirm decision" }).click();
   await expect(item.getByRole("alert")).toContainText("Evidence changed");
   await expect((await normal()).mapping_state).toBe("unverified");
@@ -358,7 +339,7 @@ test("a stale evidence digest is refused, then succeeds after reloading the evid
   await item.getByRole("button", { name: "Reload evidence" }).click();
   await expect(item).toContainText("2 linked reports");
   await expect(item.getByRole("alert")).toHaveCount(0);
-  // The unspent code still works; the form keeps the maintainer's entries.
+  // The form keeps the maintainer's entries.
   await item.getByRole("button", { name: "Confirm decision" }).click();
   await expect(notifications(page)).toContainText("Decision recorded");
   await expect(item).toHaveCount(0);
@@ -394,7 +375,6 @@ test("a maintainer-cleared quarantine is visible in the public record after deli
   await item.getByLabel("Quote variant", { exact: true }).fill("normal");
   await item.getByLabel("Review evidence URL").fill(EVIDENCE);
   await item.getByLabel("Review reason").fill("Source change checked by hand");
-  await sendCode(page, item);
   await item.getByRole("button", { name: "Confirm decision" }).click();
   await expect(notifications(page)).toContainText(
     "Decision recorded: verified"
@@ -443,7 +423,7 @@ print(json.dumps(public_record_store().read_records([key],deadline=time.monotoni
   ).toContainText("Rule: marketplace_matching v1");
 });
 
-test("the maintainer lists rule versions and activates a rule with a fresh code", async ({
+test("the maintainer lists rule versions and activates a rule", async ({
   page,
 }) => {
   seed(false);
@@ -459,15 +439,13 @@ test("the maintainer lists rule versions and activates a rule with a fresh code"
   await matching.getByLabel("Rule version").selectOption("1");
   await matching.getByLabel("Rule evidence URL").fill(EVIDENCE);
   await matching.getByLabel("Rule reason").fill("Reviewed the matching rule");
-  await sendCode(page, matching);
   await matching.getByRole("button", { name: "Confirm rule change" }).click();
   await expect(matching).toContainText("Active: version 1");
   await expect(matching).toContainText("Public delivery:");
-  // Deactivating binds the code to version 0.
+  // Deactivating is the same action with no rule.
   await matching.getByLabel("Rule version").selectOption("none");
   await matching.getByLabel("Rule evidence URL").fill(EVIDENCE);
   await matching.getByLabel("Rule reason").fill("Pause the matching rule");
-  await sendCode(page, matching);
   await matching.getByRole("button", { name: "Confirm rule change" }).click();
   await expect(matching).toContainText("No active rule");
 });
@@ -527,14 +505,13 @@ test("quarantining the Edition mapping leaves a reviewed Live identity eligible"
   await setMaintainer(true);
   const printing = await printingRow();
   await reportLive(page, printing.id);
-  // Activate the Live rule v1 with a fresh code.
+  // Activate the Live rule v1.
   const live = (await openRules(page)).getByRole("article", {
     name: "Live derivation",
   });
   await live.getByLabel("Rule version").selectOption("1");
   await live.getByLabel("Rule evidence URL").fill(EVIDENCE);
   await live.getByLabel("Rule reason").fill("Reviewed the Live rule");
-  await sendCode(page, live);
   await live.getByRole("button", { name: "Confirm rule change" }).click();
   await expect(live).toContainText("Active: version 1");
   // The activation changed the target's evidence, so reopen the review first.
@@ -550,7 +527,6 @@ test("quarantining the Edition mapping leaves a reviewed Live identity eligible"
   await item.getByLabel("Live collector number").fill("1");
   await item.getByLabel("Review evidence URL").fill(EVIDENCE);
   await item.getByLabel("Review reason").fill("Printed identity checked");
-  await sendCode(page, item);
   await item.getByRole("button", { name: "Confirm decision" }).click();
   await expect(notifications(page)).toContainText(
     "Decision recorded: eligible"
@@ -701,7 +677,6 @@ test("a decision that leaves a linked report open keeps the row, with its report
   await item.getByLabel("Quote variant", { exact: true }).fill("normal");
   await item.getByLabel("Review evidence URL").fill(EVIDENCE);
   await item.getByLabel("Review reason").fill("Mapping is right, report stays");
-  await sendCode(page, item);
   await item.getByRole("button", { name: "Confirm decision" }).click();
 
   await expect(notifications(page)).toContainText(

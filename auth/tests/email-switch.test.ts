@@ -73,13 +73,7 @@ describe("email sign-in off (the default)", () => {
     ).toBe(0);
   });
 
-  it("keeps owner approval codes and sign-out reachable", async () => {
-    const approval = await fetch(`${gateway.base}/auth/approval-code`, {
-      method: "POST",
-      headers: { origin: gateway.base, "content-type": "application/json" },
-      body: "{}",
-    });
-    expect(approval.status).toBe(401);
+  it("keeps sign-out reachable", async () => {
     const signOut = await fetch(`${gateway.base}/auth/sign-out`, {
       method: "POST",
       headers: { origin: gateway.base },

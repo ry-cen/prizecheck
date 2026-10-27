@@ -87,15 +87,6 @@ it("creates public accounts and Unsorted atomically; repeat signin retains the s
     name: "Unsorted",
     kind: "storage_leaf",
   });
-  expect(
-    (
-      await request(
-        "/auth/approval-code",
-        { reportId: randomUUID(), action: "approve_printing" },
-        cookie
-      )
-    ).status
-  ).toBe(403);
   await pool.query("DELETE FROM auth_send_event");
   await request("/auth/request-code", { email });
   expect(

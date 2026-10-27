@@ -11,7 +11,6 @@ import { Pill } from "../ui/Pill";
 import { Select } from "../ui/Select";
 import { TextArea, TextField } from "../ui/TextField";
 import { useToast } from "../ui/Toast";
-import { CodeStep } from "./CodeStep";
 import { CARD_HEADING, FIELDS, ReviewCard, ReviewQueue } from "./ReviewQueue";
 
 type Kind = "printing" | "edition";
@@ -40,7 +39,6 @@ function ReviewItem({
 }) {
   const reasonField = useRef<HTMLTextAreaElement>(null);
   const [reason, setReason] = useState("");
-  const [code, setCode] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [setId, setSetId] = useState(report.set_id || "");
@@ -58,7 +56,6 @@ function ReviewItem({
       const updated = await decideMissingCardReport(report.id, {
         decision: value,
         reason,
-        code: value === "approve" ? code : null,
         set_id: setId,
         set_name: setName,
         collector_number: number,
@@ -70,36 +67,6 @@ function ReviewItem({
       onDecided(value, updated);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Review failed.");
-      setBusy(false);
-    }
-  }
-  async function requestCode() {
-    setBusy(true);
-    setMessage("");
-    try {
-      const response = await fetch("/auth/approval-code", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          reportId: report.id,
-          action: `approve_${report.kind}`,
-        }),
-      });
-      if (!response.ok) {
-        const error = (await response.json().catch(() => ({}))) as {
-          error?: string;
-        };
-        throw new Error(
-          error.error || `Approval-code request failed (${response.status})`
-        );
-      }
-      setMessage("Fresh approval code sent to your email.");
-    } catch (error) {
-      setMessage(
-        error instanceof Error ? error.message : "Unable to send code."
-      );
-    } finally {
       setBusy(false);
     }
   }
@@ -180,7 +147,7 @@ function ReviewItem({
       <h4 className={CARD_HEADING}>Decide</h4>
       <p className="m-0 text-meta text-text-muted">
         Request information and Reject need only the reason, which the reporter
-        sees. Approving creates the shared record and needs a fresh code.
+        sees. Approving creates the shared record.
       </p>
       <div className="flex flex-wrap gap-2">
         <Button
@@ -196,16 +163,14 @@ function ReviewItem({
         >
           Reject
         </Button>
+        <Button
+          variant="primary"
+          disabled={busy || !reason.trim()}
+          onClick={() => void decision("approve")}
+        >
+          Approve shared record
+        </Button>
       </div>
-      <CodeStep
-        onSend={() => void requestCode()}
-        code={code}
-        onCode={setCode}
-        confirmLabel="Approve shared record"
-        ready={!!reason.trim()}
-        busy={busy}
-        onConfirm={() => void decision("approve")}
-      />
       <p role="status" className="m-0 text-meta">
         {message}
       </p>
@@ -341,8 +306,8 @@ function BeginRecord({ onBegun }: { onBegun: (message: string) => void }) {
 /**
  * Owner controls' Missing cards queue (#168): open missing-card reports as a ScrollTable, with Begin a
  * record directly folded above it. A report's card shows the report, its note and evidence, and the
- * verified fields. Request information and Reject need only the reason; Approve shared record takes a
- * fresh code. Approving or rejecting removes the row; asking for information keeps it, now "needs info".
+ * verified fields. Request information and Reject need only the reason; Approve shared record creates
+ * the shared record. Approving or rejecting removes the row; asking for information keeps it, now "needs info".
  * Each shows a toast.
  */
 export function MissingQueue({ onChanged }: { onChanged: () => void }) {

@@ -361,7 +361,7 @@ test.describe("desktop", () => {
     await expect(page.getByRole("article")).toHaveCount(0);
   });
 
-  test("Rules shows a card per rule kind with its versions and digest, and Activate waits for a six-digit code", async ({
+  test("Rules shows a card per rule kind with its versions and digest, and Confirm waits for evidence and a reason", async ({
     page,
   }) => {
     await signInAsOwner(page);
@@ -377,19 +377,13 @@ test.describe("desktop", () => {
       );
       await expect(card).toContainText(/Active: version \d+|No active rule/);
       await expect(card.getByLabel("Rule version")).toBeVisible();
-      await expect(
-        card.getByRole("button", { name: "Send code" })
-      ).toBeEnabled();
       const confirm = card.getByRole("button", { name: "Confirm rule change" });
       await expect(confirm).toBeDisabled();
       await card
         .getByLabel("Rule evidence URL")
         .fill("https://example.org/rule");
+      await expect(confirm).toBeDisabled();
       await card.getByLabel("Rule reason").fill("Checked the rule");
-      await expect(confirm).toBeDisabled();
-      await card.getByLabel("Fresh six-digit code").fill("12345");
-      await expect(confirm).toBeDisabled();
-      await card.getByLabel("Fresh six-digit code").fill("123456");
       await expect(confirm).toBeEnabled();
     }
     await expectPageChecks(page, "Owner controls, Rules (desktop)");

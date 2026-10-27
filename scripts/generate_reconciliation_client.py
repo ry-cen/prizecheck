@@ -17,7 +17,6 @@ export const getReviewEditions=(id: string)=>request<ReviewEditionView[]>(`/api/
 export const decideCatalogReview=(id: string,body: CatalogDecision)=>request<CatalogReviewView>(`/api/admin/catalog-reviews/${encodeURIComponent(id)}/decision`,body);
 export const getEditionReplacements=()=>request<ReplacementView[]>('/api/catalog/edition-replacements');
 export const reassignHolding=(body: ReassignHolding)=>request<ReassignResult>('/api/holdings/reassign',body);
-export const requestReviewCode=(reviewId: string,action:'confirm_source'|'resolve_catalog')=>request<{message:string}>('/auth/approval-code',{reviewId,action});
 '''
 
 

@@ -33,7 +33,7 @@ def request(method, path, user, body=None, **params):
 def seeded_catalog():
     with connect() as conn:
         conn.execute("UPDATE catalog_state SET active_generation=NULL")
-        conn.execute("TRUNCATE catalog_approval_code,catalog_override,missing_card_report,catalog_review,catalog_generation_edition,catalog_generation_printing,catalog_edition,catalog_printing,catalog_identity,catalog_generation,catalog_run CASCADE")
+        conn.execute("TRUNCATE catalog_override,missing_card_report,catalog_review,catalog_generation_edition,catalog_generation_printing,catalog_edition,catalog_printing,catalog_identity,catalog_generation,catalog_run CASCADE")
         conn.execute("INSERT INTO catalog_state(singleton,active_generation,revision,last_success) VALUES (true,NULL,0,NULL) ON CONFLICT(singleton) DO UPDATE SET active_generation=NULL,revision=0,last_success=NULL")
         conn.execute("DELETE FROM owner_binding")
         for user in (OWNER, REPORTER, OTHER):
@@ -64,18 +64,9 @@ def printing_report():
     return response.json()["id"]
 
 
-def issue_code(report_id, action="approve_printing", code="123456", expires=False):
-    digest = hmac.new(os.environ["INTERNAL_AUTH_SECRET"].encode(), f"{OWNER}:{report_id}:{action}:{code}".encode(), hashlib.sha256).hexdigest()
-    with connect() as conn:
-        conn.execute("""INSERT INTO catalog_approval_code(owner_id,report_id,action,code_hash,expires_at)
-          VALUES (%s,%s,%s,%s,now()+interval '5 minutes')""", (OWNER, report_id, action, digest))
-        if expires:
-            conn.execute("UPDATE catalog_approval_code SET expires_at=now()-interval '1 second' WHERE report_id=%s", (report_id,))
-
-
 def approve(report_id, **fields):
     return request("POST", f"/api/admin/missing-card-reports/{report_id}/decision", OWNER,
-                   {"decision": "approve", "reason": "Verified against physical card", "code": "123456", **fields})
+                   {"decision": "approve", "reason": "Verified against physical card", **fields})
 
 
 def test_private_reports_and_owner_review(seeded_catalog):
@@ -95,21 +86,16 @@ def test_private_reports_and_owner_review(seeded_catalog):
     assert updated.status_code == 200 and updated.json()["status"] == "pending"
 
 
-def test_incomplete_duplicate_ambiguous_and_code_expiry(seeded_catalog):
+def test_incomplete_duplicate_and_ambiguous_approvals_change_nothing(seeded_catalog):
     report_id = report({"kind": "printing", "english_name": "Pikachu"}).json()["id"]
-    issue_code(report_id)
     assert approve(report_id).json()["detail"]["code"] == "EVIDENCE_REQUIRED"
     assert approve(report_id, evidence_url="https://example.org/evidence").json()["detail"]["code"] == "INCOMPLETE_PRINTING"
     assert approve(report_id, set_id="base", set_name="Base Set", collector_number="1", evidence_url="https://example.org/evidence").json()["detail"]["code"] == "POSSIBLE_DUPLICATE"
     assert approve(report_id, set_id="base", set_name="Different Set", collector_number="99", evidence_url="https://example.org/evidence").json()["detail"]["code"] == "AMBIGUOUS_SET"
     with connect() as conn:
-        assert conn.execute("SELECT consumed_at FROM catalog_approval_code WHERE report_id=%s", (report_id,)).fetchone()["consumed_at"] is None
-    report2 = printing_report()
-    issue_code(report2, expires=True)
-    assert approve(report2).json()["detail"]["code"] == "INVALID_APPROVAL_CODE"
+        assert conn.execute("SELECT status FROM missing_card_report WHERE id=%s", (report_id,)).fetchone()["status"] == "pending"
     edition_id = report({"kind": "edition", "printing_id": str(seeded_catalog),
                          "evidence_url": "https://example.org/foil"}).json()["id"]
-    issue_code(edition_id, "approve_edition")
     assert approve(edition_id).json()["detail"]["code"] == "DISTINCT_VARIANT_REQUIRED"
     blank = approve(edition_id, descriptor={"label": "   "})
     assert blank.status_code == 422 and blank.json()["detail"]["code"] == "INVALID_DESCRIPTOR"
@@ -120,13 +106,14 @@ def test_approval_search_cursor_replay_and_rollback(seeded_catalog):
     cursor = _encode_cursor(("pikachu", "", ""), old, {"search_name": "pikachu", "set_id": "base",
                                                       "collector_number": "1", "id": seeded_catalog})
     report_id = printing_report()
-    issue_code(report_id)
-    wrong = request("POST", f"/api/admin/missing-card-reports/{report_id}/decision", OWNER,
-                    {"decision": "approve", "reason": "Verified", "code": "000000"})
-    assert wrong.status_code == 403
+    # Only the owner's session decides; nobody else, and no code is asked of the owner.
+    refused = request("POST", f"/api/admin/missing-card-reports/{report_id}/decision", REPORTER,
+                      {"decision": "approve", "reason": "Verified", "evidence_url": "https://example.org/evidence"})
+    assert refused.status_code == 403
     with connect() as conn:
-        assert conn.execute("SELECT attempts FROM catalog_approval_code WHERE report_id=%s", (report_id,)).fetchone()["attempts"] == 1
-    approved = approve(report_id)
+        assert conn.execute("SELECT status FROM missing_card_report WHERE id=%s", (report_id,)).fetchone()["status"] == "pending"
+    # A code left in the body by an older web bundle is ignored.
+    approved = approve(report_id, code="123456")
     assert approved.status_code == 200, approved.text
     approved_id = approved.json()["approved_printing_id"]
     found = request("GET", "/api/catalog/search", OTHER, name="Pikachu").json()
@@ -137,12 +124,10 @@ def test_approval_search_cursor_replay_and_rollback(seeded_catalog):
                row["evidence_url"] == "https://example.org/evidence" for row in found["printings"])
     assert approve(report_id).json()["detail"]["code"] == "ALREADY_REVIEWED"
     with connect() as conn:
-        assert conn.execute("SELECT consumed_at FROM catalog_approval_code WHERE report_id=%s", (report_id,)).fetchone()["consumed_at"] is not None
         row = conn.execute("SELECT reviewer_id,reason,evidence_url,revision FROM catalog_override WHERE report_id=%s", (report_id,)).fetchone()
         assert row["reviewer_id"] == OWNER and row["revision"] == old + 1 and row["evidence_url"]
     pending = report({"kind": "printing", "set_id": "jungle", "set_name": "Jungle", "collector_number": "100",
                       "english_name": "Pikachu", "evidence_url": "https://example.org/second"}).json()["id"]
-    issue_code(pending)
     with connect() as conn:
         conn.execute("""CREATE OR REPLACE FUNCTION reject_test_override() RETURNS trigger LANGUAGE plpgsql AS $$
           BEGIN RAISE EXCEPTION 'test rollback'; END; $$""")
@@ -152,7 +137,6 @@ def test_approval_search_cursor_replay_and_rollback(seeded_catalog):
             approve(pending)
         with connect() as conn:
             assert conn.execute("SELECT revision FROM catalog_state").fetchone()["revision"] == old + 1
-            assert conn.execute("SELECT consumed_at FROM catalog_approval_code WHERE report_id=%s", (pending,)).fetchone()["consumed_at"] is None
             assert conn.execute("SELECT status FROM missing_card_report WHERE id=%s", (pending,)).fetchone()["status"] == "pending"
     finally:
         with connect() as conn:
@@ -162,12 +146,10 @@ def test_approval_search_cursor_replay_and_rollback(seeded_catalog):
 
 def test_next_pull_preserves_manual_printing_and_edition(seeded_catalog):
     report_id = printing_report()
-    issue_code(report_id)
     manual_id = approve(report_id).json()["approved_printing_id"]
     edition_report = report({"kind": "edition", "printing_id": str(seeded_catalog),
                              "descriptor": {"finish": "cosmos foil"},
                              "evidence_url": "https://example.org/foil"}).json()["id"]
-    issue_code(edition_report, "approve_edition")
     edition = approve(edition_report)
     assert edition.status_code == 200, edition.text
     edition_id = edition.json()["approved_edition_id"]
@@ -193,7 +175,6 @@ def test_approved_printing_and_edition_are_published_as_public_catalog_records(t
     deadline = time.monotonic() + 5
     public_record_store().initialize(deadline=deadline)
     report_id = printing_report()
-    issue_code(report_id)
     approved = approve(report_id)
     assert approved.status_code == 200, approved.text
     with connect() as conn:
@@ -212,7 +193,6 @@ def test_subtitled_manual_printing_joins_the_card_identity_of_its_base_name(seed
                        "note": "Card in hand"})
     assert response.status_code == 201, response.text
     report_id = response.json()["id"]
-    issue_code(report_id)
     approved = approve(report_id)
     assert approved.status_code == 200, approved.text
     approved_id = approved.json()["approved_printing_id"]

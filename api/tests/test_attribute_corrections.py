@@ -1,12 +1,9 @@
 """Reviewed card attribute corrections (Deck Lists 11, issue #92) over signed HTTP against PostgreSQL.
 
-Collector reports are unapproved input; only the owner's approval-coded decision creates, replaces or removes a
+Collector reports are unapproved input; only the owner's decision creates, replaces or removes a
 Printing's correction. Effects are observed through the owner's evidence route, Deck detail checks (the Basic Energy
 exemption reads effective attributes) and the effective attributes every reader uses.
 """
-import hashlib
-import hmac
-import os
 from uuid import UUID, uuid4
 
 from app.card_attributes import RULES, CardAttributeRules, CardAttributes, advance_attribute_revision, \
@@ -24,7 +21,6 @@ from test_holdings import call
 OWNER, REPORTER, OTHER = "attr-owner", "attr-reporter", "attr-other"
 REPORTS = "/api/catalog/attribute-reports"
 ADMIN = "/api/admin/card-attributes"
-ACTION = "correct_attributes"
 CARDS = (ENERGY_BW, TRAINER_KIT_ENERGY, REVERSAL_MISLABELLED, EX_SV, RARE_CANDY_SM)
 FULL_MANUAL = {"regulation_mark": "H", "card_kind": "pokemon", "basic_energy": False, "types": ["Lightning"],
                "rule_box": False, "ace_spec": False, "radiant": False, "prism_star": False, "basic_pokemon": True}
@@ -34,21 +30,11 @@ def seed(*records):
     reset_catalog()
     run(Records(*(records or CARDS)))
     with connect() as conn:
-        conn.execute("DELETE FROM catalog_approval_code")
         for user in (OWNER, REPORTER, OTHER):
             conn.execute("INSERT INTO inventory_owner(user_id) VALUES (%s) ON CONFLICT DO NOTHING", (user,))
         conn.execute("DELETE FROM owner_binding")
         conn.execute("INSERT INTO owner_binding(singleton,user_id) VALUES (true,%s)", (OWNER,))
     return {source_id: str(printing_id) for source_id, printing_id in printing_ids(*(r["id"] for r in records or CARDS)).items()}
-
-
-def grant(printing, code="123456", action=ACTION, user=OWNER):
-    target = f"printing:{printing}"
-    digest = hmac.new(os.environ["INTERNAL_AUTH_SECRET"].encode(), f"{user}:{target}:{action}:{code}".encode(),
-                      hashlib.sha256).hexdigest()
-    with connect() as conn:
-        conn.execute("""INSERT INTO catalog_approval_code(owner_id,metadata_target,action,code_hash,expires_at)
-          VALUES (%s,%s,%s,%s,now()+interval '5 minutes')""", (user, target, action, digest))
 
 
 def evidence(printing):
@@ -57,10 +43,10 @@ def evidence(printing):
     return response.json()
 
 
-def decide(printing, decision="correct", correction=None, *, code="123456", digest=None, report_ids=(), user=OWNER):
+def decide(printing, decision="correct", correction=None, *, digest=None, report_ids=(), user=OWNER, **extra):
     body = {"printing_id": printing, "decision": decision, "evidence_digest": digest or evidence(printing)["evidence_digest"],
             "evidence_url": "https://example.org/scan", "reason": "Checked the printed card", "report_ids": list(report_ids),
-            "code": code}
+            **extra}
     if correction is not None:
         body["correction"] = correction
     return call("POST", f"{ADMIN}/decisions", user, body)
@@ -154,33 +140,22 @@ def test_reports_are_reporter_scoped_and_owner_can_ask_for_information_or_reject
     assert call("GET", f"{REPORTS}/{mine}", REPORTER).json()["status"] == "rejected"
 
 
-# ------------------------------------------------------------------ approval-coded decisions
+# ------------------------------------------------------------------ owner decisions
 
 
-def test_a_correction_needs_a_fresh_code_issued_for_this_printing_and_action():
+def test_a_correction_takes_effect_on_the_owners_request_and_only_the_owners():
     ids = seed()
     printing = ids["tk-hs-g-10"]
     correction = {"basic_energy": True}
     before = revision()
-    assert error(decide(printing, correction=correction, code=None)) == "FRESH_CODE_REQUIRED"
-    grant(printing, action="resolve_metadata")  # a Live metadata code for the same Printing
-    assert decide(printing, correction=correction).status_code == 403
-    grant(ids["bw1-105"])  # a code for another Printing
-    assert decide(printing, correction=correction).status_code == 403
-    grant(printing, user=OTHER)
-    assert decide(printing, correction=correction, user=OTHER).status_code == 403  # not the owner
-    grant(printing)
     clock_before = clock()
-    wrong = decide(printing, correction=correction, code="654321")
-    assert (wrong.status_code, error(wrong)) == (403, "INVALID_APPROVAL_CODE")
-    with connect() as conn:
-        assert conn.execute("""SELECT attempts FROM catalog_approval_code WHERE owner_id=%s AND action=%s
-          ORDER BY created_at DESC LIMIT 1""", (OWNER, ACTION)).fetchone()["attempts"] == 1
+    assert decide(printing, correction=correction, user=OTHER).status_code == 403  # not the owner
+    assert decide(printing, correction=correction, user=REPORTER).status_code == 403
     assert (revision(), clock()) == (before, clock_before) and effective(printing).basic_energy is None
-    approved = decide(printing, correction=correction)
+    # No code is asked for; one left in the body by an older web bundle is ignored.
+    approved = decide(printing, correction=correction, code="654321")
     assert approved.status_code == 200, approved.text
-    spent = decide(printing, correction=correction)
-    assert (spent.status_code, error(spent)) == (403, "INVALID_APPROVAL_CODE")  # a code is spent once
+    assert effective(printing).basic_energy is True and revision() == before + 1
 
 
 def test_an_approved_correction_overrides_derived_values_closes_reports_and_advances_the_revision_once():
@@ -191,7 +166,6 @@ def test_an_approved_correction_overrides_derived_values_closes_reports_and_adva
     unknown, known = ids["tk-hs-g-10"], ids["bw1-105"]
     sent = report(unknown, {"basic_energy": True}).json()["id"]
     before = revision()
-    grant(unknown)
     response = decide(unknown, correction={"basic_energy": True}, report_ids=[sent])
     assert response.status_code == 200, response.text
     body = response.json()
@@ -201,7 +175,6 @@ def test_an_approved_correction_overrides_derived_values_closes_reports_and_adva
     assert call("GET", f"{REPORTS}/{sent}", REPORTER).json()["status"] == "approved"
     # A definite derived value is overridden too: Grass Energy bw1-105 derives as Basic Energy.
     assert evidence(known)["derived"]["basic_energy"] is True
-    grant(known)
     assert decide(known, correction={"basic_energy": False}).status_code == 200
     assert revision() == before + 2
     assert statuses() == {"Grass Energy": "over_limit", "Water Energy": "basic_energy_exempt",
@@ -220,7 +193,6 @@ def test_a_correction_survives_re_derivation_until_it_is_removed(monkeypatch):
     ids = seed()
     printing = ids["bw1-105"]
     statuses = deck_with(edition_of("bw1-105"))
-    grant(printing)
     assert decide(printing, correction={"basic_energy": False}).status_code == 200
     # A new rules version makes the next import rewrite every derived row; the correction still wins.
     monkeypatch.setattr(CardAttributeRules, "VERSION", RULES.VERSION + 1)
@@ -229,12 +201,10 @@ def test_a_correction_survives_re_derivation_until_it_is_removed(monkeypatch):
     assert (shown["rules_version"], shown["derived"]["basic_energy"]) == (RULES.VERSION, True)
     assert effective(printing).basic_energy is False and statuses() == {"Grass Energy": "over_limit"}
     before = revision()
-    grant(printing)
     removed = decide(printing, decision="remove")
     assert removed.status_code == 200, removed.text
     assert removed.json()["correction"] is None and removed.json()["effective"]["basic_energy"] is True
     assert revision() == before + 1 and statuses() == {"Grass Energy": "basic_energy_exempt"}
-    grant(printing)
     nothing = decide(printing, decision="remove")
     assert (nothing.status_code, error(nothing)) == (422, "NO_CORRECTION")
     history = call("GET", f"{ADMIN}/{printing}/history", OWNER).json()
@@ -245,9 +215,7 @@ def test_a_correction_survives_re_derivation_until_it_is_removed(monkeypatch):
 def test_a_decision_states_the_whole_correction():
     ids = seed()
     printing = ids["sm1-129"]
-    grant(printing)
     assert decide(printing, correction={"ace_spec": True, "regulation_mark": "D"}).status_code == 200
-    grant(printing)
     replaced = decide(printing, correction={"regulation_mark": "E"})
     assert replaced.status_code == 200, replaced.text
     found = effective(printing)
@@ -265,7 +233,6 @@ def test_manual_printings_get_attributes_only_through_reviewed_corrections():
     assert set(shown["effective"].values()) == {None}
     assert manual in [item["printing_id"] for item in call("GET", f"{ADMIN}/queue", OWNER).json()["items"]]
     before = revision()
-    grant(manual)
     response = decide(manual, correction=FULL_MANUAL)
     assert response.status_code == 200, response.text
     assert response.json()["effective"] == {**FULL_MANUAL, "trainer_type": None} and revision() == before + 1
@@ -282,7 +249,6 @@ def test_a_decision_binds_to_the_evidence_shown_and_rejects_impossible_attribute
     printing = ids["tk-hs-g-10"]
     shown = evidence(printing)["evidence_digest"]
     report(printing, {"basic_energy": True})  # new evidence arrives after the owner looked
-    grant(printing)
     stale = decide(printing, correction={"basic_energy": True}, digest=shown)
     assert (stale.status_code, error(stale)) == (409, "ATTRIBUTE_EVIDENCE_CHANGED")
     for correction, code in (({}, "EMPTY_CORRECTION"), ({"types": ["Water"]}, "INCONSISTENT_ATTRIBUTES"),
@@ -295,7 +261,7 @@ def test_a_decision_binds_to_the_evidence_shown_and_rejects_impossible_attribute
     other = report(ids["bw1-105"], {"basic_energy": False}).json()["id"]
     response = decide(printing, correction={"basic_energy": True}, report_ids=[other])
     assert (response.status_code, error(response)) == (422, "INVALID_REPORT")
-    # None of the refusals spent the code.
+    # None of the refusals changed anything.
     assert decide(printing, correction={"basic_energy": True}).status_code == 200
 
 
@@ -314,7 +280,6 @@ def test_basic_pokemon_status_is_reported_and_corrected_like_any_other_attribute
     assert sent.status_code == 201, sent.text
     assert sent.json()["proposed"] == {"basic_pokemon": True}
     before = revision()
-    grant(printing)
     response = decide(printing, correction={"basic_pokemon": True}, report_ids=[sent.json()["id"]])
     assert response.status_code == 200, response.text
     assert response.json()["effective"]["basic_pokemon"] is True and revision() == before + 1
@@ -354,21 +319,6 @@ def test_owner_routes_refuse_everyone_else():
         assert call("GET", path, OWNER).status_code == 200, path
 
 
-def test_an_attribute_code_cannot_be_spent_on_a_metadata_decision():
-    ids = seed()
-    printing = ids["tk-hs-g-10"]
-    shown = call("GET", f"/api/admin/catalog-metadata/printings/{printing}", OWNER)
-    assert shown.status_code == 200, shown.text
-    item = shown.json()
-    grant(printing)  # a correct_attributes code
-    body = {"target": "live", "printing_id": printing, "decision": "unsupported", "basis_revision": item["basis_revision"],
-            "evidence_digest": item["evidence_digest"], "evidence_url": "https://example.org/evidence",
-            "reason": "Checked the physical card", "report_ids": [], "code": "123456"}
-    refused = call("POST", "/api/admin/catalog-metadata/decisions", OWNER, body)
-    assert (refused.status_code, error(refused)) == (403, "INVALID_APPROVAL_CODE")
-    assert decide(printing, correction={"basic_energy": True}).status_code == 200  # the code is still unspent
-
-
 def scans(query, params):
     """Every scan of the derived and correction tables in the query's plan as (relation, node type, keyed), where keyed
     means the scan looks rows up by an index condition. Seq scans are priced out, as row counts would at catalog scale;
@@ -396,7 +346,6 @@ def scans(query, params):
 def test_both_reader_forms_look_attributes_up_by_primary_key():
     ids = seed()
     manual, edition = seed_manual()
-    grant(str(manual))
     assert decide(str(manual), correction=FULL_MANUAL).status_code == 200
     editions = [edition_of(source_id) for source_id in ("bw1-105", "tk-hs-g-10")] + [str(edition)]
     # The join form of Deck checks and Deck List publication.

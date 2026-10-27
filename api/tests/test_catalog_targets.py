@@ -753,7 +753,7 @@ def test_pure_live_evaluation_honours_rejections_and_the_closed_flag():
     assert evaluate_printing(qualified, export, lambda: False, set(), None, lambda claim: False).state == "suspended"
 
 
-# ------------------------------------------------------------------ outbox, ordering and approval codes
+# ------------------------------------------------------------------ outbox and ordering
 
 
 def test_every_catalog_row_is_enqueued_in_its_own_transaction_and_rollback_leaves_nothing():
@@ -836,25 +836,6 @@ def test_import_takes_the_clock_before_touching_metadata_and_blocks_behind_an_ea
     assert {printing["public_revision"], *[row["public_revision"] for row in rows.values()]} == {held + 1}
 
 
-def test_approval_codes_accept_exactly_one_target_and_the_new_actions():
-    user = owner()
-    printing = str(uuid4())
-    def insert(**columns):
-        names = {"owner_id": user, "action": "resolve_metadata", "code_hash": "x", **columns}
-        with connect() as conn:
-            conn.execute(f"INSERT INTO catalog_approval_code({','.join(names)},expires_at) VALUES ({','.join(['%s'] * len(names))},now())",
-                         tuple(names.values()))
-    insert(metadata_target=f"printing:{printing}")
-    insert(metadata_target=f"edition:{printing}")
-    insert(metadata_target="rule:live_derivation:1", action="activate_rule")
-    for bad in ({"metadata_target": "printing:not-a-uuid"}, {"metadata_target": "rule:other:1"}, {},
-                {"metadata_target": f"printing:{printing}", "report_id": None, "review_id": str(uuid4())}):
-        with pytest.raises((psycopg.errors.CheckViolation, psycopg.errors.ForeignKeyViolation)):
-            insert(**bad)
-    with pytest.raises(psycopg.errors.CheckViolation):
-        insert(metadata_target=f"printing:{printing}", action="invented_action")
-
-
 def test_activations_and_decisions_are_append_only():
     reset_catalog(); activate(LIVE, 99)
     with connect() as conn, pytest.raises(psycopg.errors.RaiseException, match="append-only"):
@@ -918,7 +899,6 @@ def test_manual_approval_takes_the_clock_before_writing_metadata_and_orders_behi
             conn.execute("INSERT INTO inventory_owner(user_id) VALUES (%s) ON CONFLICT DO NOTHING", (user,))
         conn.execute("INSERT INTO owner_binding(singleton,user_id) VALUES (true,%s)", (cards.OWNER,))
     report_id = cards.printing_report()
-    cards.issue_code(report_id)
     holder = connect()
     outcome = {}
     try:
@@ -1000,7 +980,7 @@ def test_a_price_slot_belongs_to_one_edition_of_a_printing_whatever_the_product(
 
 
 def test_a_deprecated_edition_releases_its_product_and_price_slot_to_its_replacement():
-    from test_catalog_reconciliation import review_code, shown
+    from test_catalog_reconciliation import shown
     from test_holdings import call
     reset_catalog()
     run(Records(card(1), card(2)))
@@ -1015,10 +995,9 @@ def test_a_deprecated_edition_releases_its_product_and_price_slot_to_its_replace
         review = conn.execute("""INSERT INTO catalog_review(printing_id,source_id,kind,source_fingerprint,detail)
           VALUES (%s,'meta-1','variant_ambiguity','correction','Finish correction') RETURNING id""", (old["printing_id"],)).fetchone()["id"]
         before = conn.execute("SELECT mapping_revision,public_revision FROM catalog_edition_metadata WHERE edition_id=%s", (old["id"],)).fetchone()
-    review_code(user, review, "resolve_catalog")
     response = call("POST", f"/api/admin/catalog-reviews/{review}/decision", user, {
         "decision": "deprecate_edition", "reason": "Same physical card, corrected edition", "evidence_url": "https://example.org/e",
-        "code": "123456", "edition_id": str(old["id"]), "replacement_edition_id": str(new["id"]), "evidence_digest": shown(user, review)})
+        "edition_id": str(old["id"]), "replacement_edition_id": str(new["id"]), "evidence_digest": shown(user, review)})
     assert response.status_code == 200, response.text
     with connect() as conn:
         released = conn.execute("SELECT * FROM catalog_edition_metadata WHERE edition_id=%s", (old["id"],)).fetchone()

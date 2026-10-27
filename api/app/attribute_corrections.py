@@ -1,9 +1,8 @@
 """Collector reports and maintainer-reviewed corrections of one Card Printing's card attributes.
 
 Reports are unapproved input: they write one report row and nothing else. Only the owner (the catalog maintainer)
-changes a Printing's attributes, through a decision that consumes a fresh approval code issued for that Printing and
-the ``correct_attributes`` action, binds to the evidence the maintainer was shown, takes the commit-ordered public
-clock (as every catalog correction does, so it serializes with imports) and advances the attribute revision once.
+changes a Printing's attributes, through a decision that binds to the evidence the maintainer was shown, takes the
+commit-ordered public clock (as every catalog correction does, so it serializes with imports) and advances the attribute revision once.
 
 A correction is per attribute and replaces derivation for exactly the attributes it sets, until a later decision
 replaces or removes it; re-derivation on import never touches it. A decision states the Printing's whole correction:
@@ -35,12 +34,11 @@ from .card_attributes import ATTRIBUTE_COLUMNS, SOURCE_FIELDS, CardAttributes, a
 from .format_standing import rebuild_stale_best_effort
 from .holdings import fail
 from .main import connect, require_owner, verified_user
-from .metadata_reviews import consume_metadata_code, delivery_status
+from .metadata_reviews import delivery_status
 from .public_catalog import publish_catalog_best_effort
 
 router = APIRouter()
 
-ACTION = "correct_attributes"
 LOCK_TIMEOUT = "5s"
 OPEN_REPORT_LIMIT = 25
 QUEUE_PAGE = 100
@@ -221,7 +219,7 @@ def answer_report(report_id: UUID, payload: AttributeReportUpdate, user_id: str 
 
 @router.post("/api/admin/card-attributes/reports/{report_id}/decision", response_model=AttributeReportView)
 def decide_report(report_id: UUID, payload: AttributeReportDecision, user_id: str = Depends(verified_user)):
-    """Ask for more information or reject. Neither changes any attribute, so no code is needed."""
+    """Ask for more information or reject. Neither changes any attribute."""
     with connect() as conn, conn.transaction():
         require_owner(conn, user_id)
         report = conn.execute("SELECT * FROM catalog_attribute_report WHERE id=%s FOR UPDATE", (report_id,)).fetchone()
@@ -294,7 +292,7 @@ def load_evidence(conn, printing_id: UUID, lock: bool = False):
     """Everything the maintainer is shown for one Printing, from PostgreSQL.
 
     ``lock`` (the decision path) holds the derived row FOR SHARE and the open reports FOR UPDATE until commit. Lock order
-    in a decision: public clock, derived row, reports, approval code, attribute revision. Re-derivation writes derived
+    in a decision: public clock, derived row, reports, attribute revision. Re-derivation writes derived
     rows and then the attribute revision and never waits for a lock a decision takes later, so the orders don't invert.
     """
     row = conn.execute("""SELECT p.id,p.source,p.source_id,p.created_at,d.set_id,d.collector_number,d.display_name,
@@ -403,7 +401,6 @@ class AttributeDecisionInput(BaseModel):
     evidence_url: HttpUrl
     reason: str = Field(min_length=1, max_length=2000)
     report_ids: list[UUID] = Field(default_factory=list, max_length=50)
-    code: str | None = Field(default=None, pattern=r"^\d{6}$")
 
 
 class AttributeDecisionResult(BaseModel):
@@ -442,14 +439,6 @@ def decide(command: AttributeDecisionInput, background_tasks: BackgroundTasks, u
         if command.correction is not None:
             fail(422, "CORRECTION_NOT_ALLOWED")
         stated = {}
-    target = f"printing:{command.printing_id}"
-    bad_code = False
-    # A wrong code is decided before the clock is taken, so it commits only its attempt count.
-    with connect() as conn, conn.transaction():
-        require_owner(conn, user_id)
-        known = consume_metadata_code(conn, user_id, target, ACTION, command.code, spend=False)
-    if not known:
-        fail(403, "INVALID_APPROVAL_CODE")
     try:
         with connect() as conn, conn.transaction():
             require_owner(conn, user_id)
@@ -468,38 +457,33 @@ def decide(command: AttributeDecisionInput, background_tasks: BackgroundTasks, u
             if not consistent(result) or (stated.get("trainer_type") is not None and result.card_kind != "trainer"):
                 fail(422, "INCONSISTENT_ATTRIBUTES")
             closing = _closable_reports(conn, command)
-            if not consume_metadata_code(conn, user_id, target, ACTION, command.code):
-                bad_code = True
+            revision = advance_attribute_revision(conn)
+            previous = loaded["correction_values"].stated() if loaded["correction"] else None
+            derived = loaded["derived_values"].model_dump() if loaded["derived"] else None
+            decision_id = conn.execute("""INSERT INTO catalog_attribute_decision(printing_id,decision,correction,
+              previous_correction,derived,rules_version,evidence_digest,evidence_url,reason,reviewer_id,clock_revision,
+              attribute_revision) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+                                       (command.printing_id, command.decision, json.dumps(stated),
+                                        json.dumps(previous) if previous is not None else None,
+                                        json.dumps(derived) if derived is not None else None, loaded["rules_version"],
+                                        loaded["evidence_digest"], str(command.evidence_url), reason, user_id, clock,
+                                        revision)).fetchone()["id"]
+            if correction is None:
+                conn.execute("DELETE FROM catalog_attribute_correction WHERE printing_id=%s", (command.printing_id,))
             else:
-                revision = advance_attribute_revision(conn)
-                previous = loaded["correction_values"].stated() if loaded["correction"] else None
-                derived = loaded["derived_values"].model_dump() if loaded["derived"] else None
-                decision_id = conn.execute("""INSERT INTO catalog_attribute_decision(printing_id,decision,correction,
-                  previous_correction,derived,rules_version,evidence_digest,evidence_url,reason,reviewer_id,clock_revision,
-                  attribute_revision) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
-                                           (command.printing_id, command.decision, json.dumps(stated),
-                                            json.dumps(previous) if previous is not None else None,
-                                            json.dumps(derived) if derived is not None else None, loaded["rules_version"],
-                                            loaded["evidence_digest"], str(command.evidence_url), reason, user_id, clock,
-                                            revision)).fetchone()["id"]
-                if correction is None:
-                    conn.execute("DELETE FROM catalog_attribute_correction WHERE printing_id=%s", (command.printing_id,))
-                else:
-                    columns = ", ".join(ATTRIBUTE_COLUMNS)
-                    updates = ", ".join(f"{column} = EXCLUDED.{column}" for column in ATTRIBUTE_COLUMNS)
-                    conn.execute(f"""INSERT INTO catalog_attribute_correction (printing_id, {columns}, decision_id)
-                      VALUES (%s, {", ".join(["%s"] * len(ATTRIBUTE_COLUMNS))}, %s)
-                      ON CONFLICT (printing_id) DO UPDATE SET {updates}, decision_id = EXCLUDED.decision_id,
-                      updated_at = now()""",
-                                 (command.printing_id, *(stated.get(column) for column in ATTRIBUTE_COLUMNS), decision_id))
-                if closing:
-                    conn.execute("""UPDATE catalog_attribute_report SET status='approved',review_reason=%s,reviewer_id=%s,
-                      reviewed_at=now(),decision_id=%s,updated_at=now() WHERE id=ANY(%s)""",
-                                 (reason, user_id, decision_id, closing))
+                columns = ", ".join(ATTRIBUTE_COLUMNS)
+                updates = ", ".join(f"{column} = EXCLUDED.{column}" for column in ATTRIBUTE_COLUMNS)
+                conn.execute(f"""INSERT INTO catalog_attribute_correction (printing_id, {columns}, decision_id)
+                  VALUES (%s, {", ".join(["%s"] * len(ATTRIBUTE_COLUMNS))}, %s)
+                  ON CONFLICT (printing_id) DO UPDATE SET {updates}, decision_id = EXCLUDED.decision_id,
+                  updated_at = now()""",
+                             (command.printing_id, *(stated.get(column) for column in ATTRIBUTE_COLUMNS), decision_id))
+            if closing:
+                conn.execute("""UPDATE catalog_attribute_report SET status='approved',review_reason=%s,reviewer_id=%s,
+                  reviewed_at=now(),decision_id=%s,updated_at=now() WHERE id=ANY(%s)""",
+                             (reason, user_id, decision_id, closing))
     except psycopg.errors.LockNotAvailable:
         fail(409, "CATALOG_BUSY")
-    if bad_code:
-        fail(403, "INVALID_APPROVAL_CODE")
     # Committed. The Printing's public records are a derived copy: delivery is best effort and recoverable.
     publish_catalog_best_effort(printing_ids=[command.printing_id])
     # The attribute revision moved, so every Format's stored standing is stale: rebuild after the response.

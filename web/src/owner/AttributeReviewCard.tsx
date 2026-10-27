@@ -3,7 +3,6 @@ import {
   decideAttributeReport,
   decideAttributes,
   getAttributeEvidence,
-  requestMetadataCode,
   type AttributeEvidence,
   type AttributeReportView,
 } from "../metadata_generated";
@@ -14,7 +13,6 @@ import { TextArea, TextField } from "../ui/TextField";
 import {
   ATTRIBUTE_ROWS,
   EVOLVES_FROM_AFTER,
-  codeError,
   correctionFrom,
   decisionError,
   draftFrom,
@@ -25,7 +23,6 @@ import {
   stillQueued,
   type Draft,
 } from "./attributeValues";
-import { CodeStep } from "./CodeStep";
 
 /** A row header in the attribute table, sized like the ScrollTable's own cells. */
 const ROW_HEADER =
@@ -45,7 +42,7 @@ type Props = {
  * The card attributes review card (spec "Review cards", Attributes), inline under its queue row: the derived,
  * corrected and effective value of each attribute, Trainer Type included, and Evolves from (derived only). Then the
  * correction form, the linked collector reports with Ask for information and Reject report, and the decision:
- * reason, review evidence URL, Correct or Remove correction, and the fresh code. A confirmed decision closes the
+ * reason, review evidence URL, Correct or Remove correction. A confirmed decision closes the
  * linked reports with it. The card reads the Printing's evidence again when it opens, so its decision binds to what
  * it shows.
  */
@@ -59,18 +56,15 @@ export function AttributeReviewCard({ item, onClose, onDone }: Props) {
   const [decision, setDecision] = useState<"correct" | "remove">("correct");
   const [reason, setReason] = useState("");
   const [evidenceUrl, setEvidenceUrl] = useState("");
-  const [code, setCode] = useState("");
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const name = item.name ?? "Unnamed Printing";
-  const target = `printing:${item.printing_id}`;
 
   function show(next: AttributeEvidence) {
     setEvidence(next);
     setDraft(draftFrom(next.correction));
     setDecision("correct");
-    setCode("");
   }
 
   useEffect(() => {
@@ -105,20 +99,6 @@ export function AttributeReviewCard({ item, onClose, onDone }: Props) {
     }
   }
 
-  async function sendCode() {
-    setBusy(true);
-    setError("");
-    try {
-      await requestMetadataCode(target, "correct_attributes");
-      setStatus("Fresh approval code sent to your email.");
-    } catch (failure) {
-      setStatus("");
-      setError(codeError(failure));
-    } finally {
-      setBusy(false);
-    }
-  }
-
   async function confirm() {
     if (!evidence) return;
     setBusy(true);
@@ -132,9 +112,7 @@ export function AttributeReviewCard({ item, onClose, onDone }: Props) {
         evidence_url: evidenceUrl.trim(),
         reason: reason.trim(),
         report_ids: evidence.report_ids,
-        code,
       });
-      setCode("");
       await settle(
         decision === "correct"
           ? `Attributes corrected: ${name}.`
@@ -406,15 +384,15 @@ export function AttributeReviewCard({ item, onClose, onDone }: Props) {
               )}
             </Select>
           </div>
-          <CodeStep
-            onSend={() => void sendCode()}
-            code={code}
-            onCode={setCode}
-            confirmLabel="Confirm decision"
-            ready={ready}
-            busy={busy}
-            onConfirm={() => void confirm()}
-          />
+          <div>
+            <Button
+              variant="primary"
+              disabled={busy || !ready}
+              onClick={() => void confirm()}
+            >
+              Confirm decision
+            </Button>
+          </div>
         </>
       )}
       <p role="status" className="m-0 text-meta">

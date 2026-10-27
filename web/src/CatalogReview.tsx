@@ -4,13 +4,11 @@ import {
   getCatalogReviews,
   getReviewEditions,
   decideCatalogReview,
-  requestReviewCode,
   type CatalogReviewView,
   type CatalogDecision,
   type ReviewEditionView,
 } from "./reconciliation_generated";
 import { HoldingError } from "./holdings_generated";
-import { CodeStep } from "./owner/CodeStep";
 import {
   CARD_HEADING,
   Differs,
@@ -115,7 +113,6 @@ function ReviewDecision({
   );
   const [reason, setReason] = useState("");
   const [evidence, setEvidence] = useState("");
-  const [code, setCode] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const reasonField = useRef<HTMLTextAreaElement>(null);
@@ -168,20 +165,6 @@ function ReviewDecision({
       setMessage("Replacement search unavailable.");
     }
   }
-  async function sendCode() {
-    setBusy(true);
-    try {
-      await requestReviewCode(
-        review.id,
-        decision === "confirm_source" ? "confirm_source" : "resolve_catalog"
-      );
-      setMessage("Fresh review code sent to your email.");
-    } catch {
-      setMessage("Unable to send review code. Try again.");
-    } finally {
-      setBusy(false);
-    }
-  }
   async function submit() {
     setBusy(true);
     try {
@@ -190,7 +173,6 @@ function ReviewDecision({
         decision,
         reason,
         evidence_url: evidence,
-        code,
         manual_printing_id: manual || null,
         edition_id: edition || null,
         replacement_edition_id: replacement || null,
@@ -210,7 +192,7 @@ function ReviewDecision({
           cause.code === "REVIEW_EVIDENCE_CHANGED"
           ? "Review evidence changed since it was shown. Refresh the queue and check the new evidence."
           : cause instanceof HoldingError
-            ? `Review failed: ${cause.code}. Check evidence and request a fresh code if needed.`
+            ? `Review failed: ${cause.code}. Check the evidence and try again.`
             : "Review unavailable. Retry."
       );
     } finally {
@@ -245,10 +227,9 @@ function ReviewDecision({
         <Select
           label="Decision"
           value={decision}
-          onChange={(e) => {
-            setDecision(e.target.value as CatalogDecision["decision"]);
-            setCode("");
-          }}
+          onChange={(e) =>
+            setDecision(e.target.value as CatalogDecision["decision"])
+          }
         >
           <option value="keep_existing">Keep existing physical identity</option>
           {review.kind === "source_match" && (
@@ -398,15 +379,15 @@ function ReviewDecision({
           </ScrollTable>
         </>
       )}
-      <CodeStep
-        onSend={() => void sendCode()}
-        code={code}
-        onCode={setCode}
-        confirmLabel="Confirm decision"
-        ready={!!reason.trim() && !!evidence}
-        busy={busy}
-        onConfirm={() => void submit()}
-      />
+      <div>
+        <Button
+          variant="primary"
+          disabled={busy || !reason.trim() || !evidence}
+          onClick={() => void submit()}
+        >
+          Confirm decision
+        </Button>
+      </div>
       <p role="status" className="m-0 text-meta">
         {message}
       </p>
@@ -417,7 +398,7 @@ function ReviewDecision({
 /**
  * Owner controls' Catalog queue (#168): pending catalog reviews as a ScrollTable. A review's card shows the
  * incoming change beside the Printing as recorded, every Edition with its Holdings, and the decision with
- * a reason, a review evidence URL and a fresh code. A confirmed decision removes the row and shows a toast.
+ * a reason and a review evidence URL. A confirmed decision removes the row and shows a toast.
  */
 export function CatalogReview({ onChanged }: { onChanged: () => void }) {
   const [reviews, setReviews] = useState<CatalogReviewView[]>([]);

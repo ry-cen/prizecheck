@@ -1,8 +1,6 @@
 """Private missing-card reports and owner-reviewed manual catalog entries."""
 import hashlib
-import hmac
 import json
-import os
 import unicodedata
 from datetime import datetime
 from typing import Literal
@@ -57,7 +55,6 @@ class ReportUpdate(BaseModel):
 class DecisionInput(BaseModel):
     decision: Literal["needs_info", "reject", "approve"]
     reason: str = Field(min_length=1, max_length=2000)
-    code: str | None = Field(default=None, pattern=r"^\d{6}$")
     set_id: str | None = Field(default=None, max_length=80)
     set_name: str | None = Field(default=None, max_length=160)
     collector_number: str | None = Field(default=None, max_length=80)
@@ -97,27 +94,6 @@ def _valid_descriptor(descriptor: dict | None) -> tuple[str, dict]:
     if len(json.dumps(descriptor)) > 1000:
         raise HTTPException(422, {"code": "INVALID_DESCRIPTOR", "message": "Descriptor is too long."})
     return json.dumps(descriptor, sort_keys=True), descriptor
-
-
-def _code_hash(owner_id: str, report_id: UUID, action: str, code: str) -> str:
-    message = f"{owner_id}:{report_id}:{action}:{code}".encode()
-    return hmac.new(os.environ["INTERNAL_AUTH_SECRET"].encode(), message, hashlib.sha256).hexdigest()
-
-
-def _consume_code(conn, owner_id: str, report_id: UUID, action: str, code: str | None):
-    if code is None:
-        raise HTTPException(422, {"code": "FRESH_CODE_REQUIRED", "message": "Request a fresh approval code."})
-    challenge = conn.execute("""SELECT * FROM catalog_approval_code
-      WHERE owner_id=%s AND report_id=%s AND action=%s ORDER BY created_at DESC,id DESC LIMIT 1 FOR UPDATE""",
-      (owner_id, report_id, action)).fetchone()
-    if not challenge or challenge["consumed_at"] or challenge["expires_at"] <= datetime.now(challenge["expires_at"].tzinfo) or challenge["attempts"] >= 3:
-        raise HTTPException(403, {"code": "INVALID_APPROVAL_CODE", "message": "Invalid or expired approval code."})
-    if not hmac.compare_digest(challenge["code_hash"], _code_hash(owner_id, report_id, action, code)):
-        # Preserve an invalid attempt despite the HTTP error by committing this transaction first.
-        conn.execute("UPDATE catalog_approval_code SET attempts=attempts+1 WHERE id=%s", (challenge["id"],))
-        return False
-    conn.execute("UPDATE catalog_approval_code SET consumed_at=now() WHERE id=%s", (challenge["id"],))
-    return True
 
 
 @router.post("/api/missing-card-reports", response_model=ReportView, status_code=201)
@@ -193,7 +169,6 @@ def owner_begin(payload: ReportInput, user_id: str = Depends(verified_user)):
 
 @router.post("/api/admin/missing-card-reports/{report_id}/decision", response_model=ReportView)
 def decide_report(report_id: UUID, payload: DecisionInput, user_id: str = Depends(verified_user)):
-    bad_code = False
     with connect() as conn, conn.transaction():
         require_owner(conn, user_id)
         report = _report(conn, report_id, True, user_id)
@@ -248,39 +223,34 @@ def decide_report(report_id: UUID, payload: DecisionInput, user_id: str = Depend
                 raise HTTPException(422, {"code": "DISTINCT_VARIANT_REQUIRED", "message": "Use the existing Unspecified Variant when the physical variant is uncertain."})
             if conn.execute("SELECT 1 FROM catalog_edition WHERE printing_id=%s AND descriptor_key=%s", (printing_id, descriptor_key)).fetchone():
                 raise HTTPException(409, {"code": "POSSIBLE_DUPLICATE", "message": "Descriptor already exists; review the candidate."})
-        if not _consume_code(conn, user_id, report_id, action, payload.code):
-            bad_code = True
-        else:
-            # Take the commit-ordered public revision before any catalog or metadata row is written.
-            conn.execute("SELECT catalog_begin_correction()")
-            if report["kind"] == "printing":
-                key = card_identity_key(name)  # Card Identity folds apostrophes and ignores a trailing subtitle.
-                # A Card Identity merged by review keeps its key; the new Printing joins the survivor.
-                identity = conn.execute("""INSERT INTO catalog_identity(identity_key,display_name) VALUES (%s,%s)
-                  ON CONFLICT(identity_key) DO UPDATE SET identity_key=EXCLUDED.identity_key
-                  RETURNING coalesce(merged_into,id) AS id""", (key, key)).fetchone()
-                printing_id = conn.execute("""INSERT INTO catalog_printing(source,identity_id)
-                  VALUES ('manual',%s) RETURNING id""", (identity["id"],)).fetchone()["id"]
-                conn.execute("""INSERT INTO catalog_generation_printing
-                  (generation_id,printing_id,source_id,set_id,set_name,collector_number,display_name,search_name,image_url,source_fingerprint,basic_energy)
-                  VALUES (%s,%s,%s,%s,%s,%s,%s,%s,NULL,%s,'unresolved')""",
-                  (generation, printing_id, f"manual:{printing_id}", set_id, set_name, number, name,
-                   name.casefold(), hashlib.sha256(f"{set_id}:{number}:{name}".encode()).hexdigest()))
-            edition_id = conn.execute("""INSERT INTO catalog_edition(printing_id,descriptor_key,descriptor)
-              VALUES (%s,%s,%s) RETURNING id""", (printing_id, descriptor_key, json.dumps(descriptor))).fetchone()["id"]
-            conn.execute("""INSERT INTO catalog_generation_edition(generation_id,edition_id,printing_id)
-              VALUES (%s,%s,%s)""", (generation, edition_id, printing_id))
-            revision = conn.execute("""UPDATE catalog_state SET revision=revision+1 WHERE singleton RETURNING revision""").fetchone()["revision"]
-            conn.execute("""INSERT INTO catalog_override
-              (report_id,printing_id,edition_id,revision,reviewer_id,evidence_url,reason,action)
-              VALUES (%s,%s,%s,%s,%s,%s,%s,%s)""",
-              (report_id, printing_id, edition_id, revision, user_id, evidence, reason, action))
-            row = conn.execute("""UPDATE missing_card_report SET status='approved',review_reason=%s,reviewer_id=%s,
-              reviewed_at=now(),updated_at=now(),approved_printing_id=%s,approved_edition_id=%s,
-              evidence_url=%s WHERE id=%s RETURNING *""",
-              (reason, user_id, printing_id, edition_id, evidence, report_id)).fetchone()
-    if bad_code:
-        raise HTTPException(403, {"code": "INVALID_APPROVAL_CODE", "message": "Invalid or expired approval code."})
+        # Take the commit-ordered public revision before any catalog or metadata row is written.
+        conn.execute("SELECT catalog_begin_correction()")
+        if report["kind"] == "printing":
+            key = card_identity_key(name)  # Card Identity folds apostrophes and ignores a trailing subtitle.
+            # A Card Identity merged by review keeps its key; the new Printing joins the survivor.
+            identity = conn.execute("""INSERT INTO catalog_identity(identity_key,display_name) VALUES (%s,%s)
+              ON CONFLICT(identity_key) DO UPDATE SET identity_key=EXCLUDED.identity_key
+              RETURNING coalesce(merged_into,id) AS id""", (key, key)).fetchone()
+            printing_id = conn.execute("""INSERT INTO catalog_printing(source,identity_id)
+              VALUES ('manual',%s) RETURNING id""", (identity["id"],)).fetchone()["id"]
+            conn.execute("""INSERT INTO catalog_generation_printing
+              (generation_id,printing_id,source_id,set_id,set_name,collector_number,display_name,search_name,image_url,source_fingerprint,basic_energy)
+              VALUES (%s,%s,%s,%s,%s,%s,%s,%s,NULL,%s,'unresolved')""",
+              (generation, printing_id, f"manual:{printing_id}", set_id, set_name, number, name,
+               name.casefold(), hashlib.sha256(f"{set_id}:{number}:{name}".encode()).hexdigest()))
+        edition_id = conn.execute("""INSERT INTO catalog_edition(printing_id,descriptor_key,descriptor)
+          VALUES (%s,%s,%s) RETURNING id""", (printing_id, descriptor_key, json.dumps(descriptor))).fetchone()["id"]
+        conn.execute("""INSERT INTO catalog_generation_edition(generation_id,edition_id,printing_id)
+          VALUES (%s,%s,%s)""", (generation, edition_id, printing_id))
+        revision = conn.execute("""UPDATE catalog_state SET revision=revision+1 WHERE singleton RETURNING revision""").fetchone()["revision"]
+        conn.execute("""INSERT INTO catalog_override
+          (report_id,printing_id,edition_id,revision,reviewer_id,evidence_url,reason,action)
+          VALUES (%s,%s,%s,%s,%s,%s,%s,%s)""",
+          (report_id, printing_id, edition_id, revision, user_id, evidence, reason, action))
+        row = conn.execute("""UPDATE missing_card_report SET status='approved',review_reason=%s,reviewer_id=%s,
+          reviewed_at=now(),updated_at=now(),approved_printing_id=%s,approved_edition_id=%s,
+          evidence_url=%s WHERE id=%s RETURNING *""",
+          (reason, user_id, printing_id, edition_id, evidence, report_id)).fetchone()
     # The approval is committed; publishing its public catalog records is best effort and recoverable.
     publish_catalog_best_effort(printing_ids=[printing_id])
     return _view(row)

@@ -4,8 +4,8 @@ Automatic Reprint Groups (``app.reprint_groups``) only join printings whose rule
 merges reworded or errata'd printings into one group (the handbook's Copycat CES 127 and TRR 83, or Rare Candy sm1-129
 and me01-125), splits a wrong group, lets a manually approved Printing join a group (its only way into one), and merges
 Card Identities that the subtitle rule misses. As for card attribute corrections (``app.attribute_corrections``), only
-the owner changes these: each decision spends a fresh approval code issued for the Card Identity and this module's
-action, binds to the evidence the maintainer was shown, takes the commit-ordered public clock (so it serializes with
+the owner changes these: each decision binds to the evidence the maintainer was shown, takes the commit-ordered
+public clock (so it serializes with
 catalog imports), advances the attribute revision once and is recorded append-only. There are no collector reports.
 
 Every decision concerns one Card Identity, since Reprint Groups never span identities. Reviewed records name Printings
@@ -65,14 +65,12 @@ from .card_attributes import advance_attribute_revision, attribute_revision, rea
 from .format_standing import rebuild_stale_best_effort
 from .holdings import fail
 from .main import connect, require_owner, verified_user
-from .metadata_reviews import consume_metadata_code, delivery_status
+from .metadata_reviews import delivery_status
 from .public_catalog import publish_catalog_best_effort
 from .reprint_groups import GROUP_NAMESPACE, refresh_reprint_groups
 
 router = APIRouter()
 
-GROUP_ACTION = "review_reprint_groups"
-IDENTITY_ACTION = "merge_card_identities"
 LOCK_TIMEOUT = "5s"
 QUEUE_PAGE = 100
 MAX_PRINTINGS = 500
@@ -314,7 +312,6 @@ class ReprintGroupDecisionInput(BaseModel):
     evidence_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     evidence_url: HttpUrl
     reason: str = Field(min_length=1, max_length=2000)
-    code: str | None = Field(default=None, pattern=r"^\d{6}$")
 
 
 class ReprintGroupDecisionResult(BaseModel):
@@ -338,7 +335,6 @@ class CardIdentityMergeInput(BaseModel):
     into_evidence_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
     evidence_url: HttpUrl
     reason: str = Field(min_length=1, max_length=2000)
-    code: str | None = Field(default=None, pattern=r"^\d{6}$")
 
 
 class CardIdentityMergeResult(BaseModel):
@@ -361,15 +357,6 @@ def _reason(text: str) -> str:
     if not reason:
         fail(422, "REASON_REQUIRED")
     return reason
-
-
-def _verify_code(user_id: str, target: str, action: str, code: str | None):
-    """A wrong code is decided before the clock is taken, so it commits only its attempt count."""
-    with connect() as conn, conn.transaction():
-        require_owner(conn, user_id)
-        known = consume_metadata_code(conn, user_id, target, action, code, spend=False)
-    if not known:
-        fail(403, "INVALID_APPROVAL_CODE")
 
 
 def _membership(conn, identity_ids) -> dict:
@@ -455,9 +442,6 @@ def decide_groups(command: ReprintGroupDecisionInput, background_tasks: Backgrou
         fail(422, "INVALID_DECISION")
     if command.decision == "merge" and command.group_id == command.target_group_id:
         fail(422, "SAME_GROUP")
-    target = f"card_identity:{command.identity_id}"
-    _verify_code(user_id, target, GROUP_ACTION, command.code)
-    bad_code = False
     try:
         with connect() as conn, conn.transaction():
             require_owner(conn, user_id)
@@ -473,27 +457,22 @@ def decide_groups(command: ReprintGroupDecisionInput, background_tasks: Backgrou
             if not hmac.compare_digest(command.evidence_digest, loaded["evidence_digest"]):
                 fail(409, "IDENTITY_EVIDENCE_CHANGED")
             _check_group_decision(command, printing_ids, loaded)
-            if not consume_metadata_code(conn, user_id, target, GROUP_ACTION, command.code):
-                bad_code = True
-            else:
-                revision = advance_attribute_revision(conn)
-                decision_id = uuid4()
-                before = _membership(conn, [command.identity_id])
-                group = _apply_group_decision(conn, command, printing_ids, decision_id)
-                affected = _changed(before, _membership(conn, [command.identity_id]))
-                if not affected:
-                    fail(422, "NO_CHANGE")  # rolls back the records and the spent code
-                conn.execute("""INSERT INTO catalog_card_identity_decision (id, identity_id, decision, group_id,
-                  target_group_id, printing_ids, affected_printing_ids, evidence_digest, evidence_url, reason,
-                  reviewer_id, clock_revision, attribute_revision)
-                  VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
-                             (decision_id, command.identity_id, command.decision, command.group_id,
-                              command.target_group_id, printing_ids, affected, loaded["evidence_digest"],
-                              str(command.evidence_url), reason, user_id, clock, revision))
+            revision = advance_attribute_revision(conn)
+            decision_id = uuid4()
+            before = _membership(conn, [command.identity_id])
+            group = _apply_group_decision(conn, command, printing_ids, decision_id)
+            affected = _changed(before, _membership(conn, [command.identity_id]))
+            if not affected:
+                fail(422, "NO_CHANGE")  # rolls back the records
+            conn.execute("""INSERT INTO catalog_card_identity_decision (id, identity_id, decision, group_id,
+              target_group_id, printing_ids, affected_printing_ids, evidence_digest, evidence_url, reason,
+              reviewer_id, clock_revision, attribute_revision)
+              VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                         (decision_id, command.identity_id, command.decision, command.group_id,
+                          command.target_group_id, printing_ids, affected, loaded["evidence_digest"],
+                          str(command.evidence_url), reason, user_id, clock, revision))
     except psycopg.errors.LockNotAvailable:
         fail(409, "CATALOG_BUSY")
-    if bad_code:
-        fail(403, "INVALID_APPROVAL_CODE")
     # Committed. Public records are a derived copy: delivery is best effort and recoverable.
     publish_catalog_best_effort(printing_ids=affected)
     # The attribute revision moved, so every Format's stored standing is stale: rebuild after the response.
@@ -510,9 +489,6 @@ def merge_identities(command: CardIdentityMergeInput, background_tasks: Backgrou
     merged, survivor = command.identity_id, command.into_identity_id
     if merged == survivor:
         fail(422, "SAME_IDENTITY")
-    target = f"card_identity:{merged}"
-    _verify_code(user_id, target, IDENTITY_ACTION, command.code)
-    bad_code = False
     try:
         with connect() as conn, conn.transaction():
             require_owner(conn, user_id)
@@ -532,34 +508,29 @@ def merge_identities(command: CardIdentityMergeInput, background_tasks: Backgrou
                 fail(409, "IDENTITY_EVIDENCE_CHANGED")
             if any(printing.linked_group_id or printing.assigned_group_id for printing in loaded["printings"]):
                 fail(422, "REPRINT_GROUP_OVERRIDES")
-            if not consume_metadata_code(conn, user_id, target, IDENTITY_ACTION, command.code):
-                bad_code = True
-            else:
-                revision = advance_attribute_revision(conn)
-                decision_id = uuid4()
-                before = _membership(conn, [merged, survivor])
-                moved = [row["id"] for row in conn.execute(
-                    "UPDATE catalog_printing SET identity_id=%s WHERE identity_id=%s RETURNING id", (survivor, merged))]
-                conn.execute("UPDATE catalog_identity SET merged_into=%s, merge_decision_id=%s WHERE id=%s",
-                             (survivor, decision_id, merged))
-                # Identities merged into this one earlier now point at the survivor, so a key is one step from it.
-                conn.execute("UPDATE catalog_identity SET merged_into=%s WHERE merged_into=%s", (survivor, merged))
-                # Derived group IDs include the identity: re-derive the moved Printings' groups now.
-                if moved:
-                    refresh_reprint_groups(conn, printing_ids=moved)
-                # Search cursors and catalog-revision-keyed reads must not span the change (as in migration 028).
-                conn.execute("UPDATE catalog_state SET revision=revision+1 WHERE singleton")
-                affected = _changed(before, _membership(conn, [survivor]))
-                conn.execute("""INSERT INTO catalog_card_identity_decision (id, identity_id, decision,
-                  into_identity_id, printing_ids, affected_printing_ids, evidence_digest, into_evidence_digest,
-                  evidence_url, reason, reviewer_id, clock_revision, attribute_revision)
-                  VALUES (%s, %s, 'merge_identity', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
-                             (decision_id, merged, survivor, moved, affected, loaded["evidence_digest"],
-                              into["evidence_digest"], str(command.evidence_url), reason, user_id, clock, revision))
+            revision = advance_attribute_revision(conn)
+            decision_id = uuid4()
+            before = _membership(conn, [merged, survivor])
+            moved = [row["id"] for row in conn.execute(
+                "UPDATE catalog_printing SET identity_id=%s WHERE identity_id=%s RETURNING id", (survivor, merged))]
+            conn.execute("UPDATE catalog_identity SET merged_into=%s, merge_decision_id=%s WHERE id=%s",
+                         (survivor, decision_id, merged))
+            # Identities merged into this one earlier now point at the survivor, so a key is one step from it.
+            conn.execute("UPDATE catalog_identity SET merged_into=%s WHERE merged_into=%s", (survivor, merged))
+            # Derived group IDs include the identity: re-derive the moved Printings' groups now.
+            if moved:
+                refresh_reprint_groups(conn, printing_ids=moved)
+            # Search cursors and catalog-revision-keyed reads must not span the change (as in migration 028).
+            conn.execute("UPDATE catalog_state SET revision=revision+1 WHERE singleton")
+            affected = _changed(before, _membership(conn, [survivor]))
+            conn.execute("""INSERT INTO catalog_card_identity_decision (id, identity_id, decision,
+              into_identity_id, printing_ids, affected_printing_ids, evidence_digest, into_evidence_digest,
+              evidence_url, reason, reviewer_id, clock_revision, attribute_revision)
+              VALUES (%s, %s, 'merge_identity', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                         (decision_id, merged, survivor, moved, affected, loaded["evidence_digest"],
+                          into["evidence_digest"], str(command.evidence_url), reason, user_id, clock, revision))
     except psycopg.errors.LockNotAvailable:
         fail(409, "CATALOG_BUSY")
-    if bad_code:
-        fail(403, "INVALID_APPROVAL_CODE")
     publish_catalog_best_effort(printing_ids=affected)
     # The attribute and catalog revisions moved, so every Format's stored standing is stale: rebuild after the response.
     background_tasks.add_task(rebuild_stale_best_effort)

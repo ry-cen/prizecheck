@@ -2,13 +2,13 @@ import AxeBuilder from "@axe-core/playwright";
 import { test, expect } from "@playwright/test";
 import { signInAsOwner } from "./support/sign-in";
 import { execFileSync } from "node:child_process";
-import { chmodSync, readFileSync } from "node:fs";
+import { chmodSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { listHoldings } from "./support/deck-list";
 import { exemptFromPublishGate } from "./support/publish-gate";
 
-test("owner resolves source drift with evidence and a fresh action-bound email code", async ({
+test("owner resolves source drift with evidence in one step", async ({
   page,
 }) => {
   execFileSync(
@@ -21,13 +21,8 @@ promote({'reconciliation-1':'Review Pikachu'})`,
     { env: { ...process.env, PYTHONPATH: "api:api/tests" } }
   );
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-  await pool.query("DELETE FROM auth_send_event");
   try {
     await signInAsOwner(page, "/collection");
-    const mail = () =>
-      JSON.parse(
-        readFileSync(process.env.MAIL_FILE!, "utf8").trim().split("\n").at(-1)!
-      ).otp as string;
     await expect(
       page.getByRole("navigation", { name: "Main views" })
     ).toBeVisible();
@@ -87,28 +82,6 @@ promote({'reconciliation-1':'Review Pikachu'})`,
     await article
       .getByLabel("Review evidence URL")
       .fill("https://example.org/card-photo");
-    // Catalog approval shares the one-email-per-minute limit with any mail sent to the owner. Sign-in through the fake
-    // sends none, so record a send that just happened.
-    await pool.query(
-      "INSERT INTO auth_send_event(email_key, ip_key, sent_at) VALUES (encode(sha256(convert_to($1, 'UTF8')), 'hex'), 'journey', now())",
-      [(process.env.OWNER_EMAIL || "owner@example.test").trim().toLowerCase()]
-    );
-    const limited = page.waitForResponse((r) =>
-      r.url().endsWith("/auth/approval-code")
-    );
-    await article.getByRole("button", { name: "Send code" }).click();
-    expect((await limited).status()).toBe(429);
-    await expect(article.getByRole("status")).toContainText(
-      "Unable to send review code"
-    );
-    await pool.query(
-      "UPDATE auth_send_event SET sent_at=now()-interval '61 seconds'"
-    );
-    await article.getByRole("button", { name: "Send code" }).click();
-    await expect(article.getByRole("status")).toContainText(
-      "Fresh review code sent"
-    );
-    await article.getByLabel("Fresh six-digit code").fill(mail());
     await article.getByRole("button", { name: "Confirm decision" }).click();
     // A confirmed decision removes the row and says so in a toast.
     await expect(
@@ -138,14 +111,9 @@ promote({'card-1':'Correction Pikachu'})`,
     { env: { ...process.env, PYTHONPATH: "api:api/tests" } }
   );
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-  await pool.query("DELETE FROM auth_send_event");
   const location = `Correction ${Date.now()}`;
   try {
     await signInAsOwner(page, "/collection");
-    const mail = () =>
-      JSON.parse(
-        readFileSync(process.env.MAIL_FILE!, "utf8").trim().split("\n").at(-1)!
-      ).otp as string;
     const cards = page.getByRole("region", { name: "Cards" });
     const openLocation = async () => {
       await page
@@ -289,20 +257,11 @@ run(MetadataSource({'card-1': 'Correction Pikachu'}))`,
     expect(latestReview.evidence_digest).not.toBe(
       pendingBefore[0].evidence_digest
     );
-    // The owner decides through the gateway with a fresh code bound to the evidence shown.
-    await pool.query(
-      "UPDATE auth_send_event SET sent_at=now()-interval '61 seconds'"
-    );
-    const sent = await page.request.post(gateway("/auth/approval-code"), {
-      headers: sameOrigin,
-      data: { reviewId: latestReview.id, action: "resolve_catalog" },
-    });
-    expect(sent.ok()).toBeTruthy();
+    // The owner decides through the gateway, bound to the evidence shown.
     const decision = {
       decision: "keep_existing",
       reason: "Physical card confirms the established name",
       evidence_url: "https://example.org/card-photo",
-      code: mail(),
     };
     const decide = (digest: string) =>
       page.request.post(

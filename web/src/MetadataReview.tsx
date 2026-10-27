@@ -5,12 +5,10 @@ import {
   getMetadataHistory,
   getMetadataQueue,
   getMetadataTarget,
-  requestMetadataCode,
   type MetadataDecisionInput,
   type MetadataDecisionRow,
   type MetadataQueueItem,
 } from "./metadata_generated";
-import { CodeStep } from "./owner/CodeStep";
 import {
   CARD_HEADING,
   Differs,
@@ -29,9 +27,6 @@ import { useToast } from "./ui/Toast";
 const messages: Record<string, string> = {
   METADATA_EVIDENCE_CHANGED:
     "Evidence changed since you opened this target. Reload evidence and review it again before deciding.",
-  INVALID_APPROVAL_CODE:
-    "That code is invalid, used or expired. Send a new code.",
-  FRESH_CODE_REQUIRED: "Enter the fresh six-digit code first.",
   CATALOG_BUSY:
     "The catalog is busy with another change. Try again in a moment.",
   MAPPING_CONFLICT:
@@ -59,10 +54,6 @@ export const errorText = (error: unknown) =>
   error instanceof Error
     ? (messages[error.message] ?? "The request failed. Please retry.")
     : "The request failed. Please retry.";
-export const codeError = (error: unknown) =>
-  (error as { status?: number })?.status === 429
-    ? "Code rate limit reached. Try again in a minute."
-    : "Unable to send the code. Please retry.";
 
 function safeLink(value: string | null): string | undefined {
   // Reporter-supplied: only http(s) is ever a link.
@@ -266,7 +257,6 @@ function ReviewItem({
   const [evidence, setEvidence] = useState("");
   const [reason, setReason] = useState("");
   const [closeReports, setCloseReports] = useState(true);
-  const [code, setCode] = useState("");
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   const [stale, setStale] = useState(false);
@@ -290,7 +280,7 @@ function ReviewItem({
       collector_number: number.trim(),
     };
   }
-  // Everything the decision needs except the code, which the code step checks.
+  // Everything the decision needs.
   const ready =
     !!reason.trim() &&
     !!evidence.trim() &&
@@ -304,20 +294,6 @@ function ReviewItem({
     onItem(next);
     setHistoryKey((value) => value + 1);
     if (message !== undefined) setStatus(message);
-  }
-
-  async function sendCode() {
-    setBusy(true);
-    setError("");
-    try {
-      await requestMetadataCode(`${item.kind}:${targetId}`, "resolve_metadata");
-      setStatus("Fresh approval code sent to your email.");
-    } catch (failure) {
-      setStatus("");
-      setError(codeError(failure));
-    } finally {
-      setBusy(false);
-    }
   }
 
   async function submit() {
@@ -336,7 +312,6 @@ function ReviewItem({
         evidence_url: evidence.trim(),
         reason: reason.trim(),
         report_ids: closeReports ? item.report_ids : [],
-        code,
       });
       const text = `Decision recorded: ${result.state.replace(/_/g, " ")}${result.reason ? ` (${result.reason})` : ""}. Public delivery: ${result.public_delivery}.`;
       // A target stays queued while any report is still open (the box was unticked, or more than 25
@@ -569,15 +544,15 @@ function ReviewItem({
           Close linked reports with this decision
         </label>
       )}
-      <CodeStep
-        onSend={() => void sendCode()}
-        code={code}
-        onCode={setCode}
-        confirmLabel="Confirm decision"
-        ready={ready}
-        busy={busy}
-        onConfirm={() => void submit()}
-      />
+      <div>
+        <Button
+          variant="primary"
+          disabled={busy || !ready}
+          onClick={() => void submit()}
+        >
+          Confirm decision
+        </Button>
+      </div>
       <p role="status" className="m-0 text-meta">
         {status}
       </p>
@@ -642,7 +617,7 @@ function row(item: MetadataQueueItem): QueueRow {
  * Owner controls' Metadata queue (#168): quarantined Editions, suspended Printings and collector reports
  * as a ScrollTable, 100 at a time with Load more. A target's card shows source and reviewed values side by
  * side with differences marked, its linked reports with Ask for information and Reject report, the
- * decision with a reason, a review evidence URL and a fresh code, and the decision history folded away. A
+ * decision with a reason and a review evidence URL, and the decision history folded away. A
  * confirmed decision removes the row and shows a toast; a report decision reloads the target in place.
  */
 export function MetadataReview({ onChanged }: { onChanged: () => void }) {
@@ -684,7 +659,7 @@ export function MetadataReview({ onChanged }: { onChanged: () => void }) {
   return (
     <ReviewQueue
       title="Catalog metadata review"
-      intro="Quarantined Editions, suspended Printings and collector reports. Nothing changes until you record a decision with a fresh code."
+      intro="Quarantined Editions, suspended Printings and collector reports. Nothing changes until you record a decision."
       tableLabel="Metadata targets"
       rows={items.map(row)}
       emptyText="No metadata targets need review."

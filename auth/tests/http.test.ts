@@ -476,7 +476,7 @@ assert store.compare_and_swap({k: rows[k].version for k in keys}, {
     );
   });
 
-  it("issues metadata approval codes only to the owner for existing, well-formed targets, and a code spends end to end", async () => {
+  it("lets the owner's session decide a metadata change at once, refuses a collector, and no longer serves the approval-code route", async () => {
     const ids = {
       identity: randomUUID(),
       printing: randomUUID(),
@@ -494,9 +494,8 @@ assert store.compare_and_swap({k: rows[k].version for k in keys}, {
       "INSERT INTO catalog_edition(id,printing_id,descriptor_key,descriptor) VALUES ($1,$2,'probe',$3)",
       [ids.edition, ids.printing, JSON.stringify({ finish: "normal" })]
     );
-    // Earlier tests may have saturated the send limiter; code delivery is not what this test is about.
-    const reset = () => pool.query("DELETE FROM auth_send_event");
-    await reset();
+    // Earlier tests may have saturated the send limiter; sign-in mail is not what this test is about.
+    await pool.query("DELETE FROM auth_send_event");
     await post("/auth/request-code", { email });
     const signedIn = await post("/auth/verify-code", {
       email,
@@ -523,131 +522,35 @@ assert store.compare_and_swap({k: rows[k].version for k in keys}, {
     };
     await bind(userId);
     try {
-      const approval = async (body: object) => {
-        await reset();
-        return post("/auth/approval-code", body, cookie);
-      };
-      const target = `edition:${ids.edition}`;
-      const forms = [
-        { metadataTarget: "edition:not-a-uuid", action: "resolve_metadata" },
-        { metadataTarget: `printing:${ids.printing}`, action: "activate_rule" },
-        {
-          metadataTarget: "rule:live_derivation:1",
-          action: "resolve_metadata",
-        },
-        { metadataTarget: "rule:unknown_rule:1", action: "activate_rule" },
-        {
-          metadataTarget: "rule:live_derivation:1234567",
-          action: "activate_rule",
-        },
-        { metadataTarget: "rule:live_derivation:-1", action: "activate_rule" },
-        { metadataTarget: target, action: "approve_printing" },
-        // Card attribute corrections name a Printing, never an Edition or a rule.
-        { metadataTarget: target, action: "correct_attributes" },
-        {
-          metadataTarget: "rule:live_derivation:1",
-          action: "correct_attributes",
-        },
-        // Reprint Group reviews and identity merges name a Card Identity, and a Card Identity takes nothing else.
-        {
-          metadataTarget: `card_identity:${ids.identity}`,
-          action: "resolve_metadata",
-        },
-        {
-          metadataTarget: `card_identity:${ids.identity}`,
-          action: "correct_attributes",
-        },
-        {
-          metadataTarget: `printing:${ids.printing}`,
-          action: "review_reprint_groups",
-        },
-        { metadataTarget: target, action: "merge_card_identities" },
-        { metadataTarget: target, action: "resolve_catalog" },
-        {
-          metadataTarget: target,
-          reportId: randomUUID(),
-          action: "resolve_metadata",
-        },
-        {
-          metadataTarget: target,
-          reviewId: randomUUID(),
-          action: "resolve_metadata",
-        },
-        { metadataTarget: 123, action: "resolve_metadata" },
-        { metadataTarget: `${target} `, action: "resolve_metadata" },
-      ];
-      const count = async () =>
-        (
-          await pool.query(
-            "SELECT count(*)::int AS n FROM catalog_approval_code"
-          )
-        ).rows[0].n as number;
-      const before = await count();
-      for (const form of forms)
-        expect((await approval(form)).status, JSON.stringify(form)).toBe(422);
-      for (const missing of [
-        `edition:${randomUUID()}`,
-        `printing:${randomUUID()}`,
-      ])
-        expect(
-          (
-            await approval({
-              metadataTarget: missing,
-              action: "resolve_metadata",
-            })
-          ).status
-        ).toBe(404);
+      // No code is issued, mailed or stored: the route is gone.
+      const mailLines = () =>
+        readFileSync(mailFile, "utf8").trim().split("\n").length;
+      const mailed = mailLines();
       expect(
         (
-          await approval({
-            metadataTarget: `card_identity:${randomUUID()}`,
-            action: "review_reprint_groups",
-          })
+          await post(
+            "/auth/approval-code",
+            {
+              metadataTarget: `edition:${ids.edition}`,
+              action: "resolve_metadata",
+            },
+            cookie
+          )
         ).status
       ).toBe(404);
-      expect(await count()).toBe(before);
+      expect(mailLines()).toBe(mailed);
 
-      for (const [metadataTarget, action] of [
-        [`card_identity:${ids.identity}`, "review_reprint_groups"],
-        [`card_identity:${ids.identity}`, "merge_card_identities"],
-        [`printing:${ids.printing}`, "correct_attributes"],
-        [`printing:${ids.printing}`, "resolve_metadata"],
-        ["rule:live_derivation:1", "activate_rule"],
-        ["rule:marketplace_matching:0", "activate_rule"],
-      ])
-        expect((await approval({ metadataTarget, action })).status).toBe(202);
-      const issued = await approval({
-        metadataTarget: `edition:${ids.edition.toUpperCase()}`,
-        action: "resolve_metadata",
-      });
-      expect(issued.status).toBe(202);
-      const rows = await pool.query(
-        "SELECT metadata_target,action,report_id,review_id FROM catalog_approval_code WHERE metadata_target IS NOT NULL ORDER BY created_at DESC LIMIT 4"
-      );
-      expect(rows.rows.map((row) => row.metadata_target).sort()).toEqual(
-        [
-          target,
-          `printing:${ids.printing}`,
-          "rule:live_derivation:1",
-          "rule:marketplace_matching:0",
-        ].sort()
-      );
-      expect(
-        rows.rows.every(
-          (row) => row.report_id === null && row.review_id === null
-        )
-      ).toBe(true);
-
-      // The emailed code spends on exactly the decision it was issued for, through the gateway and API.
-      const spend = latestCode();
-      const shown = await fetch(
-        `${base}/api/admin/catalog-metadata/editions/${ids.edition}`,
-        { headers: { cookie } }
-      );
-      expect(shown.status).toBe(200);
-      const item = await shown.json();
-      const decide = (code: string) =>
-        post(
+      // The owner's session decides in one request.
+      // The evidence is read afresh for each decision: a collector's report changes what the owner is shown.
+      const decide = async (extra: object = {}) => {
+        const shown = await fetch(
+          `${base}/api/admin/catalog-metadata/editions/${ids.edition}`,
+          { headers: { cookie } }
+        );
+        const item = shown.ok
+          ? await shown.json()
+          : { basis_revision: 0, evidence_digest: "0".repeat(64) };
+        return post(
           "/api/admin/catalog-metadata/decisions",
           {
             target: "marketplace",
@@ -659,53 +562,29 @@ assert store.compare_and_swap({k: rows[k].version for k in keys}, {
             evidence_url: "https://example.org/gateway",
             reason: "Gateway round trip",
             report_ids: [],
-            code,
+            ...extra,
           },
           cookie
         );
-      expect((await decide("000000")).status).toBe(403);
-      const decided = await decide(spend);
-      expect(decided.status).toBe(200);
-      expect((await decided.json()).state).toBe("unverified");
-      expect((await decide(spend)).status).toBeGreaterThanOrEqual(403); // spent, and the basis moved
-      const history = await fetch(
-        `${base}/api/admin/catalog-metadata/editions/${ids.edition}/history`,
-        { headers: { cookie } }
-      );
-      expect(
-        (await history.json()).map((row: { decision: string }) => row.decision)
-      ).toEqual(["unmap"]);
+      };
 
-      // A collector never gets a code and cannot read or decide through the admin surface.
-      const denials = async () =>
-        Number(
-          (
-            await pool.query(
-              "SELECT coalesce(max(count),0) AS n FROM operations_counter WHERE name='authorization_denials'"
-            )
-          ).rows[0].n
-        );
-      const codes = await count();
+      // A collector is refused on every admin surface.
       await bind("gateway-non-owner");
       try {
-        const counted = await denials();
+        expect((await decide()).status).toBe(403);
         expect(
           (
-            await approval({
-              metadataTarget: target,
-              action: "resolve_metadata",
-            })
+            await post(
+              "/api/admin/catalog-rules/live_derivation/activate",
+              {
+                version: 1,
+                evidence_url: "https://example.org/gateway",
+                reason: "Gateway probe",
+              },
+              cookie
+            )
           ).status
         ).toBe(403);
-        expect(
-          (
-            await approval({
-              metadataTarget: "rule:live_derivation:1",
-              action: "activate_rule",
-            })
-          ).status
-        ).toBe(403);
-        expect(await denials()).toBe(counted + 2);
         expect(
           (
             await fetch(`${base}/api/admin/catalog-metadata/queue`, {
@@ -713,7 +592,6 @@ assert store.compare_and_swap({k: rows[k].version for k in keys}, {
             })
           ).status
         ).toBe(403);
-        expect((await decide("123456")).status).toBe(403);
         expect(
           (
             await fetch(`${base}/api/admin/catalog-rules`, {
@@ -738,7 +616,18 @@ assert store.compare_and_swap({k: rows[k].version for k in keys}, {
       } finally {
         await bind(userId);
       }
-      expect(await count()).toBe(codes);
+
+      // A stale `code` from an older web bundle is ignored.
+      const decided = await decide({ code: "123456" });
+      expect(decided.status).toBe(200);
+      expect((await decided.json()).state).toBe("unverified");
+      const history = await fetch(
+        `${base}/api/admin/catalog-metadata/editions/${ids.edition}/history`,
+        { headers: { cookie } }
+      );
+      expect(
+        (await history.json()).map((row: { decision: string }) => row.decision)
+      ).toEqual(["unmap"]);
       await post("/auth/sign-out", {}, cookie);
     } finally {
       // Leave no open report behind for the browser suite that shares this database.

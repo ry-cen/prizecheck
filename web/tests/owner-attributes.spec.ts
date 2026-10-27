@@ -1,26 +1,16 @@
 // Ticket #170: Owner controls' Attributes queue (spec "Missing cards and Owner controls", "Card type: one
 // source"). The queue is a ScrollTable; Review opens the review card inline, pinned to the table's visible
-// width; a Trainer Type correction takes a reason, evidence and a fresh code and closes the linked report;
+// width; a Trainer Type correction takes a reason and evidence and closes the linked report;
 // Reject report needs only the reason. The shared page check runs at 1280×800 and 375×812 with the card open
 // and closed.
 import { test, expect, type Locator, type Page } from "@playwright/test";
 import { signInAsOwner as fakeSignInAsOwner } from "./support/sign-in";
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
 import { Pool } from "pg";
 import { expectPageChecks } from "./support/page-check";
 
 const ORIGIN = process.env.TEST_ORIGIN || "http://localhost:5173";
 const OWNER_EMAIL = process.env.OWNER_EMAIL || "owner@example.test";
-const MAIL = process.env.MAIL_FILE || "/tmp/tcg-ticket01-mail";
-
-function messages(): string[] {
-  try {
-    return readFileSync(MAIL, "utf8").trim().split("\n").filter(Boolean);
-  } catch {
-    return [];
-  }
-}
 
 async function query<T = Record<string, unknown>>(
   sql: string,
@@ -116,23 +106,10 @@ const valueCells = (card: Locator, attribute: string) =>
     })
     .getByRole("cell");
 
-async function freshCode(page: Page, card: Locator) {
-  await query("UPDATE auth_send_event SET sent_at=now()-interval '61 seconds'");
-  const before = messages().length;
-  await card.getByRole("button", { name: "Send code" }).click();
-  await expect(card.getByRole("status")).toHaveText(
-    "Fresh approval code sent to your email."
-  );
-  await expect.poll(() => messages().length).toBeGreaterThan(before);
-  await card
-    .getByLabel("Fresh six-digit code")
-    .fill(JSON.parse(messages().at(-1)!).otp);
-}
-
 test.describe("desktop", () => {
   test.use({ viewport: { width: 1280, height: 800 } });
 
-  test("the queue corrects a Trainer Type with a reason, evidence and a fresh code, and the linked report closes with it", async ({
+  test("the queue corrects a Trainer Type with a reason and evidence, and the linked report closes with it", async ({
     page,
   }) => {
     seedCatalog();
@@ -203,14 +180,12 @@ test.describe("desktop", () => {
     await card
       .getByLabel("Review evidence URL")
       .fill("https://example.org/switch-scan");
-    await expect(confirm).toBeDisabled();
+    await expect(confirm).toBeEnabled();
     await expectPageChecks(
       page,
       "Owner controls, Attributes review card open (desktop)"
     );
 
-    await freshCode(page, card);
-    await expect(confirm).toBeEnabled();
     await confirm.click();
 
     await expect(

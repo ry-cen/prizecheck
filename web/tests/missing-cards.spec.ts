@@ -1,18 +1,9 @@
 import { test, expect } from "@playwright/test";
 import { signInAsOwner } from "./support/sign-in";
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
 import { Pool } from "pg";
 
-function mailLines(path: string): string[] {
-  try {
-    return readFileSync(path, "utf8").trim().split("\n").filter(Boolean);
-  } catch {
-    return [];
-  }
-}
-
-test("owner reviews a private missing Printing with a fresh approval code", async ({
+test("owner reviews a private missing Printing and approves it in one step", async ({
   page,
 }) => {
   execFileSync(
@@ -25,10 +16,8 @@ promote({'fixture-1': 'Pikachu'})`,
     { env: { ...process.env, PYTHONPATH: "api:api/tests" } }
   );
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-  await pool.query("DELETE FROM auth_send_event");
   try {
     await signInAsOwner(page, "/collection");
-    const mailFile = process.env.MAIL_FILE || "/tmp/tcg-ticket01-mail";
     await expect(
       page.getByRole("button", { name: "Catalog", exact: true })
     ).toBeVisible();
@@ -90,20 +79,6 @@ promote({'fixture-1': 'Pikachu'})`,
     await item
       .getByLabel("Review reason")
       .fill("Verified set and printed number");
-    await pool.query(
-      "UPDATE auth_send_event SET sent_at=now()-interval '61 seconds'"
-    );
-    const beforeApproval = mailLines(mailFile).length;
-    await item.getByRole("button", { name: "Send code" }).click();
-    await expect(item.getByRole("status")).toContainText(
-      "Fresh approval code sent"
-    );
-    await expect
-      .poll(() => mailLines(mailFile).length)
-      .toBeGreaterThan(beforeApproval);
-    await item
-      .getByLabel("Fresh six-digit code")
-      .fill(JSON.parse(mailLines(mailFile).at(-1)!).otp);
     await item.getByRole("button", { name: "Approve shared record" }).click();
     // A confirmed decision removes the row and says so in a toast.
     await expect(
