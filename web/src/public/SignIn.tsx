@@ -24,6 +24,8 @@ import {
   SECONDARY,
 } from "./controls";
 import { DISCOVER_PATH, followLink } from "./publicRoutes";
+import discordMark from "./brand/discord-mark-white.svg";
+import googleG from "./brand/google-g.svg";
 
 type CardProps = {
   /** Signing in returns to a page the collector asked for (a protected page, or a `next`), not the default. */
@@ -142,26 +144,24 @@ export function providerStartHref(provider: string, next: string | null) {
 const PROVIDER_BUTTON =
   "box-border m-0 flex h-10 w-full cursor-pointer items-center justify-center gap-2.5 rounded-control border px-4 font-sans text-body font-medium leading-none no-underline phone:h-11";
 
-/** Each company's own button look (sign-in decision). A provider with no entry gets the generic kit button. */
+/** Each company's own button look and downloaded mark (sign-in decision; sources and terms in brand/README.md). A
+ * provider with no entry gets the generic kit button and its initial. */
 const PROVIDER_LOOK: Record<string, { button: string; mark: string }> = {
   google: {
     button: "border-google-stroke bg-google text-on-google",
-    mark: "bg-on-google text-google",
+    mark: googleG,
   },
   discord: {
     button: "border-discord bg-discord text-on-discord",
-    mark: "bg-on-discord text-discord",
+    mark: discordMark,
   },
 };
-const GENERIC_LOOK = {
-  button:
-    "border-border-strong bg-surface-raised text-text hover:border-control-outline",
-  mark: "bg-surface-selected text-accent-strong",
-};
+const GENERIC_BUTTON =
+  "border-border-strong bg-surface-raised text-text hover:border-control-outline";
 
 /**
  * A provider's button: a plain link to its start route, stacked full width, 40 px tall on desktop and 44 px on a
- * phone. Its mark is the provider's initial until the companies' downloaded assets ship.
+ * phone, with the provider's mark.
  */
 export function ProviderButton({
   provider,
@@ -170,32 +170,39 @@ export function ProviderButton({
   provider: { id: string; name: string };
   next: string | null;
 }) {
-  const look = PROVIDER_LOOK[provider.id] ?? GENERIC_LOOK;
   return (
     <a
       href={providerStartHref(provider.id, next)}
-      className={`${PROVIDER_BUTTON} ${look.button}`}
+      className={`${PROVIDER_BUTTON} ${PROVIDER_LOOK[provider.id]?.button ?? GENERIC_BUTTON}`}
     >
-      <ProviderMark name={provider.name} className={look.mark} />
+      <ProviderMark provider={provider} />
       Continue with {provider.name}
     </a>
   );
 }
 
-/** A provider's mark: a round badge with its initial. */
+/** A provider's mark, 20 px: the company's own logo, or a round badge with the initial for a provider without one. */
 export function ProviderMark({
-  name,
-  className = GENERIC_LOOK.mark,
+  provider,
 }: {
-  name: string;
-  className?: string;
+  provider: { id: string; name: string };
 }) {
+  const mark = PROVIDER_LOOK[provider.id]?.mark;
+  if (mark)
+    return (
+      <img
+        src={mark}
+        alt=""
+        aria-hidden="true"
+        className="size-5 shrink-0 object-contain"
+      />
+    );
   return (
     <span
       aria-hidden="true"
-      className={`inline-grid size-5 shrink-0 place-items-center rounded-round text-caption font-bold ${className}`}
+      className="inline-grid size-5 shrink-0 place-items-center rounded-round bg-surface-selected text-caption font-bold text-accent-strong"
     >
-      {name.trim().charAt(0).toUpperCase() || "?"}
+      {provider.name.trim().charAt(0).toUpperCase() || "?"}
     </span>
   );
 }
