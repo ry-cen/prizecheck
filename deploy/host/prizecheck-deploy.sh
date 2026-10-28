@@ -1198,7 +1198,7 @@ readiness_deployed() {
   export PRIZECHECK_IMAGE_TAG="$current"
   printf '\nAfter the first deploy (release %s)\n' "${current:0:12}"
   compose run --rm --no-deps -T -l prizecheck.job=readiness \
-    -e "READINESS_SIGNUP_MODE=$signup" -e "READINESS_SCRIPT=bash $SCRIPT_PATH" -e "READINESS_GUIDE=$GUIDE" \
+    -e "READINESS_SIGNUP_MODE=$signup" -e "READINESS_SCRIPT=$(readiness_sudo)bash $SCRIPT_PATH" -e "READINESS_GUIDE=$GUIDE" \
     tools -m app.host_readiness </dev/null || rc=$?
   if [[ "$rc" != 0 ]]; then
     readiness_warning "Could not read the app's state (the readiness job exited $rc)" "$(readiness_sudo)bash $SCRIPT_PATH status"

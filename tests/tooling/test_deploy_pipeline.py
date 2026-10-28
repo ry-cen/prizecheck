@@ -346,6 +346,8 @@ class DeployPipelineTest(unittest.TestCase):
             self.assertIsNotNone(created, guide)
             for use in re.finditer(r'(?m)^(?:sudo install -m|scp) .*(?:/bin/?(?:\s|$)|prizecheck-deploy\.sh)', text):
                 self.assertLess(created.start(), use.start(), f'{guide}: {use.group(0)[:60]}')
+        # The API image carries the lock file the readiness report reads the pinned model id from.
+        self.assertIn('COPY web/scanner-models.lock.json /app/web/scanner-models.lock.json', (ROOT / 'deploy/docker/api.Dockerfile').read_text())
         oracle = (ROOT / 'docs/deployment-oracle.md').read_text()
         self.assertLess(oracle.index('prizecheck-deploy.sh setup\n'), oracle.index('ssh -i prizecheck-prod-deploy root@100.x.y.z status'))
         # The three-part layout, and none of the hand-written pieces it replaces.

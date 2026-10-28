@@ -1466,6 +1466,7 @@ class HostDeployScriptTest(unittest.TestCase):
         (home / 'bin/prizecheck-backup.timer').unlink()
         code, output = self.host(home, 'readiness', **self.host_env(home, docker=False, systemd=False))
         self.assertNotIn('sudo bash', output)
+        self.assertIn('then run: bash ', output)
         home = self.make_home(PROD)
         (home / 'prizecheck.env').write_text('\n'.join([*PROD, 'MAIL_MODE=file']) + '\n')
         code, output = self.host(home, 'readiness', **self.host_env(home, docker=False))
@@ -1559,8 +1560,15 @@ class HostDeployScriptTest(unittest.TestCase):
         self.assertIn('prizecheck.job=readiness', args)
         self.assertEqual(args[-3:], ['tools', '-m', 'app.host_readiness'])
         self.assertIn('READINESS_SIGNUP_MODE=owner-only', args)
-        self.assertIn(f'READINESS_SCRIPT=bash {(home / "bin/prizecheck-deploy.sh").resolve()}', args)
+        self.assertIn(f'READINESS_SCRIPT=sudo bash {(home / "bin/prizecheck-deploy.sh").resolve()}', args)
         self.assertIn('READINESS_GUIDE=docs/deployment-oracle.md', args)
+        # Unraid's operator is root: the forwarded command has no sudo.
+        dev_home, dev_env = self.ready_home(DEV)
+        (dev_home / 'state').mkdir(exist_ok=True)
+        (dev_home / 'state/current').write_text(COMMIT + '\n')
+        code, output = self.host(dev_home, 'readiness', **dev_env)
+        self.assertEqual(code, 0, output)
+        self.assertIn(f'READINESS_SCRIPT=bash {(dev_home / "bin/prizecheck-deploy.sh").resolve()}', self.fake_calls()[0]['args'])
         # The report never turns an app-side failure into a failed report.
         env['FAKE_READINESS_EXIT'] = '1'
         code, output = self.host(home, 'readiness', **env)

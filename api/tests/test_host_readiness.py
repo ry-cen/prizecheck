@@ -174,15 +174,15 @@ def test_a_price_import_or_check_without_an_outcome_is_ok_while_recent_and_a_war
     with connect() as conn:
         conn.execute("DELETE FROM price_import")
         conn.execute("DELETE FROM catalog_check")
-        conn.execute("INSERT INTO price_import(started_at,finished_at,outcome) VALUES (now()-interval '5 minutes',NULL,NULL)")
-        conn.execute("INSERT INTO catalog_check(started_at,finished_at,outcome) VALUES (now()-interval '5 minutes',NULL,NULL)")
+        conn.execute("INSERT INTO price_import(started_at,finished_at,outcome) VALUES (now()-interval '5 minutes 30 seconds',NULL,NULL)")
+        conn.execute("INSERT INTO catalog_check(started_at,finished_at,outcome) VALUES (now()-interval '5 minutes 30 seconds',NULL,NULL)")
     _, text = report()
     assert "ok       A price import started 5 minutes ago and has not finished" in text
     assert "ok       A catalog check started 5 minutes ago and has not finished" in text
     assert "warning" not in text
     with connect() as conn:
-        conn.execute("UPDATE price_import SET started_at=now()-interval '7 hours' WHERE outcome IS NULL")
-        conn.execute("UPDATE catalog_check SET started_at=now()-interval '7 hours' WHERE outcome IS NULL")
+        conn.execute("UPDATE price_import SET started_at=now()-interval '7 hours 30 minutes' WHERE outcome IS NULL")
+        conn.execute("UPDATE catalog_check SET started_at=now()-interval '7 hours 30 minutes' WHERE outcome IS NULL")
     _, text = report()
     assert "warning  The last price import started 7 hours ago and did not finish" in text
     assert f"{SCRIPT} tool /app/scripts/price_import_job.py" in text
@@ -217,3 +217,12 @@ def test_a_table_locked_by_someone_else_times_out_into_one_warning(monkeypatch):
     assert code == 0
     assert text.splitlines()[0].startswith("warning  Could not read the database (LockNotAvailable)")
     assert len([line for line in text.splitlines() if line.startswith("warning")]) == 1
+
+
+def test_an_unreadable_scanner_job_or_lock_file_is_one_warning_not_a_failed_report(monkeypatch, tmp_path):
+    prepare_ready_host()
+    monkeypatch.setattr(host_readiness, "JOB", tmp_path / "missing.py")
+    code, text = report()
+    assert code == 0
+    assert "warning  The scanner index could not be checked: the pinned model id is unreadable" in text
+    assert f"next: check the index with: {SCRIPT} compose run --rm scanner-index" in text
