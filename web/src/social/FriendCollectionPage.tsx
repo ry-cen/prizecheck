@@ -13,6 +13,7 @@ import {
   type FriendCard,
   type FriendCollection,
 } from "../social_generated";
+import { useArtRetry } from "../ui/artRetry";
 import { Button } from "../ui/Button";
 import { Chip } from "../ui/Chip";
 import { Pill } from "../ui/Pill";
@@ -300,21 +301,21 @@ export function FriendCardTile({
 /** The card's small artwork, or "Artwork unavailable" when there is none or it fails. The Want List's Get from Friends
  * panels (#251) draw it too. */
 export function CardImage({ url }: { url: string | null }) {
-  const [failed, setFailed] = useState(false);
-  useEffect(() => setFailed(false), [url]);
+  const art = useArtRetry(url);
   return (
     <span
       aria-hidden="true"
       className="block aspect-(--tile-aspect) w-full overflow-hidden rounded-card bg-surface-raised"
     >
-      {url && !failed ? (
+      {art.waiting ? null : url && art.show ? (
         <img
+          key={art.attempt}
           src={url}
           alt=""
           loading="lazy"
           decoding="async"
           draggable={false}
-          onError={() => setFailed(true)}
+          onError={art.onError}
           className="block size-full object-cover"
         />
       ) : (

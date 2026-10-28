@@ -237,6 +237,44 @@ describe("card art", () => {
     expect((await response.json()).detail.code).toBe("ART_UNAVAILABLE");
   });
 
+  it("an art 503 keeps its Retry-After and stays no-store, and another 503 does not gain one", async () => {
+    behaviour = (_, response) => {
+      response.writeHead(503, {
+        "content-type": "application/json",
+        "retry-after": "5",
+        "cache-control": "max-age=60",
+      });
+      response.end(JSON.stringify({ detail: { code: "ART_UNAVAILABLE" } }));
+    };
+    const response = await fetch(base + art, { headers: { cookie } });
+    expect(response.status).toBe(503);
+    expect(response.headers.get("retry-after")).toBe("5");
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect((await response.json()).detail.code).toBe("ART_UNAVAILABLE");
+    // Only the art route's 503 carries it; a 404 does not, whatever the API sent.
+    behaviour = (_, response) => {
+      response.writeHead(404, {
+        "content-type": "application/json",
+        "retry-after": "5",
+      });
+      response.end("{}");
+    };
+    const missing = await fetch(base + art, { headers: { cookie } });
+    expect(missing.status).toBe(404);
+    expect(missing.headers.get("retry-after")).toBeNull();
+    // Nor does another route's 503.
+    behaviour = (_, response) => {
+      response.writeHead(503, {
+        "content-type": "application/json",
+        "retry-after": "5",
+      });
+      response.end("{}");
+    };
+    const other = await fetch(base + "/api/decks", { headers: { cookie } });
+    expect(other.status).toBe(503);
+    expect(other.headers.get("retry-after")).toBeNull();
+  });
+
   it("an encoded art answer is not given a stale content-length", async () => {
     const bytes = pixels(50 * 1024);
     const encoded = gzipSync(bytes);

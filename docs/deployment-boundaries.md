@@ -27,7 +27,7 @@ The deployment sets no `Permissions-Policy` today. If one is added it must keep 
 
 The fingerprint index job fetches `{image_url}/low.webp` from `assets.tcgdex.net` and `*.tcgdex.net` only, at most 5 requests a second with 4 workers, and identifies itself with `User-Agent: PrizeCheck-scanner-index/1 (+owner contact)`. The index is behind sign-in and never public; a public launch waits for the written rights check (spec "Ship blockers").
 
-The API also stores TCGdex card art (ADR 0020). On the first signed-in request for a card picture it fetches `low.webp` or `high.webp` from `https://assets.tcgdex.net` only (no other host, no redirect to another host), at most 5 requests a second, identifying itself with `User-Agent: PrizeCheck-art/1 (+owner contact)`. It keeps the files under `ART_STORE_DIR` and serves them from `/api/art/{printing_id}/{size}` to signed-in collectors only; the files are regenerable and left out of backups.
+The API also stores TCGdex card art (ADR 0020). On the first signed-in request for a card picture it fetches `low.webp` or `high.webp` from `https://assets.tcgdex.net` only (no other host, no redirect to another host), at most 5 requests a second, identifying itself with `User-Agent: PrizeCheck-art/1 (+owner contact)`. It keeps the files under `ART_STORE_DIR` and serves them from `/api/art/{printing_id}/{size}` to signed-in collectors only. Saving deck lines also queues background fetches of the small art for that deck's printings, from the same host at the same rate limit; the files are regenerable and left out of backups.
 
 ## Jobs and recovery
 

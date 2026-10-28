@@ -67,6 +67,16 @@ def pids():
         return {row["source_id"]: row["id"] for row in conn.execute("SELECT id, source_id FROM catalog_printing")}
 
 
+def assert_unavailable(answer, retry_after=None):
+    """A temporary failure: 503 ART_UNAVAILABLE that a client may retry and no cache may keep."""
+    assert answer.status_code == 503 and answer.json()["detail"]["code"] == "ART_UNAVAILABLE"
+    assert answer.headers["cache-control"] == "no-store"
+    assert int(answer.headers["retry-after"]) >= 1
+    if retry_after is not None:
+        assert int(answer.headers["retry-after"]) <= retry_after
+    return True
+
+
 def get(pid, size="small", v="auto", user=USER, **params):
     path = f"/api/art/{pid}/{size}"
     if v == "auto":
@@ -151,7 +161,7 @@ def test_no_parameter_or_catalog_value_reaches_another_host(pids, upstream):
     set_image(pids["card-2"], "https://assets.tcgdex.net/en/fixture/card-2")
     upstream.responder = lambda request: httpx.Response(302, headers={"location": "https://evil.example/"})
     answer = get(pids["card-2"], v=None)
-    assert answer.status_code == 404 and answer.json()["detail"]["code"] == "ART_UNAVAILABLE"
+    assert_unavailable(answer)
     assert upstream.urls[1:] == ["https://assets.tcgdex.net/en/fixture/card-2/low.webp"]
     assert ledger(pids["card-2"])[0]["reason"] == "redirect"
 
@@ -187,15 +197,17 @@ def test_failures_store_nothing_and_back_off(name, pids, upstream, tmp_path):
     upstream.responder = FAILURES[name]
     pid = pids["card-1"]
     answer = get(pid)
-    assert answer.status_code == 404 and answer.json()["detail"]["code"] == "ART_UNAVAILABLE"
+    assert_unavailable(answer, 60)
     assert objects(pid) == [] and [path for path in tmp_path.rglob("*") if path.is_file()] == []
     assert [row["failures"] for row in ledger(pid)] == [1] and upstream.count == 1
-    assert get(pid).status_code == 404 and upstream.count == 1
+    backed_off = get(pid)
+    assert_unavailable(backed_off, 60) and upstream.count == 1
+    assert 55 <= int(backed_off.headers["retry-after"]) <= 60  # the rest of the wait, not the whole of it
     sql("UPDATE art_fetch_failure SET last_failed_at = now() - interval '61 seconds'")
-    assert get(pid).status_code == 404 and upstream.count == 2
+    assert_unavailable(get(pid), 240) and upstream.count == 2
     assert [row["failures"] for row in ledger(pid)] == [2]
     # Not due for the longer second wait.
-    assert get(pid).status_code == 404 and upstream.count == 2
+    assert get(pid).status_code == 503 and upstream.count == 2
 
 
 def test_a_success_clears_the_ledger(pids, upstream):
@@ -253,7 +265,9 @@ def test_each_served_request_counts_a_hit(pids, upstream):
     assert seen[0]["last_hit_at"] < seen[1]["last_hit_at"] < seen[2]["last_hit_at"]
     assert get(pid, "medium").status_code == 404
     upstream.responder = FAILURES["status"]
-    assert get(pids["card-2"]).status_code == 404
+    answer = get(pids["card-2"])  # no art at all: missing, not temporary
+    assert answer.status_code == 404 and answer.json()["detail"]["code"] == "ART_NOT_FOUND"
+    assert "retry-after" not in answer.headers
     assert sql("SELECT hits FROM art_hit WHERE printing_id=%s", pid)[0]["hits"] == 3
     assert sql("SELECT count(*) AS n FROM art_hit WHERE printing_id=%s", pids["card-2"])[0]["n"] == 0
 
@@ -296,8 +310,7 @@ def test_requests_across_a_source_change_serialize(pids, upstream, monkeypatch):
 
 def test_admission_cap_and_lock_timeout_answer_unavailable(pids, upstream, monkeypatch):
     monkeypatch.setattr(art_store, "MAX_ADMITTED", 0)
-    answer = get(pids["card-1"])
-    assert answer.status_code == 404 and answer.json()["detail"]["code"] == "ART_UNAVAILABLE" and upstream.count == 0
+    assert_unavailable(get(pids["card-1"]), 5) and upstream.count == 0
     monkeypatch.undo()
     monkeypatch.setattr(art_store, "LOCK_WAIT", 0.05)
     lock = art_store._lock_for(str(pids["card-1"]), "small")
@@ -306,7 +319,7 @@ def test_admission_cap_and_lock_timeout_answer_unavailable(pids, upstream, monke
         answer = get(pids["card-1"])
     finally:
         lock.release()
-    assert answer.status_code == 404 and answer.json()["detail"]["code"] == "ART_UNAVAILABLE"
+    assert_unavailable(answer, 5)
     assert upstream.count == 0 and ledger(pids["card-1"]) == []
 
 
@@ -325,8 +338,7 @@ def test_a_busy_limiter_answers_unavailable_without_a_ledger_entry(pids, upstrea
     limiter = RateLimiter(1, clock=lambda: 0.0, sleep=lambda seconds: None)
     limiter.next_slot = 60.0
     monkeypatch.setattr(art_store, "_fetcher", ArtFetcher(transport=httpx.MockTransport(upstream.handler), limiter=limiter))
-    answer = get(pids["card-1"])
-    assert answer.status_code == 404 and answer.json()["detail"]["code"] == "ART_UNAVAILABLE"
+    assert_unavailable(get(pids["card-1"]), 5)
     assert upstream.count == 0 and ledger(pids["card-1"]) == []
 
 
@@ -353,7 +365,7 @@ def test_upstream_requests_carry_the_art_user_agent(pids, upstream, monkeypatch)
 def test_an_encoded_answer_is_refused(pids, upstream):
     upstream.responder = lambda request: httpx.Response(200, content=gzip.compress(webp(8)), headers={
         "content-type": "image/webp", "content-encoding": "gzip"})
-    assert get(pids["card-1"]).status_code == 404
+    assert_unavailable(get(pids["card-1"]))
     assert ledger(pids["card-1"])[0]["reason"] == "content_type"
 
 
@@ -364,7 +376,7 @@ def test_production_upstream_target_is_identity():
 
 def test_a_streamed_body_over_the_cap_is_too_large(pids, upstream):
     upstream.responder = FAILURES["streamed_large"]
-    assert get(pids["card-1"]).status_code == 404
+    assert_unavailable(get(pids["card-1"]))
     assert ledger(pids["card-1"])[0]["reason"] == "too_large"
 
 
@@ -380,7 +392,7 @@ def test_a_same_host_redirect_is_followed_and_too_many_hops_fail(pids, upstream)
     assert upstream.urls == [SMALL, "https://assets.tcgdex.net/en/fixture/moved.webp"]
     set_image(pids["card-2"], "https://assets.tcgdex.net/en/fixture/card-2")
     upstream.responder = lambda request: httpx.Response(302, headers={"location": str(request.url) + "x"})
-    assert get(pids["card-2"]).status_code == 404
+    assert_unavailable(get(pids["card-2"]))
     assert ledger(pids["card-2"])[0]["reason"] == "redirect"
 
 
@@ -394,7 +406,7 @@ def test_a_deadline_passing_mid_body_is_a_timeout(pids, upstream, monkeypatch):
     upstream.responder = slow
     fetcher = ArtFetcher(transport=httpx.MockTransport(upstream.handler), limiter=RateLimiter(100000), clock=lambda: now[0])
     monkeypatch.setattr(art_store, "_fetcher", fetcher)
-    assert get(pids["card-1"]).status_code == 404
+    assert_unavailable(get(pids["card-1"]))
     assert ledger(pids["card-1"])[0]["reason"] == "timeout"
 
 
@@ -410,5 +422,5 @@ def test_a_deadline_spent_waiting_for_a_slot_writes_no_ledger_entry(pids, upstre
     limiter.try_wait = waited
     monkeypatch.setattr(art_store, "_fetcher", ArtFetcher(transport=httpx.MockTransport(upstream.handler), limiter=limiter,
                                                            clock=lambda: now[0]))
-    assert get(pids["card-1"]).status_code == 404
+    assert_unavailable(get(pids["card-1"]))
     assert upstream.count == 0 and ledger(pids["card-1"]) == []

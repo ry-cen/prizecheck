@@ -1,6 +1,7 @@
-import React, { useEffect, useState, type ReactNode } from "react";
+import React, { type ReactNode } from "react";
 import { Check, DollarSign, RefreshCw } from "lucide-react";
 import { Icon } from "./Icon";
+import { useArtRetry } from "./artRetry";
 
 /** Where a copy is, from the page's point of view: here (solid; Collection's only state), owned
  * elsewhere (dashed, ↻) or not owned (ghost, $). The deck builder's Spread view uses all three. */
@@ -205,16 +206,20 @@ function TileArt({
   name: string;
   imageUrl: string | null;
 }) {
-  const [failed, setFailed] = useState(false);
-  useEffect(() => setFailed(false), [imageUrl]);
-  return imageUrl && !failed ? (
+  // A failed picture is asked for again after a short wait (artRetry.ts) before the name takes its place for good.
+  const art = useArtRetry(imageUrl);
+  // While a retry waits the tile is the plain art surface: no name, nothing that reads as a failure.
+  if (art.waiting)
+    return <span aria-hidden="true" className="block size-full" />;
+  return imageUrl && art.show ? (
     <img
+      key={art.attempt}
       src={imageUrl}
       alt=""
       loading="lazy"
       decoding="async"
       draggable={false}
-      onError={() => setFailed(true)}
+      onError={art.onError}
       className="block size-full object-cover"
     />
   ) : (

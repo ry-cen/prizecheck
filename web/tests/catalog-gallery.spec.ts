@@ -133,7 +133,8 @@ test.describe("desktop", () => {
       )
       .toContain("brightness");
     await expect(tile(page, "Switch, MEG 130")).toContainText(
-      "Artwork unavailable"
+      "Artwork unavailable",
+      { timeout: 15_000 }
     );
     await expectPageChecks(page, "Catalog");
 

@@ -9,16 +9,22 @@ adds to ``art_hit`` (the signal for #361's upgrade job).
 
 Concurrency (D8, D9): the API is one uvicorn process, so concurrent misses for one (Printing, size) coalesce on a striped
 in-process lock. All blocking work runs in a dedicated small thread pool, so a cold page waiting on the rate limiter never
-takes the threads other routes share. Every failure answers 404 ART_UNAVAILABLE so API fault counts stay meaningful.
+takes the threads other routes share. A temporary failure (a full queue, a lock wait, a failed fetch, a backoff) answers
+503 ART_UNAVAILABLE with ``Retry-After`` and ``Cache-Control: no-store`` so a client retries; a Printing with no usable art
+answers 404 ART_NOT_FOUND.
+
+Warm-up (#396): ``warm_deck`` stores the small art of a saved deck's printings in the background through ``serve``, so the
+first view finds them stored.
 """
 import asyncio
 import hashlib
 import logging
+import os
 import re
 import threading
 import time
 import urllib.parse
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import CancelledError, ThreadPoolExecutor
 from uuid import UUID
 
 import httpx
@@ -53,6 +59,11 @@ TYPES = {
 STRIPES = 256
 LOCK_WAIT = 10.0
 MAX_ADMITTED = 64
+# Retry-After seconds for a temporary failure: a brief wait for load, the whole remaining backoff (at most RETRY_CAP).
+RETRY_BUSY = 5
+RETRY_CONTENDED = 3
+RETRY_CAP = 3600
+WARM_LIMIT = 200
 
 IMMUTABLE = "private, max-age=31536000, immutable"
 REVALIDATE = "private, no-cache"
@@ -127,8 +138,6 @@ class Busy(Exception):
 
 class ArtFetcher:
     def __init__(self, transport=None, limiter=None, clock=time.monotonic):
-        import os
-
         contact = os.environ.get("ART_FETCH_CONTACT")
         agent = f"PrizeCheck-art/1 (+{contact})" if contact else "PrizeCheck-art/1"
         self.clock = clock
@@ -223,8 +232,11 @@ def _missing(code: str) -> JSONResponse:
     return JSONResponse(status_code=404, content={"detail": {"code": code, "message": "Card art is not available."}})
 
 
-def _unavailable() -> JSONResponse:
-    return _missing("ART_UNAVAILABLE")
+def _unavailable(retry_after: float = RETRY_CONTENDED) -> JSONResponse:
+    """A temporary failure: 503 with a retry hint, never cached (the 404 for missing art may be)."""
+    return JSONResponse(status_code=503, headers={"Retry-After": str(max(1, min(RETRY_CAP, int(retry_after)))),
+                                                  "Cache-Control": "no-store"},
+                        content={"detail": {"code": "ART_UNAVAILABLE", "message": "Card art is not available right now."}})
 
 
 def _image(data: bytes, content_type: str, cache: str) -> Response:
@@ -258,7 +270,7 @@ def _hit(conn, printing_id: UUID, size: str) -> None:
         ON CONFLICT (printing_id,size) DO UPDATE SET hits=art_hit.hits+1, last_hit_at=now()""", (printing_id, size))
 
 
-def _stored(conn, printing_id: UUID, size: str, source: str, obj, fresh: bool):
+def _stored(conn, printing_id: UUID, size: str, source: str, obj, fresh: bool, count: bool = True):
     """The response for a stored object that matches the source and the bytes on disk, with the hit recorded; else None."""
     if not obj or obj["source_url"] != source:
         return None
@@ -268,11 +280,13 @@ def _stored(conn, printing_id: UUID, size: str, source: str, obj, fresh: bool):
         data = None
     if data is None or hashlib.sha256(data).hexdigest() != obj["sha256"]:
         return None
-    _hit(conn, printing_id, size)
+    if count:
+        _hit(conn, printing_id, size)
     return _image(data, obj["content_type"], IMMUTABLE if fresh else REVALIDATE)
 
 
-def serve(printing_id: str, size: str, v: str | None) -> Response:
+def serve(printing_id: str, size: str, v: str | None, count: bool = True) -> Response:
+    """The art response. ``count=False`` (the warm-up) stores the image without adding to ``art_hit``, which counts views."""
     try:
         pid = UUID(printing_id)
     except ValueError:
@@ -285,12 +299,12 @@ def serve(printing_id: str, size: str, v: str | None) -> Response:
             return _missing("ART_NOT_FOUND")
         if LINKED_ART.fullmatch(source):
             return _linked(source, v == version)
-        answer = _stored(conn, pid, size, source, obj, v == version)
+        answer = _stored(conn, pid, size, source, obj, v == version, count)
     if answer:
         return answer
     lock = _lock_for(str(pid), size)
     if not lock.acquire(timeout=LOCK_WAIT):
-        return _unavailable()
+        return _unavailable(RETRY_CONTENDED)
     try:
         with connect() as conn:
             source, obj, failure, version = _read(conn, pid, size)
@@ -298,33 +312,35 @@ def serve(printing_id: str, size: str, v: str | None) -> Response:
                 return _missing("ART_NOT_FOUND")
             if LINKED_ART.fullmatch(source):
                 return _linked(source, v == version)
-            answer = _stored(conn, pid, size, source, obj, v == version)
+            answer = _stored(conn, pid, size, source, obj, v == version, count)
         if answer:
             return answer
         if failure and failure["source_url"] == source and failure["age"] < backoff_seconds(failure["failures"]):
-            return _unavailable()
+            return _unavailable(backoff_seconds(failure["failures"]) - failure["age"])
         try:
             data, content_type = fetcher().fetch(source)
         except Busy:
-            return _unavailable()
+            return _unavailable(RETRY_BUSY)
         except FetchFailed as failed:
             with connect() as conn:
-                conn.execute("""INSERT INTO art_fetch_failure(printing_id,size,source_url,failures,last_failed_at,reason)
+                row = conn.execute("""INSERT INTO art_fetch_failure(printing_id,size,source_url,failures,last_failed_at,reason)
                     VALUES (%s,%s,%s,1,now(),%s)
                     ON CONFLICT (printing_id,size) DO UPDATE SET
                       failures = CASE WHEN art_fetch_failure.source_url = EXCLUDED.source_url
                                       THEN art_fetch_failure.failures + 1 ELSE 1 END,
-                      source_url = EXCLUDED.source_url, last_failed_at = now(), reason = EXCLUDED.reason""",
-                             (pid, size, source, failed.reason))
-            return _unavailable()
+                      source_url = EXCLUDED.source_url, last_failed_at = now(), reason = EXCLUDED.reason
+                    RETURNING failures""",
+                                       (pid, size, source, failed.reason)).fetchone()
+            return _unavailable(backoff_seconds(row["failures"]))
         digest = hashlib.sha256(data).hexdigest()
         key = f"tcgdex/{size}/{str(pid)[:2]}/{pid}-{hashlib.sha256(source.encode()).hexdigest()[:16]}"
         try:
             storage().put(key, data)
         except OSError as error:
             log.warning("Art store write failed: %s", type(error).__name__)
-            with connect() as conn:
-                _hit(conn, pid, size)
+            if count:
+                with connect() as conn:
+                    _hit(conn, pid, size)
             return _image(data, content_type, REVALIDATE)
         with connect() as conn, conn.transaction():
             conn.execute("""INSERT INTO art_object(printing_id,size,source_url,storage_key,sha256,content_type,byte_size)
@@ -334,7 +350,8 @@ def serve(printing_id: str, size: str, v: str | None) -> Response:
                   byte_size=EXCLUDED.byte_size, stored_at=now()""",
                          (pid, size, source, key, digest, content_type, len(data)))
             conn.execute("DELETE FROM art_fetch_failure WHERE printing_id=%s AND size=%s", (pid, size))
-            _hit(conn, pid, size)
+            if count:
+                _hit(conn, pid, size)
         if obj and obj["storage_key"] != key:
             try:
                 storage().delete(obj["storage_key"])
@@ -359,6 +376,102 @@ def _executor() -> ThreadPoolExecutor:
         return _pool
 
 
+# Warm-up: one background thread, apart from the request pool so a warm-up never takes a thread a page is waiting on. It
+# calls ``serve``, so it shares the limiter (5 a second with the requests), the stripe locks and the failure backoff.
+_warm_pool: ThreadPoolExecutor | None = None
+_warm_pending: set[UUID] = set()
+_warm_futures: list = []
+_warm_lock = threading.Lock()
+_warm_stop = threading.Event()  # set at shutdown: a running job stops before its next Printing
+
+
+def _warm_executor() -> ThreadPoolExecutor:
+    global _warm_pool
+    with _warm_lock:
+        if _warm_pool is None:
+            _warm_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="art-warm")
+        return _warm_pool
+
+
+def _warm(printing_ids: list[UUID]) -> None:
+    for index, pid in enumerate(printing_ids):
+        if _warm_stop.is_set():
+            with _warm_lock:
+                _warm_pending.difference_update(printing_ids[index:])
+            return
+        try:
+            serve(str(pid), "small", None, count=False)
+        except Exception as error:  # a warm-up is only a head start: nothing here may reach a caller
+            log.warning("Art warm-up failed: %s", type(error).__name__)
+        finally:
+            with _warm_lock:
+                _warm_pending.discard(pid)
+
+
+def stop_warmups() -> None:
+    """Shutdown: running jobs stop before their next Printing and queued ones are dropped."""
+    global _warm_pool
+    _warm_stop.set()
+    with _warm_lock:
+        pool, _warm_pool = _warm_pool, None
+    if pool is not None:
+        pool.shutdown(wait=False, cancel_futures=True)
+
+
+def start_warmups() -> None:
+    """Startup: a warm-up may run (the flag stays set after a shutdown in the same process, as in tests)."""
+    _warm_stop.clear()
+
+
+def warm_deck(conn, owner_id: str, deck_id: UUID) -> None:
+    """Queue background stores of the small art of a Deck's Printings that has none stored (#396). Called by the Deck List
+    commands inside their transaction, so it reads the lines just written; it needs only ids, so the job never depends on
+    the commit. Only a TCGdex source is stored (linked fallback art needs nothing). Bounded to ``WARM_LIMIT`` Printings
+    a call, and a Printing already queued is not queued twice. Never raises: a failed read is rolled back to its
+    savepoint, and the save goes on."""
+    if os.environ.get("ART_WARM_UP", "1") == "0":
+        return
+    try:
+        with conn.transaction():
+            # The Printing comes through catalog_edition, as the lines' display does (deck_list_display): a line whose
+            # Edition left the active generation still shows its picture, so it is warmed too.
+            rows = conn.execute("""SELECT DISTINCT art.printing_id AS id, art.low_image_url AS source
+                FROM deck_list_line line
+                JOIN catalog_edition edition ON edition.id=line.edition_id
+                JOIN catalog_printing_art art ON art.printing_id=edition.printing_id
+                WHERE line.owner_id=%s AND line.deck_id=%s AND art.low_image_url LIKE 'https://assets.tcgdex.net/%%'
+                  AND NOT EXISTS (SELECT 1 FROM art_object stored WHERE stored.printing_id=art.printing_id
+                    AND stored.size='small' AND stored.source_url=art.low_image_url)
+                ORDER BY art.printing_id
+                LIMIT %s""", (owner_id, deck_id, WARM_LIMIT)).fetchall()
+        usable = [row["id"] for row in rows if len(row["source"]) <= 2048 and host_allowed(row["source"])]
+        with _warm_lock:
+            fresh = [pid for pid in usable if pid not in _warm_pending]
+            _warm_pending.update(fresh)
+        if fresh:
+            try:
+                future = _warm_executor().submit(_warm, fresh)
+            except BaseException:
+                with _warm_lock:
+                    _warm_pending.difference_update(fresh)
+                raise
+            with _warm_lock:
+                _warm_futures[:] = [f for f in _warm_futures if not f.done()] + [future]
+    except Exception as error:
+        log.warning("Art warm-up not queued: %s", type(error).__name__)
+
+
+def join_warmups() -> None:
+    """Wait for the queued warm-ups (tests: none may outlive its test)."""
+    with _warm_lock:
+        futures = list(_warm_futures)
+    for future in futures:
+        try:
+            future.result()
+        except CancelledError:
+            pass
+
+
 router = APIRouter(prefix="/api/art")
 
 
@@ -368,7 +481,7 @@ async def art(printing_id: str = Path(max_length=64), size: str = Path(max_lengt
     global _admitted
     with _admit_lock:
         if _admitted >= MAX_ADMITTED:
-            return _unavailable()
+            return _unavailable(RETRY_CONTENDED)
         _admitted += 1
     try:
         return await asyncio.get_running_loop().run_in_executor(_executor(), serve, printing_id, size, v)

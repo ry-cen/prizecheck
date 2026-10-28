@@ -49,9 +49,10 @@ promote({**{f'card-{i}': f'Pikachu {i:02d}' for i in range(1, 66)}, 'card-99': '
       })
       .click();
     const details = page.getByRole("dialog", { name: "Pikachu 01" });
+    // The stand-in appears once the picture's retries are spent (about 6.5 s).
     await expect(
       details.getByRole("img", { name: "Artwork unavailable for Pikachu 01" })
-    ).toBeVisible();
+    ).toBeVisible({ timeout: 15_000 });
     // Each Card Edition is in the popup's Edition picker by its Variant, the tapped one picked.
     const editions = details
       .getByRole("group", { name: "Editions" })
@@ -64,13 +65,15 @@ promote({**{f'card-{i}': f'Pikachu {i:02d}' for i in range(1, 66)}, 'card-99': '
     await details.getByRole("button", { name: "Close card details" }).click();
     await search.fill("Pikachu 02");
     await expect(tiles).toHaveCount(1);
-    await expect(tiles).toContainText("Artwork unavailable");
+    await expect(tiles).toContainText("Artwork unavailable", {
+      timeout: 15_000,
+    });
     await tiles.getByRole("button").click();
     await expect(
       page
         .getByRole("dialog", { name: "Pikachu 02" })
         .getByRole("img", { name: "Artwork unavailable for Pikachu 02" })
-    ).toBeVisible();
+    ).toBeVisible({ timeout: 15_000 });
     await page.keyboard.press("Escape");
     await search.fill("NoSuchCard");
     await expect(results).toContainText("No cards match this search.");

@@ -6,7 +6,7 @@ from fastapi import FastAPI, Request
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
-from .art_store import router as art_router
+from .art_store import router as art_router, start_warmups, stop_warmups
 from .attribute_corrections import router as attribute_corrections_router
 from .catalog_browse import router as catalog_browse_router
 from .catalog_reconciliation import router as catalog_reconciliation_router
@@ -73,9 +73,11 @@ class HealthResponse(BaseModel):
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     # Background startup work, in the order the routers' startup handlers used to run.
+    start_warmups()
     start_rule_rollout()
     rebuild_format_standing()
     yield
+    stop_warmups()  # deck art warm-ups stop before their next Printing
     # Give counts still queued a short, bounded time to reach PostgreSQL, then stop the writer thread.
     await run_in_threadpool(operation_counter.stop)
 

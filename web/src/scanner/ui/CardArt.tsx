@@ -7,7 +7,7 @@ import { useState } from "react";
 const failed = new Set<string>();
 
 /** A card's small picture. The art is same-origin, from /api/art, so it needs no CORS under the scanner's cross-origin
- * isolation. When it fails (the route answers 404 for a card with no picture) the plain placeholder shows and the
+ * isolation. When it fails (the route answers 404 for a card with no picture, 503 while it cannot fetch one) the plain placeholder shows and the
  * picture is not requested again. */
 export function CardArt({
   src,
