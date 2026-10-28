@@ -83,8 +83,9 @@ export const legalityText = (legality: GroupLegality[]) =>
     .join(" · ");
 
 /** A Move to choice: "" stays; "group:<id>" joins that group; "new" leaves for a new group of its own;
- * "restore" returns to the group its rules text gives it. */
-export type MoveChoice = "" | "new" | "restore" | `group:${string}`;
+ * "own" confirms an ungrouped manual Printing as a card of its own, in a new group; "restore" returns to the
+ * group its rules text gives it. */
+export type MoveChoice = "" | "new" | "own" | "restore" | `group:${string}`;
 
 /** What a Printing's Move to picker offers. Each option is one the server can accept: a TCGdex Printing
  * joins another group only while it derives a group (PRINTING_NOT_GROUPABLE), a new group needs a group
@@ -106,6 +107,10 @@ export function moveOptions(
     (group) => group.group_id === printing.group_id
   )?.printing_ids.length;
   if (size && size > 1) options.push({ value: "new", label: "A new group" });
+  // A manual Printing in no group, such as the only Printing of an identity a missing-card approval made, has
+  // no group to join or split from: this is its way out of the queue (#171).
+  if (printing.source === "manual" && printing.group_id === null)
+    options.push({ value: "own", label: "A group of its own" });
   if (printing.linked_group_id || printing.assigned_group_id)
     options.push({
       value: "restore",
@@ -133,7 +138,7 @@ const printings = (count: number) =>
 
 /** Move the chosen Printings: the server takes one destination per decision, so every picker that moves
  * must name the same one. An existing group is `join`, a new group is `split` from the one group they
- * share, and the derived group is `restore`. */
+ * share, a group of their own for ungrouped manual Printings is `confirm`, and the derived group is `restore`. */
 export function movePlan(
   evidence: CardIdentityEvidence,
   moves: Record<string, MoveChoice>,
@@ -161,6 +166,11 @@ export function movePlan(
       summary: `Moves ${printings(ids.length)} into ${names.get(target)}.`,
     };
   }
+  if (choice === "own")
+    return {
+      body: { decision: "confirm", printing_ids: ids },
+      summary: `Confirms ${printings(ids.length)} as ${ids.length === 1 ? "a card" : "one card"} of its own, in a new group.`,
+    };
   if (choice === "new") {
     const from = new Set(picked.map((printing) => printing.group_id));
     const [group] = [...from];

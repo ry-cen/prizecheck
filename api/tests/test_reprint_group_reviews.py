@@ -160,10 +160,15 @@ def identity_checks(owner, deck):
 
 
 def seed_manual_printing(member_source_id, name, set_id="future", number="1"):
-    """A manually approved Printing in the Card Identity of ``member_source_id``, as a missing-card approval would."""
+    """A manually approved Printing in the Card Identity of ``member_source_id`` (a new Card Identity when it is None,
+    as a missing-card approval of an unknown card makes), as a missing-card approval would."""
     with connect() as conn:
-        identity = conn.execute("SELECT identity_id FROM catalog_printing WHERE source_id=%s",
-                                (member_source_id,)).fetchone()["identity_id"]
+        if member_source_id is None:
+            identity = conn.execute("INSERT INTO catalog_identity(identity_key,display_name) VALUES (%s,%s) RETURNING id",
+                                    (name.casefold(), name)).fetchone()["id"]
+        else:
+            identity = conn.execute("SELECT identity_id FROM catalog_printing WHERE source_id=%s",
+                                    (member_source_id,)).fetchone()["identity_id"]
         generation = conn.execute("SELECT active_generation FROM catalog_state").fetchone()["active_generation"]
         printing = conn.execute("INSERT INTO catalog_printing(source,identity_id) VALUES ('manual',%s) RETURNING id",
                                 (identity,)).fetchone()["id"]
@@ -325,6 +330,49 @@ def test_a_manual_printing_joins_a_group_only_through_review():
     assert groups(evidence(identity))[manual] == me
     assert error(decide(identity, "join", target=me, printings=[manual])) == (422, "ALREADY_IN_GROUP")
     assert error(decide(identity, "join", target=me, printings=[ids["sv02-278"]])) == (422, "PRINTING_NOT_IN_IDENTITY")
+
+
+def test_confirming_a_lone_manual_printing_gives_it_a_group_of_its_own_and_leaves_the_queue():
+    ids = seed(*CANDIES)
+    manual, edition = seed_manual_printing(None, "Future Card")
+    other, _ = seed_manual_printing(None, "Other Future Card", number="2")
+    identity, other_identity = identity_of(manual), identity_of(other)
+    assert identity not in {identity_of(printing) for printing in ids.values()}
+    assert sorted(queue()) == sorted([manual, other])
+    shown = evidence(identity)
+    assert shown["groups"] == [] and groups(shown) == {manual: None}
+    # No group exists to join, merge or split, so only this decision lets the Printing out.
+    assert error(decide(identity, "join", target=str(uuid4()), printings=[manual])) == (422, "GROUP_NOT_FOUND")
+    assert error(decide(identity, "confirm", printings=[ids["me01-125"]])) == (422, "PRINTING_NOT_IN_IDENTITY")
+    assert error(decide(identity, "confirm")) == (422, "INVALID_DECISION")
+    assert error(decide(identity, "confirm", printings=[manual], target=str(uuid4()))) == (422, "INVALID_DECISION")
+    assert error(decide(identity, "confirm", printings=[manual], digest="0" * 64)) == (409, "IDENTITY_EVIDENCE_CHANGED")
+    assert decide(identity, "confirm", printings=[manual], user=OTHER).status_code == 403
+    before = revision()
+    body = ok(decide(identity, "confirm", printings=[manual]))
+    assert (body["decision"], body["affected_printing_ids"], body["attribute_revision"]) == ("confirm", [manual], before + 1)
+    assert body["group_id"] is not None and groups(evidence(identity)) == {manual: body["group_id"]}
+    assert queue() == [other]  # only this identity's Printing left
+    assert [row[0] for row in history(identity)] == ["confirm"]
+    assert history(identity)[0][4:6] == ([manual], [manual])
+    # A confirmed Printing is not queued again, and cannot be confirmed twice; an import leaves its group alone.
+    assert error(decide(identity, "confirm", printings=[manual])) == (422, "ALREADY_IN_GROUP")
+    run(Records(*CANDIES))
+    assert groups(evidence(identity))[manual] == body["group_id"] and queue() == [other]
+    # Restore returns it to no group, so it waits again.
+    ok(decide(identity, "restore", printings=[manual]))
+    assert sorted(queue()) == sorted([manual, other])
+
+
+def test_confirm_refuses_tcgdex_printings_and_printings_already_in_a_group():
+    ids = seed(*CANDIES)
+    identity = identity_of(ids["me01-125"])
+    assert error(decide(identity, "confirm", printings=[ids["me01-125"]])) == (422, "PRINTING_NOT_GROUPABLE")
+    assert ids["me01-125"] not in queue()  # a TCGdex-only identity never waits in the queue
+    manual, _ = seed_manual_printing("me01-125", "Rare Candy")
+    me = groups(evidence(identity))[ids["me01-125"]]
+    ok(decide(identity, "join", target=me, printings=[manual]))
+    assert error(decide(identity, "confirm", printings=[manual])) == (422, "ALREADY_IN_GROUP")
 
 
 def test_a_withdrawn_printing_leaves_its_reviewed_group_in_private_and_published_results():

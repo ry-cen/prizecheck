@@ -57,14 +57,20 @@ run(Records(CANDY_ME, CANDY_SV, CANDY_SM, CANDY_SM_GUARDIANS, ENERGY_SV, BULBASA
  * one: in no Reprint Group, so its identity enters the Reprints queue. Set "future" sorts before every
  * imported set. */
 async function seedManualPrinting(
-  memberSourceId: string,
+  memberSourceId: string | null,
   name: string,
   number: string
 ) {
-  const [member] = await query<{ identity_id: string }>(
-    "SELECT identity_id FROM catalog_printing WHERE source_id=$1",
-    [memberSourceId]
-  );
+  // No member: a new Card Identity of its own, as approving a missing card nobody has imported makes.
+  const [member] = memberSourceId
+    ? await query<{ identity_id: string }>(
+        "SELECT identity_id FROM catalog_printing WHERE source_id=$1",
+        [memberSourceId]
+      )
+    : await query<{ identity_id: string }>(
+        "INSERT INTO catalog_identity(identity_key,display_name) VALUES ($1,$2) RETURNING id AS identity_id",
+        [name.toLowerCase(), name]
+      );
   const [state] = await query<{ active_generation: string }>(
     "SELECT active_generation FROM catalog_state"
   );
@@ -350,6 +356,68 @@ test.describe("desktop", () => {
         return rows.length === 2 && rows[0].group_id === rows[1].group_id;
       })
       .toBe(true);
+  });
+
+  test("a Card Identity made by a missing-card approval leaves the queue by confirming its manual Printing as a card of its own", async ({
+    page,
+  }) => {
+    seedCatalog();
+    await signInAsOwner(page);
+    const manual = await seedManualPrinting(null, "Future Card", "7");
+    await openReprints(page);
+    await expect(reprintsTab(page)).toHaveAccessibleName("Reprints 1");
+    const { card } = await openCard(page, "Future Card");
+    // No group exists to merge, so the only moves are to stay or to a group of its own.
+    await expect(
+      moveTo(card, "Future Card · future · 7").locator("option")
+    ).toHaveText(["Stay", "A group of its own"]);
+    const confirm = card.getByRole("button", { name: "Confirm decision" });
+    await expect(confirm).toBeDisabled();
+    await moveTo(card, "Future Card · future · 7").selectOption("own");
+    await expect(
+      card.getByText(
+        "Confirms 1 Printing as a card of its own, in a new group."
+      )
+    ).toBeVisible();
+    await card.getByLabel("Review reason").fill("A real card, no reprints");
+    await card
+      .getByLabel("Review evidence URL")
+      .fill("https://example.org/compendium");
+    await expect(confirm).toBeEnabled();
+    await expectPageChecks(
+      page,
+      "Owner controls, Reprints confirm own group open (desktop)"
+    );
+
+    await confirm.click();
+    await expect(notifications(page)).toContainText(
+      "Reprint Groups updated for Future Card: 1 Printing moved."
+    );
+    await expect(queueRow(page, "Future Card")).toHaveCount(0);
+    await expect(page.getByText("Nothing waits for review.")).toBeVisible();
+    await expect(reprintsTab(page)).toHaveAccessibleName("Reprints 0");
+    await expect
+      .poll(
+        async () =>
+          (
+            await query<{ decision: string }>(
+              "SELECT decision FROM catalog_card_identity_decision WHERE $1 = ANY(printing_ids)",
+              [manual]
+            )
+          )[0]?.decision
+      )
+      .toBe("confirm");
+    await expect
+      .poll(
+        async () =>
+          (
+            await query<{ n: string }>(
+              "SELECT count(*) AS n FROM catalog_reprint_group_member WHERE printing_id=$1",
+              [manual]
+            )
+          )[0].n
+      )
+      .toBe("1");
   });
 
   test("Close returns focus to Review, and a Card Identity merge finds the survivor by name", async ({

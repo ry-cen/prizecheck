@@ -20,6 +20,10 @@ Every decision concerns one Card Identity, since Reprint Groups never span ident
 An assignment applies only to a Printing that derives a group or to a manual Printing (migration 037). A withdrawn
 TCGdex Printing leaves its reviewed group like any other, so private and published format checks never count it, and
 rejoins it if a later import holds it again.
+- ``confirm`` puts the named manual Printings, which are in no group, into one new group of their own, by
+  assignment. It is how a Card Identity made by approving a missing-card report, whose only Printing is manual and has
+  no group to join, leaves Owner controls' Reprints queue (#171). TCGdex Printings never wait in that queue and are
+  refused: they derive their own group.
 - ``restore`` removes the named Printings' links and assignments, returning them to derivation. A derived group stays
   in a reviewed group while any of its Printings is still linked, so undoing a merge restores every linked member of
   the merged-in group; removing the last link also returns the unnamed Printings that followed it. The result lists
@@ -302,12 +306,13 @@ def identity_history(identity_id: UUID, user_id: str = Depends(verified_user)):
 
 class ReprintGroupDecisionInput(BaseModel):
     identity_id: UUID
-    decision: Literal["merge", "split", "join", "restore"]
+    decision: Literal["merge", "split", "join", "restore", "confirm"]
     # merge: the group whose Printings move; split: the group to split.
     group_id: UUID | None = None
     # merge and join: the group the Printings move into.
     target_group_id: UUID | None = None
-    # split: the Printings that leave; join: the Printings that join; restore: the Printings returned to derivation.
+    # split: the Printings that leave; join: the Printings that join; restore: the Printings returned to derivation;
+    # confirm: the ungrouped manual Printings that form a new group.
     printing_ids: list[UUID] = Field(default_factory=list, max_length=MAX_PRINTINGS)
     # The decision binds to the exact evidence the maintainer was shown.
     evidence_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -350,7 +355,7 @@ class CardIdentityMergeResult(BaseModel):
 
 # Which of group_id, target_group_id and printing_ids each group decision takes.
 SHAPES = {"merge": (True, True, False), "split": (True, False, True), "join": (False, True, True),
-          "restore": (False, False, True)}
+          "restore": (False, False, True), "confirm": (False, False, True)}
 
 
 def _reason(text: str) -> str:
@@ -394,6 +399,11 @@ def _check_group_decision(command: ReprintGroupDecisionInput, printing_ids: list
         if any(by_id[printing].source != "manual" and by_id[printing].derived_group_id is None
                for printing in printing_ids):
             fail(422, "PRINTING_NOT_GROUPABLE")
+    elif command.decision == "confirm":
+        if any(by_id[printing].source != "manual" for printing in printing_ids):
+            fail(422, "PRINTING_NOT_GROUPABLE")
+        if any(by_id[printing].group_id is not None for printing in printing_ids):
+            fail(422, "ALREADY_IN_GROUP")
     elif command.decision == "restore":
         if any(by_id[printing].linked_group_id is None and by_id[printing].assigned_group_id is None
                for printing in printing_ids):
@@ -424,7 +434,8 @@ def _apply_group_decision(conn, command: ReprintGroupDecisionInput, printing_ids
         for table in ("catalog_reprint_group_assignment", "catalog_reprint_group_link"):
             conn.execute(f"DELETE FROM {table} WHERE printing_id = ANY(%s)", (printing_ids,))
         return None
-    group = uuid5(GROUP_NAMESPACE, f"split:{decision_id}") if command.decision == "split" else command.target_group_id
+    group = (uuid5(GROUP_NAMESPACE, f"{command.decision}:{decision_id}") if command.decision in ("split", "confirm")
+             else command.target_group_id)
     conn.execute("""INSERT INTO catalog_reprint_group_assignment (printing_id, group_id, decision_id)
       SELECT printing_id, %s, %s FROM unnest(%s::uuid[]) AS named(printing_id)
       ON CONFLICT (printing_id) DO UPDATE SET group_id = EXCLUDED.group_id, decision_id = EXCLUDED.decision_id,
