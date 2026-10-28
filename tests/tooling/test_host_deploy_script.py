@@ -909,7 +909,7 @@ class HostDeployScriptTest(unittest.TestCase):
         bin_dir = Path(env['PATH'].split(':')[0])
         (bin_dir / 'docker').write_text(FAKE_REFRESH_DOCKER)
         # A flock that reports the lock as held, and records the file it was asked for.
-        (bin_dir / 'flock').write_text('#!/bin/sh\necho "$@" >> "$FAKE_LOG.flock"\nexit 1\n')
+        (bin_dir / 'flock').write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$FAKE_LOG.flock"\nexit 1\n')
         result = subprocess.run(['bash', str(home / 'bin/prizecheck-deploy.sh'), 'catalog-refresh'], capture_output=True,
                                 text=True, timeout=60, stdin=subprocess.DEVNULL, env={**os.environ, 'HOME': str(home), **env})
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -926,7 +926,7 @@ class HostDeployScriptTest(unittest.TestCase):
         bin_dir = Path(env['PATH'].split(':')[0])
         (bin_dir / 'docker').write_text(FAKE_REFRESH_DOCKER)
         # Its own lock is free; deploy.lock is held. The probe never waits.
-        (bin_dir / 'flock').write_text('#!/bin/sh\necho "$@" >> "$FAKE_LOG.flock"\n[ "$2" = 8 ]\n')
+        (bin_dir / 'flock').write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$FAKE_LOG.flock"\n[ "$2" = 8 ]\n')
         result = subprocess.run(['bash', str(home / 'bin/prizecheck-deploy.sh'), 'catalog-refresh'], capture_output=True,
                                 text=True, timeout=60, stdin=subprocess.DEVNULL, env={**os.environ, 'HOME': str(home), **env})
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
