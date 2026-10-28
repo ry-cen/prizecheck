@@ -349,7 +349,7 @@ class HostDeployScriptTest(unittest.TestCase):
         code, output = run(home)
         self.assertEqual(code, 0, output)
         self.assertNotIn('Warning', output)
-        # A proof for another commit is a warning: the proof is normally updated after the release lands.
+        # A proof for another commit is a warning: that release runs owner-only, and the next one cannot carry.
         (home / 'state').mkdir()
         (home / 'state/current').write_text(OTHER + '\n')
         code, output = run(home)
@@ -472,8 +472,126 @@ class HostDeployScriptTest(unittest.TestCase):
             (home / 'data/public' / path).write_text('{}')
         result = subprocess.run(['bash', str(home / 'bin/prizecheck-deploy.sh'), 'deploy', commit, digest], capture_output=True,
                                 text=True, timeout=60, stdin=subprocess.DEVNULL,
-                                env={**os.environ, 'HOME': str(home), **self.fake_env(home, FAKE_COMMIT=commit, **extra)})
+                                env={**os.environ, 'HOME': str(home), **self.fake_env(home, **{'FAKE_COMMIT': commit, **extra})})
         return result.returncode, result.stdout + result.stderr
+
+    def carry_home(self, extra=(), proof=PROOF, snapshot=True):
+        """A public home whose running release COMMIT has its published proof (unless snapshot is False)."""
+        home = self.signup_home([*PROD, 'SIGNUP_MODE=public', *extra], proof=proof, mode=0o600)
+        if snapshot:
+            (home / 'signup-active').mkdir()
+            (home / f'signup-active/{COMMIT}.json').write_text(json.dumps(PROOF))
+        return home
+
+    def assertCarried(self, home, commit, output):
+        self.assertIn(f'Signup: public for release {commit} (readiness proof carried forward from', output)
+        gateway = [call for call in self.fake_calls() if 'up' in call.get('args', []) and 'auth' in call['args']]
+        self.assertTrue(gateway and all(call['mode'] == 'public' for call in gateway), gateway)
+        self.assertEqual([path.name for path in (home / 'signup-active').iterdir()], [f'{commit}.json'])
+        proof = home / 'signup/readiness.json'
+        self.assertEqual(json.loads(proof.read_text()), {**PROOF, 'releaseCommit': commit})
+        self.assertEqual(stat.S_IMODE(proof.stat().st_mode), 0o600)
+        self.assertEqual([path.name for path in (home / 'signup').iterdir()], ['readiness.json'])
+
+    def assertNotCarried(self, home, output, proof=PROOF):
+        self.assertNotIn('carried forward from', output)
+        self.assertEqual(json.loads((home / 'signup/readiness.json').read_text()), proof)
+        gateway = [call for call in self.fake_calls() if 'up' in call.get('args', []) and 'auth' in call['args']]
+        self.assertTrue(gateway and all(call['mode'] == 'owner-only' for call in gateway), gateway)
+        self.assertFalse(list((home / 'signup-active').glob('*.json')))
+
+    @unittest.skipUnless(TSX.exists() and shutil.which('node'), 'needs node and tsx (npm ci)')
+    def test_a_deploy_while_the_running_release_is_public_carries_signup_forward(self):
+        home = self.carry_home()
+        code, output = self.deploy(home, OTHER)
+        self.assertEqual(code, 0, output)
+        self.assertIn(f'readiness proof carried forward from {COMMIT}', output)
+        self.assertCarried(home, OTHER, output)
+        self.assertEqual((home / 'state/current').read_text().strip(), OTHER)
+        # The next release carries again from the updated file.
+        code, output = self.deploy(home, COMMIT)
+        self.assertEqual(code, 0, output)
+        self.assertCarried(home, COMMIT, output)
+
+    @unittest.skipUnless(TSX.exists() and shutil.which('node'), 'needs node and tsx (npm ci)')
+    def test_a_pretty_printed_proof_carries_too(self):
+        home = self.carry_home()
+        (home / 'signup/readiness.json').write_text(json.dumps(PROOF, indent=2))
+        code, output = self.deploy(home, OTHER)
+        self.assertEqual(code, 0, output)
+        self.assertCarried(home, OTHER, output)
+
+    @unittest.skipUnless(TSX.exists() and shutil.which('node'), 'needs node and tsx (npm ci)')
+    def test_a_rollback_carries_signup_forward_too(self):
+        home = self.carry_home()
+        (home / 'state/previous').write_text(OTHER + '\n')
+        result = subprocess.run(['bash', str(home / 'bin/prizecheck-deploy.sh'), 'rollback'], capture_output=True, text=True,
+                                timeout=60, stdin=subprocess.DEVNULL,
+                                env={**os.environ, 'HOME': str(home), **self.fake_env(home, FAKE_COMMIT=OTHER)})
+        output = result.stdout + result.stderr
+        self.assertEqual(result.returncode, 0, output)
+        self.assertCarried(home, OTHER, output)
+
+    @unittest.skipUnless(TSX.exists() and shutil.which('node'), 'needs node and tsx (npm ci)')
+    def test_signup_is_not_carried_when_the_operator_closed_it_or_the_running_release_was_not_public(self):
+        home = self.signup_home([*PROD, 'SIGNUP_MODE=owner-only'])
+        (home / 'signup-active').mkdir()
+        (home / f'signup-active/{COMMIT}.json').write_text(json.dumps(PROOF))
+        code, output = self.deploy(home, OTHER)
+        self.assertEqual(code, 0, output)
+        self.assertNotCarried(home, output)
+        # The proof names a commit that has no snapshot (it never ran public): no carry.
+        home = self.carry_home(snapshot=False)
+        code, output = self.deploy(home, OTHER)
+        self.assertEqual(code, 0, output)
+        self.assertNotCarried(home, output)
+
+    @unittest.skipUnless(TSX.exists() and shutil.which('node'), 'needs node and tsx (npm ci)')
+    def test_a_carried_proof_that_fails_validation_leaves_the_release_owner_only(self):
+        for bad in ({'recoveryVerified': False}, {'providerSignInVerified': []}, {'authorizedByOwner': False}):
+            proof = {**PROOF, **bad}
+            home = self.carry_home(proof=proof)
+            code, output = self.deploy(home, OTHER)
+            self.assertEqual(code, 0, output)
+            self.assertIn('carried forward from', output)
+            self.assertIn('is refused: Signup readiness incomplete', output)
+            self.assertNotIn('public for release', output)
+            self.assertNotCarried(home, '', proof)
+
+    @unittest.skipUnless(TSX.exists() and shutil.which('node'), 'needs node and tsx (npm ci)')
+    def test_a_failed_deploy_or_rollback_leaves_the_proof_naming_the_running_release(self):
+        home = self.carry_home()
+        code, output = self.deploy(home, OTHER, FAKE_COMMIT=COMMIT)  # the images report the old tag: smoke fails
+        self.assertNotEqual(code, 0, output)
+        self.assertRestoredPublic(home, output)
+        home = self.carry_home()
+        (home / 'state/previous').write_text(OTHER + '\n')
+        result = subprocess.run(['bash', str(home / 'bin/prizecheck-deploy.sh'), 'rollback'], capture_output=True, text=True,
+                                timeout=60, stdin=subprocess.DEVNULL,
+                                env={**os.environ, 'HOME': str(home), **self.fake_env(home, FAKE_COMMIT=COMMIT)})
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertRestoredPublic(home, result.stdout + result.stderr)
+
+    def assertRestoredPublic(self, home, output):
+        self.assertIn(f'Restoring release {COMMIT}', output)
+        self.assertIn(f'Signup: public for release {COMMIT} (readiness proof valid)', output)
+        self.assertEqual(json.loads((home / 'signup/readiness.json').read_text()), PROOF, output)
+        self.assertEqual((home / 'state/current').read_text().strip(), COMMIT)
+        self.assertEqual([path.name for path in (home / 'signup-active').iterdir()], [f'{COMMIT}.json'])
+        gateway = [call for call in self.fake_calls() if 'up' in call.get('args', []) and 'auth' in call['args']]
+        self.assertTrue(gateway[-1]['mode'] == 'public', gateway)
+
+    @unittest.skipUnless(TSX.exists() and shutil.which('node'), 'needs node and tsx (npm ci)')
+    def test_a_proof_that_cannot_be_rewritten_only_warns(self):
+        home = self.carry_home()
+        # A read-only directory: the operator's file cannot be replaced.
+        (home / 'signup').chmod(0o555)
+        self.addCleanup((home / 'signup').chmod, 0o755)
+        code, output = self.deploy(home, OTHER)
+        self.assertEqual(code, 0, output)
+        self.assertIn('could not update', output)
+        self.assertIn('will not carry signup forward', output)
+        self.assertEqual(json.loads((home / 'signup/readiness.json').read_text()), PROOF)
 
     @unittest.skipUnless(TSX.exists() and shutil.which('node'), 'needs node and tsx (npm ci)')
     def test_the_running_releases_proof_stays_until_the_new_gateway_is_up(self):
