@@ -106,7 +106,7 @@ Once the timer from [#341](https://github.com/ry-cen/prizecheck/issues/341) is i
    sudo bash $P tool /app/scripts/price_import_job.py --rebind-only
    ```
 
-   If the price tables themselves are damaged, restore them from the newest pre-deploy dump or on-demand backup in `/opt/prizecheck-prod/backups/` first (there is no scheduled backup yet; see [deployment-oracle.md](../../deployment-oracle.md)), then run `--rebind-only`.
+   If the price tables themselves are damaged, restore them from the newest dump in `/opt/prizecheck-prod/backups/` first (the nightly 03:17 UTC backup from `/etc/cron.d/prizecheck-backup`, or a pre-deploy dump; see [deployment-oracle.md](../../deployment-oracle.md)), then run `--rebind-only`.
 
 3. **Ship a follow-up release** from `dev` with the fix, keeping the TCGCSV readers, then set `PRICE_READS=on` again and restart the API as in step 1.
 
