@@ -2,7 +2,7 @@
 
 Every push to `main` deploys PrizeCheck to an Oracle Cloud Ampere A1 instance (Ubuntu 24.04, linux/arm64). The site is public on your own domain, served by Caddy with a Let's Encrypt certificate. SSH is reachable only over your Tailscale tailnet.
 
-Production never builds images. `main` is only ever fast-forwarded from `dev`, so every commit on it was built and verified by the **Deploy dev** workflow. The **Deploy prod** workflow checks that those images exist for the exact commit, with a linux/arm64 entry for every service, and deploys them. A `main` commit that dev did not build (or built before multi-arch images existed) cannot be deployed.
+Deploy dev runs only by hand, so a release commit may have no images yet. The **Deploy prod** workflow first looks for images of the exact commit with a linux/arm64 entry for every service. If a manual dev deploy already built them, it deploys those. Otherwise it builds them with the same shared build Deploy dev uses (`.github/workflows/build-images.yml`: the default checks, then native amd64 and arm64 images), then deploys. The release pull request to `main` has already run the deep integration suites.
 
 This guide is for a fresh instance. The dev environment is described in [Dev deployment on Unraid](deployment-unraid.md); production reuses its images, `compose.deploy.yml` and deploy script.
 
@@ -11,8 +11,8 @@ This guide is for a fresh instance. The dev environment is described in [Dev dep
 ```
 push to main
   └─ GitHub Actions: Deploy prod (.github/workflows/deploy-prod.yml)
-       ├─ images   wait (up to 60 minutes, only while Deploy dev is still running for this commit) until the
-       │           :<commit> index of api, auth, web and scanner-index has a linux/arm64 entry; fail otherwise
+       ├─ images   check whether the :<commit> index of api, auth, web and scanner-index has a linux/arm64 entry
+       ├─ build    only when one is missing: the shared build (build-images.yml), with a moving :main pointer
        └─ deploy   join the tailnet as tag:ci-prod (ephemeral) → SSH to the Oracle host with a forced command
                      └─ prizecheck-deploy.sh deploy <commit> <host-file digest>
                           ├─ pull the :<commit> images (one-time GHCR login, deleted afterwards)
@@ -45,7 +45,7 @@ The edge network is `10.201.80.0/24` (compose network `prizecheck-prod_edge`). S
 
 | Implemented in this repository                                                          | One-time manual steps (this guide)                              |
 | --------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| Multi-arch images built by `.github/workflows/deploy-dev.yml`                           | Create the instance and its network rules (steps 1 and 4)       |
+| Multi-arch images built by `.github/workflows/build-images.yml` (dev and prod call it)  | Create the instance and its network rules (steps 1 and 4)       |
 | `.github/workflows/deploy-prod.yml`                                                     | Tailscale on the host, policy and OAuth client (steps 2 and 10) |
 | `compose.deploy.yml` and `compose.prod.yml`                                             | Docker and Compose (step 3)                                     |
 | `deploy/host/prizecheck-deploy.sh` (deploy, rollback, backup, operator helpers)         | Directories and host files (step 5)                             |
@@ -79,8 +79,7 @@ Don't announce the site until you have worked through those documents.
 
 ## Behaviour to know about
 
-- **Commits built before multi-arch support can't deploy.** Their images are amd64 only. The `images` job fails with `No linux/arm64 image for <services> at <commit>. Production deploys only images Deploy dev built and verified for this exact commit: move main to a dev commit whose Deploy dev images job succeeded after multi-arch builds were added.` The first production release must be a dev commit built after the change that introduced production.
-- **Pushing `dev` and `main` together is fine.** The `images` job waits for the running **Deploy dev** for the same commit. It fails at once if no such run is active and the images are missing, after a five-minute grace period for the run to appear.
+- **A release with no dev deploy builds its own images.** The `build` job adds about the time of a dev build (the default checks, then the image builds) before `deploy` starts. If the checks or a build fail, nothing is deployed.
 - **Every visitor's address reaches the gateway.** The per-IP limits are real in production, unlike on dev where everyone shares one bucket.
 - **Use DNS-only.** Cloudflare's proxied ("orange cloud") records would make every visitor one of Cloudflare's addresses and defeat the per-IP limits.
 - **Caddy keeps no access log.** Published-deck URLs are capability links. The Caddyfile has no `log` directive, and its global block excludes the two loggers (`http.log.error` and `http.handlers.reverse_proxy`) that would otherwise record a failed request's URI. Step 15 checks this on your host. nginx and uvicorn access logs are off as on dev.
@@ -349,7 +348,7 @@ Any `ERROR:` line names the key at fault, never its value; fix it and run the ch
 
 The `prizecheck-api`, `prizecheck-auth`, `prizecheck-web` and `prizecheck-scanner-index` packages already exist, created by the dev pipeline. No registry credential is stored on the host: each deploy pipes the job's short-lived `GITHUB_TOKEN` over SSH for one read-only login.
 
-On GitHub, check each of the four packages: **Package settings → Manage Actions access** must give `ry-cen/prizecheck` **Read**. If the dev host already pulls them, this is already true.
+On GitHub, check each of the four packages: **Package settings → Manage Actions access** must give `ry-cen/prizecheck` **Write**, because Deploy prod builds and pushes a release's images when no dev deploy built them. If the dev pipeline has pushed them, this is already true.
 
 ## 9. Create the deploy key
 
@@ -539,7 +538,7 @@ journalctl -u caddy --since '10 minutes ago' --no-pager
    cat compose.deploy.yml compose.prod.yml deploy/host/prizecheck-deploy.sh | sha256sum
    ```
 
-2. Choose the commit. It must be a `dev` commit whose **Deploy dev** run finished its `images` and `manifests` jobs, and which was built after the change that introduced production (earlier commits have no linux/arm64 images). `main` is fast-forwarded, never merged:
+2. Choose the commit. It must be a `dev` commit that includes the change that introduced production. It doesn't need a dev deploy: Deploy prod builds the images when they're missing. `main` is fast-forwarded, never merged:
 
    ```bash
    git fetch origin && git merge-base --is-ancestor origin/main FULL_40_CHAR_DEV_COMMIT && echo fast-forward
@@ -555,7 +554,7 @@ journalctl -u caddy --since '10 minutes ago' --no-pager
 
    Or, if `main` is already at the commit, run **Actions → Deploy prod → Run workflow → branch `main`, operation `deploy`**.
 
-5. Watch **Actions → Deploy prod**. The `images` job confirms a linux/arm64 entry for all four services (it waits while **Deploy dev** is still running for the commit), then `deploy` joins the tailnet, runs the script on the host and checks `GET <PROD_PUBLIC_URL>/api/health`. A missing `Strict-Transport-Security` header is a warning, not a failure.
+5. Watch **Actions → Deploy prod**. The `images` job looks for a linux/arm64 entry for all four services, `build` builds them if any is missing, then `deploy` joins the tailnet, runs the script on the host and checks `GET <PROD_PUBLIC_URL>/api/health`. A missing `Strict-Transport-Security` header is a warning, not a failure.
 
 On a new installation the script applies all migrations and initializes the public projection store, as on dev. See [public projections](public-projections.md) if the store is reported missing.
 
@@ -751,7 +750,7 @@ The application logs fixed operational messages, not request URLs, codes or cred
 | Symptom                                                                | Cause and fix                                                                                                                                                                            |
 | ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Every Deploy prod job skipped                                          | `PROD_DEPLOY_ENABLED` isn't the repository variable `true`, or (for `deploy`) the `images` job was skipped                                                                               |
-| `No linux/arm64 image for ... at <commit>`                             | `main` is at a commit dev didn't build, or built before multi-arch images. Move `main` to a dev commit whose Deploy dev `images` and `manifests` jobs succeeded                          |
+| `deploy` skipped after `build` failed                                  | A default check or an image build failed for this commit. Fix it on `dev`, move `main` to the fixed commit, or rerun Deploy prod if the failure was transient                            |
 | Tailscale step fails                                                   | OAuth client lacks **Auth Keys: Write** or isn't allowed `tag:ci-prod`; `tag:ci-prod` missing from `tagOwners`                                                                           |
 | `tailscale ping` or SSH times out                                      | The policy doesn't grant `tag:ci-prod` → `tag:prizecheck-prod:22`, the host isn't tagged, `PROD_SSH_HOST` is wrong, or key expiry took the node off the tailnet                          |
 | `Host key verification failed`                                         | `PROD_SSH_KNOWN_HOSTS` doesn't match the address in `PROD_SSH_HOST`; rescan the same address (step 9). Never disable checking                                                            |
