@@ -1,6 +1,8 @@
 import { test, expect, type Page } from "@playwright/test";
 import { signInAsOwner } from "./support/sign-in";
 import { execFileSync } from "node:child_process";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { expectPageChecks } from "./support/page-check";
@@ -11,10 +13,27 @@ import { startAsNewOwner } from "./support/owner";
 // The deck builder's Target Format (#178): header row 2's "Standard ⌄ · ✓ Legal" control (the chevron is an icon) changes the Deck's Target
 // Format through its Deck List command from a kit menu of radio items (owner decision 2026-10-14), the result opens the results dialog, and a card-level issue highlights its
 // lines. The cards come through the real catalog import with real TCGdex-shaped records, so the real rules files judge
-// them on today's date: Bulbasaur, four Rare Candy, four Switch and 51 Basic Grass Energy are legal in Standard and
+// them on the API's check date (pinned below, so the real date never changes the outcome): Bulbasaur, four Rare Candy, four Switch and 51 Basic Grass Energy are legal in Standard and
 // Expanded until the next rotation, and four-ofs break Gym Leader Challenge's one-copy rule.
 
 const ORIGIN = process.env.TEST_ORIGIN || "http://localhost:5173";
+
+// The check date the API uses for this file's tests: api/tests/catalog_process_fixture/today_fixture.py reads it from
+// $CATALOG_PROCESS_FIXTURE_DIR/today. A day on which the cards below are legal in Standard and Expanded.
+const TODAY = "2026-10-28";
+const todayFile = () => {
+  const directory = process.env.CATALOG_PROCESS_FIXTURE_DIR;
+  if (!directory) throw new Error("CATALOG_PROCESS_FIXTURE_DIR is not set");
+  return join(directory, "today");
+};
+
+test.beforeAll(() => {
+  mkdirSync(join(todayFile(), ".."), { recursive: true });
+  writeFileSync(todayFile(), TODAY);
+});
+test.afterAll(() => {
+  rmSync(todayFile(), { force: true });
+});
 
 /** Replaces the catalog with the format-check fixtures of api/tests/test_card_attributes.py. Clears every Holding. */
 function promoteCatalog() {
@@ -223,7 +242,7 @@ test.describe("on a desktop", () => {
     await expect(standard).toContainText("Advisory format checks");
     await expectPageChecks(page, "deck builder, Standard result");
     // A later "as of" date carries the future-rules note.
-    const later = new Date(Date.now() + 30 * 86_400_000)
+    const later = new Date(Date.parse(TODAY) + 30 * 86_400_000)
       .toISOString()
       .slice(0, 10);
     await standard.getByLabel("As of").fill(later);

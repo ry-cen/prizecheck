@@ -28,3 +28,6 @@ art_fixture.install()
 
 import publish_gate_fixture
 publish_gate_fixture.install_on_import()
+
+import today_fixture
+today_fixture.install()
