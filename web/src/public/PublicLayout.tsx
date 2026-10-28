@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Wordmark } from "../shell/Shell";
+import { PriceCredit } from "../ui/PriceCredit";
 import { PRIMARY, QUIET } from "./controls";
 import { DISCOVER_PATH, followLink, SIGN_IN_PATH } from "./publicRoutes";
 
@@ -41,6 +42,7 @@ export function PublicLayout({ current, onNavigate, children }: Props) {
         </nav>
       </header>
       {children}
+      <PriceCredit className="shrink-0" />
     </div>
   );
 }
