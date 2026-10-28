@@ -112,15 +112,18 @@ def empty_public_outbox():
 
 
 @pytest.fixture(autouse=True)
-def quiet_art_warm_up(monkeypatch):
+def quiet_art_warm_up():
     """Deck saves queue background art fetches (#396); the suite keeps them off, so no test reaches TCGdex. The warm-up
-    tests turn them on, and none may outlive its test."""
+    tests turn them on, and none may outlive its test. A private MonkeyPatch, not the shared fixture: requesting
+    ``monkeypatch`` here would make it outlive a test module's own fixtures, which then tear down with the test's
+    patched environment still set (test_host_readiness's unreachable DATABASE_URL)."""
     from app import art_store
     art_store.start_warmups()
-    monkeypatch.setenv('ART_WARM_UP', '0')
-    yield
-    art_store.join_warmups()
-    art_store.start_warmups()
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv('ART_WARM_UP', '0')
+        yield
+        art_store.join_warmups()
+        art_store.start_warmups()
 
 
 @pytest.fixture(autouse=True)
