@@ -10,14 +10,16 @@ export function PriceCredit({ className = "" }: { className?: string }) {
     <footer
       className={`box-border px-7 py-4 text-center text-caption text-text-subtle compact:px-5 phone:px-3 phone:py-0 ${className}`}
     >
-      Prices from{" "}
-      <a
-        href="https://tcgcsv.com"
-        rel="noopener"
-        className="text-text-subtle underline phone:inline-flex phone:min-h-tap phone:items-center"
-      >
-        TCGCSV
-      </a>
+      <p>
+        Prices from{" "}
+        <a
+          href="https://tcgcsv.com"
+          rel="noopener"
+          className="text-text-subtle underline phone:inline-flex phone:min-h-tap phone:items-center"
+        >
+          TCGCSV
+        </a>
+      </p>
     </footer>
   );
 }

@@ -277,6 +277,8 @@ def test_full_catalog_scale_publishes_in_bounded_batches_without_a_whole_run_dea
 def staged_refs():
     from app.public_catalog import drain
     reset_catalog()
+    with connect() as conn:
+        conn.execute('DELETE FROM tcgplayer_price')  # an earlier test's rows would bind during the import's rebind
     activate(MATCHING, 1)
     activate(LIVE, 99)
     run(Records(card(1)))

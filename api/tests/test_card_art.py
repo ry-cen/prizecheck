@@ -203,8 +203,9 @@ def test_a_failing_refresh_never_fails_the_import(world, monkeypatch):
     assert result.outcome == "imported" and row["outcome"] == "imported" and row["fallback_art"] is None
 
 
-def test_only_the_scanner_builds_webp_suffixes():
+def test_only_the_scanner_and_the_art_store_build_webp_suffixes():
     root = Path(__file__).resolve().parents[1] / "app"
     offenders = [str(path.relative_to(root)) for path in root.rglob("*.py")
-                 if path.name != "scanner.py" and re.search(r"/(low|high)\.webp", path.read_text())]
-    assert offenders == [], "image URLs come from catalog_printing_art; only scanner.py suffixes TCGdex URLs"
+                 if path.name not in {"scanner.py", "art_urls.py"} and re.search(r"/(low|high)\.webp", path.read_text())]
+    assert offenders == [], ("image URLs come from catalog_printing_art; only scanner.py and art_urls.py (the art "
+                             "store's source rule, #358) suffix TCGdex URLs")
