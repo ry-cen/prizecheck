@@ -152,27 +152,45 @@ def rebind_best_effort(conn=None):
     return counts
 
 
-_spawned: list[threading.Thread] = []
-_spawned_lock = threading.Lock()
+_worker_lock = threading.Lock()
+_worker: threading.Thread | None = None  # the one running rebind thread, if any
+_dirty = False  # a request arrived while the worker was running; it owes one more pass
+_idle = threading.Event()
+_idle.set()
+
+
+def _worker_loop():
+    global _worker, _dirty
+    while True:
+        try:
+            rebind_best_effort()
+        except Exception as error:  # rebind_best_effort logs its own failures; this keeps the worker serving requests
+            log.warning("Price rebind worker pass failed (%s)", type(error).__name__)
+        with _worker_lock:
+            if not _dirty:
+                _worker = None  # decided under the lock: a request after this starts a new worker
+                _idle.set()
+                return
+            _dirty = False
 
 
 def spawn_rebind():
-    """Run rebind_best_effort in a daemon thread, for callers inside an HTTP request: the rebind and publish wait on the
-    price lock and must not hold the owner's response. Returns the thread."""
-    thread = threading.Thread(target=rebind_best_effort, daemon=True, name="price-rebind")
-    with _spawned_lock:
-        _spawned[:] = [t for t in _spawned if t.is_alive()]
-        _spawned.append(thread)
-    thread.start()
-    return thread
+    """Ask for a rebind and publish after the caller's commit, for callers inside an HTTP request: they wait on the
+    price lock and must not hold the owner's response. One coalescing daemon worker runs at a time (one connection);
+    a request while it runs only marks it dirty, so a burst costs the running pass plus one more. Returns at once."""
+    global _worker, _dirty
+    with _worker_lock:
+        if _worker is not None:
+            _dirty = True
+            return
+        _idle.clear()
+        _worker = threading.Thread(target=_worker_loop, daemon=True, name="price-rebind")
+        _worker.start()
 
 
 def join_spawned_rebinds(timeout=60.0):
-    """Test seam: wait for every thread spawn_rebind has started."""
-    with _spawned_lock:
-        threads = list(_spawned)
-    for thread in threads:
-        thread.join(timeout)
+    """Test seam: wait until the rebind worker is idle, including a queued pass."""
+    _idle.wait(timeout)
 
 
 def _publish(conn):
