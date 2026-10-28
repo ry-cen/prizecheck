@@ -711,7 +711,7 @@ def test_r3_never_reuses_a_mapping_revision_the_lost_timeline_already_wrote_quot
     assert after['mapping_state'] == 'quarantined'
     assert after['mapping_revision'] > stored  # not before+1, which a later verify would walk up to the planted quote
     states = marketplace_states(public_record_store(), [edition_ref], time.monotonic() + 5)
-    assert states[edition_ref].state == 'quarantined' and states[edition_ref].quote is None
+    assert states[edition_ref].state == 'quarantined' and states[edition_ref].price is None
     # The same holds for an Edition that was already quarantined when the recovery conflict was found.
     again = plant_foreign_timeline(edition_ref, after['mapping_revision'] + 6)
     with connect() as conn:
