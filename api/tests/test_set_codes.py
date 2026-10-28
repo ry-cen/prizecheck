@@ -72,6 +72,8 @@ def test_the_display_table_is_not_the_live_export_table():
     # the owned Edition's code ("PAL 254"). Copy to my Decks (#216) shows a Published Deck row's printed code on its
     # review line (import_publication). The collection import (#228, #234) reads it to match a Dragon Shield or Sorted
     # set code and a pasted decklist-style line (collection_import_matcher). The scanner's number table (#310) carries
-    # each set's printed code so the phone can match an OCR'd "PAL 254" (scanner).
-    assert importers == ["catalog_browse.py", "collection_import_matcher.py", "deck_import.py", "import_aliases.py",
-                         "import_matching.py", "import_publication.py", "scanner.py", "swap_hints.py"]
+    # each set's printed code so the phone can match an OCR'd "PAL 254" (scanner). Collection's tiles and inspector
+    # (#192) show each holding's printed code (holdings, collection).
+    assert importers == ["catalog_browse.py", "collection.py", "collection_import_matcher.py", "deck_import.py",
+                         "holdings.py", "import_aliases.py", "import_matching.py", "import_publication.py", "scanner.py",
+                         "swap_hints.py"]
