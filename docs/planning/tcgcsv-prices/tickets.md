@@ -6,9 +6,8 @@ Decision: [ADR 0019](../../adr/0019-tcgcsv-daily-prices.md). Design sections are
 - #342 is superseded by P4.
 - #343 is unchanged and recommended before the cutover.
 
-Each ticket is accepted on its own narrow tests plus `npm run check` and `npm run guardrails`. The full gate runs once
-after the last ticket shipped to `dev` before the release PR, plus `npm run verify -- --burn-in --fast` because tests
-change ([verification](../../agents/verification.md)). Collector screens must show no source, time or refresh state
+Each ticket is accepted on its own narrow tests plus `npm run check` and `npm run guardrails`. The pull request is accepted on
+green GitHub CI; the full local gate and the burn-in are optional ([verification](../../agents/verification.md)). Collector screens must show no source, time or refresh state
 ([AGENTS.md](../../../AGENTS.md)). The single exception, decided by the owner, is P4b's footer line "Prices from TCGCSV".
 
 Issues: P1 [#345](https://github.com/ry-cen/prizecheck/issues/345), P2 [#346](https://github.com/ry-cen/prizecheck/issues/346), P2b [#347](https://github.com/ry-cen/prizecheck/issues/347), P3 [#348](https://github.com/ry-cen/prizecheck/issues/348), P4 [#349](https://github.com/ry-cen/prizecheck/issues/349), P4b [#350](https://github.com/ry-cen/prizecheck/issues/350), P5 [#351](https://github.com/ry-cen/prizecheck/issues/351), P5b [#352](https://github.com/ry-cen/prizecheck/issues/352), P6 [#353](https://github.com/ry-cen/prizecheck/issues/353), P7 [#354](https://github.com/ry-cen/prizecheck/issues/354), P8 [#355](https://github.com/ry-cen/prizecheck/issues/355), P9 [#356](https://github.com/ry-cen/prizecheck/issues/356).
@@ -464,8 +463,8 @@ Run this at least 7 days after the production cutover, with owner approval.
 `docs/price-refresh.md`, `docs/adr/0006-*.md`, `0008-*.md`, `0013-*.md` and `scripts/check_guardrails.py` (if it names
 runner tests).
 
-**Verification.** `npm run verify -- --fast`, because P9 deletes across suites, then the full gate `npm run verify` before
-the release PR.
+**Verification.** `npm run verify -- --fast`, because P9 deletes across suites, then, because it crosses suites, an
+integration run on CI (`gh workflow run verify.yml -f integration=sharded`) before the release PR.
 
 ## Not ticketed (recorded follow-ups)
 

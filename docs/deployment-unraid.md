@@ -9,7 +9,7 @@ This guide covers the dev environment. Production runs on Oracle Cloud and reuse
 ```
 push to dev
   └─ GitHub Actions: Deploy dev (.github/workflows/deploy-dev.yml)
-       ├─ verify   the fast tier of the gate, split over parallel jobs (.github/workflows/verify.yml)
+       ├─ verify   the default checks: format, lint, compile, build, unit tests (.github/workflows/verify.yml)
        ├─ images   build api, auth, web and scanner-index natively for amd64 and arm64; push per-architecture tags to GHCR
        ├─ manifests join them into one :<commit> index per image (plus a moving :dev pointer)
        └─ deploy   join the tailnet as tag:ci (ephemeral) → SSH to Unraid with a forced command
@@ -320,7 +320,7 @@ A Tailscale container started with `--network=host` behaves like the host case. 
    cat compose.deploy.yml deploy/host/prizecheck-deploy.sh | sha256sum
    ```
 
-2. Trigger the workflow by pushing to `dev`, or run it manually: **Actions → Deploy dev → Run workflow → branch `dev`, operation `deploy`**. The fast tier of the verification gate runs first, split over parallel jobs (about 5 minutes), then the images are built and the deploy runs. CI runs only the fast tier; run the full gate locally with `npm run verify`, or on CI from **Actions → Verify → Run workflow** with **full** ticked.
+2. Trigger the workflow by pushing to `dev`, or run it manually: **Actions → Deploy dev → Run workflow → branch `dev`, operation `deploy`**. The default checks run first (formatting, lint, compilation, build and unit tests), then the images are built and the deploy runs. The deep integration suites do not gate the deploy; run them on demand from **Actions → Verify → Run workflow** with an **integration** choice, or run the full gate locally with `npm run verify`.
 3. On a new installation the script applies all migrations and initializes the public projection store. It initializes the store only when the store is empty **and** nothing has been deployed before. A missing store on an existing install stops the deploy instead of silently creating an empty one; see [public projections](public-projections.md) for recovery.
 
 ## 11. Verify the application

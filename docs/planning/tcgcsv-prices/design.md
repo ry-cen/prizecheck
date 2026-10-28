@@ -123,7 +123,7 @@ with no TCGdex image shows the TCGplayer product image of its verified product.
 - **Conventions.** Migrations are numbered SQL files under `migrations/`. **151 is reserved by #339** (`catalog_check`), so
   this feature uses 152–154. Generated clients are regenerated with `scripts/generate_all_clients.py`, never hand-edited.
   UI copy follows AGENTS.md. Verification follows `docs/agents/verification.md`: narrow `npm run verify -- --suite api --
-  <files>` plus `npm run check` and `npm run guardrails` per ticket, and the full gate once after the last ticket.
+  <files>` plus `npm run check` and `npm run guardrails` per ticket, with green GitHub CI before each pull request; the full local gate is optional.
 
 ## 4. Decisions
 
