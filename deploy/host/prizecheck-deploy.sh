@@ -35,6 +35,10 @@ SIGNUP_STAGE=""
 SIGNUP_CONFIG=owner-only
 EFFECTIVE_SIGNUP_MODE=owner-only
 SIGNUP_RESOLVED_FOR=""
+# Set by resolve_signup_mode when the release SIGNUP_CARRIED_TO is public only because the proof naming SIGNUP_CARRIED_FROM
+# was carried forward; commit_signup_carry then moves the operator's file to the new commit once the release is recorded.
+SIGNUP_CARRIED_FROM=""
+SIGNUP_CARRIED_TO=""
 API_UID=10001
 AUTH_UID=1000
 KEEP_BACKUPS=10
@@ -375,18 +379,34 @@ Promise.all([import('node:fs'), import('/app/auth/signup.js')]).then(([fs, { sig
 JS
 }
 
+# Prints the commit the operator's proof names in releaseCommit (nothing when it names no 40-hex commit).
+proof_named_commit() {
+  grep -oE '"releaseCommit"[[:space:]]*:[[:space:]]*"[0-9a-f]{40}"' "$SIGNUP_FILE" 2>/dev/null | head -n 1 | grep -oE '[0-9a-f]{40}' || true
+}
+
+# Copies the proof $1 to $2 with its releaseCommit changed from the commit $3 to the commit $4 (both 40-hex).
+copy_proof_for_commit() {
+  sed -E "s/(\"releaseCommit\"[[:space:]]*:[[:space:]]*\")$3(\")/\1$4\2/" "$1" > "$2"
+}
+
 # Sets PROOF_PROBLEM and returns 1 unless the operator's proof is valid for the release $1, judged by that release's own
-# image. The proof is first copied to a staging directory, which is what the check mounts (in place of the snapshot
+# image. With a commit in $2 the proof is judged as if its releaseCommit $2 read $1 (a carried-forward proof; the
+# operator's file is not touched). The proof is first copied to a staging directory, which is what the check mounts (in place of the snapshot
 # directory); only if that exact copy passes is it moved into signup-active/$1.json in one rename. Each release has its
 # own file, so a gateway still running another release keeps the file it was started with. A check that cannot run (no
 # image, no Docker, a timeout) or a failed publish counts as not valid.
 signup_proof_problem() {
-  local commit="$1" js out line status=0 prefix=()
+  local commit="$1" carry_from="${2:-}" js out line status=0 prefix=()
   PROOF_PROBLEM=""
   check_signup_proof_file || return 1
   SIGNUP_STAGE="$(mktemp -d "$PRIZECHECK_HOME/.signup-stage.XXXXXX")" || { SIGNUP_STAGE=""; PROOF_PROBLEM="cannot stage the readiness proof"; return 1; }
   chmod 755 "$SIGNUP_STAGE"
-  if ! cp "$SIGNUP_FILE" "$SIGNUP_STAGE/readiness.json" || ! chmod 644 "$SIGNUP_STAGE/readiness.json"; then
+  if [[ -n "$carry_from" ]]; then
+    copy_proof_for_commit "$SIGNUP_FILE" "$SIGNUP_STAGE/readiness.json" "$carry_from" "$commit" || rm -f -- "$SIGNUP_STAGE/readiness.json"
+  else
+    cp "$SIGNUP_FILE" "$SIGNUP_STAGE/readiness.json"
+  fi
+  if [[ ! -f "$SIGNUP_STAGE/readiness.json" ]] || ! chmod 644 "$SIGNUP_STAGE/readiness.json"; then
     rm -rf -- "$SIGNUP_STAGE"; SIGNUP_STAGE=""; PROOF_PROBLEM="cannot stage the readiness proof"; return 1
   fi
   js="$(signup_check_js)"
@@ -429,23 +449,63 @@ prune_signup_snapshots() {
 }
 
 # Sets EFFECTIVE_SIGNUP_MODE for the release in PRIZECHECK_IMAGE_TAG and remembers it for compose(). Public only when the
-# env file asks for it and the proof is valid for this release's commit; otherwise owner-only, with the reason logged. The
-# proof names exactly one commit, so a new release or a rollback would otherwise crash-loop the gateway.
+# env file asks for it and the proof is valid for this release's commit; otherwise owner-only, with the reason logged.
+# The proof names exactly one commit. When it names the release that is running public (its snapshot is still there,
+# because snapshots of other releases are pruned once a gateway is up), the proof is carried forward: it is checked as if
+# it named this release, and commit_signup_carry updates the operator's file once the release is recorded.
 resolve_signup_mode() {
-  local commit="${PRIZECHECK_IMAGE_TAG:-}"
+  local commit="${PRIZECHECK_IMAGE_TAG:-}" named=""
   [[ -z "$commit" || "$SIGNUP_RESOLVED_FOR" != "$commit" ]] || return 0
   EFFECTIVE_SIGNUP_MODE=owner-only
+  SIGNUP_CARRIED_FROM=""; SIGNUP_CARRIED_TO=""
   if [[ "$SIGNUP_CONFIG" != public ]] || ! valid_commit "$commit"; then
     SIGNUP_RESOLVED_FOR=""
     return 0
   fi
-  if signup_proof_problem "$commit"; then
+  if [[ -f "$SIGNUP_FILE" && ! -L "$SIGNUP_FILE" ]]; then named="$(proof_named_commit)"; fi
+  if [[ -n "$named" && "$named" != "$commit" && "$named" == "$(read_state current)" && -f "$SNAPSHOT_DIR/$named.json" && ! -L "$SNAPSHOT_DIR/$named.json" ]]; then
+    if signup_proof_problem "$commit" "$named"; then
+      EFFECTIVE_SIGNUP_MODE=public
+      SIGNUP_CARRIED_FROM="$named"; SIGNUP_CARRIED_TO="$commit"
+      log "Signup: public for release $commit (readiness proof carried forward from $named)"
+    else
+      log "Signup: owner-only for release $commit; the readiness proof carried forward from $named is refused: $PROOF_PROBLEM"
+    fi
+  elif signup_proof_problem "$commit"; then
     EFFECTIVE_SIGNUP_MODE=public
     log "Signup: public for release $commit (readiness proof valid)"
   else
     log "Signup: owner-only for release $commit; SIGNUP_MODE=public is not applied: $PROOF_PROBLEM"
   fi
   SIGNUP_RESOLVED_FOR="$commit"
+}
+
+# Once release $1 is recorded as current and came up public by carrying the proof forward, points the operator's proof
+# at it, so the next release can carry again. Atomic, root-owned, mode 600. A failure only warns: the release is already
+# public through its snapshot.
+commit_signup_carry() {
+  local commit="$1" from="$SIGNUP_CARRIED_FROM" tmp
+  [[ -n "$from" && "$SIGNUP_CARRIED_TO" == "$commit" && "$EFFECTIVE_SIGNUP_MODE" == public ]] || return 0
+  SIGNUP_CARRIED_FROM=""; SIGNUP_CARRIED_TO=""
+  if ! check_signup_proof_file; then
+    log "Warning: the readiness proof was not updated to name release $commit: $PROOF_PROBLEM (the next release will not carry signup forward; fix it and run signup-apply)"
+    return 0
+  fi
+  if [[ "$(proof_named_commit)" != "$from" ]]; then
+    log "Warning: the readiness proof was edited during the release and no longer names $from; leaving it as it is (the next release will not carry signup forward; update the proof and run signup-apply)"
+    return 0
+  fi
+  if tmp="$(mktemp "$SIGNUP_DIR/.readiness.XXXXXX")" \
+    && chmod 600 "$tmp" \
+    && { [[ "$(id -u)" != 0 ]] || chown 0:0 "$tmp"; } \
+    && copy_proof_for_commit "$SIGNUP_FILE" "$tmp" "$from" "$commit" \
+    && [[ "$(grep -c "\"releaseCommit\"[[:space:]]*:[[:space:]]*\"$commit\"" "$tmp")" -ge 1 ]] \
+    && mv -f -- "$tmp" "$SIGNUP_FILE"; then
+    log "Signup: readiness proof now names release $commit"
+  else
+    [[ -z "${tmp:-}" ]] || rm -f -- "$tmp"
+    log "Warning: could not update $SIGNUP_FILE to name release $commit; it is public now, but the next release will not carry signup forward until the proof names $commit (edit it, then signup-apply)"
+  fi
 }
 
 read_state() { [[ -f "$STATE_DIR/$1" ]] && cat "$STATE_DIR/$1" || true; }
@@ -705,6 +765,7 @@ cmd_deploy() {
     [[ -n "$current" ]] && write_state previous "$current"
     write_state current "$commit"
   fi
+  commit_signup_carry "$commit"
   log "Deployed $commit"
   # Bookkeeping after the release is recorded must not turn a successful deploy into a failed job.
   printf '%s deploy %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$commit" >> "$STATE_DIR/history.log" || true
@@ -725,6 +786,7 @@ cmd_rollback() {
   fi
   write_state current "$previous"
   [[ -n "$current" ]] && write_state previous "$current"
+  commit_signup_carry "$previous"
   log "Rolled back to $previous"
   printf '%s rollback %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$previous" >> "$STATE_DIR/history.log" || true
 }
@@ -799,13 +861,12 @@ cmd_check_config() {
   validate_config
   if [[ "$SIGNUP_CONFIG" == public ]]; then
     check_signup_proof_file || die "SIGNUP_MODE=public: $PROOF_PROBLEM"
-    # The proof is normally updated after a release lands, so a different commit is a warning only: that release runs
-    # owner-only until the proof names it and signup-apply has run.
+    # A different commit is a warning only: this release runs owner-only until the proof names it and signup-apply has run.
     local named current
-    named="$(grep -oE '"releaseCommit"[[:space:]]*:[[:space:]]*"[0-9a-f]{40}"' "$SIGNUP_FILE" | head -n 1 | grep -oE '[0-9a-f]{40}' || true)"
+    named="$(proof_named_commit)"
     current="$(read_state current)"
     if [[ -n "$current" && "$named" != "$current" ]]; then
-      log "Warning: the readiness proof does not name the current release $current, which runs owner-only until it does (signup-apply)"
+      log "Warning: the readiness proof does not name the current release $current; until it does, signup-apply runs it owner-only and the next release will not carry signup forward"
     fi
   fi
   log "Configuration OK ($ENVIRONMENT)"
