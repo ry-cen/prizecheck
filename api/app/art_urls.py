@@ -27,6 +27,17 @@ def tcgdex_source(image_url: str | None, size: str) -> str | None:
     return f"{image_url.rstrip('/')}/{SIZES[size]}"
 
 
+def route_address(printing_id, small_source: str | None, size: str = "small") -> str | None:
+    """The route address for a Printing from the view's small source URL (``catalog_printing_art.low_image_url``), the
+    Python twin of ``catalog_art_route``. List reads over many rows select the raw source and call this on the page's rows
+    only, so the version is not hashed for every catalog row."""
+    if size not in SIZES:
+        raise ValueError(f"unknown art size: {size!r}")
+    if not small_source:
+        return None
+    return f"/api/art/{printing_id}/{size}?v={art_version(small_source)}"
+
+
 def large_direct_url(small_url: str | None) -> str | None:
     """The large file for a direct small address (TCGdex ``/low.webp``, TCGplayer ``_200w.jpg``), or None. Anonymous
     pages cannot use the art route, so they get direct addresses for both sizes."""

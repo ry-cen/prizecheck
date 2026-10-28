@@ -16,7 +16,7 @@ import pytest
 from app import public_catalog
 from app.art_urls import art_url, art_version, large_direct_url
 from app.main import app, connect
-from app.public_projection import public_record_store
+from app.public_projection import public_projection_store, public_record_store
 from app.public_records import catalog_printing_key
 from fastapi.testclient import TestClient
 from test_catalog import headers
@@ -182,6 +182,9 @@ def test_the_published_page_and_the_public_catalog_keep_their_direct_addresses(s
     # The same Deck, read by its owner, gets route addresses (the shape is shared; the audience is not).
     private = detail(USER, deck)
     only_routes("the owner's deck", private, len(LEGAL))
+    # Rollback safety: the large address is added on read and never stored (PublicModel rejects unknown fields).
+    stored = public_projection_store().read()[token]["snapshot"]
+    assert all("large_image_url" not in edition for identity in stored["identities"] for edition in identity["editions"])
     with connect() as conn:
         public_catalog.drain_to_completion(conn)
         printing = conn.execute("SELECT public_ref FROM catalog_printing WHERE source_id='me01-001'").fetchone()
@@ -190,20 +193,18 @@ def test_the_published_page_and_the_public_catalog_keep_their_direct_addresses(s
     assert record["image_url"] == f"{HOST}me01-001/low.webp"
 
 
-def test_only_the_anonymous_reads_and_the_art_route_select_the_source_urls():
-    """A new signed-in read that selects ``art.low_image_url`` would hand collectors a direct address: it must select
-    ``small_art_url`` or ``large_art_url``. The anonymous reads, the art route's resolver and the fallback chooser are the
-    only ones that read the source columns."""
+def test_only_the_anonymous_reads_the_art_route_and_the_paged_lists_select_the_source_urls():
+    """A signed-in read that selects ``art.low_image_url`` hands collectors a direct address unless it builds the route
+    address itself: the big paged lists (Collection, holdings, Catalog browse) select the raw source and call
+    ``route_address`` on the page's rows only, so a large Collection does not hash a version per catalog row. Every
+    other signed-in read selects ``small_art_url`` or ``large_art_url``. The anonymous reads, the art route's resolver and
+    the fallback chooser read the source columns by design."""
     root = Path(__file__).resolve().parents[1] / "app"
-    allowed = {"public_catalog.py", "publications.py", "art_store.py", "card_art.py"}
+    anonymous = {"public_catalog.py", "publications.py", "art_store.py", "card_art.py"}
+    paged = {"collection.py", "holdings.py", "catalog_browse.py"}
     offenders = [str(path.relative_to(root)) for path in root.rglob("*.py")
-                 if path.name not in allowed and re.search(r"\bart\.(low|high)_image_url\b", path.read_text())]
+                 if path.name not in anonymous | paged and re.search(r"\bart\.(low|high)_image_url\b", path.read_text())]
     assert offenders == []
-
-
-def test_a_direct_small_address_maps_to_its_large_one():
-    assert large_direct_url(HOST + "a/b/low.webp") == HOST + "a/b/high.webp"
-    assert large_direct_url("https://tcgplayer-cdn.tcgplayer.com/product/7_200w.jpg") == (
-        "https://tcgplayer-cdn.tcgplayer.com/product/7_400w.jpg")
-    assert large_direct_url(None) is None and large_direct_url("https://x.test/other.png") is None
-    assert large_direct_url("/api/art/1/small?v=ab") is None
+    for name in paged:
+        text = (root / name).read_text()
+        assert "route_address(" in text and "art.small_art_url" not in text, name
