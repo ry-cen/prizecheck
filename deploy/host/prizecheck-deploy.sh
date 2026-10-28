@@ -783,9 +783,15 @@ cmd_deploy() {
 restore_rules() {
   local tool="$1" target="$2"
   PRIZECHECK_IMAGE_TAG="$tool" compose stop api || true
-  if ! PRIZECHECK_IMAGE_TAG="$tool" compose run --rm --no-deps -T tools -c "import os, sys; sys.exit(not os.path.exists('/app/scripts/rule_rollout.py'))"; then
+  # The probe exits 3 only when the script is missing; any other failure (docker, the image, Python) is a failed restore.
+  local probe=0
+  PRIZECHECK_IMAGE_TAG="$tool" compose run --rm --no-deps -T tools -c "import os, sys; sys.exit(0 if os.path.exists('/app/scripts/rule_rollout.py') else 3)" || probe=$?
+  if [[ "$probe" == 3 ]]; then
     log "Release $tool predates catalog rule rollout; not restoring catalog rules"
     return 0
+  elif [[ "$probe" != 0 ]]; then
+    log "Could not inspect release $tool's image for its rule tool (status $probe)"
+    return 1
   fi
   PRIZECHECK_IMAGE_TAG="$tool" compose run --rm --no-deps -T tools /app/scripts/rule_rollout.py restore --to "$target"
 }

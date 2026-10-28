@@ -13,6 +13,10 @@ type Rollout = NonNullable<MetadataRuleView["rollout"]>;
 const inProgress = (rollout: Rollout | null) =>
   rollout !== null && rollout.phase !== "done" && rollout.phase !== "failed";
 
+/** Running now: an unfinished rollout under a rule problem is stopped, because nothing continues it. */
+const applyingNow = (rule: MetadataRuleView) =>
+  rule.problem === null && inProgress(rule.rollout);
+
 /** Owner controls' Rules tab: a read-only card per rule kind (spec "Review cards", Rules; ADR 0021). */
 export function RulesPanel() {
   const [rules, setRules] = useState<MetadataRuleView[]>([]);
@@ -28,7 +32,7 @@ export function RulesPanel() {
   useEffect(() => {
     void load();
   }, []);
-  const applying = rules.some((rule) => inProgress(rule.rollout));
+  const applying = rules.some(applyingNow);
   useEffect(() => {
     if (!applying) return;
     const timer = setInterval(() => void load(), 5000);
@@ -112,7 +116,7 @@ function RuleCard({ rule }: { rule: MetadataRuleView }) {
   } else if (rollout?.phase === "failed") {
     tone = "bad";
     summary = "Rollout failed";
-  } else if (inProgress(rollout)) {
+  } else if (applyingNow(rule)) {
     tone = "warn";
     summary = "Applying";
   } else {
@@ -120,7 +124,12 @@ function RuleCard({ rule }: { rule: MetadataRuleView }) {
     summary = `Version ${active.version} applied`;
   }
 
-  const progress = rollout ? rolloutLine(rollout) : null;
+  const stopped = rule.problem !== null && inProgress(rollout);
+  const progress = stopped
+    ? "Stopped: the rollout waits until the rule code matches the applied version."
+    : rollout
+      ? rolloutLine(rollout)
+      : null;
 
   return (
     <article
@@ -143,8 +152,8 @@ function RuleCard({ rule }: { rule: MetadataRuleView }) {
       )}
       {rollout?.phase === "failed" && (
         <p role="alert" className="m-0 text-meta text-danger">
-          Rollout failed: {rollout.error ?? "unknown error"}. It retries
-          automatically.
+          Rollout failed: {rollout.error ?? "unknown error"}. It retries with
+          the next catalog or price import, and when the API starts.
         </p>
       )}
       {rule.problem === "digest_mismatch" && (

@@ -647,7 +647,9 @@ test.describe("desktop", () => {
         name: "Marketplace matching",
       });
       const live = rules.getByRole("article", { name: "Live derivation" });
-      await expect(matching).toContainText("Applying: 1,200 of 9,101 Editions");
+      // The rule code differs, so the unfinished rollout is stopped, not applying.
+      await expect(matching).toContainText("Stopped: the rollout waits");
+      await expect(matching).not.toContainText("Applying");
       await expect(matching).toContainText(
         "applied by deploying release ab12ab1"
       );
