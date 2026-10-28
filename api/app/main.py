@@ -6,6 +6,7 @@ from fastapi import FastAPI, Request
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 
+from .art_store import router as art_router
 from .attribute_corrections import router as attribute_corrections_router
 from .catalog_browse import router as catalog_browse_router
 from .catalog_reconciliation import router as catalog_reconciliation_router
@@ -103,7 +104,7 @@ ROUTERS = (
     want_list_router, want_list_cost_router, want_list_mass_entry_router, deck_format_checks_router,
     # published decks, format standing, imports, scanner
     published_cost_router, published_live_export_router, published_mass_entry_router, published_format_checks_router,
-    format_standing_router, collection_import_router, scanner_router, scanner_save_router,
+    format_standing_router, collection_import_router, scanner_router, art_router, scanner_save_router,
     # social and trading
     profile_router, public_invite_router, friends_router, friend_reads_router, trade_matches_router, loans_router,
     inbox_router, trades_router, trade_settings_router, open_discovery_router, conversations_router,

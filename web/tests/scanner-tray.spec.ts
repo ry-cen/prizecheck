@@ -86,12 +86,13 @@ for (const size of SIZES) {
         finishes.getByRole("button", { name: "Reverse Holo", exact: true })
       ).toHaveAttribute("aria-pressed", "false");
       await expect(trayOpen(page)).not.toContainText("$");
-      // Every image carries crossorigin="anonymous": the page is cross-origin isolated.
+      // Every image is same-origin art: the page is cross-origin isolated.
       expect(
         await page.evaluate(
           () =>
-            [...document.images].filter((i) => i.crossOrigin !== "anonymous")
-              .length
+            [...document.images].filter(
+              (i) => new URL(i.src).origin !== location.origin
+            ).length
         )
       ).toBe(0);
       await expectPageChecks(page, `${size.name} scanner, tray open`);

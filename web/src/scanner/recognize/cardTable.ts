@@ -1,4 +1,4 @@
-// Card table v1 (the resolution's "Number table"): gzip of column-oriented JSON.
+// Card table v1/v2 (the resolution's "Number table"): gzip of column-oriented JSON.
 import type { CardDb, CardSet } from "./types";
 
 export type { CardDb, CardSet };
@@ -25,7 +25,10 @@ function nullableStr(x: unknown, what: string): string | null {
 
 export function parseCardTable(json: unknown): CardDb {
   if (!isRecord(json)) bad("not an object");
-  if (json.format !== 1) bad(`format ${String(json.format)}`);
+  // v1 carries `image` (raw URLs, never shown); v2 carries `art` (8-hex versions of the art route URL).
+  if (json.format !== 1 && json.format !== 2)
+    bad(`format ${String(json.format)}`);
+  const v2 = json.format === 2;
   if (typeof json.key !== "string") bad("key");
   if (!Array.isArray(json.sets)) bad("sets");
   const sets: CardSet[] = json.sets.map((s: unknown, i: number) => {
@@ -40,23 +43,23 @@ export function parseCardTable(json: unknown): CardDb {
   });
   const p = json.printings;
   if (!isRecord(p)) bad("printings");
-  const cols = ["id", "set", "number", "name", "image"] as const;
+  const cols = ["id", "set", "number", "name", v2 ? "art" : "image"] as const;
   for (const c of cols)
     if (!Array.isArray(p[c])) bad(`printings.${c} is not an array`);
   const id = p.id as unknown[];
   const set = p.set as unknown[];
   const number = p.number as unknown[];
   const name = p.name as unknown[];
-  const image = p.image as unknown[];
+  const artCol = (v2 ? p.art : p.image) as unknown[];
   const n = id.length;
   if (
     set.length !== n ||
     number.length !== n ||
     name.length !== n ||
-    image.length !== n
+    artCol.length !== n
   ) {
     bad(
-      `column lengths differ (id ${n}, set ${set.length}, number ${number.length}, name ${name.length}, image ${image.length})`
+      `column lengths differ (id ${n}, set ${set.length}, number ${number.length}, name ${name.length}, ${v2 ? "art" : "image"} ${artCol.length})`
     );
   }
   const ids: string[] = new Array<string>(n);
@@ -64,7 +67,7 @@ export function parseCardTable(json: unknown): CardDb {
   const setOfRow = new Int32Array(n);
   const numbers: string[] = new Array<string>(n);
   const names: string[] = new Array<string>(n);
-  const images: (string | null)[] = new Array<string | null>(n);
+  const art: (string | null)[] = new Array<string | null>(n);
   for (let i = 0; i < n; i++) {
     const a = id[i],
       s = set[i],
@@ -85,9 +88,17 @@ export function parseCardTable(json: unknown): CardDb {
     setOfRow[i] = s;
     numbers[i] = num;
     names[i] = nm;
-    images[i] = nullableStr(image[i], `printings.image[${i}]`);
+    if (v2) {
+      const v = artCol[i];
+      if (v !== null && (typeof v !== "string" || !/^[0-9a-f]{8}$/.test(v)))
+        bad(`printings.art[${i}]`);
+      art[i] = v;
+    } else {
+      nullableStr(artCol[i], `printings.image[${i}]`);
+      art[i] = null;
+    }
   }
-  return { key: json.key, ids, rowOf, setOfRow, numbers, names, images, sets };
+  return { key: json.key, ids, rowOf, setOfRow, numbers, names, art, sets };
 }
 
 export function releaseOf(db: CardDb, row: number): string {

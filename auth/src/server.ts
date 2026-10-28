@@ -55,6 +55,10 @@ if (!emailSignIn && providers.length === 0) {
   );
 }
 
+// Card art (#358): GET /api/art/{printing_id}/{size}. The gateway passes a 200 image answer as raw bytes; every other
+// answer under /api/ goes through the text path below.
+const ART_PATH = /^\/api\/art\/[^/]+\/[^/]+$/;
+
 // Routes that carry a trusted three-second budget. Keep in step with BUDGETED_ROUTES in api/app/price_budget.py;
 // api/tests/test_trade_value.py fails when they differ.
 const BUDGETED_ROUTES: { method: string; pattern: RegExp }[] = [
@@ -656,6 +660,35 @@ const server = createServer(async (request, response) => {
             ...(upstream.headers.has("x-robots-tag")
               ? { "x-robots-tag": upstream.headers.get("x-robots-tag")! }
               : {}),
+          });
+          await pipeline(
+            Readable.fromWeb(
+              upstream.body as import("node:stream/web").ReadableStream
+            ),
+            response
+          );
+          return;
+        }
+        const artType = upstream.headers.get("content-type") || "";
+        if (
+          ART_PATH.test(path) &&
+          upstream.status === 200 &&
+          upstream.body &&
+          /^image\/(webp|png|jpeg)$/.test(artType)
+        ) {
+          // Card art (#358): the text path below would decode these bytes as UTF-8 and corrupt them, and it would force
+          // no-store on a picture the API marks cacheable. Forward an allowlist of headers only (never a cookie or a
+          // CORS header) and stream; isolation headers are always set here, whatever the API sent.
+          const length = upstream.headers.get("content-length");
+          response.writeHead(200, {
+            "content-type": artType,
+            ...(length && !upstream.headers.has("content-encoding")
+              ? { "content-length": length }
+              : {}),
+            "cache-control":
+              upstream.headers.get("cache-control") || "no-store",
+            "cross-origin-resource-policy": "same-origin",
+            "x-content-type-options": "nosniff",
           });
           await pipeline(
             Readable.fromWeb(

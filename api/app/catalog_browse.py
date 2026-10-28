@@ -62,6 +62,7 @@ from . import format_evaluator as evaluator
 from . import format_standing, name_search, set_codes
 from .collection import anchor_json, anchor_value, cursor_key, encode_cursor
 from .holdings import fail
+from .art_urls import art_url
 from .borrowed_copies import borrowed_in
 from .db import connect
 from .identity import verified_user
@@ -107,7 +108,8 @@ NAME_ORDER = ("release_missing", "release_rank", "set_id", "number_missing", "nu
 NUMBER_ORDER = ("set_id", "number_missing", "number_value", "number_key", "search_name", "descriptor_key", "edition_id")
 
 LISTED = """SELECT ge.edition_id,gp.printing_id,gp.display_name AS name,gp.set_id,gp.set_name,gp.collector_number,
-    e.descriptor,e.descriptor_key,art.low_image_url AS image_url,gp.search_name,ca.card_kind,ca.trainer_type,ca.evolves_from,
+    e.descriptor,e.descriptor_key,art.low_image_url AS image_url,gp.image_url AS tcgdex_image_url,
+    gp.search_name,ca.card_kind,ca.trainer_type,ca.evolves_from,
     ca.regulation_mark,
     substring(gp.collector_number from '^[0-9]+') IS NULL AS number_missing,
     coalesce(substring(gp.collector_number from '^[0-9]+')::numeric,0) AS number_value,
@@ -147,6 +149,8 @@ class BrowseEdition(BaseModel):
     descriptor: dict
     # The small artwork (low.webp), or null when the card has none.
     image_url: str | None
+    # The same small picture from the art route (/api/art), or null when the card has none.
+    art_url: str | None
     card_kind: Literal["pokemon", "trainer", "energy"] | None
     trainer_type: Literal["supporter", "item", "tool", "stadium"] | None
     evolves_from: str | None
@@ -440,7 +444,8 @@ def _page(conn, user_id, keys, text, kind, format_name, set_id, owned, deck_id, 
             edition_id=row["edition_id"], printing_id=row["printing_id"], name=row["name"], set_id=row["set_id"],
             set_name=row["set_name"], set_code=set_codes.code_for(row["set_id"]),
             collector_number=row["collector_number"], descriptor=row["descriptor"],
-            image_url=row["image_url"], card_kind=row["card_kind"],
+            image_url=row["image_url"],
+            art_url=art_url(row["printing_id"], row["tcgdex_image_url"], "small"), card_kind=row["card_kind"],
             trainer_type=row["trainer_type"], evolves_from=row["evolves_from"], regulation_mark=row["regulation_mark"],
             standing=EditionStandings(**{name: _standing(found.get(name)) for name in ("standard", "expanded", "glc")}),
             owned=total, in_deck=in_deck if deck_id else None, free=free if deck_id else None))

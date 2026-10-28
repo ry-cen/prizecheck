@@ -7,6 +7,7 @@ import type {
   ScriptedFrame,
   ScannerTestScript,
 } from "../../src/scanner/ui/testHooks";
+import { artUpstream, PIXEL } from "./art-upstream";
 import { startAsNewOwner } from "./owner";
 import { signInAsOwner } from "./sign-in";
 
@@ -26,10 +27,6 @@ export const TABLE = `${FIXTURE_URL}/table.png`;
 export const CARD = `${FIXTURE_URL}/card-a.png`;
 
 export const ORIGIN = process.env.TEST_ORIGIN || "http://localhost:5173";
-const PIXEL = Buffer.from(
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/lXcAAAAASUVORK5CYII=",
-  "base64"
-);
 
 /** Five tiles of the catalog fixture api/tests/test_catalog_browse.py seed_popup: Bulbasaur (MEG 001; Normal and
  * Reverse Holo active, Holo retired), Rare Candy (MEG 125), Switch (MEG 130) and Professor's Research. */
@@ -65,6 +62,9 @@ export async function signInFresh(page: Page) {
   } finally {
     await pool.end();
   }
+  // The scanner's pictures come through /api/art, whose fetcher reads this stub; the route below still covers the
+  // non-scanner pages, which load the art host directly.
+  (await artUpstream()).reset();
   await page.route("https://assets.tcgdex.net/**", (route) =>
     route.fulfill({
       status: 200,

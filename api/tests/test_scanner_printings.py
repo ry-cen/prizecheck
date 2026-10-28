@@ -8,6 +8,7 @@ from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
+from app.art_urls import art_url
 from app.catalog_search import EditionView
 from app.main import app, connect
 from app.scanner import default_edition
@@ -109,7 +110,11 @@ def test_printings_resolve_with_a_starting_edition_and_list_missing_ids():
     assert pikachu["name"] == "Pikachu" and pikachu["low_image_url"].endswith("/low.webp") and len(pikachu["editions"]) == 2
     normal = next(edition for edition in pikachu["editions"] if edition["descriptor"].get("finish") == "normal")
     assert pikachu["default_edition_id"] == normal["id"]
+    base = "https://assets.tcgdex.net/en/fixture/card-1"
+    assert pikachu["art_url"] == art_url(ids["card-1"], base, "small")
+    assert pikachu["art_url"].startswith(f"/api/art/{ids['card-1']}/small?v=")
     only = body["printings"][0]
+    assert only["art_url"] is None  # a Printing with no image has no art URL
     assert len(only["editions"]) == 1 and only["default_edition_id"] == only["editions"][0]["id"]
 
 

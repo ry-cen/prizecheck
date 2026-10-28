@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app, connect
 from app import scanner, set_codes
+from app.art_urls import art_version
 from test_catalog import headers
 from test_catalog_search import promote
 
@@ -71,14 +72,15 @@ def test_cards_gzip_has_the_documented_shape_and_set_counts_come_from_the_table(
     assert response.headers["content-type"] == "application/octet-stream"
     assert response.headers["content-disposition"] == 'attachment; filename="cards.json.gz"'
     data = json.loads(gzip.decompress(response.content))
-    assert data["format"] == 1 and data["key"] == body["cards"]["key"] and data["catalog_revision"] == 1
+    assert data["format"] == 2 and data["key"] == body["cards"]["key"] and data["catalog_revision"] == 1
     assert data["sets"] == [{"id": "fixture", "code": None, "official": 25, "total": 30, "released": "2023-03-31"}]
     columns = data["printings"]
-    assert set(columns) == {"id", "set", "number", "name", "image"}
+    assert set(columns) == {"id", "set", "number", "name", "art"}
     assert columns["id"] == sorted(columns["id"]) and len(columns["id"]) == 2
     assert sorted(columns["name"]) == ["Pikachu", "Raichu"] and columns["set"] == [0, 0]
     assert sorted(columns["number"], key=str) == ["1", "2"]
-    assert sorted(columns["image"], key=lambda value: value or "") == [None, "https://assets.tcgdex.net/en/fixture/card-1"]
+    assert sorted(columns["art"], key=lambda value: value or "") == [
+        None, art_version("https://assets.tcgdex.net/en/fixture/card-1/low.webp")]
     # A set with no count row, release row or printed code carries nulls.
     with connect() as conn:
         conn.execute("DELETE FROM catalog_generation_set_count WHERE generation_id=%s", (generation,))
@@ -133,6 +135,15 @@ def test_the_key_follows_the_revision_and_a_stale_key_answers_404():
     assert stale.status_code == 404 and stale.json()["detail"]["code"] == "CARDS_NOT_CURRENT"
     assert get(new["cards"]["url"]).status_code == 200
     assert get("/api/scanner/cards/not-a-key").json()["detail"]["code"] == "CARDS_NOT_CURRENT"
+
+
+def test_the_format_is_in_the_key(monkeypatch):
+    seed()
+    with connect() as conn:
+        state = conn.execute("SELECT active_generation, revision FROM catalog_state").fetchone()
+    current = scanner.cards_key(state)
+    monkeypatch.setattr(scanner, "CARDS_FORMAT", 1)
+    assert scanner.cards_key(state) != current
 
 
 def test_the_last_build_is_kept_in_memory(monkeypatch):

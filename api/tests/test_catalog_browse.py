@@ -6,6 +6,7 @@ computed for (``format_standing.today``): the rules files' dates would otherwise
 """
 import dataclasses
 import os
+import re
 from datetime import date
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -164,12 +165,22 @@ def test_a_row_carries_display_data_card_type_standing_and_copies():
         printing = conn.execute("SELECT id FROM catalog_printing WHERE source_id='me01-001'").fetchone()["id"]
     assert row == {
         "edition_id": edition_of("me01-001"), "printing_id": str(printing), "name": "Bulbasaur", "set_id": "me01",
-        "set_name": "Mega Evolution", "set_code": "MEG", "collector_number": "001", "descriptor": row["descriptor"], "image_url": None,
+        "set_name": "Mega Evolution", "set_code": "MEG", "collector_number": "001", "descriptor": row["descriptor"], "image_url": None, "art_url": None,
         "card_kind": "pokemon", "trainer_type": None, "evolves_from": None, "regulation_mark": "I",
         "standing": {name: {"status": "legal", "reasons": []} for name in ("standard", "expanded", "glc")},
         "owned": 3, "in_deck": None, "free": None}
     assert row["descriptor"]  # the Edition's Variant Descriptor, as the other catalog reads return it
     assert page["owner_revision"] >= 2 and page["catalog_revision"] >= 1 and page["last_success"]
+
+
+def test_editions_carry_an_art_url():
+    seed_popup()
+    user = collector()
+    rows = {row["name"]: row for row in browse(user, q="")["editions"]}
+    bulbasaur = rows["Bulbasaur"]
+    assert re.fullmatch(rf"/api/art/{bulbasaur['printing_id']}/small\?v=[0-9a-f]{{8}}", bulbasaur["art_url"])
+    assert bulbasaur["image_url"] == "https://assets.tcgdex.net/en/me/me01/001/low.webp"
+    assert rows["Switch"]["art_url"] is None and rows["Switch"]["image_url"] is None
 
 
 def test_smart_search_reads_a_known_set_and_number_otherwise_a_name_search_and_may_be_empty():

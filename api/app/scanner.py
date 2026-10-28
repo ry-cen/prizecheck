@@ -5,6 +5,8 @@ All routes are signed-in and none is public. The number table is built here on r
 build is kept in memory; the fingerprint file is catalog data that scripts/scanner_index_job.py stores in
 ``scanner_index``. Both are answered as attachments with no Content-Encoding, so the gateway streams them unchanged
 (auth/src/server.ts) and nothing inflates them on the way: the device decompresses the number table itself.
+The table (format 2) carries an ``art`` column, the 8-hex art version of each Printing's small picture or null; the device
+builds ``/api/art/{id}/small?v={art}`` from it (#359), so it never holds a raw TCGdex URL.
 """
 import gzip
 import hashlib
@@ -18,6 +20,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from . import set_codes
+from .art_urls import art_url, art_version, tcgdex_source
 from .catalog_search import EditionView, PrintingView, _state, _views
 from .collection_import_finish import NORMAL, choose, facets, fits
 from .db import connect
@@ -25,7 +28,7 @@ from .identity import verified_user
 
 router = APIRouter(prefix="/api/scanner")
 
-CARDS_FORMAT = 1
+CARDS_FORMAT = 2
 DIM = 384
 OCTET_STREAM = "application/octet-stream"
 
@@ -54,6 +57,8 @@ class ScannerManifest(BaseModel):
 
 class ScannerPrinting(PrintingView):
     default_edition_id: UUID | None
+    # The small picture from the art route (/api/art), or null when the Printing has no image.
+    art_url: str | None
 
 
 class ScannerPrintingsRequest(BaseModel):
@@ -127,7 +132,8 @@ def build_cards(conn, state, key: str) -> bytes:
                            "set": [index[row["set_id"]] for row in printings],
                            "number": [row["collector_number"] for row in printings],
                            "name": [row["display_name"] for row in printings],
-                           "image": [row["image_url"] for row in printings]}}
+                           "art": [art_version(src) if (src := tcgdex_source(row["image_url"], "small")) else None
+                                   for row in printings]}}
     raw = json.dumps(table, ensure_ascii=False, separators=(",", ":")).encode()
     return gzip.compress(raw, compresslevel=6, mtime=0)
 
@@ -200,6 +206,7 @@ def printings(body: ScannerPrintingsRequest, user_id: str = Depends(verified_use
         _snapshot(conn)
         state = _state(conn)
         views: dict[UUID, PrintingView] = {}
+        image_urls: dict[UUID, str | None] = {}
         if state["active_generation"]:
             rows = conn.execute("""SELECT gp.*, p.source, p.source_id AS public_source_id, p.identity_id,
               ci.display_name AS identity_name, p.id,
@@ -211,8 +218,10 @@ def printings(body: ScannerPrintingsRequest, user_id: str = Depends(verified_use
               WHERE gp.generation_id=%s AND NOT gp.tombstoned AND gp.printing_id=ANY(%s)""",
                                 (state["active_generation"], ids)).fetchall()
             views = {view.id: view for view in _views(conn, state["active_generation"], rows)}
+            image_urls = {row["printing_id"]: row["image_url"] for row in rows}
         return ScannerPrintingsResponse(
             catalog_revision=state["revision"],
-            printings=[ScannerPrinting(**views[value].model_dump(), default_edition_id=default_edition(views[value].editions))
+            printings=[ScannerPrinting(**views[value].model_dump(), default_edition_id=default_edition(views[value].editions),
+                             art_url=art_url(value, image_urls.get(value), "small"))
                        for value in ids if value in views],
             missing=[value for value in ids if value not in views])

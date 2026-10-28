@@ -126,7 +126,7 @@ class HostDeployScriptTest(unittest.TestCase):
         for name in ('compose.deploy.yml', 'compose.prod.yml'):
             (home / name).write_bytes((ROOT / name).read_bytes())
         (home / 'bin/prizecheck-deploy.sh').write_bytes(SCRIPT.read_bytes())
-        for sub in ('postgres', 'public', 'price-runners', 'mail'):
+        for sub in ('postgres', 'public', 'price-runners', 'mail', 'art'):
             (home / 'data' / sub).mkdir(parents=True)
         env = home / 'prizecheck.env'
         env.write_text('\n'.join([*lines, f'PRIZECHECK_DATA_DIR={home / "data"}']) + '\n')
@@ -145,6 +145,13 @@ class HostDeployScriptTest(unittest.TestCase):
         code, output = self.check(lines, mode)
         self.assertNotEqual(code, 0, output)
         self.assertIn(key, output)
+
+    def test_a_missing_art_directory_is_refused(self):
+        home = self.make_home(PROD)
+        (home / 'data/art').rmdir()
+        result = self.run_script(home)
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(str(home / 'data/art'), result.stdout + result.stderr)
 
     def test_a_complete_production_file_passes(self):
         code, output = self.check(PROD)

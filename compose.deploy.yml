@@ -29,6 +29,9 @@ x-api-environment: &api-environment
   PRICE_RUNNER_LOCK_DIR: /var/lib/prizecheck/price-runners
   # Collector price kill switch (api/app/price_reads.py): `off` answers every price row unavailable without a query.
   PRICE_READS: ${PRICE_READS:-on}
+  # Card art store (#358, ADR 0020): regenerable files, left out of backups.
+  ART_STORE_DIR: /var/lib/prizecheck/art
+  ART_FETCH_CONTACT: ${SCANNER_INDEX_CONTACT:-${OWNER_EMAIL}}
   # Dev keeps the newest marketplace matching rule active without an owner approval (catalog_targets.ensure_matching_rule).
   MARKETPLACE_MATCHING: automatic
   # The owner panel shows the last day's new accounts against this cap; the auth gateway enforces it.
@@ -64,6 +67,7 @@ services:
     volumes:
       - ${PRIZECHECK_DATA_DIR}/public:/var/lib/prizecheck/public
       - ${PRIZECHECK_DATA_DIR}/price-runners:/var/lib/prizecheck/price-runners
+      - ${PRIZECHECK_DATA_DIR}/art:/var/lib/prizecheck/art
     networks: [backend, egress]
     depends_on:
       db:

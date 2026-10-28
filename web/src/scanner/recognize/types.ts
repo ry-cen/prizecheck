@@ -36,7 +36,8 @@ export type CardDb = {
   setOfRow: Int32Array;
   numbers: string[];
   names: string[];
-  images: (string | null)[];
+  /** The 8-hex art version of each card's small picture, or null (a v1 table has none). */
+  art: (string | null)[];
   sets: CardSet[];
 };
 
