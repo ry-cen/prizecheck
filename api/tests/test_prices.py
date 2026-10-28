@@ -149,15 +149,14 @@ import hmac  # noqa: E402
 import json  # noqa: E402
 import os  # noqa: E402
 import socket  # noqa: E402
-import threading  # noqa: E402
 import time  # noqa: E402
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer  # noqa: E402
 from uuid import uuid4  # noqa: E402
 
 import psycopg  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 from app import prices  # noqa: E402
+from app.price_reads import price_reads_enabled  # noqa: E402
 from app.catalog_targets import MATCHING  # noqa: E402
 from app.public_records import public_record_store, quote_key, result_key  # noqa: E402
 from test_catalog import reset_catalog  # noqa: E402
@@ -214,6 +213,8 @@ def world(pagers=0):
 
     `pagers` adds that many further unspecified Printings (used by the browser spec to fill more than one page)."""
     reset_catalog()
+    with connect() as conn:
+        conn.execute("DELETE FROM tcgplayer_price")  # an earlier test's rows would bind during the import's rebind
     activate(MATCHING, 1)
     plain = furret(id="meta-2", localId="2")
     del plain["variants_detailed"]
@@ -226,7 +227,7 @@ def world(pagers=0):
         extra.append(record)
     run(Records(card(1), plain, *extra))
     with connect() as conn:
-        rows = conn.execute("""SELECT e.id,e.public_ref,e.descriptor,m.mapping_state,m.mapping_revision,m.quote_variant,p.source_id
+        rows = conn.execute("""SELECT e.id,e.public_ref,e.descriptor,m.mapping_state,m.mapping_revision,m.product_id,m.quote_variant,p.source_id
           FROM catalog_edition e JOIN catalog_edition_metadata m ON m.edition_id=e.id JOIN catalog_printing p ON p.id=e.printing_id
           ORDER BY p.source_id""").fetchall()
     found = {"pagers": []}
@@ -248,9 +249,10 @@ def ago(delta):
     return (datetime.now(timezone.utc) - delta).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
-def seed(store, edition, amount="0.43", *, variant=None, card_id=None, state="quote", revision=None, updated=RELATIVE,
-         checked=RELATIVE, payload=True, result=None, **over):
-    """Write what ticket 08 will write: a result marker plus a quote payload under the Edition's reference and revision."""
+def seed_quote(store, edition, amount="0.43", *, variant=None, card_id=None, state="quote", revision=None, updated=RELATIVE,
+               checked=RELATIVE, payload=True, result=None, **over):
+    """Legacy record-store seeding for the readers that still read ``quote:``/``result:`` records (Published Deck cost,
+    Discover, the price runner tests; retired with P5b and P9). Writes what ticket 08 wrote: a result marker plus a quote payload under the Edition's reference and revision."""
     revision = revision or edition["mapping_revision"]
     ref = edition["public_ref"]
     # Defaults are relative to the wall clock: a provider time a day old and a check ten minutes old (under the 1 h
@@ -268,25 +270,60 @@ def seed(store, edition, amount="0.43", *, variant=None, card_id=None, state="qu
     assert store.compare_and_swap({key: snapshot.records[key].version for key in changes}, changes, deadline=time.monotonic() + 5)
 
 
+SUB_TYPES = {"normal": "Normal", "reverse-holofoil": "Reverse Holofoil"}
+
+
+def seed(store, edition, amount="0.43", *, low=None, mid=None, sub_type=None, product_id=None, revision=None, updated=RELATIVE,
+         checked=RELATIVE, bind=True):
+    """Seed what the daily import and `rebind` write: a ``tcgplayer_price`` row for the Edition's product and subtype, and an
+    ``edition_price_binding`` row at the Edition's mapping revision. ``amount`` is the market price (None is a null one).
+    ``store`` is unused; it stays so call sites read as before."""
+    sub_type = sub_type or SUB_TYPES[edition["quote_variant"]]
+    product_id = product_id or edition["product_id"]
+    revision = revision or edition["mapping_revision"]
+    # Relative to the wall clock: a snapshot a day old, seen ten minutes ago, so no seeded row ages into another band.
+    updated = ago(timedelta(days=1)) if updated is RELATIVE else updated
+    checked = ago(timedelta(minutes=10)) if checked is RELATIVE else checked
+    with connect() as conn:
+        conn.execute("""INSERT INTO tcgplayer_price(product_id,sub_type_name,market_price,low_price,mid_price,seen_at,source_updated_at)
+          VALUES (%s,%s,%s::numeric,%s::numeric,%s::numeric,%s,%s) ON CONFLICT (product_id,sub_type_name) DO UPDATE SET
+          market_price=EXCLUDED.market_price,low_price=EXCLUDED.low_price,mid_price=EXCLUDED.mid_price,
+          seen_at=EXCLUDED.seen_at,source_updated_at=EXCLUDED.source_updated_at""",
+                     (product_id, sub_type, amount, low, mid, checked, updated))
+        if bind:
+            conn.execute("""INSERT INTO edition_price_binding(edition_id,product_id,mapping_revision,sub_type_name)
+              VALUES (%s,%s,%s,%s) ON CONFLICT (edition_id) DO UPDATE SET product_id=EXCLUDED.product_id,
+              mapping_revision=EXCLUDED.mapping_revision,sub_type_name=EXCLUDED.sub_type_name,reason=NULL""",
+                         (edition["id"], product_id, revision, sub_type))
+
+
 def ui_world(pagers=0):
     """Browser-spec seeding (web/tests/prices.spec.ts): the catalog, as ids. Quotes are seeded by ui_apply."""
     found = world(pagers)
     return {**{key: str(row["id"]) for key, row in found.items() if key != "pagers"}, "pagers": [str(row["id"]) for row in found["pagers"]]}
 
 
+ROW_KEYS = ("amount", "low", "mid", "sub_type", "product_id", "revision", "updated", "checked", "bind")
+
+
 def ui_apply(commands):
-    """Browser-spec commands against the live stack's real record store. {op:'quote', edition, ...seed arguments} writes
-    what ticket 08 will write; {op:'sql', statement, edition} runs one UPDATE for the Edition (PostgreSQL state)."""
+    """Browser-spec commands against the live stack's database. {op:'quote', edition, ...seed arguments} seeds a price row and
+    its binding (what the private readers read), and also writes the legacy record-store quote that the Published Deck cost
+    and Discover readers still read until P5b; {op:'sql', statement, edition} runs one UPDATE for the Edition."""
     store = public_record_store()
     for command in commands:
         with connect() as conn:
             if command["op"] == "sql":
                 conn.execute(command["statement"], (command["edition"],))
                 continue
-            edition = conn.execute("""SELECT e.id,e.public_ref,m.mapping_revision,m.quote_variant,p.source_id FROM catalog_edition e
+            edition = conn.execute("""SELECT e.id,e.public_ref,m.mapping_revision,m.product_id,m.quote_variant,p.source_id FROM catalog_edition e
               JOIN catalog_edition_metadata m ON m.edition_id=e.id JOIN catalog_printing p ON p.id=e.printing_id WHERE e.id=%s""",
                                    (command["edition"],)).fetchone()
-        seed(store, edition, **{key: value for key, value in command.items() if key not in ("op", "edition")})
+        arguments = {key: value for key, value in command.items() if key not in ("op", "edition")}
+        if set(arguments) <= set(ROW_KEYS) and arguments.get("updated", "") is not None and arguments.get("checked", "") is not None:
+            seed(store, edition, **arguments)
+        legacy = {key: value for key, value in arguments.items() if key not in ("low", "mid", "sub_type", "product_id", "bind")}
+        seed_quote(store, edition, **legacy)
 
 
 def prices_of(response):
@@ -294,11 +331,11 @@ def prices_of(response):
     return {row["edition_id"]: row for row in response.json()["prices"]}
 
 
-def test_each_edition_gets_its_own_quote_and_every_other_state_is_labelled_not_zero(store):
+def test_each_edition_gets_its_own_price_and_every_other_state_is_labelled_not_zero(store):
     editions = world()
     normal, reverse, plain = editions["normal"], editions["reverse-holofoil"], editions["unspecified"]
     seed(store, normal, "0.25")
-    seed(store, reverse, "0.43", updated=None)
+    seed(store, reverse, "0.43", updated=ago(timedelta(hours=72)))
     unknown = uuid4()
     response = post(ids(normal["id"], reverse["id"], plain["id"], unknown, normal["id"]))
     rows = prices_of(response)
@@ -306,143 +343,119 @@ def test_each_edition_gets_its_own_quote_and_every_other_state_is_labelled_not_z
     assert response.json()["withheld"] is False
     one = rows[str(normal["id"])]
     assert (one["status"], one["amount"], one["display_amount"], one["stale"], one["age"]) == ("quote", "0.25", "$0.25", False, "known")
+    assert one["refresh"] is None and one["refresh_failed_at"] is None
     two = rows[str(reverse["id"])]
-    assert (two["amount"], two["age"], two["stale"]) == ("0.43", "unknown", None)
+    assert (two["amount"], two["age"], two["stale"]) == ("0.43", "known", True)
     three = rows[str(plain["id"])]
     assert (three["status"], three["reason"], three["amount"]) == ("unavailable", "unspecified_variant", None)
     assert (rows[str(unknown)]["status"], rows[str(unknown)]["reason"]) == ("unavailable", "not_found")
     assert response.headers["cache-control"] == "no-store"
 
 
-def test_a_quote_without_a_result_marker_or_with_an_evicted_payload_is_not_cached(store):
+def test_amounts_are_exact_decimal_text_and_display_rounds_only_at_display(store):
     editions = world()
     normal, reverse = editions["normal"], editions["reverse-holofoil"]
-    seed(store, normal, payload=False)  # a quote marker whose payload was evicted
+    seed(store, normal, "100.000000")
+    seed(store, reverse, "0.004000")
     rows = prices_of(post(ids(normal["id"], reverse["id"])))
-    assert [(r["status"], r["reason"]) for r in rows.values()] == [("unavailable", "not_cached")] * 2
+    assert (rows[str(normal["id"])]["amount"], rows[str(normal["id"])]["display_amount"]) == ("100", "$100.00")
+    assert (rows[str(reverse["id"])]["amount"], rows[str(reverse["id"])]["display_amount"]) == ("0.004", "<$0.01")
 
 
-def test_absent_is_final_and_pending_hides_the_quote_even_when_a_payload_exists(store):
+def test_only_the_market_price_is_shown_and_an_empty_or_zero_one_is_no_price(store):
     editions = world()
     normal, reverse = editions["normal"], editions["reverse-holofoil"]
-    seed(store, normal, result={"state": "absent", "checked_at": ago(timedelta(minutes=10)),
-                                 "expires_at": ago(-timedelta(minutes=50))})
-    seed(store, reverse, result={"state": "pending"})
+    seed(store, normal, None, low="0.10", mid="0.20")  # owner answer 1: no fallback to mid or low
+    seed(store, reverse, "0")
     rows = prices_of(post(ids(normal["id"], reverse["id"])))
-    one = rows[str(normal["id"])]
-    assert (one["status"], one["reason"], one["amount"]) == ("unavailable", "confirmed_absent", None)
-    assert (rows[str(reverse["id"])]["status"], rows[str(reverse["id"])]["amount"]) == ("pending", None)
+    for edition in (normal, reverse):
+        row = rows[str(edition["id"])]
+        assert (row["status"], row["reason"], row["amount"], row["display_amount"]) == ("unavailable", "no_price", None, None)
+    seed(store, normal, "0.31", low="0.10", mid="0.20")
+    assert prices_of(post(ids(normal["id"])))[str(normal["id"])]["amount"] == "0.31"
 
 
-def test_a_quote_under_an_old_mapping_revision_is_invisible_after_the_revision_moves(store):
-    normal = world()["normal"]
-    seed(store, normal)
-    assert prices_of(post(ids(normal["id"])))[str(normal["id"])]["status"] == "quote"
-    with connect() as conn:
-        conn.execute("UPDATE catalog_edition_metadata SET mapping_revision=mapping_revision+1 WHERE edition_id=%s", (normal["id"],))
-    row = prices_of(post(ids(normal["id"])))[str(normal["id"])]
-    assert (row["status"], row["reason"], row["amount"]) == ("unavailable", "not_cached", None)
-    seed(store, normal, "9.99", revision=normal["mapping_revision"] + 1)
-    assert prices_of(post(ids(normal["id"])))[str(normal["id"])]["amount"] == "9.99"
-
-
-def test_a_postgres_quarantine_hides_the_price_before_any_outbox_delivery(store):
-    editions = world()
-    normal, reverse = editions["normal"], editions["reverse-holofoil"]
-    seed(store, normal)
-    seed(store, reverse)
-    with connect() as conn:
-        conn.execute("UPDATE catalog_edition_metadata SET mapping_state='quarantined',mapping_reason='candidate_changed' WHERE edition_id=%s", (normal["id"],))
-        undelivered = conn.execute("SELECT count(*) AS n FROM catalog_public_outbox WHERE delivered_at IS NULL").fetchone()["n"]
-    assert undelivered > 0  # the store never heard about it; PostgreSQL alone decides
-    rows = prices_of(post(ids(normal["id"], reverse["id"])))
-    one = rows[str(normal["id"])]
-    assert (one["status"], one["reason"], one["amount"]) == ("unavailable", "quarantined", None)
-    assert rows[str(reverse["id"])]["status"] == "quote"
-
-
-def test_the_store_quarantine_record_is_ignored_postgres_is_authoritative(store):
-    from app.public_records import quarantine_key
-    normal = world()["normal"]
-    seed(store, normal)
-    key = quarantine_key(normal["public_ref"])
-    version = store.read_records([key], deadline=time.monotonic() + 5).records[key].version
-    record = {"edition_ref": normal["public_ref"], "state": "quarantined", "revision": 9, "mapping_revision": normal["mapping_revision"]}
-    assert store.compare_and_swap({key: version}, {key: record}, deadline=time.monotonic() + 5)
-    assert prices_of(post(ids(normal["id"])))[str(normal["id"])]["status"] == "quote"
-
-
-def test_unverified_and_unquoted_editions_are_labelled_and_never_read_the_store(store, monkeypatch):
-    editions = world()
-    normal, reverse = editions["normal"], editions["reverse-holofoil"]
-    with connect() as conn:
-        conn.execute("UPDATE catalog_edition_metadata SET quote_variant=NULL WHERE edition_id=%s", (normal["id"],))
-        conn.execute("""UPDATE catalog_edition_metadata SET mapping_state='unverified',mapping_reason='no_matching_rule',product_id=NULL,
-          quote_variant=NULL,mapping_basis=NULL,matching_activation_id=NULL,auto_closed=false WHERE edition_id=%s""", (reverse["id"],))
-    reads = []
-    real = prices.quote_states
-    monkeypatch.setattr(prices, "quote_states", lambda *a, **k: reads.append(a) or real(*a, **k))
-    rows = prices_of(post(ids(normal["id"], reverse["id"])))
-    assert rows[str(normal["id"])]["reason"] == "no_quote_variant" and rows[str(reverse["id"])]["reason"] == "unverified"
-    assert reads == []
-
-
-def test_quote_candidate_snapshots_never_seed_a_price(store):
-    normal = world()["normal"]
-    with connect() as conn:
-        conn.execute("UPDATE catalog_edition_metadata SET quote_candidate=%s WHERE edition_id=%s",
-                     (json.dumps({"market_price": 9.99, "amount": "9.99", "currency": "USD"}), normal["id"]))
-    row = prices_of(post(ids(normal["id"])))[str(normal["id"])]
-    assert (row["status"], row["reason"], row["amount"]) == ("unavailable", "not_cached", None)
-
-
-@pytest.mark.parametrize("amount", ["1e3", "NaN", "-0.01", 0.43, "1234567890123", "0.1234567"])
-def test_an_invalid_amount_fails_only_its_own_row(store, amount):
+@pytest.mark.parametrize("amount", ["NaN", "-0.01", "0.000000"])
+def test_an_invalid_or_zero_amount_is_no_price_for_its_own_row_only(store, amount):
     editions = world()
     normal, reverse = editions["normal"], editions["reverse-holofoil"]
     seed(store, normal, amount)
     seed(store, reverse, "0.43")
     rows = prices_of(post(ids(normal["id"], reverse["id"])))
     one = rows[str(normal["id"])]
-    assert (one["status"], one["reason"], one["amount"]) == ("failed", "invalid_quote", None)
+    assert (one["status"], one["reason"], one["amount"]) == ("unavailable", "no_price", None)
     assert rows[str(reverse["id"])]["amount"] == "0.43"
 
 
-def test_a_quote_for_another_card_or_variant_than_postgres_published_fails_closed(store):
+def test_a_verified_unbound_edition_a_price_free_binding_and_a_missing_row_are_no_price(store):
     editions = world()
     normal, reverse = editions["normal"], editions["reverse-holofoil"]
-    seed(store, normal, card_id="someone-else")
-    seed(store, reverse, variant="holofoil")
+    assert prices_of(post(ids(normal["id"])))[str(normal["id"])]["reason"] == "no_price"  # verified, never bound
+    seed(store, normal, "0.25", bind=False)
+    assert prices_of(post(ids(normal["id"])))[str(normal["id"])]["reason"] == "no_price"  # a price row but no binding
+    with connect() as conn:
+        conn.execute("""INSERT INTO edition_price_binding(edition_id,product_id,mapping_revision,reason)
+          VALUES (%s,%s,%s,'shared_price') ON CONFLICT (edition_id) DO UPDATE SET sub_type_name=NULL,reason='shared_price'""",
+                     (reverse["id"], reverse["product_id"], reverse["mapping_revision"]))
+        conn.execute("DELETE FROM tcgplayer_price")
+    seed(store, reverse, "0.43", bind=False)
     rows = prices_of(post(ids(normal["id"], reverse["id"])))
-    assert {r["reason"] for r in rows.values()} == {"lookup_mismatch"} and {r["status"] for r in rows.values()} == {"failed"}
+    assert {row["reason"] for row in rows.values()} == {"no_price"}  # an unbound reason hides a price on the same product
+    with connect() as conn:
+        conn.execute("""UPDATE edition_price_binding SET sub_type_name='Holofoil',reason=NULL WHERE edition_id=%s""", (reverse["id"],))
+    assert prices_of(post(ids(reverse["id"])))[str(reverse["id"])]["reason"] == "no_price"  # bound to a subtype with no row
 
 
-def test_one_malformed_result_fails_only_its_own_row_not_the_batch(store):
-    editions = world()
-    normal, reverse, plain = editions["normal"], editions["reverse-holofoil"], editions["unspecified"]
-    seed(store, normal, result={"state": "nonsense"}, payload=False)
-    seed(store, reverse)
-    rows = prices_of(post(ids(normal["id"], reverse["id"], plain["id"])))
-    assert (rows[str(normal["id"])]["status"], rows[str(normal["id"])]["reason"], rows[str(normal["id"])]["amount"]) == \
-        ("failed", "invalid_quote", None)
-    assert (rows[str(reverse["id"])]["status"], rows[str(reverse["id"])]["amount"]) == ("quote", "0.43")
-    assert rows[str(plain["id"])]["reason"] == "unspecified_variant"
-
-
-def test_a_malformed_quote_payload_fails_only_its_own_row(store):
+def test_a_binding_under_an_old_mapping_revision_or_product_is_ignored(store):
     editions = world()
     normal, reverse = editions["normal"], editions["reverse-holofoil"]
     seed(store, normal)
     seed(store, reverse)
-    key = quote_key(normal["public_ref"], normal["mapping_revision"])
-    version = store.read_records([key], deadline=time.monotonic() + 5).records[key].version
-    assert store.compare_and_swap({key: version}, {key: ["not", "a", "dict"]}, deadline=time.monotonic() + 5)
+    assert {row["status"] for row in prices_of(post(ids(normal["id"], reverse["id"]))).values()} == {"quote"}
+    with connect() as conn:
+        conn.execute("UPDATE catalog_edition_metadata SET mapping_revision=mapping_revision+1 WHERE edition_id=%s", (normal["id"],))
+        conn.execute("UPDATE edition_price_binding SET product_id=product_id+1 WHERE edition_id=%s", (reverse["id"],))
     rows = prices_of(post(ids(normal["id"], reverse["id"])))
-    assert (rows[str(normal["id"])]["status"], rows[str(normal["id"])]["reason"]) == ("failed", "invalid_quote")
-    assert rows[str(reverse["id"])]["amount"] == "0.43"
+    for edition in (normal, reverse):
+        row = rows[str(edition["id"])]
+        assert (row["status"], row["reason"], row["amount"]) == ("unavailable", "no_price", None)
+    seed(store, normal, "9.99", revision=normal["mapping_revision"] + 1)  # a rebind under the new revision prices it again
+    assert prices_of(post(ids(normal["id"])))[str(normal["id"])]["amount"] == "9.99"
 
 
-def test_staleness_uses_the_module_clock_and_a_fresh_check_does_not_clear_it(store, monkeypatch):
+def test_a_postgres_quarantine_hides_the_price_at_once(store):
+    editions = world()
+    normal, reverse = editions["normal"], editions["reverse-holofoil"]
+    seed(store, normal)
+    seed(store, reverse)
+    with connect() as conn:
+        conn.execute("UPDATE catalog_edition_metadata SET mapping_state='quarantined',mapping_reason='candidate_changed' WHERE edition_id=%s", (normal["id"],))
+    rows = prices_of(post(ids(normal["id"], reverse["id"])))
+    one = rows[str(normal["id"])]
+    assert (one["status"], one["reason"], one["amount"]) == ("unavailable", "quarantined", None)
+    assert rows[str(reverse["id"])]["status"] == "quote"
+
+
+def test_unverified_editions_keep_their_reason_and_a_price_row_does_not_verify_them(store):
+    editions = world()
+    reverse = editions["reverse-holofoil"]
+    seed(store, reverse)
+    with connect() as conn:
+        conn.execute("""UPDATE catalog_edition_metadata SET mapping_state='unverified',mapping_reason='no_matching_rule',product_id=NULL,
+          quote_variant=NULL,mapping_basis=NULL,matching_activation_id=NULL,auto_closed=false WHERE edition_id=%s""", (reverse["id"],))
+    assert prices_of(post(ids(reverse["id"])))[str(reverse["id"])]["reason"] == "unverified"
+
+
+def test_quote_candidate_snapshots_never_price_an_edition(store):
+    normal = world()["normal"]
+    with connect() as conn:
+        conn.execute("UPDATE catalog_edition_metadata SET quote_candidate=%s WHERE edition_id=%s",
+                     (json.dumps({"market_price": 9.99, "amount": "9.99", "currency": "USD"}), normal["id"]))
+    row = prices_of(post(ids(normal["id"])))[str(normal["id"])]
+    assert (row["status"], row["reason"], row["amount"]) == ("unavailable", "no_price", None)
+
+
+def test_staleness_uses_the_module_clock_and_the_snapshot_age(store, monkeypatch):
     editions = world()
     normal, reverse = editions["normal"], editions["reverse-holofoil"]
     base = datetime.now(timezone.utc).replace(microsecond=0)
@@ -456,7 +469,103 @@ def test_staleness_uses_the_module_clock_and_a_fresh_check_does_not_clear_it(sto
     monkeypatch.setattr(prices, "_now", lambda: base + timedelta(microseconds=500))
     rows = prices_of(post(ids(normal["id"], reverse["id"])))
     assert rows[str(normal["id"])]["stale"] is True and rows[str(normal["id"])]["checked_at"] == text(base - timedelta(seconds=1))
+    assert rows[str(normal["id"])]["provider_updated_at"] == text(base - timedelta(hours=48))
     assert rows[str(reverse["id"])]["stale"] is False
+
+
+# ------------------------------------------------------------------ the kill switch and the record store
+
+
+def count_connects(patched):
+    calls = []
+    real = psycopg.connect
+    patched.setattr(psycopg, "connect", lambda *a, **k: calls.append(a) or real(*a, **k))
+    return calls
+
+
+def test_price_reads_off_answers_no_price_for_every_row_without_a_query(store, monkeypatch):
+    editions = world()
+    normal, plain = editions["normal"], editions["unspecified"]
+    seed(store, normal)
+    unknown = uuid4()
+    monkeypatch.setenv("PRICE_READS", "off")
+    assert price_reads_enabled() is False
+    with monkeypatch.context() as patched:
+        calls = count_connects(patched)
+        response = post(ids(normal["id"], plain["id"], unknown))
+        stored = prices.stored_edition_quotes([normal["id"]])
+    rows = prices_of(response)
+    assert {(row["status"], row["reason"], row["amount"]) for row in rows.values()} == {("unavailable", "no_price", None)}
+    assert response.json()["withheld"] is False
+    assert stored[normal["id"]].reason == "no_price"
+    assert calls == []
+    monkeypatch.setenv("PRICE_READS", "on")
+    assert price_reads_enabled() is True and prices_of(post(ids(normal["id"])))[str(normal["id"])]["amount"] == "0.43"
+    monkeypatch.delenv("PRICE_READS")
+    assert price_reads_enabled() is True and prices_of(post(ids(normal["id"])))[str(normal["id"])]["amount"] == "0.43"
+
+
+def test_no_price_route_reads_or_writes_the_record_store_or_calls_price_refresh(store, monkeypatch):
+    from app import price_refresh, public_records
+    editions = world()
+    normal, reverse = editions["normal"], editions["reverse-holofoil"]
+    seed(store, normal)
+    seed(store, reverse, "0.43", checked=ago(timedelta(hours=30)))
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("a price read touched the record store or the refresh path")
+    for name in ("public_record_store", "quote_states"):
+        monkeypatch.setattr(public_records, name, forbidden)
+    for name in ("evaluate_and_admit", "Row"):
+        monkeypatch.setattr(price_refresh, name, forbidden)
+    rows = prices_of(post(ids(normal["id"], reverse["id"])))
+    assert {row["status"] for row in rows.values()} == {"quote"} and {row["refresh"] for row in rows.values()} == {None}
+    assert prices.stored_edition_quotes([normal["id"], reverse["id"]])[normal["id"]].amount == "0.43"
+    assert not hasattr(prices, "public_record_store") and not hasattr(prices, "price_refresh")
+
+
+def test_stored_edition_quotes_answer_from_the_same_rows_and_none_when_postgres_cannot(store, monkeypatch):
+    editions = world()
+    normal, reverse, plain = editions["normal"], editions["reverse-holofoil"], editions["unspecified"]
+    seed(store, normal, "0.25")
+    views = prices.stored_edition_quotes([normal["id"], reverse["id"], plain["id"]])
+    assert (views[normal["id"]].status, views[normal["id"]].amount) == ("quote", "0.25")
+    assert views[reverse["id"]].reason == "no_price" and views[plain["id"]].reason == "unspecified_variant"
+    assert prices.stored_edition_quotes([]) == {}
+
+    def down(*args, **kwargs):
+        raise psycopg.OperationalError("down")
+    with monkeypatch.context() as patched:
+        patched.setattr(psycopg, "connect", down)
+        assert prices.stored_edition_quotes([normal["id"]]) is None
+
+
+def test_a_postgres_failure_withholds_the_row_as_validation_unavailable(store, monkeypatch):
+    normal = world()["normal"]
+    seed(store, normal)
+
+    def down(*args, **kwargs):
+        raise psycopg.OperationalError("down")
+    with monkeypatch.context() as patched:
+        patched.setattr(psycopg, "connect", down)
+        response = post(ids(normal["id"]))
+    row = response.json()["prices"][0]
+    assert (row["status"], row["reason"], row["amount"]) == ("failed", "validation_unavailable", None)
+    assert response.json()["withheld"] is True
+
+
+def test_a_catalog_pull_writes_no_quote_result_or_fence_record(store):
+    from app import catalog
+    from app.public_records import fence_key
+    world()
+    assert not hasattr(catalog, "seed_from_import") and not hasattr(catalog, "price_views") and not hasattr(catalog, "price_view")
+    assert not hasattr(catalog.TCGdexSource(), "price_views")
+    run(Records(card(1), furret(id="meta-2", localId="2")))
+    with connect() as conn:
+        rows = conn.execute("SELECT public_ref,mapping_revision FROM catalog_edition e JOIN catalog_edition_metadata m ON m.edition_id=e.id").fetchall()
+    assert rows
+    keys = [make(row["public_ref"], row["mapping_revision"]) for row in rows for make in (quote_key, result_key, fence_key)]
+    assert {record.value for record in store.read_records(keys, deadline=time.monotonic() + 5).records.values()} == {None}
 
 
 # ------------------------------------------------------------------ the trusted budget
@@ -502,22 +611,22 @@ def test_time_since_the_gateway_signed_is_spent_budget(store, monkeypatch):
     fresh = client.post(PATH, content=body, headers=headers_for(body))
     assert fresh.status_code == 200 and fresh.json()["withheld"] is False
     # Signed 3.5 s ago with 3000 ms granted: the gateway has already aborted, so no work may start.
-    monkeypatch.setattr(prices, "quote_states", lambda *a, **k: pytest.fail("a spent budget started a store read"))
     aged = headers_for(body, budget_stamp_ms=int(time.time() * 1000) - 3_500)
-    response = client.post(PATH, content=body, headers=aged)
+    with monkeypatch.context() as patched:
+        patched.setattr(psycopg, "connect", lambda *a, **k: pytest.fail("a spent budget started a price query"))
+        response = client.post(PATH, content=body, headers=aged)
     assert response.status_code == 200 and response.json()["withheld"] is True
     assert response.json()["prices"][0]["reason"] == "deadline"
 
 
 @pytest.mark.serial(reason='wall-clock: asserts an upper bound on elapsed time')
-def test_an_exhausted_budget_withholds_immediately_without_touching_postgres_or_the_store(store, monkeypatch):
+def test_an_exhausted_budget_withholds_immediately_without_touching_postgres(store, monkeypatch):
     normal = world()["normal"]
     seed(store, normal)
 
     def forbidden(*a, **k):
         raise AssertionError("an exhausted budget must not start work")
-    monkeypatch.setattr(prices, "quote_states", forbidden)
-    monkeypatch.setattr(prices, "_read_targets", forbidden)
+    monkeypatch.setattr(prices, "_read_rows", forbidden)
     started = time.monotonic()
     response = post(ids(normal["id"]), ms=0)
     assert time.monotonic() - started < 0.5
@@ -526,84 +635,13 @@ def test_an_exhausted_budget_withholds_immediately_without_touching_postgres_or_
     assert (row["status"], row["reason"], row["amount"]) == ("failed", "deadline", None)
 
 
-class Hanging(BaseHTTPRequestHandler):
-    release = threading.Event()
-
-    def do_POST(self):
-        Hanging.release.wait(8)
-
-    def log_message(self, *args):
-        pass
-
-
 @pytest.mark.serial(reason='wall-clock: asserts an upper bound on elapsed time')
-@pytest.mark.slow(reason='wall-clock: a stalled relay holds the request up to its 3 s budget')
-def test_a_relay_that_stalls_cannot_hold_the_answer_past_three_seconds(store, monkeypatch):
-    editions = world()
-    normal, plain = editions["normal"], editions["unspecified"]
-    Hanging.release = threading.Event()
-    server = ThreadingHTTPServer(("127.0.0.1", 0), Hanging)
-    server.daemon_threads = True
-    threading.Thread(target=server.serve_forever, kwargs={'poll_interval': 0.02}, daemon=True).start()
-    monkeypatch.setenv("PUBLIC_PROJECTION_ADAPTER", "http")
-    monkeypatch.setenv("PUBLIC_PROJECTION_URL", f"http://127.0.0.1:{server.server_port}")
-    monkeypatch.setenv("PUBLIC_PROJECTION_TOKEN", "t")
-    try:
-        started = time.monotonic()
-        response = post(ids(normal["id"], plain["id"]))
-        elapsed = time.monotonic() - started
-    finally:
-        Hanging.release.set()
-        server.shutdown()
-    assert elapsed < 3.0, elapsed
-    rows = prices_of(response)
-    assert (rows[str(normal["id"])]["status"], rows[str(normal["id"])]["reason"]) == ("failed", "deadline")
-    assert rows[str(plain["id"])]["reason"] == "unspecified_variant"  # the rest of the page is independent
-    assert response.json()["withheld"] is True
-
-
-def test_the_http_adapter_works_from_the_synchronous_route(store, monkeypatch, tmp_path):
-    import multiprocessing
-    from public_records_fixture import serve_relay
-    editions = world()
-    normal = editions["normal"]
-    config = {"adapter": "filesystem", "directory": str(tmp_path)}
-    seed(store, normal, "3.10")
-    receive, send = multiprocessing.get_context("spawn").Pipe(False)
-    process = multiprocessing.get_context("spawn").Process(target=serve_relay, args=(config, send), daemon=True)
-    process.start()
-    try:
-        port = receive.recv()
-        monkeypatch.setenv("PUBLIC_PROJECTION_ADAPTER", "http")
-        monkeypatch.setenv("PUBLIC_PROJECTION_URL", f"http://127.0.0.1:{port}")
-        monkeypatch.setenv("PUBLIC_PROJECTION_TOKEN", "conformance-secret")
-        row = prices_of(post(ids(normal["id"])))[str(normal["id"])]
-    finally:
-        process.terminate()
-        process.join()
-    assert (row["status"], row["amount"], row["display_amount"]) == ("quote", "3.10", "$3.10")
-
-
-@pytest.mark.serial(reason='wall-clock: asserts an upper bound on elapsed time')
-@pytest.mark.slow(reason='wall-clock: waits out a stalled final validation')
-def test_a_stalled_final_validation_withholds_the_quote_inside_the_budget(store, monkeypatch):
-    editions = world()
-    normal = editions["normal"]
+@pytest.mark.slow(reason='wall-clock: waits out a stalled price query')
+def test_a_stalled_price_query_withholds_the_row_inside_the_budget(store, monkeypatch):
+    normal = world()["normal"]
     seed(store, normal)
     locker = psycopg.connect(os.environ["DATABASE_URL"])
-    real = prices.public_record_store
-
-    class Locking:
-        """An external store that, once it has answered, leaves PostgreSQL unable to answer the final read."""
-        def __init__(self, inner):
-            self.inner = inner
-
-        def read_all(self, keys, **kwargs):
-            answer = self.inner.read_all(keys, **kwargs)
-            locker.execute("LOCK TABLE catalog_edition_metadata IN ACCESS EXCLUSIVE MODE")
-            return answer
-
-    monkeypatch.setattr(prices, "public_record_store", lambda: Locking(real()))
+    locker.execute("LOCK TABLE edition_price_binding IN ACCESS EXCLUSIVE MODE")
     try:
         started = time.monotonic()
         response = post(ids(normal["id"]), ms=1500)
@@ -613,44 +651,19 @@ def test_a_stalled_final_validation_withholds_the_quote_inside_the_budget(store,
         locker.close()
     assert elapsed < 1.5, elapsed
     row = response.json()["prices"][0]
-    assert (row["status"], row["reason"], row["amount"], row["display_amount"]) == ("failed", "validation_unavailable", None, None)
-    assert response.json()["withheld"] is True
-
-
-def test_final_validation_drops_a_row_whose_mapping_changed_while_the_store_was_read(store, monkeypatch):
-    editions = world()
-    normal, reverse = editions["normal"], editions["reverse-holofoil"]
-    seed(store, normal)
-    seed(store, reverse)
-    real = prices.public_record_store
-
-    class Racing:
-        def __init__(self, inner):
-            self.inner = inner
-
-        def read_all(self, keys, **kwargs):
-            answer = self.inner.read_all(keys, **kwargs)
-            with connect() as conn:
-                conn.execute("UPDATE catalog_edition_metadata SET mapping_state='quarantined',mapping_reason='candidate_changed' WHERE edition_id=%s", (normal["id"],))
-                conn.execute("UPDATE catalog_edition_metadata SET mapping_revision=mapping_revision+1 WHERE edition_id=%s", (reverse["id"],))
-            return answer
-
-    monkeypatch.setattr(prices, "public_record_store", lambda: Racing(real()))
-    rows = prices_of(post(ids(normal["id"], reverse["id"])))
-    one, two = rows[str(normal["id"])], rows[str(reverse["id"])]
-    assert (one["status"], one["reason"], one["amount"]) == ("unavailable", "quarantined", None)
-    assert (two["status"], two["reason"], two["amount"]) == ("unavailable", "not_cached", None)
+    assert row["status"] == "failed" and row["reason"] in ("deadline", "validation_unavailable")
+    assert (row["amount"], row["display_amount"]) == (None, None) and response.json()["withheld"] is True
 
 
 def test_a_response_that_would_finish_after_the_hard_deadline_is_withheld(store, monkeypatch):
     normal = world()["normal"]
     seed(store, normal)
-    real = prices.validate_quote
+    real = prices._row_view
 
     def slow(*args, **kwargs):
         time.sleep(0.3)
         return real(*args, **kwargs)
-    monkeypatch.setattr(prices, "validate_quote", slow)
+    monkeypatch.setattr(prices, "_row_view", slow)
     response = post(ids(normal["id"]), ms=200)
     row = response.json()["prices"][0]
     assert (row["status"], row["reason"], row["amount"]) == ("failed", "deadline", None) and response.json()["withheld"] is True
@@ -686,19 +699,18 @@ def test_bodies_over_16_kib_are_413_even_when_valid_json_and_correctly_signed():
 # ------------------------------------------------------------------ no side effects
 
 
-def test_an_under_one_hour_read_writes_nothing_and_contacts_nothing_but_postgres_and_the_store(store, monkeypatch):
+def test_a_price_read_writes_nothing_and_contacts_nothing_but_postgres(store, monkeypatch):
     editions = world()
     normal, plain = editions["normal"], editions["unspecified"]
-    seed(store, normal, checked=ago(timedelta(minutes=59)))  # inside the 1 h fresh band: no admission, no write
-    tables = ("catalog_edition", "catalog_edition_metadata", "catalog_printing", "catalog_public_outbox", "operations_hour")
+    seed(store, normal, checked=ago(timedelta(hours=30)))  # old rows are read as they are; there is nothing to refresh
+    tables = ("catalog_edition", "catalog_edition_metadata", "catalog_printing", "catalog_public_outbox", "operations_hour",
+              "tcgplayer_price", "tcgplayer_product", "edition_price_binding")
 
     def stamps():
         operation_counter.flush()  # counts from earlier requests are written in the background
         with connect() as conn:
             return {t: sorted(r["x"] for r in conn.execute(f"SELECT xmin::text||':'||ctid::text AS x FROM {t}")) for t in tables}
     before = stamps()
-    key = result_key(normal["public_ref"], normal["mapping_revision"])
-    generation = store.read_records([key], deadline=time.monotonic() + 5).generation
     real = socket.socket.connect
 
     def guarded(self, address):
@@ -709,7 +721,6 @@ def test_an_under_one_hour_read_writes_nothing_and_contacts_nothing_but_postgres
     assert post(ids(normal["id"], plain["id"])).status_code == 200
     monkeypatch.undo()
     assert stamps() == before  # including operations_hour: the request counter is not written for price reads
-    assert store.read_records([key], deadline=time.monotonic() + 5).generation == generation
 
 
 def test_there_is_no_refresh_or_force_route():
@@ -717,26 +728,8 @@ def test_there_is_no_refresh_or_force_route():
     assert paths == {PATH: {"post"}}
 
 
-# ------------------------------------------------------------------ ticket 07: access-triggered refresh
-import re  # noqa: E402
-
-from app import price_launcher, quote_contract  # noqa: E402
-from app.public_projection import ProjectionUnavailable  # noqa: E402
-
-
-@pytest.fixture
-def launches(monkeypatch):
-    calls = []
-    monkeypatch.setattr(price_launcher, "spawn", lambda slot, owner: calls.append((slot, owner)) or True)
-    return calls
-
-
-def scheduler(store):
-    key = quote_contract.scheduler_key()
-    return store.read_records([key], deadline=time.monotonic() + 5).records[key].value
-
-
 def test_no_api_route_can_refresh_or_force_a_price():
+    import re
     for path in app.openapi()["paths"]:
         assert not re.search(r"refresh|force|reload|revalidate|max.?age|no.?cache", path, re.I), path
     assert not any(re.search(r"refresh|force", name, re.I) for name in prices.PriceRequest.model_fields)
@@ -744,95 +737,10 @@ def test_no_api_route_can_refresh_or_force_a_price():
         assert post({**ids(uuid4()), **extra}).status_code == 422
 
 
-def test_cache_control_and_pragma_headers_change_nothing(store, launches):
+def test_cache_control_and_pragma_headers_change_nothing(store):
     normal = world()["normal"]
     seed(store, normal, checked=ago(timedelta(minutes=30)))
     raw = json.dumps(ids(normal["id"]), separators=(",", ":")).encode()
     headers = {**headers_for(raw), "cache-control": "no-cache, max-age=0", "pragma": "no-cache", "x-refresh": "1"}
     row = client.post(PATH, content=raw, headers=headers).json()["prices"][0]
-    assert row["refresh"] is None and launches == [] and scheduler(store) is None
-
-
-@pytest.mark.serial(reason='wall-clock: asserts an upper bound on elapsed time')
-def test_a_stale_quote_is_returned_now_and_refreshed_in_the_background(store, launches):
-    normal = world()["normal"]
-    seed(store, normal, checked=ago(timedelta(minutes=61)))
-    started = time.monotonic()
-    row = prices_of(post(ids(normal["id"])))[str(normal["id"])]
-    assert time.monotonic() - started < 1.5
-    assert (row["status"], row["amount"], row["refresh"]) == ("quote", "0.43", "background")
-    sched = scheduler(store)
-    assert list(sched["jobs"]) == [f"{normal['public_ref']}:{normal['mapping_revision']}"] and sched["interactive"] == {}
-    assert len(launches) == 1
-
-
-@pytest.mark.serial(reason='wall-clock: asserts an upper bound on elapsed time')
-def test_a_day_old_quote_waits_for_the_runner_and_returns_the_new_quote(store, launches):
-    normal = world()["normal"]
-    seed(store, normal, checked=ago(timedelta(hours=25)))
-
-    def runner():
-        time.sleep(0.4)
-        seed(store, normal, "0.99", checked=ago(timedelta(0)))
-    thread = threading.Thread(target=runner)
-    thread.start()
-    started = time.monotonic()
-    row = prices_of(post(ids(normal["id"])))[str(normal["id"])]
-    thread.join()
-    assert time.monotonic() - started < 2.0
-    assert (row["amount"], row["refresh"]) == ("0.99", "refreshed")
-
-
-@pytest.mark.serial(reason='wall-clock: asserts an upper bound on elapsed time')
-@pytest.mark.slow(reason='wall-clock: waits out the real 2.5 s wait window')
-def test_a_day_old_quote_with_no_runner_times_out_inside_the_budget_and_keeps_the_cache(store, launches):
-    normal = world()["normal"]
-    checked = ago(timedelta(hours=25))
-    seed(store, normal, checked=checked)
-    started = time.monotonic()
-    response = post(ids(normal["id"]))
-    elapsed = time.monotonic() - started
-    row = prices_of(response)[str(normal["id"])]
-    assert 2.0 < elapsed < 3.0, elapsed
-    assert (row["status"], row["amount"], row["refresh"], row["checked_at"]) == ("quote", "0.43", "timeout", checked)
-    assert response.json()["withheld"] is False
-    assert scheduler(store)["interactive"] == {}      # the permit is released after the response
-
-
-@pytest.mark.serial(reason='wall-clock: asserts an upper bound on elapsed time')
-def test_a_launch_failure_answers_busy_at_once_and_never_errors(store, monkeypatch):
-    monkeypatch.setattr(price_launcher, "spawn", lambda slot, owner: False)
-    normal = world()["normal"]
-    started = time.monotonic()
-    row = prices_of(post(ids(normal["id"])))[str(normal["id"])]
-    assert time.monotonic() - started < 1.5
-    assert (row["status"], row["reason"], row["refresh"]) == ("unavailable", "not_cached", "busy")
-
-
-def test_an_unavailable_store_during_admission_still_returns_the_cached_quote(store, monkeypatch, launches):
-    normal = world()["normal"]
-    seed(store, normal, checked=ago(timedelta(minutes=90)))
-    real = prices.public_record_store()
-
-    class Flaky:
-        def read_all(self, *a, **k):
-            return real.read_all(*a, **k)
-
-        def read_records(self, *a, **k):
-            return real.read_records(*a, **k)
-
-        def compare_and_swap(self, *a, **k):
-            raise ProjectionUnavailable()
-
-        def operation_status(self, *a, **k):
-            raise ProjectionUnavailable()
-    monkeypatch.setattr(prices, "public_record_store", lambda: Flaky())
-    row = prices_of(post(ids(normal["id"])))[str(normal["id"])]
-    assert (row["status"], row["amount"], row["refresh"]) == ("quote", "0.43", "busy")
-
-
-def test_different_users_are_treated_alike(store, launches):
-    normal = world()["normal"]
-    seed(store, normal, checked=ago(timedelta(minutes=90)))
-    rows = [prices_of(post(ids(normal["id"]), user=user))[str(normal["id"])]["refresh"] for user in ("price-reader", "owner")]
-    assert rows == ["background", "background"]
+    assert row["refresh"] is None and row["amount"] == "0.43"

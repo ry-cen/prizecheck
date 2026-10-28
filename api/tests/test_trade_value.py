@@ -14,9 +14,9 @@ from uuid import uuid4
 import pytest
 
 from app.main import app, connect  # noqa: F401
-from app import price_budget, price_refresh, prices
+from app import price_budget, prices
 from test_catalog_targets import isolated_rules  # noqa: F401  (an autouse fixture)
-from test_deck_cost import launches, scheduler, store  # noqa: F401  (autouse fixtures)
+from test_deck_cost import store  # noqa: F401  (a fixture)
 from test_prices import ago, client, headers_for, seed, world
 
 PATH = "/api/trades/value"
@@ -66,7 +66,7 @@ def test_each_side_reads_empty_partial_no_quotes_or_incomplete(store, monkeypatc
 
     def failing_reverse(ids, *args, **kwargs):
         views = real_quotes(ids, *args, **kwargs)
-        views[reverse["id"]] = prices._failed([reverse["id"]], "store_unavailable")[reverse["id"]]
+        views[reverse["id"]] = prices._failed([reverse["id"]], "validation_unavailable")[reverse["id"]]
         return views
     seed(store, reverse, "0.43")
     monkeypatch.setattr(prices, "private_edition_quotes", failing_reverse)
@@ -75,25 +75,30 @@ def test_each_side_reads_empty_partial_no_quotes_or_incomplete(store, monkeypatc
     assert side(body["you_get"]) == ("priced", "$0.50", "2", "2")
 
 
-def test_an_edition_on_both_sides_is_read_and_admitted_once(store, monkeypatch):
+def test_an_edition_on_both_sides_is_read_once(store, monkeypatch):
     found = world()
     normal, reverse = found["normal"], found["reverse-holofoil"]
-    for edition in (normal, reverse):    # checked two hours ago: answered now, refreshed in the background
+    for edition in (normal, reverse):
         seed(store, edition, "0.25", checked=ago(timedelta(hours=2)))
-    reads, admissions = [], []
-    real_quotes, real_admit = prices.private_edition_quotes, price_refresh.evaluate_and_admit
+    reads = []
+    real_quotes = prices.private_edition_quotes
     monkeypatch.setattr(
         prices, "private_edition_quotes",
         lambda ids, *a, **k: reads.append(sorted(str(item) for item in ids)) or real_quotes(ids, *a, **k))
-    monkeypatch.setattr(price_refresh, "evaluate_and_admit",
-                        lambda rows, *a, **k: admissions.append([row.key for row in rows]) or real_admit(rows, *a, **k))
     body = body_of(value([("you_give", normal["id"], 2), ("you_give", reverse["id"], 1), ("you_get", normal["id"], 1)]))
     assert reads == [sorted([str(normal["id"]), str(reverse["id"])])]
-    assert len(admissions) <= 1
-    for keys in admissions:
-        assert len(keys) == len(set(keys))
     assert side(body["you_give"]) == ("priced", "$0.75", "3", "3")
     assert side(body["you_get"]) == ("priced", "$0.25", "1", "1")
+
+
+def test_with_price_reads_off_both_sides_read_no_quotes_and_nothing_is_queried(store, monkeypatch):
+    found = world()
+    normal = found["normal"]
+    seed(store, normal, "0.25")
+    monkeypatch.setenv("PRICE_READS", "off")
+    monkeypatch.setattr(prices, "_read_rows", lambda *a, **k: pytest.fail("a price query ran"))
+    body = body_of(value([("you_give", normal["id"], 2), ("you_get", normal["id"], 1)]))
+    assert side(body["you_give"]) == ("no_quotes", None, "0", "2") and side(body["you_get"]) == ("no_quotes", None, "0", "1")
 
 
 def test_refusals_come_in_order_before_any_price_is_read(store, monkeypatch):

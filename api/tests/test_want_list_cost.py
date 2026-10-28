@@ -19,9 +19,9 @@ import psycopg
 import pytest
 
 from app.main import connect  # noqa: F401
-from app import price_refresh, prices
+from app import prices
 from test_catalog_targets import isolated_rules  # noqa: F401  (an autouse fixture)
-from test_deck_cost import EMPTY, cost as deck_cost, launches, scheduler, store  # noqa: F401  (autouse fixtures)
+from test_deck_cost import EMPTY, cost as deck_cost, store  # noqa: F401  (a fixture)
 from test_deck_counting import counting, deck, hold, iono_world, line, new_owner
 from test_holdings import call
 from test_prices import ago, client, headers_for, seed, world
@@ -148,8 +148,7 @@ def test_nothing_to_get_is_zero_dollars_and_reads_no_price(store, monkeypatch):
     edition = str(world()["normal"]["id"])
     built = deck(owner, "Built", 0)
     hold(owner, built, edition, 2)          # moving copies in lists them: the Deck needs nothing
-    monkeypatch.setattr(prices, "quote_states", lambda *a, **k: pytest.fail("a complete Want List read a price"))
-    monkeypatch.setattr(price_refresh, "evaluate_and_admit", lambda *a, **k: pytest.fail("a complete Want List admitted"))
+    monkeypatch.setattr(prices, "_read_rows", lambda *a, **k: pytest.fail("a complete Want List read a price"))
     priced = body_of(cost(owner))
     assert priced["total"] == EMPTY and section(priced, built)["cost"] == EMPTY
     assert priced["combined"] == [] and section(priced, built)["lines"] == []
@@ -157,6 +156,21 @@ def test_nothing_to_get_is_zero_dollars_and_reads_no_price(store, monkeypatch):
     stranger, _ = new_owner()
     empty = body_of(cost(stranger))
     assert (empty["total"], empty["sections"], empty["combined"]) == (EMPTY, [], [])
+
+
+def test_with_price_reads_off_every_figure_is_no_quotes_and_nothing_is_queried(store, monkeypatch):
+    found = world()
+    normal = found["normal"]
+    seed(store, normal, "0.25")
+    owner, _ = new_owner()
+    wanted = deck(owner, "Wanted", 0)
+    line(owner, wanted, str(normal["id"]), 2)
+    monkeypatch.setenv("PRICE_READS", "off")
+    monkeypatch.setattr(prices, "_read_rows", lambda *a, **k: pytest.fail("a price query ran"))
+    priced = body_of(cost(owner))
+    assert summary(priced["total"]) == ("no_quotes", None, None, "0", "2")
+    assert summary(section(priced, wanted)["cost"]) == ("no_quotes", None, None, "0", "2")
+    assert priced["total"]["fallback_copies"] == "0"
 
 
 def test_a_failed_row_makes_only_the_figures_containing_it_incomplete(store, monkeypatch):
@@ -170,7 +184,7 @@ def test_a_failed_row_makes_only_the_figures_containing_it_incomplete(store, mon
     def failing_reverse(ids, *args, **kwargs):
         calls.append(list(ids))
         views = real_quotes(ids, *args, **kwargs)
-        views[reverse["id"]] = prices._failed([reverse["id"]], "store_unavailable")[reverse["id"]]
+        views[reverse["id"]] = prices._failed([reverse["id"]], "validation_unavailable")[reverse["id"]]
         return views
     monkeypatch.setattr(prices, "private_edition_quotes", failing_reverse)
     owner, _ = new_owner()
@@ -184,20 +198,20 @@ def test_a_failed_row_makes_only_the_figures_containing_it_incomplete(store, mon
     assert summary(section(priced, only_normal)["cost"]) == ("priced", "0.5", "$0.50", "2", "2")
     failed = section(priced, both)["cost"]
     assert (failed["status"], failed["reason"], failed["total_copies"], failed["priced_copies"], failed["amount"]) == (
-        "incomplete", "store_unavailable", "2", None, None)
+        "incomplete", "validation_unavailable", "2", None, None)
     lines = {item["edition_id"]: item for item in section(priced, both)["lines"]}
     assert summary(lines[str(normal["id"])]["cost"]) == ("priced", "0.25", "$0.25", "1", "1")
     assert lines[str(reverse["id"])]["cost"]["status"] == "incomplete" and lines[str(reverse["id"])]["price_each"] is None
     assert (priced["total"]["status"], priced["total"]["reason"], priced["total"]["total_copies"]) == (
-        "incomplete", "store_unavailable", "4")
+        "incomplete", "validation_unavailable", "4")
     rows = {item["edition_id"]: item for item in priced["combined"]}
     assert summary(rows[str(normal["id"])]["cost"]) == ("priced", "0.75", "$0.75", "3", "3")
     assert rows[str(reverse["id"])]["cost"]["status"] == "incomplete"
 
 
-def test_an_exhausted_budget_answers_incomplete_without_a_capture_or_a_store_read(store, monkeypatch):
+def test_an_exhausted_budget_answers_incomplete_without_a_capture_or_a_price_read(store, monkeypatch):
     owner, charizard, _, _ = iono_world(store)
-    monkeypatch.setattr(prices, "quote_states", lambda *a, **k: pytest.fail("an exhausted budget read the store"))
+    monkeypatch.setattr(prices, "_read_rows", lambda *a, **k: pytest.fail("an exhausted budget read a price"))
     for scope in (None, charizard):
         priced = body_of(cost(owner, scope, ms=0))
         assert priced["total"] == {**EMPTY, **{key: None for key in EMPTY if key not in ("status", "currency")},
@@ -229,17 +243,15 @@ def test_a_held_inventory_lock_answers_inside_the_budget_without_a_count(store):
 # ------------------------------------------------------------------ one access, one admission, one budget
 
 
-def test_one_access_reads_and_admits_every_needed_edition_once(store, monkeypatch):
+def test_one_access_reads_every_needed_edition_once(store, monkeypatch):
     found = world()
     normal, reverse, plain = found["normal"], found["reverse-holofoil"], found["unspecified"]
-    for edition in (normal, reverse):    # checked two hours ago: answered now, refreshed in the background
-        seed(store, edition, "0.25", checked=ago(timedelta(hours=2)))
-    reads, admissions = [], []
-    real_quotes, real_admit = prices.private_edition_quotes, price_refresh.evaluate_and_admit
+    for edition in (normal, reverse):
+        seed(store, edition, "0.25", checked=ago(timedelta(hours=30)), updated=ago(timedelta(hours=30)))
+    reads = []
+    real_quotes = prices.private_edition_quotes
     monkeypatch.setattr(prices, "private_edition_quotes",
                         lambda ids, *a, **k: reads.append(sorted(ids)) or real_quotes(ids, *a, **k))
-    monkeypatch.setattr(price_refresh, "evaluate_and_admit",
-                        lambda rows, *a, **k: admissions.append(sorted(row.key for row in rows)) or real_admit(rows, *a, **k))
     owner, _ = new_owner()
     first, second, built = deck(owner, "First", 0), deck(owner, "Second", 1), deck(owner, "Built", 2)
     line(owner, first, str(normal["id"]), 2)
@@ -247,38 +259,10 @@ def test_one_access_reads_and_admits_every_needed_edition_once(store, monkeypatc
     line(owner, second, str(reverse["id"]), 3)
     hold(owner, built, str(plain["id"]), 1)     # listed and held: nothing to buy, so never priced
     priced = body_of(cost(owner))
-    # Two Decks need normal and one needs reverse: one read and one admission, each Edition once.
+    # Two Decks need normal and one needs reverse: one read, each Edition once.
     assert reads == [sorted([normal["id"], reverse["id"]])]
-    assert admissions == [sorted([normal["id"], reverse["id"]])]
     assert summary(priced["total"]) == ("priced", "1.5", "$1.50", "6", "6")
     assert priced["total"]["fallback_copies"] == "0"
-    assert len(scheduler(store)["jobs"]) == 2        # both rows queued for a background refresh
-
-
-@pytest.mark.serial(reason='wall-clock: asserts an upper bound on elapsed time')
-@pytest.mark.slow(reason='wall-clock: waits out the real 2.5 s wait window')
-def test_rows_needing_a_refresh_in_several_decks_wait_once_inside_one_budget(store, monkeypatch):
-    found = world()
-    normal, reverse = found["normal"], found["reverse-holofoil"]
-    for edition in (normal, reverse):    # a day old: the request waits for a runner, which never comes here
-        seed(store, edition, "0.25", checked=ago(timedelta(hours=25)))
-    admissions = []
-    real_admit = price_refresh.evaluate_and_admit
-    monkeypatch.setattr(price_refresh, "evaluate_and_admit",
-                        lambda rows, *a, **k: admissions.append(len(rows)) or real_admit(rows, *a, **k))
-    owner, _ = new_owner()
-    first, second = deck(owner, "First", 0), deck(owner, "Second", 1)
-    line(owner, first, str(normal["id"]), 1)
-    line(owner, second, str(reverse["id"]), 1)
-    started = time.monotonic()
-    priced = body_of(cost(owner))
-    elapsed = time.monotonic() - started
-    assert admissions == [2]
-    # One wait window for both Decks; two waits would take twice as long. The gateway tests own the 3.0 s contract.
-    assert 2.4 < elapsed < 3.5, elapsed
-    # The cached quotes are kept and labelled: shown from the cache because the refresh didn't finish.
-    assert summary(priced["total"]) == ("priced", "0.5", "$0.50", "2", "2")
-    assert priced["total"]["fallback_copies"] == "2"
 
 
 # ------------------------------------------------------------------ pairing, privacy and the budget
@@ -343,9 +327,8 @@ def test_the_route_is_private_signed_and_budgeted(store, monkeypatch):
     assert client.get(PATH, headers=headers_for(b"", method="GET", path=other, user=owner)).status_code == 401
 
 
-def test_no_request_field_forces_a_refresh(store, launches):
+def test_no_request_field_forces_a_refresh(store):
     owner, _, _, _ = iono_world(store)          # Iono's quote was checked moments ago
     headers = {**headers_for(b"", method="GET", path=PATH, user=owner), "cache-control": "no-cache", "pragma": "no-cache"}
     response = client.get(PATH + "?force=1&refresh=1&max_age=0", headers=headers)
     assert body_of(response)["total"]["priced_copies"] == "4"
-    assert launches == [] and scheduler(store) is None

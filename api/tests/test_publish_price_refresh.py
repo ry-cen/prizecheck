@@ -12,7 +12,7 @@ from app import publish_refresh
 from app.public_projection import ProjectionUnavailable
 from test_deck_cost import scheduler
 from test_holdings import call
-from test_prices import ago, seed, world
+from test_prices import ago, seed_quote as seed, world
 from test_publications import command, stored_decks
 from test_published_cost import USER, launches, listed_deck, store  # noqa: F401  (store, launches: autouse)
 

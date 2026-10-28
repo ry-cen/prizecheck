@@ -27,6 +27,8 @@ x-api-environment: &api-environment
   PUBLIC_PROJECTION_ADAPTER: filesystem
   PUBLIC_PROJECTION_DIR: /var/lib/prizecheck/public
   PRICE_RUNNER_LOCK_DIR: /var/lib/prizecheck/price-runners
+  # Collector price kill switch (api/app/price_reads.py): `off` answers every price row unavailable without a query.
+  PRICE_READS: ${PRICE_READS:-on}
   # Dev keeps the newest marketplace matching rule active without an owner approval (catalog_targets.ensure_matching_rule).
   MARKETPLACE_MATCHING: automatic
   # The owner panel shows the last day's new accounts against this cap; the auth gateway enforces it.

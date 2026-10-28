@@ -179,11 +179,7 @@ test("an empty Deck is $0.00 with No cards, and a Deck with no eligible quote is
     {
       op: "quote",
       edition: ids.normal,
-      result: {
-        state: "absent",
-        checked_at: ago(0.1),
-        expires_at: ago(-0.9),
-      },
+      amount: null,
     },
   ]);
   const unpriced = await deckWith(page, {

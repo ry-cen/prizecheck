@@ -164,7 +164,7 @@ def test_the_export_and_the_cost_count_the_same_copies(store):
 
 
 def test_the_export_is_private_scoped_like_the_want_list_and_not_a_price_access(store, launches, monkeypatch):
-    monkeypatch.setattr(prices, "quote_states", lambda *a, **k: pytest.fail("the export read a price"))
+    monkeypatch.setattr(prices, "_read_rows", lambda *a, **k: pytest.fail("the export read a price"))
     owner, older, _ = mixed_world(store)
     stranger, _ = new_owner()
     unsorted = next(entry["id"] for entry in call("GET", "/api/location-tree", owner).json()["locations"]

@@ -1,11 +1,10 @@
-"""Complete private Deck cost (ticket 09): signed HTTP against PostgreSQL and a real record store.
+"""Complete private Deck cost (ticket 09): signed HTTP against PostgreSQL, priced from the imported TCGCSV rows (ADR 0019).
 
 Every assertion is on the route's answer (the same body the browser renders) or on what the shared stores hold
 afterwards; nothing here calls the arithmetic or the capture directly.
 """
 from datetime import timedelta
 import os
-import threading
 import time
 from uuid import uuid4
 
@@ -13,8 +12,7 @@ import psycopg
 import pytest
 
 from app.main import app, connect  # noqa: F401
-from app import price_launcher, price_refresh, prices, quote_contract
-from app.public_projection import ProjectionUnavailable
+from app import price_launcher, prices, quote_contract
 from app.public_records import public_record_store
 from test_catalog_targets import isolated_rules, owner  # noqa: F401  (isolated_rules is autouse)
 from test_holdings import add, call
@@ -26,6 +24,8 @@ USER = "deck-cost-owner"
 
 @pytest.fixture(autouse=True)
 def store(tmp_path, monkeypatch):
+    """Prices live in PostgreSQL; the record store stays only for the files that import this fixture and check it is
+    untouched (the first argument of ``seed`` is unused)."""
     monkeypatch.setenv("PUBLIC_PROJECTION_DIR", str(tmp_path))
     monkeypatch.setenv("PUBLIC_PROJECTION_ADAPTER", "filesystem")
     public_record_store().initialize(deadline=time.monotonic() + 5)
@@ -34,7 +34,7 @@ def store(tmp_path, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def launches(monkeypatch):
-    """No real runner is ever started here: admission sees a launcher that always succeeds and records the slot."""
+    """Records any runner launch (other files import this fixture): pricing never starts one."""
     calls = []
     monkeypatch.setattr(price_launcher, "spawn", lambda slot, owner: calls.append((slot, owner)) or True)
     return calls
@@ -53,6 +53,11 @@ def body_of(response):
     assert response.status_code == 200, response.text
     assert response.headers["cache-control"] == "no-store"
     return response.json()
+
+
+def scheduler(store):
+    key = quote_contract.scheduler_key()
+    return store.read_records([key], deadline=time.monotonic() + 5).records[key].value
 
 
 def deck_with(quantities, user=USER):
@@ -117,11 +122,6 @@ def revision_of(user=USER):
         return conn.execute("SELECT revision FROM inventory_owner WHERE user_id=%s", (user,)).fetchone()["revision"]
 
 
-def scheduler(store):
-    key = quote_contract.scheduler_key()
-    return store.read_records([key], deadline=time.monotonic() + 5).records[key].value
-
-
 # ------------------------------------------------------------------ the visible example
 
 
@@ -145,15 +145,30 @@ def test_three_at_25_cents_two_stale_at_43_and_one_unpriced_is_161_and_five_of_s
     assert result["deck_list_revision"] == detail_of(deck)["deck_list"]["revision"]
 
 
-def test_unknown_provider_age_is_counted_by_copy_and_never_called_fresh_or_stale(store):
+def test_only_the_market_price_counts_and_a_row_with_only_low_or_mid_is_unpriced(store):
     editions = world()
     normal, reverse = editions["normal"], editions["reverse-holofoil"]
-    seed(store, normal, "1.10", updated=ago(timedelta(hours=1)))
-    seed(store, reverse, "2.00", updated=None)
+    seed(store, normal, "1.10")
+    seed(store, reverse, None, low="2.00", mid="2.50")
     result = body_of(cost(deck_with({normal["id"]: 1, reverse["id"]: 4})))
-    assert (result["status"], result["amount"], result["display_amount"]) == ("priced", "9.1", "$9.10")
-    assert (result["priced_copies"], result["total_copies"]) == ("5", "5")
-    assert (result["stale_copies"], result["unknown_age_copies"]) == ("0", "4")
+    assert (result["status"], result["amount"], result["display_amount"]) == ("priced", "1.1", "$1.10")
+    assert (result["priced_copies"], result["total_copies"]) == ("1", "5")
+    assert (result["stale_copies"], result["unknown_age_copies"], result["fallback_copies"]) == ("0", "0", "0")
+
+
+def test_with_price_reads_off_every_figure_is_no_quotes_and_nothing_is_queried(store, monkeypatch):
+    editions = world()
+    normal, reverse = editions["normal"], editions["reverse-holofoil"]
+    seed(store, normal, "0.25")
+    seed(store, reverse, "0.43")
+    deck = deck_list_with({normal["id"]: 2, reverse["id"]: 1}, held={normal["id"]: 1})
+    monkeypatch.setenv("PRICE_READS", "off")
+    monkeypatch.setattr(prices, "_read_rows", lambda *a, **k: pytest.fail("a price query ran"))
+    result = body_of(cost(deck))
+    for figure in (result, result["deck_list_cost"], result["cost_to_complete"]):
+        assert figure["status"] == "no_quotes" and (figure["amount"], figure["display_amount"]) == (None, None)
+        assert figure["priced_copies"] == "0" and figure["fallback_copies"] == "0"
+    assert result["total_copies"] == "1"
 
 
 def test_the_subtotal_is_exact_and_rounded_once_at_display(store):
@@ -193,8 +208,7 @@ def test_huge_quantities_and_amounts_stay_exact_beyond_double_and_decimal_contex
 
 
 def test_an_empty_deck_is_zero_dollars_with_no_cards_and_reads_no_price(store, monkeypatch):
-    monkeypatch.setattr(prices, "quote_states", lambda *a, **k: pytest.fail("an empty Deck read a price"))
-    monkeypatch.setattr(price_refresh, "evaluate_and_admit", lambda *a, **k: pytest.fail("an empty Deck was admitted"))
+    monkeypatch.setattr(prices, "_read_rows", lambda *a, **k: pytest.fail("an empty Deck read a price"))
     deck = deck_with({})
     result = body_of(cost(deck))
     assert result["status"] == "empty"
@@ -205,31 +219,27 @@ def test_an_empty_deck_is_zero_dollars_with_no_cards_and_reads_no_price(store, m
     assert result["deck_list_revision"] == detail_of(deck)["deck_list"]["revision"]
 
 
-@pytest.mark.slow(reason='wall-clock: waits out the real 2.5 s wait window for an uncached row')
 def test_a_complete_scan_with_no_eligible_quote_is_price_unavailable_and_zero_of_n(store):
     editions = world()
     normal, reverse, plain = editions["normal"], editions["reverse-holofoil"], editions["unspecified"]
-    seed(store, normal, result={"state": "absent", "checked_at": ago(timedelta(minutes=10)),
-                                 "expires_at": ago(-timedelta(minutes=50))})
-    # reverse: nothing cached at all; plain: an Unspecified Variant is never priced.
+    seed(store, normal, None)
+    # reverse: no price row at all; plain: an Unspecified Variant is never priced.
     result = body_of(cost(deck_with({normal["id"]: 2, reverse["id"]: 3, plain["id"]: 4})))
     assert result["status"] == "no_quotes"
     assert (result["amount"], result["display_amount"]) == (None, None)
     assert (result["priced_copies"], result["total_copies"]) == ("0", "9")
 
 
-def test_a_store_outage_reports_no_numeric_coverage_only_the_total(store, monkeypatch):
+def test_a_postgres_price_outage_reports_no_numeric_coverage_only_the_total(store, monkeypatch):
     editions = world()
     normal, plain = editions["normal"], editions["unspecified"]
     seed(store, normal, "0.25")
 
-    class Down:
-        def read_all(self, *a, **k):
-            raise ProjectionUnavailable()
-        read_records = read_all
-    monkeypatch.setattr(prices, "public_record_store", lambda: Down())
+    def down(*a, **k):
+        raise psycopg.OperationalError("down")
+    monkeypatch.setattr(prices, "_read_rows", down)
     result = body_of(cost(deck_with({normal["id"]: 2, plain["id"]: 5})))
-    assert result["status"] == "incomplete" and result["reason"] == "store_unavailable"
+    assert result["status"] == "incomplete" and result["reason"] == "validation_unavailable"
     assert result["total_copies"] == "7"
     for field in ("amount", "display_amount", "priced_copies", "stale_copies", "unknown_age_copies"):
         assert result[field] is None, field
@@ -239,10 +249,10 @@ def test_a_store_outage_reports_no_numeric_coverage_only_the_total(store, monkey
 
 
 @pytest.mark.serial(reason='wall-clock: asserts an upper bound on elapsed time')
-def test_an_exhausted_budget_reports_incomplete_without_touching_the_store(store, monkeypatch):
+def test_an_exhausted_budget_reports_incomplete_without_reading_a_price(store, monkeypatch):
     normal = world()["normal"]
     seed(store, normal)
-    monkeypatch.setattr(prices, "quote_states", lambda *a, **k: pytest.fail("an exhausted budget read the store"))
+    monkeypatch.setattr(prices, "_read_rows", lambda *a, **k: pytest.fail("an exhausted budget read a price"))
     deck = deck_with({normal["id"]: 2})
     started = time.monotonic()
     result = body_of(cost(deck, ms=0))
@@ -282,12 +292,11 @@ def test_a_held_inventory_lock_answers_inside_the_budget_without_a_count(store):
 # ------------------------------------------------------------------ invalidated and superseded quotes
 
 
-def test_confirmed_absence_and_a_quarantined_mapping_never_enter_the_subtotal(store):
+def test_an_empty_market_price_and_a_quarantined_mapping_never_enter_the_subtotal(store):
     editions = world()
     normal, reverse = editions["normal"], editions["reverse-holofoil"]
-    # A confirmed absence whose superseded quote payload is still stored, and a quarantined mapping with a cached quote.
-    seed(store, normal, "5.00", result={"state": "absent", "attempt": 1, "checked_at": ago(timedelta(minutes=10)),
-                                         "expires_at": ago(-timedelta(minutes=50))})
+    # An empty market price next to a stored mid price, and a quarantined mapping with a price row.
+    seed(store, normal, None, mid="5.00")
     seed(store, reverse, "7.00")
     with connect() as conn:
         conn.execute("UPDATE catalog_edition_metadata SET mapping_state='quarantined',mapping_reason='physical_conflict' WHERE edition_id=%s",
@@ -314,98 +323,60 @@ def verified_editions(count):
                                     (card, identity)).fetchone()["id"]
             edition = conn.execute("""INSERT INTO catalog_edition(printing_id,descriptor_key,descriptor)
               VALUES (%s,'normal','{"finish":"normal"}') RETURNING id,public_ref""", (printing,)).fetchone()
+            product = 1 + uuid4().int % 2_000_000_000
             revision = conn.execute("""UPDATE catalog_edition_metadata SET mapping_state='verified',mapping_reason=NULL,
               product_id=%s,quote_variant='normal',mapping_basis='matching_rule',matching_activation_id=%s,auto_closed=true
               WHERE edition_id=%s RETURNING mapping_revision""",
-                                    (uuid4().int % 10**12, activation, edition["id"])).fetchone()["mapping_revision"]
+                                    (product, activation, edition["id"])).fetchone()["mapping_revision"]
             made.append({"id": edition["id"], "public_ref": edition["public_ref"], "mapping_revision": revision,
-                         "quote_variant": "normal", "source_id": card})
+                         "quote_variant": "normal", "source_id": card, "product_id": product})
     return made
 
 
-@pytest.mark.serial(reason='wall-clock: asserts an upper bound on elapsed time')
-@pytest.mark.slow(reason='wall-clock: waits out the real 2.5 s wait window')
-def test_every_copy_of_a_large_deck_is_evaluated_with_one_admission_and_one_budget(store, monkeypatch):
-    from app import public_records
-    editions = verified_editions(70)          # 140 store keys: more than one 128-key read
-    fresh, hard = editions[:30], editions[30:]
+def test_every_copy_of_a_large_deck_is_evaluated_with_one_price_query(store, monkeypatch):
+    editions = verified_editions(70)
+    fresh, old = editions[:30], editions[30:]
     for edition in fresh:
         seed(store, edition, "0.10")
-    for edition in hard:                      # 40 day-old checks: more than the 32 new jobs one access may admit
-        seed(store, edition, "0.20", checked=ago(timedelta(hours=25)))
-    calls, batches = [], []
-    real_admit, real_records = price_refresh.evaluate_and_admit, public_records._Records.read_all
-    monkeypatch.setattr(price_refresh, "evaluate_and_admit",
-                        lambda rows, *a, **k: calls.append(len(rows)) or real_admit(rows, *a, **k))
-
-    def counting(self, keys, **kwargs):
-        batches.append(len(list(keys)))
-        return real_records(self, keys, **kwargs)
-    monkeypatch.setattr(public_records._Records, "read_all", counting)
+    for edition in old:
+        seed(store, edition, "0.20", updated=ago(timedelta(hours=72)))
+    queries = []
+    real = prices._read_rows
+    monkeypatch.setattr(prices, "_read_rows", lambda ids, timeout: queries.append(len(ids)) or real(ids, timeout))
     deck = deck_with({edition["id"]: 2 for edition in editions})
-    started = time.monotonic()
     result = body_of(cost(deck))
-    elapsed = time.monotonic() - started
-    assert calls == [70]                      # one access, every Deck row, one admission
-    assert max(batches) >= 140
-    # The hard rows used one wait window for the whole Deck: 70 per-Edition waits would take multiples of it. The gateway
-    # tests own the 3.0 s contract; this clock also covers final validation and the permit release after the budget.
-    assert 2.4 < elapsed < 3.5, elapsed
+    assert queries == [70]                    # one read, every Deck row
     assert (result["status"], result["priced_copies"], result["total_copies"]) == ("priced", "140", "140")
     assert (result["amount"], result["display_amount"]) == ("22", "$22.00")   # 60 x 0.10 + 80 x 0.20, nothing omitted
     assert result["deck_list_cost"] == figures(result) and result["cost_to_complete"] == EMPTY
-    assert result["fallback_copies"] == "80"  # the day-old copies kept their labelled cached quote
-    sched = scheduler(store)
-    assert len(sched["jobs"]) == 32 and sched["interactive"] == {}
+    assert (result["stale_copies"], result["fallback_copies"]) == ("80", "0")
 
 
-def test_bounded_admission_never_drops_copies_on_a_later_access(store):
+def test_a_deck_larger_than_one_access_is_priced_without_dropping_copies(store):
     editions = verified_editions(40)
     for edition in editions:
-        seed(store, edition, "0.20", checked=ago(timedelta(hours=2)))   # soft: answered now, refreshed in the background
+        seed(store, edition, "0.20", checked=ago(timedelta(hours=2)))
     deck = deck_with({edition["id"]: 1 for edition in editions})
-    first = body_of(cost(deck))
-    assert (first["status"], first["priced_copies"], first["total_copies"], first["amount"]) == ("priced", "40", "40", "8")
-    assert len(scheduler(store)["jobs"]) == 32       # 32 new jobs per access; the other 8 rows are labelled, not dropped
-    second = body_of(cost(deck))                     # the caller's 32 outstanding jobs refuse more work, never copies
-    assert (second["priced_copies"], second["total_copies"], second["amount"]) == ("40", "40", "8")
-    assert len(scheduler(store)["jobs"]) == 32
+    for _ in range(2):
+        answer = body_of(cost(deck))
+        assert (answer["status"], answer["priced_copies"], answer["total_copies"], answer["amount"]) == ("priced", "40", "40", "8")
 
 
 # ------------------------------------------------------------------ locks, revisions and the rest of the page
 
 
-@pytest.mark.serial(reason='wall-clock: asserts an upper bound on elapsed time')
-@pytest.mark.slow(reason='wall-clock: writes inside the real wait window')
-def test_inventory_locks_are_released_before_the_wait_and_the_answer_names_its_revision(store):
+def test_the_answer_names_the_owner_revision_it_was_captured_at(store):
     editions = world()
     normal, plain = editions["normal"], editions["unspecified"]
-    seed(store, normal, "0.25", checked=ago(timedelta(hours=25)))     # hard: the request waits for a runner
+    seed(store, normal, "0.25")
     deck = deck_with({normal["id"]: 2})
     captured = revision_of()
-    answer = {}
-    waiting = threading.Thread(target=lambda: answer.setdefault("response", cost(deck)))
-    waiting.start()
-    deadline = time.monotonic() + 3                                  # wait until the request holds its interactive permit
-    while True:
-        try:
-            if scheduler(store)["interactive"]:
-                break
-        except (KeyError, TypeError):
-            pass
-        assert time.monotonic() < deadline, "the cost request never reached its wait window"
-        time.sleep(0.05)
-    started = time.monotonic()
-    added = add(USER, deck, str(plain["id"]), "1")
-    checks = call("GET", f"/api/decks/{deck}", USER)
-    elapsed = time.monotonic() - started
-    waiting.join()
-    assert added.status_code == 200, added.text
-    assert checks.status_code == 200 and checks.json()["checks"]["total"] == "3"
-    assert elapsed < 1.0, elapsed                                    # neither the write nor the checks waited for prices
-    result = body_of(answer["response"])
-    assert result["owner_revision"] == captured != revision_of()     # the client discards it for the newer revision
+    result = body_of(cost(deck))
+    assert result["owner_revision"] == captured
     assert (result["priced_copies"], result["total_copies"]) == ("2", "2")
+    added = add(USER, deck, str(plain["id"]), "1")
+    assert added.status_code == 200, added.text
+    assert revision_of() != captured                       # the client discards the first answer for the newer revision
     assert body_of(cost(deck))["total_copies"] == "3"
 
 
@@ -432,7 +403,7 @@ def test_no_request_field_forces_a_refresh(store, launches):
     headers = {**headers_for(b"", method="GET", path=path, user=USER), "cache-control": "no-cache", "pragma": "no-cache"}
     response = client.get(path + "?force=1&refresh=1&max_age=0", headers=headers)
     assert body_of(response)["priced_copies"] == "1"
-    assert launches == [] and scheduler(store) is None
+    assert launches == []
 
 
 # ------------------------------------------------------------------ Deck List cost and cost to complete (Deck Lists 08)
@@ -511,18 +482,17 @@ def test_an_unpriced_not_owned_line_is_never_counted_as_zero(store):
     assert (listed["status"], listed["amount"], listed["priced_copies"], listed["total_copies"]) == ("priced", "0.25", "1", "3")
 
 
-def test_a_deck_with_no_cards_yet_prices_its_deck_list_in_the_one_admission(store, monkeypatch):
+def test_a_deck_with_no_cards_yet_prices_its_deck_list_in_one_read(store, monkeypatch):
     editions = world()
     normal, reverse = editions["normal"], editions["reverse-holofoil"]
     seed(store, normal, "0.25")
     seed(store, reverse, "0.43", updated=ago(timedelta(hours=72)))
     calls = []
-    real_admit = price_refresh.evaluate_and_admit
-    monkeypatch.setattr(price_refresh, "evaluate_and_admit",
-                        lambda rows, *a, **k: calls.append(len(rows)) or real_admit(rows, *a, **k))
+    real = prices._read_rows
+    monkeypatch.setattr(prices, "_read_rows", lambda ids, timeout: calls.append(len(ids)) or real(ids, timeout))
     deck = deck_list_with({normal["id"]: 2, reverse["id"]: 1})
     result = body_of(cost(deck))
-    assert calls == [2]                                   # every listed Edition, one admission
+    assert calls == [2]                                   # every listed Edition, one read
     assert figures(result) == EMPTY
     listed = result["deck_list_cost"]
     assert (listed["status"], listed["amount"], listed["priced_copies"], listed["total_copies"]) == ("priced", "0.93", "3", "3")
@@ -553,13 +523,13 @@ def test_a_failed_row_makes_only_the_figures_containing_it_incomplete(store, mon
     def failing_reverse(ids, *args, **kwargs):
         calls.append(set(ids))
         views = real_quotes(ids, *args, **kwargs)
-        views[reverse["id"]] = prices._failed([reverse["id"]], "store_unavailable")[reverse["id"]]
+        views[reverse["id"]] = prices._failed([reverse["id"]], "validation_unavailable")[reverse["id"]]
         return views
     monkeypatch.setattr(prices, "private_edition_quotes", failing_reverse)
     # reverse is held but cut from the Deck List; normal is listed and not owned.
     deck = deck_list_with({normal["id"]: 2}, held={reverse["id"]: 1})
     result = body_of(cost(deck))
-    assert (result["status"], result["reason"], result["total_copies"]) == ("incomplete", "store_unavailable", "1")
+    assert (result["status"], result["reason"], result["total_copies"]) == ("incomplete", "validation_unavailable", "1")
     assert (result["deck_list_cost"]["status"], result["deck_list_cost"]["amount"]) == ("priced", "0.5")
     assert result["cost_to_complete"] == result["deck_list_cost"]
     # One quote read covers the held and the listed Editions together.

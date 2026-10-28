@@ -23,7 +23,7 @@ const python = (code: string, argument: object) => {
     maxBuffer: 64 * 1024 * 1024,
   }).toString();
 };
-/** Catalog fixtures may use SQL and the importer; prices are written to the live stack's real record store. */
+/** Catalog fixtures may use SQL and the importer; prices are written to the live stack's database as price rows. */
 function seed(pagers = 0): Ids {
   const out = python(
     `import json, sys
@@ -146,7 +146,7 @@ test("card information shows each Edition's own price with age, stale and finish
       op: "quote",
       edition: ids["reverse-holofoil"],
       amount: "0.4349",
-      updated: null,
+      updated: ago(2),
     },
   ]);
   await signIn(page);
@@ -174,7 +174,7 @@ test("card information shows each Edition's own price with age, stale and finish
   const picked = card.getByRole("group", { name: "Selected Edition" });
   await expect(picked.locator(".edition-price")).toHaveCount(1);
   await expect(picked.locator(".edition-price")).toHaveText("$0.25");
-  // Picking the Reverse Holo: no provider time, and still only the amount.
+  // Picking the Reverse Holo: still only the amount.
   await card
     .getByRole("group", { name: "Editions" })
     .getByRole("button", { name: /^Reverse Holo/ })
@@ -186,7 +186,7 @@ test("card information shows each Edition's own price with age, stale and finish
   await expect(card).toContainText("Price unavailable");
   await expect(card).not.toContainText("finish not established");
 
-  // A quote over 48 hours old still shows its price, with no Stale label.
+  // A price from a snapshot over 48 hours old still shows, with no Stale label.
   apply([
     {
       op: "quote",
@@ -208,14 +208,23 @@ test("card information shows each Edition's own price with age, stale and finish
   await expect(card).toContainText("$0.25");
   await expect(card).toContainText("$0.43");
 
-  // Invalid cached decimals never render as a number.
-  apply([{ op: "quote", edition: ids.normal, amount: "1e3" }]);
+  // Only the market price is shown: an empty one is no price, even beside a low and a mid price.
+  apply([
+    {
+      op: "quote",
+      edition: ids.normal,
+      amount: null,
+      low: "5.00",
+      mid: "6.00",
+    },
+  ]);
   await search(page);
   card = await details(page, "Furret, DAA 1, Darkness Ablaze, Normal");
   await expect(card).toContainText("Price unavailable");
-  await expect(card).not.toContainText("1000");
+  await expect(card).not.toContainText("$5.00");
+  await expect(card).not.toContainText("$6.00");
 
-  // A PostgreSQL quarantine hides the quote before anything reaches the store.
+  // A PostgreSQL quarantine hides the price at once.
   apply([
     {
       op: "quote",

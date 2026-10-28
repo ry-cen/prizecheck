@@ -23,7 +23,7 @@ from app.public_records import public_record_store, quarantine_key
 from test_catalog_targets import isolated_rules, owner  # noqa: F401  (isolated_rules is autouse)
 from test_deck_cost import scheduler
 from test_holdings import add
-from test_prices import ago, client, headers_for, seed, world
+from test_prices import ago, client, headers_for, seed_quote as seed, world
 from test_publications import command, legacy_snapshot, stored_decks
 
 USER = "published-cost-owner"

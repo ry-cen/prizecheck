@@ -5,16 +5,13 @@ catalog search route, the order the collector sees. No real runner is ever start
 """
 from datetime import timedelta
 import json
-import time
 from uuid import uuid4
 
 import psycopg
 import pytest
 
 from app.main import app, connect  # noqa: F401
-from app import price_launcher, prices, quote_contract
-from app.public_projection import ProjectionUnavailable
-from app.public_records import public_record_store, result_key
+from app import prices
 from test_catalog_targets import isolated_rules  # noqa: F401  (autouse)
 from test_decks import create
 from test_deck_lists import add_line, change_line, code, detail
@@ -22,20 +19,10 @@ from test_holdings import call, client
 from test_prices import ago, seed, world
 
 
-@pytest.fixture(autouse=True)
-def store(tmp_path, monkeypatch):
-    monkeypatch.setenv("PUBLIC_PROJECTION_DIR", str(tmp_path))
-    monkeypatch.setenv("PUBLIC_PROJECTION_ADAPTER", "filesystem")
-    public_record_store().initialize(deadline=time.monotonic() + 5)
-    return public_record_store()
-
-
-@pytest.fixture(autouse=True)
-def launches(monkeypatch):
-    """Records any runner launch; choosing an Edition must never cause one."""
-    calls = []
-    monkeypatch.setattr(price_launcher, "spawn", lambda slot, owner: calls.append((slot, owner)) or True)
-    return calls
+@pytest.fixture
+def store():
+    """The first argument of ``seed``; prices live in PostgreSQL, so there is no store."""
+    return None
 
 
 def printings_path(deck):
@@ -80,15 +67,10 @@ def lines(body):
     return {line["edition_id"]: line["quantity"] for line in body["deck_list"]["lines"]}
 
 
-def scheduler(store):
-    key = quote_contract.scheduler_key()
-    return store.read_records([key], deadline=time.monotonic() + 5).records[key].value
-
-
 # ------------------------------------------------------------------ which Edition is chosen
 
 
-def test_the_edition_with_the_cheapest_stored_price_is_chosen_and_stored_as_an_ordinary_line(store, launches):
+def test_the_edition_with_the_cheapest_stored_price_is_chosen_and_stored_as_an_ordinary_line(store):
     owner = str(uuid4())
     printing, (first, second), by_id = furret_world(owner)
     seed(store, by_id[first], "0.50")
@@ -108,10 +90,9 @@ def test_the_edition_with_the_cheapest_stored_price_is_chosen_and_stored_as_an_o
     assert listed == body["deck_list"]
     assert all("chosen_by" not in line for line in listed["lines"])
     # A priced Edition later in catalog order beats an unpriced earlier one.
-    seed(store, by_id[first], result={"state": "absent", "checked_at": ago(timedelta(minutes=10))}, payload=False)
+    seed(store, by_id[first], None)
     seed(store, by_id[second], "7.00")
     assert chosen(add_printing(owner, deck_of(owner), printing, "1", 1)) == (second, "cheapest_price")
-    assert launches == []
 
 
 def test_a_response_stored_by_an_older_release_replays_with_every_display_field(store):
@@ -140,14 +121,14 @@ def test_a_response_stored_by_an_older_release_replays_with_every_display_field(
         assert replayed.json() == first.json()
 
 
-def test_equal_prices_go_to_catalog_order_and_a_zero_price_is_the_cheapest(store):
+def test_equal_prices_go_to_catalog_order_and_a_zero_price_is_no_price(store):
     owner = str(uuid4())
     printing, (first, second), by_id = furret_world(owner)
     seed(store, by_id[first], "0.25")
     seed(store, by_id[second], "0.250")
     assert chosen(add_printing(owner, deck_of(owner), printing, "1", 1)) == (first, "cheapest_price")
-    seed(store, by_id[second], "0")
-    assert chosen(add_printing(owner, deck_of(owner), printing, "1", 1)) == (second, "cheapest_price")
+    seed(store, by_id[second], "0")   # a zero market price is no price: it never wins as the cheapest
+    assert chosen(add_printing(owner, deck_of(owner), printing, "1", 1)) == (first, "cheapest_price")
 
 
 def test_with_no_stored_price_the_first_edition_in_catalog_order_is_chosen(store):
@@ -155,11 +136,11 @@ def test_with_no_stored_price_the_first_edition_in_catalog_order_is_chosen(store
     printing, (first, second), by_id = furret_world(owner)
     # Nothing cached at all.
     assert chosen(add_printing(owner, deck_of(owner), printing, "2", 1)) == (first, "catalog_order")
-    # Confirmed absent, pending, and a quote for another variant are not prices either.
-    seed(store, by_id[first], result={"state": "pending"})
-    seed(store, by_id[second], "0.01", variant="holofoil")
+    # An empty market price (even with a low and a mid), a zero one and an unbound row are not prices either.
+    seed(store, by_id[first], None, low="0.01", mid="0.02")
+    seed(store, by_id[second], "0.01", bind=False)
     assert chosen(add_printing(owner, deck_of(owner), printing, "2", 1)) == (first, "catalog_order")
-    seed(store, by_id[first], result={"state": "absent", "checked_at": ago(timedelta(minutes=10))}, payload=False)
+    seed(store, by_id[second], "0")
     assert chosen(add_printing(owner, deck_of(owner), printing, "2", 1)) == (first, "catalog_order")
 
 
@@ -215,33 +196,33 @@ def test_the_chosen_edition_never_changes_when_prices_change_later(store):
     assert chosen(add_printing(owner, deck_of(owner), printing, "1", 1)) == (second, "cheapest_price")
 
 
-def test_choosing_reads_only_the_cache_and_never_admits_a_refresh(store, launches):
+def test_choosing_reads_old_rows_as_they_are_and_writes_no_price_data(store):
     owner = str(uuid4())
     printing, (first, second), by_id = furret_world(owner)
-    # Both quotes are past the one-hour band and the cheaper one past the 24-hour band: a price display would refresh
-    # them, and wait for the second. Adding a card displays no price, so neither happens.
     seed(store, by_id[first], "0.50", checked=ago(timedelta(hours=2)))
     seed(store, by_id[second], "0.10", checked=ago(timedelta(hours=25)))
-    keys = [result_key(by_id[edition]["public_ref"], by_id[edition]["mapping_revision"]) for edition in (first, second)]
-    generation = store.read_records(keys, deadline=time.monotonic() + 5).generation
+
+    def stamps():
+        with connect() as conn:
+            return [sorted(r["x"] for r in conn.execute(f"SELECT xmin::text||':'||ctid::text AS x FROM {table}"))
+                    for table in ("tcgplayer_price", "tcgplayer_product", "edition_price_binding")]
+    before = stamps()
     assert chosen(add_printing(owner, deck_of(owner), printing, "1", 1)) == (second, "cheapest_price")
-    assert launches == []
-    assert scheduler(store) is None
-    assert store.read_records(keys, deadline=time.monotonic() + 5).generation == generation
+    assert stamps() == before
 
 
-def test_an_unreadable_price_cache_writes_nothing_and_a_retry_can_succeed(store, monkeypatch):
+def test_an_unreadable_price_read_writes_nothing_and_a_retry_can_succeed(store, monkeypatch):
     owner = str(uuid4())
     printing, (first, second), by_id = furret_world(owner)
     seed(store, by_id[second], "0.10")
     deck = deck_of(owner)
 
-    def unavailable():
-        raise ProjectionUnavailable()
+    def unavailable(*args, **kwargs):
+        raise psycopg.OperationalError("down")
     key = uuid4()
     # monkeypatch.context(), not monkeypatch.undo(): undo would also drop the store fixture's environment.
     with monkeypatch.context() as patch:
-        patch.setattr(prices, "public_record_store", unavailable)
+        patch.setattr(prices, "_read_rows", unavailable)
         failed = add_printing(owner, deck, printing, "1", 1, key)
     assert failed.status_code == 503 and code(failed) == "PRICES_UNAVAILABLE"
     assert detail(owner, deck)["deck_list"] == {"revision": 1, "lines": []}
@@ -249,17 +230,15 @@ def test_an_unreadable_price_cache_writes_nothing_and_a_retry_can_succeed(store,
     assert chosen(retried) == (second, "cheapest_price")
     # A replay never needs the cache.
     with monkeypatch.context() as patch:
-        patch.setattr(prices, "public_record_store", unavailable)
+        patch.setattr(prices, "_read_rows", unavailable)
         assert add_printing(owner, deck, printing, "1", 1, key).json() == retried.json()
 
 
-def test_stale_and_unknown_age_quotes_still_count_as_prices(store):
+def test_stale_prices_still_count_as_prices(store):
     owner = str(uuid4())
     printing, (first, second), by_id = furret_world(owner)
     seed(store, by_id[first], "0.50")
     seed(store, by_id[second], "0.10", updated=ago(timedelta(hours=72)))
-    assert chosen(add_printing(owner, deck_of(owner), printing, "1", 1)) == (second, "cheapest_price")
-    seed(store, by_id[second], "0.10", updated=None)
     assert chosen(add_printing(owner, deck_of(owner), printing, "1", 1)) == (second, "cheapest_price")
 
 
@@ -282,7 +261,7 @@ def test_a_failed_target_read_is_prices_unavailable_and_writes_nothing(store, mo
     def broken(*args, **kwargs):
         raise psycopg.OperationalError("down")
     with monkeypatch.context() as patch:
-        patch.setattr(prices, "_read_targets", broken)
+        patch.setattr(prices, "_read_rows", broken)
         failed = add_printing(owner, deck, printing, "1", 1)
     assert failed.status_code == 503 and code(failed) == "PRICES_UNAVAILABLE"
     assert detail(owner, deck)["deck_list"] == {"revision": 1, "lines": []}

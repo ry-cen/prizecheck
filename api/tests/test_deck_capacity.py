@@ -98,8 +98,26 @@ def capacity_world(count, owner):
     return [{**row, "quantity": 1 + row["n"] % 3, "held": 1 + row["n"] % 3 - (row["n"] % 4 == 0)} for row in rows]
 
 
+def seed_price_rows(editions):
+    """The private readers' data: a $0.25 market price and a binding for every Edition but each tenth, which is bound to a
+    product that has no price row. Set-based."""
+    priced = [edition for edition in editions if edition["n"] % 10 != 0]
+    with connect() as conn, conn.transaction():
+        conn.execute("DELETE FROM tcgplayer_price")
+        conn.execute("""INSERT INTO tcgplayer_price(product_id,sub_type_name,market_price,seen_at,source_updated_at)
+          SELECT 900000+n,'Normal',%s,now(),now()-interval '1 day' FROM unnest(%s::int[]) n""",
+                     (PRICE, [edition["n"] for edition in priced]))
+        conn.execute("""INSERT INTO edition_price_binding(edition_id,product_id,mapping_revision,sub_type_name)
+          SELECT id,900000+n,rev,'Normal' FROM unnest(%s::uuid[],%s::int[],%s::bigint[]) AS t(id,n,rev)
+          ON CONFLICT (edition_id) DO UPDATE SET product_id=EXCLUDED.product_id,mapping_revision=EXCLUDED.mapping_revision,
+            sub_type_name='Normal',reason=NULL""",
+                     ([e["id"] for e in editions], [e["n"] for e in editions], [e["mapping_revision"] for e in editions]))
+
+
 def seed_quotes(store, editions):
-    """Every tenth Edition is a fresh confirmed absence; every other one a fresh $0.25 quote. 64 Editions per commit."""
+    """The record-store half (the public Published Deck readers, until P5b) and the PostgreSQL half (the private readers).
+    Every tenth Edition is a fresh confirmed absence; every other one a fresh $0.25 quote. 64 Editions per commit."""
+    seed_price_rows(editions)
     checked = ago(timedelta(minutes=10))
     for offset in range(0, len(editions), 64):
         changes = {}

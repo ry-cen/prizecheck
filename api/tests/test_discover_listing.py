@@ -33,7 +33,7 @@ from test_catalog_reconciliation import run
 from test_deck_format_checks import CARDS
 from test_holdings import add, call
 from test_moves import leaf
-from test_prices import ago, client, seed
+from test_prices import ago, client, seed_quote as seed
 from test_publications import command, edition_refs, legacy_snapshot
 from test_published_cost import USER, generation, launches, listed_deck, store  # noqa: F401  (store, launches: autouse)
 from test_target_format import set_target

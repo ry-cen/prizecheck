@@ -23,8 +23,6 @@ from .format_standing import rebuild_stale_best_effort
 from .evolution_roots import refresh_evolution_roots
 from .catalog_targets import (IDENTITY_REVIEW_KINDS, MatchingRulesV1, TargetContext, ensure_matching_rule, refresh_editions,
                               refresh_printing)
-from . import quote_contract
-from .price_seed import seed_from_import
 from .price_binding import rebind_best_effort
 from .public_catalog import publish_catalog_best_effort
 from .reprint_groups import refresh_reprint_groups
@@ -155,22 +153,11 @@ def variant_descriptors(record: dict) -> tuple[list[dict], bool]:
     return descriptors, ambiguous
 
 
-# The only parts of a card the price runner's quote selection reads (tcgdex_record.select_quote, priced_variant).
-PRICE_VIEW_KEYS = ("id", "pricing", "variants_detailed")
-
-
-def price_view(record):
-    """The parts of a card that price selection reads, or None when the response is not a card."""
-    return {key: record[key] for key in PRICE_VIEW_KEYS if key in record} if isinstance(record, dict) else None
-
-
 class TCGdexSource:
     def __init__(self):
         self.client = httpx.Client(timeout=20, follow_redirects=False,
                                    limits=httpx.Limits(max_connections=MAX_WORKERS, max_keepalive_connections=MAX_WORKERS))
         self.excluded_sets, self.excluded_ids = frozenset(), frozenset()
-        # source_id -> (exact-text price view, epoch ms it arrived); an import seeds the price cache from it (ADR 0013).
-        self.price_views = {}
 
     def _response(self, url: str):
         for attempt in range(12):
@@ -252,9 +239,6 @@ class TCGdexSource:
         data = response.json()
         if not isinstance(data, dict) or data.get("id") != source_id:
             raise CatalogError("Full record source ID mismatch")
-        # The same bytes again with exact decimal text, as the price runner parses a card (price_source.fetch). The
-        # import's own record above is unchanged, so its fingerprints and quote candidates are too (ADR 0007).
-        self.price_views[source_id] = (price_view(response.json(parse_float=str)), quote_contract.wall_ms())
         return data
 
 
@@ -766,18 +750,13 @@ def _promote(conn, run_id: UUID, first, records, normalized, release_dates, raw,
 
 
 def _publish_after_commit(conn, run_id: UUID, source) -> None:
-    """Rebuild Format Standing, publish the public catalog and seed prices once the import is committed."""
+    """Rebuild Format Standing, publish the public catalog and bind prices once the import is committed."""
     # The import is committed. Stored Format Standing is keyed by the catalog and attribute revisions, so every
     # Format is stale now: rebuild it before the unbounded delivery below. Best effort; the next reader rebuilds.
     rebuild_stale_best_effort()
     # Public catalog records are a derived copy: a failure
     # here is reported and recoverable by backfill, never a failed or rolled-back run.
     publish_catalog_best_effort(conn)
-    # Seed the price cache from the cards this run received, after the commit and the catalog records it is
-    # checked against (ADR 0013). seed_from_import never raises, so it never changes the run's outcome.
-    price_views = getattr(source, "price_views", None)
-    if price_views:
-        seed_from_import(conn, run_id, dict(price_views))
     # Bind the new verified Editions to their product subtype (ADR 0019). Logged, never raises.
     rebind_best_effort()
 
