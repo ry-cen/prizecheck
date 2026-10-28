@@ -158,6 +158,31 @@ def test_a_correction_takes_effect_on_the_owners_request_and_only_the_owners():
     assert effective(printing).basic_energy is True and revision() == before + 1
 
 
+def test_the_owner_can_review_a_printing_nobody_reported_with_the_same_reason_and_evidence_rules():
+    ids = seed()
+    printing = ids["sv04-266"]
+    queued = lambda: [item["printing_id"] for item in call("GET", f"{ADMIN}/queue", OWNER).json()["items"]]
+    assert printing not in queued()  # a derived TCGdex Printing with no report is not queued
+    shown = evidence(printing)
+    assert (shown["reports"], shown["report_ids"], shown["correction"]) == ([], [], None)
+    assert call("GET", f"{ADMIN}/{uuid4()}", OWNER).status_code == 404
+    before = revision()
+    # The same rules as a reported card: a reason, an evidence URL and the evidence digest are required.
+    assert decide(printing, correction={"basic_energy": True}, reason=" ").status_code == 422
+    assert decide(printing, correction={"basic_energy": True}, evidence_url="not a url").status_code == 422
+    assert decide(printing, correction={"basic_energy": True}, digest="0" * 64).status_code == 409
+    assert decide(printing, correction={"basic_energy": True}, report_ids=[str(uuid4())]).status_code == 422
+    assert revision() == before and effective(printing).basic_energy is not True
+    approved = decide(printing, correction={"basic_energy": True})
+    assert approved.status_code == 200, approved.text
+    assert approved.json()["closed_report_ids"] == [] and revision() == before + 1
+    assert effective(printing).basic_energy is True
+    history = call("GET", f"{ADMIN}/{printing}/history", OWNER).json()
+    assert [(row["decision"], row["reviewer_id"]) for row in history] == [("correct", OWNER)]
+    assert printing not in queued()  # a reviewed derived Printing still never enters the queue
+    assert decide(printing, "remove").status_code == 200 and effective(printing).basic_energy is not True
+
+
 def test_an_approved_correction_overrides_derived_values_closes_reports_and_advances_the_revision_once():
     ids = seed()
     statuses = deck_with(*(edition_of(source_id) for source_id in ("bw1-105", "tk-hs-g-10", "sv04-266", "sv01-032")))

@@ -6,6 +6,7 @@ import {
 import { Button } from "../ui/Button";
 import { useToast } from "../ui/Toast";
 import { AttributeReviewCard } from "./AttributeReviewCard";
+import { AttributeSearch } from "./AttributeSearch";
 import { queueKind } from "./attributeValues";
 import { ReviewQueue } from "./ReviewQueue";
 
@@ -116,6 +117,20 @@ export function AttributesQueue({ onDecided }: { onDecided: () => void }) {
       }}
       onRefresh={() => void load()}
       status={status}
+      before={
+        <AttributeSearch
+          queued={(printingId) =>
+            items.some((item) => item.printing_id === printingId)
+          }
+          onOpenQueued={setOpen}
+          onDone={(message) => {
+            toast.show({ message });
+            onDecided();
+            // A manual Printing may have left or joined the queue.
+            void load();
+          }}
+        />
+      }
       after={
         next && (
           <div>

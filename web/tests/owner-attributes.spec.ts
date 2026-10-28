@@ -237,6 +237,82 @@ test.describe("desktop", () => {
     await expect(queueRow(page, "Switch")).toHaveCount(1);
   });
 
+  test("Review any card finds a Printing nobody reported and corrects it with a reason and evidence", async ({
+    page,
+  }) => {
+    seedCatalog();
+    await signInAsOwner(page);
+    await openAttributes(page);
+    await expect(page.getByText("Nothing waits for review.")).toBeVisible();
+    const search = page.getByRole("searchbox", {
+      name: "Find a card to review",
+    });
+    await search.fill("Bulbasaur");
+    await page.getByRole("button", { name: "Find", exact: true }).click();
+    await page
+      .getByRole("combobox", { name: "Printing to review" })
+      .selectOption({ label: "Bulbasaur · me01 · 001" });
+    await page.getByRole("button", { name: "Review card" }).click();
+
+    const card = reviewCard(page, "Bulbasaur");
+    await expect(card.getByLabel("Reason")).toBeFocused();
+    await expect(
+      card.getByRole("region", { name: "Collector reports" })
+    ).toHaveCount(0);
+    const confirm = card.getByRole("button", { name: "Confirm decision" });
+    await card
+      .getByRole("combobox", { name: "Regulation mark", exact: true })
+      .selectOption("H");
+    await expect(confirm).toBeDisabled();
+    await card.getByLabel("Reason").fill("Printed as H");
+    await card
+      .getByLabel("Review evidence URL")
+      .fill("https://example.org/bulbasaur-scan");
+    await expect(confirm).toBeEnabled();
+    await expectPageChecks(
+      page,
+      "Owner controls, Attributes review any card open (desktop)"
+    );
+    await confirm.click();
+
+    await expect(
+      page.getByRole("region", { name: "Notifications" })
+    ).toContainText("Attributes corrected: Bulbasaur.");
+    await expect(card).toHaveCount(0);
+    await expect(search).toBeFocused();
+    await expect
+      .poll(
+        async () =>
+          (
+            await query<{ regulation_mark: string | null }>(
+              "SELECT c.regulation_mark FROM catalog_attribute_correction c JOIN catalog_printing p ON p.id=c.printing_id WHERE p.source_id='me01-001'"
+            )
+          )[0]?.regulation_mark
+      )
+      .toBe("H");
+  });
+
+  test("Review any card opens a Printing that is already queued in its queue row", async ({
+    page,
+  }) => {
+    seedCatalog();
+    await signInAsOwner(page);
+    await reportSwitch(page, { trainer_type: "item" });
+    await openAttributes(page);
+    await page
+      .getByRole("searchbox", { name: "Find a card to review" })
+      .fill("Switch");
+    await page.getByRole("button", { name: "Find", exact: true }).click();
+    await page
+      .getByRole("combobox", { name: "Printing to review" })
+      .selectOption({ label: "Switch · me01 · 130" });
+    await page.getByRole("button", { name: "Review card" }).click();
+    await expect(
+      queueRow(page, "Switch").getByRole("button", { name: "Review Switch" })
+    ).toHaveAttribute("aria-expanded", "true");
+    await expect(reviewCard(page, "Switch")).toHaveCount(1);
+  });
+
   test("Close returns focus to Review, and Reject report needs only the reason", async ({
     page,
   }) => {
