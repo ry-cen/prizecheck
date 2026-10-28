@@ -13,7 +13,7 @@ This repository uses a single-context domain-documentation layout.
 /
 ├── CONTEXT.md
 ├── docs/
-│   └── adr/
+│ └── adr/
 └── src/
 
 ## Vocabulary
