@@ -63,13 +63,16 @@ if 'run' in args and 'auth' in args:
     wanted = [a for a in args if a.startswith('SIGNUP_READINESS_FILE=')][0].split('=', 1)[1]
     proof = os.path.join(mount[0], os.path.basename(wanted))
     js = args[args.index('-e', args.index('auth')) + 1].replace('/app/auth/signup.js', os.environ['FAKE_SIGNUP_MODULE'])
+    keys = ('EMAIL_SIGN_IN', 'MAIL_MODE', 'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'DISCORD_CLIENT_ID', 'DISCORD_CLIENT_SECRET')
     settings = {}
     for line in open(os.environ['FAKE_ENV_FILE']).read().splitlines():
         if '=' in line and not line.startswith('#'):
             key, value = line.split('=', 1)
-            if key in ('EMAIL_SIGN_IN', 'MAIL_MODE', 'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'DISCORD_CLIENT_ID', 'DISCORD_CLIENT_SECRET'):
+            if key in keys:
                 settings[key] = value
-    env = dict(os.environ, **settings, SIGNUP_MODE=os.environ['PRIZECHECK_SIGNUP_MODE'], RELEASE_COMMIT=os.environ['PRIZECHECK_IMAGE_TAG'],
+    # Like the container, these come only from the env file: scripts/ci.sh exports fake provider credentials.
+    inherited = {key: value for key, value in os.environ.items() if key not in keys}
+    env = dict(inherited, **settings, SIGNUP_MODE=os.environ['PRIZECHECK_SIGNUP_MODE'], RELEASE_COMMIT=os.environ['PRIZECHECK_IMAGE_TAG'],
                SIGNUP_READINESS_FILE=proof, NODE_ENV='production')
     with open(os.environ['FAKE_LOG'], 'a') as log:
         log.write(json.dumps({'check': True, 'mode': os.environ['PRIZECHECK_SIGNUP_MODE'], 'mount': mount[0]}) + '\n')
