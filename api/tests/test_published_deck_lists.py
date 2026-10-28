@@ -33,7 +33,7 @@ JUNIPER_NAME = "Professor's Research (Professor Juniper)"
 MAGNOLIA_NAME = "Professor's Research (Professor Magnolia)"
 SNAPSHOT_KEYS = {'title', 'published_at', 'version', 'target_format', 'total', 'identities', 'checks'}
 EDITION_KEYS = {'set_id', 'set_name', 'collector_number', 'variant', 'image_url', 'quantity', 'edition_ref', 'printing_ref',
-                'printing_name', 'card_kind', 'trainer_type', 'evolves_from', 'evolution_root', 'evolution_stage'}
+                'printing_name', 'large_image_url', 'card_kind', 'trainer_type', 'evolves_from', 'evolution_root', 'evolution_stage'}
 
 
 def ok(response):

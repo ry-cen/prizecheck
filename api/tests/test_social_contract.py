@@ -61,7 +61,7 @@ REACH_CALLERS = {'social/friend_copies.py', 'social/discovery.py'}
 # Conversations (trading #298): only social/conversations.py (and the future reports module) may name the message and
 # member tables in SQL. Matched against string constants, never docstrings.
 MESSAGE_TABLE = re.compile(
-    r'(?:\bFROM|\bJOIN|\bUPDATE|\bINTO|\bUSING|\bTRUNCATE(?:\s+TABLE)?|\bLATERAL|,|\()\s*(?:ONLY\s+)?(?:"?\w+"?\s*\.\s*)?"?'
+    r'(?:\bFROM|\bJOIN|\bUPDATE|\bINTO|\bUSING|\bTRUNCATE(?:\s+TABLE)?|\bLATERAL|,|(?<!%)\()\s*(?:ONLY\s+)?(?:"?\w+"?\s*\.\s*)?"?'
     r'(?:message|conversation_member)"?\b', re.IGNORECASE)
 MESSAGE_CALLERS = {'social/conversations.py', 'social/reports.py'}
 LISTABLE_CALL = re.compile(r'\btrade_listable\s*\(')
@@ -666,7 +666,8 @@ def test_the_message_guard_matches_sql_and_never_docstrings():
         assert any(MESSAGE_TABLE.search(text) for text in string_constants(f'SQL = {sql!r}\n')), sql
     described = 'def f():\n    """Reads FROM message and JOIN conversation_member."""\n    return 1\n'
     assert not any(MESSAGE_TABLE.search(text) for text in string_constants(described))
-    for text in ("NOTE = 'message'\n", 'BODY = {"code": "X", "message": "y"}\n', "SQL = 'SELECT 1 FROM message_log'\n"):
+    for text in ("NOTE = 'message'\n", 'BODY = {"code": "X", "message": "y"}\n', "SQL = 'SELECT 1 FROM message_log'\n",
+                 'FORMAT = "%(asctime)s %(name)s %(message)s"\n'):
         assert not any(MESSAGE_TABLE.search(found) for found in string_constants(text)), text
 
 

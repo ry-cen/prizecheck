@@ -324,6 +324,7 @@ describe("live Better Auth boundary", () => {
       expect(Object.keys(shown.identities[0].editions[0]).sort()).toEqual(
         [
           ...Object.keys(edition),
+          "large_image_url",
           "card_kind",
           "trainer_type",
           "evolves_from",
