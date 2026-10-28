@@ -362,6 +362,91 @@ test.describe("desktop", () => {
     await expect(inDialog).toHaveCount(70);
   });
 
+  test("editing the queue after an add that may have completed settles that add first, so no copy is added twice (#175)", async ({
+    page,
+  }) => {
+    seedPopup();
+    await signIn(page);
+    await mode(page, "Add to a Location").click();
+    // The first batch add commits on the server, but its answer never arrives.
+    let dropped = false;
+    const keys: string[] = [];
+    await page.route("**/api/holdings/batch", async (route) => {
+      keys.push(
+        (route.request().postDataJSON() as { idempotency_key: string })
+          .idempotency_key
+      );
+      if (!dropped) {
+        dropped = true;
+        await route.fetch();
+        await route.abort("failed");
+        return;
+      }
+      await route.continue();
+    });
+    const bar = addBar(page);
+    await more(page, BULBASAUR).click();
+    await bar.getByRole("button", { name: "Add 1 card" }).click();
+    await expect(bar).toContainText(
+      "Adding may have completed. Press Add again to check safely."
+    );
+
+    // The collector edits the queue, then presses Add: the first batch is replayed under its own key, and the
+    // edited one is not sent.
+    await more(page, CANDY).click();
+    await bar.getByRole("button", { name: "Add 2 cards" }).click();
+    await expect(toast(page)).toHaveText("Added 1 card to Unsorted.");
+    await expect(queued(page)).toHaveText([`1× ${BULBASAUR}`, `1× ${CANDY}`]);
+    expect(keys).toHaveLength(2);
+    expect(keys[1]).toBe(keys[0]);
+    const response = await page.request.get(`${ORIGIN}/api/location-tree`);
+    const unsorted = (
+      (await response.json()) as { locations: TreeNode[] }
+    ).locations.find((node) => node.name === "Unsorted")!.id;
+    expect(await held(page, unsorted)).toEqual(["1 Bulbasaur"]);
+
+    // The edited queue goes on its own key when the collector presses Add again.
+    await bar.getByRole("button", { name: "Add 2 cards" }).click();
+    await expect(toast(page)).toHaveText("Added 2 cards to Unsorted.");
+    expect(keys).toHaveLength(3);
+    expect(keys[2]).not.toBe(keys[0]);
+    expect(await held(page, unsorted)).toEqual(["1 Rare Candy", "2 Bulbasaur"]);
+  });
+
+  test("an Undo that finishes after a newer toast came leaves the newer toast alone (#177)", async ({
+    page,
+  }) => {
+    seedPopup();
+    await signIn(page);
+    await mode(page, "Add to a Location").click();
+    await more(page, BULBASAUR).click();
+    await addBar(page).getByRole("button", { name: "Add 1 card" }).click();
+    await expect(toast(page)).toHaveText("Added 1 card to Unsorted.");
+
+    // The Undo is applied, but its answer waits until another add has shown its own toast.
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    await page.route("**/api/moves/undo/**", async (route) => {
+      const response = await route.fetch();
+      await held;
+      await route.fulfill({ response });
+    });
+    await undo(page).click();
+    await more(page, CANDY).click();
+    await addBar(page).getByRole("button", { name: "Add 1 card" }).click();
+    await expect(toast(page)).toHaveText("Added 1 card to Unsorted.");
+    await expect(undo(page)).toBeVisible();
+    release();
+    // The Undo's result reaches the tiles but not the toast.
+    await expect(
+      tile(page, "Bulbasaur, MEG 001, Mega Evolution, Normal")
+    ).toHaveAccessibleName(
+      "Bulbasaur, MEG 001, Mega Evolution, Normal, not owned"
+    );
+    await expect(toast(page)).toHaveText("Added 1 card to Unsorted.");
+    await expect(undo(page)).toBeVisible();
+  });
+
   test("from All owned, Add cards asks for a Location and leaves you in it", async ({
     page,
   }) => {

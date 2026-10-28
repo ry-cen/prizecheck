@@ -41,6 +41,8 @@ type ToastApi = {
   update: (id: number, toast: ToastInput) => void;
   /** Takes the toast down. With an id, only while that toast is the one on screen. */
   dismiss: (id?: number) => void;
+  /** Whether the toast with this id is still the one on screen (a newer one replaces it). */
+  isShown: (id: number) => boolean;
   /** Focuses the first usable button of the toast with this id. False when it isn't on screen. */
   focus: (id: number) => boolean;
   /** Raises the toast this many px for one bottom bar, so it clears them all: it rises by the sum of every
@@ -111,6 +113,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         setToast((current) =>
           id === undefined || current?.id === id ? null : current
         ),
+      isShown: (id) => shownId.current === id,
       focus: (id) => {
         if (shownId.current !== id) return false;
         const button = firstButton();

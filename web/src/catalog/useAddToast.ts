@@ -89,16 +89,19 @@ export function useAddToast({ shown, onUndone }: Options) {
     try {
       const result = await applyUndo(added.undoId, key);
       keys.current.delete(added.undoId);
-      show(addUndoneText(result.copy_count, added.path), null, true);
+      // The copies are out either way; the message only replaces this toast, never a newer one (#196).
+      if (kit.isShown(toastId))
+        show(addUndoneText(result.copy_count, added.path), null, true);
       live.current(added, result.owner_revision);
     } catch (cause) {
       const retry = !(cause instanceof MoveError) || cause.status >= 500;
       if (!retry) keys.current.delete(added.undoId);
-      show(
-        addUndoFailed(cause instanceof MoveError ? cause.code : "", retry),
-        retry ? added : null,
-        true
-      );
+      if (kit.isShown(toastId))
+        show(
+          addUndoFailed(cause instanceof MoveError ? cause.code : "", retry),
+          retry ? added : null,
+          true
+        );
     } finally {
       busy.current = false;
     }
