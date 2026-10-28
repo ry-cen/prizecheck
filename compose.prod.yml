@@ -19,6 +19,10 @@ services:
       MAIL_MODE: ${MAIL_MODE:-http}
       # Only the web container's nginx may tell the gateway the client's address (X-Real-IP).
       TRUSTED_PROXY_IPS: 10.201.80.10
+    # The readiness proof the host script validated for this release (signup-active/, not the operator's signup/ edits;
+    # docs/signup-readiness.md). The directory is mounted, not the file: a missing file would become a directory.
+    volumes:
+      - ./signup-active:/run/prizecheck/signup:ro
   web:
     networks:
       edge:

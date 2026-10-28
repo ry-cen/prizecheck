@@ -99,7 +99,11 @@ services:
       MAIL_RELAY_URL: ${MAIL_RELAY_URL:-}
       MAIL_RELAY_TOKEN: ${MAIL_RELAY_TOKEN:-}
       MAIL_FROM: ${MAIL_FROM:-}
-      SIGNUP_MODE: owner-only
+      # The host script computes PRIZECHECK_SIGNUP_MODE for every call (owner-only unless the env file asks for public and
+      # the readiness proof is valid for this release's commit; docs/signup-readiness.md). Never read from the env file.
+      SIGNUP_MODE: ${PRIZECHECK_SIGNUP_MODE:-owner-only}
+      RELEASE_COMMIT: ${PRIZECHECK_IMAGE_TAG:-}
+      SIGNUP_READINESS_FILE: /run/prizecheck/signup/${PRIZECHECK_IMAGE_TAG:-none}.json
       # Email-code sign-in is off unless EMAIL_SIGN_IN=on. With no provider credentials and email off the gateway refuses
       # to start, so keep EMAIL_SIGN_IN=on in the env file until Google or Discord is registered (spec launch checklist).
       EMAIL_SIGN_IN: ${EMAIL_SIGN_IN:-off}

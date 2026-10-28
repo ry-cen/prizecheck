@@ -68,9 +68,9 @@ No mail relay: with OAuth sign-in and `EMAIL_SIGN_IN=off`, production sends no m
 
 ### Launch blockers that remain open
 
-A working pipeline doesn't open the site to the public. Public signup stays `owner-only`: only the account whose verified email is `OWNER_EMAIL` can create an account. These items are still open, and this guide doesn't clear any of them:
+A working pipeline doesn't open the site to the public. Public signup stays `owner-only` (`SIGNUP_MODE=owner-only` in the env file): only the account whose verified email is `OWNER_EMAIL` can create an account. Opening it is a separate operator step ([Opening signup](#opening-signup)). These items are still open, and this guide doesn't clear any of them:
 
-- real mail delivery and public signup ([signup readiness](signup-readiness.md));
+- the readiness proof for public signup and, if you turn email sign-in on, real mail delivery ([signup readiness](signup-readiness.md));
 - the scanner rights check ([scanner launch checklist](planning/card-scanner/launch-checklist.md));
 - the provider, storage and scheduling boundaries ([deployment boundaries](deployment-boundaries.md));
 - the release gate ([release tooling](operations/release.md)).
@@ -225,15 +225,16 @@ Remember that this firewall does not govern ports Docker publishes. The `web` co
 
 Everything lives under `/opt/prizecheck-prod`:
 
-| Path                                     | Contents                                                     |
-| ---------------------------------------- | ------------------------------------------------------------ |
-| `bin/prizecheck-deploy.sh`               | The deploy script                                            |
-| `compose.deploy.yml`, `compose.prod.yml` | The stack and the production overlay                         |
-| `prizecheck.env`                         | The env file (mode 600; step 7)                              |
-| `data/`                                  | PostgreSQL, the public projection store, price runners, mail |
-| `state/`, `backups/`                     | Release state and logs; database dumps and archives          |
+| Path                                     | Contents                                                                                                          |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `bin/prizecheck-deploy.sh`               | The deploy script                                                                                                 |
+| `compose.deploy.yml`, `compose.prod.yml` | The stack and the production overlay                                                                              |
+| `prizecheck.env`                         | The env file (mode 600; step 7)                                                                                   |
+| `data/`                                  | PostgreSQL, the public projection store, price runners, mail                                                      |
+| `state/`, `backups/`                     | Release state and logs; database dumps and archives                                                               |
+| `signup/`, `signup-active/`              | The signup readiness proof you edit, and the validated copy the gateway reads ([Opening signup](#opening-signup)) |
 
-The script finds its home as the parent of its `bin/` directory, so keep that layout. `setup` (step 7) creates `data/`, `state/` and `backups/`.
+The script finds its home as the parent of its `bin/` directory, so keep that layout. `setup` (step 7) creates `data/`, `state/`, `backups/`, `signup/` and `signup-active/`.
 
 On the instance:
 
@@ -317,6 +318,7 @@ Edit `prizecheck.env` (`sudo nano prizecheck.env`):
 | `EMAIL_SIGN_IN`                              | `off`. Leave the `MAIL_RELAY_*` and `MAIL_FROM` lines commented out                           |
 | `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET` | From step 6. Leave the `GOOGLE_*` pair empty                                                  |
 | `DAILY_SEND_CAP`, `DAILY_SIGNUP_CAP`         | Whole numbers; the example's `100` is fine                                                    |
+| `SIGNUP_MODE`                                | `owner-only`. Only [Opening signup](#opening-signup) changes it                               |
 | `MARKETPLACE_MATCHING`                       | Leave it commented out, so rule activation stays owner-approved                               |
 
 The file may contain only `KEY=value` lines, comments and blank lines. The script refuses `export KEY=...`, indented keys, `KEY: value`, a space between `=` and the value, a quoted value that doesn't close on its own line, and a backslash inside a quoted value (escaped quotes are not supported), because Docker Compose would read those lines differently from the script's own checks. It names the offending line number. Values stay in this file only: they aren't in the repository or GitHub, and the script reads individual keys without printing them.
@@ -666,6 +668,42 @@ journalctl -u caddy --since '10 minutes ago' --no-pager | grep -c forced-502-mar
 ```
 
 The count must be `0`. Caddy may well log that the upstream refused the connection, but the line must not contain the request path or the client address. If the marker appears, the Caddyfile's `log default { exclude ... }` block isn't doing its job on this Caddy version: don't announce the site, since published-deck URLs are capability links, and fix the Caddyfile first. Run `status` afterwards to confirm `web` is healthy again. This check can't cover everything: Caddy's `http.stdlib` logger can still record client IP addresses when a TLS handshake fails. Those lines carry no request path, but they are not excluded.
+
+## Opening signup
+
+Production starts owner-only. The gateway opens signup only while a readiness proof (version 2, described in [signup readiness](signup-readiness.md)) names the exact commit that is running. Do this only after you have actually done the checks the proof attests to.
+
+You edit the proof in `/opt/prizecheck-prod/signup/readiness.json`. The gateway never reads that file. When the script starts a release (a deploy, a rollback or `signup-apply`), it checks the file with that release's own gateway code and, only if it passes, copies it to `signup-active/<commit>.json`, one file per release; the gateway container mounts that directory. A deploy keeps the running release's file until the new gateway is up, then deletes the others. So editing `readiness.json` is safe at any time and takes effect only through a deploy or `signup-apply`; a gateway that restarts by itself (crash, reboot) keeps reading the copy that was checked.
+
+1. Write the proof. `setup` created the directory (root-owned). The file must be owned by root and not writable by group or others; it need not be readable by anyone else, because the gateway reads only the copy the script publishes. It holds attestation flags and where the evidence lives, no secrets:
+
+   ```bash
+   sudo nano /opt/prizecheck-prod/signup/readiness.json
+   sudo chown root:root /opt/prizecheck-prod/signup/readiness.json
+   sudo chmod 600 /opt/prizecheck-prod/signup/readiness.json
+   ```
+
+   `releaseCommit` is the full commit of the running release (`status` prints it). `providerSignInVerified` must list every provider you configured.
+
+2. Set `SIGNUP_MODE=public` in `prizecheck.env`, then validate. `check-config` refuses a missing, symlinked, non-root-owned or group/world-writable proof, and warns when the proof names a commit other than the current release:
+
+   ```bash
+   sudo bash /opt/prizecheck-prod/bin/prizecheck-deploy.sh check-config
+   ```
+
+3. Apply it:
+
+   ```bash
+   sudo bash /opt/prizecheck-prod/bin/prizecheck-deploy.sh signup-apply
+   ```
+
+   The last line is `Signup mode for release <commit>: public` or `owner-only`; when it is `owner-only` the line before it says why (for example `readiness proof names commit X, not Y`, `Signup readiness incomplete`, or that the check could not run). When the mode or the proof changed, `signup-apply` restarts the gateway, and `/api` is unavailable for about 5 to 15 seconds; when neither changed it restarts nothing. `status` shows the mode the running gateway has.
+
+**After every release or rollback** the proof names the wrong commit, and that release runs owner-only: the deploy never fails or crash-loops over the proof, it just doesn't open signup. Once you have re-checked the new release, update `releaseCommit` (and anything else that changed) and run `signup-apply` again.
+
+**To close signup**, set `SIGNUP_MODE=owner-only` in `prizecheck.env` and run `signup-apply`. Deleting or editing `readiness.json` alone closes nothing: the running gateway keeps its copy until the next deploy or `signup-apply`.
+
+`SIGNUP_MODE` accepts only `owner-only` and `public`, and `public` only in production. `PRIZECHECK_SIGNUP_MODE` is computed by the script for each release; the env file may not set it.
 
 ## Updating the host files
 

@@ -114,10 +114,22 @@ class DeployPipelineTest(unittest.TestCase):
         self.assertEqual(gateway, realip)
 
     def test_dev_compose_keeps_dev_behaviour(self):
-        for kept in ('TRUSTED_PROXY_IPS: ""', 'MARKETPLACE_MATCHING: automatic', 'SIGNUP_MODE: owner-only',
+        for kept in ('TRUSTED_PROXY_IPS: ""', 'MARKETPLACE_MATCHING: automatic', 'SIGNUP_MODE: ${PRIZECHECK_SIGNUP_MODE:-owner-only}',
                      '"${PRIZECHECK_WEB_BIND:-127.0.0.1}:${PRIZECHECK_WEB_PORT:-8088}:8080"'):
             self.assertIn(kept, COMPOSE_DEV)
         self.assertNotIn('ipam', COMPOSE_DEV)
+
+    def test_signup_mode_comes_only_from_the_host_script(self):
+        compose = uncommented(COMPOSE_DEV)
+        # The default is owner-only; the env file's own SIGNUP_MODE is never interpolated, and the script refuses a
+        # PRIZECHECK_SIGNUP_MODE there.
+        self.assertEqual(re.findall(r'\$\{[^}]*SIGNUP_(?:MODE|READINESS)[^}]*\}', compose), ['${PRIZECHECK_SIGNUP_MODE:-owner-only}'])
+        self.assertIn('RELEASE_COMMIT: ${PRIZECHECK_IMAGE_TAG:-}', compose)
+        self.assertIn('SIGNUP_READINESS_FILE: /run/prizecheck/signup/${PRIZECHECK_IMAGE_TAG:-none}.json', compose)
+        # Only production mounts the validated proof copy, as a read-only directory (a missing file would become a directory).
+        self.assertIn('- ./signup-active:/run/prizecheck/signup:ro', uncommented(COMPOSE_PROD))
+        self.assertIn('PRIZECHECK_SIGNUP_MODE="$mode" "${COMPOSE[@]}" "${COMPOSE_ARGS[@]}" "$@"', SCRIPT)
+        self.assertIn('SIGNUP_MODE=owner-only', PROD_ENV)
 
     def test_the_prod_overlay_forces_production(self):
         compose = uncommented(COMPOSE_PROD)

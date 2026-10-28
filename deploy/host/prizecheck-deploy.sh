@@ -24,6 +24,17 @@ APP_SERVICES=(api auth web)
 # Images a deploy pulls: the services above, plus the scanner index job, which is only run by hand (`compose run`) but must
 # be pulled while the deploy holds its registry login.
 PULL_SERVICES=(api auth web scanner-index)
+# The operator's signup readiness proof (docs/signup-readiness.md) is edited in signup/. Only a copy this script has
+# validated for the release being started goes to signup-active/<commit>.json, the one directory the auth container mounts: a gateway
+# that restarts on its own (crash, reboot) must never read a proof edited after the last deploy or signup-apply.
+SIGNUP_DIR="$PRIZECHECK_HOME/signup"
+SIGNUP_FILE="$SIGNUP_DIR/readiness.json"
+SNAPSHOT_DIR="$PRIZECHECK_HOME/signup-active"
+SIGNUP_STAGE=""
+# SIGNUP_MODE from the env file (set by check_signup_config); the mode a release actually gets is EFFECTIVE_SIGNUP_MODE.
+SIGNUP_CONFIG=owner-only
+EFFECTIVE_SIGNUP_MODE=owner-only
+SIGNUP_RESOLVED_FOR=""
 API_UID=10001
 AUTH_UID=1000
 KEEP_BACKUPS=10
@@ -43,6 +54,9 @@ log() {
 die() { log "ERROR: $*" >&2; exit 1; }
 
 cleanup() {
+  if [[ -n "$SIGNUP_STAGE" && -d "$SIGNUP_STAGE" ]]; then
+    rm -rf -- "$SIGNUP_STAGE"
+  fi
   if [[ -n "$TEMP_DOCKER_CONFIG" && -d "$TEMP_DOCKER_CONFIG" ]]; then
     rm -rf -- "$TEMP_DOCKER_CONFIG"
   fi
@@ -120,7 +134,7 @@ check_published_ports() {
     log "Note: Docker Compose not found; published-port check skipped"
     return 0
   fi
-  config="$(PRIZECHECK_IMAGE_TAG=none "${COMPOSE[@]}" "${COMPOSE_ARGS[@]}" config --format json 2>/dev/null)" \
+  config="$(PRIZECHECK_IMAGE_TAG=none PRIZECHECK_SIGNUP_MODE=owner-only "${COMPOSE[@]}" "${COMPOSE_ARGS[@]}" config --format json 2>/dev/null)" \
     || die "Docker Compose cannot render the configuration; check $ENV_FILE"
   # Port targets are numbers; volume targets are strings, so only the ports are counted.
   published="$(grep -oE '"target": *[0-9]+' <<<"$config" | wc -l | tr -d ' ')"
@@ -136,6 +150,7 @@ check_published_ports() {
 
 # Portable between GNU and BSD stat, so the config checks also run in the repository's tests on a Mac.
 file_mode() { stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1"; }
+file_owner() { stat -c '%u' "$1" 2>/dev/null || stat -f '%u' "$1"; }
 
 # Sets ENVIRONMENT (dev unless the env file says prod), the compose files it uses, and the compose arguments.
 read_environment() {
@@ -216,6 +231,20 @@ check_production_env() {
   fi
 }
 
+# SIGNUP_MODE in the env file is the operator's request (owner-only unless it says public). Compose never reads it: the
+# script computes PRIZECHECK_SIGNUP_MODE for each release (resolve_signup_mode), so the env file may not set that.
+check_signup_config() {
+  if grep -qE '^PRIZECHECK_SIGNUP_MODE=' "$ENV_FILE"; then
+    die "PRIZECHECK_SIGNUP_MODE is computed by the deploy script; remove it from $ENV_FILE (the key to set is SIGNUP_MODE)"
+  fi
+  SIGNUP_CONFIG="$(trimmed_value SIGNUP_MODE)"; SIGNUP_CONFIG="${SIGNUP_CONFIG:-owner-only}"
+  case "$SIGNUP_CONFIG" in
+    owner-only) ;;
+    public) [[ "$ENVIRONMENT" == prod ]] || die "SIGNUP_MODE=public is for production only; this environment stays owner-only" ;;
+    *) die "SIGNUP_MODE must be owner-only or public (local-public is for local rehearsal and is refused here)" ;;
+  esac
+}
+
 # Every check on the env file and the host's files. The only docker use is the published-port check, which is skipped
 # where Compose is not installed, so `check-config` runs anywhere.
 validate_config() {
@@ -255,6 +284,7 @@ validate_config() {
     [[ -n "$bridge" && "$WEB_BIND" == "$bridge" ]] \
       || die "PRIZECHECK_WEB_BIND must be 127.0.0.1 or docker0's address (${bridge:-not found})"
   fi
+  check_signup_config
   if [[ "$ENVIRONMENT" == prod ]]; then
     check_production_env
   fi
@@ -273,8 +303,149 @@ load_config() {
   compose_cmd
 }
 
+# Every Compose call passes PRIZECHECK_SIGNUP_MODE explicitly: public only for the release resolve_signup_mode has just
+# approved (the tag in effect), owner-only for everything else. Nothing here runs the readiness check, so a call made
+# inside $(...) cannot lose its result or pollute captured output.
 compose() {
-  "${COMPOSE[@]}" "${COMPOSE_ARGS[@]}" "$@"
+  local mode=owner-only
+  if [[ -n "$SIGNUP_RESOLVED_FOR" && "$SIGNUP_RESOLVED_FOR" == "${PRIZECHECK_IMAGE_TAG:-}" ]]; then
+    mode="$EFFECTIVE_SIGNUP_MODE"
+  fi
+  PRIZECHECK_SIGNUP_MODE="$mode" "${COMPOSE[@]}" "${COMPOSE_ARGS[@]}" "$@"
+}
+
+# --- Signup readiness -------------------------------------------------------------------------------------------------
+
+# Sets PROOF_PROBLEM and returns 1 when the operator's proof file cannot be trusted. The gateway never reads it (it reads
+# the copy this script publishes), so only its writers matter: it must belong to root (or to whoever runs this script)
+# and be writable by nobody else, or a different writer could open signup for a release the operator never attested.
+check_signup_proof_file() {
+  local me mode uid path
+  me="$(id -u)"
+  PROOF_PROBLEM=""
+  for path in "$SIGNUP_DIR" "$SIGNUP_FILE"; do
+    if [[ -L "$path" ]]; then
+      PROOF_PROBLEM="$path must not be a symlink"; return 1
+    fi
+    if [[ ! -e "$path" ]]; then
+      PROOF_PROBLEM="readiness proof $SIGNUP_FILE is missing"; return 1
+    fi
+    uid="$(file_owner "$path")"
+    # Production requires root; elsewhere (the repository's tests) the invoking user's own files pass.
+    if [[ "$uid" != 0 && ( "$ENVIRONMENT" == prod || "$uid" != "$me" ) ]]; then
+      PROOF_PROBLEM="$path must be owned by root"; return 1
+    fi
+    mode="00$(file_mode "$path")"
+    if [[ "${mode: -2:1}" == [2367] || "${mode: -1}" == [2367] ]]; then
+      PROOF_PROBLEM="$path must not be group or world writable"; return 1
+    fi
+  done
+  [[ -d "$SIGNUP_DIR" && -f "$SIGNUP_FILE" ]] || { PROOF_PROBLEM="$SIGNUP_FILE must be a regular file in a directory"; return 1; }
+}
+
+# The release's own gateway code answers whether a readiness proof is valid: signupEnabled() from the built signup
+# module, run in the auth image with the environment the gateway will have. It prints one "SIGNUP_CHECK" line and exits
+# 3 when the proof is not valid for the release. Only fixed messages and the proof's commit are printed, never the
+# proof's text or any setting.
+signup_check_js() {
+  cat <<'JS'
+Promise.all([import('node:fs'), import('/app/auth/signup.js')]).then(([fs, { signupEnabled }]) => {
+  try {
+    if (signupEnabled() === true) {
+      console.log('SIGNUP_CHECK ok');
+      return;
+    }
+    console.log('SIGNUP_CHECK signup did not enable');
+    process.exit(3);
+  } catch (e) {
+    const message = String((e && e.message) || '');
+    let reason = /^(Public )?[Ss]ignup /.test(message)
+      ? message
+      : 'readiness proof is unreadable or invalid JSON, or the gateway configuration is invalid';
+    try {
+      const proof = JSON.parse(fs.readFileSync(process.env.SIGNUP_READINESS_FILE, 'utf8'));
+      if (/^[a-f0-9]{40}$/.test(String(proof.releaseCommit)) && proof.releaseCommit !== process.env.RELEASE_COMMIT) {
+        reason = 'readiness proof names commit ' + proof.releaseCommit + ', not ' + process.env.RELEASE_COMMIT;
+      }
+    } catch (ignored) {}
+    console.log('SIGNUP_CHECK ' + reason);
+    process.exit(3);
+  }
+}, () => { console.log('SIGNUP_CHECK the release gateway code could not be loaded'); process.exit(4); });
+JS
+}
+
+# Sets PROOF_PROBLEM and returns 1 unless the operator's proof is valid for the release $1, judged by that release's own
+# image. The proof is first copied to a staging directory, which is what the check mounts (in place of the snapshot
+# directory); only if that exact copy passes is it moved into signup-active/$1.json in one rename. Each release has its
+# own file, so a gateway still running another release keeps the file it was started with. A check that cannot run (no
+# image, no Docker, a timeout) or a failed publish counts as not valid.
+signup_proof_problem() {
+  local commit="$1" js out line status=0 prefix=()
+  PROOF_PROBLEM=""
+  check_signup_proof_file || return 1
+  SIGNUP_STAGE="$(mktemp -d "$PRIZECHECK_HOME/.signup-stage.XXXXXX")" || { SIGNUP_STAGE=""; PROOF_PROBLEM="cannot stage the readiness proof"; return 1; }
+  chmod 755 "$SIGNUP_STAGE"
+  if ! cp "$SIGNUP_FILE" "$SIGNUP_STAGE/readiness.json" || ! chmod 644 "$SIGNUP_STAGE/readiness.json"; then
+    rm -rf -- "$SIGNUP_STAGE"; SIGNUP_STAGE=""; PROOF_PROBLEM="cannot stage the readiness proof"; return 1
+  fi
+  js="$(signup_check_js)"
+  if command -v timeout >/dev/null 2>&1; then prefix=(timeout 120); fi
+  out="$(PRIZECHECK_IMAGE_TAG="$commit" PRIZECHECK_SIGNUP_MODE=public ${prefix[@]+"${prefix[@]}"} "${COMPOSE[@]}" "${COMPOSE_ARGS[@]}" \
+    run --rm --no-deps -T -v "$SIGNUP_STAGE:/run/prizecheck/candidate:ro" -e SIGNUP_READINESS_FILE=/run/prizecheck/candidate/readiness.json \
+    auth node -e "$js" </dev/null 2>&1)" || status=$?
+  line="$(grep '^SIGNUP_CHECK ' <<<"$out" | tail -n 1 || true)"
+  if [[ "$status" -eq 0 && "$line" == "SIGNUP_CHECK ok" ]]; then
+    if ! mkdir -p "$SNAPSHOT_DIR" || ! chmod 755 "$SNAPSHOT_DIR"; then
+      rm -rf -- "$SIGNUP_STAGE"; SIGNUP_STAGE=""; PROOF_PROBLEM="cannot publish the validated proof"; return 1
+    fi
+    if [[ "$(id -u)" == 0 ]]; then chown 0:0 "$SNAPSHOT_DIR" "$SIGNUP_STAGE/readiness.json" || true; fi
+    mv -f -- "$SIGNUP_STAGE/readiness.json" "$SNAPSHOT_DIR/$commit.json" \
+      || { rm -rf -- "$SIGNUP_STAGE"; SIGNUP_STAGE=""; PROOF_PROBLEM="cannot publish the validated proof"; return 1; }
+    rm -rf -- "$SIGNUP_STAGE"; SIGNUP_STAGE=""
+    if [[ ! -f "$SNAPSHOT_DIR/$commit.json" || -L "$SNAPSHOT_DIR/$commit.json" ]]; then
+      PROOF_PROBLEM="cannot publish the validated proof"; return 1
+    fi
+    return 0
+  fi
+  rm -rf -- "$SIGNUP_STAGE"; SIGNUP_STAGE=""
+  if [[ "$status" -eq 3 && -n "$line" && "$line" != "SIGNUP_CHECK ok" ]]; then
+    PROOF_PROBLEM="${line#SIGNUP_CHECK }"
+  else
+    PROOF_PROBLEM="the readiness check could not run in the release's gateway image"
+  fi
+  return 1
+}
+
+# Removes the published proofs no running or starting gateway needs: every one except the release $1 when it is public,
+# all of them when it is owner-only. Only called once the new gateway is up.
+prune_signup_snapshots() {
+  local file
+  for file in "$SNAPSHOT_DIR"/*.json; do
+    [[ -e "$file" || -L "$file" ]] || continue
+    if [[ "$EFFECTIVE_SIGNUP_MODE" == public && "$file" == "$SNAPSHOT_DIR/$1.json" ]]; then continue; fi
+    rm -rf -- "$file"
+  done
+}
+
+# Sets EFFECTIVE_SIGNUP_MODE for the release in PRIZECHECK_IMAGE_TAG and remembers it for compose(). Public only when the
+# env file asks for it and the proof is valid for this release's commit; otherwise owner-only, with the reason logged. The
+# proof names exactly one commit, so a new release or a rollback would otherwise crash-loop the gateway.
+resolve_signup_mode() {
+  local commit="${PRIZECHECK_IMAGE_TAG:-}"
+  [[ -z "$commit" || "$SIGNUP_RESOLVED_FOR" != "$commit" ]] || return 0
+  EFFECTIVE_SIGNUP_MODE=owner-only
+  if [[ "$SIGNUP_CONFIG" != public ]] || ! valid_commit "$commit"; then
+    SIGNUP_RESOLVED_FOR=""
+    return 0
+  fi
+  if signup_proof_problem "$commit"; then
+    EFFECTIVE_SIGNUP_MODE=public
+    log "Signup: public for release $commit (readiness proof valid)"
+  else
+    log "Signup: owner-only for release $commit; SIGNUP_MODE=public is not applied: $PROOF_PROBLEM"
+  fi
+  SIGNUP_RESOLVED_FOR="$commit"
 }
 
 read_state() { [[ -f "$STATE_DIR/$1" ]] && cat "$STATE_DIR/$1" || true; }
@@ -327,7 +498,7 @@ link_cli_plugins() {
 
 pull_images() {
   if [[ -n "$PULL_DOCKER_CONFIG" ]]; then
-    DOCKER_CONFIG="$PULL_DOCKER_CONFIG" "${COMPOSE[@]}" "${COMPOSE_ARGS[@]}" pull --quiet "${PULL_SERVICES[@]}"
+    DOCKER_CONFIG="$PULL_DOCKER_CONFIG" PRIZECHECK_SIGNUP_MODE=owner-only "${COMPOSE[@]}" "${COMPOSE_ARGS[@]}" pull --quiet "${PULL_SERVICES[@]}"
   else
     compose pull --quiet "${PULL_SERVICES[@]}"
   fi
@@ -431,7 +602,10 @@ PY
 start_release() {
   local commit="$1"
   export PRIZECHECK_IMAGE_TAG="$commit"
+  resolve_signup_mode
   compose up -d --wait --wait-timeout 240 --remove-orphans "${APP_SERVICES[@]}" || { log "Services did not become healthy"; return 1; }
+  # Other releases' published proofs are needed only until the new gateway is up.
+  prune_signup_snapshots "$commit"
   smoke "$commit"
 }
 
@@ -561,6 +735,10 @@ cmd_status() {
   local current; current="$(read_state current)"
   export PRIZECHECK_IMAGE_TAG="${current:-none}"
   compose ps --format 'table {{.Service}}\t{{.Image}}\t{{.Status}}'
+  # What the running gateway was started with, not a fresh judgement (signup-apply applies a changed proof).
+  local running
+  running="$(compose exec -T auth printenv SIGNUP_MODE 2>/dev/null </dev/null || true)"
+  printf 'signup:   %s requested, gateway running %s\n' "$SIGNUP_CONFIG" "${running:-unknown}"
 }
 
 cmd_setup() {
@@ -573,6 +751,10 @@ cmd_setup() {
   chown "$API_UID:$API_UID" "$DATA_DIR/public" "$DATA_DIR/price-runners"
   chown "$AUTH_UID:$AUTH_UID" "$DATA_DIR/mail"
   chmod 700 "$DATA_DIR/public" "$DATA_DIR/price-runners" "$DATA_DIR/mail" "$STATE_DIR" "$BACKUP_DIR"
+  # The readiness proof goes in signup/; signup-active/ holds the validated copy the gateway reads (no secrets in either).
+  mkdir -p "$SIGNUP_DIR" "$SNAPSHOT_DIR"
+  chown 0:0 "$SIGNUP_DIR" "$SNAPSHOT_DIR"
+  chmod 755 "$SIGNUP_DIR" "$SNAPSHOT_DIR"
   compose_cmd
   log "Compose: $("${COMPOSE[@]}" version --short)"
   log "Directories ready under $DATA_DIR"
@@ -614,7 +796,42 @@ cmd_sign_in_code() {
 
 cmd_check_config() {
   validate_config
+  if [[ "$SIGNUP_CONFIG" == public ]]; then
+    check_signup_proof_file || die "SIGNUP_MODE=public: $PROOF_PROBLEM"
+    # The proof is normally updated after a release lands, so a different commit is a warning only: that release runs
+    # owner-only until the proof names it and signup-apply has run.
+    local named current
+    named="$(grep -oE '"releaseCommit"[[:space:]]*:[[:space:]]*"[0-9a-f]{40}"' "$SIGNUP_FILE" | head -n 1 | grep -oE '[0-9a-f]{40}' || true)"
+    current="$(read_state current)"
+    if [[ -n "$current" && "$named" != "$current" ]]; then
+      log "Warning: the readiness proof does not name the current release $current, which runs owner-only until it does (signup-apply)"
+    fi
+  fi
   log "Configuration OK ($ENVIRONMENT)"
+}
+
+# Re-evaluates the readiness proof for the current release and restarts the gateway on the result, so an edited proof
+# takes effect without a deploy. Compose would not restart it: a new proof changes nothing Compose compares.
+cmd_signup_apply() {
+  load_config
+  take_lock
+  local current; current="$(read_state current)"
+  [[ -n "$current" ]] || die "Nothing deployed yet"
+  export PRIZECHECK_IMAGE_TAG="$current"
+  SIGNUP_RESOLVED_FOR=""
+  local before after running
+  before="$(cat "$SNAPSHOT_DIR/$current.json" 2>/dev/null || true)"
+  resolve_signup_mode
+  after="$(cat "$SNAPSHOT_DIR/$current.json" 2>/dev/null || true)"
+  running="$(compose exec -T auth printenv SIGNUP_MODE 2>/dev/null </dev/null || true)"
+  if [[ "$running" == "$EFFECTIVE_SIGNUP_MODE" && "$before" == "$after" ]]; then
+    log "The gateway already runs $EFFECTIVE_SIGNUP_MODE with this proof; not restarting it"
+  else
+    log "Restarting the gateway; /api is unavailable for about 5 to 15 seconds"
+    compose up -d --no-deps --force-recreate --wait --wait-timeout 120 auth || die "The gateway did not become healthy; see 'compose logs auth'"
+  fi
+  start_release "$current" || die "Release $current did not pass its checks after the restart"
+  log "Signup mode for release $current: $EFFECTIVE_SIGNUP_MODE"
 }
 
 cmd_tool() {
@@ -627,8 +844,25 @@ cmd_tool() {
 
 cmd_compose() {
   load_config
-  local current; current="$(read_state current)"
+  local current running; current="$(read_state current)"
   export PRIZECHECK_IMAGE_TAG="${current:-none}"
+  # Only `up` and `create` can start the gateway, so only they re-check the proof. Anything else passes the mode the
+  # gateway is running now (owner-only if unknown) and prints nothing extra.
+  local sub="" arg
+  for arg in "$@"; do
+    if [[ "$arg" != -* ]]; then sub="$arg"; break; fi
+  done
+  case "$sub" in
+    up|create) resolve_signup_mode ;;
+    *)
+      if [[ "$SIGNUP_CONFIG" == public ]]; then
+        running="$(compose exec -T auth printenv SIGNUP_MODE 2>/dev/null </dev/null || true)"
+        if [[ "$running" == public ]]; then
+          EFFECTIVE_SIGNUP_MODE=public
+          SIGNUP_RESOLVED_FOR="$PRIZECHECK_IMAGE_TAG"
+        fi
+      fi ;;
+  esac
   compose "$@"
 }
 
@@ -637,11 +871,12 @@ usage() {
 Usage: $SCRIPT_PATH <command>
   deploy <commit> <bundle-digest>  Pull, back up, migrate, start and check a release (CI)
   rollback                         Return to the previous successful release (no reverse migrations)
-  status                           Show current/previous releases and containers
+  status                           Show current/previous releases, containers and the gateway's signup mode
   setup                            Create data directories with container ownership (once)
   backup                           Dump PostgreSQL and archive the public store into $BACKUP_DIR
   init-store <commit>              First install only: initialize the public store after a failed initialization
   sign-in-code [n]                 Show the newest n delivered sign-in codes (MAIL_MODE=file)
+  signup-apply                     Re-check the signup readiness proof and restart the gateway on the result
   tool <script> [args]             Run a Python script in the current API image, e.g. tool /app/scripts/bind_owner.py <id>
   compose <args>                   Run docker compose for this stack, e.g. compose logs -f api
   check-config                     Validate the env file and host files (no containers are touched)
@@ -687,6 +922,7 @@ main() {
     backup) cmd_backup ;;
     sign-in-code) cmd_sign_in_code "$@" ;;
     init-store) cmd_init_store "$@" ;;
+    signup-apply) cmd_signup_apply ;;
     tool) cmd_tool "$@" ;;
     compose) cmd_compose "$@" ;;
     check-config) cmd_check_config ;;

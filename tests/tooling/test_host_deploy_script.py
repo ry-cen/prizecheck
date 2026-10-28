@@ -3,10 +3,13 @@ against a scratch PRIZECHECK_HOME. Docker is absent or faked (the published-port
 NODE_ENV=production, or what would expose the web port; a dev file keeps passing as it did. Each case checks the exit code
 and a stable substring of the message (which names a key, never a value)."""
 import hashlib
+import json
 from pathlib import Path
 import os
+import shutil
 import subprocess
 import stat
+import sys
 import tempfile
 import unittest
 
@@ -26,6 +29,76 @@ DEV = [
     f'BETTER_AUTH_SECRET={SECRET}', f'INTERNAL_AUTH_SECRET={SECRET}', 'MAIL_MODE=file', 'EMAIL_SIGN_IN=on',
 ]
 WARNING = 'no mail relay'
+COMMIT = 'ab12' * 10
+OTHER = 'cd34' * 10
+TSX = ROOT / 'node_modules/.bin/tsx'
+PROOF = {
+    'schemaVersion': 2, 'releaseCommit': COMMIT, 'authorizedByOwner': True, 'ownerWalkthroughVerified': True,
+    'recoveryVerified': True, 'privacyVerified': True, 'capacityVerified': True, 'providerSignInVerified': ['google'],
+    'evidence': 'dated acceptance notes',
+}
+# A `docker` for the signup tests. `compose run ... auth node -e <js>` runs the script's own readiness check through
+# the gateway's real signup module (tsx), with the environment the auth service would get; every other call is
+# recorded (with the PRIZECHECK_SIGNUP_MODE it was given) and succeeds.
+FAKE_DOCKER = r'''#!PYTHON
+import json, os, subprocess, sys, tempfile
+args = sys.argv[1:]
+if 'version' in args:
+    print('v2'); sys.exit(0)
+if 'config' in args:
+    print('{"services": {"web": {"ports": [{"host_ip": "127.0.0.1", "target": 8080, "published": "8088"}]}}}'); sys.exit(0)
+if 'inspect' in args:
+    print('ghcr.io/example/prizecheck-api:' + os.environ['FAKE_COMMIT']); sys.exit(0)
+if 'ps' in args and '-q' in args:
+    print('container'); sys.exit(0)
+if 'exec' in args and 'printenv' in args:
+    print(os.environ.get('FAKE_AUTH_MODE', '')); sys.exit(0)
+if 'exec' in args and 'web' in args:
+    sys.stdout.write(open(os.environ['FAKE_INDEX']).read()); sys.exit(0)
+if 'run' in args and 'tools' in args:
+    print('schema'); sys.exit(0)
+if 'run' in args and 'auth' in args:
+    # The candidate proof is the directory mounted with -v, named by the SIGNUP_READINESS_FILE given with -e.
+    mount = args[args.index('-v') + 1].split(':')
+    wanted = [a for a in args if a.startswith('SIGNUP_READINESS_FILE=')][0].split('=', 1)[1]
+    proof = os.path.join(mount[0], os.path.basename(wanted))
+    js = args[args.index('-e', args.index('auth')) + 1].replace('/app/auth/signup.js', os.environ['FAKE_SIGNUP_MODULE'])
+    settings = {}
+    for line in open(os.environ['FAKE_ENV_FILE']).read().splitlines():
+        if '=' in line and not line.startswith('#'):
+            key, value = line.split('=', 1)
+            if key in ('EMAIL_SIGN_IN', 'MAIL_MODE', 'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'DISCORD_CLIENT_ID', 'DISCORD_CLIENT_SECRET'):
+                settings[key] = value
+    env = dict(os.environ, **settings, SIGNUP_MODE=os.environ['PRIZECHECK_SIGNUP_MODE'], RELEASE_COMMIT=os.environ['PRIZECHECK_IMAGE_TAG'],
+               SIGNUP_READINESS_FILE=proof, NODE_ENV='production')
+    with open(os.environ['FAKE_LOG'], 'a') as log:
+        log.write(json.dumps({'check': True, 'mode': os.environ['PRIZECHECK_SIGNUP_MODE'], 'mount': mount[0]}) + '\n')
+    if os.environ.get('FAKE_RUN_EXIT'):
+        sys.exit(int(os.environ['FAKE_RUN_EXIT']))
+    with tempfile.TemporaryDirectory() as scratch:
+        script = os.path.join(scratch, 'check.mjs')
+        open(script, 'w').write(js)
+        sys.exit(subprocess.run([os.environ['FAKE_TSX'], script], env=env).returncode)
+with open(os.environ['FAKE_LOG'], 'a') as log:
+    snapshots = sorted(os.listdir(os.environ['FAKE_SNAPSHOTS'])) if os.environ.get('FAKE_SNAPSHOTS') else None
+    log.write(json.dumps({'args': args, 'mode': os.environ.get('PRIZECHECK_SIGNUP_MODE'), 'snapshots': snapshots}) + '\n')
+'''.replace('#!PYTHON', '#!' + sys.executable)
+# Smoke only needs plausible answers from the web port.
+FAKE_CURL = '''#!/bin/sh
+case " $* " in
+  *" -w "*) case "$*" in *locations*) printf 401;; *unknown-smoke-token*) printf 404;; *) printf 200;; esac;;
+  *) cat "$FAKE_INDEX";;
+esac
+'''
+# The script requires root-owned proof files; the tests' files belong to whoever runs them, so `stat` reports uid
+# $FAKE_OWNER (default 0) for owners and otherwise defers to the real one.
+FAKE_STAT = '''#!/bin/sh
+for arg in "$@"; do case "$arg" in *%u*) echo "${FAKE_OWNER:-0}"; exit 0;; esac; done
+exec REALSTAT "$@"
+'''
+# No GNU sha256sum on a Mac.
+FAKE_SHA256SUM = ('#!' + sys.executable + '\nimport hashlib, sys\n'
+                  'print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest() + "  -")\n')
 RELAY = ['MAIL_RELAY_URL=https://relay.example/send', 'MAIL_RELAY_TOKEN=token', 'MAIL_FROM=sender@example.com']
 
 
@@ -190,6 +263,276 @@ class HostDeployScriptTest(unittest.TestCase):
         self.assertIn('published on 127.0.0.1 only', result.stdout + result.stderr)
         result = self.run_script(self.make_home(DEV), **self.fake_docker('127.0.0.1'))
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_the_signup_mode_in_the_env_file(self):
+        for mode in ('owner-only', 'public', ''):
+            code, output = self.check([*PROD, f'SIGNUP_MODE={mode}'])
+            self.assertEqual(code, 0 if mode != 'public' else 1, output)
+        for mode in ('local-public', 'open', 'Public'):
+            self.assertRefused([*PROD, f'SIGNUP_MODE={mode}'], 'SIGNUP_MODE must be owner-only or public')
+        self.assertRefused([*PROD, 'PRIZECHECK_SIGNUP_MODE=public'], 'PRIZECHECK_SIGNUP_MODE is computed by the deploy script')
+        self.assertRefused([*DEV, 'PRIZECHECK_SIGNUP_MODE=owner-only'], 'PRIZECHECK_SIGNUP_MODE')
+        self.assertRefused([*DEV, 'SIGNUP_MODE=public'], 'SIGNUP_MODE=public is for production only')
+        code, output = self.check([*DEV, 'SIGNUP_MODE=owner-only'])
+        self.assertEqual(code, 0, output)
+
+    def write_proof(self, home, proof=PROOF, mode=0o644, directory_mode=0o755):
+        directory = home / 'signup'
+        directory.mkdir(exist_ok=True)
+        directory.chmod(directory_mode)
+        file = directory / 'readiness.json'
+        file.write_text(json.dumps(proof))
+        file.chmod(mode)
+        return file
+
+    def fake_env(self, home, **extra):
+        """Environment that puts the fake docker, curl, flock, sleep, stat and sha256sum first on PATH."""
+        scratch = tempfile.TemporaryDirectory()
+        self.addCleanup(scratch.cleanup)
+        bin_dir = Path(scratch.name)
+        shims = {'docker': FAKE_DOCKER, 'curl': FAKE_CURL, 'flock': '#!/bin/sh\nexit 0\n', 'sleep': '#!/bin/sh\nexit 0\n',
+                 'stat': FAKE_STAT.replace('REALSTAT', shutil.which('stat')), 'sha256sum': FAKE_SHA256SUM}
+        for name, body in shims.items():
+            (bin_dir / name).write_text(body)
+            (bin_dir / name).chmod(0o755)
+        index = bin_dir / 'index.html'
+        index.write_text('<script src="/assets/app.js"></script>\n')
+        self.fake_log = bin_dir / 'calls.jsonl'
+        return {'PATH': f'{bin_dir}:{os.environ["PATH"]}', 'FAKE_COMMIT': COMMIT, 'FAKE_INDEX': str(index),
+                'FAKE_LOG': str(self.fake_log), 'FAKE_ENV_FILE': str(home / 'prizecheck.env'),
+                'FAKE_SIGNUP_MODULE': str(ROOT / 'auth/src/signup.ts'), 'FAKE_TSX': str(TSX), **extra}
+
+    def fake_calls(self):
+        return [json.loads(line) for line in self.fake_log.read_text().splitlines()] if self.fake_log.exists() else []
+
+    def test_check_config_inspects_the_proof_file_when_signup_is_public(self):
+        public = [*PROD, 'SIGNUP_MODE=public']
+
+        def run(home, **extra):
+            result = self.run_script(home, **self.fake_env(home, **extra))
+            return result.returncode, result.stdout + result.stderr
+
+        home = self.make_home(public)
+        code, output = run(home)
+        self.assertNotEqual(code, 0)
+        self.assertIn('readiness proof', output)
+        self.assertIn('is missing', output)
+        for kwargs, message in (({'mode': 0o664}, 'group or world writable'), ({'directory_mode': 0o777}, 'group or world writable')):
+            home = self.make_home(public)
+            self.write_proof(home, **kwargs)
+            code, output = run(home)
+            self.assertNotEqual(code, 0, kwargs)
+            self.assertIn(message, output)
+        # The gateway reads only the script's own copy, so the operator's file and directory may be private.
+        home = self.make_home(public)
+        self.write_proof(home, mode=0o600, directory_mode=0o700)
+        code, output = run(home)
+        self.assertEqual(code, 0, output)
+        # Production wants root: a file that belongs to the invoking user is not enough.
+        home = self.make_home(public)
+        self.write_proof(home)
+        code, output = run(home, FAKE_OWNER='1000')
+        self.assertNotEqual(code, 0)
+        self.assertIn('must be owned by root', output)
+        home = self.make_home(public)
+        self.write_proof(home)
+        code, output = run(home)
+        self.assertEqual(code, 0, output)
+        self.assertNotIn('Warning', output)
+        # A proof for another commit is a warning: the proof is normally updated after the release lands.
+        (home / 'state').mkdir()
+        (home / 'state/current').write_text(OTHER + '\n')
+        code, output = run(home)
+        self.assertEqual(code, 0, output)
+        self.assertIn(f'Warning: the readiness proof does not name the current release {OTHER}', output)
+        # A symlinked proof is refused.
+        home = self.make_home(public)
+        self.write_proof(home)
+        real = home / 'elsewhere.json'
+        (home / 'signup/readiness.json').rename(real)
+        (home / 'signup/readiness.json').symlink_to(real)
+        code, output = run(home)
+        self.assertNotEqual(code, 0)
+        self.assertIn('must not be a symlink', output)
+
+    def signup_home(self, lines, proof=PROOF, **proof_kwargs):
+        """A home whose current release is COMMIT, with the operator's proof written (or absent when None)."""
+        home = self.make_home(lines)
+        (home / 'state').mkdir()
+        (home / 'state/current').write_text(COMMIT + '\n')
+        if proof is not None:
+            self.write_proof(home, proof, **proof_kwargs)
+        return home
+
+    def apply(self, home, **extra):
+        """Runs `signup-apply`; returns (exit code, output, recorded docker calls)."""
+        result = subprocess.run(['bash', str(home / 'bin/prizecheck-deploy.sh'), 'signup-apply'], capture_output=True, text=True,
+                                timeout=60, stdin=subprocess.DEVNULL,
+                                env={**os.environ, 'HOME': str(home), **self.fake_env(home, **extra)})
+        return result.returncode, result.stdout + result.stderr, self.fake_calls()
+
+    def assertAllModes(self, calls, expected):
+        """Every Compose call that is not the readiness check carries an explicit mode, and the up calls the result."""
+        up = [call for call in calls if 'args' in call and 'up' in call['args']]
+        self.assertTrue(up)
+        for call in calls:
+            if 'compose' in call.get('args', [])[:1]:
+                self.assertIn(call['mode'], ('owner-only', 'public'), call)
+        self.assertTrue(all(call['mode'] == expected for call in up), up)
+
+    def assertSignup(self, lines, expected, reason=None, **kwargs):
+        home = self.signup_home(lines, **kwargs)
+        code, output, calls = self.apply(home)
+        self.assertEqual(code, 0, output)
+        self.assertIn(f'Signup mode for release {COMMIT}: {expected}', output)
+        if reason:
+            self.assertIn(reason, output)
+        self.assertAllModes(calls, expected)
+        self.assertNotIn(SECRET, output)
+        self.assertEqual((home / f'signup-active/{COMMIT}.json').exists(), expected == 'public')
+        return output
+
+    @unittest.skipUnless(TSX.exists() and shutil.which('node'), 'needs node and tsx (npm ci)')
+    def test_signup_apply_opens_signup_only_on_a_valid_proof_for_the_release(self):
+        public = [*PROD, 'SIGNUP_MODE=public']
+        output = self.assertSignup(public, 'public')
+        self.assertIn(f'Signup: public for release {COMMIT}', output)
+        # Without a request, or with the default, the proof is not even consulted.
+        for lines in (PROD, [*PROD, 'SIGNUP_MODE=owner-only'], [*PROD, 'SIGNUP_MODE=']):
+            code, output, calls = self.apply(self.signup_home(lines))
+            self.assertEqual(code, 0, output)
+            self.assertFalse([call for call in calls if call.get('check')])
+            self.assertIn(f'Signup mode for release {COMMIT}: owner-only', output)
+        self.assertSignup(public, 'owner-only', f'readiness proof names commit {OTHER}, not {COMMIT}',
+                          proof={**PROOF, 'releaseCommit': OTHER})
+        self.assertSignup(public, 'owner-only', 'Signup readiness incomplete', proof={**PROOF, 'recoveryVerified': False})
+        self.assertSignup(public, 'owner-only', 'Signup readiness incomplete', proof={**PROOF, 'schemaVersion': 1})
+        self.assertSignup(public, 'owner-only', 'Signup readiness incomplete', proof={**PROOF, 'evidence': ' '})
+        # Google is configured but not proven.
+        self.assertSignup(public, 'owner-only', 'Signup readiness incomplete', proof={**PROOF, 'providerSignInVerified': []})
+        self.assertSignup(public, 'owner-only', 'is missing', proof=None)
+        # A private operator file is fine: the published copy is what the gateway reads.
+        self.assertSignup(public, 'public', mode=0o600, directory_mode=0o700)
+
+    @unittest.skipUnless(TSX.exists() and shutil.which('node'), 'needs node and tsx (npm ci)')
+    def test_a_failed_publish_never_reports_public(self):
+        home = self.signup_home([*PROD, 'SIGNUP_MODE=public'])
+        (home / f'signup-active/{COMMIT}.json').mkdir(parents=True)
+        code, output, calls = self.apply(home)
+        self.assertEqual(code, 0, output)
+        self.assertIn('cannot publish the validated proof', output)
+        self.assertIn(f'Signup mode for release {COMMIT}: owner-only', output)
+        self.assertAllModes(calls, 'owner-only')
+        self.assertEqual(list((home / 'signup-active').iterdir()), [])
+        self.assertEqual([path.name for path in home.glob('.signup-stage.*')], [])
+
+    @unittest.skipUnless(TSX.exists() and shutil.which('node'), 'needs node and tsx (npm ci)')
+    def test_signup_apply_checks_the_mail_gates_when_email_sign_in_is_on(self):
+        email = [*without(PROD, 'EMAIL_SIGN_IN'), 'EMAIL_SIGN_IN=on', *RELAY, 'SIGNUP_MODE=public']
+        self.assertSignup(email, 'owner-only', 'Signup readiness incomplete')
+        self.assertSignup(email, 'public', proof={**PROOF, 'senderVerified': True, 'recipientDeliveryVerified': True})
+
+    @unittest.skipUnless(TSX.exists() and shutil.which('node'), 'needs node and tsx (npm ci)')
+    def test_a_check_that_cannot_run_leaves_the_release_owner_only(self):
+        # `docker compose run` failing (no image, daemon trouble) or timing out must not stop the release.
+        for status in ('125', '124'):
+            home = self.signup_home([*PROD, 'SIGNUP_MODE=public'])
+            code, output, calls = self.apply(home, FAKE_RUN_EXIT=status)
+            self.assertEqual(code, 0, output)
+            self.assertIn('could not run', output)
+            self.assertIn(f'Signup mode for release {COMMIT}: owner-only', output)
+            self.assertAllModes(calls, 'owner-only')
+            self.assertFalse(list((home / 'signup-active').glob('*.json')))
+
+    @unittest.skipUnless(TSX.exists() and shutil.which('node'), 'needs node and tsx (npm ci)')
+    def test_a_deploy_of_another_release_runs_owner_only_and_succeeds(self):
+        home = self.signup_home([*PROD, 'SIGNUP_MODE=public'])
+        code, output = self.deploy(home, OTHER)
+        self.assertEqual(code, 0, output)
+        self.assertIn(f'Deployed {OTHER}', output)
+        self.assertIn(f'readiness proof names commit {COMMIT}, not {OTHER}', output)
+        self.assertAllModes(self.fake_calls(), 'owner-only')
+        self.assertFalse(list((home / 'signup-active').glob('*.json')))
+
+    def deploy(self, home, commit, **extra):
+        digest = hashlib.sha256(b''.join((home / name).read_bytes()
+                                         for name in ('compose.deploy.yml', 'compose.prod.yml', 'bin/prizecheck-deploy.sh'))).hexdigest()
+        for path in ('current.json', 'records/current.json'):
+            (home / 'data/public' / path).parent.mkdir(parents=True, exist_ok=True)
+            (home / 'data/public' / path).write_text('{}')
+        result = subprocess.run(['bash', str(home / 'bin/prizecheck-deploy.sh'), 'deploy', commit, digest], capture_output=True,
+                                text=True, timeout=60, stdin=subprocess.DEVNULL,
+                                env={**os.environ, 'HOME': str(home), **self.fake_env(home, FAKE_COMMIT=commit, **extra)})
+        return result.returncode, result.stdout + result.stderr
+
+    @unittest.skipUnless(TSX.exists() and shutil.which('node'), 'needs node and tsx (npm ci)')
+    def test_the_running_releases_proof_stays_until_the_new_gateway_is_up(self):
+        home = self.signup_home([*PROD, 'SIGNUP_MODE=public'], proof={**PROOF, 'releaseCommit': OTHER})
+        active = home / 'signup-active'
+        active.mkdir()
+        (active / f'{COMMIT}.json').write_text(json.dumps(PROOF))
+        code, output = self.deploy(home, OTHER, FAKE_SNAPSHOTS=str(active))
+        self.assertEqual(code, 0, output)
+        self.assertIn(f'Signup: public for release {OTHER}', output)
+        # While the services start, the old release's file is still there beside the new one...
+        ups = [call for call in self.fake_calls() if 'up' in call.get('args', []) and 'auth' in call['args']]
+        self.assertEqual(ups[-1]['snapshots'], [f'{COMMIT}.json', f'{OTHER}.json'])
+        self.assertEqual(ups[-1]['mode'], 'public')
+        # ...and afterwards only the running release's remains.
+        self.assertEqual([path.name for path in active.iterdir()], [f'{OTHER}.json'])
+
+    @unittest.skipUnless(TSX.exists() and shutil.which('node'), 'needs node and tsx (npm ci)')
+    def test_the_gateway_reads_a_validated_snapshot_not_the_operators_file(self):
+        home = self.signup_home([*PROD, 'SIGNUP_MODE=public'])
+        snapshot = home / f'signup-active/{COMMIT}.json'
+        code, output, calls = self.apply(home)
+        self.assertEqual(code, 0, output)
+        self.assertEqual(json.loads(snapshot.read_text()), PROOF)
+        # The check ran on a staged copy of the operator's file, never on the snapshot directory.
+        checks = [call for call in calls if call.get('check')]
+        self.assertTrue(checks)
+        self.assertTrue(all(Path(call['mount']).parent.resolve() == home.resolve() and Path(call['mount']).name.startswith('.signup-stage.')
+                            for call in checks), checks)
+        self.assertEqual([path.name for path in home.glob('.signup-stage.*')], [])
+        self.assertEqual(stat.S_IMODE(snapshot.stat().st_mode), 0o644)
+        # Editing the operator's file changes nothing until signup-apply: the snapshot is what a restart would read.
+        (home / 'signup/readiness.json').write_text(json.dumps({**PROOF, 'recoveryVerified': False}))
+        self.assertEqual(json.loads(snapshot.read_text()), PROOF)
+        # Applying an unchanged request with the gateway already public restarts nothing...
+        code, output, calls = self.apply(home, FAKE_AUTH_MODE='public')
+        self.assertEqual(code, 0, output)
+        self.assertIn('Signup mode for release %s: owner-only' % COMMIT, output)
+        self.assertFalse(snapshot.exists())
+        # ...while the edited (now invalid) proof closes signup, which needs the restart.
+        self.assertTrue([call for call in calls if '--force-recreate' in call.get('args', [])])
+
+    @unittest.skipUnless(TSX.exists() and shutil.which('node'), 'needs node and tsx (npm ci)')
+    def test_signup_apply_skips_the_restart_when_nothing_changed(self):
+        home = self.signup_home([*PROD, 'SIGNUP_MODE=public'])
+        code, output, calls = self.apply(home, FAKE_AUTH_MODE='')
+        self.assertEqual(code, 0, output)
+        self.assertIn('/api is unavailable', output)
+        self.assertTrue([call for call in calls if '--force-recreate' in call.get('args', [])])
+        self.fake_log.unlink()
+        code, output, calls = self.apply(home, FAKE_AUTH_MODE='public')
+        self.assertEqual(code, 0, output)
+        self.assertIn('not restarting it', output)
+        self.assertFalse([call for call in calls if '--force-recreate' in call.get('args', [])])
+        # A changed proof restarts the gateway even though the mode is the same.
+        (home / 'signup/readiness.json').write_text(json.dumps({**PROOF, 'evidence': 'newer notes'}))
+        self.fake_log.unlink()
+        code, output, calls = self.apply(home, FAKE_AUTH_MODE='public')
+        self.assertEqual(code, 0, output)
+        self.assertTrue([call for call in calls if '--force-recreate' in call.get('args', [])])
+
+    @unittest.skipUnless(TSX.exists() and shutil.which('node'), 'needs node and tsx (npm ci)')
+    def test_status_reports_the_signup_mode(self):
+        home = self.make_home([*PROD, 'SIGNUP_MODE=public'])
+        result = subprocess.run(['bash', str(home / 'bin/prizecheck-deploy.sh'), 'status'], capture_output=True, text=True,
+                                timeout=60, stdin=subprocess.DEVNULL,
+                                env={**os.environ, 'HOME': str(home), **self.fake_env(home, FAKE_AUTH_MODE='owner-only')})
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('signup:   public requested, gateway running owner-only', result.stdout)
 
     @unittest.skipUnless(tee_keeps_writing(), 'the SSH gate logs through GNU tee -p')
     def test_the_ssh_gate_refuses_operator_commands(self):
