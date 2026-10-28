@@ -9,7 +9,7 @@ The runner checks the current working-tree source, including staged changes. Git
 
 A job named `verify` passes only when `checks` and both image builds passed and every integration job the run asked for passed, so pull requests and the dev deploy wait on that one check. It fails when a requested job failed or was cancelled, and also when a job that was not requested ran or a requested one was skipped. Making the `verify` job a protected-branch requirement remains repository-host configuration.
 
-The deep suites (the PostgreSQL-backed `api/tests`, the `auth/tests` vitest suite, the Playwright specs and the scanner real-model test) run on CI only on demand, because they need a database server and browsers and take about 5 minutes a leg. Start them from Actions → Verify → Run workflow, choosing an **integration** value, or with the GitHub CLI:
+The deep suites (the PostgreSQL-backed `api/tests`, the `auth/tests` vitest suite, the Playwright specs and the scanner real-model test) need a database server and browsers and take about 5 minutes a leg. They run automatically on pull requests whose base is `main`, the release pull requests from `dev`, as the `sharded` set below; `verify` then requires them, so a skipped leg cannot pass. On pull requests to `dev` or any other branch, and in the dev deploy's call, only the default checks run, and the deep suites run on demand. Start them from Actions → Verify → Run workflow, choosing an **integration** value, or with the GitHub CLI:
 
 ```sh
 gh workflow run verify.yml --ref <branch> -f integration=sharded
@@ -18,7 +18,7 @@ gh workflow run verify.yml --ref <branch> -f integration=full
 
 - `sharded` adds the `integration-legs` jobs, 14 legs that run at once, each on its own runner with its own database server: `--suite api --fast --shard K/3` for K from 1 to 3, `--suite auth --fast` (guardrails, the build and vitest, run once for every leg) and `--suite browser --fast --shard K/10` for K from 1 to 10; each leg uploads its own artifact, `verification-<leg>` (such as `verification-api-2` or `verification-browser-7`). On one runner the fast tier took about 32 minutes; a leg takes about 5. It also adds `integration-scanner-model` on both architectures, which builds the Dockerfile's `test` stage and runs the real-model test, the only test that needs ONNX Runtime.
 - `full` adds `integration-full`, one unsharded `npm run verify` (slow tests and the operations suite included) whose artifact is `verification`, plus `integration-scanner-model`. The slow capacity and timing tests fail at random on hosted runners, so a red `full` run needs a look at the failing test before it counts.
-- `none`, the default, adds nothing. The default checks run in every dispatched run too.
+- `none`, the default, adds nothing (a pull request to `main` runs `sharded` regardless). The default checks run in every dispatched run too.
 
 The local gate (`npm run verify`) and the burn-in (below) are optional tools, not a step before a pull request.
 
