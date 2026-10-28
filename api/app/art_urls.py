@@ -9,7 +9,7 @@ that cached the old picture for a year asks again (D2). The route never uses ``v
 version still gets the current image, only without the immutable cache header (D3).
 
 A Printing's art comes from one place, the ``catalog_printing_art`` view (TCGdex first, then the fallback). Signed-in
-reads select the view's ``small_art_url`` and ``large_art_url`` (migration 157, built by ``catalog_art_route``, the SQL
+reads select the view's ``small_art_url`` and ``large_art_url`` (migration 158, built by ``catalog_art_route``, the SQL
 twin of ``art_url`` below); the route's resolver reads the view's source URLs. The scanner is the exception that stays on
 TCGdex (its page cannot load other hosts), so ``tcgdex_source`` and ``art_url`` serve the scanner and nothing else.
 """
@@ -25,6 +25,18 @@ def tcgdex_source(image_url: str | None, size: str) -> str | None:
     if not image_url:
         return None
     return f"{image_url.rstrip('/')}/{SIZES[size]}"
+
+
+def large_direct_url(small_url: str | None) -> str | None:
+    """The large file for a direct small address (TCGdex ``/low.webp``, TCGplayer ``_200w.jpg``), or None. Anonymous
+    pages cannot use the art route, so they get direct addresses for both sizes."""
+    if not small_url:
+        return None
+    if small_url.endswith("/low.webp"):
+        return small_url[: -len("low.webp")] + SIZES["large"]
+    if small_url.endswith("_200w.jpg"):
+        return small_url[: -len("_200w.jpg")] + "_400w.jpg"
+    return None
 
 
 def art_version(source_url: str) -> str:

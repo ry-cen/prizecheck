@@ -11,13 +11,13 @@
 --
 -- Safe to run on existing data and to run again.
 CREATE OR REPLACE FUNCTION catalog_art_version(source text) RETURNS text
-LANGUAGE sql IMMUTABLE AS $$
+LANGUAGE sql STABLE PARALLEL SAFE AS $$
   SELECT CASE WHEN source IS NULL OR source = '' THEN NULL
     ELSE left(encode(sha256(convert_to(source, 'UTF8')), 'hex'), 8) END
 $$;
 
 CREATE OR REPLACE FUNCTION catalog_art_route(printing uuid, size text, source text, small_source text) RETURNS text
-LANGUAGE sql IMMUTABLE AS $$
+LANGUAGE sql STABLE PARALLEL SAFE AS $$
   SELECT CASE WHEN source IS NULL OR source = '' THEN NULL
     ELSE '/api/art/' || printing || '/' || size || '?v=' || catalog_art_version(small_source) END
 $$;

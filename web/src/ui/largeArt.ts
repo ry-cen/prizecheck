@@ -8,13 +8,16 @@ import { largeArtUrl } from "./artRoute";
  * An address that isn't an art-route small address is used as it is. Failures count per address, so a new card
  * starts from its large artwork in the same render.
  */
-export function useLargeArt(url: string | null): {
+export function useLargeArt(
+  url: string | null,
+  largeUrl?: string | null
+): {
   src: string | null;
   onError: () => void;
 } {
   const [failure, setFailure] = useState({ url, count: 0 });
   const attempt = failure.url === url ? failure.count : 0;
-  const large = url ? largeArtUrl(url) : null;
+  const large = largeUrl ?? (url ? largeArtUrl(url) : null);
   const sources = large ? [large, url] : [url];
   return {
     src: sources[attempt] ?? null,

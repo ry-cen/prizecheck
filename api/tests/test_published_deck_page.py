@@ -197,7 +197,7 @@ def test_no_public_response_the_page_reads_contains_ownership_or_storage(store):
     for identity in answers["snapshot"].json()["identities"]:
         for edition in identity["editions"]:
             assert set(edition) == {"set_id", "set_name", "collector_number", "variant", "image_url", "quantity",
-                                    "edition_ref", "printing_ref", "printing_name", *DISPLAY_KEYS}
+                                    "edition_ref", "printing_ref", "printing_name", "large_image_url", *DISPLAY_KEYS}
     assert [deck_card["url"] for deck_card in answers["discovery"].json()["decks"]] == [f"/published/{token}"]
     assert timeless(answers["format-checks"].json()["results"])[0]["format"] == "standard"
 

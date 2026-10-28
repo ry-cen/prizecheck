@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator, ValidationError
 
 from .api_errors import api_error
+from .art_urls import large_direct_url
 from .db import connect
 from .identity import verified_user
 from .construction_checks import DISCLAIMER, IdentityCount, evaluate_checks
@@ -23,6 +24,10 @@ from .public_projection import public_projection_store, ProjectionUnavailable
 router = APIRouter(tags=['publication'])
 TOKEN = re.compile(r'[A-Za-z0-9_-]{32}')
 PUBLIC_HEADERS = {'Cache-Control': 'no-store', 'Pragma': 'no-cache', 'X-Robots-Tag': 'noindex, nofollow'}
+
+
+# Fields a public read adds that a snapshot never stores.
+READ_ONLY = {'identities': {'__all__': {'editions': {'__all__': {'large_image_url'}}}}}
 
 
 class PublicModel(BaseModel):
@@ -50,6 +55,9 @@ class PublicEdition(PublicModel):
     evolves_from: str | None = None
     evolution_root: str | None = None
     evolution_stage: int | None = None
+    # The large picture's direct address, added when the page is read (never stored with the snapshot): the Published
+    # Deck page is anonymous, so its card popup cannot use the signed-in art route (ADR 0020).
+    large_image_url: str | None = None
 
 
 class PublicIdentity(PublicModel):
@@ -334,7 +342,7 @@ def mutate(deck_id, command, owner, action, token=None):
                     conn.execute('UPDATE deck_publication SET revoked=true WHERE token=%s', (target,))
                 else:
                     public = snapshot(conn, owner, deck_id, command.title, version, target_format)
-                    projection = {'visibility': active['visibility'] if active else 'unlisted', 'snapshot': public.model_dump(mode='json')}
+                    projection = {'visibility': active['visibility'] if active else 'unlisted', 'snapshot': public.model_dump(mode='json', exclude=READ_ONLY)}
                     conn.execute('UPDATE deck_publication SET version=%s,title=%s WHERE token=%s', (version, command.title, target))
                 result = PublicationResult(token=target, version=version, revoked=action == 'revoke').model_dump(mode='json')
                 conn.execute('INSERT INTO publication_command(owner_id,request_key,request_digest,token,projection,result) VALUES (%s,%s,%s,%s,%s,%s)',
@@ -414,6 +422,9 @@ def public_snapshot(token: str, response: Response):
         public = PublicSnapshot.model_validate(record['snapshot'])
     except (KeyError, TypeError, ValueError, ValidationError):
         raise HTTPException(503, {'code': 'PUBLIC_PROJECTION_UNAVAILABLE'}, headers=PUBLIC_HEADERS) from None
+    for identity in public.identities:
+        for edition in identity.editions:
+            edition.large_image_url = large_direct_url(edition.image_url)
     if record['visibility'] == 'listed':
         response.headers['X-Robots-Tag'] = 'index, follow'
     return public

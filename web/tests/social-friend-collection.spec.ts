@@ -178,9 +178,6 @@ test("a Friend's Collection opens from the Friends drawer on my Want List, with 
     1
   );
 
-  await page.route(/^https:\/\/assets\.tcgdex\.net\//, (route) =>
-    route.abort()
-  );
   await signInAsOwner(page, "/decks");
   await nameCollector(page, "Ash K");
   await befriend(page, misty.page);
@@ -268,9 +265,6 @@ async function befriendMisty(
   const misty = await collectors.signIn({ next: "/decks" });
   const handle = await nameCollector(misty.page, "Misty W");
   await hold(misty.page, await unsorted(misty.page), ids["PAL 185"], 1);
-  await page.route(/^https:\/\/assets\.tcgdex\.net\//, (route) =>
-    route.abort()
-  );
   await signInAsOwner(page, "/decks");
   await nameCollector(page, "Ash K");
   await befriend(page, misty.page);

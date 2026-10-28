@@ -186,8 +186,17 @@ export function CardPopup({
 }
 
 /** The card's large artwork at full width of its column, or "Artwork unavailable" when there is none or it fails. */
-export function CardArt({ url, name }: { url: string | null; name: string }) {
-  const art = useLargeArt(url);
+export function CardArt({
+  url,
+  name,
+  largeUrl,
+}: {
+  url: string | null;
+  name: string;
+  /** An explicit large address (the anonymous Published Deck page has no art route); used before `url`. */
+  largeUrl?: string | null;
+}) {
+  const art = useLargeArt(url, largeUrl);
   if (!art.src)
     return (
       <div

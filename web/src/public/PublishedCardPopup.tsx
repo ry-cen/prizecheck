@@ -14,6 +14,8 @@ import {
 type Props = {
   /** The deck's lines in the panel's order; the popup steps through them. */
   lines: readonly DeckLine[];
+  /** Each line's large picture address by line key (the page is anonymous: no art route). */
+  largeArt: ReadonlyMap<string, string | null>;
   /** The line shown, or null while closed. */
   index: number | null;
   onIndex: (index: number) => void;
@@ -44,6 +46,7 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
  */
 export function PublishedCardPopup({
   lines,
+  largeArt,
   index,
   onIndex,
   onClose,
@@ -75,7 +78,15 @@ export function PublishedCardPopup({
         line ? `Card ${shown + 1} of ${lines.length}: ${line.line.name}` : ""
       }
       returnFocus={returnFocus}
-      art={line && <CardArt url={line.line.image_url} name={line.line.name} />}
+      art={
+        line && (
+          <CardArt
+            url={line.line.image_url}
+            largeUrl={largeArt.get(line.line.edition_id) ?? null}
+            name={line.line.name}
+          />
+        )
+      }
     >
       {line && (
         <dl className="m-0 flex flex-col gap-3">

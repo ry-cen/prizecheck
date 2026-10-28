@@ -41,6 +41,7 @@ import {
   costText,
   pricesOf,
   publishedGroups,
+  publishedLargeArt,
   publishedLines,
 } from "./publishedDeckModel";
 
@@ -218,6 +219,11 @@ export function PublishedDeckPage({
     () => (snapshot ? publishedLines(snapshot) : []),
     [snapshot]
   );
+  const largeArt = useMemo(
+    () =>
+      snapshot ? publishedLargeArt(snapshot) : new Map<string, string | null>(),
+    [snapshot]
+  );
   const groups = useMemo(() => publishedGroups(lines), [lines]);
   // The popup steps through the lines in the order the panel draws them.
   const ordered = useMemo(
@@ -387,6 +393,7 @@ export function PublishedDeckPage({
       </p>
       <PublishedCardPopup
         lines={ordered}
+        largeArt={largeArt}
         index={card}
         onIndex={setCard}
         onClose={() => setCard(null)}

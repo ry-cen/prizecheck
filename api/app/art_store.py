@@ -35,7 +35,7 @@ log = logging.getLogger(__name__)
 ALLOWED_HOST = "assets.tcgdex.net"
 # Fallback art (ADR 0019, #354): linked, never copied. The route answers a redirect to this exact URL shape, which
 # the view builds from an integer product id.
-LINKED_ART = re.compile(r"^https://tcgplayer-cdn\.tcgplayer\.com/product/[0-9]{1,9}_(?:200|400)w\.jpg$")
+LINKED_ART = re.compile(r"https://tcgplayer-cdn\.tcgplayer\.com/product/[0-9]{1,9}_(?:200|400)w\.jpg")
 RATE = 5
 MAX_BYTES = 2 * 1024 * 1024
 CONNECT_TIMEOUT = 3.0
@@ -204,17 +204,19 @@ def fetcher() -> ArtFetcher:
         return _fetcher
 
 
-def resolve(conn, printing_id: UUID, size: str) -> str | None:
-    """The source URL for a (Printing, size): what ``catalog_printing_art`` chooses (TCGdex first, else the fallback),
-    the one place a Printing's art comes from. None when the Printing has no art or the URL is not one the route may use:
-    a TCGdex file on the exact host (fetched and stored) or a linked fallback (redirected, never fetched)."""
+def resolve(conn, printing_id: UUID, size: str):
+    """(source, version) for a (Printing, size): what ``catalog_printing_art`` chooses (TCGdex first, else the fallback),
+    the one place a Printing's art comes from, and the version ``?v=`` must equal for the immutable cache header (the
+    Printing's small-source version). (None, None) when the Printing has no art or the URL is not one the route may
+    use: a TCGdex file on the exact host (fetched and stored) or a linked fallback (redirected, never fetched)."""
     column = "low_image_url" if size == "small" else "high_image_url"
-    row = conn.execute(f"SELECT {column} AS source FROM catalog_printing_art WHERE printing_id = %s", (printing_id,)).fetchone()
+    row = conn.execute(f"SELECT {column} AS source, art_version FROM catalog_printing_art WHERE printing_id = %s",
+                       (printing_id,)).fetchone()
     source = row["source"] if row else None
     # art_object.source_url holds at most 2048 characters: a longer source could be fetched but never stored.
-    if source and len(source) <= 2048 and (host_allowed(source) or LINKED_ART.match(source)):
-        return source
-    return None
+    if source and len(source) <= 2048 and (host_allowed(source) or LINKED_ART.fullmatch(source)):
+        return source, row["art_version"]
+    return None, None
 
 
 def _missing(code: str) -> JSONResponse:
@@ -242,11 +244,9 @@ def _linked(source: str, fresh: bool) -> Response:
 def _read(conn, printing_id: UUID, size: str):
     """(source, object row, ledger row, version) for a (Printing, size); the ledger row carries its age in database seconds.
     The version is the one ``?v=`` must equal for the immutable cache header (the Printing's small-source version)."""
-    source = resolve(conn, printing_id, size)
+    source, version = resolve(conn, printing_id, size)
     if source is None:
         return None, None, None, None
-    version = conn.execute("SELECT art_version FROM catalog_printing_art WHERE printing_id=%s",
-                           (printing_id,)).fetchone()["art_version"]
     obj = conn.execute("SELECT * FROM art_object WHERE printing_id=%s AND size=%s", (printing_id, size)).fetchone()
     failure = conn.execute("""SELECT source_url, failures, EXTRACT(EPOCH FROM now() - last_failed_at) AS age
         FROM art_fetch_failure WHERE printing_id=%s AND size=%s""", (printing_id, size)).fetchone()
@@ -283,7 +283,7 @@ def serve(printing_id: str, size: str, v: str | None) -> Response:
         source, obj, _, version = _read(conn, pid, size)
         if source is None:
             return _missing("ART_NOT_FOUND")
-        if LINKED_ART.match(source):
+        if LINKED_ART.fullmatch(source):
             return _linked(source, v == version)
         answer = _stored(conn, pid, size, source, obj, v == version)
     if answer:
@@ -296,7 +296,7 @@ def serve(printing_id: str, size: str, v: str | None) -> Response:
             source, obj, failure, version = _read(conn, pid, size)
             if source is None:
                 return _missing("ART_NOT_FOUND")
-            if LINKED_ART.match(source):
+            if LINKED_ART.fullmatch(source):
                 return _linked(source, v == version)
             answer = _stored(conn, pid, size, source, obj, v == version)
         if answer:

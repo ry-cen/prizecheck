@@ -149,7 +149,7 @@ def test_snapshot_allowlist_private_edits_republish_revoke_and_burned_url():
     assert snapshot['title'] == 'Public deck' and snapshot['total'] == '59' and snapshot['version'] == 1
     identity = snapshot['identities'][0]
     assert set(identity) == {'name', 'quantity', 'editions'}
-    assert set(identity['editions'][0]) == {'set_id','set_name','collector_number','variant','image_url','quantity','edition_ref','printing_ref','printing_name',*DISPLAY_KEYS}
+    assert set(identity['editions'][0]) == {'set_id','set_name','collector_number','variant','image_url','quantity','edition_ref','printing_ref','printing_name','large_image_url',*DISPLAY_KEYS}
     assert identity['editions'][0]['printing_name'] == 'Pikachu'
     assert published_refs(snapshot) == [edition_refs(edition)]
     assert all(__import__('re').fullmatch(REF[1:-1], ref) for pair in published_refs(snapshot) for ref in pair)

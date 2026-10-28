@@ -14,7 +14,7 @@ from uuid import uuid4
 import pytest
 
 from app import public_catalog
-from app.art_urls import art_url, art_version
+from app.art_urls import art_url, art_version, large_direct_url
 from app.main import app, connect
 from app.public_projection import public_record_store
 from app.public_records import catalog_printing_key
@@ -31,6 +31,8 @@ from test_friend_copies import collection, ok, place
 from test_published_cost import USER, store  # noqa: F401  (an autouse fixture)
 from test_holdings import call
 from test_trade_lists import friend_list, friends
+from test_trade_matches import matches
+from test_trade_wants import set_want
 from want_list_swap_fixtures import seed_swap_catalog
 
 client = TestClient(app)
@@ -96,7 +98,11 @@ def test_every_signed_in_read_carries_route_addresses_and_no_art_host(swap_world
     deck = create(ash, f"Art deck {uuid4()}").json()["location"]["id"]
     for edition in (iono, fallback, bare):
         line(ash, deck, edition, 2)
+    ok(set_want(ash, iono, 1))
     answers = {
+        "trade matches": {"rows": matches(ash)["rows"]},
+        "deck import review": call("POST", "/api/decks/import/review", ash,
+                                   {"source": {"text": "4 Iono PAL 185\n"}, "fixes": []}),
         "holdings": call("GET", f"/api/holdings/{binder}", misty),
         "collection": call("GET", "/api/collection", misty),
         "collection holdings": call("GET", "/api/collection/holdings", misty),
@@ -107,10 +113,13 @@ def test_every_signed_in_read_carries_route_addresses_and_no_art_host(swap_world
         "decks": call("GET", "/api/decks", ash),
         "want list": call("GET", "/api/want-list", ash),
     }
+    assert answers["trade matches"]["rows"], "Misty offers the Iono Ash wants"
     for name, response in answers.items():
-        assert response.status_code == 200, (name, response.text)
+        body = response if isinstance(response, dict) else response.json()
+        if not isinstance(response, dict):
+            assert response.status_code == 200, (name, response.text)
         # The Deck index shows a cover only when the Deck leads with a card it can picture.
-        only_routes(name, response.json(), 0 if name == "decks" else 1)
+        only_routes(name, body, 0 if name == "decks" else 1)
     deck_lines = detail(ash, deck)["deck_list"]["lines"]
     by_edition = {entry["edition_id"]: entry["image_url"] for entry in deck_lines}
     assert ROUTE.match(by_edition[iono]) and ROUTE.match(by_edition[fallback]) and by_edition[bare] is None
@@ -164,6 +173,9 @@ def test_the_published_page_and_the_public_catalog_keep_their_direct_addresses(s
     assert page.status_code == 200, page.text
     expected = {f"{HOST}{source_id}/low.webp" for source_id, _ in LEGAL}
     assert set(image_values(page.json())) == expected
+    # The large picture is a direct address too (the page is anonymous: no art route), added on read and never stored.
+    large = {edition["large_image_url"] for identity in page.json()["identities"] for edition in identity["editions"]}
+    assert large == {f"{HOST}{source_id}/high.webp" for source_id, _ in LEGAL}
     assert "/api/art/" not in page.text
     for path in ("/api/public/discovery", f"/api/public/decks/{token}/versions/1/exports/live"):
         assert "/api/art/" not in client.get(path).text, path
@@ -187,3 +199,11 @@ def test_only_the_anonymous_reads_and_the_art_route_select_the_source_urls():
     offenders = [str(path.relative_to(root)) for path in root.rglob("*.py")
                  if path.name not in allowed and re.search(r"\bart\.(low|high)_image_url\b", path.read_text())]
     assert offenders == []
+
+
+def test_a_direct_small_address_maps_to_its_large_one():
+    assert large_direct_url(HOST + "a/b/low.webp") == HOST + "a/b/high.webp"
+    assert large_direct_url("https://tcgplayer-cdn.tcgplayer.com/product/7_200w.jpg") == (
+        "https://tcgplayer-cdn.tcgplayer.com/product/7_400w.jpg")
+    assert large_direct_url(None) is None and large_direct_url("https://x.test/other.png") is None
+    assert large_direct_url("/api/art/1/small?v=ab") is None

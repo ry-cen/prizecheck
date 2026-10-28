@@ -64,6 +64,21 @@ export function publishedLines(snapshot: PublicSnapshot): DeckLine[] {
   return [...lines.values()].map((line) => deckLine(line, undefined));
 }
 
+/** Each line's large picture address, by line key: the snapshot's own direct address (the page is anonymous, so it has
+ * no art route). Rows of one Edition merge into the first. */
+export function publishedLargeArt(
+  snapshot: PublicSnapshot
+): Map<string, string | null> {
+  const found = new Map<string, string | null>();
+  let index = 0;
+  for (const identity of snapshot.identities)
+    for (const edition of identity.editions) {
+      const key = rowKey(edition.edition_ref, index++);
+      if (!found.has(key)) found.set(key, edition.large_image_url ?? null);
+    }
+  return found;
+}
+
 /**
  * The builder's groups. A snapshot published before #183 froze no card kinds, so every line would sit under "Card
  * type unknown": it is one group, "Cards", instead.

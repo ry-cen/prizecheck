@@ -54,6 +54,21 @@ promote({'card-1': 'Pikachu'})`,
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });
   const anonymous = await browser.newContext();
   const publicPage = await anonymous.newPage();
+  const artRequests: string[] = [];
+  await publicPage.route(/^https:\/\/assets\.tcgdex\.net\//, (route) => {
+    artRequests.push(route.request().url());
+    return route.fulfill({
+      status: 200,
+      contentType: "image/png",
+      body: Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
+        "base64"
+      ),
+    });
+  });
+  publicPage.on("request", (request) => {
+    if (request.url().includes("/api/art/")) artRequests.push(request.url());
+  });
   try {
     await pool.query("DELETE FROM auth_send_event");
     await signInAsOwner(page, "/collection");
@@ -124,6 +139,11 @@ promote({'card-1': 'Pikachu'})`,
     await expect(
       publicPage.getByRole("dialog", { name: "Pikachu" })
     ).toContainText("Fixture Set");
+    // The page is anonymous, so the popup's large picture is the snapshot's own direct address, never the art route.
+    await expect
+      .poll(() => artRequests)
+      .toContain("https://assets.tcgdex.net/en/fixture/card-1/high.webp");
+    expect(artRequests.some((url) => url.includes("/api/art/"))).toBe(false);
     await publicPage.keyboard.press("Escape");
     const token = firstUrl.split("/").at(-1)!;
     const snapshotResponse = await anonymous.request.get(
@@ -147,6 +167,7 @@ promote({'card-1': 'Pikachu'})`,
       "evolution_stage",
       "evolves_from",
       "image_url",
+      "large_image_url",
       "printing_name",
       "printing_ref",
       "quantity",
