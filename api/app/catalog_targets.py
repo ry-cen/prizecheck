@@ -19,7 +19,19 @@ import unicodedata
 from collections import Counter
 from dataclasses import dataclass, replace
 
-from .price_import import number_key
+
+def number_key(number):
+    """The comparison key of a card number: trimmed, uppercase, any "/total" dropped and the leading zeros of the first
+    digit run removed (DP05 -> DP5, SWSH001 -> SWSH1, 001 -> 1, XY01 -> XY1; 000 -> 0). None for a missing number.
+    tcgplayer_product.number_key is filled with it, and matching rule v4 (design section 4.4) must use the same function."""
+    if number is None:
+        return None
+    text = unicodedata.normalize("NFC", str(number)).strip().split("/", 1)[0].strip().upper()
+    if not text:
+        return None
+    return re.sub(r"\d+", lambda run: run.group().lstrip("0") or "0", text, count=1)
+
+
 
 LIVE = "live_derivation"
 MATCHING = "marketplace_matching"

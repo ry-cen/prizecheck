@@ -1045,7 +1045,7 @@ def promo(source_id, number, set_id="svp", name="Pikachu", variants=None):
 
 
 def listing(product_id, name, number, group, conn=None):
-    from app.price_import import number_key
+    from app.catalog_targets import number_key
     with connect() as connection:
         connection.execute("""INSERT INTO tcgplayer_product(product_id,group_id,name,number,number_key,seen_at,source_updated_at)
           VALUES (%s,%s,%s,%s,%s,now(),now())""", (product_id, group, name, number, number_key(number)))
