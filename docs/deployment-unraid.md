@@ -4,6 +4,8 @@ Running **Deploy dev** by hand on `dev` deploys PrizeCheck to an Unraid server o
 
 This guide covers the dev environment. Production runs on Oracle Cloud and reuses the same image build and deploy script, with its own project name, data directory, secrets, GitHub environment and SSH key (see [Adding production later](#adding-production-later)).
 
+The guide has three parts. **Part 1** is what only you can do: the Unraid settings, Tailscale, GitHub, the env file with its secrets, and the deploy key. **Part 2** copies the host files to Unraid and runs `setup`, which does everything a root script can do safely and ends with a readiness report. **Part 3** follows that report: the first deploy, the owner, the catalog rules and the first catalog pull.
+
 ## How it works
 
 ```
@@ -53,14 +55,16 @@ Deploy state lives under `PRIZECHECK_HOME` (`state/current`, `state/previous`, `
 
 ### What the repository provides and what you set up
 
-| Implemented in this repository                                                         | One-time manual steps (this guide)                                      |
-| -------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| `deploy/docker/{api,auth,web}.Dockerfile`, `deploy/docker/nginx.conf`, `.dockerignore` | Install Docker Compose on Unraid (step 2)                               |
-| `compose.deploy.yml`                                                                   | Create the directories and the env file on Unraid (steps 3 to 5)        |
-| `deploy/host/prizecheck-deploy.sh` (deploy, rollback, backup, operator helpers)        | Generate the deploy SSH key and install it as a forced command (step 6) |
-| `deploy/host/prizecheck-dev.env.example`                                               | Tailscale tag, policy, OAuth client and Serve (steps 7 and 9)           |
-| `.github/workflows/deploy-dev.yml`, `build-images.yml`; `verify.yml` made reusable     | GitHub environment, secrets and variables (step 8)                      |
-| Health checks, smoke checks, pre-migration backups, automatic rollback                 | First deploy, owner binding, catalog import (steps 10 and 11)           |
+| Implemented in this repository                                                         | Done by you (Part 1)                                               | Done by `setup` (Part 2)                                    |
+| -------------------------------------------------------------------------------------- | ------------------------------------------------------------------ | ----------------------------------------------------------- |
+| `deploy/docker/{api,auth,web}.Dockerfile`, `deploy/docker/nginx.conf`, `.dockerignore` | Prepare Unraid and install Docker Compose (steps 1 and 2)          | The data, state and backup directories and their owners     |
+| `compose.deploy.yml`                                                                   | Tailscale tag, policy, OAuth client and Serve (steps 3 and 4)      | The readiness report, with the next step for each open item |
+| `deploy/host/prizecheck-deploy.sh` (deploy, rollback, backup, readiness, helpers)      | GHCR access and the env file (steps 5 and 6)                       | The two User Scripts entries to add (Unraid has no systemd) |
+| `deploy/host/prizecheck-dev.env.example`                                               | Generate the deploy SSH key and install it as a forced command (7) |                                                             |
+| `.github/workflows/deploy-dev.yml`, `build-images.yml`; `verify.yml` made reusable     | GitHub environment, secrets and variables (step 8)                 |                                                             |
+| Health checks, smoke checks, pre-migration backups, automatic rollback                 |                                                                    |                                                             |
+
+The first deploy, owner binding, the catalog rules (applied by the deploy) and the catalog import (Part 3, steps 10 to 13) follow the report.
 
 Nothing in this guide has been run against your server yet. The images were not built locally (there was no Docker on the development machine), so the first run of the `images` job is also their first build.
 
@@ -73,13 +77,17 @@ Nothing in this guide has been run against your server yet. The images were not 
 - **One rate-limit bucket.** `TRUSTED_PROXY_IPS` is empty, so the gateway ignores forwarding headers and sees every browser as the `web` container. The per-IP limits (code sends, public reads) are shared by everyone using dev. That's fine for a single owner.
 - **No URLs in logs.** Published-deck URLs are capability links. nginx and uvicorn access logs are off, and nginx logs only its own critical failures. Container logs rotate at 3 × 10 MB per service.
 
-## 1. Prepare the Unraid host
+## Part 1. What only you can do
+
+These steps use the Unraid web interface, other accounts' consoles or your own secrets, so no script on the host can do them. The readiness report in Part 3 checks the ones it can and prints the command again when one is missing.
+
+### 1. Prepare the Unraid host
 
 Requirements:
 
 - Unraid 6.12 or later with Docker enabled.
 - A pool for app data. These examples use `/mnt/cache`; substitute your pool name.
-- Tailscale running on the host (step 9 checks this).
+- Tailscale running on the host (step 4 checks this).
 - SSH enabled: **Settings → Management Access → Use SSH**.
 
 Choose the install directory. The examples use:
@@ -90,7 +98,7 @@ export PRIZECHECK_HOME=/mnt/cache/appdata/prizecheck-dev
 
 Use a pool path such as `/mnt/cache/...`, not the `/mnt/user/...` FUSE path. PostgreSQL, the projection store's atomic renames and the price-runner `flock` locks need a real filesystem. If your appdata share uses Unraid's Exclusive mode, `/mnt/user/appdata` bypasses FUSE and also works; a plain cache-only share still goes through FUSE.
 
-## 2. Install Docker Compose
+### 2. Install Docker Compose
 
 Check on the Unraid terminal:
 
@@ -100,108 +108,7 @@ docker compose version
 
 If that fails, install the **Docker Compose Manager** plugin from **Apps** (Community Applications). It installs Compose v2, which provides `docker compose`. The deploy script also accepts a standalone `docker-compose` v2. It needs Compose 2.20 or later for `up --wait --wait-timeout`.
 
-## 3. Create the persistent directories and install the host files
-
-From your workstation, in a checkout of the `dev` commit you're going to deploy, copy the two host files. Replace `unraid` with the host's tailnet name or IP:
-
-```bash
-ssh root@unraid 'mkdir -p /mnt/cache/appdata/prizecheck-dev/bin'
-```
-
-```bash
-scp compose.deploy.yml root@unraid:/mnt/cache/appdata/prizecheck-dev/compose.deploy.yml
-```
-
-```bash
-scp deploy/host/prizecheck-deploy.sh deploy/host/prizecheck-catalog-refresh.service deploy/host/prizecheck-catalog-refresh.timer deploy/host/prizecheck-dev.env.example root@unraid:/mnt/cache/appdata/prizecheck-dev/bin/
-```
-
-The script finds its home as the parent of its `bin/` directory, so keep that layout. The two catalog refresh unit files go in `bin/` too, although Unraid does not run systemd: they are part of the digest CI checks, and `setup` skips the timer here. Steps 4 and 5 finish the setup.
-
-## 4. Authenticate Unraid with GHCR
-
-The workflow needs no stored registry credential on Unraid. Each deploy pipes the job's short-lived `GITHUB_TOKEN` (`packages: read` and `contents: read`) over SSH. The host logs in to a temporary Docker config, pulls, and deletes the config.
-
-The packages `prizecheck-api`, `prizecheck-auth`, `prizecheck-web` and `prizecheck-scanner-index` are created private and linked to the repository by the first `images` run. If a deploy fails with `Image pull failed`, open each package on GitHub, go to **Package settings → Manage Actions access**, and give `ry-cen/prizecheck` **Read**. A deploy also pulls the `scanner-index` image, so the card scanner's index job is ready to run; start it by hand with `prizecheck-deploy.sh compose run --rm scanner-index`.
-
-Optionally, for manual pulls (deploying a specific older commit by hand), store a persistent read-only login. Use a classic personal access token with only the `read:packages` scope:
-
-```bash
-DOCKER_CONFIG=/mnt/cache/appdata/prizecheck-dev/docker-config docker login ghcr.io -u YOUR_GITHUB_USER
-```
-
-The script uses this config only when CI hasn't supplied a token. Don't log in as plain `root`: `/root` lives in RAM on Unraid and is lost on reboot.
-
-## 5. Configure the deployment environment file
-
-On Unraid:
-
-```bash
-cd /mnt/cache/appdata/prizecheck-dev && cp bin/prizecheck-dev.env.example prizecheck.env && chmod 600 prizecheck.env
-```
-
-Generate three distinct secrets, one per command run:
-
-```bash
-openssl rand -hex 32
-```
-
-Edit `prizecheck.env` (for example `nano prizecheck.env`):
-
-| Variable               | Value                                                                                                            |
-| ---------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `PRIZECHECK_DATA_DIR`  | `/mnt/cache/appdata/prizecheck-dev/data`                                                                         |
-| `PRIZECHECK_WEB_PORT`  | A free loopback port. Default `8088`; check with `ss -ltn \| grep 8088`                                          |
-| `PUBLIC_ORIGIN`        | The exact URL from step 9, e.g. `https://unraid.tail1234.ts.net`. Include `:8443` if you serve on a non-443 port |
-| `OWNER_EMAIL`          | The address you sign in with                                                                                     |
-| `POSTGRES_PASSWORD`    | A secret (letters and digits only, at least 32 characters; it's embedded in a connection URL)                    |
-| `BETTER_AUTH_SECRET`   | A secret                                                                                                         |
-| `INTERNAL_AUTH_SECRET` | A secret                                                                                                         |
-| `MAIL_MODE`            | Keep `file`, unless you have an HTTP mail relay (then set the three `MAIL_*` relay values)                       |
-
-These values stay in this file only. They aren't in the repository or GitHub, and the deploy script reads individual keys without printing them. Don't reuse them for production.
-
-Then create the data directories with the ownership the non-root containers need:
-
-```bash
-bash /mnt/cache/appdata/prizecheck-dev/bin/prizecheck-deploy.sh setup
-```
-
-## 6. Generate the SSH deployment key
-
-On your workstation, create a key used only for this:
-
-```bash
-ssh-keygen -t ed25519 -N '' -C prizecheck-dev-deploy -f prizecheck-dev-deploy
-```
-
-Install the public key on Unraid as a **forced command**. With `restrict`, the key can't open a shell, forward ports or allocate a terminal. It can only ask the deploy script for `deploy <commit> <digest>`, `rollback` or `status`; anything else is refused. Add this single line (with your public key) to root's authorized keys:
-
-```text
-restrict,command="/bin/bash /mnt/cache/appdata/prizecheck-dev/bin/prizecheck-deploy.sh --ssh-gate" ssh-ed25519 AAAA...your-key... prizecheck-dev-deploy
-```
-
-On Unraid the root filesystem is in RAM, so the line must go where Unraid persists keys. On recent releases you can paste it into **Users → root → SSH authorized keys**, which writes `/boot/config/ssh/root/authorized_keys`. Check what your version does with `ls -la /root/.ssh` and confirm the line survives a reboot.
-
-Record the host key for CI's verification. On the Unraid console, read its fingerprint:
-
-```bash
-ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
-```
-
-From a tailnet machine, fetch the key using the **same address CI will use** (`UNRAID_SSH_HOST` in step 8). The tailnet IP is the most stable choice:
-
-```bash
-ssh-keyscan -t ed25519 100.x.y.z > unraid_known_hosts && ssh-keygen -lf unraid_known_hosts
-```
-
-The two fingerprints must match. The content of `unraid_known_hosts` becomes `UNRAID_SSH_KNOWN_HOSTS`. CI connects with `StrictHostKeyChecking=yes`. Unraid keeps its host keys on the flash drive, so they survive reboots.
-
-Delete the private key file from your workstation after storing it in GitHub (step 8).
-
-If Tailscale SSH is enabled for the Unraid node (`tailscale set --ssh`), tailscaled answers port 22 on the tailnet address itself and never consults `authorized_keys`. The policy in step 7 doesn't grant `tag:ci` Tailscale SSH, so the deploy is denied rather than let in. Keep Tailscale SSH off on this node, so CI reaches Unraid's OpenSSH.
-
-## 7. Configure Tailscale for CI
+### 3. Configure Tailscale for CI
 
 In the [Tailscale admin console](https://login.tailscale.com/admin):
 
@@ -229,39 +136,9 @@ In the [Tailscale admin console](https://login.tailscale.com/admin):
 
 2. **Trust credentials** (Settings → OAuth clients): create an OAuth client with the **Auth Keys → Write** scope, limited to tag `tag:ci`. Copy the client ID and secret into GitHub (step 8). The action uses them to mint a short-lived, ephemeral, pre-authorized node for each run, which disappears when the run ends. The `tailscale/github-action` also supports OIDC workload identity federation (`audience`), which needs no stored secret; switch to it later if you want.
 
-3. **DNS**: enable **MagicDNS** and **HTTPS Certificates** (needed by Serve in step 9). Certificate issuance publishes the machine name (for example `unraid.tail1234.ts.net`) in public Certificate Transparency logs. The app itself stays unreachable from the internet.
+3. **DNS**: enable **MagicDNS** and **HTTPS Certificates** (needed by Serve in step 4). Certificate issuance publishes the machine name (for example `unraid.tail1234.ts.net`) in public Certificate Transparency logs. The app itself stays unreachable from the internet.
 
-## 8. Configure GitHub
-
-In `ry-cen/prizecheck` → **Settings**:
-
-1. **Environments → New environment `dev`**: under deployment branches, allow only `dev`. Optionally add yourself as a required reviewer for manual approval of each deploy.
-2. **Environment secrets** (in `dev`):
-
-   | Secret                   | Value                                           |
-   | ------------------------ | ----------------------------------------------- |
-   | `TS_OAUTH_CLIENT_ID`     | Tailscale OAuth client ID (step 7)              |
-   | `TS_OAUTH_SECRET`        | Tailscale OAuth client secret (step 7)          |
-   | `UNRAID_SSH_PRIVATE_KEY` | The content of `prizecheck-dev-deploy` (step 6) |
-
-3. **Environment variables** (in `dev`):
-
-   | Variable                 | Value                                                  |
-   | ------------------------ | ------------------------------------------------------ |
-   | `UNRAID_SSH_HOST`        | The Unraid tailnet IP (or name) used for `ssh-keyscan` |
-   | `UNRAID_SSH_USER`        | `root` (the default when unset)                        |
-   | `UNRAID_SSH_KNOWN_HOSTS` | The content of `unraid_known_hosts` (step 6)           |
-
-4. **Repository variables** (Secrets and variables → Actions → Variables). These are read before the job enters the environment, so they must be repository-level:
-
-   | Variable             | Value                                                                               |
-   | -------------------- | ----------------------------------------------------------------------------------- |
-   | `DEV_PUBLIC_URL`     | The `PUBLIC_ORIGIN` from step 5 (shown as the deployment link)                      |
-   | `DEV_DEPLOY_ENABLED` | `true`. Set this last; until then `verify` and `images` run but `deploy` is skipped |
-
-The workflow uses the job's own `GITHUB_TOKEN` for GHCR. Grants are per job: `contents: read` for `verify`, `images` and `deploy`, `packages: write` only for `images`, `packages: read` for `deploy`, and none for `rollback`. Third-party actions are pinned to commit SHAs.
-
-## 9. Enable Tailscale Serve
+### 4. Enable Tailscale Serve
 
 First find out where Tailscale runs. On the Unraid terminal:
 
@@ -307,7 +184,199 @@ tailscale serve --bg --https=443 http://172.17.0.1:8088
 
 A Tailscale container started with `--network=host` behaves like the host case. A Tailscale container on a custom `br0` (macvlan/ipvlan) network can't reach `172.17.0.1`; run it with host networking instead. The deploy script accepts only `127.0.0.1` or docker0's own address for `PRIZECHECK_WEB_BIND` and refuses to deploy with anything else (for example `0.0.0.0` or a LAN address).
 
-## 10. Perform the initial deployment
+### 5. Authenticate Unraid with GHCR
+
+The workflow needs no stored registry credential on Unraid. Each deploy pipes the job's short-lived `GITHUB_TOKEN` (`packages: read` and `contents: read`) over SSH. The host logs in to a temporary Docker config, pulls, and deletes the config.
+
+The packages `prizecheck-api`, `prizecheck-auth`, `prizecheck-web` and `prizecheck-scanner-index` are created private and linked to the repository by the first `images` run. If a deploy fails with `Image pull failed`, open each package on GitHub, go to **Package settings → Manage Actions access**, and give `ry-cen/prizecheck` **Read**. A deploy also pulls the `scanner-index` image, so the card scanner's index job is ready to run; start it by hand with `prizecheck-deploy.sh compose run --rm scanner-index`.
+
+Optionally, for manual pulls (deploying a specific older commit by hand), store a persistent read-only login. Use a classic personal access token with only the `read:packages` scope:
+
+```bash
+DOCKER_CONFIG=/mnt/cache/appdata/prizecheck-dev/docker-config docker login ghcr.io -u YOUR_GITHUB_USER
+```
+
+The script uses this config only when CI hasn't supplied a token. Don't log in as plain `root`: `/root` lives in RAM on Unraid and is lost on reboot.
+
+### 6. Create the env file
+
+Create the install directory on Unraid, then copy the example from your workstation (in a checkout of the `dev` commit you're going to deploy) as the env file. Replace `unraid` with the host's tailnet name or IP:
+
+```bash
+ssh root@unraid 'mkdir -p /mnt/cache/appdata/prizecheck-dev/bin'
+```
+
+```bash
+scp deploy/host/prizecheck-dev.env.example root@unraid:/mnt/cache/appdata/prizecheck-dev/prizecheck.env
+```
+
+```bash
+ssh root@unraid 'chmod 600 /mnt/cache/appdata/prizecheck-dev/prizecheck.env'
+```
+
+Generate three distinct secrets, one per command run:
+
+```bash
+openssl rand -hex 32
+```
+
+Edit `prizecheck.env` (for example `nano /mnt/cache/appdata/prizecheck-dev/prizecheck.env`):
+
+| Variable               | Value                                                                                                            |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `PRIZECHECK_DATA_DIR`  | `/mnt/cache/appdata/prizecheck-dev/data`                                                                         |
+| `PRIZECHECK_WEB_PORT`  | A free loopback port. Default `8088`; check with `ss -ltn \| grep 8088`                                          |
+| `PUBLIC_ORIGIN`        | The exact URL from step 4, e.g. `https://unraid.tail1234.ts.net`. Include `:8443` if you serve on a non-443 port |
+| `OWNER_EMAIL`          | The address you sign in with                                                                                     |
+| `POSTGRES_PASSWORD`    | A secret (letters and digits only, at least 32 characters; it's embedded in a connection URL)                    |
+| `BETTER_AUTH_SECRET`   | A secret                                                                                                         |
+| `INTERNAL_AUTH_SECRET` | A secret                                                                                                         |
+| `MAIL_MODE`            | Keep `file`, unless you have an HTTP mail relay (then set the three `MAIL_*` relay values)                       |
+
+These values stay in this file only. They aren't in the repository or GitHub, and the deploy script reads individual keys without printing them. Don't reuse them for production.
+
+`setup` (step 9) creates the data directories and checks this file with `check-config`; its report names the key at fault, never the value.
+
+### 7. Generate the SSH deployment key
+
+On your workstation, create a key used only for this:
+
+```bash
+ssh-keygen -t ed25519 -N '' -C prizecheck-dev-deploy -f prizecheck-dev-deploy
+```
+
+Install the public key on Unraid as a **forced command**. With `restrict`, the key can't open a shell, forward ports or allocate a terminal. It can only ask the deploy script for `deploy <commit> <digest>`, `rollback` or `status`; anything else is refused. Add this single line (with your public key) to root's authorized keys:
+
+```text
+restrict,command="/bin/bash /mnt/cache/appdata/prizecheck-dev/bin/prizecheck-deploy.sh --ssh-gate" ssh-ed25519 AAAA...your-key... prizecheck-dev-deploy
+```
+
+On Unraid the root filesystem is in RAM, so the line must go where Unraid persists keys. On recent releases you can paste it into **Users → root → SSH authorized keys**, which writes `/boot/config/ssh/root/authorized_keys`. Check what your version does with `ls -la /root/.ssh` and confirm the line survives a reboot.
+
+Record the host key for CI's verification. On the Unraid console, read its fingerprint:
+
+```bash
+ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
+```
+
+From a tailnet machine, fetch the key using the **same address CI will use** (`UNRAID_SSH_HOST` in step 8). The tailnet IP is the most stable choice:
+
+```bash
+ssh-keyscan -t ed25519 100.x.y.z > unraid_known_hosts && ssh-keygen -lf unraid_known_hosts
+```
+
+The two fingerprints must match. The content of `unraid_known_hosts` becomes `UNRAID_SSH_KNOWN_HOSTS`. CI connects with `StrictHostKeyChecking=yes`. Unraid keeps its host keys on the flash drive, so they survive reboots.
+
+Delete the private key file from your workstation after storing it in GitHub (step 8).
+
+If Tailscale SSH is enabled for the Unraid node (`tailscale set --ssh`), tailscaled answers port 22 on the tailnet address itself and never consults `authorized_keys`. The policy in step 3 doesn't grant `tag:ci` Tailscale SSH, so the deploy is denied rather than let in. Keep Tailscale SSH off on this node, so CI reaches Unraid's OpenSSH.
+
+### 8. Configure GitHub
+
+In `ry-cen/prizecheck` → **Settings**:
+
+1. **Environments → New environment `dev`**: under deployment branches, allow only `dev`. Optionally add yourself as a required reviewer for manual approval of each deploy.
+2. **Environment secrets** (in `dev`):
+
+   | Secret                   | Value                                           |
+   | ------------------------ | ----------------------------------------------- |
+   | `TS_OAUTH_CLIENT_ID`     | Tailscale OAuth client ID (step 3)              |
+   | `TS_OAUTH_SECRET`        | Tailscale OAuth client secret (step 3)          |
+   | `UNRAID_SSH_PRIVATE_KEY` | The content of `prizecheck-dev-deploy` (step 7) |
+
+3. **Environment variables** (in `dev`):
+
+   | Variable                 | Value                                                  |
+   | ------------------------ | ------------------------------------------------------ |
+   | `UNRAID_SSH_HOST`        | The Unraid tailnet IP (or name) used for `ssh-keyscan` |
+   | `UNRAID_SSH_USER`        | `root` (the default when unset)                        |
+   | `UNRAID_SSH_KNOWN_HOSTS` | The content of `unraid_known_hosts` (step 7)           |
+
+4. **Repository variables** (Secrets and variables → Actions → Variables). These are read before the job enters the environment, so they must be repository-level:
+
+   | Variable             | Value                                                                               |
+   | -------------------- | ----------------------------------------------------------------------------------- |
+   | `DEV_PUBLIC_URL`     | The `PUBLIC_ORIGIN` from step 6 (shown as the deployment link)                      |
+   | `DEV_DEPLOY_ENABLED` | `true`. Set this last; until then `verify` and `images` run but `deploy` is skipped |
+
+The workflow uses the job's own `GITHUB_TOKEN` for GHCR. Grants are per job: `contents: read` for `verify`, `images` and `deploy`, `packages: write` only for `images`, `packages: read` for `deploy`, and none for `rollback`. Third-party actions are pinned to commit SHAs.
+
+## Part 2. Install the host files and run `setup`
+
+`setup` is the one command that prepares the host. It does every step a root script can do safely, can be run as often as you like, and changes nothing the second time. Run it again after every change to a host file.
+
+### 9. Install the host files and run `setup`
+
+From your workstation, in a checkout of the `dev` commit you're going to deploy, copy the host files. Replace `unraid` with the host's tailnet name or IP:
+
+```bash
+scp compose.deploy.yml root@unraid:/mnt/cache/appdata/prizecheck-dev/compose.deploy.yml
+```
+
+```bash
+scp deploy/host/prizecheck-deploy.sh deploy/host/prizecheck-catalog-refresh.service deploy/host/prizecheck-catalog-refresh.timer deploy/host/prizecheck-backup.service deploy/host/prizecheck-backup.timer deploy/host/prizecheck-dev.env.example root@unraid:/mnt/cache/appdata/prizecheck-dev/bin/
+```
+
+The script finds its home as the parent of its `bin/` directory, so keep that layout. The four unit files go in `bin/` too, although Unraid does not run systemd: they are part of the digest CI checks, and `setup` installs none of them here.
+
+Run `setup` on Unraid:
+
+```bash
+bash /mnt/cache/appdata/prizecheck-dev/bin/prizecheck-deploy.sh setup
+```
+
+`setup` stops with an error if the env file (step 6) is missing. Otherwise it:
+
+- creates `data/` (PostgreSQL, the public projection store, price runners, mail, card art), `state/`, `backups/`, `signup/` and `signup-active/`, with the owners the containers need. `data/art/` holds the card pictures the API fetched from TCGdex on first request (ADR 0020); it is regenerable, so `backup` leaves it out on purpose, and deploys refuse to run without it;
+- installs no units, because there is no systemd, and prints the two User Scripts entries to add instead (below);
+- ends with the readiness report, which `setup` also runs for you. Run it alone with `bash /mnt/cache/appdata/prizecheck-dev/bin/prizecheck-deploy.sh readiness`.
+
+The report prints one line per item, `ok`, `missing` or `warning`, with the command for each item that is not ok. It exits non-zero while a prerequisite for the first deploy is missing: Docker or the Compose plugin, or the env file and its `check-config` checks. Tailscale is checked as a warning only, because the detection can be wrong (it cannot see a Tailscale that runs in a container). It never prints a value from the env file.
+
+`check-config` runs the env file checks without the report (no containers are touched; with Docker Compose installed, it also checks that the rendered configuration publishes the web port on your `PRIZECHECK_WEB_BIND` address only):
+
+```bash
+bash /mnt/cache/appdata/prizecheck-dev/bin/prizecheck-deploy.sh check-config
+```
+
+Any `ERROR:` line names the key or file at fault, never its value; fix it and run `setup` again.
+
+**The two User Scripts entries.** Unraid has no systemd, so schedule the two jobs in the User Scripts plugin (custom schedules; Unraid reads them in the server's time zone). `setup` and `readiness` print them with this host's script path:
+
+| Job                   | Schedule     | Command                                                                           |
+| --------------------- | ------------ | --------------------------------------------------------------------------------- |
+| Daily catalog refresh | `0 4 * * *`  | `bash /mnt/cache/appdata/prizecheck-dev/bin/prizecheck-deploy.sh catalog-refresh` |
+| Nightly backup        | `17 3 * * *` | `bash /mnt/cache/appdata/prizecheck-dev/bin/prizecheck-deploy.sh backup`          |
+
+The refresh imports the TCGCSV prices, checks TCGdex for catalog changes (pulling only when the card list changed), then runs the scanner index (skipped only after a pull the check started that failed). The backup dumps PostgreSQL and archives the public store ([Backing up persistent data](#backing-up-persistent-data)). Before the first deploy each logs that nothing is deployed yet and exits 0. Their output appears in the User Scripts log. The dev host works without them: pulling by hand from Owner controls keeps working.
+
+## Part 3. Follow the readiness report
+
+When the report says `This host is ready for the first deploy`, deploy. After the first deploy, `setup` or `readiness` also reads the app's state through the release's own tools image and lists what is left, each with its command:
+
+| Report item            | Step                                                        |
+| ---------------------- | ----------------------------------------------------------- |
+| The owner is bound     | [12](#12-verify-the-application-and-sign-in)                |
+| The catalog rules      | [13](#13-apply-the-catalog-rules-and-import-the-catalog) |
+| An active catalog      | [13](#13-apply-the-catalog-rules-and-import-the-catalog) |
+| The last price import  | [13](#13-apply-the-catalog-rules-and-import-the-catalog) |
+| The scanner index      | [13](#13-apply-the-catalog-rules-and-import-the-catalog) |
+| The last catalog check | [Step 9](#9-install-the-host-files-and-run-setup)           |
+| The signup mode        | Owner-only on dev                                           |
+
+These items never fail the report: they come after the first deploy.
+
+### 10. Read the report
+
+Run the report whenever you want to know what is left:
+
+```bash
+bash /mnt/cache/appdata/prizecheck-dev/bin/prizecheck-deploy.sh readiness
+```
+
+Before the first deploy it lists only the host items. Fix every `missing` line (the `next:` line under it has the command), run the report again, and go on when it says the host is ready.
+
+### 11. Perform the initial deployment
 
 1. Confirm the host files match the commit you'll deploy. On Unraid:
 
@@ -318,13 +387,13 @@ A Tailscale container started with `--network=host` behaves like the host case. 
    On your workstation, in the same commit:
 
    ```bash
-   cat compose.deploy.yml deploy/host/prizecheck-deploy.sh deploy/host/prizecheck-catalog-refresh.service deploy/host/prizecheck-catalog-refresh.timer | sha256sum
+   cat compose.deploy.yml deploy/host/prizecheck-deploy.sh deploy/host/prizecheck-catalog-refresh.service deploy/host/prizecheck-catalog-refresh.timer deploy/host/prizecheck-backup.service deploy/host/prizecheck-backup.timer | sha256sum
    ```
 
 2. Run the workflow: **Actions → Deploy dev → Run workflow → branch `dev`, operation `deploy`** (or `gh workflow run deploy-dev.yml --ref dev`). Pushing to `dev` doesn't start it. The default checks run first (formatting, lint, compilation, build and unit tests), then the images are built and the deploy runs. The deep integration suites do not gate the deploy; run them on demand from **Actions → Verify → Run workflow** with an **integration** choice, or run the full gate locally with `npm run verify`.
 3. On a new installation the script applies all migrations and initializes the public projection store. It initializes the store only when the store is empty **and** nothing has been deployed before. A missing store on an existing install stops the deploy instead of silently creating an empty one; see [public projections](public-projections.md) for recovery.
 
-## 11. Verify the application
+### 12. Verify the application and sign in
 
 On Unraid:
 
@@ -367,31 +436,37 @@ Then sign in from a tailnet device:
    bash /mnt/cache/appdata/prizecheck-dev/bin/prizecheck-deploy.sh tool /app/scripts/bind_owner.py 'ID-FROM-THE-QUERY'
    ```
 
-4. Refresh, open **Owner controls**, and start the full English catalog pull.
-
 From a device that is **not** on the tailnet, the URL must not resolve or connect.
 
-## Optional: daily catalog refresh
+### 13. Apply the catalog rules and import the catalog
 
-The dev host needs no schedule; pulling by hand from Owner controls keeps working. To check TCGdex for new cards every day ([ADR 0018](adr/0018-scheduled-catalog-change-check.md)), add a User Scripts entry (the User Scripts plugin, custom schedule `0 4 * * *`, which Unraid reads in the server's time zone) with this command:
+A deploy applies the newest version of each catalog rule by itself ([ADR 0021](adr/0021-deploy-applies-newest-catalog-rules.md)); there is no activation step and no environment switch. It does so only once the owner is bound, so the first deploy leaves them unapplied until then. Until both are applied, the daily check records a failed check and starts no pull, and the report lists the rules as missing. Apply them now rather than waiting for the next deploy:
 
 ```bash
-bash /mnt/cache/appdata/prizecheck-dev/bin/prizecheck-deploy.sh catalog-refresh
+bash /mnt/cache/appdata/prizecheck-dev/bin/prizecheck-deploy.sh tool /app/scripts/rule_rollout.py resume
 ```
 
-It imports the TCGCSV prices, checks TCGdex for catalog changes (pulling only when the card list changed), then runs the scanner index (skipped only after a pull the check started that failed). Its output appears in the User Scripts log. The systemd units in `deploy/host/` are for the Oracle host: here they only sit in `bin/` for the digest, and `setup` logs that it skipped the timer.
+It applies the newest rules, finishes any unfinished rollout and prints one line per rule. If a rollout failed, Owner controls → **Rules** shows the error; run the same command again to resume it. Then refresh, open **Owner controls**, and start the full English catalog pull. After the pull, build the scanner's index and import the first prices; the daily refresh keeps both current afterwards if you added its User Scripts entry.
+
+```bash
+bash /mnt/cache/appdata/prizecheck-dev/bin/prizecheck-deploy.sh compose run --rm scanner-index
+```
+
+```bash
+bash /mnt/cache/appdata/prizecheck-dev/bin/prizecheck-deploy.sh tool /app/scripts/price_import_job.py --rematch
+```
 
 ## Updating the host files
 
-`compose.deploy.yml`, `prizecheck-deploy.sh` and the two catalog refresh unit files run on Unraid as root, so CI never ships them. A stolen deploy key can only deploy images from GHCR with the files you installed. CI sends the digest of the commit's copies, and the host refuses to deploy if its own files differ:
+`compose.deploy.yml`, `prizecheck-deploy.sh` and the four unit files (the catalog refresh and the nightly backup) run on Unraid as root, so CI never ships them. A stolen deploy key can only deploy images from GHCR with the files you installed. CI sends the digest of the commit's copies, and the host refuses to deploy if its own files differ:
 
 ```text
-ERROR: Host deployment files differ from commit ...; reinstall compose.deploy.yml, prizecheck-deploy.sh and the catalog refresh units (docs/deployment-unraid.md, 'Updating the host files')
+ERROR: Host deployment files differ from commit ...; reinstall compose.deploy.yml, prizecheck-deploy.sh and the host units (docs/deployment-unraid.md, 'Updating the host files')
 ```
 
-When a commit changes any of these files, repeat the `scp` commands in step 3 from that commit, then re-run the failed workflow run. To check the env file and host files (no containers are touched), run `prizecheck-deploy.sh check-config` on Unraid.
+When a commit changes any of these files, repeat the `scp` commands in step 9 from that commit, run `setup`, then re-run the failed workflow run. To check the env file and host files (no containers are touched), run `prizecheck-deploy.sh check-config` on Unraid.
 
-**Reinstall once after the commit that introduced production.** That commit moved the script from `deploy/unraid/` to `deploy/host/` and changed both `compose.deploy.yml` and `prizecheck-deploy.sh`. Until you repeat the `scp` commands in step 3 from a `dev` commit that includes it, the next dev deploy fails with the error above. The script now also refuses an env file with an `export KEY=...`, indented or `KEY: value` line, a space between `=` and the value, a quoted value that doesn't close on its own line, or a backslash inside a quoted value (Docker Compose would read those differently from the script's checks), and names the line number. Where Docker Compose is installed, `check-config` and every deploy also render the configuration and refuse it unless the web port is published on your `PRIZECHECK_WEB_BIND` address only. Your existing `prizecheck.env` needs no other change.
+**Reinstall once after the commit that introduced production.** That commit moved the script from `deploy/unraid/` to `deploy/host/` and changed both `compose.deploy.yml` and `prizecheck-deploy.sh`. Until you repeat the `scp` commands in step 9 from a `dev` commit that includes it, the next dev deploy fails with the error above. The script now also refuses an env file with an `export KEY=...`, indented or `KEY: value` line, a space between `=` and the value, a quoted value that doesn't close on its own line, or a backslash inside a quoted value (Docker Compose would read those differently from the script's checks), and names the line number. Where Docker Compose is installed, `check-config` and every deploy also render the configuration and refuse it unless the web port is published on your `PRIZECHECK_WEB_BIND` address only. Your existing `prizecheck.env` needs no other change.
 
 ## Viewing logs
 
@@ -413,11 +488,11 @@ The application logs fixed operational messages, not request URLs, codes or cred
 | `deploy` job skipped                             | `DEV_DEPLOY_ENABLED` isn't the repository variable `true`, or a newer commit is now `dev`'s head (that run deploys)                                                                                                                                                   |
 | Tailscale step fails                             | OAuth client lacks **Auth Keys: Write** or isn't allowed `tag:ci`; `tag:ci` missing from `tagOwners`                                                                                                                                                                  |
 | `tailscale ping` or SSH times out                | The policy doesn't grant `tag:ci` → `unraid:22`, `UNRAID_SSH_HOST` is wrong, or SSH is disabled on Unraid                                                                                                                                                             |
-| `Host key verification failed`                   | `UNRAID_SSH_KNOWN_HOSTS` doesn't match the address in `UNRAID_SSH_HOST`; rescan the same address (step 6). Never disable checking                                                                                                                                     |
+| `Host key verification failed`                   | `UNRAID_SSH_KNOWN_HOSTS` doesn't match the address in `UNRAID_SSH_HOST`; rescan the same address (step 7). Never disable checking                                                                                                                                     |
 | `Permission denied (publickey)`                  | The authorized-keys line didn't persist (check after reboot) or has a typo; the secret must contain the whole private key, including the BEGIN/END lines                                                                                                              |
 | `Refused`                                        | Something other than `deploy`, `rollback` or `status` was sent through the forced command                                                                                                                                                                             |
 | `Host deployment files differ`                   | See [Updating the host files](#updating-the-host-files)                                                                                                                                                                                                               |
-| `Image pull failed`                              | The package doesn't grant the repository Read access (step 4)                                                                                                                                                                                                         |
+| `Image pull failed`                              | The package doesn't grant the repository Read access (step 5)                                                                                                                                                                                                         |
 | `Data directory ... is missing`                  | The array or pool isn't started, or `PRIZECHECK_DATA_DIR` is wrong. The deploy refuses to create data in the wrong place                                                                                                                                              |
 | `Public projection store ... missing`            | An existing install lost `data/public`: restore it (`backup` archives it) or follow [public projections](public-projections.md). On a first install whose store initialization failed, run `prizecheck-deploy.sh init-store <commit>` on Unraid and re-run the deploy |
 | `Migration failed`                               | `scripts/migrate.py` runs all pending migrations in one transaction, so nothing was committed and the previous release was restarted. Fix forward with a new commit                                                                                                   |
@@ -438,7 +513,7 @@ Don't cancel a workflow run while its **Deploy on Unraid** step is running. The 
 
 Rollback starts the previous successful release's images (kept locally), runs the same health and smoke checks, and swaps `current` and `previous`. It does **not** reverse migrations. A failed deploy already rolls back automatically.
 
-To deploy a specific older commit by hand, use the persistent GHCR login from step 4 and the host-file digest of that commit's files:
+To deploy a specific older commit by hand, use the persistent GHCR login from step 5 and the host-file digest of that commit's files:
 
 ```bash
 bash /mnt/cache/appdata/prizecheck-dev/bin/prizecheck-deploy.sh deploy FULL_40_CHAR_COMMIT "$(bash /mnt/cache/appdata/prizecheck-dev/bin/prizecheck-deploy.sh bundle-digest)"
@@ -479,7 +554,7 @@ If publications changed after the dump, also restore the matching `public` archi
   bash /mnt/cache/appdata/prizecheck-dev/bin/prizecheck-deploy.sh backup
   ```
 
-- **Scheduled:** add that command as a daily job in the Unraid **User Scripts** plugin.
+- **Nightly:** add the backup entry `setup` printed to the Unraid **User Scripts** plugin (`17 3 * * *`, step 9). Before the first deploy it logs that and exits 0.
 - **Off the server:** copy `backups/` and `prizecheck.env` to separate storage. Without the env file's secrets, existing sessions and the database password are lost. The backups contain private collection data; keep them out of any shared or public location.
 
 Don't run `backup` while a deploy is migrating; the deploy lock prevents this when both use the script. For the application's own logical backup and restore drill, which also enforces the public/private storage separation, see [local recovery](operations/local-recovery.md).

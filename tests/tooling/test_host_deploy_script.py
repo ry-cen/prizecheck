@@ -15,7 +15,8 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / 'deploy/host/prizecheck-deploy.sh'
-UNITS = ('prizecheck-catalog-refresh.service', 'prizecheck-catalog-refresh.timer')
+UNITS = ('prizecheck-catalog-refresh.service', 'prizecheck-catalog-refresh.timer', 'prizecheck-backup.service',
+         'prizecheck-backup.timer')
 # A `systemctl` that logs its arguments (printf, never echo: dash's echo eats -n) and keeps "enabled" in a state file.
 FAKE_SYSTEMCTL = '''#!/bin/sh
 printf '%s\\n' "$*" >> "$FAKE_SYSTEMCTL_LOG"
@@ -160,6 +161,36 @@ exec REALSTAT "$@"
 FAKE_SHA256SUM = ('#!' + sys.executable + '\nimport hashlib, sys\n'
                   'print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest() + "  -")\n')
 RELAY = ['MAIL_RELAY_URL=https://relay.example/send', 'MAIL_RELAY_TOKEN=token', 'MAIL_FROM=sender@example.com']
+
+# A `docker` for the readiness and backup tests: answers `compose version` (unless FAKE_NO_COMPOSE), prints a rendered model for
+# the published-port check, records `run ... app.host_readiness` and prints FAKE_READINESS_OUT (exit FAKE_READINESS_EXIT),
+# answers `ps -q db` unless FAKE_NO_DB, and logs every other call.
+FAKE_HOST_DOCKER = r'''#!PYTHON
+import json, os, sys
+args = sys.argv[1:]
+if 'version' in args:
+    if os.environ.get('FAKE_NO_COMPOSE'):
+        sys.exit(1)
+    print('v2'); sys.exit(0)
+if 'config' in args:
+    print('{"services": {"web": {"ports": [{"host_ip": "127.0.0.1", "target": 8080, "published": "8088"}]}}}'); sys.exit(0)
+with open(os.environ['FAKE_LOG'], 'a') as log:
+    log.write(json.dumps({'args': args, 'tag': os.environ.get('PRIZECHECK_IMAGE_TAG')}) + '\n')
+if 'app.host_readiness' in args:
+    sys.stdout.write(os.environ.get('FAKE_READINESS_OUT', 'ok       The owner is bound\n'))
+    sys.exit(int(os.environ.get('FAKE_READINESS_EXIT', '0')))
+if 'ps' in args and '-q' in args:
+    if not os.environ.get('FAKE_NO_DB'):
+        print('container')
+    sys.exit(0)
+if 'pg_dump' in args:
+    sys.stdout.write('DUMP')
+sys.exit(0)
+'''.replace('#!PYTHON', '#!' + sys.executable)
+# The commands the host script needs, linked into a directory that is the whole PATH of a readiness test, so the machine
+# running the tests (which may have Docker, Tailscale or iptables) cannot change a result.
+HOST_TOOLS = ('dirname', 'readlink', 'grep', 'tail', 'head', 'sed', 'cut', 'tr', 'awk', 'cat', 'chmod', 'mkdir', 'date',
+              'id', 'ls', 'mktemp', 'mv', 'rm', 'cmp', 'wc', 'find', 'sort', 'touch', 'ln', 'tee', 'uname', 'env')
 
 
 def tee_keeps_writing():
@@ -849,7 +880,9 @@ class HostDeployScriptTest(unittest.TestCase):
                 'FAKE_SYSTEMCTL_STATE': str(bin_dir / 'enabled')}
 
     def systemctl_calls(self):
-        return self.systemctl_log.read_text().splitlines() if self.systemctl_log.exists() else []
+        # The readiness report at the end of setup only asks (is-active, is-enabled); the calls that change the host are these.
+        calls = self.systemctl_log.read_text().splitlines() if self.systemctl_log.exists() else []
+        return [call for call in calls if not call.startswith(('is-active', 'is-enabled'))]
 
     def test_setup_installs_the_units_and_a_second_setup_changes_nothing(self):
         home = self.make_home(PROD)
@@ -857,16 +890,18 @@ class HostDeployScriptTest(unittest.TestCase):
         result = self.run_script(home, 'setup', **env)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         script = (home / 'bin/prizecheck-deploy.sh').resolve()
-        service = (home / 'units/prizecheck-catalog-refresh.service').read_text()
-        self.assertIn(f'ExecStart=/bin/bash {script} catalog-refresh\n', service)
-        self.assertNotIn('/opt/prizecheck-prod', service)
-        source = (ROOT / 'deploy/host/prizecheck-catalog-refresh.service').read_text()
-        self.assertEqual(service.replace(str(script), '/opt/prizecheck-prod/bin/prizecheck-deploy.sh'), source)
-        self.assertEqual((home / 'units/prizecheck-catalog-refresh.timer').read_text(),
-                         (ROOT / 'deploy/host/prizecheck-catalog-refresh.timer').read_text())
+        for name, subcommand in (('catalog-refresh', 'catalog-refresh'), ('backup', 'backup')):
+            service = (home / f'units/prizecheck-{name}.service').read_text()
+            self.assertIn(f'ExecStart=/bin/bash {script} {subcommand}\n', service)
+            self.assertNotIn('/opt/prizecheck-prod', service)
+            source = (ROOT / f'deploy/host/prizecheck-{name}.service').read_text()
+            self.assertEqual(service.replace(str(script), '/opt/prizecheck-prod/bin/prizecheck-deploy.sh'), source)
+            self.assertEqual((home / f'units/prizecheck-{name}.timer').read_text(),
+                             (ROOT / f'deploy/host/prizecheck-{name}.timer').read_text())
         for unit in UNITS:
             self.assertEqual((home / 'units' / unit).stat().st_mode & 0o777, 0o644)
-        self.assertEqual(self.systemctl_calls(), ['daemon-reload', 'enable --now prizecheck-catalog-refresh.timer'])
+        self.assertEqual(self.systemctl_calls(), ['daemon-reload', 'enable --now prizecheck-catalog-refresh.timer',
+                                                  'enable --now prizecheck-backup.timer'])
         self.assertIn('Installed', result.stdout)
         # Setup alone is a complete check of the result.
         result = self.run_script(home, 'check-config', **env)
@@ -879,14 +914,65 @@ class HostDeployScriptTest(unittest.TestCase):
         self.assertNotIn('Installed', result.stdout)
         self.assertEqual(stamps, {unit: (home / 'units' / unit).stat().st_mtime_ns for unit in UNITS})
         self.assertNotIn('daemon-reload', self.systemctl_calls())
-        # A changed unit is replaced, with a reload.
-        (home / 'bin/prizecheck-catalog-refresh.timer').write_text(
-            (ROOT / 'deploy/host/prizecheck-catalog-refresh.timer').read_text() + '# changed\n')
+        # A changed unit is replaced, with a reload; the other units stay as they were.
+        (home / 'bin/prizecheck-backup.timer').write_text(
+            (ROOT / 'deploy/host/prizecheck-backup.timer').read_text() + '# changed\n')
         self.systemctl_log.unlink()
+        stamps = {unit: (home / 'units' / unit).stat().st_mtime_ns for unit in UNITS}
         result = self.run_script(home, 'setup', **env)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn('# changed', (home / 'units/prizecheck-catalog-refresh.timer').read_text())
-        self.assertEqual(self.systemctl_calls(), ['daemon-reload', 'enable --now prizecheck-catalog-refresh.timer'])
+        self.assertIn('# changed', (home / 'units/prizecheck-backup.timer').read_text())
+        self.assertEqual(self.systemctl_calls(), ['daemon-reload', 'enable --now prizecheck-catalog-refresh.timer',
+                                                  'enable --now prizecheck-backup.timer'])
+        for unit in UNITS:
+            if unit != 'prizecheck-backup.timer':
+                self.assertEqual(stamps[unit], (home / 'units' / unit).stat().st_mtime_ns, unit)
+
+    def test_the_backup_timer_runs_at_the_time_of_the_cron_entry_it_replaces(self):
+        timer = (ROOT / 'deploy/host/prizecheck-backup.timer').read_text()
+        self.assertIn('OnCalendar=*-*-* 03:17:00 UTC\n', timer)
+        self.assertIn('Persistent=true', timer)
+        self.assertNotRegex(timer, r'(?m)^(OnBootSec|OnStartupSec|OnActiveSec|RandomizedDelaySec)=')
+        service = (ROOT / 'deploy/host/prizecheck-backup.service').read_text()
+        self.assertIn('Type=oneshot', service)
+        self.assertIn('User=root', service)
+        self.assertIn('ExecStart=/bin/bash /opt/prizecheck-prod/bin/prizecheck-deploy.sh backup\n', service)
+        self.assertNotIn('[Install]', service)
+
+    def test_setup_removes_the_old_backup_cron_file_once_the_timer_is_enabled(self):
+        home = self.make_home(PROD)
+        cron = home / 'cron.d-prizecheck-backup'
+        cron.write_text('17 3 * * * root /bin/bash /opt/prizecheck-prod/bin/prizecheck-deploy.sh backup\n')
+        env = {**self.systemd_env(home), 'PRIZECHECK_CRON_BACKUP_FILE': str(cron)}
+        result = self.run_script(home, 'setup', **env)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse(cron.exists())
+        self.assertIn(f'Removed {cron}', result.stdout)
+        self.assertTrue(Path(env['FAKE_SYSTEMCTL_STATE']).exists())
+        self.assertLess(self.systemctl_calls().index('enable --now prizecheck-backup.timer'), len(self.systemctl_calls()))
+        # Nothing to remove the second time.
+        result = self.run_script(home, 'setup', **env)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn('Removed', result.stdout)
+
+    def test_a_failed_enable_leaves_the_old_cron_file_alone(self):
+        home = self.make_home(PROD)
+        cron = home / 'cron.d-prizecheck-backup'
+        cron.write_text('17 3 * * * root backup\n')
+        env = {**self.systemd_env(home), 'PRIZECHECK_CRON_BACKUP_FILE': str(cron)}
+        systemctl = Path(env['PATH'].split(':')[0]) / 'systemctl'
+        systemctl.write_text('#!/bin/sh\ncase "$1" in enable) exit 1;; esac\nexit 0\n')
+        result = self.run_script(home, 'setup', **env)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertTrue(cron.exists())
+
+    def test_the_cron_file_is_left_alone_without_systemd(self):
+        home = self.make_home(PROD)
+        cron = home / 'cron.d-prizecheck-backup'
+        cron.write_text('17 3 * * * root backup\n')
+        result = self.run_script(home, 'setup', PRIZECHECK_CRON_BACKUP_FILE=str(cron))
+        self.assertTrue(cron.exists())
+        self.assertNotIn('Removed', result.stdout)
 
     def test_setup_dies_when_a_unit_is_missing_on_a_systemd_host(self):
         for missing in UNITS:
@@ -906,6 +992,8 @@ class HostDeployScriptTest(unittest.TestCase):
         result = self.run_script(home, 'setup', **{**env, 'PRIZECHECK_SYSTEMD_RUN_DIR': str(home / 'absent')})
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn('No systemd on this host', result.stdout)
+        self.assertIn(f"schedule '0 4 * * *':  bash {(home / 'bin/prizecheck-deploy.sh').resolve()} catalog-refresh", result.stdout)
+        self.assertIn(f"schedule '17 3 * * *':        bash {(home / 'bin/prizecheck-deploy.sh').resolve()} backup", result.stdout)
         self.assertFalse((home / 'units').exists())
         self.assertEqual(self.systemctl_calls(), [])
         # A Linux runner has a real systemctl in /usr/bin, so the PATH half applies only where it is absent.
@@ -1221,6 +1309,287 @@ class HostDeployScriptTest(unittest.TestCase):
         self.assertIn('Import the TCGCSV prices', usage)
         # The SSH gate does not offer it.
         self.assertNotIn('catalog-refresh', SCRIPT.read_text().split('ssh_gate() {')[1].split('main() {')[0])
+
+
+    def host_env(self, home, docker=True, systemd=True, **extra):
+        """A PATH that holds only the host script's own tools and stubs; returns the environment. `docker=False` leaves
+        Docker out, `systemd=False` leaves systemd out. The stubs of other commands go in with `shims={name: body}`."""
+        shims = extra.pop('shims', {})
+        scratch = tempfile.TemporaryDirectory()
+        self.addCleanup(scratch.cleanup)
+        bin_dir = Path(scratch.name)
+        for name in HOST_TOOLS:
+            if shutil.which(name):
+                (bin_dir / name).symlink_to(shutil.which(name))
+        bodies = {'stat': FAKE_STAT.replace('REALSTAT', shutil.which('stat')), 'flock': '#!/bin/sh\nexit 0\n',
+                  'chown': '#!/bin/sh\nexit 0\n', 'sha256sum': FAKE_SHA256SUM}
+        if docker:
+            bodies['docker'] = FAKE_HOST_DOCKER
+        if systemd:
+            bodies['systemctl'] = FAKE_SYSTEMCTL
+            (home / 'run-systemd').mkdir(exist_ok=True)
+        bodies.update(shims)
+        for name, body in bodies.items():
+            (bin_dir / name).unlink(missing_ok=True)  # a stub replaces the linked tool of the same name
+            (bin_dir / name).write_text(body)
+            (bin_dir / name).chmod(0o755)
+        self.systemctl_log = bin_dir / 'systemctl.log'
+        self.fake_log = bin_dir / 'calls.jsonl'
+        return {'PATH': str(bin_dir), 'FAKE_LOG': str(self.fake_log), 'FAKE_SYSTEMCTL_LOG': str(self.systemctl_log),
+                'FAKE_SYSTEMCTL_STATE': str(bin_dir / 'enabled'),
+                'PRIZECHECK_SYSTEMD_RUN_DIR': str(home / ('run-systemd' if systemd else 'no-systemd')),
+                'PRIZECHECK_SYSTEMD_UNIT_DIR': str(home / 'units'), 'PRIZECHECK_CADDYFILE': str(home / 'Caddyfile'),
+                'PRIZECHECK_CRON_BACKUP_FILE': str(home / 'no-cron'), **extra}
+
+    def host(self, home, command, **env):
+        """Runs a subcommand with the bare PATH from host_env; returns (exit code, output)."""
+        result = subprocess.run([shutil.which('bash'), str(home / 'bin/prizecheck-deploy.sh'), command], capture_output=True,
+                                text=True, timeout=60, stdin=subprocess.DEVNULL, env={'HOME': str(home), **env})
+        return result.returncode, result.stdout + result.stderr
+
+    def assertNoSecrets(self, output):
+        for value in (POSTGRES, SECRET, 'o@example.com', 'prizecheck.example.com', 'secret', 'token'):
+            self.assertNotIn(value, output)
+
+    def ready_home(self, lines=PROD, **extra):
+        """A home whose setup has run: returns (home, env)."""
+        home = self.make_home(lines)
+        env = self.host_env(home, **extra)
+        code, output = self.host(home, 'setup', **env)
+        self.assertEqual(code, 0, output)
+        return home, env
+
+    def test_readiness_says_a_prepared_host_is_ready_for_the_first_deploy(self):
+        home, env = self.ready_home()
+        code, output = self.host(home, 'readiness', **env)
+        self.assertEqual(code, 0, output)
+        self.assertIn('ok       Docker is installed', output)
+        self.assertIn('ok       Docker Compose v2', output)
+        self.assertIn('ok       The env file and host files pass check-config', output)
+        self.assertIn('ok       The catalog refresh and backup timers are installed and enabled', output)
+        self.assertIn('This host is ready for the first deploy', output)
+        self.assertNotIn('missing', output)
+        # Detection that can be wrong only warns: no tailscale, Caddy or iptables here.
+        self.assertIn('warning  The tailscale command was not found', output)
+        self.assertIn('warning  Caddy is running but', output)
+        self.assertIn('warning  Could not read the iptables INPUT rules', output)
+        # Nothing is deployed, so nothing is asked of the app.
+        self.assertNotIn('After the first deploy', output)
+        self.assertEqual(self.fake_calls(), [])
+        self.assertNoSecrets(output)
+
+    def test_setup_ends_with_the_report_and_fails_while_a_pre_deploy_item_is_missing(self):
+        home = self.make_home(PROD)
+        env = self.host_env(home, docker=False)
+        code, output = self.host(home, 'setup', **env)
+        self.assertEqual(code, 1, output)
+        # Everything setup can do was done before the report.
+        self.assertTrue((home / 'data/art').is_dir())
+        for unit in UNITS:
+            self.assertTrue((home / 'units' / unit).is_file(), unit)
+        self.assertIn('missing  Docker is not installed', output)
+        self.assertIn('missing  Docker Compose v2 is not installed', output)
+        self.assertIn('2 pre-deploy item(s) missing', output)
+        self.assertNotIn('ready for the first deploy', output)
+        self.assertNoSecrets(output)
+
+    def test_readiness_fails_without_docker_and_names_the_command(self):
+        home = self.make_home(PROD)
+        env = self.host_env(home, docker=False)
+        code, output = self.host(home, 'readiness', **env)
+        self.assertEqual(code, 1, output)
+        self.assertIn('missing  Docker is not installed', output)
+        self.assertIn('next: sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin', output)
+        self.assertIn('docs/deployment-oracle.md, step 3', output)
+        # A dev host gets the Unraid steps.
+        home = self.make_home(DEV)
+        code, output = self.host(home, 'readiness', **self.host_env(home, docker=False, systemd=False))
+        self.assertEqual(code, 1, output)
+        self.assertIn('docs/deployment-unraid.md, step 1', output)
+        self.assertIn('Docker Compose Manager plugin', output)
+
+    def test_readiness_fails_without_the_compose_plugin(self):
+        home = self.make_home(PROD)
+        code, output = self.host(home, 'readiness', **self.host_env(home, FAKE_NO_COMPOSE='1'))
+        self.assertEqual(code, 1, output)
+        self.assertIn('ok       Docker is installed', output)
+        self.assertIn('missing  Docker Compose v2 is not installed', output)
+        self.assertIn('next: sudo apt install -y docker-compose-plugin', output)
+
+    def test_readiness_fails_for_a_missing_env_key_and_never_prints_a_value(self):
+        for key in ('OWNER_EMAIL', 'POSTGRES_PASSWORD', 'PUBLIC_ORIGIN'):
+            home, env = self.ready_home()
+            lines = [line for line in (home / 'prizecheck.env').read_text().splitlines() if not line.startswith(key + '=')]
+            (home / 'prizecheck.env').write_text('\n'.join(lines) + '\n')
+            code, output = self.host(home, 'readiness', **env)
+            self.assertEqual(code, 1, output)
+            self.assertIn(f'missing  check-config: {key} is not set in', output)
+            self.assertIn('next: fix it, then run: sudo bash', output)
+            self.assertNoSecrets(output)
+        # A secret that is too short is refused by name, not by value.
+        home, env = self.ready_home()
+        text = (home / 'prizecheck.env').read_text().replace(SECRET, 'short', 1)
+        (home / 'prizecheck.env').write_text(text)
+        code, output = self.host(home, 'readiness', **env)
+        self.assertEqual(code, 1, output)
+        self.assertIn('is a placeholder or shorter than 32 characters', output)
+        self.assertNotIn('short\n', output)
+        self.assertNoSecrets(output)
+
+    def test_readiness_fails_without_the_env_file(self):
+        home = self.make_home(PROD)
+        (home / 'prizecheck.env').unlink()
+        code, output = self.host(home, 'readiness', **self.host_env(home))
+        self.assertEqual(code, 1, output)
+        self.assertIn('missing  The env file', output)
+        self.assertIn('prizecheck-<dev|prod>.env.example', output)
+
+    def test_readiness_fails_while_the_units_are_not_installed_or_enabled(self):
+        home = self.make_home(PROD)
+        env = self.host_env(home)
+        code, output = self.host(home, 'readiness', **env)
+        self.assertEqual(code, 1, output)
+        self.assertIn('missing  Timers:', output)
+        self.assertIn('is missing or differs from the host file', output)
+        self.assertIn('next: sudo bash', output)
+        code, output = self.host(home, 'setup', **env)
+        self.assertEqual(code, 0, output)
+        Path(env['FAKE_SYSTEMCTL_STATE']).unlink()
+        code, output = self.host(home, 'readiness', **env)
+        self.assertEqual(code, 1, output)
+        self.assertIn('is not enabled', output)
+
+    def test_readiness_without_systemd_prints_the_user_scripts_entries_and_does_not_fail(self):
+        home = self.make_home(DEV)
+        env = self.host_env(home, systemd=False)
+        code, output = self.host(home, 'setup', **env)
+        self.assertEqual(code, 0, output)
+        script = (home / 'bin/prizecheck-deploy.sh').resolve()
+        self.assertIn(f"warning  No systemd on this host: the two jobs need User Scripts entries", output)
+        self.assertIn(f"next: daily catalog refresh, schedule '0 4 * * *': bash {script} catalog-refresh", output)
+        self.assertIn(f"next: nightly backup, schedule '17 3 * * *': bash {script} backup", output)
+        self.assertFalse((home / 'units').exists())
+        self.assertIn('ready for the first deploy', output)
+
+    def test_readiness_network_checks_only_warn(self):
+        home, env = self.ready_home()
+        accept = '-P INPUT ACCEPT\n-A INPUT -p tcp -m tcp --dport 80 -j ACCEPT\n-A INPUT -p tcp -m tcp --dport 443 -j ACCEPT\n'
+        (home / 'Caddyfile').write_text('prizecheck.example.com {\n}\n')
+        shims = {'tailscale': '#!/bin/sh\nexit 0\n', 'iptables': f"#!/bin/sh\nprintf '%s' '{accept}'\n"}
+        env = self.host_env(home, shims=shims)
+        env['FAKE_SYSTEMCTL_STATE'] = str(home / 'enabled')
+        (home / 'enabled').write_text('')
+        code, output = self.host(home, 'readiness', **env)
+        self.assertEqual(code, 0, output)
+        self.assertIn('ok       Tailscale is up', output)
+        self.assertIn('ok       Caddy is running and its Caddyfile names the host of PUBLIC_ORIGIN', output)
+        self.assertIn('ok       iptables accepts ports 80 and 443', output)
+        self.assertNoSecrets(output)
+        # Each one wrong: still exit 0.
+        (home / 'Caddyfile').write_text('other.example.org {\n}\n')
+        shims = {'tailscale': '#!/bin/sh\nexit 1\n', 'iptables': "#!/bin/sh\nprintf '%s\\n' '-P INPUT ACCEPT'\n",
+                 'systemctl': FAKE_SYSTEMCTL.replace('esac', '  is-active) exit 3 ;;\nesac')}
+        env = self.host_env(home, shims=shims)
+        env['FAKE_SYSTEMCTL_STATE'] = str(home / 'enabled')
+        code, output = self.host(home, 'readiness', **env)
+        self.assertEqual(code, 0, output)
+        self.assertIn('warning  Tailscale is not up', output)
+        self.assertIn('next: sudo tailscale up --ssh=false --advertise-tags=tag:prizecheck-prod', output)
+        self.assertIn('warning  iptables INPUT does not accept ports 80 and 443', output)
+        self.assertIn('warning  Caddy is not running', output)
+        # Running, but with a Caddyfile for another host.
+        env = self.host_env(home, shims={**shims, 'systemctl': FAKE_SYSTEMCTL})
+        env['FAKE_SYSTEMCTL_STATE'] = str(home / 'enabled')
+        code, output = self.host(home, 'readiness', **env)
+        self.assertEqual(code, 0, output)
+        self.assertIn('warning  Caddy is running but', output)
+        self.assertNoSecrets(output)
+
+    def test_readiness_after_a_deploy_runs_the_app_report_and_never_fails_on_it(self):
+        home, env = self.ready_home()
+        (home / 'state').mkdir(exist_ok=True)
+        (home / 'state/current').write_text(COMMIT + '\n')
+        env['FAKE_READINESS_OUT'] = 'missing  No owner is bound\n         next: bind it\nok       Signup mode: owner-only\n'
+        code, output = self.host(home, 'readiness', **env)
+        self.assertEqual(code, 0, output)
+        self.assertIn(f'After the first deploy (release {COMMIT[:12]})', output)
+        self.assertIn('missing  No owner is bound\n         next: bind it\n', output)
+        self.assertNotIn('ready for the first deploy', output)
+        calls = self.fake_calls()
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]['tag'], COMMIT)
+        args = calls[0]['args']
+        self.assertEqual(args[args.index('run') + 1:args.index('run') + 5], ['--rm', '--no-deps', '-T', '-l'])
+        self.assertIn('prizecheck.job=readiness', args)
+        self.assertEqual(args[-3:], ['tools', '-m', 'app.host_readiness'])
+        self.assertIn('READINESS_SIGNUP_MODE=owner-only', args)
+        self.assertIn(f'READINESS_SCRIPT=bash {(home / "bin/prizecheck-deploy.sh").resolve()}', args)
+        self.assertIn('READINESS_GUIDE=docs/deployment-oracle.md', args)
+        # The report never turns an app-side failure into a failed report.
+        env['FAKE_READINESS_EXIT'] = '1'
+        code, output = self.host(home, 'readiness', **env)
+        self.assertEqual(code, 0, output)
+        self.assertIn('warning  Could not read the app', output)
+        self.assertNoSecrets(output)
+
+    def test_readiness_passes_the_signup_mode_from_the_env_file(self):
+        home, env = self.ready_home()
+        (home / 'state').mkdir(exist_ok=True)
+        (home / 'state/current').write_text(COMMIT + '\n')
+        self.write_proof(home)
+        with (home / 'prizecheck.env').open('a') as handle:
+            handle.write('SIGNUP_MODE=public\n')
+        (home / 'signup').chmod(0o755)
+        code, output = self.host(home, 'readiness', **env)
+        self.assertEqual(code, 0, output)
+        self.assertIn('READINESS_SIGNUP_MODE=public', self.fake_calls()[0]['args'])
+
+    def test_readiness_without_a_pre_deploy_item_does_not_touch_the_app(self):
+        home, env = self.ready_home()
+        (home / 'state').mkdir(exist_ok=True)
+        (home / 'state/current').write_text(COMMIT + '\n')
+        (home / 'prizecheck.env').write_text('PRIZECHECK_ENVIRONMENT=prod\n')
+        code, output = self.host(home, 'readiness', **env)
+        self.assertEqual(code, 1, output)
+        self.assertEqual(self.fake_calls(), [])
+
+    def test_readiness_is_listed_in_usage(self):
+        home = self.make_home(PROD)
+        usage = self.run_script(home, 'help').stdout
+        self.assertIn('readiness', usage)
+        self.assertIn('Prepare the host', usage)
+
+    def test_backup_before_the_first_release_logs_and_exits_zero(self):
+        home = self.make_home(PROD)
+        env = self.host_env(home)
+        code, output = self.host(home, 'backup', **env)
+        self.assertEqual(code, 0, output)
+        self.assertIn('Nothing deployed yet; skipping the backup', output)
+        self.assertEqual(self.fake_calls(), [])
+        self.assertEqual(list((home / 'backups').iterdir()), [])
+
+    def test_backup_without_a_database_container_logs_and_exits_zero(self):
+        home = self.make_home(PROD)
+        (home / 'state').mkdir()
+        (home / 'state/current').write_text(COMMIT + '\n')
+        env = self.host_env(home, FAKE_NO_DB='1')
+        code, output = self.host(home, 'backup', **env)
+        self.assertEqual(code, 0, output)
+        self.assertIn('No database container is running; skipping the backup', output)
+        self.assertFalse(any('pg_dump' in call['args'] for call in self.fake_calls()))
+
+    def test_backup_with_a_release_and_a_database_dumps_and_archives(self):
+        home = self.make_home(PROD)
+        (home / 'state').mkdir()
+        (home / 'state/current').write_text(COMMIT + '\n')
+        env = self.host_env(home, shims={'tar': '#!/bin/sh\n: > "$4"\n', 'find': '#!/bin/sh\nexit 0\n'})
+        code, output = self.host(home, 'backup', **env)
+        self.assertEqual(code, 0, output)
+        names = sorted(path.name for path in (home / 'backups').iterdir())
+        self.assertEqual(len(names), 2, names)
+        self.assertTrue(any(name.endswith('-manual.dump') for name in names))
+        self.assertTrue(any(name.endswith('-public.tar.gz') for name in names))
+        self.assertTrue(any('pg_dump' in call['args'] for call in self.fake_calls()))
 
 
 if __name__ == '__main__':

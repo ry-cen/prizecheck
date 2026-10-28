@@ -1,0 +1,15 @@
+[Unit]
+Description=PrizeCheck nightly backup of PostgreSQL and the public projection store
+Wants=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+# Runs as root with a bash invocation, as the cron entry it replaces did (/etc/cron.d/prizecheck-backup; setup removes that file).
+User=root
+Environment=HOME=/root
+ExecStart=/bin/bash /opt/prizecheck-prod/bin/prizecheck-deploy.sh backup
+# Output goes to the journal: journalctl -u prizecheck-backup
+StandardOutput=journal
+StandardError=journal
+# Before the first release there is nothing to back up: the script logs that and exits 0.

@@ -5,7 +5,7 @@ After=docker.service network-online.target
 
 [Service]
 Type=oneshot
-# Runs as root with a bash invocation, as the nightly backup cron does (/etc/cron.d/prizecheck-backup).
+# Runs as root with a bash invocation, as the nightly backup does (prizecheck-backup.service).
 User=root
 Environment=HOME=/root
 ExecStart=/bin/bash /opt/prizecheck-prod/bin/prizecheck-deploy.sh catalog-refresh
@@ -17,5 +17,5 @@ TimeoutStartSec=infinity
 # No Restart: the timer starts the next run, and the script's own non-blocking lock makes overlapping runs harmless.
 # Stopping the unit ends the script and its docker client, not the one-off containers compose started; they keep running
 # until they finish. They carry the label prizecheck.job=catalog-refresh, and the next deploy stops them
-# (docs/deployment-oracle.md, step 16).
+# (docs/deployment-oracle.md, "The daily jobs").
 KillMode=control-group

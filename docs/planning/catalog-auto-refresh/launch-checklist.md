@@ -8,8 +8,8 @@ The units and the guide steps are checked in CI. These checks need the productio
 
 ## Before any check
 
-1. **Reinstall the host files, run `setup`, then deploy the release** that contains the `catalog-refresh` subcommand and the price import step ([#355](https://github.com/ry-cen/prizecheck/issues/355)). Install the compose files, `prizecheck-deploy.sh` and the two catalog refresh units from that commit into `bin/` (Oracle guide, "Updating the host files"), run `sudo bash /opt/prizecheck-prod/bin/prizecheck-deploy.sh setup`, then deploy. The units are in the bundle digest, so a deploy without them is refused.
-2. **Confirm `setup` installed and enabled the timer** (`systemctl list-timers prizecheck-catalog-refresh.timer`; step 16 of the [Oracle guide](../../deployment-oracle.md)).
+1. **Reinstall the host files, then deploy the release** that contains the `catalog-refresh` subcommand and the price import step ([#355](https://github.com/ry-cen/prizecheck/issues/355)). Install `prizecheck-deploy.sh` and the compose files from that commit first (Oracle guide, "Updating the host files"), because the deploy refuses until they match, so the first scheduled run includes prices (the daily refresh depends on #355 being deployed; Oracle guide, "The daily jobs").
+2. **Copy the units into `bin/` with the other host files** (Oracle guide, step 12) and run `sudo bash /opt/prizecheck-prod/bin/prizecheck-deploy.sh setup`, which installs the units, enables both timers (the refresh and the nightly backup) and removes the old `/etc/cron.d/prizecheck-backup` entry (see [the daily jobs](../../deployment-oracle.md#the-daily-jobs) in the Oracle guide). The units are in the bundle digest, so the deploy refuses until the host files match.
 
 ## Checks
 
@@ -19,7 +19,7 @@ The units and the guide steps are checked in CI. These checks need the productio
 - [ ] First run by hand: `sudo systemctl start --no-block prizecheck-catalog-refresh`; `journalctl -u prizecheck-catalog-refresh` shows the price import, the check and the scanner index and ends with "Catalog refresh finished" (or the errors it names), and `systemctl status` shows the exit status.
 - [ ] Owner controls shows the last automatic check (needs [#340](https://github.com/ry-cen/prizecheck/issues/340) deployed; skip it until then).
 - [ ] Optional: the User Scripts entry on the dev host, and its first log.
-- [ ] No interim price-import cron exists on prod (`ls /etc/cron.d`; none existed on 2026-10-28), so the timer is the only scheduler of the price import.
+- [ ] No interim price-import cron exists on prod (`ls /etc/cron.d`; none existed on 2026-10-28), so the timer is the only scheduler of the price import. `/etc/cron.d/prizecheck-backup` is gone too (`setup` removes it) and `systemctl list-timers prizecheck-backup.timer` shows a next run at 03:17 UTC.
 
 | Step | Done on | By | Result |
 | --- | --- | --- | --- |

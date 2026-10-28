@@ -1,0 +1,10 @@
+[Unit]
+Description=Run the PrizeCheck backup nightly
+
+[Timer]
+OnCalendar=*-*-* 03:17:00 UTC
+# A run missed while the host was off runs once at the next start. There is no OnBootSec: a boot alone starts nothing.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

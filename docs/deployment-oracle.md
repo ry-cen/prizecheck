@@ -6,6 +6,8 @@ Deploy dev runs only by hand, so a release commit may have no images yet. The **
 
 This guide is for a fresh instance. The dev environment is described in [Dev deployment on Unraid](deployment-unraid.md); production reuses its images, `compose.deploy.yml` and deploy script.
 
+The guide has three parts. **Part 1** is what only you can do: the Oracle console, Tailscale, packages, the firewall, DNS and Caddy, Discord, GitHub, the env file with its secrets, and the deploy key. **Part 2** copies the host files to the instance and runs `setup`, which does everything a root script can do safely and ends with a readiness report. **Part 3** follows that report: the first release, the owner, the catalog rules and the rest.
+
 ## How it works
 
 ```
@@ -39,22 +41,23 @@ The auth gateway's per-IP limits (signups, code sends, public reads) need the vi
 2. Caddy reaches `web` through Docker's published loopback port. nginx sees the connection come from the edge network's gateway, `10.201.80.1`, and trusts `X-Real-IP` only from that address.
 3. nginx forwards the resolved address to the auth gateway as `X-Real-IP` and strips `X-Forwarded-For`. The gateway trusts it only from the `web` container's fixed address, `10.201.80.10` (`TRUSTED_PROXY_IPS`).
 
-The edge network is `10.201.80.0/24` (compose network `prizecheck-prod_edge`). Step 15 verifies the chain on your host. If you later run Caddy in a container or put a CDN or proxy in front of Caddy, the chain must be revisited.
+The edge network is `10.201.80.0/24` (compose network `prizecheck-prod_edge`). Step 18 verifies the chain on your host. If you later run Caddy in a container or put a CDN or proxy in front of Caddy, the chain must be revisited.
 
 ### What the repository provides and what you set up
 
-| Implemented in this repository                                                          | One-time manual steps (this guide)                              |
-| --------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| Multi-arch images built by `.github/workflows/build-images.yml` (dev and prod call it)  | Create the instance and its network rules (steps 1 and 4)       |
-| `.github/workflows/deploy-prod.yml`                                                     | Tailscale on the host, policy and OAuth client (steps 2 and 10) |
-| `compose.deploy.yml` and `compose.prod.yml`                                             | Docker and Compose (step 3)                                     |
-| `deploy/host/prizecheck-deploy.sh` (deploy, rollback, backup, operator helpers)         | Directories and host files (step 5)                             |
-| `deploy/host/prizecheck-prod.env.example`                                               | The env file and the Discord application (steps 6 and 7)        |
-| `deploy/oracle/Caddyfile`, `deploy/docker/nginx.conf`                                   | The deploy key as a forced command (step 9)                     |
-| Health checks, smoke checks, pre-migration backups, automatic rollback, public check    | GitHub environment, secrets and variables (step 11)             |
-| Repository tests that pin the compose overlay, the Caddyfile, nginx and the host script | DNS and Caddy (step 12)                                         |
-| `deploy/host/prizecheck-catalog-refresh.service` and `.timer`                           | First release, owner binding, edge checks (steps 13 to 15)      |
-|                                                                                         | The daily catalog refresh timer (step 16)                       |
+| Implemented in this repository                                                          | Done by you (Part 1)                                            | Done by `setup` (Part 2)                                    |
+| --------------------------------------------------------------------------------------- | --------------------------------------------------------------- | ----------------------------------------------------------- |
+| Multi-arch images built by `.github/workflows/build-images.yml` (dev and prod call it)  | Create the instance and its network rules (steps 1 and 4)       | The data, state and backup directories and their owners     |
+| `.github/workflows/deploy-prod.yml`                                                     | Tailscale on the host, policy and OAuth client (steps 2 and 10) | The catalog refresh timer and the nightly backup timer      |
+| `compose.deploy.yml` and `compose.prod.yml`                                             | Docker and Compose (step 3)                                     | Removing the old `/etc/cron.d/prizecheck-backup` entry      |
+| `deploy/host/prizecheck-deploy.sh` (deploy, rollback, backup, readiness, helpers)       | The Discord application and the env file (steps 5 and 6)        | The readiness report, with the next step for each open item |
+| `deploy/host/prizecheck-prod.env.example`                                               | DNS and Caddy (step 7)                                          |                                                             |
+| `deploy/oracle/Caddyfile`, `deploy/docker/nginx.conf`                                   | The deploy key as a forced command (step 9)                     |                                                             |
+| `deploy/host/prizecheck-catalog-refresh.*` and `prizecheck-backup.*` (systemd units)    | GitHub environment, secrets and variables (step 11)             |                                                             |
+| Health checks, smoke checks, pre-migration backups, automatic rollback, public check    |                                                                 |                                                             |
+| Repository tests that pin the compose overlay, the Caddyfile, nginx and the host script |                                                                 |                                                             |
+
+The first release, the owner binding, the catalog rules (applied by the deploy), the first pull and the edge checks (Part 3, steps 13 to 18) follow the report.
 
 Nothing in this guide has been run against an Oracle instance yet. Commands and messages quoted from the repository come from the files themselves; where the guide relies on behaviour of Oracle, Ubuntu, Docker, Caddy, Tailscale or Discord that the repository can't confirm, it says so.
 
@@ -83,13 +86,17 @@ Don't announce the site until you have worked through those documents.
 - **A release with no dev deploy builds its own images.** The `build` job adds about the time of a dev build (the default checks, then the image builds) before `deploy` starts. If the checks or a build fail, nothing is deployed.
 - **Every visitor's address reaches the gateway.** The per-IP limits are real in production, unlike on dev where everyone shares one bucket.
 - **Use DNS-only.** Cloudflare's proxied ("orange cloud") records would make every visitor one of Cloudflare's addresses and defeat the per-IP limits.
-- **Caddy keeps no access log.** Published-deck URLs are capability links. The Caddyfile has no `log` directive, and its global block excludes the two loggers (`http.log.error` and `http.handlers.reverse_proxy`) that would otherwise record a failed request's URI. Step 15 checks this on your host. nginx and uvicorn access logs are off as on dev.
+- **Caddy keeps no access log.** Published-deck URLs are capability links. The Caddyfile has no `log` directive, and its global block excludes the two loggers (`http.log.error` and `http.handlers.reverse_proxy`) that would otherwise record a failed request's URI. Step 18 checks this on your host. nginx and uvicorn access logs are off as on dev.
 - **Deploys with pending migrations cause downtime, and a deploy interrupts running imports.** Both work as described in the [Unraid guide](deployment-unraid.md#behaviour-to-know-about).
 - **Migrations are never reversed.** See [Rolling back](#rolling-back).
 - **Always Free instances can be reclaimed when idle.** Oracle may reclaim idle Always Free compute instances. Upgrading the account to Pay As You Go keeps the free shapes but is said to stop reclamation. This guide couldn't confirm that against current Oracle terms: check them before relying on it.
 - **Docker publishes bypass the host firewall.** Ports Docker publishes are reachable whatever the iptables `INPUT` rules say. That is why the deploy script refuses `PRIZECHECK_WEB_BIND` other than `127.0.0.1` in production.
 
-## 1. Create the instance
+## Part 1. What only you can do
+
+These steps need the Oracle console, other accounts' consoles or your own secrets, so no script on the host can do them. Packages and firewall edits stay manual on purpose: they depend on the distribution, and a wrong firewall edit can lock you out. The readiness report in Part 3 checks each of them and prints the command again when one is missing.
+
+### 1. Create the instance
 
 In the Oracle Cloud console, create a compute instance with these choices:
 
@@ -114,7 +121,7 @@ Log in as the image's default user, `ubuntu`, with your key. The rest of this gu
 ssh ubuntu@PUBLIC_IP
 ```
 
-## 2. Install Tailscale and close port 22
+### 2. Install Tailscale and close port 22
 
 On the instance, install Tailscale with its official script:
 
@@ -150,7 +157,7 @@ Then, in the OCI console, delete the TCP 22 ingress rule from the VCN's security
 ssh -o ConnectTimeout=10 ubuntu@PUBLIC_IP
 ```
 
-## 3. Install Docker and the Compose plugin
+### 3. Install Docker and the Compose plugin
 
 These are Docker's documented apt steps for Ubuntu (see [Install Docker Engine on Ubuntu](https://docs.docker.com/engine/install/ubuntu/)); check that page if they have changed.
 
@@ -183,9 +190,9 @@ Check that Compose v2 works (the deploy script needs 2.20 or later):
 docker compose version
 ```
 
-Leave Docker's default settings alone. In particular, don't add `userland-proxy: false` to `/etc/docker/daemon.json` without redoing the checks in step 15.
+Leave Docker's default settings alone. In particular, don't add `userland-proxy: false` to `/etc/docker/daemon.json` without redoing the checks in step 18.
 
-## 4. Open ports 80 and 443 on the host
+### 4. Open ports 80 and 443 on the host
 
 Oracle's image documentation says platform images "have a default set of firewall rules that allow only SSH access", on top of the VCN security list. Without a host rule, Caddy can't get a certificate and nobody can reach the site. Look at the file before you edit it, since the exact rules can differ between image builds.
 
@@ -221,57 +228,7 @@ sudo iptables -S INPUT
 
 Remember that this firewall does not govern ports Docker publishes. The `web` container's port is protected by being bound to `127.0.0.1`, not by these rules.
 
-## 5. Create the directories and install the host files
-
-Everything lives under `/opt/prizecheck-prod`:
-
-| Path                                     | Contents                                                                                                          |
-| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `bin/prizecheck-deploy.sh`               | The deploy script                                                                                                 |
-| `bin/prizecheck-catalog-refresh.*`       | The daily refresh's service and timer units; `setup` installs them into systemd (step 16)                         |
-| `compose.deploy.yml`, `compose.prod.yml` | The stack and the production overlay                                                                              |
-| `prizecheck.env`                         | The env file (mode 600; step 7)                                                                                   |
-| `data/`                                  | PostgreSQL, the public projection store, price runners, mail, card art                                            |
-| `state/`, `backups/`                     | Release state and logs; database dumps and archives                                                               |
-| `signup/`, `signup-active/`              | The signup readiness proof you edit, and the validated copy the gateway reads ([Opening signup](#opening-signup)) |
-
-The script finds its home as the parent of its `bin/` directory, so keep that layout. `setup` (step 7) creates `data/`, `state/`, `backups/`, `signup/` and `signup-active/`.
-
-`data/art/` holds the card pictures the API fetched from TCGdex on first request (ADR 0020). It is regenerable, so `backup` leaves it out on purpose; deleting it only costs refetches. After copying an updated `prizecheck-deploy.sh` to the instance, run `sudo bash /opt/prizecheck-prod/bin/prizecheck-deploy.sh setup` once: it creates `data/art`, and deploys refuse to run without it.
-
-On the instance:
-
-```bash
-sudo mkdir -p /opt/prizecheck-prod/bin
-```
-
-From your workstation, in a checkout of the commit you're going to deploy (step 13), copy the host files to the `ubuntu` user's home. Use the tailnet address:
-
-```bash
-scp compose.deploy.yml compose.prod.yml deploy/host/prizecheck-deploy.sh deploy/host/prizecheck-catalog-refresh.service deploy/host/prizecheck-catalog-refresh.timer deploy/host/prizecheck-prod.env.example deploy/oracle/Caddyfile ubuntu@100.x.y.z:
-```
-
-On the instance, install them as root:
-
-```bash
-sudo install -m 0644 compose.deploy.yml compose.prod.yml /opt/prizecheck-prod/
-```
-
-```bash
-sudo install -m 0755 prizecheck-deploy.sh /opt/prizecheck-prod/bin/prizecheck-deploy.sh
-```
-
-```bash
-sudo install -m 0644 prizecheck-catalog-refresh.service prizecheck-catalog-refresh.timer /opt/prizecheck-prod/bin/
-```
-
-```bash
-sudo install -m 0644 prizecheck-prod.env.example /opt/prizecheck-prod/bin/prizecheck-prod.env.example
-```
-
-The `Caddyfile` stays in your home directory until step 12.
-
-## 6. Register the Discord application
+### 5. Register the Discord application
 
 Production sign-in is Discord OAuth. Register the application before you fill in the env file, because the env file needs its credentials.
 
@@ -293,12 +250,18 @@ The gateway uses Better Auth's default scopes. The portal's menu names above are
 
 Google works the same way: its redirect URL ends in `/callback/google`, and its credentials go in `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`. Set a pair completely or not at all.
 
-## 7. Configure the env file
+### 6. Create the env file
 
-On the instance:
+On your workstation, in a checkout of the commit you're going to deploy, copy the example to the instance. Use the tailnet address:
 
 ```bash
-cd /opt/prizecheck-prod && sudo cp bin/prizecheck-prod.env.example prizecheck.env && sudo chmod 600 prizecheck.env
+scp deploy/host/prizecheck-prod.env.example ubuntu@100.x.y.z:
+```
+
+On the instance, create the install directory and the env file from it (mode 600, owned by root):
+
+```bash
+sudo install -d -m 0755 /opt/prizecheck-prod && sudo install -m 0600 prizecheck-prod.env.example /opt/prizecheck-prod/prizecheck.env
 ```
 
 Generate three distinct secrets, one per command run. Don't reuse any value from dev:
@@ -307,7 +270,7 @@ Generate three distinct secrets, one per command run. Don't reuse any value from
 openssl rand -hex 32
 ```
 
-Edit `prizecheck.env` (`sudo nano prizecheck.env`):
+Edit `/opt/prizecheck-prod/prizecheck.env` (`sudo nano /opt/prizecheck-prod/prizecheck.env`):
 
 | Variable                                     | Value                                                                                         |
 | -------------------------------------------- | --------------------------------------------------------------------------------------------- |
@@ -318,44 +281,91 @@ Edit `prizecheck.env` (`sudo nano prizecheck.env`):
 | `PRIZECHECK_WEB_PORT`                        | `8088`, and the same port in the Caddyfile                                                    |
 | `PRIZECHECK_REGISTRY`                        | `ghcr.io/ry-cen`                                                                              |
 | `PUBLIC_ORIGIN`                              | `https://YOUR-DOMAIN`: https, host and optional port, no path                                 |
-| `OWNER_EMAIL`                                | The verified email address of your Discord account (step 6)                                   |
+| `OWNER_EMAIL`                                | The verified email address of your Discord account (step 5)                                   |
 | `POSTGRES_PASSWORD`                          | A secret (letters and digits only, at least 32 characters; it's embedded in a connection URL) |
 | `BETTER_AUTH_SECRET`, `INTERNAL_AUTH_SECRET` | A secret each                                                                                 |
 | `MAIL_MODE`                                  | `http`. The gateway refuses file and console mail under `NODE_ENV=production`                 |
 | `EMAIL_SIGN_IN`                              | `off`. Leave the `MAIL_RELAY_*` and `MAIL_FROM` lines commented out                           |
-| `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET` | From step 6. Leave the `GOOGLE_*` pair empty                                                  |
+| `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET` | From step 5. Leave the `GOOGLE_*` pair empty                                                  |
 | `DAILY_SEND_CAP`, `DAILY_SIGNUP_CAP`         | Whole numbers; the example's `100` is fine                                                    |
 | `SIGNUP_MODE`                                | `owner-only`. Only [Opening signup](#opening-signup) changes it                               |
 
 The file may contain only `KEY=value` lines, comments and blank lines. The script refuses `export KEY=...`, indented keys, `KEY: value`, a space between `=` and the value, a quoted value that doesn't close on its own line, and a backslash inside a quoted value (escaped quotes are not supported), because Docker Compose would read those lines differently from the script's own checks. It names the offending line number. Values stay in this file only: they aren't in the repository or GitHub, and the script reads individual keys without printing them.
 
-Create the data directories with the ownership the non-root containers need:
+`setup` (step 12) creates the data directories and checks this file with `check-config`; its report names the key at fault, never the value. The file stays on the instance only: it is not in the repository or GitHub.
+
+### 7. Set up DNS and Caddy
+
+Create an **A record** for your domain pointing at the instance's public (reserved) IP. Use DNS-only: no CDN proxy in front. There's no AAAA record because the instance has no IPv6.
+
+Install Caddy from its official apt repository. These are the commands from [caddyserver.com/docs/install](https://caddyserver.com/docs/install) (Debian, Ubuntu, Raspbian, stable releases). Run them in order:
 
 ```bash
-sudo bash /opt/prizecheck-prod/bin/prizecheck-deploy.sh setup
+sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https curl
 ```
-
-Then validate the file (no containers are touched; if Docker Compose is installed, it also checks that the rendered configuration publishes the web port on `127.0.0.1` only):
 
 ```bash
-sudo bash /opt/prizecheck-prod/bin/prizecheck-deploy.sh check-config
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
 ```
 
-A good file ends with this line, prefixed with a timestamp:
-
-```text
-Configuration OK (prod)
+```bash
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
 ```
 
-Any `ERROR:` line names the key at fault, never its value; fix it and run the check again.
+```bash
+sudo chmod o+r /usr/share/keyrings/caddy-stable-archive-keyring.gpg /etc/apt/sources.list.d/caddy-stable.list
+```
 
-## 8. Allow the repository to pull the images
+```bash
+sudo apt update && sudo apt install -y caddy
+```
+
+From your workstation, copy the Caddyfile to the instance:
+
+```bash
+scp deploy/oracle/Caddyfile ubuntu@100.x.y.z:
+```
+
+On the instance, replace the example domain in it, then install it:
+
+```bash
+sed -i 's/prizecheck\.example\.com/YOUR-DOMAIN/' Caddyfile
+```
+
+```bash
+sudo install -m 0644 Caddyfile /etc/caddy/Caddyfile
+```
+
+Validate it and reload Caddy:
+
+```bash
+caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+```
+
+```bash
+sudo systemctl reload caddy
+```
+
+The Caddyfile does four things:
+
+- It obtains and renews the certificate itself and redirects HTTP to HTTPS.
+- It sends `Strict-Transport-Security: max-age=31536000` (no `includeSubDomains`, no preload).
+- It forwards to `127.0.0.1:8088` and sets `X-Real-IP` to the visitor's address (the chain described above).
+- It keeps no access log, and no compression or `Cross-Origin-*` headers: nginx owns those, including the scanner page's isolation headers.
+
+Until the stack is deployed, Caddy answers with a 502 for the domain, which is expected. Caddy can obtain its certificate as soon as DNS resolves and ports 80 and 443 are open; see its journal if not:
+
+```bash
+journalctl -u caddy --since '10 minutes ago' --no-pager
+```
+
+### 8. Allow the repository to pull the images
 
 The `prizecheck-api`, `prizecheck-auth`, `prizecheck-web` and `prizecheck-scanner-index` packages already exist, created by the dev pipeline. No registry credential is stored on the host: each deploy pipes the job's short-lived `GITHUB_TOKEN` over SSH for one read-only login.
 
 On GitHub, check each of the four packages: **Package settings → Manage Actions access** must give `ry-cen/prizecheck` **Write**, because Deploy prod builds and pushes a release's images when no dev deploy built them. If the dev pipeline has pushed them, this is already true.
 
-## 9. Create the deploy key
+### 9. Create the deploy key
 
 On your workstation, create a key used only for production:
 
@@ -405,7 +415,7 @@ ssh -i prizecheck-prod-deploy root@100.x.y.z status
 
 Delete the private key file from your workstation after storing it in GitHub (step 11).
 
-## 10. Configure Tailscale for CI
+### 10. Configure Tailscale for CI
 
 In the [Tailscale admin console](https://login.tailscale.com/admin):
 
@@ -438,7 +448,7 @@ In the [Tailscale admin console](https://login.tailscale.com/admin):
 
 2. **Trust credentials** (Settings → OAuth clients): create an OAuth client with the **Auth Keys → Write** scope, limited to the tag `tag:ci-prod`. Copy the client ID and secret into GitHub (step 11). The action mints a short-lived, ephemeral node for each run.
 
-## 11. Configure GitHub
+### 11. Configure GitHub
 
 In `ry-cen/prizecheck` → **Settings**:
 
@@ -465,71 +475,108 @@ In `ry-cen/prizecheck` → **Settings**:
 
    | Variable              | Value                                                                                    |
    | --------------------- | ---------------------------------------------------------------------------------------- |
-   | `PROD_PUBLIC_URL`     | The `PUBLIC_ORIGIN` from step 7 (the deployment link and the target of the public check) |
-   | `PROD_DEPLOY_ENABLED` | `true`. **Set this last, in step 13**; until then every Deploy prod job is skipped       |
+   | `PROD_PUBLIC_URL`     | The `PUBLIC_ORIGIN` from step 6 (the deployment link and the target of the public check) |
+   | `PROD_DEPLOY_ENABLED` | `true`. **Set this last, in step 14**; until then every Deploy prod job is skipped       |
 
 Don't set `PROD_DEPLOY_ENABLED` yet: DNS and Caddy come first, because the workflow checks the public site after deploying.
 
-## 12. Set up DNS and Caddy
+## Part 2. Install the host files and run `setup`
 
-Create an **A record** for your domain pointing at the instance's public (reserved) IP. Use DNS-only: no CDN proxy in front. There's no AAAA record because the instance has no IPv6.
+`setup` is the one command that prepares the host. It does every step a root script can do safely, can be run as often as you like, and changes nothing the second time. Run it again after every change to a host file.
 
-Install Caddy from its official apt repository. These are the commands from [caddyserver.com/docs/install](https://caddyserver.com/docs/install) (Debian, Ubuntu, Raspbian, stable releases). Run them in order:
+### 12. Install the host files and run `setup`
+
+Everything lives under `/opt/prizecheck-prod`:
+
+| Path                                     | Contents                                                                                                          |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `bin/prizecheck-deploy.sh`               | The deploy script                                                                                                 |
+| `bin/prizecheck-catalog-refresh.*`       | The daily refresh's service and timer units; `setup` installs them into systemd                                   |
+| `bin/prizecheck-backup.*`                | The nightly backup's service and timer units; `setup` installs them too                                           |
+| `compose.deploy.yml`, `compose.prod.yml` | The stack and the production overlay                                                                              |
+| `prizecheck.env`                         | The env file (mode 600; step 6)                                                                                   |
+| `data/`                                  | PostgreSQL, the public projection store, price runners, mail, card art                                            |
+| `state/`, `backups/`                     | Release state and logs; database dumps and archives                                                               |
+| `signup/`, `signup-active/`              | The signup readiness proof you edit, and the validated copy the gateway reads ([Opening signup](#opening-signup)) |
+
+The script finds its home as the parent of its `bin/` directory, so keep that layout.
+
+From your workstation, in a checkout of the commit you're going to deploy (step 14), copy the host files to the `ubuntu` user's home. Use the tailnet address:
 
 ```bash
-sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https curl
+scp compose.deploy.yml compose.prod.yml deploy/host/prizecheck-deploy.sh deploy/host/prizecheck-catalog-refresh.service deploy/host/prizecheck-catalog-refresh.timer deploy/host/prizecheck-backup.service deploy/host/prizecheck-backup.timer deploy/host/prizecheck-prod.env.example ubuntu@100.x.y.z:
+```
+
+On the instance, install them as root:
+
+```bash
+sudo install -m 0644 compose.deploy.yml compose.prod.yml /opt/prizecheck-prod/
 ```
 
 ```bash
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+sudo install -m 0755 prizecheck-deploy.sh /opt/prizecheck-prod/bin/prizecheck-deploy.sh
 ```
 
 ```bash
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+sudo install -m 0644 prizecheck-catalog-refresh.service prizecheck-catalog-refresh.timer prizecheck-backup.service prizecheck-backup.timer prizecheck-prod.env.example /opt/prizecheck-prod/bin/
 ```
+
+Run `setup`:
 
 ```bash
-sudo chmod o+r /usr/share/keyrings/caddy-stable-archive-keyring.gpg /etc/apt/sources.list.d/caddy-stable.list
+sudo bash /opt/prizecheck-prod/bin/prizecheck-deploy.sh setup
 ```
+
+`setup` stops with an error if the env file (step 6) or a unit file is missing. Otherwise it:
+
+- creates `data/` (PostgreSQL, the public projection store, price runners, mail, card art), `state/`, `backups/`, `signup/` and `signup-active/`, with the owners the containers need. `data/art/` holds the card pictures the API fetched from TCGdex on first request (ADR 0020); it is regenerable, so `backup` leaves it out on purpose, and deploys refuse to run without it;
+- installs the two timers' units into `/etc/systemd/system/` (rewriting each service's `ExecStart` to the installed script's own path), reloads systemd and enables the catalog refresh timer and the nightly backup timer. A unit is written only when its content differs. [The daily jobs](#the-daily-jobs) describe what they run;
+- removes `/etc/cron.d/prizecheck-backup` if an earlier version of this guide made it, and logs that, so the backup never runs twice;
+- ends with the readiness report, which `setup` also runs for you. Run it alone with `sudo bash /opt/prizecheck-prod/bin/prizecheck-deploy.sh readiness`.
+
+The report prints one line per item, `ok`, `missing` or `warning`, with the command for each item that is not ok. It exits non-zero while a prerequisite for the first deploy is missing: Docker or the Compose plugin, the env file and its `check-config` checks, or the installed and enabled units. Tailscale, Caddy and the port 80 and 443 rules are checked as warnings only, because the detection can be wrong. It never prints a value from the env file.
+
+`check-config` runs the env file and unit checks without the report (no containers are touched; with Docker Compose installed, it also checks that the rendered configuration publishes the web port on `127.0.0.1` only):
 
 ```bash
-sudo apt update && sudo apt install -y caddy
+sudo bash /opt/prizecheck-prod/bin/prizecheck-deploy.sh check-config
 ```
 
-Replace the example domain in the Caddyfile you copied in step 5, then install it:
+A good file ends with this line, prefixed with a timestamp:
+
+```text
+Configuration OK (prod)
+```
+
+Any `ERROR:` line names the key or file at fault, never its value; fix it and run `setup` again.
+
+## Part 3. Follow the readiness report
+
+When the report says `This host is ready for the first deploy`, deploy. After the first deploy, `setup` or `readiness` also reads the app's state through the release's own tools image and lists what is left, each with its command:
+
+| Report item            | Step                                                                 |
+| ---------------------- | -------------------------------------------------------------------- |
+| The owner is bound     | [15](#15-verify-the-application-and-sign-in)                         |
+| The catalog rules      | [16](#16-apply-the-catalog-rules)                                 |
+| An active catalog      | [17](#17-pull-the-catalog-build-the-scanner-index-and-import-prices) |
+| The last price import  | [17](#17-pull-the-catalog-build-the-scanner-index-and-import-prices) |
+| The scanner index      | [17](#17-pull-the-catalog-build-the-scanner-index-and-import-prices) |
+| The last catalog check | [The daily jobs](#the-daily-jobs)                                    |
+| The signup mode        | [Opening signup](#opening-signup)                                    |
+
+These items never fail the report: they come after the first deploy.
+
+### 13. Read the report
+
+Run the report whenever you want to know what is left:
 
 ```bash
-sed -i 's/prizecheck\.example\.com/YOUR-DOMAIN/' Caddyfile
+sudo bash /opt/prizecheck-prod/bin/prizecheck-deploy.sh readiness
 ```
 
-```bash
-sudo install -m 0644 Caddyfile /etc/caddy/Caddyfile
-```
+Before the first release it lists only the host items. Fix every `missing` line (the `next:` line under it has the command), run the report again, and go on when it says the host is ready. A `warning` does not block the deploy, but read it: a Caddy without your domain, or no rule for port 443, shows up as a failed public check after the deploy.
 
-Validate it and reload Caddy:
-
-```bash
-caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
-```
-
-```bash
-sudo systemctl reload caddy
-```
-
-The Caddyfile does four things:
-
-- It obtains and renews the certificate itself and redirects HTTP to HTTPS.
-- It sends `Strict-Transport-Security: max-age=31536000` (no `includeSubDomains`, no preload).
-- It forwards to `127.0.0.1:8088` and sets `X-Real-IP` to the visitor's address (the chain described above).
-- It keeps no access log, and no compression or `Cross-Origin-*` headers: nginx owns those, including the scanner page's isolation headers.
-
-Until the stack is deployed, Caddy answers with a 502 for the domain, which is expected. Caddy can obtain its certificate as soon as DNS resolves and ports 80 and 443 are open; see its journal if not:
-
-```bash
-journalctl -u caddy --since '10 minutes ago' --no-pager
-```
-
-## 13. Perform the first release
+### 14. Perform the first release
 
 1. Confirm the host files match the commit you'll deploy. On the instance:
 
@@ -540,7 +587,7 @@ journalctl -u caddy --since '10 minutes ago' --no-pager
    On your workstation, in the same commit:
 
    ```bash
-   cat compose.deploy.yml compose.prod.yml deploy/host/prizecheck-deploy.sh deploy/host/prizecheck-catalog-refresh.service deploy/host/prizecheck-catalog-refresh.timer | sha256sum
+   cat compose.deploy.yml compose.prod.yml deploy/host/prizecheck-deploy.sh deploy/host/prizecheck-catalog-refresh.service deploy/host/prizecheck-catalog-refresh.timer deploy/host/prizecheck-backup.service deploy/host/prizecheck-backup.timer | sha256sum
    ```
 
 2. Choose the commit. It must be a `dev` commit that includes the change that introduced production. It doesn't need a dev deploy: Deploy prod builds the images when they're missing. `main` is fast-forwarded, never merged:
@@ -563,9 +610,9 @@ journalctl -u caddy --since '10 minutes ago' --no-pager
 
 On a new installation the script applies all migrations and initializes the public projection store, as on dev. See [public projections](public-projections.md) if the store is reported missing.
 
-If either of the checks in step 15 fails, set `PROD_DEPLOY_ENABLED` to anything other than `true` to stop further deploys while you investigate.
+If either of the checks in step 18 fails, set `PROD_DEPLOY_ENABLED` to anything other than `true` to stop further deploys while you investigate.
 
-## 14. Verify the application and sign in
+### 15. Verify the application and sign in
 
 On the instance:
 
@@ -600,28 +647,35 @@ Then sign in:
    sudo bash /opt/prizecheck-prod/bin/prizecheck-deploy.sh tool /app/scripts/bind_owner.py 'ID-FROM-THE-QUERY'
    ```
 
-3. Apply the catalog rules **before** the first pull. The price import prices only the Editions a matching rule has already verified, so an import run before the rules are applied prices nothing. A release applies its newest rules by itself, but only once the owner is bound (step 2), so run it now rather than waiting for the next deploy:
+### 16. Apply the catalog rules
 
-   ```bash
-   sudo bash /opt/prizecheck-prod/bin/prizecheck-deploy.sh tool /app/scripts/rule_rollout.py resume
-   ```
+A deploy applies the newest version of each catalog rule by itself ([ADR 0021](adr/0021-deploy-applies-newest-catalog-rules.md)); there is no activation step and no environment switch. It does so only once the owner is bound (step 15), so the first release on a new host leaves them unapplied until then. Apply them **before** the first pull: the price import prices only the Editions a matching rule has already verified, so an import run before the rules are applied prices nothing. Run it now rather than waiting for the next deploy:
 
-   Otherwise the first catalog pull applies them. The rollout re-evaluates targets in short batches, so it doesn't block your collection changes. Its progress shows under Owner controls → **Rules**. Matching v4 also matches the Black Star promo sets by card number from the stored TCGCSV products, which the first price import (step 5) stores; that run carries `--rematch`, and promos TCGCSV lists later are picked up by `price_import_job.py --rematch`.
+```bash
+sudo bash /opt/prizecheck-prod/bin/prizecheck-deploy.sh tool /app/scripts/rule_rollout.py resume
+```
 
-4. Refresh, open **Owner controls**, and start the full English catalog pull. The first pull is still started by hand; the daily refresh (step 16) only keeps the catalog current afterwards. A pull does not fetch prices: they come from the TCGCSV import in step 5.
-5. After the catalog pull, build the scanner's index and import the first prices by hand. The index first:
+It applies the newest rules and finishes any unfinished rollout, and it prints one line per rule. The rollout re-evaluates targets in short batches, so it doesn't block your collection changes. Its progress or error shows under Owner controls → **Rules**; when a rollout failed, run the same command again to resume it. The report in step 13 stays open while a rule is not applied. If the first catalog pull has not run yet, it applies them too.
 
-   ```bash
-   sudo bash /opt/prizecheck-prod/bin/prizecheck-deploy.sh compose run --rm scanner-index
-   ```
+Matching v4 and later also match the Black Star promo sets by card number from the stored TCGCSV products, which the first price import (step 17) stores; that run carries `--rematch`, and promos TCGCSV lists later are picked up by `price_import_job.py --rematch`.
 
-   Then the prices. The import reads TCGCSV's daily snapshot and prices the Editions a matching rule has verified, so run it after the catalog pull. Matching v4 and later (step 3 applies the newest) match the Black Star promos from stored TCGCSV products, which exist only after an import, so the first run carries `--rematch`. A newer rule a later release applies binds and publishes its Editions itself:
+### 17. Pull the catalog, build the scanner index and import prices
 
-   ```bash
-   sudo bash /opt/prizecheck-prod/bin/prizecheck-deploy.sh tool /app/scripts/price_import_job.py --rematch
-   ```
+**Pull.** Refresh, open **Owner controls**, and start the full English catalog pull. The first pull is still started by hand; the daily refresh ([the daily jobs](#the-daily-jobs)) only keeps the catalog current afterwards. A pull does not fetch prices: they come from the TCGCSV import below.
 
-## 15. Check the edge on the host
+**Index and prices.** After the catalog pull, build the scanner's index and import the first prices by hand. The index first:
+
+```bash
+sudo bash /opt/prizecheck-prod/bin/prizecheck-deploy.sh compose run --rm scanner-index
+```
+
+Then the prices. The import reads TCGCSV's daily snapshot and prices the Editions a matching rule has verified, so run it after the catalog pull. Matching v4 and later (step 16 applies the newest) match the Black Star promos from stored TCGCSV products, which exist only after an import, so the first run carries `--rematch`. A newer rule a later release applies binds and publishes its Editions itself:
+
+```bash
+sudo bash /opt/prizecheck-prod/bin/prizecheck-deploy.sh tool /app/scripts/price_import_job.py --rematch
+```
+
+### 18. Check the edge on the host
 
 These two checks confirm the assumptions the client-address chain and the no-URL-logging promise rest on. Neither could be run while this guide was written, so run both once on the real host before you rely on the per-IP limits or announce the site. In a shell on the instance:
 
@@ -689,25 +743,23 @@ journalctl -u caddy --since '10 minutes ago' --no-pager | grep -c forced-502-mar
 
 The count must be `0`. Caddy may well log that the upstream refused the connection, but the line must not contain the request path or the client address. If the marker appears, the Caddyfile's `log default { exclude ... }` block isn't doing its job on this Caddy version: don't announce the site, since published-deck URLs are capability links, and fix the Caddyfile first. Run `status` afterwards to confirm `web` is healthy again. This check can't cover everything: Caddy's `http.stdlib` logger can still record client IP addresses when a TLS handshake fails. Those lines carry no request path, but they are not excluded.
 
-## 16. Install the daily catalog refresh timer
+## The daily jobs
 
-The timer runs `prizecheck-deploy.sh catalog-refresh`, which imports the TCGCSV prices, then checks TCGdex for catalog changes, then runs the scanner index. `setup` (step 7) installs and enables the timer as soon as the units are in `bin/`, so it exists before the first release; a run before the first release (step 13) logs "Nothing deployed yet; skipping the catalog refresh" and exits 0, and the check records a failed check (CATALOG_RULES_INACTIVE, exit 2) until a deploy has applied both catalog rules ([ADR 0021](adr/0021-deploy-applies-newest-catalog-rules.md); step 14, item 3, finishes an unfinished rollout by hand), so it starts no pull on its own. Reinstalling the host files from a commit brings that commit's `prizecheck-deploy.sh`, which includes the price import ([#355](https://github.com/ry-cen/prizecheck/issues/355)); a host still on an older script runs the check and the index only.
+`setup` (step 12) installs two systemd timers. They exist before the first release: a run before it logs that nothing is deployed yet and exits 0.
 
-The units are already in `/opt/prizecheck-prod/bin/` if you installed the host files from that commit (step 5, or "Updating the host files"). `setup` copies them into `/etc/systemd/system/` (rewriting the service's `ExecStart` to the installed script's own path), reloads systemd and enables the timer. It writes a unit only when its content differs, so running it again changes nothing:
+**Daily catalog refresh.** `prizecheck-catalog-refresh.timer` runs `prizecheck-deploy.sh catalog-refresh`, which imports the TCGCSV prices, then checks TCGdex for catalog changes, then runs the scanner index. Before the first release it logs "Nothing deployed yet; skipping the catalog refresh". The check records a failed check (CATALOG_RULES_INACTIVE, exit 2) until a deploy has applied both catalog rules ([ADR 0021](adr/0021-deploy-applies-newest-catalog-rules.md); step 16 finishes an unfinished rollout by hand), so it starts no pull on its own. The price import ([#355](https://github.com/ry-cen/prizecheck/issues/355)) is a step of the deployed release's script: the installed `prizecheck-deploy.sh` must be that release's copy (see "Updating the host files"), because an older script runs the check and the index only, and the daily prices would silently stop being imported.
 
-```bash
-sudo bash /opt/prizecheck-prod/bin/prizecheck-deploy.sh setup
-```
+**Nightly backup.** `prizecheck-backup.timer` runs `prizecheck-deploy.sh backup` at 03:17 UTC, the time and command of the cron entry earlier versions of this guide asked for. Before the first release, or with no database container running, it logs that and exits 0. [Backing up persistent data](#backing-up-persistent-data) says what it keeps.
 
-`setup` stops with an error if the units are missing from `bin/`. `check-config` fails when an installed unit differs from the `bin/` copy or the timer is not enabled. Check the timer:
+Check both timers:
 
 ```bash
-systemctl list-timers prizecheck-catalog-refresh.timer
+systemctl list-timers prizecheck-catalog-refresh.timer prizecheck-backup.timer
 ```
 
-The list shows the next run at about 04:00 UTC (up to 30 minutes later, from the random delay) and no earlier run yet. The timer fires once a day, not on boot, and a run missed while the instance was off runs once at the next start.
+The refresh shows its next run at about 04:00 UTC (up to 30 minutes later, from the random delay), the backup at 03:17 UTC. Neither fires on boot, and a run missed while the instance was off runs once at the next start. `check-config` fails when an installed unit differs from the `bin/` copy or a timer is not enabled.
 
-Optionally run it once by hand to see it work. The first run can take more than an hour on 1 OCPU, so start it without waiting:
+Optionally run the refresh once by hand to see it work. The first run can take more than an hour on 1 OCPU, so start it without waiting:
 
 ```bash
 sudo systemctl start --no-block prizecheck-catalog-refresh
@@ -717,9 +769,9 @@ sudo systemctl start --no-block prizecheck-catalog-refresh
 journalctl -u prizecheck-catalog-refresh -f
 ```
 
-The script's output lands in the journal: `journalctl -u prizecheck-catalog-refresh`. `systemctl status prizecheck-catalog-refresh` shows whether the last run exited 0. When nothing changed, the run still imports the prices and runs the scanner index (it is skipped only after a pull the check started that failed), then ends with "Catalog refresh finished". Once [#340](https://github.com/ry-cen/prizecheck/issues/340) is deployed, Owner controls shows the last automatic check. The exit codes are in [portable jobs](operations/portable-jobs.md).
+The script's output lands in the journal: `journalctl -u prizecheck-catalog-refresh` and `journalctl -u prizecheck-backup`. `systemctl status prizecheck-catalog-refresh` shows whether the last run exited 0. When nothing changed, the refresh still imports the prices and runs the scanner index (it is skipped only after a pull the check started that failed), then ends with "Catalog refresh finished". Once [#340](https://github.com/ry-cen/prizecheck/issues/340) is deployed, Owner controls shows the last automatic check. The exit codes are in [portable jobs](operations/portable-jobs.md).
 
-The units are host files, not part of the release, and they are part of the bundle digest. On every new host, including a move to AWS, install the host files (step 5) and run `setup`. After a commit changes either unit, the deploy refuses until you reinstall the host files from that commit; run `setup` again then, which copies the changed unit and reloads systemd. Stopping the service (`systemctl stop`) ends the script but not a container it already started; `docker ps --filter label=prizecheck.job=catalog-refresh` lists those, and the next deploy stops them.
+The units are host files, not part of the release, and they are part of the bundle digest. On every new host, including a move to AWS, install the host files (step 12) and run `setup`. After a commit changes a unit, the deploy refuses until you reinstall the host files from that commit; run `setup` again then, which copies the changed unit and reloads systemd. Stopping the refresh service (`systemctl stop`) ends the script but not a container it already started; `docker ps --filter label=prizecheck.job=catalog-refresh` lists those, and the next deploy stops them.
 
 ## Opening signup
 
@@ -761,13 +813,13 @@ Nothing is carried when the running release is owner-only, when the proof names 
 
 ## Updating the host files
 
-`compose.deploy.yml`, `compose.prod.yml`, `prizecheck-deploy.sh` and the two catalog refresh units run on the instance as root, so CI never ships them. A stolen deploy key can only deploy images from GHCR with the files you installed. CI sends the digest of the commit's copies, and the host refuses to deploy if its own differ:
+`compose.deploy.yml`, `compose.prod.yml`, `prizecheck-deploy.sh` and the four systemd units (the catalog refresh and the nightly backup) run on the instance as root, so CI never ships them. A stolen deploy key can only deploy images from GHCR with the files you installed. CI sends the digest of the commit's copies, and the host refuses to deploy if its own differ:
 
 ```text
-ERROR: Host deployment files differ from commit ...; reinstall compose.deploy.yml, compose.prod.yml, prizecheck-deploy.sh and the catalog refresh units (docs/deployment-oracle.md, 'Updating the host files')
+ERROR: Host deployment files differ from commit ...; reinstall compose.deploy.yml compose.prod.yml prizecheck-deploy.sh and the host units (docs/deployment-oracle.md, 'Updating the host files')
 ```
 
-When a commit changes any of these files, repeat the `scp` and `install` commands in step 5 from that commit, run `setup` (it installs a changed unit into systemd and reloads it, and does nothing else when nothing changed), then re-run the failed workflow run. The digest covers only those five files (the digest order is the compose files, the script, the service, the timer): `deploy/oracle/Caddyfile` isn't checked, and the deploy never touches `/etc/caddy/Caddyfile`. Reinstall and reload it yourself (step 12) when a commit changes it. The release that ships catalog rule rollout (ADR 0021, #377) changes the bundle digest: reinstall before the first deploy of it.
+When a commit changes any of these files, repeat the `scp` and `install` commands in step 12 from that commit, run `setup` (it installs a changed unit into systemd and reloads it, and does nothing else when nothing changed), then re-run the failed workflow run. The digest covers only those seven files (the digest order is the compose files, the script, the refresh service, the refresh timer, the backup service, the backup timer): `deploy/oracle/Caddyfile` isn't checked, and the deploy never touches `/etc/caddy/Caddyfile`. Reinstall and reload it yourself (step 7) when a commit changes it. The release that ships catalog rule rollout (ADR 0021, #377) changes the bundle digest: reinstall before the first deploy of it.
 
 ## Viewing logs
 
@@ -843,11 +895,7 @@ To restore a pre-migration dump after data damage or when an old release can't r
   sudo bash /opt/prizecheck-prod/bin/prizecheck-deploy.sh backup
   ```
 
-- **Nightly (recommended, not set up by the pipeline):** a root cron entry. Create it with:
-
-  ```bash
-  echo '17 3 * * * root /bin/bash /opt/prizecheck-prod/bin/prizecheck-deploy.sh backup' | sudo tee /etc/cron.d/prizecheck-backup
-  ```
+- **Nightly:** `setup` installs `prizecheck-backup.timer`, which runs that command at 03:17 UTC (see [The daily jobs](#the-daily-jobs)). It removes the `/etc/cron.d/prizecheck-backup` entry earlier versions of this guide had you create, so the backup never runs twice. Before the first release it logs that and exits 0. Check its runs with `journalctl -u prizecheck-backup`.
 
 **Scheduled off-host backups are not set up yet.** Nothing in this repository or the pipeline copies `backups/` or `prizecheck.env` off the instance, and the dumps sit on the same boot volume as the database. Until you set that up (for example by copying them to OCI Object Storage, your choice), a lost instance or volume loses the data. Without the env file's secrets, existing sessions and the database password are lost too. The backups contain private collection data; keep them out of any shared or public location.
 

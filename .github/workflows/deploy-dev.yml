@@ -48,7 +48,7 @@ jobs:
           persist-credentials: false
       - name: Host file digest
         id: bundle
-        run: echo "digest=$(cat compose.deploy.yml deploy/host/prizecheck-deploy.sh deploy/host/prizecheck-catalog-refresh.service deploy/host/prizecheck-catalog-refresh.timer | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+        run: echo "digest=$(cat compose.deploy.yml deploy/host/prizecheck-deploy.sh deploy/host/prizecheck-catalog-refresh.service deploy/host/prizecheck-catalog-refresh.timer deploy/host/prizecheck-backup.service deploy/host/prizecheck-backup.timer | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
       - uses: tailscale/github-action@d1b6cd204f8dceda5b3eaad7f1f767be390056cd # v4.2.0
         with:
           oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}

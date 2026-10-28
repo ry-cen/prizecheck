@@ -24,7 +24,7 @@ Rules: when the live-derivation or the marketplace-matching rule is not active, 
 CATALOG_RULES_INACTIVE and starts nothing: with no active catalog every id looks new, and the check would start a full pull
 before a deploy has applied the rules. A deploy applies the newest version of each rule by itself (ADR 0021), but only once
 the owner is bound. If the owner was bound after the release started, run `scripts/rule_rollout.py resume` through the
-deploy script's `tool` command (docs/deployment-oracle.md, step 14, item 3); a rule whose code no longer matches its recorded
+deploy script's `tool` command (docs/deployment-oracle.md, step 16); a rule whose code no longer matches its recorded
 digest is an integrity failure that resume reports and does not fix (ADR 0021).
 
 Pause: when 3 or more pulls this check started have failed since the latest successful pull (whoever started that one), the

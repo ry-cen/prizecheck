@@ -14,13 +14,21 @@ umask 077
 
 SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 PRIZECHECK_HOME="$(dirname "$(dirname "$SCRIPT_PATH")")"
-# The daily catalog refresh's systemd units (ADR 0018) travel with this script in bin/, are part of the bundle digest, and are
-# installed by `setup`. The two directories can be overridden so tests need no systemd; production uses the defaults.
+# The host's systemd units travel with this script in bin/, are part of the bundle digest (in this order), and are installed
+# by `setup`: the daily catalog refresh (ADR 0018) and the nightly backup. The directories and the old backup cron file can be
+# overridden so tests need no systemd; production uses the defaults.
 UNIT_SOURCE_DIR="$(dirname "$SCRIPT_PATH")"
 REFRESH_SERVICE=prizecheck-catalog-refresh.service
 REFRESH_TIMER=prizecheck-catalog-refresh.timer
+BACKUP_SERVICE=prizecheck-backup.service
+BACKUP_TIMER=prizecheck-backup.timer
+HOST_UNITS=("$REFRESH_SERVICE" "$REFRESH_TIMER" "$BACKUP_SERVICE" "$BACKUP_TIMER")
+HOST_TIMERS=("$REFRESH_TIMER" "$BACKUP_TIMER")
 SYSTEMD_RUN_DIR="${PRIZECHECK_SYSTEMD_RUN_DIR:-/run/systemd/system}"
 SYSTEMD_UNIT_DIR="${PRIZECHECK_SYSTEMD_UNIT_DIR:-/etc/systemd/system}"
+# The nightly backup used to be a cron entry made by hand (docs/deployment-oracle.md); `setup` removes it once the timer is on.
+CRON_BACKUP_FILE="${PRIZECHECK_CRON_BACKUP_FILE:-/etc/cron.d/prizecheck-backup}"
+CADDYFILE="${PRIZECHECK_CADDYFILE:-/etc/caddy/Caddyfile}"
 COMPOSE_FILE="$PRIZECHECK_HOME/compose.deploy.yml"
 ENV_FILE="$PRIZECHECK_HOME/prizecheck.env"
 STATE_DIR="$PRIZECHECK_HOME/state"
@@ -531,14 +539,15 @@ valid_commit() { [[ "$1" =~ ^[0-9a-f]{40}$ ]]; }
 
 bundle_digest() {
   read_environment
-  local unit
-  for unit in "$REFRESH_SERVICE" "$REFRESH_TIMER"; do
+  local unit files=()
+  for unit in "${HOST_UNITS[@]}"; do
     [[ -f "$UNIT_SOURCE_DIR/$unit" ]] || die "Missing $UNIT_SOURCE_DIR/$unit; install it with the other host files ($GUIDE, 'Updating the host files')"
+    files+=("$UNIT_SOURCE_DIR/$unit")
   done
-  cat "${COMPOSE_FILES[@]}" "$SCRIPT_PATH" "$UNIT_SOURCE_DIR/$REFRESH_SERVICE" "$UNIT_SOURCE_DIR/$REFRESH_TIMER" | sha256sum | cut -d' ' -f1
+  cat "${COMPOSE_FILES[@]}" "$SCRIPT_PATH" "${files[@]}" | sha256sum | cut -d' ' -f1
 }
 
-# --- Refresh units ------------------------------------------------------------------------------------------------------
+# --- Host units ------------------------------------------------------------------------------------------------------
 
 # True on a host that runs systemd (the Oracle host); false on Unraid.
 has_systemd() { command -v systemctl >/dev/null 2>&1 && [[ -d "$SYSTEMD_RUN_DIR" ]]; }
@@ -549,7 +558,7 @@ render_unit() {
   # systemd splits ExecStart on spaces and reads % as a specifier, so the script must live at a plain path.
   [[ "$SCRIPT_PATH" =~ ^/[A-Za-z0-9._/-]+$ ]] || die "$SCRIPT_PATH cannot go in a systemd unit (spaces, '%' and other special characters are not allowed); install the host files under a plain path such as /opt/prizecheck-prod/bin"
   [[ -f "$source" ]] || die "Missing $source; install it with the other host files ($GUIDE, 'Updating the host files')"
-  if [[ "$unit" != "$REFRESH_SERVICE" ]]; then
+  if [[ "$unit" != *.service ]]; then
     cat "$source"
     return
   fi
@@ -568,18 +577,25 @@ unit_installed_current() {
   [[ -f "$SYSTEMD_UNIT_DIR/$1" ]] && render_unit "$1" | cmp -s - "$SYSTEMD_UNIT_DIR/$1"
 }
 
-install_refresh_units() {
+# The commands for a host without systemd (Unraid), where the operator schedules the two jobs in the User Scripts plugin.
+print_user_scripts() {
+  log "No systemd on this host; installing no units. Add these two entries in the User Scripts plugin (custom schedules; Unraid reads them in the server's time zone):"
+  log "  daily catalog refresh, schedule '0 4 * * *':  bash $SCRIPT_PATH catalog-refresh"
+  log "  nightly backup, schedule '17 3 * * *':        bash $SCRIPT_PATH backup"
+}
+
+install_host_units() {
   if ! has_systemd; then
-    log "No systemd on this host; not installing the daily catalog refresh timer (optional: a User Scripts entry, $GUIDE)"
+    print_user_scripts
     return 0
   fi
   local unit
-  for unit in "$REFRESH_SERVICE" "$REFRESH_TIMER"; do
-    [[ -f "$UNIT_SOURCE_DIR/$unit" ]] || die "Missing $UNIT_SOURCE_DIR/$unit; install the catalog refresh units with the other host files ($GUIDE, 'Updating the host files') and run setup again"
+  for unit in "${HOST_UNITS[@]}"; do
+    [[ -f "$UNIT_SOURCE_DIR/$unit" ]] || die "Missing $UNIT_SOURCE_DIR/$unit; install the host units with the other host files ($GUIDE, 'Updating the host files') and run setup again"
   done
   mkdir -p "$SYSTEMD_UNIT_DIR"
-  local changed=0 tmp
-  for unit in "$REFRESH_SERVICE" "$REFRESH_TIMER"; do
+  local changed=0 tmp timer
+  for unit in "${HOST_UNITS[@]}"; do
     if unit_installed_current "$unit"; then
       continue
     fi
@@ -594,28 +610,37 @@ install_refresh_units() {
   if (( changed )); then
     systemctl daemon-reload || die "systemctl daemon-reload failed"
   fi
-  systemctl enable --now "$REFRESH_TIMER" || die "Could not enable $REFRESH_TIMER"
-  if (( changed )); then
-    log "Daily catalog refresh timer installed and enabled ($REFRESH_TIMER)"
-  else
-    log "Daily catalog refresh timer already installed; enabled ($REFRESH_TIMER)"
+  for timer in "${HOST_TIMERS[@]}"; do
+    systemctl enable --now "$timer" || die "Could not enable $timer"
+    if (( changed )); then
+      log "Timer installed and enabled ($timer)"
+    else
+      log "Timer already installed; enabled ($timer)"
+    fi
+  done
+  # The timer replaces the hand-made cron entry; leaving both would back up twice.
+  if [[ -e "$CRON_BACKUP_FILE" || -L "$CRON_BACKUP_FILE" ]]; then
+    rm -f -- "$CRON_BACKUP_FILE" || die "Could not remove $CRON_BACKUP_FILE"
+    log "Removed $CRON_BACKUP_FILE: $BACKUP_TIMER runs the nightly backup now"
   fi
 }
 
-# On a systemd host the installed units must be the rendered bin/ copies and the timer enabled. Prints the first problem
+# On a systemd host the installed units must be the rendered bin/ copies and the timers enabled. Prints the first problem
 # and returns 1 (never dies, so a deploy can warn); returns 0 when all is well or the host has no systemd.
-refresh_units_problem() {
+host_units_problem() {
   has_systemd || return 0
-  local unit
-  for unit in "$REFRESH_SERVICE" "$REFRESH_TIMER"; do
+  local unit timer
+  for unit in "${HOST_UNITS[@]}"; do
     unit_installed_current "$unit" || { printf '%s\n' "$SYSTEMD_UNIT_DIR/$unit is missing or differs from the host file; run '$SCRIPT_PATH setup'"; return 1; }
   done
-  systemctl is-enabled --quiet "$REFRESH_TIMER" || { printf '%s\n' "$REFRESH_TIMER is not enabled; run '$SCRIPT_PATH setup'"; return 1; }
+  for timer in "${HOST_TIMERS[@]}"; do
+    systemctl is-enabled --quiet "$timer" || { printf '%s\n' "$timer is not enabled; run '$SCRIPT_PATH setup'"; return 1; }
+  done
 }
 
-check_refresh_units() {
+check_host_units() {
   local problem
-  problem="$(refresh_units_problem)" || die "$problem"
+  problem="$(host_units_problem)" || die "$problem"
 }
 
 # --- Registry -----------------------------------------------------------------------------------------------------------
@@ -816,11 +841,11 @@ cmd_deploy() {
   [[ "$expected_bundle" =~ ^[0-9a-f]{64}$ ]] || die "deploy requires the 64-character bundle digest"
   load_config
   if [[ "$(bundle_digest)" != "$expected_bundle" ]]; then
-    die "Host deployment files differ from commit $commit; reinstall ${COMPOSE_FILES[*]##*/}, prizecheck-deploy.sh and the catalog refresh units ($GUIDE, 'Updating the host files')"
+    die "Host deployment files differ from commit $commit; reinstall ${COMPOSE_FILES[*]##*/}, prizecheck-deploy.sh and the host units ($GUIDE, 'Updating the host files')"
   fi
-  # The daily refresh must not stop quietly after a host-file update, but a stale timer is no reason to refuse a deploy.
+  # The daily jobs must not stop quietly after a host-file update, but a stale timer is no reason to refuse a deploy.
   local unit_problem
-  unit_problem="$(refresh_units_problem)" || log "WARNING: $unit_problem"
+  unit_problem="$(host_units_problem)" || log "WARNING: $unit_problem"
   take_lock
   registry_login_from_stdin
   local current; current="$(read_state current)"
@@ -963,17 +988,31 @@ cmd_setup() {
   mkdir -p "$SIGNUP_DIR" "$SNAPSHOT_DIR"
   chown 0:0 "$SIGNUP_DIR" "$SNAPSHOT_DIR"
   chmod 755 "$SIGNUP_DIR" "$SNAPSHOT_DIR"
-  compose_cmd
-  log "Compose: $("${COMPOSE[@]}" version --short)"
+  # A missing Compose is reported by the readiness report below instead of stopping the rest of the setup.
+  if find_compose; then
+    log "Compose: $("${COMPOSE[@]}" version --short)"
+  else
+    log "Docker Compose v2 not found; the readiness report below names the next step"
+  fi
   log "Directories ready under $DATA_DIR"
-  install_refresh_units
+  install_host_units
+  cmd_readiness
 }
 
 cmd_backup() {
   load_config
   take_lock
   local current; current="$(read_state current)"
-  export PRIZECHECK_IMAGE_TAG="${current:-none}"
+  # The nightly timer starts before the first release (setup installs it), when there is no database to dump.
+  if [[ -z "$current" ]]; then
+    log "Nothing deployed yet; skipping the backup"
+    return 0
+  fi
+  export PRIZECHECK_IMAGE_TAG="$current"
+  if [[ -z "$(compose ps -q db 2>/dev/null </dev/null || true)" ]]; then
+    log "No database container is running; skipping the backup"
+    return 0
+  fi
   backup_database manual manual
   local target
   target="$BACKUP_DIR/$(date -u +%Y%m%dT%H%M%SZ)-public.tar.gz"
@@ -1004,7 +1043,9 @@ cmd_sign_in_code() {
   tail -n "${1:-1}" "$DATA_DIR/mail/codes.jsonl"
 }
 
-cmd_check_config() {
+# Every check on the env file, the host files and the signup proof, except the installed units. `check-config` and the
+# readiness report share it.
+check_config_files() {
   validate_config
   if [[ "$SIGNUP_CONFIG" == public ]]; then
     check_signup_proof_file || die "SIGNUP_MODE=public: $PROOF_PROBLEM"
@@ -1016,8 +1057,178 @@ cmd_check_config() {
       log "Warning: the readiness proof does not name the current release $current; until it does, signup-apply runs it owner-only and the next release will not carry signup forward"
     fi
   fi
-  check_refresh_units
+}
+
+cmd_check_config() {
+  check_config_files
+  check_host_units
   log "Configuration OK ($ENVIRONMENT)"
+}
+
+# --- Readiness report ---------------------------------------------------------------------------------------------------
+
+# One line per item: `ok`, `missing` (a pre-deploy prerequisite; makes the report fail) or `warning` (detection can be wrong,
+# so it never fails). Each missing item and warning is followed by the next step. Messages name keys and files, never the
+# env file's values.
+READINESS_MISSING=0
+readiness_line() { printf '%-8s %s\n' "$1" "$2"; }
+readiness_next() { printf '         next: %s\n' "$1"; }
+readiness_ok() { readiness_line ok "$1"; }
+readiness_missing() {
+  READINESS_MISSING=$((READINESS_MISSING + 1))
+  readiness_line missing "$1"; shift
+  local step; for step in "$@"; do readiness_next "$step"; done
+}
+readiness_warning() {
+  readiness_line warning "$1"; shift
+  local step; for step in "$@"; do readiness_next "$step"; done
+}
+
+# Runs a command in a subshell with errexit on and keeps its output and status in CAPTURED_OUT and CAPTURED_RC, so a die
+# inside a check ends only that check.
+capture() {
+  set +e
+  CAPTURED_OUT="$( ( set -e; "$@" ) 2>&1 )"
+  CAPTURED_RC=$?
+  set -e
+}
+
+# The last error a captured check reported, without its timestamp.
+captured_error() {
+  local line
+  line="$(grep 'ERROR: ' <<<"$CAPTURED_OUT" | tail -n 1 || true)"
+  printf '%s' "${line#*ERROR: }"
+}
+
+readiness_docker() {
+  local compose_version
+  if command -v docker >/dev/null 2>&1; then
+    readiness_ok "Docker is installed"
+  elif [[ "$ENVIRONMENT" == prod ]]; then
+    readiness_missing "Docker is not installed" \
+      "sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin (add Docker's apt repository first: $GUIDE, step 3)"
+  else
+    readiness_missing "Docker is not installed" "enable Docker in the Unraid settings ($GUIDE, step 1)"
+  fi
+  if find_compose; then
+    compose_version="$("${COMPOSE[@]}" version --short 2>/dev/null || true)"
+    readiness_ok "Docker Compose${compose_version:+ $compose_version}"
+  elif [[ "$ENVIRONMENT" == prod ]]; then
+    readiness_missing "Docker Compose v2 is not installed" "sudo apt install -y docker-compose-plugin ($GUIDE, step 3)"
+  else
+    readiness_missing "Docker Compose v2 is not installed" "install the Docker Compose Manager plugin from Apps ($GUIDE, step 2)"
+  fi
+}
+
+# Sets READINESS_ENV_OK to 1 when the env file passes every check-config check.
+readiness_env() {
+  READINESS_ENV_OK=0
+  if [[ ! -f "$ENV_FILE" ]]; then
+    readiness_missing "The env file $ENV_FILE does not exist" \
+      "cp $PRIZECHECK_HOME/bin/prizecheck-<dev|prod>.env.example $ENV_FILE; chmod 600 $ENV_FILE; fill it in ($GUIDE, 'Create the env file')"
+    return 0
+  fi
+  capture check_config_files
+  if [[ "$CAPTURED_RC" == 0 ]]; then
+    readiness_ok "The env file and host files pass check-config"
+    READINESS_ENV_OK=1
+  else
+    readiness_missing "check-config: $(captured_error)" "fix it, then run: sudo bash $SCRIPT_PATH check-config ($GUIDE)"
+  fi
+}
+
+readiness_units() {
+  if ! has_systemd; then
+    readiness_warning "No systemd on this host: the two jobs need User Scripts entries" \
+      "daily catalog refresh, schedule '0 4 * * *': bash $SCRIPT_PATH catalog-refresh" \
+      "nightly backup, schedule '17 3 * * *': bash $SCRIPT_PATH backup"
+    return 0
+  fi
+  capture check_host_units
+  if [[ "$CAPTURED_RC" == 0 ]]; then
+    readiness_ok "The catalog refresh and backup timers are installed and enabled"
+  else
+    readiness_missing "Timers: $(captured_error)" "sudo bash $SCRIPT_PATH setup"
+  fi
+}
+
+# Warnings only: each detection can be wrong, and none is needed to deploy.
+readiness_network() {
+  if ! command -v tailscale >/dev/null 2>&1; then
+    readiness_warning "The tailscale command was not found (fine when Tailscale runs in a container)" \
+      "check that the host is on the tailnet ($GUIDE)"
+  elif tailscale status >/dev/null 2>&1; then
+    readiness_ok "Tailscale is up"
+  elif [[ "$ENVIRONMENT" == prod ]]; then
+    readiness_warning "Tailscale is not up" "sudo tailscale up --ssh=false --advertise-tags=tag:prizecheck-prod ($GUIDE, step 2)"
+  else
+    readiness_warning "Tailscale is not up" "start Tailscale on the host ($GUIDE, step 4)"
+  fi
+  [[ "$ENVIRONMENT" == prod ]] || return 0
+  local origin host rules
+  origin="$(trimmed_value PUBLIC_ORIGIN)"
+  host="${origin#https://}"; host="${host%%[:/]*}"
+  if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet caddy 2>/dev/null; then
+    if [[ -n "$host" ]] && grep -qF -- "$host" "$CADDYFILE" 2>/dev/null; then
+      readiness_ok "Caddy is running and its Caddyfile names the host of PUBLIC_ORIGIN"
+    else
+      readiness_warning "Caddy is running but $CADDYFILE does not name the host of PUBLIC_ORIGIN" \
+        "install the Caddyfile with your domain, then: sudo systemctl reload caddy ($GUIDE, step 7)"
+    fi
+  else
+    readiness_warning "Caddy is not running" "sudo apt install -y caddy, then install the Caddyfile ($GUIDE, step 7)"
+  fi
+  if ! command -v iptables >/dev/null 2>&1 || ! rules="$(iptables -S INPUT 2>/dev/null)"; then
+    readiness_warning "Could not read the iptables INPUT rules (needs root)" "sudo iptables -S INPUT ($GUIDE, step 4)"
+  elif grep -Eq -- '--dport 80 .*-j ACCEPT' <<<"$rules" && grep -Eq -- '--dport 443 .*-j ACCEPT' <<<"$rules"; then
+    readiness_ok "iptables accepts ports 80 and 443"
+  else
+    readiness_warning "iptables INPUT does not accept ports 80 and 443" \
+      "add the three ACCEPT lines above the final REJECT in /etc/iptables/rules.v4, then reboot ($GUIDE, step 4)"
+  fi
+}
+
+# After a deploy: the app's own state, read through the tools image. It never fails the report.
+readiness_deployed() {
+  local current="$1" rc=0 signup
+  signup="$(trimmed_value SIGNUP_MODE)"; signup="${signup:-owner-only}"
+  export PRIZECHECK_IMAGE_TAG="$current"
+  printf '\nAfter the first deploy (release %s)\n' "${current:0:12}"
+  compose run --rm --no-deps -T -l prizecheck.job=readiness \
+    -e "READINESS_SIGNUP_MODE=$signup" -e "READINESS_SCRIPT=bash $SCRIPT_PATH" -e "READINESS_GUIDE=$GUIDE" \
+    tools -m app.host_readiness </dev/null || rc=$?
+  if [[ "$rc" != 0 ]]; then
+    readiness_warning "Could not read the app's state (the readiness job exited $rc)" "sudo bash $SCRIPT_PATH status"
+  fi
+}
+
+cmd_readiness() {
+  READINESS_MISSING=0
+  if [[ -f "$ENV_FILE" ]] && ( read_environment ) >/dev/null 2>&1; then
+    read_environment
+  else
+    ENVIRONMENT=dev; GUIDE="docs/deployment-unraid.md"
+  fi
+  printf 'Host readiness (%s)\n\nBefore the first deploy\n' "$ENVIRONMENT"
+  readiness_docker
+  readiness_env
+  readiness_units
+  local current=""
+  if [[ "$READINESS_ENV_OK" == 1 ]]; then
+    readiness_network
+    current="$(read_state current)"
+  fi
+  if [[ -n "$current" ]] && find_compose; then
+    readiness_deployed "$current"
+  fi
+  printf '\n'
+  if [[ "$READINESS_MISSING" != 0 ]]; then
+    printf '%s pre-deploy item(s) missing; fix them, then run: sudo bash %s readiness\n' "$READINESS_MISSING" "$SCRIPT_PATH"
+    return 1
+  fi
+  if [[ -z "$current" ]]; then
+    printf 'This host is ready for the first deploy (%s, "Perform the first release").\n' "$GUIDE"
+  fi
 }
 
 # Re-evaluates the readiness proof for the current release and restarts the gateway on the result, so an edited proof
@@ -1212,8 +1423,9 @@ Usage: $SCRIPT_PATH <command>
   deploy <commit> <bundle-digest>  Pull, back up, migrate, start and check a release (CI)
   rollback                         Return to the previous successful release (no reverse migrations)
   status                           Show current/previous releases, containers and the gateway's signup mode
-  setup                            Create data directories with container ownership (once)
-  backup                           Dump PostgreSQL and archive the public store into $BACKUP_DIR
+  setup                            Prepare the host: data directories, systemd timers, then the readiness report (safe to repeat)
+  readiness                        Report what is left before the first deploy and, once deployed, what the app still needs
+  backup                           Dump PostgreSQL and archive the public store into $BACKUP_DIR (the nightly timer runs it)
   init-store <commit>              First install only: initialize the public store after a failed initialization
   sign-in-code [n]                 Show the newest n delivered sign-in codes (MAIL_MODE=file)
   signup-apply                     Re-check the signup readiness proof and restart the gateway on the result
@@ -1268,6 +1480,7 @@ main() {
     catalog-refresh) cmd_catalog_refresh ;;
     compose) cmd_compose "$@" ;;
     check-config) cmd_check_config ;;
+    readiness) cmd_readiness ;;
     bundle-digest) bundle_digest ;;
     help|-h|--help) usage ;;
     *) usage; exit 2 ;;

@@ -214,11 +214,13 @@ class DeployPipelineTest(unittest.TestCase):
                     self.assertNotIn('${{', line, f'{name}: {line}')
 
     def test_digest_file_lists_match_the_host_script(self):
-        units = 'deploy/host/prizecheck-catalog-refresh.service deploy/host/prizecheck-catalog-refresh.timer'
+        units = ('deploy/host/prizecheck-catalog-refresh.service deploy/host/prizecheck-catalog-refresh.timer '
+                 'deploy/host/prizecheck-backup.service deploy/host/prizecheck-backup.timer')
         self.assertIn(f'cat compose.deploy.yml deploy/host/prizecheck-deploy.sh {units} | sha256sum', DEV)
         self.assertIn(f'cat compose.deploy.yml compose.prod.yml deploy/host/prizecheck-deploy.sh {units} | sha256sum', PROD)
         # The host script concatenates in the same order, and the guides quote the same recipe.
-        self.assertRegex(SCRIPT, r'cat "\$\{COMPOSE_FILES\[@\]\}" "\$SCRIPT_PATH" "\$UNIT_SOURCE_DIR/\$REFRESH_SERVICE" "\$UNIT_SOURCE_DIR/\$REFRESH_TIMER" \| sha256sum')
+        self.assertIn('HOST_UNITS=("$REFRESH_SERVICE" "$REFRESH_TIMER" "$BACKUP_SERVICE" "$BACKUP_TIMER")', SCRIPT)
+        self.assertIn('cat "${COMPOSE_FILES[@]}" "$SCRIPT_PATH" "${files[@]}" | sha256sum', SCRIPT)
         self.assertIn(f'cat compose.deploy.yml compose.prod.yml deploy/host/prizecheck-deploy.sh {units} | sha256sum',
                       (ROOT / 'docs/deployment-oracle.md').read_text())
         self.assertIn(f'cat compose.deploy.yml deploy/host/prizecheck-deploy.sh {units} | sha256sum',
@@ -317,6 +319,43 @@ class DeployPipelineTest(unittest.TestCase):
         self.assertIn('WantedBy=timers.target', UNIT_TIMER)
         self.assertNotRegex(UNIT_TIMER, r'(?m)^(OnBootSec|OnStartupSec|OnActiveSec)=')
         self.assertIn('catalog-refresh) cmd_catalog_refresh ;;', SCRIPT)
+
+    def test_the_guides_name_only_files_commands_and_anchors_that_exist(self):
+        usage = SCRIPT[SCRIPT.index('usage() {'):SCRIPT.index('ssh_gate() {')]
+        commands = set(re.findall(r'(?m)^  ([a-z][a-z-]+)\b', usage))
+        self.assertIn('readiness', commands)
+        for guide in ('deployment-oracle.md', 'deployment-unraid.md'):
+            text = (ROOT / 'docs' / guide).read_text()
+            for path in set(re.findall(r'(?<![\w/.-])((?:deploy|scripts|docs|api|compose)[\w./-]*\.(?:sh|py|md|yml|service|timer|example)|deploy/oracle/Caddyfile)\b', text)):
+                if path.startswith('docs/'):
+                    self.assertTrue((ROOT / path).exists() or (ROOT / 'docs' / path[5:]).exists(), f'{guide}: {path}')
+                elif '/' in path or path.endswith(('.yml', '.service', '.timer')):
+                    self.assertTrue((ROOT / path).exists(), f'{guide}: {path}')
+            for command in re.findall(r'(?m)^\s*(?:sudo )?bash \S*prizecheck-deploy\.sh ([a-z][a-z-]+)', text):
+                self.assertIn(command, commands, f'{guide}: {command}')
+            headings = {re.sub(r'[^a-z0-9 -]', '', h.lower()).strip().replace(' ', '-')
+                        for h in re.findall(r'(?m)^#{1,6} (.+)$', text)}
+            for anchor in re.findall(r'\]\(#([a-z0-9-]+)\)', text):
+                self.assertIn(anchor, headings, f'{guide}: #{anchor}')
+        # The three-part layout, and none of the hand-written pieces it replaces.
+        for guide in ('deployment-oracle.md', 'deployment-unraid.md'):
+            text = (ROOT / 'docs' / guide).read_text()
+            parts = re.findall(r'(?m)^## (Part [123])\.', text)
+            self.assertEqual(parts, ['Part 1', 'Part 2', 'Part 3'], guide)
+            self.assertNotIn('| sudo tee /etc/cron.d', text)
+        self.assertNotIn('Install the daily catalog refresh timer', (ROOT / 'docs/deployment-oracle.md').read_text())
+
+    def test_the_backup_units_run_the_subcommand_nightly_and_the_script_lists_readiness(self):
+        service = (ROOT / 'deploy/host/prizecheck-backup.service').read_text()
+        timer = (ROOT / 'deploy/host/prizecheck-backup.timer').read_text()
+        self.assertIn('ExecStart=/bin/bash /opt/prizecheck-prod/bin/prizecheck-deploy.sh backup\n', service)
+        self.assertIn('OnCalendar=*-*-* 03:17:00 UTC\n', timer)
+        self.assertIn('backup) cmd_backup ;;', SCRIPT)
+        self.assertIn('readiness) cmd_readiness ;;', SCRIPT)
+        # Neither is reachable through the CI gate.
+        gate = SCRIPT[SCRIPT.index('ssh_gate() {'):SCRIPT.index('main() {')]
+        self.assertNotIn('readiness', gate)
+        self.assertNotIn('backup', gate)
 
     def test_the_prod_overlay_forces_production(self):
         compose = uncommented(COMPOSE_PROD)
