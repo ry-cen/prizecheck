@@ -112,3 +112,21 @@ def test_a_lane_needs_a_slot():
 
 def test_prices_late_is_the_lane_late():
     assert prices._Late is Late
+
+
+@pytest.mark.parametrize('error, outcome', [(MemoryError, Late), (RuntimeError, Late), (KeyboardInterrupt, KeyboardInterrupt)])
+def test_a_thread_that_cannot_start_gives_its_slot_back(monkeypatch, error, outcome):
+    lane = Lane('t', 1)
+
+    class Broken:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def start(self):
+            raise error()
+    monkeypatch.setattr(bounded_work.threading, 'Thread', Broken)
+    with pytest.raises(outcome):
+        lane.run(lambda: 1, 1)
+    assert lane.live() == 0
+    monkeypatch.undo()
+    assert lane.run(lambda: 2, 1) == 2

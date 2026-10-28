@@ -60,10 +60,12 @@ class Lane:
         try:
             thread = threading.Thread(target=work, name=self.name, daemon=True)
             thread.start()
-        except RuntimeError:
+        except BaseException as exc:  # no thread runs the work, so nothing else will give the slot back
             self._add(-1)
             self._slots.release()
-            raise Late() from None
+            if isinstance(exc, Exception):  # RuntimeError, MemoryError: the call never started inside the budget
+                raise Late() from None
+            raise  # KeyboardInterrupt, SystemExit: not ours to swallow, but the slot is already back
         thread.join(max(0.0, deadline - time.monotonic()))
         if thread.is_alive():
             raise Late()

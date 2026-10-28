@@ -124,7 +124,7 @@ def read_current(token: str, *, deadline: float) -> ActiveSnapshot:
     if remaining <= 0:
         raise SnapshotLate()
     try:
-        record = PROJECTION_LANE.run(lambda: _record(token, max(0.001, remaining)), remaining)
+        record = PROJECTION_LANE.run(lambda: _record(token, max(0.001, deadline - time.monotonic())), remaining)
     except Late:
         raise SnapshotLate() from None
     if record is None:

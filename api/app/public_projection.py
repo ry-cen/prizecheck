@@ -66,7 +66,7 @@ class FilePublicProjection:
         global _file_records
         try:
             cached = _file_records
-            if cached and cached[0] == _identity(self.path, os.stat(self.path)):
+            if cached and cached[0] == _identity(self.path, os.stat(self.path)) and _file_records is cached:
                 return cached[2]
             with _records_lock:
                 cached = _file_records
@@ -75,7 +75,7 @@ class FilePublicProjection:
                 stream = self.path.open('rb')
                 try:
                     identity = _identity(self.path, os.fstat(stream.fileno()))
-                    records = _record_texts(_manifest(json.load(stream))[0])
+                    records = _record_texts(_manifest(json.loads(stream.read().decode('utf-8')))[0])
                 except BaseException:
                     stream.close()
                     raise
@@ -189,7 +189,8 @@ class HttpPublicProjection:
         ETag reuses this process's parse of that manifest, and a relay that ignores If-None-Match answers 200 as before."""
         global _http_records
         scope = (self.url, self.token)  # credentials could select another representation at the same URL
-        cached = _http_records if _http_records and _http_records[0] == scope else None
+        held = _http_records
+        cached = held if held and held[0] == scope else None
         response = self._request('GET', timeout=timeout, headers={'If-None-Match': cached[1]} if cached else {})
         if response.status_code == 304:
             if cached is None or response.headers.get('ETag') != cached[1]:

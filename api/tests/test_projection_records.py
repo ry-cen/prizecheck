@@ -1,4 +1,5 @@
 """FilePublicProjection.read_record: one parse per installed manifest, fresh objects, and every replacement seen (#77)."""
+import codecs
 import json
 import os
 import threading
@@ -70,7 +71,7 @@ def test_an_atomic_rewrite_with_the_same_revision_is_seen(store):
 def test_same_size_same_revision_replacements_are_each_seen(store):
     projection, _ = store
     projection.apply(A, record('0000'))
-    for i in range(50):
+    for i in range(1, 51):
         projection.read_record(A)
         swap(projection, lambda decks: decks.update({A: record(f'{i:04d}')}))
         assert projection.read_record(A)['snapshot']['n'] == f'{i:04d}'
@@ -91,7 +92,7 @@ def test_a_broken_manifest_is_unavailable_even_after_a_cached_read(store):
     projection.apply(A, record(1))
     good = json.loads(projection.path.read_text())
     broken = [b'not json', json.dumps({**good, 'format': 2}).encode(), json.dumps({**good, 'decks': []}).encode(),
-              b'\xff\xfe{"format":1}']
+              codecs.BOM_UTF8 + json.dumps(good).encode(), json.dumps(good).encode('utf-16'), b'{"format":1,"x":"\xff"}']
     for body in broken:
         assert projection.read_record(A) == record(1)  # fills the cache
         pending = projection.path.with_name('.pending-test')
@@ -107,7 +108,7 @@ def test_a_broken_manifest_is_unavailable_even_after_a_cached_read(store):
         projection.read_record(A)
 
 
-def test_concurrent_readers_across_a_replacement_end_on_the_newest_manifest(store):
+def test_concurrent_readers_across_replacements_raise_nothing_and_the_final_read_is_fresh(store):
     projection, _ = store
     projection.apply(A, record(0))
     failures = []
