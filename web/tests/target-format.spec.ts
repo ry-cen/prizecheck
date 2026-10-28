@@ -120,10 +120,13 @@ async function buildDeck(page: Page): Promise<Built> {
 
 /** How many times the page has asked for the Deck's cost since `stubPrices`. */
 const costReads = { count: 0 };
+/** While set, the cost route holds its answer until this resolves, then names the Deck's real revisions. */
+const costHold: { gate: Promise<void> | null } = { gate: null };
 
 /** Fixed cost and price answers, so nothing waits on the price cache. */
 async function stubPrices(page: Page, deckId: string) {
   costReads.count = 0;
+  costHold.gate = null;
   const figure = {
     status: "unavailable",
     reason: "not_cached",
@@ -136,14 +139,19 @@ async function stubPrices(page: Page, deckId: string) {
     display_amount: null,
     currency: "USD",
   };
-  await page.route("**/api/decks/*/cost", (route) => {
+  await page.route("**/api/decks/*/cost", async (route) => {
     costReads.count++;
+    let deckListRevision: number | null = null;
+    if (costHold.gate) {
+      await costHold.gate;
+      deckListRevision = (await deckRead(page, deckId)).deck_list.revision;
+    }
     return route.fulfill({
       json: {
         deck_id: deckId,
         ...figure,
         owner_revision: null,
-        deck_list_revision: null,
+        deck_list_revision: deckListRevision,
         deck_list_cost: figure,
         cost_to_complete: figure,
       },
@@ -365,6 +373,32 @@ test.describe("on a desktop", () => {
         .getByRole("dialog", { name: "Standard result" })
         .getByRole("region", { name: "Deck issues" })
     ).toContainText("deck has exactly 60 cards; this one has 65");
+  });
+
+  test("a cost answered for the revision a Target Format change produced still settles", async ({
+    page,
+  }) => {
+    promoteCatalog();
+    await signIn(page);
+    const built = await buildDeck(page);
+    await stubPrices(page, built.deckId);
+    let release!: () => void;
+    costHold.gate = new Promise<void>((resolve) => (release = resolve));
+    await page.goto(`${ORIGIN}/decks/${built.deckId}`);
+    await expect(formatButton(page)).toHaveAccessibleName(
+      "Target Format: Standard"
+    );
+    await expect.poll(() => costReads.count).toBe(1);
+
+    // The cost request is still in flight when the format change commits a newer Deck List revision, and the answer
+    // names that revision: the page must not wait for it forever.
+    await chooseFormat(page, "Gym Leader Challenge");
+    await expect(formatButton(page)).toHaveAccessibleName(
+      "Target Format: Gym Leader Challenge"
+    );
+    release();
+    await expect(page.getByText(/^Deck price unavailable/)).toBeVisible();
+    await expect(page.getByText("Checking prices…")).toHaveCount(0);
   });
 
   test("a change from a page that missed an edit re-reads the Deck and says so", async ({

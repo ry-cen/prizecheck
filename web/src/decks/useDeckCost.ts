@@ -21,7 +21,9 @@ export type DeckCostSettled =
  *
  * A Target Format change advances the Deck List revision but not the cards, so the cost it was drawn for still stands.
  * `cardsRevision` is the revision that last changed the cards (`useCardsRevision`): only it, the Deck and the other
- * revisions start a new access, while an answer is still checked against the current `deckListRevision`.
+ * revisions start a new access, while an answer is still checked against the current `deckListRevision`. A Deck List
+ * revision change alone keeps a cost already held, but restarts a request that has not answered (it could name the new
+ * revision, which nothing would then read again).
  */
 export function useDeckCost(
   deckId: string,
@@ -32,6 +34,13 @@ export function useDeckCost(
   cardsRevision: number | null = deckListRevision
 ): DeckCostSettled {
   const [settled, setSettled] = useState<DeckCostSettled>(null);
+  // The answer held and the inputs the last run asked for, so a Deck List revision change alone can keep a held cost.
+  const held = useRef<DeckCostSettled>(null);
+  const asked = useRef<unknown[] | null>(null);
+  const settle = (value: DeckCostSettled) => {
+    held.current = value;
+    setSettled(value);
+  };
   const latest = useRef({
     deckList: deckListRevision,
     owner: ownerRevision,
@@ -44,7 +53,14 @@ export function useDeckCost(
       owner: ownerRevision,
       settings: settingsRevision,
     };
-    setSettled(null);
+    const inputs = [deckId, cardsRevision, ownerRevision, settingsRevision];
+    const unchanged =
+      asked.current !== null &&
+      inputs.every((input, index) => input === asked.current![index]);
+    asked.current = inputs;
+    // Only the Deck List revision moved (a Target Format change) and a cost is held: it still stands.
+    if (unchanged && held.current?.kind === "cost") return;
+    settle(null);
     if (cardsRevision === null || ownerRevision === null) return;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), CLIENT_TIMEOUT_MS);
@@ -63,7 +79,7 @@ export function useDeckCost(
           settings === null ||
           settings === settingsRevision;
         if (ownerMatches && listMatches && settingsMatch)
-          setSettled({ kind: "cost", cost });
+          settle({ kind: "cost", cost });
         else if (
           (owner !== null && owner > (latest.current.owner ?? 0)) ||
           (deckList !== null && deckList > (latest.current.deckList ?? 0)) ||
@@ -72,10 +88,10 @@ export function useDeckCost(
             settings > (latest.current.settings ?? 0))
         )
           onNewerRevision();
-        else setSettled({ kind: "unavailable" });
+        else settle({ kind: "unavailable" });
       })
       .catch(() => {
-        if (live) setSettled({ kind: "unavailable" });
+        if (live) settle({ kind: "unavailable" });
       })
       .finally(() => clearTimeout(timer));
     return () => {
@@ -84,7 +100,13 @@ export function useDeckCost(
       controller.abort();
     };
     // onNewerRevision is a fresh closure on every render; only the Deck and its revisions start a new access.
-  }, [deckId, cardsRevision, ownerRevision, settingsRevision]);
+  }, [
+    deckId,
+    deckListRevision,
+    cardsRevision,
+    ownerRevision,
+    settingsRevision,
+  ]);
 
   return settled;
 }
@@ -98,11 +120,16 @@ export function useCardsRevision(
   formatOnly: number | null
 ): number | null {
   const cards = useRef<number | null>(null);
-  if (revision === null) cards.current = null;
-  else if (
-    cards.current === null ||
-    (revision !== cards.current && revision !== formatOnly)
-  )
-    cards.current = revision;
-  return cards.current;
+  const next =
+    revision === null
+      ? null
+      : cards.current === null ||
+          (revision !== cards.current && revision !== formatOnly)
+        ? revision
+        : cards.current;
+  // Committed after the render, so a render React discards leaves the ref as it was.
+  useEffect(() => {
+    cards.current = next;
+  });
+  return next;
 }
