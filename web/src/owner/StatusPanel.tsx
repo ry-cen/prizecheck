@@ -52,6 +52,9 @@ export function StatusPanel({
   } else if (stale) {
     runTone = "bad";
     runLabel = "Progress stale";
+  } else if (run?.phase === "promoting") {
+    // One long transaction writes the catalog; the run reports no progress until it commits.
+    runLabel = "Saving the catalog…";
   }
   const count = (value: number) => value.toLocaleString();
   const prices = priceImportLines(status);

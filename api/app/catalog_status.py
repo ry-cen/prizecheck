@@ -104,8 +104,11 @@ def owner_catalog_status(user_id: str = Depends(verified_user)):
     with connect() as conn:
         require_owner(conn, user_id)
         run = conn.execute("""SELECT id,phase,outcome,enumerated_count,fetched_count,validated_count,error,started_at,finished_at,
-          (outcome IS NULL AND coalesce(lease_until,started_at+interval '2 minutes')<=clock_timestamp()) AS heartbeat_stale
-          FROM catalog_run ORDER BY (outcome IS NULL) DESC,started_at DESC LIMIT 1""").fetchone()
+          (outcome IS NULL AND coalesce(lease_until,started_at+interval '2 minutes')<=clock_timestamp()
+           AND NOT EXISTS (SELECT 1 FROM pg_locks WHERE locktype='advisory' AND granted AND database=(
+               SELECT oid FROM pg_database WHERE datname=current_database())
+             AND classid=0 AND objid=%s AND objsubid=1)) AS heartbeat_stale
+          FROM catalog_run ORDER BY (outcome IS NULL) DESC,started_at DESC LIMIT 1""",(catalog_dispatch.RUNNER_LOCK,)).fetchone()
         reviews = conn.execute("""SELECT id,kind,source_id,detail,created_at FROM catalog_review
           WHERE status='pending' ORDER BY created_at LIMIT 50""").fetchall()
         latest = conn.execute("""SELECT outcome,started_at,finished_at,source_updated_at,groups_total,groups_failed,verified_editions,

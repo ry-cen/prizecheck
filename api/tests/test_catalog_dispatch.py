@@ -149,3 +149,25 @@ def test_a_failing_on_reserved_marks_the_run_failed_without_launching():
         assert caught.value.detail == {'code': 'CATALOG_DISPATCH_FAILED'}
         assert conn.execute('SELECT outcome,error FROM catalog_run').fetchone() == {'outcome': 'failed', 'error': 'CATALOG_DISPATCH_FAILED'}
     launcher.assert_not_called()
+
+
+def test_expired_lease_is_stale_only_when_no_session_holds_the_runner_lock():
+    from app.catalog_dispatch import RUNNER_LOCK
+    owner = owner_fixture()
+    with connect() as conn:
+        conn.execute("INSERT INTO catalog_run(phase,started_at,lease_until) VALUES ('promoting',now()-interval '10 minutes',now()-interval '5 minutes')")
+        conn.commit()
+    def stale():
+        response = client.get(PATH,headers=headers(owner,'GET',PATH))
+        assert response.status_code == 200
+        run = response.json()['run']
+        assert run['phase'] == 'promoting'
+        return run['heartbeat_stale']
+    assert stale() is True
+    with connect() as runner:
+        assert runner.execute('SELECT pg_try_advisory_lock(%s) AS got',(RUNNER_LOCK,)).fetchone()['got']
+        try:
+            assert stale() is False
+        finally:
+            runner.execute('SELECT pg_advisory_unlock(%s)',(RUNNER_LOCK,))
+    assert stale() is True
