@@ -12,7 +12,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app, connect
-from app import metadata_reviews, public_catalog
+from app import metadata_reviews, price_binding, public_catalog
+from app.price_binding import rebind_best_effort
 from app.catalog_targets import LIVE, MATCHING, activate_rule, edition_targets, fingerprint, printing_live
 from test_catalog import reset_catalog
 from test_catalog_metadata import Records, furret
@@ -48,6 +49,18 @@ def spawned(monkeypatch):
     calls = []
     monkeypatch.setattr(public_catalog, "spawn_background_drain", lambda: calls.append(True) or True)
     return calls
+
+
+@pytest.fixture(autouse=True)
+def price_store(monkeypatch, tmp_path):
+    """The `price:` store the post-commit publish writes to; every thread the routes spawn is joined before the next test."""
+    from app import price_binding, public_prices
+    from app.public_records import FilePublicRecords
+    records = FilePublicRecords(tmp_path / "price-store")
+    records.initialize(deadline=time.monotonic() + 10)
+    monkeypatch.setattr(public_prices, "public_record_store", lambda: records)
+    yield records
+    price_binding.join_spawned_rebinds()
 
 
 def seed_users():
@@ -908,21 +921,20 @@ def test_card_number_filter_pages_and_is_owner_only(number_matches, monkeypatch)
     assert request("GET", f"{ADMIN}/queue", OWNER, matched="other").status_code == 422
 
 
-def test_rejecting_a_card_number_match_unverifies_it_and_neither_rebind_activation_nor_rematch_verifies_it_again(number_matches):
-    from app.price_binding import rebind
+def test_rejecting_a_card_number_match_unverifies_it_and_neither_rebind_activation_nor_rematch_verifies_it_again(number_matches, price_store):
     with connect() as conn:
         conn.execute("""INSERT INTO tcgplayer_price(product_id,sub_type_name,market_price,seen_at,source_updated_at)
           VALUES (900,'Holofoil',3,now(),now())""")
-        rebind(conn)
-        assert conn.execute("SELECT count(*) AS n FROM edition_price_binding WHERE product_id=900").fetchone()["n"] == 1
+    rebind_best_effort()  # setup only: the activation above verified the Edition; this binds and publishes it
     turtwig = next(item for item in matches()["items"] if item["name"] == "Turtwig")
+    assert bindings_of(900) == 1 and price_records(price_store) == {turtwig["edition_id"]: "3"}
     response = decide(turtwig, "reject_source")
     assert response.status_code == 200, response.text
     assert (response.json()["state"], response.json()["reason"]) == ("unverified", "reviewed_unmapped")
     assert [item["name"] for item in matches()["items"]] == ["Chimchar"]
+    price_binding.join_spawned_rebinds()  # the decision's own post-commit rebind and publish, with nothing run by hand
+    assert bindings_of(900) == 0 and price_records(price_store) == {}
     with connect() as conn:
-        rebind(conn)  # the decision already rebinds best effort; a full rebind agrees
-        assert conn.execute("SELECT count(*) AS n FROM edition_price_binding WHERE product_id=900").fetchone()["n"] == 0
         assert rematch_promos(conn) == 0
     activate_as_owner(MATCHING, 3)
     activate_as_owner(MATCHING, 4)
@@ -938,3 +950,84 @@ def test_the_owner_status_counts_card_number_matches_and_collector_status_does_n
     assert status.status_code == 200 and status.json()["matched_by_number"] == 2
     assert request("GET", "/api/admin/catalog-runs", REPORTER).status_code == 403
     assert "matched_by_number" not in request("GET", "/api/catalog/status", REPORTER).text
+
+
+# ------------------------------------------------------------------ the post-commit rebind and publish (#348, #351)
+
+
+def price_records(store):
+    """{edition id: stored amount} for every `price:` record in the store."""
+    from app.public_records import price_key
+    with connect() as conn:
+        refs = {r["public_ref"]: str(r["id"]) for r in conn.execute("SELECT id, public_ref FROM catalog_edition")}
+        registered = [r["edition_ref"] for r in conn.execute("SELECT edition_ref FROM public_price_ref")]
+    keys = {ref: price_key(ref) for ref in set(refs) | set(registered)}
+    records = store.read_all(list(keys.values()), deadline=time.monotonic() + 10).records if keys else {}
+    return {refs[ref]: records[key].value["amount"] for ref, key in keys.items() if ref in refs and records[key].value}
+
+
+def bindings_of(product_id):
+    with connect() as conn:
+        return conn.execute("SELECT count(*) AS n FROM edition_price_binding WHERE product_id=%s", (product_id,)).fetchone()["n"]
+
+
+def stock_prices(*rows):
+    with connect() as conn:
+        conn.execute("TRUNCATE tcgplayer_price")
+        for product_id, sub_type, market in rows:
+            conn.execute("""INSERT INTO tcgplayer_price(product_id,sub_type_name,market_price,seen_at,source_updated_at)
+              VALUES (%s,%s,%s,now(),now())""", (product_id, sub_type, market))
+
+
+def all_bindings():
+    with connect() as conn:
+        return {str(r["edition_id"]): (r["sub_type_name"], r["reason"]) for r in conn.execute("SELECT * FROM edition_price_binding")}
+
+
+def test_verifying_a_second_edition_onto_a_bound_product_leaves_neither_bound_nor_published(world, price_store):
+    with connect() as conn:  # a holo Edition of the same Printing; with one "Normal" row it takes the same product subtype
+        holo = str(conn.execute("""INSERT INTO catalog_edition(printing_id,descriptor_key,descriptor)
+          VALUES (%s,'holo-extra','{"type":"holo"}') RETURNING id""", (world["printing"],)).fetchone()["id"])
+    stock_prices((1001, "Normal", 2))
+    first = decide(evidence("editions", world["normal"]), "verify_source")
+    assert first.status_code == 200, first.text
+    price_binding.join_spawned_rebinds()
+    assert all_bindings() == {world["normal"]: ("Normal", None)}
+    assert price_records(price_store) == {world["normal"]: "2"}
+    second = decide(evidence("editions", holo), "correct", {"product_id": 1001, "quote_variant": None})
+    assert second.status_code == 200, second.text
+    price_binding.join_spawned_rebinds()
+    assert all_bindings() == {world["normal"]: (None, "shared_price"), holo: (None, "shared_price")}
+    assert price_records(price_store) == {}
+
+
+def test_a_decision_returns_before_a_busy_price_lock_frees(world, price_store):
+    stock_prices((1001, "Normal", 2))
+    with connect() as holder:
+        holder.execute("SELECT pg_advisory_lock(%s)", (price_binding.PRICE_LOCK,))
+        try:
+            response = decide(evidence("editions", world["normal"]), "verify_source")
+            assert response.status_code == 200, response.text  # the route did not wait for the rebind
+            assert all_bindings() == {}
+        finally:
+            holder.execute("SELECT pg_advisory_unlock(%s)", (price_binding.PRICE_LOCK,))
+    price_binding.join_spawned_rebinds()
+    assert all_bindings() == {world["normal"]: ("Normal", None)}
+
+
+def test_activating_a_matching_rule_binds_and_publishes_the_newly_verified_editions(world, price_store):
+    stock_prices((1001, "Normal", 2), (1001, "Reverse Holofoil", 5))
+    assert all_bindings() == {}
+    response = activation("marketplace_matching", 1)
+    assert response.status_code == 200, response.text
+    price_binding.join_spawned_rebinds()
+    assert all_bindings() == {world["normal"]: ("Normal", None), world["reverse"]: ("Reverse Holofoil", None)}
+    assert price_records(price_store) == {world["normal"]: "2", world["reverse"]: "5"}
+
+
+def test_the_automatic_matching_startup_work_binds_and_publishes(world, price_store, monkeypatch):
+    monkeypatch.setenv("MARKETPLACE_MATCHING", "automatic")
+    stock_prices((1001, "Normal", 2), (1001, "Reverse Holofoil", 5))
+    metadata_reviews._apply_automatic_matching()
+    assert all_bindings() == {world["normal"]: ("Normal", None), world["reverse"]: ("Reverse Holofoil", None)}
+    assert price_records(price_store) == {world["normal"]: "2", world["reverse"]: "5"}
