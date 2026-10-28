@@ -5,7 +5,6 @@ the pure `sub_type_for` and stored in `edition_price_binding`. `rebind` is alway
 shared-price guard needs every Edition that holds a product. Readers require the binding's product and mapping revision to
 match the mapping, so a stale binding leaves an Edition unpriced and never prices it from the wrong product.
 """
-import importlib
 import logging
 
 from .catalog_targets import MatchingRulesV3, is_unspecified
@@ -134,8 +133,9 @@ def rebind(conn) -> dict[str, int]:
 
 
 def rebind_best_effort(conn=None):
-    """The post-commit step of promotion, owner decisions and rule activations: rebind, then publish public price records
-    when that exists. Logged, never raised. Uses its own connection unless one is given. Returns the counts or None."""
+    """The post-commit step of promotion, owner decisions and rule activations: rebind, then publish the public price
+    records (full, differences only). Each is logged and never raised; a failed publish does not hide the rebind counts.
+    Uses its own connection unless one is given. Returns the counts or None."""
     try:
         if conn is None:
             from .db import connect
@@ -144,18 +144,16 @@ def rebind_best_effort(conn=None):
                 _publish(own)
                 return counts
         counts = rebind(conn)
-        _publish(conn)
-        return counts
     except Exception as error:  # a failed rebind leaves Editions unpriced until the next one; it never fails its caller
         log.warning("Price rebind failed (%s)", type(error).__name__)
         return None
+    _publish(conn)
+    return counts
 
 
 def _publish(conn):
+    from . import public_prices
     try:
-        module = importlib.import_module(".public_prices", __package__)
-    except ModuleNotFoundError as error:
-        if error.name != f"{__package__}.public_prices":
-            raise
-        return
-    module.publish(conn)
+        public_prices.publish(conn)
+    except Exception as error:  # the records catch up on the next publish
+        log.warning("Price publish failed (%s)", type(error).__name__)

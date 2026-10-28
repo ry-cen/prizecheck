@@ -24,7 +24,7 @@ from decimal import Decimal
 import httpx
 import psycopg
 
-from . import price_binding
+from . import price_binding, public_prices
 from .catalog_targets import number_key
 
 BASE_URL = "https://tcgcsv.com"
@@ -57,6 +57,7 @@ class ImportResult:
     import_id: int | None = None
     source_updated_at: datetime | None = None
     error_code: str | None = None
+    public_error: str | None = None
     groups_total: int = 0
     groups_failed: int = 0
     product_rows: int = 0
@@ -283,12 +284,24 @@ def post_import_steps(conn, result):
     counts = bind_prices(conn)
     if counts:
         result.verified_editions, result.priced_editions, result.unpriced = counts["verified"], counts["priced"], counts["unpriced"]
+    result.public_error = publish_prices(conn)
+
+
+def publish_prices(conn):
+    """Publish the public price records; the failure's class name (recorded as public_error), or None. Never raises."""
+    try:
+        public_prices.publish(conn)
+    except Exception as error:
+        log(f"publishing the public price records failed ({type(error).__name__})")
+        return type(error).__name__[:100]
+    return None
 
 
 def rebind_only(conn):
     """The data-repair step (--rebind-only): the binding, art and publishing steps without fetching anything. Exit code."""
     counts = bind_prices(conn)
-    return OK if counts else FAILED
+    published = publish_prices(conn) is None
+    return OK if counts and published else FAILED
 
 
 def rematch(conn):
@@ -314,10 +327,10 @@ def finish(conn, result):
     conn.execute(
         "UPDATE price_import SET finished_at = now(), outcome = %s, source_updated_at = %s, groups_total = %s, "
         "groups_failed = %s, product_rows = %s, price_rows = %s, rejected_rows = %s, error_code = %s, verified_editions = %s, "
-        "priced_editions = %s, unpriced = %s WHERE id = %s",
+        "priced_editions = %s, unpriced = %s, public_error = %s WHERE id = %s",
         (result.outcome, result.source_updated_at, result.groups_total, result.groups_failed, result.product_rows,
          result.price_rows, result.rejected_rows, result.error_code, result.verified_editions, result.priced_editions,
-         json.dumps(result.unpriced), result.import_id))
+         json.dumps(result.unpriced), result.public_error, result.import_id))
     log(f"{result.outcome}" + (f" ({result.error_code})" if result.error_code else "")
         + f": {result.groups_total} groups, {result.groups_failed} failed, {result.product_rows} products, "
           f"{result.price_rows} prices, {result.rejected_rows} rejected")

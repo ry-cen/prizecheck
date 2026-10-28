@@ -121,6 +121,7 @@ _FAMILIES = (
     ('catalog_edition', re.compile(r'catalog:edition:([0-9a-f]{48})'), False),
     ('catalog_format', re.compile(r'catalog:format:([0-9a-f]{48})'), False),
     ('quarantine', re.compile(r'quarantine:edition:([0-9a-f]{48})'), False),
+    ('price', re.compile(r'price:([0-9a-f]{48})'), False),
     ('quote', re.compile(r'quote:([0-9a-f]{48}):([1-9][0-9]{0,18})'), True),
     ('result', re.compile(r'result:([0-9a-f]{48}):([1-9][0-9]{0,18})'), False),
     ('fence', re.compile(r'fence:([0-9a-f]{48}):([1-9][0-9]{0,18})'), False),
@@ -180,6 +181,11 @@ def quarantine_key(edition_ref):
 
 def quote_key(edition_ref, mapping_revision):
     return 'quote:' + _ref(edition_ref) + ':' + _revision(mapping_revision)
+
+
+def price_key(edition_ref):
+    """An Edition's public price record (ADR 0019): {mapping_revision, product_id, amount}. Protected, never evicted."""
+    return 'price:' + _ref(edition_ref)
 
 
 def result_key(edition_ref, mapping_revision):

@@ -112,6 +112,31 @@ def test_catalog_printing_and_edition_keys_are_namespaced_and_protected():
         records.catalog_format_key('A' * 48)
 
 
+def test_price_keys_are_one_protected_family_per_edition_without_a_revision():
+    key = records.price_key(REF)
+    assert key == 'price:' + REF and key != records.price_key(OTHER)
+    assert records.key_family(key).name == 'price' and not records.key_family(key).evictable
+    for bad in ('A' * 48, 'a' * 47, None, 7):
+        with pytest.raises(ValueError):
+            records.price_key(bad)
+    for bad in ('price:' + REF + ':1', 'price:' + 'A' * 48, 'price:', 'price:scheduler'):
+        with pytest.raises(ValueError):
+            records.key_family(bad)
+
+
+def test_price_records_survive_capacity_eviction_and_replace_and_delete_by_version(tmp_path):
+    store = FilePublicRecords(tmp_path, max_entries=1, max_bytes=1024)
+    store.initialize(deadline=deadline())
+    key, value = records.price_key(REF), {'mapping_revision': 1, 'product_id': 5, 'amount': '1.5'}
+    write(store, {key: value})
+    write(store, {quote_key(REF, 1): {'x': 1}})
+    write(store, {quote_key(OTHER, 1): {'x': 2}})  # evictable quotes churn at capacity 1
+    assert values(store, [key]) == {key: value}
+    write(store, {key: {**value, 'amount': '2'}})
+    write(store, {key: None})
+    assert values(store, [key]) == {key: None}
+
+
 def test_quote_keys_are_exact_to_edition_and_mapping_revision_and_only_quotes_are_evictable():
     assert records.quote_key(REF, 1) != records.quote_key(REF, 2)
     assert records.quote_key(REF, 1) != records.quote_key(OTHER, 1)
