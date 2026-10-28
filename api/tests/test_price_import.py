@@ -310,6 +310,65 @@ def test_a_group_that_fails_three_times_is_left_alone_and_the_run_is_partial(con
     assert after[(201, "Unlimited Holofoil")]["market_price"] == 14
 
 
+@pytest.mark.parametrize("literal", ["NaN", "Infinity", "1e30", "1.5", "0", "-3", '"7"', "null"])
+def test_an_unusable_group_id_fails_only_that_group(conn, literal):
+    fake = Tcgcsv()
+    groups = '[{"groupId": 1, "name": "Base Set"}, {"groupId": 2, "name": "Jungle"}, {"groupId": %s, "name": "Odd"}]' % literal
+    fake.raw["/tcgplayer/3/groups"] = (200, '{"success": true, "errors": [], "results": %s}' % groups)
+    result = run(conn, fake)
+    assert (result.outcome, result.groups_total, result.groups_failed, result.exit_code) == ("partial", 3, 1, 3)
+    assert {pid for pid, _ in prices(conn)} >= {101, 201}
+
+
+def test_a_database_data_error_in_one_group_fails_that_group_only(conn):
+    fake = Tcgcsv()
+    fake.products[1][0] = product(101, "Ala\x00kazam", "1/102")
+    result = run(conn, fake)
+    assert (result.outcome, result.groups_failed, result.exit_code) == ("partial", 1, 3)
+    assert {pid for pid, _ in prices(conn)} == {201}
+    assert last_import(conn)["outcome"] == "partial"
+
+
+@pytest.fixture
+def drains(monkeypatch):
+    """Stand-ins for the art refresh and the public catalog outbox; the list records each best-effort drain."""
+    class Seen(list):
+        def __init__(self):
+            super().__init__()
+            self.state = {"pending": 3}
+    seen = Seen()
+    state = seen.state
+    monkeypatch.setattr(price_import.card_art, "refresh_fallbacks", lambda conn: 2)
+    monkeypatch.setattr(price_import.public_prices, "publish", lambda conn: None)
+    monkeypatch.setattr(price_import.public_catalog, "pending_status", lambda conn: (state["pending"], None))
+    monkeypatch.setattr(price_import.public_catalog, "publish_catalog_best_effort", lambda conn: seen.append("drain") or True)
+    return seen
+
+
+def test_the_catalog_outbox_is_drained_after_the_art_refresh_in_an_import_and_in_rebind_only(conn, drains):
+    assert run(conn, Tcgcsv()).fallback_art == 2
+    assert drains == ["drain"]
+    assert price_import.rebind_only(conn) == 0
+    assert drains == ["drain", "drain"]
+
+
+def test_nothing_is_drained_when_the_outbox_is_empty_or_the_art_refresh_failed(conn, drains, monkeypatch):
+    drains.state["pending"] = 0
+    run(conn, Tcgcsv())
+    drains.state["pending"] = 3
+    monkeypatch.setattr(price_import.card_art, "refresh_fallbacks", lambda conn: 1 / 0)
+    run(conn, Tcgcsv(), force=True)
+    assert drains == []
+
+
+def test_a_failing_drain_never_changes_the_import(conn, drains, monkeypatch):
+    def boom(conn):
+        raise RuntimeError("store down")
+    monkeypatch.setattr(price_import.public_catalog, "pending_status", boom)
+    assert run(conn, Tcgcsv()).outcome == "imported"
+    assert price_import.rebind_only(conn) == 0
+
+
 def test_a_request_that_succeeds_on_the_third_attempt_is_fine(conn, monkeypatch):
     fake = Tcgcsv()
     fake.failures["/tcgplayer/3/1/prices"] = 2

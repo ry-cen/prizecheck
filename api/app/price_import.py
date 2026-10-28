@@ -24,7 +24,7 @@ from decimal import Decimal
 import httpx
 import psycopg
 
-from . import card_art, price_binding, public_prices
+from . import card_art, price_binding, public_catalog, public_prices
 from .catalog_targets import number_key
 
 BASE_URL = "https://tcgcsv.com"
@@ -283,18 +283,35 @@ def refresh_art(conn):
         return None
 
 
+def deliver_catalog(conn):
+    """Best effort: drain the public catalog outbox when the art refresh left Printings in it (their `catalog:printing`
+    image changed). Never raises; a failure leaves the rows pending for the next drain."""
+    try:
+        if public_catalog.pending_status(conn)[0]:
+            public_catalog.publish_catalog_best_effort(conn)
+    except Exception as error:
+        log(f"delivering the public catalog records failed ({type(error).__name__})")
+
+
+def refresh_art_and_deliver(conn):
+    art = refresh_art(conn)
+    if art is not None:
+        deliver_catalog(conn)
+    return art
+
+
 def post_import_steps(conn, result):
     """Binding, art and publishing run after every import, including `unchanged` and `stale_source` runs (design 4.2 step 5).
     CALL LIST: later tickets add their calls here, in this order, each in its own try block so that one failing step never
     stops the next and never changes the import's outcome:
       P3: price_binding.rebind(conn)   (bind_prices below)
-      P7: card_art.refresh_fallbacks(conn)
+      P7: card_art.refresh_fallbacks(conn), then a best-effort drain of the public catalog outbox
       P5: public_prices.publish(conn)   (best effort; a failure sets price_import.public_error)
     """
     counts = bind_prices(conn)
     if counts:
         result.verified_editions, result.priced_editions, result.unpriced = counts["verified"], counts["priced"], counts["unpriced"]
-    result.fallback_art = refresh_art(conn)
+    result.fallback_art = refresh_art_and_deliver(conn)
     result.public_error = publish_prices(conn)
 
 
@@ -311,7 +328,7 @@ def publish_prices(conn):
 def rebind_only(conn):
     """The data-repair step (--rebind-only): the binding, art and publishing steps without fetching anything. Exit code."""
     counts = bind_prices(conn)
-    art = refresh_art(conn)
+    art = refresh_art_and_deliver(conn)
     published = publish_prices(conn) is None
     return OK if counts and art is not None and published else FAILED
 
@@ -322,7 +339,7 @@ def rematch(conn):
     from app.catalog_targets import rematch_promos
     try:
         changed = rematch_promos(conn)
-    except psycopg.Error as error:
+    except Exception as error:
         log(f"the rematch failed ({type(error).__name__})")
         return
     log(f"rematch changed {changed} editions")
@@ -363,17 +380,21 @@ def import_snapshot(conn, fetcher, result, force):
     if (not force and last and last["outcome"] in ("imported", "unchanged") and last["source_updated_at"] == first):
         result.outcome = "unchanged"
         return
-    groups = [g for g in fetcher.results(f"/tcgplayer/{CATEGORY}/groups", "groups_unavailable")
-              if isinstance(g, dict) and isinstance(g.get("groupId"), Decimal)]
+    groups = [g for g in fetcher.results(f"/tcgplayer/{CATEGORY}/groups", "groups_unavailable") if isinstance(g, dict)]
     result.groups_total = len(groups)
     snapshot = {"seen_at": datetime.now(timezone.utc), "source": first}
     for group in groups:
-        gid = int(group["groupId"])
+        raw = group.get("groupId")
+        if not (isinstance(raw, Decimal) and raw == raw.to_integral_value() and 0 < raw < 2**31):
+            result.groups_failed += 1
+            log("a group with an unusable id was skipped")
+            continue
+        gid = int(raw)
         try:
             products = product_rows(fetcher.results(f"/tcgplayer/{CATEGORY}/{gid}/products", "group_unusable"), gid, result)
             prices = price_rows(fetcher.results(f"/tcgplayer/{CATEGORY}/{gid}/prices", "group_unusable"), result)
             write_group(conn, gid, products, prices, snapshot, result)
-        except SourceError:
+        except (SourceError, psycopg.DataError):
             result.groups_failed += 1
             log(f"group {gid} was left as stored")
     try:
@@ -435,8 +456,9 @@ def main(argv=None):
     try:
         if args.rebind_only:
             return rebind_only(conn)
-        code = run(conn, force=args.force).exit_code
-        if args.rematch and code in (OK, PARTIAL):
+        outcome = run(conn, force=args.force)
+        code = outcome.exit_code
+        if args.rematch and code in (OK, PARTIAL) and outcome.outcome != "locked":
             rematch(conn)
         return code
     except psycopg.Error as error:

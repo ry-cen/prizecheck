@@ -131,6 +131,18 @@ class DeployPipelineTest(unittest.TestCase):
         self.assertIn('PRIZECHECK_SIGNUP_MODE="$mode" "${COMPOSE[@]}" "${COMPOSE_ARGS[@]}" "$@"', SCRIPT)
         self.assertIn('SIGNUP_MODE=owner-only', PROD_ENV)
 
+    def test_the_tools_service_gets_the_price_import_contact(self):
+        # The price import refuses to run without a contact; only `tools` runs it (prizecheck-deploy.sh tool ...).
+        tools = COMPOSE_DEV[COMPOSE_DEV.index('\n  tools:\n'):]
+        tools = tools[:tools.index('    depends_on:')]
+        self.assertIn('<<: *api-environment', tools)
+        self.assertIn('PRICE_IMPORT_CONTACT: ${PRICE_IMPORT_CONTACT:-${OWNER_EMAIL}}', tools)
+        self.assertEqual(len(re.findall(r'(?m)^\s*PRICE_IMPORT_CONTACT:', COMPOSE_DEV)), 1)
+        for example in ('prizecheck-dev.env.example', 'prizecheck-prod.env.example'):
+            text = (ROOT / 'deploy/host' / example).read_text()
+            self.assertRegex(uncommented(text), r'(?m)^OWNER_EMAIL=')
+            self.assertIn('PRICE_IMPORT_CONTACT', text)
+
     def test_the_prod_overlay_forces_production(self):
         compose = uncommented(COMPOSE_PROD)
         self.assertEqual(compose.count('NODE_ENV: production'), 3)

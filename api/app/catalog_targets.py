@@ -310,7 +310,7 @@ class MatchingRulesV4(MatchingRulesV3):
 
     @classmethod
     def table(cls):
-        # number_key lives in price_import and fills tcgplayer_product.number_key; its source is part of the approved rule.
+        # number_key (above, in this module) fills tcgplayer_product.number_key; its source is part of the approved rule.
         return {**super().table(), "tcgplayer_groups": dict(cls.TCGPLAYER_GROUPS), "number_key": _source(number_key)}
 
     @classmethod
@@ -343,10 +343,20 @@ class MatchingRulesV4(MatchingRulesV3):
         return bool(cls.products(lookup)[1]) or cls.listed_product(lookup) is not None
 
     @classmethod
+    def record_has_tcgdex_id(cls, record):
+        """Whether the card record names a TCGplayer product anywhere: the card's own block or any variant's."""
+        if not isinstance(record, dict):
+            return False
+        detailed = record.get("variants_detailed")
+        return cls.has_tcgdex_id(record) or (isinstance(detailed, list) and any(cls.has_tcgdex_id(item) for item in detailed))
+
+    @classmethod
     def matched_by_number(cls, facts):
-        """Whether the card-number path (not a TCGdex ID) is what can name this Edition's product."""
+        """Whether the card-number path is what can name this Edition's product: the Printing has no TCGdex ID anywhere
+        (not on this variant, nor on the card or a sibling variant)."""
         display = facts.get("display")
-        return bool(display) and display["set_id"] in cls.TCGPLAYER_GROUPS and not cls.has_tcgdex_id(facts["lookup"])
+        return (bool(display) and display["set_id"] in cls.TCGPLAYER_GROUPS and not cls.has_tcgdex_id(facts["lookup"])
+                and not cls.record_has_tcgdex_id(facts.get("source_record")))
 
     @classmethod
     def special(cls, descriptor):

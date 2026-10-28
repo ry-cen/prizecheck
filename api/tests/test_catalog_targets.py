@@ -1018,7 +1018,7 @@ PINNED_DIGESTS = {
     (MATCHING, 1): "5367c25316bea657d01a044af5a175dfe66dab656d36f82bcc16bb060dfb25d6",
     (MATCHING, 2): "6994b033232a73138f83cda642e97edc8e75e692e9bba29a3704b913eb7a6eef",
     (MATCHING, 3): "60e02ce648ea81e2177124c2f4a5740897e5481dbecfa20a1a1395dddf184c5e",
-    (MATCHING, 4): "b2bb54f5321df60cf54f84e7f2a7640069c09ea4c0931742798613ef856142ae",
+    (MATCHING, 4): "6a6b62a2081d42185309a4ba389cd1260409e018c1449de20eb1e0feb797b57a",
 }
 
 
@@ -1169,6 +1169,25 @@ def test_v4_number_path_has_its_own_duplicate_check_and_matched_by_number_follow
     for lookup in ({"thirdParty": {"tcgplayer": 5}}, {"pricing": {"tcgplayer": {"normal": {"productId": 5}}}}):
         assert not MatchingRulesV4.matched_by_number(promo_facts(lookup=lookup))
     assert evaluate_v4(found=candidates("Chespin"), lookup={"thirdParty": {"tcgplayer": "5"}}) == Failure("no_product")  # an unusable id is still an id
+
+
+def test_v4_number_path_never_applies_when_a_sibling_or_the_card_carries_a_tcgdex_id():
+    """"No TCGdex id anywhere" covers the whole Printing, not only this Edition's own variant."""
+    plain = {"type": "holo", "size": "standard"}
+    sibling = {"type": "reverse", "size": "standard", "thirdParty": {"tcgplayer": 77}}
+    records = ({"variants_detailed": [plain, sibling]},
+               {"pricing": {"tcgplayer": {"holofoil": {"productId": 77}}}, "variants_detailed": [plain]},
+               {"variants_detailed": [plain, {"type": "reverse", "pricing": {"tcgplayer": {"reverseHolofoil": {"productId": 78}}}}]})
+    for extra in records:
+        record = {"set": {"id": "xyp"}, "localId": "XY01", "name": "Chespin", **extra}
+        given = promo_facts(found=candidates("Chespin"))
+        given["source_record"] = record
+        assert not MatchingRulesV4.matched_by_number(given), extra
+        assert MatchingRulesV4.evaluate(given, lambda product, variant: False) == Failure("no_product"), extra
+    clean = promo_facts(found=candidates("Chespin"))
+    clean["source_record"] = {**clean["source_record"], "variants_detailed": [plain, {"type": "reverse", "size": "standard"}]}
+    assert MatchingRulesV4.matched_by_number(clean)
+    assert MatchingRulesV4.evaluate(clean, lambda product, variant: False) == (100, "holofoil")
 
 
 @pytest.mark.parametrize("given,key", [("DP05", "DP5"), ("SWSH001", "SWSH1"), ("001", "1"), ("XY01", "XY1"), ("12/102", "12")])
