@@ -339,6 +339,14 @@ def rule_inputs(mapping_candidate):
     return rule_projection(mapping_candidate)
 
 
+def inputs_moved(previous, current):
+    """Whether a matching-rule input moved. A candidate that gains the card-level ID it never stored has only been enriched."""
+    before, after = rule_inputs(previous), rule_inputs(current)
+    if "card_tcgplayer" in after and "card_tcgplayer" not in before:
+        after = {key: value for key, value in after.items() if key != "card_tcgplayer"}
+    return before != after
+
+
 def store_source_metadata(conn, printing_id, record, physical_conflict=False, identity_flags=(), context=None):
     """Retain source candidates without approving a physical or target match.
 
@@ -370,7 +378,7 @@ def store_source_metadata(conn, printing_id, record, physical_conflict=False, id
         item = edition_metadata(record, edition["descriptor"], physical_conflict)
         # Quotes are keyed on the mapping revision, so it moves only when a matching-rule input moved.
         previous = edition["previous"]
-        bump = int(bool(previous) and rule_inputs(previous) != rule_inputs(item["mapping_candidate"]))
+        bump = int(bool(previous) and inputs_moved(previous, item["mapping_candidate"]))
         row = conn.execute("""INSERT INTO catalog_edition_metadata AS m
           (edition_id,mapping_candidate,mapping_evidence,quote_candidate,source_variant,unknown_fields)
           VALUES (%s,%s,%s,%s,%s,%s) ON CONFLICT(edition_id) DO UPDATE SET

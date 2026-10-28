@@ -986,7 +986,7 @@ PINNED_DIGESTS = {
     (MATCHING, 2): "6994b033232a73138f83cda642e97edc8e75e692e9bba29a3704b913eb7a6eef",
     (MATCHING, 3): "60e02ce648ea81e2177124c2f4a5740897e5481dbecfa20a1a1395dddf184c5e",
     (MATCHING, 4): "6a6b62a2081d42185309a4ba389cd1260409e018c1449de20eb1e0feb797b57a",
-    (MATCHING, 5): "b2a36de92a7d2c3033b3babcdf1992df3b8b119512f3f91d633a131b6c0b78c5",
+    (MATCHING, 5): "6a870e3f61697fe0a35009951889d6a83a74f3c2f33b7af0c840d4d5c8240106",
 }
 
 
@@ -1287,7 +1287,7 @@ def block(*keys, product=10):
 
 def card_level(product, **record):
     return {"source_record": {"set": {"id": "xy11"}, "localId": "116", "name": "Gardevoir EX", "thirdParty": {"tcgplayer": product}, **record},
-            "lookup": {"variantId": "generated"}}
+            "card_tcgplayer": product, "lookup": {"variantId": "generated"}}
 
 
 def test_v5_table_is_v4s_plus_the_30th_sets_and_registered_as_5():
@@ -1308,7 +1308,7 @@ def test_v5_card_product_needs_a_plain_edition_and_a_variant_without_a_tcgdex_id
         assert evaluate_v5(**card_level(bad)) == Failure("no_product"), bad
     sibling = {"set": {"id": "xy11"}, "localId": "116", "name": "Gardevoir EX", "thirdParty": {"tcgplayer": 121240},
                "variants_detailed": [{"type": "normal"}, {"type": "reverse", "thirdParty": {"tcgplayer": 9}}]}
-    assert evaluate_v5(source_record=sibling, lookup={"variantId": "x"}) == Failure("no_product")  # a sibling has its own id
+    assert evaluate_v5(source_record=sibling, card_tcgplayer=121240, lookup={"variantId": "x"}) == Failure("no_product")  # a sibling has its own id
     assert evaluate_v5(**{**card_level(121240), "lookup": {"thirdParty": {"tcgplayer": 7}}}) == (7, "normal")  # the variant's own id wins
     assert evaluate_v5(**{**card_level(121240), "lookup": {"thirdParty": {"tcgplayer": "x"}}}) == Failure("no_product")
     assert evaluate_v5(**{**card_level(121240), "correspondence": "printing_level"}) == Failure("not_established")
@@ -1567,3 +1567,57 @@ def test_v5_activation_rechecks_only_unverified_editions_that_are_not_auto_close
     assert activate(MATCHING, 5) == {"printings": 0, "editions": 1}
     assert states("open-1") == [("verified", None, 500, "normal")]
     assert {source: states(source) for source in before} == before
+
+
+def strip_card_field(source_id):
+    """Rewrite an Edition's stored candidate to the shape written before the card-level ID was kept."""
+    with connect() as conn:
+        conn.execute("""UPDATE catalog_edition_metadata SET mapping_candidate=mapping_candidate-'card_tcgplayer' WHERE edition_id IN
+          (SELECT e.id FROM catalog_edition e JOIN catalog_printing p ON p.id=e.printing_id WHERE p.source_id=%s)""", (source_id,))
+
+
+def accepted_projection_of(source_id):
+    with connect() as conn:
+        return conn.execute("""SELECT m.accepted_fingerprint,m.accepted_projection,m.mapping_revision FROM catalog_edition_metadata m
+          JOIN catalog_edition e ON e.id=m.edition_id JOIN catalog_printing p ON p.id=e.printing_id WHERE p.source_id=%s""",
+                            (source_id,)).fetchone()
+
+
+def test_v5_over_candidates_stored_before_the_card_field_never_quarantines_on_the_next_import(tcgplayer_products):
+    reset_catalog()
+    run(Records(xy11_116()))
+    strip_card_field("xy11-116")  # stored before the field existed
+    activate(MATCHING, 5)  # the rollout applies v5 before any import: nothing in the candidate names the card's product yet
+    assert states("xy11-116") == [("unverified", "rule_failed", None, None)]
+    run(Records(xy11_116()))  # the next import writes the field and the rule can now verify
+    assert states("xy11-116") == [("verified", None, 121240, "normal")]
+    run(Records(xy11_116()))
+    assert states("xy11-116") == [("verified", None, 121240, "normal")]
+
+
+def test_v5_a_gained_card_field_is_enrichment_and_a_later_change_or_removal_quarantines(tcgplayer_products):
+    reset_catalog()
+    run(Records(xy11_116()))
+    activate(MATCHING, 5)
+    assert states("xy11-116") == [("verified", None, 121240, "normal")]
+    strip_card_field("xy11-116")
+    with connect() as conn:  # the accepted projection a v5 activation over the old candidate shape would have stored
+        from app.catalog_targets import fingerprint, rule_projection
+        row = conn.execute("""SELECT m.edition_id,m.mapping_candidate FROM catalog_edition_metadata m JOIN catalog_edition e ON e.id=m.edition_id
+          JOIN catalog_printing p ON p.id=e.printing_id WHERE p.source_id='xy11-116'""").fetchone()
+        conn.execute("UPDATE catalog_edition_metadata SET accepted_fingerprint=%s,accepted_projection=%s WHERE edition_id=%s",
+                     (fingerprint(row["mapping_candidate"]), fingerprint(rule_projection(row["mapping_candidate"])), row["edition_id"]))
+    revision = accepted_projection_of("xy11-116")["mapping_revision"]
+    run(Records(xy11_116()))
+    assert states("xy11-116") == [("verified", None, 121240, "normal")]
+    after = accepted_projection_of("xy11-116")
+    assert after["mapping_revision"] == revision and after["accepted_projection"] != row["mapping_candidate"] and after["accepted_fingerprint"]
+    run(Records(xy11_116(product=121241)))
+    assert states("xy11-116") == [("quarantined", "candidate_changed", 121240, "normal")]
+    reset_catalog()
+    run(Records(xy11_116()))
+    activate(MATCHING, 5)
+    removed = xy11_116()
+    del removed["thirdParty"]  # the card-level id is removed
+    run(Records(removed))
+    assert states("xy11-116") == [("quarantined", "candidate_changed", 121240, "normal")]

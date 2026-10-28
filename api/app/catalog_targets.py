@@ -433,8 +433,7 @@ class MatchingRulesV5(MatchingRulesV4):
         detailed = record.get("variants_detailed") if isinstance(record, dict) else None
         if isinstance(detailed, list) and any(cls.listed_product(item) is not None for item in detailed):
             return None  # a sibling variant has its own id: the card's product may not be this variant's
-        third_party = record.get("thirdParty") if isinstance(record, dict) else None
-        product = third_party.get("tcgplayer") if isinstance(third_party, dict) else None
+        product = facts.get("card_tcgplayer")  # the candidate's copy, the same value the projection compares
         return product if cls.usable_product(product) else None
 
     @classmethod
@@ -590,6 +589,11 @@ def evaluate_edition(current, facts, rejections, active, verified_elsewhere):
             return current
         if current.accepted_projection is not None and projection_fp == current.accepted_projection:
             return replace(current, accepted_fingerprint=candidate_fp)  # enrichment the rule never reads: accept silently
+        if facts.get("card_tcgplayer") is not None and current.accepted_projection == fingerprint(rule_projection(
+                {"correspondence": facts["correspondence"], "candidate": facts["lookup"]})):
+            # A candidate stored before the card-level ID was kept gains it: enrichment, not a change. A later change or
+            # removal of the value moves the projection and quarantines as usual.
+            return replace(current, accepted_fingerprint=candidate_fp, accepted_projection=projection_fp)
         problem, found = MatchingRulesV1.products(facts["lookup"])
         if facts["correspondence"] == "unresolved":
             reason = "physical_conflict"
