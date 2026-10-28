@@ -1,4 +1,5 @@
 import React, { useEffect, useState, type ReactNode } from "react";
+import { largeArtUrl } from "./artRoute";
 import { ART, LINE, ROOT } from "./CopyTile";
 
 type Props = Omit<
@@ -134,16 +135,12 @@ function EditionArt({
   imageUrl: string | null;
   dark: boolean;
 }) {
-  // A gallery asks the artwork host for dozens of images at once and one can fail for a moment: the first
-  // failure retries once with the large artwork (another address, so not a cached failure) before giving up.
+  // A gallery asks for dozens of images at once and one can fail for a moment: the first failure retries once with
+  // the large artwork (another address, so not a cached failure) before giving up.
   const [attempt, setAttempt] = useState(0);
   useEffect(() => setAttempt(0), [imageUrl]);
   const src =
-    attempt === 1 && imageUrl
-      ? imageUrl
-          .replace(/\/low\.webp$/, "/high.webp")
-          .replace(/_200w\.jpg$/, "_400w.jpg")
-      : imageUrl;
+    attempt === 1 && imageUrl ? (largeArtUrl(imageUrl) ?? imageUrl) : imageUrl;
   return src && attempt < 2 ? (
     <img
       key={attempt}

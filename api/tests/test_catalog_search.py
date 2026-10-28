@@ -1,8 +1,10 @@
 from test_catalog import claim_current
+import json
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
+from app.art_urls import art_url
 from app.catalog import claim_run, execute_run
 from app.main import app, connect
 from test_catalog import Source, headers, reset_catalog
@@ -46,13 +48,14 @@ def test_unavailable_literal_prefix_unicode_and_detail():
     assert [item["name"] for item in search(name="éner").json()["printings"]] == ["Énergie"]
     result = search(name="Pikachu").json()
     printing = result["printings"][0]
-    assert printing["low_image_url"] == "https://assets.tcgdex.net/en/fixture/card-1/low.webp"
+    assert printing["low_image_url"] == art_url(printing["id"], "https://assets.tcgdex.net/en/fixture/card-1", "small")
     assert printing["identity_name"] == "Pikachu"
     assert printing["source"] == "tcgdex"
     assert len(printing["editions"]) == 2
     path = f'/api/catalog/printings/{printing["id"]}'
     detail = client.get(path, headers=headers(USER, "GET", path)).json()
-    assert detail["printing"]["high_image_url"].endswith("/high.webp")
+    assert detail["printing"]["high_image_url"] == art_url(printing["id"], "https://assets.tcgdex.net/en/fixture/card-1", "large")
+    assert "assets.tcgdex.net" not in json.dumps(detail) and "assets.tcgdex.net" not in json.dumps(result)
     assert detail["last_success"] and detail["revision"] == 1
     assert search(name="Missing").json()["printings"] == []
     assert search(name=" ").status_code == 422

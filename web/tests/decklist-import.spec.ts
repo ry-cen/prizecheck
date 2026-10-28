@@ -6,6 +6,7 @@ import { Pool } from "pg";
 import { expectPageChecks } from "./support/page-check";
 import { expectTouchTarget } from "./support/touch-target";
 import { startAsNewOwner } from "./support/owner";
+import { artUpstream } from "./support/art-upstream";
 
 // Importing a list into a new Deck (#212, #213): Decks' Import a list button opens /decks/import, where a pasted TCG Live
 // or Limitless list is read by the server (a live count of card lines and cards), named, and given a Target Format; the
@@ -17,12 +18,6 @@ import { startAsNewOwner } from "./support/owner";
 // review with the resolver open, at 1280×800 and 375×812.
 
 const ORIGIN = process.env.TEST_ORIGIN || "http://localhost:5173";
-
-// A 1×1 PNG stands in for card artwork, so no test reaches the network.
-const PIXEL = Buffer.from(
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/lXcAAAAASUVORK5CYII=",
-  "base64"
-);
 
 /** The browser catalog (api/tests/deck_import_fixtures.py): every Printing of the Limitless list F3 except Meowth ex
  * POR 62 (a Meowth ex in two other Reprint Groups makes it Pick one), Judge POR 76 (Not found) and the MEE Energy
@@ -48,9 +43,8 @@ async function query<T>(sql: string, values: unknown[] = []): Promise<T[]> {
 }
 
 async function signIn(page: Page) {
-  await page.route(/^https:\/\/assets\.tcgdex\.net\//, (route) =>
-    route.fulfill({ status: 200, contentType: "image/png", body: PIXEL })
-  );
+  // Card art comes through the art route; the API fetches it from the art stub (a 1×1 PNG).
+  (await artUpstream()).reset();
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });
   try {
     await pool.query("DELETE FROM auth_send_event");

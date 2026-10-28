@@ -34,7 +34,7 @@ class Distribution(BaseModel):
 
 COLUMNS = """e.id AS edition_id,e.printing_id,coalesce(pd.display_name,ci.display_name) AS printing_name,
  coalesce(pd.set_id,'') AS set_id,coalesce(pd.set_name,'') AS set_name,
- coalesce(pd.collector_number,'') AS collector_number,e.descriptor,art.low_image_url AS image_url"""
+ coalesce(pd.collector_number,'') AS collector_number,e.descriptor,art.small_art_url AS image_url"""
 JOINS = """JOIN catalog_edition e ON e.id=h.edition_id
  JOIN catalog_printing p ON p.id=e.printing_id JOIN catalog_identity ci ON ci.id=p.identity_id
  LEFT JOIN catalog_printing_display pd ON pd.printing_id=p.id
@@ -119,7 +119,7 @@ def collection(name: str=Query(default='',max_length=120),set_id: str=Query(defa
         rows=conn.execute(f"""WITH totals AS (SELECT {COLUMNS},sum(h.quantity) AS quantity,
           coalesce(lower(pd.display_name),lower(ci.display_name)) AS search_name
           FROM holding h {JOINS} WHERE h.owner_id=%s {scope} {filters}
-          GROUP BY e.id,ci.id,pd.printing_id,gp.generation_id,gp.printing_id,art.low_image_url)
+          GROUP BY e.id,ci.id,pd.printing_id,gp.generation_id,gp.printing_id,art.small_art_url)
           SELECT * FROM totals {after} ORDER BY {order} LIMIT 31""",params).fetchall()
         page=rows[:30]
         next_cursor=encode_cursor(context,[str(page[-1]['quantity']) if sort=='quantity' else page[-1]['search_name'],str(page[-1]['edition_id'])]) if len(rows)>30 else None
@@ -152,7 +152,7 @@ HOLDING_PATHS = """WITH RECURSIVE paths AS (
 HOLDING_COLUMNS = """h.edition_id,h.location_id,l.name AS location_name,coalesce(lp.path,l.name) AS location_path,h.quantity,h.version,
   p.id AS printing_id,coalesce(pd.display_name,ci.display_name) AS printing_name,
   coalesce(pd.set_id,'') AS set_id,coalesce(pd.set_name,'') AS set_name,
-  coalesce(pd.collector_number,'') AS collector_number,e.descriptor,art.low_image_url AS image_url,
+  coalesce(pd.collector_number,'') AS collector_number,e.descriptor,art.small_art_url AS image_url,
   CASE ca.card_kind WHEN 'pokemon' THEN 'Pokemon' WHEN 'trainer' THEN 'Trainer' WHEN 'energy' THEN 'Energy' END AS category,
   coalesce(ca.types,'{}') AS elemental_types,ca.trainer_type,
   coalesce(lower(pd.display_name),lower(ci.display_name)) AS search_name,

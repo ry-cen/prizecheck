@@ -58,6 +58,10 @@ if (!emailSignIn && providers.length === 0) {
 // Card art (#358): GET /api/art/{printing_id}/{size}. The gateway passes a 200 image answer as raw bytes; every other
 // answer under /api/ goes through the text path below.
 const ART_PATH = /^\/api\/art\/[^/]+\/[^/]+$/;
+// A Printing with only fallback art gets a redirect to the linked TCGplayer image (#360, ADR 0020). The gateway never
+// follows it: it passes on a redirect to exactly this address shape and nothing else.
+const ART_LINK =
+  /^https:\/\/tcgplayer-cdn\.tcgplayer\.com\/product\/[0-9]{1,9}_(?:200|400)w\.jpg$/;
 
 // Routes that carry a trusted three-second budget. Keep in step with BUDGETED_ROUTES in api/app/price_budget.py;
 // api/tests/test_trade_value.py fails when they differ.
@@ -642,7 +646,23 @@ const server = createServer(async (request, response) => {
           headers,
           body: body.length > 0 ? body : undefined,
           signal: controller?.signal,
+          redirect: ART_PATH.test(path) ? "manual" : "follow",
         });
+        const link = upstream.headers.get("location");
+        if (
+          ART_PATH.test(path) &&
+          upstream.status === 302 &&
+          link &&
+          ART_LINK.test(link)
+        ) {
+          response.writeHead(302, {
+            location: link,
+            "cache-control":
+              upstream.headers.get("cache-control") || "no-store",
+          });
+          response.end();
+          return;
+        }
         const disposition = upstream.headers.get("content-disposition");
         if (
           disposition &&

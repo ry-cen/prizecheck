@@ -2,6 +2,7 @@ import { test, expect } from "@playwright/test";
 import { signInAsOwner } from "./support/sign-in";
 import { execFileSync } from "node:child_process";
 import { Pool } from "pg";
+import { artUpstream } from "./support/art-upstream";
 
 test("collector searches a promoted generation and chooses an exact Edition", async ({
   page,
@@ -15,19 +16,10 @@ promote({**{f'card-{i}': f'Pikachu {i:02d}' for i in range(1, 66)}, 'card-99': '
     ],
     { env: { ...process.env, PYTHONPATH: "api:api/tests" } }
   );
-  await page.route("https://assets.tcgdex.net/**", async (route) => {
-    if (route.request().url().endsWith("/high.webp"))
-      await route.fulfill({ status: 404 });
-    else
-      await route.fulfill({
-        status: 200,
-        contentType: "image/png",
-        body: Buffer.from(
-          "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/lXcAAAAASUVORK5CYII=",
-          "base64"
-        ),
-      });
-  });
+  // Pictures come through the art route; the art host has no large file (the popup falls back to the small one).
+  const upstream = await artUpstream();
+  upstream.reset();
+  upstream.missing.add("/en/fixture/card-1/high.webp");
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });
   await pool.query("DELETE FROM auth_send_event");
   try {

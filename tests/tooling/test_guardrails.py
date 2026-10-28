@@ -224,6 +224,26 @@ class FlakeGuardrailTest(unittest.TestCase):
             relative = path.relative_to(guardrails.ROOT).as_posix()
             self.assertFalse(guardrails.onnxruntime_import_violations(path.read_text(), relative), relative)
 
+    def test_webp_suffixes_are_built_only_by_the_art_url_module_and_the_scanner(self):
+        for source in ('url = f"{base}/low.webp"', "const big = url.replace(/\\/low\\.webp$/, '/high.webp');",
+                       "SELECT image_url || '/high.webp' AS image_url", 'src = base + "/low.webp"'):
+            for other in ('api/app/collection.py', 'api/app/art_store.py', 'web/src/ui/largeArt.ts',
+                          'web/src/ui/EditionTile.tsx', 'api/app/social/friend_reads.py'):
+                self.assertTrue(guardrails.webp_suffix_violations(source, other), (source, other))
+            for owner in ('api/app/art_urls.py', 'api/app/scanner.py'):
+                self.assertFalse(guardrails.webp_suffix_violations(source, owner), (source, owner))
+
+    def test_other_webp_mentions_are_allowed(self):
+        other = 'api/app/collection.py'
+        for source in ('# the art route replaced /low.webp swaps', '// TCGdex /high.webp is built by the server',
+                       ' * served as /low.webp upstream', 'name = "card.webp"', 'path = "/api/art/1/small?v=ab"'):
+            self.assertFalse(guardrails.webp_suffix_violations(source, other), source)
+
+    def test_the_api_and_web_sources_build_webp_suffixes_only_in_the_allowed_modules(self):
+        for path in guardrails.art_source_files():
+            relative = path.relative_to(guardrails.ROOT).as_posix()
+            self.assertFalse(guardrails.webp_suffix_violations(path.read_text(), relative), relative)
+
     def test_dockerignore_must_exclude_the_oauth_fake(self):
         self.assertTrue(guardrails.dockerignore_violations('**/.env\n.git/\n'))
         self.assertFalse(guardrails.dockerignore_violations('**/.env\nauth/testing/\n.git/\n'))

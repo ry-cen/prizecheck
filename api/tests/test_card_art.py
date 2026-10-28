@@ -1,13 +1,12 @@
 """TCGplayer fallback art for Printings without a TCGdex image (ticket P7, design 4.8)."""
 import json
-import re
 import time
-from pathlib import Path
 from uuid import uuid4
 
 import pytest
 
 from app import card_art, price_import
+from app.art_urls import art_version
 from app.catalog_targets import MATCHING  # noqa: F401  (imported so the rule tables exist in the schema under test)
 from app.db import connect
 from app.public_catalog import drain
@@ -174,10 +173,14 @@ def test_catalog_search_and_detail_serve_the_fallback_urls(world):
     add_edition(world, "card-2", NORMAL, 500)
     refresh()
     found = search(name="Raichu").json()["printings"][0]
-    assert (found["low_image_url"], found["high_image_url"]) == (LOW.format(500), HIGH.format(500))
+    # Signed-in reads get route URLs (ADR 0020), one version for both sizes; the view keeps the source URLs.
+    version = art_version(LOW.format(500))
+    assert (found["low_image_url"], found["high_image_url"]) == (
+        f"/api/art/{found['id']}/small?v={version}", f"/api/art/{found['id']}/large?v={version}")
+    assert (art("card-2")["low_image_url"], art("card-2")["high_image_url"]) == (LOW.format(500), HIGH.format(500))
     path = f'/api/catalog/printings/{found["id"]}'
     detail = client.get(path, headers=headers("catalog-reader", "GET", path)).json()["printing"]
-    assert detail["high_image_url"] == HIGH.format(500)
+    assert detail["high_image_url"] == f"/api/art/{found['id']}/large?v={version}"
 
 
 def test_the_import_row_counts_the_fallback_table(world, monkeypatch):
@@ -201,11 +204,3 @@ def test_a_failing_refresh_never_fails_the_import(world, monkeypatch):
         result = price_import.run(conn, fake.client())
         row = conn.execute("SELECT outcome, fallback_art FROM price_import ORDER BY id DESC LIMIT 1").fetchone()
     assert result.outcome == "imported" and row["outcome"] == "imported" and row["fallback_art"] is None
-
-
-def test_only_the_scanner_and_the_art_store_build_webp_suffixes():
-    root = Path(__file__).resolve().parents[1] / "app"
-    offenders = [str(path.relative_to(root)) for path in root.rglob("*.py")
-                 if path.name not in {"scanner.py", "art_urls.py"} and re.search(r"/(low|high)\.webp", path.read_text())]
-    assert offenders == [], ("image URLs come from catalog_printing_art; only scanner.py and art_urls.py (the art "
-                             "store's source rule, #358) suffix TCGdex URLs")

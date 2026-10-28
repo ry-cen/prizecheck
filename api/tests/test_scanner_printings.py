@@ -107,7 +107,7 @@ def test_printings_resolve_with_a_starting_edition_and_list_missing_ids():
     assert [item["id"] for item in body["printings"]] == [str(ids["card-2"]), str(ids["card-1"])]
     assert body["missing"] == [str(unknown), str(ids["card-3"])]
     pikachu = body["printings"][1]
-    assert pikachu["name"] == "Pikachu" and pikachu["low_image_url"].endswith("/low.webp") and len(pikachu["editions"]) == 2
+    assert pikachu["name"] == "Pikachu" and pikachu["low_image_url"] == pikachu["art_url"] and len(pikachu["editions"]) == 2
     normal = next(edition for edition in pikachu["editions"] if edition["descriptor"].get("finish") == "normal")
     assert pikachu["default_edition_id"] == normal["id"]
     base = "https://assets.tcgdex.net/en/fixture/card-1"

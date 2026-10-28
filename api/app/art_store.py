@@ -14,6 +14,7 @@ takes the threads other routes share. Every failure answers 404 ART_UNAVAILABLE 
 import asyncio
 import hashlib
 import logging
+import re
 import threading
 import time
 import urllib.parse
@@ -22,16 +23,19 @@ from uuid import UUID
 
 import httpx
 from fastapi import APIRouter, Depends, Path, Query
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, RedirectResponse, Response
 
 from .art_storage import storage
-from .art_urls import SIZES, art_version, tcgdex_source
+from .art_urls import SIZES
 from .db import connect
 from .identity import verified_user
 
 log = logging.getLogger(__name__)
 
 ALLOWED_HOST = "assets.tcgdex.net"
+# Fallback art (ADR 0019, #354): linked, never copied. The route answers a redirect to this exact URL shape, which
+# the view builds from an integer product id.
+LINKED_ART = re.compile(r"^https://tcgplayer-cdn\.tcgplayer\.com/product/[0-9]{1,9}_(?:200|400)w\.jpg$")
 RATE = 5
 MAX_BYTES = 2 * 1024 * 1024
 CONNECT_TIMEOUT = 3.0
@@ -201,15 +205,16 @@ def fetcher() -> ArtFetcher:
 
 
 def resolve(conn, printing_id: UUID, size: str) -> str | None:
-    """The source URL for a (Printing, size) in the active generation, or None. The one plug-in point for later sources."""
-    row = conn.execute("""SELECT gp.image_url FROM catalog_state s JOIN catalog_generation_printing gp
-        ON gp.generation_id = s.active_generation
-        WHERE s.singleton AND gp.printing_id = %s AND NOT gp.tombstoned""", (printing_id,)).fetchone()
-    if not row:
-        return None
-    source = tcgdex_source(row["image_url"], size)
+    """The source URL for a (Printing, size): what ``catalog_printing_art`` chooses (TCGdex first, else the fallback),
+    the one place a Printing's art comes from. None when the Printing has no art or the URL is not one the route may use:
+    a TCGdex file on the exact host (fetched and stored) or a linked fallback (redirected, never fetched)."""
+    column = "low_image_url" if size == "small" else "high_image_url"
+    row = conn.execute(f"SELECT {column} AS source FROM catalog_printing_art WHERE printing_id = %s", (printing_id,)).fetchone()
+    source = row["source"] if row else None
     # art_object.source_url holds at most 2048 characters: a longer source could be fetched but never stored.
-    return source if source and len(source) <= 2048 and host_allowed(source) else None
+    if source and len(source) <= 2048 and (host_allowed(source) or LINKED_ART.match(source)):
+        return source
+    return None
 
 
 def _missing(code: str) -> JSONResponse:
@@ -228,15 +233,24 @@ def _image(data: bytes, content_type: str, cache: str) -> Response:
     })
 
 
+def _linked(source: str, fresh: bool) -> Response:
+    """Fallback art is linked, not copied (ADR 0019): the browser fetches it from the host the view names."""
+    return RedirectResponse(source, status_code=302, headers={
+        "Cache-Control": IMMUTABLE if fresh else REVALIDATE})
+
+
 def _read(conn, printing_id: UUID, size: str):
-    """(source, object row, ledger row) for a (Printing, size); the ledger row carries its age in database seconds."""
+    """(source, object row, ledger row, version) for a (Printing, size); the ledger row carries its age in database seconds.
+    The version is the one ``?v=`` must equal for the immutable cache header (the Printing's small-source version)."""
     source = resolve(conn, printing_id, size)
     if source is None:
-        return None, None, None
+        return None, None, None, None
+    version = conn.execute("SELECT art_version FROM catalog_printing_art WHERE printing_id=%s",
+                           (printing_id,)).fetchone()["art_version"]
     obj = conn.execute("SELECT * FROM art_object WHERE printing_id=%s AND size=%s", (printing_id, size)).fetchone()
     failure = conn.execute("""SELECT source_url, failures, EXTRACT(EPOCH FROM now() - last_failed_at) AS age
         FROM art_fetch_failure WHERE printing_id=%s AND size=%s""", (printing_id, size)).fetchone()
-    return source, obj, failure
+    return source, obj, failure, version
 
 
 def _hit(conn, printing_id: UUID, size: str) -> None:
@@ -244,7 +258,7 @@ def _hit(conn, printing_id: UUID, size: str) -> None:
         ON CONFLICT (printing_id,size) DO UPDATE SET hits=art_hit.hits+1, last_hit_at=now()""", (printing_id, size))
 
 
-def _stored(conn, printing_id: UUID, size: str, source: str, obj, v: str | None):
+def _stored(conn, printing_id: UUID, size: str, source: str, obj, fresh: bool):
     """The response for a stored object that matches the source and the bytes on disk, with the hit recorded; else None."""
     if not obj or obj["source_url"] != source:
         return None
@@ -255,7 +269,7 @@ def _stored(conn, printing_id: UUID, size: str, source: str, obj, v: str | None)
     if data is None or hashlib.sha256(data).hexdigest() != obj["sha256"]:
         return None
     _hit(conn, printing_id, size)
-    return _image(data, obj["content_type"], IMMUTABLE if v == art_version(source) else REVALIDATE)
+    return _image(data, obj["content_type"], IMMUTABLE if fresh else REVALIDATE)
 
 
 def serve(printing_id: str, size: str, v: str | None) -> Response:
@@ -266,10 +280,12 @@ def serve(printing_id: str, size: str, v: str | None) -> Response:
     if size not in SIZES:
         return _missing("ART_NOT_FOUND")
     with connect() as conn:
-        source, obj, _ = _read(conn, pid, size)
+        source, obj, _, version = _read(conn, pid, size)
         if source is None:
             return _missing("ART_NOT_FOUND")
-        answer = _stored(conn, pid, size, source, obj, v)
+        if LINKED_ART.match(source):
+            return _linked(source, v == version)
+        answer = _stored(conn, pid, size, source, obj, v == version)
     if answer:
         return answer
     lock = _lock_for(str(pid), size)
@@ -277,10 +293,12 @@ def serve(printing_id: str, size: str, v: str | None) -> Response:
         return _unavailable()
     try:
         with connect() as conn:
-            source, obj, failure = _read(conn, pid, size)
+            source, obj, failure, version = _read(conn, pid, size)
             if source is None:
                 return _missing("ART_NOT_FOUND")
-            answer = _stored(conn, pid, size, source, obj, v)
+            if LINKED_ART.match(source):
+                return _linked(source, v == version)
+            answer = _stored(conn, pid, size, source, obj, v == version)
         if answer:
             return answer
         if failure and failure["source_url"] == source and failure["age"] < backoff_seconds(failure["failures"]):
@@ -322,7 +340,7 @@ def serve(printing_id: str, size: str, v: str | None) -> Response:
                 storage().delete(obj["storage_key"])
             except (ValueError, OSError):
                 pass
-        return _image(data, content_type, IMMUTABLE if v == art_version(source) else REVALIDATE)
+        return _image(data, content_type, IMMUTABLE if v == version else REVALIDATE)
     finally:
         lock.release()
 

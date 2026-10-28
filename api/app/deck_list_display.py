@@ -23,7 +23,7 @@ TrainerType = Literal['supporter', 'item', 'tool', 'stadium']
 
 DISPLAY_QUERY = """SELECT e.id AS edition_id,coalesce(pd.display_name,ci.display_name) AS name,
   coalesce(pd.set_id,'') AS set_id,coalesce(pd.set_name,'') AS set_name,
-  coalesce(pd.collector_number,'') AS collector_number,e.descriptor,art.low_image_url AS image_url,
+  coalesce(pd.collector_number,'') AS collector_number,e.descriptor,art.small_art_url AS image_url,
   ca.card_kind,ca.trainer_type,ca.evolves_from,ci.id AS identity_id,ci.display_name AS identity_name,
   er.root_name AS evolution_root,er.stage AS evolution_stage
   FROM catalog_edition e JOIN catalog_printing p ON p.id=e.printing_id
@@ -40,8 +40,8 @@ DISPLAY_KEYS = frozenset(('name', 'set_id', 'set_name', 'collector_number', 'des
 
 
 def read_line_display(conn, edition_ids) -> dict[UUID, dict]:
-    """Display fields by Edition id for ``edition_ids``. The image is the small artwork, as every other card route
-    serves it (``catalog_printing_art.low_image_url``), or None when the catalog has none."""
+    """Display fields by Edition id for ``edition_ids``. The image is the small artwork as an art-route URL (``catalog_printing_art.small_art_url``,
+    ADR 0020), or None when the catalog has none."""
     ids = list(edition_ids)
     if not ids:
         return {}

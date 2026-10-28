@@ -95,7 +95,7 @@ class ImportPrinting(BaseModel):
     set_code: str              # the printed code ("PAL"), or the TCGdex set ID when it has none (set_codes)
     set_name: str
     collector_number: str
-    image_url: str | None      # the small artwork (low.webp), or None
+    image_url: str | None      # the small artwork (art-route URL), or None
     card_kind: Literal['pokemon', 'trainer', 'energy'] | None
 
 
@@ -261,7 +261,7 @@ def _printings(conn, generation, printing_ids) -> dict[UUID, ImportPrinting]:
     if not printing_ids:
         return {}
     rows = conn.execute("""SELECT gp.printing_id,gp.display_name AS name,gp.set_id,gp.set_name,gp.collector_number,
-        art.low_image_url AS image_url,ca.card_kind
+        art.small_art_url AS image_url,ca.card_kind
       FROM catalog_generation_printing gp LEFT JOIN catalog_card_attribute ca ON ca.printing_id=gp.printing_id
       LEFT JOIN catalog_printing_art art ON art.printing_id=gp.printing_id
       WHERE gp.generation_id=%s AND gp.printing_id=ANY(%s) AND NOT gp.tombstoned""",

@@ -6,6 +6,7 @@ import { writeFileSync } from "node:fs";
 import { Pool } from "pg";
 import { expectTouchTarget } from "./support/touch-target";
 import { startAsNewOwner } from "./support/owner";
+import { artUpstream } from "./support/art-upstream";
 
 // Ticket 111: the inspected Card Edition's price in the inspector, the opt-in Prices toggle that prices each
 // mounted tile, and the inspector's metadata report link. Prices are the existing EditionPrice component and
@@ -78,9 +79,8 @@ print('WORLD' + json.dumps(ui_world(json.load(open(sys.argv[1]))['pagers'])))`,
 }
 
 async function signIn(page: Page) {
-  await page.route(/^https:\/\/assets\.tcgdex\.net\//, (route) =>
-    route.fulfill({ status: 200, contentType: "image/png", body: PIXEL })
-  );
+  // Card art comes through the art route; the API fetches it from the art stub (a 1×1 PNG).
+  (await artUpstream()).reset();
   await pool.query("DELETE FROM auth_send_event");
   await startAsNewOwner(pool);
   await signInAsOwner(page, "/collection");
@@ -253,10 +253,13 @@ test.describe("desktop", () => {
        ON CONFLICT (printing_id) DO UPDATE SET product_id=777`,
       [ids.normal]
     );
-    const requested: string[] = [];
-    await page.route(/^https:\/\/tcgplayer-cdn\.tcgplayer\.com\//, (route) => {
-      requested.push(route.request().url());
-      return route.fulfill({
+    // The route answers a fallback Printing with a redirect to the linked TCGplayer image. Read where each one points and
+    // answer the page with a stand-in picture, so the test never reaches the network.
+    const linked: string[] = [];
+    await page.route(/\/api\/art\//, async (route) => {
+      const answer = await route.fetch({ maxRedirects: 0 });
+      linked.push(answer.headers()["location"] ?? "");
+      await route.fulfill({
         status: 200,
         contentType: "image/png",
         body: PIXEL,
@@ -268,18 +271,24 @@ test.describe("desktop", () => {
     ]);
     await page.reload();
     const card = tile(page, "Furret, Darkness Ablaze 1, Normal, copy 1");
+    // Fallback art is an art-route address too; the route links the browser on to the TCGplayer image.
     await expect(card.locator("img")).toHaveAttribute(
       "src",
-      "https://tcgplayer-cdn.tcgplayer.com/product/777_200w.jpg"
+      /^\/api\/art\/[0-9a-f-]{36}\/small\?v=[0-9a-f]{8}$/
     );
     await card.click();
     await expect(inspector(page).locator("img")).toHaveAttribute(
       "src",
-      "https://tcgplayer-cdn.tcgplayer.com/product/777_400w.jpg"
+      /^\/api\/art\/[0-9a-f-]{36}\/large\?v=[0-9a-f]{8}$/
     );
-    expect(requested).toContain(
-      "https://tcgplayer-cdn.tcgplayer.com/product/777_400w.jpg"
-    );
+    await expect
+      .poll(() => linked)
+      .toEqual(
+        expect.arrayContaining([
+          "https://tcgplayer-cdn.tcgplayer.com/product/777_200w.jpg",
+          "https://tcgplayer-cdn.tcgplayer.com/product/777_400w.jpg",
+        ])
+      );
   });
 
   test("a tile words a timed-out row like the inspector", async ({ page }) => {

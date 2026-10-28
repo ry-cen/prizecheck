@@ -6,6 +6,7 @@ import { expectPageChecks } from "./support/page-check";
 import { startAsNewOwner } from "./support/owner";
 import { signInAsOwner } from "./support/sign-in";
 import { expectTouchTarget } from "./support/touch-target";
+import { artUpstream } from "./support/art-upstream";
 
 // Owned cards in the import (#214). The review's side column holds the owned-cards setting: Use cards I own (the
 // default) also uses owned copies of other printings of a card, Exact printings only the printing each line names.
@@ -15,12 +16,6 @@ import { expectTouchTarget } from "./support/touch-target";
 
 const ORIGIN = process.env.TEST_ORIGIN || "http://localhost:5173";
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-
-// A 1×1 PNG stands in for card artwork, so no test reaches the network.
-const PIXEL = Buffer.from(
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/lXcAAAAASUVORK5CYII=",
-  "base64"
-);
 
 function seedCatalog() {
   execFileSync(
@@ -42,9 +37,8 @@ async function edition(sourceId: string, finish: string): Promise<string> {
 }
 
 async function signIn(page: Page) {
-  await page.route(/^https:\/\/assets\.tcgdex\.net\//, (route) =>
-    route.fulfill({ status: 200, contentType: "image/png", body: PIXEL })
-  );
+  // Card art comes through the art route; the API fetches it from the art stub (a 1×1 PNG).
+  (await artUpstream()).reset();
   await pool.query("DELETE FROM auth_send_event");
   await startAsNewOwner(pool);
   await signInAsOwner(page, "/decks");

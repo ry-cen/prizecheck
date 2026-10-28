@@ -91,7 +91,7 @@ FRIEND_BY_HANDLE = """SELECT p.user_id AS collector_id, p.handle, p.display_name
 CARD_FACTS = """SELECT e.id AS edition_id, e.printing_id, p.identity_id,
   coalesce(pd.display_name, ci.display_name) AS name, coalesce(pd.set_id, '') AS set_id,
   coalesce(pd.set_name, '') AS set_name, coalesce(pd.collector_number, '') AS collector_number, e.descriptor,
-  art.low_image_url AS image_url, replace(catalog_search_words(coalesce(pd.display_name, ci.display_name)), ' ', '') AS search_key
+  art.small_art_url AS image_url, replace(catalog_search_words(coalesce(pd.display_name, ci.display_name)), ' ', '') AS search_key
   FROM catalog_edition e
   JOIN catalog_printing p ON p.id = e.printing_id
   JOIN catalog_identity ci ON ci.id = p.identity_id

@@ -302,7 +302,7 @@ def leaf_holdings(location_id: UUID, cursor: str | None = Query(default=None, ma
           p.id AS printing_id,coalesce(pd.display_name,ci.display_name) AS printing_name,
           coalesce(lower(pd.display_name),lower(ci.display_name)) AS search_name,
           coalesce(pd.set_id,'') AS set_id,coalesce(pd.set_name,'') AS set_name,
-          coalesce(pd.collector_number,'') AS collector_number,e.descriptor,art.low_image_url AS image_url
+          coalesce(pd.collector_number,'') AS collector_number,e.descriptor,art.small_art_url AS image_url
           FROM holding h JOIN location l ON l.id=h.location_id AND l.owner_id=h.owner_id
           JOIN catalog_edition e ON e.id=h.edition_id
           JOIN catalog_printing p ON p.id=e.printing_id

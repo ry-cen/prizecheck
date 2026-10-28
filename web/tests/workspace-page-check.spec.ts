@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { expectPageChecks } from "./support/page-check";
 import { startAsNewOwner } from "./support/owner";
+import { artUpstream } from "./support/art-upstream";
 
 // #166: Collection's sidebar and Location tree, toolbar, filters and display settings, the stale banner, the
 // Reviewed Edition corrections, the Deck heading, Add cards, Manage locations and a Location's settings are on the kit. Each state
@@ -12,12 +13,6 @@ import { startAsNewOwner } from "./support/owner";
 // closed. Helpers follow workspace-accessibility.spec.ts.
 
 type TreeNode = { id: string; name: string; version: number };
-
-// A 1×1 PNG stands in for card artwork, so no test reaches the network.
-const PIXEL = Buffer.from(
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
-  "base64"
-);
 
 /** Replaces the catalog with one Printing per name (set "Fixture Set", number from the id), each with
  * artwork. This also clears every Holding. */
@@ -42,9 +37,8 @@ search.promote(json.loads(sys.argv[1]))`,
 }
 
 async function signIn(page: Page) {
-  await page.route(/^https:\/\/assets\.tcgdex\.net\//, (route) =>
-    route.fulfill({ status: 200, contentType: "image/png", body: PIXEL })
-  );
+  // Card art comes through the art route; the API fetches it from the art stub (a 1×1 PNG).
+  (await artUpstream()).reset();
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });
   try {
     await pool.query("DELETE FROM auth_send_event");

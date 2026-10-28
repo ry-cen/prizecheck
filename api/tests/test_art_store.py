@@ -70,7 +70,7 @@ def pids():
 def get(pid, size="small", v="auto", user=USER, **params):
     path = f"/api/art/{pid}/{size}"
     if v == "auto":
-        v = art_version(SMALL if size == "small" else LARGE)
+        v = art_version(SMALL)
     if v is not None:
         params["v"] = v
     return client.get(path, params=params, headers=headers(user, "GET", path))

@@ -6,18 +6,13 @@ import { Pool } from "pg";
 import { expectPageChecks } from "./support/page-check";
 import { listCards } from "./support/deck-list";
 import { startAsNewOwner } from "./support/owner";
+import { artUpstream } from "./support/art-upstream";
 
 // Gather (#179): Gather N in the deck header opens the Pick List as a dialog arranged by card, with a source picker per
 // row and a warning when a source is another Deck that would be left short. Confirm picked and Confirm all are each one
 // multi-source Move with one Undo record, so one Undo puts back copies from more than five Locations.
 
 const ORIGIN = process.env.TEST_ORIGIN || "http://localhost:5173";
-
-// A 1×1 PNG stands in for card artwork, so no test reaches the network.
-const PIXEL = Buffer.from(
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
-  "base64"
-);
 
 /** Replaces the catalog with three cards through the real import. This also clears every Holding. */
 function promoteCatalog() {
@@ -42,9 +37,8 @@ async function query<T>(sql: string, values: unknown[] = []): Promise<T[]> {
 }
 
 async function signIn(page: Page) {
-  await page.route(/^https:\/\/assets\.tcgdex\.net\//, (route) =>
-    route.fulfill({ status: 200, contentType: "image/png", body: PIXEL })
-  );
+  // Card art comes through the art route; the API fetches it from the art stub (a 1×1 PNG).
+  (await artUpstream()).reset();
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });
   try {
     await pool.query("DELETE FROM auth_send_event");

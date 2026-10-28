@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { expectPageChecks } from "./support/page-check";
 import { startAsNewOwner } from "./support/owner";
+import { artUpstream } from "./support/art-upstream";
 
 // #164: every Card Edition in Collection names its Variant Descriptor (tiles, accessible names, the
 // inspector), and the inspector lists each Storage Leaf that holds the Edition. Helpers follow
@@ -14,11 +15,10 @@ type TreeNode = { id: string; name: string; version: number };
 
 const OWNER_EMAIL = process.env.OWNER_EMAIL || "owner@example.test";
 
-// A 1×1 PNG stands in for card artwork, so no test reaches the network.
-const PIXEL = Buffer.from(
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
-  "base64"
-);
+// Card artwork comes through the art route (/api/art/{printing}/{small|large}); the API's fetcher reads the stub of
+// support/art-upstream.ts (a 1×1 PNG), so no test reaches the network.
+const ART_SMALL = /^\/api\/art\/[0-9a-f-]{36}\/small\?v=[0-9a-f]{8}$/;
+const ART_LARGE = /^\/api\/art\/[0-9a-f-]{36}\/large\?v=[0-9a-f]{8}$/;
 
 /** A Variant Descriptor too long for a tile's Names line. */
 const LONG_VARIANT =
@@ -48,9 +48,7 @@ search.promote(json.loads(sys.argv[1]))`,
 }
 
 async function signIn(page: Page) {
-  await page.route(/^https:\/\/assets\.tcgdex\.net\//, (route) =>
-    route.fulfill({ status: 200, contentType: "image/png", body: PIXEL })
-  );
+  (await artUpstream()).reset();
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });
   try {
     await pool.query("DELETE FROM auth_send_event");
@@ -327,6 +325,7 @@ test.describe("desktop", () => {
   }) => {
     promoteCatalog({ "card-1": "Art Abra", "card-2": "Art Pikachu" });
     await signIn(page);
+    const upstream = await artUpstream();
     const s = randomUUID().slice(0, 8);
     const leaf = await createLocation(page, `Art ${s}`, null);
     const ids = await editions();
@@ -341,34 +340,25 @@ test.describe("desktop", () => {
       page,
       `Art Abra, Fixture Set 1, Normal, copy 1, Art ${s}`
     ).click();
-    await expect(art).toHaveAttribute(
-      "src",
-      "https://assets.tcgdex.net/en/fixture/card-1/high.webp"
-    );
+    await expect(art).toHaveAttribute("src", ART_LARGE);
+    await expect
+      .poll(() => upstream.requests)
+      .toContain("/en/fixture/card-1/high.webp");
 
-    // Registered last, so it answers before signIn's artwork route.
-    await page.route(/\/high\.webp$/, (route) =>
-      route.fulfill({ status: 404 })
-    );
+    // The art host has no large file for card-2: the route answers 404 and the inspector shows the small one.
+    upstream.missing.add("/en/fixture/card-2/high.webp");
     await tile(
       page,
       `Art Pikachu, Fixture Set 2, Unspecified Variant, copy 1, Art ${s}`
     ).click();
-    await expect(art).toHaveAttribute(
-      "src",
-      "https://assets.tcgdex.net/en/fixture/card-2/low.webp"
-    );
+    await expect(art).toHaveAttribute("src", ART_SMALL);
 
     // Another card starts again from its large artwork.
-    await page.unroute(/\/high\.webp$/);
     await tile(
       page,
       `Art Abra, Fixture Set 1, Normal, copy 1, Art ${s}`
     ).click();
-    await expect(art).toHaveAttribute(
-      "src",
-      "https://assets.tcgdex.net/en/fixture/card-1/high.webp"
-    );
+    await expect(art).toHaveAttribute("src", ART_LARGE);
   });
 });
 

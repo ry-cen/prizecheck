@@ -179,7 +179,7 @@ def test_editions_carry_an_art_url():
     rows = {row["name"]: row for row in browse(user, q="")["editions"]}
     bulbasaur = rows["Bulbasaur"]
     assert re.fullmatch(rf"/api/art/{bulbasaur['printing_id']}/small\?v=[0-9a-f]{{8}}", bulbasaur["art_url"])
-    assert bulbasaur["image_url"] == "https://assets.tcgdex.net/en/me/me01/001/low.webp"
+    assert bulbasaur["image_url"] == bulbasaur["art_url"]  # one route URL, built by the server (ADR 0020)
     assert rows["Switch"]["art_url"] is None and rows["Switch"]["image_url"] is None
 
 

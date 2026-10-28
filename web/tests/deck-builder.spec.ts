@@ -6,17 +6,12 @@ import { Pool } from "pg";
 import { expectPageChecks } from "./support/page-check";
 import { listCards } from "./support/deck-list";
 import { startAsNewOwner } from "./support/owner";
+import { artUpstream } from "./support/art-upstream";
 
 // The deck builder's Deck List (#176): opening a Deck on the Decks page shows every copy, its ownership state and the
 // cost, in Spread, Stacked and List, grouped by evolution line, Trainer Type and Energy.
 
 const ORIGIN = process.env.TEST_ORIGIN || "http://localhost:5173";
-
-// A 1×1 PNG stands in for card artwork, so no test reaches the network.
-const PIXEL = Buffer.from(
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
-  "base64"
-);
 
 type Card = {
   name: string;
@@ -140,9 +135,8 @@ async function query<T>(sql: string, values: unknown[] = []): Promise<T[]> {
 }
 
 async function signIn(page: Page) {
-  await page.route(/^https:\/\/assets\.tcgdex\.net\//, (route) =>
-    route.fulfill({ status: 200, contentType: "image/png", body: PIXEL })
-  );
+  // Card art comes through the art route; the API fetches it from the art stub (a 1×1 PNG).
+  (await artUpstream()).reset();
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });
   try {
     await pool.query("DELETE FROM auth_send_event");

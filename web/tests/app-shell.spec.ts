@@ -7,17 +7,12 @@ import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { expectPageChecks } from "./support/page-check";
 import { signInWithButton } from "./support/sign-in";
+import { artUpstream } from "./support/art-upstream";
 
 type TreeNode = { id: string; name: string; version: number };
 
 const ORIGIN = process.env.TEST_ORIGIN || "http://localhost:5173";
 const OWNER_EMAIL = process.env.OWNER_EMAIL || "owner@example.test";
-
-// A 1×1 PNG stands in for card artwork, so no test reaches the network.
-const PIXEL = Buffer.from(
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
-  "base64"
-);
 
 /** Replaces the catalog with one Printing per name (set "Fixture Set"), each with artwork. This also
  * clears every Holding, so All owned holds only what a test adds. */
@@ -44,9 +39,8 @@ search.promote(json.loads(sys.argv[1]))`,
 /** Opens `path` signed out, checks where the address lands, and signs in there through the sign-in card's Google
  * button (the OAuth test fake). */
 async function signIn(page: Page, path = "/collection") {
-  await page.route(/^https:\/\/assets\.tcgdex\.net\//, (route) =>
-    route.fulfill({ status: 200, contentType: "image/png", body: PIXEL })
-  );
+  // Card art comes through the art route; the API fetches it from the art stub (a 1×1 PNG).
+  (await artUpstream()).reset();
   await page.goto(`${ORIGIN}${path}`);
   await expect(page).toHaveURL(/\/collection$/);
   await signInWithButton(page);

@@ -7,6 +7,7 @@ clearing it moves no Deck List revision, Deck version or inventory revision. ``s
 live in their own file.
 """
 import os
+import re
 from pathlib import Path
 from uuid import uuid4
 
@@ -83,7 +84,7 @@ def test_the_automatic_cover_is_the_line_with_most_copies_then_a_pokemon_then_th
         assert cover['edition_id'] == found[expected], quantities
         assert cover['name'] == {'energy': 'Basic Grass Energy', 'bulbasaur': 'Bulbasaur'}[expected]
         if expected == 'bulbasaur':
-            assert cover['image_url'] == 'https://assets.tcgdex.net/en/me/me01/001/low.webp'
+            assert re.fullmatch(r'/api/art/[0-9a-f-]{36}/small\?v=[0-9a-f]{8}', cover['image_url'])
     deck = new_deck(owner)
     list_cards(owner, deck, {found['switch']: 4})
     assert index_cover(owner, deck)['image_url'] is None

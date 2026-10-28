@@ -13,13 +13,9 @@ import { Pool } from "pg";
 import { startAsNewOwner } from "./support/owner";
 import { expectPageChecks } from "./support/page-check";
 import { expectTouchTarget } from "./support/touch-target";
+import { artUpstream } from "./support/art-upstream";
 
 const ORIGIN = process.env.TEST_ORIGIN || "http://localhost:5173";
-const PIXEL = Buffer.from(
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/lXcAAAAASUVORK5CYII=",
-  "base64"
-);
-
 /** Five tiles (api/tests/test_catalog_browse.py seed_popup): Bulbasaur Normal and Reverse Holo (MEG 001), Rare Candy
  * (MEG 125) and Switch (MEG 130), then Professor's Research (Professor Juniper). */
 function seedPopup() {
@@ -41,9 +37,8 @@ function seedGallery() {
 
 /** Signs in at /catalog as a new owner, who owns nothing yet, and lands on Catalog. */
 async function signIn(page: Page) {
-  await page.route("https://assets.tcgdex.net/**", (route) =>
-    route.fulfill({ status: 200, contentType: "image/png", body: PIXEL })
-  );
+  // Card art comes through the art route; the API fetches it from the art stub (a 1×1 PNG).
+  (await artUpstream()).reset();
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });
   try {
     await startAsNewOwner(pool);

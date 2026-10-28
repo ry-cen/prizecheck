@@ -157,7 +157,7 @@ def search_catalog(name: str | None = None, set_id: str | None = None, number: s
             condition += " AND (gp.search_name,gp.set_id,gp.collector_number,gp.printing_id) > (%s,%s,%s,%s)"
             values.extend(key)
         rows = conn.execute(f"""SELECT gp.*, p.source, p.source_id AS public_source_id, p.identity_id, ci.display_name AS identity_name, p.id,
-            art.low_image_url, art.high_image_url
+            art.small_art_url AS low_image_url, art.large_art_url AS high_image_url
           FROM catalog_generation_printing gp JOIN catalog_printing p ON p.id=gp.printing_id
           JOIN catalog_identity ci ON ci.id=p.identity_id
           LEFT JOIN catalog_printing_art art ON art.printing_id=p.id
@@ -176,7 +176,7 @@ def printing_detail(printing_id: UUID, user_id: str = Depends(verified_user)):
         if not state["active_generation"]:
             raise HTTPException(404, "Printing not found")
         row = conn.execute("""SELECT gp.*, p.source, p.source_id AS public_source_id, p.identity_id, ci.display_name AS identity_name, p.id,
-            art.low_image_url, art.high_image_url
+            art.small_art_url AS low_image_url, art.large_art_url AS high_image_url
           FROM catalog_generation_printing gp JOIN catalog_printing p ON p.id=gp.printing_id
           JOIN catalog_identity ci ON ci.id=p.identity_id
           LEFT JOIN catalog_printing_art art ON art.printing_id=p.id

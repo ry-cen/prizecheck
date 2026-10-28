@@ -211,8 +211,10 @@ def printings(body: ScannerPrintingsRequest, user_id: str = Depends(verified_use
             rows = conn.execute("""SELECT gp.*, p.source, p.source_id AS public_source_id, p.identity_id,
               ci.display_name AS identity_name, p.id,
               -- The scanner page's COEP blocks the TCGplayer CDN, so it stays on TCGdex art (never catalog_printing_art).
-              CASE WHEN gp.image_url IS NOT NULL THEN gp.image_url || '/low.webp' END AS low_image_url,
-              CASE WHEN gp.image_url IS NOT NULL THEN gp.image_url || '/high.webp' END AS high_image_url
+              catalog_art_route(gp.printing_id, 'small', CASE WHEN gp.image_url IS NOT NULL THEN gp.image_url || '/low.webp' END,
+                CASE WHEN gp.image_url IS NOT NULL THEN gp.image_url || '/low.webp' END) AS low_image_url,
+              catalog_art_route(gp.printing_id, 'large', CASE WHEN gp.image_url IS NOT NULL THEN gp.image_url || '/high.webp' END,
+                CASE WHEN gp.image_url IS NOT NULL THEN gp.image_url || '/low.webp' END) AS high_image_url
               FROM catalog_generation_printing gp JOIN catalog_printing p ON p.id=gp.printing_id
               JOIN catalog_identity ci ON ci.id=p.identity_id
               WHERE gp.generation_id=%s AND NOT gp.tombstoned AND gp.printing_id=ANY(%s)""",

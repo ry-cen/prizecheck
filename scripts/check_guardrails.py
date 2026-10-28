@@ -223,6 +223,29 @@ def onnxruntime_import_violations(source, filename):
             if ORT_IMPORT.search(line) and not line.lstrip().startswith(('//', '*', '/*'))]
 
 
+# Card art (ADR 0020, #354, #360): a Printing's art comes from one place, the `catalog_printing_art` view, and the
+# signed-in app shows it through the art route. TCGdex's `/low.webp` and `/high.webp` file names are built only by the
+# art-URL module (`api/app/art_urls.py`, the scanner's TCGdex-only rule) and the scanner's own query; the web build
+# never spells them, so a client cannot derive a size by editing an address.
+WEBP_SUFFIX = re.compile(r'/(?:low|high)\.webp')
+WEBP_SUFFIX_MODULES = ('api/app/scanner.py', 'api/app/art_urls.py')
+
+
+def webp_suffix_violations(source, filename):
+    """No `/low.webp` or `/high.webp` outside the modules that own the TCGdex file names."""
+    if filename in WEBP_SUFFIX_MODULES:
+        return []
+    return [(number, 'Build card art addresses through the art route (api/app/art_urls.py, catalog_printing_art), '
+                     'not with a /low.webp or /high.webp suffix')
+            for number, line in enumerate(source.splitlines(), 1)
+            if WEBP_SUFFIX.search(line) and not line.lstrip().startswith(('#', '//', '*', '/*'))]
+
+
+def art_source_files():
+    yield from sorted((ROOT/'api/app').rglob('*.py'))
+    yield from web_source_files()
+
+
 def web_source_files():
     for suffix in ('*.ts', '*.tsx'):
         yield from sorted((ROOT/'web/src').rglob(suffix))
@@ -323,6 +346,11 @@ def main():
     for path in web_source_files():
         relative = path.relative_to(ROOT).as_posix()
         for line, reason in onnxruntime_import_violations(path.read_text(), relative):
+            print(f'{relative}:{line}: {reason}')
+            failed = True
+    for path in art_source_files():
+        relative = path.relative_to(ROOT).as_posix()
+        for line, reason in webp_suffix_violations(path.read_text(), relative):
             print(f'{relative}:{line}: {reason}')
             failed = True
     for line, reason in dockerignore_violations((ROOT/'.dockerignore').read_text()):

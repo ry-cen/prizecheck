@@ -193,6 +193,38 @@ describe("card art", () => {
     expect(seen[0].headers["x-internal-user"]).toBe(userId);
   });
 
+  it("a fallback-art redirect passes on as a redirect, and only to the linked address shape", async () => {
+    const link = "https://tcgplayer-cdn.tcgplayer.com/product/777_400w.jpg";
+    behaviour = (_, response) => {
+      response.writeHead(302, { location: link, "cache-control": cache });
+      response.end();
+    };
+    const response = await fetch(base + art, {
+      headers: { cookie },
+      redirect: "manual",
+    });
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe(link);
+    expect(response.headers.get("cache-control")).toBe(cache);
+    // Any other target is not passed on, and the gateway does not follow it.
+    for (const other of [
+      "https://example.org/product/777_400w.jpg",
+      "https://tcgplayer-cdn.tcgplayer.com.example.org/product/777_400w.jpg",
+      "http://tcgplayer-cdn.tcgplayer.com/product/777_400w.jpg",
+    ]) {
+      behaviour = (_, response) => {
+        response.writeHead(302, { location: other });
+        response.end();
+      };
+      const refused = await fetch(base + art, {
+        headers: { cookie },
+        redirect: "manual",
+      });
+      expect(refused.headers.get("location")).toBeNull();
+      expect(refused.headers.get("cache-control")).toBe("no-store");
+    }
+  });
+
   it("an art 404 stays JSON and no-store", async () => {
     behaviour = (_, response) => {
       response.writeHead(404, { "content-type": "application/json" });

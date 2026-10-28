@@ -4,16 +4,11 @@ import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { startAsNewOwner } from "./support/owner";
+import { artUpstream } from "./support/art-upstream";
 
 type TreeNode = { id: string; name: string; version: number };
 
 // A 1×1 PNG stands in for card artwork, so no test reaches the network and Names checks
-// aren't confused by the no-image fallback (which shows the card name).
-const PIXEL = Buffer.from(
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
-  "base64"
-);
-
 /** Replaces the catalog with one Printing per name (set "Fixture Set", number from the id),
  * each with artwork. This also clears every Holding, so All owned holds only what a test adds. */
 function promoteCatalog(names: Record<string, string>) {
@@ -37,9 +32,8 @@ search.promote(json.loads(sys.argv[1]))`,
 }
 
 async function signIn(page: Page) {
-  await page.route(/^https:\/\/assets\.tcgdex\.net\//, (route) =>
-    route.fulfill({ status: 200, contentType: "image/png", body: PIXEL })
-  );
+  // Card art comes through the art route; the API fetches it from the art stub (a 1×1 PNG).
+  (await artUpstream()).reset();
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });
   try {
     await pool.query("DELETE FROM auth_send_event");

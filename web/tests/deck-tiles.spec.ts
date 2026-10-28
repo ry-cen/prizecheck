@@ -11,8 +11,12 @@ import { startAsNewOwner } from "./support/owner";
 // (support/legal-deck.ts); its fixtures have no artwork, so a tile shows the cover card's name on the placeholder.
 
 const ORIGIN = process.env.TEST_ORIGIN || "http://localhost:5173";
-const IMAGE_OK = "https://assets.tcgdex.net/en/test/ok/low.webp";
-const IMAGE_FAIL = "https://assets.tcgdex.net/en/test/fail/low.webp";
+// Art-route addresses, as the API sends them (ADR 0020). The "ok" Printing is answered below; the "fail" one is not a
+// Printing the API knows, so the route answers 404.
+const IMAGE_OK =
+  "/api/art/00000000-0000-4000-8000-0000000000a1/small?v=0000000a";
+const IMAGE_FAIL =
+  "/api/art/00000000-0000-4000-8000-0000000000a2/small?v=0000000b";
 // A 1×1 PNG stands in for card artwork, so no test reaches the network.
 const PIXEL = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
@@ -178,8 +182,9 @@ test.describe("on a desktop", () => {
           deck.cover.image_url = imageUrl;
       await route.fulfill({ response, json });
     });
-    await page.route(IMAGE_OK, (route) =>
-      route.fulfill({ contentType: "image/png", body: PIXEL })
+    await page.route(
+      /\/api\/art\/00000000-0000-4000-8000-0000000000a1\//,
+      (route) => route.fulfill({ contentType: "image/png", body: PIXEL })
     );
 
     await page.reload();

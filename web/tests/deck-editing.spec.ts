@@ -6,18 +6,13 @@ import { Pool } from "pg";
 import { expectPageChecks } from "./support/page-check";
 import { listCards, raiseLine } from "./support/deck-list";
 import { startAsNewOwner } from "./support/owner";
+import { artUpstream } from "./support/art-upstream";
 
 // Editing the Deck List (#177): the deck builder's library (the browse route with the Deck's id), adding by drag and
 // by tap, the copy sheet's ±1 and Swap, Delete and Backspace, one batch per edit with an Undo toast, and fast taps
 // merged behind the command on its way.
 
 const ORIGIN = process.env.TEST_ORIGIN || "http://localhost:5173";
-
-// A 1×1 PNG stands in for card artwork, so no test reaches the network.
-const PIXEL = Buffer.from(
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
-  "base64"
-);
 
 type Card = {
   name: string;
@@ -117,9 +112,8 @@ async function query<T>(sql: string, values: unknown[] = []): Promise<T[]> {
 }
 
 async function signIn(page: Page) {
-  await page.route(/^https:\/\/assets\.tcgdex\.net\//, (route) =>
-    route.fulfill({ status: 200, contentType: "image/png", body: PIXEL })
-  );
+  // Card art comes through the art route; the API fetches it from the art stub (a 1×1 PNG).
+  (await artUpstream()).reset();
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });
   try {
     await pool.query("DELETE FROM auth_send_event");
@@ -435,7 +429,10 @@ test.describe("on a desktop", () => {
     // The library sends the small artwork; the popup shows the large one.
     await expect(
       popup.getByRole("img", { name: "Pikachu card art" })
-    ).toHaveAttribute("src", /\/high\.webp$/);
+    ).toHaveAttribute(
+      "src",
+      /^\/api\/art\/[0-9a-f-]{36}\/large\?v=[0-9a-f]{8}$/
+    );
     await expect(popup).toContainText("Alpha Set (set-a) · #25 · Normal");
     await expect(popup).toContainText("Not owned");
     await expect(popup).toContainText("Standard legality unknown");

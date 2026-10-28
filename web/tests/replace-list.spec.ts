@@ -5,6 +5,7 @@ import { Pool } from "pg";
 import { expectPageChecks } from "./support/page-check";
 import { startAsNewOwner } from "./support/owner";
 import { signInAsOwner } from "./support/sign-in";
+import { artUpstream } from "./support/art-upstream";
 
 // Replace a Deck's list (#215). The builder's Replace list… opens /decks/<id>/replace, where a pasted list is reviewed
 // as the Deck's new Deck List: the Deck's own copies come first (under Exact printings in their own Edition), and the
@@ -20,12 +21,6 @@ import { signInAsOwner } from "./support/sign-in";
 
 const ORIGIN = process.env.TEST_ORIGIN || "http://localhost:5173";
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-
-// A 1×1 PNG stands in for card artwork, so no test reaches the network.
-const PIXEL = Buffer.from(
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/lXcAAAAASUVORK5CYII=",
-  "base64"
-);
 
 const PASTE =
   "4 Iono PAL 185\n1 Nest Ball SVI 181\n4 Basic Psychic Energy SVE 13\n";
@@ -50,11 +45,8 @@ async function edition(sourceId: string, finish: string): Promise<string> {
 }
 
 async function signIn(page: Page) {
-  await page
-    .context()
-    .route(/^https:\/\/assets\.tcgdex\.net\//, (route) =>
-      route.fulfill({ status: 200, contentType: "image/png", body: PIXEL })
-    );
+  // Card art comes through the art route; the API fetches it from the art stub (a 1×1 PNG).
+  (await artUpstream()).reset();
   await pool.query("DELETE FROM auth_send_event");
   await startAsNewOwner(pool);
   await signInAsOwner(page, "/decks");

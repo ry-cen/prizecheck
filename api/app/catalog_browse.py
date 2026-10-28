@@ -108,7 +108,7 @@ NAME_ORDER = ("release_missing", "release_rank", "set_id", "number_missing", "nu
 NUMBER_ORDER = ("set_id", "number_missing", "number_value", "number_key", "search_name", "descriptor_key", "edition_id")
 
 LISTED = """SELECT ge.edition_id,gp.printing_id,gp.display_name AS name,gp.set_id,gp.set_name,gp.collector_number,
-    e.descriptor,e.descriptor_key,art.low_image_url AS image_url,gp.image_url AS tcgdex_image_url,
+    e.descriptor,e.descriptor_key,art.small_art_url AS image_url,gp.image_url AS tcgdex_image_url,
     gp.search_name,ca.card_kind,ca.trainer_type,ca.evolves_from,
     ca.regulation_mark,
     substring(gp.collector_number from '^[0-9]+') IS NULL AS number_missing,
@@ -147,9 +147,9 @@ class BrowseEdition(BaseModel):
     set_code: str
     collector_number: str
     descriptor: dict
-    # The small artwork (low.webp), or null when the card has none.
+    # The small artwork as an art-route URL, or null when the card has none.
     image_url: str | None
-    # The same small picture from the art route (/api/art), or null when the card has none.
+    # The small picture from the art route for the scanner, which shows TCGdex art only (its page cannot load other hosts), or null.
     art_url: str | None
     card_kind: Literal["pokemon", "trainer", "energy"] | None
     trainer_type: Literal["supporter", "item", "tool", "stadium"] | None

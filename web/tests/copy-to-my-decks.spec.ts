@@ -6,6 +6,7 @@ import { expectPageChecks } from "./support/page-check";
 import { startAsNewOwner } from "./support/owner";
 import { signInAsOwner, signInWithButton } from "./support/sign-in";
 import { expectTouchTarget } from "./support/touch-target";
+import { artUpstream } from "./support/art-upstream";
 
 // Copy to my Decks (decklist import #216). A Published Deck's Copy to my Decks opens the import's paste screen with the
 // snapshot's cards in place of the text box, the new Deck named after the Published Deck and set to its Target Format
@@ -55,6 +56,9 @@ async function edition(sourceId: string, finish: string): Promise<string> {
 }
 
 async function stubArt(page: Page) {
+  // The Published Deck page is anonymous and loads the art host directly; the signed-in pages use the art route, whose
+  // fetcher reads the art stub.
+  (await artUpstream()).reset();
   await page.route(/^https:\/\/assets\.tcgdex\.net\//, (route) =>
     route.fulfill({ status: 200, contentType: "image/png", body: PIXEL })
   );
