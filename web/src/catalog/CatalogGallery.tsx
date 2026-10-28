@@ -277,15 +277,16 @@ export function CatalogGallery({
     setBusy(true);
     setFailure("");
     const items = queueItems(queue);
-    const outcome = await addCards(target.id, items, pendingAdd);
+    const outcome = await addCards(target.id, target.label, items, pendingAdd);
     busyRef.current = false;
     setBusy(false);
     if (outcome.ok) {
-      setQueue(EMPTY_QUEUE);
+      // A batch that may have completed earlier is settled first (#196): the queue stays for the collector to review.
+      if (!outcome.settledEarlier) setQueue(EMPTY_QUEUE);
       added({
-        locationId: target.id,
-        path: target.label,
-        items,
+        locationId: outcome.locationId,
+        path: outcome.path,
+        items: outcome.items,
         copies: outcome.copies,
         ownerRevision: outcome.ownerRevision,
         undoId: outcome.undoId,
@@ -397,7 +398,8 @@ export function CatalogGallery({
           </p>
           {browse.editions.length > 0 && (
             <ul
-              aria-busy={browse.loading}
+              data-catalog-tiles=""
+              aria-busy={browse.loading || browse.loadingMore}
               className="m-0 grid list-none grid-cols-[repeat(auto-fill,minmax(var(--tile-medium),1fr))] gap-x-(--tile-gap-column) gap-y-(--tile-gap-row) p-0"
             >
               {browse.editions.map((edition, index) => {
@@ -450,12 +452,19 @@ export function CatalogGallery({
               <Button onClick={browse.retry}>Retry</Button>
             </div>
           )}
-          <p aria-live="polite" className="m-0 text-meta text-text-subtle">
-            {browse.loadingMore
-              ? "Loading more cards…"
-              : browse.editions.length > 0 && browse.nextCursor === null
-                ? `All ${browse.editions.length.toLocaleString()} cards shown`
-                : ""}
+          {/* The list is marked busy while a page loads; only the end of the list is announced. */}
+          <p className="m-0 text-meta text-text-subtle empty:hidden">
+            {browse.loadingMore ? "Loading more cards…" : ""}
+          </p>
+          <p
+            aria-live="polite"
+            className="m-0 text-meta text-text-subtle empty:hidden"
+          >
+            {!browse.loadingMore &&
+            browse.editions.length > 0 &&
+            browse.nextCursor === null
+              ? `All ${browse.editions.length.toLocaleString()} cards shown`
+              : ""}
           </p>
         </section>
       )}

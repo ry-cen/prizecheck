@@ -52,6 +52,12 @@ export function MetadataReport({
   const [editionId, setEditionId] = useState(
     initialEditionId ?? editions[0]?.id ?? ""
   );
+  // The picked Edition moved under an open form (#174): the typed text stays and the report follows it.
+  const [followed, setFollowed] = useState(initialEditionId ?? null);
+  if ((initialEditionId ?? null) !== followed) {
+    setFollowed(initialEditionId ?? null);
+    if (initialEditionId) setEditionId(initialEditionId);
+  }
   const [productId, setProductId] = useState("");
   const [variant, setVariant] = useState("");
   const [category, setCategory] = useState("");

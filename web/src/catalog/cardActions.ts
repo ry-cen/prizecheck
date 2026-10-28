@@ -15,6 +15,8 @@ export type AddItem = { editionId: string; quantity: number };
 /** A batch add as sent: one Location, its items in order, and the key that makes a resend replay it. */
 export type AddCommand = {
   locationId: string;
+  /** The Location's path, for messages. */
+  path: string;
   items: readonly AddItem[];
   key: string;
 };
@@ -22,6 +24,12 @@ export type AddCommand = {
 export type AddOutcome =
   | {
       ok: true;
+      /** What was added: this call's items, or the earlier uncertain batch's when `settledEarlier`. */
+      locationId: string;
+      path: string;
+      items: readonly AddItem[];
+      /** An earlier batch that may have completed was replayed first; the items of this call were not sent. */
+      settledEarlier: boolean;
       copies: number;
       editions: number;
       ownerRevision: number;
@@ -47,58 +55,102 @@ function sameItems(a: readonly AddItem[], b: readonly AddItem[]): boolean {
   );
 }
 
+function succeeded(
+  command: AddCommand,
+  result: Awaited<ReturnType<typeof batchAddHoldings>>,
+  settledEarlier: boolean
+): AddOutcome {
+  return {
+    ok: true,
+    locationId: command.locationId,
+    path: command.path,
+    items: command.items,
+    settledEarlier,
+    copies: Number(result.copy_count),
+    editions: result.edition_count,
+    ownerRevision: result.owner_revision,
+    undoId: result.undo_id,
+  };
+}
+
+function send(command: AddCommand) {
+  return batchAddHoldings({
+    location_id: command.locationId,
+    idempotency_key: command.key,
+    items: command.items.map((item) => ({
+      edition_id: item.editionId,
+      quantity: String(item.quantity),
+    })),
+  });
+}
+
+function failed(cause: unknown): Extract<AddOutcome, { ok: false }> {
+  const failure = cause instanceof HoldingError ? cause : null;
+  return {
+    ok: false,
+    code: failure?.code ?? "",
+    editionId: failure?.editionId ?? null,
+    retry: !(failure !== null && failure.status < 500),
+  };
+}
+
 /** Adds copies of up to 200 Card Editions to one Storage Leaf or Deck in one batch add (POST /api/holdings/batch):
  * all or nothing, one owner revision, and one Undo record. A copy is a physical card: the owner revision moves, so an
- * open browse cursor answers 409 afterwards. */
+ * open browse cursor answers 409 afterwards.
+ *
+ * A batch that may have completed (its outcome unknown) is never left behind by a different one (#196): the server
+ * replays it only under its own key, so a changed batch under a new key would add the first one's copies again. When
+ * the items differ, the earlier command is sent again first. If that completes, its result is returned with
+ * `settledEarlier` and the changed items wait for the next call; if its outcome is still unknown, so is the answer
+ * (`retry`), and nothing new is sent. */
 export async function addCards(
   locationId: string,
+  path: string,
   items: readonly AddItem[],
   pending: { current: AddCommand | null }
 ): Promise<AddOutcome> {
   const previous = pending.current;
-  const command =
+  if (
     previous &&
-    previous.locationId === locationId &&
-    sameItems(previous.items, items)
-      ? previous
-      : { locationId, items: [...items], key: crypto.randomUUID() };
+    !(previous.locationId === locationId && sameItems(previous.items, items))
+  ) {
+    try {
+      const result = await send(previous);
+      pending.current = null;
+      return succeeded(previous, result, true);
+    } catch (cause) {
+      const outcome = failed(cause);
+      if (outcome.retry) return outcome;
+      // The server refused it for good (so it never committed), or can no longer say: the new batch goes on its own.
+      pending.current = null;
+      if (outcome.code === "REPLAY_OUTCOME_UNAVAILABLE") return outcome;
+    }
+  }
+  const command = pending.current ?? {
+    locationId,
+    path,
+    items: [...items],
+    key: crypto.randomUUID(),
+  };
   pending.current = command;
   try {
-    const result = await batchAddHoldings({
-      location_id: locationId,
-      idempotency_key: command.key,
-      items: command.items.map((item) => ({
-        edition_id: item.editionId,
-        quantity: String(item.quantity),
-      })),
-    });
+    const result = await send(command);
     pending.current = null;
-    return {
-      ok: true,
-      copies: Number(result.copy_count),
-      editions: result.edition_count,
-      ownerRevision: result.owner_revision,
-      undoId: result.undo_id,
-    };
+    return succeeded(command, result, false);
   } catch (cause) {
-    const failure = cause instanceof HoldingError ? cause : null;
-    const definite = failure !== null && failure.status < 500;
-    if (definite) pending.current = null;
-    return {
-      ok: false,
-      code: failure?.code ?? "",
-      editionId: failure?.editionId ?? null,
-      retry: !definite,
-    };
+    const outcome = failed(cause);
+    if (!outcome.retry) pending.current = null;
+    return outcome;
   }
 }
 
 /** The popup's Add N: `quantity` copies of one Card Edition, as a batch add of one item. */
 export function addToCollection(
   locationId: string,
+  path: string,
   editionId: string,
   quantity: number,
   pending: { current: AddCommand | null }
 ): Promise<AddOutcome> {
-  return addCards(locationId, [{ editionId, quantity }], pending);
+  return addCards(locationId, path, [{ editionId, quantity }], pending);
 }

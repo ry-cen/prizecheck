@@ -267,7 +267,7 @@ export function CatalogCardPopup({
                   <MissingCardReports printingId={ready.printing.id} />
                 ) : (
                   <MetadataReport
-                    key={reportEditionId ?? "printing"}
+                    key={reportEditionId ? "edition" : "printing"}
                     printingId={ready.printing.id}
                     printingName={ready.printing.name}
                     editions={ready.printing.editions.map((edition) => ({
@@ -375,7 +375,7 @@ export function CatalogCardPopup({
           <AskToTrade printingId={ready.printing.id} />
           {selected && (
             <AddRows
-              key={`${cardKey}:${selected.id}`}
+              key={cardKey}
               edition={selected}
               places={places}
               alsoOffer={alsoOffer}
@@ -619,6 +619,13 @@ function AddRows({
   const [failure, setFailure] = useState("");
   const pendingAdd = useRef<AddCommand | null>(null);
   const usable = edition.active;
+  // Another Edition was picked: the count stays, the last Edition's result line goes.
+  const [shownFor, setShownFor] = useState(edition.id);
+  if (shownFor !== edition.id) {
+    setShownFor(edition.id);
+    setDone("");
+    setFailure("");
+  }
 
   async function add() {
     if (!location || busy) return;
@@ -627,18 +634,25 @@ function AddRows({
     setFailure("");
     const outcome = await addToCollection(
       location.id,
+      location.label,
       edition.id,
       count,
       pendingAdd
     );
     setBusy(false);
     if (outcome.ok) {
-      setDone(addedText(count, location.label));
-      setCount(1);
+      // A batch that may have completed earlier is settled first (#196): its copies are reported, and this press's
+      // are not sent until the next one.
+      const copiesAdded = outcome.items.reduce(
+        (sum, item) => sum + item.quantity,
+        0
+      );
+      setDone(addedText(copiesAdded, outcome.path));
+      if (!outcome.settledEarlier) setCount(1);
       onAdded({
-        locationId: location.id,
-        path: location.label,
-        items: [{ editionId: edition.id, quantity: count }],
+        locationId: outcome.locationId,
+        path: outcome.path,
+        items: outcome.items,
         copies: outcome.copies,
         ownerRevision: outcome.ownerRevision,
         undoId: outcome.undoId,

@@ -290,6 +290,36 @@ test.describe("desktop", () => {
     );
   });
 
+  test("picking another Edition keeps the typed report and the Add count, and the report follows the pick (#174)", async ({
+    page,
+  }) => {
+    seedPopup();
+    await signIn(page);
+    await tile(page, "Bulbasaur, MEG 001, Mega Evolution, Normal").click();
+    const card = page.getByRole("dialog", { name: "Bulbasaur" });
+    await expect(editions(page)).toHaveCount(3);
+    await card.getByRole("button", { name: "Report this Edition" }).click();
+    const report = card.getByRole("region", { name: "Report card metadata" });
+    const note = report.getByLabel("Note");
+    const reported = report.getByLabel("Card Edition");
+    await expect(reported.locator("option:checked")).toHaveText("Normal");
+    await note.fill("The price match looks wrong");
+    await addRow(page)
+      .getByRole("button", { name: "Increase Copies to add" })
+      .click();
+    await expect(
+      addRow(page).getByRole("button", { name: "Add 2" })
+    ).toBeVisible();
+
+    await editions(page).nth(1).click();
+    await expect(editions(page).nth(1)).toHaveAttribute("aria-pressed", "true");
+    await expect(note).toHaveValue("The price match looks wrong");
+    await expect(reported.locator("option:checked")).toHaveText("Reverse Holo");
+    await expect(
+      addRow(page).getByRole("button", { name: "Add 2" })
+    ).toBeVisible();
+  });
+
   test("stepping reaches the next page, and the collector's own Add restarts the walk quietly in place", async ({
     page,
   }) => {
