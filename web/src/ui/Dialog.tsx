@@ -38,8 +38,11 @@ const FRAME =
   "flex-col overflow-hidden bg-surface p-0 text-text backdrop:bg-scrim open:flex";
 // There is no --space-16 token: a max-height that names it is invalid and drops out, so the centred panel grew past the
 // screen and its frame clipped the body instead of letting it scroll (#365). Name only tokens tokens.css defines.
+// A phone bottom sheet hangs from the bottom of 100dvh by its own height rather than sitting at bottom:0. Firefox on
+// iPhone drew a bottom:0 sheet out of sight (only the scrim showed) while drawers measured from the top with dvh
+// showed (#364), so the sheet takes the same top-down measure as the drawers.
 const CENTRED =
-  "inset-0 m-auto h-fit max-h-[calc(100dvh-var(--space-8)-var(--space-8))] w-dialog max-w-[calc(100vw-var(--space-8))] rounded-dialog border border-border-strong phone:inset-x-0 phone:top-auto phone:bottom-0 phone:m-0 phone:max-h-[85dvh] phone:w-full phone:max-w-none phone:rounded-b-none phone:border-x-0 phone:border-b-0";
+  "inset-0 m-auto h-fit max-h-[calc(100dvh-var(--space-8)-var(--space-8))] w-dialog max-w-[calc(100vw-var(--space-8))] rounded-dialog border border-border-strong phone:inset-x-0 phone:top-[100dvh] phone:bottom-auto phone:m-0 phone:-translate-y-full phone:max-h-[85dvh] phone:w-full phone:max-w-none phone:rounded-b-none phone:border-x-0 phone:border-b-0";
 const LEFT =
   "inset-y-0 left-0 right-auto m-0 h-dvh max-h-none w-drawer max-w-none rounded-none border-y-0 border-l-0 border-r border-border-strong";
 const RIGHT =
@@ -48,7 +51,7 @@ const WIDE =
   "inset-0 m-auto h-fit max-h-[min(860px,calc(100dvh-var(--space-8)-var(--space-8)))] w-[min(760px,calc(100vw-var(--space-6)-var(--space-6)))] max-w-none rounded-dialog border border-border-strong phone:h-dvh phone:max-h-none phone:w-full phone:rounded-none phone:border-0";
 // WIDE on desktop, CENTRED's bottom sheet on a phone, a little taller so a card's details fit.
 const CARD =
-  "inset-0 m-auto h-fit max-h-[min(860px,calc(100dvh-var(--space-8)-var(--space-8)))] w-[min(760px,calc(100vw-var(--space-6)-var(--space-6)))] max-w-none rounded-dialog border border-border-strong phone:inset-x-0 phone:top-auto phone:bottom-0 phone:m-0 phone:max-h-[92dvh] phone:w-full phone:rounded-b-none phone:border-x-0 phone:border-b-0";
+  "inset-0 m-auto h-fit max-h-[min(860px,calc(100dvh-var(--space-8)-var(--space-8)))] w-[min(760px,calc(100vw-var(--space-6)-var(--space-6)))] max-w-none rounded-dialog border border-border-strong phone:inset-x-0 phone:top-[100dvh] phone:bottom-auto phone:m-0 phone:-translate-y-full phone:max-h-[92dvh] phone:w-full phone:rounded-b-none phone:border-x-0 phone:border-b-0";
 
 /**
  * The kit's one dialog, on the native <dialog> element (ADR 0012). It opens with showModal(), so the
