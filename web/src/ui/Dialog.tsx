@@ -36,8 +36,10 @@ type Props = {
 // resets, are all set here. Each property is set once per width, so no two classes compete.
 const FRAME =
   "flex-col overflow-hidden bg-surface p-0 text-text backdrop:bg-scrim open:flex";
+// There is no --space-16 token: a max-height that names it is invalid and drops out, so the centred panel grew past the
+// screen and its frame clipped the body instead of letting it scroll (#365). Name only tokens tokens.css defines.
 const CENTRED =
-  "inset-0 m-auto h-fit max-h-[calc(100dvh-var(--space-16))] w-dialog max-w-[calc(100vw-var(--space-8))] rounded-dialog border border-border-strong phone:inset-x-0 phone:top-auto phone:bottom-0 phone:m-0 phone:max-h-[85dvh] phone:w-full phone:max-w-none phone:rounded-b-none phone:border-x-0 phone:border-b-0";
+  "inset-0 m-auto h-fit max-h-[calc(100dvh-var(--space-8)-var(--space-8))] w-dialog max-w-[calc(100vw-var(--space-8))] rounded-dialog border border-border-strong phone:inset-x-0 phone:top-auto phone:bottom-0 phone:m-0 phone:max-h-[85dvh] phone:w-full phone:max-w-none phone:rounded-b-none phone:border-x-0 phone:border-b-0";
 const LEFT =
   "inset-y-0 left-0 right-auto m-0 h-dvh max-h-none w-drawer max-w-none rounded-none border-y-0 border-l-0 border-r border-border-strong";
 const RIGHT =
