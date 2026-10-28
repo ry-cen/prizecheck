@@ -986,7 +986,7 @@ PINNED_DIGESTS = {
     (MATCHING, 2): "6994b033232a73138f83cda642e97edc8e75e692e9bba29a3704b913eb7a6eef",
     (MATCHING, 3): "60e02ce648ea81e2177124c2f4a5740897e5481dbecfa20a1a1395dddf184c5e",
     (MATCHING, 4): "6a6b62a2081d42185309a4ba389cd1260409e018c1449de20eb1e0feb797b57a",
-    (MATCHING, 5): "2d4d684153038c490d12bca2474ec997e3a2d1042b3d79f45934a3fa44c85942",
+    (MATCHING, 5): "b2a36de92a7d2c3033b3babcdf1992df3b8b119512f3f91d633a131b6c0b78c5",
 }
 
 
@@ -1306,6 +1306,9 @@ def test_v5_card_product_needs_a_plain_edition_and_a_variant_without_a_tcgdex_id
     assert evaluate_v5(descriptor={"type": "normal", "stamp": ["1st-edition"]}, **card_level(121240)) == (121240, None)
     for bad in (True, "5", 0, -3, 2**31, 1.0, None):
         assert evaluate_v5(**card_level(bad)) == Failure("no_product"), bad
+    sibling = {"set": {"id": "xy11"}, "localId": "116", "name": "Gardevoir EX", "thirdParty": {"tcgplayer": 121240},
+               "variants_detailed": [{"type": "normal"}, {"type": "reverse", "thirdParty": {"tcgplayer": 9}}]}
+    assert evaluate_v5(source_record=sibling, lookup={"variantId": "x"}) == Failure("no_product")  # a sibling has its own id
     assert evaluate_v5(**{**card_level(121240), "lookup": {"thirdParty": {"tcgplayer": 7}}}) == (7, "normal")  # the variant's own id wins
     assert evaluate_v5(**{**card_level(121240), "lookup": {"thirdParty": {"tcgplayer": "x"}}}) == Failure("no_product")
     assert evaluate_v5(**{**card_level(121240), "correspondence": "printing_level"}) == Failure("not_established")
@@ -1317,7 +1320,6 @@ def test_v5_shared_block_accepts_one_product_under_several_keys_only_when_it_is_
             (("1st-edition", "unlimited"), {"type": "normal"}, (10, "normal")),
             (("1st-edition", "unlimited"), {"type": "normal", "stamp": ["1st-edition"]}, (10, None)),
             (("1st-edition-holofoil", "unlimited-holofoil"), {"type": "holo"}, (10, "holofoil")),
-            (("normal", "reverse-holofoil"), {"type": "holo"}, (10, "holofoil")),
             (("normal", "reverse-holofoil", "holofoil"), {"type": "holo", "subtype": "unlimited"}, (10, None))):
         given = v5_facts(lookup=block(*keys), descriptor=descriptor)
         assert MatchingRulesV4.evaluate(given, lambda p, v: False) == Failure("conflict"), keys
@@ -1331,6 +1333,10 @@ def test_v5_shared_block_accepts_one_product_under_several_keys_only_when_it_is_
     odd["pricing"]["tcgplayer"]["unlimited"]["productId"] = True
     for lookup in (two, different_own, no_own, odd):
         assert MatchingRulesV5.evaluate(v5_facts(lookup=lookup), lambda p, v: False) == Failure("conflict"), lookup
+    # No key fits the Edition's finish (swsh9tg TG24, hgss2-26): TCGdex's id may belong to another card.
+    for keys, descriptor in ((("normal", "reverse-holofoil"), {"type": "holo"}), (("holofoil", "reverse-holofoil"), {"type": "normal"}),
+                             (("normal", "holofoil"), {"type": "reverse"})):
+        assert MatchingRulesV5.evaluate(v5_facts(lookup=block(*keys), descriptor=descriptor), lambda p, v: False) == Failure("conflict"), keys
     for descriptor in ({"type": "reverse", "stamp": ["set-logo"]}, {"type": "normal", "foil": "cosmos"}, {"type": "normal", "stamp": ["staff"]}):
         given = v5_facts(lookup=block("normal", "reverse-holofoil"), descriptor=descriptor)
         assert MatchingRulesV5.evaluate(given, lambda p, v: False) == Failure("conflict"), descriptor
@@ -1521,3 +1527,43 @@ def test_v5_tables_follow_the_active_rule_and_v4_ignores_the_30th_sets(tcgplayer
     run(Records(thirty("th-21", "021", "Greninja ex")))
     activate(MATCHING, 4)
     assert rematched() == 0 and states("th-21") == [("unverified", "rule_failed", None, None)]
+
+
+def test_v5_card_level_id_change_quarantines_an_edition_verified_from_it(tcgplayer_products):
+    reset_catalog()
+    run(Records(xy11_116()))
+    activate(MATCHING, 5)
+    assert states("xy11-116") == [("verified", None, 121240, "normal")]
+    run(Records(xy11_116(product=121241)))
+    assert states("xy11-116") == [("quarantined", "candidate_changed", 121240, "normal")]
+    reset_catalog()
+    run(Records(xy11_116()))
+    activate(MATCHING, 5)
+    run(Records(with_card_id({**xy11_116(), "rarity": "Rare"}, 121240)))  # an unrelated change is accepted silently
+    assert states("xy11-116") == [("verified", None, 121240, "normal")]
+
+
+def test_v5_name_only_count_folds_case_like_the_name_match(tcgplayer_products):
+    reset_catalog()
+    thirty_products()
+    run(Records(thirty("c-7", "007", "Eevee", "30th-c"), thirty("c-8", "008", "EEVEE", "30th-c")))
+    activate(MATCHING, 5)
+    assert states("c-7") == [("unverified", "rule_failed", None, None)] == states("c-8")
+
+
+def test_v5_activation_rechecks_only_unverified_editions_that_are_not_auto_closed(tcgplayer_products):
+    reset_catalog()
+    run(Records(xy11_116("open-1", "1", 500), xy11_116("closed-2", "2", 501), xy11_116("quarantined-3", "3", 502),
+                xy11_116("decided-4", "4", 503)))
+    activate(MATCHING, 4)
+    with connect() as conn:
+        def mark(source, sql):
+            conn.execute(f"""UPDATE catalog_edition_metadata SET {sql} WHERE edition_id IN (SELECT e.id FROM catalog_edition e
+              JOIN catalog_printing p ON p.id=e.printing_id WHERE p.source_id=%s)""", (source,))
+        mark("closed-2", "auto_closed=true")
+        mark("quarantined-3", "mapping_state='quarantined',mapping_reason='candidate_changed',auto_closed=true")
+        mark("decided-4", "mapping_reason='reviewed_unmapped',auto_closed=true")
+    before = {source: states(source) for source in ("closed-2", "quarantined-3", "decided-4")}
+    assert activate(MATCHING, 5) == {"printings": 0, "editions": 1}
+    assert states("open-1") == [("verified", None, 500, "normal")]
+    assert {source: states(source) for source in before} == before

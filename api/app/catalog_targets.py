@@ -411,10 +411,14 @@ class MatchingRulesV5(MatchingRulesV4):
     TCGPLAYER_GROUPS = {**MatchingRulesV4.TCGPLAYER_GROUPS, "30th": 24722, "30th-c": 24837}
     NAME_ONLY_SETS = frozenset({"30th-c"})
     MAX_PRODUCT = 2**31 - 1
+    FINISH_KEYS = {"holo": frozenset(("holofoil", "1st-edition-holofoil", "unlimited-holofoil")),
+                   "normal": frozenset(("normal", "1st-edition", "unlimited")), "reverse": frozenset(("reverse-holofoil",))}
 
     @classmethod
     def table(cls):
-        return {**super().table(), "name_only_sets": sorted(cls.NAME_ONLY_SETS)}
+        # The set-path readers and the projection are not rule classes, so their source is part of the approved rule.
+        return {**super().table(), "name_only_sets": sorted(cls.NAME_ONLY_SETS), "set_path_facts": _source(set_path_facts),
+                "tcgplayer_candidates": _source(tcgplayer_candidates), "rule_projection": _source(rule_projection)}
 
     @classmethod
     def usable_product(cls, value):
@@ -426,6 +430,9 @@ class MatchingRulesV5(MatchingRulesV4):
         if cls.has_tcgdex_id(facts["lookup"]) or not isinstance(facts["descriptor"], dict) or cls.special(facts["descriptor"]):
             return None
         record = facts.get("source_record")
+        detailed = record.get("variants_detailed") if isinstance(record, dict) else None
+        if isinstance(detailed, list) and any(cls.listed_product(item) is not None for item in detailed):
+            return None  # a sibling variant has its own id: the card's product may not be this variant's
         third_party = record.get("thirdParty") if isinstance(record, dict) else None
         product = third_party.get("tcgplayer") if isinstance(third_party, dict) else None
         return product if cls.usable_product(product) else None
@@ -443,6 +450,10 @@ class MatchingRulesV5(MatchingRulesV4):
         listed_products = [value["productId"] for key, value in block.items()
                            if key not in cls.BLOCK_METADATA and isinstance(value, dict) and "productId" in value]
         own = cls.listed_product(lookup)
+        plain = cls.plain(facts["descriptor"])
+        fitting = cls.FINISH_KEYS.get(plain.get("type", plain.get("finish")), frozenset())
+        if not fitting & {key for key in block if key not in cls.BLOCK_METADATA}:
+            return None  # no key of the block fits this Edition's finish: TCGdex's id may be another card's
         if len(listed_products) < 2 or not cls.usable_product(own) or any(product != own or type(product) is not int
                                                                           for product in listed_products):
             return None
@@ -548,6 +559,14 @@ def edition_state(row) -> EditionState:
     return EditionState(*(row[column] for column in EDITION_COLUMNS))
 
 
+def rule_projection(mapping_candidate):
+    """The candidate inputs a verified mapping depends on. The card-level TCGplayer ID counts only when the candidate carries
+    it, which ``catalog.edition_metadata`` does only for an Edition whose own lookup names no TCGdex ID."""
+    projection = MatchingRulesV1.projection(mapping_candidate.get("correspondence"), mapping_candidate.get("candidate") or {})
+    card = mapping_candidate.get("card_tcgplayer")
+    return projection if card is None else {**projection, "card_tcgplayer": card}
+
+
 def _product_variant(facts, found):
     [(key, product)] = found.items()
     return product, MatchingRulesV1.variant(facts["descriptor"], key)
@@ -564,7 +583,8 @@ def evaluate_edition(current, facts, rejections, active, verified_elsewhere):
     candidate_fp = facts["fingerprint"]
     if current.state == "quarantined":
         return current  # Strict clearing: nothing but a maintainer decision lifts it.
-    projection_fp = fingerprint(MatchingRulesV1.projection(facts["correspondence"], facts["lookup"]))
+    projection_fp = fingerprint(rule_projection({"correspondence": facts["correspondence"], "candidate": facts["lookup"],
+                                                 "card_tcgplayer": facts.get("card_tcgplayer")}))
     if current.state == "verified":
         if candidate_fp == current.accepted_fingerprint or candidate_fp in rejections:
             return current
@@ -794,7 +814,7 @@ def set_path_facts(conn, rule, row):
         return {}
     facts = {"tcgplayer_candidates": tcgplayer_candidates(conn, row["set_id"], row["collector_number"], rule)}
     if row["set_id"] in getattr(rule, "NAME_ONLY_SETS", ()):
-        facts["set_name_count"] = conn.execute("SELECT count(*) AS n FROM catalog_printing_display WHERE set_id=%s AND display_name=%s",
+        facts["set_name_count"] = conn.execute("SELECT count(*) AS n FROM catalog_printing_display WHERE set_id=%s AND lower(display_name)=lower(%s)",
                                                (row["set_id"], row["display_name"])).fetchone()["n"]
     return facts
 
@@ -823,7 +843,8 @@ def refresh_editions(conn, context, edition_ids, complete=False):
         if not candidate:
             continue  # Never imported: nothing to evaluate.
         facts = {"fingerprint": fingerprint(candidate), "correspondence": candidate.get("correspondence"),
-                 "lookup": candidate.get("candidate") or {}, "descriptor": row["descriptor"], "source": row["source"],
+                 "lookup": candidate.get("candidate") or {}, "card_tcgplayer": candidate.get("card_tcgplayer"),
+                 "descriptor": row["descriptor"], "source": row["source"],
                  "source_id": row["source_id"], "source_record": row["source_record"] or {},
                  "display": {"set_id": row["set_id"], "collector_number": row["collector_number"],
                              "display_name": row["display_name"]} if row["set_id"] is not None else None}

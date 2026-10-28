@@ -38,30 +38,36 @@ def special(plain) -> bool:
 
 def sub_type_for(descriptor, offered: frozenset[str]) -> tuple[str | None, str | None]:
     """(sub_type_name, None) or (None, reason). Pure."""
+    return _sub_type(descriptor, offered)[:2]
+
+
+def _sub_type(descriptor, offered: frozenset[str]):
+    """(sub_type_name, reason, fallback): fallback is True when the only offered Normal/Holofoil row was taken for a
+    mislabelled finish rather than named by the descriptor."""
     plain = MatchingRulesV3.plain(descriptor)
     if not isinstance(plain, dict) or is_unspecified(plain):
-        return None, "unspecified_variant"
+        return None, "unspecified_variant", False
     if plain.get("size", "standard") != "standard":
-        return None, "uncovered_variant"
+        return None, "uncovered_variant", False
     kind = plain.get("type", plain.get("finish"))
     finish = FINISH.get(kind) if isinstance(kind, str) else None
     first = FIRST_EDITION in [s for s in stamps_of(plain) if isinstance(s, str)]
     extra = special(plain)
     names = NAMES.get((finish, first))
     if names is None:
-        return None, "uncovered_variant"
+        return None, "uncovered_variant", False
     if not offered:
-        return None, "no_product_rows"
+        return None, "no_product_rows", False
     hits = [name for name in names if name in offered]
     if len(hits) == 1:
-        return hits[0], None
+        return hits[0], None, False
     if hits:
-        return None, "ambiguous"
+        return None, "ambiguous", False
     # TCGdex sometimes labels a promo's finish wrongly: an ordinary normal/holo Edition takes the product's only price.
     if not first and not extra and finish in ("normal", "holo") and len(offered) == 1 \
             and next(iter(offered)) in ("Normal", "Holofoil"):
-        return next(iter(offered)), None
-    return None, "uncovered_variant"
+        return next(iter(offered)), None, True
+    return None, "uncovered_variant", False
 
 
 def resolve(rows):
@@ -71,9 +77,9 @@ def resolve(rows):
     resolved = []
     for row in rows:
         offered = row["offered"] or {}
-        sub, reason = sub_type_for(row["descriptor"], frozenset(offered))
+        sub, reason, fallback = _sub_type(row["descriptor"], frozenset(offered))
         resolved.append([row["id"], row["product_id"], row["mapping_revision"], sub, reason, bool(sub and offered.get(sub)),
-                         row["descriptor"]])
+                         row["descriptor"], fallback])
     # Shared-price guard: one product row cannot price two physical Editions.
     holders = {}
     for item in resolved:
@@ -81,7 +87,9 @@ def resolve(rows):
             holders.setdefault((item[1], item[3]), []).append(item)
     for group in holders.values():
         if len(group) > 1:
-            for item in group:
+            exact = [item for item in group if not item[7]]
+            # One exact hit keeps the row; Editions that only fell back to it are unbound. Any other collision unbinds all.
+            for item in (group if len(exact) != 1 else [item for item in group if item[7]]):
                 item[3], item[4], item[5] = None, "shared_price", False
     # Special Editions are priced only from a product no other verified Edition holds.
     on_product = {}

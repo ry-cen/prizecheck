@@ -940,7 +940,7 @@ def all_bindings():
         return {str(r["edition_id"]): (r["sub_type_name"], r["reason"]) for r in conn.execute("SELECT * FROM edition_price_binding")}
 
 
-def test_verifying_a_second_edition_onto_a_bound_product_leaves_neither_bound_nor_published(world, price_store):
+def test_verifying_a_second_edition_onto_a_bound_product_unbinds_only_the_one_that_fell_back_to_its_subtype(world, price_store):
     with connect() as conn:  # a holo Edition of the same Printing; with one "Normal" row it takes the same product subtype
         holo = str(conn.execute("""INSERT INTO catalog_edition(printing_id,descriptor_key,descriptor)
           VALUES (%s,'holo-extra','{"type":"holo"}') RETURNING id""", (world["printing"],)).fetchone()["id"])
@@ -953,8 +953,9 @@ def test_verifying_a_second_edition_onto_a_bound_product_leaves_neither_bound_no
     second = decide(evidence("editions", holo), "correct", {"product_id": 1001, "quote_variant": None})
     assert second.status_code == 200, second.text
     price_binding.join_spawned_rebinds()
-    assert all_bindings() == {world["normal"]: (None, "shared_price"), holo: (None, "shared_price")}
-    assert price_records(price_store) == {}
+    # The holo Edition only fell back to the lone Normal row; the normal Edition named it exactly and keeps its price.
+    assert all_bindings() == {world["normal"]: ("Normal", None), holo: (None, "shared_price")}
+    assert price_records(price_store) == {world["normal"]: "2"}
 
 
 def test_a_decision_returns_before_a_busy_price_lock_frees(world, price_store):

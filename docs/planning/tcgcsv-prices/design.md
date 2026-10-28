@@ -661,8 +661,19 @@ binding (§4.3), not taken from TCGdex:
 - with both `Normal` and `Holofoil` offered, it binds the descriptor's finish, so a mislabelled finish never takes
   another finish's price.
 
-`price_binding.py` does not change. It replaces the earlier "card's only finish" idea, which read the card's `pricing`
-block. The import does not keep that block.
+The binding's subtype choice does not change, but its shared-price guard (`resolve`) does, in one place. When two Editions
+land on one `(product, subtype)` and exactly one of them named that subtype exactly, the exact Edition keeps the price and
+only the Editions that reached it through the single-row fallback are unbound. Without this, ex13-111 Mew would lose its
+holo price: the holo Edition's borrowed `holofoil` block binds `Holofoil` exactly, while the normal Edition (card-level id
+only) falls back to the same lone `Holofoil` row. Two exact hits, or only fallbacks, still unbind all. This replaces the
+earlier "card's only finish" idea, which read the card's `pricing` block. The import does not keep that block.
+
+The card-level id is also part of the Edition's candidate (`card_tcgplayer`, kept only for an Edition whose own lookup names
+no TCGdex id) and of its rule projection, so a TCGdex correction of the card's id quarantines an Edition verified from it as
+`candidate_changed`. `card_product` refuses a card where any variant carries its own id. Source 4 additionally needs one
+block key that fits the Edition's finish (holo: `holofoil`, `1st-edition-holofoil`, `unlimited-holofoil`; normal: `normal`,
+`1st-edition`, `unlimited`; reverse: `reverse-holofoil`), because TCGdex's ids on some Trainer Gallery and promo cards point
+at another card.
 
 **Source 4: one product listed under several finish keys (`shared_block_product`, ticket P13, #380).** Investigated on the
 dev catalog on 2026-10-27 by running the released v4 code over all 3,121 unverified `rule_failed` Editions whose

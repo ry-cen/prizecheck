@@ -172,6 +172,21 @@ def test_a_staff_edition_sharing_the_unstamped_product_is_shared_price(world):
     assert bindings()[plain] == (10, "Reverse Holofoil", None)  # only the staff copy is held back when the subtypes differ
 
 
+def test_an_exact_subtype_hit_keeps_its_price_and_only_the_fallback_edition_is_unbound(world):
+    stock((10, "Holofoil", 5))
+    holo, normal = add_editions(world, [(HOLO, 10), (NORMAL, 10)])  # the normal Edition only falls back to the lone Holofoil row
+    counts = do_rebind()
+    assert bindings() == {holo: (10, "Holofoil", None), normal: (10, None, "shared_price")}
+    assert (counts["bound"], counts["priced"], counts["shared_price"]) == (1, 1, 1)
+
+
+def test_two_exact_hits_on_one_subtype_still_unbind_both(world):
+    stock((10, "Holofoil", 5))
+    first, second = add_editions(world, [(HOLO, 10), ({"type": "holo", "thirdParty": {"tcgplayer": 10}}, 10)])
+    do_rebind()
+    assert bindings() == {first: (10, None, "shared_price"), second: (10, None, "shared_price")}
+
+
 def test_a_foil_edition_sharing_a_product_with_the_same_subtype_unbinds_both(world):
     stock((10, "Holofoil", 1))
     plain, foil = add_editions(world, [(HOLO, 10), ({"type": "holo", "foil": "cosmos"}, 10)])
