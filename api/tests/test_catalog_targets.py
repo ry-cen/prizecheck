@@ -1611,7 +1611,11 @@ def test_v5_a_gained_card_field_is_enrichment_and_a_later_change_or_removal_quar
     run(Records(xy11_116()))
     assert states("xy11-116") == [("verified", None, 121240, "normal")]
     after = accepted_projection_of("xy11-116")
-    assert after["mapping_revision"] == revision and after["accepted_projection"] != row["mapping_candidate"] and after["accepted_fingerprint"]
+    with connect() as conn:
+        stored = conn.execute("SELECT mapping_candidate FROM catalog_edition_metadata WHERE edition_id=%s",
+                              (row["edition_id"],)).fetchone()["mapping_candidate"]
+    assert stored["card_tcgplayer"] == 121240 and after["mapping_revision"] == revision
+    assert after["accepted_projection"] == fingerprint(rule_projection(stored)) and after["accepted_fingerprint"] == fingerprint(stored)
     run(Records(xy11_116(product=121241)))
     assert states("xy11-116") == [("quarantined", "candidate_changed", 121240, "normal")]
     reset_catalog()

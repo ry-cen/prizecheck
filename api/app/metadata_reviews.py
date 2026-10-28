@@ -23,7 +23,8 @@ from . import public_catalog
 from .price_binding import spawn_rebind
 from .catalog_targets import (LIVE, MATCHING, REGISTRIES, MatchingRulesV1, MatchingRulesV2, TargetContext,
                               code_digest, fingerprint, is_unspecified,
-                              load_active, refresh_editions, refresh_printing, reviewed_rule, verified_elsewhere)
+                              load_active, refresh_editions, refresh_printing, reviewed_rule, rule_projection,
+                              verified_elsewhere)
 from .holdings import fail
 from .db import connect
 from .identity import require_owner, verified_user
@@ -593,8 +594,7 @@ def decide(command: MetadataDecisionInput, user_id: str = Depends(verified_user)
                              (command.target, command.printing_id, command.edition_id, source_fingerprint, decision_id))
             if kind == "edition":
                 candidate = loaded["source_candidate"]
-                projection = (fingerprint(MatchingRulesV1.projection(candidate.get("correspondence"), candidate.get("candidate") or {}))
-                              if source_fingerprint else None)
+                projection = fingerprint(rule_projection(candidate)) if source_fingerprint else None
                 apply_marketplace(conn, context, target_id, plan, decision_id, source_fingerprint, projection)
             else:
                 apply_live(conn, context, target_id, plan, decision_id)
