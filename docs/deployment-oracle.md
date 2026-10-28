@@ -53,7 +53,8 @@ The edge network is `10.201.80.0/24` (compose network `prizecheck-prod_edge`). S
 | `deploy/oracle/Caddyfile`, `deploy/docker/nginx.conf`                                   | The deploy key as a forced command (step 9)                     |
 | Health checks, smoke checks, pre-migration backups, automatic rollback, public check    | GitHub environment, secrets and variables (step 11)             |
 | Repository tests that pin the compose overlay, the Caddyfile, nginx and the host script | DNS and Caddy (step 12)                                         |
-|                                                                                         | First release, owner binding, edge checks (steps 13 to 15)      |
+| `deploy/host/prizecheck-catalog-refresh.service` and `.timer`                           | First release, owner binding, edge checks (steps 13 to 15)      |
+|                                                                                         | The daily catalog refresh timer (step 16)                       |
 
 Nothing in this guide has been run against an Oracle instance yet. Commands and messages quoted from the repository come from the files themselves; where the guide relies on behaviour of Oracle, Ubuntu, Docker, Caddy, Tailscale or Discord that the repository can't confirm, it says so.
 
@@ -685,7 +686,7 @@ The count must be `0`. Caddy may well log that the upstream refused the connecti
 
 ## 16. Install the daily catalog refresh timer
 
-Install the timer only once the price import step ([#355](https://github.com/ry-cen/prizecheck/issues/355)) is in the deployed release, so the first scheduled run includes prices. A timer installed earlier runs the check and the scanner index only. The step runs after the first release (step 13) and the first catalog pull (step 14), because the check needs a deployed release and an active catalog.
+The timer runs `prizecheck-deploy.sh catalog-refresh`, which imports the TCGCSV prices, then checks TCGdex for catalog changes, then runs the scanner index. Install it after the first release (step 13) and the first catalog pull (step 14), because the check needs a deployed release and an active catalog. Install it only once the price import ([#355](https://github.com/ry-cen/prizecheck/issues/355)) is in the deployed release and the installed `prizecheck-deploy.sh` is that release's copy (see "Updating the host files"): an older script runs the check and the index only, and the daily prices would silently stop being imported. Until then, import the prices by hand each day (`prizecheck-deploy.sh tool /app/scripts/price_import_job.py`).
 
 From your workstation, in a checkout of the deployed commit, copy the units to the `ubuntu` user's home:
 
@@ -723,7 +724,7 @@ sudo systemctl start --no-block prizecheck-catalog-refresh
 journalctl -u prizecheck-catalog-refresh -f
 ```
 
-The script's output lands in the journal: `journalctl -u prizecheck-catalog-refresh`. `systemctl status prizecheck-catalog-refresh` shows whether the last run exited 0. When nothing changed, the run ends after the check and the scanner index, with "Catalog refresh finished". Owner controls shows the last automatic check. The exit codes are in [portable jobs](operations/portable-jobs.md).
+The script's output lands in the journal: `journalctl -u prizecheck-catalog-refresh`. `systemctl status prizecheck-catalog-refresh` shows whether the last run exited 0. When nothing changed, the run still imports the prices and runs the scanner index (it is skipped only after a pull the check started that failed), then ends with "Catalog refresh finished". Once [#340](https://github.com/ry-cen/prizecheck/issues/340) is deployed, Owner controls shows the last automatic check. The exit codes are in [portable jobs](operations/portable-jobs.md).
 
 The units are host files, not part of the release. Reinstall the timer on every new host, including a move to AWS, with the commands above. After a commit changes either unit, copy and `install` it again and run `sudo systemctl daemon-reload`; systemd keeps using the old unit until then. Stopping the service (`systemctl stop`) ends the script but not a container it already started; `docker ps --filter label=prizecheck.job=catalog-refresh` lists those, and the next deploy stops them.
 

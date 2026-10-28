@@ -299,6 +299,7 @@ class DeployPipelineTest(unittest.TestCase):
 
     def test_the_catalog_refresh_units_run_the_subcommand_daily_and_not_on_boot(self):
         self.assertIn('Type=oneshot', UNIT_SERVICE)
+        self.assertRegex(UNIT_SERVICE, r'(?m)^Description=.*price import.*catalog change check.*scanner index')
         self.assertIn('ExecStart=/bin/bash /opt/prizecheck-prod/bin/prizecheck-deploy.sh catalog-refresh\n', UNIT_SERVICE)
         self.assertIn('TimeoutStartSec=infinity', UNIT_SERVICE)
         self.assertNotIn('Restart=', UNIT_SERVICE)

@@ -379,7 +379,7 @@ The dev host needs no schedule; pulling by hand from Owner controls keeps workin
 bash /mnt/cache/appdata/prizecheck-dev/bin/prizecheck-deploy.sh catalog-refresh
 ```
 
-It pulls only when the card list changed, then runs the scanner index. Its output appears in the User Scripts log. The systemd units in `deploy/host/` are for the Oracle host and are not used here.
+It imports the TCGCSV prices, checks TCGdex for catalog changes (pulling only when the card list changed), then runs the scanner index (skipped only after a pull the check started that failed). Its output appears in the User Scripts log. The systemd units in `deploy/host/` are for the Oracle host and are not used here.
 
 ## Updating the host files
 

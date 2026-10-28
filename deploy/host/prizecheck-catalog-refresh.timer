@@ -1,5 +1,5 @@
 [Unit]
-Description=Run the PrizeCheck catalog change check daily (ADR 0018)
+Description=Run the PrizeCheck price import, catalog change check and scanner index daily (ADR 0018, ADR 0019)
 
 [Timer]
 OnCalendar=*-*-* 04:00:00 UTC

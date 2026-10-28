@@ -1,5 +1,5 @@
 [Unit]
-Description=PrizeCheck daily catalog change check and scanner index (ADR 0018)
+Description=PrizeCheck daily price import, catalog change check and scanner index (ADR 0018, ADR 0019)
 Wants=docker.service network-online.target
 After=docker.service network-online.target
 
@@ -12,7 +12,7 @@ ExecStart=/bin/bash /opt/prizecheck-prod/bin/prizecheck-deploy.sh catalog-refres
 # Output goes to the journal: journalctl -u prizecheck-catalog-refresh
 StandardOutput=journal
 StandardError=journal
-# A full pull plus the scanner index can take more than an hour on 1 OCPU, so the run has no time limit.
+# The price import, a full pull and the scanner index can take more than an hour on 1 OCPU, so the run has no time limit.
 TimeoutStartSec=infinity
 # No Restart: the timer starts the next run, and the script's own non-blocking lock makes overlapping runs harmless.
 # Stopping the unit ends the script and its docker client, not the one-off containers compose started; they keep running
