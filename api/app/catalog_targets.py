@@ -19,6 +19,8 @@ import unicodedata
 from collections import Counter
 from dataclasses import dataclass, replace
 
+from .price_import import number_key
+
 LIVE = "live_derivation"
 MATCHING = "marketplace_matching"
 UNSPECIFIED_LABEL = "Unspecified Variant"
@@ -276,8 +278,103 @@ class MatchingRulesV3(MatchingRulesV2):
         return super().evaluate({**facts, "descriptor": cls.plain(facts["descriptor"])}, verified_elsewhere)
 
 
+class MatchingRulesV4(MatchingRulesV3):
+    """V3, then two more reviewed product sources, both behind every V1 physical check.
+
+    1. The variant's own TCGdex ``thirdParty.tcgplayer`` ID, when V3 finds no product in the priced block (the block is
+       absent or lists none). V3's ``conflict`` outcomes are never overridden.
+    2. The reviewed Black Star promo path, only for a Printing with no TCGdex product ID anywhere whose set is in
+       ``TCGPLAYER_GROUPS``: the TCGCSV group's products on the card's number, accepted when exactly one has a name that
+       equals the card's name once one trailing number qualifier is removed. Only an Edition without a special facet
+       (a stamp other than 1st Edition, foil, another subtype or size) takes it. Everything else stays ``no_product``.
+
+    New sets or changes to the name rule ship as a later rule version, never as an edit of this class.
+    """
+    TCGPLAYER_GROUPS = {"basep": 1418, "np": 1423, "dpp": 1421, "hgssp": 1453, "bwp": 1407, "xyp": 1451, "smp": 1861,
+                        "swshp": 2545, "svp": 22872, "mep": 24451}
+    FIRST_EDITION = "1st-edition"
+    PLAIN_FACETS = frozenset(("type", "finish", "size", "subtype", "stamp"))
+    PAREN_QUALIFIER = re.compile(r" \(([^()]+)\)$")
+
+    @classmethod
+    def table(cls):
+        # number_key lives in price_import and fills tcgplayer_product.number_key; its source is part of the approved rule.
+        return {**super().table(), "tcgplayer_groups": dict(cls.TCGPLAYER_GROUPS), "number_key": _source(number_key)}
+
+    @classmethod
+    def number_key(cls, number):
+        return number_key(number)
+
+    @staticmethod
+    def fold(text):
+        return " ".join(unicodedata.normalize("NFC", text).split()).casefold()
+
+    @classmethod
+    def match_name(cls, product_name, number):
+        """The product name, folded, minus one trailing " - <n>" or " (<n>)" qualifier naming this card's own number."""
+        name, own = cls.fold(product_name), cls.number_key(number)
+        head, dash, tail = name.rpartition(" - ")
+        if dash and own is not None and not re.search(r"[()\[\]]", tail) and cls.number_key(tail) == own:
+            return head.rstrip()
+        found = cls.PAREN_QUALIFIER.search(name)
+        if found and own is not None and cls.number_key(found.group(1)) == own:
+            return name[:found.start()].rstrip()
+        return name
+
+    @classmethod
+    def listed_product(cls, lookup):
+        third_party = lookup.get("thirdParty") if isinstance(lookup, dict) else None
+        return third_party.get("tcgplayer") if isinstance(third_party, dict) else None
+
+    @classmethod
+    def has_tcgdex_id(cls, lookup):
+        return bool(cls.products(lookup)[1]) or cls.listed_product(lookup) is not None
+
+    @classmethod
+    def matched_by_number(cls, facts):
+        """Whether the card-number path (not a TCGdex ID) is what can name this Edition's product."""
+        display = facts.get("display")
+        return bool(display) and display["set_id"] in cls.TCGPLAYER_GROUPS and not cls.has_tcgdex_id(facts["lookup"])
+
+    @classmethod
+    def special(cls, descriptor):
+        plain = cls.plain(descriptor)
+        stamps = plain.get("stamp") or []
+        return (bool(set(plain) - cls.PLAIN_FACETS) or plain.get("size", "standard") != "standard"
+                or plain.get("subtype") not in (None, "unlimited", "shadowless")
+                or not isinstance(stamps, list) or any(stamp != cls.FIRST_EDITION for stamp in stamps))
+
+    @classmethod
+    def promo_product(cls, facts):
+        """The one TCGCSV product on the card's number whose name equals the card's, or None."""
+        if cls.special(facts["descriptor"]):
+            return None
+        display = facts["display"]
+        wanted = cls.fold(display["display_name"])
+        exact = {candidate["product_id"] for candidate in facts.get("tcgplayer_candidates") or ()
+                 if cls.match_name(candidate["name"], display["collector_number"]) == wanted}
+        return next(iter(exact)) if len(exact) == 1 else None
+
+    @classmethod
+    def evaluate(cls, facts, verified_elsewhere):
+        result = super().evaluate(facts, verified_elsewhere)
+        if not (isinstance(result, Failure) and result.reason == "no_product"):
+            return result
+        listed = cls.listed_product(facts["lookup"])
+        if type(listed) is int and 1 <= listed <= 2**31 - 1:
+            product = listed
+        elif cls.matched_by_number(facts):
+            product = cls.promo_product(facts)
+        else:
+            product = None
+        if product is None:
+            return result
+        variant = cls.finish_key(cls.plain(facts["descriptor"]))
+        return Failure("duplicate") if verified_elsewhere(product, variant) else (product, variant)
+
+
 LIVE_RULES = {1: LiveRulesV1}
-MATCHING_RULES = {1: MatchingRulesV1, 2: MatchingRulesV2, 3: MatchingRulesV3}
+MATCHING_RULES = {1: MatchingRulesV1, 2: MatchingRulesV2, 3: MatchingRulesV3, 4: MatchingRulesV4}
 REGISTRIES = {LIVE: LIVE_RULES, MATCHING: MATCHING_RULES}
 
 
@@ -558,6 +655,16 @@ def verified_elsewhere(conn, printing_id, edition_id):
     return held
 
 
+def tcgplayer_candidates(conn, set_id, collector_number):
+    """TCGCSV products in the set's reviewed group on the card's number, for matching rule v4's promo path."""
+    key = number_key(collector_number)
+    if key is None:
+        return []
+    return [{"product_id": row["product_id"], "name": row["name"], "number": row["number"]} for row in conn.execute(
+        "SELECT product_id,name,number FROM tcgplayer_product WHERE group_id=%s AND number_key=%s ORDER BY product_id",
+        (MatchingRulesV4.TCGPLAYER_GROUPS[set_id], key))]
+
+
 def refresh_editions(conn, context, edition_ids, complete=False):
     """Re-evaluate marketplace state for Editions whose candidate changed or whose rule changed.
 
@@ -585,6 +692,8 @@ def refresh_editions(conn, context, edition_ids, complete=False):
                  "source_id": row["source_id"], "source_record": row["source_record"] or {},
                  "display": {"set_id": row["set_id"], "collector_number": row["collector_number"],
                              "display_name": row["display_name"]} if row["set_id"] is not None else None}
+        if row["set_id"] in MatchingRulesV4.TCGPLAYER_GROUPS:
+            facts["tcgplayer_candidates"] = tcgplayer_candidates(conn, row["set_id"], row["collector_number"])
         rejections = LazySet(lambda edition_id=row["id"]: [r["source_fingerprint"] for r in conn.execute(
             "SELECT source_fingerprint FROM catalog_metadata_rejection WHERE edition_id=%s AND target='marketplace'",
             (edition_id,))])
@@ -692,6 +801,26 @@ def activate_rule(conn, kind, version, reviewer_id, evidence_url, reason):
       WHERE mapping_state='verified' AND quote_variant IS NULL AND mapping_basis='matching_rule' ORDER BY edition_id""")]
     changed += sum(refresh_editions(conn, context, ids[start:start + 500], complete=True) for start in range(0, len(ids), 500))
     return {"printings": 0, "editions": changed}
+
+
+def rematch_promos(conn, batch=500):
+    """Re-evaluate unverified ``rule_failed`` Editions of the reviewed promo sets under the active rule; returns the count changed.
+
+    For promos TCGCSV lists after the rule was activated. Batches of ``batch`` Editions, each in its own transaction.
+    Does nothing without an active matching rule, so an Edition is never relabelled ``no_matching_rule`` here.
+    """
+    if load_active(conn, MATCHING) is None:
+        return 0
+    ids = [row["edition_id"] for row in conn.execute("""SELECT m.edition_id FROM catalog_edition_metadata m
+      JOIN catalog_edition e ON e.id=m.edition_id JOIN catalog_printing_display d ON d.printing_id=e.printing_id
+      WHERE m.mapping_state='unverified' AND NOT m.auto_closed AND m.mapping_reason='rule_failed' AND d.set_id=ANY(%s)
+      ORDER BY m.edition_id""", (list(MatchingRulesV4.TCGPLAYER_GROUPS),))]
+    changed = 0
+    for start in range(0, len(ids), batch):
+        with conn.transaction():
+            conn.execute("SELECT catalog_begin_correction()")
+            changed += refresh_editions(conn, TargetContext(conn), ids[start:start + batch])
+    return changed
 
 
 AUTOMATIC_MATCHING_EVIDENCE = "https://github.com/ry-cen/tcg-tracker/blob/dev/api/app/catalog_targets.py"
