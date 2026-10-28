@@ -77,6 +77,19 @@ export function putAwayItems(
   }));
 }
 
+/**
+ * The Put away dialog's progress after `done` of `total` cards are staged, in batches of `batch`: null once the last
+ * batch is in (the commit's own text follows) and for a list that fits in one batch (nothing to report between).
+ */
+export function stagedText(
+  done: number,
+  total: number,
+  batch: number
+): string | null {
+  if (total <= batch || done >= total) return null;
+  return `Prepared ${done.toLocaleString("en-US")} of ${total.toLocaleString("en-US")} cards…`;
+}
+
 /** "1 copy", "3 copies", "25,000 copies". */
 export function copiesText(count: bigint): string {
   return `${count.toLocaleString("en-US")} ${count === 1n ? "copy" : "copies"}`;

@@ -18,6 +18,7 @@ import {
   copiesText,
   putAwayFailure,
   putAwayItems,
+  stagedText,
   surplusCards,
   surplusTotal,
 } from "./surplusModel";
@@ -241,11 +242,18 @@ export function usePutAway({ deckId, deckName, surplus, onChanged }: Options) {
           pending.current = null;
           setProgress("Preparing…");
           const manifest = await startMove(deckId);
-          for (let start = 0; start < items.length; start += STAGE_BATCH)
+          for (let start = 0; start < items.length; start += STAGE_BATCH) {
             await stageMove(
               manifest.id,
               items.slice(start, start + STAGE_BATCH)
             );
+            const text = stagedText(
+              start + STAGE_BATCH,
+              items.length,
+              STAGE_BATCH
+            );
+            if (text) setProgress(text);
+          }
           attempt = {
             manifestId: manifest.id,
             key: crypto.randomUUID(),
