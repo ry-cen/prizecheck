@@ -95,7 +95,7 @@ def _quantity(text: str) -> int:
 
 
 def _record(token: str, timeout: float):
-    return public_projection_store().read_state(timeout=timeout)[0].get(token)
+    return public_projection_store().read_record(token, timeout=timeout)
 
 
 def parse_record(token: str, record) -> ActiveSnapshot:

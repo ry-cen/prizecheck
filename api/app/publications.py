@@ -411,7 +411,7 @@ def public_snapshot(token: str, response: Response):
     if not TOKEN.fullmatch(token):
         raise HTTPException(404, {'code': 'PUBLISHED_DECK_NOT_FOUND'}, headers=PUBLIC_HEADERS)
     try:
-        record = public_projection_store().read().get(token)
+        record = public_projection_store().read_record(token)
     except ProjectionUnavailable:
         raise HTTPException(503, {'code': 'PUBLIC_PROJECTION_UNAVAILABLE'}, headers=PUBLIC_HEADERS) from None
     if record is None:

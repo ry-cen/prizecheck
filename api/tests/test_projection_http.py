@@ -7,6 +7,7 @@ import time
 from uuid import uuid4
 import threading
 import pytest
+from app import public_projection
 from test_holdings import fixture, client
 from test_decks import create
 from test_publications import command, list_cards
@@ -16,7 +17,7 @@ from test_discovery import visibility
 def relay(monkeypatch, tmp_path):
     state = {'format':1,'revision':0,'decks':{}}
     guard = threading.Lock()
-    controls = {'collide':True,'failed':False,'weak':False,'requests':0,'put_failed':False,'hang':False}
+    controls = {'collide':True,'failed':False,'weak':False,'requests':0,'put_failed':False,'hang':False,'conditional':True,'not_modified':0,'bad_304':False}
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args): pass
         def do_GET(self):
@@ -26,6 +27,12 @@ def relay(monkeypatch, tmp_path):
                 controls['requests'] += 1
                 assert self.headers['Authorization'] == 'Bearer projection-test-secret'
                 assert self.headers['Cache-Control'] == 'no-cache, no-store'
+                current_etag = '"'+str(state['revision'])+'"'
+                if controls['conditional'] and not controls['failed'] and self.headers.get('If-None-Match') == current_etag:
+                    controls['not_modified'] += 1
+                    self.send_response(304)
+                    self.send_header('ETag', '"other"' if controls['bad_304'] else current_etag)
+                    self.end_headers(); return
                 self.send_response(503 if controls['failed'] else 200)
                 self.send_header('ETag', ('W/' if controls['weak'] else '')+'"'+str(state['revision'])+'"')
                 self.end_headers(); self.wfile.write(json.dumps(state).encode())
@@ -45,6 +52,7 @@ def relay(monkeypatch, tmp_path):
                 self.send_response(204); self.end_headers()
     server = ThreadingHTTPServer(('127.0.0.1',0),Handler)
     thread = threading.Thread(target=server.serve_forever,kwargs={'poll_interval':0.02},daemon=True);thread.start()
+    monkeypatch.setattr(public_projection, '_http_records', None)  # a reused port must not inherit another relay's cache
     monkeypatch.setenv('PUBLIC_PROJECTION_ADAPTER','http')
     monkeypatch.setenv('PUBLIC_PROJECTION_URL',f'http://127.0.0.1:{server.server_port}/manifest')
     monkeypatch.setenv('PUBLIC_PROJECTION_TOKEN','projection-test-secret')
@@ -71,6 +79,36 @@ def test_http_manifest_publication_cas_revoke_discovery_and_no_private_database(
     assert client.get('/api/public/discovery').json()['decks'] == []
     relay['failed'] = True
     assert client.get('/api/public/decks/'+token).status_code == 503
+
+def test_snapshot_reads_revalidate_the_cached_manifest_by_etag(relay):
+    owner,_,_,_,edition,_ = fixture()
+    deck = create(owner).json()['location']['id'];list_cards(owner,deck,{edition:4})
+    token = command(owner,deck).json()['token']
+    for _ in range(2):
+        response = client.get('/api/public/decks/'+token)
+        assert response.status_code == 200 and response.json()['total'] == '4'
+    assert relay['not_modified'] >= 1
+    assert command(owner,deck,'DELETE').status_code == 200
+    assert client.get('/api/public/decks/'+token).status_code == 404
+
+def test_a_relay_that_ignores_if_none_match_still_answers(relay):
+    relay['conditional'] = False
+    owner,_,_,_,edition,_ = fixture()
+    deck = create(owner).json()['location']['id'];list_cards(owner,deck,{edition:4})
+    token = command(owner,deck).json()['token']
+    for _ in range(2):
+        response = client.get('/api/public/decks/'+token)
+        assert response.status_code == 200 and response.json()['total'] == '4'
+    assert relay['not_modified'] == 0
+
+def test_a_304_for_another_etag_is_unavailable(relay):
+    owner,_,_,_,edition,_ = fixture()
+    deck = create(owner).json()['location']['id'];list_cards(owner,deck,{edition:4})
+    token = command(owner,deck).json()['token']
+    assert client.get('/api/public/decks/'+token).status_code == 200
+    relay['bad_304'] = True
+    response = client.get('/api/public/decks/'+token)
+    assert response.status_code == 503 and response.json()['detail'] == {'code':'PUBLIC_PROJECTION_UNAVAILABLE'}
 
 def test_concurrent_http_writers_preserve_both_decks_and_ordered_revocation(relay):
     owner,other,_,_,edition,_ = fixture()
