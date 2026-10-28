@@ -559,7 +559,7 @@ When the report says `This host is ready for the first deploy`, deploy. After th
 | Report item            | Step                                                                 |
 | ---------------------- | -------------------------------------------------------------------- |
 | The owner is bound     | [15](#15-verify-the-application-and-sign-in)                         |
-| The catalog rules      | [16](#16-apply-the-catalog-rules)                                 |
+| The catalog rules      | [16](#16-apply-the-catalog-rules)                                    |
 | An active catalog      | [17](#17-pull-the-catalog-build-the-scanner-index-and-import-prices) |
 | The last price import  | [17](#17-pull-the-catalog-build-the-scanner-index-and-import-prices) |
 | The scanner index      | [17](#17-pull-the-catalog-build-the-scanner-index-and-import-prices) |
@@ -657,7 +657,7 @@ A deploy applies the newest version of each catalog rule by itself ([ADR 0021](a
 sudo bash /opt/prizecheck-prod/bin/prizecheck-deploy.sh tool /app/scripts/rule_rollout.py resume
 ```
 
-It applies the newest rules and finishes any unfinished rollout, and it prints one line per rule. The rollout re-evaluates targets in short batches, so it doesn't block your collection changes. Its progress or error shows under Owner controls → **Rules**; when a rollout failed, run the same command again to resume it. The report in step 13 stays open while a rule is not applied. If the first catalog pull has not run yet, it applies them too.
+It applies the newest rules and finishes any unfinished rollout, and it prints one line per rule. The rollout re-evaluates targets in short batches, so it doesn't block your collection changes. Its progress or error shows under Owner controls → **Rules**; when a rollout failed, run the same command again to resume it. The report in step 13 stays open while a rule is not applied. If you skip this, the first successful catalog pull applies them.
 
 Matching v4 and later also match the Black Star promo sets by card number from the stored TCGCSV products, which the first price import (step 17) stores; that run carries `--rematch`, and promos TCGCSV lists later are picked up by `price_import_job.py --rematch`.
 
