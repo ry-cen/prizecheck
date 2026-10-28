@@ -23,12 +23,11 @@ import {
   stillQueued,
   type Draft,
 } from "./attributeValues";
+import { CARD_HEADING, ReviewCard } from "./ReviewQueue";
 
 /** A row header in the attribute table, sized like the ScrollTable's own cells. */
 const ROW_HEADER =
   "h-8 border-b border-border px-2.5 py-1 text-left align-middle font-medium";
-const SUBHEADING =
-  "m-0 text-meta font-semibold uppercase tracking-wide text-text-muted";
 
 type Props = {
   /** The queue's row: names the card until the fresh evidence arrives. */
@@ -47,9 +46,8 @@ type Props = {
  * it shows.
  */
 export function AttributeReviewCard({ item, onClose, onDone }: Props) {
-  const headingId = useId();
   const reportsId = useId();
-  const heading = useRef<HTMLHeadingElement>(null);
+  const reasonField = useRef<HTMLTextAreaElement>(null);
   const [evidence, setEvidence] = useState<AttributeEvidence | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   const [draft, setDraft] = useState<Draft>(() => draftFrom(null));
@@ -68,7 +66,6 @@ export function AttributeReviewCard({ item, onClose, onDone }: Props) {
   }
 
   useEffect(() => {
-    heading.current?.focus();
     let current = true;
     getAttributeEvidence(item.printing_id).then(
       (next) => current && show(next),
@@ -157,21 +154,7 @@ export function AttributeReviewCard({ item, onClose, onDone }: Props) {
     : "Loading attributes…";
 
   return (
-    <article
-      aria-labelledby={headingId}
-      className="box-border flex min-w-0 flex-col gap-3 rounded-panel border border-border bg-surface-raised p-4 text-body"
-    >
-      <div className="flex flex-wrap items-center gap-2">
-        <h3
-          id={headingId}
-          ref={heading}
-          tabIndex={-1}
-          className="m-0 mr-auto text-body font-semibold wrap-anywhere"
-        >
-          {name}
-        </h3>
-        <Button onClick={onClose}>Close</Button>
-      </div>
+    <ReviewCard title={name} onClose={onClose} focusRef={reasonField}>
       <p className="m-0 text-meta text-text-muted">
         {[item.set_id, item.collector_number].filter(Boolean).join(" · ")}
         {item.set_id || item.collector_number ? " · " : ""}
@@ -234,7 +217,7 @@ export function AttributeReviewCard({ item, onClose, onDone }: Props) {
             disabled={decision === "remove" || busy}
             className="m-0 flex min-w-0 flex-col gap-3 border-0 p-0"
           >
-            <legend className={`${SUBHEADING} p-0`}>Correct to</legend>
+            <legend className={`${CARD_HEADING} p-0`}>Correct to</legend>
             <p className="m-0 text-meta text-text-muted">
               The correction is everything set here. An attribute left at Not
               corrected follows the derived value.
@@ -293,7 +276,7 @@ export function AttributeReviewCard({ item, onClose, onDone }: Props) {
               aria-labelledby={reportsId}
               className="flex min-w-0 flex-col gap-2"
             >
-              <h4 id={reportsId} className={SUBHEADING}>
+              <h4 id={reportsId} className={CARD_HEADING}>
                 Collector reports
               </h4>
               <ul className="m-0 flex list-none flex-col gap-2 p-0">
@@ -356,45 +339,46 @@ export function AttributeReviewCard({ item, onClose, onDone }: Props) {
               </p>
             </section>
           )}
-
-          <h4 className={SUBHEADING}>Decision</h4>
-          <TextArea
-            label="Reason"
-            maxLength={2000}
-            value={reason}
-            onChange={(event) => setReason(event.target.value)}
-          />
-          <div className="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-3">
-            <TextField
-              label="Review evidence URL"
-              type="url"
-              value={evidenceUrl}
-              onChange={(event) => setEvidenceUrl(event.target.value)}
-            />
-            <Select
-              label="Decision"
-              value={decision}
-              onChange={(event) =>
-                setDecision(event.target.value as "correct" | "remove")
-              }
-            >
-              <option value="correct">Correct</option>
-              {evidence.correction && (
-                <option value="remove">Remove correction</option>
-              )}
-            </Select>
-          </div>
-          <div>
-            <Button
-              variant="primary"
-              disabled={busy || !ready}
-              onClick={() => void confirm()}
-            >
-              Confirm decision
-            </Button>
-          </div>
         </>
       )}
+      <h4 className={CARD_HEADING}>Decision</h4>
+      <TextArea
+        ref={reasonField}
+        label="Reason"
+        maxLength={2000}
+        value={reason}
+        onChange={(event) => setReason(event.target.value)}
+      />
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-3">
+        <TextField
+          label="Review evidence URL"
+          type="url"
+          value={evidenceUrl}
+          onChange={(event) => setEvidenceUrl(event.target.value)}
+        />
+        <Select
+          label="Decision"
+          value={decision}
+          disabled={!evidence || busy}
+          onChange={(event) =>
+            setDecision(event.target.value as "correct" | "remove")
+          }
+        >
+          <option value="correct">Correct</option>
+          {evidence?.correction && (
+            <option value="remove">Remove correction</option>
+          )}
+        </Select>
+      </div>
+      <div>
+        <Button
+          variant="primary"
+          disabled={busy || !evidence || !ready}
+          onClick={() => void confirm()}
+        >
+          Confirm decision
+        </Button>
+      </div>
       <p role="status" className="m-0 text-meta">
         {status}
       </p>
@@ -403,6 +387,6 @@ export function AttributeReviewCard({ item, onClose, onDone }: Props) {
           {error}
         </p>
       )}
-    </article>
+    </ReviewCard>
   );
 }

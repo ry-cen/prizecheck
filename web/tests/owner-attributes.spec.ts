@@ -1,4 +1,4 @@
-// Ticket #170: Owner controls' Attributes queue (spec "Missing cards and Owner controls", "Card type: one
+// Tickets #170 and #193: Owner controls' Attributes queue, on the shared ReviewQueue (spec "Missing cards and Owner controls", "Card type: one
 // source"). The queue is a ScrollTable; Review opens the review card inline, pinned to the table's visible
 // width; a Trainer Type correction takes a reason and evidence and closes the linked report;
 // Reject report needs only the reason. The shared page check runs at 1280×800 and 375×812 with the card open
@@ -124,7 +124,7 @@ test.describe("desktop", () => {
 
     await expect(queue(page).getByRole("columnheader")).toHaveText([
       "Card",
-      "Set and number",
+      "Set · number",
       "Kind",
       "Reports",
       "Opened",
@@ -145,7 +145,7 @@ test.describe("desktop", () => {
     await review.click();
     await expect(review).toHaveAttribute("aria-expanded", "true");
     const card = reviewCard(page, "Switch");
-    await expect(card.getByRole("heading", { name: "Switch" })).toBeFocused();
+    await expect(card.getByLabel("Reason")).toBeFocused();
 
     // Derived, correction and effective values per attribute, Trainer Type and Evolves from included.
     await expect(valueCells(card, "Card kind")).toHaveText([
@@ -227,6 +227,16 @@ test.describe("desktop", () => {
       .toBe("item");
   });
 
+  test("Refresh queue reads the queue again", async ({ page }) => {
+    seedCatalog();
+    await signInAsOwner(page);
+    await openAttributes(page);
+    await expect(page.getByText("Nothing waits for review.")).toBeVisible();
+    await reportSwitch(page, { trainer_type: "item" });
+    await page.getByRole("button", { name: "Refresh queue" }).click();
+    await expect(queueRow(page, "Switch")).toHaveCount(1);
+  });
+
   test("Close returns focus to Review, and Reject report needs only the reason", async ({
     page,
   }) => {
@@ -302,18 +312,23 @@ test.describe("phone", () => {
     await expect
       .poll(() => queue(page).evaluate((element) => element.scrollLeft))
       .toBeGreaterThan(0);
-    // Pinned: the card starts at the queue's left edge (inside its padding) and ends inside its right edge.
+    // Pinned: the card's box starts at the queue's inner left edge and is as wide as its visible area.
     await expect
-      .poll(async () => {
-        const box = (await queue(page).boundingBox())!;
-        const shown = (await card.boundingBox())!;
-        return (
-          shown.x >= box.x &&
-          shown.x - box.x <= 12 &&
-          shown.x + shown.width <= box.x + box.width + 1
-        );
-      })
-      .toBe(true);
+      .poll(() =>
+        queue(page).evaluate((box) => {
+          const pinned = box
+            .querySelector("article")!
+            .parentElement!.getBoundingClientRect();
+          const region = box.getBoundingClientRect();
+          return {
+            scrolled: box.scrollLeft > 0,
+            atLeftEdge:
+              Math.abs(pinned.left - (region.left + box.clientLeft)) < 1.5,
+            fullWidth: Math.abs(pinned.width - box.clientWidth) < 1.5,
+          };
+        })
+      )
+      .toEqual({ scrolled: true, atLeftEdge: true, fullWidth: true });
     await expectPageChecks(
       page,
       "Owner controls, Attributes review card open (phone)"

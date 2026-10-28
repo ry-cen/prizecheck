@@ -162,17 +162,6 @@ export const stillQueued = (evidence: AttributeEvidence) =>
 export const queueKind = (evidence: AttributeEvidence) =>
   evidence.reports.length ? "Collector report" : "Manual Printing";
 
-/** How long ago the Printing needed review: "12 min", "5 h" or "3 d". */
-export function age(openedAt: string, now: number): string {
-  const minutes = Math.max(
-    0,
-    Math.floor((now - new Date(openedAt).getTime()) / 60000)
-  );
-  if (minutes < 60) return `${minutes} min`;
-  const hours = Math.floor(minutes / 60);
-  return hours < 48 ? `${hours} h` : `${Math.floor(hours / 24)} d`;
-}
-
 const messages: Record<string, string> = {
   ATTRIBUTE_EVIDENCE_CHANGED:
     "The evidence changed since this card opened. Close it and review it again.",
