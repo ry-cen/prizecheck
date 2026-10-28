@@ -513,7 +513,10 @@ test.describe("desktop", () => {
       await expect(
         page.getByRole("navigation", { name: "Main views" })
       ).toBeVisible();
-      const text = (await page.locator("body").innerText()).toLowerCase();
+      // The footer credit is the one allowed mention of the source (#350); price-credit.spec.ts checks it.
+      const text = (await page.locator("body").innerText())
+        .toLowerCase()
+        .replace("prices from tcgcsv", "");
       for (const word of [
         "tcgcsv",
         "price import",
