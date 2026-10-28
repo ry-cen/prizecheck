@@ -499,6 +499,8 @@ def test_price_reads_off_answers_no_price_for_every_row_without_a_query(store, m
     assert response.json()["withheld"] is False
     assert stored[normal["id"]].reason == "no_price"
     assert calls == []
+    monkeypatch.setenv("PRICE_READS", "of")
+    assert price_reads_enabled() is False  # a mistyped value fails safe
     monkeypatch.setenv("PRICE_READS", "on")
     assert price_reads_enabled() is True and prices_of(post(ids(normal["id"])))[str(normal["id"])]["amount"] == "0.43"
     monkeypatch.delenv("PRICE_READS")
