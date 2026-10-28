@@ -62,7 +62,7 @@ user-facing request, and a thank-you link is appreciated. The owner decided on 2
     removed. Products named with qualifiers (Staff, Prerelease, LV.X, Cosmos Holo) never match. On 2026-10-27 this priced
     about 256 promo cards, mostly dpp, bwp, xyp and mep, and left about 133 for the owner.
   - **Owner review.** The owner reviews the matches from a "Matched by card number" list and can reject any of them.
-  - It is activated like every rule. Quarantine, owner decisions and strict clearing are unchanged.
+  - It reaches production by deploying the release that ships it ([ADR 0021](0021-deploy-applies-newest-catalog-rules.md)). Quarantine, owner decisions and strict clearing are unchanged.
 - **One read path.**
   - Card prices, Deck cost, Want List cost, Trade value and the stored reads on write paths read one PostgreSQL query:
     Edition, mapping, binding and price.

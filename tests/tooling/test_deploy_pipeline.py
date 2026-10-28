@@ -233,7 +233,7 @@ class DeployPipelineTest(unittest.TestCase):
         self.assertEqual(gateway, realip)
 
     def test_dev_compose_keeps_dev_behaviour(self):
-        for kept in ('TRUSTED_PROXY_IPS: ""', 'MARKETPLACE_MATCHING: automatic', 'SIGNUP_MODE: ${PRIZECHECK_SIGNUP_MODE:-owner-only}',
+        for kept in ('TRUSTED_PROXY_IPS: ""', 'SIGNUP_MODE: ${PRIZECHECK_SIGNUP_MODE:-owner-only}',
                      '"${PRIZECHECK_WEB_BIND:-127.0.0.1}:${PRIZECHECK_WEB_PORT:-8088}:8080"'):
             self.assertIn(kept, COMPOSE_DEV)
         self.assertNotIn('ipam', COMPOSE_DEV)
@@ -266,8 +266,31 @@ class DeployPipelineTest(unittest.TestCase):
         compose = uncommented(COMPOSE_PROD)
         self.assertEqual(compose.count('NODE_ENV: production'), 3)
         self.assertIn('MAIL_MODE: ${MAIL_MODE:-http}', compose)
-        self.assertEqual(compose.count('MARKETPLACE_MATCHING: ${MARKETPLACE_MATCHING:-off}'), 2)
+        self.assertNotIn('MARKETPLACE_MATCHING', compose)
         self.assertNotIn('automatic', compose)
+
+    def test_api_and_tools_get_the_release_commit(self):
+        # The API applies its release's newest catalog rules at startup and the tools image restores them on a rollback
+        # (ADR 0021); both read the release commit from the image tag.
+        block = COMPOSE_DEV[COMPOSE_DEV.index('x-api-environment: &api-environment'):COMPOSE_DEV.index('\nservices:')]
+        self.assertIn('RELEASE_COMMIT: ${PRIZECHECK_IMAGE_TAG:-}', block)
+        tools = COMPOSE_DEV[COMPOSE_DEV.index('\n  tools:\n'):]
+        self.assertIn('<<: *api-environment', tools[:tools.index('    depends_on:')])
+        api = re.search(r'(?s)\n  api:\n(.*?)\n  [a-z]+:\n', COMPOSE_DEV).group(1)
+        self.assertIn('environment: *api-environment', api)
+
+    def test_marketplace_matching_is_gone(self):
+        paths = [*ROOT.glob('compose*.yml'), *(ROOT / 'deploy/host').glob('*.env.example'), ROOT / '.env.example',
+                 *(ROOT / 'api/app').rglob('*.py'),
+                 *(path for path in (ROOT / 'docs').rglob('*.md') if not {'planning', 'adr'} & set(path.relative_to(ROOT / 'docs').parts))]
+        self.assertTrue(paths)
+        self.assertEqual([str(path.relative_to(ROOT)) for path in paths if 'MARKETPLACE_MATCHING' in path.read_text()], [])
+
+    def test_rollback_restores_the_rules_before_starting_the_previous_release(self):
+        rollback = SCRIPT[SCRIPT.index('cmd_rollback() {'):SCRIPT.index('cmd_status() {')]
+        self.assertIn('rule_rollout.py restore --to "$previous"', rollback)
+        self.assertLess(rollback.index('rule_rollout.py restore --to "$previous"'), rollback.index('start_release "$previous"'))
+        self.assertLess(rollback.index('compose stop api'), rollback.index('rule_rollout.py restore'))
 
     def test_caddy_forwards_the_visitor_address_and_logs_no_requests(self):
         caddy = uncommented(CADDYFILE)

@@ -56,6 +56,10 @@ if 'exec' in args and 'printenv' in args:
 if 'exec' in args and 'web' in args:
     sys.stdout.write(open(os.environ['FAKE_INDEX']).read()); sys.exit(0)
 if 'run' in args and 'tools' in args:
+    if any(a.endswith('rule_rollout.py') for a in args):
+        with open(os.environ['FAKE_LOG'], 'a') as log:
+            log.write(json.dumps({'tools': args, 'tag': os.environ.get('PRIZECHECK_IMAGE_TAG')}) + '\n')
+        sys.exit(int(os.environ.get('FAKE_RESTORE_EXIT', '0')))
     print('schema'); sys.exit(0)
 if 'run' in args and 'auth' in args:
     # The candidate proof is the directory mounted with -v, named by the SIGNUP_READINESS_FILE given with -e.
@@ -84,7 +88,8 @@ if 'run' in args and 'auth' in args:
         sys.exit(subprocess.run([os.environ['FAKE_TSX'], script], env=env).returncode)
 with open(os.environ['FAKE_LOG'], 'a') as log:
     snapshots = sorted(os.listdir(os.environ['FAKE_SNAPSHOTS'])) if os.environ.get('FAKE_SNAPSHOTS') else None
-    log.write(json.dumps({'args': args, 'mode': os.environ.get('PRIZECHECK_SIGNUP_MODE'), 'snapshots': snapshots}) + '\n')
+    log.write(json.dumps({'args': args, 'mode': os.environ.get('PRIZECHECK_SIGNUP_MODE'), 'snapshots': snapshots,
+                          'tag': os.environ.get('PRIZECHECK_IMAGE_TAG')}) + '\n')
 '''.replace('#!PYTHON', '#!' + sys.executable)
 # Smoke only needs plausible answers from the web port.
 FAKE_CURL = '''#!/bin/sh
@@ -531,6 +536,37 @@ class HostDeployScriptTest(unittest.TestCase):
         output = result.stdout + result.stderr
         self.assertEqual(result.returncode, 0, output)
         self.assertCarried(home, OTHER, output)
+
+    def rollback(self, home, **extra):
+        result = subprocess.run(['bash', str(home / 'bin/prizecheck-deploy.sh'), 'rollback'], capture_output=True, text=True,
+                                timeout=60, stdin=subprocess.DEVNULL,
+                                env={**os.environ, 'HOME': str(home), **self.fake_env(home, **extra)})
+        return result.returncode, result.stdout + result.stderr
+
+    def test_a_rollback_restores_rules_with_the_current_release_first(self):
+        home = self.signup_home(PROD)
+        (home / 'state/previous').write_text(OTHER + '\n')
+        code, output = self.rollback(home, FAKE_COMMIT=OTHER)
+        self.assertEqual(code, 0, output)
+        calls = self.fake_calls()
+        [index] = [i for i, call in enumerate(calls) if 'tools' in call]
+        self.assertEqual(calls[index]['tag'], COMMIT)  # the current release's tool, so it knows the rules to hand back
+        self.assertEqual(calls[index]['tools'][-3:], ['restore', '--to', OTHER])
+        stopped = [i for i, call in enumerate(calls) if call.get('args', [])[-2:] == ['stop', 'api']]
+        self.assertTrue(stopped and stopped[0] < index, calls)  # the API stops before the restore
+        first_up = next(i for i, call in enumerate(calls) if 'up' in call.get('args', []))
+        self.assertLess(index, first_up)
+        self.assertEqual((home / 'state/current').read_text().strip(), OTHER)
+
+    def test_a_failed_rule_restore_refuses_the_rollback(self):
+        home = self.signup_home(PROD)
+        (home / 'state/previous').write_text(OTHER + '\n')
+        code, output = self.rollback(home, FAKE_COMMIT=COMMIT, FAKE_RESTORE_EXIT='2')
+        self.assertEqual(code, 1, output)
+        self.assertIn('refused: restoring its catalog rules failed', output)
+        self.assertEqual((home / 'state/current').read_text().strip(), COMMIT)
+        ups = [call for call in self.fake_calls() if 'up' in call.get('args', [])]
+        self.assertTrue(ups and all(call['tag'] == COMMIT for call in ups), ups)  # only the current release was restarted
 
     @unittest.skipUnless(TSX.exists() and shutil.which('node'), 'needs node and tsx (npm ci)')
     def test_signup_is_not_carried_when_the_operator_closed_it_or_the_running_release_was_not_public(self):

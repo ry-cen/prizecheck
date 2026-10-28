@@ -779,6 +779,15 @@ cmd_rollback() {
   current="$(read_state current)"; previous="$(read_state previous)"
   [[ -n "$previous" ]] || die "No previous release recorded"
   log "Rolling back from ${current:-none} to $previous. Migrations are not reversed: $previous runs against the current schema."
+  # Restore the catalog rules the previous release knows, with the current release's tool (ADR 0021). The API stops
+  # first so the current release cannot apply its newer rules again after the restore.
+  if [[ -n "$current" ]]; then
+    PRIZECHECK_IMAGE_TAG="$current" compose stop api || true
+    if ! PRIZECHECK_IMAGE_TAG="$current" compose run --rm --no-deps -T tools /app/scripts/rule_rollout.py restore --to "$previous"; then
+      restore_release "$current" || true
+      die "Rollback to $previous refused: restoring its catalog rules failed; $current was restarted"
+    fi
+  fi
   if ! start_release "$previous"; then
     compose logs --no-color --tail 50 "${APP_SERVICES[@]}" >&2 || true
     [[ -n "$current" ]] && restore_release "$current" || true

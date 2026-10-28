@@ -6,12 +6,9 @@ services:
   api:
     environment:
       NODE_ENV: production
-      # Activating a marketplace matching rule stays an owner approval unless the env file says automatic.
-      MARKETPLACE_MATCHING: ${MARKETPLACE_MATCHING:-off}
   tools:
     environment:
       NODE_ENV: production
-      MARKETPLACE_MATCHING: ${MARKETPLACE_MATCHING:-off}
   auth:
     environment:
       NODE_ENV: production

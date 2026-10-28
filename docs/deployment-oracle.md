@@ -27,7 +27,7 @@ push to main
 
 The deploy script's steps are the same as on dev (see [Dev deployment on Unraid](deployment-unraid.md#how-it-works)). What differs in production:
 
-- `compose.prod.yml` is added to `compose.deploy.yml` whenever the env file says `PRIZECHECK_ENVIRONMENT=prod`. It forces `NODE_ENV=production`, defaults `MAIL_MODE` to `http`, defaults `MARKETPLACE_MATCHING` to `off`, and pins the edge network.
+- `compose.prod.yml` is added to `compose.deploy.yml` whenever the env file says `PRIZECHECK_ENVIRONMENT=prod`. It forces `NODE_ENV=production`, defaults `MAIL_MODE` to `http`, and pins the edge network.
 - The script refuses a configuration the auth gateway would reject under `NODE_ENV=production`, or one that would publish the web port beyond loopback.
 - Caddy on the host is the only public entry. It forwards to the `web` container's loopback port, `127.0.0.1:8088`.
 
@@ -64,7 +64,7 @@ Nothing in this guide has been run against an Oracle instance yet. Commands and 
 - **A Discord account** whose verified email address becomes `OWNER_EMAIL`.
 - **An SSH key** for your first login to the instance, and a Tailscale tailnet.
 
-No mail relay: with OAuth sign-in and `EMAIL_SIGN_IN=off`, production sends no mail, so leave the `MAIL_RELAY_*` values out. Owner decisions (catalog reviews, missing cards, attribute and reprint decisions, marketplace rules) take effect on your click; none of them sends a code. `MARKETPLACE_MATCHING` stays unset in production, so you activate each marketplace matching rule yourself; setting `MARKETPLACE_MATCHING=automatic` is optional.
+No mail relay: with OAuth sign-in and `EMAIL_SIGN_IN=off`, production sends no mail, so leave the `MAIL_RELAY_*` values out. Owner decisions (catalog reviews, missing cards, attribute and reprint decisions, marketplace rules) take effect on your click; none of them sends a code. Catalog rules are not an owner step: deploying a release applies its newest version of each rule by itself ([ADR 0021](adr/0021-deploy-applies-newest-catalog-rules.md)).
 
 ### Launch blockers that remain open
 
@@ -320,7 +320,6 @@ Edit `prizecheck.env` (`sudo nano prizecheck.env`):
 | `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET` | From step 6. Leave the `GOOGLE_*` pair empty                                                  |
 | `DAILY_SEND_CAP`, `DAILY_SIGNUP_CAP`         | Whole numbers; the example's `100` is fine                                                    |
 | `SIGNUP_MODE`                                | `owner-only`. Only [Opening signup](#opening-signup) changes it                               |
-| `MARKETPLACE_MATCHING`                       | Leave it commented out, so rule activation stays owner-approved                               |
 
 The file may contain only `KEY=value` lines, comments and blank lines. The script refuses `export KEY=...`, indented keys, `KEY: value`, a space between `=` and the value, a quoted value that doesn't close on its own line, and a backslash inside a quoted value (escaped quotes are not supported), because Docker Compose would read those lines differently from the script's own checks. It names the offending line number. Values stay in this file only: they aren't in the repository or GitHub, and the script reads individual keys without printing them.
 
@@ -595,18 +594,13 @@ Then sign in:
    sudo bash /opt/prizecheck-prod/bin/prizecheck-deploy.sh tool /app/scripts/bind_owner.py 'ID-FROM-THE-QUERY'
    ```
 
-3. Activate both catalog rules **before** the first pull. A pull seeds prices only for Editions a matching rule has already verified, so a pull run first seeds nothing. The rule activation can outrun the web request's 60-second limit on a small instance and blocks your collection changes while it runs ([#343](https://github.com/ry-cen/prizecheck/issues/343)), so run it on the host while you aren't using the app. Live v1 took 26 seconds and matching v3 18 minutes on 2 OCPUs, both against a full catalog. On an empty catalog, before the first pull, both are quick and Owner controls' **Rules** panel works as well.
+3. Apply the catalog rules **before** the first pull. A pull seeds prices only for Editions a matching rule has already verified, so a pull run first seeds nothing. A release applies its newest rules by itself, but only once the owner is bound (step 2), so run it now rather than waiting for the next deploy:
 
    ```bash
-   sudo bash /opt/prizecheck-prod/bin/prizecheck-deploy.sh compose exec -T api python -c "
-   from app.metadata_reviews import activate, MetadataRuleActivation
-   for kind, version in (('live_derivation', 1), ('marketplace_matching', 4)):
-       print(activate(kind, MetadataRuleActivation(version=version,
-           evidence_url='https://github.com/ry-cen/prizecheck/blob/main/api/app/catalog_targets.py',
-           reason='Initial activation'), user_id='ID-FROM-THE-QUERY'))"
+   sudo bash /opt/prizecheck-prod/bin/prizecheck-deploy.sh tool /app/scripts/rule_rollout.py resume
    ```
 
-   Use the newest version each panel lists. Matching v4 also matches the Black Star promo sets by card number from the stored TCGCSV products, so activate it after the first price import has run; promos TCGCSV lists later are picked up by `price_import_job.py --rematch`.
+   Otherwise the first catalog pull applies them. The rollout re-evaluates targets in short batches, so it doesn't block your collection changes. Its progress shows under Owner controls → **Rules**. Matching v4 also matches the Black Star promo sets by card number from the stored TCGCSV products; promos TCGCSV lists later are picked up by `price_import_job.py --rematch`.
 
 4. Refresh, open **Owner controls**, and start the full English catalog pull. A pull seeds prices for at most 10 minutes, so part of the catalog is priced only when someone first opens a card ([#342](https://github.com/ry-cen/prizecheck/issues/342)).
 5. After the catalog pull, build the scanner's index by hand:
@@ -729,7 +723,7 @@ Nothing is carried when the running release is owner-only, when the proof names 
 ERROR: Host deployment files differ from commit ...; reinstall compose.deploy.yml compose.prod.yml and prizecheck-deploy.sh (docs/deployment-oracle.md, 'Updating the host files')
 ```
 
-When a commit changes any of the three files, repeat the `scp` and `install` commands in step 5 from that commit, then re-run the failed workflow run. The digest covers only those three files: `deploy/oracle/Caddyfile` isn't checked, and the deploy never touches `/etc/caddy/Caddyfile`. Reinstall and reload it yourself (step 12) when a commit changes it.
+When a commit changes any of the three files, repeat the `scp` and `install` commands in step 5 from that commit, then re-run the failed workflow run. The digest covers only those three files: `deploy/oracle/Caddyfile` isn't checked, and the deploy never touches `/etc/caddy/Caddyfile`. Reinstall and reload it yourself (step 12) when a commit changes it. The release that ships catalog rule rollout (ADR 0021, #377) changes all three, so it changes the bundle digest: reinstall before the first deploy of it.
 
 ## Viewing logs
 
@@ -788,7 +782,7 @@ Don't cancel a workflow run while its **Deploy on the Oracle host** step is runn
   sudo bash /opt/prizecheck-prod/bin/prizecheck-deploy.sh rollback
   ```
 
-Rollback starts the previous successful release's images (kept locally), runs the same health and smoke checks, and swaps `current` and `previous`. It does **not** reverse migrations. A failed deploy already rolls back automatically.
+Rollback starts the previous successful release's images (kept locally), runs the same health and smoke checks, and swaps `current` and `previous`. It does **not** reverse migrations. Before it starts them, it restores the catalog rules the previous release knows (the current release's `rule_rollout.py restore`), and it refuses to roll back, restarting the current release, if that fails. A host job started through the `tool` command during those few minutes (for example the daily catalog refresh) still runs the current release's image; an older release records nothing for a rule version it doesn't know. A failed deploy already rolls back automatically.
 
 To return `main` to an earlier commit as well, you would have to rewrite `main`, which this setup doesn't do for you; a rollback changes only what runs on the host until the next push to `main`.
 

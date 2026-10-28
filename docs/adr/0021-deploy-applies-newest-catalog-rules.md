@@ -1,6 +1,6 @@
 # Deploying a release applies its newest catalog rules
 
-**Status:** proposed 2026-10-27 (owner decision, not yet implemented). Refines [ADR 0007](0007-edition-marketplace-metadata-boundary.md)
+**Status:** accepted 2026-10-28 (implemented in #377). Refines [ADR 0007](0007-edition-marketplace-metadata-boundary.md)
 and [ADR 0019](0019-tcgcsv-daily-prices.md): the owner no longer activates catalog rules from Owner controls. Design:
 [tcgcsv-prices design §4.15](../planning/tcgcsv-prices/design.md). Ticket: P11 (#377).
 
