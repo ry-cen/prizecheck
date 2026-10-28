@@ -277,8 +277,126 @@ const deckList = (page: Page) =>
 const toast = (page: Page) =>
   page.getByRole("region", { name: "Notifications" });
 
+/**
+ * A Charmander with 120 Editions (#365): the swap list reads 60 at a time, and its own Edition (`current`) falls on
+ * the second page, so the copy sheet is taller than any screen and the Current row is not in the first page.
+ */
+async function manyVariants(page: Page, current: string) {
+  const row = (index: number, edition: string, number: string) => ({
+    edition_id: edition,
+    printing_id: `printing-${index}`,
+    name: "Charmander",
+    set_id: "set-m",
+    set_name: "Many Set",
+    set_code: "MNY",
+    collector_number: number,
+    descriptor: { finish: "normal" },
+    image_url: null,
+    art_url: null,
+    card_kind: "pokemon",
+    trainer_type: null,
+    evolves_from: null,
+    regulation_mark: null,
+    standing: {},
+    owned: 0,
+    in_deck: null,
+    free: null,
+  });
+  const first = Array.from({ length: 60 }, (_, index) =>
+    row(
+      index,
+      `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+      String(index + 1)
+    )
+  );
+  const second = Array.from({ length: 60 }, (_, index) =>
+    index === 5
+      ? row(100 + index, current, "999")
+      : row(
+          100 + index,
+          `00000000-0000-4000-8000-${String(100 + index).padStart(12, "0")}`,
+          String(100 + index)
+        )
+  );
+  await page.route("**/api/catalog/editions?*identity_id=*", (route) => {
+    const second_page = new URL(route.request().url()).searchParams.has(
+      "cursor"
+    );
+    return route.fulfill({
+      json: {
+        available: true,
+        catalog_revision: 1,
+        owner_revision: 1,
+        last_success: null,
+        search: {
+          mode: "all",
+          text: "",
+          set_id: null,
+          set_name: null,
+          set_code: null,
+          number: null,
+        },
+        editions: second_page ? second : first,
+        next_cursor: second_page ? null : "page-2",
+        printings: null,
+        matches: null,
+      },
+    });
+  });
+}
+
+/** Scrolls the copy sheet to Show more, takes it, and checks the Current row stays single and cannot be chosen. */
+async function expectSwapListScrolls(page: Page, built: Built) {
+  await manyVariants(page, built.editions["edit-1"]);
+  await page.goto(`${ORIGIN}/decks/${built.deckId}`);
+  // A phone shows the Library or the Deck List, one tab at a time.
+  if (page.viewportSize()!.width <= 760)
+    await page.getByRole("tab", { name: /^Deck \d/ }).tap();
+  await page
+    .getByRole("button", { name: /^Charmander, Alpha Set · 4 · Normal/ })
+    .first()
+    .click();
+  const sheet = page.getByRole("dialog", { name: "Charmander" });
+  const swaps = sheet.getByRole("region", { name: "Swap this copy for" });
+  const current = swaps.locator('li[aria-current="true"]');
+  // The Current row leads the list although its Edition is on the second page, and it has no button.
+  await expect(current).toHaveCount(1);
+  await expect(current).toContainText("Alpha Set · 4 · Normal");
+  await expect(current).toContainText("Current");
+  await expect(current.getByRole("button")).toHaveCount(0);
+  await expect(swaps.getByRole("button", { name: /Many Set/ })).toHaveCount(60);
+
+  const viewport = page.viewportSize()!;
+  const frame = (await sheet.boundingBox())!;
+  expect(frame.y).toBeGreaterThanOrEqual(0);
+  expect(frame.y + frame.height).toBeLessThanOrEqual(viewport.height);
+  const more = swaps.getByRole("button", { name: "Show more Editions" });
+  await sheet.locator("div.overflow-auto").hover();
+  await page.mouse.wheel(0, 100_000);
+  await expect(more).toBeInViewport({ ratio: 1 });
+  await more.click();
+  // Page two adds 59 rows: its own copy of the Current Edition is not listed again.
+  await expect(swaps.getByRole("button", { name: /Many Set/ })).toHaveCount(
+    119
+  );
+  await expect(current).toHaveCount(1);
+  await expect(more).toHaveCount(0);
+  await page.mouse.wheel(0, 100_000);
+  await expect(
+    swaps.getByRole("button", { name: /Many Set/ }).last()
+  ).toBeInViewport({ ratio: 1 });
+}
+
 test.describe("on a desktop", () => {
   test.use({ viewport: { width: 1280, height: 800 } });
+
+  test("a card with many Editions scrolls its copy sheet to the last swap row and keeps the Current Edition once", async ({
+    page,
+  }) => {
+    promoteCatalog();
+    await signIn(page);
+    await expectSwapListScrolls(page, await buildDeck(page, { "edit-1": 2 }));
+  });
 
   test("the library lists Editions free of owned, starting on Owned and the Deck's Target Format, and narrows them", async ({
     page,
@@ -509,6 +627,11 @@ test.describe("on a desktop", () => {
       exact: true,
     });
     await expect(swaps.getByRole("button")).toHaveCount(1);
+    // The copy's own Edition is listed first, marked Current, and has no button.
+    const current = swaps.locator('li[aria-current="true"]');
+    await expect(current).toContainText("Alpha Set · 4 · Normal");
+    await expect(current).toContainText("Current");
+    await expect(current.getByRole("button")).toHaveCount(0);
     await expectPageChecks(page, "deck builder, copy sheet with editing");
     await gamma.click();
     await expect(sheet).toBeHidden();
@@ -592,6 +715,14 @@ test.describe("on a desktop", () => {
 
 test.describe("on a phone", () => {
   test.use({ viewport: { width: 375, height: 812 }, hasTouch: true });
+
+  test("a card with many Editions scrolls its copy sheet to the last swap row and keeps the Current Edition once", async ({
+    page,
+  }) => {
+    promoteCatalog();
+    await signIn(page);
+    await expectSwapListScrolls(page, await buildDeck(page, { "edit-1": 2 }));
+  });
 
   test("the Library tab lists the library, its card popup is a bottom sheet with ±1, and the Deck tab counts the copy", async ({
     page,
