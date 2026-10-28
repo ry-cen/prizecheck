@@ -183,12 +183,13 @@ def snapshot(conn, owner, deck_id, title, version, target_format):
       e.public_ref AS edition_ref,p.public_ref AS printing_ref,
       coalesce(pd.display_name,ci.display_name) AS printing_name,
       coalesce(pd.set_id,'') AS set_id,coalesce(pd.set_name,'') AS set_name,
-      coalesce(pd.collector_number,'') AS collector_number,pd.image_url,
+      coalesce(pd.collector_number,'') AS collector_number,art.low_image_url AS image_url,
       CASE a.basic_energy WHEN true THEN 'supported' WHEN false THEN 'not_basic' ELSE 'unresolved' END AS basic_energy,
       a.card_kind,a.trainer_type,a.evolves_from,er.root_name AS evolution_root,er.stage AS evolution_stage
       FROM deck_list_line l JOIN catalog_edition e ON e.id=l.edition_id
       JOIN catalog_printing p ON p.id=e.printing_id JOIN catalog_identity ci ON ci.id=p.identity_id
       LEFT JOIN catalog_printing_display pd ON pd.printing_id=p.id
+      LEFT JOIN catalog_printing_art art ON art.printing_id=p.id
       LEFT JOIN catalog_card_attribute a ON a.printing_id=p.id
       LEFT JOIN catalog_evolution_root er ON er.identity_key=ci.identity_key AND a.card_kind='pokemon'
       WHERE l.owner_id=%s AND l.deck_id=%s
@@ -200,7 +201,7 @@ def snapshot(conn, owner, deck_id, title, version, target_format):
         group['amount'] += row['quantity']
         group['classes'].append(row['basic_energy'])
         group['editions'].append(PublicEdition(set_id=row['set_id'], set_name=row['set_name'], collector_number=row['collector_number'],
-            variant=row['descriptor'], image_url=f"{row['image_url']}/low.webp" if row['image_url'] else None, quantity=str(row['quantity']),
+            variant=row['descriptor'], image_url=row['image_url'], quantity=str(row['quantity']),
             edition_ref=row['edition_ref'], printing_ref=row['printing_ref'], printing_name=row['printing_name'],
             card_kind=row['card_kind'], trainer_type=row['trainer_type'], evolves_from=row['evolves_from'],
             evolution_root=row['evolution_root'], evolution_stage=row['evolution_stage']))

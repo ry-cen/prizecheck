@@ -241,6 +241,46 @@ test.describe("desktop", () => {
     await expect(inspector(page)).not.toContainText("Stale");
   });
 
+  test("a Printing with no TCGdex image shows TCGplayer art in its tile and the larger size in the inspector", async ({
+    page,
+  }) => {
+    const ids = priceWorld();
+    // The price world's cards carry no TCGdex image; Furret #1 gets TCGplayer product 777 as its fallback art.
+    await pool.query(
+      `INSERT INTO catalog_printing_fallback_art(printing_id, product_id)
+       SELECT printing_id, 777 FROM catalog_edition WHERE id=$1
+       ON CONFLICT (printing_id) DO UPDATE SET product_id=777`,
+      [ids.normal]
+    );
+    const requested: string[] = [];
+    await page.route(/^https:\/\/tcgplayer-cdn\.tcgplayer\.com\//, (route) => {
+      requested.push(route.request().url());
+      return route.fulfill({
+        status: 200,
+        contentType: "image/png",
+        body: PIXEL,
+      });
+    });
+    await signIn(page);
+    await hold(await createLeaf(page, `Art ${randomUUID().slice(0, 6)}`), [
+      ids.normal,
+    ]);
+    await page.reload();
+    const card = tile(page, "Furret, Darkness Ablaze 1, Normal, copy 1");
+    await expect(card.locator("img")).toHaveAttribute(
+      "src",
+      "https://tcgplayer-cdn.tcgplayer.com/product/777_200w.jpg"
+    );
+    await card.click();
+    await expect(inspector(page).locator("img")).toHaveAttribute(
+      "src",
+      "https://tcgplayer-cdn.tcgplayer.com/product/777_400w.jpg"
+    );
+    expect(requested).toContain(
+      "https://tcgplayer-cdn.tcgplayer.com/product/777_400w.jpg"
+    );
+  });
+
   test("a tile shows only the amount for a quote of unknown age, and words a timed-out row like the inspector", async ({
     page,
   }) => {

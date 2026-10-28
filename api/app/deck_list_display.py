@@ -23,12 +23,13 @@ TrainerType = Literal['supporter', 'item', 'tool', 'stadium']
 
 DISPLAY_QUERY = """SELECT e.id AS edition_id,coalesce(pd.display_name,ci.display_name) AS name,
   coalesce(pd.set_id,'') AS set_id,coalesce(pd.set_name,'') AS set_name,
-  coalesce(pd.collector_number,'') AS collector_number,e.descriptor,pd.image_url,
+  coalesce(pd.collector_number,'') AS collector_number,e.descriptor,art.low_image_url AS image_url,
   ca.card_kind,ca.trainer_type,ca.evolves_from,ci.id AS identity_id,ci.display_name AS identity_name,
   er.root_name AS evolution_root,er.stage AS evolution_stage
   FROM catalog_edition e JOIN catalog_printing p ON p.id=e.printing_id
   JOIN catalog_identity ci ON ci.id=p.identity_id
   LEFT JOIN catalog_printing_display pd ON pd.printing_id=p.id
+  LEFT JOIN catalog_printing_art art ON art.printing_id=p.id
   LEFT JOIN catalog_card_attribute ca ON ca.printing_id=p.id
   LEFT JOIN catalog_evolution_root er ON er.identity_key=ci.identity_key AND ca.card_kind='pokemon'
   WHERE e.id=ANY(%s)"""
@@ -40,14 +41,13 @@ DISPLAY_KEYS = frozenset(('name', 'set_id', 'set_name', 'collector_number', 'des
 
 def read_line_display(conn, edition_ids) -> dict[UUID, dict]:
     """Display fields by Edition id for ``edition_ids``. The image is the small artwork, as every other card route
-    serves it (``<image_url>/low.webp``), or None when the catalog has none."""
+    serves it (``catalog_printing_art.low_image_url``), or None when the catalog has none."""
     ids = list(edition_ids)
     if not ids:
         return {}
     found = {}
     for row in conn.execute(DISPLAY_QUERY, (ids,)).fetchall():
         fields = {key: value for key, value in row.items() if key != 'edition_id'}
-        fields['image_url'] = f"{row['image_url']}/low.webp" if row['image_url'] else None
         found[row['edition_id']] = fields
     return found
 

@@ -140,7 +140,9 @@ function EditionArt({
   useEffect(() => setAttempt(0), [imageUrl]);
   const src =
     attempt === 1 && imageUrl
-      ? imageUrl.replace(/\/low\.webp$/, "/high.webp")
+      ? imageUrl
+          .replace(/\/low\.webp$/, "/high.webp")
+          .replace(/_200w\.jpg$/, "_400w.jpg")
       : imageUrl;
   return src && attempt < 2 ? (
     <img

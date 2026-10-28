@@ -91,11 +91,12 @@ FRIEND_BY_HANDLE = """SELECT p.user_id AS collector_id, p.handle, p.display_name
 CARD_FACTS = """SELECT e.id AS edition_id, e.printing_id, p.identity_id,
   coalesce(pd.display_name, ci.display_name) AS name, coalesce(pd.set_id, '') AS set_id,
   coalesce(pd.set_name, '') AS set_name, coalesce(pd.collector_number, '') AS collector_number, e.descriptor,
-  pd.image_url, replace(catalog_search_words(coalesce(pd.display_name, ci.display_name)), ' ', '') AS search_key
+  art.low_image_url AS image_url, replace(catalog_search_words(coalesce(pd.display_name, ci.display_name)), ' ', '') AS search_key
   FROM catalog_edition e
   JOIN catalog_printing p ON p.id = e.printing_id
   JOIN catalog_identity ci ON ci.id = p.identity_id
   LEFT JOIN catalog_printing_display pd ON pd.printing_id = p.id
+  LEFT JOIN catalog_printing_art art ON art.printing_id = p.id
   WHERE e.id = ANY(%s)"""
 
 # Every Edition each wanted Edition reaches (see the module docstring), and whether it is of another Printing.
@@ -140,7 +141,7 @@ def card_facts(conn, edition_ids) -> dict[UUID, Card]:
         edition_id=row['edition_id'], printing_id=row['printing_id'], identity_id=row['identity_id'], name=row['name'],
         set_code=set_codes.code_for(row['set_id']), set_name=row['set_name'],
         collector_number=row['collector_number'], descriptor=row['descriptor'],
-        image_url=f"{row['image_url']}/low.webp" if row['image_url'] else None, search_key=row['search_key'] or '')
+        image_url=row['image_url'], search_key=row['search_key'] or '')
         for row in conn.execute(CARD_FACTS, (ids,))}
 
 

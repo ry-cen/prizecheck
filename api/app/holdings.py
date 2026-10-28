@@ -302,12 +302,13 @@ def leaf_holdings(location_id: UUID, cursor: str | None = Query(default=None, ma
           p.id AS printing_id,coalesce(pd.display_name,ci.display_name) AS printing_name,
           coalesce(lower(pd.display_name),lower(ci.display_name)) AS search_name,
           coalesce(pd.set_id,'') AS set_id,coalesce(pd.set_name,'') AS set_name,
-          coalesce(pd.collector_number,'') AS collector_number,e.descriptor,pd.image_url
+          coalesce(pd.collector_number,'') AS collector_number,e.descriptor,art.low_image_url AS image_url
           FROM holding h JOIN location l ON l.id=h.location_id AND l.owner_id=h.owner_id
           JOIN catalog_edition e ON e.id=h.edition_id
           JOIN catalog_printing p ON p.id=e.printing_id
           JOIN catalog_identity ci ON ci.id=p.identity_id
           LEFT JOIN catalog_printing_display pd ON pd.printing_id=p.id
+          LEFT JOIN catalog_printing_art art ON art.printing_id=p.id
           LEFT JOIN catalog_generation_printing gp ON gp.generation_id=%s AND gp.printing_id=p.id
           WHERE h.owner_id=%s AND h.location_id=%s {filters} {after}
           ORDER BY {order} LIMIT 49""", params).fetchall()
@@ -315,7 +316,7 @@ def leaf_holdings(location_id: UUID, cursor: str | None = Query(default=None, ma
         views = [HoldingView(edition_id=row["edition_id"], quantity=str(row["quantity"]), version=row["version"],
                              printing_id=row["printing_id"], printing_name=row["printing_name"],
                              set_id=row["set_id"], set_name=row["set_name"], collector_number=row["collector_number"],
-                             descriptor=row["descriptor"], image_url=f'{row["image_url"]}/low.webp' if row["image_url"] else None,
+                             descriptor=row["descriptor"], image_url=row["image_url"],
                              location_id=row["location_id"], location_name=row["location_name"]) for row in page]
         return LeafHoldings(holdings=views, owner_revision=revision, catalog_revision=state["revision"],
                             next_cursor=encode_cursor(context,[str(page[-1]['quantity']) if sort=='quantity' else page[-1]['search_name'],str(page[-1]['edition_id'])]) if len(rows)>48 else None)
