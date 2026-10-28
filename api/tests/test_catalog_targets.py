@@ -9,8 +9,8 @@ import psycopg
 import pytest
 
 from app.catalog_targets import (LIVE, LIVE_RULES, MATCHING, MATCHING_RULES, REGISTRIES, EditionState, Failure,
-                                 LiveRulesV1, MatchingRulesV1, MatchingRulesV2, MatchingRulesV3, PrintingState, TargetContext, activate_rule,
-                                 code_digest, complete_quote_variant, edition_state, edition_targets, ensure_matching_rule, evaluate_edition, normalized_name,
+                                 LiveRulesV1, MatchingRulesV1, MatchingRulesV2, MatchingRulesV3, MatchingRulesV4, PrintingState, TargetContext, activate_rule,
+                                 code_digest, complete_quote_variant, rematch_promos, edition_state, edition_targets, ensure_matching_rule, evaluate_edition, normalized_name,
                                  evaluate_printing, fingerprint, load_active, printing_live, refresh_printing)
 from app.main import connect
 from test_catalog import reset_catalog
@@ -1018,6 +1018,7 @@ PINNED_DIGESTS = {
     (MATCHING, 1): "5367c25316bea657d01a044af5a175dfe66dab656d36f82bcc16bb060dfb25d6",
     (MATCHING, 2): "6994b033232a73138f83cda642e97edc8e75e692e9bba29a3704b913eb7a6eef",
     (MATCHING, 3): "60e02ce648ea81e2177124c2f4a5740897e5481dbecfa20a1a1395dddf184c5e",
+    (MATCHING, 4): "b2bb54f5321df60cf54f84e7f2a7640069c09ea4c0931742798613ef856142ae",
 }
 
 
@@ -1030,3 +1031,248 @@ def test_registered_rule_digests_are_pinned():
     registered = {(kind, version): code_digest(kind, version)
                   for kind, registry in REGISTRIES.items() for version in registry if version != 99}  # 99 is the test-injected table
     assert registered == PINNED_DIGESTS
+
+
+# ------------------------------------------------------------------ matching rule v4
+
+
+def promo(source_id, number, set_id="svp", name="Pikachu", variants=None):
+    """A TCGdex card whose variants carry only thirdParty IDs (or none): no pricing block anywhere."""
+    record = furret(**{"id": source_id, "name": name, "localId": number, "set": {"id": set_id, "name": set_id, "cardCount": {"official": 1, "total": 1}}})
+    del record["card_pricing"]
+    record["variants_detailed"] = variants or [{"type": "holo", "size": "standard"}]
+    return record
+
+
+def listing(product_id, name, number, group, conn=None):
+    from app.price_import import number_key
+    with connect() as connection:
+        connection.execute("""INSERT INTO tcgplayer_product(product_id,group_id,name,number,number_key,seen_at,source_updated_at)
+          VALUES (%s,%s,%s,%s,%s,now(),now())""", (product_id, group, name, number, number_key(number)))
+
+
+@pytest.fixture
+def tcgplayer_products():
+    with connect() as conn:
+        conn.execute("TRUNCATE tcgplayer_product, tcgplayer_price")
+    yield
+    with connect() as conn:
+        conn.execute("TRUNCATE tcgplayer_product, tcgplayer_price")
+
+
+def states(source_id):
+    return sorted((row["mapping_state"], row["mapping_reason"], row["product_id"], row["quote_variant"])
+                  for row in metadata(source_id)[1].values())
+
+
+def test_v4_takes_the_variants_own_tcgdex_id_where_v3_finds_no_product():
+    reset_catalog()
+    run(Records(promo("svp-1", "1", variants=[{"type": "holo", "size": "standard", "thirdParty": {"tcgplayer": 477184}}])))
+    activate(MATCHING, 3)
+    assert states("svp-1") == [("unverified", "rule_failed", None, None)]
+    assert activate(MATCHING, 4) == {"printings": 0, "editions": 1}
+    assert states("svp-1") == [("verified", None, 477184, "holofoil")]
+
+
+def test_v4_verifies_base1_4s_three_variants_and_siblings_may_share_a_product():
+    reset_catalog()
+    run(Records(promo("base1-4", "4", "base1", "Charizard", [
+        {"type": "holo", "subtype": "unlimited", "size": "standard", "thirdParty": {"tcgplayer": 42382}},
+        {"type": "holo", "subtype": "shadowless", "stamp": ["1st-edition"], "size": "standard", "thirdParty": {"tcgplayer": 106999}},
+        {"type": "holo", "subtype": "shadowless", "size": "standard", "thirdParty": {"tcgplayer": 106999}}])))
+    activate(MATCHING, 4)
+    with connect() as conn:
+        rows = conn.execute("""SELECT e.descriptor,m.mapping_state,m.product_id FROM catalog_edition e
+          JOIN catalog_edition_metadata m ON m.edition_id=e.id""").fetchall()
+    assert sorted((row["descriptor"].get("subtype"), "stamp" in row["descriptor"], row["mapping_state"], row["product_id"])
+                  for row in rows) == [("shadowless", False, "verified", 106999), ("shadowless", True, "verified", 106999),
+                                               ("unlimited", False, "verified", 42382)]
+
+
+def test_a_tcgdex_id_verified_on_another_printing_is_a_duplicate_and_v3_conflicts_stay_conflicts():
+    reset_catalog()
+    shared = [{"type": "holo", "size": "standard", "thirdParty": {"tcgplayer": 777}}]
+    run(Records(promo("svp-1", "1", variants=shared), promo("svp-2", "2", name="Raichu", variants=shared)))
+    activate(MATCHING, 4)
+    assert sorted(states("svp-1") + states("svp-2")) == [("unverified", "duplicate_mapping", None, None), ("verified", None, 777, "holofoil")]
+    reset_catalog()
+    clash = card(1)
+    for variant in clash["variants_detailed"]:
+        variant["thirdParty"] = {"tcgplayer": 5}  # the block says 1001
+    run(Records(clash))
+    activate(MATCHING, 4)
+    assert {row["mapping_reason"] for row in metadata()[1].values()} == {"rule_failed"}
+
+
+def test_the_promo_path_is_a_card_number_and_exact_name_match(tcgplayer_products):
+    reset_catalog()
+    listing(900, "Chespin - XY01", "XY01", 1451)
+    listing(901, "Tepig (BW02)", "BW02", 1407)
+    run(Records(promo("xyp-1", "XY01", "xyp", "Chespin"), promo("bwp-2", "BW02", "bwp", "Tepig")))
+    activate(MATCHING, 3)
+    assert states("xyp-1") == [("unverified", "rule_failed", None, None)]
+    activate(MATCHING, 4)
+    assert states("xyp-1") == [("verified", None, 900, "holofoil")]
+    assert states("bwp-2") == [("verified", None, 901, "holofoil")]
+
+
+def test_a_set_outside_the_table_and_a_card_with_a_tcgdex_id_never_take_the_number_path(tcgplayer_products):
+    reset_catalog()
+    listing(900, "Chespin", "XY01", 1451)
+    listing(901, "Furret", "136", 1451)
+    run(Records(promo("other-1", "XY01", "swsh3", "Chespin"),
+                promo("xyp-9", "XY01", "xyp", "Chespin", [{"type": "holo", "size": "standard", "thirdParty": {"tcgplayer": 12}}])))
+    activate(MATCHING, 4)
+    assert states("other-1") == [("unverified", "rule_failed", None, None)]
+    assert states("xyp-9") == [("verified", None, 12, "holofoil")]  # its own id, never product 900
+
+
+def candidates(*names, number="XY01"):
+    return [{"product_id": 100 + index, "name": name, "number": number} for index, name in enumerate(names)]
+
+
+def promo_facts(name="Chespin", number="XY01", set_id="xyp", descriptor=None, lookup=None, found=()):
+    return facts(descriptor=descriptor or {"type": "holo", "size": "standard"}, lookup=lookup or {},
+                 source_record={"set": {"id": set_id}, "localId": number, "name": name},
+                 display={"set_id": set_id, "collector_number": number, "display_name": name}, tcgplayer_candidates=list(found))
+
+
+def evaluate_v4(**changes):
+    return MatchingRulesV4.evaluate(promo_facts(**changes), lambda product, variant: False)
+
+
+def test_v4_name_rule_removes_one_qualifier_for_the_cards_own_number_only():
+    for name, number, product in (("Chespin", "XY01", "Chespin - XY01"), ("Tepig", "BW02", "Tepig (BW02)"), ("Tepig", "BW02", "TEPIG  (bw002)")):
+        assert evaluate_v4(name=name, number=number, found=candidates(product, number=number)) == (100, "holofoil"), product
+    for name, number, product in (("Torterra", "DP09", "Torterra LV.X - DP09"), ("Minccino", "BW13", "Minccino - BW13 (Cosmos Holo)"),
+                                  ("Dragalge", "XY10", "Dragalge - XY10 (Prerelease)"), ("Dragalge", "XY10", "Dragalge Spirit"),
+                                  ("Tepig", "BW02", "Tepig (BW03)"), ("Tepig", "BW02", "Tepig - BW02 - BW02")):
+        assert evaluate_v4(name=name, number=number, found=candidates(product, number=number)) == Failure("no_product"), product
+
+
+def test_v4_collisions_need_exactly_one_exact_name_and_a_non_special_edition():
+    found = candidates("Chespin [Staff]", "Chespin - XY01", "Chespin (Prerelease)")
+    assert evaluate_v4(found=found) == (101, "holofoil")
+    assert evaluate_v4(found=found, descriptor={"type": "holo", "stamp": ["staff"]}) == Failure("no_product")
+    assert evaluate_v4(found=candidates("Chespin", "Chespin - XY01")) == Failure("no_product")  # two exact matches
+    assert evaluate_v4(found=candidates("Chespin [Staff]")) == Failure("no_product")
+    assert evaluate_v4(found=[]) == Failure("no_product")
+    for descriptor in ({"type": "holo", "foil": "x"}, {"type": "holo", "subtype": "other"}, {"type": "holo", "size": "jumbo"}):
+        assert evaluate_v4(found=candidates("Chespin"), descriptor=descriptor) == Failure("no_product")
+    assert evaluate_v4(found=candidates("Chespin"), descriptor={"type": "holo", "stamp": ["1st-edition"]}) == (100, None)
+
+
+def test_v4_number_path_has_its_own_duplicate_check_and_matched_by_number_follows_the_rule():
+    assert MatchingRulesV4.evaluate(promo_facts(found=candidates("Chespin")), lambda product, variant: product == 100) == Failure("duplicate")
+    assert MatchingRulesV4.matched_by_number(promo_facts())
+    assert not MatchingRulesV4.matched_by_number(promo_facts(set_id="swsh3"))
+    for lookup in ({"thirdParty": {"tcgplayer": 5}}, {"pricing": {"tcgplayer": {"normal": {"productId": 5}}}}):
+        assert not MatchingRulesV4.matched_by_number(promo_facts(lookup=lookup))
+    assert evaluate_v4(found=candidates("Chespin"), lookup={"thirdParty": {"tcgplayer": "5"}}) == Failure("no_product")  # an unusable id is still an id
+
+
+@pytest.mark.parametrize("given,key", [("DP05", "DP5"), ("SWSH001", "SWSH1"), ("001", "1"), ("XY01", "XY1"), ("12/102", "12")])
+def test_v4_number_key(given, key):
+    assert MatchingRulesV4.number_key(given) == key
+
+
+def test_v4_table_names_exactly_the_reviewed_groups():
+    assert MatchingRulesV4.TCGPLAYER_GROUPS == {"basep": 1418, "np": 1423, "dpp": 1421, "hgssp": 1453, "bwp": 1407, "xyp": 1451,
+                                                "smp": 1861, "swshp": 2545, "svp": 22872, "mep": 24451}
+
+
+def test_activating_v4_re_evaluates_only_unverified_open_editions(tcgplayer_products):
+    reset_catalog()
+    listing(900, "Chespin", "XY01", 1451)
+    activate(MATCHING, 3)
+    run(Records(promo("xyp-1", "XY01", "xyp", "Chespin"), repeated_block(2), repeated_block(3)))
+    with connect() as conn:
+        conn.execute("""UPDATE catalog_edition_metadata SET mapping_state='quarantined',mapping_reason='candidate_changed',auto_closed=true
+          WHERE edition_id IN (SELECT e.id FROM catalog_edition e JOIN catalog_printing p ON p.id=e.printing_id WHERE p.source_id='meta-2')""")
+        conn.execute("""UPDATE catalog_edition_metadata SET mapping_state='unverified',mapping_reason='reviewed_unmapped',auto_closed=true
+          WHERE edition_id IN (SELECT e.id FROM catalog_edition e JOIN catalog_printing p ON p.id=e.printing_id WHERE p.source_id='meta-3')""")
+    before = {source: states(source) for source in ("meta-2", "meta-3")}
+    activate(MATCHING, 4)
+    assert {source: states(source) for source in ("meta-2", "meta-3")} == before
+    assert states("xyp-1") == [("verified", None, 900, "holofoil")]
+
+
+def test_automatic_matching_activates_v4(monkeypatch):
+    reset_catalog(); owner(); run(Records(repeated_block(1)))
+    monkeypatch.setenv("MARKETPLACE_MATCHING", "automatic")
+    with connect() as conn, conn.transaction():
+        ensure_matching_rule(conn)
+    assert load_active_version() == 4
+
+
+def test_an_activation_the_code_lacks_verifies_nothing_new_and_unmatches_nothing(monkeypatch):
+    class Newer(MatchingRulesV4):
+        pass
+    reset_catalog()
+    monkeypatch.setitem(MATCHING_RULES, 99, Newer)
+    activate(MATCHING, 4)
+    run(Records(card(1)))
+    assert states("meta-1") == [("verified", None, 1001, "normal"), ("verified", None, 1001, "reverse-holofoil")] or \
+        {row["mapping_state"] for row in metadata("meta-1")[1].values()} == {"verified"}
+    activate(MATCHING, 99)
+    del MATCHING_RULES[99]  # older code, after v99 was activated
+    with connect() as conn:
+        assert load_active(conn, MATCHING) is None
+    run(Records(card(1), card(2)))
+    assert {row["mapping_state"] for row in metadata("meta-1")[1].values()} == {"verified"}
+    assert {(row["mapping_state"], row["mapping_reason"]) for row in metadata("meta-2")[1].values()} == {("unverified", "no_matching_rule")}
+
+
+# ------------------------------------------------------------------ --rematch
+
+
+def rematched():
+    with connect() as conn:
+        return rematch_promos(conn)
+
+
+def test_rematch_verifies_an_edition_whose_product_appeared_later_and_touches_nothing_else(tcgplayer_products):
+    reset_catalog()
+    activate(MATCHING, 4)
+    run(Records(promo("svp-1", "9", "svp", "Pikachu"), promo("xyp-27", "XY27", "xyp", "Zorua"), promo("xyp-28", "XY28", "xyp", "Zoroark"),
+                promo("other-1", "5", "swsh3", "Nope"), repeated_block(3)))
+    assert rematched() == 0  # no tcgplayer_product rows at all: everything stays rule_failed
+    assert states("svp-1") == [("unverified", "rule_failed", None, None)]
+    listing(910, "Pikachu", "009", 22872)
+    listing(911, "Zorua - XY27", "XY27", 1451)
+    listing(912, "Zorua [Staff]", "XY27", 1451)
+    listing(913, "Zoroark", "XY28", 1451)
+    listing(914, "Zoroark - XY28", "XY28", 1451)  # two exact matches
+    listing(915, "Nope", "5", 1451)
+    before = {source: metadata(source)[1] for source in ("other-1", "meta-3")}
+    with connect() as conn:
+        conn.execute("UPDATE catalog_edition_metadata SET mapping_reason='reviewed_unmapped' WHERE edition_id IN "
+                     "(SELECT e.id FROM catalog_edition e JOIN catalog_printing p ON p.id=e.printing_id WHERE p.source_id='xyp-28')")
+    assert rematched() == 2  # svp-1 and xyp-27
+    assert states("svp-1") == [("verified", None, 910, "holofoil")]
+    assert states("xyp-27") == [("verified", None, 911, "holofoil")]
+    assert states("xyp-28")[0][1] == "reviewed_unmapped"
+    assert states("other-1") == [("unverified", "rule_failed", None, None)]
+    assert {source: metadata(source)[1] for source in ("other-1", "meta-3")} == before
+    assert rematched() == 0
+
+
+def test_rematch_does_nothing_without_an_active_matching_rule(tcgplayer_products):
+    reset_catalog()
+    listing(910, "Pikachu", "9", 22872)
+    activate(MATCHING, 3)
+    run(Records(promo("svp-1", "9", "svp", "Pikachu")))
+    activate(MATCHING, None)
+    before = states("svp-1")
+    assert rematched() == 0
+    assert states("svp-1") == before and before[0][0] == "unverified"
+
+
+def test_rematch_two_products_on_a_number_stay_rule_failed(tcgplayer_products):
+    reset_catalog()
+    activate(MATCHING, 4)
+    run(Records(promo("xyp-27", "XY27", "xyp", "Zorua")))
+    listing(911, "Zorua - XY27", "XY27", 1451)
+    listing(912, "Zorua (XY27)", "XY27", 1451)
+    assert rematched() == 0
+    assert states("xyp-27") == [("unverified", "rule_failed", None, None)]

@@ -303,6 +303,20 @@ def rebind_only(conn):
     return OK if counts else FAILED
 
 
+def rematch(conn):
+    """--rematch: re-evaluate the reviewed promo sets' rule_failed Editions under the active rule (promos TCGCSV listed
+    after the activation), then rebind when any Edition changed. Logged, never raised, and never changes the exit code."""
+    from app.catalog_targets import rematch_promos
+    try:
+        changed = rematch_promos(conn)
+    except psycopg.Error as error:
+        log(f"the rematch failed ({type(error).__name__})")
+        return
+    log(f"rematch changed {changed} editions")
+    if changed:
+        rebind_only(conn)
+
+
 def newest_finished(conn):
     return conn.execute("SELECT outcome, source_updated_at FROM price_import WHERE outcome IS NOT NULL "
                         "ORDER BY id DESC LIMIT 1").fetchone()
@@ -396,6 +410,8 @@ def main(argv=None):
     parser.add_argument("--force", action="store_true", help="download again even when last-updated.txt is unchanged")
     parser.add_argument("--rebind-only", action="store_true",
                         help="rebind prices (and refresh art and publish once they exist) without fetching anything")
+    parser.add_argument("--rematch", action="store_true",
+                        help="after the import, re-evaluate unverified rule_failed promo Editions under the active matching rule")
     args = parser.parse_args(argv)
     from app.db import connect
     try:
@@ -406,7 +422,10 @@ def main(argv=None):
     try:
         if args.rebind_only:
             return rebind_only(conn)
-        return run(conn, force=args.force).exit_code
+        code = run(conn, force=args.force).exit_code
+        if args.rematch and code in (OK, PARTIAL):
+            rematch(conn)
+        return code
     except psycopg.Error as error:
         log(f"the database failed ({type(error).__name__})")
         return UNREACHABLE

@@ -599,13 +599,13 @@ Then sign in:
    ```bash
    sudo bash /opt/prizecheck-prod/bin/prizecheck-deploy.sh compose exec -T api python -c "
    from app.metadata_reviews import activate, MetadataRuleActivation
-   for kind, version in (('live_derivation', 1), ('marketplace_matching', 3)):
+   for kind, version in (('live_derivation', 1), ('marketplace_matching', 4)):
        print(activate(kind, MetadataRuleActivation(version=version,
            evidence_url='https://github.com/ry-cen/prizecheck/blob/main/api/app/catalog_targets.py',
            reason='Initial activation'), user_id='ID-FROM-THE-QUERY'))"
    ```
 
-   Use the newest version each panel lists.
+   Use the newest version each panel lists. Matching v4 also matches the Black Star promo sets by card number from the stored TCGCSV products, so activate it after the first price import has run; promos TCGCSV lists later are picked up by `price_import_job.py --rematch`.
 
 4. Refresh, open **Owner controls**, and start the full English catalog pull. A pull seeds prices for at most 10 minutes, so part of the catalog is priced only when someone first opens a card ([#342](https://github.com/ry-cen/prizecheck/issues/342)).
 5. After the catalog pull, build the scanner's index by hand:
