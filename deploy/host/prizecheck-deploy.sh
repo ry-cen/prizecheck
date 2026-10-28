@@ -546,6 +546,8 @@ has_systemd() { command -v systemctl >/dev/null 2>&1 && [[ -d "$SYSTEMD_RUN_DIR"
 # Prints a unit as this host should have it: the service's ExecStart runs this host's own copy of the script.
 render_unit() {
   local unit="$1" source="$UNIT_SOURCE_DIR/$1" line found=0
+  # systemd splits ExecStart on spaces and reads % as a specifier, so the script must live at a plain path.
+  [[ "$SCRIPT_PATH" =~ ^/[A-Za-z0-9._/-]+$ ]] || die "$SCRIPT_PATH cannot go in a systemd unit (spaces, '%' and other special characters are not allowed); install the host files under a plain path such as /opt/prizecheck-prod/bin"
   [[ -f "$source" ]] || die "Missing $source; install it with the other host files ($GUIDE, 'Updating the host files')"
   if [[ "$unit" != "$REFRESH_SERVICE" ]]; then
     cat "$source"
@@ -582,7 +584,8 @@ install_refresh_units() {
       continue
     fi
     tmp="$(mktemp "$SYSTEMD_UNIT_DIR/.$unit.XXXXXX")"
-    render_unit "$unit" > "$tmp" || { rm -f "$tmp"; die "Could not render $unit"; }
+    # A subshell, so that render_unit's die cannot skip the cleanup of the temp file.
+    (render_unit "$unit" > "$tmp") || { rm -f "$tmp"; die "Could not render $unit"; }
     chmod 0644 "$tmp"
     mv -f "$tmp" "$SYSTEMD_UNIT_DIR/$unit"
     log "Installed $SYSTEMD_UNIT_DIR/$unit"
@@ -599,14 +602,20 @@ install_refresh_units() {
   fi
 }
 
-# On a systemd host the installed units must be the rendered bin/ copies and the timer enabled.
-check_refresh_units() {
+# On a systemd host the installed units must be the rendered bin/ copies and the timer enabled. Prints the first problem
+# and returns 1 (never dies, so a deploy can warn); returns 0 when all is well or the host has no systemd.
+refresh_units_problem() {
   has_systemd || return 0
   local unit
   for unit in "$REFRESH_SERVICE" "$REFRESH_TIMER"; do
-    unit_installed_current "$unit" || die "$SYSTEMD_UNIT_DIR/$unit is missing or differs from the host file; run '$SCRIPT_PATH setup'"
+    unit_installed_current "$unit" || { printf '%s\n' "$SYSTEMD_UNIT_DIR/$unit is missing or differs from the host file; run '$SCRIPT_PATH setup'"; return 1; }
   done
-  systemctl is-enabled --quiet "$REFRESH_TIMER" || die "$REFRESH_TIMER is not enabled; run '$SCRIPT_PATH setup'"
+  systemctl is-enabled --quiet "$REFRESH_TIMER" || { printf '%s\n' "$REFRESH_TIMER is not enabled; run '$SCRIPT_PATH setup'"; return 1; }
+}
+
+check_refresh_units() {
+  local problem
+  problem="$(refresh_units_problem)" || die "$problem"
 }
 
 # --- Registry -----------------------------------------------------------------------------------------------------------
@@ -809,6 +818,9 @@ cmd_deploy() {
   if [[ "$(bundle_digest)" != "$expected_bundle" ]]; then
     die "Host deployment files differ from commit $commit; reinstall ${COMPOSE_FILES[*]##*/}, prizecheck-deploy.sh and the catalog refresh units ($GUIDE, 'Updating the host files')"
   fi
+  # The daily refresh must not stop quietly after a host-file update, but a stale timer is no reason to refuse a deploy.
+  local unit_problem
+  unit_problem="$(refresh_units_problem)" || log "WARNING: $unit_problem"
   take_lock
   registry_login_from_stdin
   local current; current="$(read_state current)"

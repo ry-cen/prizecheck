@@ -945,6 +945,50 @@ class HostDeployScriptTest(unittest.TestCase):
         result = self.run_script(home, 'check-config')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
+    def deploy_with_units(self, home, env):
+        env = {key: value for key, value in env.items() if key != 'FAKE_COMMIT'}
+        return self.deploy(home, OTHER, **env)
+
+    def test_a_deploy_with_a_stale_unit_warns_and_succeeds(self):
+        home = self.signup_home(PROD, proof=None)
+        env = self.systemd_env(home)
+        self.assertEqual(self.run_script(home, 'setup', **env).returncode, 0)
+        service = home / 'units/prizecheck-catalog-refresh.service'
+        service.write_text(service.read_text() + '# edited\n')
+        code, output = self.deploy_with_units(home, env)
+        self.assertEqual(code, 0, output)
+        self.assertIn(f'Deployed {OTHER}', output)
+        self.assertIn(f'WARNING: {service} is missing or differs from the host file; run', output)
+        self.assertIn('setup', output)
+        # A disabled timer warns too.
+        self.assertEqual(self.run_script(home, 'setup', **env).returncode, 0)
+        Path(env['FAKE_SYSTEMCTL_STATE']).unlink()
+        code, output = self.deploy_with_units(home, env)
+        self.assertEqual(code, 0, output)
+        self.assertIn('WARNING: prizecheck-catalog-refresh.timer is not enabled', output)
+
+    def test_a_deploy_with_matching_units_prints_no_unit_warning(self):
+        home = self.signup_home(PROD, proof=None)
+        env = self.systemd_env(home)
+        self.assertEqual(self.run_script(home, 'setup', **env).returncode, 0)
+        code, output = self.deploy_with_units(home, env)
+        self.assertEqual(code, 0, output)
+        self.assertIn(f'Deployed {OTHER}', output)
+        self.assertNotIn('missing or differs', output)
+        self.assertNotIn('is not enabled', output)
+
+    def test_setup_refuses_a_script_path_systemd_cannot_use(self):
+        for name in ('with space', 'pct%h'):
+            home = self.make_home(PROD)
+            odd = home / name
+            (home / 'bin').rename(odd)
+            result = subprocess.run(['bash', str(odd / 'prizecheck-deploy.sh'), 'setup'], capture_output=True, text=True,
+                                    timeout=30, env={**os.environ, 'HOME': str(home), **self.systemd_env(home)})
+            self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn('cannot go in a systemd unit', result.stdout + result.stderr)
+            self.assertFalse(list((home / 'units').glob('*')) if (home / 'units').exists() else [])
+            self.assertEqual(self.systemctl_calls(), [])
+
     def refresh(self, **extra):
         """Runs `catalog-refresh` in a home whose current release is COMMIT with the refresh fake docker; returns
         (exit code, output, recorded run calls)."""

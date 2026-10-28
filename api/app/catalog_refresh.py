@@ -144,9 +144,10 @@ def run_check(conn, source=None, out=None) -> int:
     print(f"catalog_check_id={check_id}", file=out, flush=True)
     counts = {"new": None, "removed": None}
     try:
-        if any(load_active(conn, kind) is None for kind in (LIVE, MATCHING)):
+        inactive = [kind for kind in (LIVE, MATCHING) if load_active(conn, kind) is None]
+        if inactive:
             conn.commit()
-            log.error("check %s: a catalog rule is not active; not starting a pull", check_id)
+            log.error("check %s: catalog rule not active (%s); not starting a pull", check_id, ", ".join(inactive))
             _finish(conn, check_id, "failed", error="CATALOG_RULES_INACTIVE")
             return EXIT_CHECK_FAILED
         conn.commit()
