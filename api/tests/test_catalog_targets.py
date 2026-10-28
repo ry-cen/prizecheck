@@ -991,7 +991,7 @@ PINNED_DIGESTS = {
     (MATCHING, 5): "6a870e3f61697fe0a35009951889d6a83a74f3c2f33b7af0c840d4d5c8240106",
 
 
-    (MATCHING, 6): "e5b5a8b34450681d37f1ceafd0b5257cf5f0152f53d19be02d495736a3148fc4",
+    (MATCHING, 6): "af70686645e41acce32346fcecb9119652bcb26f608b49d9c701ee80acdea1de",
 }
 
 
@@ -1807,11 +1807,27 @@ def test_v6_rematch_picks_up_a_product_listed_after_activation_in_any_group_of_a
     assert states("bw11-rc1") == [("verified", None, 5, "holofoil")] and states("g1-5") == [("verified", None, 6, "holofoil")]
 
 
-def test_v6_tables_follow_the_active_rule_and_candidates_span_a_sets_groups(tcgplayer_products):
-    from app.catalog_targets import reviewed_rule, tcgplayer_candidates
+def test_v6_candidates_span_a_sets_groups_and_earlier_rules_see_exactly_what_they_did_before(tcgplayer_products):
+    from app.catalog_targets import multi_group_candidates, reviewed_rule, tcgplayer_candidates
     v6_products()
+    listing(20, "Chespin", "XY01", 1451)
+    listing(21, "Cabinet", "XY01", 1452)
     with connect() as conn:
         assert reviewed_rule(None) is MatchingRulesV6
-        assert [item["product_id"] for item in tcgplayer_candidates(conn, "bw11", "1")] == [9, 10]
-        assert [item["product_id"] for item in tcgplayer_candidates(conn, "sma", "SV46")] == [3]
-        assert [item["product_id"] for item in tcgplayer_candidates(conn, "xyp", "XY01")] == []
+        assert [item["product_id"] for item in multi_group_candidates(conn, "bw11", "1", MatchingRulesV6)] == [9, 10]
+        assert [item["product_id"] for item in multi_group_candidates(conn, "sma", "SV46", MatchingRulesV6)] == [3]
+        assert multi_group_candidates(conn, "sma", "", MatchingRulesV6) == []
+        # v4 and v5 read their single group, and the shared function is the one rule v5 pins: v6's groups never reach it
+        for rule in (MatchingRulesV4, MatchingRulesV5):
+            assert [item["product_id"] for item in tcgplayer_candidates(conn, "xyp", "XY01", rule)] == [20]
+        assert [item["product_id"] for item in tcgplayer_candidates(conn, "bw11", "1", MatchingRulesV6)] == [9]  # first group only
+
+
+def test_v6_refresh_uses_every_group_of_a_set_while_v5_active_leaves_the_main_sets_alone(tcgplayer_products):
+    reset_catalog()
+    v6_products()
+    run(Records(promo("bw11-rc1", "RC1", "bw11", "Radiant Charizard"), promo("ex15-1", "1", "ex15", "Ampharos δ")))
+    activate(MATCHING, 5)
+    assert states("bw11-rc1") == [("unverified", "rule_failed", None, None)] and states("ex15-1") == [("unverified", "rule_failed", None, None)]
+    activate(MATCHING, 6)
+    assert states("bw11-rc1") == [("verified", None, 5, "holofoil")] and states("ex15-1") == [("verified", None, 1, "holofoil")]
