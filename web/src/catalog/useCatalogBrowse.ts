@@ -85,6 +85,25 @@ export function useCatalogBrowse(
   // Owner revisions the collector's own Adds on this page moved past the first page's.
   const ownChanges = useRef(0);
 
+  const restoreFocus = useRef<{ id: string; index: number } | null>(null);
+  // After a restart, a tile that lost focus gets it back: the same Edition's, else the one at its place, else the last.
+  useEffect(() => {
+    const wanted = restoreFocus.current;
+    if (!wanted || editions.length === 0 || loading) return;
+    restoreFocus.current = null;
+    const active = document.activeElement;
+    if (active && active !== document.body && active.isConnected) return;
+    const tiles = Array.from(
+      document.querySelectorAll<HTMLElement>(
+        "[data-catalog-tiles] [data-edition-id]"
+      )
+    );
+    (
+      tiles.find((tile) => tile.dataset.editionId === wanted.id) ??
+      tiles[Math.min(wanted.index, tiles.length - 1)]
+    )?.focus();
+  }, [editions, loading]);
+
   const load = useCallback(async (why = "", depth = 0) => {
     const mine = ++latest.current;
     // Own Adds counted before this read; ones that land while it runs stay counted.
@@ -116,8 +135,10 @@ export function useCatalogBrowse(
       setNotice(why);
       setError(null);
     } catch (cause) {
-      if (mine === latest.current)
+      if (mine === latest.current) {
+        restoreFocus.current = null;
         setError({ text: failure(cause), more: false });
+      }
     } finally {
       if (mine === latest.current) setLoading(false);
     }
@@ -152,6 +173,8 @@ export function useCatalogBrowse(
           if (mine !== latest.current) return;
           why = quiet ? "" : COLLECTION_REFRESHED;
         }
+        // Keyboard focus on a tile when the walk starts again (#196): put it back once the rows are redrawn.
+        restoreFocus.current = focusedTile();
         void load(why, shownRows.current);
       } else setError({ text: failure(cause), more: true });
     } finally {
@@ -231,4 +254,16 @@ export function useCatalogBrowse(
     retry: () => void (error?.more ? loadMore() : load()),
     noteAdded,
   };
+}
+
+/** The gallery tile that holds keyboard focus, and its place among the tiles. */
+function focusedTile(): { id: string; index: number } | null {
+  const tile = document.activeElement?.closest<HTMLElement>(
+    "[data-catalog-tiles] [data-edition-id]"
+  );
+  if (!tile?.dataset.editionId) return null;
+  const tiles = Array.from(
+    document.querySelectorAll("[data-catalog-tiles] [data-edition-id]")
+  );
+  return { id: tile.dataset.editionId, index: tiles.indexOf(tile) };
 }

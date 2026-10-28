@@ -132,6 +132,9 @@ const SET_ROW =
  * newest first (setEras.ts); all folders are closed on open except the one holding the chosen set, and typing in the
  * box opens every folder that still has a match. Until a catalog import has named the eras, the list is flat, A–Z.
  */
+/** How long the set list stays fresh while the page lives. */
+const SETS_STALE_MS = 5 * 60 * 1000;
+
 function SetPicker({
   open,
   current,
@@ -147,6 +150,10 @@ function SetPicker({
 }) {
   const [sets, setSets] = useState<CatalogSet[] | null>(null);
   const [failed, setFailed] = useState(false);
+  const fetchedAt = useRef(0);
+  const reading = useRef(false);
+  const hadSets = useRef(false);
+  hadSets.current = sets !== null;
   const [filter, setFilter] = useState("");
   // The folders the collector flipped from their starting state (closed, or open while a filter is typed).
   const [flipped, setFlipped] = useState<ReadonlySet<string>>(new Set());
@@ -155,20 +162,27 @@ function SetPicker({
     if (!open) return;
     setFilter("");
     setFlipped(new Set());
-    if (sets) return;
+    // A list read a while ago is shown at once and read again behind it (#196): the catalog is refreshed from time to time.
+    if (sets && Date.now() - fetchedAt.current < SETS_STALE_MS) return;
+    if (reading.current) return;
+    reading.current = true;
     setFailed(false);
-    let cancelled = false;
     getCatalogSets()
       .then((list) => {
-        if (!cancelled) setSets(list.sets);
+        fetchedAt.current = Date.now();
+        setSets(list.sets);
       })
       .catch(() => {
-        if (!cancelled) setFailed(true);
+        // A stale list stays usable when its refresh fails.
+        if (!hadSets.current) setFailed(true);
+      })
+      // A read that finishes after the picker closed still keeps its list for the next opening.
+      .finally(() => {
+        reading.current = false;
       });
-    return () => {
-      cancelled = true;
-    };
-  }, [open, sets]);
+    // `sets` is read only to see whether a list is already shown; its own arrival must not run this again.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   const wanted = filter.trim().toLowerCase();
   const shown = (sets ?? []).filter(

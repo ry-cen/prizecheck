@@ -381,12 +381,19 @@ test.describe("desktop", () => {
         isBrowse(request.url()) &&
         !new URL(request.url()).searchParams.has("cursor")
     );
-    await tiles(page).last().scrollIntoViewIfNeeded();
+    // Focus reaching the last tile (the keyboard path) asks for the page that answers 409.
+    const lastTile = tiles(page).last().getByRole("button");
+    await lastTile.focus();
+    const focusedId = await lastTile.getAttribute("data-edition-id");
     await restart;
     await expect(status(page)).toContainText(
       "Catalog changed. Results refreshed from page one."
     );
     await expect(tiles(page)).toHaveCount(70);
+    // The restart redraws the rows but keeps keyboard focus on the tile it was on (#196).
+    await expect(
+      results(page).locator(`[data-edition-id="${focusedId}"]`)
+    ).toBeFocused();
 
     // A failed page shows Retry at the end of the gallery and loads nothing more until it is pressed. Focus reaching
     // the last tile (the keyboard path) asks for the next page, and loading never moves focus.
@@ -416,6 +423,66 @@ test.describe("desktop", () => {
     await expect(tiles(page)).toHaveCount(70);
     await expect(results(page)).toContainText("All 70 cards shown");
     await expect(failure).toHaveCount(0);
+  });
+
+  test("the live region announces the end of the list once, not each page (#196)", async ({
+    page,
+  }) => {
+    seedGallery();
+    await signIn(page);
+    await expect(tiles(page)).toHaveCount(60);
+    const live = results(page).locator('[aria-live="polite"]');
+    await expect(live).toHaveText("");
+
+    // A page loading is shown but not announced.
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    await page.route(
+      (url) => isBrowse(url.href) && url.searchParams.has("cursor"),
+      async (route) => {
+        await gate;
+        await route.continue();
+      }
+    );
+    await tiles(page).last().scrollIntoViewIfNeeded();
+    await expect(results(page).getByText("Loading more cards…")).toBeVisible();
+    await expect(live).toHaveText("");
+    release();
+    await expect(tiles(page)).toHaveCount(70);
+    await expect(live).toHaveText("All 70 cards shown");
+    await expect(live.getByText("Loading more cards…")).toHaveCount(0);
+  });
+
+  test("the set picker reads the set list again when it is opened after a while (#196)", async ({
+    page,
+  }) => {
+    await page.clock.install();
+    seedGallery();
+    await signIn(page);
+    let reads = 0;
+    await page.route("**/api/catalog/sets", (route) => {
+      reads += 1;
+      return route.continue();
+    });
+    const picker = page.getByRole("dialog", { name: "Choose a set" });
+    const open = async () => {
+      await chip(page, "Any set").click();
+      await expect(picker).toBeVisible();
+      await expect(picker.getByRole("searchbox")).toBeFocused();
+      await expect(picker.getByRole("button").first()).toBeVisible();
+      await page.keyboard.press("Escape");
+      await expect(picker).toBeHidden();
+    };
+    await open();
+    expect(reads).toBe(1);
+    // Reopened at once, the list is fresh and is not read again.
+    await open();
+    expect(reads).toBe(1);
+    // Long after, opening shows the list it has and reads it again.
+    await page.clock.fastForward("10:00");
+    await chip(page, "Any set").click();
+    await expect(picker.getByRole("button").first()).toBeVisible();
+    await expect.poll(() => reads).toBe(2);
   });
 
   test("before the first import the status line says the catalog is unavailable", async ({
