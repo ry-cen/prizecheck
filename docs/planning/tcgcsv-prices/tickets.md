@@ -10,7 +10,7 @@ Each ticket is accepted on its own narrow tests plus `npm run check` and `npm ru
 green GitHub CI; the full local gate and the burn-in are optional ([verification](../../agents/verification.md)). Collector screens must show no source, time or refresh state
 ([AGENTS.md](../../../AGENTS.md)). The single exception, decided by the owner, is P4b's footer line "Prices from TCGCSV".
 
-Issues: P1 [#345](https://github.com/ry-cen/prizecheck/issues/345), P2 [#346](https://github.com/ry-cen/prizecheck/issues/346), P2b [#347](https://github.com/ry-cen/prizecheck/issues/347), P3 [#348](https://github.com/ry-cen/prizecheck/issues/348), P4 [#349](https://github.com/ry-cen/prizecheck/issues/349), P4b [#350](https://github.com/ry-cen/prizecheck/issues/350), P5 [#351](https://github.com/ry-cen/prizecheck/issues/351), P5b [#352](https://github.com/ry-cen/prizecheck/issues/352), P6 [#353](https://github.com/ry-cen/prizecheck/issues/353), P7 [#354](https://github.com/ry-cen/prizecheck/issues/354), P8 [#355](https://github.com/ry-cen/prizecheck/issues/355), P9 [#356](https://github.com/ry-cen/prizecheck/issues/356), P10 [#376](https://github.com/ry-cen/prizecheck/issues/376), P11 [#377](https://github.com/ry-cen/prizecheck/issues/377), P12 [#378](https://github.com/ry-cen/prizecheck/issues/378).
+Issues: P1 [#345](https://github.com/ry-cen/prizecheck/issues/345), P2 [#346](https://github.com/ry-cen/prizecheck/issues/346), P2b [#347](https://github.com/ry-cen/prizecheck/issues/347), P3 [#348](https://github.com/ry-cen/prizecheck/issues/348), P4 [#349](https://github.com/ry-cen/prizecheck/issues/349), P4b [#350](https://github.com/ry-cen/prizecheck/issues/350), P5 [#351](https://github.com/ry-cen/prizecheck/issues/351), P5b [#352](https://github.com/ry-cen/prizecheck/issues/352), P6 [#353](https://github.com/ry-cen/prizecheck/issues/353), P7 [#354](https://github.com/ry-cen/prizecheck/issues/354), P8 [#355](https://github.com/ry-cen/prizecheck/issues/355), P9 [#356](https://github.com/ry-cen/prizecheck/issues/356), P10 [#376](https://github.com/ry-cen/prizecheck/issues/376), P11 [#377](https://github.com/ry-cen/prizecheck/issues/377), P12 [#378](https://github.com/ry-cen/prizecheck/issues/378), P13 [#380](https://github.com/ry-cen/prizecheck/issues/380).
 
 Order: P1 → P2 and P3 (parallel) → P2b, P5, P6 and P7 (after P2/P3) → **release A** → P4, P4b and P5b → **release B** → P8 (after
 #339) → P9 (≥7 days after release B). The two releases are the staged cutover in [design](design.md) §4.11. Release A changes no
@@ -612,7 +612,37 @@ Design §4.16.
 **Verification.** `npm run verify -- --suite api -- api/tests/test_catalog_targets.py api/tests/test_metadata_reviews.py`,
 plus `npm run check` and `npm run guardrails`.
 
+## P13. Rule v5: one product listed under several finish keys (#380)
+
+Design §4.14, source 4. This ships **in rule v5 with P10**: the same `MatchingRulesV5` class and the same pull request, so
+production re-checks once. If P10 has already merged, it ships as the next rule version instead.
+
+**What to build.** `MatchingRulesV5.shared_block_product`, tried when V3/V4 return `conflict` (§4.14 source 4).
+
+**Acceptance criteria.**
+
+- [ ] A gym1-shaped `normal` Edition with no stamp, block `{1st-edition: {productId: P}, unlimited: {productId: P}}` and
+      `thirdParty.tcgplayer` P, verifies to P under v5 and is a `conflict` under v4. With TCGCSV offering
+      `1st Edition` and `Unlimited`, it binds `Unlimited`. Its 1st Edition sibling binds `1st Edition`.
+- [ ] A `holo` Edition with block `1st-edition-holofoil` + `unlimited-holofoil` (one product) binds
+      `Unlimited Holofoil`, or `1st Edition Holofoil` when stamped 1st Edition.
+- [ ] These stay `conflict`:
+  - a block listing two different products;
+  - a block whose single product differs from the variant's `thirdParty.tcgplayer`;
+  - a `set-logo` stamped reverse holo, or any other special Editions.
+- [ ] The product verified on another Printing gives `duplicate_mapping`.
+- [ ] On a copy of the dev catalog, v5 verifies about 1,530 of the 2,216 `conflict` Editions.
+
+**Blocked by.** P11 for rollout, like P10.
+
+**Likely touched.** `api/app/catalog_targets.py` and `api/tests/test_catalog_targets.py`.
+
+**Verification.** `npm run verify -- --suite api -- api/tests/test_catalog_targets.py api/tests/test_price_binding.py`.
+
 ## Not ticketed (recorded follow-ups)
+
+- 905 special variants with no id of their own (copyright, cosmos, stamps, jumbo; design §4.14) stay with the owner. 46
+  plain ones (for example base1-8 Shadowless) are outside P12 because a sibling has an id.
 
 - Scanner fingerprints of fallback art. They are blocked by the scanner page's COEP and the CDN's missing CORS header.
 - An owner subtype override for ambiguous or shared Editions. Only if the P6 counts show it is needed.

@@ -664,6 +664,48 @@ binding (§4.3), not taken from TCGdex:
 `price_binding.py` does not change. It replaces the earlier "card's only finish" idea, which read the card's `pricing`
 block. The import does not keep that block.
 
+**Source 4: one product listed under several finish keys (`shared_block_product`, ticket P13, #380).** Investigated on the
+dev catalog on 2026-10-27 by running the released v4 code over all 3,121 unverified `rule_failed` Editions whose
+variants carry a TCGdex `thirdParty.tcgplayer`.
+
+- **2,216 fail with `conflict`.** Each one's variant block lists a **single product under two or three keys**:
+  - `1st-edition` + `unlimited` (1,331);
+  - `1st-edition-holofoil` + `unlimited-holofoil` (321);
+  - `normal` + `reverse-holofoil`, sometimes with `holofoil` (~560).
+
+  The finish table (`VARIANT_KEYS`: `normal`, `reverse-holofoil`, `holofoil`) has no `unlimited` or `1st-edition` keys,
+  so `narrow` keeps the whole block, and V1 refuses a block with more than one entry. In 2,207 of them the product equals
+  the variant's own `thirdParty.tcgplayer`. The sets are mostly vintage and EX: gym1/gym2, neo1–4, base2/3/5, ex6/7/10.
+- Non-special Editions: 622 `normal`, 617 `normal` 1st Edition, 150 `holo` and 145 `holo` 1st Edition, about **1,534**
+  in all. The rest are special (376 `set-logo` reverse holos, artist stamps, other facets).
+
+The rule applies when V3/V4 return `conflict` and all of these hold:
+
+- the variant's block has two or more product entries, and every one names the same `productId`;
+- that product equals the variant's own `thirdParty.tcgplayer`;
+- the descriptor is not special.
+
+The result is `(product, finish_key(plain(descriptor)))`, with `verified_elsewhere` applied. Every other `conflict`
+still stands, including blocks with two different products.
+
+The binding then picks the subtype from TCGCSV: `Unlimited`/`Normal` or `1st Edition` by the 1st Edition stamp, and
+`Holofoil`/`Unlimited Holofoil` or `1st Edition Holofoil` for holos. This narrows V3's "never override a `conflict`" in
+exactly one place, where the conflict is only a spelling of one product.
+
+**Left as they are: 905 `no_product`.** These are special variants with no id of their own while a sibling has one:
+
+| Variant | Editions |
+| --- | --- |
+| `1999-2000-copyright` | 149 |
+| cosmos foil | 121 |
+| player-rewards, set-logo, snowflake, staff, GameStop and EB Games stamps | ~260 |
+| jumbo | 55 |
+| gold foil | 11 |
+
+They are mostly different products on TCGplayer, or not listed separately, so they stay with the owner. 46 are plain
+Editions with no id of their own (for example base1-8 Shadowless, which has only a Cardmarket id). P12 does not reach
+them, because a sibling has an id, so they are recorded as a follow-up.
+
 **Source 2, extended: the reviewed set path.**
 
 - `MatchingRulesV5.TCGPLAYER_GROUPS` is V4's ten sets plus `"30th": 24722` and `"30th-c": 24837`.
@@ -701,7 +743,8 @@ and owner decisions are untouched. The price import already runs daily, so `tcgp
 open, so on prod the activation runs on the host at a quiet time, following the Oracle guide's existing step. After it
 commits, the activation route's rebind and publish price the new matches. No collector screen or response changes.
 
-**Expected outcome.** About 1,500 plain Editions with a card-level id and 180 cards of the 30th sets (156 + 24) gain a price. TCGdex has no
+**Expected outcome.** About 1,500 plain Editions with a card-level id, about 1,530 Editions whose block lists one product
+under several keys, and 180 cards of the 30th sets (156 + 24) gain a price. TCGdex has no
 image for any `30th-c` card (`image: null` in every language, and the asset URL returns 404), so the 24 matched there also
 gain TCGplayer fallback art (§4.8), which needs a verified product. Eight 30th cards
 (2 + 6) are left in the unverified queue, where the owner can verify a product by decision. Ticket: P10 (#376).
