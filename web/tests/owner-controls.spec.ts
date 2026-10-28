@@ -146,6 +146,36 @@ with connect() as conn, conn.transaction():
   );
 }
 
+/**
+ * Seeds an in-progress deploy rollout for the matching rule and a live rule, both recorded as deploy activations
+ * whose digest differs from the code, so no promotion in the stack can resume and advance the rollout. The test clears the rule state afterwards.
+ */
+function seedRollout() {
+  execFileSync(
+    ".venv/bin/python",
+    [
+      "-c",
+      `from app.main import connect
+from app.catalog_targets import LIVE, MATCHING, REGISTRIES
+with connect() as conn, conn.transaction():
+    conn.execute("INSERT INTO inventory_owner(user_id) VALUES ('seed-maintainer') ON CONFLICT DO NOTHING")
+    rev = conn.execute("SELECT catalog_begin_correction() AS r").fetchone()["r"]
+    commit = 'ab12' * 10
+    version = max(REGISTRIES[MATCHING])
+    activation = conn.execute("""INSERT INTO catalog_rule_activation(kind,version,code_digest,reviewer_id,evidence_url,reason,clock_revision,source,release_commit)
+      VALUES (%s,%s,%s,'seed-maintainer','https://example.org/rule','Seeded',%s,'deploy',%s) RETURNING id""",
+      (MATCHING, version, '0' * 64, rev, commit)).fetchone()["id"]
+    conn.execute("UPDATE catalog_rule_state SET activation_id=%s WHERE kind=%s", (activation, MATCHING))
+    conn.execute("INSERT INTO catalog_rule_rollout(activation_id,phase,total,done) VALUES (%s,'editions',9101,1200)", (activation,))
+    live = conn.execute("""INSERT INTO catalog_rule_activation(kind,version,code_digest,reviewer_id,evidence_url,reason,clock_revision,source,release_commit)
+      VALUES (%s,1,%s,'seed-maintainer','https://example.org/rule','Seeded',%s,'deploy',%s) RETURNING id""",
+      (LIVE, '0' * 64, rev, commit)).fetchone()["id"]
+    conn.execute("UPDATE catalog_rule_state SET activation_id=%s WHERE kind=%s", (live, LIVE))`,
+    ],
+    { env: { ...process.env, PYTHONPATH: "api:api/tests" } }
+  );
+}
+
 const priceImport = (page: Page) =>
   page.getByRole("region", { name: "Price import" });
 
@@ -603,32 +633,42 @@ test.describe("desktop", () => {
     await expect(page.getByRole("article")).toHaveCount(0);
   });
 
-  test("Rules shows a card per rule kind with its versions and digest, and Confirm waits for evidence and a reason", async ({
+  test("Rules is read-only and shows the applied version, its release and the rollout's progress", async ({
     page,
   }) => {
-    await signInAsOwner(page);
-    await openFromAccountMenu(page);
-    await sectionTab(page, "Rules").click();
-    const rules = page.getByRole("tabpanel", { name: "Rules" });
-    await expect(rules.getByRole("article")).toHaveCount(2);
-    for (const name of ["Live derivation", "Marketplace matching"]) {
-      const card = rules.getByRole("article", { name });
-      await expect(card.getByRole("heading", { name })).toBeVisible();
-      await expect(card).toContainText(
-        /Version \d+ · digest [0-9a-f]{12} · latest/
+    seedRollout();
+    try {
+      await signInAsOwner(page);
+      await openFromAccountMenu(page);
+      await sectionTab(page, "Rules").click();
+      const rules = page.getByRole("tabpanel", { name: "Rules" });
+      await expect(rules.getByRole("article")).toHaveCount(2);
+      const matching = rules.getByRole("article", {
+        name: "Marketplace matching",
+      });
+      const live = rules.getByRole("article", { name: "Live derivation" });
+      await expect(matching).toContainText("Applying: 1,200 of 9,101 Editions");
+      await expect(matching).toContainText(
+        "applied by deploying release ab12ab1"
       );
-      await expect(card).toContainText(/Active: version \d+|No active rule/);
-      await expect(card.getByLabel("Rule version")).toBeVisible();
-      const confirm = card.getByRole("button", { name: "Confirm rule change" });
-      await expect(confirm).toBeDisabled();
-      await card
-        .getByLabel("Rule evidence URL")
-        .fill("https://example.org/rule");
-      await expect(confirm).toBeDisabled();
-      await card.getByLabel("Rule reason").fill("Checked the rule");
-      await expect(confirm).toBeEnabled();
+      await expect(matching).toContainText(
+        "Rule code differs from the applied version"
+      );
+      await expect(live).toContainText(
+        "Rule code differs from the applied version"
+      );
+      for (const name of ["Live derivation", "Marketplace matching"]) {
+        const card = rules.getByRole("article", { name });
+        await expect(card.getByRole("heading", { name })).toBeVisible();
+        await expect(card.getByRole("button")).toHaveCount(0);
+        await expect(card.getByRole("combobox")).toHaveCount(0);
+        await expect(card.getByRole("textbox")).toHaveCount(0);
+        await expect(card).toContainText(/Version \d+ · digest [0-9a-f]{12}/);
+      }
+      await expectPageChecks(page, "Owner controls, Rules (desktop)");
+    } finally {
+      await query("UPDATE catalog_rule_state SET activation_id=NULL");
     }
-    await expectPageChecks(page, "Owner controls, Rules (desktop)");
   });
 });
 

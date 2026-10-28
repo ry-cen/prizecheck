@@ -574,19 +574,6 @@ assert store.compare_and_swap({k: rows[k].version for k in keys}, {
         expect((await decide()).status).toBe(403);
         expect(
           (
-            await post(
-              "/api/admin/catalog-rules/live_derivation/activate",
-              {
-                version: 1,
-                evidence_url: "https://example.org/gateway",
-                reason: "Gateway probe",
-              },
-              cookie
-            )
-          ).status
-        ).toBe(403);
-        expect(
-          (
             await fetch(`${base}/api/admin/catalog-metadata/queue`, {
               headers: { cookie },
             })

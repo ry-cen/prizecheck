@@ -119,16 +119,6 @@ async function reportEdition(
 const notifications = (page: Page) =>
   page.getByRole("region", { name: "Notifications" });
 
-/** Owner controls' Rules tab (#167), where the metadata rules moved from the metadata review. */
-async function openRules(page: Page) {
-  await page.reload();
-  await page.getByRole("button", { name: "Account" }).click();
-  await page.getByRole("menuitem", { name: "Owner controls" }).click();
-  await page.getByRole("tab", { name: "Rules" }).click();
-  await expect(page).toHaveURL(/\/owner\/rules$/);
-  return page.getByRole("tabpanel", { name: "Rules" });
-}
-
 test.beforeEach(async () => {
   await pool.query("DELETE FROM catalog_metadata_report");
 });
@@ -423,33 +413,6 @@ print(json.dumps(public_record_store().read_records([key],deadline=time.monotoni
   ).toContainText("Rule: marketplace_matching v1");
 });
 
-test("the maintainer lists rule versions and activates a rule", async ({
-  page,
-}) => {
-  seed(false);
-  await signIn(page);
-  await setMaintainer(true);
-  await pool.query("UPDATE catalog_rule_state SET activation_id=NULL");
-  const rules = await openRules(page);
-  const matching = rules.getByRole("article", {
-    name: "Marketplace matching",
-  });
-  await expect(matching).toContainText("Version 1");
-  await expect(matching).toContainText("No active rule");
-  await matching.getByLabel("Rule version").selectOption("1");
-  await matching.getByLabel("Rule evidence URL").fill(EVIDENCE);
-  await matching.getByLabel("Rule reason").fill("Reviewed the matching rule");
-  await matching.getByRole("button", { name: "Confirm rule change" }).click();
-  await expect(matching).toContainText("Active: version 1");
-  await expect(matching).toContainText("Public delivery:");
-  // Deactivating is the same action with no rule.
-  await matching.getByLabel("Rule version").selectOption("none");
-  await matching.getByLabel("Rule evidence URL").fill(EVIDENCE);
-  await matching.getByLabel("Rule reason").fill("Pause the matching rule");
-  await matching.getByRole("button", { name: "Confirm rule change" }).click();
-  await expect(matching).toContainText("No active rule");
-});
-
 const printingRow = async () =>
   (
     await pool.query(
@@ -457,6 +420,22 @@ const printingRow = async () =>
        JOIN catalog_printing_metadata m ON m.printing_id=p.id WHERE p.source_id='meta-1'`
     )
   ).rows[0];
+
+/** Activates the Live rule v1 the way a test seed does: synchronously, in one transaction. */
+function activateLiveRule() {
+  execFileSync(
+    ".venv/bin/python",
+    [
+      "-c",
+      `from app.main import connect
+from app.catalog_targets import LIVE, activate_rule
+with connect() as conn, conn.transaction():
+    conn.execute("INSERT INTO inventory_owner(user_id) VALUES ('seed-maintainer') ON CONFLICT DO NOTHING")
+    activate_rule(conn, LIVE, 1, 'seed-maintainer', 'https://example.org/rule', 'Reviewed against the target')`,
+    ],
+    { env: { ...process.env, PYTHONPATH: "api:api/tests" } }
+  );
+}
 
 /** Activates the shipped matching rule, then moves the normal Edition's source product so it quarantines. */
 function quarantineNormalEdition() {
@@ -505,15 +484,8 @@ test("quarantining the Edition mapping leaves a reviewed Live identity eligible"
   await setMaintainer(true);
   const printing = await printingRow();
   await reportLive(page, printing.id);
-  // Activate the Live rule v1.
-  const live = (await openRules(page)).getByRole("article", {
-    name: "Live derivation",
-  });
-  await live.getByLabel("Rule version").selectOption("1");
-  await live.getByLabel("Rule evidence URL").fill(EVIDENCE);
-  await live.getByLabel("Rule reason").fill("Reviewed the Live rule");
-  await live.getByRole("button", { name: "Confirm rule change" }).click();
-  await expect(live).toContainText("Active: version 1");
+  // Activate the Live rule v1 (rules are applied by deploys now; the synchronous helper seeds it).
+  activateLiveRule();
   // The activation changed the target's evidence, so reopen the review first.
   let review = await openOwnerReview(page);
 

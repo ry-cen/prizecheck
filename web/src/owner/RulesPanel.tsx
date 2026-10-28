@@ -8,7 +8,12 @@ const RULE_NAMES: Record<MetadataRuleView["kind"], string> = {
   marketplace_matching: "Marketplace matching",
 };
 
-/** Owner controls' Rules tab: a card per rule kind (spec "Review cards", Rules). */
+type Rollout = NonNullable<MetadataRuleView["rollout"]>;
+
+const inProgress = (rollout: Rollout | null) =>
+  rollout !== null && rollout.phase !== "done" && rollout.phase !== "failed";
+
+/** Owner controls' Rules tab: a read-only card per rule kind (spec "Review cards", Rules; ADR 0021). */
 export function RulesPanel() {
   const [rules, setRules] = useState<MetadataRuleView[]>([]);
   const [error, setError] = useState("");
@@ -23,11 +28,17 @@ export function RulesPanel() {
   useEffect(() => {
     void load();
   }, []);
+  const applying = rules.some((rule) => inProgress(rule.rollout));
+  useEffect(() => {
+    if (!applying) return;
+    const timer = setInterval(() => void load(), 5000);
+    return () => clearInterval(timer);
+  }, [applying]);
   return (
     <div className="flex flex-col gap-4">
       <p className="m-0 text-body text-text-muted">
-        Rules live in code. Activating a version records your approval for its
-        exact code digest.
+        Rules live in code. Deploying a release applies its newest version of
+        each rule; older versions stay as an archive.
       </p>
       {error && (
         <p role="alert" className="m-0 text-body text-danger">
@@ -41,8 +52,39 @@ export function RulesPanel() {
   );
 }
 
+function metaLine(active: NonNullable<MetadataRuleView["active"]>): string {
+  const sha = active.release_commit?.slice(0, 7) ?? "";
+  const at = when(active.activated_at);
+  const v = `Version ${active.version}`;
+  if (active.source === "deploy") {
+    return `${v} · applied by deploying release ${sha} · ${at}`;
+  }
+  if (active.source === "rollback") {
+    return `${v} · restored by rolling back to release ${sha} · ${at}`;
+  }
+  return `${v} · activated by the owner · ${at}`;
+}
+
+function rolloutLine(rollout: Rollout): string | null {
+  const count = `${rollout.done.toLocaleString()} of ${(rollout.total ?? 0).toLocaleString()}`;
+  switch (rollout.phase) {
+    case "live":
+      return "Applying: re-evaluating Printings";
+    case "editions":
+      return `Applying: ${count} Editions`;
+    case "quote_variants":
+      return `Applying: completing price variants, ${count} Editions`;
+    case "deliver":
+      return "Applying: publishing the changes";
+    case "done":
+      return `Applied ${when(rollout.finished_at ?? rollout.updated_at)} · ${rollout.changed.toLocaleString()} changed`;
+    default:
+      return null;
+  }
+}
+
 /**
- * One rule kind: its active version and every version with its code digest, the latest marked.
+ * One rule kind: its applied version, rollout progress and every version with its code digest.
  */
 function RuleCard({ rule }: { rule: MetadataRuleView }) {
   const headingId = useId();
@@ -54,22 +96,31 @@ function RuleCard({ rule }: { rule: MetadataRuleView }) {
   );
   const active =
     rule.active && rule.active.version !== null ? rule.active : null;
+  const rollout = rule.rollout;
 
   let tone: PillTone;
   let summary: string;
-  if (active && !active.digest_current) {
+  if (rule.problem === "digest_mismatch") {
     tone = "bad";
-    summary = "Needs approval again";
+    summary = "Code differs";
+  } else if (rule.problem === "newer_than_code") {
+    tone = "bad";
+    summary = "Newer than this release";
   } else if (!active) {
     tone = "warn";
-    summary = "Inactive";
-  } else if (latest && latest.version > (active.version ?? 0)) {
+    summary = "No rule applied";
+  } else if (rollout?.phase === "failed") {
+    tone = "bad";
+    summary = "Rollout failed";
+  } else if (inProgress(rollout)) {
     tone = "warn";
-    summary = `Version ${latest.version} ready`;
+    summary = "Applying";
   } else {
     tone = "ok";
-    summary = `Version ${active.version} active`;
+    summary = `Version ${active.version} applied`;
   }
+
+  const progress = rollout ? rolloutLine(rollout) : null;
 
   return (
     <article
@@ -83,21 +134,37 @@ function RuleCard({ rule }: { rule: MetadataRuleView }) {
         <Pill tone={tone}>{summary}</Pill>
       </div>
       <p className="m-0 text-meta text-text-muted">
-        {active
-          ? `Active: version ${active.version} · activated ${when(active.activated_at)} · ${active.reason}`
-          : "No active rule"}
+        {active ? metaLine(active) : "No rule applied yet"}
       </p>
-      {active && !active.digest_current && (
-        <p role="alert" className="m-0 text-meta text-danger">
-          The rule code changed after approval, so it is inactive until you
-          approve it again.
+      {progress && (
+        <p role="status" className="m-0 text-meta">
+          {progress}
         </p>
       )}
+      {rollout?.phase === "failed" && (
+        <p role="alert" className="m-0 text-meta text-danger">
+          Rollout failed: {rollout.error ?? "unknown error"}. It retries
+          automatically.
+        </p>
+      )}
+      {rule.problem === "digest_mismatch" && (
+        <p role="alert" className="m-0 text-meta text-danger">
+          Rule code differs from the applied version. It is not applied; a
+          changed rule ships as a new version.
+        </p>
+      )}
+      {rule.problem === "newer_than_code" && (
+        <p role="alert" className="m-0 text-meta text-danger">
+          The applied version is newer than this release knows.
+        </p>
+      )}
+      <h3 className="m-0 text-meta font-semibold">Versions</h3>
       <ul className="m-0 flex list-none flex-col gap-1 p-0 text-meta">
         {rule.versions.map((entry) => (
           <li key={entry.version}>
             Version {entry.version} · digest {entry.code_digest.slice(0, 12)}
-            {entry.version === latest?.version ? " · latest" : ""}
+            {entry.version === active?.version ? " · applied" : ""}
+            {entry.version === latest?.version ? " · newest" : ""}
           </li>
         ))}
       </ul>
