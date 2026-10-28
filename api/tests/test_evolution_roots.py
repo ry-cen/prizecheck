@@ -9,6 +9,9 @@ these tests live in their own file.
 """
 from uuid import uuid4
 
+import psycopg
+import pytest
+
 from app.catalog import rederive_card_attributes
 from app.evolution_roots import EvolutionRoot, evolution_roots
 from app.format_standing import ensure_current
@@ -144,7 +147,34 @@ def test_a_failed_roots_refresh_is_contained_and_leaves_the_callers_transaction_
             # Without the savepoint the transaction is aborted here and this statement raises.
             conn.execute("SELECT 1")
     assert "Evolution roots refresh failed" in caplog.text
+    assert caplog.records[-1].exc_info  # the log carries the traceback, not just the exception's name
     with connect() as conn:
         assert conn.execute("SELECT count(*) AS n FROM inventory_owner WHERE user_id=%s", (owner,)).fetchone()["n"] == 1
         assert conn.execute("SELECT identity_key,root_name,stage FROM catalog_evolution_root ORDER BY identity_key"
                             ).fetchall() == before
+
+
+def test_an_uncontained_roots_refresh_raises_and_the_derivation_fails_loudly(monkeypatch):
+    """``scripts/derive_card_attributes.py`` exists to rebuild the roots, so its failure must not be swallowed: the
+    savepoint is rolled back (the stored roots stay) and the error reaches the caller, which rolls the derivation back."""
+    from app import evolution_roots as module
+    seed(*CARDS)
+    with connect() as conn:
+        before = conn.execute("SELECT identity_key,root_name,stage FROM catalog_evolution_root ORDER BY identity_key"
+                              ).fetchall()
+    monkeypatch.setattr(module, "WRITE", "INSERT INTO catalog_evolution_root_missing "
+                        "SELECT * FROM unnest(%s::text[],%s::text[],%s::smallint[])")
+    with connect() as conn:
+        with conn.transaction():
+            with pytest.raises(psycopg.errors.UndefinedTable):
+                module.refresh_evolution_roots(conn, contain=False)
+            conn.execute("SELECT 1")  # the savepoint was rolled back, so the transaction is still usable
+    with connect() as conn:
+        with pytest.raises(psycopg.errors.UndefinedTable):
+            rederive_card_attributes(conn)
+    with connect() as conn:
+        assert conn.execute("SELECT identity_key,root_name,stage FROM catalog_evolution_root ORDER BY identity_key"
+                            ).fetchall() == before
+        # The importer's lock was released on the way out, so the next derivation is not "already running".
+        monkeypatch.undo()
+        rederive_card_attributes(conn)

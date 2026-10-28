@@ -524,7 +524,8 @@ def rederive_card_attributes(conn) -> int:
             changed = refresh_card_attributes(conn)
             refresh_reprint_groups(conn)
             # Evolution roots follow evolves from through the re-derived attributes; they are not attributes (migration 043).
-            refresh_evolution_roots(conn)
+            # Not contained: this script exists to rebuild the roots, so a failure must fail it.
+            refresh_evolution_roots(conn, contain=False)
             return changed
     finally:
         conn.execute("SELECT pg_advisory_unlock(914703)")
@@ -778,7 +779,8 @@ def _promote(conn, run_id: UUID, first, records, normalized, set_details, raw, b
         # changes in this transaction advance the attribute revision once.
         refresh_reprint_groups(conn, run_id)
         # Each Pokémon's evolution root, from the evolves from just derived (migration 043). Advances no revision.
-        refresh_evolution_roots(conn)
+        # Contained: the roots are derived data, so a failure must not abort the import that stored its generation.
+        refresh_evolution_roots(conn, contain=True)
         conn.execute("UPDATE catalog_state SET active_generation=%s, revision=revision+1, last_success=now() WHERE singleton", (run_id,))
         conn.execute("UPDATE catalog_run SET phase='complete', outcome='succeeded', finished_at=now(), lease_until=NULL WHERE id=%s", (run_id,))
         # Keep current and previous successful compressed raw generations.

@@ -93,19 +93,22 @@ WRITE = """INSERT INTO catalog_evolution_root AS r(identity_key,root_name,stage)
   WHERE (r.root_name,r.stage) IS DISTINCT FROM (EXCLUDED.root_name,EXCLUDED.stage)"""
 
 
-def refresh_evolution_roots(conn) -> int:
+def refresh_evolution_roots(conn, contain: bool = True) -> int:
     """Recompute every Pokémon identity's root from the effective card attributes and store the ones that changed,
     removing identities that are no longer Pokémon. Runs in the caller's transaction, after the card attributes are
     derived (a catalog import and ``scripts/derive_card_attributes.py``). Returns the number of rows written or removed.
 
     Roots are derived data that the next derivation rebuilds, so a failure here must not abort the caller's
     transaction (a catalog import that already stored its generation): the work runs in a savepoint, a failure rolls
-    back only the roots (the stored ones stay as they were), is logged, and returns 0."""
+    back only the roots (the stored ones stay as they were), is logged, and returns 0. With ``contain=False`` (the
+    derivation script, which exists to rebuild the roots) the savepoint is still rolled back, but the error is raised."""
     try:
         with conn.transaction():
             return _refresh(conn)
     except Exception as error:
-        log.warning("Evolution roots refresh failed (%s)", type(error).__name__)
+        if not contain:
+            raise
+        log.warning("Evolution roots refresh failed (%s)", type(error).__name__, exc_info=True)
         return 0
 
 
