@@ -600,7 +600,7 @@ Then sign in:
    sudo bash /opt/prizecheck-prod/bin/prizecheck-deploy.sh tool /app/scripts/rule_rollout.py resume
    ```
 
-   Otherwise the first catalog pull applies them. The rollout re-evaluates targets in short batches, so it doesn't block your collection changes. Its progress shows under Owner controls → **Rules**. Matching v4 also matches the Black Star promo sets by card number from the stored TCGCSV products; promos TCGCSV lists later are picked up by `price_import_job.py --rematch`.
+   Otherwise the first catalog pull applies them. The rollout re-evaluates targets in short batches, so it doesn't block your collection changes. Its progress shows under Owner controls → **Rules**. Matching v4 also matches the Black Star promo sets by card number from the stored TCGCSV products, which the first price import (step 5) stores; that run carries `--rematch`, and promos TCGCSV lists later are picked up by `price_import_job.py --rematch`.
 
 4. Refresh, open **Owner controls**, and start the full English catalog pull. A pull does not fetch prices: they come from the TCGCSV import in step 5.
 5. After the catalog pull, build the scanner's index and import the first prices by hand. The index first:
@@ -609,10 +609,10 @@ Then sign in:
    sudo bash /opt/prizecheck-prod/bin/prizecheck-deploy.sh compose run --rm scanner-index
    ```
 
-   Then the prices. The import reads TCGCSV's daily snapshot and prices the Editions a matching rule has verified, so run it after the catalog pull; after a rule activation that comes later (matching v4 above), run it again with `--force`:
+   Then the prices. The import reads TCGCSV's daily snapshot and prices the Editions a matching rule has verified, so run it after the catalog pull. Matching v4 (step 3's command activates it) matches the Black Star promos from stored TCGCSV products, which exist only after an import, so the first run carries `--rematch`; after a rule activation that comes later, run it again with `--force`:
 
    ```bash
-   sudo bash /opt/prizecheck-prod/bin/prizecheck-deploy.sh tool /app/scripts/price_import_job.py
+   sudo bash /opt/prizecheck-prod/bin/prizecheck-deploy.sh tool /app/scripts/price_import_job.py --rematch
    ```
 
 ## 15. Check the edge on the host

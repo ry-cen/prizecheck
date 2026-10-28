@@ -116,7 +116,7 @@ A reader failure (an exception or a timeout) already answers "unavailable" for t
 
 | Step | Done on | By | Result |
 | --- | --- | --- | --- |
-| Release A deployed |  | | |
+| Release A deployed | shipped with release B in v0.2.1 | | |
 | First import by hand | 2026-10-28 | | exit 0, 24,509 of 25,093 priced |
 | Matching v4 activated | | | |
 | `--force` re-import | | | |
