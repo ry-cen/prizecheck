@@ -23,8 +23,9 @@ to stderr, and no log carries a secret or a raw TCGdex payload.
 Rules: when the live-derivation or the marketplace-matching rule is not active, the check records `failed` with error_code
 CATALOG_RULES_INACTIVE and starts nothing: with no active catalog every id looks new, and the check would start a full pull
 before a deploy has applied the rules. A deploy applies the newest version of each rule by itself (ADR 0021), but only once
-the owner is bound; if a rollout is unfinished or failed, run `scripts/rule_rollout.py resume` through the deploy script's
-`tool` command (docs/deployment-oracle.md, step 14, item 3).
+the owner is bound. If the owner was bound after the release started, run `scripts/rule_rollout.py resume` through the
+deploy script's `tool` command (docs/deployment-oracle.md, step 14, item 3); a rule whose code no longer matches its recorded
+digest is an integrity failure that resume reports and does not fix (ADR 0021).
 
 Pause: when 3 or more pulls this check started have failed since the latest successful pull (whoever started that one), the
 check records `paused` with the newest such failure's error and starts nothing. Any successful pull, owner- or check-started,
@@ -150,7 +151,7 @@ def run_check(conn, source=None, out=None) -> int:
         if inactive:
             conn.commit()
             log.error("check %s: catalog rule not applied yet (%s); not starting a pull. A deploy applies the newest rules; "
-                      "run scripts/rule_rollout.py resume if a rollout is unfinished", check_id, ", ".join(inactive))
+                      "run scripts/rule_rollout.py resume if the owner was bound after the release started", check_id, ", ".join(inactive))
             _finish(conn, check_id, "failed", error="CATALOG_RULES_INACTIVE")
             return EXIT_CHECK_FAILED
         conn.commit()

@@ -908,11 +908,13 @@ class HostDeployScriptTest(unittest.TestCase):
         self.assertIn('No systemd on this host', result.stdout)
         self.assertFalse((home / 'units').exists())
         self.assertEqual(self.systemctl_calls(), [])
-        (Path(env['PATH'].split(':')[0]) / 'systemctl').unlink()
-        result = self.run_script(home, 'setup', **{**env, 'PATH': env['PATH'].split(':')[0] + ':' + '/usr/bin:/bin'})
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn('No systemd on this host', result.stdout)
-        self.assertFalse((home / 'units').exists())
+        # A Linux runner has a real systemctl in /usr/bin, so the PATH half applies only where it is absent.
+        if shutil.which('systemctl', path='/usr/bin:/bin') is None:
+            (Path(env['PATH'].split(':')[0]) / 'systemctl').unlink()
+            result = self.run_script(home, 'setup', **{**env, 'PATH': env['PATH'].split(':')[0] + ':' + '/usr/bin:/bin'})
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn('No systemd on this host', result.stdout)
+            self.assertFalse((home / 'units').exists())
 
     def test_check_config_flags_a_differing_missing_or_disabled_unit(self):
         home = self.make_home(PROD)
