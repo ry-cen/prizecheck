@@ -89,4 +89,16 @@ test.describe("phone", () => {
   test("a long panel scrolls its body on a phone", async ({ page }) => {
     await expectBodyScrolls(page);
   });
+
+  test("a bottom sheet rests on the bottom edge of the screen", async ({
+    page,
+  }) => {
+    // The sheet hangs from the top of the screen by its own height (#364); it must still end at the bottom edge.
+    const picker = await openSetPicker(page);
+    const viewport = page.viewportSize()!;
+    const frame = (await picker.boundingBox())!;
+    expect(frame.x).toBe(0);
+    expect(frame.width).toBe(viewport.width);
+    expect(Math.abs(frame.y + frame.height - viewport.height)).toBeLessThan(1);
+  });
 });
