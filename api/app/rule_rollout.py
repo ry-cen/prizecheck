@@ -41,6 +41,9 @@ COMMIT = re.compile(r"[0-9a-f]{40}")
 BATCH_FILTERS = {"editions": UNVERIFIED_EDITIONS, "quote_variants": QUOTE_VARIANT_EDITIONS}
 NEXT_PHASE = {"editions": "quote_variants", "quote_variants": "deliver"}
 
+STARTUP_ATTEMPTS = 5
+STARTUP_RETRY_SECONDS = 60
+
 _startup_thread = None
 
 
@@ -373,7 +376,11 @@ def _plan(conn, to_commit, current_commit):
         active = conn.execute("""SELECT a.version,a.code_digest FROM catalog_rule_state s
           JOIN catalog_rule_activation a ON a.id=s.activation_id WHERE s.kind=%s""", (kind,)).fetchone()
         target = _restore_target(conn, kind, to_commit, current_commit)
-        if target is None or target["version"] is None or (
+        if target is not None and target["version"] is not None and target["version"] not in REGISTRIES[kind]:
+            # A forward rollback: this release does not know the version. The newer release applies its own at start.
+            log.warning("Version %d of %s is newer than this release knows; leaving the active rule", target["version"], kind)
+            plan[kind] = None
+        elif target is None or target["version"] is None or (
                 active and (active["version"], active["code_digest"]) == (target["version"], target["code_digest"])):
             plan[kind] = None
         else:
@@ -418,10 +425,20 @@ def restore(connect_fn, to_commit: str, current_commit: str) -> dict[str, str]:
 # ---------------------------------------------------------------- startup
 
 
+def _startup():
+    """Another runner (a job, or an old API during a deploy) may hold the lock; try again a few times, never in a request."""
+    for attempt in range(STARTUP_ATTEMPTS):
+        result = resume()
+        if not (isinstance(result, dict) and result.get("status") == "busy"):
+            return
+        if attempt < STARTUP_ATTEMPTS - 1:
+            time.sleep(STARTUP_RETRY_SECONDS)
+
+
 def start_on_startup() -> None:
     """Apply or finish the release's rules in a background thread, so startup and health checks never wait for it."""
     global _startup_thread
-    _startup_thread = Thread(target=resume, daemon=True, name="rule-rollout")
+    _startup_thread = Thread(target=_startup, daemon=True, name="rule-rollout")
     _startup_thread.start()
 
 

@@ -757,6 +757,11 @@ cmd_deploy() {
   if ! start_release "$commit"; then
     log "Release $commit failed its health checks; rolling back"
     compose logs --no-color --tail 50 "${APP_SERVICES[@]}" >&2 || true
+    # The new release may have applied newer catalog rules before it failed; hand back the ones $current knows, with the
+    # new release's tool. The new release is broken, so a failure here is logged and the rollback goes on.
+    if [[ -n "$current" && "$current" != "$commit" ]] && ! restore_rules "$commit" "$current"; then
+      log "WARNING: restoring $current's catalog rules failed; Printings may show no_active_rule until the next release applies its rules"
+    fi
     restore_release "$current" || true
     die "Deployment of $commit failed; see the log above"
   fi
@@ -772,6 +777,19 @@ cmd_deploy() {
   prune_images || true
 }
 
+# restore_rules TOOL_RELEASE TARGET_RELEASE: make the catalog rules TARGET_RELEASE knows current again, with TOOL_RELEASE's
+# tool (ADR 0021). The API stops first so TOOL_RELEASE cannot apply its newer rules again after the restore. A tool release
+# that predates catalog rule rollout has no script; there is nothing to restore with then.
+restore_rules() {
+  local tool="$1" target="$2"
+  PRIZECHECK_IMAGE_TAG="$tool" compose stop api || true
+  if ! PRIZECHECK_IMAGE_TAG="$tool" compose run --rm --no-deps -T tools -c "import os, sys; sys.exit(not os.path.exists('/app/scripts/rule_rollout.py'))"; then
+    log "Release $tool predates catalog rule rollout; not restoring catalog rules"
+    return 0
+  fi
+  PRIZECHECK_IMAGE_TAG="$tool" compose run --rm --no-deps -T tools /app/scripts/rule_rollout.py restore --to "$target"
+}
+
 cmd_rollback() {
   load_config
   take_lock
@@ -779,11 +797,9 @@ cmd_rollback() {
   current="$(read_state current)"; previous="$(read_state previous)"
   [[ -n "$previous" ]] || die "No previous release recorded"
   log "Rolling back from ${current:-none} to $previous. Migrations are not reversed: $previous runs against the current schema."
-  # Restore the catalog rules the previous release knows, with the current release's tool (ADR 0021). The API stops
-  # first so the current release cannot apply its newer rules again after the restore.
+  # Restore the catalog rules the previous release knows, with the current release's tool.
   if [[ -n "$current" ]]; then
-    PRIZECHECK_IMAGE_TAG="$current" compose stop api || true
-    if ! PRIZECHECK_IMAGE_TAG="$current" compose run --rm --no-deps -T tools /app/scripts/rule_rollout.py restore --to "$previous"; then
+    if ! restore_rules "$current" "$previous"; then
       restore_release "$current" || true
       die "Rollback to $previous refused: restoring its catalog rules failed; $current was restarted"
     fi

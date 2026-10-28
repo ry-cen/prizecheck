@@ -161,7 +161,7 @@ def test_a_second_runner_returns_busy_and_one_activation_is_recorded(monkeypatch
 
 
 @pytest.mark.slow(reason="process: two rule_rollout.py resume processes")
-def test_two_processes_at_once_record_one_activation():
+def test_two_resume_processes_started_together_record_one_activation_per_kind():
     seed(3)
     commit = new_commit()
     env = {**os.environ, "RELEASE_COMMIT": commit}
@@ -282,22 +282,24 @@ def test_a_promotion_during_a_rollout_uses_the_new_rule(monkeypatch):
 
 @pytest.mark.slow(reason="sleep: 0.5 s inside each batch")
 @pytest.mark.serial(reason="asserts an elapsed-time bound")
-def test_a_collection_write_waits_less_than_one_batch(monkeypatch):
+def test_a_collection_write_made_during_a_batch_is_not_held_up_by_the_rollout(monkeypatch):
     monkeypatch.setenv("RULE_ROLLOUT_BATCH", "2")
     seed(4)
     monkeypatch.setenv("RELEASE_COMMIT", new_commit())
-    monkeypatch.setattr(rule_rollout, "_in_batch", lambda phase: time.sleep(0.5) if phase == "editions" else None)
+    batches, second_batch = [], threading.Event()
+
+    def slow_batch(phase):
+        if phase == "editions":
+            batches.append(1)
+            if len(batches) >= 2:
+                second_batch.set()  # a batch's transaction is open from here for 0.5 s
+            time.sleep(0.5)
+
+    monkeypatch.setattr(rule_rollout, "_in_batch", slow_batch)
     thread = threading.Thread(target=rule_rollout.apply_newest_rules)
     thread.start()
     try:
-        deadline = time.monotonic() + 60
-        while time.monotonic() < deadline:
-            row = rollout(MATCHING)
-            if row and row["phase"] == "editions" and row["done"] >= 2:
-                break
-            time.sleep(0.02)
-        else:
-            pytest.fail("the rollout never reached its second batch")
+        assert second_batch.wait(60), "the rollout never reached its second batch"
         with connect() as conn:
             user = conn.execute("SELECT user_id FROM owner_binding WHERE singleton").fetchone()["user_id"]
         started = time.monotonic()
@@ -450,6 +452,86 @@ def test_an_unfinished_rollout_is_left_alone_under_an_incompatible_rule(monkeypa
     monkeypatch.setattr(rule_rollout, "code_digest", lambda kind, version: "0" * 64)
     assert rule_rollout.resume()[MATCHING] == "digest_mismatch"
     assert rollout(MATCHING) == unfinished
+
+
+def test_a_stale_runner_is_superseded_after_a_restore_and_writes_nothing(monkeypatch):
+    seed(3)
+    older, current = new_commit(), new_commit()
+    monkeypatch.setenv("RELEASE_COMMIT", older)
+    rule_rollout.apply_newest_rules()
+    newer_rules(monkeypatch)
+    monkeypatch.setenv("RELEASE_COMMIT", current)
+
+    def kill(phase, done):
+        if phase == "editions":
+            raise Killed
+
+    monkeypatch.setattr(rule_rollout, "_after_batch", kill)
+    with pytest.raises(Killed):
+        rule_rollout.apply_newest_rules()
+    stale = rollout(MATCHING)
+    assert stale["phase"] == "quote_variants"
+    assert rule_rollout.restore(connect, older, current)[MATCHING].startswith("restored")
+    runner = rule_rollout._Runner(connect)
+    try:
+        with pytest.raises(rule_rollout._Superseded):
+            runner._batch(MATCHING, stale["activation_id"], "quote_variants", None, 0)
+        with pytest.raises(rule_rollout._Superseded):
+            runner._record_failure(stale["activation_id"], "quote_variants", None, RuntimeError("late"))
+    finally:
+        runner.close()
+    with connect() as conn:
+        assert conn.execute("SELECT phase FROM catalog_rule_rollout WHERE activation_id=%s", (stale["activation_id"],)).fetchone()["phase"] == "quote_variants"
+
+
+def test_startup_retries_while_another_runner_holds_the_lock(monkeypatch):
+    results = iter([{"status": "busy"}, {"status": "busy"}, {LIVE: "current", MATCHING: "current"}])
+    calls = []
+    monkeypatch.setattr(rule_rollout, "resume", lambda: calls.append(1) or next(results))
+    monkeypatch.setattr(rule_rollout, "STARTUP_RETRY_SECONDS", 0.01)
+    rule_rollout.start_on_startup()
+    rule_rollout.join_startup(10)
+    assert len(calls) == 3
+    always_busy = []
+    monkeypatch.setattr(rule_rollout, "resume", lambda: always_busy.append(1) or {"status": "busy"})
+    rule_rollout.start_on_startup()
+    rule_rollout.join_startup(10)
+    assert len(always_busy) == rule_rollout.STARTUP_ATTEMPTS
+
+
+def test_restore_leaves_a_version_this_release_does_not_know_and_the_newer_release_applies_its_own(monkeypatch):
+    seed(3)
+    older, newer = new_commit(), new_commit()
+    version = newer_rules(monkeypatch)
+    monkeypatch.setenv("RELEASE_COMMIT", newer)
+    rule_rollout.apply_newest_rules()  # the newer release's rows: live 100, matching `version`
+    before = {kind: current_activation(kind)["id"] for kind in KINDS}
+    del LIVE_RULES[100]
+    del MATCHING_RULES[version]
+    # A forward rollback: the older release's tool is asked to restore the newer release's rules.
+    assert rule_rollout.restore(connect, newer, older) == {LIVE: "unchanged", MATCHING: "unchanged"}
+    assert {kind: current_activation(kind)["id"] for kind in KINDS} == before
+
+
+def test_the_script_reports_an_unreachable_database_only_for_connection_failures(monkeypatch, capsys):
+    module = script()
+    monkeypatch.setenv("RELEASE_COMMIT", new_commit())
+
+    def refuse(**options):
+        raise psycopg.OperationalError("connection refused")
+
+    monkeypatch.setattr(module, "connect", refuse)
+    assert module.main(["resume"]) == 1
+    assert "unreachable" in capsys.readouterr().err
+
+    def cancel(*args, **kwargs):
+        raise psycopg.errors.QueryCanceled("canceling statement due to statement timeout")
+
+    monkeypatch.setattr(module, "connect", connect)
+    monkeypatch.setattr(module.rule_rollout, "restore", cancel)
+    assert module.main(["restore", "--to", new_commit()]) == 2
+    error = capsys.readouterr().err
+    assert "QueryCanceled" in error and "unreachable" not in error
 
 
 def test_deliver_hands_an_undelivered_backlog_to_a_detached_drain(monkeypatch, spawned):

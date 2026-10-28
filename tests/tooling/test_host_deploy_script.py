@@ -60,6 +60,8 @@ if 'run' in args and 'tools' in args:
         with open(os.environ['FAKE_LOG'], 'a') as log:
             log.write(json.dumps({'tools': args, 'tag': os.environ.get('PRIZECHECK_IMAGE_TAG')}) + '\n')
         sys.exit(int(os.environ.get('FAKE_RESTORE_EXIT', '0')))
+    if '-c' in args and os.environ.get('FAKE_NO_ROLLOUT_SCRIPT'):  # the probe for scripts/rule_rollout.py in the image
+        sys.exit(1)
     print('schema'); sys.exit(0)
 if 'run' in args and 'auth' in args:
     # The candidate proof is the directory mounted with -v, named by the SIGNUP_READINESS_FILE given with -e.
@@ -557,6 +559,35 @@ class HostDeployScriptTest(unittest.TestCase):
         first_up = next(i for i, call in enumerate(calls) if 'up' in call.get('args', []))
         self.assertLess(index, first_up)
         self.assertEqual((home / 'state/current').read_text().strip(), OTHER)
+
+    def test_a_release_that_predates_rule_rollout_has_no_restore_to_run(self):
+        home = self.signup_home(PROD)
+        (home / 'state/previous').write_text(OTHER + '\n')
+        code, output = self.rollback(home, FAKE_COMMIT=OTHER, FAKE_NO_ROLLOUT_SCRIPT='1')
+        self.assertEqual(code, 0, output)
+        self.assertIn('predates catalog rule rollout', output)
+        self.assertFalse([call for call in self.fake_calls() if 'tools' in call])
+        self.assertEqual((home / 'state/current').read_text().strip(), OTHER)
+
+    def test_a_failed_deploy_hands_back_the_running_releases_rules_with_the_new_releases_tool(self):
+        home = self.signup_home(PROD)
+        code, output = self.deploy(home, OTHER, FAKE_COMMIT=COMMIT)  # the images report the old tag: smoke fails
+        self.assertNotEqual(code, 0, output)
+        calls = self.fake_calls()
+        [index] = [i for i, call in enumerate(calls) if 'tools' in call]
+        self.assertEqual((calls[index]['tag'], calls[index]['tools'][-3:]), (OTHER, ['restore', '--to', COMMIT]))
+        stopped = [i for i, call in enumerate(calls[:index]) if call.get('args', [])[-2:] == ['stop', 'api']]
+        self.assertTrue(stopped, calls)  # the broken release's API stops first
+        ups = [call for call in calls[index:] if 'up' in call.get('args', [])]
+        self.assertTrue(ups and all(call['tag'] == COMMIT for call in ups), ups)  # then the running release restarts
+        self.assertEqual((home / 'state/current').read_text().strip(), COMMIT)
+
+    def test_a_failed_rules_restore_does_not_stop_a_failed_deploy_from_restarting_the_running_release(self):
+        home = self.signup_home(PROD)
+        code, output = self.deploy(home, OTHER, FAKE_COMMIT=COMMIT, FAKE_RESTORE_EXIT='2')
+        self.assertNotEqual(code, 0, output)
+        self.assertIn("WARNING: restoring %s's catalog rules failed" % COMMIT, output)
+        self.assertIn(f'Restoring release {COMMIT}', output)
 
     def test_a_failed_rule_restore_refuses_the_rollback(self):
         home = self.signup_home(PROD)

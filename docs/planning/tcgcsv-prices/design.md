@@ -831,7 +831,10 @@ about catalog rules in general, but it sits here because P10's v5 is the first v
    newer release's first `deploy` row. In one transaction it inserts a `rollback` activation copying that version and
    digest, and points `catalog_rule_state` at it. Nothing is re-evaluated. Editions verified under the newer rule stay
    verified, so the older code finds a version it knows and never suspends Printings. The script is part of P11, so this
-   protects rollbacks *from* P11 onward. Rolling back to a release before P11 also works, because that release's
+   protects rollbacks *from* P11 onward. A deploy whose new release fails its health checks does the same with the new
+   release's tool, `restore --to <running release>`, before the running release restarts; a failure there is logged and
+   does not stop the restart. A version the running tool does not register is left alone (a forward rollback), and a
+   release whose image has no `rule_rollout.py` is skipped. Rolling back to a release before P11 also works, because that release's
    versions are in earlier activation rows.
 7. **Owner controls.** The rules panel becomes read-only. Per kind it shows:
    - the applied version and its source (`deploy`, `owner` or `rollback`);

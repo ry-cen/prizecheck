@@ -991,7 +991,12 @@ def test_the_rules_view_shows_the_deploy_and_its_rollout(world):
     activation = insert_activation(MATCHING, version, code_digest(MATCHING, version), source="deploy", release_commit=commit)
     with connect() as conn:
         conn.execute("INSERT INTO catalog_rule_rollout(activation_id,phase,total,done,changed) VALUES (%s,'editions',5,2,1)", (activation,))
-    rule = rule_view(MATCHING)
+    try:
+        rule = rule_view(MATCHING)
+    finally:
+        with connect() as conn:
+            conn.execute("UPDATE catalog_rule_state SET activation_id=NULL")
+            conn.execute("DELETE FROM catalog_rule_rollout")
     assert (rule["active"]["source"], rule["active"]["release_commit"], rule["active"]["version"]) == ("deploy", commit, version)
     assert (rule["rollout"]["phase"], rule["rollout"]["total"], rule["rollout"]["done"], rule["rollout"]["changed"]) == ("editions", 5, 2, 1)
     assert rule["rollout"]["finished_at"] is None and rule["rollout"]["error"] is None and rule["problem"] is None

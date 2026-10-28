@@ -22,6 +22,17 @@ from app import rule_rollout  # noqa: E402
 from app.db import connect  # noqa: E402
 
 
+class _Unreachable(Exception):
+    """The database refused the connection (as opposed to a query failing)."""
+
+
+def _connect(**options):
+    try:
+        return connect(**options)
+    except psycopg.OperationalError as exc:
+        raise _Unreachable from exc
+
+
 class _Parser(argparse.ArgumentParser):
     def error(self, message):
         self.print_usage(sys.stderr)
@@ -39,21 +50,17 @@ def main(argv=None) -> int:
         return int(exit_.code or 0)
     try:
         if args.command == 'resume':
-            outcome = rule_rollout.apply_newest_rules(connect)
-            for kind, result in outcome.items():
+            for kind, result in rule_rollout.apply_newest_rules(_connect).items():
                 print(f'{kind}: {result}')
             return 0
         current = os.environ.get('RELEASE_COMMIT')
         if current is None or not rule_rollout.COMMIT.fullmatch(current):
             print('RELEASE_COMMIT must name the current release (40 hex characters)', file=sys.stderr)
             return 2
-        for kind, result in rule_rollout.restore(connect, args.to_commit, current).items():
+        for kind, result in rule_rollout.restore(_connect, args.to_commit, current).items():
             print(f'{kind}: {result}')
         return 0
-    except psycopg.OperationalError as exc:
-        if isinstance(exc, psycopg.errors.LockNotAvailable):
-            print(f'rule_rollout failed ({type(exc).__name__})', file=sys.stderr)
-            return 2
+    except _Unreachable:
         print('The database is unreachable', file=sys.stderr)
         return 1
     except Exception as exc:

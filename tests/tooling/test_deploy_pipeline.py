@@ -287,10 +287,14 @@ class DeployPipelineTest(unittest.TestCase):
         self.assertEqual([str(path.relative_to(ROOT)) for path in paths if 'MARKETPLACE_MATCHING' in path.read_text()], [])
 
     def test_rollback_restores_the_rules_before_starting_the_previous_release(self):
+        helper = SCRIPT[SCRIPT.index('restore_rules() {'):SCRIPT.index('cmd_rollback() {')]
+        self.assertLess(helper.index('compose stop api'), helper.index('rule_rollout.py restore --to "$target"'))
         rollback = SCRIPT[SCRIPT.index('cmd_rollback() {'):SCRIPT.index('cmd_status() {')]
-        self.assertIn('rule_rollout.py restore --to "$previous"', rollback)
-        self.assertLess(rollback.index('rule_rollout.py restore --to "$previous"'), rollback.index('start_release "$previous"'))
-        self.assertLess(rollback.index('compose stop api'), rollback.index('rule_rollout.py restore'))
+        self.assertLess(rollback.index('restore_rules "$current" "$previous"'), rollback.index('start_release "$previous"'))
+
+    def test_a_failed_deploy_restores_the_running_releases_rules_before_restarting_it(self):
+        deploy = SCRIPT[SCRIPT.index('failed its health checks; rolling back'):SCRIPT.index('Deployment of $commit failed; see the log above')]
+        self.assertLess(deploy.index('restore_rules "$commit" "$current"'), deploy.index('restore_release "$current"'))
 
     def test_caddy_forwards_the_visitor_address_and_logs_no_requests(self):
         caddy = uncommented(CADDYFILE)
