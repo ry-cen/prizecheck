@@ -101,14 +101,18 @@ function OwnerControls({
   }, [section, readOperations]);
 
   useEffect(() => {
-    if (!status.run || status.run.outcome) return;
+    const checking =
+      !!status.last_check &&
+      !status.last_check.outcome &&
+      !status.last_check.unfinished_stale;
+    if ((!status.run || status.run.outcome) && !checking) return;
     const timer = window.setInterval(() => {
       void getOwnerCatalogStatus()
         .then(onStatus)
         .catch(() => onMessage("Catalog status temporarily unavailable."));
     }, 5000);
     return () => window.clearInterval(timer);
-  }, [status.run?.outcome]);
+  }, [status.run?.outcome, status.last_check?.outcome]);
 
   function refresh() {
     onMessage("");

@@ -3,7 +3,7 @@ import type { OperationsStatus, OwnerCatalogStatus } from "../generated";
 import { Button } from "../ui/Button";
 import { Pill, type PillTone } from "../ui/Pill";
 import { ScrollTable } from "../ui/ScrollTable";
-import { healthChecks, priceImportLines } from "./health";
+import { catalogCheckLines, healthChecks, priceImportLines } from "./health";
 
 export const PANEL =
   "box-border flex min-w-0 flex-col gap-3 rounded-panel border border-border bg-surface p-4";
@@ -56,6 +56,7 @@ export function StatusPanel({
   const count = (value: number) => value.toLocaleString();
   const prices = priceImportLines(status);
   const pricesId = useId();
+  const checks = catalogCheckLines(status);
 
   return (
     <>
@@ -74,6 +75,20 @@ export function StatusPanel({
             ? `Last successful pull: ${new Date(status.catalog.last_success).toLocaleString()}`
             : "Catalog unavailable until the first complete import."}
         </p>
+        {checks.info.map((line) => (
+          <p key={line} className="m-0 break-words text-meta">
+            {line}
+          </p>
+        ))}
+        {checks.warnings.map((line) => (
+          <p
+            key={line}
+            role="alert"
+            className="m-0 break-words text-meta text-danger"
+          >
+            {line}
+          </p>
+        ))}
         {run && (
           <>
             <div className="flex flex-wrap items-center gap-2 text-meta">

@@ -56,9 +56,27 @@ class PriceImportRun(BaseModel):
     error_code: str | None
 
 
+class CatalogCheck(BaseModel):
+    """The newest scheduled change check (#340; owner only, collector responses never carry it)."""
+    outcome: str | None
+    started_at: datetime
+    finished_at: datetime | None
+    new_count: int | None
+    removed_count: int | None
+    catalog_run_id: UUID | None
+    run_outcome: str | None
+    error_code: str | None
+    index_exit_code: int | None
+    # Computed in the database. An unfinished check older than 30 minutes crashed.
+    unfinished_stale: bool = False
+    # A pull succeeded after this check began, so a `paused` check no longer describes the catalog.
+    pull_succeeded_after: bool = False
+
+
 class OwnerCatalogStatus(BaseModel):
     catalog: CatalogStatus
     run: CatalogRun | None
+    last_check: CatalogCheck | None = None
     last_price_import: PriceImportRun | None = None
     last_good_price_import_at: datetime | None = None
     source_updated_at_max: datetime | None = None
@@ -98,7 +116,14 @@ def owner_catalog_status(user_id: str = Depends(verified_user)):
           coalesce(s.source_max < now()-interval '48 hours', true) AS source_stale
           FROM (SELECT max(finished_at) AS good FROM price_import WHERE outcome IN ('imported','unchanged')) g,
                (SELECT max(source_updated_at) AS source_max FROM tcgplayer_price) s""").fetchone()
+        check = conn.execute("""SELECT c.outcome,c.started_at,c.finished_at,c.new_count,c.removed_count,c.catalog_run_id,
+          r.outcome AS run_outcome,c.error_code,c.index_exit_code,
+          (c.outcome IS NULL AND c.started_at < clock_timestamp() - interval '30 minutes') AS unfinished_stale,
+          EXISTS (SELECT 1 FROM catalog_run s WHERE s.outcome = 'succeeded' AND s.finished_at > c.started_at) AS pull_succeeded_after
+          FROM catalog_check c LEFT JOIN catalog_run r ON r.id = c.catalog_run_id
+          ORDER BY c.started_at DESC, c.id LIMIT 1""").fetchone()
         return OwnerCatalogStatus(catalog=catalog_status_row(conn), run=CatalogRun(**run) if run else None,
+                                  last_check=CatalogCheck(**check) if check else None,
                                   last_price_import=PriceImportRun(**latest) if latest else None,
                                   last_good_price_import_at=ages["good"], source_updated_at_max=ages["source_max"],
                                   matched_by_number=len(matched_by_number_editions(conn)),

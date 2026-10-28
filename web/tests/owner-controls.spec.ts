@@ -179,6 +179,57 @@ with connect() as conn, conn.transaction():
 const priceImport = (page: Page) =>
   page.getByRole("region", { name: "Price import" });
 
+/** Empties the automatic-check records and the runs they name; the check tests start from "no check has run". */
+async function resetChecks() {
+  await query("DELETE FROM catalog_check");
+  await query("DELETE FROM catalog_run");
+}
+
+/** One catalog_check row started `minutesAgo` minutes ago (finished unless `outcome` is null). `run` also makes
+ * the catalog_run it names: succeeded, failed, or running (unfinished, with a live lease). */
+async function seedCheck(
+  outcome: string | null,
+  extra: {
+    run?: "succeeded" | "failed" | "running";
+    minutesAgo?: number;
+    newCount?: number;
+    removedCount?: number;
+    errorCode?: string;
+    indexExitCode?: number;
+  } = {}
+) {
+  let runId: string | null = null;
+  if (extra.run) {
+    const done = extra.run !== "running";
+    const [run] = await query<{ id: string }>(
+      `INSERT INTO catalog_run(phase,outcome,started_at,finished_at,lease_until)
+       VALUES ($1,$2,now()-interval '5 minutes',CASE WHEN $3 THEN now() END,now()+interval '10 minutes') RETURNING id`,
+      [
+        extra.run === "succeeded" ? "complete" : done ? "failed" : "fetching",
+        done ? extra.run : null,
+        done,
+      ]
+    );
+    runId = run.id;
+  }
+  await query(
+    `INSERT INTO catalog_check(started_at,finished_at,outcome,new_count,removed_count,catalog_run_id,error_code,index_exit_code)
+     VALUES (now()-$1*interval '1 minute',CASE WHEN $2::text IS NULL THEN NULL ELSE now() END,$2,$3,$4,$5,$6,$7)`,
+    [
+      extra.minutesAgo ?? 1,
+      outcome,
+      extra.newCount ?? null,
+      extra.removedCount ?? null,
+      runId,
+      extra.errorCode ?? null,
+      extra.indexExitCode ?? null,
+    ]
+  );
+}
+
+const pullPanel = (page: Page) =>
+  page.getByRole("region", { name: "English catalog pull" });
+
 const sections = (page: Page) =>
   page.getByRole("tablist", { name: "Owner controls sections" });
 const sectionTab = (page: Page, name: string | RegExp) =>
@@ -561,6 +612,182 @@ test.describe("desktop", () => {
     }
   });
 
+  test("the pull panel says no automatic check has run before any check", async ({
+    page,
+  }) => {
+    await signInAsOwner(page);
+    await resetChecks();
+    await openFromAccountMenu(page);
+    await expect(pullPanel(page)).toContainText("No automatic check has run.");
+  });
+
+  const checkCases: {
+    name: string;
+    outcome: string | null;
+    extra: Parameters<typeof seedCheck>[1];
+    shown: string[];
+    absent?: string[];
+  }[] = [
+    {
+      name: "no_change",
+      outcome: "no_change",
+      extra: { newCount: 0, removedCount: 0 },
+      shown: ["Last automatic check:", "no change"],
+      absent: ["failed", "paused"],
+    },
+    {
+      name: "pull_started with a succeeded pull",
+      outcome: "pull_started",
+      extra: { run: "succeeded", newCount: 182, removedCount: 3 },
+      shown: ["182 new printings, 3 removed, pull succeeded"],
+    },
+    {
+      name: "pull_started with a failed pull",
+      outcome: "pull_started",
+      extra: {
+        run: "failed",
+        newCount: 1,
+        removedCount: 0,
+        errorCode: "CATALOG_PULL_FAILED",
+      },
+      shown: ["1 new printing, 0 removed, pull failed (CATALOG_PULL_FAILED)"],
+    },
+    {
+      name: "pull_started with a running pull",
+      outcome: "pull_started",
+      extra: { run: "running", newCount: 5, removedCount: 0 },
+      shown: ["5 new printings, 0 removed, pull running"],
+    },
+    {
+      name: "pull_running",
+      outcome: "pull_running",
+      extra: { newCount: 2, removedCount: 0 },
+      shown: ["a pull was already running, so none was started"],
+    },
+    {
+      name: "paused",
+      outcome: "paused",
+      extra: { errorCode: "CATALOG_PULL_INTERRUPTED" },
+      shown: [
+        "Automatic pulls are paused after 3 failed pulls: CATALOG_PULL_INTERRUPTED",
+      ],
+    },
+    {
+      name: "failed",
+      outcome: "failed",
+      extra: { errorCode: "TCGDEX_UNAVAILABLE" },
+      shown: ["Check failed:", "(TCGDEX_UNAVAILABLE)"],
+    },
+    {
+      name: "an unfinished check",
+      outcome: null,
+      extra: {},
+      shown: ["Automatic check running (started"],
+    },
+    {
+      name: "an unfinished check that crashed",
+      outcome: null,
+      extra: { minutesAgo: 45 },
+      shown: ["did not finish."],
+    },
+    {
+      name: "a failed card index",
+      outcome: "no_change",
+      extra: { newCount: 0, removedCount: 0, indexExitCode: 3 },
+      shown: ["no change", "Card index failed (exit code 3)."],
+    },
+  ];
+  for (const item of checkCases)
+    test(`the pull panel shows the last automatic check: ${item.name}`, async ({
+      page,
+    }) => {
+      await signInAsOwner(page);
+      await resetChecks();
+      try {
+        await seedCheck(item.outcome, item.extra);
+        await openFromAccountMenu(page);
+        for (const text of item.shown)
+          await expect(pullPanel(page)).toContainText(text);
+        for (const text of item.absent ?? [])
+          await expect(pullPanel(page)).not.toContainText(text);
+        if (!item.extra?.indexExitCode)
+          await expect(pullPanel(page)).not.toContainText("Card index");
+        await expectPageChecks(page, `Owner controls, check ${item.name}`);
+      } finally {
+        await resetChecks();
+      }
+    });
+
+  test("a paused check stops saying paused once a later pull succeeds", async ({
+    page,
+  }) => {
+    await signInAsOwner(page);
+    await resetChecks();
+    try {
+      await seedCheck("paused", { errorCode: "CATALOG_PULL_FAILED" });
+      await openFromAccountMenu(page);
+      await expect(pullPanel(page)).toContainText(
+        "Automatic pulls are paused after 3 failed pulls: CATALOG_PULL_FAILED"
+      );
+      await query(
+        "INSERT INTO catalog_run(phase,outcome,started_at,finished_at) VALUES ('complete','succeeded',now(),now()+interval '1 second')"
+      );
+      await pullPanel(page).getByRole("button", { name: "Refresh" }).click();
+      await expect(pullPanel(page)).toContainText("A later pull succeeded.");
+      await expect(pullPanel(page)).not.toContainText("paused");
+    } finally {
+      await resetChecks();
+    }
+  });
+
+  test("an unfinished check refreshes the panel every 5 seconds until it finishes", async ({
+    page,
+  }) => {
+    await signInAsOwner(page);
+    await resetChecks();
+    try {
+      await seedCheck(null);
+      await openFromAccountMenu(page);
+      await expect(pullPanel(page)).toContainText("Automatic check running");
+      await query(
+        "UPDATE catalog_check SET outcome='no_change',finished_at=now(),new_count=0,removed_count=0"
+      );
+      await expect(pullPanel(page)).toContainText("no change", {
+        timeout: 15_000,
+      });
+    } finally {
+      await resetChecks();
+    }
+  });
+
+  test("a collector's pages carry no automatic check text", async ({
+    page,
+  }) => {
+    await signInAsOwner(page);
+    await resetChecks();
+    try {
+      await seedCheck("failed", {
+        errorCode: "TCGDEX_UNAVAILABLE",
+        indexExitCode: 3,
+      });
+      await page.goto(`${ORIGIN}/catalog`);
+      await expect(
+        page.getByRole("navigation", { name: "Main views" })
+      ).toBeVisible();
+      const text = (await page.locator("body").innerText()).toLowerCase();
+      for (const word of [
+        "automatic check",
+        "automatic pulls",
+        "check failed",
+        "tcgdex_unavailable",
+        "card index",
+      ])
+        expect(text).not.toContain(word);
+    } finally {
+      await resetChecks();
+    }
+  });
+
   test("the panel counts number and name matches and links to the list, where an owner rejects one", async ({
     page,
   }) => {
@@ -737,6 +964,44 @@ test.describe("phone", () => {
       await expect(sheet).toBeHidden();
     } finally {
       await undoHealth();
+    }
+  });
+
+  test("the automatic check lines stay readable on a phone", async ({
+    page,
+  }) => {
+    await signInAsOwner(page);
+    await resetChecks();
+    try {
+      await seedCheck("pull_started", {
+        run: "failed",
+        newCount: 1234,
+        removedCount: 56,
+        errorCode: "CATALOG_DISPATCH_FAILED",
+        indexExitCode: 3,
+      });
+      await page.getByRole("button", { name: "Account", exact: true }).tap();
+      await page
+        .getByRole("dialog", { name: "Account" })
+        .getByRole("button", { name: "Owner controls" })
+        .tap();
+      await expect(pullPanel(page)).toContainText(
+        "1,234 new printings, 56 removed, pull failed (CATALOG_DISPATCH_FAILED)"
+      );
+      await expect(pullPanel(page)).toContainText("Card index failed");
+      // The text wraps inside the panel; the page itself never scrolls sideways.
+      await expect
+        .poll(() =>
+          page.evaluate(
+            () =>
+              document.documentElement.scrollWidth <=
+              document.documentElement.clientWidth
+          )
+        )
+        .toBe(true);
+      await expectPageChecks(page, "Owner controls, automatic check (phone)");
+    } finally {
+      await resetChecks();
     }
   });
 });

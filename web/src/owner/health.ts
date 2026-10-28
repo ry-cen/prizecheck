@@ -211,3 +211,56 @@ export function priceImportLines(status: OwnerCatalogStatus): {
     );
   return { info, warnings };
 }
+
+/** The owner panel's automatic-check lines (#340): what the last scheduled check did, then red lines for a failed
+ * check, a pause or a failed card index. Owner screens may show times and error codes; collector screens show nothing. */
+export function catalogCheckLines(status: OwnerCatalogStatus): {
+  info: string[];
+  warnings: string[];
+} {
+  const check = status.last_check;
+  if (!check) return { info: ["No automatic check has run."], warnings: [] };
+  const info: string[] = [];
+  const warnings: string[] = [];
+  const at = when(check.started_at);
+  const printings = (n: number) =>
+    `${n.toLocaleString()} new printing${n === 1 ? "" : "s"}`;
+  if (!check.outcome) {
+    if (check.unfinished_stale)
+      warnings.push(`The automatic check started ${at} did not finish.`);
+    else info.push(`Automatic check running (started ${at}).`);
+  } else if (check.outcome === "no_change") {
+    info.push(`Last automatic check: ${at}, no change.`);
+  } else if (check.outcome === "pull_started") {
+    const counts = `${printings(check.new_count ?? 0)}, ${(check.removed_count ?? 0).toLocaleString()} removed`;
+    const pull = check.run_outcome
+      ? check.run_outcome === "succeeded"
+        ? "pull succeeded"
+        : `pull failed${check.error_code ? ` (${check.error_code})` : ""}`
+      : "pull running";
+    const line = `Last automatic check: ${at}, ${counts}, ${pull}`;
+    if (check.run_outcome && check.run_outcome !== "succeeded")
+      warnings.push(line);
+    else info.push(line);
+  } else if (check.outcome === "pull_running") {
+    info.push(
+      `Last automatic check: ${at}, a pull was already running, so none was started.`
+    );
+  } else if (check.outcome === "paused") {
+    if (check.pull_succeeded_after)
+      info.push(
+        `Last automatic check: ${at}, no pull started. A later pull succeeded.`
+      );
+    else
+      warnings.push(
+        `Automatic pulls are paused after 3 failed pulls: ${check.error_code ?? "unknown"}`
+      );
+  } else {
+    warnings.push(
+      `Check failed: ${at}${check.error_code ? ` (${check.error_code})` : ""}`
+    );
+  }
+  if (check.index_exit_code)
+    warnings.push(`Card index failed (exit code ${check.index_exit_code}).`);
+  return { info, warnings };
+}

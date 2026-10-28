@@ -2,7 +2,7 @@
 import client_generator as gen
 
 TARGET = "web/src/generated.ts"
-NAMES = ("Location", "LocationsResponse", "HealthResponse", "CatalogStatus", "CatalogRun", "CatalogReview", "PriceImportRun", "OwnerCatalogStatus", "EditionView", "PrintingView", "SearchResponse", "DetailResponse", "ReportInput", "ReportView", "ReportUpdate", "DecisionInput", "QuotaStatus", "OperationsStatus")
+NAMES = ("Location", "LocationsResponse", "HealthResponse", "CatalogStatus", "CatalogRun", "CatalogReview", "PriceImportRun", "CatalogCheck", "OwnerCatalogStatus", "EditionView", "PrintingView", "SearchResponse", "DetailResponse", "ReportInput", "ReportView", "ReportUpdate", "DecisionInput", "QuotaStatus", "OperationsStatus")
 
 # Hand-written routes: each throws a plain Error with its own message, so there is no shared error class.
 BODY = """export async function getOperationsStatus(): Promise<OperationsStatus> {

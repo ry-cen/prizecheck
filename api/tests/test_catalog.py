@@ -247,3 +247,109 @@ def test_catalog_runs_price_import_frozen_source_is_stale_though_latest_run_is_u
     body = owner_status(owner)
     assert body["last_price_import"]["outcome"] == "unchanged"
     assert body["price_import_stale"] is False and body["price_source_stale"] is True
+
+
+def add_check(outcome, run_outcome=None, **columns):
+    """One catalog_check row, finished now unless `outcome` is None. `run_outcome` ('succeeded', 'failed' or 'running')
+    also makes the catalog_run the check names; returns its id."""
+    run_id = None
+    with connect() as conn:
+        if run_outcome:
+            done = run_outcome != "running"
+            run_id = conn.execute("""INSERT INTO catalog_run(phase,outcome,started_at,finished_at,lease_until)
+              VALUES (%s,%s,now(),CASE WHEN %s THEN now() END,now()+interval '10 minutes') RETURNING id""",
+                                  ("complete" if run_outcome == "succeeded" else "failed" if done else "fetching",
+                                   run_outcome if done else None, done)).fetchone()["id"]
+        names = ",".join(["outcome", "finished_at", "catalog_run_id", *columns])
+        marks = ",".join(["%s", "CASE WHEN %s THEN now() END", "%s", *["%s"] * len(columns)])
+        conn.execute(f"INSERT INTO catalog_check({names}) VALUES ({marks})",
+                     [outcome, outcome is not None, run_id, *columns.values()])
+    return run_id
+
+
+def reset_checks():
+    owner, other = price_import_owner()
+    with connect() as conn:
+        conn.execute("DELETE FROM catalog_check")
+        conn.execute("DELETE FROM catalog_run")
+    return owner, other
+
+
+def test_catalog_runs_last_check_is_null_before_any_check_and_403_for_a_non_owner():
+    owner, other = reset_checks()
+    assert owner_status(owner)["last_check"] is None
+    path = "/api/admin/catalog-runs"
+    assert client.get(path, headers=headers(other, "GET", path)).status_code == 403
+
+
+def test_catalog_runs_last_check_reports_each_outcome():
+    owner, _ = reset_checks()
+    add_check("no_change", new_count=0, removed_count=0)
+    last = owner_status(owner)["last_check"]
+    assert (last["outcome"], last["new_count"], last["removed_count"], last["catalog_run_id"]) == ("no_change", 0, 0, None)
+    assert last["started_at"] and last["finished_at"] and last["error_code"] is None and last["index_exit_code"] is None
+
+    def newest(*args, **columns):
+        with connect() as conn:  # each row is the newest: move the earlier ones back
+            conn.execute("UPDATE catalog_check SET started_at = started_at - interval '1 minute'")
+        run_id = add_check(*args, **columns)
+        return run_id, owner_status(owner)["last_check"]
+
+    run_id, last = newest("pull_started", "succeeded", new_count=182, removed_count=3)
+    assert (last["outcome"], last["new_count"], last["removed_count"]) == ("pull_started", 182, 3)
+    assert (last["catalog_run_id"], last["run_outcome"]) == (str(run_id), "succeeded")
+
+    _, last = newest("pull_started", "failed", new_count=1, removed_count=0, error_code="CATALOG_PULL_FAILED")
+    assert (last["run_outcome"], last["error_code"]) == ("failed", "CATALOG_PULL_FAILED")
+
+    _, last = newest("pull_started", "running", new_count=1, removed_count=0)
+    assert last["outcome"] == "pull_started" and last["run_outcome"] is None
+
+    _, last = newest("pull_running", new_count=2, removed_count=0)
+    assert last["outcome"] == "pull_running"
+
+    _, last = newest("failed", error_code="TCGDEX_UNAVAILABLE")
+    assert (last["outcome"], last["error_code"], last["new_count"]) == ("failed", "TCGDEX_UNAVAILABLE", None)
+
+
+def test_catalog_runs_unfinished_check_is_stale_after_30_minutes():
+    owner, _ = reset_checks()
+    add_check(None)
+    last = owner_status(owner)["last_check"]
+    assert last["outcome"] is None and last["finished_at"] is None and last["unfinished_stale"] is False
+    with connect() as conn:
+        conn.execute("UPDATE catalog_check SET started_at=now()-interval '31 minutes'")
+    assert owner_status(owner)["last_check"]["unfinished_stale"] is True
+
+
+def test_catalog_runs_paused_check_clears_once_a_later_pull_succeeds():
+    owner, _ = reset_checks()
+    add_check("paused", error_code="CATALOG_PULL_FAILED")
+    last = owner_status(owner)["last_check"]
+    assert (last["outcome"], last["error_code"], last["pull_succeeded_after"]) == ("paused", "CATALOG_PULL_FAILED", False)
+    with connect() as conn:  # a success before the check began changes nothing
+        conn.execute("""INSERT INTO catalog_run(phase,outcome,started_at,finished_at)
+          VALUES ('complete','succeeded',now()-interval '1 hour',now()-interval '1 hour')""")
+    assert owner_status(owner)["last_check"]["pull_succeeded_after"] is False
+    with connect() as conn:
+        conn.execute("""INSERT INTO catalog_run(phase,outcome,started_at,finished_at)
+          VALUES ('complete','succeeded',now(),now()+interval '1 second')""")
+    assert owner_status(owner)["last_check"]["pull_succeeded_after"] is True
+
+
+def test_catalog_runs_last_check_reports_the_index_exit_code():
+    owner, _ = reset_checks()
+    add_check("no_change", new_count=0, removed_count=0, index_exit_code=0)
+    assert owner_status(owner)["last_check"]["index_exit_code"] == 0
+    with connect() as conn:
+        conn.execute("UPDATE catalog_check SET index_exit_code=3")
+    assert owner_status(owner)["last_check"]["index_exit_code"] == 3
+
+
+def test_catalog_runs_checks_leave_the_collector_catalog_status_unchanged():
+    _, other = reset_checks()
+    add_check("failed", error_code="TCGDEX_UNAVAILABLE", index_exit_code=3)
+    path = "/api/catalog/status"
+    response = client.get(path, headers=headers(other, "GET", path))
+    assert response.status_code == 200 and set(response.json()) == {"available", "revision", "last_success"}
+    assert "check" not in response.text.lower() and "TCGDEX" not in response.text
