@@ -25,6 +25,8 @@ from decimal import Decimal
 import httpx
 import psycopg
 
+from . import price_binding
+
 BASE_URL = "https://tcgcsv.com"
 CATEGORY = 3  # Pokemon
 ADVISORY_LOCK = 914712
@@ -60,6 +62,9 @@ class ImportResult:
     product_rows: int = 0
     price_rows: int = 0
     rejected_rows: int = 0
+    verified_editions: int | None = None
+    priced_editions: int | None = None
+    unpriced: dict = field(default_factory=dict)
     unknown_subtypes: set = field(default_factory=set)
 
     @property
@@ -264,14 +269,38 @@ def write_group(conn, group_id, products, prices, snapshot, result):
 # --- The run -------------------------------------------------------------------------------------------------------------
 
 
+def bind_prices(conn):
+    """Rebind every verified Edition; the counts, or None when the rebind failed (logged, never raised)."""
+    try:
+        counts = price_binding.rebind(conn)
+    except Exception as error:
+        log(f"the price binding failed ({type(error).__name__})")
+        return None
+    unpriced = {reason: counts[reason] for reason in price_binding.REASONS if counts[reason]}
+    if counts["bound"] > counts["priced"]:
+        unpriced["no_price"] = counts["bound"] - counts["priced"]  # bound, but the product row has no market price above zero
+    counts["unpriced"] = unpriced
+    log(f"{counts['verified']} verified Editions, {counts['priced']} priced, unpriced by reason: {unpriced}")
+    return counts
+
+
 def post_import_steps(conn, result):
     """Binding, art and publishing run after every import, including `unchanged` and `stale_source` runs (design 4.2 step 5).
     CALL LIST: later tickets add their calls here, in this order, each in its own try block so that one failing step never
     stops the next and never changes the import's outcome:
-      P3: price_binding.rebind(conn)
+      P3: price_binding.rebind(conn)   (bind_prices below)
       P7: card_art.refresh_fallbacks(conn)
       P5: public_prices.publish(conn)   (best effort; a failure sets price_import.public_error)
     """
+    counts = bind_prices(conn)
+    if counts:
+        result.verified_editions, result.priced_editions, result.unpriced = counts["verified"], counts["priced"], counts["unpriced"]
+
+
+def rebind_only(conn):
+    """The data-repair step (--rebind-only): the binding, art and publishing steps without fetching anything. Exit code."""
+    counts = bind_prices(conn)
+    return OK if counts else FAILED
 
 
 def newest_finished(conn):
@@ -282,9 +311,11 @@ def newest_finished(conn):
 def finish(conn, result):
     conn.execute(
         "UPDATE price_import SET finished_at = now(), outcome = %s, source_updated_at = %s, groups_total = %s, "
-        "groups_failed = %s, product_rows = %s, price_rows = %s, rejected_rows = %s, error_code = %s WHERE id = %s",
+        "groups_failed = %s, product_rows = %s, price_rows = %s, rejected_rows = %s, error_code = %s, verified_editions = %s, "
+        "priced_editions = %s, unpriced = %s WHERE id = %s",
         (result.outcome, result.source_updated_at, result.groups_total, result.groups_failed, result.product_rows,
-         result.price_rows, result.rejected_rows, result.error_code, result.import_id))
+         result.price_rows, result.rejected_rows, result.error_code, result.verified_editions, result.priced_editions,
+         json.dumps(result.unpriced), result.import_id))
     log(f"{result.outcome}" + (f" ({result.error_code})" if result.error_code else "")
         + f": {result.groups_total} groups, {result.groups_failed} failed, {result.product_rows} products, "
           f"{result.price_rows} prices, {result.rejected_rows} rejected")
@@ -363,6 +394,8 @@ def run(conn, client=None, *, force=False):
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Import the daily TCGCSV Pokemon price snapshot.")
     parser.add_argument("--force", action="store_true", help="download again even when last-updated.txt is unchanged")
+    parser.add_argument("--rebind-only", action="store_true",
+                        help="rebind prices (and refresh art and publish once they exist) without fetching anything")
     args = parser.parse_args(argv)
     from app.db import connect
     try:
@@ -371,6 +404,8 @@ def main(argv=None):
         log("the database is unreachable")
         return UNREACHABLE
     try:
+        if args.rebind_only:
+            return rebind_only(conn)
         return run(conn, force=args.force).exit_code
     except psycopg.Error as error:
         log(f"the database failed ({type(error).__name__})")

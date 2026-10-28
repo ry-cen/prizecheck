@@ -25,6 +25,7 @@ from .catalog_targets import (IDENTITY_REVIEW_KINDS, MatchingRulesV1, TargetCont
                               refresh_printing)
 from . import quote_contract
 from .price_seed import seed_from_import
+from .price_binding import rebind_best_effort
 from .public_catalog import publish_catalog_best_effort
 from .reprint_groups import refresh_reprint_groups
 from .set_counts import insert_set_counts, set_counts
@@ -777,6 +778,8 @@ def _publish_after_commit(conn, run_id: UUID, source) -> None:
     price_views = getattr(source, "price_views", None)
     if price_views:
         seed_from_import(conn, run_id, dict(price_views))
+    # Bind the new verified Editions to their product subtype (ADR 0019). Logged, never raises.
+    rebind_best_effort()
 
 
 def execute_run(conn, run_id: UUID, source=None, before_promotion=None):
