@@ -32,8 +32,8 @@ Release A carries the importer, the binding and the writer of the public `price:
 
    Done on 2026-10-28, exit 0 (see above).
 
-- [ ] At a quiet time, activate matching rule v4 on the host. Use the command in [deployment-oracle.md](../../deployment-oracle.md), step 14.3, with `('marketplace_matching', 4)` only, or Owner controls' **Rules** panel once [#343](https://github.com/ry-cen/prizecheck/issues/343) has shipped. The activation of v3 took 18 minutes on the 1-OCPU production instance.
-- [ ] Import again with `--force`. It rebinds and publishes. Add `--rematch` to also re-evaluate the unverified promo Editions under v4:
+- [ ] Deploy the release that applies the newest catalog rules ([#377](https://github.com/ry-cen/prizecheck/issues/377), ADR 0021). The deploy applies the newest matching rule by itself; check that Owner controls → **Rules** shows it applied and its rollout finished.
+- [ ] Import again with `--force`. It rebinds and publishes. Add `--rematch` to also re-evaluate the unverified promo Editions under the new rule:
 
    ```sh
    sudo bash $P tool /app/scripts/price_import_job.py --force
@@ -118,7 +118,7 @@ A reader failure (an exception or a timeout) already answers "unavailable" for t
 | --- | --- | --- | --- |
 | Release A deployed | shipped with release B in v0.2.1 | | |
 | First import by hand | 2026-10-28 | | exit 0, 24,509 of 25,093 priced |
-| Matching v4 activated | | | |
+| Newest matching rule applied | | | |
 | `--force` re-import | | | |
 | Spot checks | | | |
 | Release B deployed |  | | |

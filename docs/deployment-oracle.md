@@ -609,7 +609,7 @@ Then sign in:
    sudo bash /opt/prizecheck-prod/bin/prizecheck-deploy.sh compose run --rm scanner-index
    ```
 
-   Then the prices. The import reads TCGCSV's daily snapshot and prices the Editions a matching rule has verified, so run it after the catalog pull. Matching v4 (step 3's command activates it) matches the Black Star promos from stored TCGCSV products, which exist only after an import, so the first run carries `--rematch`; after a rule activation that comes later, run it again with `--force`:
+   Then the prices. The import reads TCGCSV's daily snapshot and prices the Editions a matching rule has verified, so run it after the catalog pull. Matching v4 and later (step 3 applies the newest) match the Black Star promos from stored TCGCSV products, which exist only after an import, so the first run carries `--rematch`. A newer rule a later release applies binds and publishes its Editions itself:
 
    ```bash
    sudo bash /opt/prizecheck-prod/bin/prizecheck-deploy.sh tool /app/scripts/price_import_job.py --rematch
