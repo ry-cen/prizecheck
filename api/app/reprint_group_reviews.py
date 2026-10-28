@@ -2,10 +2,11 @@
 
 Automatic Reprint Groups (``app.reprint_groups``) only join printings whose rules text is exactly equal. The maintainer
 merges reworded or errata'd printings into one group (the handbook's Copycat CES 127 and TRR 83, or Rare Candy sm1-129
-and me01-125), splits a wrong group, lets a manually approved Printing join a group (its only way into one), and merges
-Card Identities that the subtitle rule misses. As for card attribute corrections (``app.attribute_corrections``), only
-the owner changes these: each decision binds to the evidence the maintainer was shown, takes the commit-ordered
-public clock (so it serializes with catalog imports), advances the attribute revision once and is recorded
+and me01-125), splits a wrong group, lets a manually approved Printing join a group or confirms it as a group of its
+own (its only ways into one), and merges Card Identities that the subtitle rule misses. As for card attribute
+corrections (``app.attribute_corrections``), only the owner changes these: each decision binds to the evidence the
+maintainer was shown, takes the commit-ordered public clock (so it serializes with catalog imports), advances the
+attribute revision once and is recorded
 append-only. There are no collector reports.
 
 Every decision concerns one Card Identity, since Reprint Groups never span identities. Reviewed records name Printings
@@ -14,8 +15,8 @@ Every decision concerns one Card Identity, since Reprint Groups never span ident
 - ``merge`` puts every Printing of one group into another. Each member's derived group is linked to the target, so a
   reprint with either wording imported later joins the merged group too; members held by an assignment move with it.
 - ``split`` moves the named Printings of one group into a new group of their own, by assignment.
-- ``join`` puts the named Printings into a group by assignment. Manually approved Printings join groups only this way.
-  A TCGdex Printing joins only while it derives a group of its own (it is held, not withdrawn, and has rules text).
+- ``join`` puts the named Printings into a group by assignment. Manually approved Printings join an existing group only
+  this way. A TCGdex Printing joins only while it derives a group of its own (it is held, not withdrawn, has rules text).
 
 An assignment applies only to a Printing that derives a group or to a manual Printing (migration 037). A withdrawn
 TCGdex Printing leaves its reviewed group like any other, so private and published format checks never count it, and

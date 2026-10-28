@@ -311,6 +311,60 @@ test.describe("desktop", () => {
       queueRow(page, "Switch").getByRole("button", { name: "Review Switch" })
     ).toHaveAttribute("aria-expanded", "true");
     await expect(reviewCard(page, "Switch")).toHaveCount(1);
+    // Asking again for a card whose row is already open puts focus in its reason field.
+    await page.getByRole("button", { name: "Find", exact: true }).focus();
+    await page.getByRole("button", { name: "Review card" }).click();
+    await expect(reviewCard(page, "Switch").getByLabel("Reason")).toBeFocused();
+    await expect(reviewCard(page, "Switch")).toHaveCount(1);
+  });
+
+  test("Review any card announces its result and Show more reaches Printings past the first 30", async ({
+    page,
+  }) => {
+    execFileSync(
+      ".venv/bin/python",
+      [
+        "-c",
+        `from test_catalog_search import promote
+promote({f'card-{i}': f'Pikachu {i:02d}' for i in range(1, 66)})`,
+      ],
+      { env: { ...process.env, PYTHONPATH: "api:api/tests" } }
+    );
+    await signInAsOwner(page);
+    await openAttributes(page);
+    const finder = page.getByRole("region", { name: "Card attributes" });
+    await expect(page.getByText("Loading the queue…")).toHaveCount(0);
+    await page
+      .getByRole("searchbox", { name: "Find a card to review" })
+      .fill("Pikachu");
+    await page.getByRole("button", { name: "Find", exact: true }).click();
+    const options = page
+      .getByRole("combobox", { name: "Printing to review" })
+      .locator("option");
+    await expect(options).toHaveCount(31); // the placeholder and 30 Printings
+    await expect(
+      finder.getByRole("status").filter({ hasText: "cards found" })
+    ).toHaveText("30 cards found. More cards match.");
+    const more = page.getByRole("button", { name: "Show more" });
+    await more.click();
+    await expect(options).toHaveCount(61);
+    await expect(more).toBeVisible();
+    await more.click();
+    await expect(options).toHaveCount(66);
+    await expect(
+      finder.getByRole("status").filter({ hasText: "cards found" })
+    ).toHaveText("65 cards found.");
+    await expect(more).toHaveCount(0);
+    const last = await options
+      .filter({ hasText: "Pikachu 65" })
+      .getAttribute("value");
+    await page
+      .getByRole("combobox", { name: "Printing to review" })
+      .selectOption(last!);
+    await page.getByRole("button", { name: "Review card" }).click();
+    await expect(
+      reviewCard(page, "Pikachu 65").getByLabel("Reason")
+    ).toBeFocused();
   });
 
   test("Close returns focus to Review, and Reject report needs only the reason", async ({

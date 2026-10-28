@@ -22,7 +22,7 @@ export function AttributesQueue({ onDecided }: { onDecided: () => void }) {
   const [items, setItems] = useState<AttributeEvidence[]>([]);
   const [next, setNext] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
-  const [status, setStatus] = useState("Loading the queue…");
+  const [status, setStatus] = useState("");
   const [loadingMore, setLoadingMore] = useState(false);
 
   async function load() {
@@ -56,6 +56,22 @@ export function AttributesQueue({ onDecided }: { onDecided: () => void }) {
     } finally {
       setLoadingMore(false);
     }
+  }
+
+  /** Opens a queued Printing's row; one that is already open has nothing to open, so its reason field takes focus. */
+  function openQueued(printingId: string) {
+    if (open === printingId) {
+      // One row is open at a time: its Review button names the card it controls.
+      const controls = document
+        .querySelector('button[aria-expanded="true"][aria-controls]')
+        ?.getAttribute("aria-controls");
+      document
+        .getElementById(controls ?? "")
+        ?.querySelector<HTMLTextAreaElement>("textarea")
+        ?.focus();
+      return;
+    }
+    setOpen(printingId);
   }
 
   function done(
@@ -122,7 +138,7 @@ export function AttributesQueue({ onDecided }: { onDecided: () => void }) {
           queued={(printingId) =>
             items.some((item) => item.printing_id === printingId)
           }
-          onOpenQueued={setOpen}
+          onOpenQueued={openQueued}
           onDone={(message) => {
             toast.show({ message });
             onDecided();

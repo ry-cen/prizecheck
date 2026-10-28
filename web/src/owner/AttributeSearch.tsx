@@ -31,42 +31,87 @@ export function AttributeSearch({ queued, onOpenQueued, onDone }: Props) {
   const searchField = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState("");
   const [found, setFound] = useState<PrintingView[] | null>(null);
-  const [more, setMore] = useState(false);
+  const [next, setNext] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [chosen, setChosen] = useState("");
   const [picked, setPicked] = useState<AttributeEvidence | null>(null);
   const [error, setError] = useState("");
+  // A newer search or pick makes an older, slower answer stale; it is dropped when it arrives.
+  const searchRequest = useRef(0);
+  const pickRequest = useRef(0);
 
   function focusSearch() {
     searchField.current?.querySelector("input")?.focus();
   }
 
   async function find() {
-    if (!query.trim()) return;
+    const name = query.trim();
+    if (!name) return;
+    const request = ++searchRequest.current;
     setError("");
+    setLoadingMore(false);
     try {
-      const page = await searchCatalog({ name: query.trim() });
+      const page = await searchCatalog({ name });
+      if (request !== searchRequest.current) return;
       setFound(page.printings);
-      setMore(!!page.next_cursor);
+      setNext(page.next_cursor ?? null);
       setChosen("");
     } catch {
+      if (request !== searchRequest.current) return;
       setError("Unable to search the catalog. Please retry.");
+    }
+  }
+
+  /** The next page of the search that is showing; the catalog changing under it starts over from page one. */
+  async function showMore() {
+    const name = query.trim();
+    if (!next || !name) return;
+    const request = ++searchRequest.current;
+    setError("");
+    setLoadingMore(true);
+    try {
+      const page = await searchCatalog({ name }, next);
+      if (request !== searchRequest.current) return;
+      setFound((previous) => [...(previous ?? []), ...page.printings]);
+      setNext(page.next_cursor ?? null);
+    } catch (failure) {
+      if (request !== searchRequest.current) return;
+      if (failure instanceof Error && failure.message === "CATALOG_CHANGED") {
+        setLoadingMore(false);
+        void find();
+        return;
+      }
+      setError("Unable to search the catalog. Please retry.");
+    } finally {
+      if (request === searchRequest.current) setLoadingMore(false);
     }
   }
 
   async function review() {
     if (!chosen) return;
+    const request = ++pickRequest.current;
     setError("");
+    setPicked(null);
     if (queued(chosen)) {
-      setPicked(null);
       onOpenQueued(chosen);
       return;
     }
     try {
-      setPicked(await getAttributeEvidence(chosen));
+      const evidence = await getAttributeEvidence(chosen);
+      if (request !== pickRequest.current) return;
+      setPicked(evidence);
     } catch {
+      if (request !== pickRequest.current) return;
       setError("Unable to load that card. Please retry.");
     }
   }
+
+  const message =
+    found === null
+      ? ""
+      : found.length
+        ? `${found.length} ${found.length === 1 ? "card" : "cards"} found.${next ? " More cards match." : ""}`
+        : "No card has a name that starts that way.";
 
   return (
     <div className="flex min-w-0 flex-col gap-3">
@@ -87,36 +132,34 @@ export function AttributeSearch({ queued, onOpenQueued, onDone }: Props) {
           Find
         </Button>
       </div>
-      {found &&
-        (found.length ? (
-          <div className="flex flex-wrap items-end gap-2">
-            <div className="min-w-0 grow basis-60">
-              <Select
-                label="Printing to review"
-                value={chosen}
-                onChange={(event) => setChosen(event.target.value)}
-              >
-                <option value="">Choose a Printing</option>
-                {found.map((printing) => (
-                  <option key={printing.id} value={printing.id}>
-                    {label(printing)}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            <Button disabled={!chosen} onClick={() => void review()}>
-              Review card
-            </Button>
+      <p role="status" className="m-0 text-meta text-text-muted">
+        {message}
+      </p>
+      {found && found.length > 0 && (
+        <div className="flex flex-wrap items-end gap-2">
+          <div className="min-w-0 grow basis-60">
+            <Select
+              label="Printing to review"
+              value={chosen}
+              onChange={(event) => setChosen(event.target.value)}
+            >
+              <option value="">Choose a Printing</option>
+              {found.map((printing) => (
+                <option key={printing.id} value={printing.id}>
+                  {label(printing)}
+                </option>
+              ))}
+            </Select>
           </div>
-        ) : (
-          <p className="m-0 text-meta text-text-muted">
-            No card has a name that starts that way.
-          </p>
-        ))}
-      {found && more && (
-        <p className="m-0 text-meta text-text-muted">
-          More cards match. Type more of the name to narrow the list.
-        </p>
+          <Button disabled={!chosen} onClick={() => void review()}>
+            Review card
+          </Button>
+          {next && (
+            <Button disabled={loadingMore} onClick={() => void showMore()}>
+              Show more
+            </Button>
+          )}
+        </div>
       )}
       {error && (
         <p role="alert" className="m-0 text-meta text-danger">

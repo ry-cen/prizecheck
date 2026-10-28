@@ -159,11 +159,15 @@ def identity_checks(owner, deck):
     return {row["name"]: (row["quantity"], row["status"]) for row in rows}
 
 
-def seed_manual_printing(member_source_id, name, set_id="future", number="1"):
+def seed_manual_printing(member_source_id, name, set_id="future", number="1", same_identity_as=None):
     """A manually approved Printing in the Card Identity of ``member_source_id`` (a new Card Identity when it is None,
-    as a missing-card approval of an unknown card makes), as a missing-card approval would."""
+    as a missing-card approval of an unknown card makes), as a missing-card approval would. ``same_identity_as`` (a
+    Printing ID) puts it in that Printing's Card Identity instead."""
     with connect() as conn:
-        if member_source_id is None:
+        if same_identity_as is not None:
+            identity = conn.execute("SELECT identity_id FROM catalog_printing WHERE id=%s",
+                                    (same_identity_as,)).fetchone()["identity_id"]
+        elif member_source_id is None:
             identity = conn.execute("INSERT INTO catalog_identity(identity_key,display_name) VALUES (%s,%s) RETURNING id",
                                     (name.casefold(), name)).fetchone()["id"]
         else:
@@ -362,6 +366,33 @@ def test_confirming_a_lone_manual_printing_gives_it_a_group_of_its_own_and_leave
     # Restore returns it to no group, so it waits again.
     ok(decide(identity, "restore", printings=[manual]))
     assert sorted(queue()) == sorted([manual, other])
+    # The restore is recorded after the confirm, newest first, and names the Printing it returned.
+    assert [row[0] for row in history(identity)] == ["restore", "confirm"]
+    assert history(identity)[0][4:6] == ([manual], [manual])
+
+
+def test_confirming_two_manual_printings_at_once_puts_them_in_one_group_and_reaches_format_results():
+    ids = seed(*CANDIES)
+    first, first_edition = seed_manual_printing(None, "Future Card")
+    second, second_edition = seed_manual_printing(None, "Future Card", number="2", same_identity_as=first)
+    identity = identity_of(first)
+    assert identity_of(second) == identity and sorted(queue()) == sorted([first, second])
+    for printing in (first, second):
+        correct_attributes(printing, MANUAL_TRAINER)
+    owner, deck = deck_of((first_edition, 3), (second_edition, 3), (edition_of("me01-001"), 1))
+    codes = {issue["code"] for issue in standard(owner, deck, "2026-10-11")["issues"]}
+    assert "copy_limit" in codes  # six copies of one name, counted by name while the Printings have no group
+    before = revision()
+    body = ok(decide(identity, "confirm", printings=[first, second]))
+    assert (body["decision"], body["attribute_revision"]) == ("confirm", before + 1)
+    assert body["affected_printing_ids"] == sorted([first, second])
+    assert body["public_delivery"] == "delivered"
+    assert body["group_id"] is not None
+    assert groups(evidence(identity)) == {first: body["group_id"], second: body["group_id"]}  # one group, not two
+    assert queue() == [] and [row[0] for row in history(identity)] == ["confirm"]
+    assert [sorted(ids) for ids in history(identity)[0][4:6]] == [sorted([first, second])] * 2
+    # The format result is read from the new group without a republish, and still counts the six copies together.
+    assert {issue["code"] for issue in standard(owner, deck, "2026-10-11")["issues"]} == codes
 
 
 def test_confirm_refuses_tcgdex_printings_and_printings_already_in_a_group():

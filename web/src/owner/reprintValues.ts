@@ -169,7 +169,7 @@ export function movePlan(
   if (choice === "own")
     return {
       body: { decision: "confirm", printing_ids: ids },
-      summary: `Confirms ${printings(ids.length)} as ${ids.length === 1 ? "a card" : "one card"} of its own, in a new group.`,
+      summary: `Confirms ${printings(ids.length)} as ${ids.length === 1 ? "a card of its own" : "one card of their own"}, in a new group.`,
     };
   if (choice === "new") {
     const from = new Set(picked.map((printing) => printing.group_id));
