@@ -25,6 +25,8 @@ COPY --from=deps /opt/venv /opt/venv
 COPY api/app /app/api/app
 COPY migrations /app/migrations
 COPY scripts /app/scripts
+# The pinned scanner model id (app.host_readiness counts only that model's fingerprints, as the index job does).
+COPY web/scanner-models.lock.json /app/web/scanner-models.lock.json
 WORKDIR /app/api
 USER 10001:10001
 EXPOSE 8000

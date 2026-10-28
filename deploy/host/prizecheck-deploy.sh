@@ -1133,9 +1133,12 @@ readiness_env() {
     readiness_ok "The env file and host files pass check-config"
     READINESS_ENV_OK=1
   else
-    readiness_missing "check-config: $(captured_error)" "fix it, then run: sudo bash $SCRIPT_PATH check-config ($GUIDE)"
+    readiness_missing "check-config: $(captured_error)" "fix it, then run: $(readiness_sudo)bash $SCRIPT_PATH check-config ($GUIDE)"
   fi
 }
+
+# What an operator types before a command: Oracle's operator is `ubuntu` and needs sudo; Unraid's is root.
+readiness_sudo() { if [[ "$ENVIRONMENT" == prod ]]; then printf 'sudo '; fi; }
 
 readiness_units() {
   if ! has_systemd; then
@@ -1148,7 +1151,7 @@ readiness_units() {
   if [[ "$CAPTURED_RC" == 0 ]]; then
     readiness_ok "The catalog refresh and backup timers are installed and enabled"
   else
-    readiness_missing "Timers: $(captured_error)" "sudo bash $SCRIPT_PATH setup"
+    readiness_missing "Timers: $(captured_error)" "$(readiness_sudo)bash $SCRIPT_PATH setup"
   fi
 }
 
@@ -1198,7 +1201,7 @@ readiness_deployed() {
     -e "READINESS_SIGNUP_MODE=$signup" -e "READINESS_SCRIPT=bash $SCRIPT_PATH" -e "READINESS_GUIDE=$GUIDE" \
     tools -m app.host_readiness </dev/null || rc=$?
   if [[ "$rc" != 0 ]]; then
-    readiness_warning "Could not read the app's state (the readiness job exited $rc)" "sudo bash $SCRIPT_PATH status"
+    readiness_warning "Could not read the app's state (the readiness job exited $rc)" "$(readiness_sudo)bash $SCRIPT_PATH status"
   fi
 }
 
@@ -1223,11 +1226,13 @@ cmd_readiness() {
   fi
   printf '\n'
   if [[ "$READINESS_MISSING" != 0 ]]; then
-    printf '%s pre-deploy item(s) missing; fix them, then run: sudo bash %s readiness\n' "$READINESS_MISSING" "$SCRIPT_PATH"
+    printf '%s pre-deploy item(s) missing; fix them, then run: %sbash %s readiness\n' "$READINESS_MISSING" "$(readiness_sudo)" "$SCRIPT_PATH"
     return 1
   fi
   if [[ -z "$current" ]]; then
-    printf 'This host is ready for the first deploy (%s, "Perform the first release").\n' "$GUIDE"
+    local step="Perform the first release"
+    [[ "$ENVIRONMENT" == prod ]] || step="Perform the initial deployment"
+    printf 'This host is ready for the first deploy (%s, "%s").\n' "$GUIDE" "$step"
   fi
 }
 

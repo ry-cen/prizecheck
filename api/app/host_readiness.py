@@ -8,20 +8,26 @@ unfinished item the next step:
   owner bound, catalog rules applied (a deploy applies them, ADR 0021), active catalog generation, last price import, scanner index,
   last catalog check, signup mode.
 
-A database that cannot be read prints one `warning` line and nothing else.
+A database that cannot be read, or that answers too slowly (15 s a statement, 5 s on a lock), prints one `warning` line and
+nothing else. The session is read-only.
 
 Environment set by the host script: READINESS_SIGNUP_MODE (SIGNUP_MODE from the env file, read on the host: the database
 does not hold it), READINESS_SCRIPT (how the operator runs the host script), READINESS_GUIDE (the deployment guide).
 """
+import importlib.util
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import psycopg
 
 from .catalog_targets import LIVE, MATCHING, load_active
 from .db import connect
 
+# A price import or catalog check that has recorded no outcome after this long did not finish (a crash or a kill).
+UNFINISHED_AFTER = timedelta(hours=6)
+JOB = Path(__file__).resolve().parents[2] / "scripts" / "scanner_index_job.py"
 RULE_KINDS = ((LIVE, "live derivation"), (MATCHING, "marketplace matching"))
 
 
@@ -33,6 +39,17 @@ def age(moment, now):
             count = seconds // size
             return f"{count} {unit}{'s' if count != 1 else ''} ago"
     return "just now"
+
+
+def pinned_model_id():
+    """The model id scripts/scanner_index_job.py indexes with, from the same lock file (None when it cannot be read)."""
+    try:
+        spec = importlib.util.spec_from_file_location("scanner_index_job", JOB)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module.load_model().id
+    except Exception:  # an unreadable job or lock file must not fail the report
+        return None
 
 
 class Report:
@@ -111,7 +128,13 @@ def prices(conn, report, now, script):
     elif row["outcome"] in ("imported", "unchanged"):
         report.ok(f"The last price import {row['outcome']} {age(row['finished_at'] or row['started_at'], now)}")
     elif row["outcome"] is None:
-        report.ok(f"A price import started {age(row['started_at'], now)} and has not finished")
+        if now - row["started_at"] > UNFINISHED_AFTER:
+            report.warning(
+                f"The last price import started {age(row['started_at'], now)} and did not finish",
+                f"run it again: {script} tool /app/scripts/price_import_job.py",
+            )
+        else:
+            report.ok(f"A price import started {age(row['started_at'], now)} and has not finished")
     else:
         report.warning(
             f"The last price import {row['outcome']} {age(row['finished_at'] or row['started_at'], now)}",
@@ -123,14 +146,19 @@ def scanner(conn, report, generation_id, script):
     if generation_id is None:
         report.warning("The scanner index waits for the catalog", "it can be built after the catalog pull")
         return
+    model_id = pinned_model_id()
+    if model_id is None:
+        report.warning("The scanner index could not be checked: the pinned model id is unreadable",
+                       f"check the index with: {script} compose run --rm scanner-index")
+        return
     row = conn.execute(
         """SELECT count(*) AS total,
                   count(*) FILTER (WHERE NOT EXISTS (
                     SELECT 1 FROM scanner_fingerprint f
-                    WHERE f.printing_id = gp.printing_id AND f.image_url = gp.image_url)) AS missing
+                    WHERE f.printing_id = gp.printing_id AND f.image_url = gp.image_url AND f.model_id = %s)) AS missing
            FROM catalog_generation_printing gp
            WHERE gp.generation_id = %s AND NOT gp.tombstoned AND gp.image_url IS NOT NULL AND gp.image_url <> ''""",
-        (generation_id,)).fetchone()
+        (model_id, generation_id)).fetchone()
     if row["total"] == 0:
         report.warning("The active catalog has no printings with art to index")
     elif row["missing"] == 0:
@@ -157,7 +185,13 @@ def check(conn, report, now, script):
             f"fix the cause (rules not applied and a TCGdex error are the usual ones), then: {script} catalog-refresh",
         )
     elif row["outcome"] is None:
-        report.ok(f"A catalog check started {age(row['started_at'], now)} and has not finished")
+        if now - row["started_at"] > UNFINISHED_AFTER:
+            report.warning(
+                f"The last catalog check started {age(row['started_at'], now)} and did not finish",
+                f"run it again: {script} catalog-refresh",
+            )
+        else:
+            report.ok(f"A catalog check started {age(row['started_at'], now)} and has not finished")
     else:
         report.ok(f"The last catalog check ended {row['outcome'].replace('_', ' ')}, {age(row['started_at'], now)}")
 
@@ -179,7 +213,8 @@ def main(out=None, environ=None) -> int:
     report = Report(out)
     now = datetime.now(timezone.utc)
     try:
-        with connect(connect_timeout=10) as conn:
+        with connect(connect_timeout=10, options="-c statement_timeout=15000 -c lock_timeout=5000") as conn:
+            conn.read_only = True
             bound = owner(conn, report, script)
             rules(conn, report, guide, script, bound)
             generation_id = generation(conn, report)

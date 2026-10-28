@@ -14,6 +14,7 @@ SCRIPT = "bash /opt/prizecheck-prod/bin/prizecheck-deploy.sh"
 GUIDE = "docs/deployment-oracle.md"
 ENVIRONMENT = {"READINESS_SIGNUP_MODE": "owner-only", "READINESS_SCRIPT": SCRIPT, "READINESS_GUIDE": GUIDE}
 BASE = "https://assets.tcgdex.net/en/fx"
+MODEL = host_readiness.pinned_model_id()
 
 
 def clear():
@@ -61,8 +62,8 @@ def prepare_ready_host():
                  collector_number,display_name,search_name,image_url,source_fingerprint,basic_energy)
                  VALUES (%s,%s,%s,'fx','Fixture',%s,%s,%s,%s,'f','not_basic')""",
                          (generation, pid, f"fx-{pid}", str(n), f"Card {n}", f"card {n}", f"{BASE}/{n}"))
-            conn.execute("INSERT INTO scanner_fingerprint(printing_id,model_id,image_url,scale,vector) VALUES (%s,'m',%s,1,%s)",
-                         (pid, f"{BASE}/{n}", b"\x00" * 384))
+            conn.execute("INSERT INTO scanner_fingerprint(printing_id,model_id,image_url,scale,vector) VALUES (%s,%s,%s,1,%s)",
+                         (pid, MODEL, f"{BASE}/{n}", b"\x00" * 384))
         conn.execute("INSERT INTO price_import(started_at,finished_at,outcome) VALUES (now()-interval '3 hours 5 minutes',now()-interval '3 hours 5 minutes','imported')")
         conn.execute("INSERT INTO catalog_check(started_at,finished_at,outcome) VALUES (now()-interval '2 hours 5 minutes',now()-interval '2 hours 5 minutes','no_change')")
     return owner, ids
@@ -157,3 +158,62 @@ def test_an_unreachable_database_prints_one_warning_line_and_exits_zero(monkeypa
     assert len([line for line in text.splitlines() if line.startswith("warning")]) == 1
     assert "hunter2-secret" not in text and "127.0.0.1" not in text
     assert "Signup mode" not in text
+
+
+def test_fingerprints_of_another_model_do_not_count_as_covered():
+    _, ids = prepare_ready_host()
+    with connect() as conn:
+        conn.execute("UPDATE scanner_fingerprint SET model_id='an-older-model' WHERE printing_id=%s", (ids[0],))
+    _, text = report()
+    assert MODEL and MODEL != "an-older-model"
+    assert "missing  1 of 2 printings have no scanner fingerprint" in text
+
+
+def test_a_price_import_or_check_without_an_outcome_is_ok_while_recent_and_a_warning_after_six_hours():
+    prepare_ready_host()
+    with connect() as conn:
+        conn.execute("DELETE FROM price_import")
+        conn.execute("DELETE FROM catalog_check")
+        conn.execute("INSERT INTO price_import(started_at,finished_at,outcome) VALUES (now()-interval '5 minutes',NULL,NULL)")
+        conn.execute("INSERT INTO catalog_check(started_at,finished_at,outcome) VALUES (now()-interval '5 minutes',NULL,NULL)")
+    _, text = report()
+    assert "ok       A price import started 5 minutes ago and has not finished" in text
+    assert "ok       A catalog check started 5 minutes ago and has not finished" in text
+    assert "warning" not in text
+    with connect() as conn:
+        conn.execute("UPDATE price_import SET started_at=now()-interval '7 hours' WHERE outcome IS NULL")
+        conn.execute("UPDATE catalog_check SET started_at=now()-interval '7 hours' WHERE outcome IS NULL")
+    _, text = report()
+    assert "warning  The last price import started 7 hours ago and did not finish" in text
+    assert f"{SCRIPT} tool /app/scripts/price_import_job.py" in text
+    assert "warning  The last catalog check started 7 hours ago and did not finish" in text
+    assert f"next: run it again: {SCRIPT} catalog-refresh" in text
+
+
+def test_the_report_reads_in_a_read_only_session_with_statement_and_lock_timeouts(monkeypatch):
+    prepare_ready_host()
+    seen = {}
+
+    def spy(**options):
+        seen.update(options)
+        conn = connect(**options)
+        seen["conn"] = conn
+        return conn
+
+    monkeypatch.setattr(host_readiness, "connect", spy)
+    report()
+    assert seen["connect_timeout"] == 10
+    assert "statement_timeout=15000" in seen["options"] and "lock_timeout=5000" in seen["options"]
+    assert seen["conn"].read_only is True
+
+
+def test_a_table_locked_by_someone_else_times_out_into_one_warning(monkeypatch):
+    prepare_ready_host()
+    monkeypatch.setattr(host_readiness, "connect",
+                        lambda **options: connect(connect_timeout=10, options="-c lock_timeout=200"))
+    with connect() as holder, holder.transaction():
+        holder.execute("LOCK TABLE owner_binding IN ACCESS EXCLUSIVE MODE")
+        code, text = report()
+    assert code == 0
+    assert text.splitlines()[0].startswith("warning  Could not read the database (LockNotAvailable)")
+    assert len([line for line in text.splitlines() if line.startswith("warning")]) == 1

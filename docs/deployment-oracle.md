@@ -94,7 +94,7 @@ Don't announce the site until you have worked through those documents.
 
 ## Part 1. What only you can do
 
-These steps need the Oracle console, other accounts' consoles or your own secrets, so no script on the host can do them. Packages and firewall edits stay manual on purpose: they depend on the distribution, and a wrong firewall edit can lock you out. The readiness report in Part 3 checks each of them and prints the command again when one is missing.
+These steps need the Oracle console, other accounts' consoles or your own secrets, so no script on the host can do them. Packages and firewall edits stay manual on purpose: they depend on the distribution, and a wrong firewall edit can lock you out. The readiness report in Part 3 checks the instance's Docker and Compose, Tailscale, Caddy and the port 80 and 443 rules, and the env file's keys, and prints the command again when one is missing. It does not check Discord, DNS, GitHub or the deploy key: do those by their own steps.
 
 ### 1. Create the instance
 
@@ -258,10 +258,10 @@ On your workstation, in a checkout of the commit you're going to deploy, copy th
 scp deploy/host/prizecheck-prod.env.example ubuntu@100.x.y.z:
 ```
 
-On the instance, create the install directory and the env file from it (mode 600, owned by root):
+On the instance, create the install directory (with its `bin/`, where step 12 puts the script and the units) and the env file from it (mode 600, owned by root):
 
 ```bash
-sudo install -d -m 0755 /opt/prizecheck-prod && sudo install -m 0600 prizecheck-prod.env.example /opt/prizecheck-prod/prizecheck.env
+sudo install -d -m 0755 /opt/prizecheck-prod /opt/prizecheck-prod/bin && sudo install -m 0600 prizecheck-prod.env.example /opt/prizecheck-prod/prizecheck.env
 ```
 
 Generate three distinct secrets, one per command run. Don't reuse any value from dev:
@@ -407,13 +407,9 @@ ssh-keyscan -t ed25519 100.x.y.z > oracle_known_hosts && ssh-keygen -lf oracle_k
 
 The two fingerprints must match. The content of `oracle_known_hosts` becomes `PROD_SSH_KNOWN_HOSTS`. CI connects with `StrictHostKeyChecking=yes`.
 
-Test the key from the tailnet machine. Nothing is deployed yet, so `status` may print an empty `current:` line or an error from the script. What matters is that you reach the script: `Permission denied` means the key line is wrong, and `Refused` means the forced command didn't recognise the request.
+The forced command runs the script that step 12 installs, so you test the key at the end of step 12.
 
-```bash
-ssh -i prizecheck-prod-deploy root@100.x.y.z status
-```
-
-Delete the private key file from your workstation after storing it in GitHub (step 11).
+Delete the private key file from your workstation after storing it in GitHub (step 11) and testing it (step 12).
 
 ### 10. Configure Tailscale for CI
 
@@ -549,6 +545,12 @@ Configuration OK (prod)
 ```
 
 Any `ERROR:` line names the key or file at fault, never its value; fix it and run `setup` again.
+
+Now test the deploy key (step 9) from the tailnet machine. Nothing is deployed yet, so `status` may print an empty `current:` line or an error from the script. What matters is that you reach the script, which step 12 has just installed: `Permission denied` means the key line is wrong, and `Refused` means the forced command didn't recognise the request.
+
+```bash
+ssh -i prizecheck-prod-deploy root@100.x.y.z status
+```
 
 ## Part 3. Follow the readiness report
 

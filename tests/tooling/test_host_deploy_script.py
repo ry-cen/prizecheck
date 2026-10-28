@@ -21,7 +21,11 @@ UNITS = ('prizecheck-catalog-refresh.service', 'prizecheck-catalog-refresh.timer
 FAKE_SYSTEMCTL = '''#!/bin/sh
 printf '%s\\n' "$*" >> "$FAKE_SYSTEMCTL_LOG"
 case "$1" in
-  enable) : > "$FAKE_SYSTEMCTL_STATE" ;;
+  enable)
+    : > "$FAKE_SYSTEMCTL_STATE"
+    # Whether the old cron file still exists the moment each timer is enabled.
+    if [ -e "$PRIZECHECK_CRON_BACKUP_FILE" ]; then cron=present; else cron=absent; fi
+    printf '%s\n' "$* cron-$cron" >> "$FAKE_SYSTEMCTL_LOG.cron" ;;
   is-enabled) [ -e "$FAKE_SYSTEMCTL_STATE" ]; exit $? ;;
 esac
 exit 0
@@ -949,7 +953,8 @@ class HostDeployScriptTest(unittest.TestCase):
         self.assertFalse(cron.exists())
         self.assertIn(f'Removed {cron}', result.stdout)
         self.assertTrue(Path(env['FAKE_SYSTEMCTL_STATE']).exists())
-        self.assertLess(self.systemctl_calls().index('enable --now prizecheck-backup.timer'), len(self.systemctl_calls()))
+        # The file was still there when the timer was enabled: it goes only after a successful enable.
+        self.assertIn('enable --now prizecheck-backup.timer cron-present', Path(f'{self.systemctl_log}.cron').read_text().splitlines())
         # Nothing to remove the second time.
         result = self.run_script(home, 'setup', **env)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -1380,7 +1385,7 @@ class HostDeployScriptTest(unittest.TestCase):
         self.assertIn('ok       Docker Compose v2', output)
         self.assertIn('ok       The env file and host files pass check-config', output)
         self.assertIn('ok       The catalog refresh and backup timers are installed and enabled', output)
-        self.assertIn('This host is ready for the first deploy', output)
+        self.assertIn('This host is ready for the first deploy (docs/deployment-oracle.md, "Perform the first release")', output)
         self.assertNotIn('missing', output)
         # Detection that can be wrong only warns: no tailscale, Caddy or iptables here.
         self.assertIn('warning  The tailscale command was not found', output)
@@ -1448,6 +1453,24 @@ class HostDeployScriptTest(unittest.TestCase):
         self.assertIn('is a placeholder or shorter than 32 characters', output)
         self.assertNotIn('short\n', output)
         self.assertNoSecrets(output)
+
+    def test_readiness_names_the_guide_heading_and_the_sudo_of_each_environment(self):
+        home = self.make_home(DEV)
+        env = self.host_env(home, systemd=False)
+        code, output = self.host(home, 'readiness', **env)
+        self.assertEqual(code, 0, output)
+        self.assertIn('(docs/deployment-unraid.md, "Perform the initial deployment")', output)
+        self.assertNotIn('Perform the first release', output)
+        # Unraid's operator is root: no sudo before a script command.
+        home = self.make_home(DEV)
+        (home / 'bin/prizecheck-backup.timer').unlink()
+        code, output = self.host(home, 'readiness', **self.host_env(home, docker=False, systemd=False))
+        self.assertNotIn('sudo bash', output)
+        home = self.make_home(PROD)
+        (home / 'prizecheck.env').write_text('\n'.join([*PROD, 'MAIL_MODE=file']) + '\n')
+        code, output = self.host(home, 'readiness', **self.host_env(home, docker=False))
+        self.assertEqual(code, 1, output)
+        self.assertIn('then run: sudo bash ', output)
 
     def test_readiness_fails_without_the_env_file(self):
         home = self.make_home(PROD)

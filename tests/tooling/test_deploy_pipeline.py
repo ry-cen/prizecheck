@@ -337,6 +337,17 @@ class DeployPipelineTest(unittest.TestCase):
                         for h in re.findall(r'(?m)^#{1,6} (.+)$', text)}
             for anchor in re.findall(r'\]\(#([a-z0-9-]+)\)', text):
                 self.assertIn(anchor, headings, f'{guide}: #{anchor}')
+        # Each guide creates the bin/ directory before anything is installed or copied into it, and the deploy key (which
+        # forces the installed script) is tested only after `setup` has run.
+        for guide, creator in (('deployment-oracle.md', r'(?m)^sudo install -d -m 0755 /opt/prizecheck-prod /opt/prizecheck-prod/bin\b'),
+                               ('deployment-unraid.md', r"(?m)^ssh root@unraid 'mkdir -p /mnt/cache/appdata/prizecheck-dev/bin'")):
+            text = (ROOT / 'docs' / guide).read_text()
+            created = re.search(creator, text)
+            self.assertIsNotNone(created, guide)
+            for use in re.finditer(r'(?m)^(?:sudo install -m|scp) .*(?:/bin/?(?:\s|$)|prizecheck-deploy\.sh)', text):
+                self.assertLess(created.start(), use.start(), f'{guide}: {use.group(0)[:60]}')
+        oracle = (ROOT / 'docs/deployment-oracle.md').read_text()
+        self.assertLess(oracle.index('prizecheck-deploy.sh setup\n'), oracle.index('ssh -i prizecheck-prod-deploy root@100.x.y.z status'))
         # The three-part layout, and none of the hand-written pieces it replaces.
         for guide in ('deployment-oracle.md', 'deployment-unraid.md'):
             text = (ROOT / 'docs' / guide).read_text()
