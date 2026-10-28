@@ -494,6 +494,34 @@ test.describe("desktop", () => {
     }
   });
 
+  test("Status shows a live promotion as Saving the catalog with no Restart pull or stale warning", async ({
+    page,
+  }) => {
+    await signInAsOwner(page);
+    const undoHealth = await seedHealth();
+    const runId = await seedRun();
+    try {
+      await query("UPDATE catalog_run SET phase='promoting' WHERE id=$1", [
+        runId,
+      ]);
+      await openFromAccountMenu(page);
+      const pull = page.getByRole("region", { name: "English catalog pull" });
+      await expect(
+        pull.getByText("Saving the catalog…", { exact: true })
+      ).toBeVisible();
+      await expect(
+        pull.getByRole("button", { name: "Start full pull" })
+      ).toBeDisabled();
+      await expect(
+        pull.getByRole("button", { name: "Restart pull" })
+      ).toHaveCount(0);
+      await expect(pull.getByText("Progress stale")).toHaveCount(0);
+    } finally {
+      await query("DELETE FROM catalog_run WHERE id=$1", [runId]);
+      await undoHealth();
+    }
+  });
+
   test("Status shows the price import: never imported, an imported run, and one warning line for each problem", async ({
     page,
   }) => {
