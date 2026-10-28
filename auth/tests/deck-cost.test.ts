@@ -1,25 +1,21 @@
 // @module-tag slow
-// slow (process): the 08-C stack (two gateways, two APIs, real price runners) and the real 3 s price budget.
+// slow (process): the price stack (two gateways, two APIs, the record-store relay) and the real 3 s price budget.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { randomUUID } from "node:crypto";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import {
-  HOUR,
-  keyOf,
-  LEASES,
   metric,
   SCHEDULER,
-  sleep,
   Stack,
-  waitFor,
   type Edition,
 } from "./price-runners-harness";
 
-// Ticket 09: complete private Deck costs through the real gateways, two APIs, the shared record store (HTTP relay) and
-// real runners fetching from a fake TCGdex. Every elapsed time is measured from outside the gateway with a real clock.
+// Ticket 09 through ADR 0019: complete private Deck costs through the real gateways read the imported TCGCSV prices from
+// PostgreSQL only. Nothing admits a refresh, fetches a source or touches the record store; every elapsed time is measured
+// from outside the gateway with a real clock. (The API suite covers the arithmetic; this proves the routing and the
+// budget end to end.)
 const stack = new Stack();
 const source = stack.source;
+const HOUR = 3_600_000;
 const ago = (ms: number) =>
   new Date(Math.floor((Date.now() - ms) / 1000) * 1000).toISOString();
 
@@ -49,7 +45,29 @@ type Cost = {
   display_amount: string | null;
 };
 
+const SUB_TYPES: Record<string, string> = {
+  normal: "Normal",
+  "reverse-holofoil": "Reverse Holofoil",
+};
 const user = () => stack.users[0];
+
+/** What the daily import and `rebind` store for one Edition: the market price (null for none) and the binding to it. */
+async function price(edition: Edition, market: string | null, updated: string) {
+  const subType = SUB_TYPES[edition.variant];
+  await stack.pool.query(
+    `INSERT INTO tcgplayer_price(product_id,sub_type_name,market_price,seen_at,source_updated_at)
+     VALUES ($1,$2,$3::numeric,now(),$4) ON CONFLICT (product_id,sub_type_name)
+     DO UPDATE SET market_price=EXCLUDED.market_price,source_updated_at=EXCLUDED.source_updated_at`,
+    [edition.productId, subType, market, updated]
+  );
+  await stack.pool.query(
+    `INSERT INTO edition_price_binding(edition_id,product_id,mapping_revision,sub_type_name) VALUES ($1,$2,$3,$4)
+     ON CONFLICT (edition_id) DO UPDATE SET product_id=EXCLUDED.product_id,
+     mapping_revision=EXCLUDED.mapping_revision,sub_type_name=EXCLUDED.sub_type_name,reason=NULL`,
+    [edition.id, edition.productId, edition.revision, subType]
+  );
+}
+
 async function deckWith(quantities: Array<[Edition, number]>) {
   const deck = randomUUID();
   await stack.pool.query(
@@ -103,34 +121,20 @@ const revision = async () =>
       )
     ).rows[0].revision
   );
-/** Teaches the fake source one Edition's answer: a price (or null for a confirmed absence) and the provider's time. */
-function answer(edition: Edition, price: string | null, updated: string) {
-  source.records.set(edition.card, [
-    {
-      descriptor: { finish: edition.variant },
-      variant: edition.variant,
-      productId: edition.productId,
-      price,
-      updated,
-    },
-  ]);
-}
 
 describe("a complete private Deck through the gateways", () => {
-  it("prices the six-copy example as $1.61 and 5/6, with a runner refreshing inside the one budget: check age renews, provider age stays stale, and a confirmed absence replaces an old quote", async () => {
+  it("prices the six-copy example as $1.61 and 5/6 from PostgreSQL alone: provider age stays stale, a row with no market price stays unpriced, and nothing is fetched or admitted", async () => {
     await stack.quiesce();
     const [[fresh], [stale], [gone]] = await stack.cards(3);
-    await stack.seedQuote(fresh, "0.25", 10 * 60_000, ago(HOUR));
-    // Both day-old checks are hard rows: the access admits them once, and the runner answers inside the wait window.
-    await stack.seedQuote(stale, "0.40", 25 * HOUR, ago(80 * HOUR));
-    await stack.seedQuote(gone, "9.99", 25 * HOUR, ago(HOUR));
-    answer(stale, "0.43", ago(72 * HOUR));
-    answer(gone, null, ago(HOUR)); // a matching block without a price: confirmed absent
+    await price(fresh, "0.25", ago(HOUR));
+    await price(stale, "0.43", ago(72 * HOUR));
+    await price(gone, null, ago(HOUR)); // a matching block without a market price
     const deck = await deckWith([
       [fresh, 3],
       [stale, 2],
       [gone, 1],
     ]);
+    const before = await stack.read([SCHEDULER]);
     const response = await cost(0, deck);
     expect(response.status).toBe(200);
     expect(response.elapsed).toBeLessThanOrEqual(3_000);
@@ -140,181 +144,55 @@ describe("a complete private Deck through the gateways", () => {
       display_amount: "$1.61",
       priced_copies: "5",
       total_copies: "6",
-      stale_copies: "2", // freshly checked, but the provider's own time is 72 h old
+      stale_copies: "2", // the provider's own time is 72 h old
       unknown_age_copies: "0",
-      fallback_copies: "0",
+      fallback_copies: "0", // there is no refresh label any more
       owner_revision: await revision(),
     });
-    const rows = await stack.read([
-      keyOf("result", stale),
-      keyOf("result", gone),
-      keyOf("quote", gone),
-    ]);
-    expect(
-      Date.parse(rows[keyOf("result", stale)].value.checked_at)
-    ).toBeGreaterThan(Date.now() - 60_000);
-    expect(rows[keyOf("result", gone)].value.state).toBe("absent");
-    expect(rows[keyOf("quote", gone)].value).toBeNull(); // the $9.99 quote never reaches any later subtotal
+    for (const edition of [fresh, stale, gone])
+      expect(source.requests(edition.card)).toEqual([]);
+    expect(await stack.read([SCHEDULER])).toEqual(before);
     metric(
-      `deck six-copy refresh: ${response.elapsed.toFixed(0)} ms (bound 3000)`
+      `deck six-copy cost: ${response.elapsed.toFixed(0)} ms (bound 3000)`
     );
-    await stack.quiesce();
   }, 60_000);
 
-  it("gives a whole Deck of hard rows one three-second budget against a hanging source, keeps checks and inventory writes responsive, and names the captured revision", async () => {
+  it("answers a whole Deck of 34 Editions at once, keeps checks and inventory writes responsive, and names the captured revision", async () => {
     await stack.quiesce();
-    const cards = await stack.cards(17, 2); // 34 Editions: more than one access may admit
+    const cards = await stack.cards(17, 2);
     const editions = cards.flat();
-    for (const edition of editions) {
-      await stack.seedQuote(edition, "0.50", 25 * HOUR, ago(HOUR));
-      source.behaviour.set(edition.card, { kind: "hang" });
-    }
+    for (const edition of editions) await price(edition, "0.50", ago(HOUR));
     const deck = await deckWith(editions.map((edition) => [edition, 2]));
     const captured = await revision();
-    const pending = cost(1, deck);
-    await waitFor(
-      async () =>
-        Object.keys((await stack.get(SCHEDULER))?.jobs ?? {}).length > 0,
-      "the Deck's admission"
-    );
-    // While the cost waits for the source, the rest of the Deck page and an inventory write do not.
+    const before = await stack.read([SCHEDULER]);
+    const response = await cost(1, deck);
     const checks = await gateway(0, "GET", `/api/decks/${deck}`);
     // An inventory write serialized on the same owner row the capture locked.
     const added = await gateway(0, "POST", "/api/decks", {
       name: `Another ${randomUUID().slice(0, 8)}`,
       idempotency_key: randomUUID(),
     });
-    const response = await pending;
     expect(checks.status).toBe(200);
     expect(checks.json.checks.total).toBe("68");
     expect(checks.elapsed).toBeLessThan(1_000);
     expect(added.status).toBe(201);
     expect(added.elapsed).toBeLessThan(1_000);
     expect(response.status).toBe(200);
-    expect(response.elapsed).toBeLessThanOrEqual(3_000);
-    expect(response.elapsed).toBeGreaterThan(1_500); // it did wait, once, for the whole Deck
+    expect(response.elapsed).toBeLessThan(1_500); // no wait for any source
     expect(response.cost).toMatchObject({
       status: "priced",
       owner_revision: captured,
       priced_copies: "68",
       total_copies: "68",
       amount: "34",
-      fallback_copies: "68", // every copy is the labelled cached fallback
+      fallback_copies: "0",
     });
-    expect(await revision()).toBe(captured + 1); // the browser discards this answer and asks again
-    const sched = await stack.get(SCHEDULER);
-    expect(sched.stats.admitted).toBe(32);
+    expect(await revision()).toBe(captured + 1); // the write moved it: the browser would ask again
+    expect(await stack.read([SCHEDULER])).toEqual(before);
     metric(
-      `deck hard expiry, 34 Editions, hanging source: ${response.elapsed.toFixed(0)} ms (bound 3000); checks ${checks.elapsed.toFixed(0)} ms, inventory write ${added.elapsed.toFixed(0)} ms (bound 1000)`
+      `deck of 34 Editions: ${response.elapsed.toFixed(0)} ms (bound 1500); checks ${checks.elapsed.toFixed(0)} ms, inventory write ${added.elapsed.toFixed(0)} ms`
     );
-    for (const edition of editions) source.behaviour.delete(edition.card);
-    await stack.quiesce();
   }, 90_000);
-
-  it("keeps cached quotes and numeric coverage through a source outage, and answers a slow store inside the budget", async () => {
-    await stack.quiesce();
-    const [[down], [cached], [never]] = await stack.cards(3);
-    await stack.seedQuote(down, "1.00", 25 * HOUR, ago(HOUR));
-    await stack.seedQuote(cached, "2.00", 10 * 60_000, ago(HOUR));
-    for (const edition of [down, never])
-      source.behaviour.set(edition.card, { kind: "status", code: 503 });
-    const deck = await deckWith([
-      [down, 1],
-      [cached, 2],
-      [never, 3],
-    ]);
-    const outage = await cost(0, deck);
-    expect(outage.elapsed).toBeLessThanOrEqual(3_000);
-    expect(outage.cost).toMatchObject({
-      status: "priced",
-      amount: "5",
-      priced_copies: "3",
-      total_copies: "6",
-      fallback_copies: "1", // only the cached copy: the three never-cached copies have no cached data to show
-    });
-
-    for (const edition of [down, never]) source.behaviour.delete(edition.card);
-    await stack.quiesce();
-
-    // A store whose writes stall: a new hard row needs an admission write, which gives up inside its own deadline. The
-    // cached rows still count, the stalled row keeps its cached quote with a busy label, and the answer is in time.
-    const [[stalled]] = await stack.cards(1);
-    await stack.seedQuote(stalled, "3.00", 25 * HOUR, ago(HOUR));
-    const second = await deckWith([
-      [stalled, 1],
-      [cached, 2],
-    ]);
-    const fault = join(stack.directory, "store", "faults", "delay-transact");
-    mkdirSync(join(stack.directory, "store", "faults"), { recursive: true });
-    writeFileSync(fault, "2.5");
-    let slow;
-    try {
-      slow = await cost(1, second);
-    } finally {
-      rmSync(fault, { force: true });
-    }
-    expect(slow.status).toBe(200);
-    expect(slow.elapsed).toBeLessThanOrEqual(3_000);
-    expect(slow.cost).toMatchObject({
-      status: "priced",
-      amount: "7",
-      priced_copies: "3",
-      total_copies: "3",
-      fallback_copies: "1",
-    });
-    metric(
-      `deck outage: ${outage.elapsed.toFixed(0)} ms; stalled store writes: ${slow.elapsed.toFixed(0)} ms (bound 3000)`
-    );
-    // The stalled write lands late on the relay (a queued job and maybe a reservation nobody spawned into); clear it.
-    await sleep(3_000);
-    await stack.cas([SCHEDULER, ...LEASES], () => ({
-      [SCHEDULER]: null,
-      [LEASES[0]]: null,
-      [LEASES[1]]: null,
-    }));
-  }, 90_000);
-
-  it("reports an incomplete scan, with the copy total but no numeric coverage, when the store cannot answer the cache read", async () => {
-    await stack.quiesce();
-    const [[priced], [other]] = await stack.cards(2);
-    await stack.seedQuote(priced, "0.25", 10 * 60_000, ago(HOUR));
-    await stack.seedQuote(other, "0.43", 10 * 60_000, ago(HOUR));
-    const deck = await deckWith([
-      [priced, 3],
-      [other, 2],
-    ]);
-    // The relay answers every read with a malformed body: the API's store read fails for the whole Deck.
-    const fault = join(stack.directory, "store", "faults", "malformed-records");
-    mkdirSync(join(stack.directory, "store", "faults"), { recursive: true });
-    writeFileSync(fault, "");
-    let response;
-    try {
-      response = await cost(0, deck);
-    } finally {
-      rmSync(fault, { force: true });
-    }
-    expect(response.status).toBe(200);
-    expect(response.elapsed).toBeLessThanOrEqual(3_000);
-    expect(response.cost).toMatchObject({
-      status: "incomplete",
-      reason: "store_unavailable",
-      total_copies: "5",
-      priced_copies: null,
-      stale_copies: null,
-      amount: null,
-      display_amount: null,
-    });
-    // Once the store answers again the same Deck is complete.
-    const again = await cost(1, deck);
-    expect(again.cost).toMatchObject({
-      status: "priced",
-      amount: "1.61",
-      priced_copies: "5",
-    });
-    metric(
-      `deck incomplete scan (store read failed): ${response.elapsed.toFixed(0)} ms (bound 3000)`
-    );
-  }, 60_000);
 
   it("answers an empty Deck with $0.00 at once and touches no coordination record", async () => {
     await stack.quiesce();

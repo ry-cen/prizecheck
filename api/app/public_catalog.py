@@ -36,7 +36,9 @@ from psycopg.pq import TransactionStatus
 from .card_attributes import FORMAT_FACT_COLUMNS, CardAttributeRules, CardAttributes
 from .db import connect
 from .public_projection import ProjectionUnavailable, public_record_store
-from .public_records import (catalog_edition_key, catalog_format_key, catalog_printing_key, quarantine_key, quote_states)
+from .price_reads import price_reads_enabled
+from .public_records import (catalog_edition_key, catalog_format_key, catalog_printing_key, price_key, quarantine_key)
+from .quote_contract import parse_amount
 
 log = logging.getLogger(__name__)
 LOCK = 914706               # Session advisory lock: one drainer at a time. Correctness never depends on it.
@@ -647,17 +649,13 @@ class MarketplaceState:
     mapping_revision: int | None = None
     product_id: int | None = None
     quote_lookup: dict | None = None
-    quote: object = None            # QuoteState when a price lookup is allowed, else None
+    price: dict | None = None       # The validated ``price:`` record ({mapping_revision, product_id, amount}), else None
     generation: str | None = None
     printing_ref: str | None = None
 
     @property
     def product_eligible(self):
         return self.state == 'verified' and self.product_id is not None
-
-    @property
-    def price_eligible(self):
-        return self.product_eligible and self.quote_lookup is not None
 
 
 @dataclass(frozen=True)
@@ -709,14 +707,29 @@ def _marketplace(ref, edition, quarantine):
     return 'verified', None, market['mapping_revision'], product, lookup
 
 
+PRICE_KEYS = {'mapping_revision', 'product_id', 'amount'}
+
+
+def _price(value, mapping_revision, product):
+    """The ``price:`` record when it is exactly the allowlist and agrees with the Edition record's mapping revision and
+    product ID and its amount parses; otherwise None, which leaves the row unpriced."""
+    if not isinstance(value, dict) or set(value) != PRICE_KEYS:
+        return None
+    if type(value['mapping_revision']) is not int or value['mapping_revision'] != mapping_revision \
+            or type(value['product_id']) is not int or value['product_id'] != product \
+            or not isinstance(value['amount'], str) or parse_amount(value['amount']) is None:
+        return None
+    return dict(value)
+
+
 def marketplace_states(store, edition_refs, deadline, *, generation=None):
     """Marketplace eligibility per Edition reference, read at one pinned generation.
 
     An Edition is ineligible (``unknown``) when either its catalog or quarantine record is
     missing, malformed or disagrees on revision or mapping revision, and when it is
     quarantined or not verified. A verified Edition is product-eligible when a product ID
-    is published and price-eligible when a quote lookup is. Quote state, when allowed, is
-    read at the same generation. ProjectionUnavailable propagates when the store is down.
+    is published. Its ``price:`` record is read at the same generation and kept only when valid (``_price``); with
+    ``PRICE_READS=off`` no ``price:`` record is read. ProjectionUnavailable propagates when the store is down.
     ``printing_ref`` is the Edition record's Printing, so public callers can prove a frozen row's reference.
     """
     refs = list(dict.fromkeys(edition_refs))
@@ -724,7 +737,7 @@ def marketplace_states(store, edition_refs, deadline, *, generation=None):
         return {}
     keys = [key for ref in refs for key in (catalog_edition_key(ref), quarantine_key(ref))]
     snapshot = store.read_all(keys, deadline=deadline, generation=generation)
-    states, pairs = {}, []
+    states, priceable = {}, []
     for ref in refs:
         edition = snapshot.records[catalog_edition_key(ref)].value
         checked = _marketplace(ref, edition, snapshot.records[quarantine_key(ref)].value)
@@ -734,11 +747,15 @@ def marketplace_states(store, edition_refs, deadline, *, generation=None):
         state, reason, mapping_revision, product, lookup = checked
         states[ref] = MarketplaceState(state, reason, mapping_revision, product, lookup, None, snapshot.generation,
                                        edition['printing_ref'] if isinstance(edition['printing_ref'], str) else None)
-        if state == 'verified' and lookup is not None and mapping_revision >= 1:
-            pairs.append((ref, mapping_revision))
-    if pairs:
-        for (ref, revision), quote in quote_states(store, pairs, deadline=deadline, generation=snapshot.generation).items():
-            states[ref] = MarketplaceState(**{**states[ref].__dict__, 'quote': quote})
+        if state == 'verified' and mapping_revision >= 1:
+            priceable.append(ref)
+    if priceable and price_reads_enabled():
+        found = store.read_all([price_key(ref) for ref in priceable], deadline=deadline, generation=snapshot.generation)
+        for ref in priceable:
+            current = states[ref]
+            price = _price(found.records[price_key(ref)].value, current.mapping_revision, current.product_id)
+            if price is not None:
+                states[ref] = MarketplaceState(**{**current.__dict__, 'price': price})
     return states
 
 

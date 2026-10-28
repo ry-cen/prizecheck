@@ -25,7 +25,7 @@ import pytest
 
 from app.main import app, connect  # noqa: F401
 from app import deck_format_checks, discovery, format_evaluator
-from app.public_records import catalog_edition_key, quarantine_key
+from app.public_records import catalog_edition_key, price_key, quarantine_key
 from test_card_attributes import BULBASAUR_ME, ENERGY_MEE, ENERGY_SV, RARE_CANDY_ME, card, edition_of
 from test_catalog import reset_catalog
 from test_catalog_metadata import Records
@@ -33,9 +33,9 @@ from test_catalog_reconciliation import run
 from test_deck_format_checks import CARDS
 from test_holdings import add, call
 from test_moves import leaf
-from test_prices import ago, client, seed_quote as seed
+from test_prices import client
 from test_publications import command, edition_refs, legacy_snapshot
-from test_published_cost import USER, generation, launches, listed_deck, store  # noqa: F401  (store, launches: autouse)
+from test_published_cost import USER, generation, listed_deck, store  # noqa: F401  (store: autouse)
 from test_target_format import set_target
 
 TODAY = date(2026, 10, 11)
@@ -118,8 +118,8 @@ def public_status(token, target="standard"):
     return result["status"]
 
 
-def priced(store, source_id, amount, **quote):
-    """Make the Edition of ``source_id`` price-eligible with a cached quote of ``amount``."""
+def priced(store, source_id, amount):
+    """Make the Edition of ``source_id`` price-eligible with a public ``price:`` record of ``amount``."""
     edition_ref = edition_refs(edition_of(source_id))[0]
     keys = [catalog_edition_key(edition_ref), quarantine_key(edition_ref)]
     found = store.read_records(keys, deadline=time.monotonic() + 5).records
@@ -131,8 +131,10 @@ def priced(store, source_id, amount, **quote):
                                   {keys[0]: {**edition, "marketplace": marketplace},
                                    keys[1]: {**quarantine, "mapping_revision": revision}},
                                   deadline=time.monotonic() + 5)
-    seed(store, {"public_ref": edition_ref, "mapping_revision": revision, "source_id": source_id,
-                 "quote_variant": "normal"}, amount, **quote)
+    price = price_key(edition_ref)
+    assert store.compare_and_swap({price: store.read_records([price], deadline=time.monotonic() + 5).records[price].version},
+                                  {price: {"mapping_revision": revision, "product_id": marketplace["product_id"],
+                                           "amount": amount}}, deadline=time.monotonic() + 5)
 
 
 def manifest():
@@ -261,7 +263,7 @@ def test_format_filters_by_target_format_and_binds_the_cursor(store):
     assert discover(f"?cursor={cursor}").status_code == 400
 
 
-def test_cost_comes_from_cached_quotes_only_and_never_admits_a_refresh(store, launches):
+def test_cost_comes_from_the_price_records_only_and_writes_nothing(store):
     catalog()
     _, token = published(LEGAL)
     assert listed()[0]["cost"] == {"amount": None, "priced_copies": "0", "total_copies": "60"}
@@ -269,12 +271,11 @@ def test_cost_comes_from_cached_quotes_only_and_never_admits_a_refresh(store, la
     priced(store, "me01-125", "1.50")
     priced(store, "me01-130", "0.10")
     assert listed()[0]["cost"] == {"amount": "6.65", "priced_copies": "9", "total_copies": "60"}
-    # A stale cached quote still counts as priced.
-    priced(store, "sv02-278", "0.05", updated=ago(timedelta(days=5)))
+    priced(store, "sv02-278", "0.05")
     before, records = manifest(), generation(store)
     assert listed()[0]["cost"] == {"amount": "9.2", "priced_copies": "60", "total_copies": "60"}
-    # Discover wrote nothing (no admission, work or quote record, no manifest byte) and started no refresh.
-    assert generation(store) == records and manifest() == before and launches == []
+    # Discover wrote nothing (no record, no manifest byte).
+    assert generation(store) == records and manifest() == before
     assert "age" not in json.dumps(listed()[0]["cost"])
 
 

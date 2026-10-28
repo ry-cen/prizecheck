@@ -48,7 +48,6 @@ let owner = { id: "", cookie: "" };
 let activation = "";
 let liveActivation = "";
 let sequence = 0;
-let attempt = 0;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const freePort = () =>
@@ -105,6 +104,7 @@ type Edition = {
   card: string;
   finish: string;
   revision: number;
+  productId: number;
 };
 
 /** One Printing per call with one Edition per finish; verified ones get a quote variant and a product. */
@@ -153,6 +153,7 @@ async function printing(
       card,
       finish,
       revision,
+      productId,
     });
   }
   return group;
@@ -166,80 +167,50 @@ async function deliver() {
   });
 }
 
-const STORE = `import json, sys, time
-from app import quote_contract as qc
-from app.public_records import public_record_store, quote_key, result_key
-argument = json.load(open(sys.argv[1]))
-store = public_record_store()
-deadline = lambda: time.monotonic() + 5
-`;
+const SUB_TYPES: Record<string, string> = {
+  normal: "Normal",
+  "reverse-holofoil": "Reverse Holofoil",
+};
 
-/** Seeds what an earlier refresh wrote: a quote checked `checkedAgoMs` ago, with the provider's own time. */
-async function seedQuote(
-  edition: Edition,
-  amount: string,
-  checkedAgoMs: number,
-  updated: string
-) {
-  attempt++;
-  await python(
-    STORE +
-      `keys = [quote_key(argument['ref'], argument['revision']), result_key(argument['ref'], argument['revision'])]
-snapshot = store.read_records(keys, deadline=deadline())
-changes = {
-    keys[1]: {'state': 'quote', 'attempt': argument['attempt'], 'checked_at': argument['checked']},
-    keys[0]: {'attempt': argument['attempt'], 'amount': argument['amount'], 'currency': 'USD', 'source': 'tcgdex',
-              'card': argument['card'], 'variant': argument['finish'], 'provider_updated_at': argument['updated']},
+/** Seeds what the daily import and `rebind` store (a market price and the Edition's binding to it), then runs the last
+ * step of the import job: `public_prices.publish` writes the `price:` records the anonymous routes read. */
+async function seedPrices(entries: Array<[Edition, string]>) {
+  for (const [edition, amount] of entries) {
+    const subType = SUB_TYPES[edition.finish];
+    await pool.query(
+      `INSERT INTO tcgplayer_price(product_id,sub_type_name,market_price,seen_at,source_updated_at)
+       VALUES ($1,$2,$3::numeric,now(),now()) ON CONFLICT (product_id,sub_type_name)
+       DO UPDATE SET market_price=EXCLUDED.market_price`,
+      [edition.productId, subType, amount]
+    );
+    await pool.query(
+      `INSERT INTO edition_price_binding(edition_id,product_id,mapping_revision,sub_type_name) VALUES ($1,$2,$3,$4)
+       ON CONFLICT (edition_id) DO UPDATE SET product_id=EXCLUDED.product_id,
+       mapping_revision=EXCLUDED.mapping_revision,sub_type_name=EXCLUDED.sub_type_name,reason=NULL`,
+      [edition.id, edition.productId, edition.revision, subType]
+    );
+  }
+  await python(`from app import public_prices
+from app.db import connect
+with connect() as conn:
+    public_prices.publish(conn)
+`);
 }
-assert store.compare_and_swap({key: snapshot.records[key].version for key in changes}, changes, deadline=deadline())
-`,
-    {
-      ref: edition.ref,
-      revision: edition.revision,
-      attempt,
-      amount,
-      checked: iso(checkedAgoMs),
-      card: edition.card,
-      finish: edition.finish,
-      updated,
-    }
-  );
-}
+const seedPrice = (edition: Edition, amount: string) =>
+  seedPrices([[edition, amount]]);
 
-const scheduler = async () =>
+/** The `price:` record of one Edition, or null. */
+const readPrice = async (edition: Edition) =>
   JSON.parse(
     await python(
-      STORE +
-        "print(json.dumps(store.read_records([qc.scheduler_key()], deadline=deadline()).records[qc.scheduler_key()].value))"
-    )
-  );
-const readRecord = async (key: string) =>
-  JSON.parse(
-    await python(
-      STORE +
-        "key = argument\nprint(json.dumps(store.read_records([key], deadline=deadline()).records[key].value))",
-      key
-    )
-  );
-
-/** A new scheduler whose anonymous ledger already counts `count` callers this hour; leases and ledger shards cleared. */
-async function resetScheduler(count: number) {
-  await python(
-    STORE +
-      `now = int(time.time() * 1000)
-scheduler = qc.new_scheduler(now)
-scheduler['ledger'] = {'interval': now // qc.FRESH_MS, 'count': argument}
-keys = [qc.scheduler_key()] + [qc.runner_lease_key(n) for n in qc.RUNNER_SLOTS] + [qc.ledger_key(n) for n in range(qc.LEDGER_SHARDS)]
-snapshot = store.read_records(keys, deadline=deadline())
-changes = {qc.scheduler_key(): scheduler}
-for key in keys[1:]:
-    if snapshot.records[key].value is not None:
-        changes[key] = None
-assert store.compare_and_swap({key: snapshot.records[key].version for key in changes}, changes, deadline=deadline())
+      `import json, sys, time
+from app.public_records import price_key, public_record_store
+key = price_key(json.load(open(sys.argv[1])))
+print(json.dumps(public_record_store().read_records([key], deadline=time.monotonic() + 5).records[key].value))
 `,
-    count
+      edition.ref
+    )
   );
-}
 
 async function deckWith(quantities: Array<[Edition, number]>) {
   const deck = randomUUID();
@@ -334,32 +305,6 @@ const exportPath = (token: string, version: number, kind: string) =>
 const KINDS = ["live", "live.txt", "tcgplayer", "tcgplayer.txt"];
 const costPath = (token: string, version: number) =>
   `/api/public/decks/${token}/versions/${version}/cost`;
-
-/** Seeds many quotes in one process: [edition, amount, checkedAgoMs, providerUpdated], 64 Editions per commit. */
-async function seedQuotes(entries: Array<[Edition, string, number, string]>) {
-  await python(
-    STORE +
-      `for offset in range(0, len(argument), 64):
-    changes = {}
-    for row in argument[offset:offset + 64]:
-        changes[result_key(row['ref'], row['revision'])] = {'state': 'quote', 'attempt': row['attempt'], 'checked_at': row['checked']}
-        changes[quote_key(row['ref'], row['revision'])] = {'attempt': row['attempt'], 'amount': row['amount'], 'currency': 'USD',
-            'source': 'tcgdex', 'card': row['card'], 'variant': row['finish'], 'provider_updated_at': row['updated']}
-    snapshot = store.read_records(list(changes), deadline=deadline())
-    assert store.compare_and_swap({key: snapshot.records[key].version for key in changes}, changes, deadline=deadline())
-`,
-    entries.map(([edition, amount, checkedAgoMs, updated]) => ({
-      ref: edition.ref,
-      revision: edition.revision,
-      attempt: ++attempt,
-      amount,
-      checked: iso(checkedAgoMs),
-      card: edition.card,
-      finish: edition.finish,
-      updated,
-    }))
-  );
-}
 
 /** An anonymous call through gateway `gateway` (G0 or G1) from client address `ip` (the gateways trust 127.0.0.1's x-real-ip). */
 async function anonymousFrom(gateway: string, path: string, ip: string) {
@@ -593,8 +538,10 @@ describe("the Published Deck cost through the real gateway", () => {
       );
       const [plain] = await printing("pc-plain", ["normal"], false);
       await deliver();
-      await seedQuote(normal, "0.25", 10 * 60_000, iso(3_600_000));
-      await seedQuote(reverse, "0.43", 10 * 60_000, iso(72 * 3_600_000));
+      await seedPrices([
+        [normal, "0.25"],
+        [reverse, "0.43"],
+      ]);
       const deck = await deckWith([
         [normal, 3],
         [reverse, 2],
@@ -708,12 +655,12 @@ describe("the Published Deck cost through the real gateway", () => {
   );
 
   it(
-    "answers a republished version with 409 and a revoked token with 404, even when the refresh lands after the revoke, and moves no manifest or discovery revision",
+    "answers a republished version with 409 and a revoked token with 404, even when a price changes after the revoke, and moves no manifest or discovery revision",
     { timeout: 45_000 },
     async () => {
       const [edition] = await printing("pc-wait", ["normal"], true);
       await deliver();
-      await seedQuote(edition, "0.25", 10 * 60_000, iso(3_600_000));
+      await seedPrice(edition, "0.25");
       const deck = await deckWith([[edition, 2]]);
       const { token } = await publication("POST", deck);
       const baseline = { ...wakeups };
@@ -726,7 +673,7 @@ describe("the Published Deck cost through the real gateway", () => {
       });
       const manifest = readFileSync(currentJson);
       const revision = (await anonymous("/api/public/discovery")).json.revision;
-      await seedQuote(edition, "0.30", 5 * 60_000, iso(3_600_000));
+      await seedPrice(edition, "0.30");
       expect((await anonymous(costPath(token, 1))).json).toMatchObject({
         display_amount: "$0.60",
       });
@@ -747,17 +694,11 @@ describe("the Published Deck cost through the real gateway", () => {
         total_copies: "3",
       });
 
-      // A hard row: the access admits it and waits. The launch line is appended in A1 right after the admission commit,
-      // so the request is inside its wait window. Never more than one waiting request per caller is in flight.
-      await seedQuote(edition, "0.30", 25 * 3_600_000, iso(3_600_000));
-      const lines = launches();
-      const pending = anonymous(costPath(token, 2));
-      await waitFor(() => launches() > lines, "the admission", 10_000, 20);
+      // The price changes after the revoke: nothing answers for a revoked token.
       expect((await publication("DELETE", deck)).revoked).toBe(true);
       const revoked = readFileSync(currentJson);
-      // The late refresh ends the wait.
-      await seedQuote(edition, "0.35", 0, iso(0));
-      const answer = await pending;
+      await seedPrice(edition, "0.35");
+      const answer = await anonymous(costPath(token, 2));
       expect(answer.status).toBe(404);
       expect(answer.json.detail.code).toBe("PUBLISHED_DECK_NOT_FOUND");
       expect((await anonymous(`/api/public/decks/${token}`)).status).toBe(404);
@@ -769,7 +710,7 @@ describe("the Published Deck cost through the real gateway", () => {
   );
 
   it(
-    "answers a hard row inside the 3 s budget measured outside the gateway while the snapshot stays fast, and a full anonymous ledger refuses a new caller without waiting",
+    "answers from the price records at once, admits no work, and follows a price record that changes or goes",
     { timeout: 45_000 },
     async () => {
       const [edition] = await printing("pc-hard", ["normal"], true);
@@ -777,15 +718,26 @@ describe("the Published Deck cost through the real gateway", () => {
       const deck = await deckWith([[edition, 2]]);
       const { token } = await publication("POST", deck);
       const baseline = { ...wakeups };
-      await resetScheduler(0);
+      const lines = launches();
 
-      await seedQuote(edition, "1.00", 25 * 3_600_000, iso(3_600_000));
+      // A row with no price record is unpriced.
+      expect((await anonymous(costPath(token, 1))).json).toMatchObject({
+        status: "no_quotes",
+        priced_copies: "0",
+        amount: null,
+      });
+      await seedPrice(edition, "1.00");
+      expect(await readPrice(edition)).toEqual({
+        mapping_revision: edition.revision,
+        product_id: edition.productId,
+        amount: "1",
+      });
       const [cost, snapshot] = await Promise.all([
         anonymous(costPath(token, 1)),
-        sleep(200).then(() => anonymous(`/api/public/decks/${token}`)),
+        anonymous(`/api/public/decks/${token}`),
       ]);
       metric(
-        `published cost hard row: ${cost.elapsed.toFixed(0)} ms (gate abort 3000); snapshot meanwhile: ${snapshot.elapsed.toFixed(0)} ms (bound 1500)`
+        `published cost from price records: ${cost.elapsed.toFixed(0)} ms; snapshot meanwhile: ${snapshot.elapsed.toFixed(0)} ms (bound 1500)`
       );
       expect(cost.status).toBe(200);
       expect(cost.json).toMatchObject({
@@ -793,54 +745,28 @@ describe("the Published Deck cost through the real gateway", () => {
         display_amount: "$2.00",
         priced_copies: "2",
       });
-      // The two copies come from the labelled cache; the public answer doesn't say so (no staleness hints, #183).
       expect(cost.json).not.toHaveProperty("fallback_copies");
-      // The bound is generous because vitest has no serial pass (#68) and a loaded host stretches it; the strict 3.0 s
-      // gate is the gateway's abort, which turns an overrun into a 504 and so fails the status check above.
-      expect(cost.elapsed).toBeGreaterThan(2_000);
-      expect(cost.elapsed).toBeLessThanOrEqual(3_500);
+      expect(cost.elapsed).toBeLessThan(1_500);
       expect(snapshot.status).toBe(200);
       expect(snapshot.elapsed).toBeLessThan(1_500);
 
-      // Ledger: the hourly interval must not roll over while this runs.
-      if (Date.now() % 3_600_000 > 3_600_000 - 15_000) await sleep(15_500);
-      await resetScheduler(10_000);
-      await seedQuote(edition, "1.00", 2 * 3_600_000, iso(3_600_000));
-      const refused = await anonymous(costPath(token, 1));
-      expect(refused.elapsed).toBeLessThan(2_000);
-      expect(refused.json).toMatchObject({
-        status: "priced",
-        priced_copies: "2",
+      // The Edition stops being priced: the import's publish deletes the record and the cost follows.
+      await pool.query(
+        "DELETE FROM edition_price_binding WHERE edition_id=$1",
+        [edition.id]
+      );
+      await python(`from app import public_prices
+from app.db import connect
+with connect() as conn:
+    public_prices.publish(conn)
+`);
+      expect(await readPrice(edition)).toBeNull();
+      expect((await anonymous(costPath(token, 1))).json).toMatchObject({
+        status: "no_quotes",
+        priced_copies: "0",
       });
-      const full = await scheduler();
-      expect(Object.keys(full.jobs)).toEqual([]);
-      expect(full.ledger.count).toBe(10_000);
-
-      await resetScheduler(0);
-      const admitted = await anonymous(costPath(token, 1));
-      expect(admitted.json).toMatchObject({ status: "priced" });
-      const jobs = (await scheduler()).jobs;
-      const job = `${edition.ref}:${edition.revision}`;
-      expect(jobs[job].caller).toMatch(/^anon:[0-9a-f]{32}$/);
-      const work = await readRecord(`work:${job}`);
-      expect(Object.keys(work).sort()).toEqual([
-        "admitted_ms",
-        "attempt",
-        "caller",
-        "card",
-        "edition_ref",
-        "expires_ms",
-        "mapping_revision",
-        "owner",
-        "product_id",
-        "slot",
-        "state",
-        "v",
-        "variant",
-      ]);
-      const text = JSON.stringify(work);
-      expect(text).not.toContain(owner.id);
-      expect(text).not.toContain(deck);
+      // Nothing in the cost path launched a runner or wrote a coordination record.
+      expect(launches()).toBe(lines);
       expect(wakeups).toEqual(baseline);
     }
   );
@@ -1040,7 +966,7 @@ describe("the Published Deck cost through the real gateway", () => {
     }
   );
   it(
-    "keeps cached prices under 500 ms p95 through the gateway, and answers 100 simultaneous callers on both gateways over overlapping and disjoint Published Decks with every frozen copy counted, shared work deduplicated and the interactive cap held",
+    "keeps prices under 500 ms p95 through the gateway, and answers 100 simultaneous callers on both gateways over overlapping and disjoint Published Decks with every frozen copy counted and no work admitted",
     { timeout: 90_000 },
     async () => {
       const made: Edition[] = [];
@@ -1048,9 +974,7 @@ describe("the Published Deck cost through the real gateway", () => {
         made.push(...(await printing(`pc-cap-${n}`, ["normal"], true)));
       const [plain] = await printing("pc-cap-plain", ["normal"], false);
       await deliver();
-      await seedQuotes(
-        made.map((e) => [e, "0.25", 10 * 60_000, iso(3_600_000)])
-      );
+      await seedPrices(made.map((e) => [e, "0.25"] as [Edition, string]));
       // A: 60 copies. B overlaps A on five Editions. C is disjoint, with one unverified copy.
       const decks = {
         A: await deckWith(
@@ -1072,10 +996,9 @@ describe("the Published Deck cost through the real gateway", () => {
       const tokens: Record<string, string> = {};
       for (const [name, deck] of Object.entries(decks))
         tokens[name] = (await publication("POST", deck)).token;
-      await resetScheduler(0);
       const baseline = { ...wakeups };
 
-      // Cached ordinary prices, one at a time: the card price route (signed in, G0) and the Published Deck cost (G1).
+      // Ordinary prices, one at a time: the card price route (signed in, G0) and the Published Deck cost (G1).
       const editionTimes: number[] = [];
       const costTimes: number[] = [];
       for (let n = 0; n <= 20; n++) {
@@ -1130,10 +1053,7 @@ describe("the Published Deck cost through the real gateway", () => {
             return { name, ...answer };
           })
         );
-      const check = (
-        answers: Awaited<ReturnType<typeof burst>>,
-        hard: boolean
-      ) => {
+      const check = (answers: Awaited<ReturnType<typeof burst>>) => {
         for (const answer of answers) {
           expect(answer.status, JSON.stringify(answer.json)).toBe(200);
           const want = expected[answer.name];
@@ -1148,46 +1068,13 @@ describe("the Published Deck cost through the real gateway", () => {
       };
       const launchesBefore = launches();
 
-      // 100 callers, every row cached: no work, no launch.
-      const cached = await burst("198.51.100");
-      check(cached, false);
-      const times = cached.map((a) => a.elapsed);
-      expect(Object.keys((await scheduler()).jobs)).toEqual([]);
+      // 100 callers: no work, no launch, nothing waits.
+      const answers = await burst("198.51.100");
+      check(answers);
+      const times = answers.map((a) => a.elapsed);
+      expect(launches()).toBe(launchesBefore);
       metric(
-        `100 simultaneous callers, cached: p50 ${percentile(times, 0.5).toFixed(0)} ms, p95 ${percentile(times, 0.95).toFixed(0)} ms, max ${Math.max(...times).toFixed(0)} ms (bound 3500)`
-      );
-
-      // 100 callers again (new addresses), the five Editions A and B share now a day old: one job each, whoever asks.
-      await seedQuotes(
-        made
-          .slice(10, 15)
-          .map((e) => [e, "0.25", 25 * 3_600_000, iso(3_600_000)])
-      );
-      await resetScheduler(0);
-      const hard = await burst("203.0.113");
-      check(hard, true);
-      const waited = hard.filter(
-        (a) => a.name !== "C" && a.elapsed >= 2_000
-      ).length;
-      const after = await scheduler();
-      const jobs = Object.entries(after.jobs) as Array<[string, any]>;
-      expect(jobs.map(([key]) => key).sort()).toEqual(
-        made
-          .slice(10, 15)
-          .map((e) => `${e.ref}:${e.revision}`)
-          .sort()
-      );
-      for (const [, job] of jobs)
-        expect(job.caller).toMatch(/^anon:[0-9a-f]{32}$/);
-      expect(waited).toBeGreaterThanOrEqual(1);
-      expect(waited).toBeLessThanOrEqual(32);
-      expect(launches() - launchesBefore).toBeLessThanOrEqual(2);
-      const queueAge = Math.max(
-        ...jobs.map(([, job]) => Date.now() - job.admitted_ms)
-      );
-      const hardTimes = hard.map((a) => a.elapsed);
-      metric(
-        `100 simultaneous callers, 5 shared day-old Editions: jobs ${jobs.length} for ${hard.filter((a) => a.name !== "C").length} accesses; waited ${waited} (cap 32); launches ${launches() - launchesBefore} (cap 2); oldest queued job ${queueAge} ms; p50 ${percentile(hardTimes, 0.5).toFixed(0)} ms, p95 ${percentile(hardTimes, 0.95).toFixed(0)} ms, max ${Math.max(...hardTimes).toFixed(0)} ms; stats ${JSON.stringify(after.stats)}`
+        `100 simultaneous callers: p50 ${percentile(times, 0.5).toFixed(0)} ms, p95 ${percentile(times, 0.95).toFixed(0)} ms, max ${Math.max(...times).toFixed(0)} ms (bound 3500)`
       );
       expect(wakeups).toEqual(baseline);
     }

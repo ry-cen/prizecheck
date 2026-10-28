@@ -297,18 +297,18 @@ def swap(changes):
 
 def test_marketplace_and_live_readers_use_one_generation_and_expose_quotes_only_for_verified_priced_editions():
     from app.public_catalog import live_states, marketplace_states
-    from app.public_records import quote_key, result_key
+    from app.public_records import price_key
     pref, refs = staged_refs()
     normal = refs['normal']
     mapping_revision = read(quarantine_key(normal))[quarantine_key(normal)].value['mapping_revision']
-    swap({quote_key(normal, mapping_revision): {'attempt': 1, 'amount': '1.00'},
-          result_key(normal, mapping_revision): {'state': 'quote', 'attempt': 1}})
+    swap({price_key(normal): {'mapping_revision': mapping_revision, 'product_id': 1001, 'amount': '1.00'}})
     store = public_record_store()
     states = marketplace_states(store, list(refs.values()), deadline())
     market = states[normal]
-    assert market.state == 'verified' and market.product_eligible and market.price_eligible and market.product_id == 1001
+    assert market.state == 'verified' and market.product_eligible and market.product_id == 1001
     assert market.quote_lookup == {'source': 'tcgdex', 'card': 'meta-1', 'variant': 'normal'}
-    assert market.quote.status == 'quote' and market.quote.generation == market.generation
+    assert market.price == {'mapping_revision': mapping_revision, 'product_id': 1001, 'amount': '1.00'}
+    assert states[refs['reverse']].price is None  # no price: record for it
     assert {state.generation for state in states.values()} == {market.generation}
     live = live_states(store, [pref], deadline())[pref]
     assert live.eligible and live.identity['set_code'] == 'DAA' and live.rule_version == 99
@@ -318,6 +318,50 @@ def test_marketplace_and_live_readers_use_one_generation_and_expose_quotes_only_
     assert marketplace_states(store, [normal], deadline(), generation=pinned)[normal].state == 'verified'
     assert marketplace_states(store, [normal], deadline())[normal].state == 'quarantined'
     assert marketplace_states(store, [], deadline()) == {} and live_states(store, [], deadline()) == {}
+
+
+def test_a_price_record_is_kept_only_when_exactly_the_allowlist_and_it_agrees_with_the_edition_record(monkeypatch):
+    from app.public_catalog import marketplace_states
+    from app.public_records import price_key
+    pref, refs = staged_refs()
+    normal = refs['normal']
+    store = public_record_store()
+    revision = read(quarantine_key(normal))[quarantine_key(normal)].value['mapping_revision']
+    good = {'mapping_revision': revision, 'product_id': 1001, 'amount': '1.00'}
+
+    def price(value):
+        swap({price_key(normal): value})
+        return marketplace_states(store, [normal], deadline())[normal].price
+
+    assert price(good) == good
+    for bad in ({**good, 'mapping_revision': revision + 1}, {**good, 'product_id': 1002}, {**good, 'extra': 1},
+                {'mapping_revision': revision, 'product_id': 1001}, {**good, 'amount': '1.0000000'}, {**good, 'amount': 1.0},
+                {**good, 'amount': '-1'}, {**good, 'mapping_revision': True}, 'x', [], None):
+        assert price(bad) is None, bad
+    price(good)
+    # Quarantined: no price is exposed even though the record remains.
+    swap({quarantine_key(normal): {**read(quarantine_key(normal))[quarantine_key(normal)].value, 'state': 'quarantined'}})
+    assert marketplace_states(store, [normal], deadline())[normal].price is None
+    assert read(price_key(normal))[price_key(normal)].value == good
+
+
+def test_price_reads_off_reads_no_price_record(monkeypatch):
+    from app.public_catalog import marketplace_states
+    from app.public_records import FilePublicRecords, price_key
+    pref, refs = staged_refs()
+    normal = refs['normal']
+    revision = read(quarantine_key(normal))[quarantine_key(normal)].value['mapping_revision']
+    swap({price_key(normal): {'mapping_revision': revision, 'product_id': 1001, 'amount': '1.00'}})
+    read_keys, original = [], FilePublicRecords.read_records
+
+    def spy(self, keys, **kwargs):
+        read_keys.extend(keys)
+        return original(self, keys, **kwargs)
+    monkeypatch.setattr(FilePublicRecords, 'read_records', spy)
+    monkeypatch.setenv('PRICE_READS', 'off')
+    state = marketplace_states(public_record_store(), [normal], deadline())[normal]
+    assert state.state == 'verified' and state.product_eligible and state.price is None
+    assert read_keys and not [key for key in read_keys if key.startswith('price:')]
 
 
 def test_readers_fail_closed_on_missing_malformed_or_inconsistent_records():
