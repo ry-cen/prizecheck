@@ -16,6 +16,8 @@ type Props = {
   /** Re-reads the pull, operational health and the tab counts. */
   onRefresh: () => void;
   onStart: () => void;
+  /** Opens the Metadata tab's "Matched by card number" list. */
+  onReviewMatches: () => void;
 };
 
 /** Owner controls' Status tab (spec "Status"): the catalog pull panel, then operational health. */
@@ -25,6 +27,7 @@ export function StatusPanel({
   operationsFailed,
   onRefresh,
   onStart,
+  onReviewMatches,
 }: Props) {
   const pullId = useId();
   const healthId = useId();
@@ -125,6 +128,15 @@ export function StatusPanel({
             {line}
           </p>
         ))}
+        {!!status.matched_by_number && (
+          <p className="m-0 flex flex-wrap items-center gap-2 text-meta">
+            {status.matched_by_number.toLocaleString()} Edition
+            {status.matched_by_number === 1 ? "" : "s"} matched by card number
+            <Button variant="quiet" onClick={onReviewMatches}>
+              Review matches
+            </Button>
+          </p>
+        )}
         {prices.warnings.map((line) => (
           <p
             key={line}

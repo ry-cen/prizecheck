@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field, HttpUrl
 
 from . import public_catalog
 from .price_binding import rebind_best_effort
-from .catalog_targets import (LIVE, MATCHING, REGISTRIES, MatchingRulesV1, MatchingRulesV2, TargetContext, activate_rule,
+from .catalog_targets import (LIVE, MATCHING, REGISTRIES, MatchingRulesV1, MatchingRulesV2, MatchingRulesV4, TargetContext, activate_rule,
                               automatic_matching, code_digest, ensure_matching_rule, fingerprint, is_unspecified,
                               refresh_editions, refresh_printing, verified_elsewhere)
 from .holdings import fail
@@ -189,6 +189,13 @@ def decide_report(report_id: UUID, payload: MetadataReportDecision, user_id: str
 # ---------------------------------------------------------------- evidence, queue and history
 
 
+class MatchedProduct(BaseModel):
+    """The TCGCSV product a card-number match named (owner screens only)."""
+    product_id: int
+    name: str | None
+    group_id: int | None
+
+
 class MetadataQueueItem(BaseModel):
     kind: Literal["edition", "printing"]
     target: Literal["marketplace", "live"]
@@ -210,6 +217,9 @@ class MetadataQueueItem(BaseModel):
     reports: list[MetadataReportView]
     rejected_fingerprints: list[str]
     evidence_digest: str
+    # Only on the ``matched=card_number`` list: the product the number named and the matching rule version that verified it.
+    matched_product: MatchedProduct | None = None
+    rule_version: int | None = None
 
 
 class MetadataQueuePage(BaseModel):
@@ -291,7 +301,7 @@ def load_target(conn, kind: str, target_id: UUID, lock: bool = False):
 
 
 def item_view(loaded) -> MetadataQueueItem:
-    return MetadataQueueItem(**{key: loaded[key] for key in MetadataQueueItem.model_fields})
+    return MetadataQueueItem(**{key: loaded[key] for key in MetadataQueueItem.model_fields if key in loaded})
 
 
 def _cursor(value: str):
@@ -304,11 +314,44 @@ def _cursor(value: str):
         fail(422, "INVALID_CURSOR")
 
 
+def matched_by_number_editions(conn) -> list:
+    """Verified Editions the card-number path named, in Edition id order: the rule's own predicate decides.
+
+    Maintainer decisions are left out (the owner chose those). Rows carry the product and the rule version.
+    """
+    rows = conn.execute("""SELECT e.id AS edition_id,m.product_id,p.name AS product_name,p.group_id,a.version AS rule_version,
+      m.mapping_candidate,d.set_id
+      FROM catalog_edition_metadata m JOIN catalog_edition e ON e.id=m.edition_id
+      JOIN catalog_printing_display d ON d.printing_id=e.printing_id
+      LEFT JOIN catalog_rule_activation a ON a.id=m.matching_activation_id
+      LEFT JOIN tcgplayer_product p ON p.product_id=m.product_id
+      WHERE m.mapping_state='verified' AND m.mapping_basis='matching_rule' AND d.set_id=ANY(%s)
+      ORDER BY e.id""", (list(MatchingRulesV4.TCGPLAYER_GROUPS),)).fetchall()
+    return [row for row in rows if MatchingRulesV4.matched_by_number(
+        {"display": {"set_id": row["set_id"]}, "lookup": (row["mapping_candidate"] or {}).get("candidate") or {}})]
+
+
+def _matched_page(conn, after: UUID) -> MetadataQueuePage:
+    rows = [row for row in matched_by_number_editions(conn) if row["edition_id"] > after]
+    page = rows[:QUEUE_PAGE]
+    items = []
+    for row in page:
+        item = item_view(load_target(conn, "edition", row["edition_id"]))
+        item.matched_product = MatchedProduct(product_id=row["product_id"], name=row["product_name"], group_id=row["group_id"])
+        item.rule_version = row["rule_version"]
+        items.append(item)
+    next_cursor = (base64.urlsafe_b64encode(f"edition:{page[-1]['edition_id']}".encode()).decode()
+                   if len(rows) > QUEUE_PAGE else None)
+    return MetadataQueuePage(items=items, next_cursor=next_cursor)
+
+
 @router.get("/api/admin/catalog-metadata/queue", response_model=MetadataQueuePage)
-def review_queue(cursor: str | None = None, user_id: str = Depends(verified_user)):
+def review_queue(cursor: str | None = None, matched: Literal["card_number"] | None = None, user_id: str = Depends(verified_user)):
     after = _cursor(cursor) if cursor else ("", UUID(int=0))
     with connect() as conn:
         require_owner(conn, user_id)
+        if matched:
+            return _matched_page(conn, after[1])
         rows = conn.execute("""WITH attention AS (
             SELECT 'edition'::text AS kind,edition_id AS id FROM catalog_edition_metadata
               WHERE mapping_state='quarantined' OR mapping_reason='recovery_conflict'

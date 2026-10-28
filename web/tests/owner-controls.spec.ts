@@ -5,6 +5,7 @@
 // owner-reprints).
 import { test, expect, type Page } from "@playwright/test";
 import { signInAsOwner as fakeSignInAsOwner } from "./support/sign-in";
+import { execFileSync } from "node:child_process";
 import { Pool } from "pg";
 import { expectPageChecks } from "./support/page-check";
 
@@ -116,6 +117,32 @@ async function seedPrice(hoursAgo = 0) {
   await query(
     "INSERT INTO tcgplayer_price(product_id,sub_type_name,market_price,seen_at,source_updated_at) VALUES (1,'Normal',1,now(),now()-$1*interval '1 hour')",
     [hoursAgo]
+  );
+}
+
+/** Two dpp Editions verified by card number under matching rule v4 (the Status panel's count and the Metadata list). */
+function seedNumberMatches() {
+  execFileSync(
+    ".venv/bin/python",
+    [
+      "-c",
+      `from test_catalog import reset_catalog
+from test_catalog_metadata import Records
+from test_catalog_reconciliation import run
+from test_catalog_targets import promo, listing
+from app.main import connect
+from app.catalog_targets import MATCHING, activate_rule
+reset_catalog()
+with connect() as conn:
+    conn.execute("TRUNCATE tcgplayer_product, tcgplayer_price")
+listing(900, "Turtwig", "DP01", 1421)
+listing(901, "Chimchar - DP02", "DP02", 1421)
+run(Records(promo("dpp-1", "DP01", "dpp", "Turtwig"), promo("dpp-2", "DP02", "dpp", "Chimchar")))
+with connect() as conn, conn.transaction():
+    conn.execute("INSERT INTO inventory_owner(user_id) VALUES ('seed-maintainer') ON CONFLICT DO NOTHING")
+    activate_rule(conn, MATCHING, 4, 'seed-maintainer', 'https://example.org/rule', 'Reviewed against the target')`,
+    ],
+    { env: { ...process.env, PYTHONPATH: "api:api/tests" } }
   );
 }
 
@@ -487,8 +514,71 @@ test.describe("desktop", () => {
         page.getByRole("navigation", { name: "Main views" })
       ).toBeVisible();
       const text = (await page.locator("body").innerText()).toLowerCase();
-      for (const word of ["tcgcsv", "price import", "stale_source", "imported"])
+      for (const word of [
+        "tcgcsv",
+        "price import",
+        "stale_source",
+        "imported",
+        "matched by card number",
+      ])
         expect(text).not.toContain(word);
+    } finally {
+      await resetPriceImports();
+    }
+  });
+
+  test("the panel counts card-number matches and links to the list, where an owner rejects one", async ({
+    page,
+  }) => {
+    seedNumberMatches();
+    await signInAsOwner(page);
+    await resetPriceImports();
+    try {
+      // The reset above emptied the product list the seed matched against; the list shows the products again.
+      await query(
+        `INSERT INTO tcgplayer_product(product_id,group_id,name,number,number_key,seen_at,source_updated_at) VALUES
+         (900,1421,'Turtwig','DP01','DP1',now(),now()),(901,1421,'Chimchar - DP02','DP02','DP2',now(),now())`
+      );
+      await seedPrice();
+      await seedImport("imported", 0);
+      await openFromAccountMenu(page);
+      const panel = priceImport(page);
+      await expect(panel).toContainText("2 Editions matched by card number");
+      await panel.getByRole("button", { name: "Review matches" }).click();
+      const list = page.getByRole("region", { name: "Matched by card number" });
+      const table = list.getByRole("region", { name: "Card-number matches" });
+      await expect(table.getByRole("row")).toHaveCount(3);
+      await expect(table).toContainText("Chimchar - DP02");
+      await expect(table).toContainText("product 901, group 1421");
+      await expect(table).toContainText("v4");
+      const turtwig = table.getByRole("row").filter({ hasText: "Turtwig" });
+      await turtwig.getByRole("button", { name: /^Review / }).click();
+      const card = list.getByRole("article");
+      await expect(card.getByLabel("Review reason")).toBeFocused();
+      const reject = card.getByRole("button", { name: "Reject match" });
+      await expect(reject).toBeDisabled();
+      await card.getByLabel("Review reason").fill("Wrong card");
+      await card
+        .getByLabel("Review evidence URL")
+        .fill("https://example.org/evidence");
+      await reject.click();
+      await expect(table.getByRole("row")).toHaveCount(2);
+      await expect(table).not.toContainText("Turtwig");
+      const [row] = await query<{
+        mapping_state: string;
+        mapping_reason: string;
+      }>(
+        `SELECT m.mapping_state,m.mapping_reason FROM catalog_edition_metadata m JOIN catalog_edition e ON e.id=m.edition_id
+         JOIN catalog_printing p ON p.id=e.printing_id WHERE p.source_id='dpp-1'`
+      );
+      expect(row).toEqual({
+        mapping_state: "unverified",
+        mapping_reason: "reviewed_unmapped",
+      });
+      await expectPageChecks(
+        page,
+        "Owner controls, Matched by card number (desktop)"
+      );
     } finally {
       await resetPriceImports();
     }

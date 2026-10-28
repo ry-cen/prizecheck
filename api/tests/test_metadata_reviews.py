@@ -857,3 +857,84 @@ def test_the_automatic_matching_startup_hook_runs_once_under_the_app_lifespan(mo
     with TestClient(app):
         pass
     assert applied == [True]
+
+
+# ------------------------------------------------------------------ card-number matches (#347)
+
+from app.catalog_targets import rematch_promos  # noqa: E402
+from test_catalog_targets import listing, promo, tcgplayer_products  # noqa: E402,F401
+
+
+@pytest.fixture
+def number_matches(tcgplayer_products):
+    """Two dpp Editions verified by card number and one svp Edition verified by its TCGdex id, under rule v4."""
+    seed_users()
+    listing(900, "Turtwig", "DP01", 1421)
+    listing(901, "Chimchar - DP02", "DP02", 1421)
+    run(Records(promo("dpp-1", "DP01", "dpp", "Turtwig"), promo("dpp-2", "DP02", "dpp", "Chimchar"),
+                promo("svp-1", "1", "svp", "Pikachu", [{"type": "holo", "size": "standard", "thirdParty": {"tcgplayer": 477184}}]),
+                promo("dpp-3", "DP03", "dpp", "Piplup")))  # dpp-3 has no TCGCSV product: stays unverified
+    activate_as_owner(MATCHING, 4)
+
+
+def matches(user=OWNER, **params):
+    response = request("GET", f"{ADMIN}/queue", user, matched="card_number", **params)
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def source_edition(source_id):
+    return metadata(source_id)[1]
+
+
+def test_card_number_filter_lists_the_number_matched_editions_only_with_their_product_and_rule(number_matches):
+    items = matches()["items"]
+    assert sorted((item["name"], item["set_id"], item["collector_number"], item["matched_product"]["product_id"],
+                   item["matched_product"]["name"], item["matched_product"]["group_id"], item["rule_version"], item["state"])
+                  for item in items) == [("Chimchar", "dpp", "DP02", 901, "Chimchar - DP02", 1421, 4, "verified"),
+                                         ("Turtwig", "dpp", "DP01", 900, "Turtwig", 1421, 4, "verified")]
+    assert matches()["next_cursor"] is None
+    plain = queue()["items"]  # the ordinary queue is unchanged and carries no match
+    assert all(item["matched_product"] is None for item in plain)
+
+
+def test_card_number_filter_pages_and_is_owner_only(number_matches, monkeypatch):
+    monkeypatch.setattr(metadata_reviews, "QUEUE_PAGE", 1)
+    first = matches()
+    second = matches(cursor=first["next_cursor"])
+    assert len(first["items"]) == len(second["items"]) == 1 and second["next_cursor"] is None
+    assert first["items"][0]["edition_id"] != second["items"][0]["edition_id"]
+    assert request("GET", f"{ADMIN}/queue", REPORTER, matched="card_number").status_code == 403
+    assert request("GET", f"{ADMIN}/queue", OWNER, matched="other").status_code == 422
+
+
+def test_rejecting_a_card_number_match_unverifies_it_and_neither_rebind_activation_nor_rematch_verifies_it_again(number_matches):
+    from app.price_binding import rebind
+    with connect() as conn:
+        conn.execute("""INSERT INTO tcgplayer_price(product_id,sub_type_name,market_price,seen_at,source_updated_at)
+          VALUES (900,'Holofoil',3,now(),now())""")
+        rebind(conn)
+        assert conn.execute("SELECT count(*) AS n FROM edition_price_binding WHERE product_id=900").fetchone()["n"] == 1
+    turtwig = next(item for item in matches()["items"] if item["name"] == "Turtwig")
+    response = decide(turtwig, "reject_source")
+    assert response.status_code == 200, response.text
+    assert (response.json()["state"], response.json()["reason"]) == ("unverified", "reviewed_unmapped")
+    assert [item["name"] for item in matches()["items"]] == ["Chimchar"]
+    with connect() as conn:
+        rebind(conn)  # the decision already rebinds best effort; a full rebind agrees
+        assert conn.execute("SELECT count(*) AS n FROM edition_price_binding WHERE product_id=900").fetchone()["n"] == 0
+        assert rematch_promos(conn) == 0
+    activate_as_owner(MATCHING, 3)
+    activate_as_owner(MATCHING, 4)
+    with connect() as conn:
+        assert rematch_promos(conn) == 0
+    row = edition_row(turtwig["edition_id"])
+    assert (row["mapping_state"], row["mapping_reason"], row["product_id"]) == ("unverified", "reviewed_unmapped", None)
+    assert [item["name"] for item in matches()["items"]] == ["Chimchar"]
+
+
+def test_the_owner_status_counts_card_number_matches_and_collector_status_does_not(number_matches):
+    status = request("GET", "/api/admin/catalog-runs", OWNER)
+    assert status.status_code == 200 and status.json()["matched_by_number"] == 2
+    assert request("GET", "/api/admin/catalog-runs", REPORTER).status_code == 403
+    assert "matched_by_number" not in request("GET", "/api/catalog/status", REPORTER).text

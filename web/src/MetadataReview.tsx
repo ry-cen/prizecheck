@@ -69,7 +69,7 @@ function summarize(value: Record<string, unknown> | null | undefined) {
     )
     .join(", ");
 }
-function editionLabel(descriptor: Record<string, unknown> | null) {
+export function editionLabel(descriptor: Record<string, unknown> | null) {
   if (!descriptor) return "Edition";
   if (typeof descriptor.label === "string") return descriptor.label;
   return Object.entries(descriptor)

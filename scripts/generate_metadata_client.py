@@ -2,7 +2,7 @@
 import client_generator as gen
 
 TARGET = "web/src/metadata_generated.ts"
-NAMES = ('MetadataReportInput','MetadataReportView','MetadataReportUpdate','MetadataReportDecision','MetadataQueueItem','MetadataQueuePage',
+NAMES = ('MetadataReportInput','MetadataReportView','MetadataReportUpdate','MetadataReportDecision','MatchedProduct','MetadataQueueItem','MetadataQueuePage',
              'MetadataDecisionRow','MetadataDecisionInput','MetadataDecisionResult','RuleVersionView','ActiveRuleView','MetadataRuleView',
              'MetadataRuleActivation','MetadataRuleResult','AttributeValues','AttributeReportInput','AttributeReportView',
              'AttributeReportUpdate','AttributeReportDecision','AttributeEvidence','AttributeQueuePage','AttributeDecisionRow',
@@ -26,7 +26,7 @@ export const submitMetadataReport=(body: MetadataReportInput)=>request<MetadataR
 export const getMyMetadataReports=()=>request<MetadataReportView[]>('GET','/api/catalog/metadata-reports');
 export const getMyMetadataReport=(reportId: string)=>request<MetadataReportView>('GET',`/api/catalog/metadata-reports/${id(reportId)}`);
 export const answerMetadataReport=(reportId: string,body: MetadataReportUpdate)=>request<MetadataReportView>('PATCH',`/api/catalog/metadata-reports/${id(reportId)}`,body);
-export const getMetadataQueue=(cursor?: string)=>request<MetadataQueuePage>('GET',`/api/admin/catalog-metadata/queue${cursor?`?cursor=${id(cursor)}`:''}`);
+export const getMetadataQueue=(cursor?: string,matched?: 'card_number')=>request<MetadataQueuePage>('GET',`/api/admin/catalog-metadata/queue${cursor||matched?`?${[cursor?`cursor=${id(cursor)}`:'',matched?`matched=${matched}`:''].filter(Boolean).join('&')}`:''}`);
 export const getMetadataTarget=(kind: MetadataTargetKind,targetId: string)=>request<MetadataQueueItem>('GET',`/api/admin/catalog-metadata/${kind}/${id(targetId)}`);
 export const getMetadataHistory=(kind: MetadataTargetKind,targetId: string)=>request<MetadataDecisionRow[]>('GET',`/api/admin/catalog-metadata/${kind}/${id(targetId)}/history`);
 export const decideMetadata=(body: MetadataDecisionInput)=>request<MetadataDecisionResult>('POST','/api/admin/catalog-metadata/decisions',body);

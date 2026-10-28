@@ -16,7 +16,9 @@ import {
 import { CatalogReview } from "../CatalogReview";
 import { MetadataReview } from "../MetadataReview";
 import { MissingQueue } from "./MissingQueue";
+import { NumberMatches } from "./NumberMatches";
 import { PageHeader } from "../shell/PageHeader";
+import { Button } from "../ui/Button";
 import { Pill } from "../ui/Pill";
 import { Segmented, segmentId } from "../ui/Segmented";
 import { AttributesQueue } from "./AttributesQueue";
@@ -71,6 +73,10 @@ function OwnerControls({
   const [operations, setOperations] = useState<OperationsStatus | null>(null);
   const [operationsFailed, setOperationsFailed] = useState(false);
   const { counts, refresh: refreshCounts } = useQueueCounts(section);
+  // The Metadata tab's two views; the Status panel's matched-by-number link opens the second.
+  const [metadataView, setMetadataView] = useState<"review" | "card_number">(
+    "review"
+  );
 
   // Only the latest read may set the state, so a slow earlier read can't overwrite a newer one.
   const latestRead = useRef(0);
@@ -145,6 +151,10 @@ function OwnerControls({
           operationsFailed={operationsFailed}
           onRefresh={refresh}
           onStart={() => void start()}
+          onReviewMatches={() => {
+            setMetadataView("card_number");
+            onSection("metadata");
+          }}
         />
       );
       break;
@@ -152,7 +162,31 @@ function OwnerControls({
       content = <CatalogReview onChanged={recount} />;
       break;
     case "metadata":
-      content = <MetadataReview onChanged={recount} />;
+      content = (
+        <>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant={metadataView === "review" ? "primary" : "quiet"}
+              aria-pressed={metadataView === "review"}
+              onClick={() => setMetadataView("review")}
+            >
+              Needs review
+            </Button>
+            <Button
+              variant={metadataView === "card_number" ? "primary" : "quiet"}
+              aria-pressed={metadataView === "card_number"}
+              onClick={() => setMetadataView("card_number")}
+            >
+              Matched by card number
+            </Button>
+          </div>
+          {metadataView === "review" ? (
+            <MetadataReview onChanged={recount} />
+          ) : (
+            <NumberMatches onChanged={recount} />
+          )}
+        </>
+      );
       break;
     case "attributes":
       content = <AttributesQueue onDecided={refreshCounts} />;
