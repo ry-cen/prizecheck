@@ -371,6 +371,16 @@ Then sign in from a tailnet device:
 
 From a device that is **not** on the tailnet, the URL must not resolve or connect.
 
+## Optional: daily catalog refresh
+
+The dev host needs no schedule; pulling by hand from Owner controls keeps working. To check TCGdex for new cards every day ([ADR 0018](adr/0018-scheduled-catalog-change-check.md)), add a User Scripts entry (the User Scripts plugin, custom schedule `0 4 * * *`, which Unraid reads in the server's time zone) with this command:
+
+```bash
+bash /mnt/cache/appdata/prizecheck-dev/bin/prizecheck-deploy.sh catalog-refresh
+```
+
+It pulls only when the card list changed, then runs the scanner index. Its output appears in the User Scripts log. The systemd units in `deploy/host/` are for the Oracle host and are not used here.
+
 ## Updating the host files
 
 `compose.deploy.yml` and `prizecheck-deploy.sh` run on Unraid as root, so CI never ships them. A stolen deploy key can only deploy images from GHCR with the files you installed. CI sends the digest of the commit's copies, and the host refuses to deploy if its own files differ:

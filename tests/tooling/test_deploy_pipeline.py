@@ -18,6 +18,8 @@ SCRIPT = (ROOT / 'deploy/host/prizecheck-deploy.sh').read_text()
 COMPOSE_DEV = (ROOT / 'compose.deploy.yml').read_text()
 COMPOSE_PROD = (ROOT / 'compose.prod.yml').read_text()
 NGINX = (ROOT / 'deploy/docker/nginx.conf').read_text()
+UNIT_SERVICE = (ROOT / 'deploy/host/prizecheck-catalog-refresh.service').read_text()
+UNIT_TIMER = (ROOT / 'deploy/host/prizecheck-catalog-refresh.timer').read_text()
 CADDYFILE = (ROOT / 'deploy/oracle/Caddyfile').read_text()
 PROD_ENV = (ROOT / 'deploy/host/prizecheck-prod.env.example').read_text()
 
@@ -294,6 +296,19 @@ class DeployPipelineTest(unittest.TestCase):
         self.assertIn('-l "$CATALOG_REFRESH_LABEL" ' + price, body)
         self.assertLess(body.index(price), body.index('-m app.catalog_refresh'))
         self.assertLess(body.index(price), body.index('scanner-index'))
+
+    def test_the_catalog_refresh_units_run_the_subcommand_daily_and_not_on_boot(self):
+        self.assertIn('Type=oneshot', UNIT_SERVICE)
+        self.assertIn('ExecStart=/bin/bash /opt/prizecheck-prod/bin/prizecheck-deploy.sh catalog-refresh\n', UNIT_SERVICE)
+        self.assertIn('TimeoutStartSec=infinity', UNIT_SERVICE)
+        self.assertNotIn('Restart=', UNIT_SERVICE)
+        self.assertNotIn('[Install]', UNIT_SERVICE)  # only the timer is enabled
+        self.assertIn('OnCalendar=*-*-* 04:00:00 UTC\n', UNIT_TIMER)
+        self.assertRegex(UNIT_TIMER, r'(?m)^RandomizedDelaySec=\d+min$')
+        self.assertIn('Persistent=true', UNIT_TIMER)
+        self.assertIn('WantedBy=timers.target', UNIT_TIMER)
+        self.assertNotRegex(UNIT_TIMER, r'(?m)^(OnBootSec|OnStartupSec|OnActiveSec)=')
+        self.assertIn('catalog-refresh) cmd_catalog_refresh ;;', SCRIPT)
 
     def test_the_prod_overlay_forces_production(self):
         compose = uncommented(COMPOSE_PROD)

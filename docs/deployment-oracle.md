@@ -602,7 +602,7 @@ Then sign in:
 
    Otherwise the first catalog pull applies them. The rollout re-evaluates targets in short batches, so it doesn't block your collection changes. Its progress shows under Owner controls → **Rules**. Matching v4 also matches the Black Star promo sets by card number from the stored TCGCSV products, which the first price import (step 5) stores; that run carries `--rematch`, and promos TCGCSV lists later are picked up by `price_import_job.py --rematch`.
 
-4. Refresh, open **Owner controls**, and start the full English catalog pull. A pull does not fetch prices: they come from the TCGCSV import in step 5.
+4. Refresh, open **Owner controls**, and start the full English catalog pull. The first pull is still started by hand; the daily refresh (step 16) only keeps the catalog current afterwards. A pull does not fetch prices: they come from the TCGCSV import in step 5.
 5. After the catalog pull, build the scanner's index and import the first prices by hand. The index first:
 
    ```bash
@@ -683,6 +683,50 @@ journalctl -u caddy --since '10 minutes ago' --no-pager | grep -c forced-502-mar
 
 The count must be `0`. Caddy may well log that the upstream refused the connection, but the line must not contain the request path or the client address. If the marker appears, the Caddyfile's `log default { exclude ... }` block isn't doing its job on this Caddy version: don't announce the site, since published-deck URLs are capability links, and fix the Caddyfile first. Run `status` afterwards to confirm `web` is healthy again. This check can't cover everything: Caddy's `http.stdlib` logger can still record client IP addresses when a TLS handshake fails. Those lines carry no request path, but they are not excluded.
 
+## 16. Install the daily catalog refresh timer
+
+Install the timer only once the price import step ([#355](https://github.com/ry-cen/prizecheck/issues/355)) is in the deployed release, so the first scheduled run includes prices. A timer installed earlier runs the check and the scanner index only. The step runs after the first release (step 13) and the first catalog pull (step 14), because the check needs a deployed release and an active catalog.
+
+From your workstation, in a checkout of the deployed commit, copy the units to the `ubuntu` user's home:
+
+```bash
+scp deploy/host/prizecheck-catalog-refresh.service deploy/host/prizecheck-catalog-refresh.timer ubuntu@100.x.y.z:
+```
+
+On the instance, install and enable them:
+
+```bash
+sudo install -m 0644 prizecheck-catalog-refresh.service prizecheck-catalog-refresh.timer /etc/systemd/system/
+```
+
+```bash
+sudo systemctl daemon-reload
+```
+
+```bash
+sudo systemctl enable --now prizecheck-catalog-refresh.timer
+```
+
+```bash
+systemctl list-timers prizecheck-catalog-refresh.timer
+```
+
+The list shows the next run at about 04:00 UTC (up to 30 minutes later, from the random delay) and no earlier run yet. The timer fires once a day, not on boot, and a run missed while the instance was off runs once at the next start.
+
+Run it once by hand to see it work. The first run can take more than an hour on 1 OCPU, so start it without waiting:
+
+```bash
+sudo systemctl start --no-block prizecheck-catalog-refresh
+```
+
+```bash
+journalctl -u prizecheck-catalog-refresh -f
+```
+
+The script's output lands in the journal: `journalctl -u prizecheck-catalog-refresh`. `systemctl status prizecheck-catalog-refresh` shows whether the last run exited 0. When nothing changed, the run ends after the check and the scanner index, with "Catalog refresh finished". Owner controls shows the last automatic check. The exit codes are in [portable jobs](operations/portable-jobs.md).
+
+The units are host files, not part of the release. Reinstall the timer on every new host, including a move to AWS, with the commands above. After a commit changes either unit, copy and `install` it again and run `sudo systemctl daemon-reload`; systemd keeps using the old unit until then. Stopping the service (`systemctl stop`) ends the script but not a container it already started; `docker ps --filter label=prizecheck.job=catalog-refresh` lists those, and the next deploy stops them.
+
 ## Opening signup
 
 Production starts owner-only. The gateway opens signup only while a readiness proof (version 2, described in [signup readiness](signup-readiness.md)) names the exact commit it is started with. Once signup is open, the deploy script moves the proof to each new release for you (see below). Do this only after you have actually done the checks the proof attests to.
@@ -729,7 +773,7 @@ Nothing is carried when the running release is owner-only, when the proof names 
 ERROR: Host deployment files differ from commit ...; reinstall compose.deploy.yml compose.prod.yml and prizecheck-deploy.sh (docs/deployment-oracle.md, 'Updating the host files')
 ```
 
-When a commit changes any of the three files, repeat the `scp` and `install` commands in step 5 from that commit, then re-run the failed workflow run. The digest covers only those three files: `deploy/oracle/Caddyfile` isn't checked, and the deploy never touches `/etc/caddy/Caddyfile`. Reinstall and reload it yourself (step 12) when a commit changes it. The release that ships catalog rule rollout (ADR 0021, #377) changes all three, so it changes the bundle digest: reinstall before the first deploy of it.
+When a commit changes any of the three files, repeat the `scp` and `install` commands in step 5 from that commit, then re-run the failed workflow run. The digest covers only those three files: `deploy/oracle/Caddyfile` isn't checked, and the deploy never touches `/etc/caddy/Caddyfile`. Reinstall and reload it yourself (step 12) when a commit changes it. The catalog refresh units in `deploy/host/` aren't in the digest either: reinstall them by hand (step 16) when a commit changes them. The release that ships catalog rule rollout (ADR 0021, #377) changes all three, so it changes the bundle digest: reinstall before the first deploy of it.
 
 ## Viewing logs
 

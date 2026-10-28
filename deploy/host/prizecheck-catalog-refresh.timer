@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the PrizeCheck catalog change check daily (ADR 0018)
+
+[Timer]
+OnCalendar=*-*-* 04:00:00 UTC
+RandomizedDelaySec=30min
+# A run missed while the host was off runs once at the next start. There is no OnBootSec: a boot alone starts nothing.
+Persistent=true
+
+[Install]
+WantedBy=timers.target
