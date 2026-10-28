@@ -293,6 +293,9 @@ def test_migration_merges_subtitled_identities_and_keeps_every_reference(project
               NULL::boolean AS basic_pokemon WHERE false""")
             conn.execute("""CREATE TEMP VIEW catalog_reprint_group_member AS SELECT NULL::uuid AS printing_id,
               NULL::uuid AS group_id WHERE false""")
+            # And the fallback-art view of migration 154 (no art before it), which public delivery reads for image_url.
+            conn.execute("""CREATE TEMP VIEW catalog_printing_art AS SELECT NULL::uuid AS printing_id,NULL::text AS tcgdex_url,
+              NULL::text AS low_image_url,NULL::text AS high_image_url WHERE false""")
             conn.commit()
             rebuild(conn)
             owner_before = identity_by_printing(conn)
