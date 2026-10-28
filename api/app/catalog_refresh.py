@@ -22,7 +22,9 @@ to stderr, and no log carries a secret or a raw TCGdex payload.
 
 Rules: when the live-derivation or the marketplace-matching rule is not active, the check records `failed` with error_code
 CATALOG_RULES_INACTIVE and starts nothing: with no active catalog every id looks new, and the check would start a full pull
-before the owner has activated the rules (docs/deployment-oracle.md, step 14).
+before a deploy has applied the rules. A deploy applies the newest version of each rule by itself (ADR 0021), but only once
+the owner is bound; if a rollout is unfinished or failed, run `scripts/rule_rollout.py resume` through the deploy script's
+`tool` command (docs/deployment-oracle.md, step 14, item 3).
 
 Pause: when 3 or more pulls this check started have failed since the latest successful pull (whoever started that one), the
 check records `paused` with the newest such failure's error and starts nothing. Any successful pull, owner- or check-started,
@@ -147,7 +149,8 @@ def run_check(conn, source=None, out=None) -> int:
         inactive = [kind for kind in (LIVE, MATCHING) if load_active(conn, kind) is None]
         if inactive:
             conn.commit()
-            log.error("check %s: catalog rule not active (%s); not starting a pull", check_id, ", ".join(inactive))
+            log.error("check %s: catalog rule not applied yet (%s); not starting a pull. A deploy applies the newest rules; "
+                      "run scripts/rule_rollout.py resume if a rollout is unfinished", check_id, ", ".join(inactive))
             _finish(conn, check_id, "failed", error="CATALOG_RULES_INACTIVE")
             return EXIT_CHECK_FAILED
         conn.commit()
