@@ -17,7 +17,6 @@ import os
 import re
 import sys
 import time
-import unicodedata
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -26,6 +25,7 @@ import httpx
 import psycopg
 
 from . import price_binding
+from .catalog_targets import number_key
 
 BASE_URL = "https://tcgcsv.com"
 CATEGORY = 3  # Pokemon
@@ -81,18 +81,6 @@ class SourceError(Exception):
 
 
 # --- Shared helpers ------------------------------------------------------------------------------------------------------
-
-
-def number_key(number):
-    """The comparison key of a card number: trimmed, uppercase, any "/total" dropped and the leading zeros of the first
-    digit run removed (DP05 -> DP5, SWSH001 -> SWSH1, 001 -> 1, XY01 -> XY1; 000 -> 0). None for a missing number.
-    tcgplayer_product.number_key is filled with it, and matching rule v4 (design section 4.4) must use the same function."""
-    if number is None:
-        return None
-    text = unicodedata.normalize("NFC", str(number)).strip().split("/", 1)[0].strip().upper()
-    if not text:
-        return None
-    return re.sub(r"\d+", lambda run: run.group().lstrip("0") or "0", text, count=1)
 
 
 def contact():
