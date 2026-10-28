@@ -554,7 +554,7 @@ If publications changed after the dump, also restore the matching `public` archi
   bash /mnt/cache/appdata/prizecheck-dev/bin/prizecheck-deploy.sh backup
   ```
 
-- **Nightly:** add the backup entry `setup` printed to the Unraid **User Scripts** plugin (`17 3 * * *`, step 9). Before the first deploy it logs that and exits 0.
+- **Nightly:** add the backup entry `setup` printed to the Unraid **User Scripts** plugin (`17 3 * * *`, step 9). Before the first deploy it logs that and exits 0; on a deployed host whose database container is not running it exits non-zero with a clear log line, so the User Scripts log shows the failure.
 - **Off the server:** copy `backups/` and `prizecheck.env` to separate storage. Without the env file's secrets, existing sessions and the database password are lost. The backups contain private collection data; keep them out of any shared or public location.
 
 Don't run `backup` while a deploy is migrating; the deploy lock prevents this when both use the script. For the application's own logical backup and restore drill, which also enforces the public/private storage separation, see [local recovery](operations/local-recovery.md).

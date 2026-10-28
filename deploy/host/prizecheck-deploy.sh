@@ -1009,9 +1009,9 @@ cmd_backup() {
     return 0
   fi
   export PRIZECHECK_IMAGE_TAG="$current"
+  # A deployed host without a running database is a problem: fail, so the timer unit shows failed.
   if [[ -z "$(compose ps -q db 2>/dev/null </dev/null || true)" ]]; then
-    log "No database container is running; skipping the backup"
-    return 0
+    die "No database container is running although release $current is deployed; no backup was made (start the stack, or roll back, then run backup again)"
   fi
   backup_database manual manual
   local target

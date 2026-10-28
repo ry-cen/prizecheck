@@ -1057,6 +1057,19 @@ class HostDeployScriptTest(unittest.TestCase):
         self.assertEqual(code, 0, output)
         self.assertIn('WARNING: prizecheck-catalog-refresh.timer is not enabled', output)
 
+    def test_a_deploy_with_a_stale_backup_unit_warns_and_succeeds(self):
+        home = self.signup_home(PROD, proof=None)
+        env = self.systemd_env(home)
+        self.assertEqual(self.run_script(home, 'setup', **env).returncode, 0)
+        timer = home / 'units/prizecheck-backup.timer'
+        timer.write_text(timer.read_text() + '# edited\n')
+        code, output = self.deploy_with_units(home, env)
+        self.assertEqual(code, 0, output)
+        self.assertIn(f'Deployed {OTHER}', output)
+        self.assertIn(f'WARNING: {timer} is missing or differs from the host file; run', output)
+        # The installed refresh units are current, so only the backup unit is named.
+        self.assertNotIn('prizecheck-catalog-refresh.service is missing', output)
+
     def test_a_deploy_with_matching_units_prints_no_unit_warning(self):
         home = self.signup_home(PROD, proof=None)
         env = self.systemd_env(home)
@@ -1568,15 +1581,18 @@ class HostDeployScriptTest(unittest.TestCase):
         self.assertEqual(self.fake_calls(), [])
         self.assertEqual(list((home / 'backups').iterdir()), [])
 
-    def test_backup_without_a_database_container_logs_and_exits_zero(self):
+    def test_backup_on_a_deployed_host_without_a_database_container_fails(self):
         home = self.make_home(PROD)
         (home / 'state').mkdir()
         (home / 'state/current').write_text(COMMIT + '\n')
         env = self.host_env(home, FAKE_NO_DB='1')
         code, output = self.host(home, 'backup', **env)
-        self.assertEqual(code, 0, output)
-        self.assertIn('No database container is running; skipping the backup', output)
+        self.assertNotEqual(code, 0, output)
+        self.assertIn('No database container is running although release', output)
+        self.assertIn('no backup was made', output)
+        self.assertNotIn('skipping the backup', output)
         self.assertFalse(any('pg_dump' in call['args'] for call in self.fake_calls()))
+        self.assertEqual(list((home / 'backups').iterdir()), [])
 
     def test_backup_with_a_release_and_a_database_dumps_and_archives(self):
         home = self.make_home(PROD)
