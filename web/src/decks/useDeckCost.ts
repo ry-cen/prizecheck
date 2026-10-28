@@ -18,13 +18,18 @@ export type DeckCostSettled =
  *
  * A page that draws the Deck's need (the deck builder's Buy missing) also passes the settings revision it read (#208):
  * the cost to complete follows the Want List counting setting, which moves neither revision above.
+ *
+ * A Target Format change advances the Deck List revision but not the cards, so the cost it was drawn for still stands.
+ * `cardsRevision` is the revision that last changed the cards (`useCardsRevision`): only it, the Deck and the other
+ * revisions start a new access, while an answer is still checked against the current `deckListRevision`.
  */
 export function useDeckCost(
   deckId: string,
   deckListRevision: number | null,
   ownerRevision: number | null,
   onNewerRevision: () => void,
-  settingsRevision: number | null = null
+  settingsRevision: number | null = null,
+  cardsRevision: number | null = deckListRevision
 ): DeckCostSettled {
   const [settled, setSettled] = useState<DeckCostSettled>(null);
   const latest = useRef({
@@ -40,7 +45,7 @@ export function useDeckCost(
       settings: settingsRevision,
     };
     setSettled(null);
-    if (deckListRevision === null || ownerRevision === null) return;
+    if (cardsRevision === null || ownerRevision === null) return;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), CLIENT_TIMEOUT_MS);
     let live = true;
@@ -51,7 +56,8 @@ export function useDeckCost(
         const deckList = cost.deck_list_revision ?? null;
         const settings = cost.settings_revision ?? null;
         const ownerMatches = owner === null || owner === ownerRevision;
-        const listMatches = deckList === null || deckList === deckListRevision;
+        const listMatches =
+          deckList === null || deckList === latest.current.deckList;
         const settingsMatch =
           settingsRevision === null ||
           settings === null ||
@@ -78,7 +84,25 @@ export function useDeckCost(
       controller.abort();
     };
     // onNewerRevision is a fresh closure on every render; only the Deck and its revisions start a new access.
-  }, [deckId, deckListRevision, ownerRevision, settingsRevision]);
+  }, [deckId, cardsRevision, ownerRevision, settingsRevision]);
 
   return settled;
+}
+
+/**
+ * The Deck List revision that last changed the cards: `revision` follows the Deck List, except a revision named by
+ * `formatOnly` (the one a Target Format change produced), which leaves it where it was.
+ */
+export function useCardsRevision(
+  revision: number | null,
+  formatOnly: number | null
+): number | null {
+  const cards = useRef<number | null>(null);
+  if (revision === null) cards.current = null;
+  else if (
+    cards.current === null ||
+    (revision !== cards.current && revision !== formatOnly)
+  )
+    cards.current = revision;
+  return cards.current;
 }

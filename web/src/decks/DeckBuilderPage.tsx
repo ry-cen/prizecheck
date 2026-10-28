@@ -33,7 +33,7 @@ import { FormatResultsDialog } from "./FormatResultsDialog";
 import { useDeckActions } from "./useDeckActions";
 import { flaggedLines, resultFor, type TargetFormat } from "./targetFormat";
 import { TargetFormatControl } from "./TargetFormatControl";
-import { useDeckCost } from "./useDeckCost";
+import { useCardsRevision, useDeckCost } from "./useDeckCost";
 import { useGatherToast } from "./useGatherToast";
 import { variantLabel } from "../ui/variantLabel";
 import { DeckLibrary } from "./DeckLibrary";
@@ -112,6 +112,8 @@ export function DeckBuilderPage({ deckId, onAllDecks, onReplaceList }: Props) {
     revision: number;
     key: string;
   } | null>(null);
+  // The Deck List revision a Target Format change produced: the cost isn't asked for again at it.
+  const formatOnlyRevision = useRef<number | null>(null);
   const resultButton = useRef<HTMLButtonElement | null>(null);
   const reads = useRef(0);
   const readsInFlight = useRef(0);
@@ -224,6 +226,7 @@ export function DeckBuilderPage({ deckId, onAllDecks, onReplaceList }: Props) {
         revision,
         idempotency_key: key,
       });
+      formatOnlyRevision.current = result.deck_list.revision;
       setLoad((previous) =>
         previous.kind === "ready"
           ? {
@@ -360,12 +363,18 @@ export function DeckBuilderPage({ deckId, onAllDecks, onReplaceList }: Props) {
     }
     edits.focusUndo();
   });
+  // A Target Format change moves the Deck List revision, not the cards, so it doesn't ask for the cost again.
+  const cardsRevision = useCardsRevision(
+    detail?.deck_list.revision ?? null,
+    formatOnlyRevision.current
+  );
   const cost = useDeckCost(
     deckId,
     detail?.deck_list.revision ?? null,
     detail?.owner_revision ?? null,
     () => void read(),
-    detail?.settings_revision ?? null
+    detail?.settings_revision ?? null,
+    cardsRevision
   );
   // Put away for the surplus group (#180): its dialog and Undo toast outlive the phone's Deck and Library tabs.
   const putAway = usePutAway({

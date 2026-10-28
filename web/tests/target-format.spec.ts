@@ -118,8 +118,12 @@ async function buildDeck(page: Page): Promise<Built> {
   return { deckId, owner, energy };
 }
 
+/** How many times the page has asked for the Deck's cost since `stubPrices`. */
+const costReads = { count: 0 };
+
 /** Fixed cost and price answers, so nothing waits on the price cache. */
 async function stubPrices(page: Page, deckId: string) {
+  costReads.count = 0;
   const figure = {
     status: "unavailable",
     reason: "not_cached",
@@ -132,8 +136,9 @@ async function stubPrices(page: Page, deckId: string) {
     display_amount: null,
     currency: "USD",
   };
-  await page.route("**/api/decks/*/cost", (route) =>
-    route.fulfill({
+  await page.route("**/api/decks/*/cost", (route) => {
+    costReads.count++;
+    return route.fulfill({
       json: {
         deck_id: deckId,
         ...figure,
@@ -142,8 +147,8 @@ async function stubPrices(page: Page, deckId: string) {
         deck_list_cost: figure,
         cost_to_complete: figure,
       },
-    })
-  );
+    });
+  });
   await page.route("**/api/prices/editions", async (route) => {
     const ids = (route.request().postDataJSON() as { edition_ids: string[] })
       .edition_ids;
@@ -220,6 +225,7 @@ test.describe("on a desktop", () => {
     await expect(formatButton(page)).toHaveAccessibleName(
       "Target Format: Standard"
     );
+    await expect.poll(() => costReads.count).toBe(1);
     await expect(formatButton(page)).toHaveText(/^Standard$/);
     await expect(formatButton(page).locator("svg")).toHaveCount(1);
     await expect(resultButton(page)).toHaveText(/^✓\s*Legal/);
@@ -286,6 +292,8 @@ test.describe("on a desktop", () => {
       /Not legal, 2 issues\. Show the Gym Leader Challenge result$/
     );
     expect((await deckRead(page, built.deckId)).target_format).toBe("glc");
+    // A Format change moves the Deck List revision, not the cards: the cost is not asked for again.
+    expect(costReads.count).toBe(1);
 
     // A card-level issue highlights its lines; other lines stay plain.
     for (const name of ["Rare Candy", "Switch"])
