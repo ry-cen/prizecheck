@@ -210,6 +210,28 @@ def test_the_lock_is_released_when_a_publish_fails(priced, store):
     assert run_publish(store).written == 3
 
 
+def test_a_slow_but_progressing_read_across_many_slices_succeeds(priced, store, monkeypatch):
+    """Each slice has a fresh deadline: a read whose total time exceeds one deadline still works while every slice is quick."""
+    clock = [0.0]
+    monkeypatch.setattr(public_prices, "READ_SLICE", 1)
+    monkeypatch.setattr(public_prices.time, "monotonic", lambda: clock[0])
+    deadlines = []
+
+    class Slow:
+        def __getattr__(self, name):
+            return getattr(store, name)
+
+        def read_all(self, keys, *, deadline, **rest):
+            assert deadline - clock[0] == public_prices.CHUNK_SECONDS  # fresh for this slice
+            deadlines.append(deadline)
+            clock[0] += public_prices.CHUNK_SECONDS * 0.6  # every slice is slow; all of them together are not in time
+            return store.read_all(keys, deadline=time.monotonic() + 10, **rest)
+
+    with connect() as conn:
+        assert publish(conn, Slow()).written == 3
+    assert len(deadlines) >= 4 and clock[0] > public_prices.CHUNK_SECONDS
+
+
 # --- crash points ------------------------------------------------------------------------------------------------------
 
 

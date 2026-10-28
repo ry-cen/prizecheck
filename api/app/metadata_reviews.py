@@ -21,7 +21,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, HttpUrl
 
 from . import public_catalog
-from .price_binding import rebind_best_effort
+from .price_binding import rebind_best_effort, spawn_rebind
 from .catalog_targets import (LIVE, MATCHING, REGISTRIES, MatchingRulesV1, MatchingRulesV2, MatchingRulesV4, TargetContext, activate_rule,
                               automatic_matching, code_digest, ensure_matching_rule, fingerprint, is_unspecified,
                               refresh_editions, refresh_printing, verified_elsewhere)
@@ -611,7 +611,7 @@ def decide(command: MetadataDecisionInput, user_id: str = Depends(verified_user)
     # The decision is committed; delivery to the public store is best effort and recoverable from the outbox.
     public_catalog.publish_catalog_best_effort(printing_ids=[command.printing_id])
     if kind == "edition":
-        rebind_best_effort()
+        spawn_rebind()
     return MetadataDecisionResult(decision_id=decision_id, target=command.target, decision=command.decision, state=final["state"],
                           reason=final["reason"], mapping_revision=final["mapping_revision"], public_revision=final["basis_revision"],
                           closed_report_ids=closing,
@@ -726,7 +726,7 @@ def activate(kind: Literal["live_derivation", "marketplace_matching"], command: 
     # whatever remains is delivered by an unbounded drain in a detached process; until then the owner sees "pending".
     public_catalog.publish_catalog_best_effort()
     if kind == MATCHING:
-        rebind_best_effort()
+        spawn_rebind()
     delivery = delivery_status(revision=revision)
     if delivery == "pending":
         public_catalog.spawn_background_drain()

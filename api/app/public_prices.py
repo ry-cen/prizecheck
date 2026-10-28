@@ -21,11 +21,12 @@ from .quote_contract import parse_amount
 
 log = logging.getLogger(__name__)
 CHUNK = MAX_BATCH           # Keys per compare-and-swap.
-CHUNK_SECONDS = 10          # Per store call, so a full publish is never bounded by one deadline.
+CHUNK_SECONDS = 10          # Per store call (one read slice or one compare-and-swap), so a full publish is never bounded by one deadline.
 ATTEMPTS = 4                # Re-read-and-retry rounds when a compare-and-swap loses.
 LOCK_SECONDS = 600          # How long a publisher waits for the one in front of it.
 LOCK_POLL = 0.2
 REGISTRY_CHUNK = 5000
+READ_SLICE = 40 * MAX_BATCH  # Keys per store read; each slice gets a fresh deadline.
 
 DESIRED = """SELECT e.public_ref, m.mapping_revision, m.product_id, p.market_price
   FROM catalog_edition e
@@ -118,6 +119,15 @@ def _deadline():
     return time.monotonic() + CHUNK_SECONDS
 
 
+def _read(store, store_keys):
+    """Read every key in slices, each with its own deadline. Safe because the price lock makes publish the only writer of
+    `price:` keys, so the slices need no shared snapshot."""
+    records = {}
+    for start in range(0, len(store_keys), READ_SLICE):
+        records.update(store.read_all(store_keys[start:start + READ_SLICE], deadline=_deadline()).records)
+    return records
+
+
 def _round(conn, store):
     """One re-read-and-write pass. Returns (written, deleted, unchanged, lost) where lost means a compare-and-swap failed."""
     wanted = desired_values(conn)
@@ -126,7 +136,7 @@ def _round(conn, store):
     _register(conn, set(wanted) - registered)
     refs = sorted(set(wanted) | registered)
     keys = {ref: price_key(ref) for ref in refs}
-    current = store.read_all(list(keys.values()), deadline=_deadline()).records if refs else {}
+    current = _read(store, list(keys.values()))
     changes = [ref for ref in refs if current[keys[ref]].value != wanted.get(ref)]
     gone_already = [ref for ref in refs if ref not in wanted and current[keys[ref]].value is None]
     written = deleted = 0

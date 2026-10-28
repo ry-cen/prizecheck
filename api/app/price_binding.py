@@ -6,6 +6,7 @@ shared-price guard needs every Edition that holds a product. Readers require the
 match the mapping, so a stale binding leaves an Edition unpriced and never prices it from the wrong product.
 """
 import logging
+import threading
 
 from .catalog_targets import MatchingRulesV3, is_unspecified
 
@@ -149,6 +150,29 @@ def rebind_best_effort(conn=None):
         return None
     _publish(conn)
     return counts
+
+
+_spawned: list[threading.Thread] = []
+_spawned_lock = threading.Lock()
+
+
+def spawn_rebind():
+    """Run rebind_best_effort in a daemon thread, for callers inside an HTTP request: the rebind and publish wait on the
+    price lock and must not hold the owner's response. Returns the thread."""
+    thread = threading.Thread(target=rebind_best_effort, daemon=True, name="price-rebind")
+    with _spawned_lock:
+        _spawned[:] = [t for t in _spawned if t.is_alive()]
+        _spawned.append(thread)
+    thread.start()
+    return thread
+
+
+def join_spawned_rebinds(timeout=60.0):
+    """Test seam: wait for every thread spawn_rebind has started."""
+    with _spawned_lock:
+        threads = list(_spawned)
+    for thread in threads:
+        thread.join(timeout)
 
 
 def _publish(conn):

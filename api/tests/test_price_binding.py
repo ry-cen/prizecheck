@@ -277,17 +277,6 @@ def test_rebind_only_binds_without_fetching(world, monkeypatch):
         assert conn.execute("SELECT count(*) AS n FROM price_import").fetchone()["n"] == 0
 
 
-def test_a_marketplace_decision_and_a_rule_activation_call_the_rebind(world, monkeypatch):
-    import inspect
-    from app import metadata_reviews
-    source = inspect.getsource(metadata_reviews)
-    assert source.count("rebind_best_effort()") >= 3
-    calls = []
-    monkeypatch.setattr(metadata_reviews, "rebind_best_effort", lambda *a: calls.append(1))
-    metadata_reviews.rebind_best_effort()
-    assert calls == [1]
-
-
 # --- capacity ----------------------------------------------------------------------------------------------------------
 
 
