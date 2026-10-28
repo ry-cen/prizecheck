@@ -28,13 +28,18 @@ def between(text, start, end):
     return text[text.index(start):text.index(end)]
 
 
+RELEASE_PR = "github.event_name == 'pull_request' && github.base_ref == 'main'"
+
+
 def job_body(name):
     """The text of one verify.yml job, from its key to the next job's key."""
     jobs = VERIFY[VERIFY.index('\njobs:'):]
     start = jobs.index(f'\n  {name}:\n') + 1
     following = re.search(r'(?m)^  [a-z][a-z-]*:$', jobs[start + 1 + len(name) + 3:])
     end = start + 1 + len(name) + 3 + following.start() if following else len(jobs)
-    return jobs[start:end]
+    body = jobs[start:end].rstrip('\n')
+    # Drop the comment block that introduces the next job.
+    return re.sub(r'(\n  #[^\n]*)+$', '', body) + '\n'
 
 
 def one(pattern, text):
@@ -76,7 +81,7 @@ class DeployPipelineTest(unittest.TestCase):
         self.assertIn('ubuntu-24.04-arm', job)
         self.assertIn('target: test', job)
         self.assertIn('docker run --rm prizecheck-scanner-index-test', job)
-        self.assertRegex(job, r"(?m)^    if: \$\{\{ inputs\.integration == 'sharded' \|\| inputs\.integration == 'full' \}\}$")
+        self.assertIn("inputs.integration == 'sharded' || inputs.integration == 'full' || (" + RELEASE_PR + ')', job)
 
     def test_the_default_checks_need_no_database_and_no_browser(self):
         checks = job_body('checks')
@@ -100,9 +105,12 @@ class DeployPipelineTest(unittest.TestCase):
         self.assertRegex(on, r'(?m)^      integration:$')
         self.assertRegex(on, r'(?m)^        options:\n          - none\n          - sharded\n          - full\n        default: none$')
         self.assertNotIn('inputs.full', VERIFY)
-        gates = {'integration-legs': "inputs.integration == 'sharded'", 'integration-full': "inputs.integration == 'full'"}
-        for name, condition in gates.items():
-            self.assertIn(f'    if: ${{{{ {condition} }}}}', job_body(name), name)
+        # Sharded is also due on every pull request to main (a release); the unsharded full gate only on request.
+        self.assertIn(f"    if: ${{{{ inputs.integration == 'sharded' || ({RELEASE_PR}) }}}}", job_body('integration-legs'))
+        self.assertIn("    if: ${{ inputs.integration == 'full' }}", job_body('integration-full'))
+        self.assertNotIn('pull_request', job_body('integration-full'))
+        self.assertNotIn('pull_request', job_body('checks'))
+        self.assertNotIn('pull_request', job_body('scanner-index-image'))
         # The deep suites live only in the optional jobs.
         for name in ('checks', 'scanner-index-image', 'verify'):
             body = job_body(name)
@@ -131,6 +139,10 @@ class DeployPipelineTest(unittest.TestCase):
                          'full) legs=skipped; full=success; model=success ;;',
                          'test "$LEGS_RESULT" = "$legs"', 'test "$FULL_RESULT" = "$full"', 'test "$SCANNER_MODEL_RESULT" = "$model"'):
             self.assertIn(required, script)
+        # A pull request to main is due the sharded jobs even with no input, so skipped legs cannot pass there.
+        self.assertIn("RELEASE_PR: ${{ " + RELEASE_PR + " && 'true' || 'false' }}", verify)
+        self.assertIn('if [ "$RELEASE_PR" = true ] && [ "$INTEGRATION" = none ]; then INTEGRATION=sharded; fi', script)
+        self.assertLess(script.index('RELEASE_PR" = true'), script.index('case "$INTEGRATION"'))
         # An unrecognised choice fails instead of passing with everything skipped.
         self.assertIn('exit 1', script)
 

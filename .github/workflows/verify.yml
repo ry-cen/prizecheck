@@ -3,9 +3,11 @@ on:
   # Pull requests, and each dev deploy through deploy-dev.yml's call. No push trigger: a push to dev already runs this
   # workflow as the deploy gate, and other branches are checked when their pull request opens.
   pull_request:
-  # The default checks (formatting, lint, compilation, build, unit tests) are all an automatic run does. The deep
-  # integration suites (PostgreSQL-backed API tests, the auth server tests and Playwright) run only on demand: Actions ->
-  # Verify -> Run workflow, with an integration choice other than none. The default checks run in that run too.
+  # The default checks (formatting, lint, compilation, build, unit tests) are what an automatic run does, except on a
+  # pull request to main (a release), which also runs the sharded integration suites. Otherwise the deep integration
+  # suites (PostgreSQL-backed API tests, the auth server tests and Playwright) run only on demand: Actions -> Verify ->
+  # Run workflow, with an integration choice other than none. The default checks run in that run too. deploy-dev.yml's
+  # call is not a pull request, so it runs the default checks only.
   workflow_dispatch:
     inputs:
       integration:
@@ -49,8 +51,14 @@ jobs:
         run: npx vite build --config web/vite.config.ts && npm run check:bundle
       - name: Unit tests
         run: npm run test:unit
+  # Optional (integration: sharded, and every pull request to main). The fast tier of the deep suites, split into legs
+  # that run at once, each on its own runner with its own database server and stacks: three shards of api/tests, the
+  # auth leg (guardrails, the build and vitest, run once for every leg) and ten shards of the Playwright specs
+  # (scripts/verify.py --shard). On one hosted runner the fast tier took about 32 minutes, 22 of them in Playwright
+  # (October 2026); a leg takes about 5. inputs.integration is empty on pull_request and workflow_call, so these jobs
+  # run there only for a pull request to main.
   integration-legs:
-    if: ${{ inputs.integration == 'sharded' }}
+    if: ${{ inputs.integration == 'sharded' || (github.event_name == 'pull_request' && github.base_ref == 'main') }}
     name: ${{ matrix.leg }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -216,10 +224,10 @@ jobs:
           push: false
           cache-from: type=gha,scope=prizecheck-scanner-index${{ matrix.cache }}
           cache-to: type=gha,mode=max,scope=prizecheck-scanner-index${{ matrix.cache }}
-  # Optional (integration: sharded or full). Builds the Dockerfile's test stage with the pinned embedder and runs the
+  # Optional (integration: sharded or full, and every pull request to main). Builds the Dockerfile's test stage with the pinned embedder and runs the
   # real-model test inside it. That test needs ONNX Runtime, which the API venv does not have, so no other job runs it.
   integration-scanner-model:
-    if: ${{ inputs.integration == 'sharded' || inputs.integration == 'full' }}
+    if: ${{ inputs.integration == 'sharded' || inputs.integration == 'full' || (github.event_name == 'pull_request' && github.base_ref == 'main') }}
     name: integration-scanner-model (${{ matrix.runner }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
@@ -251,7 +259,7 @@ jobs:
   # The one check that stands for the whole run: pull requests and deploy-dev.yml's images job wait on "verify".
   # always() makes it run and fail after a failed or cancelled job instead of being skipped with it, because a skipped
   # check counts as passing. The default checks must always succeed. Each optional job must succeed when this run asked
-  # for it and must be skipped when it did not, so a job skipped by a wrong condition fails here instead of passing.
+  # for it, by the dispatch input or by a pull request to main, and must be skipped when it did not, so a job skipped by a wrong condition fails here instead of passing.
   verify:
     needs:
       [
@@ -268,15 +276,18 @@ jobs:
       - name: Require the default checks, and every requested integration job, to have passed
         env:
           INTEGRATION: ${{ inputs.integration || 'none' }}
+          RELEASE_PR: ${{ github.event_name == 'pull_request' && github.base_ref == 'main' && 'true' || 'false' }}
           CHECKS_RESULT: ${{ needs.checks.result }}
           SCANNER_INDEX_RESULT: ${{ needs.scanner-index-image.result }}
           LEGS_RESULT: ${{ needs.integration-legs.result }}
           FULL_RESULT: ${{ needs.integration-full.result }}
           SCANNER_MODEL_RESULT: ${{ needs.integration-scanner-model.result }}
         run: |
-          echo "integration: $INTEGRATION; checks: $CHECKS_RESULT; scanner index image: $SCANNER_INDEX_RESULT; legs: $LEGS_RESULT; full: $FULL_RESULT; scanner model: $SCANNER_MODEL_RESULT"
+          echo "integration: $INTEGRATION; release pull request: $RELEASE_PR; checks: $CHECKS_RESULT; scanner index image: $SCANNER_INDEX_RESULT; legs: $LEGS_RESULT; full: $FULL_RESULT; scanner model: $SCANNER_MODEL_RESULT"
           test "$CHECKS_RESULT" = success
           test "$SCANNER_INDEX_RESULT" = success
+          # A pull request to main (a release) is due the sharded legs even though no input was set.
+          if [ "$RELEASE_PR" = true ] && [ "$INTEGRATION" = none ]; then INTEGRATION=sharded; fi
           case "$INTEGRATION" in
             none) legs=skipped; full=skipped; model=skipped ;;
             sharded) legs=success; full=skipped; model=success ;;
