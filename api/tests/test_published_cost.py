@@ -18,6 +18,7 @@ import pytest
 
 from app.main import app, connect  # noqa: F401
 from app import price_launcher, public_deck, published_cost
+from app.bounded_work import Lane, Late
 from app.public_projection import FilePublicProjection, ProjectionUnavailable
 from app.public_records import price_key, public_record_store, quarantine_key
 from test_catalog_targets import isolated_rules, owner  # noqa: F401  (isolated_rules is autouse)
@@ -374,3 +375,19 @@ def test_a_stalled_snapshot_read_answers_inside_the_budget(store, monkeypatch):
     body = body_of(response)
     assert (body["status"], body["reason"], body["digest"], body["total_copies"]) == ("incomplete", "deadline", None, None)
     assert 0.4 < elapsed < 0.9, elapsed
+
+
+def test_a_full_projection_lane_answers_deadline_inside_the_budget(store, monkeypatch):
+    editions = world()
+    normal = editions["normal"]
+    seed(store, normal, "0.25")
+    _, token = publish({normal["id"]: 1})
+    lane, gate = Lane("t", 1), threading.Event()
+    monkeypatch.setattr(public_deck, "PROJECTION_LANE", lane)
+    try:
+        with pytest.raises(Late):
+            lane.run(lambda: gate.wait(5), 0.01)
+        body = body_of(public_cost(token, 1, ms=1000))
+        assert (body["status"], body["reason"], body["digest"], body["total_copies"]) == ("incomplete", "deadline", None, None)
+    finally:
+        gate.set()

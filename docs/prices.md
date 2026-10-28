@@ -89,7 +89,7 @@ Read order in `private_edition_quotes(edition_ids, budget)`:
 4. Final validation re-reads `edition_targets` inside the reserve. A row whose state, revision or lookup changed is relabelled from the fresh state (or `not_cached` when only the revision moved). If PostgreSQL cannot answer, the quotes are withheld (`validation_unavailable`).
 5. If the monotonic clock is past `hard`, every row becomes `deadline`.
 
-PostgreSQL work runs in a worker thread that the request waits on with its own clock, because libpq raises any connect timeout below two seconds to two. An abandoned worker ends on its own statement and lock timeouts.
+PostgreSQL work runs in a worker thread that the request waits on with its own clock, because libpq raises any connect timeout below two seconds to two. An abandoned worker ends on its own statement and lock timeouts. The worker threads come from a lane of at most 16 per API process (`prices.POSTGRES_LANE`), and a read that finds every slot taken past its own deadline answers `deadline`.
 
 ## Operational counters
 

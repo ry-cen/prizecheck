@@ -56,6 +56,7 @@ import hmac  # noqa: E402
 import json  # noqa: E402
 import os  # noqa: E402
 import socket  # noqa: E402
+import threading  # noqa: E402
 import time  # noqa: E402
 from uuid import uuid4  # noqa: E402
 
@@ -63,6 +64,7 @@ import psycopg  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 from app import prices  # noqa: E402
+from app.bounded_work import Lane, Late  # noqa: E402
 from app.price_reads import price_reads_enabled  # noqa: E402
 from app.catalog_targets import MATCHING  # noqa: E402
 from app.public_records import public_record_store, quote_key, result_key  # noqa: E402
@@ -439,6 +441,19 @@ def test_stored_edition_quotes_answer_from_the_same_rows_and_none_when_postgres_
     with monkeypatch.context() as patched:
         patched.setattr(psycopg, "connect", down)
         assert prices.stored_edition_quotes([normal["id"]]) is None
+
+
+def test_a_full_postgres_lane_answers_none_for_a_stored_read(store, monkeypatch):
+    normal = world()["normal"]
+    seed(store, normal)
+    lane, gate = Lane("t", 1), threading.Event()
+    monkeypatch.setattr(prices, "POSTGRES_LANE", lane)
+    try:
+        with pytest.raises(Late):
+            lane.run(lambda: gate.wait(5), 0.01)
+        assert prices.stored_edition_quotes([uuid4()], wait_seconds=0.05) is None
+    finally:
+        gate.set()
 
 
 def test_a_postgres_failure_withholds_the_row_as_validation_unavailable(store, monkeypatch):

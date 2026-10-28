@@ -17,12 +17,13 @@ from dataclasses import dataclass
 from fastapi import HTTPException, Request
 from pydantic import ValidationError
 
-from . import prices
+from .bounded_work import Lane, Late
 from .public_projection import ProjectionUnavailable, public_projection_store
 from .publications import PUBLIC_HEADERS, TOKEN, PublicSnapshot
 
 VERSION = re.compile(r'[1-9][0-9]{0,17}')
 QUANTITY = re.compile(r'[1-9][0-9]{0,63}')
+PROJECTION_LANE = Lane('public-projection', 4)  # a hit is microseconds and a miss is CPU-bound; caps leftover stall threads
 
 
 class SnapshotGone(Exception):
@@ -123,8 +124,8 @@ def read_current(token: str, *, deadline: float) -> ActiveSnapshot:
     if remaining <= 0:
         raise SnapshotLate()
     try:
-        record = prices._bounded(lambda: _record(token, max(0.001, remaining)), remaining)
-    except prices._Late:
+        record = PROJECTION_LANE.run(lambda: _record(token, max(0.001, remaining)), remaining)
+    except Late:
         raise SnapshotLate() from None
     if record is None:
         raise SnapshotGone()

@@ -8,7 +8,6 @@ unavailable/no_price without a query.
 from datetime import datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal, localcontext
 import os
-import threading
 from typing import Literal
 from uuid import UUID
 
@@ -18,6 +17,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from psycopg.rows import dict_row
 
+from .bounded_work import Lane, Late
 from .catalog_targets import is_unspecified
 from . import quote_contract
 from .price_reads import price_reads_enabled
@@ -76,28 +76,15 @@ def _unavailable(reason: Reason, status: Status = 'unavailable') -> QuoteView:
 
 
 # --- Reading ---------------------------------------------------------------------------------------------------
-class _Late(Exception):
-    """Work did not finish inside the budget; its thread is abandoned and ends on its own PostgreSQL timeouts."""
+_Late = Late  # Kept for deck_cost, want_list_cost: the same class as bounded_work.Late.
+POSTGRES_LANE = Lane('price-postgres', 16)  # under anyio's 40 threads and PostgreSQL's connection limit; caps stall growth
 
 
 def _bounded(call, timeout: float):
-    """Run blocking PostgreSQL work so the caller's own clock, not libpq's two-second connect floor, bounds the wait."""
-    box = {}
-
-    def work():
-        try:
-            box['value'] = call()
-        except BaseException as exc:  # noqa: BLE001 - re-raised in the caller
-            box['error'] = exc
-
-    thread = threading.Thread(target=work, name='price-postgres', daemon=True)
-    thread.start()
-    thread.join(max(0.0, timeout))
-    if thread.is_alive():
-        raise _Late()
-    if 'error' in box:
-        raise box['error']
-    return box['value']
+    """Run blocking PostgreSQL work so the caller's own clock, not libpq's two-second connect floor, bounds the wait,
+    slot wait included. At most 16 PostgreSQL reads run at once in a process; an abandoned one ends on its own
+    PostgreSQL timeouts."""
+    return POSTGRES_LANE.run(call, timeout)
 
 
 PRICE_QUERY = """SELECT e.id, e.descriptor, m.mapping_state, m.mapping_reason, m.product_id,
