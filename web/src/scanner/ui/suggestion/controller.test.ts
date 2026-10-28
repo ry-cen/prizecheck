@@ -13,7 +13,7 @@ const printing = (id: string, edition: string | null = "e-" + id) =>
     name: `Card ${id}`,
     set_name: "Set",
     collector_number: id.toUpperCase(),
-    low_image_url: `https://img/${id}.png`,
+    art_url: `/api/art/${id}/small?v=0a1b2c3d`,
     default_edition_id: edition,
     editions: [],
   }) as unknown as ScannerPrinting;
@@ -46,7 +46,7 @@ describe("candidatesFrom", () => {
       printingId: "a",
       name: "Card a",
       setLine: "Set A",
-      image: "https://img/a.png",
+      image: "/api/art/a/small?v=0a1b2c3d",
     });
   });
 });

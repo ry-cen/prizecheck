@@ -44,6 +44,9 @@ Persistent data lives on the host under `PRIZECHECK_DATA_DIR`:
 | `public/`        | Public projection and shared records store (published decks, discovery) | 10001       |
 | `price-runners/` | Price-runner lock files and host id                                     | 10001       |
 | `mail/`          | `codes.jsonl`, the sign-in codes while `MAIL_MODE=file`                 | 1000        |
+| `art/`           | Card art stored on first request (ADR 0020); regenerable                | 10001       |
+
+`art/` holds the card pictures the API fetched from TCGdex on first request and serves from `/api/art`. It is regenerable, so `backup` leaves it out on purpose; deleting it only costs refetches. After copying an updated `prizecheck-deploy.sh` to the host, run `prizecheck-deploy.sh setup` once: it creates `art/`, and deploys refuse to run without it.
 
 Deploy state lives under `PRIZECHECK_HOME` (`state/current`, `state/previous`, `state/history.log`, `backups/`).
 
@@ -459,7 +462,7 @@ If publications changed after the dump, also restore the matching `public` archi
 ## Backing up persistent data
 
 - **Automatic:** before applying migrations to an existing install, each deploy writes `backups/<time>-pre-<commit>.dump` (`pg_dump -Fc`) and keeps the newest ten pre-deploy dumps. Pre-deploy and manual dumps are pruned separately (ten of each), so daily manual backups never push out the pre-migration dump a restore needs.
-- **On demand:** this dumps PostgreSQL and archives the public projection store into `backups/`:
+- **On demand:** this dumps PostgreSQL and archives the public projection store into `backups/` (card art in `art/` is regenerable and left out):
 
   ```bash
   bash /mnt/cache/appdata/prizecheck-dev/bin/prizecheck-deploy.sh backup

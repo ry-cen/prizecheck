@@ -60,7 +60,7 @@ export function rowView(
   return {
     name: printing.name,
     setLine: `${printing.set_name} ${printing.collector_number}`,
-    image: printing.low_image_url,
+    image: printing.art_url,
     options,
     selected,
     onlyFinish:

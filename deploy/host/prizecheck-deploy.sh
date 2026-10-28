@@ -292,7 +292,7 @@ validate_config() {
   REGISTRY="$(env_value PRIZECHECK_REGISTRY)"; REGISTRY="${REGISTRY:-ghcr.io/ry-cen}"
   [[ -d "$DATA_DIR" ]] || die "Data directory $DATA_DIR is missing (storage not mounted?)"
   local sub
-  for sub in postgres public price-runners mail; do
+  for sub in postgres public price-runners mail art; do
     [[ -d "$DATA_DIR/$sub" ]] || die "Missing $DATA_DIR/$sub; run '$SCRIPT_PATH setup'"
   done
 }
@@ -747,10 +747,10 @@ cmd_setup() {
   read_environment
   DATA_DIR="$(env_value PRIZECHECK_DATA_DIR)"
   [[ -n "$DATA_DIR" ]] || die "Set PRIZECHECK_DATA_DIR in $ENV_FILE"
-  mkdir -p "$DATA_DIR"/{postgres,public,price-runners,mail} "$STATE_DIR" "$BACKUP_DIR"
-  chown "$API_UID:$API_UID" "$DATA_DIR/public" "$DATA_DIR/price-runners"
+  mkdir -p "$DATA_DIR"/{postgres,public,price-runners,mail,art} "$STATE_DIR" "$BACKUP_DIR"
+  chown "$API_UID:$API_UID" "$DATA_DIR/public" "$DATA_DIR/price-runners" "$DATA_DIR/art"
   chown "$AUTH_UID:$AUTH_UID" "$DATA_DIR/mail"
-  chmod 700 "$DATA_DIR/public" "$DATA_DIR/price-runners" "$DATA_DIR/mail" "$STATE_DIR" "$BACKUP_DIR"
+  chmod 700 "$DATA_DIR/public" "$DATA_DIR/price-runners" "$DATA_DIR/mail" "$DATA_DIR/art" "$STATE_DIR" "$BACKUP_DIR"
   # The readiness proof goes in signup/; signup-active/ holds the validated copy the gateway reads (no secrets in either).
   mkdir -p "$SIGNUP_DIR" "$SNAPSHOT_DIR"
   chown 0:0 "$SIGNUP_DIR" "$SNAPSHOT_DIR"
@@ -768,6 +768,7 @@ cmd_backup() {
   backup_database manual manual
   local target
   target="$BACKUP_DIR/$(date -u +%Y%m%dT%H%M%SZ)-public.tar.gz"
+  # art/ is regenerable card art (ADR 0020) and is left out on purpose
   tar -C "$DATA_DIR" -czf "$target" public
   prune_backups '*-public.tar.gz'
   log "Public projection store archived to $target"

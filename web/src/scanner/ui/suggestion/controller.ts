@@ -69,7 +69,7 @@ export function candidatesFrom(
       printingId: id,
       name: p.name,
       setLine: `${p.set_name} ${p.collector_number}`,
-      image: p.low_image_url,
+      image: p.art_url,
     });
   }
   return out;

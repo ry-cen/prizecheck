@@ -22,6 +22,18 @@ const tiny = {
   },
 };
 
+const tiny2 = {
+  ...tiny,
+  format: 2,
+  printings: {
+    id: tiny.printings.id,
+    set: tiny.printings.set,
+    number: tiny.printings.number,
+    name: tiny.printings.name,
+    art: [null, "0a1b2c3d"],
+  },
+};
+
 describe("card table", () => {
   it("inflates and parses subset-table.json.gz", async () => {
     const db = await loadSubsetTable();
@@ -56,9 +68,25 @@ describe("card table", () => {
       )
     );
     expect(a).toEqual(b);
-    expect(a.images).toEqual([null, "http://x/2"]);
+    expect(a.art).toEqual([null, null]);
     expect(releaseOf(a, 0)).toBe("");
     expect(releaseOf(a, 1)).toBe("2020-01-01");
+  });
+  it("parses format 2 and keeps the art versions", () => {
+    expect(parseCardTable(tiny2).art).toEqual([null, "0a1b2c3d"]);
+  });
+  it("rejects a format 2 art value that is not an 8-hex version", () => {
+    for (const art of [["https://x"], ["0A1B2C3D"], [7]])
+      expect(() =>
+        parseCardTable({
+          ...tiny2,
+          printings: { ...tiny2.printings, art: [null, ...art] },
+        })
+      ).toThrow(/printings\.art\[1\]/);
+    const { art: _art, ...noArt } = tiny2.printings;
+    expect(() => parseCardTable({ ...tiny2, printings: noArt })).toThrow(
+      /CARD_TABLE_INVALID/
+    );
   });
   it("throws CARD_TABLE_INVALID on a mismatched column length, bad format or bad set index", () => {
     expect(() =>
@@ -67,7 +95,7 @@ describe("card table", () => {
         printings: { ...tiny.printings, name: ["One"] },
       })
     ).toThrow(/CARD_TABLE_INVALID/);
-    expect(() => parseCardTable({ ...tiny, format: 2 })).toThrow(
+    expect(() => parseCardTable({ ...tiny, format: 3 })).toThrow(
       /CARD_TABLE_INVALID/
     );
     expect(() =>

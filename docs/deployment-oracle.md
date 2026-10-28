@@ -230,11 +230,13 @@ Everything lives under `/opt/prizecheck-prod`:
 | `bin/prizecheck-deploy.sh`               | The deploy script                                                                                                 |
 | `compose.deploy.yml`, `compose.prod.yml` | The stack and the production overlay                                                                              |
 | `prizecheck.env`                         | The env file (mode 600; step 7)                                                                                   |
-| `data/`                                  | PostgreSQL, the public projection store, price runners, mail                                                      |
+| `data/`                                  | PostgreSQL, the public projection store, price runners, mail, card art                                            |
 | `state/`, `backups/`                     | Release state and logs; database dumps and archives                                                               |
 | `signup/`, `signup-active/`              | The signup readiness proof you edit, and the validated copy the gateway reads ([Opening signup](#opening-signup)) |
 
 The script finds its home as the parent of its `bin/` directory, so keep that layout. `setup` (step 7) creates `data/`, `state/`, `backups/`, `signup/` and `signup-active/`.
+
+`data/art/` holds the card pictures the API fetched from TCGdex on first request (ADR 0020). It is regenerable, so `backup` leaves it out on purpose; deleting it only costs refetches. After copying an updated `prizecheck-deploy.sh` to the instance, run `sudo bash /opt/prizecheck-prod/bin/prizecheck-deploy.sh setup` once: it creates `data/art`, and deploys refuse to run without it.
 
 On the instance:
 
@@ -796,7 +798,7 @@ To restore a pre-migration dump after data damage or when an old release can't r
 ## Backing up persistent data
 
 - **Automatic:** before applying migrations to an existing install, each deploy writes `backups/<time>-pre-<commit>.dump` and keeps the newest ten pre-deploy dumps.
-- **On demand:** this dumps PostgreSQL and archives the public projection store into `backups/`, keeping ten of each kind:
+- **On demand:** this dumps PostgreSQL and archives the public projection store into `backups/`, keeping ten of each kind (card art in `data/art/` is regenerable and left out):
 
   ```bash
   sudo bash /opt/prizecheck-prod/bin/prizecheck-deploy.sh backup

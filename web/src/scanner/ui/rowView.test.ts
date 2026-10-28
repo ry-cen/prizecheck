@@ -10,7 +10,7 @@ const printing = (
     name: "Ralts",
     set_name: "Scarlet & Violet",
     collector_number: "084",
-    low_image_url: "https://img.example/ralts.png",
+    art_url: "/api/art/p/small?v=0a1b2c3d",
     editions: editions.map((e) => ({
       id: e.id,
       active: e.active,
@@ -76,6 +76,21 @@ describe("rowView", () => {
     );
     expect(v.name).toBe("Ralts");
     expect(v.setLine).toBe("SVI 084");
+  });
+
+  it("shows the art route URL of the printing, or of the cached face when the printing is not loaded", () => {
+    expect(rowView(row(), ralts, null, live).image).toBe(
+      "/api/art/p/small?v=0a1b2c3d"
+    );
+    const face = {
+      name: "Ralts",
+      setCode: "SVI",
+      number: "084",
+      image: "/api/art/p/small?v=0a1b2c3d",
+    };
+    expect(
+      rowView(row(), undefined, face, { offline: true, searchRow: false }).image
+    ).toBe(face.image);
   });
 
   it("names the one finish of a Printing that has only one", () => {

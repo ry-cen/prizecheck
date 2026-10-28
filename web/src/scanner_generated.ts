@@ -8,7 +8,7 @@ export type ScannerPrintingsResponse = { catalog_revision: number; printings: Sc
 export type ScanSaveItem = { edition_id: string; quantity: string };
 export type ScanSave = { location_id: string; idempotency_key: string; items: ScanSaveItem[] };
 export type ScanSaveResult = { location_id: string; edition_count: number; copy_count: string; owner_revision: number };
-export type ScannerPrinting = PrintingView & { default_edition_id: string | null };
+export type ScannerPrinting = PrintingView & { default_edition_id: string | null; art_url: string | null };
 
 /** A failed scanner request. `code` is the API's error code (CARDS_NOT_CURRENT, FINGERPRINTS_NOT_FOUND,
  * CATALOG_UNAVAILABLE) or SCANNER_REQUEST_FAILED when the response carried none. */

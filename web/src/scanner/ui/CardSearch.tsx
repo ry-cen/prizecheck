@@ -9,7 +9,6 @@ import { Dialog } from "../../ui/Dialog";
 import { variantLabel } from "../../ui/variantLabel";
 import { useDebouncedValue } from "../../workspace/useDebouncedValue";
 import { CardArt } from "./CardArt";
-import { tcgdexArt } from "./tcgdexArt";
 import {
   BACK_TO_SCANNING,
   NO_MATCHES,
@@ -115,7 +114,7 @@ export function CardSearch({
                   }
                   className="box-border flex min-h-control w-full cursor-pointer items-center gap-3 rounded-control border border-border-strong bg-surface-raised p-2 text-left font-sans text-control text-text hover:border-control-outline phone:min-h-tap"
                 >
-                  <CardArt src={tcgdexArt(card.image_url)} size="sm" />
+                  <CardArt src={card.art_url} size="sm" />
                   <span className="flex min-w-0 flex-col">
                     <span className="font-semibold">{card.name}</span>
                     <span className="text-meta text-text-muted">

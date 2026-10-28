@@ -1,7 +1,14 @@
-/** A card's small picture. Every image in the scanner carries crossorigin="anonymous": the page is cross-origin
- * isolated, and the art's host answers with Access-Control-Allow-Origin: * (spec "Web and delivery"). */
 import { useState } from "react";
 
+// Pictures that failed to load in this page. A card is locked, counted and shown again in new components (the tray
+// peek is keyed by count, the tray mounts its rows when it opens), so the memory lives here, not in a component: a
+// missing picture asks the route once per page and every later mount draws the placeholder straight away. A transient
+// failure therefore keeps the placeholder until the page is reloaded.
+const failed = new Set<string>();
+
+/** A card's small picture. The art is same-origin, from /api/art, so it needs no CORS under the scanner's cross-origin
+ * isolation. When it fails (the route answers 404 for a card with no picture) the plain placeholder shows and the
+ * picture is not requested again. */
 export function CardArt({
   src,
   size = "md",
@@ -9,15 +16,17 @@ export function CardArt({
   src: string | null;
   size?: "sm" | "md";
 }) {
+  const [, rerender] = useState(0);
   const box = size === "sm" ? "w-9" : "w-12";
-  const [failed, setFailed] = useState<string | null>(null);
-  return src && failed !== src ? (
+  return src && !failed.has(src) ? (
     <img
       src={src}
       alt=""
-      crossOrigin="anonymous"
-      onError={() => setFailed(src)}
       loading="lazy"
+      onError={() => {
+        failed.add(src);
+        rerender((n) => n + 1);
+      }}
       className={`${box} aspect-(--tile-aspect) shrink-0 rounded-card bg-surface-raised object-cover`}
     />
   ) : (

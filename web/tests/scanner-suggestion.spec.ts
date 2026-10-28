@@ -60,13 +60,14 @@ for (const size of SIZES) {
       await expect(
         card.getByRole("button", { name: "None of these" })
       ).toBeVisible();
-      // No scores, no prices; every image is anonymous-CORS.
+      // No scores, no prices; every image is same-origin art.
       await expect(card).not.toContainText(/\$|%|score/i);
       expect(
         await page.evaluate(
           () =>
-            [...document.images].filter((i) => i.crossOrigin !== "anonymous")
-              .length
+            [...document.images].filter(
+              (i) => new URL(i.src).origin !== location.origin
+            ).length
         )
       ).toBe(0);
 
