@@ -394,8 +394,93 @@ class MatchingRulesV4(MatchingRulesV3):
         return Failure("duplicate") if verified_elsewhere(product, variant) else (product, variant)
 
 
+class MatchingRulesV5(MatchingRulesV4):
+    """V4, then three more reviewed product sources, each tried only after V4 and behind every V1 physical check.
+
+    1. ``card_product``: the card's own TCGdex ``thirdParty.tcgplayer`` ID, for a plain Edition whose variant names no
+       TCGdex ID (V4 returned ``no_product``). Special Editions stay unverified.
+    2. ``shared_block_product``: V4 returned ``conflict`` only because one product is listed under several block keys
+       (1st-edition/unlimited, the holofoil pairs, normal/reverse-holofoil) and that product is the variant's own
+       ``thirdParty.tcgplayer``. Any other conflict, special Editions included, stands.
+    3. The reviewed set path, extended with the 30th Celebration sets. ``30th`` uses V4's number and exact-name path;
+       ``30th-c`` numbers its products by their original set, so it matches on the card's name alone, only when exactly
+       one numbered product has that name and no other Printing in the set shares it.
+
+    New sets or changes to these rules ship as a later rule version, never as an edit of this class.
+    """
+    TCGPLAYER_GROUPS = {**MatchingRulesV4.TCGPLAYER_GROUPS, "30th": 24722, "30th-c": 24837}
+    NAME_ONLY_SETS = frozenset({"30th-c"})
+    MAX_PRODUCT = 2**31 - 1
+
+    @classmethod
+    def table(cls):
+        return {**super().table(), "name_only_sets": sorted(cls.NAME_ONLY_SETS)}
+
+    @classmethod
+    def usable_product(cls, value):
+        return type(value) is int and 1 <= value <= cls.MAX_PRODUCT
+
+    @classmethod
+    def card_product(cls, facts):
+        """The card-level TCGdex TCGplayer ID for a plain Edition whose own lookup names no TCGdex ID, or None."""
+        if cls.has_tcgdex_id(facts["lookup"]) or not isinstance(facts["descriptor"], dict) or cls.special(facts["descriptor"]):
+            return None
+        record = facts.get("source_record")
+        third_party = record.get("thirdParty") if isinstance(record, dict) else None
+        product = third_party.get("tcgplayer") if isinstance(third_party, dict) else None
+        return product if cls.usable_product(product) else None
+
+    @classmethod
+    def shared_block_product(cls, facts):
+        """The one product a variant's block lists under two or more keys, when it is the variant's own ID, or None."""
+        lookup = facts["lookup"]
+        if not isinstance(facts["descriptor"], dict) or cls.special(facts["descriptor"]):
+            return None
+        pricing = lookup.get("pricing") if isinstance(lookup, dict) else None
+        block = pricing.get("tcgplayer") if isinstance(pricing, dict) else None
+        if not isinstance(block, dict):
+            return None
+        listed_products = [value["productId"] for key, value in block.items()
+                           if key not in cls.BLOCK_METADATA and isinstance(value, dict) and "productId" in value]
+        own = cls.listed_product(lookup)
+        if len(listed_products) < 2 or not cls.usable_product(own) or any(product != own or type(product) is not int
+                                                                          for product in listed_products):
+            return None
+        return own
+
+    @classmethod
+    def promo_product(cls, facts):
+        """V4's number and name path; for a name-only set, the one numbered product named exactly like the card."""
+        display = facts["display"]
+        if display["set_id"] not in cls.NAME_ONLY_SETS:
+            return super().promo_product(facts)
+        if cls.special(facts["descriptor"]) or facts.get("set_name_count") != 1:
+            return None
+        wanted = cls.fold(display["display_name"])
+        exact = {candidate["product_id"] for candidate in facts.get("tcgplayer_candidates") or ()
+                 if cls.number_key(candidate.get("number")) is not None and cls.fold(candidate["name"]) == wanted}
+        return next(iter(exact)) if len(exact) == 1 else None
+
+    @classmethod
+    def evaluate(cls, facts, verified_elsewhere):
+        result = super().evaluate(facts, verified_elsewhere)
+        if not isinstance(result, Failure):
+            return result
+        if result.reason == "no_product":
+            product = cls.card_product(facts)
+        elif result.reason == "conflict":
+            product = cls.shared_block_product(facts)
+        else:
+            product = None
+        if product is None:
+            return result
+        variant = cls.finish_key(cls.plain(facts["descriptor"]))
+        return Failure("duplicate") if verified_elsewhere(product, variant) else (product, variant)
+
+
 LIVE_RULES = {1: LiveRulesV1}
-MATCHING_RULES = {1: MatchingRulesV1, 2: MatchingRulesV2, 3: MatchingRulesV3, 4: MatchingRulesV4}
+MATCHING_RULES = {1: MatchingRulesV1, 2: MatchingRulesV2, 3: MatchingRulesV3, 4: MatchingRulesV4,
+                  5: MatchingRulesV5}
 REGISTRIES = {LIVE: LIVE_RULES, MATCHING: MATCHING_RULES}
 
 
@@ -676,14 +761,42 @@ def verified_elsewhere(conn, printing_id, edition_id):
     return held
 
 
-def tcgplayer_candidates(conn, set_id, collector_number):
-    """TCGCSV products in the set's reviewed group on the card's number, for matching rule v4's promo path."""
-    key = number_key(collector_number)
-    if key is None:
-        return []
-    return [{"product_id": row["product_id"], "name": row["name"], "number": row["number"]} for row in conn.execute(
-        "SELECT product_id,name,number FROM tcgplayer_product WHERE group_id=%s AND number_key=%s ORDER BY product_id",
-        (MatchingRulesV4.TCGPLAYER_GROUPS[set_id], key))]
+def reviewed_rule(active=None):
+    """The matching rule whose reviewed set table callers read: the active one, else the newest registered rule.
+
+    An active rule older than v4 has no set table, so the newest registered rule's table answers instead.
+    """
+    if active is not None and hasattr(active.rule, "TCGPLAYER_GROUPS"):
+        return active.rule
+    return MATCHING_RULES[max(MATCHING_RULES)]
+
+
+def tcgplayer_candidates(conn, set_id, collector_number, rule=None):
+    """TCGCSV products in the set's reviewed group for the rule's set path: the group's numbered products for a name-only
+    set, otherwise those on the card's number."""
+    rule = rule or reviewed_rule()
+    if set_id in getattr(rule, "NAME_ONLY_SETS", ()):
+        found = conn.execute("SELECT product_id,name,number FROM tcgplayer_product WHERE group_id=%s AND number_key IS NOT NULL "
+                             "ORDER BY product_id", (rule.TCGPLAYER_GROUPS[set_id],))
+    else:
+        key = number_key(collector_number)
+        if key is None:
+            return []
+        found = conn.execute("SELECT product_id,name,number FROM tcgplayer_product WHERE group_id=%s AND number_key=%s "
+                             "ORDER BY product_id", (rule.TCGPLAYER_GROUPS[set_id], key))
+    return [{"product_id": row["product_id"], "name": row["name"], "number": row["number"]} for row in found]
+
+
+def set_path_facts(conn, rule, row):
+    """The extra facts the rule's reviewed set path reads for one Edition row: candidates and, for name-only sets, the
+    number of Printings in the set sharing the card's display name."""
+    if row["set_id"] not in rule.TCGPLAYER_GROUPS:
+        return {}
+    facts = {"tcgplayer_candidates": tcgplayer_candidates(conn, row["set_id"], row["collector_number"], rule)}
+    if row["set_id"] in getattr(rule, "NAME_ONLY_SETS", ()):
+        facts["set_name_count"] = conn.execute("SELECT count(*) AS n FROM catalog_printing_display WHERE set_id=%s AND display_name=%s",
+                                               (row["set_id"], row["display_name"])).fetchone()["n"]
+    return facts
 
 
 def refresh_editions(conn, context, edition_ids, complete=False):
@@ -704,6 +817,7 @@ def refresh_editions(conn, context, edition_ids, complete=False):
       LEFT JOIN catalog_printing_display d ON d.printing_id=p.id
       WHERE e.id=ANY(%s) ORDER BY e.id""", (list(edition_ids),)).fetchall()
     changed = 0
+    rule = reviewed_rule(context.matching)
     for row in rows:
         candidate = row["mapping_candidate"]
         if not candidate:
@@ -713,8 +827,7 @@ def refresh_editions(conn, context, edition_ids, complete=False):
                  "source_id": row["source_id"], "source_record": row["source_record"] or {},
                  "display": {"set_id": row["set_id"], "collector_number": row["collector_number"],
                              "display_name": row["display_name"]} if row["set_id"] is not None else None}
-        if row["set_id"] in MatchingRulesV4.TCGPLAYER_GROUPS:
-            facts["tcgplayer_candidates"] = tcgplayer_candidates(conn, row["set_id"], row["collector_number"])
+        facts.update(set_path_facts(conn, rule, row))
         rejections = LazySet(lambda edition_id=row["id"]: [r["source_fingerprint"] for r in conn.execute(
             "SELECT source_fingerprint FROM catalog_metadata_rejection WHERE edition_id=%s AND target='marketplace'",
             (edition_id,))])
@@ -858,12 +971,13 @@ def rematch_promos(conn, batch=500):
     For promos TCGCSV lists after the rule was activated. Batches of ``batch`` Editions, each in its own transaction.
     Does nothing without an active matching rule, so an Edition is never relabelled ``no_matching_rule`` here.
     """
-    if load_active(conn, MATCHING) is None:
+    active = load_active(conn, MATCHING)
+    if active is None:
         return 0
     ids = [row["edition_id"] for row in conn.execute("""SELECT m.edition_id FROM catalog_edition_metadata m
       JOIN catalog_edition e ON e.id=m.edition_id JOIN catalog_printing_display d ON d.printing_id=e.printing_id
       WHERE m.mapping_state='unverified' AND NOT m.auto_closed AND m.mapping_reason='rule_failed' AND d.set_id=ANY(%s)
-      ORDER BY m.edition_id""", (list(MatchingRulesV4.TCGPLAYER_GROUPS),))]
+      ORDER BY m.edition_id""", (list(reviewed_rule(active).TCGPLAYER_GROUPS),))]
     changed = 0
     for start in range(0, len(ids), batch):
         with conn.transaction():

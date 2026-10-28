@@ -553,6 +553,7 @@ test.describe("desktop", () => {
         "stale_source",
         "imported",
         "matched by card number",
+        "matched by number or name",
       ])
         expect(text).not.toContain(word);
     } finally {
@@ -560,7 +561,7 @@ test.describe("desktop", () => {
     }
   });
 
-  test("the panel counts card-number matches and links to the list, where an owner rejects one", async ({
+  test("the panel counts number and name matches and links to the list, where an owner rejects one", async ({
     page,
   }) => {
     seedNumberMatches();
@@ -576,10 +577,14 @@ test.describe("desktop", () => {
       await seedImport("imported", 0);
       await openFromAccountMenu(page);
       const panel = priceImport(page);
-      await expect(panel).toContainText("2 Editions matched by card number");
+      await expect(panel).toContainText("2 Editions matched by number or name");
       await panel.getByRole("button", { name: "Review matches" }).click();
-      const list = page.getByRole("region", { name: "Matched by card number" });
-      const table = list.getByRole("region", { name: "Card-number matches" });
+      const list = page.getByRole("region", {
+        name: "Matched by number or name",
+      });
+      const table = list.getByRole("region", {
+        name: "Number and name matches",
+      });
       await expect(table.getByRole("row")).toHaveCount(3);
       await expect(table).toContainText("Chimchar - DP02");
       await expect(table).toContainText("product 901, group 1421");
@@ -610,7 +615,7 @@ test.describe("desktop", () => {
       });
       await expectPageChecks(
         page,
-        "Owner controls, Matched by card number (desktop)"
+        "Owner controls, Matched by number or name (desktop)"
       );
     } finally {
       await resetPriceImports();

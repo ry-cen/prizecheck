@@ -877,6 +877,30 @@ def test_rejecting_a_card_number_match_unverifies_it_and_neither_rebind_activati
     assert [item["name"] for item in matches()["items"]] == ["Chimchar"]
 
 
+def test_the_matched_list_follows_the_active_rule_and_a_rejected_30th_classic_name_match_stays_unverified(tcgplayer_products):
+    seed_users()
+    listing(900, "Turtwig", "DP01", 1421)
+    listing(910, "Charizard", "4/102", 24837)
+    run(Records(promo("dpp-1", "DP01", "dpp", "Turtwig"), promo("c-1", "001", "30th-c", "Charizard"),
+                promo("th-1", "021", "30th", "Greninja ex", [{"type": "holo", "size": "standard", "thirdParty": {"tcgplayer": 477184}}])))
+    activate_as_owner(MATCHING, 4)
+    assert [item["name"] for item in matches()["items"]] == ["Turtwig"]
+    activate_as_owner(MATCHING, 5)
+    listed = sorted((item["name"], item["set_id"], item["matched_product"]["product_id"], item["rule_version"]) for item in matches()["items"])
+    assert listed == [("Charizard", "30th-c", 910, 5), ("Turtwig", "dpp", 900, 4)]  # the 30th card with a TCGdex id is not listed
+    classic = next(item for item in matches()["items"] if item["name"] == "Charizard")
+    assert decide(classic, "reject_source").status_code == 200
+    assert [item["name"] for item in matches()["items"]] == ["Turtwig"]
+    with connect() as conn:
+        assert rematch_promos(conn) == 0
+    activate_as_owner(MATCHING, 4)
+    activate_as_owner(MATCHING, 5)
+    with connect() as conn:
+        assert rematch_promos(conn) == 0
+    row = edition_row(classic["edition_id"])
+    assert (row["mapping_state"], row["mapping_reason"], row["product_id"]) == ("unverified", "reviewed_unmapped", None)
+
+
 def test_the_owner_status_counts_card_number_matches_and_collector_status_does_not(number_matches):
     status = request("GET", "/api/admin/catalog-runs", OWNER)
     assert status.status_code == 200 and status.json()["matched_by_number"] == 2

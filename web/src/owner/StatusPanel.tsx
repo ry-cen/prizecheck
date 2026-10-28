@@ -16,7 +16,7 @@ type Props = {
   /** Re-reads the pull, operational health and the tab counts. */
   onRefresh: () => void;
   onStart: () => void;
-  /** Opens the Metadata tab's "Matched by card number" list. */
+  /** Opens the Metadata tab's "Matched by number or name" list. */
   onReviewMatches: () => void;
 };
 
@@ -131,7 +131,8 @@ export function StatusPanel({
         {!!status.matched_by_number && (
           <p className="m-0 flex flex-wrap items-center gap-2 text-meta">
             {status.matched_by_number.toLocaleString()} Edition
-            {status.matched_by_number === 1 ? "" : "s"} matched by card number
+            {status.matched_by_number === 1 ? "" : "s"} matched by number or
+            name
             <Button variant="quiet" onClick={onReviewMatches}>
               Review matches
             </Button>

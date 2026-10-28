@@ -9,7 +9,7 @@ import psycopg
 import pytest
 
 from app.catalog_targets import (LIVE, LIVE_RULES, MATCHING, MATCHING_RULES, REGISTRIES, EditionState, Failure,
-                                 LiveRulesV1, MatchingRulesV1, MatchingRulesV2, MatchingRulesV3, MatchingRulesV4, PrintingState, TargetContext, activate_rule,
+                                 LiveRulesV1, MatchingRulesV1, MatchingRulesV2, MatchingRulesV3, MatchingRulesV4, MatchingRulesV5, PrintingState, TargetContext, activate_rule,
                                  code_digest, complete_quote_variant, rematch_promos, edition_state, edition_targets, evaluate_edition, normalized_name,
                                  evaluate_printing, fingerprint, load_active, printing_live, refresh_printing)
 from app.main import connect
@@ -986,6 +986,7 @@ PINNED_DIGESTS = {
     (MATCHING, 2): "6994b033232a73138f83cda642e97edc8e75e692e9bba29a3704b913eb7a6eef",
     (MATCHING, 3): "60e02ce648ea81e2177124c2f4a5740897e5481dbecfa20a1a1395dddf184c5e",
     (MATCHING, 4): "6a6b62a2081d42185309a4ba389cd1260409e018c1449de20eb1e0feb797b57a",
+    (MATCHING, 5): "2d4d684153038c490d12bca2474ec997e3a2d1042b3d79f45934a3fa44c85942",
 }
 
 
@@ -1261,3 +1262,262 @@ def test_activate_rule_refuses_deactivation():
     reset_catalog()
     with connect() as conn, conn.transaction(), pytest.raises(ValueError, match="Deactivation was removed"):
         activate_rule(conn, LIVE, None, owner(), "https://example.org/rule", "Reviewed against the target")
+
+
+# ------------------------------------------------------------------ matching rule v5 (P10 #376, P13 #380)
+
+
+def with_card_id(record, product):
+    record["thirdParty"] = {"tcgplayer": product}
+    return record
+
+
+def v5_facts(**changes):
+    return facts(**{"source_record": {"set": {"id": "xy11"}, "localId": "116", "name": "Gardevoir EX"},
+                    "display": {"set_id": "xy11", "collector_number": "116", "display_name": "Gardevoir EX"}, **changes})
+
+
+def evaluate_v5(**changes):
+    return MatchingRulesV5.evaluate(v5_facts(**changes), lambda product, variant: False)
+
+
+def block(*keys, product=10):
+    return {"pricing": {"tcgplayer": {"unit": "USD", **{key: {"productId": product} for key in keys}}}, "thirdParty": {"tcgplayer": product}}
+
+
+def card_level(product, **record):
+    return {"source_record": {"set": {"id": "xy11"}, "localId": "116", "name": "Gardevoir EX", "thirdParty": {"tcgplayer": product}, **record},
+            "lookup": {"variantId": "generated"}}
+
+
+def test_v5_table_is_v4s_plus_the_30th_sets_and_registered_as_5():
+    assert MatchingRulesV5.TCGPLAYER_GROUPS == {**MatchingRulesV4.TCGPLAYER_GROUPS, "30th": 24722, "30th-c": 24837}
+    assert MatchingRulesV5.NAME_ONLY_SETS == frozenset({"30th-c"})
+    assert MATCHING_RULES[5] is MatchingRulesV5 and "30th" not in MatchingRulesV4.TCGPLAYER_GROUPS
+    assert MatchingRulesV5.table()["name_only_sets"] == ["30th-c"]
+
+
+def test_v5_card_product_needs_a_plain_edition_and_a_variant_without_a_tcgdex_id():
+    assert MatchingRulesV4.evaluate(v5_facts(**card_level(121240)), lambda p, v: False) == Failure("no_product")
+    assert evaluate_v5(**card_level(121240)) == (121240, "normal")
+    for descriptor in ({"type": "normal", "stamp": ["staff"]}, {"type": "normal", "foil": "cosmos"}, {"type": "normal", "size": "jumbo"},
+                       {"type": "normal", "subtype": "other"}):
+        assert evaluate_v5(descriptor=descriptor, **card_level(121240)) == Failure("no_product"), descriptor
+    assert evaluate_v5(descriptor={"type": "normal", "stamp": ["1st-edition"]}, **card_level(121240)) == (121240, None)
+    for bad in (True, "5", 0, -3, 2**31, 1.0, None):
+        assert evaluate_v5(**card_level(bad)) == Failure("no_product"), bad
+    assert evaluate_v5(**{**card_level(121240), "lookup": {"thirdParty": {"tcgplayer": 7}}}) == (7, "normal")  # the variant's own id wins
+    assert evaluate_v5(**{**card_level(121240), "lookup": {"thirdParty": {"tcgplayer": "x"}}}) == Failure("no_product")
+    assert evaluate_v5(**{**card_level(121240), "correspondence": "printing_level"}) == Failure("not_established")
+    assert MatchingRulesV5.evaluate(v5_facts(**card_level(121240)), lambda product, variant: product == 121240) == Failure("duplicate")
+
+
+def test_v5_shared_block_accepts_one_product_under_several_keys_only_when_it_is_the_variants_own_id():
+    for keys, descriptor, expected in (
+            (("1st-edition", "unlimited"), {"type": "normal"}, (10, "normal")),
+            (("1st-edition", "unlimited"), {"type": "normal", "stamp": ["1st-edition"]}, (10, None)),
+            (("1st-edition-holofoil", "unlimited-holofoil"), {"type": "holo"}, (10, "holofoil")),
+            (("normal", "reverse-holofoil"), {"type": "holo"}, (10, "holofoil")),
+            (("normal", "reverse-holofoil", "holofoil"), {"type": "holo", "subtype": "unlimited"}, (10, None))):
+        given = v5_facts(lookup=block(*keys), descriptor=descriptor)
+        assert MatchingRulesV4.evaluate(given, lambda p, v: False) == Failure("conflict"), keys
+        assert MatchingRulesV5.evaluate(given, lambda p, v: False) == expected, keys
+        assert MatchingRulesV5.evaluate(given, lambda p, v: p == 10) == Failure("duplicate"), keys
+    two = block("1st-edition", "unlimited")
+    two["pricing"]["tcgplayer"]["unlimited"]["productId"] = 11
+    different_own = {**block("1st-edition", "unlimited"), "thirdParty": {"tcgplayer": 11}}
+    no_own = {"pricing": block("1st-edition", "unlimited")["pricing"]}
+    odd = block("1st-edition", "unlimited")
+    odd["pricing"]["tcgplayer"]["unlimited"]["productId"] = True
+    for lookup in (two, different_own, no_own, odd):
+        assert MatchingRulesV5.evaluate(v5_facts(lookup=lookup), lambda p, v: False) == Failure("conflict"), lookup
+    for descriptor in ({"type": "reverse", "stamp": ["set-logo"]}, {"type": "normal", "foil": "cosmos"}, {"type": "normal", "stamp": ["staff"]}):
+        given = v5_facts(lookup=block("normal", "reverse-holofoil"), descriptor=descriptor)
+        assert MatchingRulesV5.evaluate(given, lambda p, v: False) == Failure("conflict"), descriptor
+
+
+def test_v5_name_only_set_needs_one_exact_numbered_product_and_a_unique_name_in_the_set():
+    def classic(name="Charizard", count=1, found=None, **changes):
+        found = [{"product_id": 1, "name": "Charizard", "number": "4/102"}] if found is None else found
+        return MatchingRulesV5.evaluate(
+            facts(**{"source_record": {"set": {"id": "30th-c"}, "localId": "001", "name": name},
+                     "display": {"set_id": "30th-c", "collector_number": "001", "display_name": name}, "tcgplayer_candidates": found,
+                     "set_name_count": count, "descriptor": {"type": "holo"}, **changes}), lambda p, v: False)
+    assert classic() == (1, "holofoil")
+    assert classic(count=2) == Failure("no_product")
+    assert classic(name="Metagross", found=[{"product_id": 2, "name": "Metagross (Delta Species)", "number": "1/10"}]) == Failure("no_product")
+    assert classic(found=[{"product_id": 1, "name": "Charizard", "number": "4/102"},
+                          {"product_id": 2, "name": "charizard", "number": "5/102"}]) == Failure("no_product")
+    assert classic(found=[{"product_id": 1, "name": "Charizard", "number": None}]) == Failure("no_product")
+    assert classic(found=[{"product_id": 1, "name": "Charizard - 001", "number": "001"}]) == Failure("no_product")  # no qualifier is stripped
+    assert classic(descriptor={"type": "holo", "stamp": ["staff"]}) == Failure("no_product")
+    assert classic(lookup={"thirdParty": {"tcgplayer": 5}}) == (5, "holofoil")  # a TCGdex id never takes the set path
+
+
+def xy11_116(source_id="xy11-116", number="116", product=121240, variants=None):
+    return with_card_id(promo(source_id, number, "xy11", "Gardevoir EX", variants or [{"type": "normal", "size": "standard"}]), product)
+
+
+def stock_prices(*rows):
+    with connect() as conn:
+        for product, sub_type in rows:
+            conn.execute("INSERT INTO tcgplayer_price(product_id,sub_type_name,market_price,seen_at,source_updated_at) VALUES (%s,%s,1,now(),now())",
+                         (product, sub_type))
+
+
+def bound_sub_types():
+    from app.price_binding import rebind
+    with connect() as conn:
+        rebind(conn)
+        return sorted((row["product_id"], row["sub_type_name"]) for row in conn.execute("SELECT * FROM edition_price_binding"))
+
+
+def test_v5_verifies_a_card_level_id_where_v4_fails_and_the_binding_picks_the_offered_subtype(tcgplayer_products):
+    reset_catalog()
+    run(Records(xy11_116()))
+    activate(MATCHING, 4)
+    assert states("xy11-116") == [("unverified", "rule_failed", None, None)]
+    assert activate(MATCHING, 5) == {"printings": 0, "editions": 1}
+    assert states("xy11-116") == [("verified", None, 121240, "normal")]
+    stock_prices((121240, "Holofoil"))
+    assert bound_sub_types() == [(121240, "Holofoil")]
+    stock_prices((121240, "Normal"))
+    assert bound_sub_types() == [(121240, "Normal")]
+
+
+def test_v5_card_level_id_covers_normal_and_reverse_siblings_but_not_stamped_variants_or_variants_with_their_own_id(tcgplayer_products):
+    reset_catalog()
+    run(Records(
+        xy11_116("two-1", "1", 500, [{"type": "normal", "size": "standard"}, {"type": "reverse", "size": "standard"}]),
+        xy11_116("stamp-2", "2", 501, [{"type": "normal", "size": "standard", "stamp": ["staff"]}]),
+        xy11_116("own-3", "3", 502, [{"type": "normal", "size": "standard", "thirdParty": {"tcgplayer": 599}}])))
+    activate(MATCHING, 5)
+    assert states("two-1") == [("verified", None, 500, "normal"), ("verified", None, 500, "reverse-holofoil")]
+    assert states("stamp-2") == [("unverified", "rule_failed", None, None)]
+    assert states("own-3") == [("verified", None, 599, "normal")]
+    stock_prices((500, "Normal"), (500, "Reverse Holofoil"))
+    assert [item for item in bound_sub_types() if item[0] == 500] == [(500, "Normal"), (500, "Reverse Holofoil")]
+
+
+def test_v5_card_level_id_held_by_another_printing_is_a_duplicate(tcgplayer_products):
+    reset_catalog()
+    run(Records(xy11_116("a-1", "1", 500), xy11_116("b-2", "2", 500)))
+    activate(MATCHING, 5)
+    assert sorted(states("a-1") + states("b-2")) == [("unverified", "duplicate_mapping", None, None), ("verified", None, 500, "normal")]
+
+
+def gym(source_id, number, product, variants):
+    record = promo(source_id, number, "gym1", "Blaine's Moltres", variants)
+    return record
+
+
+def shared(descriptor, product, *keys, own=None):
+    return {**descriptor, "size": "standard", "thirdParty": {"tcgplayer": own or product},
+            "pricing": {"tcgplayer": {"unit": "USD", **{key: {"productId": product} for key in keys}}}}
+
+
+def test_v5_shared_block_binds_unlimited_and_the_first_edition_sibling_and_leaves_other_conflicts(tcgplayer_products):
+    reset_catalog()
+    keys = ("1st-edition", "unlimited")
+    run(Records(
+        gym("gym-1", "1", 700, [shared({"type": "normal"}, 700, *keys), shared({"type": "normal", "stamp": ["1st-edition"]}, 700, *keys)]),
+        gym("gym-2", "2", 701, [shared({"type": "holo"}, 701, "1st-edition-holofoil", "unlimited-holofoil"),
+                                shared({"type": "holo", "stamp": ["1st-edition"]}, 701, "1st-edition-holofoil", "unlimited-holofoil")]),
+        gym("gym-3", "3", 702, [shared({"type": "normal"}, 702, *keys, own=9)]),
+        gym("gym-4", "4", 703, [shared({"type": "reverse", "stamp": ["set-logo"]}, 703, "normal", "reverse-holofoil")])))
+    activate(MATCHING, 4)
+    assert {row["mapping_reason"] for source in ("gym-1", "gym-2", "gym-3", "gym-4") for row in metadata(source)[1].values()} == {"rule_failed"}
+    activate(MATCHING, 5)
+    def by_stamp(source_id):
+        with connect() as conn:
+            return {"1st-edition" in row["descriptor"].get("stamp", []): (row["mapping_state"], row["product_id"], row["quote_variant"])
+                    for row in conn.execute("""SELECT e.descriptor,m.* FROM catalog_edition e JOIN catalog_edition_metadata m ON m.edition_id=e.id
+                      JOIN catalog_printing p ON p.id=e.printing_id WHERE p.source_id=%s""", (source_id,))}
+    assert by_stamp("gym-1") == {False: ("verified", 700, "normal"), True: ("verified", 700, None)}
+    assert by_stamp("gym-2") == {False: ("verified", 701, "holofoil"), True: ("verified", 701, None)}
+    assert states("gym-3") == [("unverified", "rule_failed", None, None)]
+    assert states("gym-4") == [("unverified", "rule_failed", None, None)]
+    stock_prices((700, "1st Edition"), (700, "Unlimited"), (701, "1st Edition Holofoil"), (701, "Unlimited Holofoil"))
+    with connect() as conn:
+        from app.price_binding import rebind
+        rebind(conn)
+        rows = conn.execute("""SELECT e.descriptor,b.sub_type_name FROM edition_price_binding b JOIN catalog_edition e ON e.id=b.edition_id""").fetchall()
+    assert sorted(("1st-edition" in row["descriptor"].get("stamp", []), row["sub_type_name"]) for row in rows) == [
+        (False, "Unlimited"), (False, "Unlimited Holofoil"), (True, "1st Edition"), (True, "1st Edition Holofoil")]
+
+
+def thirty(source_id, number, name, set_id="30th", **extra):
+    return {**promo(source_id, number, set_id, name), **extra}
+
+
+def thirty_products():
+    listing(800, "Greninja ex - 021/128", "021/128", 24722)
+    listing(801, "Nidoran F - 087/128", "087/128", 24722)
+    with connect() as conn:  # a sealed product: no number, never a candidate
+        conn.execute("""INSERT INTO tcgplayer_product(product_id,group_id,name,number,number_key,seen_at,source_updated_at)
+          VALUES (809,24722,'Greninja ex',NULL,NULL,now(),now())""")
+    listing(810, "Charizard", "4/102", 24837)
+    listing(811, "Metagross (Delta Species)", "5/102", 24837)
+    listing(812, "Pikachu", "6/102", 24837)
+    listing(813, "Pikachu", "7/102", 24837)
+    listing(814, "Eevee", "8/102", 24837)
+
+
+def test_v5_30th_sets_match_by_number_and_name_and_by_name_alone(tcgplayer_products):
+    reset_catalog()
+    thirty_products()
+    run(Records(thirty("th-21", "021", "Greninja ex", image="https://assets.tcgdex.net/en/me/30th/021"),
+                thirty("th-87", "087", "Nidoran♀"),
+                thirty("c-1", "001", "Charizard", "30th-c"), thirty("c-3", "003", "Metagross", "30th-c"),
+                thirty("c-6", "006", "Pikachu", "30th-c"), thirty("c-7", "007", "Eevee", "30th-c"),
+                thirty("c-8", "008", "Eevee", "30th-c")))
+    activate(MATCHING, 4)
+    assert states("th-21") == [("unverified", "rule_failed", None, None)]
+    activate(MATCHING, 5)
+    assert states("th-21") == [("verified", None, 800, "holofoil")]
+    assert states("th-87") == [("unverified", "rule_failed", None, None)]
+    assert states("c-1") == [("verified", None, 810, "holofoil")]
+    for source in ("c-3", "c-6", "c-7", "c-8"):  # a delta-species name, two products, and two Printings sharing a name
+        assert states(source) == [("unverified", "rule_failed", None, None)], source
+
+
+def test_v5_30th_classic_printing_gets_tcgplayer_art_and_a_30th_printing_keeps_its_tcgdex_image(tcgplayer_products):
+    from app import card_art
+    reset_catalog()
+    thirty_products()
+    with connect() as conn:
+        conn.execute("UPDATE tcgplayer_product SET image_count=1 WHERE product_id IN (800,810)")
+    run(Records(thirty("th-21", "021", "Greninja ex", image="https://assets.tcgdex.net/en/me/30th/021"),
+                thirty("c-1", "001", "Charizard", "30th-c")))
+    activate(MATCHING, 5)
+    with connect() as conn:
+        card_art.refresh_fallbacks(conn)
+        chosen = {row["source_id"]: row["product_id"] for row in conn.execute(
+            "SELECT p.source_id,f.product_id FROM catalog_printing_fallback_art f JOIN catalog_printing p ON p.id=f.printing_id")}
+    assert chosen == {"c-1": 810}
+
+
+def test_v5_rematch_picks_up_a_30th_product_listed_after_activation(tcgplayer_products):
+    reset_catalog()
+    activate(MATCHING, 5)
+    run(Records(thirty("th-21", "021", "Greninja ex"), thirty("c-1", "001", "Charizard", "30th-c")))
+    assert rematched() == 0
+    assert states("th-21") == [("unverified", "rule_failed", None, None)]
+    listing(800, "Greninja ex - 021/128", "021/128", 24722)
+    listing(810, "Charizard", "4/102", 24837)
+    assert rematched() == 2
+    assert states("th-21") == [("verified", None, 800, "holofoil")] and states("c-1") == [("verified", None, 810, "holofoil")]
+
+
+def test_v5_tables_follow_the_active_rule_and_v4_ignores_the_30th_sets(tcgplayer_products):
+    from app.catalog_targets import reviewed_rule, tcgplayer_candidates
+    thirty_products()
+    with connect() as conn:
+        assert reviewed_rule(None) is MatchingRulesV5 and reviewed_rule(load_active(conn, MATCHING)) is MatchingRulesV5
+        assert [item["product_id"] for item in tcgplayer_candidates(conn, "30th-c", "001")] == [810, 811, 812, 813, 814]
+        assert [item["product_id"] for item in tcgplayer_candidates(conn, "30th", "21")] == [800]
+        assert tcgplayer_candidates(conn, "30th", "") == []
+    reset_catalog()
+    run(Records(thirty("th-21", "021", "Greninja ex")))
+    activate(MATCHING, 4)
+    assert rematched() == 0 and states("th-21") == [("unverified", "rule_failed", None, None)]

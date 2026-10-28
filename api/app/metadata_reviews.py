@@ -21,9 +21,9 @@ from pydantic import BaseModel, Field, HttpUrl
 
 from . import public_catalog
 from .price_binding import spawn_rebind
-from .catalog_targets import (LIVE, MATCHING, REGISTRIES, MatchingRulesV1, MatchingRulesV2, MatchingRulesV4, TargetContext,
+from .catalog_targets import (LIVE, MATCHING, REGISTRIES, MatchingRulesV1, MatchingRulesV2, TargetContext,
                               code_digest, fingerprint, is_unspecified,
-                              refresh_editions, refresh_printing, verified_elsewhere)
+                              load_active, refresh_editions, refresh_printing, reviewed_rule, verified_elsewhere)
 from .holdings import fail
 from .db import connect
 from .identity import require_owner, verified_user
@@ -318,6 +318,7 @@ def matched_by_number_editions(conn) -> list:
 
     Maintainer decisions are left out (the owner chose those). Rows carry the product and the rule version.
     """
+    rule = reviewed_rule(load_active(conn, MATCHING))
     rows = conn.execute("""SELECT e.id AS edition_id,m.product_id,p.name AS product_name,p.group_id,a.version AS rule_version,
       m.mapping_candidate->'candidate' AS lookup,d.set_id,
       CASE WHEN jsonb_typeof(pm.source_record)='object' THEN jsonb_build_object('pricing',pm.source_record->'pricing',
@@ -331,8 +332,8 @@ def matched_by_number_editions(conn) -> list:
       LEFT JOIN catalog_rule_activation a ON a.id=m.matching_activation_id
       LEFT JOIN tcgplayer_product p ON p.product_id=m.product_id
       WHERE m.mapping_state='verified' AND m.mapping_basis='matching_rule' AND d.set_id=ANY(%s)
-      ORDER BY e.id""", (list(MatchingRulesV4.TCGPLAYER_GROUPS),)).fetchall()
-    return [row for row in rows if MatchingRulesV4.matched_by_number(
+      ORDER BY e.id""", (list(rule.TCGPLAYER_GROUPS),)).fetchall()
+    return [row for row in rows if rule.matched_by_number(
         {"display": {"set_id": row["set_id"]}, "lookup": row["lookup"] or {}, "source_record": row["record"] or {}})]
 
 

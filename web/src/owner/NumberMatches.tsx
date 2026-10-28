@@ -85,7 +85,7 @@ function RejectCard({
     <ReviewCard title={label(item)} onClose={onClose} focusRef={reasonField}>
       <p className="m-0 text-meta text-text-muted">
         {item.set_id ? `${item.set_id} #${item.collector_number} · ` : ""}
-        Matched by card number to {productText(item)}
+        Matched by number or name to {productText(item)}
         {item.rule_version == null
           ? ""
           : ` · matching rule v${item.rule_version}`}
@@ -128,7 +128,7 @@ function RejectCard({
   );
 }
 
-/** Owner controls' "Matched by card number" view (#347): verified Editions the card-number path matched, each with
+/** Owner controls' "Matched by number or name" view (#347, #376): verified Editions the set path matched, each with
  * the product it named and a Reject match decision. */
 export function NumberMatches({ onChanged }: { onChanged: () => void }) {
   const [items, setItems] = useState<MetadataQueueItem[]>([]);
@@ -152,7 +152,7 @@ export function NumberMatches({ onChanged }: { onChanged: () => void }) {
       setCursor(page.next_cursor);
       setMessage("");
     } catch {
-      setMessage("Unable to load the card-number matches.");
+      setMessage("Unable to load the number and name matches.");
     }
   }
   useEffect(() => {
@@ -161,12 +161,12 @@ export function NumberMatches({ onChanged }: { onChanged: () => void }) {
 
   return (
     <ReviewQueue
-      title="Matched by card number"
-      intro="Editions verified by the card-number rule rather than a product ID. Reject a match that names the wrong product."
-      tableLabel="Card-number matches"
+      title="Matched by number or name"
+      intro="Editions verified by card number or card name rather than a product ID. Reject a match that names the wrong product."
+      tableLabel="Number and name matches"
       columns={COLUMNS}
       rows={items.map(row)}
-      emptyText="No Editions are matched by card number."
+      emptyText="No Editions are matched by number or name."
       open={open}
       onOpen={setOpen}
       renderCard={(rowKey, close) => {

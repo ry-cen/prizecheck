@@ -177,7 +177,7 @@ function OwnerControls({
               aria-pressed={metadataView === "card_number"}
               onClick={() => setMetadataView("card_number")}
             >
-              Matched by card number
+              Matched by number or name
             </Button>
           </div>
           {metadataView === "review" ? (
