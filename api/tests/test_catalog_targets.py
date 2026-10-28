@@ -1,5 +1,6 @@
 """Reviewed Live and Marketplace target state: rules, precedence, quarantine and commit-ordered revisions."""
 import copy
+import inspect
 import json
 import re
 import threading
@@ -989,9 +990,7 @@ PINNED_DIGESTS = {
     (MATCHING, 3): "60e02ce648ea81e2177124c2f4a5740897e5481dbecfa20a1a1395dddf184c5e",
     (MATCHING, 4): "6a6b62a2081d42185309a4ba389cd1260409e018c1449de20eb1e0feb797b57a",
     (MATCHING, 5): "6a870e3f61697fe0a35009951889d6a83a74f3c2f33b7af0c840d4d5c8240106",
-
-
-    (MATCHING, 6): "af70686645e41acce32346fcecb9119652bcb26f608b49d9c701ee80acdea1de",
+    (MATCHING, 6): "ed8cafaf8481c43926c4914babfbb155058a6f65d323a225508200e03495e121",
 }
 
 
@@ -1698,6 +1697,14 @@ def test_v6_name_equivalences_agree_with_the_proposal_script():
         folded = MatchingRulesV6.fold(name)
         assert MatchingRulesV6.equivalent(folded) == script.apply_equivalences(folded, script.ALL_EQUIVALENCES)[0], name
         assert MatchingRulesV6.fold(name) == script.fold(name), name
+    assert script.DELTA.pattern == MatchingRulesV6.DELTA.pattern
+    assert script.HYPHEN_SUFFIX.pattern == MatchingRulesV6.HYPHEN_SUFFIX.pattern
+    assert script.CURLY_APOSTROPHES == MatchingRulesV6.CURLY_APOSTROPHES
+    assert {"\u2019", "\u2018", "\u02bc", "`"} == {chr(code) for code in MatchingRulesV6.CURLY_APOSTROPHES}
+    for code in [*range(0xC0, 0x250), *range(0x300, 0x370), 0xFE0F]:
+        char = chr(code)
+        assert MatchingRulesV6.strip_accents(char) == script.strip_accents(char), hex(code)
+        assert MatchingRulesV6.strip_accents("a" + char + "b") == script.strip_accents("a" + char + "b"), hex(code)
     assert tuple(script.ALL_EQUIVALENCES - script.CORE_EQUIVALENCES) and set(MatchingRulesV6.EQUIVALENCES) == set(script.ALL_EQUIVALENCES)
     for number in ("1", "001", "SV46", "12/102", "", None):
         assert MatchingRulesV6.number_key(number) == script.number_key(number), number
@@ -1807,7 +1814,16 @@ def test_v6_rematch_picks_up_a_product_listed_after_activation_in_any_group_of_a
     assert states("bw11-rc1") == [("verified", None, 5, "holofoil")] and states("g1-5") == [("verified", None, 6, "holofoil")]
 
 
-def test_v6_candidates_span_a_sets_groups_and_earlier_rules_see_exactly_what_they_did_before(tcgplayer_products):
+def test_v6_digest_covers_the_candidate_lookup_and_the_hook_that_calls_it():
+    from app.catalog_targets import multi_group_candidates, v6_set_path_facts
+    table = MatchingRulesV6.table()
+    assert table["multi_group_candidates"] == inspect.getsource(multi_group_candidates)
+    assert table["v6_set_path_facts"] == inspect.getsource(v6_set_path_facts)
+    assert "multi_group_candidates" not in MatchingRulesV5.table() and "v6_set_path_facts" not in MatchingRulesV5.table()
+    assert v6_set_path_facts(None, MatchingRulesV6, {"set_id": "svp"}) == {} == v6_set_path_facts(None, MatchingRulesV5, {"set_id": "ex15"})
+
+
+def test_v6_candidates_span__a_sets_groups_and_earlier_rules_see_exactly_what_they_did_before(tcgplayer_products):
     from app.catalog_targets import multi_group_candidates, reviewed_rule, tcgplayer_candidates
     v6_products()
     listing(20, "Chespin", "XY01", 1451)

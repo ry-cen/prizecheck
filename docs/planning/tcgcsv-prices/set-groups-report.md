@@ -9,6 +9,7 @@ Decided by the owner on 2026-10-27; final.
 - Accepted all 50 proposed sets below, with the group(s) listed for each (`bw11`: 1409 and 1465; `g1`: 1728 and 1729). The
   14 sets with no proposal stay out of the table.
 - Accepted all four name equivalences: `delta`, `hyphen-suffix`, `apostrophe` and `accent`. Nothing else is folded.
+- Apostrophe-like characters ’ ‘ ʼ ` fold to ', decided by the orchestrator under the owner's delegation, 2026-10-28.
 - Matching rule v6 (`MatchingRulesV6.TCGPLAYER_SET_GROUPS` in `api/app/catalog_targets.py`) holds exactly these sets; a test
   keeps the table equal to the Summary below.
 
@@ -126,7 +127,7 @@ Reviewed in design section 4.16:
 
 Accepted by the owner, because the misses show TCGplayer writing plain ASCII names (without them the sets below lose the cards listed in the table above):
 
-- `apostrophe`: a curly apostrophe `’` = a straight `'`.
+- `apostrophe`: the apostrophe-like characters `’` `‘` `ʼ` and a backtick all equal a straight `'`.
 - `accent`: an accented letter = the plain letter (`Poké Ball` = `Poke Ball`).
 
 A method named in the lists below is the set of equivalences that changed either name.

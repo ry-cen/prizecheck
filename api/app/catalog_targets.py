@@ -525,7 +525,8 @@ class MatchingRulesV6(MatchingRulesV5):
     @classmethod
     def table(cls):
         return {**super().table(), "tcgplayer_set_groups": {set_id: list(groups) for set_id, groups in cls.TCGPLAYER_SET_GROUPS.items()},
-                "name_equivalences": list(cls.EQUIVALENCES)}
+                "name_equivalences": list(cls.EQUIVALENCES), "multi_group_candidates": _source(multi_group_candidates),
+                "v6_set_path_facts": _source(v6_set_path_facts)}
 
     @classmethod
     def strip_accents(cls, text):
@@ -891,6 +892,14 @@ def multi_group_candidates(conn, set_id, collector_number, rule):
     return [{"product_id": row["product_id"], "name": row["name"], "number": row["number"]} for row in found]
 
 
+def v6_set_path_facts(conn, rule, row):
+    """The set-path facts of a set in the rule's ``TCGPLAYER_SET_GROUPS`` (rule v6): its candidates across every listed group.
+    Empty for any other set or rule, which then read ``set_path_facts``."""
+    if row["set_id"] not in getattr(rule, "TCGPLAYER_SET_GROUPS", ()):
+        return {}
+    return {"tcgplayer_candidates": multi_group_candidates(conn, row["set_id"], row["collector_number"], rule)}
+
+
 def set_path_facts(conn, rule, row):
     """The extra facts the rule's reviewed set path reads for one Edition row: candidates and, for name-only sets, the
     number of Printings in the set sharing the card's display name."""
@@ -933,9 +942,7 @@ def refresh_editions(conn, context, edition_ids, complete=False):
                  "display": {"set_id": row["set_id"], "collector_number": row["collector_number"],
                              "display_name": row["display_name"]} if row["set_id"] is not None else None}
         if hasattr(rule, "TCGPLAYER_GROUPS"):  # a release whose newest rule predates v4 has no set table
-            facts.update(set_path_facts(conn, rule, row))
-        if row["set_id"] in getattr(rule, "TCGPLAYER_SET_GROUPS", ()):
-            facts["tcgplayer_candidates"] = multi_group_candidates(conn, row["set_id"], row["collector_number"], rule)
+            facts.update(v6_set_path_facts(conn, rule, row) or set_path_facts(conn, rule, row))  # one candidate query per row
         rejections = LazySet(lambda edition_id=row["id"]: [r["source_fingerprint"] for r in conn.execute(
             "SELECT source_fingerprint FROM catalog_metadata_rejection WHERE edition_id=%s AND target='marketplace'",
             (edition_id,))])
