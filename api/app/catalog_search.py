@@ -131,8 +131,8 @@ def _views(conn, generation: UUID, rows: list[dict]) -> list[PrintingView]:
                          set_id=row["set_id"], set_name=row["set_name"], collector_number=row["collector_number"],
                          name=row["display_name"], identity_id=row["identity_id"], identity_name=row["identity_name"],
                          basic_energy=row["basic_energy"], tombstoned=row["tombstoned"],
-                         low_image_url=f'{row["image_url"]}/low.webp' if row["image_url"] else None,
-                         high_image_url=f'{row["image_url"]}/high.webp' if row["image_url"] else None,
+                         low_image_url=row["low_image_url"],
+                         high_image_url=row["high_image_url"],
                          editions=editions[row["id"]], evidence_url=evidence.get(row["id"]),source_references=references[row["id"]]) for row in rows]
 
 
@@ -156,9 +156,11 @@ def search_catalog(name: str | None = None, set_id: str | None = None, number: s
         if key:
             condition += " AND (gp.search_name,gp.set_id,gp.collector_number,gp.printing_id) > (%s,%s,%s,%s)"
             values.extend(key)
-        rows = conn.execute(f"""SELECT gp.*, p.source, p.source_id AS public_source_id, p.identity_id, ci.display_name AS identity_name, p.id
+        rows = conn.execute(f"""SELECT gp.*, p.source, p.source_id AS public_source_id, p.identity_id, ci.display_name AS identity_name, p.id,
+            art.low_image_url, art.high_image_url
           FROM catalog_generation_printing gp JOIN catalog_printing p ON p.id=gp.printing_id
           JOIN catalog_identity ci ON ci.id=p.identity_id
+          LEFT JOIN catalog_printing_art art ON art.printing_id=p.id
           WHERE gp.generation_id=%s AND NOT gp.tombstoned AND {condition}
           ORDER BY gp.search_name,gp.set_id,gp.collector_number,gp.printing_id LIMIT 31""", (*values,)).fetchall()
         page = rows[:30]
@@ -173,9 +175,11 @@ def printing_detail(printing_id: UUID, user_id: str = Depends(verified_user)):
         state = _state(conn)
         if not state["active_generation"]:
             raise HTTPException(404, "Printing not found")
-        row = conn.execute("""SELECT gp.*, p.source, p.source_id AS public_source_id, p.identity_id, ci.display_name AS identity_name, p.id
+        row = conn.execute("""SELECT gp.*, p.source, p.source_id AS public_source_id, p.identity_id, ci.display_name AS identity_name, p.id,
+            art.low_image_url, art.high_image_url
           FROM catalog_generation_printing gp JOIN catalog_printing p ON p.id=gp.printing_id
           JOIN catalog_identity ci ON ci.id=p.identity_id
+          LEFT JOIN catalog_printing_art art ON art.printing_id=p.id
           WHERE gp.generation_id=%s AND gp.printing_id=%s AND NOT gp.tombstoned""",
                            (state["active_generation"], printing_id)).fetchone()
         if not row:

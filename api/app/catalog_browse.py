@@ -107,7 +107,7 @@ NAME_ORDER = ("release_missing", "release_rank", "set_id", "number_missing", "nu
 NUMBER_ORDER = ("set_id", "number_missing", "number_value", "number_key", "search_name", "descriptor_key", "edition_id")
 
 LISTED = """SELECT ge.edition_id,gp.printing_id,gp.display_name AS name,gp.set_id,gp.set_name,gp.collector_number,
-    e.descriptor,e.descriptor_key,gp.image_url,gp.search_name,ca.card_kind,ca.trainer_type,ca.evolves_from,
+    e.descriptor,e.descriptor_key,art.low_image_url AS image_url,gp.search_name,ca.card_kind,ca.trainer_type,ca.evolves_from,
     ca.regulation_mark,
     substring(gp.collector_number from '^[0-9]+') IS NULL AS number_missing,
     coalesce(substring(gp.collector_number from '^[0-9]+')::numeric,0) AS number_value,
@@ -117,6 +117,7 @@ LISTED = """SELECT ge.edition_id,gp.printing_id,gp.display_name AS name,gp.set_i
   FROM catalog_generation_edition ge
   JOIN catalog_generation_printing gp ON gp.generation_id=ge.generation_id AND gp.printing_id=ge.printing_id
   JOIN catalog_edition e ON e.id=ge.edition_id
+  LEFT JOIN catalog_printing_art art ON art.printing_id=ge.printing_id
   LEFT JOIN catalog_card_attribute ca ON ca.printing_id=ge.printing_id
   LEFT JOIN catalog_generation_set gs ON gs.generation_id=ge.generation_id AND gs.set_id=gp.set_id
   LEFT JOIN unnest(%s::text[],%s::date[]) AS rd(set_id,released) ON rd.set_id=gp.set_id"""
@@ -434,7 +435,7 @@ def _page(conn, user_id, keys, text, kind, format_name, set_id, owned, deck_id, 
             edition_id=row["edition_id"], printing_id=row["printing_id"], name=row["name"], set_id=row["set_id"],
             set_name=row["set_name"], set_code=set_codes.code_for(row["set_id"]),
             collector_number=row["collector_number"], descriptor=row["descriptor"],
-            image_url=f'{row["image_url"]}/low.webp' if row["image_url"] else None, card_kind=row["card_kind"],
+            image_url=row["image_url"], card_kind=row["card_kind"],
             trainer_type=row["trainer_type"], evolves_from=row["evolves_from"], regulation_mark=row["regulation_mark"],
             standing=EditionStandings(**{name: _standing(found.get(name)) for name in ("standard", "expanded", "glc")}),
             owned=total, in_deck=in_deck if deck_id else None, free=free if deck_id else None))

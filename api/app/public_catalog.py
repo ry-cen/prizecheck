@@ -75,16 +75,11 @@ class Built:
     values: dict            # record key -> public value
 
 
-def public_image_url(image_url):
-    """The same derived image the frozen Published Deck rows use."""
-    return f'{image_url}/low.webp' if image_url else None
-
-
 def printing_value(row):
     identity = row['live_identity'] if row['live_state'] == 'eligible' and isinstance(row['live_identity'], dict) else None
     return {'printing_ref': row['printing_ref'], 'name': row['display_name'], 'set_id': row['set_id'],
             'set_name': row['set_name'], 'collector_number': row['collector_number'],
-            'image_url': public_image_url(row['image_url']), 'revision': row['public_revision'],
+            'image_url': row['image_url'], 'revision': row['public_revision'],
             'live': {'state': row['live_state'], 'reason': row['live_reason'], 'rule_version': row['rule_version'],
                      'identity': None if identity is None else {key: identity.get(key) for key in LIVE_IDENTITY_KEYS}}}
 
@@ -157,7 +152,7 @@ def build_values(conn, targets):
         # Its format record (Deck Lists 18) carries the facts format checks read, at the same revision.
         for row in conn.execute(f"""SELECT p.id,p.public_ref AS printing_ref,coalesce(pd.display_name,ci.display_name) AS display_name,
           coalesce(pd.set_id,'') AS set_id,coalesce(pd.set_name,'') AS set_name,
-          coalesce(pd.collector_number,'') AS collector_number,pd.image_url,
+          coalesce(pd.collector_number,'') AS collector_number,art.low_image_url AS image_url,
           m.public_revision,m.live_state,m.live_reason,m.live_identity,a.version AS rule_version,
           nullif(pd.set_id,'') AS format_set_id,nullif(pd.collector_number,'') AS format_collector_number,
           ci.identity_key,ci.display_name AS identity_name,
@@ -171,6 +166,7 @@ def build_values(conn, targets):
           FROM catalog_printing p JOIN catalog_identity ci ON ci.id=p.identity_id
           JOIN catalog_printing_metadata m ON m.printing_id=p.id
           LEFT JOIN catalog_printing_display pd ON pd.printing_id=p.id
+          LEFT JOIN catalog_printing_art art ON art.printing_id=p.id
           LEFT JOIN catalog_rule_activation a ON a.id=m.live_activation_id
           LEFT JOIN catalog_card_attribute ca ON ca.printing_id=p.id
           LEFT JOIN catalog_reprint_group_member rg ON rg.printing_id=p.id

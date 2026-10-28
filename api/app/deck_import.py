@@ -261,14 +261,15 @@ def _printings(conn, generation, printing_ids) -> dict[UUID, ImportPrinting]:
     if not printing_ids:
         return {}
     rows = conn.execute("""SELECT gp.printing_id,gp.display_name AS name,gp.set_id,gp.set_name,gp.collector_number,
-        gp.image_url,ca.card_kind
+        art.low_image_url AS image_url,ca.card_kind
       FROM catalog_generation_printing gp LEFT JOIN catalog_card_attribute ca ON ca.printing_id=gp.printing_id
+      LEFT JOIN catalog_printing_art art ON art.printing_id=gp.printing_id
       WHERE gp.generation_id=%s AND gp.printing_id=ANY(%s) AND NOT gp.tombstoned""",
                         (generation, list(printing_ids))).fetchall()
     return {row['printing_id']: ImportPrinting(
         printing_id=row['printing_id'], name=row['name'], set_id=row['set_id'], set_code=set_codes.code_for(row['set_id']),
         set_name=row['set_name'], collector_number=row['collector_number'],
-        image_url=f"{row['image_url']}/low.webp" if row['image_url'] else None, card_kind=row['card_kind'])
+        image_url=row['image_url'], card_kind=row['card_kind'])
         for row in rows}
 
 

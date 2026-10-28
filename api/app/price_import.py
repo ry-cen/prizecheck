@@ -24,7 +24,7 @@ from decimal import Decimal
 import httpx
 import psycopg
 
-from . import price_binding, public_prices
+from . import card_art, price_binding, public_prices
 from .catalog_targets import number_key
 
 BASE_URL = "https://tcgcsv.com"
@@ -66,6 +66,7 @@ class ImportResult:
     verified_editions: int | None = None
     priced_editions: int | None = None
     unpriced: dict = field(default_factory=dict)
+    fallback_art: int | None = None
     unknown_subtypes: set = field(default_factory=set)
 
     @property
@@ -273,6 +274,15 @@ def bind_prices(conn):
     return counts
 
 
+def refresh_art(conn):
+    """Choose TCGplayer art for Printings without a TCGdex image; the table's row count, or None when it failed (logged)."""
+    try:
+        return card_art.refresh_fallbacks(conn)
+    except Exception as error:
+        log(f"the fallback art refresh failed ({type(error).__name__})")
+        return None
+
+
 def post_import_steps(conn, result):
     """Binding, art and publishing run after every import, including `unchanged` and `stale_source` runs (design 4.2 step 5).
     CALL LIST: later tickets add their calls here, in this order, each in its own try block so that one failing step never
@@ -284,6 +294,7 @@ def post_import_steps(conn, result):
     counts = bind_prices(conn)
     if counts:
         result.verified_editions, result.priced_editions, result.unpriced = counts["verified"], counts["priced"], counts["unpriced"]
+    result.fallback_art = refresh_art(conn)
     result.public_error = publish_prices(conn)
 
 
@@ -300,8 +311,9 @@ def publish_prices(conn):
 def rebind_only(conn):
     """The data-repair step (--rebind-only): the binding, art and publishing steps without fetching anything. Exit code."""
     counts = bind_prices(conn)
+    art = refresh_art(conn)
     published = publish_prices(conn) is None
-    return OK if counts and published else FAILED
+    return OK if counts and art is not None and published else FAILED
 
 
 def rematch(conn):
@@ -327,10 +339,10 @@ def finish(conn, result):
     conn.execute(
         "UPDATE price_import SET finished_at = now(), outcome = %s, source_updated_at = %s, groups_total = %s, "
         "groups_failed = %s, product_rows = %s, price_rows = %s, rejected_rows = %s, error_code = %s, verified_editions = %s, "
-        "priced_editions = %s, unpriced = %s, public_error = %s WHERE id = %s",
+        "priced_editions = %s, unpriced = %s, fallback_art = %s, public_error = %s WHERE id = %s",
         (result.outcome, result.source_updated_at, result.groups_total, result.groups_failed, result.product_rows,
          result.price_rows, result.rejected_rows, result.error_code, result.verified_editions, result.priced_editions,
-         json.dumps(result.unpriced), result.public_error, result.import_id))
+         json.dumps(result.unpriced), result.fallback_art, result.public_error, result.import_id))
     log(f"{result.outcome}" + (f" ({result.error_code})" if result.error_code else "")
         + f": {result.groups_total} groups, {result.groups_failed} failed, {result.product_rows} products, "
           f"{result.price_rows} prices, {result.rejected_rows} rejected")
