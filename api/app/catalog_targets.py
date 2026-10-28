@@ -852,7 +852,8 @@ def refresh_editions(conn, context, edition_ids, complete=False):
                  "source_id": row["source_id"], "source_record": row["source_record"] or {},
                  "display": {"set_id": row["set_id"], "collector_number": row["collector_number"],
                              "display_name": row["display_name"]} if row["set_id"] is not None else None}
-        facts.update(set_path_facts(conn, rule, row))
+        if hasattr(rule, "TCGPLAYER_GROUPS"):  # a release whose newest rule predates v4 has no set table
+            facts.update(set_path_facts(conn, rule, row))
         rejections = LazySet(lambda edition_id=row["id"]: [r["source_fingerprint"] for r in conn.execute(
             "SELECT source_fingerprint FROM catalog_metadata_rejection WHERE edition_id=%s AND target='marketplace'",
             (edition_id,))])
