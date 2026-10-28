@@ -25,12 +25,15 @@ The roots are catalog data derived from ``evolves_from``, which is not a card at
 attribute revision, never re-stamps a public format fact, and never makes a saved format result or a stored Format
 Standing stale. This module is outside both ``CODE_SHA256`` digests on purpose.
 """
+import logging
 import unicodedata
 from collections import Counter
 from dataclasses import dataclass
 from typing import Mapping, Sequence
 
 from .card_identity import card_identity_key
+
+log = logging.getLogger(__name__)
 
 # Basic, Stage 1 and Stage 2 are two steps; BREAK, LEVEL-UP and the like add one. Four allows every printed chain.
 MAX_HOPS = 4
@@ -93,7 +96,20 @@ WRITE = """INSERT INTO catalog_evolution_root AS r(identity_key,root_name,stage)
 def refresh_evolution_roots(conn) -> int:
     """Recompute every Pokémon identity's root from the effective card attributes and store the ones that changed,
     removing identities that are no longer Pokémon. Runs in the caller's transaction, after the card attributes are
-    derived (a catalog import and ``scripts/derive_card_attributes.py``). Returns the number of rows written or removed."""
+    derived (a catalog import and ``scripts/derive_card_attributes.py``). Returns the number of rows written or removed.
+
+    Roots are derived data that the next derivation rebuilds, so a failure here must not abort the caller's
+    transaction (a catalog import that already stored its generation): the work runs in a savepoint, a failure rolls
+    back only the roots (the stored ones stay as they were), is logged, and returns 0."""
+    try:
+        with conn.transaction():
+            return _refresh(conn)
+    except Exception as error:
+        log.warning("Evolution roots refresh failed (%s)", type(error).__name__)
+        return 0
+
+
+def _refresh(conn) -> int:
     pokemon: dict[str, tuple[str, list[str | None]]] = {}
     for row in conn.execute(POKEMON).fetchall():
         entry = pokemon.setdefault(row["identity_key"], (row["display_name"], []))

@@ -124,3 +124,27 @@ def test_a_vote_for_a_merged_card_identity_counts_for_its_survivor():
     found = evolution_roots({"Riolu": ("Riolu", [None]), "Lucario": ("Lucario", ["Rioluu", "Riolu"])},
                             merged={"Rioluu": "Riolu"})
     assert found["Lucario"] == EvolutionRoot("Riolu", 1)
+
+
+def test_a_failed_roots_refresh_is_contained_and_leaves_the_callers_transaction_usable(monkeypatch, caplog):
+    """The refresh runs in a savepoint: a SQL failure inside it rolls back only the roots work (the stored roots stay),
+    is logged, and the caller's earlier writes and later statements in the same transaction still commit."""
+    from app import evolution_roots as module
+    seed(*CARDS)
+    owner = f"roots-{uuid4()}"
+    with connect() as conn:
+        before = conn.execute("SELECT identity_key,root_name,stage FROM catalog_evolution_root ORDER BY identity_key"
+                              ).fetchall()
+    assert before
+    monkeypatch.setattr(module, "WRITE", "INSERT INTO catalog_evolution_root_missing VALUES (1)")
+    with connect() as conn:
+        with conn.transaction():
+            conn.execute("INSERT INTO inventory_owner(user_id) VALUES (%s)", (owner,))
+            assert module.refresh_evolution_roots(conn) == 0
+            # Without the savepoint the transaction is aborted here and this statement raises.
+            conn.execute("SELECT 1")
+    assert "Evolution roots refresh failed" in caplog.text
+    with connect() as conn:
+        assert conn.execute("SELECT count(*) AS n FROM inventory_owner WHERE user_id=%s", (owner,)).fetchone()["n"] == 1
+        assert conn.execute("SELECT identity_key,root_name,stage FROM catalog_evolution_root ORDER BY identity_key"
+                            ).fetchall() == before
