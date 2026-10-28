@@ -37,7 +37,7 @@ const messages: Record<string, string> = {
     "An Unspecified Variant can never be verified. Leave it unmapped.",
   INVALID_DECISION: "That decision is not allowed for this target.",
   NO_ACTIVE_RULE:
-    "No Live rule is active. Activate a rule before verifying or correcting Live identity.",
+    "No Live rule is applied yet. Rules are applied when a release deploys; try again once it has.",
   INVALID_LIVE_INPUT:
     "The Live inputs are incomplete or not covered by the active rule.",
   LIVE_CONFLICT: "Those Live inputs conflict with another Printing.",
