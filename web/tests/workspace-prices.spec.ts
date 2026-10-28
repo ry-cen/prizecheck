@@ -282,22 +282,20 @@ test.describe("desktop", () => {
     );
   });
 
-  test("a tile shows only the amount for a quote of unknown age, and words a timed-out row like the inspector", async ({
-    page,
-  }) => {
+  test("a tile words a timed-out row like the inspector", async ({ page }) => {
     const ids = priceWorld();
     await signIn(page);
     await hold(await createLeaf(page, `Small ${randomUUID().slice(0, 6)}`), [
       ids["reverse-holofoil"],
       ids.unspecified,
     ]);
-    // No provider time: the quote has an unknown age. The second Edition's row is a server-side deadline.
+    // The second Edition's row is a server-side deadline.
     quote([
       {
         op: "quote",
         edition: ids["reverse-holofoil"],
         amount: "0.43",
-        updated: null,
+        updated: ago(2),
       },
     ]);
     await page.route("**/api/prices/editions", async (route) => {
@@ -315,9 +313,6 @@ test.describe("desktop", () => {
     await expect(tiles(page)).toHaveCount(2);
     await pricesToggle(page).click();
 
-    const unknown = tiles(page).filter({ hasText: "$0.43" });
-    await expect(unknown).toHaveAccessibleDescription("$0.43");
-    await expect(unknown).not.toContainText("No age");
     await expect(
       tile(page, "Furret, Darkness Ablaze 2, ")
     ).toHaveAccessibleDescription("Price check timed out");

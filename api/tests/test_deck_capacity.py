@@ -5,7 +5,6 @@ the HTTP records relay; publication, the public cost and the public exports use 
 records directory. The gateway-level capacity proof (100 simultaneous callers on two gateways and two APIs) is in
 auth/tests/published-cost.test.ts.
 """
-from datetime import timedelta
 from decimal import Decimal
 import json
 import os
@@ -20,12 +19,12 @@ from app.main import app, connect  # noqa: F401
 from app import price_launcher, public_catalog
 from app.catalog_targets import LIVE, activate_rule
 from app.public_projection import FilePublicProjection
-from app.public_records import public_record_store, quote_key, result_key
+from app.public_records import public_record_store
 from test_catalog import reset_catalog
 from test_catalog_targets import isolated_rules  # noqa: F401  (autouse: clears rule activations)
 from test_decks import create
 from test_holdings import call, client
-from test_prices import ago, headers_for
+from test_prices import headers_for
 from test_public_records import start_relay, stop
 from test_publications import command
 
@@ -115,25 +114,12 @@ def seed_price_rows(editions):
 
 
 def seed_quotes(store, editions):
-    """The record-store half (the public Published Deck readers, until P5b) and the PostgreSQL half (the private readers).
-    Every tenth Edition is a fresh confirmed absence; every other one a fresh $0.25 quote. 64 Editions per commit."""
+    """The PostgreSQL half (the private readers), then the public ``price:`` records the Published Deck readers read, published
+    against the test's store. Every tenth Edition has no market price, so it stays unpriced."""
+    from app.public_prices import publish
     seed_price_rows(editions)
-    checked = ago(timedelta(minutes=10))
-    for offset in range(0, len(editions), 64):
-        changes = {}
-        for edition in editions[offset:offset + 64]:
-            ref, revision = edition["public_ref"], edition["mapping_revision"]
-            if edition["n"] % 10 == 0:
-                changes[result_key(ref, revision)] = {"state": "absent", "attempt": 1, "checked_at": checked,
-                                                      "expires_at": ago(-timedelta(minutes=50))}
-            else:
-                changes[result_key(ref, revision)] = {"state": "quote", "attempt": 1, "checked_at": checked}
-                changes[quote_key(ref, revision)] = {"attempt": 1, "amount": str(PRICE), "currency": "USD", "source": "tcgdex",
-                                                     "card": edition["source_id"], "variant": "normal",
-                                                     "provider_updated_at": ago(timedelta(days=1))}
-        current = store.read_records(list(changes), deadline=time.monotonic() + 30)
-        assert store.compare_and_swap({key: row.version for key, row in current.records.items()}, changes,
-                                      deadline=time.monotonic() + 30)
+    with connect() as conn:
+        publish(conn, store)
 
 
 def timed(function):
