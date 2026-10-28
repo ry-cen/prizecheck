@@ -3,26 +3,54 @@ on:
   # Pull requests, and each dev deploy through deploy-dev.yml's call. No push trigger: a push to dev already runs this
   # workflow as the deploy gate, and other branches are checked when their pull request opens.
   pull_request:
-  # Every automatic run is the fast tier: the slow capacity and timing tests fail at random on hosted runners.
-  # Run the full gate on demand from Actions -> Verify -> Run workflow, or locally with `npm run verify`.
-  # The burn-in of changed tests (npm run verify -- --burn-in) is a local gate before the pull request, not a CI job.
+  # The default checks (formatting, lint, compilation, build, unit tests) are all an automatic run does. The deep
+  # integration suites (PostgreSQL-backed API tests, the auth server tests and Playwright) run only on demand: Actions ->
+  # Verify -> Run workflow, with an integration choice other than none. The default checks run in that run too.
   workflow_dispatch:
     inputs:
-      full:
-        description: Run the full gate (slow tests and the operations suite included)
-        type: boolean
-        default: false
+      integration:
+        description: "Also run the deep integration suites: sharded (API, auth, Playwright and scanner real-model legs) or full (one unsharded npm run verify, slow tests and the operations suite included, plus the scanner real-model test)"
+        type: choice
+        options:
+          - none
+          - sharded
+          - full
+        default: none
   workflow_call:
 permissions:
   contents: read
 jobs:
-  # The fast tier, split into legs that run at once, each on its own runner with its own database server and stacks:
-  # three shards of api/tests, the auth leg (guardrails, the build and vitest, run once for every leg) and ten shards
-  # of the Playwright specs (scripts/verify.py --shard). On one hosted runner the fast tier took about 32 minutes, 22
-  # of them in Playwright (October 2026); a leg takes about 5. inputs.full is empty on pull_request and workflow_call,
-  # so those always run the legs.
-  legs:
-    if: ${{ !inputs.full }}
+  # The default checks, in one job: no database and no browser. A pull request needs the same npm and Python installs
+  # for every step, so one job pays for them once. Each step is named for the check it runs.
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - run: npm ci
+      # check:client and guardrails run from .venv.
+      - run: python -m venv .venv && .venv/bin/pip install -r api/requirements.txt
+      - name: Format
+        run: npx prettier --check .
+      - name: Lint (guardrails and the tooling tests)
+        run: npm run guardrails
+      - name: Compile (TypeScript, scanner models lock, generated clients, Python byte-compile)
+        run: npm run check && .venv/bin/python -m compileall -q api scripts
+      - name: Build (the web bundle and its boundary)
+        run: npx vite build --config web/vite.config.ts && npm run check:bundle
+      - name: Unit tests
+        run: npm run test:unit
+  integration-legs:
+    if: ${{ inputs.integration == 'sharded' }}
     name: ${{ matrix.leg }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -112,9 +140,9 @@ jobs:
           path: .scratch/verification/
           retention-days: 7
           include-hidden-files: true
-  # The full gate, unsharded, on demand: Actions -> Verify -> Run workflow with full ticked.
-  full:
-    if: ${{ inputs.full }}
+  # Optional (integration: full). The full gate, unsharded.
+  integration-full:
+    if: ${{ inputs.integration == 'full' }}
     runs-on: ubuntu-latest
     # Well above the unsharded fast tier's 32 minutes on a hosted runner, since the full gate adds the slow tests and
     # the operations suite.
@@ -159,12 +187,40 @@ jobs:
           path: .scratch/verification/
           retention-days: 7
           include-hidden-files: true
-  # The scanner index job's image (deploy/docker/scanner-index.Dockerfile): builds it with the pinned embedder, then runs
-  # the real-model test inside it. That test needs ONNX Runtime, which the API venv does not have, so no other leg runs it.
-  # It runs natively on both architectures, because production runs the arm64 image. Always runs, in full-gate runs too.
-  # deploy-dev.yml pushes the same image once this workflow has passed.
+  # The scanner index job's image (deploy/docker/scanner-index.Dockerfile): a build check of the job image, on both
+  # architectures because production runs the arm64 image. The image's default stage does not depend on the test stage,
+  # so the real-model test is not built or run here; integration-scanner-model does that on demand. deploy-dev.yml
+  # pushes the same image once this workflow has passed.
   scanner-index-image:
     name: scanner-index-image (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            cache: ""
+          - runner: ubuntu-24.04-arm
+            cache: "-arm64"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build the job image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: deploy/docker/scanner-index.Dockerfile
+          push: false
+          cache-from: type=gha,scope=prizecheck-scanner-index${{ matrix.cache }}
+          cache-to: type=gha,mode=max,scope=prizecheck-scanner-index${{ matrix.cache }}
+  # Optional (integration: sharded or full). Builds the Dockerfile's test stage with the pinned embedder and runs the
+  # real-model test inside it. That test needs ONNX Runtime, which the API venv does not have, so no other job runs it.
+  integration-scanner-model:
+    if: ${{ inputs.integration == 'sharded' || inputs.integration == 'full' }}
+    name: integration-scanner-model (${{ matrix.runner }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
     strategy:
@@ -192,30 +248,41 @@ jobs:
           cache-to: type=gha,mode=max,scope=prizecheck-scanner-index-test${{ matrix.cache }}
       - name: Real-model test
         run: docker run --rm prizecheck-scanner-index-test
-      - name: Build the job image
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: .
-          file: deploy/docker/scanner-index.Dockerfile
-          push: false
-          cache-from: type=gha,scope=prizecheck-scanner-index${{ matrix.cache }}
   # The one check that stands for the whole run: pull requests and deploy-dev.yml's images job wait on "verify".
-  # always() makes it run and fail after a failed or cancelled leg instead of being skipped with it, because a skipped
-  # check counts as passing.
+  # always() makes it run and fail after a failed or cancelled job instead of being skipped with it, because a skipped
+  # check counts as passing. The default checks must always succeed. Each optional job must succeed when this run asked
+  # for it and must be skipped when it did not, so a job skipped by a wrong condition fails here instead of passing.
   verify:
-    needs: [legs, full, scanner-index-image]
+    needs:
+      [
+        checks,
+        scanner-index-image,
+        integration-legs,
+        integration-full,
+        integration-scanner-model,
+      ]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Require the legs, or the full gate, to have passed
+      - name: Require the default checks, and every requested integration job, to have passed
         env:
-          FULL: ${{ inputs.full && 'true' || 'false' }}
-          LEGS_RESULT: ${{ needs.legs.result }}
-          FULL_RESULT: ${{ needs.full.result }}
+          INTEGRATION: ${{ inputs.integration || 'none' }}
+          CHECKS_RESULT: ${{ needs.checks.result }}
           SCANNER_INDEX_RESULT: ${{ needs.scanner-index-image.result }}
-        # The mode this run chose must report success: a job skipped by a wrong condition fails here instead of passing.
+          LEGS_RESULT: ${{ needs.integration-legs.result }}
+          FULL_RESULT: ${{ needs.integration-full.result }}
+          SCANNER_MODEL_RESULT: ${{ needs.integration-scanner-model.result }}
         run: |
-          echo "full gate requested: $FULL; legs: $LEGS_RESULT; full gate: $FULL_RESULT; scanner index image: $SCANNER_INDEX_RESULT"
+          echo "integration: $INTEGRATION; checks: $CHECKS_RESULT; scanner index image: $SCANNER_INDEX_RESULT; legs: $LEGS_RESULT; full: $FULL_RESULT; scanner model: $SCANNER_MODEL_RESULT"
+          test "$CHECKS_RESULT" = success
           test "$SCANNER_INDEX_RESULT" = success
-          if [ "$FULL" = true ]; then test "$FULL_RESULT" = success; else test "$LEGS_RESULT" = success; fi
+          case "$INTEGRATION" in
+            none) legs=skipped; full=skipped; model=skipped ;;
+            sharded) legs=success; full=skipped; model=success ;;
+            full) legs=skipped; full=success; model=success ;;
+            *) echo "unknown integration choice: $INTEGRATION"; exit 1 ;;
+          esac
+          test "$LEGS_RESULT" = "$legs"
+          test "$FULL_RESULT" = "$full"
+          test "$SCANNER_MODEL_RESULT" = "$model"

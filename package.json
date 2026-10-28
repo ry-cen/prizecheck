@@ -10,6 +10,8 @@
     "check:bundle": ".venv/bin/python scripts/check_bundle_boundary.py",
     "build": "npm run check && vite build --config web/vite.config.ts",
     "test:auth": "vitest run",
+    "test:unit": "vitest run web/src --exclude \"**/*.local.test.ts\" --exclude \"**/*.models.test.ts\"",
+    "format:check": "prettier --check .",
     "test:api": "PYTHONPATH=api .venv/bin/pytest api/tests",
     "prepare": "husky",
     "typecheck": "npm run check",

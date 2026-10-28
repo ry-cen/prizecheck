@@ -2,7 +2,7 @@
 
 Decision: [ADR 0018](../../adr/0018-scheduled-catalog-change-check.md). Issues: [#339](https://github.com/ry-cen/prizecheck/issues/339), [#340](https://github.com/ry-cen/prizecheck/issues/340), [#341](https://github.com/ry-cen/prizecheck/issues/341), labelled `implementation` and `feature: catalog auto-refresh`. Terms are those of [CONTEXT.md](../../../CONTEXT.md). Related, not in scope: [#338](https://github.com/ry-cen/prizecheck/issues/338).
 
-Each ticket is accepted on its own narrow tests plus `npm run check` and `npm run guardrails`; the full gate runs once, after ticket 3 ([verification](../../agents/verification.md)). Collector-facing screens must show nothing about the check ([AGENTS.md](../../../AGENTS.md), UI copy).
+Each ticket is accepted on its own narrow tests plus `npm run check` and `npm run guardrails`; the pull request is accepted on green GitHub CI, and the full local gate is optional ([verification](../../agents/verification.md)). Collector-facing screens must show nothing about the check ([AGENTS.md](../../../AGENTS.md), UI copy).
 
 ## 1. (#339) Daily change check, its record, and the `catalog-refresh` subcommand
 

@@ -3,6 +3,7 @@ architecture natively and joins them, production deploys only dev's images and n
 up the client-IP chain (compose.prod.yml, deploy/docker/nginx.conf, deploy/oracle/Caddyfile) agree. Text and regex only:
 no YAML library is available to the tooling tests."""
 import ipaddress
+import json
 from pathlib import Path
 import re
 import unittest
@@ -25,6 +26,15 @@ def uncommented(text):
 
 def between(text, start, end):
     return text[text.index(start):text.index(end)]
+
+
+def job_body(name):
+    """The text of one verify.yml job, from its key to the next job's key."""
+    jobs = VERIFY[VERIFY.index('\njobs:'):]
+    start = jobs.index(f'\n  {name}:\n') + 1
+    following = re.search(r'(?m)^  [a-z][a-z-]*:$', jobs[start + 1 + len(name) + 3:])
+    end = start + 1 + len(name) + 3 + following.start() if following else len(jobs)
+    return jobs[start:end]
 
 
 def one(pattern, text):
@@ -53,11 +63,81 @@ class DeployPipelineTest(unittest.TestCase):
         deploy = between(DEV, '\n  deploy:', '\n  rollback:')
         self.assertRegex(deploy, r'(?m)^    needs: manifests$')
 
-    def test_the_scanner_index_real_model_test_runs_on_arm64(self):
-        job = VERIFY[VERIFY.index('  scanner-index-image:'):]
-        job = job[:job.index('\n  verify:')]
+    def test_the_scanner_index_image_builds_on_both_architectures_without_the_real_model_test(self):
+        job = job_body('scanner-index-image')
         self.assertIn('ubuntu-24.04-arm', job)
         self.assertIn('runs-on: ${{ matrix.runner }}', job)
+        self.assertIn('push: false', job)
+        self.assertNotIn('target: test', job)
+        self.assertNotIn('docker run', job)
+
+    def test_the_scanner_real_model_test_is_an_optional_integration_job_on_both_architectures(self):
+        job = job_body('integration-scanner-model')
+        self.assertIn('ubuntu-24.04-arm', job)
+        self.assertIn('target: test', job)
+        self.assertIn('docker run --rm prizecheck-scanner-index-test', job)
+        self.assertRegex(job, r"(?m)^    if: \$\{\{ inputs\.integration == 'sharded' \|\| inputs\.integration == 'full' \}\}$")
+
+    def test_the_default_checks_need_no_database_and_no_browser(self):
+        checks = job_body('checks')
+        for required in ('npm ci', 'api/requirements.txt', 'npx prettier --check .', 'npm run guardrails', 'npm run check',
+                         'compileall -q api scripts', 'vite build', 'npm run check:bundle', 'npm run test:unit'):
+            self.assertIn(required, checks)
+        self.assertNotRegex(uncommented(checks), r'(?m)^\s+if:')
+        for forbidden in ('postgres', 'playwright', 'npm run verify', 'TEST_ADMIN_DATABASE_URL', 'services:'):
+            self.assertNotIn(forbidden, checks.lower() if forbidden.islower() else checks)
+
+    def test_the_unit_test_script_leaves_out_integration_and_model_tests(self):
+        script = json.loads((ROOT / 'package.json').read_text())['scripts']['test:unit']
+        self.assertIn('web/src', script)
+        self.assertNotIn('auth/tests', script)
+        for excluded in ('**/*.local.test.ts', '**/*.models.test.ts'):
+            self.assertIn(f'--exclude "{excluded}"', script)
+
+    def test_the_integration_jobs_run_only_when_a_dispatch_asks_for_them(self):
+        on = VERIFY[:VERIFY.index('\njobs:')]
+        self.assertRegex(on, r'(?m)^  workflow_dispatch:$')
+        self.assertRegex(on, r'(?m)^      integration:$')
+        self.assertRegex(on, r'(?m)^        options:\n          - none\n          - sharded\n          - full\n        default: none$')
+        self.assertNotIn('inputs.full', VERIFY)
+        gates = {'integration-legs': "inputs.integration == 'sharded'", 'integration-full': "inputs.integration == 'full'"}
+        for name, condition in gates.items():
+            self.assertIn(f'    if: ${{{{ {condition} }}}}', job_body(name), name)
+        # The deep suites live only in the optional jobs.
+        for name in ('checks', 'scanner-index-image', 'verify'):
+            body = job_body(name)
+            for deep in ('playwright', 'postgres', 'npm run verify'):
+                self.assertNotIn(deep, body.lower(), f'{name} must not run {deep}')
+        legs = job_body('integration-legs')
+        for arg in ('--suite api --fast --shard 1/3', '--suite api --fast --shard 3/3', '--suite auth --fast',
+                    '--suite browser --fast --shard 1/10', '--suite browser --fast --shard 10/10'):
+            self.assertIn(arg, legs)
+        self.assertEqual(len(re.findall(r'(?m)^          - leg: ', legs)), 14)
+        self.assertIn('run: npm run verify\n', job_body('integration-full'))
+
+    def test_the_verify_aggregator_requires_the_default_checks_and_every_requested_job(self):
+        verify = job_body('verify')
+        jobs = ['checks', 'scanner-index-image', 'integration-legs', 'integration-full', 'integration-scanner-model']
+        needs = re.search(r'needs:\s*\[([^\]]*)\]', verify).group(1)
+        self.assertEqual([n.strip() for n in needs.split(',') if n.strip()], jobs)
+        # always() keeps it from being skipped with a failed or cancelled job; a skipped check counts as passing.
+        self.assertRegex(verify, r'(?m)^    if: \$\{\{ always\(\) \}\}$')
+        for name in jobs:
+            self.assertIn(f'needs.{name}.result', verify)
+        script = verify[verify.index('run: |'):]
+        for required in ('test "$CHECKS_RESULT" = success', 'test "$SCANNER_INDEX_RESULT" = success',
+                         'none) legs=skipped; full=skipped; model=skipped ;;',
+                         'sharded) legs=success; full=skipped; model=success ;;',
+                         'full) legs=skipped; full=success; model=success ;;',
+                         'test "$LEGS_RESULT" = "$legs"', 'test "$FULL_RESULT" = "$full"', 'test "$SCANNER_MODEL_RESULT" = "$model"'):
+            self.assertIn(required, script)
+        # An unrecognised choice fails instead of passing with everything skipped.
+        self.assertIn('exit 1', script)
+
+    def test_dev_gates_its_images_on_the_verify_check(self):
+        self.assertRegex(between(DEV, '\n  verify:', '\n  images:'), r'uses: \./\.github/workflows/verify\.yml')
+        self.assertRegex(between(DEV, '\n  images:', '\n    runs-on'), r'(?m)^    needs: verify$')
+        self.assertNotRegex(PROD, r'verify\.yml')
 
     def test_prod_never_builds_images(self):
         for forbidden in ('build-push-action', 'packages: write', 'imagetools create'):

@@ -23,7 +23,8 @@ jobs:
   verify:
     if: github.ref == 'refs/heads/dev' && inputs.operation != 'rollback'
     uses: ./.github/workflows/verify.yml
-    # verify.yml runs the fast tier when called: the slow capacity and timing tests are unreliable on hosted runners.
+    # verify.yml runs only its default checks when called (formatting, lint, compilation, build, unit tests); the deep
+    # integration suites run on demand.
     permissions:
       contents: read
 
