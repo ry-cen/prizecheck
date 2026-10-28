@@ -354,15 +354,15 @@ The refresh imports the TCGCSV prices, checks TCGdex for catalog changes (pullin
 
 When the report says `This host is ready for the first deploy`, deploy. After the first deploy, `setup` or `readiness` also reads the app's state through the release's own tools image and lists what is left, each with its command:
 
-| Report item            | Step                                                        |
-| ---------------------- | ----------------------------------------------------------- |
-| The owner is bound     | [12](#12-verify-the-application-and-sign-in)                |
+| Report item            | Step                                                     |
+| ---------------------- | -------------------------------------------------------- |
+| The owner is bound     | [12](#12-verify-the-application-and-sign-in)             |
 | The catalog rules      | [13](#13-apply-the-catalog-rules-and-import-the-catalog) |
 | An active catalog      | [13](#13-apply-the-catalog-rules-and-import-the-catalog) |
 | The last price import  | [13](#13-apply-the-catalog-rules-and-import-the-catalog) |
 | The scanner index      | [13](#13-apply-the-catalog-rules-and-import-the-catalog) |
-| The last catalog check | [Step 9](#9-install-the-host-files-and-run-setup)           |
-| The signup mode        | Owner-only on dev                                           |
+| The last catalog check | [Step 9](#9-install-the-host-files-and-run-setup)        |
+| The signup mode        | Owner-only on dev                                        |
 
 These items never fail the report: they come after the first deploy.
 
@@ -390,7 +390,7 @@ Before the first deploy it lists only the host items. Fix every `missing` line (
    cat compose.deploy.yml deploy/host/prizecheck-deploy.sh deploy/host/prizecheck-catalog-refresh.service deploy/host/prizecheck-catalog-refresh.timer deploy/host/prizecheck-backup.service deploy/host/prizecheck-backup.timer | sha256sum
    ```
 
-2. Run the workflow: **Actions → Deploy dev → Run workflow → branch `dev`, operation `deploy`** (or `gh workflow run deploy-dev.yml --ref dev`). Pushing to `dev` doesn't start it. The default checks run first (formatting, lint, compilation, build and unit tests), then the images are built and the deploy runs. The deep integration suites do not gate the deploy; run them on demand from **Actions → Verify → Run workflow** with an **integration** choice, or run the full gate locally with `npm run verify`.
+2. Run the workflow: **Actions → Deploy dev → Run workflow → branch `dev`, operation `deploy`** (or `gh workflow run .github/workflows/deploy-dev.yml --ref dev`). Pushing to `dev` doesn't start it. The default checks run first (formatting, lint, compilation, build and unit tests), then the images are built and the deploy runs. The deep integration suites do not gate the deploy; run them on demand from **Actions → Verify → Run workflow** with an **integration** choice, or run the full gate locally with `npm run verify`.
 3. On a new installation the script applies all migrations and initializes the public projection store. It initializes the store only when the store is empty **and** nothing has been deployed before. A missing store on an existing install stops the deploy instead of silently creating an empty one; see [public projections](public-projections.md) for recovery.
 
 ### 12. Verify the application and sign in
