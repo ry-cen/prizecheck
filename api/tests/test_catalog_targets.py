@@ -1,7 +1,9 @@
 """Reviewed Live and Marketplace target state: rules, precedence, quarantine and commit-ordered revisions."""
 import copy
 import json
+import re
 import threading
+from pathlib import Path
 from dataclasses import replace
 from uuid import uuid4
 
@@ -9,7 +11,7 @@ import psycopg
 import pytest
 
 from app.catalog_targets import (LIVE, LIVE_RULES, MATCHING, MATCHING_RULES, REGISTRIES, EditionState, Failure,
-                                 LiveRulesV1, MatchingRulesV1, MatchingRulesV2, MatchingRulesV3, MatchingRulesV4, MatchingRulesV5, PrintingState, TargetContext, activate_rule,
+                                 LiveRulesV1, MatchingRulesV1, MatchingRulesV2, MatchingRulesV3, MatchingRulesV4, MatchingRulesV5, MatchingRulesV6, PrintingState, TargetContext, activate_rule,
                                  code_digest, complete_quote_variant, rematch_promos, edition_state, edition_targets, evaluate_edition, normalized_name,
                                  evaluate_printing, fingerprint, load_active, printing_live, refresh_printing)
 from app.main import connect
@@ -987,6 +989,9 @@ PINNED_DIGESTS = {
     (MATCHING, 3): "60e02ce648ea81e2177124c2f4a5740897e5481dbecfa20a1a1395dddf184c5e",
     (MATCHING, 4): "6a6b62a2081d42185309a4ba389cd1260409e018c1449de20eb1e0feb797b57a",
     (MATCHING, 5): "6a870e3f61697fe0a35009951889d6a83a74f3c2f33b7af0c840d4d5c8240106",
+
+
+    (MATCHING, 6): "e5b5a8b34450681d37f1ceafd0b5257cf5f0152f53d19be02d495736a3148fc4",
 }
 
 
@@ -1519,7 +1524,7 @@ def test_v5_tables_follow_the_active_rule_and_v4_ignores_the_30th_sets(tcgplayer
     from app.catalog_targets import reviewed_rule, tcgplayer_candidates
     thirty_products()
     with connect() as conn:
-        assert reviewed_rule(None) is MatchingRulesV5 and reviewed_rule(load_active(conn, MATCHING)) is MatchingRulesV5
+        assert reviewed_rule(None) is MatchingRulesV6 and reviewed_rule(load_active(conn, MATCHING)) is MatchingRulesV6
         assert [item["product_id"] for item in tcgplayer_candidates(conn, "30th-c", "001")] == [810, 811, 812, 813, 814]
         assert [item["product_id"] for item in tcgplayer_candidates(conn, "30th", "21")] == [800]
         assert tcgplayer_candidates(conn, "30th", "") == []
@@ -1625,3 +1630,188 @@ def test_v5_a_gained_card_field_is_enrichment_and_a_later_change_or_removal_quar
     del removed["thirdParty"]  # the card-level id is removed
     run(Records(removed))
     assert states("xy11-116") == [("quarantined", "candidate_changed", 121240, "normal")]
+
+
+# ------------------------------------------------------------------ matching rule v6 (P12 #378)
+
+
+REPORT = Path(__file__).resolve().parents[2] / "docs/planning/tcgcsv-prices/set-groups-report.md"
+SCRIPT = Path(__file__).resolve().parents[2] / "scripts/propose_set_groups.py"
+
+
+def v6_facts(name="Ampharos δ", number="1", set_id="ex15", descriptor=None, lookup=None, found=(), record=None):
+    return facts(descriptor=descriptor or {"type": "holo", "size": "standard"}, lookup=lookup or {},
+                 source_record=record or {"set": {"id": set_id}, "localId": number, "name": name},
+                 display={"set_id": set_id, "collector_number": number, "display_name": name}, tcgplayer_candidates=list(found))
+
+
+def evaluate_v6(rule=MatchingRulesV6, **changes):
+    return rule.evaluate(v6_facts(**changes), lambda product, variant: False)
+
+
+def named(*names, number="1"):
+    return [{"product_id": 100 + index, "name": name, "number": number} for index, name in enumerate(names)]
+
+
+def test_v6_is_registered_as_6_and_adds_only_the_reviewed_sets_to_v5s_table():
+    assert MATCHING_RULES[6] is MatchingRulesV6
+    assert set(MatchingRulesV6.TCGPLAYER_GROUPS) == set(MatchingRulesV5.TCGPLAYER_GROUPS) | set(MatchingRulesV6.TCGPLAYER_SET_GROUPS)
+    assert not set(MatchingRulesV5.TCGPLAYER_GROUPS) & set(MatchingRulesV6.TCGPLAYER_SET_GROUPS)
+    assert MatchingRulesV6.TCGPLAYER_SET_GROUPS["bw11"] == (1409, 1465) and MatchingRulesV6.TCGPLAYER_SET_GROUPS["g1"] == (1728, 1729)
+    assert MatchingRulesV6.TCGPLAYER_SET_GROUPS["sma"] == (2594,)
+    assert not {"basep", "svp", "30th", "30th-c"} & set(MatchingRulesV6.TCGPLAYER_SET_GROUPS)
+    assert MatchingRulesV6.table()["tcgplayer_set_groups"]["bw11"] == [1409, 1465]
+    assert len(MatchingRulesV6.TCGPLAYER_SET_GROUPS) == 50
+
+
+def report_table():
+    """{set id: groups} read from the Summary table of the owner-reviewed report."""
+    summary = REPORT.read_text(encoding="utf-8").split("## Summary")[1].split("## Doubtful")[0]
+    return {set_id: tuple(int(group.split()[0]) for group in groups.split("; "))
+            for set_id, groups in re.findall(r"^\| `([^`]+)` \| [^|]* \| ([^|]*) \|", summary, re.M)}
+
+
+def load_script():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("propose_set_groups", SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_v6_set_table_equals_the_sets_the_owner_accepted_in_the_report():
+    report = REPORT.read_text(encoding="utf-8")
+    assert "## Owner review" in report and "2026-10-27" in report.split("## Summary")[0]
+    assert report_table() == MatchingRulesV6.TCGPLAYER_SET_GROUPS
+    assert load_script().OWNER_REVIEW in report
+
+
+EQUIVALENCE_CASES = ["Ampharos δ", "Ampharos (Delta Species)", "Deoxys (Delta Species - Attack Forme)", "Leafeon-GX", "Leafeon GX",
+                     "Victini-EX", "Mew-V", "Mew VMAX", "Arceus-VSTAR", "Mew-ex", "Flabébé", "Flabebe", "Farfetch’d", "Farfetch'd",
+                     "Gengar (Prime)", "Gengar", "Torterra LV.X", "Poké Ball", "Pokémon Rumble δ", "Ho-Oh", "Porygon-Z", "Mr. Mime",
+                     "A-V", "Ex-Man", "Tapu Koko-GX δ", "  Eevee  "]
+
+
+def test_v6_name_equivalences_agree_with_the_proposal_script():
+    script = load_script()
+    for name in EQUIVALENCE_CASES:
+        folded = MatchingRulesV6.fold(name)
+        assert MatchingRulesV6.equivalent(folded) == script.apply_equivalences(folded, script.ALL_EQUIVALENCES)[0], name
+        assert MatchingRulesV6.fold(name) == script.fold(name), name
+    assert tuple(script.ALL_EQUIVALENCES - script.CORE_EQUIVALENCES) and set(MatchingRulesV6.EQUIVALENCES) == set(script.ALL_EQUIVALENCES)
+    for number in ("1", "001", "SV46", "12/102", "", None):
+        assert MatchingRulesV6.number_key(number) == script.number_key(number), number
+    for product, number in (("Ampharos (Delta Species)", "1"), ("Leafeon GX - SV46", "SV46"), ("Pikachu (12)", "12/102")):
+        assert MatchingRulesV6.match_name(product, number) == script.strip_number_qualifier(product, number), product
+
+
+def test_v6_matches_the_reviewed_name_equivalences_in_a_listed_set():
+    assert evaluate_v6(found=named("Ampharos (Delta Species)")) == (100, "holofoil")
+    assert evaluate_v6(name="Leafeon-GX", number="SV46", set_id="sma", found=named("Leafeon GX", number="SV46")) == (100, "holofoil")
+    assert evaluate_v6(name="Leafeon GX", number="SV46", set_id="sma", found=named("Leafeon-GX - SV46", number="SV46")) == (100, "holofoil")
+    assert evaluate_v6(name="Mew-ex", set_id="bw4", found=named("Mew ex")) == (100, "holofoil")
+    assert evaluate_v6(name="Farfetch’d", set_id="bw4", found=named("Farfetch'd")) == (100, "holofoil")
+    assert evaluate_v6(name="Flabébé", set_id="bw4", found=named("Flabebe")) == (100, "holofoil")
+    assert evaluate_v6(name="Flabebe", set_id="bw4", found=named("Flabébé")) == (100, "holofoil")
+
+
+def test_v6_leaves_everything_else_unfolded():
+    assert evaluate_v6(name="Deoxys δ", found=named("Deoxys (Delta Species - Attack Forme)")) == Failure("no_product")
+    assert evaluate_v6(name="Gengar", set_id="bw4", found=named("Gengar (Prime)")) == Failure("no_product")
+    assert evaluate_v6(name="Torterra", set_id="bw4", found=named("Torterra LV.X")) == Failure("no_product")
+    assert evaluate_v6(name="Pikachu", set_id="bw4", found=named("Pikachu [Cosmos Holo]")) == Failure("no_product")
+    assert evaluate_v6(found=named("Ampharos")) == Failure("no_product")
+    assert evaluate_v6(found=[]) == Failure("no_product")
+
+
+def test_v6_needs_exactly_one_equivalent_product_across_the_groups_and_never_matches_a_special_edition():
+    assert evaluate_v6(found=named("Ampharos (Delta Species)", "Ampharos δ")) == Failure("no_product")  # two products claim it
+    two_groups = named("Ampharos (Delta Species)", "Ampharos (Delta Species) [Radiant]")
+    assert evaluate_v6(found=two_groups) == (100, "holofoil")
+    for descriptor in ({"type": "holo", "stamp": ["staff"]}, {"type": "holo", "subtype": "other"}, {"type": "holo", "size": "jumbo"}):
+        assert evaluate_v6(descriptor=descriptor, found=named("Ampharos (Delta Species)")) == Failure("no_product"), descriptor
+    assert evaluate_v6(descriptor={"type": "holo", "stamp": ["1st-edition"]}, found=named("Ampharos (Delta Species)")) == (100, None)
+    assert MatchingRulesV6.evaluate(v6_facts(found=named("Ampharos (Delta Species)")), lambda product, variant: product == 100) == Failure("duplicate")
+
+
+def test_v6_a_card_with_any_tcgdex_id_never_takes_the_set_path():
+    plain = {"type": "holo", "size": "standard"}
+    sibling = {"type": "reverse", "size": "standard", "thirdParty": {"tcgplayer": 77}}
+    records = ({"variants_detailed": [plain, sibling]}, {"thirdParty": {"tcgplayer": 77}},
+               {"pricing": {"tcgplayer": {"holofoil": {"productId": 77}}}, "variants_detailed": [plain]})
+    for extra in records:
+        given = v6_facts(found=named("Ampharos (Delta Species)"), record={"set": {"id": "ex15"}, "localId": "1", "name": "Ampharos δ", **extra})
+        assert not MatchingRulesV6.matched_by_number(given), extra
+        assert MatchingRulesV6.evaluate(given, lambda product, variant: False) != (100, "holofoil"), extra
+    assert MatchingRulesV6.evaluate(v6_facts(found=named("Ampharos (Delta Species)"), lookup={"thirdParty": {"tcgplayer": 5}}),
+                                    lambda product, variant: False) == (5, "holofoil")
+    assert MatchingRulesV6.matched_by_number(v6_facts())
+    assert not MatchingRulesV6.matched_by_number(v6_facts(set_id="swsh3"))
+
+
+def test_v6_does_not_change_v5s_exact_names_in_v5s_sets_and_v5_ignores_the_new_sets():
+    assert evaluate_v6(name="Chespin δ", number="XY01", set_id="xyp", found=named("Chespin (Delta Species)", number="XY01")) == Failure("no_product")
+    assert evaluate_v6(name="Chespin", number="XY01", set_id="xyp", found=named("Chespin - XY01", number="XY01")) == (100, "holofoil")
+    assert evaluate_v6(rule=MatchingRulesV5, found=named("Ampharos (Delta Species)")) == Failure("no_product")
+
+
+def v6_products():
+    listing(1, "Ampharos (Delta Species)", "1/101", 1411)
+    listing(2, "Deoxys (Delta Species - Attack Forme)", "3/101", 1411)
+    listing(3, "Leafeon GX", "SV46/SV94", 2594)
+    listing(4, "Leafeon-GX", "SV46/SV94", 2781)  # Shining Fates: not a group of sma
+    listing(5, "Radiant Charizard", "RC1/RC25", 1465)
+    listing(6, "Gengar (Prime)", "9/101", 1411)
+    listing(7, "Farfetch'd", "5/101", 1411)
+    listing(8, "Flabebe", "6/101", 1411)
+    listing(9, "Mew", "1/110", 1409)
+    listing(10, "Mew", "1/110", 1465)
+    listing(11, "Ampharos (Delta Species)", "2/101", 1411)
+
+
+def v6_cards():
+    return Records(promo("ex15-1", "1", "ex15", "Ampharos δ"), promo("ex15-3", "3", "ex15", "Deoxys δ"),
+                   promo("sma-46", "SV46", "sma", "Leafeon-GX"), promo("bw11-rc1", "RC1", "bw11", "Radiant Charizard"),
+                   promo("ex15-9", "9", "ex15", "Gengar"), promo("ex15-5", "5", "ex15", "Farfetch’d"),
+                   promo("ex15-6", "6", "ex15", "Flabébé"),
+                   promo("bw11-1", "1", "bw11", "Mew"),  # one Mew on the number in each of bw11's two groups: a collision
+                   promo("ex15-id", "2", "ex15", "Ampharos δ", [{"type": "holo", "size": "standard", "thirdParty": {"tcgplayer": 12}}]),
+                   promo("swsh9-1", "1", "swsh9", "Ampharos δ"))
+
+
+def test_v6_verifies_the_reviewed_set_cards_where_v5_fails_and_leaves_the_rest(tcgplayer_products):
+    reset_catalog()
+    v6_products()
+    run(v6_cards())
+    activate(MATCHING, 5)
+    assert states("ex15-1") == [("unverified", "rule_failed", None, None)]
+    activate(MATCHING, 6)
+    assert states("ex15-1") == [("verified", None, 1, "holofoil")]
+    assert states("sma-46") == [("verified", None, 3, "holofoil")]  # never 4, which sits in Shining Fates' group
+    assert states("bw11-rc1") == [("verified", None, 5, "holofoil")]  # its product lives in Radiant Collection 1465
+    assert states("ex15-5") == [("verified", None, 7, "holofoil")] and states("ex15-6") == [("verified", None, 8, "holofoil")]
+    assert states("bw11-1") == [("unverified", "rule_failed", None, None)]  # Mew is on the number in both groups
+    for source in ("ex15-3", "ex15-9", "swsh9-1"):  # forme qualifier, (Prime), a set outside the table
+        assert states(source) == [("unverified", "rule_failed", None, None)], source
+    assert states("ex15-id") == [("verified", None, 12, "holofoil")]  # its own id, never product 1
+
+
+def test_v6_rematch_picks_up_a_product_listed_after_activation_in_any_group_of_a_set(tcgplayer_products):
+    reset_catalog()
+    activate(MATCHING, 6)
+    run(Records(promo("bw11-rc1", "RC1", "bw11", "Radiant Charizard"), promo("g1-5", "5", "g1", "Venusaur-EX")))
+    assert rematched() == 0
+    listing(5, "Radiant Charizard", "RC1/RC25", 1465)
+    listing(6, "Venusaur EX", "5/115", 1729)
+    assert rematched() == 2
+    assert states("bw11-rc1") == [("verified", None, 5, "holofoil")] and states("g1-5") == [("verified", None, 6, "holofoil")]
+
+
+def test_v6_tables_follow_the_active_rule_and_candidates_span_a_sets_groups(tcgplayer_products):
+    from app.catalog_targets import reviewed_rule, tcgplayer_candidates
+    v6_products()
+    with connect() as conn:
+        assert reviewed_rule(None) is MatchingRulesV6
+        assert [item["product_id"] for item in tcgplayer_candidates(conn, "bw11", "1")] == [9, 10]
+        assert [item["product_id"] for item in tcgplayer_candidates(conn, "sma", "SV46")] == [3]
+        assert [item["product_id"] for item in tcgplayer_candidates(conn, "xyp", "XY01")] == []

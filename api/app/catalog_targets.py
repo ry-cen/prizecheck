@@ -488,9 +488,77 @@ class MatchingRulesV5(MatchingRulesV4):
         return Failure("duplicate") if verified_elsewhere(product, variant) else (product, variant)
 
 
+class MatchingRulesV6(MatchingRulesV5):
+    """V5, then the reviewed main-set path (design section 4.16): cards of the sets in ``TCGPLAYER_SET_GROUPS`` that have no
+    TCGdex TCGplayer ID anywhere (not on the variant, the card or a sibling variant) take V4's number-and-name path over
+    the products of all the set's TCGCSV groups, with the reviewed name equivalences applied to both names first.
+
+    * Exactly one product on the card's number, across the listed groups, must have an equivalent name. Two such
+      products, or none, leave the Edition ``no_product``.
+    * A Special Edition (V4's ``special``) is never matched.
+    * The equivalences are ``delta`` (``Ampharos δ`` = ``Ampharos (Delta Species)``), ``hyphen-suffix`` (``Leafeon-GX`` =
+      ``Leafeon GX``, also -EX, -V, -VMAX, -VSTAR, -ex), ``apostrophe`` (a curly ``’`` = ``'``) and ``accent`` (an accented
+      letter = the plain letter). Nothing else is folded: ``LV.X``, ``(Prime)``, stamps and forme qualifiers still fail.
+    * V5's sets keep V5's exact-name behaviour.
+
+    The set table is the one the owner accepted on 2026-10-27 in docs/planning/tcgcsv-prices/set-groups-report.md (a test
+    keeps the two equal). New sets or changes to these rules ship as a later rule version, never as an edit of this class.
+    """
+    TCGPLAYER_SET_GROUPS = {"base2": (635,), "base4": (605,), "bw1": (1400,), "bw10": (1370,), "bw11": (1409, 1465),
+                           "bw2": (1424,), "bw4": (1412,), "bw5": (1386,), "bw6": (1394,), "bw7": (1408,),
+                           "bw8": (1413,), "bw9": (1382,), "dp1": (1430,), "dp5": (1390,), "dp6": (1417,),
+                           "dp7": (1369,), "ex11": (1429,), "ex12": (1378,), "ex13": (1379,), "ex14": (1395,),
+                           "ex15": (1411,), "ex7": (1428,), "ex9": (1410,), "g1": (1728, 1729), "neo1": (1396,),
+                           "neo2": (1434,), "neo3": (1389,), "neo4": (1444,), "ru1": (1433,), "sm10": (2420,),
+                           "sm11": (2464,), "sm115": (2480,), "sm12": (2534,), "sm3.5": (2054,), "sm5": (2178,),
+                           "sm6": (2209,), "sm7": (2278,), "sm7.5": (2295,), "sm8": (2328,), "sm9": (2377,),
+                           "sma": (2594,), "swsh1": (2585,), "swsh3.5": (2685,), "xy0": (1522,), "xy10": (1780,),
+                           "xy11": (1815,), "xy12": (1842,), "xy2": (1464,), "xy8": (1661,), "xy9": (1701,)}
+    # Callers that only need to know which sets take a reviewed path, or one group of a set, read ``TCGPLAYER_GROUPS``;
+    # the candidates come from every group of ``TCGPLAYER_SET_GROUPS`` (see ``multi_group_candidates``).
+    TCGPLAYER_GROUPS = {**MatchingRulesV5.TCGPLAYER_GROUPS, **{set_id: groups[0] for set_id, groups in TCGPLAYER_SET_GROUPS.items()}}
+    EQUIVALENCES = ("delta", "hyphen-suffix", "apostrophe", "accent")
+    DELTA = re.compile(r"^(?P<head>.*?)\s*δ$")
+    HYPHEN_SUFFIX = re.compile(r"(?<=\S)-(?P<suffix>ex|gx|v|vmax|vstar)\b")
+    CURLY_APOSTROPHES = str.maketrans({"\u2019": "'", "\u2018": "'", "\u02bc": "'", "`": "'"})
+
+    @classmethod
+    def table(cls):
+        return {**super().table(), "tcgplayer_set_groups": {set_id: list(groups) for set_id, groups in cls.TCGPLAYER_SET_GROUPS.items()},
+                "name_equivalences": list(cls.EQUIVALENCES)}
+
+    @classmethod
+    def strip_accents(cls, text):
+        """The text without combining marks (é -> e); characters with no decomposition (such as δ) stay."""
+        return unicodedata.normalize("NFC", "".join(char for char in unicodedata.normalize("NFD", text)
+                                                    if unicodedata.category(char) != "Mn"))
+
+    @classmethod
+    def equivalent(cls, folded):
+        """A folded name with the four reviewed equivalences applied."""
+        found = cls.DELTA.match(folded)
+        if found:
+            folded = f"{found.group('head')} (delta species)"
+        folded = cls.HYPHEN_SUFFIX.sub(r" \g<suffix>", folded)
+        return cls.strip_accents(folded.translate(cls.CURLY_APOSTROPHES))
+
+    @classmethod
+    def promo_product(cls, facts):
+        """For a main set, the one product on the card's number (any listed group) whose equivalent name equals the card's."""
+        display = facts["display"]
+        if display["set_id"] not in cls.TCGPLAYER_SET_GROUPS:
+            return super().promo_product(facts)
+        if cls.special(facts["descriptor"]):
+            return None
+        wanted = cls.equivalent(cls.fold(display["display_name"]))
+        exact = {candidate["product_id"] for candidate in facts.get("tcgplayer_candidates") or ()
+                 if cls.equivalent(cls.match_name(candidate["name"], display["collector_number"])) == wanted}
+        return next(iter(exact)) if len(exact) == 1 else None
+
+
 LIVE_RULES = {1: LiveRulesV1}
 MATCHING_RULES = {1: MatchingRulesV1, 2: MatchingRulesV2, 3: MatchingRulesV3, 4: MatchingRulesV4,
-                  5: MatchingRulesV5}
+                  5: MatchingRulesV5, 6: MatchingRulesV6}
 REGISTRIES = {LIVE: LIVE_RULES, MATCHING: MATCHING_RULES}
 
 
@@ -811,6 +879,18 @@ def tcgplayer_candidates(conn, set_id, collector_number, rule=None):
     return [{"product_id": row["product_id"], "name": row["name"], "number": row["number"]} for row in found]
 
 
+def multi_group_candidates(conn, set_id, collector_number, rule):
+    """TCGCSV products on the card's number across every group the rule lists for the set (rule v6's ``TCGPLAYER_SET_GROUPS``).
+
+    Kept apart from ``tcgplayer_candidates`` so the pinned source of rule v5 does not change."""
+    key = number_key(collector_number)
+    if key is None:
+        return []
+    found = conn.execute("SELECT product_id,name,number FROM tcgplayer_product WHERE group_id=ANY(%s) AND number_key=%s "
+                         "ORDER BY product_id", (list(rule.TCGPLAYER_SET_GROUPS[set_id]), key))
+    return [{"product_id": row["product_id"], "name": row["name"], "number": row["number"]} for row in found]
+
+
 def set_path_facts(conn, rule, row):
     """The extra facts the rule's reviewed set path reads for one Edition row: candidates and, for name-only sets, the
     number of Printings in the set sharing the card's display name."""
@@ -854,6 +934,8 @@ def refresh_editions(conn, context, edition_ids, complete=False):
                              "display_name": row["display_name"]} if row["set_id"] is not None else None}
         if hasattr(rule, "TCGPLAYER_GROUPS"):  # a release whose newest rule predates v4 has no set table
             facts.update(set_path_facts(conn, rule, row))
+        if row["set_id"] in getattr(rule, "TCGPLAYER_SET_GROUPS", ()):
+            facts["tcgplayer_candidates"] = multi_group_candidates(conn, row["set_id"], row["collector_number"], rule)
         rejections = LazySet(lambda edition_id=row["id"]: [r["source_fingerprint"] for r in conn.execute(
             "SELECT source_fingerprint FROM catalog_metadata_rejection WHERE edition_id=%s AND target='marketplace'",
             (edition_id,))])

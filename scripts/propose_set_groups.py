@@ -66,6 +66,17 @@ JOIN catalog_printing_metadata pm ON pm.printing_id=p.id
 JOIN catalog_printing_display d ON d.printing_id=p.id
 ORDER BY d.set_id, e.id"""
 
+# Recorded at the top of the report so a regenerated report keeps the owner's decisions (kept equal to the rule by tests).
+OWNER_REVIEW = """## Owner review
+
+Decided by the owner on 2026-10-27; final.
+
+- Accepted all 50 proposed sets below, with the group(s) listed for each (`bw11`: 1409 and 1465; `g1`: 1728 and 1729). The
+  14 sets with no proposal stay out of the table.
+- Accepted all four name equivalences: `delta`, `hyphen-suffix`, `apostrophe` and `accent`. Nothing else is folded.
+- Matching rule v6 (`MatchingRulesV6.TCGPLAYER_SET_GROUPS` in `api/app/catalog_targets.py`) holds exactly these sets; a test
+  keeps the table equal to the Summary below."""
+
 
 # ------------------------------------------------------------------ pure matching (mirrors MatchingRulesV4)
 
@@ -385,14 +396,13 @@ def render_report(proposals, core_proposals=()):
     lines = ['# Matching rule v6: proposed TCGdex set to TCGCSV group table', '',
              'Written by `scripts/propose_set_groups.py` (ticket P12, #378). It lists the main-set cards that have no TCGdex '
              'TCGplayer id, neither on a variant nor on the card, and for each set proposes the TCGCSV group(s) the '
-             'rule would search. Review each set and accept or reject it; the rule\'s table will contain only accepted '
-             'sets. Nothing here has been applied.', '']
+             'rule searches. The rule\'s table contains only the sets the owner accepted.', '', OWNER_REVIEW, '']
     lines += [f'Proposed {len(accepted)} sets. They would gain **{total_cards} cards** ({total_editions} Editions) '
               f'out of {sum(item[0]["no_id"] for item in proposals)} cards with no id in {len(proposals)} sets. '
               f'With only the two reviewed equivalences (`delta`, `hyphen-suffix`) the gain is '
               f'**{sum(core_gain.values())} cards** ({sum(core_editions.values())} Editions) in {len(core_gain)} sets; the '
-              f'rest comes from the further equivalences proposed below (`apostrophe`, `accent`), which the owner must '
-              f'accept or reject too.', '']
+              f'rest comes from the further equivalences proposed below (`apostrophe`, `accent`), which the owner '
+              f'accepted too.', '']
     lines += ['## Summary', '',
               '| Set | Name | Group(s) | TCGdex cards | No id | Would gain | Of those, reviewed equivalences only | Editions | '
               'Special only | Doubtful |',
@@ -428,7 +438,7 @@ def render_report(proposals, core_proposals=()):
               'Reviewed in design section 4.16:', '',
               '- `delta`: `<name> δ` = `<name> (Delta Species)`.',
               '- `hyphen-suffix`: `-EX`, `-GX`, `-V`, `-VMAX`, `-VSTAR`, `-ex` = the same suffix after a space.', '',
-              'Proposed here, because the misses show TCGplayer writing plain ASCII names (reject them and the sets below '
+              'Accepted by the owner, because the misses show TCGplayer writing plain ASCII names (reject them and the sets below '
               'lose the cards listed in the table above):', '',
               '- `apostrophe`: a curly apostrophe `’` = a straight `\'`.',
               '- `accent`: an accented letter = the plain letter (`Poké Ball` = `Poke Ball`).', '',

@@ -209,7 +209,7 @@ class ProposalTests(unittest.TestCase):
         core = propose.build_proposals(rows, groups, products, CORE)
         report = propose.render_report(proposals, core)
         for text in ('## Summary', '## Doubtful sets', '## Sets with no proposal', '### `ex15` Dragon Frontiers', 'delta',
-                     'Gengar (Prime)', '**1 cards**'):
+                     'Gengar (Prime)', '**1 cards**', '## Owner review', propose.OWNER_REVIEW):
             self.assertIn(text, report)
 
 
