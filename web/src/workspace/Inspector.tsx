@@ -253,7 +253,7 @@ function DetailsArt({
       className={`block aspect-(--tile-aspect) overflow-hidden rounded-card bg-[linear-gradient(135deg,var(--color-art-start),var(--color-art-end))] shadow-[0_var(--space-1)_var(--space-3)_var(--color-shadow)] ${narrow ? "mx-auto w-1/2" : "w-full"}`}
       aria-hidden="true"
     >
-      {art.src ? (
+      {art.waiting ? null : art.src ? (
         <img
           key={art.src}
           src={art.src}

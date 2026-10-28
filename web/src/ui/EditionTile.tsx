@@ -1,5 +1,6 @@
-import React, { useEffect, useState, type ReactNode } from "react";
+import React, { type ReactNode } from "react";
 import { largeArtUrl } from "./artRoute";
+import { useArtRetry } from "./artRetry";
 import { ART, LINE, ROOT } from "./CopyTile";
 
 type Props = Omit<
@@ -135,21 +136,26 @@ function EditionArt({
   imageUrl: string | null;
   dark: boolean;
 }) {
-  // A gallery asks for dozens of images at once and one can fail for a moment: the first failure retries once with
-  // the large artwork (another address, so not a cached failure) before giving up.
-  const [attempt, setAttempt] = useState(0);
-  useEffect(() => setAttempt(0), [imageUrl]);
+  // A gallery asks for dozens of images at once and one can fail for a moment: the first failure retries at once with
+  // the large artwork (another address, so not a cached failure); later failures retry after a short wait, alternating
+  // the small and large artwork (artRetry.ts), before giving up.
+  const art = useArtRetry(imageUrl, 1);
   const src =
-    attempt === 1 && imageUrl ? (largeArtUrl(imageUrl) ?? imageUrl) : imageUrl;
-  return src && attempt < 2 ? (
+    art.attempt % 2 === 1 && imageUrl
+      ? (largeArtUrl(imageUrl) ?? imageUrl)
+      : imageUrl;
+  // While a retry waits the tile is the plain art surface: no "Artwork unavailable".
+  if (art.waiting)
+    return <span aria-hidden="true" className="block size-full" />;
+  return src && art.show ? (
     <img
-      key={attempt}
+      key={art.attempt}
       src={src}
       alt=""
       loading="lazy"
       decoding="async"
       draggable={false}
-      onError={() => setAttempt((n) => n + 1)}
+      onError={art.onError}
       className={`block size-full object-cover${dark ? " brightness-50" : ""}`}
     />
   ) : (

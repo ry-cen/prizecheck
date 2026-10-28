@@ -112,6 +112,18 @@ def empty_public_outbox():
 
 
 @pytest.fixture(autouse=True)
+def quiet_art_warm_up(monkeypatch):
+    """Deck saves queue background art fetches (#396); the suite keeps them off, so no test reaches TCGdex. The warm-up
+    tests turn them on, and none may outlive its test."""
+    from app import art_store
+    art_store.start_warmups()
+    monkeypatch.setenv('ART_WARM_UP', '0')
+    yield
+    art_store.join_warmups()
+    art_store.start_warmups()
+
+
+@pytest.fixture(autouse=True)
 def join_price_rebinds():
     """The owner routes start a background price rebind; none may outlive its test."""
     yield

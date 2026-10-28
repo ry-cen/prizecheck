@@ -197,6 +197,13 @@ export function CardArt({
   largeUrl?: string | null;
 }) {
   const art = useLargeArt(url, largeUrl);
+  if (art.waiting)
+    return (
+      <div
+        aria-hidden="true"
+        className="box-border aspect-(--tile-aspect) w-full rounded-card bg-surface-raised"
+      />
+    );
   if (!art.src)
     return (
       <div

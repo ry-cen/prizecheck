@@ -724,6 +724,12 @@ const server = createServer(async (request, response) => {
           "content-type":
             upstream.headers.get("content-type") || "application/json",
           "cache-control": "no-store",
+          // A temporary art failure tells the client when to ask again (#396).
+          ...(ART_PATH.test(path) &&
+          upstream.status === 503 &&
+          upstream.headers.has("retry-after")
+            ? { "retry-after": upstream.headers.get("retry-after")! }
+            : {}),
           ...(upstream.headers.has("x-robots-tag")
             ? { "x-robots-tag": upstream.headers.get("x-robots-tag")! }
             : {}),

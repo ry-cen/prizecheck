@@ -194,10 +194,13 @@ test.describe("on a desktop", () => {
     );
     await expect(tile(page, built.deckName).locator("img")).toBeVisible();
 
-    // A failed image is replaced by the card's name, never a broken image.
+    // A failed image is asked for twice more (a plain surface in between), then replaced by the card's name, never a
+    // broken image.
     imageUrl = IMAGE_FAIL;
     await page.reload();
-    await expect(tile(page, built.deckName)).toContainText("Switch");
+    await expect(tile(page, built.deckName)).toContainText("Switch", {
+      timeout: 15_000,
+    });
     await expect(tile(page, built.deckName).locator("img")).toHaveCount(0);
 
     // The picked card leaves the Deck List: the automatic cover shows again.
@@ -216,6 +219,58 @@ test.describe("on a desktop", () => {
     await expect(tile(page, built.deckName)).toContainText(
       "Basic Grass Energy"
     );
+  });
+
+  test("A tile whose first picture request is answered 503 shows a plain surface, then the picture once the route serves it", async ({
+    page,
+  }) => {
+    promoteLegalCatalog();
+    await signIn(page);
+    await stubCost(page);
+    const built = await buildLegalDeck(page, "Tiles");
+    await setCover(page, built.deckId, built.editions.switch, null);
+    await page.route(/\/api\/decks(\?.*)?$/, async (route) => {
+      const response = await route.fetch();
+      const json = await response.json();
+      for (const deck of json.decks)
+        if (deck.id === built.deckId && deck.cover)
+          deck.cover.image_url = IMAGE_OK;
+      await route.fulfill({ response, json });
+    });
+    // The route can't serve the picture yet (a busy queue, a fetch in backoff): the first request is a 503, as the API
+    // answers it, and the next one is served.
+    let asked = 0;
+    await page.route(
+      /\/api\/art\/00000000-0000-4000-8000-0000000000a1\//,
+      (route) => {
+        asked += 1;
+        return asked === 1
+          ? route.fulfill({
+              status: 503,
+              headers: { "retry-after": "3", "cache-control": "no-store" },
+              json: { detail: { code: "ART_UNAVAILABLE", message: "" } },
+            })
+          : route.fulfill({ contentType: "image/png", body: PIXEL });
+      }
+    );
+
+    await page.goto(`${ORIGIN}/decks`);
+    // The wait before the retry is the plain art surface: no broken image, no name, no status text.
+    const picture = tile(page, built.deckName).locator("img");
+    await expect(tile(page, built.deckName)).toBeVisible();
+    await expect.poll(() => asked).toBe(1);
+    await expect(picture).toHaveCount(0);
+    await expect(
+      tile(page, built.deckName).locator('span[aria-hidden="true"]').first()
+    ).toBeVisible();
+    await expect(tile(page, built.deckName)).not.toContainText("Switch");
+    await expect(tile(page, built.deckName)).not.toContainText("unavailable");
+    await expect(picture).toHaveAttribute("src", IMAGE_OK, { timeout: 10_000 });
+    await expect(picture).toBeVisible();
+    await expect
+      .poll(() => picture.evaluate((img: HTMLImageElement) => img.naturalWidth))
+      .toBeGreaterThan(0);
+    expect(asked).toBe(2);
   });
 });
 
